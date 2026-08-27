@@ -17,6 +17,7 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+android/cohub-upload.jks
 
 # Metro
 .metro-health-check*

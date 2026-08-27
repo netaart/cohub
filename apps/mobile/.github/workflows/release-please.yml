@@ -32,14 +32,15 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   mobile-release:
-    name: Build and submit mobile release
+    name: Build and submit native mobile release
     needs: release
     if: needs.release.outputs.release_created == 'true'
-    uses: ./.github/workflows/eas-build.yml
+    uses: ./.github/workflows/native-release.yml
     with:
       ref: ${{ needs.release.outputs.tag_name }}
       platform: all
       profile: production
       submit: true
+      android_track: internal
       release_tag: ${{ needs.release.outputs.tag_name }}
     secrets: inherit

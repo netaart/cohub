@@ -61,8 +61,14 @@
     "export:android": "expo export --platform android --output-dir dist/android",
     "export:ios": "expo export --platform ios --output-dir dist/ios",
     "prebuild": "expo prebuild",
-    "eas:preview": "npx eas-cli@22.6.0 build --platform all --profile preview",
-    "eas:production": "npx eas-cli@22.6.0 build --platform all --profile production --auto-submit"
+    "native:android": "npm run native:android:prepare && npm run native:android:build",
+    "native:android:prepare": "npx expo prebuild --platform android --no-install",
+    "native:android:build": "node scripts/build-android-debug.mjs",
+    "native:ios": "npm run native:ios:prepare && npm run native:ios:build",
+    "native:ios:prepare": "npx expo prebuild --platform ios --no-install && pod install --project-directory=ios",
+    "native:ios:build": "node scripts/build-ios-simulator.mjs",
+    "native:android:release": "node scripts/build-android-release.mjs",
+    "native:ios:release": "node scripts/build-ios-release.mjs"
   },
   "private": true,
   "overrides": {

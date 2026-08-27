@@ -1,0 +1,359 @@
+name: Native Release
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build for preview; ignored for production
+        required: false
+        type: string
+        default: ""
+      platform:
+        description: Platform to build
+        required: false
+        type: string
+        default: all
+      profile:
+        description: Native build profile
+        required: false
+        type: string
+        default: production
+      submit:
+        description: Submit completed artifacts to the stores
+        required: false
+        type: boolean
+        default: false
+      android_track:
+        description: Google Play track
+        required: false
+        type: string
+        default: internal
+      release_tag:
+        description: Required vX.Y.Z tag for production builds
+        required: false
+        type: string
+        default: ""
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
+        required: false
+      APPSTORE_CERTIFICATES_FILE_BASE64:
+        required: false
+      APPSTORE_CERTIFICATES_PASSWORD:
+        required: false
+      APPSTORE_API_PRIVATE_KEY:
+        required: false
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build for preview; ignored for production
+        required: false
+        type: string
+      platform:
+        description: Platform to build
+        required: true
+        type: choice
+        options: [all, android, ios]
+        default: all
+      profile:
+        description: Native build profile
+        required: true
+        type: choice
+        options: [preview, production]
+        default: preview
+      submit:
+        description: Submit completed artifacts to the stores
+        required: true
+        type: boolean
+        default: false
+      android_track:
+        description: Google Play track
+        required: true
+        type: choice
+        options: [internal, production]
+        default: internal
+      release_tag:
+        description: Required for production, for example v1.2.0
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-release-${{ inputs.profile || 'production' }}-${{ inputs.platform || 'all' }}
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  EXPO_NO_TELEMETRY: "1"
+
+jobs:
+  metadata:
+    name: Validate release target
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      target_ref: ${{ steps.target.outputs.ref }}
+      target_sha: ${{ steps.target.outputs.sha }}
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve and validate target ref
+        id: target
+        env:
+          PROFILE: ${{ inputs.profile }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$PROFILE" == "production" ]]; then
+            if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Production builds require a stable release tag such as v1.2.0. The ref input is ignored."
+              exit 1
+            fi
+            git fetch --no-tags origin main
+            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            tag_sha=$(git rev-list -n 1 "$RELEASE_TAG^{commit}")
+            main_sha=$(git rev-parse origin/main)
+            if ! git merge-base --is-ancestor "$tag_sha" "$main_sha"; then
+              echo "Production tag $RELEASE_TAG is not reachable from origin/main. Refusing to use signing credentials."
+              exit 1
+            fi
+            echo "ref=refs/tags/$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+            echo "sha=$tag_sha" >> "$GITHUB_OUTPUT"
+            echo "Using protected main-history tag $RELEASE_TAG at $tag_sha."
+          else
+            target_ref="${INPUT_REF:-${GITHUB_REF}}"
+            test -n "$target_ref" || { echo "A preview ref could not be resolved"; exit 1; }
+            echo "ref=$target_ref" >> "$GITHUB_OUTPUT"
+            echo "Using preview ref $target_ref."
+          fi
+
+  android:
+    name: Android release
+    needs: metadata
+    if: inputs.platform == 'all' || inputs.platform == 'android'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout validated ref
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.metadata.outputs.target_sha || needs.metadata.outputs.target_ref }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate source metadata
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          npm run check
+          if [[ "${{ inputs.profile }}" == "production" ]]; then
+            npm run release:check -- --require-native-tag
+          fi
+
+      - name: Generate Android project
+        run: npm run native:android:prepare
+
+      - name: Resolve Android identifier
+        id: identifiers
+        run: node scripts/print-native-identifiers.mjs
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Validate Android signing inputs
+        if: inputs.profile == 'production'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "ANDROID_KEYSTORE_BASE64 is required for production Android builds"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "ANDROID_KEYSTORE_PASSWORD is required for production Android builds"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "ANDROID_KEY_ALIAS is required for production Android builds"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD is required for production Android builds"; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/cohub-upload.jks
+          {
+            echo "COHUB_ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/android/cohub-upload.jks"
+            echo "COHUB_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "COHUB_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "COHUB_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure Android release signing
+        if: inputs.profile == 'production'
+        run: node scripts/configure-android-signing.mjs
+
+      - name: Build preview APK
+        if: inputs.profile == 'preview'
+        run: npm run native:android:build
+
+      - name: Build production AAB
+        if: inputs.profile == 'production'
+        run: npm run native:android:release
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-android-${{ inputs.profile }}-${{ github.run_id }}
+          path: ${{ inputs.profile == 'production' && 'android/app/build/outputs/bundle/release/app-release.aab' || 'android/app/build/outputs/apk/debug/app-debug.apk' }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Validate Google Play submission input
+        if: inputs.profile == 'production' && inputs.submit == true
+        env:
+          GOOGLE_PLAY_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: test -n "$GOOGLE_PLAY_JSON" || { echo "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is required when submit=true"; exit 1; }
+
+      - name: Submit Android to Google Play
+        if: inputs.profile == 'production' && inputs.submit == true
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ steps.identifiers.outputs.android_package }}
+          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          tracks: ${{ inputs.android_track }}
+          releaseName: ${{ inputs.release_tag || github.ref_name }}
+          status: completed
+
+  ios:
+    name: iOS release
+    needs: metadata
+    if: inputs.platform == 'all' || inputs.platform == 'ios'
+    runs-on: macos-latest
+    timeout-minutes: 65
+    steps:
+      - name: Checkout validated ref
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.metadata.outputs.target_sha || needs.metadata.outputs.target_ref }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate source metadata
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          npm run check
+          if [[ "${{ inputs.profile }}" == "production" ]]; then
+            npm run release:check -- --require-native-tag
+          fi
+
+      - name: Generate iOS project and install pods
+        run: npm run native:ios:prepare
+
+      - name: Resolve iOS identifier
+        id: identifiers
+        run: node scripts/print-native-identifiers.mjs
+
+      - name: Build preview simulator app
+        if: inputs.profile == 'preview'
+        run: npm run native:ios:build
+
+      - name: Validate iOS signing inputs
+        if: inputs.profile == 'production'
+        env:
+          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
+          API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
+          TEAM_ID: ${{ vars.APPSTORE_TEAM_ID }}
+          PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          CERTIFICATE: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ISSUER_ID" || { echo "APPSTORE_ISSUER_ID repository variable is required"; exit 1; }
+          test -n "$API_KEY_ID" || { echo "APPSTORE_API_KEY_ID repository variable is required"; exit 1; }
+          test -n "$TEAM_ID" || { echo "APPSTORE_TEAM_ID repository variable is required"; exit 1; }
+          test -n "$PRIVATE_KEY" || { echo "APPSTORE_API_PRIVATE_KEY secret is required"; exit 1; }
+          test -n "$CERTIFICATE" || { echo "APPSTORE_CERTIFICATES_FILE_BASE64 secret is required"; exit 1; }
+          test -n "$CERTIFICATE_PASSWORD" || { echo "APPSTORE_CERTIFICATES_PASSWORD secret is required"; exit 1; }
+          {
+            echo "IOS_TEAM_ID=$TEAM_ID"
+            echo "APPSTORE_ISSUER_ID=$ISSUER_ID"
+            echo "APPSTORE_API_KEY_ID=$API_KEY_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Import iOS distribution certificate
+        if: inputs.profile == 'production'
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+
+      - name: Download iOS provisioning profile
+        if: inputs.profile == 'production'
+        id: profiles
+        uses: apple-actions/download-provisioning-profiles@v6
+        with:
+          bundle-id: ${{ steps.identifiers.outputs.ios_bundle_id }}
+          profile-type: IOS_APP_STORE
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+
+      - name: Resolve provisioning profile name
+        if: inputs.profile == 'production'
+        env:
+          PROFILES_JSON: ${{ steps.profiles.outputs.profiles }}
+        run: |
+          profile_name=$(node -e 'const profiles = JSON.parse(process.env.PROFILES_JSON); if (!profiles[0]?.name) process.exit(1); process.stdout.write(profiles[0].name)')
+          echo "IOS_PROFILE_NAME=$profile_name" >> "$GITHUB_ENV"
+
+      - name: Build production IPA
+        if: inputs.profile == 'production'
+        run: npm run native:ios:release
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-ios-${{ inputs.profile }}-${{ github.run_id }}
+          path: ${{ inputs.profile == 'production' && 'build/export/Cohub.ipa' || 'build/artifacts/Cohub-ios-simulator.zip' }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Submit iOS to TestFlight
+        if: inputs.profile == 'production' && inputs.submit == true
+        uses: apple-actions/upload-testflight-build@v5
+        with:
+          app-path: build/export/Cohub.ipa
+          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          wait-for-processing: "false"
+          uses-non-exempt-encryption: "false"

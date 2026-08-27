@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import process from "node:process";
 
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
@@ -7,6 +8,7 @@ const appJson = await readJson(new URL("../app.json", import.meta.url));
 const version = String(packageJson.version ?? "").trim();
 const appVersion = String(appJson.expo?.version ?? "").trim();
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const stableSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const failures = [];
 
 if (!semver.test(version)) failures.push(`package.json has invalid SemVer: ${version || "<empty>"}`);
@@ -18,13 +20,17 @@ if (expectedTag && expectedTag !== `v${version}`) {
   failures.push(`Tag mismatch: expected v${version}, received ${expectedTag}`);
 }
 
-if (process.argv.includes("--require-eas")) {
-  const projectId = process.env.EXPO_PROJECT_ID?.trim();
-  const owner = process.env.EXPO_OWNER?.trim();
-  const token = process.env.EXPO_TOKEN?.trim();
-  if (!projectId) failures.push("EXPO_PROJECT_ID is required for an EAS release");
-  if (!owner) failures.push("EXPO_OWNER is required for an EAS release");
-  if (!token) failures.push("EXPO_TOKEN is required for an EAS release");
+if (process.argv.includes("--require-native-tag")) {
+  if (!expectedTag) failures.push("A release tag is required for a native production build");
+  if (!stableSemver.test(version)) failures.push(`Native production builds require a stable package version: ${version}`);
+  if (expectedTag && !/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(expectedTag)) {
+    failures.push(`Native production builds require a stable vX.Y.Z tag: ${expectedTag}`);
+  }
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", "HEAD", "origin/main"], { stdio: "ignore" });
+  } catch {
+    failures.push("The checked out native release commit must be reachable from origin/main");
+  }
 }
 
 if (failures.length > 0) {

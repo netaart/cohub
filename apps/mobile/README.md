@@ -16,11 +16,11 @@ The app uses native screens for Chats, Spaces, Activity, Profile, session timeli
 - Native file viewer plus constrained WebView for published Works
 - Activity and usage overview
 - Cache-first SQLite hydration, reconnect reconciliation, and user-scoped cache clearing
-- Native Logto PKCE, `cohub://` deep links, notification tap routing, APNs/FCM token acquisition, and EAS profiles
+- Native Logto PKCE, `cohub://` deep links, notification tap routing, APNs/FCM token acquisition, and GitHub-native build profiles
 
 ## Stack
 
-- Expo SDK 57 and React Native New Architecture
+- Expo SDK 57 and React Native New Architecture (Expo is used as an open-source toolchain; EAS is not required)
 - Expo Router for native navigation and deep links
 - `@neta-art/cohub` for Cohub HTTP and WebSocket APIs
 - SQLite for user-scoped offline cache
@@ -52,17 +52,20 @@ npm run check
 npm run export:web
 npm run export:android
 npm run export:ios
+npm run native:android
+npm run native:ios
 ```
 
 ## CI and releases
 
-- `CI` runs lint, strict TypeScript, release metadata validation, Expo Doctor, high-severity dependency audit, and three-platform exports.
+- `CI` runs lint, strict TypeScript, release metadata validation, Expo Doctor, dependency audit, and three-platform JavaScript exports.
+- `Native CI` compiles Android and iOS debug artifacts on GitHub-hosted Linux/macOS runners.
 - `Security` runs dependency review and CodeQL.
 - Release Please maintains `CHANGELOG.md`, synchronizes the Expo and npm versions, and creates `vX.Y.Z` GitHub Releases.
-- A created release calls the reusable EAS workflow to build and submit iOS and Android production artifacts.
+- A created release calls the GitHub-native workflow to build and optionally submit signed iOS/Android artifacts. EAS is not required.
 - Dependabot updates npm and GitHub Actions dependencies weekly.
 
-See [docs/releasing.md](docs/releasing.md) for required GitHub variables/secrets, EAS credentials, normal releases, manual preview builds, and recovery.
+See [docs/releasing.md](docs/releasing.md) for signing secrets, store credentials, native runner details, normal releases, manual builds, and recovery.
 
 ## Logto setup
 
