@@ -19,14 +19,14 @@ export type AttachmentDraft = {
 export type StreamView = {
   status: "pending" | "streaming" | "completed" | "failed" | "interrupted";
   contentBlocks: ContentBlock[];
-  intermediateMessages: Array<{
+  intermediateMessages: {
     id?: string;
     messageId: string | null;
     messageOrdinal: number | null;
     content: ContentBlock[];
     text?: string | null;
     meta?: Record<string, unknown> | null;
-  }>;
+  }[];
   turnId: string | null;
   messageId: string | null;
 };

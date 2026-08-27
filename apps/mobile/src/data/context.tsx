@@ -259,8 +259,9 @@ export function AppProvider({
   children: ReactNode;
 }) {
   const [installationId, setInstallationId] = useState<string | null>(null);
-  const [client, setClient] = useState<CohubClient | null>(null);
-  const [state, setState] = useState<AppState>(initialState);
+  const [state, setState] = useState<AppState>(() =>
+    offline ? { ...initialState, booting: false, refreshing: false } : initialState,
+  );
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const stateRef = useRef(state);
   const subscriptions = useRef(new Map<string, () => void>());
@@ -281,15 +282,13 @@ export function AppProvider({
     };
   }, []);
 
-  useEffect(() => {
-    if (offline) {
-      setState((current) => ({ ...current, booting: false, refreshing: false }));
-      setClient(null);
-      return;
-    }
-    if (!installationId) return;
-    setClient(createMobileClient(getAccessToken, installationId));
-  }, [getAccessToken, installationId, offline]);
+  const client = useMemo(
+    () =>
+      !offline && installationId
+        ? createMobileClient(getAccessToken, installationId)
+        : null,
+    [getAccessToken, installationId, offline],
+  );
 
   const dispatch = useCallback((action: Action) => {
     setState((current) => reducer(current, action));
@@ -327,6 +326,7 @@ export function AppProvider({
   useEffect(() => {
     if (!client) return;
     let active = true;
+    const activeSubscriptions = subscriptions.current;
     void (async () => {
       if (Platform.OS !== "web") {
         try {
@@ -342,8 +342,8 @@ export function AppProvider({
     })();
     return () => {
       active = false;
-      for (const stop of subscriptions.current.values()) stop();
-      subscriptions.current.clear();
+      for (const stop of activeSubscriptions.values()) stop();
+      activeSubscriptions.clear();
     };
   }, [client, dispatch, refreshHome, userKey]);
 

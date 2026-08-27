@@ -45,10 +45,7 @@ function NativeRoot() {
   const [userUuid, setUserUuid] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      setUserUuid(null);
-      return;
-    }
+    if (!isAuthenticated) return;
     let active = true;
     void client.getIdTokenClaims().then((claims) => {
       if (active) setUserUuid(typeof claims.sub === "string" ? claims.sub : null);

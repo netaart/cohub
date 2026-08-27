@@ -42,6 +42,9 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "eslint": "9.39.5",
+    "eslint-config-expo": "~57.0.2",
+    "expo-doctor": "1.20.4",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -49,10 +52,17 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "doctor": "expo-doctor",
+    "release:check": "node scripts/check-release.mjs",
+    "check": "npm run lint && npm run typecheck && npm run release:check && npm run doctor",
     "export:web": "expo export --platform web",
+    "export:android": "expo export --platform android --output-dir dist/android",
+    "export:ios": "expo export --platform ios --output-dir dist/ios",
     "prebuild": "expo prebuild",
-    "doctor": "npx expo-doctor"
+    "eas:preview": "npx eas-cli@22.6.0 build --platform all --profile preview",
+    "eas:production": "npx eas-cli@22.6.0 build --platform all --profile production --auto-submit"
   },
   "private": true
 }

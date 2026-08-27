@@ -35,12 +35,14 @@ export default function SpaceScreen() {
   useEffect(() => {
     if (!client || !spaceId) return;
     let active = true;
-    setLoadingResources(true);
-    void Promise.allSettled([
-      client.space(spaceId).checkpoints.list({ limit: 5 }),
-      client.apps.listBySpace(spaceId),
-      client.tasks.list({ spaceId, limit: 8 }),
-    ]).then(([checkpointResult, appResult, taskResult]) => {
+    void Promise.resolve().then(() => {
+      if (active) setLoadingResources(true);
+      return Promise.allSettled([
+        client.space(spaceId).checkpoints.list({ limit: 5 }),
+        client.apps.listBySpace(spaceId),
+        client.tasks.list({ spaceId, limit: 8 }),
+      ]);
+    }).then(([checkpointResult, appResult, taskResult]) => {
       if (!active) return;
       setResources({
         checkpoints: checkpointResult.status === "fulfilled" ? checkpointResult.value.checkpoints : [],

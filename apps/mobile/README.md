@@ -1,5 +1,9 @@
 # Cohub Mobile
 
+[![CI](https://github.com/markbang/cohub-mobile/actions/workflows/ci.yml/badge.svg)](https://github.com/markbang/cohub-mobile/actions/workflows/ci.yml)
+[![Security](https://github.com/markbang/cohub-mobile/actions/workflows/security.yml/badge.svg)](https://github.com/markbang/cohub-mobile/actions/workflows/security.yml)
+[![Release](https://github.com/markbang/cohub-mobile/actions/workflows/release-please.yml/badge.svg)](https://github.com/markbang/cohub-mobile/actions/workflows/release-please.yml)
+
 A native iOS and Android client for Cohub, built with React Native and Expo.
 
 The app uses native screens for Chats, Spaces, Activity, Profile, session timelines, files, and settings. Published HTML/Work previews are opened in a constrained WebView because their content is inherently web-based.
@@ -40,6 +44,25 @@ npm run android
 ```
 
 The web command is only a lightweight preview. The product target is native iOS/Android.
+
+Run the same checks as CI before opening a PR:
+
+```bash
+npm run check
+npm run export:web
+npm run export:android
+npm run export:ios
+```
+
+## CI and releases
+
+- `CI` runs lint, strict TypeScript, release metadata validation, Expo Doctor, high-severity dependency audit, and three-platform exports.
+- `Security` runs dependency review and CodeQL.
+- Release Please maintains `CHANGELOG.md`, synchronizes the Expo and npm versions, and creates `vX.Y.Z` GitHub Releases.
+- A created release calls the reusable EAS workflow to build and submit iOS and Android production artifacts.
+- Dependabot updates npm and GitHub Actions dependencies weekly.
+
+See [docs/releasing.md](docs/releasing.md) for required GitHub variables/secrets, EAS credentials, normal releases, manual preview builds, and recovery.
 
 ## Logto setup
 

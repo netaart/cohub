@@ -22,8 +22,10 @@ export default function FilesScreen() {
   useEffect(() => {
     if (!client || !spaceId) return;
     let active = true;
-    setLoading(true);
-    void client.space(spaceId).files.list().then((result) => { if (active) { setEntries(result.entries); setError(null); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to load Files"); }).finally(() => { if (active) setLoading(false); });
+    void Promise.resolve().then(() => {
+      if (active) setLoading(true);
+      return client.space(spaceId).files.list();
+    }).then((result) => { if (active) { setEntries(result.entries); setError(null); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to load Files"); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [client, spaceId]);
   return <Screen>
