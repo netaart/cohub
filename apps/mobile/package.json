@@ -1,7 +1,7 @@
 {
   "name": "cohub-mobile",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@logto/rn": "^1.2.0",

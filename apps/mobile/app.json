@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cohub",
     "slug": "cohub-mobile",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cohub",
@@ -10,7 +10,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "io.github.markbang.cohubmobile",
-      "associatedDomains": ["applinks:cohub.live"],
+      "associatedDomains": [
+        "applinks:cohub.live"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Cohub uses the camera to attach references to a Chat.",
         "NSMicrophoneUsageDescription": "Cohub uses the microphone for voice input.",
@@ -29,11 +31,23 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "cohub.live", "pathPrefix": "/" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "https",
+              "host": "cohub.live",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
-      "permissions": ["POST_NOTIFICATIONS", "VIBRATE"]
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "VIBRATE"
+      ]
     },
     "web": {
       "bundler": "metro",
