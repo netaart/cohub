@@ -28,4 +28,4 @@ Keep changes focused. CI must pass Quality, all three Bundle jobs, and the relev
 
 ## Releases
 
-See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR is the release approval action; it creates the tag and GitHub Release, then queues production iOS and Android builds on GitHub-hosted runners with store submission enabled.
+See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR is the release approval action; it creates the tag and GitHub Release. Production iOS and Android builds are queued automatically only when `NATIVE_AUTO_RELEASE_ENABLED=true`, and store submission additionally requires `NATIVE_AUTO_SUBMIT_ENABLED=true`.
