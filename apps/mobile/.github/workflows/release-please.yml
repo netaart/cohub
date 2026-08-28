@@ -45,30 +45,38 @@ jobs:
     secrets: inherit
 
   publish-android:
-    name: Publish Android APK to GitHub Release
+    name: Publish Android APKs to GitHub Release
     needs: [release, mobile-release]
     if: needs.release.outputs.release_created == 'true' && vars.NATIVE_AUTO_RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download Android APK
+      - name: Download Android APKs
         uses: actions/download-artifact@v8
         with:
           name: cohub-android-preview-${{ github.run_id }}
           path: build/release
 
-      - name: Upload APK to GitHub Release
+      - name: Upload APKs to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
         run: |
           set -euo pipefail
-          apk=$(find build/release -type f -name '*.apk' -print -quit)
-          test -n "$apk" || { echo "Android APK was not found in the downloaded artifact"; exit 1; }
-          gh release upload "$RELEASE_TAG" "$apk#cohub-${RELEASE_TAG}-android.apk" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+          shopt -s nullglob
+          apks=(build/release/*.apk)
+          test "${#apks[@]}" -eq 4 || { echo "Expected four Android ABI APKs, found ${#apks[@]}"; exit 1; }
+          for apk in "${apks[@]}"; do
+            abi=$(basename "$apk" | sed -E 's/^app-(.+)-debug\.apk$/\1/')
+            case "$abi" in
+              armeabi-v7a|arm64-v8a|x86|x86_64) ;;
+              *) echo "Unexpected Android APK name: $(basename "$apk")"; exit 1 ;;
+            esac
+            gh release upload "$RELEASE_TAG" "$apk#cohub-${RELEASE_TAG}-android-${abi}.apk" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          done
 
   native-release-not-configured:
     name: Native release is disabled

@@ -27,9 +27,18 @@ You can also set it with the GitHub CLI:
 gh variable set NATIVE_AUTO_RELEASE_ENABLED --repo markbang/cohub-mobile --body true
 ```
 
-On the next Release Please release, GitHub Actions builds an Android debug APK for `arm64-v8a` devices on Ubuntu and attaches it to the GitHub Release as `cohub-vX.Y.Z-android.apk`. This is a direct APK download, not a Google Play upload. The automatic path does not build iOS and does not use any store credentials. Most current Android phones use arm64; an x86 emulator or older 32-bit-only device needs a separately configured architecture build.
+On the next Release Please release, GitHub Actions builds four Android debug APKs on Ubuntu, one for each ABI, and attaches them to the GitHub Release:
 
-For the existing `v1.1.0` release, run `Native Release` manually with `platform=android`, `profile=preview`, `submit=false` if you want an APK before the next version release.
+```text
+cohub-vX.Y.Z-android-arm64-v8a.apk
+cohub-vX.Y.Z-android-armeabi-v7a.apk
+cohub-vX.Y.Z-android-x86.apk
+cohub-vX.Y.Z-android-x86_64.apk
+```
+
+Each APK contains only its own native libraries, so each download is much smaller than one universal APK. This is direct APK distribution, not a Google Play upload. The automatic path does not build iOS and does not use any store credentials.
+
+For the existing `v1.1.0` release, run `Native Release` manually with `ref=v1.1.0`, `platform=android`, `profile=preview`, `submit=false` if you want ABI-specific APKs before the next version release.
 
 ### Android / Google Play later
 
@@ -70,7 +79,7 @@ Register `cohub://callback` in the Native Logto application. Logto credentials a
 4. Confirm the required CI, Security, and Native CI checks are green.
 5. Merge the Release Please PR.
 6. GitHub creates the `vX.Y.Z` tag and release.
-7. If `NATIVE_AUTO_RELEASE_ENABLED=true`, the same workflow builds an Android debug APK and attaches it to the GitHub Release. It does not build iOS or upload to Google Play/TestFlight. With the variable unset or `false`, only the GitHub Release is created.
+7. If `NATIVE_AUTO_RELEASE_ENABLED=true`, the same workflow builds four ABI-specific Android debug APKs and attaches them to the GitHub Release. It does not build iOS or upload to Google Play/TestFlight. With the variable unset or `false`, only the GitHub Release is created.
 
 The release workflow validates that the tag is exactly `v<package version>`, and that `package.json` and `app.json` have identical versions. Native build numbers are derived deterministically from the app version in `app.config.ts`.
 
@@ -97,7 +106,7 @@ The iOS command requires macOS and Xcode. The Android command requires the Andro
 
 ## Recovery
 
-If the automatic unsigned Android APK build fails, no signing or store credential is involved. Inspect the build error and rerun `Native Release` manually with `ref` set to the existing `vX.Y.Z` tag, `platform=android`, `profile=preview`, and `submit=false`. The manual rerun only produces a downloadable Actions artifact and does not attach it to the GitHub Release; keeping `NATIVE_AUTO_RELEASE_ENABLED=true` lets the next Release Please release rebuild and attach its APK automatically. The automatic preview build targets `arm64-v8a` only.
+If the automatic unsigned Android APK build fails, no signing or store credential is involved. Inspect the build error and rerun `Native Release` manually with `ref` set to the existing `vX.Y.Z` tag, `platform=android`, `profile=preview`, and `submit=false`. The manual rerun only produces downloadable Actions artifacts and does not attach them to the GitHub Release; keeping `NATIVE_AUTO_RELEASE_ENABLED=true` lets the next Release Please release rebuild and attach all four APKs automatically.
 
 For a Google Play failure, configure the Android signing and Play service-account secrets first, then rerun `Native Release` with:
 

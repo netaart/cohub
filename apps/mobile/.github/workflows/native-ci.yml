@@ -46,16 +46,16 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Compile debug APK
+      - name: Compile debug APKs
         env:
           COHUB_ANDROID_ARCHITECTURES: armeabi-v7a,arm64-v8a,x86,x86_64
         run: npm run native:android:build
 
-      - name: Upload debug APK
+      - name: Upload debug APKs
         uses: actions/upload-artifact@v7
         with:
           name: cohub-android-debug-${{ github.sha }}
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/app-*-debug.apk
           if-no-files-found: error
           retention-days: 7
 
