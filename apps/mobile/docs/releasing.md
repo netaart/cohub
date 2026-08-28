@@ -7,15 +7,33 @@ The repository does not require Expo Application Services (EAS) for builds.
 1. `CI` validates every PR and push to `main`, then exports Web, Android, and iOS JavaScript bundles.
 2. `Native CI` compiles an Android debug APK on a GitHub Linux runner and an iOS simulator app on a GitHub macOS runner.
 3. `Release Please` maintains a version/changelog PR from Conventional Commits.
-4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. Native production builds are opt-in and run on GitHub-hosted runners only after the repository variable `NATIVE_AUTO_RELEASE_ENABLED` is set to `true`.
+4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. When the repository variable `NATIVE_AUTO_RELEASE_ENABLED` is `true`, the release also builds an Android debug APK and attaches it to that GitHub Release. iOS and store submissions are not part of this automatic path.
 
 Expo is used as the open-source React Native toolchain and for native modules. `expo prebuild` generates standard Gradle and Xcode projects inside CI. No Expo subscription or EAS project is required.
 
 ## One-time repository setup
 
-### Android
+### Android APK now
 
-Create an upload keystore and add these GitHub Actions secrets:
+No signing or store credentials are needed for the current Android distribution path. In GitHub, open **Settings -> Secrets and variables -> Actions -> Variables**, create a repository variable, and set:
+
+| Variable | Value |
+| --- | --- |
+| `NATIVE_AUTO_RELEASE_ENABLED` | `true` |
+
+You can also set it with the GitHub CLI:
+
+```bash
+gh variable set NATIVE_AUTO_RELEASE_ENABLED --repo markbang/cohub-mobile --body true
+```
+
+On the next Release Please release, GitHub Actions builds an Android debug APK on Ubuntu and attaches it to the GitHub Release as `cohub-vX.Y.Z-android.apk`. This is a direct APK download, not a Google Play upload. The automatic path does not build iOS and does not use any store credentials.
+
+For the existing `v1.1.0` release, run `Native Release` manually with `platform=android`, `profile=preview`, `submit=false` if you want an APK before the next version release.
+
+### Android / Google Play later
+
+A Google Play release requires an upload keystore and these GitHub Actions secrets:
 
 | Secret | Purpose |
 | --- | --- |
@@ -25,16 +43,7 @@ Create an upload keystore and add these GitHub Actions secrets:
 | `ANDROID_KEY_PASSWORD` | Upload key password |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Google Play Developer API service account JSON |
 
-The service account must be invited to the app in Google Play Console. The package name is `io.github.markbang.cohubmobile`.
-
-Set these repository variables to enable the automatic native release path:
-
-| Variable | Value |
-| --- | --- |
-| `NATIVE_AUTO_RELEASE_ENABLED` | `true` after all signing/build credentials are configured |
-| `NATIVE_AUTO_SUBMIT_ENABLED` | `true` to upload to Google Play and TestFlight; otherwise `false` |
-
-Keep both variables unset or set to `false` while preparing credentials. Release Please will still create the GitHub Release and will show a disabled native-release job.
+The service account must be invited to the app in Google Play Console. The package name is `io.github.markbang.cohubmobile`. Use the manual `Native Release` workflow with `platform=android`, `profile=production`, and `submit=true` after these credentials are configured.
 
 ### iOS
 
@@ -61,7 +70,7 @@ Register `cohub://callback` in the Native Logto application. Logto credentials a
 4. Confirm the required CI, Security, and Native CI checks are green.
 5. Merge the Release Please PR.
 6. GitHub creates the `vX.Y.Z` tag and release.
-7. If `NATIVE_AUTO_RELEASE_ENABLED=true`, the same workflow starts signed Android and iOS production builds. If `NATIVE_AUTO_SUBMIT_ENABLED=true`, Android is sent to the `internal` track and iOS is uploaded to TestFlight. With the default disabled gate, rerun `Native Release` manually after credentials are ready.
+7. If `NATIVE_AUTO_RELEASE_ENABLED=true`, the same workflow builds an Android debug APK and attaches it to the GitHub Release. It does not build iOS or upload to Google Play/TestFlight. With the variable unset or `false`, only the GitHub Release is created.
 
 The release workflow validates that the tag is exactly `v<package version>`, and that `package.json` and `app.json` have identical versions. Native build numbers are derived deterministically from the app version in `app.config.ts`.
 
@@ -74,8 +83,8 @@ Open Actions -> `Native Release` -> Run workflow. Choose:
 - `preview` for an Android debug APK and an iOS simulator ZIP
 - `production` for signed store artifacts
 - one platform or `all`
-- `submit=true` only when the artifact should be sent to a store; the automatic path maps this to `NATIVE_AUTO_SUBMIT_ENABLED`
-- `internal` or `production` for the Google Play track (the automatic Release Please path uses `internal` until the first Play Console release is promoted)
+- `submit=true` only when a production artifact should be sent to a store; the automatic Release Please path always uses `submit=false`
+- `internal` or `production` for the Google Play track when manually submitting a `profile=production` Android build
 
 Equivalent local preview commands:
 
@@ -88,12 +97,14 @@ The iOS command requires macOS and Xcode. The Android command requires the Andro
 
 ## Recovery
 
-If a native build fails after a GitHub Release exists, fix the relevant signing or store credential, set `NATIVE_AUTO_RELEASE_ENABLED=true` if using automatic releases, and rerun `Native Release` with:
+If the automatic unsigned Android APK build fails, no signing or store credential is involved. Inspect the build error and rerun `Native Release` manually with `ref` set to the existing `vX.Y.Z` tag, `platform=android`, `profile=preview`, and `submit=false`. The manual rerun only produces a downloadable Actions artifact and does not attach it to the GitHub Release; keeping `NATIVE_AUTO_RELEASE_ENABLED=true` lets the next Release Please release rebuild and attach its APK automatically.
+
+For a Google Play failure, configure the Android signing and Play service-account secrets first, then rerun `Native Release` with:
 
 - ref: the existing `vX.Y.Z` tag
 - profile: `production`
-- platform: the failed platform or `all`
-- submit: enabled when the store upload should be retried
+- platform: `android`
+- submit: `true` when the store upload should be retried
 - release tag: the same `vX.Y.Z`
 
 Do not create a second tag for the same source version.

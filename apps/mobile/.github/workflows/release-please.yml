@@ -32,18 +32,43 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   mobile-release:
-    name: Build native mobile release
+    name: Build Android APK
     needs: release
     if: needs.release.outputs.release_created == 'true' && vars.NATIVE_AUTO_RELEASE_ENABLED == 'true'
     uses: ./.github/workflows/native-release.yml
     with:
       ref: ${{ needs.release.outputs.tag_name }}
-      platform: all
-      profile: production
-      submit: ${{ vars.NATIVE_AUTO_SUBMIT_ENABLED == 'true' }}
-      android_track: internal
+      platform: android
+      profile: preview
+      submit: false
       release_tag: ${{ needs.release.outputs.tag_name }}
     secrets: inherit
+
+  publish-android:
+    name: Publish Android APK to GitHub Release
+    needs: [release, mobile-release]
+    if: needs.release.outputs.release_created == 'true' && vars.NATIVE_AUTO_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Android APK
+        uses: actions/download-artifact@v8
+        with:
+          name: cohub-android-preview-${{ github.run_id }}
+          path: build/release
+
+      - name: Upload APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          apk=$(find build/release -type f -name '*.apk' -print -quit)
+          test -n "$apk" || { echo "Android APK was not found in the downloaded artifact"; exit 1; }
+          gh release upload "$RELEASE_TAG" "$apk#cohub-${RELEASE_TAG}-android.apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
 
   native-release-not-configured:
     name: Native release is disabled
@@ -55,5 +80,5 @@ jobs:
     steps:
       - name: Explain release gate
         run: |
-          echo "::notice::GitHub Release created without native store artifacts."
-          echo "Set the NATIVE_AUTO_RELEASE_ENABLED repository variable to true after configuring signing credentials."
+          echo "::notice::GitHub Release created without an Android APK."
+          echo "Set the NATIVE_AUTO_RELEASE_ENABLED repository variable to true to build and attach an Android APK."
