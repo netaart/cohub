@@ -64,6 +64,7 @@
     "native:android": "npm run native:android:prepare && npm run native:android:build",
     "native:android:prepare": "npx expo prebuild --platform android --no-install",
     "native:android:build": "node scripts/build-android-debug.mjs",
+    "native:android:preview": "node scripts/build-android-preview.mjs",
     "native:ios": "npm run native:ios:prepare && npm run native:ios:build",
     "native:ios:prepare": "npx expo prebuild --platform ios --no-install && pod install --project-directory=ios",
     "native:ios:build": "node scripts/build-ios-simulator.mjs",

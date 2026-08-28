@@ -45,20 +45,20 @@ jobs:
     secrets: inherit
 
   publish-android:
-    name: Publish Android APKs to GitHub Release
+    name: Publish standalone Android APKs to GitHub Release
     needs: [release, mobile-release]
     if: needs.release.outputs.release_created == 'true' && vars.NATIVE_AUTO_RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download Android APKs
+      - name: Download standalone Android APKs
         uses: actions/download-artifact@v8
         with:
           name: cohub-android-preview-${{ github.run_id }}
           path: build/release
 
-      - name: Upload APKs to GitHub Release
+      - name: Upload standalone APKs to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
@@ -68,12 +68,14 @@ jobs:
           apks=(build/release/*.apk)
           test "${#apks[@]}" -eq 4 || { echo "Expected four Android ABI APKs, found ${#apks[@]}"; exit 1; }
           for apk in "${apks[@]}"; do
-            abi=$(basename "$apk" | sed -E 's/^app-(.+)-debug\.apk$/\1/')
+            abi=$(basename "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
             case "$abi" in
               armeabi-v7a|arm64-v8a|x86|x86_64) ;;
               *) echo "Unexpected Android APK name: $(basename "$apk")"; exit 1 ;;
             esac
-            gh release upload "$RELEASE_TAG" "$apk#cohub-${RELEASE_TAG}-android-${abi}.apk" \
+            release_apk="cohub-${RELEASE_TAG}-android-${abi}.apk"
+            cp "$apk" "$release_apk"
+            gh release upload "$RELEASE_TAG" "$release_apk" \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
           done

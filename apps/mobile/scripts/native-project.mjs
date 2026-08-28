@@ -86,6 +86,15 @@ export async function configureAndroidAbiSplits(root = process.cwd(), architectu
   return normalizedArchitectures;
 }
 
+export async function buildAndroid(root = process.cwd(), { architectures, variant, minify = false }) {
+  const normalizedArchitectures = await configureAndroidAbiSplits(root, architectures);
+  const task = variant === "release" ? "assembleRelease" : "assembleDebug";
+  const args = [`-PreactNativeArchitectures=${normalizedArchitectures}`];
+  if (minify) args.push("-Pandroid.enableMinifyInReleaseBuilds=true");
+  args.push(task, "--no-daemon", "--stacktrace");
+  await run("./gradlew", args, { cwd: join(root, "android") });
+}
+
 export async function run(command, args, options = {}) {
   const { cwd = process.cwd(), env = process.env } = options;
   await new Promise((resolvePromise, reject) => {

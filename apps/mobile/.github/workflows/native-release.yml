@@ -215,7 +215,7 @@ jobs:
         if: inputs.profile == 'preview'
         env:
           COHUB_ANDROID_ARCHITECTURES: armeabi-v7a,arm64-v8a,x86,x86_64
-        run: npm run native:android:build
+        run: npm run native:android:preview
 
       - name: Build production AAB
         if: inputs.profile == 'production'
@@ -225,7 +225,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cohub-android-${{ inputs.profile }}-${{ github.run_id }}
-          path: ${{ inputs.profile == 'production' && 'android/app/build/outputs/bundle/release/app-release.aab' || 'android/app/build/outputs/apk/debug/app-*-debug.apk' }}
+          path: ${{ inputs.profile == 'production' && 'android/app/build/outputs/bundle/release/app-release.aab' || 'android/app/build/outputs/apk/release/app-*-release.apk' }}
           if-no-files-found: error
           retention-days: 30
 
