@@ -5,29 +5,50 @@
 The repository does not require Expo Application Services (EAS) for builds.
 
 1. `CI` validates every PR and push to `main`, then exports Web, Android, and iOS JavaScript bundles.
-2. `Native CI` compiles an Android debug APK on a GitHub Linux runner and an iOS simulator app on a GitHub macOS runner.
+2. `Native CI` compiles an Android debug APK on a GitHub Linux runner and an iOS simulator app on a GitHub macOS runner for internal validation only.
 3. `Release Please` maintains a version/changelog PR from Conventional Commits.
-4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. When the repository variable `NATIVE_AUTO_RELEASE_ENABLED` is `true`, the release also builds Android release APKs and attaches them to that GitHub Release. iOS and store submissions are not part of this automatic path.
+4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. When the repository variable `NATIVE_AUTO_RELEASE_ENABLED` is `true` and the Android release keystore secrets are configured, the release also builds signed Android distribution APKs and attaches them to that GitHub Release. iOS and store submissions are not part of this automatic path.
 
 Expo is used as the open-source React Native toolchain and for native modules. `expo prebuild` generates standard Gradle and Xcode projects inside CI. No Expo subscription or EAS project is required.
 
 ## One-time repository setup
 
-### Android APK now
+### Android formal distribution
 
-No signing or store credentials are needed for the current Android distribution path. In GitHub, open **Settings -> Secrets and variables -> Actions -> Variables**, create a repository variable, and set:
+The current direct-download release path does not need a Google Play service account, but it does need one stable Android release keystore for formal APK signing. The same keystore must be used for every future version so Android can install updates over the previous version. The current `v1.1.0` APKs were signed with the old debug key and are not upgrade-compatible with the future formal-distribution key; uninstall `v1.1.0` before installing the first formally signed build.
 
-| Variable | Value |
-| --- | --- |
-| `NATIVE_AUTO_RELEASE_ENABLED` | `true` |
+Generate the keystore locally and keep a protected backup of both the file and its passwords:
 
-You can also set it with the GitHub CLI:
+```bash
+keytool -genkeypair -v \
+  -keystore cohub-release.keystore \
+  -alias cohub-release \
+  -storetype JKS \
+  -keyalg RSA \
+  -keysize 4096 \
+  -validity 10000
+```
+
+Add the keystore and its metadata as GitHub Actions secrets:
+
+```bash
+base64 < cohub-release.keystore | tr -d '\n' | gh secret set ANDROID_KEYSTORE_BASE64 --repo markbang/cohub-mobile
+gh secret set ANDROID_KEYSTORE_PASSWORD --repo markbang/cohub-mobile
+gh secret set ANDROID_KEY_ALIAS --repo markbang/cohub-mobile --body cohub-release
+gh secret set ANDROID_KEY_PASSWORD --repo markbang/cohub-mobile
+```
+
+The two password commands read their values interactively. Do not commit `cohub-release.keystore` or put it in the repository. Losing this keystore means future APKs cannot update an installed version.
+
+If `NATIVE_AUTO_RELEASE_ENABLED=true` before all four Android signing secrets exist, the release gate logs a notice and skips the APK build; it does not fail the GitHub Release. Add all four secrets before expecting APKs.
+
+After the secrets are configured, enable automatic formal APK builds:
 
 ```bash
 gh variable set NATIVE_AUTO_RELEASE_ENABLED --repo markbang/cohub-mobile --body true
 ```
 
-On the next Release Please release, GitHub Actions builds four standalone Android release APKs on Ubuntu, one for each ABI, and attaches them to the GitHub Release. These packages include the JavaScript bundle and can start without a Metro development server:
+On the next Release Please release, GitHub Actions builds four signed standalone Android release APKs on Ubuntu, one for each ABI, and attaches them to the GitHub Release. These packages include the JavaScript bundle and can start without a Metro development server:
 
 ```text
 cohub-vX.Y.Z-android-arm64-v8a.apk
@@ -36,9 +57,9 @@ cohub-vX.Y.Z-android-x86.apk
 cohub-vX.Y.Z-android-x86_64.apk
 ```
 
-Each APK contains only its own native libraries, so each download is much smaller than one universal APK. The files are named directly (not only with a GitHub display label), so the downloaded filename includes the ABI. This is direct APK distribution, not a Google Play upload. The automatic path does not build iOS and does not use any store credentials.
+Each APK contains only its own native libraries, so each download is much smaller than one universal APK. The files are named directly, so the downloaded filename includes the ABI. This is direct APK distribution, not a Google Play upload. The automatic path does not build iOS and does not use a Google Play service account.
 
-For the existing `v1.1.0` release, run `Native Release` manually with `ref=v1.1.0`, `platform=android`, `profile=preview`, `submit=false` if you want standalone ABI-specific APKs before the next version release.
+The first formally signed package must be produced by a new release created after this distribution workflow is merged. The existing `v1.1.0` APKs were produced before formal signing was enabled and use the old debug key; uninstall them before installing the first formally signed release. The manual run produces Actions artifacts and does not modify an existing GitHub Release.
 
 ### Android / Google Play later
 
@@ -79,7 +100,7 @@ Register `cohub://callback` in the Native Logto application. Logto credentials a
 4. Confirm the required CI, Security, and Native CI checks are green.
 5. Merge the Release Please PR.
 6. GitHub creates the `vX.Y.Z` tag and release.
-7. If `NATIVE_AUTO_RELEASE_ENABLED=true`, the same workflow builds four standalone ABI-specific Android release APKs and attaches them to the GitHub Release. It does not build iOS or upload to Google Play/TestFlight. With the variable unset or `false`, only the GitHub Release is created.
+7. If `NATIVE_AUTO_RELEASE_ENABLED=true` and the Android release keystore secrets exist, the same workflow builds four signed ABI-specific Android distribution APKs and attaches them to the GitHub Release. It does not build iOS or upload to Google Play/TestFlight. With the variable unset or `false`, only the GitHub Release is created.
 
 The release workflow validates that the tag is exactly `v<package version>`, and that `package.json` and `app.json` have identical versions. Native build numbers are derived deterministically from the app version in `app.config.ts`.
 
@@ -89,24 +110,25 @@ GitHub-hosted macOS runner usage may be subject to your GitHub plan's Actions qu
 
 Open Actions -> `Native Release` -> Run workflow. Choose:
 
-- `preview` for standalone Android release APKs and an iOS simulator ZIP
-- `production` for signed store artifacts
+- `distribution` for signed standalone Android release APKs
+- `production` for signed store artifacts (AAB/IPA)
 - one platform or `all`
 - `submit=true` only when a production artifact should be sent to a store; the automatic Release Please path always uses `submit=false`
 - `internal` or `production` for the Google Play track when manually submitting a `profile=production` Android build
 
-Equivalent local preview commands:
+Equivalent local commands:
 
 ```bash
-npm run native:android
-npm run native:ios
+npm run native:android:distribution
 ```
+
+The regular `npm run native:android` command remains a debug build for local development. It is not a release artifact.
 
 The iOS command requires macOS and Xcode. The Android command requires the Android SDK and Java 17.
 
 ## Recovery
 
-If the automatic standalone Android APK build fails, no signing or store credential is involved. Inspect the build error and rerun `Native Release` manually with `ref` set to the existing `vX.Y.Z` tag, `platform=android`, `profile=preview`, and `submit=false`. The manual rerun only produces downloadable Actions artifacts and does not attach them to the GitHub Release; keeping `NATIVE_AUTO_RELEASE_ENABLED=true` lets the next Release Please release rebuild and attach all four APKs automatically.
+If the automatic Android distribution build fails, inspect the build error and rerun `Native Release` with `release_tag` set to the existing post-distribution `vX.Y.Z` tag, `platform=android`, `profile=distribution`, and `submit=false`. The manual rerun produces downloadable Actions artifacts; it does not attach them to the GitHub Release. Keep the same release keystore and passwords for all future versions.
 
 For a Google Play failure, configure the Android signing and Play service-account secrets first, then rerun `Native Release` with:
 

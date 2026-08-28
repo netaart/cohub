@@ -28,4 +28,4 @@ Keep changes focused. CI must pass Quality, all three Bundle jobs, and the relev
 
 ## Releases
 
-See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR is the release approval action; it creates the tag and GitHub Release. When `NATIVE_AUTO_RELEASE_ENABLED=true`, it also builds and attaches an Android debug APK. iOS builds and store submissions remain manual.
+See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR is the release approval action; it creates the tag and GitHub Release. When `NATIVE_AUTO_RELEASE_ENABLED=true` and the Android release keystore secrets are configured, it also builds and attaches four signed Android distribution APKs. iOS builds and store submissions remain manual.

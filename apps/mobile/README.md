@@ -62,7 +62,7 @@ npm run native:ios
 - `Native CI` compiles Android and iOS debug artifacts on GitHub-hosted Linux/macOS runners.
 - `Security` runs dependency review and CodeQL.
 - Release Please maintains `CHANGELOG.md`, synchronizes the Expo and npm versions, and creates `vX.Y.Z` GitHub Releases.
-- When `NATIVE_AUTO_RELEASE_ENABLED=true`, a created release builds four standalone ABI-specific Android release APKs (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`) and attaches them to the GitHub Release; iOS and store uploads remain manual. EAS is not required.
+- When `NATIVE_AUTO_RELEASE_ENABLED=true` and the Android release keystore secrets are configured, a created release builds four signed standalone ABI-specific Android release APKs (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`) and attaches them to the GitHub Release; iOS and store uploads remain manual. EAS is not required.
 - Dependabot updates npm and GitHub Actions dependencies weekly.
 
 See [docs/releasing.md](docs/releasing.md) for signing secrets, store credentials, native runner details, normal releases, manual builds, and recovery.
