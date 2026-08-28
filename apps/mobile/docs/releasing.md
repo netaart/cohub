@@ -27,7 +27,7 @@ You can also set it with the GitHub CLI:
 gh variable set NATIVE_AUTO_RELEASE_ENABLED --repo markbang/cohub-mobile --body true
 ```
 
-On the next Release Please release, GitHub Actions builds an Android debug APK on Ubuntu and attaches it to the GitHub Release as `cohub-vX.Y.Z-android.apk`. This is a direct APK download, not a Google Play upload. The automatic path does not build iOS and does not use any store credentials.
+On the next Release Please release, GitHub Actions builds an Android debug APK for `arm64-v8a` devices on Ubuntu and attaches it to the GitHub Release as `cohub-vX.Y.Z-android.apk`. This is a direct APK download, not a Google Play upload. The automatic path does not build iOS and does not use any store credentials. Most current Android phones use arm64; an x86 emulator or older 32-bit-only device needs a separately configured architecture build.
 
 For the existing `v1.1.0` release, run `Native Release` manually with `platform=android`, `profile=preview`, `submit=false` if you want an APK before the next version release.
 
@@ -97,7 +97,7 @@ The iOS command requires macOS and Xcode. The Android command requires the Andro
 
 ## Recovery
 
-If the automatic unsigned Android APK build fails, no signing or store credential is involved. Inspect the build error and rerun `Native Release` manually with `ref` set to the existing `vX.Y.Z` tag, `platform=android`, `profile=preview`, and `submit=false`. The manual rerun only produces a downloadable Actions artifact and does not attach it to the GitHub Release; keeping `NATIVE_AUTO_RELEASE_ENABLED=true` lets the next Release Please release rebuild and attach its APK automatically.
+If the automatic unsigned Android APK build fails, no signing or store credential is involved. Inspect the build error and rerun `Native Release` manually with `ref` set to the existing `vX.Y.Z` tag, `platform=android`, `profile=preview`, and `submit=false`. The manual rerun only produces a downloadable Actions artifact and does not attach it to the GitHub Release; keeping `NATIVE_AUTO_RELEASE_ENABLED=true` lets the next Release Please release rebuild and attach its APK automatically. The automatic preview build targets `arm64-v8a` only.
 
 For a Google Play failure, configure the Android signing and Play service-account secrets first, then rerun `Native Release` with:
 
