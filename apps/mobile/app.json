@@ -22,7 +22,7 @@
     "android": {
       "package": "io.github.markbang.cohubmobile",
       "adaptiveIcon": {
-        "backgroundColor": "#111317",
+        "backgroundColor": "#0f1114",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -62,7 +62,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/notification-icon.png",
-          "color": "#e87942"
+          "color": "#f08349"
         }
       ],
       [
@@ -83,7 +83,7 @@
         {
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#111317"
+          "backgroundColor": "#0f1114"
         }
       ]
     ],

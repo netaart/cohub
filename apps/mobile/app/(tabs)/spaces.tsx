@@ -4,13 +4,14 @@ import { FlatList, Modal, Pressable, Text, TextInput, View } from "react-native"
 import { SpaceRow } from "@/src/components/SpaceRow";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { BrandMark, EmptyState, IconButton, LoadingRows, PrimaryButton, SearchField, TopBar } from "@/src/ui";
+import { BrandMark, DataError, EmptyState, IconButton, LoadingRows, PrimaryButton, SearchField, SyncStatus, TopBar, Screen } from "@/src/ui";
 import { displaySpaceName } from "@/src/utils";
 
 export default function SpacesScreen() {
   const router = useRouter();
   const theme = useAppTheme();
   const { state, refreshHome, createSpace } = useApp();
+  const dataError = state.error ?? state.spacesError;
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
@@ -21,8 +22,9 @@ export default function SpacesScreen() {
     const needle = query.trim().toLowerCase();
     return state.spaces.filter((space) => !needle || [displaySpaceName(space), space.description].some((value) => value?.toLowerCase().includes(needle)));
   }, [query, state.spaces]);
-  return <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
-    <TopBar title="Spaces" subtitle={`${state.spaces.length} workspaces`} left={<BrandMark size={36} />} right={<IconButton name="add" label="New Space" size={38} tone="accent" onPress={() => { setCreateError(null); setCreateOpen(true); }} />} />
+  return <Screen>
+    <TopBar title="Spaces" subtitle={dataError ? "Spaces unavailable" : `${state.spaces.length} workspaces`} left={<BrandMark size={36} />} right={<IconButton name="add" label="New Space" size={38} tone="accent" onPress={() => { setCreateError(null); setCreateOpen(true); }} />} />
+    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
     <FlatList
       data={spaces}
       keyExtractor={(item) => item.id}
@@ -31,8 +33,8 @@ export default function SpacesScreen() {
       onRefresh={() => void refreshHome()}
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ paddingBottom: 30, flexGrow: spaces.length === 0 ? 1 : undefined }}
-      ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 5 }}><SearchField value={query} onChangeText={setQuery} placeholder="Find a Space" /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 20 }]}>Your workspaces</Text></View>}
-      ListEmptyComponent={state.booting ? <LoadingRows count={4} /> : <EmptyState icon="layers-outline" title={query ? "No matching Spaces" : "No Spaces yet"} description={query ? "Try another name or description." : "Create a Space first, then start a Chat with an Agent."} action={query ? "Clear search" : "Create Space"} onAction={() => query ? setQuery("") : setCreateOpen(true)} />}
+      ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 5 }}><SearchField value={query} onChangeText={setQuery} placeholder="Find a Space" /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 16 }]}>Your workspaces</Text></View>}
+      ListEmptyComponent={state.booting ? <LoadingRows count={4} /> : dataError ? <EmptyState icon="cloud-offline-outline" title="Spaces are unavailable" description="Retry above after checking your connection and sign-in session." /> : <EmptyState icon="layers-outline" title={query ? "No matching Spaces" : "No Spaces yet"} description={query ? "Try another name or description." : "Create a Space first, then start a Chat with an Agent."} action={query ? "Clear search" : "Create Space"} onAction={() => query ? setQuery("") : setCreateOpen(true)} />}
     />
     <Modal visible={createOpen} transparent animationType="slide" onRequestClose={() => setCreateOpen(false)}>
       <Pressable style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.55)" }} onPress={() => setCreateOpen(false)}>
@@ -49,5 +51,5 @@ export default function SpacesScreen() {
         </Pressable>
       </Pressable>
     </Modal>
-  </View>;
+  </Screen>;
 }

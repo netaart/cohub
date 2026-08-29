@@ -48,6 +48,11 @@ export type AppState = {
   booting: boolean;
   refreshing: boolean;
   error: string | null;
+  spacesError: string | null;
+  sessionsError: string | null;
+  activityLoading: boolean;
+  activityError: string | null;
+  lastSyncedAt: string | null;
   spaces: SpaceRecord[];
   sessions: UserSessionListItem[];
   sessionViews: Record<string, SessionView>;

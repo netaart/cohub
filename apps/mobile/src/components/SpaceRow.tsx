@@ -9,7 +9,7 @@ export function SpaceRow({ space, chatCount, onPress }: { space: SpaceRecord; ch
   const name = displaySpaceName(space);
   const active = space.status === "running" || space.status === "bootstrapping";
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={onPress} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 13, minHeight: 82, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={onPress} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 13, minHeight: 84, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>
       <Avatar name={name} uri={space.publicProfile?.avatarUrl} size={50} online={active} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{name}</Text>{active ? <StatusPill label="Active" tone="success" /> : null}</View>

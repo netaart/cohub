@@ -20,7 +20,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem } from "@/src/data/types";
-import { initials } from "@/src/utils";
+import { formatRelativeTime, initials } from "@/src/utils";
 
 export type IconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -136,10 +136,10 @@ export function EmptyState({ icon, title, description, action, onAction }: { ico
   const theme = useAppTheme();
   return (
     <View style={styles.emptyState}>
-      <View style={[styles.emptyIcon, { backgroundColor: theme.colors.surfaceRaised }]}><AppIcon name={icon} size={24} color={theme.colors.textMuted} /></View>
-      <Text style={[typography.heading, { color: theme.colors.text, marginTop: 16, textAlign: "center" }]}>{title}</Text>
+      <View style={[styles.emptyIcon, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}><AppIcon name={icon} size={24} color={theme.colors.accent} /></View>
+      <Text style={[typography.heading, { color: theme.colors.text, marginTop: 14, textAlign: "center" }]}>{title}</Text>
       <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 6, textAlign: "center", maxWidth: 300 }]}>{description}</Text>
-      {action && onAction ? <PrimaryButton label={action} onPress={onAction} style={{ marginTop: 20 }} /> : null}
+      {action && onAction ? <PrimaryButton label={action} onPress={onAction} style={{ marginTop: 18 }} /> : null}
     </View>
   );
 }
@@ -154,20 +154,20 @@ export function PrimaryButton({ label, onPress, icon, loading = false, disabled 
   );
 }
 
-export function SearchField({ value, onChangeText, placeholder = "Search" }: Pick<TextInputProps, "value" | "onChangeText" | "placeholder">) {
+export function SearchField({ value, onChangeText, placeholder = "Search", inputRef }: Pick<TextInputProps, "value" | "onChangeText" | "placeholder"> & { inputRef?: React.RefObject<TextInput | null> }) {
   const theme = useAppTheme();
   return (
     <View style={[styles.searchField, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
       <AppIcon name="search-outline" size={18} color={theme.colors.textMuted} />
-      <TextInput value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { flex: 1, color: theme.colors.text, paddingVertical: 0 }]} returnKeyType="search" />
-      {value ? <AppIcon name="close-circle" size={17} color={theme.colors.textFaint} /> : null}
+      <TextInput ref={inputRef} value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { flex: 1, color: theme.colors.text, paddingVertical: 0 }]} returnKeyType="search" />
+      {value ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => onChangeText?.("")} hitSlop={8}><AppIcon name="close-circle" size={17} color={theme.colors.textFaint} /></Pressable> : null}
     </View>
   );
 }
 
 export function LoadingRows({ count = 5 }: { count?: number }) {
   const theme = useAppTheme();
-  return <View style={{ paddingHorizontal: 16, gap: 12 }}>{Array.from({ length: count }).map((_, index) => <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 }}><View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ flex: 1, gap: 8 }}><View style={{ width: `${58 + (index % 3) * 10}%`, height: 12, borderRadius: 6, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ width: `${38 + (index % 2) * 15}%`, height: 10, borderRadius: 5, backgroundColor: theme.colors.surfaceRaised }} /></View></View>)}</View>;
+  return <View style={{ paddingHorizontal: 16, gap: 4 }}>{Array.from({ length: count }).map((_, index) => <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}><View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ flex: 1, gap: 9 }}><View style={{ width: `${58 + (index % 3) * 10}%`, height: 12, borderRadius: 6, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ width: `${38 + (index % 2) * 15}%`, height: 10, borderRadius: 5, backgroundColor: theme.colors.surfaceRaised }} /></View></View>)}</View>;
 }
 
 export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, disabled = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; disabled?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
@@ -213,7 +213,18 @@ export function ConnectionBanner({ state }: { state: string }) {
   const theme = useAppTheme();
   if (state === "open" || state === "idle") return null;
   const reconnecting = state === "reconnecting" || state === "connecting";
-  return <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 7, backgroundColor: reconnecting ? theme.colors.warningSoft : theme.colors.dangerSoft }}><AppIcon name={reconnecting ? "sync-outline" : "cloud-offline-outline"} size={14} color={reconnecting ? theme.colors.warning : theme.colors.danger} /><Text style={[typography.caption, { color: reconnecting ? theme.colors.warning : theme.colors.danger }]}>{reconnecting ? "Reconnecting to Cohub" : "Connection unavailable"}</Text></View>;
+  return <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 8, backgroundColor: reconnecting ? theme.colors.warningSoft : theme.colors.dangerSoft }}><AppIcon name={reconnecting ? "sync-outline" : "cloud-offline-outline"} size={14} color={reconnecting ? theme.colors.warning : theme.colors.danger} /><Text style={[typography.caption, { color: reconnecting ? theme.colors.warning : theme.colors.danger }]}>{reconnecting ? "Reconnecting to Cohub" : "Connection unavailable"}</Text></View>;
+}
+
+export function DataError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const theme = useAppTheme();
+  return <View style={[styles.dataError, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><View style={[styles.dataErrorIcon, { backgroundColor: theme.colors.background }]}><AppIcon name="cloud-offline-outline" size={17} color={theme.colors.danger} /></View><View style={{ flex: 1, minWidth: 0 }}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Could not load your data</Text><Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 3 }]}>{message}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Retry loading data" onPress={onRetry} hitSlop={8}><Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>Retry</Text></Pressable></View>;
+}
+
+export function SyncStatus({ timestamp }: { timestamp: string | null }) {
+  const theme = useAppTheme();
+  if (!timestamp) return null;
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 16, paddingTop: 12 }}><AppIcon name="checkmark-circle-outline" size={13} color={theme.colors.success} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>Updated {formatRelativeTime(timestamp)}</Text></View>;
 }
 
 export function getStatusTone(status: ActivityItem["status"]): "success" | "warning" | "danger" {
@@ -226,13 +237,15 @@ export function useBackButton() {
 
 const styles = StyleSheet.create({
   iconButton: { alignItems: "center", justifyContent: "center" },
-  topBar: { minHeight: 62, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
-  topBarLeft: { width: 48, alignItems: "flex-start", justifyContent: "center" },
-  topBarTitle: { flex: 1, minWidth: 0 },
+  topBar: { minHeight: 70, paddingHorizontal: 16, paddingVertical: 7, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
+  topBarLeft: { width: 44, alignItems: "flex-start", justifyContent: "center" },
+  topBarTitle: { flex: 1, minWidth: 0, paddingVertical: 2 },
   topBarRight: { width: 96, alignItems: "flex-end", justifyContent: "center", flexDirection: "row", gap: 2 },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 24, paddingBottom: 10 },
-  emptyState: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, minHeight: 360 },
-  emptyIcon: { width: 56, height: 56, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 22, paddingBottom: 10 },
+  emptyState: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, minHeight: 260 },
+  emptyIcon: { width: 56, height: 56, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  dataError: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderWidth: 1, borderRadius: 14 },
+  dataErrorIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   searchField: { minHeight: 44, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 9 },
   composerWrap: { paddingHorizontal: 12, paddingTop: 9, paddingBottom: 10 },

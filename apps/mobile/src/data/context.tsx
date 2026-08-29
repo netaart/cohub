@@ -36,6 +36,40 @@ import {
   sortByRecent,
 } from "@/src/utils";
 
+const HOME_REQUEST_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, label: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after 15 seconds`)), HOME_REQUEST_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (typeof error === "object" && error !== null && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    if (status === 401) return "Your sign-in session was rejected. Please sign in again and retry.";
+    if (status === 403) return "Your account does not have access to this data.";
+  }
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+function withAccessTokenTimeout(
+  promise: Promise<string | null>,
+  timeoutMs = 10_000,
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 const emptyView = (): SessionView => ({
   space: null,
   session: null,
@@ -51,6 +85,11 @@ const initialState: AppState = {
   booting: true,
   refreshing: false,
   error: null,
+  spacesError: null,
+  sessionsError: null,
+  activityLoading: false,
+  activityError: null,
+  lastSyncedAt: null,
   spaces: [],
   sessions: [],
   sessionViews: {},
@@ -60,9 +99,11 @@ const initialState: AppState = {
 type Action =
   | { type: "hydrate"; spaces: SpaceRecord[]; sessions: UserSessionListItem[] }
   | { type: "home-start" }
-  | { type: "home-success"; spaces: SpaceRecord[]; sessions: UserSessionListItem[] }
+  | { type: "home-success"; spaces: SpaceRecord[]; sessions: UserSessionListItem[]; spacesError?: string; sessionsError?: string }
   | { type: "home-error"; message: string }
+  | { type: "usage-start" }
   | { type: "usage"; usage: SpaceUsageSummary }
+  | { type: "usage-error"; message: string }
   | { type: "session-start"; sessionId: string; space?: SpaceRecord | null; session?: SessionRecord | null }
   | { type: "session-meta"; sessionId: string; space?: SpaceRecord | null; session: SessionRecord }
   | { type: "session-cache"; sessionId: string; messages: MessageRecord[] }
@@ -113,20 +154,27 @@ function reducer(state: AppState, action: Action): AppState {
         booting: false,
       };
     case "home-start":
-      return { ...state, refreshing: true, error: null };
+      return { ...state, refreshing: true, error: null, spacesError: null, sessionsError: null, activityLoading: true, activityError: null };
     case "home-success":
       return {
         ...state,
         booting: false,
         refreshing: false,
         error: null,
+        spacesError: action.spacesError ?? null,
+        sessionsError: action.sessionsError ?? null,
+        lastSyncedAt: new Date().toISOString(),
         spaces: sortByRecent(action.spaces),
         sessions: sortByRecent(action.sessions),
       };
     case "home-error":
-      return { ...state, booting: false, refreshing: false, error: action.message };
+      return { ...state, booting: false, refreshing: false, activityLoading: false, error: action.message, spacesError: action.message, sessionsError: action.message, activityError: action.message };
+    case "usage-start":
+      return { ...state, activityLoading: true, activityError: null };
     case "usage":
-      return { ...state, usage: action.usage };
+      return { ...state, activityLoading: false, activityError: null, usage: action.usage };
+    case "usage-error":
+      return { ...state, activityLoading: false, activityError: action.message };
     case "session-start":
       return updateView(state, action.sessionId, {
         loading: true,
@@ -266,21 +314,41 @@ export function AppProvider({
   const stateRef = useRef(state);
   const subscriptions = useRef(new Map<string, () => void>());
   const openTokens = useRef(new Map<string, number>());
+  const installationIdRef = useRef<string | null>(null);
+  const installationRequestRef = useRef<Promise<string> | null>(null);
+  const clientRef = useRef<CohubClient | null>(null);
+  const homeRefreshGenerationRef = useRef(0);
   const userKey = userUuid;
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  useEffect(() => {
-    let active = true;
-    void getInstallationId().then((id) => {
-      if (active) setInstallationId(id);
-    });
-    return () => {
-      active = false;
-    };
+  const dispatch = useCallback((action: Action) => {
+    setState((current) => reducer(current, action));
   }, []);
+
+  const ensureInstallation = useCallback(async () => {
+    const existing = installationIdRef.current;
+    if (existing) return existing;
+    const pending = installationRequestRef.current;
+    if (pending) return pending;
+
+    const request = getInstallationId().then((id) => {
+      installationIdRef.current = id;
+      setInstallationId(id);
+      return id;
+    });
+    installationRequestRef.current = request;
+    void request.finally(() => {
+      if (installationRequestRef.current === request) installationRequestRef.current = null;
+    }).catch(() => undefined);
+    return request;
+  }, []);
+
+  useEffect(() => {
+    installationIdRef.current = installationId;
+  }, [installationId]);
 
   const client = useMemo(
     () =>
@@ -290,41 +358,67 @@ export function AppProvider({
     [getAccessToken, installationId, offline],
   );
 
-  const dispatch = useCallback((action: Action) => {
-    setState((current) => reducer(current, action));
-  }, []);
+  useEffect(() => {
+    clientRef.current = client;
+  }, [client]);
 
   const refreshHome = useCallback(async () => {
-    if (!client) return;
+    if (offline) return;
+    const generation = homeRefreshGenerationRef.current + 1;
+    homeRefreshGenerationRef.current = generation;
     dispatch({ type: "home-start" });
     try {
-      const [spaces, sessionResponse] = await Promise.all([
-        client.spaces.list(),
-        client.user.listSessions({ limit: 60 }),
+      const resolvedInstallationId = await ensureInstallation();
+      const activeClient = clientRef.current ?? createMobileClient(getAccessToken, resolvedInstallationId);
+      clientRef.current = activeClient;
+      const token = await withAccessTokenTimeout(getAccessToken());
+      if (!token) throw new Error("Your sign-in session is unavailable. Please sign in again.");
+      const [spacesResult, sessionsResult] = await Promise.all([
+        withTimeout(activeClient.spaces.list(), "Loading Spaces").then(
+          (spaces) => ({ status: "fulfilled" as const, value: spaces }),
+          (reason: unknown) => ({ status: "rejected" as const, reason }),
+        ),
+        withTimeout(activeClient.user.listSessions({ limit: 60 }), "Loading Chats").then(
+          (sessions) => ({ status: "fulfilled" as const, value: sessions }),
+          (reason: unknown) => ({ status: "rejected" as const, reason }),
+        ),
       ]);
-      const sessions = sessionResponse.sessions;
-      dispatch({ type: "home-success", spaces, sessions });
+      if (generation !== homeRefreshGenerationRef.current) return;
+      const errors = [spacesResult, sessionsResult].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+      if (errors.length === 2) {
+        throw new Error(errors.map((error) => errorMessage(error, "Request failed")).join("\n"));
+      }
+      const spaces = spacesResult.status === "fulfilled" ? spacesResult.value ?? [] : stateRef.current.spaces;
+      const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value.sessions ?? [] : stateRef.current.sessions;
+      const spacesError = spacesResult.status === "rejected"
+        ? `Spaces could not be refreshed: ${errorMessage(spacesResult.reason, "Request failed")}`
+        : undefined;
+      const sessionsError = sessionsResult.status === "rejected"
+        ? `Chats could not be refreshed: ${errorMessage(sessionsResult.reason, "Request failed")}`
+        : undefined;
+      dispatch({ type: "home-success", spaces, sessions, spacesError, sessionsError });
+      dispatch({ type: "usage-start" });
       if (Platform.OS !== "web") {
         void saveHome(userKey, { spaces, sessions }).catch((error) => {
           console.warn("[mobile-cache] failed to save home", error);
         });
       }
-      void client.user
-        .getActivity({ days: 7 })
-        .then((activity) => dispatch({ type: "usage", usage: activity.summary }))
-        .catch(() => undefined);
+      void withTimeout(activeClient.user.getActivity({ days: 7 }), "Loading activity")
+        .then((activity) => {
+          if (generation === homeRefreshGenerationRef.current) dispatch({ type: "usage", usage: activity.summary });
+        })
+        .catch((error) => {
+          if (generation === homeRefreshGenerationRef.current) dispatch({ type: "usage-error", message: errorMessage(error, "Activity could not be refreshed") });
+        });
     } catch (error) {
-      if (Platform.OS === "web" && !(await getAccessToken())) {
-        dispatch({ type: "home-success", spaces: [], sessions: [] });
-        return;
+      if (generation === homeRefreshGenerationRef.current) {
+        dispatch({ type: "home-error", message: errorMessage(error, "Unable to load Cohub") });
       }
-      const message = error instanceof Error ? error.message : "Unable to load Cohub";
-      dispatch({ type: "home-error", message });
     }
-  }, [client, dispatch, getAccessToken, userKey]);
+  }, [dispatch, ensureInstallation, getAccessToken, offline, userKey]);
 
   useEffect(() => {
-    if (!client) return;
+    if (offline) return;
     let active = true;
     const activeSubscriptions = subscriptions.current;
     void (async () => {
@@ -338,14 +432,23 @@ export function AppProvider({
           console.warn("[mobile-cache] failed to hydrate home", error);
         }
       }
-      if (active) await refreshHome();
-    })();
+      if (active) {
+        await refreshHome();
+      }
+    })().catch((error) => {
+      if (active) {
+        dispatch({
+          type: "home-error",
+          message: errorMessage(error, "Unable to initialize Cohub"),
+        });
+      }
+    });
     return () => {
       active = false;
       for (const stop of activeSubscriptions.values()) stop();
       activeSubscriptions.clear();
     };
-  }, [client, dispatch, refreshHome, userKey]);
+  }, [dispatch, offline, refreshHome, userKey]);
 
   useEffect(() => {
     if (!client) return;
@@ -645,7 +748,7 @@ export function AppProvider({
 
   const clearCache = useCallback(async () => {
     await clearUserCache(userKey);
-    setState(initialState);
+    setState({ ...initialState, booting: false, refreshing: false });
   }, [userKey]);
 
   const activityItems = useMemo<ActivityItem[]>(() => {

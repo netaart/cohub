@@ -5,14 +5,15 @@ import { Alert, Pressable, Text, View } from "react-native";
 import { useApp } from "@/src/data/context";
 import { registerForPushNotifications } from "@/src/platform/notifications";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, Avatar, BrandMark, IconButton, Screen, SectionHeader, StatusPill, TopBar } from "@/src/ui";
+import { AppIcon, Avatar, BrandMark, DataError, IconButton, Screen, SectionHeader, StatusPill, SyncStatus, TopBar } from "@/src/ui";
 
 export default function ProfileScreen() {
   const theme = useAppTheme();
   const { getClaims, signOut } = useProfileSession();
-  const { state, connectionState, clearCache, installationId } = useApp();
+  const { state, connectionState, clearCache, installationId, refreshHome } = useApp();
+  const dataError = state.error ?? state.spacesError ?? state.sessionsError;
   const [profile, setProfile] = useState<{ name: string; email: string | null; avatar: string | null }>({ name: "Cohub user", email: null, avatar: null });
-  const [notificationState, setNotificationState] = useState<"unknown" | "enabled" | "denied">("unknown");
+  const [notificationState, setNotificationState] = useState<"unknown" | "enabled" | "unavailable">("unknown");
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
@@ -28,10 +29,9 @@ export default function ProfileScreen() {
   const enableNotifications = async () => {
     try {
       const registration = await registerForPushNotifications();
-      setNotificationState(registration ? "enabled" : "denied");
-      if (!registration) Alert.alert("Notifications are off", "Allow notifications in system settings to receive Agent updates.");
-    } catch (error) {
-      Alert.alert("Notifications unavailable", error instanceof Error ? error.message : "Unable to enable notifications.");
+      setNotificationState(registration ? "enabled" : "unavailable");
+    } catch {
+      setNotificationState("unavailable");
     }
   };
 
@@ -40,12 +40,13 @@ export default function ProfileScreen() {
   };
 
   return <Screen scroll>
-    <TopBar title="Profile" subtitle="Account and device" left={<BrandMark size={36} />} right={<IconButton name="settings-outline" label="Settings" size={38} onPress={() => Alert.alert("Settings", "More account settings will be available here.")} />} />
-    <View style={{ alignItems: "center", paddingTop: 28, paddingBottom: 22 }}><Avatar name={profile.name} uri={profile.avatar} size={76} online={connectionState === "open"} /><Text style={[typography.title, { color: theme.colors.text, marginTop: 13 }]}>{profile.name}</Text>{profile.email ? <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 4 }]}>{profile.email}</Text> : null}</View>
+    <TopBar title="Profile" subtitle="Account and device" left={<BrandMark size={38} />} right={<IconButton name="settings-outline" label="Settings" size={40} onPress={() => Alert.alert("Settings", "More account settings will be available here.")} />} />
+    <View style={{ alignItems: "center", paddingTop: 22, paddingBottom: 18 }}><Avatar name={profile.name} uri={profile.avatar} size={76} online={connectionState === "open"} /><Text style={[typography.title, { color: theme.colors.text, marginTop: 12 }]}>{profile.name}</Text>{profile.email ? <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 4 }]}>{profile.email}</Text> : null}</View>
+    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
     <SectionHeader title="Device" />
     <View style={{ marginHorizontal: 16, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 14, backgroundColor: theme.colors.surface, overflow: "hidden" }}>
       <SettingRow icon="wifi-outline" title="Connection" detail={connectionState === "open" ? "Connected to Cohub" : connectionState} trailing={<StatusPill label={connectionState === "open" ? "Online" : "Offline"} tone={connectionState === "open" ? "success" : "neutral"} />} />
-      <SettingRow icon="notifications-outline" title="Agent notifications" detail={notificationState === "enabled" ? "Permission enabled" : "Get notified when work finishes"} onPress={enableNotifications} trailing={<AppIcon name="chevron-forward" size={17} color={theme.colors.textFaint} />} />
+      <SettingRow icon="notifications-outline" title="Agent notifications" detail={notificationState === "enabled" ? "Permission enabled" : notificationState === "unavailable" ? "Push setup is not available yet" : "Get notified when work finishes"} onPress={enableNotifications} trailing={<AppIcon name="chevron-forward" size={17} color={theme.colors.textFaint} />} />
       <SettingRow icon="finger-print-outline" title="Installation" detail={installationId ? `${installationId.slice(0, 8)}…` : "Preparing device identity"} />
     </View>
     <SectionHeader title="Data" />

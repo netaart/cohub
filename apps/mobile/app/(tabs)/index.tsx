@@ -1,20 +1,27 @@
 import { useRouter } from "expo-router";
-import { useMemo, useState } from "react";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { useMemo, useRef, useState } from "react";
+import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { SessionRow } from "@/src/components/SessionRow";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, BrandMark, ConnectionBanner, EmptyState, IconButton, LoadingRows, SearchField, TopBar } from "@/src/ui";
+import { BrandMark, ConnectionBanner, DataError, EmptyState, IconButton, LoadingRows, Screen, SearchField, SyncStatus, TopBar } from "@/src/ui";
 import { isNeedsAttentionStatus, isRunningStatus } from "@/src/utils";
 
 type Filter = "all" | "running" | "attention";
 
 export default function ChatsScreen() {
   const router = useRouter();
-  const theme = useAppTheme();
   const { state, connectionState, refreshHome } = useApp();
+  const dataError = state.error ?? state.sessionsError;
+  const searchRef = useRef<TextInput>(null);
+  const listRef = useRef<FlatList>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+
+  const focusSearch = () => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    requestAnimationFrame(() => searchRef.current?.focus());
+  };
 
   const sessions = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -27,15 +34,17 @@ export default function ChatsScreen() {
   }, [filter, query, state.sessions]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+    <Screen>
       <TopBar
         title="Chats"
-        subtitle={state.sessions.length > 0 ? `${state.sessions.length} recent threads` : "Your work inbox"}
-        left={<BrandMark size={36} />}
-        right={<><IconButton name="search-outline" label="Focus search" size={38} onPress={() => setQuery((value) => value || " ")} /><IconButton name="create-outline" label="New Chat" size={38} tone="accent" onPress={() => router.push("/new-chat")} /></>}
+        subtitle={dataError ? "Chats unavailable" : state.sessions.length > 0 ? `${state.sessions.length} recent threads` : "Your work inbox"}
+        left={<BrandMark size={38} />}
+        right={<><IconButton name="search-outline" label="Focus search" size={40} onPress={focusSearch} /><IconButton name="create-outline" label="New Chat" size={40} tone="accent" onPress={() => router.push("/new-chat")} /></>}
       />
       <ConnectionBanner state={connectionState} />
+      {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
       <FlatList
+        ref={listRef}
         data={sessions}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <SessionRow session={item} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: item.id } })} />}
@@ -43,18 +52,17 @@ export default function ChatsScreen() {
         refreshing={state.refreshing}
         onRefresh={() => void refreshHome()}
         contentContainerStyle={{ paddingBottom: 30, flexGrow: sessions.length === 0 ? 1 : undefined }}
-        ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 14 }}>
-          <SearchField value={query.trim()} onChangeText={setQuery} placeholder="Search Chats and Spaces" />
-          <View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}>
+        ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <SearchField inputRef={searchRef} value={query} onChangeText={setQuery} placeholder="Search Chats and Spaces" />
+          <View style={{ flexDirection: "row", gap: 8, paddingTop: 12, paddingBottom: 4 }}>
             <FilterChip label="All" selected={filter === "all"} onPress={() => setFilter("all")} />
             <FilterChip label="Running" selected={filter === "running"} onPress={() => setFilter("running")} />
             <FilterChip label="Needs you" selected={filter === "attention"} onPress={() => setFilter("attention")} />
           </View>
-          {state.error ? <Pressable onPress={() => void refreshHome()} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 14, padding: 11, borderRadius: 12, backgroundColor: theme.colors.dangerSoft }}><AppIcon name="alert-circle-outline" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{state.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>Retry</Text></Pressable> : null}
         </View>}
-        ListEmptyComponent={state.booting ? <LoadingRows count={5} /> : <EmptyState icon={query || filter !== "all" ? "search-outline" : "chatbubbles-outline"} title={query || filter !== "all" ? "No matching Chats" : "No Chats yet"} description={query || filter !== "all" ? "Try another search or filter." : "Start a focused thread inside one of your Spaces."} action={query || filter !== "all" ? "Clear filters" : "New Chat"} onAction={() => { if (query || filter !== "all") { setQuery(""); setFilter("all"); } else router.push("/new-chat"); }} />}
+        ListEmptyComponent={state.booting ? <LoadingRows count={5} /> : dataError ? <EmptyState icon="cloud-offline-outline" title="Chats are unavailable" description="Retry above after checking your connection and sign-in session." /> : <EmptyState icon={query || filter !== "all" ? "search-outline" : "chatbubbles-outline"} title={query || filter !== "all" ? "No matching Chats" : "No Chats yet"} description={query || filter !== "all" ? "Try another search or filter." : "Start a focused thread inside one of your Spaces."} action={query || filter !== "all" ? "Clear filters" : "New Chat"} onAction={() => { if (query || filter !== "all") { setQuery(""); setFilter("all"); } else router.push("/new-chat"); }} />}
       />
-    </View>
+    </Screen>
   );
 }
 

@@ -3,31 +3,33 @@ import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, BrandMark, ConnectionBanner, EmptyState, IconButton, Screen, SectionHeader, StatusPill, TopBar, getStatusTone } from "@/src/ui";
+import { AppIcon, BrandMark, ConnectionBanner, DataError, EmptyState, IconButton, LoadingRows, Screen, SectionHeader, StatusPill, SyncStatus, TopBar, getStatusTone } from "@/src/ui";
 import { formatNumber, formatRelativeTime } from "@/src/utils";
 
 export default function ActivityScreen() {
   const router = useRouter();
   const theme = useAppTheme();
   const { state, activityItems, connectionState, refreshHome } = useApp();
+  const dataError = state.error ?? state.sessionsError ?? state.activityError;
   const [filter, setFilter] = useState<"all" | "running" | "attention">("all");
   const items = useMemo(() => filter === "all" ? activityItems : activityItems.filter((item) => item.status === filter), [activityItems, filter]);
   return <Screen scroll refreshing={state.refreshing} onRefresh={() => void refreshHome()}>
-    <TopBar title="Activity" subtitle="What needs your attention" left={<BrandMark size={36} />} right={<IconButton name="refresh-outline" label="Refresh activity" size={38} onPress={() => void refreshHome()} />} />
+    <TopBar title="Activity" subtitle={dataError ? "Activity unavailable" : "What needs your attention"} left={<BrandMark size={38} />} right={<IconButton name="refresh-outline" label="Refresh activity" size={40} onPress={() => void refreshHome()} />} />
     <ConnectionBanner state={connectionState} />
-    <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingTop: 16, gap: 10 }}>
-      <Metric label="Requests" value={formatNumber(state.usage?.requestCount)} icon="flash-outline" />
-      <Metric label="Successful" value={formatNumber(state.usage?.successCount)} icon="checkmark-circle-outline" tone="success" />
-      <Metric label="Tokens" value={formatNumber(state.usage?.totalTokens)} icon="layers-outline" tone="info" />
+    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
+    <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingTop: 14, gap: 10 }}>
+      <Metric label="Requests" value={state.activityLoading ? "…" : formatNumber(state.usage?.requestCount)} icon="flash-outline" />
+      <Metric label="Successful" value={state.activityLoading ? "…" : formatNumber(state.usage?.successCount)} icon="checkmark-circle-outline" tone="success" />
+      <Metric label="Tokens" value={state.activityLoading ? "…" : formatNumber(state.usage?.totalTokens)} icon="layers-outline" tone="info" />
     </View>
-    <SectionHeader title="Recent work" />
+    <SectionHeader title="Recent work" action={items.length > 0 ? `${items.length} items` : undefined} onAction={() => setFilter("all")} />
     <View style={{ paddingHorizontal: 16, flexDirection: "row", gap: 8 }}>
       <ActivityFilter label="All" selected={filter === "all"} onPress={() => setFilter("all")} />
       <ActivityFilter label="Running" selected={filter === "running"} onPress={() => setFilter("running")} />
       <ActivityFilter label="Needs you" selected={filter === "attention"} onPress={() => setFilter("attention")} />
     </View>
     <View style={{ marginTop: 10 }}>
-      {items.length > 0 ? items.map((item) => <Pressable key={item.id} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: item.sessionId } })} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 16, paddingVertical: 13, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>
+      {dataError && items.length === 0 ? <EmptyState icon="cloud-offline-outline" title="Activity is unavailable" description="Retry above after checking your connection and sign-in session." /> : state.booting ? <LoadingRows count={4} /> : items.length > 0 ? items.map((item) => <Pressable key={item.id} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: item.sessionId } })} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>
         <View style={[{ width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" }, { backgroundColor: item.status === "running" ? theme.colors.warningSoft : item.status === "attention" ? theme.colors.dangerSoft : theme.colors.successSoft }]}><AppIcon name={item.status === "running" ? "sync-outline" : item.status === "attention" ? "alert-outline" : "checkmark-outline"} size={17} color={item.status === "running" ? theme.colors.warning : item.status === "attention" ? theme.colors.danger : theme.colors.success} /></View>
         <View style={{ flex: 1, minWidth: 0 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{item.title}</Text><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{formatRelativeTime(item.updatedAt)}</Text></View><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>{item.spaceName} · {item.preview}</Text></View>
         <StatusPill label={item.status === "running" ? "Running" : item.status === "attention" ? "Needs you" : "Done"} tone={getStatusTone(item.status)} />

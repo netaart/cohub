@@ -10,7 +10,7 @@ export function SessionRow({ session, onPress }: { session: UserSessionListItem;
   const running = isRunningStatus(session.status);
   const attention = isNeedsAttentionStatus(session.status);
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`Open ${displaySessionTitle(session)}`} onPress={onPress} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 76, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Open ${displaySessionTitle(session)}`} onPress={onPress} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>
       <Avatar name={spaceName} uri={session.space?.publicProfile?.avatarUrl} size={48} online={running} />
       <View style={{ flex: 1, minWidth: 0, alignSelf: "stretch", justifyContent: "center" }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
