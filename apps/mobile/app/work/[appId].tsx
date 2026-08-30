@@ -5,7 +5,7 @@ import { Linking, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { IconButton, LoadingRows, Screen, TopBar } from "@/src/ui";
+import { DetailTopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
 
 type Params = { appId?: string | string[] };
 
@@ -36,7 +36,7 @@ export default function WorkScreen() {
 
   const title = detail?.app.meta?.title || detail?.app.meta?.name || detail?.app.slug || "Work";
   return <Screen>
-    <TopBar title={title} subtitle={detail?.space.name || "Published Work"} left={<IconButton name="arrow-back" label="Back" size={40} onPress={() => router.back()} />} right={contentUrl ? <IconButton name="open-outline" label="Open externally" size={40} onPress={() => void Linking.openURL(contentUrl)} /> : undefined} />
+    <DetailTopBar title={title} subtitle={detail?.space.name || "Published Work"} onBack={() => router.back()} actions={contentUrl ? <IconButton name="external-link" label="Open externally" size={40} onPress={() => void Linking.openURL(contentUrl)} /> : undefined} />
     {error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center" }]}>{error}</Text></View> : !detail ? <LoadingRows count={6} /> : !contentUrl ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>This Work has no published content yet.</Text></View> : <WebView
       source={{ uri: contentUrl }}
       style={{ flex: 1, backgroundColor: theme.colors.background }}

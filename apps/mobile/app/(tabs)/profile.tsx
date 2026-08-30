@@ -40,20 +40,20 @@ export default function ProfileScreen() {
   };
 
   return <Screen scroll>
-    <TopBar title="Profile" subtitle="Account and device" left={<BrandMark size={38} />} right={<IconButton name="settings-outline" label="Settings" size={40} onPress={() => Alert.alert("Settings", "More account settings will be available here.")} />} />
+    <TopBar title="Profile" subtitle="Account and device" left={<BrandMark size={38} />} right={<IconButton name="settings" label="Settings" size={40} onPress={() => Alert.alert("Settings", "More account settings will be available here.")} />} />
     <View style={{ alignItems: "center", paddingTop: 22, paddingBottom: 18 }}><Avatar name={profile.name} uri={profile.avatar} size={76} online={connectionState === "open"} /><Text style={[typography.title, { color: theme.colors.text, marginTop: 12 }]}>{profile.name}</Text>{profile.email ? <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 4 }]}>{profile.email}</Text> : null}</View>
     {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
     <SectionHeader title="Device" />
     <View style={{ marginHorizontal: 16, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 14, backgroundColor: theme.colors.surface, overflow: "hidden" }}>
-      <SettingRow icon="wifi-outline" title="Connection" detail={connectionState === "open" ? "Connected to Cohub" : connectionState} trailing={<StatusPill label={connectionState === "open" ? "Online" : "Offline"} tone={connectionState === "open" ? "success" : "neutral"} />} />
-      <SettingRow icon="notifications-outline" title="Agent notifications" detail={notificationState === "enabled" ? "Permission enabled" : notificationState === "unavailable" ? "Push setup is not available yet" : "Get notified when work finishes"} onPress={enableNotifications} trailing={<AppIcon name="chevron-forward" size={17} color={theme.colors.textFaint} />} />
-      <SettingRow icon="finger-print-outline" title="Installation" detail={installationId ? `${installationId.slice(0, 8)}…` : "Preparing device identity"} />
+      <SettingRow icon="wifi" title="Connection" detail={connectionState === "open" ? "Connected to Cohub" : connectionState} trailing={<StatusPill label={connectionState === "open" ? "Online" : "Offline"} tone={connectionState === "open" ? "success" : "neutral"} />} />
+      <SettingRow icon="bell" title="Agent notifications" detail={notificationState === "enabled" ? "Permission enabled" : notificationState === "unavailable" ? "Push setup is not available yet" : "Get notified when work finishes"} onPress={enableNotifications} trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />} />
+      <SettingRow icon="fingerprint" title="Installation" detail={installationId ? `${installationId.slice(0, 8)}…` : "Preparing device identity"} />
     </View>
     <SectionHeader title="Data" />
     <View style={{ marginHorizontal: 16, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 14, backgroundColor: theme.colors.surface, overflow: "hidden" }}>
-      <SettingRow icon="server-outline" title="Cached Spaces" detail={`${state.spaces.length} available offline`} />
-      <SettingRow icon="chatbubbles-outline" title="Cached Chats" detail={`${state.sessions.length} recent threads`} />
-      <SettingRow icon="trash-outline" title="Clear local cache" detail="Remove cached work from this device" onPress={() => Alert.alert("Clear cache?", "This only removes local copies. Your Spaces remain on Cohub.", [{ text: "Cancel", style: "cancel" }, { text: "Clear", style: "destructive", onPress: () => void clearCache() }])} trailing={<AppIcon name="chevron-forward" size={17} color={theme.colors.textFaint} />} />
+      <SettingRow icon="database" title="Cached Spaces" detail={`${state.spaces.length} available offline`} />
+      <SettingRow icon="messages" title="Cached Chats" detail={`${state.sessions.length} recent threads`} />
+      <SettingRow icon="trash" title="Clear local cache" detail="Remove cached work from this device" onPress={() => Alert.alert("Clear cache?", "This only removes local copies. Your Spaces remain on Cohub.", [{ text: "Cancel", style: "cancel" }, { text: "Clear", style: "destructive", onPress: () => void clearCache() }])} trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />} />
     </View>
     <Pressable disabled={signingOut} onPress={handleSignOut} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 26, minHeight: 48, borderRadius: 13, borderWidth: 1, borderColor: theme.colors.danger, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.dangerSoft : "transparent", opacity: signingOut ? 0.55 : 1 })}><Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>{signingOut ? "Signing out…" : "Sign out"}</Text></Pressable>
     <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center", marginTop: 22, marginBottom: 8 }]}>Cohub Mobile · {Application.nativeApplicationVersion ?? "1.0.0"}</Text>
@@ -63,5 +63,5 @@ export default function ProfileScreen() {
 function SettingRow({ icon, title, detail, trailing, onPress }: { icon: React.ComponentProps<typeof AppIcon>["name"]; title: string; detail: string; trailing?: React.ReactNode; onPress?: () => void }) {
   const theme = useAppTheme();
   const content = <View style={{ minHeight: 62, flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 13, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}><View style={{ width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.surfaceRaised }}><AppIcon name={icon} size={16} color={theme.colors.textMuted} /></View><View style={{ flex: 1, minWidth: 0 }}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{title}</Text><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{detail}</Text></View>{trailing}</View>;
-  return onPress ? <Pressable onPress={onPress} style={({ pressed }) => ({ backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{content}</Pressable> : content;
+  return onPress ? <Pressable onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{content}</Pressable> : content;
 }

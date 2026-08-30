@@ -21,10 +21,10 @@ function Block({ block }: { block: ContentBlock }) {
     return <Image source={{ uri: block.source.url }} resizeMode="contain" style={{ width: "100%", height: 220, borderRadius: 12, backgroundColor: theme.colors.surfaceRaised }} />;
   }
   if (block.type === "tool_use") {
-    return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}><AppIcon name="terminal-outline" size={15} color={theme.colors.info} /><Text style={[typography.caption, { color: theme.colors.info }]}>{block.name || "Using a tool"}</Text></View>;
+    return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}><AppIcon name="terminal" size={15} color={theme.colors.info} /><Text style={[typography.caption, { color: theme.colors.info }]}>{block.name || "Using a tool"}</Text></View>;
   }
   if (block.type === "tool_result") {
-    return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7 }}><AppIcon name="checkmark-circle-outline" size={15} color={theme.colors.success} /><Text style={[typography.caption, { color: theme.colors.textMuted }]}>{contentBlockText(block)}</Text></View>;
+    return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7 }}><AppIcon name="check-circle" size={15} color={theme.colors.success} /><Text style={[typography.caption, { color: theme.colors.textMuted }]}>{contentBlockText(block)}</Text></View>;
   }
   return null;
 }

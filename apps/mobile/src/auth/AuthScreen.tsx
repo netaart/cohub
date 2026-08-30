@@ -18,14 +18,14 @@ export function AuthScreen({ onSignIn, loading, error }: { onSignIn: () => Promi
 
       <View style={styles.center}>
         <View style={[styles.signalRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-          <View style={[styles.signalIcon, { backgroundColor: theme.colors.accentSoft }]}><AppIcon name="sparkles-outline" size={20} color={theme.colors.accent} /></View>
+          <View style={[styles.signalIcon, { backgroundColor: theme.colors.accentSoft }]}><AppIcon name="sparkles" size={20} color={theme.colors.accent} /></View>
           <View style={{ flex: 1 }}>
             <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Your work, in context</Text>
             <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>Chats, files, previews, and Agent runs in one Space.</Text>
           </View>
         </View>
         <View style={[styles.signalRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, marginTop: 10 }]}>
-          <View style={[styles.signalIcon, { backgroundColor: theme.colors.infoSoft }]}><AppIcon name="sync-outline" size={20} color={theme.colors.info} /></View>
+          <View style={[styles.signalIcon, { backgroundColor: theme.colors.infoSoft }]}><AppIcon name="sync" size={20} color={theme.colors.info} /></View>
           <View style={{ flex: 1 }}>
             <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Pick up anywhere</Text>
             <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>Continue a run from your phone without losing the thread.</Text>
@@ -34,7 +34,7 @@ export function AuthScreen({ onSignIn, loading, error }: { onSignIn: () => Promi
       </View>
 
       <View style={styles.footer}>
-        {error ? <View style={[styles.error, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><AppIcon name="alert-circle-outline" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{error}</Text></View> : null}
+        {error ? <View style={[styles.error, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{error}</Text></View> : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Continue with Cohub"
@@ -44,7 +44,7 @@ export function AuthScreen({ onSignIn, loading, error }: { onSignIn: () => Promi
           onPressOut={() => setPressed(false)}
           style={[styles.signIn, { backgroundColor: pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: loading ? 0.65 : 1 }]}
         >
-          {loading ? <ActivityIndicator color={theme.colors.accentText} /> : <AppIcon name="arrow-forward" size={19} color={theme.colors.accentText} />}
+          {loading ? <ActivityIndicator color={theme.colors.accentText} /> : <AppIcon name="arrow-right" size={19} color={theme.colors.accentText} />}
           <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>{loading ? "Opening sign in…" : "Continue with Cohub"}</Text>
         </Pressable>
         <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center", marginTop: 12 }]}>Secure sign in via Logto</Text>

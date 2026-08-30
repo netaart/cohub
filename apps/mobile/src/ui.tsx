@@ -1,4 +1,3 @@
-import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { type ReactNode } from "react";
 import {
@@ -13,20 +12,23 @@ import {
   Text,
   TextInput,
   View,
+  type ColorValue,
   type GestureResponderEvent,
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { icons, type IconName } from "@/src/icons";
 import { useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem } from "@/src/data/types";
 import { formatRelativeTime, initials } from "@/src/utils";
 
-export type IconName = React.ComponentProps<typeof Ionicons>["name"];
+export type { IconName } from "@/src/icons";
 
-export function AppIcon({ name, size = 20, color, style }: { name: IconName; size?: number; color?: string; style?: object }) {
+export function AppIcon({ name, size = 20, color, strokeWidth = 1.9, style }: { name: IconName; size?: number; color?: ColorValue; strokeWidth?: number; style?: object }) {
   const theme = useAppTheme();
-  return <Ionicons name={name} size={size} color={color ?? theme.colors.textSecondary} style={style} />;
+  const Icon = icons[name];
+  return <Icon size={size} color={color ?? theme.colors.textSecondary} strokeWidth={strokeWidth} absoluteStrokeWidth style={style} />;
 }
 
 export function BrandMark({ size = 36 }: { size?: number }) {
@@ -57,7 +59,6 @@ export function Avatar({ name, uri, size = 42, online = false }: { name: string;
 export function IconButton({ name, onPress, label, size = 42, tone = "default", disabled = false }: { name: IconName; onPress: (event: GestureResponderEvent) => void; label: string; size?: number; tone?: "default" | "accent" | "danger"; disabled?: boolean }) {
   const theme = useAppTheme();
   const color = tone === "accent" ? theme.colors.accent : tone === "danger" ? theme.colors.danger : theme.colors.textSecondary;
-  const background = tone === "accent" ? theme.colors.accentSoft : "transparent";
   return (
     <Pressable
       accessibilityRole="button"
@@ -65,9 +66,10 @@ export function IconButton({ name, onPress, label, size = 42, tone = "default", 
       hitSlop={6}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [styles.iconButton, { width: size, height: size, borderRadius: size / 3, backgroundColor: pressed ? theme.colors.surfacePressed : background, opacity: disabled ? 0.45 : 1 }]}
+      android_ripple={{ color: theme.colors.pressOverlay, borderless: true }}
+      style={({ pressed }) => [styles.iconButton, { width: size, height: size, borderRadius: size / 2, backgroundColor: pressed ? (tone === "accent" ? theme.colors.accentSoft : theme.colors.surfacePressed) : "transparent", opacity: disabled ? 0.45 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] }]}
     >
-      <AppIcon name={name} size={size * 0.46} color={color} />
+      <AppIcon name={name} size={size * 0.48} color={color} />
     </Pressable>
   );
 }
@@ -101,6 +103,20 @@ export function TopBar({ title, subtitle, left, right }: { title: string; subtit
         {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 1 }]}>{subtitle}</Text> : null}
       </View>
       <View style={styles.topBarRight}>{right}</View>
+    </View>
+  );
+}
+
+export function DetailTopBar({ title, subtitle, onBack, backLabel = "Back", actions }: { title: string; subtitle?: string; onBack: () => void; backLabel?: string; actions?: ReactNode }) {
+  const theme = useAppTheme();
+  return (
+    <View style={[styles.detailTopBar, { borderBottomColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
+      <IconButton name="arrow-left" label={backLabel} size={40} onPress={onBack} />
+      <View style={styles.detailTopBarTitle}>
+        <Text accessibilityRole="header" numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
+        {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textSecondary, marginTop: 1 }]}>{subtitle}</Text> : null}
+      </View>
+      {actions ? <View style={styles.detailTopBarActions}>{actions}</View> : null}
     </View>
   );
 }
@@ -147,7 +163,7 @@ export function EmptyState({ icon, title, description, action, onAction }: { ico
 export function PrimaryButton({ label, onPress, icon, loading = false, disabled = false, style }: { label: string; onPress: () => void; icon?: IconName; loading?: boolean; disabled?: boolean; style?: ViewStyle }) {
   const theme = useAppTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled || loading} onPress={onPress} style={({ pressed }) => [styles.primaryButton, { backgroundColor: pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: disabled || loading ? 0.55 : 1 }, style]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled || loading} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.primaryButton, { backgroundColor: pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: disabled || loading ? 0.55 : 1, transform: [{ scale: pressed ? 0.985 : 1 }] }, style]}>
       {loading ? <ActivityIndicator color={theme.colors.accentText} size="small" /> : icon ? <AppIcon name={icon} size={17} color={theme.colors.accentText} /> : null}
       <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>{label}</Text>
     </Pressable>
@@ -157,10 +173,10 @@ export function PrimaryButton({ label, onPress, icon, loading = false, disabled 
 export function SearchField({ value, onChangeText, placeholder = "Search", inputRef }: Pick<TextInputProps, "value" | "onChangeText" | "placeholder"> & { inputRef?: React.RefObject<TextInput | null> }) {
   const theme = useAppTheme();
   return (
-    <View style={[styles.searchField, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-      <AppIcon name="search-outline" size={18} color={theme.colors.textMuted} />
+    <View style={[styles.searchField, { backgroundColor: theme.colors.surfaceRaised }]}>
+      <AppIcon name="search" size={18} color={theme.colors.textMuted} />
       <TextInput ref={inputRef} value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { flex: 1, color: theme.colors.text, paddingVertical: 0 }]} returnKeyType="search" />
-      {value ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => onChangeText?.("")} hitSlop={8}><AppIcon name="close-circle" size={17} color={theme.colors.textFaint} /></Pressable> : null}
+      {value ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => onChangeText?.("")} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1, transform: [{ scale: pressed ? 0.9 : 1 }] })}><AppIcon name="circle-x" size={17} color={theme.colors.textFaint} /></Pressable> : null}
     </View>
   );
 }
@@ -177,7 +193,7 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
   return (
     <View style={[styles.composerWrap, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
       <View style={[styles.composer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-        <IconButton name="add" label="Add attachment" size={34} onPress={onAttach} disabled={disabled || running} />
+        <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={disabled || running} />
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -195,8 +211,8 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           }}
           blurOnSubmit={false}
         />
-        {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={disabled || running || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "ellipsis-horizontal" : "mic-outline"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={canStop ? onStop : onSend} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop || canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
+        {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={disabled || running || voiceStarting} onPress={onVoice} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent", transform: [{ scale: pressed ? 0.92 : 1 }] }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
+        <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={canStop ? onStop : onSend} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop || canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised, transform: [{ scale: pressed ? 0.92 : 1 }] }]}>
           <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 16 : 18} color={canStop || canSend ? theme.colors.accentText : theme.colors.textFaint} />
         </Pressable>
       </View>
@@ -206,25 +222,25 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
 
 export function AttachmentChip({ name, onRemove }: { name: string; onRemove: () => void }) {
   const theme = useAppTheme();
-  return <View style={[styles.attachmentChip, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}><AppIcon name="document-outline" size={15} color={theme.colors.accent} /><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>{name}</Text><Pressable onPress={onRemove} hitSlop={8}><AppIcon name="close" size={15} color={theme.colors.textMuted} /></Pressable></View>;
+  return <View style={[styles.attachmentChip, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}><AppIcon name="file-text" size={15} color={theme.colors.accent} /><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>{name}</Text><Pressable onPress={onRemove} hitSlop={8}><AppIcon name="x" size={15} color={theme.colors.textMuted} /></Pressable></View>;
 }
 
 export function ConnectionBanner({ state }: { state: string }) {
   const theme = useAppTheme();
   if (state === "open" || state === "idle") return null;
   const reconnecting = state === "reconnecting" || state === "connecting";
-  return <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 8, backgroundColor: reconnecting ? theme.colors.warningSoft : theme.colors.dangerSoft }}><AppIcon name={reconnecting ? "sync-outline" : "cloud-offline-outline"} size={14} color={reconnecting ? theme.colors.warning : theme.colors.danger} /><Text style={[typography.caption, { color: reconnecting ? theme.colors.warning : theme.colors.danger }]}>{reconnecting ? "Reconnecting to Cohub" : "Connection unavailable"}</Text></View>;
+  return <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 8, backgroundColor: reconnecting ? theme.colors.warningSoft : theme.colors.dangerSoft }}><AppIcon name={reconnecting ? "sync" : "cloud-off"} size={14} color={reconnecting ? theme.colors.warning : theme.colors.danger} /><Text style={[typography.caption, { color: reconnecting ? theme.colors.warning : theme.colors.danger }]}>{reconnecting ? "Reconnecting to Cohub" : "Connection unavailable"}</Text></View>;
 }
 
 export function DataError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const theme = useAppTheme();
-  return <View style={[styles.dataError, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><View style={[styles.dataErrorIcon, { backgroundColor: theme.colors.background }]}><AppIcon name="cloud-offline-outline" size={17} color={theme.colors.danger} /></View><View style={{ flex: 1, minWidth: 0 }}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Could not load your data</Text><Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 3 }]}>{message}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Retry loading data" onPress={onRetry} hitSlop={8}><Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>Retry</Text></Pressable></View>;
+  return <View style={[styles.dataError, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><View style={[styles.dataErrorIcon, { backgroundColor: theme.colors.background }]}><AppIcon name="cloud-off" size={17} color={theme.colors.danger} /></View><View style={{ flex: 1, minWidth: 0 }}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Could not load your data</Text><Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 3 }]}>{message}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Retry loading data" onPress={onRetry} hitSlop={8}><Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>Retry</Text></Pressable></View>;
 }
 
 export function SyncStatus({ timestamp }: { timestamp: string | null }) {
   const theme = useAppTheme();
   if (!timestamp) return null;
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 16, paddingTop: 12 }}><AppIcon name="checkmark-circle-outline" size={13} color={theme.colors.success} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>Updated {formatRelativeTime(timestamp)}</Text></View>;
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 16, paddingTop: 12 }}><AppIcon name="check-circle" size={13} color={theme.colors.success} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>Updated {formatRelativeTime(timestamp)}</Text></View>;
 }
 
 export function getStatusTone(status: ActivityItem["status"]): "success" | "warning" | "danger" {
@@ -241,17 +257,20 @@ const styles = StyleSheet.create({
   topBarLeft: { width: 44, alignItems: "flex-start", justifyContent: "center" },
   topBarTitle: { flex: 1, minWidth: 0, paddingVertical: 2 },
   topBarRight: { width: 96, alignItems: "flex-end", justifyContent: "center", flexDirection: "row", gap: 2 },
+  detailTopBar: { minHeight: 60, paddingHorizontal: 8, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4, borderBottomWidth: StyleSheet.hairlineWidth },
+  detailTopBarTitle: { flex: 1, minWidth: 0, paddingHorizontal: 2 },
+  detailTopBarActions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 0 },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 22, paddingBottom: 10 },
   emptyState: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, minHeight: 260 },
   emptyIcon: { width: 56, height: 56, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   dataError: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderWidth: 1, borderRadius: 14 },
   dataErrorIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
-  searchField: { minHeight: 44, borderWidth: 1, borderRadius: 13, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 9 },
+  searchField: { minHeight: 44, borderRadius: 12, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 9 },
   composerWrap: { paddingHorizontal: 12, paddingTop: 9, paddingBottom: 10 },
   composer: { minHeight: 52, borderWidth: 1, borderRadius: 18, paddingHorizontal: 5, paddingVertical: 5, flexDirection: "row", alignItems: "flex-end", gap: 4 },
   composerText: { flex: 1, maxHeight: 130, paddingHorizontal: 7, paddingTop: 8, paddingBottom: 8 },
-  sendButton: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center", marginBottom: 2 },
-  voiceButton: { width: 36, height: 36, borderRadius: 12, borderWidth: 1, alignItems: "center", justifyContent: "center", marginBottom: 2 },
+  sendButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginBottom: 2 },
+  voiceButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center", marginBottom: 2 },
   attachmentChip: { flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 7, maxWidth: "100%" },
 });

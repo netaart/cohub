@@ -39,7 +39,7 @@ export default function ChatsScreen() {
         title="Chats"
         subtitle={dataError ? "Chats unavailable" : state.sessions.length > 0 ? `${state.sessions.length} recent threads` : "Your work inbox"}
         left={<BrandMark size={38} />}
-        right={<><IconButton name="search-outline" label="Focus search" size={40} onPress={focusSearch} /><IconButton name="create-outline" label="New Chat" size={40} tone="accent" onPress={() => router.push("/new-chat")} /></>}
+        right={<><IconButton name="search" label="Focus search" size={40} onPress={focusSearch} /><IconButton name="square-pen" label="New Chat" size={40} tone="accent" onPress={() => router.push("/new-chat")} /></>}
       />
       <ConnectionBanner state={connectionState} />
       {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
@@ -60,7 +60,7 @@ export default function ChatsScreen() {
             <FilterChip label="Needs you" selected={filter === "attention"} onPress={() => setFilter("attention")} />
           </View>
         </View>}
-        ListEmptyComponent={state.booting ? <LoadingRows count={5} /> : dataError ? <EmptyState icon="cloud-offline-outline" title="Chats are unavailable" description="Retry above after checking your connection and sign-in session." /> : <EmptyState icon={query || filter !== "all" ? "search-outline" : "chatbubbles-outline"} title={query || filter !== "all" ? "No matching Chats" : "No Chats yet"} description={query || filter !== "all" ? "Try another search or filter." : "Start a focused thread inside one of your Spaces."} action={query || filter !== "all" ? "Clear filters" : "New Chat"} onAction={() => { if (query || filter !== "all") { setQuery(""); setFilter("all"); } else router.push("/new-chat"); }} />}
+        ListEmptyComponent={state.booting ? <LoadingRows count={5} /> : dataError ? <EmptyState icon="cloud-off" title="Chats are unavailable" description="Retry above after checking your connection and sign-in session." /> : <EmptyState icon={query || filter !== "all" ? "search" : "messages"} title={query || filter !== "all" ? "No matching Chats" : "No Chats yet"} description={query || filter !== "all" ? "Try another search or filter." : "Start a focused thread inside one of your Spaces."} action={query || filter !== "all" ? "Clear filters" : "New Chat"} onAction={() => { if (query || filter !== "all") { setQuery(""); setFilter("all"); } else router.push("/new-chat"); }} />}
       />
     </Screen>
   );
@@ -68,5 +68,5 @@ export default function ChatsScreen() {
 
 function FilterChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
   const theme = useAppTheme();
-  return <Pressable onPress={onPress} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
+  return <Pressable onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border, transform: [{ scale: pressed ? 0.97 : 1 }] })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }

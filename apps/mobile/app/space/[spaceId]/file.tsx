@@ -5,7 +5,7 @@ import { Linking, ScrollView, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { IconButton, LoadingRows, Screen, TopBar } from "@/src/ui";
+import { DetailTopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
 
 type Params = { spaceId?: string | string[]; path?: string | string[] };
 
@@ -34,7 +34,7 @@ export default function FileScreen() {
     return () => { active = false; };
   }, [client, path, spaceId]);
   return <Screen>
-    <TopBar title={path?.split("/").pop() || "File"} subtitle={path} left={<IconButton name="arrow-back" label="Back" size={40} onPress={() => router.back()} />} right={url ? <IconButton name="open-outline" label="Open externally" size={40} onPress={() => void Linking.openURL(url)} /> : undefined} />
+    <DetailTopBar title={path?.split("/").pop() || "File"} subtitle={path} onBack={() => router.back()} actions={url ? <IconButton name="external-link" label="Open externally" size={40} onPress={() => void Linking.openURL(url)} /> : undefined} />
     {error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center" }]}>{error}</Text></View> : !file ? <LoadingRows count={5} /> : url && !isText(file.mimeType) ? <WebView source={{ uri: url }} style={{ flex: 1, backgroundColor: theme.colors.background }} startInLoadingState /> : <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}><Text selectable style={{ color: theme.colors.textSecondary, fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19 }}>{file.content}</Text></ScrollView>}
   </Screen>;
 }
