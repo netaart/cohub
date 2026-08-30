@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.2.0](https://github.com/markbang/cohub-mobile/compare/v1.1.0...v1.2.0) (2026-08-30)
+
+
+### Features
+
+* refine mobile navigation and controls ([5dfdd4c](https://github.com/markbang/cohub-mobile/commit/5dfdd4cf9390d2e7136ec21f17b0a1867d853e9e))
+
+
+### Fixes
+
+* improve mobile data loading and ux ([9db55b8](https://github.com/markbang/cohub-mobile/commit/9db55b86f8a6377a8e6782201264530529d8b7fe))
+* limit distributed apk to arm64 ([#18](https://github.com/markbang/cohub-mobile/issues/18)) ([eedea23](https://github.com/markbang/cohub-mobile/commit/eedea23cd6114633e0a61c1b83865e5f3a1ecb33))
+* publish separate Android ABI APKs ([#19](https://github.com/markbang/cohub-mobile/issues/19)) ([0195192](https://github.com/markbang/cohub-mobile/commit/0195192fc359f6c1529b37c372631a9a9c761abc))
+* publish standalone Android APKs ([#20](https://github.com/markbang/cohub-mobile/issues/20)) ([976248b](https://github.com/markbang/cohub-mobile/commit/976248b83fbcca7b133e4d7abe8e5da9e8716170))
+
+
+### CI
+
+* formalize Android distribution builds ([#21](https://github.com/markbang/cohub-mobile/issues/21)) ([b960d24](https://github.com/markbang/cohub-mobile/commit/b960d241b40abc9ab7f1a7518142d05e695c6581))
+* publish Android APK with releases ([#16](https://github.com/markbang/cohub-mobile/issues/16)) ([a25fa31](https://github.com/markbang/cohub-mobile/commit/a25fa31cfc45acb4b58d6d585ca10b1136934e78))
+
 ## [1.1.0](https://github.com/markbang/cohub-mobile/compare/v1.0.0...v1.1.0) (2026-08-27)
 
 
