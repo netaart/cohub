@@ -173,6 +173,26 @@ jobs:
       - name: Generate Android project
         run: npm run native:android:prepare
 
+      # This also makes recovery builds work for tags created before the helper changed.
+      - name: Configure Android release heap
+        run: |
+          set -euo pipefail
+          gradle_properties=android/gradle.properties
+          memory_args_path=scripts/android-gradle-jvmargs.txt
+          if [[ ! -f "$memory_args_path" ]]; then
+            memory_args_path="$RUNNER_TEMP/android-gradle-jvmargs.txt"
+            git show "origin/main:scripts/android-gradle-jvmargs.txt" > "$memory_args_path"
+          fi
+          memory_args=$(sed -n '1p' "$memory_args_path")
+          test -n "$memory_args"
+          memory_line="org.gradle.jvmargs=$memory_args"
+          if grep -q '^org\.gradle\.jvmargs=' "$gradle_properties"; then
+            sed -i "s|^org\\.gradle\\.jvmargs=.*$|$memory_line|" "$gradle_properties"
+          else
+            printf '\n%s\n' "$memory_line" >> "$gradle_properties"
+          fi
+          grep -Fxq "$memory_line" "$gradle_properties"
+
       - name: Resolve Android identifier
         id: identifiers
         run: node scripts/print-native-identifiers.mjs

@@ -86,8 +86,25 @@ export async function configureAndroidAbiSplits(root = process.cwd(), architectu
   return normalizedArchitectures;
 }
 
+export async function configureAndroidGradleMemory(root = process.cwd()) {
+  const gradlePath = join(root, "android", "gradle.properties");
+  const memoryArgsPath = join(root, "scripts", "android-gradle-jvmargs.txt");
+  const memoryArgs = (await readFile(memoryArgsPath, "utf8")).trim();
+  if (!memoryArgs) throw new Error(`Android Gradle JVM args are empty in ${memoryArgsPath}`);
+  const memoryLine = `org.gradle.jvmargs=${memoryArgs}`;
+  const source = await readFile(gradlePath, "utf8");
+  const propertyPattern = /^org\.gradle\.jvmargs=.*$/m;
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const updatedSource = propertyPattern.test(source)
+    ? source.replace(propertyPattern, memoryLine)
+    : `${source.replace(/[\r\n]+$/, "")}${newline}${memoryLine}${newline}`;
+  if (updatedSource !== source) await writeFile(gradlePath, updatedSource);
+  console.log(`Configured Android Gradle heap in ${gradlePath}.`);
+}
+
 export async function buildAndroid(root = process.cwd(), { architectures, variant, minify = false }) {
   const normalizedArchitectures = await configureAndroidAbiSplits(root, architectures);
+  if (variant === "release") await configureAndroidGradleMemory(root);
   const task = variant === "release" ? "assembleRelease" : "assembleDebug";
   const args = [`-PreactNativeArchitectures=${normalizedArchitectures}`];
   if (minify) args.push("-Pandroid.enableMinifyInReleaseBuilds=true");
