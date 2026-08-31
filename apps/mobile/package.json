@@ -4,7 +4,7 @@
   "version": "1.2.1",
   "dependencies": {
     "@logto/rn": "^1.2.0",
-    "@neta-art/cohub": "^8.2.0",
+    "@neta-art/cohub": "^8.3.1",
     "@react-native-async-storage/async-storage": "~2.2.0",
     "expo": "~57.0.18",
     "expo-application": "~57.0.2",
