@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/markbang/cohub-mobile/compare/v1.3.0...v1.3.1) (2026-08-31)
+
+
+### Fixes
+
+* **mobile:** avoid Expo Go notification crash ([#32](https://github.com/markbang/cohub-mobile/issues/32)) ([e064fe6](https://github.com/markbang/cohub-mobile/commit/e064fe6eb99b744b7998f6096fadb6e26aee3c26))
+
 ## [1.3.0](https://github.com/markbang/cohub-mobile/compare/v1.2.1...v1.3.0) (2026-08-31)
 
 
