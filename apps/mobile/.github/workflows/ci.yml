@@ -74,7 +74,7 @@ jobs:
         run: npx expo export --platform "${{ matrix.platform }}" --output-dir "dist/${{ matrix.platform }}"
 
       - name: Upload ${{ matrix.platform }} bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cohub-mobile-${{ matrix.platform }}-${{ github.sha }}
           path: dist/${{ matrix.platform }}
