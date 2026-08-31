@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/markbang/cohub-mobile/compare/v1.2.0...v1.2.1) (2026-08-31)
+
+
+### Fixes
+
+* resolve mobile runtime issues ([f7e6d25](https://github.com/markbang/cohub-mobile/commit/f7e6d25d9965d9e819d362ee103a94d0fd9e6e5b))
+
 ## [1.2.0](https://github.com/markbang/cohub-mobile/compare/v1.1.0...v1.2.0) (2026-08-30)
 
 
