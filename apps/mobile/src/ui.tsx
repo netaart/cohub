@@ -189,12 +189,13 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
   return <View style={{ paddingHorizontal: 16, gap: 4 }}>{Array.from({ length: count }).map((_, index) => <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}><View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ flex: 1, gap: 9 }}><View style={{ width: `${58 + (index % 3) * 10}%`, height: 12, borderRadius: 6, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ width: `${38 + (index % 2) * 15}%`, height: 10, borderRadius: 5, backgroundColor: theme.colors.surfaceRaised }} /></View></View>)}</View>;
 }
 
-export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, disabled = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; disabled?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
+export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel = "Automatic", disabled = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; disabled?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
   const theme = useAppTheme();
   const canSend = (value.trim().length > 0 || hasAttachment) && !disabled && !running;
   const canStop = running && !disabled && Boolean(onStop);
   return (
     <View style={[styles.composerWrap, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
+      {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}`} disabled={disabled || running} onPress={onModelPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.modelTrigger, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: disabled || running ? 0.5 : 1 }]}><AppIcon name="sparkles" size={14} color={theme.colors.accent} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
       <View style={[styles.composer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
         <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={disabled || running} />
         <TextInput
@@ -271,6 +272,7 @@ const styles = StyleSheet.create({
   primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   searchField: { minHeight: 44, borderRadius: 12, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 9 },
   composerWrap: { paddingHorizontal: 12, paddingTop: 9, paddingBottom: 10 },
+  modelTrigger: { minHeight: 28, maxWidth: "72%", alignSelf: "flex-start", paddingHorizontal: 7, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 5, overflow: "hidden" },
   composer: { minHeight: 52, borderWidth: 1, borderRadius: 18, paddingHorizontal: 5, paddingVertical: 5, flexDirection: "row", alignItems: "flex-end", gap: 4 },
   composerText: { flex: 1, maxHeight: 130, paddingHorizontal: 7, paddingTop: 8, paddingBottom: 8 },
   sendButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginBottom: 2 },

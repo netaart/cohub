@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import "react-native-reanimated";
 import { AuthScreen } from "@/src/auth/AuthScreen";
+import { AppUpdateBanner } from "@/src/components/AppUpdateBanner";
 import { config } from "@/src/config";
 import { AppProvider } from "@/src/data/context";
 import { useAppTheme } from "@/src/theme";
@@ -118,15 +119,18 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
   return <ThemeProvider value={theme.mode === "dark" ? DarkTheme : DefaultTheme}>
     <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
     <NativeInteractionBridge />
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="chat/[sessionId]" options={{ animation: "slide_from_right" }} />
-      <Stack.Screen name="space/[spaceId]" options={{ animation: "slide_from_right" }} />
-      <Stack.Screen name="space/[spaceId]/files" options={{ animation: "slide_from_right" }} />
-      <Stack.Screen name="space/[spaceId]/file" options={{ animation: "slide_from_right" }} />
-      <Stack.Screen name="work/[appId]" options={{ animation: "slide_from_right" }} />
-      <Stack.Screen name="new-chat" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
-    </Stack>
+    <View style={{ flex: 1 }}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="chat/[sessionId]" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="space/[spaceId]" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="space/[spaceId]/files" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="space/[spaceId]/file" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="work/[appId]" options={{ animation: "slide_from_right" }} />
+        <Stack.Screen name="new-chat" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
+      </Stack>
+      <AppUpdateBanner />
+    </View>
   </ThemeProvider>;
 }
 

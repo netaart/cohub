@@ -1,5 +1,5 @@
 import { useProfileSession } from "@/src/auth/profile-session";
-import * as Application from "expo-application";
+import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
@@ -47,7 +47,7 @@ export default function ProfileScreen() {
   const [clearingCache, setClearingCache] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
-  const version = Application.nativeApplicationVersion ?? "1.2.0";
+  const version = getInstalledAppVersion();
 
   useEffect(() => {
     let active = true;

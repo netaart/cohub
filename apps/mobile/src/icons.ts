@@ -10,10 +10,12 @@ import Camera from "lucide-react-native/icons/camera";
 import Check from "lucide-react-native/icons/check";
 import CircleCheck from "lucide-react-native/icons/circle-check";
 import CircleX from "lucide-react-native/icons/circle-x";
+import ChevronDown from "lucide-react-native/icons/chevron-down";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
 import CloudOff from "lucide-react-native/icons/cloud-off";
 import Compass from "lucide-react-native/icons/compass";
 import Database from "lucide-react-native/icons/database";
+import Download from "lucide-react-native/icons/download";
 import Ellipsis from "lucide-react-native/icons/ellipsis";
 import ExternalLink from "lucide-react-native/icons/external-link";
 import FileText from "lucide-react-native/icons/file-text";
@@ -53,10 +55,12 @@ export const icons = {
   check: Check,
   "check-circle": CircleCheck,
   "circle-x": CircleX,
+  "chevron-down": ChevronDown,
   "chevron-right": ChevronRight,
   "cloud-off": CloudOff,
   compass: Compass,
   database: Database,
+  download: Download,
   "external-link": ExternalLink,
   "file-text": FileText,
   fingerprint: FingerprintPattern,

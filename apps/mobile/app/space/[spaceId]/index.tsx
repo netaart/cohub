@@ -5,6 +5,7 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native"
 import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionRow } from "@/src/components/SessionRow";
+import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, Avatar, DetailTopBar, IconButton, PrimaryButton, Screen, SectionHeader, StatusPill } from "@/src/ui";
@@ -30,6 +31,7 @@ export default function SpaceScreen() {
   const [resources, setResources] = useState<Resources>(emptyResources);
   const [loadingResources, setLoadingResources] = useState(false);
   const [spaceActionsOpen, setSpaceActionsOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<SpacePanel | null>(null);
   const space = state.spaces.find((item) => item.id === spaceId) ?? null;
   const sessions = useMemo(
     () => state.sessions.filter((session) => session.spaceId === spaceId),
@@ -66,11 +68,25 @@ export default function SpaceScreen() {
   const name = displaySpaceName(space);
   const activeTasks = resources.tasks.filter((task) => task.status === "pending" || task.status === "running").length;
   return <Screen>
+    <SpacePanels
+      key={space.id}
+      spaceId={space.id}
+      spaceName={name}
+      sessions={sessions}
+      client={client}
+      activePanel={activePanel}
+      onActivePanelChange={setActivePanel}
+      onOpenSession={(sessionId) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId } })}
+      onNewChat={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })}
+      onOpenFile={(path) => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: space.id, path } })}
+      onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}
+    >
+      <View style={{ flex: 1 }}>
     <DetailTopBar
       title={name}
       subtitle="Space"
       onBack={() => router.back()}
-      actions={<IconButton name="more" label="Space actions" size={40} onPress={() => setSpaceActionsOpen(true)} />}
+      actions={<><IconButton name="messages" label="Open Chats" size={38} onPress={() => setActivePanel("chat")} /><IconButton name="more" label="Space actions" size={38} onPress={() => setSpaceActionsOpen(true)} /></>}
     />
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.background }}
@@ -88,11 +104,11 @@ export default function SpaceScreen() {
       <SpaceMetric icon="activity" label="Running" value={String(activeTasks)} />
     </View>
     <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 16, marginTop: 18 }}>
-      <PrimaryButton label="New Chat" icon="plus" onPress={() => router.push({ pathname: "/new-chat", params: { spaceId: space.id } })} style={{ flex: 1 }} />
-      <Pressable accessibilityRole="button" accessibilityLabel="Open Files" onPress={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 46, width: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}><AppIcon name="folder-open" size={19} color={theme.colors.textSecondary} /></Pressable>
+      <PrimaryButton label="New Chat" icon="plus" onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} style={{ flex: 1 }} />
+      <Pressable accessibilityRole="button" accessibilityLabel="Open Files panel" onPress={() => setActivePanel("files")} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 46, width: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}><AppIcon name="folder-open" size={19} color={theme.colors.textSecondary} /></Pressable>
     </View>
 
-    <SectionHeader title="Chats" action="New" onAction={() => router.push({ pathname: "/new-chat", params: { spaceId: space.id } })} />
+    <SectionHeader title="Chats" action="New" onAction={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} />
     <View>{sessions.length > 0 ? sessions.slice(0, 8).map((session) => <SessionRow key={session.id} session={{ ...session, space: session.space ?? { id: space.id, name, slug: space.slug, publicProfile: space.publicProfile ?? null } }} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } })} />) : <ResourceEmpty text="No Chats in this Space yet." />}</View>
 
     <SectionHeader title="Works" />
@@ -121,7 +137,7 @@ export default function SpaceScreen() {
         detail="Start a focused thread in this Space"
         onPress={() => {
           setSpaceActionsOpen(false);
-          router.push({ pathname: "/new-chat", params: { spaceId: space.id } });
+          router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } });
         }}
       />
       <SheetAction
@@ -134,6 +150,8 @@ export default function SpaceScreen() {
         }}
       />
     </AdaptiveSheet>
+      </View>
+    </SpacePanels>
   </Screen>;
 }
 

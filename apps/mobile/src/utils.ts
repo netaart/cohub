@@ -10,7 +10,7 @@ export function displaySpaceName(space: Pick<SpaceRecord, "name" | "title"> | nu
 }
 
 export function displaySessionTitle(session: Pick<SessionRecord, "title" | "latestMessageText">) {
-  return session.title?.trim() || session.latestMessageText?.trim().split("\n")[0]?.slice(0, 64) || "New Chat";
+  return session.title?.trim() || session.latestMessageText?.trim().split("\n")[0]?.slice(0, 64) || "Untitled conversation";
 }
 
 export function initials(value: string) {

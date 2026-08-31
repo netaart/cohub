@@ -1,6 +1,7 @@
 import type {
   ContentBlock,
   MessageRecord,
+  ModelCatalogEntry,
   SessionRecord,
   SpaceRecord,
   SpaceUsageSummary,
@@ -15,6 +16,14 @@ export type AttachmentDraft = {
   mimeType: string;
   size: number;
 };
+
+export type ChatModelSelection = {
+  provider: string;
+  id: string;
+  name?: string;
+};
+
+export type ChatModelCatalogItem = ModelCatalogEntry;
 
 export type StreamView = {
   status: "pending" | "streaming" | "completed" | "failed" | "interrupted";

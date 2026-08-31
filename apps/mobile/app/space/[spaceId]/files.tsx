@@ -2,12 +2,12 @@ import type { SpaceFsEntry } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
+import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, DetailTopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
 import {
   displaySpaceName,
-  formatRelativeTime,
   normalizeSpacePath,
   parentSpacePath,
   spacePathName,
@@ -151,7 +151,7 @@ export default function FilesScreen() {
             flexGrow: entries.length === 0 ? 1 : undefined,
           }}
           renderItem={({ item }) => (
-            <FileRow entry={item} onPress={() => openEntry(item)} />
+            <SpaceFileRow entry={item} onPress={() => openEntry(item)} />
           )}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -198,54 +198,6 @@ function DirectoryParentBar({ parentPath, onPress }: { parentPath: string; onPre
   );
 }
 
-function FileRow({ entry, onPress }: { entry: SpaceFsEntry; onPress: () => void }) {
-  const theme = useAppTheme();
-  const isDirectory = entry.type === "dir";
-  const isSymlink = entry.type === "symlink";
-  const icon = isDirectory ? "folder" : isSymlink ? "external-link" : "file-text";
-  const iconColor = isDirectory ? theme.colors.accent : theme.colors.textMuted;
-  const detail = isDirectory
-    ? "Folder"
-    : isSymlink
-      ? "Symbolic link"
-      : `${entry.mimeType || "File"} · ${formatBytes(entry.size)}`;
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${isDirectory ? "Open folder" : "Open file"} ${entry.name}`}
-      onPress={onPress}
-      android_ripple={{ color: theme.colors.pressOverlay }}
-      style={({ pressed }) => ({
-        minHeight: 63,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 11,
-        paddingHorizontal: 16,
-        backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
-        borderBottomWidth: 1,
-        borderBottomColor: theme.colors.border,
-      })}
-    >
-      <View style={[styles.fileIcon, { backgroundColor: isDirectory ? theme.colors.accentSoft : theme.colors.surface }]}>
-        <AppIcon name={icon} size={17} color={iconColor} />
-      </View>
-      <View style={styles.fileText}>
-        <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text }]}>
-          {entry.name}
-        </Text>
-        <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textMuted, marginTop: 3 }]}>
-          {detail}
-        </Text>
-      </View>
-      <Text style={[typography.micro, { color: theme.colors.textFaint }]}>
-        {entry.mtimeMs ? formatRelativeTime(new Date(entry.mtimeMs).toISOString()) : ""}
-      </Text>
-      <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
-    </Pressable>
-  );
-}
-
 function FilesError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const theme = useAppTheme();
   return (
@@ -259,12 +211,6 @@ function FilesError({ message, onRetry }: { message: string; onRetry: () => void
   );
 }
 
-function formatBytes(value: number) {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 const styles = {
   parentBar: {
     minHeight: 42,
@@ -273,17 +219,6 @@ const styles = {
     alignItems: "center" as const,
     gap: 8,
     borderBottomWidth: 1,
-  },
-  fileIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: "center" as const,
-    justifyContent: "center" as const,
-  },
-  fileText: {
-    flex: 1,
-    minWidth: 0,
   },
   emptyState: {
     flex: 1,

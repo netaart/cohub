@@ -37,6 +37,7 @@ const defaults =
 
 export const config = {
   environment,
+  updateApiUrl: "https://api.github.com/repos/markbang/cohub-mobile/releases/latest",
   apiOrigin: readPublic(process.env.EXPO_PUBLIC_API_ORIGIN, extra.apiOrigin ?? defaults.apiOrigin),
   gatewayOrigin: readPublic(
     process.env.EXPO_PUBLIC_GATEWAY_ORIGIN,

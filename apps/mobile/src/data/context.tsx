@@ -22,6 +22,8 @@ import type {
   ActivityItem,
   AppState,
   AttachmentDraft,
+  ChatModelCatalogItem,
+  ChatModelSelection,
   ConnectionState,
   SessionView,
   StreamView,
@@ -55,6 +57,49 @@ function errorMessage(error: unknown, fallback: string) {
     if (status === 403) return "Your account does not have access to this data.";
   }
   return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+async function buildPromptContent(
+  client: CohubClient,
+  spaceId: string,
+  sessionId: string | undefined,
+  text: string,
+  attachments: AttachmentDraft[],
+) {
+  let promptText = text;
+  const content: ContentBlock[] = [];
+  const imageBlocks: ContentBlock[] = [];
+  for (const attachment of attachments) {
+    const blob: Blob = Platform.OS === "web"
+      ? await (await fetch(attachment.uri)).blob()
+      : new ExpoFile(attachment.uri);
+    const uploaded = await client.publicAssets.uploadChatAttachment({
+      spaceId,
+      sessionId,
+      file: blob,
+      mimeType: attachment.mimeType,
+      filename: attachment.name,
+    });
+    if (attachment.mimeType.startsWith("image/")) {
+      imageBlocks.push({
+        type: "image",
+        source: { type: "url", url: uploaded.publicUrl },
+        _meta: {
+          filename: attachment.name,
+          mediaType: attachment.mimeType,
+          size: attachment.size,
+        },
+      });
+    } else {
+      promptText = [
+        promptText,
+        `Attached file: ${attachment.name}\n${uploaded.publicUrl}`,
+      ].filter(Boolean).join("\n\n");
+    }
+  }
+  if (promptText) content.push({ type: "text", text: promptText });
+  content.push(...imageBlocks);
+  return content;
 }
 
 function withAccessTokenTimeout(
@@ -144,6 +189,15 @@ function updateView(state: AppState, sessionId: string, update: Partial<SessionV
   };
 }
 
+function preferNewerSession(current: SessionRecord | null | undefined, incoming: SessionRecord) {
+  if (!current) return incoming;
+  const currentTime = Date.parse(current.updatedAt);
+  const incomingTime = Date.parse(incoming.updatedAt);
+  return Number.isFinite(currentTime) && Number.isFinite(incomingTime) && currentTime > incomingTime
+    ? current
+    : incoming;
+}
+
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate":
@@ -189,13 +243,17 @@ function reducer(state: AppState, action: Action): AppState {
       });
     case "session-cache":
       return updateView(state, action.sessionId, { messages: action.messages, loading: false });
-    case "session-success":
+    case "session-success": {
+      const session = preferNewerSession(
+        state.sessionViews[action.sessionId]?.session,
+        action.session,
+      );
       return updateView(
         {
           ...state,
           sessions: state.sessions.map((item) =>
-            item.id === action.session.id
-              ? { ...item, ...action.session, space: item.space ?? { id: action.space.id, name: displaySpaceName(action.space), slug: action.space.slug, publicProfile: action.space.publicProfile ?? null } }
+            item.id === session.id
+              ? { ...item, ...session, space: item.space ?? { id: action.space.id, name: displaySpaceName(action.space), slug: action.space.slug, publicProfile: action.space.publicProfile ?? null } }
               : item,
           ),
         },
@@ -205,10 +263,11 @@ function reducer(state: AppState, action: Action): AppState {
           refreshing: false,
           error: null,
           space: action.space,
-          session: action.session,
+          session,
           messages: action.messages,
         },
       );
+    }
     case "session-error":
       return updateView(state, action.sessionId, { loading: false, refreshing: false, error: action.message });
     case "session-refresh-start":
@@ -284,9 +343,13 @@ export type AppContextValue = {
   openSession: (sessionId: string) => Promise<void>;
   closeSession: (sessionId: string) => void;
   refreshSession: (sessionId: string) => Promise<void>;
-  sendMessage: (sessionId: string, text: string, attachments?: AttachmentDraft[]) => Promise<void>;
+  sendMessage: (sessionId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<void>;
+  sendNewMessage: (spaceId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<SessionRecord>;
   abortSession: (sessionId: string) => Promise<void>;
-  createChat: (spaceId: string, title?: string) => Promise<SessionRecord>;
+  models: ChatModelCatalogItem[];
+  modelsLoading: boolean;
+  modelsError: string | null;
+  loadModels: (options?: { force?: boolean }) => Promise<ChatModelCatalogItem[]>;
   createSpace: (name: string, description?: string) => Promise<SpaceRecord>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   clearCache: () => Promise<void>;
@@ -318,6 +381,10 @@ export function AppProvider({
   const installationRequestRef = useRef<Promise<string> | null>(null);
   const clientRef = useRef<CohubClient | null>(null);
   const homeRefreshGenerationRef = useRef(0);
+  const [models, setModels] = useState<ChatModelCatalogItem[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const modelsRequestRef = useRef<Promise<ChatModelCatalogItem[]> | null>(null);
   const userKey = userUuid;
 
   useEffect(() => {
@@ -361,6 +428,34 @@ export function AppProvider({
   useEffect(() => {
     clientRef.current = client;
   }, [client]);
+
+  const loadModels = useCallback(async (options: { force?: boolean } = {}) => {
+    if (offline) return [];
+    if (models.length > 0 && !options.force) return models;
+    if (modelsRequestRef.current && !options.force) return modelsRequestRef.current;
+    const activeClient = clientRef.current;
+    if (!activeClient) throw new Error("Cohub is still connecting");
+
+    setModelsLoading(true);
+    setModelsError(null);
+    const request = activeClient.models.list()
+      .then((catalog) => {
+        const next = Object.values(catalog).flat();
+        setModels(next);
+        return next;
+      })
+      .catch((error) => {
+        const message = errorMessage(error, "Unable to load models");
+        setModelsError(message);
+        throw error;
+      })
+      .finally(() => {
+        setModelsLoading(false);
+        if (modelsRequestRef.current === request) modelsRequestRef.current = null;
+      });
+    modelsRequestRef.current = request;
+    return request;
+  }, [models, offline]);
 
   const refreshHome = useCallback(async () => {
     if (offline) return;
@@ -562,6 +657,25 @@ export function AppProvider({
           { recover: true },
         );
         const stopPersisted = sessionClient.subscribe({
+          event: (event) => {
+            if (event.type !== "session.updated") return;
+            const currentSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
+            const current = stateRef.current.sessionViews[sessionId]?.session
+              ?? currentSummary;
+            if (!current) return;
+            const payload = event.payload as { session?: Partial<SessionRecord> };
+            if (!payload.session || payload.session.id !== sessionId) return;
+            const updated = { ...current, ...payload.session };
+            dispatch({
+              type: "session-upsert",
+              session: {
+                ...updated,
+                space: currentSummary?.space ?? null,
+              },
+            });
+            const currentView = stateRef.current.sessionViews[sessionId];
+            if (currentView) dispatch({ type: "session-meta", sessionId, session: updated, space: currentView.space });
+          },
           persisted: (event) => {
             if (event.type !== "session.message.persisted") return;
             const message = (event.payload as { message?: MessageRecord }).message;
@@ -609,7 +723,12 @@ export function AppProvider({
   );
 
   const sendMessage = useCallback(
-    async (sessionId: string, rawText: string, attachments: AttachmentDraft[] = []) => {
+    async (
+      sessionId: string,
+      rawText: string,
+      attachments: AttachmentDraft[] = [],
+      options: { model?: ChatModelSelection | null } = {},
+    ) => {
       if (!client) throw new Error("Cohub is still connecting");
       const text = rawText.trim();
       const view = stateRef.current.sessionViews[sessionId];
@@ -627,8 +746,8 @@ export function AppProvider({
         content: [{ type: "text", text: optimisticText }],
         text: optimisticText,
         sequence: currentMax + 1,
-        provider: null,
-        model: null,
+        provider: options.model?.provider ?? null,
+        model: options.model?.id ?? null,
         stopReason: null,
         errorMessage: null,
         usage: null,
@@ -644,38 +763,17 @@ export function AppProvider({
       dispatch({ type: "send-start", sessionId });
 
       try {
-        let promptText = text;
-        const content: ContentBlock[] = [];
-        const imageBlocks: ContentBlock[] = [];
-        for (const attachment of attachments) {
-          const blob: Blob = Platform.OS === "web"
-            ? await (await fetch(attachment.uri)).blob()
-            : new ExpoFile(attachment.uri);
-          const uploaded = await client.publicAssets.uploadChatAttachment({
-            spaceId: session.spaceId,
-            sessionId,
-            file: blob,
-            mimeType: attachment.mimeType,
-            filename: attachment.name,
-          });
-          if (attachment.mimeType.startsWith("image/")) {
-            imageBlocks.push({
-              type: "image",
-              source: { type: "url", url: uploaded.publicUrl },
-              _meta: { filename: attachment.name, mediaType: attachment.mimeType, size: attachment.size },
-            });
-          } else {
-            promptText = [promptText, `Attached file: ${attachment.name}\n${uploaded.publicUrl}`].filter(Boolean).join("\n\n");
-          }
-        }
-        if (promptText) content.push({ type: "text", text: promptText });
-        content.push(...imageBlocks);
+        const content = await buildPromptContent(client, session.spaceId, sessionId, text, attachments);
         await client.space(session.spaceId).prompt({
           mode: "agent",
           sessionId,
           content,
           source: "mobile",
           clientMessageId,
+          accessMode: "full_access",
+          intent: "followup",
+          schedule: { mode: "immediate" },
+          ...(options.model ? { model: options.model.id, provider: options.model.provider } : {}),
         });
         dispatch({ type: "send-end", sessionId });
       } catch (error) {
@@ -684,6 +782,59 @@ export function AppProvider({
       }
     },
     [client, dispatch, userUuid],
+  );
+
+  const sendNewMessage = useCallback(
+    async (
+      spaceId: string,
+      rawText: string,
+      attachments: AttachmentDraft[] = [],
+      options: { model?: ChatModelSelection | null } = {},
+    ) => {
+      if (!client) throw new Error("Cohub is still connecting");
+      const text = rawText.trim();
+      if (!spaceId) throw new Error("Space is required");
+      if (!text && attachments.length === 0) throw new Error("Message cannot be empty");
+
+      const clientMessageId = newId();
+      const content = await buildPromptContent(client, spaceId, undefined, text, attachments);
+      const result = await client.space(spaceId).prompt({
+        mode: "agent",
+        content,
+        source: "mobile",
+        clientMessageId,
+        accessMode: "full_access",
+        intent: "followup",
+        schedule: { mode: "immediate" },
+        ...(options.model ? { model: options.model.id, provider: options.model.provider } : {}),
+      });
+      if (result.mode !== "immediate" || !result.session) {
+        throw new Error("The new Chat was not created");
+      }
+
+      const space = stateRef.current.spaces.find((item) => item.id === spaceId) ?? null;
+      const session = {
+        ...result.session,
+        space: space
+          ? {
+              id: space.id,
+              name: displaySpaceName(space),
+              slug: space.slug,
+              publicProfile: space.publicProfile ?? null,
+            }
+          : null,
+      };
+      dispatch({ type: "session-upsert", session });
+      if (Platform.OS !== "web") {
+        const home = stateRef.current;
+        void saveHome(userKey, {
+          spaces: home.spaces,
+          sessions: [session, ...home.sessions.filter((item) => item.id !== session.id)],
+        }).catch(() => undefined);
+      }
+      return result.session;
+    },
+    [client, dispatch, userKey],
   );
 
   const createSpace = useCallback(
@@ -709,28 +860,6 @@ export function AppProvider({
     [client, dispatch, userKey],
   );
 
-  const createChat = useCallback(
-    async (spaceId: string, title?: string) => {
-      if (!client) throw new Error("Cohub is still connecting");
-      const result = await client.space(spaceId).sessions.create({
-        title: title?.trim() || null,
-        source: "mobile",
-      });
-      const space = stateRef.current.spaces.find((item) => item.id === spaceId) ?? null;
-      dispatch({
-        type: "session-upsert",
-        session: {
-          ...result.session,
-          space: space
-            ? { id: space.id, name: displaySpaceName(space), slug: space.slug, publicProfile: space.publicProfile ?? null }
-            : null,
-        },
-      });
-      return result.session;
-    },
-    [client, dispatch],
-  );
-
   const renameSession = useCallback(
     async (sessionId: string, title: string) => {
       if (!client) throw new Error("Cohub is still connecting");
@@ -748,6 +877,8 @@ export function AppProvider({
 
   const clearCache = useCallback(async () => {
     await clearUserCache(userKey);
+    setModels([]);
+    setModelsError(null);
     setState({ ...initialState, booting: false, refreshing: false });
   }, [userKey]);
 
@@ -783,8 +914,12 @@ export function AppProvider({
       closeSession,
       refreshSession,
       sendMessage,
+      sendNewMessage,
       abortSession,
-      createChat,
+      models,
+      modelsLoading,
+      modelsError,
+      loadModels,
       createSpace,
       renameSession,
       clearCache,
@@ -797,15 +932,19 @@ export function AppProvider({
       client,
       closeSession,
       connectionState,
-      createChat,
       createSpace,
       getAccessToken,
       installationId,
+      loadModels,
+      models,
+      modelsError,
+      modelsLoading,
       openSession,
       refreshHome,
       refreshSession,
       renameSession,
       sendMessage,
+      sendNewMessage,
       state,
     ],
   );
