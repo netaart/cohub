@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.0](https://github.com/markbang/cohub-mobile/compare/v1.2.1...v1.3.0) (2026-08-31)
+
+
+### Features
+
+* **mobile:** align Chat workflow with Web ([#30](https://github.com/markbang/cohub-mobile/issues/30)) ([cf9bbae](https://github.com/markbang/cohub-mobile/commit/cf9bbae8c315a966749e6b6af3b1e3f4f7f09e49))
+
+
+### CI
+
+* bump actions/checkout from 4 to 7 ([#1](https://github.com/markbang/cohub-mobile/issues/1)) ([8dcb5bc](https://github.com/markbang/cohub-mobile/commit/8dcb5bc07055e469d08cb6b08a2a58416646545d))
+* bump actions/dependency-review-action from 4 to 5 ([#4](https://github.com/markbang/cohub-mobile/issues/4)) ([be70655](https://github.com/markbang/cohub-mobile/commit/be70655618d52a214516ce48b98cf70781ff2212))
+* bump actions/setup-node from 4 to 7 ([#3](https://github.com/markbang/cohub-mobile/issues/3)) ([62a6e36](https://github.com/markbang/cohub-mobile/commit/62a6e36df6ed49c3b2cd6b59f80d09002205fa88))
+* bump actions/upload-artifact from 4 to 7 ([#2](https://github.com/markbang/cohub-mobile/issues/2)) ([9301c0d](https://github.com/markbang/cohub-mobile/commit/9301c0dcb7c2b108e129146067b85fdfe7ee4a13))
+* bump googleapis/release-please-action from 4 to 5 ([#5](https://github.com/markbang/cohub-mobile/issues/5)) ([a1bca44](https://github.com/markbang/cohub-mobile/commit/a1bca446fecb1d7a15dc1c873a71b04c252f8db9))
+
 ## [1.2.1](https://github.com/markbang/cohub-mobile/compare/v1.2.0...v1.2.1) (2026-08-31)
 
 
