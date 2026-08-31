@@ -1,37 +1,262 @@
 import type { SpaceFsEntry } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, DetailTopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
-import { displaySpaceName, formatRelativeTime } from "@/src/utils";
+import { AppIcon, DetailTopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
+import {
+  displaySpaceName,
+  formatRelativeTime,
+  normalizeSpacePath,
+  parentSpacePath,
+  spacePathName,
+} from "@/src/utils";
 
-type Params = { spaceId?: string | string[] };
+type Params = { spaceId?: string | string[]; path?: string | string[] };
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
 
 export default function FilesScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<Params>();
-  const spaceId = Array.isArray(params.spaceId) ? params.spaceId[0] : params.spaceId;
+  const spaceId = firstParam(params.spaceId);
+  const currentPath = normalizeSpacePath(firstParam(params.path));
   const theme = useAppTheme();
   const { client, state } = useApp();
   const space = state.spaces.find((item) => item.id === spaceId);
   const [entries, setEntries] = useState<SpaceFsEntry[]>([]);
+  const requestIdRef = useRef(0);
   const [loading, setLoading] = useState(true);
+  const [refreshToken, setRefreshToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const loadEntries = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    if (!client || !spaceId) {
+      setEntries([]);
+      setLoading(false);
+      setError(spaceId ? "Connect to Cohub to browse Files." : "Space is unavailable.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await client.space(spaceId).files.list(currentPath || undefined);
+      if (requestId === requestIdRef.current) setEntries(result.entries);
+    } catch (caught) {
+      if (requestId === requestIdRef.current) setError(caught instanceof Error ? caught.message : "Unable to load Files");
+    } finally {
+      if (requestId === requestIdRef.current) setLoading(false);
+    }
+  }, [client, currentPath, spaceId]);
+
   useEffect(() => {
-    if (!client || !spaceId) return;
     let active = true;
     void Promise.resolve().then(() => {
-      if (active) setLoading(true);
-      return client.space(spaceId).files.list();
-    }).then((result) => { if (active) { setEntries(result.entries); setError(null); } }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to load Files"); }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [client, spaceId]);
-  return <Screen>
-    <DetailTopBar title="Files" subtitle={space ? displaySpaceName(space) : "Space workspace"} onBack={() => router.back()} actions={<IconButton name="refresh" label="Refresh files" size={40} onPress={() => router.replace({ pathname: "/space/[spaceId]/files", params: { spaceId: spaceId ?? "" } })} />} />
-    {loading ? <LoadingRows count={6} /> : error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><AppIcon name="cloud-off" size={25} color={theme.colors.danger} /><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 10 }]}>{error}</Text></View> : <FlatList data={entries} keyExtractor={(item) => item.path} contentContainerStyle={{ paddingVertical: 10, paddingBottom: 28, flexGrow: entries.length === 0 ? 1 : undefined }} renderItem={({ item }) => <Pressable onPress={() => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: spaceId ?? "", path: item.path } })} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 63, flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 16, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", borderBottomWidth: 1, borderBottomColor: theme.colors.border })}><View style={{ width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: item.type === "dir" ? theme.colors.accentSoft : theme.colors.surface }}><AppIcon name={item.type === "dir" ? "folder" : "file-text"} size={17} color={item.type === "dir" ? theme.colors.accent : theme.colors.textMuted} /></View><View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text }]}>{item.name}</Text><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textMuted, marginTop: 3 }]}>{item.type === "dir" ? "Directory" : `${item.mimeType || "File"} · ${formatBytes(item.size)}`}</Text></View><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{item.mtimeMs ? formatRelativeTime(new Date(item.mtimeMs).toISOString()) : ""}</Text><AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} /></Pressable>} ListEmptyComponent={<View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><AppIcon name="folder-open" size={26} color={theme.colors.textMuted} /><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10 }]}>This workspace is empty.</Text></View>} />}
-  </Screen>;
+      if (active) void loadEntries();
+    });
+    return () => {
+      active = false;
+      requestIdRef.current += 1;
+    };
+  }, [loadEntries, refreshToken]);
+
+  const openPath = useCallback(
+    (path: string) => {
+      if (!spaceId) return;
+      const normalizedPath = normalizeSpacePath(path);
+      router.push({
+        pathname: "/space/[spaceId]/files",
+        params: normalizedPath ? { spaceId, path: normalizedPath } : { spaceId },
+      });
+    },
+    [router, spaceId],
+  );
+
+  const dismissPath = useCallback(
+    (path: string) => {
+      if (!spaceId) return;
+      const normalizedPath = normalizeSpacePath(path);
+      router.dismissTo({
+        pathname: "/space/[spaceId]/files",
+        params: normalizedPath ? { spaceId, path: normalizedPath } : { spaceId },
+      });
+    },
+    [router, spaceId],
+  );
+
+  const openEntry = useCallback(
+    (entry: SpaceFsEntry) => {
+      if (entry.type === "dir") {
+        openPath(entry.path);
+        return;
+      }
+      if (!spaceId) return;
+      router.push({
+        pathname: "/space/[spaceId]/file",
+        params: { spaceId, path: entry.path },
+      });
+    },
+    [openPath, router, spaceId],
+  );
+
+  const goToParent = useCallback(() => {
+    dismissPath(parentSpacePath(currentPath));
+  }, [currentPath, dismissPath]);
+
+  const title = currentPath ? spacePathName(currentPath) : "Files";
+  const subtitle = space
+    ? currentPath
+      ? `${displaySpaceName(space)} / ${currentPath}`
+      : displaySpaceName(space)
+    : "Space workspace";
+
+  return (
+    <Screen>
+      <DetailTopBar
+        title={title}
+        subtitle={subtitle}
+        onBack={() => router.back()}
+        actions={
+          <IconButton
+            name="refresh"
+            label="Refresh files"
+            size={40}
+            onPress={() => setRefreshToken((value) => value + 1)}
+            disabled={loading}
+          />
+        }
+      />
+      {currentPath ? (
+        <DirectoryParentBar
+          parentPath={parentSpacePath(currentPath)}
+          onPress={goToParent}
+        />
+      ) : null}
+      {loading ? (
+        <LoadingRows count={6} />
+      ) : error ? (
+        <FilesError message={error} onRetry={() => setRefreshToken((value) => value + 1)} />
+      ) : (
+        <FlatList
+          data={entries}
+          keyExtractor={(item) => item.path}
+          contentContainerStyle={{
+            paddingVertical: 10,
+            paddingBottom: 28,
+            flexGrow: entries.length === 0 ? 1 : undefined,
+          }}
+          renderItem={({ item }) => (
+            <FileRow entry={item} onPress={() => openEntry(item)} />
+          )}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <AppIcon name="folder-open" size={26} color={theme.colors.textMuted} />
+              <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10 }]}>
+                {currentPath ? "This folder is empty." : "This workspace is empty."}
+              </Text>
+              {currentPath ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Files"
+                  onPress={() => dismissPath("")}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, marginTop: 14 })}
+                >
+                  <Text style={[typography.bodyMedium, { color: theme.colors.accent }]}>Back to Files</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          }
+        />
+      )}
+    </Screen>
+  );
+}
+
+function DirectoryParentBar({ parentPath, onPress }: { parentPath: string; onPress: () => void }) {
+  const theme = useAppTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={parentPath ? `Back to ${parentPath}` : "Back to Files"}
+      onPress={onPress}
+      android_ripple={{ color: theme.colors.pressOverlay }}
+      style={({ pressed }) => [
+        styles.parentBar,
+        { borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.background },
+      ]}
+    >
+      <AppIcon name="arrow-left" size={16} color={theme.colors.textMuted} />
+      <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textSecondary }]}>
+        {parentPath ? `Back to ${spacePathName(parentPath)}` : "Back to Files"}
+      </Text>
+    </Pressable>
+  );
+}
+
+function FileRow({ entry, onPress }: { entry: SpaceFsEntry; onPress: () => void }) {
+  const theme = useAppTheme();
+  const isDirectory = entry.type === "dir";
+  const isSymlink = entry.type === "symlink";
+  const icon = isDirectory ? "folder" : isSymlink ? "external-link" : "file-text";
+  const iconColor = isDirectory ? theme.colors.accent : theme.colors.textMuted;
+  const detail = isDirectory
+    ? "Folder"
+    : isSymlink
+      ? "Symbolic link"
+      : `${entry.mimeType || "File"} · ${formatBytes(entry.size)}`;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${isDirectory ? "Open folder" : "Open file"} ${entry.name}`}
+      onPress={onPress}
+      android_ripple={{ color: theme.colors.pressOverlay }}
+      style={({ pressed }) => ({
+        minHeight: 63,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 11,
+        paddingHorizontal: 16,
+        backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.border,
+      })}
+    >
+      <View style={[styles.fileIcon, { backgroundColor: isDirectory ? theme.colors.accentSoft : theme.colors.surface }]}>
+        <AppIcon name={icon} size={17} color={iconColor} />
+      </View>
+      <View style={styles.fileText}>
+        <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text }]}>
+          {entry.name}
+        </Text>
+        <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textMuted, marginTop: 3 }]}>
+          {detail}
+        </Text>
+      </View>
+      <Text style={[typography.micro, { color: theme.colors.textFaint }]}>
+        {entry.mtimeMs ? formatRelativeTime(new Date(entry.mtimeMs).toISOString()) : ""}
+      </Text>
+      <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
+    </Pressable>
+  );
+}
+
+function FilesError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const theme = useAppTheme();
+  return (
+    <View style={styles.errorState}>
+      <AppIcon name="cloud-off" size={26} color={theme.colors.danger} />
+      <Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 10 }]}>
+        {message}
+      </Text>
+      <PrimaryButton label="Retry" icon="refresh" onPress={onRetry} style={{ marginTop: 16 }} />
+    </View>
+  );
 }
 
 function formatBytes(value: number) {
@@ -39,3 +264,37 @@ function formatBytes(value: number) {
   if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+const styles = {
+  parentBar: {
+    minHeight: 42,
+    paddingHorizontal: 16,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
+    borderBottomWidth: 1,
+  },
+  fileIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  fileText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    padding: 24,
+  },
+  errorState: {
+    flex: 1,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    padding: 24,
+  },
+} satisfies Record<string, object>;

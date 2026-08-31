@@ -1,7 +1,8 @@
 import type { AppRecord, CheckpointRecord, TaskRunRecord } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionRow } from "@/src/components/SessionRow";
 import { useApp } from "@/src/data/context";
@@ -28,6 +29,7 @@ export default function SpaceScreen() {
   const { state, client, refreshHome } = useApp();
   const [resources, setResources] = useState<Resources>(emptyResources);
   const [loadingResources, setLoadingResources] = useState(false);
+  const [spaceActionsOpen, setSpaceActionsOpen] = useState(false);
   const space = state.spaces.find((item) => item.id === spaceId) ?? null;
   const sessions = useMemo(
     () => state.sessions.filter((session) => session.spaceId === spaceId),
@@ -68,7 +70,7 @@ export default function SpaceScreen() {
       title={name}
       subtitle="Space"
       onBack={() => router.back()}
-      actions={<IconButton name="more" label="Space actions" size={40} onPress={() => Alert.alert(name, space.description || "A Cohub Space")} />}
+      actions={<IconButton name="more" label="Space actions" size={40} onPress={() => setSpaceActionsOpen(true)} />}
     />
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.background }}
@@ -102,6 +104,36 @@ export default function SpaceScreen() {
     <SectionHeader title="Task Runs" />
     <View style={{ paddingBottom: 24 }}>{resources.tasks.length > 0 ? resources.tasks.map((task) => <ResourceRow key={task.id} icon={task.status === "running" ? "sync" : task.status === "failed" ? "alert" : "check-circle"} title={task.taskType.replaceAll("_", " ")} subtitle={task.errorMessage || `${formatRelativeTime(task.updatedAt)} · attempt ${task.attemptCount}`} trailing={<StatusPill label={task.status} tone={task.status === "failed" ? "danger" : task.status === "running" || task.status === "pending" ? "warning" : "success"} />} onPress={task.sessionId ? () => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: task.sessionId! } }) : undefined} />) : <ResourceEmpty text={loadingResources ? "Loading task runs…" : "No recent task runs."} />}</View>
     </ScrollView>
+    <AdaptiveSheet
+      visible={spaceActionsOpen}
+      title={name}
+      subtitle="Space actions"
+      onClose={() => setSpaceActionsOpen(false)}
+      scrollable={false}
+      testID="space-actions-sheet"
+    >
+      <Text style={[typography.body, { color: theme.colors.textSecondary }]}>
+        {space.description || "A shared workspace for people and Agents."}
+      </Text>
+      <SheetAction
+        icon="messages"
+        title="New Chat"
+        detail="Start a focused thread in this Space"
+        onPress={() => {
+          setSpaceActionsOpen(false);
+          router.push({ pathname: "/new-chat", params: { spaceId: space.id } });
+        }}
+      />
+      <SheetAction
+        icon="folder-open"
+        title="Open Files"
+        detail="Browse files in this Space"
+        onPress={() => {
+          setSpaceActionsOpen(false);
+          router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } });
+        }}
+      />
+    </AdaptiveSheet>
   </Screen>;
 }
 

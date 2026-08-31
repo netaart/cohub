@@ -66,6 +66,21 @@ export function contentText(content: ContentBlock[] | null | undefined) {
   return (content ?? []).map((block) => contentBlockText(block)).filter(Boolean).join("\n\n");
 }
 
+export function hasRenderableContent(content: ContentBlock[] | null | undefined) {
+  return (content ?? []).some((block) => {
+    if (block.type === "text") return typeof block.text === "string" && block.text.trim().length > 0;
+    if (block.type === "thinking") return typeof block.thinking === "string" && block.thinking.trim().length > 0;
+    if (block.type === "image") return block.source?.type === "url" && Boolean(block.source.url);
+    if (block.type === "tool_use") return true;
+    if (block.type === "tool_result") return true;
+    return false;
+  });
+}
+
+export function hasRenderableMessage(message: Pick<MessageRecord, "text" | "content" | "errorMessage">) {
+  return Boolean(message.errorMessage?.trim() || message.text?.trim() || hasRenderableContent(message.content));
+}
+
 export function messageText(message: Pick<MessageRecord, "text" | "content">) {
   return message.text?.trim() || contentText(message.content).trim();
 }
@@ -82,6 +97,26 @@ export function messageKind(message: Pick<MessageRecord, "role" | "meta">) {
 
 export function isAssistantIntermediate(message: Pick<MessageRecord, "role" | "meta">) {
   return message.role === "assistant" && message.meta?.messageKind === "assistant_intermediate";
+}
+
+export function normalizeSpacePath(value: string | null | undefined) {
+  return (value ?? "")
+    .trim()
+    .replaceAll("\\", "/")
+    .split("/")
+    .filter(Boolean)
+    .join("/");
+}
+
+export function parentSpacePath(value: string) {
+  const path = normalizeSpacePath(value);
+  const separator = path.lastIndexOf("/");
+  return separator < 0 ? "" : path.slice(0, separator);
+}
+
+export function spacePathName(value: string, fallback = "Files") {
+  const path = normalizeSpacePath(value);
+  return path.split("/").pop() || fallback;
 }
 
 export function sortByRecent<T extends { updatedAt?: string | null; lastMessageAt?: string | null }>(items: T[]) {

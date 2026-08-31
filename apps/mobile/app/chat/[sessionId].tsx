@@ -3,7 +3,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, Modal, Pressable, Text, TextInput, View } from "react-native";
 import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
 import { MessageBubble, StreamCard } from "@/src/components/MessageContent";
 import { useApp, useSession } from "@/src/data/context";
@@ -11,7 +11,7 @@ import type { AttachmentDraft } from "@/src/data/types";
 import { useAppTheme, typography } from "@/src/theme";
 import { useNativeVoiceInput } from "@/src/platform/native-voice-input";
 import { AppIcon, AttachmentChip, ComposerInput, ConnectionBanner, DetailTopBar, IconButton, PrimaryButton, Screen } from "@/src/ui";
-import { displaySessionTitle, displaySpaceName } from "@/src/utils";
+import { displaySessionTitle, displaySpaceName, hasRenderableMessage, isAssistantIntermediate } from "@/src/utils";
 
 type RouteParams = { sessionId?: string | string[] };
 
@@ -33,12 +33,16 @@ function ChatContent({ sessionId }: { sessionId: string }) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [stopping, setStopping] = useState(false);
+  const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
   const listRef = useRef<FlatList>(null);
   const initialScrollDone = useRef(false);
   const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
   const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
   const spaceName = view.space ? displaySpaceName(view.space) : sessionSummary?.space?.name || "Space";
-  const messages = useMemo(() => [...view.messages].sort((a, b) => a.sequence - b.sequence), [view.messages]);
+  const messages = useMemo(
+    () => view.messages.filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message)).sort((a, b) => a.sequence - b.sequence),
+    [view.messages],
+  );
   const running = view.sending || view.stream?.status === "pending" || view.stream?.status === "streaming";
   const voice = useNativeVoiceInput({
     getAccessToken,
@@ -60,7 +64,7 @@ function ChatContent({ sessionId }: { sessionId: string }) {
       if (result.canceled) return;
       appendAttachments(result.assets.map((asset) => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || "application/octet-stream", size: asset.size ?? 0 })));
     } catch (error) {
-      Alert.alert("Attachment unavailable", error instanceof Error ? error.message : "Unable to select a file.");
+      setNotice({ title: "Attachment unavailable", message: error instanceof Error ? error.message : "Unable to select a file." });
     }
   };
 
@@ -69,14 +73,14 @@ function ChatContent({ sessionId }: { sessionId: string }) {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert("Photo access is off", "Allow photo access in system settings to attach an image.");
+        setNotice({ title: "Photo access is off", message: "Allow photo access in system settings to attach an image." });
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, quality: 0.88 });
       if (result.canceled) return;
       appendAttachments(result.assets.map((asset, index) => ({ uri: asset.uri, name: asset.fileName || `image-${index + 1}.jpg`, mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 })));
     } catch (error) {
-      Alert.alert("Photo picker unavailable", error instanceof Error ? error.message : "Unable to select a photo.");
+      setNotice({ title: "Photo picker unavailable", message: error instanceof Error ? error.message : "Unable to select a photo." });
     }
   };
 
@@ -85,7 +89,7 @@ function ChatContent({ sessionId }: { sessionId: string }) {
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert("Camera access is off", "Allow camera access in system settings to take a photo.");
+        setNotice({ title: "Camera access is off", message: "Allow camera access in system settings to take a photo." });
         return;
       }
       const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.88 });
@@ -93,7 +97,7 @@ function ChatContent({ sessionId }: { sessionId: string }) {
       const asset = result.assets[0];
       if (asset) appendAttachments([{ uri: asset.uri, name: asset.fileName || "camera-photo.jpg", mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }]);
     } catch (error) {
-      Alert.alert("Camera unavailable", error instanceof Error ? error.message : "Unable to take a photo.");
+      setNotice({ title: "Camera unavailable", message: error instanceof Error ? error.message : "Unable to take a photo." });
     }
   };
 
@@ -104,7 +108,7 @@ function ChatContent({ sessionId }: { sessionId: string }) {
     try {
       await abortSession(sessionId);
     } catch (error) {
-      Alert.alert("Unable to stop", error instanceof Error ? error.message : "The Agent could not be stopped.");
+      setNotice({ title: "Unable to stop", message: error instanceof Error ? error.message : "The Agent could not be stopped." });
     } finally {
       setStopping(false);
     }
@@ -120,7 +124,7 @@ function ChatContent({ sessionId }: { sessionId: string }) {
       await renameSession(sessionId, renameValue);
       setRenameOpen(false);
     } catch (error) {
-      Alert.alert("Rename failed", error instanceof Error ? error.message : "Unable to rename this Chat.");
+      setNotice({ title: "Rename failed", message: error instanceof Error ? error.message : "Unable to rename this Chat." });
     }
   };
 
@@ -185,6 +189,17 @@ function ChatContent({ sessionId }: { sessionId: string }) {
       <SheetAction icon="images" title="Photo library" detail="Choose one or more images" onPress={() => void pickPhotos()} />
       <SheetAction icon="camera" title="Take a photo" detail="Use the device camera" onPress={() => void takePhoto()} />
       <SheetAction icon="paperclip" title="Choose a file" detail="Attach a document or archive" onPress={() => void pickAttachments()} />
+    </AdaptiveSheet>
+
+    <AdaptiveSheet
+      visible={notice !== null}
+      title={notice?.title ?? "Notice"}
+      onClose={() => setNotice(null)}
+      scrollable={false}
+      footer={<View style={{ alignItems: "flex-end" }}><PrimaryButton label="Done" onPress={() => setNotice(null)} style={{ minHeight: 44, paddingHorizontal: 18 }} /></View>}
+      testID="chat-notice-sheet"
+    >
+      <Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text>
     </AdaptiveSheet>
 
     <Modal visible={renameOpen} transparent animationType="fade" onRequestClose={() => setRenameOpen(false)}>

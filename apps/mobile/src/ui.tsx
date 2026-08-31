@@ -160,12 +160,15 @@ export function EmptyState({ icon, title, description, action, onAction }: { ico
   );
 }
 
-export function PrimaryButton({ label, onPress, icon, loading = false, disabled = false, style }: { label: string; onPress: () => void; icon?: IconName; loading?: boolean; disabled?: boolean; style?: ViewStyle }) {
+export function PrimaryButton({ label, onPress, icon, loading = false, disabled = false, tone = "accent", style }: { label: string; onPress: () => void; icon?: IconName; loading?: boolean; disabled?: boolean; tone?: "accent" | "danger"; style?: ViewStyle }) {
   const theme = useAppTheme();
+  const color = tone === "danger" ? theme.colors.danger : theme.colors.accent;
+  const pressedColor = tone === "danger" ? theme.colors.danger : theme.colors.accentPressed;
+  const foreground = tone === "danger" ? theme.colors.dangerText : theme.colors.accentText;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled || loading} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.primaryButton, { backgroundColor: pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: disabled || loading ? 0.55 : 1, transform: [{ scale: pressed ? 0.985 : 1 }] }, style]}>
-      {loading ? <ActivityIndicator color={theme.colors.accentText} size="small" /> : icon ? <AppIcon name={icon} size={17} color={theme.colors.accentText} /> : null}
-      <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>{label}</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled || loading} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.primaryButton, { backgroundColor: pressed ? pressedColor : color, opacity: disabled || loading ? 0.55 : 1, transform: [{ scale: pressed ? 0.985 : 1 }] }, style]}>
+      {loading ? <ActivityIndicator color={foreground} size="small" /> : icon ? <AppIcon name={icon} size={17} color={foreground} /> : null}
+      <Text style={[typography.bodyMedium, { color: foreground }]}>{label}</Text>
     </Pressable>
   );
 }

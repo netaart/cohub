@@ -257,14 +257,18 @@ export function SheetAction({
   detail,
   onPress,
   disabled = false,
+  tone = "default",
 }: {
   icon: IconName;
   title: string;
   detail?: string;
   onPress: () => void;
   disabled?: boolean;
+  tone?: "default" | "danger";
 }) {
   const theme = useAppTheme();
+  const toneColor = tone === "danger" ? theme.colors.danger : theme.colors.accent;
+  const toneBackground = tone === "danger" ? theme.colors.dangerSoft : theme.colors.accentSoft;
   return (
     <Pressable
       accessibilityRole="button"
@@ -280,11 +284,11 @@ export function SheetAction({
         },
       ]}
     >
-      <View style={[styles.actionIcon, { backgroundColor: theme.colors.accentSoft }]}>
-        <AppIcon name={icon} size={18} color={theme.colors.accent} />
+      <View style={[styles.actionIcon, { backgroundColor: toneBackground }]}>
+        <AppIcon name={icon} size={18} color={toneColor} />
       </View>
       <View style={styles.actionText}>
-        <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{title}</Text>
+        <Text style={[typography.bodyMedium, { color: tone === "danger" ? toneColor : theme.colors.text }]}>{title}</Text>
         {detail ? (
           <Text style={[typography.caption, { color: theme.colors.textSecondary, marginTop: 2 }]}>
             {detail}

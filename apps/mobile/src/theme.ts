@@ -25,6 +25,7 @@ export type AppTheme = {
     warningSoft: string;
     danger: string;
     dangerSoft: string;
+    dangerText: string;
     info: string;
     infoSoft: string;
     shadow: string;
@@ -70,6 +71,7 @@ const darkTheme: AppTheme = {
     warningSoft: "#382f1d",
     danger: "#e47d7d",
     dangerSoft: "#392123",
+    dangerText: "#2a1515",
     info: "#83a9e8",
     infoSoft: "#202d42",
     shadow: "#000000",
@@ -103,6 +105,7 @@ const lightTheme: AppTheme = {
     warningSoft: "#fff5d9",
     danger: "#b34242",
     dangerSoft: "#fdeaea",
+    dangerText: "#ffffff",
     info: "#416fae",
     infoSoft: "#eaf1fc",
     shadow: "#15202b",
