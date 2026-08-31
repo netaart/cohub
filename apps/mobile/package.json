@@ -57,7 +57,7 @@
     "typecheck": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "doctor": "expo-doctor",
     "release:check": "node scripts/check-release.mjs",
-    "check": "npm run lint && npm run typecheck && npm run release:check && npm run doctor",
+    "check": "npm run lint && npm run typecheck && node scripts/check-expo-go-notifications.mjs && npm run release:check && npm run doctor",
     "export:web": "expo export --platform web",
     "export:android": "expo export --platform android --output-dir dist/android",
     "export:ios": "expo export --platform ios --output-dir dist/ios",

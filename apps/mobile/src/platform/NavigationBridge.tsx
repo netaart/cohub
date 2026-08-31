@@ -1,9 +1,11 @@
 import * as ExpoLinking from "expo-linking";
-import * as Notifications from "expo-notifications";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect } from "react";
 import { Platform } from "react-native";
-import { getInitialNotificationUrl } from "@/src/platform/notifications";
+import {
+  getInitialNotificationUrl,
+  subscribeToNotificationResponses,
+} from "@/src/platform/notifications";
 
 function routeFromUrl(rawUrl: string) {
   try {
@@ -44,23 +46,32 @@ export function NativeInteractionBridge() {
 
   useEffect(() => {
     if (Platform.OS === "web") return;
+    let active = true;
+    let notificationCleanup: (() => void) | null = null;
     const linkingSubscription = ExpoLinking.addEventListener("url", ({ url }) => openUrl(url));
-    const notificationSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as Record<string, unknown> | undefined;
-      if (typeof data?.deepLink === "string") {
-        openUrl(data.deepLink);
-        return;
-      }
-      if (typeof data?.sessionId === "string") {
-        openUrl(`cohub://chat/${encodeURIComponent(data.sessionId)}`);
-      }
-    });
+    const notificationSubscription = subscribeToNotificationResponses(openUrl)
+      .then((cleanup) => {
+        if (active) {
+          notificationCleanup = cleanup;
+        } else {
+          cleanup();
+        }
+      })
+      .catch((error) => {
+        console.warn("[mobile-notifications] response listener unavailable", error);
+      });
 
-    void ExpoLinking.getInitialURL().then(openUrl);
-    void getInitialNotificationUrl().then(openUrl);
+    void notificationSubscription;
+    void ExpoLinking.getInitialURL().then(openUrl).catch((error) => {
+      console.warn("[mobile-linking] initial URL unavailable", error);
+    });
+    void getInitialNotificationUrl().then(openUrl).catch((error) => {
+      console.warn("[mobile-notifications] initial response unavailable", error);
+    });
     return () => {
+      active = false;
       linkingSubscription.remove();
-      notificationSubscription.remove();
+      notificationCleanup?.();
     };
   }, [openUrl]);
 
