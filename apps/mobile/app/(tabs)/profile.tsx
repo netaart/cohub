@@ -1,10 +1,10 @@
 import { useProfileSession } from "@/src/auth/profile-session";
+import { useRouter } from "expo-router";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
-import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
+import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useApp } from "@/src/data/context";
-import { registerForPushNotifications } from "@/src/platform/notifications";
 import { useAppTheme, typography } from "@/src/theme";
 import {
   AppIcon,
@@ -20,7 +20,7 @@ import {
   TopBar,
 } from "@/src/ui";
 
-type ProfileSheet = "settings" | "clear-cache" | "sign-out" | null;
+type ProfileSheet = "clear-cache" | "sign-out" | null;
 
 type ProfileData = {
   name: string;
@@ -30,6 +30,7 @@ type ProfileData = {
 
 export default function ProfileScreen() {
   const theme = useAppTheme();
+  const router = useRouter();
   const { getClaims, signOut } = useProfileSession();
   const { state, connectionState, clearCache, installationId, refreshHome } = useApp();
   const dataError = state.error ?? state.spacesError ?? state.sessionsError;
@@ -38,10 +39,6 @@ export default function ProfileScreen() {
     email: null,
     avatar: null,
   });
-  const [notificationState, setNotificationState] = useState<
-    "unknown" | "enabled" | "unavailable"
-  >("unknown");
-  const [notificationLoading, setNotificationLoading] = useState(false);
   const [sheet, setSheet] = useState<ProfileSheet>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
@@ -72,33 +69,13 @@ export default function ProfileScreen() {
     };
   }, [getClaims]);
 
-  const enableNotifications = async () => {
-    if (notificationLoading) return;
-    setNotificationLoading(true);
-    setSheetError(null);
-    try {
-      const registration = await registerForPushNotifications();
-      if (registration) {
-        setNotificationState("enabled");
-      } else {
-        setNotificationState("unavailable");
-        setSheetError("Push notifications are not available on this device yet.");
-      }
-    } catch {
-      setNotificationState("unavailable");
-      setSheetError("Push notifications could not be enabled. Check system permissions and try again.");
-    } finally {
-      setNotificationLoading(false);
-    }
-  };
-
   const openSheet = (nextSheet: Exclude<ProfileSheet, null>) => {
     setSheetError(null);
     setSheet(nextSheet);
   };
 
   const closeSheet = () => {
-    if (!clearingCache && !signingOut && !notificationLoading) setSheet(null);
+    if (!clearingCache && !signingOut) setSheet(null);
   };
 
   const confirmClearCache = async () => {
@@ -134,12 +111,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const notificationDetail =
-    notificationState === "enabled"
-      ? "Permission enabled"
-      : notificationState === "unavailable"
-        ? "Push setup is not available yet"
-        : "Get notified when work finishes";
+  const notificationDetail = "Permission, device registration, and delivery status";
 
   return (
     <Screen scroll>
@@ -152,7 +124,7 @@ export default function ProfileScreen() {
             name="settings"
             label="Open settings"
             size={40}
-            onPress={() => openSheet("settings")}
+            onPress={() => router.push({ pathname: "/settings", params: { section: "profile" } })}
           />
         }
       />
@@ -181,7 +153,7 @@ export default function ProfileScreen() {
           icon="bell"
           title="Agent notifications"
           detail={notificationDetail}
-          onPress={() => void enableNotifications()}
+          onPress={() => router.push({ pathname: "/settings", params: { section: "notifications" } })}
           trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
         />
         <SettingRow
@@ -229,41 +201,6 @@ export default function ProfileScreen() {
       <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center", marginTop: 22, marginBottom: 8 }]}>
         Cohub Mobile · {version}
       </Text>
-
-      <AdaptiveSheet
-        visible={sheet === "settings"}
-        title="Settings"
-        subtitle="Manage your account and device preferences."
-        onClose={closeSheet}
-        dismissible={!notificationLoading}
-        scrollable={false}
-        testID="profile-settings-sheet"
-      >
-        <SheetAction
-          icon="bell"
-          title="Agent notifications"
-          detail={notificationDetail}
-          disabled={notificationLoading}
-          onPress={() => void enableNotifications()}
-        />
-        <SheetAction
-          icon="database"
-          title="Local data"
-          detail={`${state.spaces.length} Spaces and ${state.sessions.length} Chats cached`}
-          disabled={notificationLoading}
-          onPress={() => openSheet("clear-cache")}
-        />
-        <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 12, marginLeft: 8 }]}>Cohub Mobile · {version}</Text>
-        <SheetAction
-          icon="user"
-          title="Sign out"
-          detail="Clear local work and end this session"
-          tone="danger"
-          disabled={notificationLoading}
-          onPress={() => openSheet("sign-out")}
-        />
-        {sheetError ? <SheetError message={sheetError} /> : null}
-      </AdaptiveSheet>
 
       <AdaptiveSheet
         visible={sheet === "clear-cache"}

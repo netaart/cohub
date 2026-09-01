@@ -2,7 +2,10 @@ import type {
   ContentBlock,
   MessageRecord,
   ModelCatalogEntry,
+  ModelThinkingLevel,
   SessionRecord,
+  SessionTurnIndexItem,
+  SessionTurnRecord,
   SpaceRecord,
   SpaceUsageSummary,
   UserSessionListItem,
@@ -21,6 +24,7 @@ export type ChatModelSelection = {
   provider: string;
   id: string;
   name?: string;
+  thinkingLevel?: ModelThinkingLevel | null;
 };
 
 export type ChatModelCatalogItem = ModelCatalogEntry;
@@ -43,7 +47,20 @@ export type StreamView = {
 export type SessionView = {
   space: SpaceRecord | null;
   session: SessionRecord | null;
+  /** Live message events and the short-lived optimistic send overlay. */
   messages: MessageRecord[];
+  /** Authoritative turn history loaded from the paginated session API. */
+  turns: SessionTurnRecord[];
+  /** True after the first authoritative turn response has arrived. */
+  historyLoaded: boolean;
+  turnIndex: SessionTurnIndexItem[];
+  turnIndexLoading: boolean;
+  hasMoreOlder: boolean;
+  hasMoreNewer: boolean;
+  loadingOlder: boolean;
+  loadingNewer: boolean;
+  oldestCursor: number | null;
+  newestCursor: number | null;
   loading: boolean;
   refreshing: boolean;
   sending: boolean;
@@ -64,6 +81,9 @@ export type AppState = {
   lastSyncedAt: string | null;
   spaces: SpaceRecord[];
   sessions: UserSessionListItem[];
+  sessionsHasMore: boolean;
+  sessionsCursor: string | null;
+  sessionsLoadingMore: boolean;
   sessionViews: Record<string, SessionView>;
   usage: UsageSummary;
 };

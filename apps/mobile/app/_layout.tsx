@@ -128,6 +128,7 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
         <Stack.Screen name="space/[spaceId]/file" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="work/[appId]" options={{ animation: "slide_from_right" }} />
         <Stack.Screen name="new-chat" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
+        <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
       </Stack>
       <AppUpdateBanner />
     </View>

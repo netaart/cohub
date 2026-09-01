@@ -5,6 +5,7 @@ import ArrowLeft from "lucide-react-native/icons/arrow-left";
 import ArrowRight from "lucide-react-native/icons/arrow-right";
 import ArrowUp from "lucide-react-native/icons/arrow-up";
 import Bell from "lucide-react-native/icons/bell";
+import Brain from "lucide-react-native/icons/brain";
 import Bookmark from "lucide-react-native/icons/bookmark";
 import Camera from "lucide-react-native/icons/camera";
 import Check from "lucide-react-native/icons/check";
@@ -22,9 +23,11 @@ import FileText from "lucide-react-native/icons/file-text";
 import FingerprintPattern from "lucide-react-native/icons/fingerprint-pattern";
 import Folder from "lucide-react-native/icons/folder";
 import FolderOpen from "lucide-react-native/icons/folder-open";
+import Gift from "lucide-react-native/icons/gift";
 import Images from "lucide-react-native/icons/images";
 import Info from "lucide-react-native/icons/info";
 import Layers2 from "lucide-react-native/icons/layers-2";
+import ListTree from "lucide-react-native/icons/list-tree";
 import MessagesSquare from "lucide-react-native/icons/messages-square";
 import Mic from "lucide-react-native/icons/mic";
 import Paperclip from "lucide-react-native/icons/paperclip";
@@ -32,6 +35,9 @@ import Plus from "lucide-react-native/icons/plus";
 import RefreshCw from "lucide-react-native/icons/refresh-cw";
 import Rocket from "lucide-react-native/icons/rocket";
 import Search from "lucide-react-native/icons/search";
+import Share from "lucide-react-native/icons/share";
+import Sun from "lucide-react-native/icons/sun";
+import Moon from "lucide-react-native/icons/moon";
 import Settings from "lucide-react-native/icons/settings";
 import Sparkles from "lucide-react-native/icons/sparkles";
 import Square from "lucide-react-native/icons/square";
@@ -50,6 +56,7 @@ export const icons = {
   "arrow-right": ArrowRight,
   "arrow-up": ArrowUp,
   bell: Bell,
+  brain: Brain,
   bookmark: Bookmark,
   camera: Camera,
   check: Check,
@@ -66,9 +73,11 @@ export const icons = {
   fingerprint: FingerprintPattern,
   folder: Folder,
   "folder-open": FolderOpen,
+  gift: Gift,
   images: Images,
   info: Info,
   layers: Layers2,
+  "list-tree": ListTree,
   messages: MessagesSquare,
   mic: Mic,
   more: Ellipsis,
@@ -77,6 +86,9 @@ export const icons = {
   refresh: RefreshCw,
   rocket: Rocket,
   search: Search,
+  share: Share,
+  sun: Sun,
+  moon: Moon,
   settings: Settings,
   sparkles: Sparkles,
   "square-pen": SquarePen,

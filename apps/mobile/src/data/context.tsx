@@ -2,7 +2,10 @@ import type {
   CohubClient,
   ContentBlock,
   MessageRecord,
+  ModelStatusResponse,
   SessionRecord,
+  SessionTurnIndexItem,
+  SessionTurnRecord,
   SpaceRecord,
   SpaceUsageSummary,
   UserSessionListItem,
@@ -28,6 +31,7 @@ import type {
   SessionView,
   StreamView,
 } from "@/src/data/types";
+import { mergeDisplayMessages, mergeTurns, messagesFromTurns } from "@/src/data/session-history";
 import { getInstallationId } from "@/src/platform/installation";
 import {
   displaySessionTitle,
@@ -119,6 +123,16 @@ const emptyView = (): SessionView => ({
   space: null,
   session: null,
   messages: [],
+  turns: [],
+  historyLoaded: false,
+  turnIndex: [],
+  turnIndexLoading: false,
+  hasMoreOlder: false,
+  hasMoreNewer: false,
+  loadingOlder: false,
+  loadingNewer: false,
+  oldestCursor: null,
+  newestCursor: null,
   loading: false,
   refreshing: false,
   sending: false,
@@ -137,6 +151,9 @@ const initialState: AppState = {
   lastSyncedAt: null,
   spaces: [],
   sessions: [],
+  sessionsHasMore: false,
+  sessionsCursor: null,
+  sessionsLoadingMore: false,
   sessionViews: {},
   usage: null,
 };
@@ -144,7 +161,10 @@ const initialState: AppState = {
 type Action =
   | { type: "hydrate"; spaces: SpaceRecord[]; sessions: UserSessionListItem[] }
   | { type: "home-start" }
-  | { type: "home-success"; spaces: SpaceRecord[]; sessions: UserSessionListItem[]; spacesError?: string; sessionsError?: string }
+  | { type: "home-success"; spaces: SpaceRecord[]; sessions: UserSessionListItem[]; sessionsHasMore?: boolean; sessionsCursor?: string | null; spacesError?: string; sessionsError?: string }
+  | { type: "sessions-more-start" }
+  | { type: "sessions-more-success"; sessions: UserSessionListItem[]; hasMore: boolean; cursor: string | null }
+  | { type: "sessions-more-error"; message: string }
   | { type: "home-error"; message: string }
   | { type: "usage-start" }
   | { type: "usage"; usage: SpaceUsageSummary }
@@ -152,10 +172,18 @@ type Action =
   | { type: "session-start"; sessionId: string; space?: SpaceRecord | null; session?: SessionRecord | null }
   | { type: "session-meta"; sessionId: string; space?: SpaceRecord | null; session: SessionRecord }
   | { type: "session-cache"; sessionId: string; messages: MessageRecord[] }
-  | { type: "session-success"; sessionId: string; space: SpaceRecord; session: SessionRecord; messages: MessageRecord[] }
+  | { type: "session-success"; sessionId: string; space: SpaceRecord; session: SessionRecord; messages: MessageRecord[]; turns: SessionTurnRecord[]; hasMoreOlder: boolean; hasMoreNewer?: boolean; oldestCursor?: number | null; newestCursor?: number | null }
   | { type: "session-error"; sessionId: string; message: string }
   | { type: "session-refresh-start"; sessionId: string }
-  | { type: "session-refresh-end"; sessionId: string; messages?: MessageRecord[]; error?: string }
+  | { type: "session-refresh-end"; sessionId: string; session?: SessionRecord; messages?: MessageRecord[]; turns?: SessionTurnRecord[]; hasMoreOlder?: boolean; hasMoreNewer?: boolean; oldestCursor?: number | null; newestCursor?: number | null; error?: string }
+  | { type: "session-page-start"; sessionId: string; direction: "older" | "newer" }
+  | { type: "session-page-success"; sessionId: string; session?: SessionRecord | null; turns: SessionTurnRecord[]; hasMore: boolean; direction: "older" | "newer" }
+  | { type: "session-page-error"; sessionId: string; message: string }
+  | { type: "session-page-end"; sessionId: string; direction: "older" | "newer" }
+  | { type: "session-window-success"; sessionId: string; session?: SessionRecord | null; turns: SessionTurnRecord[]; hasMoreOlder: boolean; hasMoreNewer: boolean; oldestCursor?: number | null; newestCursor?: number | null }
+  | { type: "turn-index-start"; sessionId: string }
+  | { type: "turn-index"; sessionId: string; turnIndex: SessionTurnIndexItem[] }
+  | { type: "turn-index-end"; sessionId: string }
   | { type: "message-add"; sessionId: string; message: MessageRecord }
   | { type: "message-optimistic"; sessionId: string; message: MessageRecord }
   | { type: "send-start"; sessionId: string }
@@ -165,6 +193,10 @@ type Action =
   | { type: "stream-clear"; sessionId: string }
   | { type: "session-upsert"; session: UserSessionListItem }
   | { type: "space-upsert"; space: SpaceRecord };
+
+function isLiveMessage(message: MessageRecord) {
+  return message.meta?.optimistic === true || message.meta?._mobileLive === true;
+}
 
 function mergeMessages(messages: MessageRecord[], incoming: MessageRecord) {
   const clientMessageId = incoming.meta?.clientMessageId;
@@ -198,6 +230,14 @@ function preferNewerSession(current: SessionRecord | null | undefined, incoming:
     : incoming;
 }
 
+function mergeSessionItem(current: UserSessionListItem | undefined, incoming: UserSessionListItem) {
+  if (!current) return incoming;
+  const preferred = preferNewerSession(current, incoming);
+  return preferred === current
+    ? { ...current, space: current.space ?? incoming.space }
+    : { ...current, ...incoming, space: incoming.space ?? current.space };
+}
+
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate":
@@ -209,7 +249,9 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "home-start":
       return { ...state, refreshing: true, error: null, spacesError: null, sessionsError: null, activityLoading: true, activityError: null };
-    case "home-success":
+    case "home-success": {
+      const existingSessions = new Map(state.sessions.map((session) => [session.id, session]));
+      const refreshedSessions = action.sessions.map((session) => mergeSessionItem(existingSessions.get(session.id), session));
       return {
         ...state,
         booting: false,
@@ -219,8 +261,28 @@ function reducer(state: AppState, action: Action): AppState {
         sessionsError: action.sessionsError ?? null,
         lastSyncedAt: new Date().toISOString(),
         spaces: sortByRecent(action.spaces),
-        sessions: sortByRecent(action.sessions),
+        sessions: sortByRecent(refreshedSessions),
+        sessionsHasMore: action.sessionsHasMore ?? false,
+        sessionsCursor: action.sessionsCursor ?? null,
+        sessionsLoadingMore: false,
       };
+    }
+    case "sessions-more-start":
+      return { ...state, sessionsLoadingMore: true, sessionsError: null };
+    case "sessions-more-success": {
+      const incomingById = new Map(action.sessions.map((session) => [session.id, session]));
+      const existingIds = new Set(state.sessions.map((session) => session.id));
+      const merged = [
+        ...state.sessions.map((session) => {
+          const incoming = incomingById.get(session.id);
+          return incoming ? mergeSessionItem(session, incoming) : session;
+        }),
+        ...action.sessions.filter((session) => !existingIds.has(session.id)),
+      ];
+      return { ...state, sessionsLoadingMore: false, sessions: sortByRecent(merged), sessionsHasMore: action.hasMore, sessionsCursor: action.cursor };
+    }
+    case "sessions-more-error":
+      return { ...state, sessionsLoadingMore: false, sessionsError: action.message };
     case "home-error":
       return { ...state, booting: false, refreshing: false, activityLoading: false, error: action.message, spacesError: action.message, sessionsError: action.message, activityError: action.message };
     case "usage-start":
@@ -232,6 +294,9 @@ function reducer(state: AppState, action: Action): AppState {
     case "session-start":
       return updateView(state, action.sessionId, {
         loading: true,
+        historyLoaded: false,
+        loadingOlder: false,
+        loadingNewer: false,
         error: null,
         space: action.space ?? state.sessionViews[action.sessionId]?.space ?? null,
         session: action.session ?? state.sessionViews[action.sessionId]?.session ?? null,
@@ -253,7 +318,7 @@ function reducer(state: AppState, action: Action): AppState {
           ...state,
           sessions: state.sessions.map((item) =>
             item.id === session.id
-              ? { ...item, ...session, space: item.space ?? { id: action.space.id, name: displaySpaceName(action.space), slug: action.space.slug, publicProfile: action.space.publicProfile ?? null } }
+              ? { ...mergeSessionItem(item, session as UserSessionListItem), space: item.space ?? { id: action.space.id, name: displaySpaceName(action.space), slug: action.space.slug, publicProfile: action.space.publicProfile ?? null } }
               : item,
           ),
         },
@@ -265,6 +330,14 @@ function reducer(state: AppState, action: Action): AppState {
           space: action.space,
           session,
           messages: action.messages,
+          turns: action.turns,
+          historyLoaded: true,
+          hasMoreOlder: action.hasMoreOlder,
+          hasMoreNewer: action.hasMoreNewer ?? false,
+          loadingOlder: false,
+          loadingNewer: false,
+          oldestCursor: action.oldestCursor ?? action.turns[0]?.sequence ?? null,
+          newestCursor: action.newestCursor ?? action.turns.at(-1)?.sequence ?? null,
         },
       );
     }
@@ -272,16 +345,76 @@ function reducer(state: AppState, action: Action): AppState {
       return updateView(state, action.sessionId, { loading: false, refreshing: false, error: action.message });
     case "session-refresh-start":
       return updateView(state, action.sessionId, { refreshing: true, error: null });
-    case "session-refresh-end":
+    case "session-refresh-end": {
+      const current = state.sessionViews[action.sessionId];
+      const session = action.session && current?.session
+        ? preferNewerSession(current.session, action.session)
+        : action.session;
       return updateView(state, action.sessionId, {
         refreshing: false,
+        ...(session ? { session } : {}),
         ...(action.messages ? { messages: action.messages } : {}),
+        ...(action.turns ? { turns: action.turns, historyLoaded: true } : {}),
+        ...(action.hasMoreOlder !== undefined ? { hasMoreOlder: action.hasMoreOlder } : {}),
+        ...(action.hasMoreNewer !== undefined ? { hasMoreNewer: action.hasMoreNewer } : {}),
+        ...(action.oldestCursor !== undefined ? { oldestCursor: action.oldestCursor } : {}),
+        ...(action.newestCursor !== undefined ? { newestCursor: action.newestCursor } : {}),
         ...(action.error ? { error: action.error } : {}),
       });
+    }
+    case "session-page-start":
+      return updateView(state, action.sessionId, action.direction === "older" ? { loadingOlder: true, error: null } : { loadingNewer: true, error: null });
+    case "session-page-success": {
+      const current = state.sessionViews[action.sessionId] ?? emptyView();
+      const turns = mergeTurns(current.turns, action.turns);
+      const session = action.session && current.session ? preferNewerSession(current.session, action.session) : action.session;
+      return updateView(state, action.sessionId, {
+        error: null,
+        ...(session ? { session } : {}),
+        turns,
+        historyLoaded: true,
+        messages: mergeDisplayMessages(messagesFromTurns(turns), current.messages.filter(isLiveMessage)),
+        hasMoreOlder: action.direction === "older" ? action.hasMore : current.hasMoreOlder,
+        hasMoreNewer: action.direction === "newer" ? action.hasMore : current.hasMoreNewer,
+        loadingOlder: action.direction === "older" ? false : current.loadingOlder,
+        loadingNewer: action.direction === "newer" ? false : current.loadingNewer,
+        oldestCursor: turns[0]?.sequence ?? current.oldestCursor,
+        newestCursor: turns.at(-1)?.sequence ?? current.newestCursor,
+      });
+    }
+    case "session-page-error":
+      return updateView(state, action.sessionId, { loadingOlder: false, loadingNewer: false, error: action.message });
+    case "session-page-end":
+      return updateView(state, action.sessionId, action.direction === "older" ? { loadingOlder: false } : { loadingNewer: false });
+    case "session-window-success": {
+      const current = state.sessionViews[action.sessionId] ?? emptyView();
+      const turns = mergeTurns(current.turns, action.turns);
+      const session = action.session && current.session ? preferNewerSession(current.session, action.session) : action.session;
+      return updateView(state, action.sessionId, {
+        error: null,
+        ...(session ? { session } : {}),
+        turns,
+        historyLoaded: true,
+        messages: mergeDisplayMessages(messagesFromTurns(turns), current.messages.filter(isLiveMessage)),
+        hasMoreOlder: action.hasMoreOlder,
+        hasMoreNewer: action.hasMoreNewer,
+        loadingOlder: false,
+        loadingNewer: false,
+        oldestCursor: turns[0]?.sequence ?? action.oldestCursor ?? null,
+        newestCursor: turns.at(-1)?.sequence ?? action.newestCursor ?? null,
+      });
+    }
+    case "turn-index-start":
+      return updateView(state, action.sessionId, { turnIndexLoading: true });
+    case "turn-index":
+      return updateView(state, action.sessionId, { turnIndex: action.turnIndex });
+    case "turn-index-end":
+      return updateView(state, action.sessionId, { turnIndexLoading: false });
     case "message-add": {
       const view = state.sessionViews[action.sessionId] ?? emptyView();
+      const message = { ...action.message, meta: { ...(action.message.meta ?? {}), _mobileLive: true } };
       return updateView(state, action.sessionId, {
-        messages: mergeMessages(view.messages, action.message),
+        messages: mergeMessages(view.messages, message),
       });
     }
     case "message-optimistic": {
@@ -312,7 +445,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         sessions: sortByRecent(
           exists
-            ? state.sessions.map((session) => (session.id === action.session.id ? { ...session, ...action.session } : session))
+            ? state.sessions.map((session) => (session.id === action.session.id ? mergeSessionItem(session, action.session) : session))
             : [action.session, ...state.sessions],
         ),
       };
@@ -340,16 +473,25 @@ export type AppContextValue = {
   installationId: string | null;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
   refreshHome: () => Promise<void>;
+  loadMoreSessions: () => Promise<void>;
   openSession: (sessionId: string) => Promise<void>;
   closeSession: (sessionId: string) => void;
   refreshSession: (sessionId: string) => Promise<void>;
+  loadOlderTurns: (sessionId: string) => Promise<void>;
+  loadNewerTurns: (sessionId: string) => Promise<void>;
+  loadTurnIndex: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
+  jumpToTurn: (sessionId: string, target: number | { turnId: string }) => Promise<number>;
   sendMessage: (sessionId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<void>;
   sendNewMessage: (spaceId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<SessionRecord>;
   abortSession: (sessionId: string) => Promise<void>;
   models: ChatModelCatalogItem[];
   modelsLoading: boolean;
   modelsError: string | null;
+  modelStatus: ModelStatusResponse | null;
+  modelStatusLoading: boolean;
+  modelStatusError: string | null;
   loadModels: (options?: { force?: boolean }) => Promise<ChatModelCatalogItem[]>;
+  loadModelStatus: (options?: { force?: boolean }) => Promise<ModelStatusResponse | null>;
   createSpace: (name: string, description?: string) => Promise<SpaceRecord>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   clearCache: () => Promise<void>;
@@ -385,6 +527,13 @@ export function AppProvider({
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const modelsRequestRef = useRef<Promise<ChatModelCatalogItem[]> | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelStatusResponse | null>(null);
+  const [modelStatusLoading, setModelStatusLoading] = useState(false);
+  const [modelStatusError, setModelStatusError] = useState<string | null>(null);
+  const modelStatusRequestRef = useRef<Promise<ModelStatusResponse | null> | null>(null);
+  const modelStatusLoadedAtRef = useRef(0);
+  const paginationRequestsRef = useRef(new Map<string, Promise<void>>());
+  const sessionsMoreRequestRef = useRef<Promise<void> | null>(null);
   const userKey = userUuid;
 
   useEffect(() => {
@@ -457,6 +606,34 @@ export function AppProvider({
     return request;
   }, [models, offline]);
 
+  const loadModelStatus = useCallback(async (options: { force?: boolean } = {}) => {
+    if (offline) return null;
+    if (!options.force && modelStatus && Date.now() - modelStatusLoadedAtRef.current < 60_000) return modelStatus;
+    if (modelStatusRequestRef.current && !options.force) return modelStatusRequestRef.current;
+    const activeClient = clientRef.current;
+    if (!activeClient) throw new Error("Cohub is still connecting");
+
+    setModelStatusLoading(true);
+    setModelStatusError(null);
+    const request = activeClient.models.status()
+      .then((next) => {
+        setModelStatus(next);
+        modelStatusLoadedAtRef.current = Date.now();
+        return next;
+      })
+      .catch((error) => {
+        const message = errorMessage(error, "Unable to load model status");
+        setModelStatusError(message);
+        throw error;
+      })
+      .finally(() => {
+        setModelStatusLoading(false);
+        if (modelStatusRequestRef.current === request) modelStatusRequestRef.current = null;
+      });
+    modelStatusRequestRef.current = request;
+    return request;
+  }, [modelStatus, offline]);
+
   const refreshHome = useCallback(async () => {
     if (offline) return;
     const generation = homeRefreshGenerationRef.current + 1;
@@ -485,13 +662,15 @@ export function AppProvider({
       }
       const spaces = spacesResult.status === "fulfilled" ? spacesResult.value ?? [] : stateRef.current.spaces;
       const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value.sessions ?? [] : stateRef.current.sessions;
+      const sessionsHasMore = sessionsResult.status === "fulfilled" ? Boolean(sessionsResult.value.pageInfo?.hasMore) : stateRef.current.sessionsHasMore;
+      const sessionsCursor = sessionsResult.status === "fulfilled" ? (sessionsResult.value.pageInfo?.nextCursor ?? null) : stateRef.current.sessionsCursor;
       const spacesError = spacesResult.status === "rejected"
         ? `Spaces could not be refreshed: ${errorMessage(spacesResult.reason, "Request failed")}`
         : undefined;
       const sessionsError = sessionsResult.status === "rejected"
         ? `Chats could not be refreshed: ${errorMessage(sessionsResult.reason, "Request failed")}`
         : undefined;
-      dispatch({ type: "home-success", spaces, sessions, spacesError, sessionsError });
+      dispatch({ type: "home-success", spaces, sessions, sessionsHasMore, sessionsCursor, spacesError, sessionsError });
       dispatch({ type: "usage-start" });
       if (Platform.OS !== "web") {
         void saveHome(userKey, { spaces, sessions }).catch((error) => {
@@ -511,6 +690,35 @@ export function AppProvider({
       }
     }
   }, [dispatch, ensureInstallation, getAccessToken, offline, userKey]);
+
+  const loadMoreSessions = useCallback(async () => {
+    if (sessionsMoreRequestRef.current) return sessionsMoreRequestRef.current;
+    const current = stateRef.current;
+    if (!client || !current.sessionsHasMore || !current.sessionsCursor || current.sessionsLoadingMore) return;
+    const task = (async () => {
+      dispatch({ type: "sessions-more-start" });
+      try {
+        const response = await client.user.listSessions({ limit: 60, cursor: current.sessionsCursor });
+        if (stateRef.current.sessionsCursor !== current.sessionsCursor) {
+          dispatch({ type: "sessions-more-success", sessions: [], hasMore: stateRef.current.sessionsHasMore, cursor: stateRef.current.sessionsCursor });
+          return;
+        }
+        const nextSessions = response.sessions ?? [];
+        dispatch({ type: "sessions-more-success", sessions: nextSessions, hasMore: Boolean(response.pageInfo?.hasMore), cursor: response.pageInfo?.nextCursor ?? null });
+        if (Platform.OS !== "web") {
+          const merged = [...stateRef.current.sessions, ...nextSessions.filter((item) => !stateRef.current.sessions.some((currentItem) => currentItem.id === item.id))];
+          void saveHome(userKey, { spaces: stateRef.current.spaces, sessions: merged }).catch(() => undefined);
+        }
+      } catch (error) {
+        dispatch({ type: "sessions-more-error", message: errorMessage(error, "Chats could not be loaded") });
+      }
+    })();
+    sessionsMoreRequestRef.current = task;
+    void task.finally(() => {
+      if (sessionsMoreRequestRef.current === task) sessionsMoreRequestRef.current = null;
+    }).catch(() => undefined);
+    return task;
+  }, [client, dispatch, userKey]);
 
   useEffect(() => {
     if (offline) return;
@@ -566,9 +774,23 @@ export function AppProvider({
       if (!spaceId) return;
       dispatch({ type: "session-refresh-start", sessionId });
       try {
-        const response = await client.space(spaceId).session(sessionId).messages.list();
-        dispatch({ type: "session-refresh-end", sessionId, messages: response.messages });
-        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, response.messages).catch(() => undefined);
+        const response = await client.space(spaceId).session(sessionId).turns.listPaginated({ limit: 30 });
+        const current = stateRef.current.sessionViews[sessionId];
+        const turns = mergeTurns(current?.turns ?? [], response.turns);
+        const messages = mergeDisplayMessages(messagesFromTurns(turns), current?.messages.filter(isLiveMessage) ?? []);
+        const keptOlderWindow = Boolean(current?.turns.some((turn) => turn.sequence < (response.turns[0]?.sequence ?? Number.MAX_SAFE_INTEGER)));
+        dispatch({
+          type: "session-refresh-end",
+          sessionId,
+          session: response.session,
+          messages,
+          turns,
+          hasMoreOlder: keptOlderWindow ? current?.hasMoreOlder ?? true : response.hasMore,
+          hasMoreNewer: current?.hasMoreNewer ?? false,
+          oldestCursor: turns[0]?.sequence ?? null,
+          newestCursor: turns.at(-1)?.sequence ?? null,
+        });
+        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messages).catch(() => undefined);
       } catch (error) {
         dispatch({
           type: "session-refresh-end",
@@ -579,6 +801,136 @@ export function AppProvider({
     },
     [client, dispatch, userKey],
   );
+
+  const loadTurnIndex = useCallback(async (sessionId: string, options: { force?: boolean } = {}) => {
+    const current = stateRef.current.sessionViews[sessionId];
+    if (!options.force && current?.turnIndex.length) return;
+    const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const spaceId = current?.session?.spaceId ?? sessionSummary?.spaceId;
+    const activeClient = clientRef.current;
+    if (!activeClient || !spaceId) return;
+    const key = `${sessionId}:index`;
+    const pending = paginationRequestsRef.current.get(key);
+    if (pending && !options.force) return pending;
+
+    const task = (async () => {
+      dispatch({ type: "turn-index-start", sessionId });
+      try {
+        let cursor: number | undefined;
+        const collected: SessionTurnIndexItem[] = [];
+        for (;;) {
+          const response = await activeClient.space(spaceId).session(sessionId).turns.index({ cursor, limit: 500 });
+          collected.push(...response.turns);
+          if (!response.hasMore || response.nextCursor == null) break;
+          cursor = response.nextCursor;
+        }
+        const bySequence = new Map<number, SessionTurnIndexItem>();
+        for (const item of collected) bySequence.set(item.sequence, item);
+        dispatch({ type: "turn-index", sessionId, turnIndex: [...bySequence.values()].sort((a, b) => a.sequence - b.sequence) });
+      } catch (error) {
+        console.warn("[mobile-session] failed to load turn index", error);
+      } finally {
+        dispatch({ type: "turn-index-end", sessionId });
+      }
+    })();
+    paginationRequestsRef.current.set(key, task);
+    void task.finally(() => {
+      if (paginationRequestsRef.current.get(key) === task) paginationRequestsRef.current.delete(key);
+    }).catch(() => undefined);
+    return task;
+  }, [dispatch]);
+
+  const loadOlderTurns = useCallback(async (sessionId: string) => {
+    const key = `${sessionId}:older`;
+    const pending = paginationRequestsRef.current.get(key);
+    if (pending) return pending;
+    const task = (async () => {
+      const view = stateRef.current.sessionViews[sessionId];
+      const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
+      const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
+      const activeClient = clientRef.current;
+      if (!activeClient || !spaceId || !view || !view.hasMoreOlder || view.loadingOlder) return;
+      const openToken = openTokens.current.get(sessionId);
+      const isCurrentRequest = () => openToken === undefined || openTokens.current.get(sessionId) === openToken;
+      dispatch({ type: "session-page-start", sessionId, direction: "older" });
+      try {
+        const response = await activeClient.space(spaceId).session(sessionId).turns.listPaginated({ ...(view.oldestCursor != null ? { cursor: view.oldestCursor } : {}), direction: "older", limit: 30 });
+        if (!isCurrentRequest()) {
+          dispatch({ type: "session-page-end", sessionId, direction: "older" });
+          return;
+        }
+        dispatch({ type: "session-page-success", sessionId, session: response.session, turns: response.turns, hasMore: response.hasMore, direction: "older" });
+        const merged = mergeTurns(stateRef.current.sessionViews[sessionId]?.turns ?? [], response.turns);
+        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messagesFromTurns(merged)).catch(() => undefined);
+      } catch (error) {
+        if (!isCurrentRequest()) {
+          dispatch({ type: "session-page-end", sessionId, direction: "older" });
+          return;
+        }
+        dispatch({ type: "session-page-error", sessionId, message: errorMessage(error, "Unable to load earlier turns") });
+      }
+    })();
+    paginationRequestsRef.current.set(key, task);
+    void task.finally(() => {
+      if (paginationRequestsRef.current.get(key) === task) paginationRequestsRef.current.delete(key);
+    }).catch(() => undefined);
+    return task;
+  }, [dispatch, userKey]);
+
+  const loadNewerTurns = useCallback(async (sessionId: string) => {
+    const key = `${sessionId}:newer`;
+    const pending = paginationRequestsRef.current.get(key);
+    if (pending) return pending;
+    const task = (async () => {
+      const view = stateRef.current.sessionViews[sessionId];
+      const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
+      const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
+      const activeClient = clientRef.current;
+      if (!activeClient || !spaceId || !view || !view.hasMoreNewer || view.loadingNewer) return;
+      const openToken = openTokens.current.get(sessionId);
+      const isCurrentRequest = () => openToken === undefined || openTokens.current.get(sessionId) === openToken;
+      dispatch({ type: "session-page-start", sessionId, direction: "newer" });
+      try {
+        const response = await activeClient.space(spaceId).session(sessionId).turns.listPaginated({ ...(view.newestCursor != null ? { cursor: view.newestCursor } : {}), direction: "newer", limit: 100 });
+        if (!isCurrentRequest()) {
+          dispatch({ type: "session-page-end", sessionId, direction: "newer" });
+          return;
+        }
+        dispatch({ type: "session-page-success", sessionId, session: response.session, turns: response.turns, hasMore: response.hasMore, direction: "newer" });
+        const merged = mergeTurns(stateRef.current.sessionViews[sessionId]?.turns ?? [], response.turns);
+        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messagesFromTurns(merged)).catch(() => undefined);
+      } catch (error) {
+        if (!isCurrentRequest()) {
+          dispatch({ type: "session-page-end", sessionId, direction: "newer" });
+          return;
+        }
+        dispatch({ type: "session-page-error", sessionId, message: errorMessage(error, "Unable to load newer turns") });
+      }
+    })();
+    paginationRequestsRef.current.set(key, task);
+    void task.finally(() => {
+      if (paginationRequestsRef.current.get(key) === task) paginationRequestsRef.current.delete(key);
+    }).catch(() => undefined);
+    return task;
+  }, [dispatch, userKey]);
+
+  const jumpToTurn = useCallback(async (sessionId: string, target: number | { turnId: string }) => {
+    const view = stateRef.current.sessionViews[sessionId];
+    const targetTurn = typeof target === "number"
+      ? view?.turns.find((turn) => turn.sequence === target)
+      : view?.turns.find((turn) => turn.id === target.turnId || turn.sourceTurnId === target.turnId);
+    if (targetTurn) return targetTurn.sequence;
+    const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
+    const activeClient = clientRef.current;
+    if (!activeClient || !spaceId) throw new Error("Chat context is unavailable");
+    const response = await activeClient.space(spaceId).session(sessionId).turns.window({ ...(typeof target === "number" ? { sequence: target } : { turnId: target.turnId }), before: 10, after: 20 });
+    const sequence = response.anchorSequence ?? response.turns.find((turn) => (typeof target === "number" && turn.sequence === target) || (typeof target !== "number" && (turn.id === target.turnId || turn.sourceTurnId === target.turnId)))?.sequence;
+    if (sequence == null) throw new Error("The requested conversation turn is unavailable");
+    dispatch({ type: "session-window-success", sessionId, session: response.session, turns: response.turns, hasMoreOlder: response.hasMoreOlder, hasMoreNewer: response.hasMoreNewer, oldestCursor: response.oldestCursor, newestCursor: response.newestCursor });
+    if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messagesFromTurns(mergeTurns(view?.turns ?? [], response.turns))).catch(() => undefined);
+    return sequence;
+  }, [dispatch, userKey]);
 
   const openSession = useCallback(
     async (sessionId: string) => {
@@ -665,7 +1017,7 @@ export function AppProvider({
             if (!current) return;
             const payload = event.payload as { session?: Partial<SessionRecord> };
             if (!payload.session || payload.session.id !== sessionId) return;
-            const updated = { ...current, ...payload.session };
+            const updated = preferNewerSession(current, { ...current, ...payload.session });
             dispatch({
               type: "session-upsert",
               session: {
@@ -688,21 +1040,26 @@ export function AppProvider({
           stopPersisted();
         };
         subscriptions.current.set(sessionId, stop);
-        const response = await sessionClient.messages.list();
+        const response = await sessionClient.turns.listPaginated({ limit: 30 });
         if (openTokens.current.get(sessionId) !== token) return;
-        dispatch({ type: "session-success", sessionId, space, session, messages: response.messages });
-        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, response.messages).catch(() => undefined);
+        const messages = messagesFromTurns(response.turns);
+        const cachedMessages = stateRef.current.sessionViews[sessionId]?.messages ?? [];
+        const liveMessages = cachedMessages.filter(isLiveMessage);
+        dispatch({ type: "session-success", sessionId, space, session: response.session ?? session, messages: mergeDisplayMessages(messages, liveMessages), turns: response.turns, hasMoreOlder: response.hasMore, hasMoreNewer: false, oldestCursor: response.turns[0]?.sequence ?? null, newestCursor: response.turns.at(-1)?.sequence ?? null });
+        void loadTurnIndex(sessionId).catch(() => undefined);
+        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messages).catch(() => undefined);
       } catch (error) {
         if (openTokens.current.get(sessionId) !== token) return;
         dispatch({ type: "session-error", sessionId, message: error instanceof Error ? error.message : "Unable to open Chat" });
       }
     },
-    [client, dispatch, refreshSession, userKey],
+    [client, dispatch, loadTurnIndex, refreshSession, userKey],
   );
 
   const closeSession = useCallback((sessionId: string) => {
     subscriptions.current.get(sessionId)?.();
     subscriptions.current.delete(sessionId);
+    openTokens.current.set(sessionId, (openTokens.current.get(sessionId) ?? 0) + 1);
   }, []);
 
   const abortSession = useCallback(
@@ -751,7 +1108,7 @@ export function AppProvider({
         stopReason: null,
         errorMessage: null,
         usage: null,
-        meta: { optimistic: true, clientMessageId },
+        meta: { optimistic: true, clientMessageId, ...(options.model?.thinkingLevel ? { requestedThinkingLevel: options.model.thinkingLevel } : {}) },
         authorUuid: userUuid,
         authorProfile: null,
         startedAt: null,
@@ -773,7 +1130,7 @@ export function AppProvider({
           accessMode: "full_access",
           intent: "followup",
           schedule: { mode: "immediate" },
-          ...(options.model ? { model: options.model.id, provider: options.model.provider } : {}),
+          ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
         });
         dispatch({ type: "send-end", sessionId });
       } catch (error) {
@@ -806,7 +1163,7 @@ export function AppProvider({
         accessMode: "full_access",
         intent: "followup",
         schedule: { mode: "immediate" },
-        ...(options.model ? { model: options.model.id, provider: options.model.provider } : {}),
+        ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
       });
       if (result.mode !== "immediate" || !result.session) {
         throw new Error("The new Chat was not created");
@@ -879,6 +1236,10 @@ export function AppProvider({
     await clearUserCache(userKey);
     setModels([]);
     setModelsError(null);
+    setModelStatus(null);
+    setModelStatusError(null);
+    modelStatusLoadedAtRef.current = 0;
+    paginationRequestsRef.current.clear();
     setState({ ...initialState, booting: false, refreshing: false });
   }, [userKey]);
 
@@ -910,16 +1271,25 @@ export function AppProvider({
       installationId,
       getAccessToken,
       refreshHome,
+      loadMoreSessions,
       openSession,
       closeSession,
       refreshSession,
+      loadOlderTurns,
+      loadNewerTurns,
+      loadTurnIndex,
+      jumpToTurn,
       sendMessage,
       sendNewMessage,
       abortSession,
       models,
       modelsLoading,
       modelsError,
+      modelStatus,
+      modelStatusLoading,
+      modelStatusError,
       loadModels,
+      loadModelStatus,
       createSpace,
       renameSession,
       clearCache,
@@ -935,10 +1305,19 @@ export function AppProvider({
       createSpace,
       getAccessToken,
       installationId,
+      jumpToTurn,
+      loadModelStatus,
       loadModels,
+      loadMoreSessions,
+      loadNewerTurns,
+      loadOlderTurns,
+      loadTurnIndex,
       models,
       modelsError,
       modelsLoading,
+      modelStatus,
+      modelStatusError,
+      modelStatusLoading,
       openSession,
       refreshHome,
       refreshSession,

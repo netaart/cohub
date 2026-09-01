@@ -10,11 +10,14 @@ The app uses native screens for Chats, Spaces, Activity, Profile, session timeli
 
 ## Included
 
-- Native Chats inbox with search, running/attention filters, optimistic sends, stop, rename, attachments, camera, photo library, and live Cohub stream patches
+- Native Chats inbox with paginated cross-Space selection, search, running/attention filters, optimistic sends, stop, rename, attachments, camera, photo library, and live Cohub stream patches
+- Turn-based Chat history with older/newer pagination, searchable turn navigation, direct window jumps, and stable scroll position
+- Model picker with availability lights, provider/context metadata, and per-model thinking levels
 - Native PCM voice input connected to Cohub ASR
 - Spaces with Chats, Files, Saves, Works, and Task Runs
 - Native file viewer plus constrained WebView for published Works
 - Activity and usage overview
+- Native Settings sections for Profile, Appearance, Activity, Notifications, Rules, Channels, Billing, and Referrals
 - Cache-first SQLite hydration, reconnect reconciliation, and user-scoped cache clearing
 - Native Logto PKCE, `cohub://` deep links, notification tap routing, APNs/FCM token acquisition, and GitHub-native build profiles
 
@@ -79,7 +82,14 @@ The production defaults mirror the Cohub web client. The hosted Logto applicatio
 
 ## Push setup
 
-The client requests native notification permission and reads an APNs/FCM device token. Backend device registration still needs to be enabled on the Cohub API. The expected server contract is:
+The client requests native notification permission, reads an APNs/FCM device token, and registers the device with Cohub. Remote push requires all of the following:
+
+- A physical device and a development or standalone build. Expo Go cannot provide Android remote push tokens.
+- Android: a Firebase `google-services.json` for `io.github.markbang.cohubmobile`, supplied to the build as `COHUB_GOOGLE_SERVICES_JSON_BASE64`.
+- iOS: valid APNs entitlements and signing credentials.
+- A deployed Cohub API with `POST /api/me/devices` enabled and a configured notification delivery provider.
+
+The expected server registration contract is:
 
 ```text
 POST /api/me/devices
@@ -91,7 +101,7 @@ POST /api/me/devices
 }
 ```
 
-Push payloads should contain `notificationId`, `type`, `spaceId`, `sessionId`, `turnId`, and `deepLink`. The app routes foreground and cold-start notification taps into the target Chat and fetches authoritative state from Cohub rather than trusting message text in the payload.
+The mobile Settings screen reports which prerequisite failed: permission, native token, Firebase/APNs configuration, authentication, or server registration. Push payloads should contain `notificationId`, `type`, `spaceId`, `sessionId`, `turnId`, and `deepLink`. The app routes foreground and cold-start notification taps into the target Chat and fetches authoritative state from Cohub rather than trusting message text in the payload.
 
 Universal links also require `cohub.live` to publish the Apple AASA and Android asset-links files for `io.github.markbang.cohubmobile`. Custom `cohub://` links work without those hosted files.
 

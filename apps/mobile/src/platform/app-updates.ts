@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import Constants from "expo-constants";
 import * as Device from "expo-device";
+import { Platform } from "react-native";
 import { config } from "@/src/config";
 
 const CACHE_KEY = "cohub:mobile-update-check:v1";
@@ -63,11 +64,8 @@ export function isNewerAppVersion(current: string, latest: string) {
 }
 
 export function getInstalledAppVersion() {
-  return (
-    Application.nativeApplicationVersion?.trim() ||
-    Constants.expoConfig?.version?.trim() ||
-    "0.0.0"
-  );
+  if (Platform.OS === "web") return Constants.expoConfig?.version?.trim() || "0.0.0";
+  return Application.nativeApplicationVersion?.trim() || Constants.expoConfig?.version?.trim() || "0.0.0";
 }
 
 function resolveDownloadUrl(payload: Record<string, unknown>) {

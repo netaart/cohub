@@ -2,6 +2,7 @@ import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import { Image, Text, View } from "react-native";
 import type { ReactNode } from "react";
 import { AppIcon } from "@/src/ui";
+import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { useAppTheme, typography } from "@/src/theme";
 import { contentBlockText, hasRenderableContent, hasRenderableMessage } from "@/src/utils";
 
@@ -108,8 +109,9 @@ export function MessageBubble({ message, local = false }: { message: MessageReco
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || "System update"}</Text></View>;
+  const thinkingLevel = requestedThinkingLevel(message.meta);
   return <View style={{ paddingHorizontal: 16, paddingVertical: 7, alignItems: isUser ? "flex-end" : "stretch" }}>
-    {!isUser ? <Text style={[typography.micro, { color: theme.colors.textMuted, marginBottom: 5, marginLeft: 2 }]}>{message.provider || "Agent"}{message.model ? ` · ${message.model}` : ""}</Text> : null}
+    {!isUser ? <Text style={[typography.micro, { color: theme.colors.textMuted, marginBottom: 5, marginLeft: 2 }]}>{message.provider || "Agent"}{message.model ? ` · ${message.model}` : ""}{thinkingLevel ? ` · Thinking ${formatThinkingLevel(thinkingLevel)}` : ""}</Text> : null}
     <View style={{ maxWidth: isUser ? "86%" : "100%", borderRadius: isUser ? 17 : 13, borderTopRightRadius: isUser ? 5 : 13, backgroundColor: isUser ? theme.colors.accentSoft : theme.colors.surface, borderWidth: 1, borderColor: isUser ? theme.colors.accentBorder : theme.colors.border, paddingHorizontal: 13, paddingVertical: 11, opacity: local ? 0.72 : 1 }}>
       {hasRenderableContent(message.content) ? <MessageContent content={message.content} /> : message.text?.trim() ? <TextBlock value={message.text} /> : null}
       {local ? <Text style={[typography.micro, { color: theme.colors.textMuted, marginTop: 7 }]}>Sending…</Text> : null}

@@ -61,6 +61,16 @@ Each APK contains only its own native libraries, so each download is much smalle
 
 The first formally signed package must be produced by a new release created after this distribution workflow is merged. The existing `v1.1.0` APKs were produced before formal signing was enabled and use the old debug key; uninstall them before installing the first formally signed release. The manual run produces Actions artifacts and does not modify an existing GitHub Release.
 
+### Android remote push later
+
+Remote Android push is separate from APK signing. Create a Firebase Android app for package `io.github.markbang.cohubmobile`, download its `google-services.json`, and store it as a GitHub Actions secret without committing the file:
+
+```bash
+base64 < google-services.json | tr -d '\n' | gh secret set COHUB_GOOGLE_SERVICES_JSON_BASE64 --repo markbang/cohub-mobile
+```
+
+The release workflow injects this file only when the secret exists. The deployed Cohub API must also expose `POST /api/me/devices` and have a configured FCM/APNs delivery provider; the current production API returns `404` for that registration route, so adding the Firebase file alone cannot activate push delivery.
+
 ### Android / Google Play later
 
 A Google Play release requires an upload keystore and these GitHub Actions secrets:

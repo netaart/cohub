@@ -36,6 +36,8 @@ on:
         required: false
       ANDROID_KEY_PASSWORD:
         required: false
+      COHUB_GOOGLE_SERVICES_JSON_BASE64:
+        required: false
       GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
         required: false
       APPSTORE_CERTIFICATES_FILE_BASE64:
@@ -168,6 +170,20 @@ jobs:
           npm run check
           if [[ "${{ inputs.profile }}" == "distribution" || "${{ inputs.profile }}" == "production" ]]; then
             npm run release:check -- --require-native-tag
+          fi
+
+      - name: Prepare Firebase configuration
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.COHUB_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GOOGLE_SERVICES_JSON_BASE64" ]]; then
+            echo "No Android Firebase configuration supplied; remote push token registration will remain unavailable in this build."
+          else
+            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > "$RUNNER_TEMP/google-services.json"
+            test -s "$RUNNER_TEMP/google-services.json"
+            echo "COHUB_GOOGLE_SERVICES_FILE=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
+            echo "Android Firebase configuration prepared."
           fi
 
       - name: Generate Android project

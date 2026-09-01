@@ -33,9 +33,10 @@ export function NativeInteractionBridge() {
     if (!id || resource === "callback") return;
     if (resource === "chat") {
       const turn = result.parsed.searchParams.get("turn");
+      const turnId = result.parsed.searchParams.get("turnId");
       router.push({
         pathname: "/chat/[sessionId]",
-        params: { sessionId: id, ...(turn ? { turn } : {}) },
+        params: { sessionId: id, ...(turn ? { turn } : {}), ...(turnId ? { turnId } : {}) },
       });
       return;
     }

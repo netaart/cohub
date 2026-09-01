@@ -1,4 +1,6 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform, useColorScheme } from "react-native";
+import { useEffect, useState } from "react";
 
 export type AppTheme = {
   mode: "light" | "dark";
@@ -114,10 +116,72 @@ const lightTheme: AppTheme = {
   radius: { sm: 8, md: 12, lg: 18, pill: 999 },
 };
 
+export type ThemePreference = "system" | "light" | "dark";
+
+const THEME_PREFERENCE_KEY = "cohub:mobile:theme-preference:v1";
+let themePreference: ThemePreference = "system";
+let themePreferenceLoaded = false;
+let themePreferenceLoad: Promise<void> | null = null;
+const themePreferenceListeners = new Set<() => void>();
+
+function isThemePreference(value: string | null): value is ThemePreference {
+  return value === "system" || value === "light" || value === "dark";
+}
+
+function notifyThemePreferenceListeners() {
+  for (const listener of themePreferenceListeners) listener();
+}
+
+function loadThemePreference() {
+  if (themePreferenceLoad) return themePreferenceLoad;
+  themePreferenceLoad = AsyncStorage.getItem(THEME_PREFERENCE_KEY)
+    .then((value) => {
+      if (!themePreferenceLoaded && isThemePreference(value)) themePreference = value;
+      themePreferenceLoaded = true;
+      notifyThemePreferenceListeners();
+    })
+    .catch(() => {
+      themePreferenceLoaded = true;
+    })
+    .finally(() => {
+      themePreferenceLoad = null;
+    });
+  return themePreferenceLoad;
+}
+
+export function getThemePreference(): ThemePreference {
+  return themePreference;
+}
+
+export function useThemePreference(): ThemePreference {
+  const [preference, setPreference] = useState(themePreference);
+  useEffect(() => {
+    const listener = () => setPreference(themePreference);
+    themePreferenceListeners.add(listener);
+    if (!themePreferenceLoaded) void loadThemePreference();
+    listener();
+    return () => {
+      themePreferenceListeners.delete(listener);
+    };
+  }, []);
+  return preference;
+}
+
+export async function setThemePreference(next: ThemePreference) {
+  themePreference = next;
+  themePreferenceLoaded = true;
+  notifyThemePreferenceListeners();
+  await AsyncStorage.setItem(THEME_PREFERENCE_KEY, next);
+}
+
 export function useAppTheme(): AppTheme {
   const colorScheme = useColorScheme();
+  const preference = useThemePreference();
   if (Platform.OS === "web") return lightTheme;
-  return colorScheme === "light" ? lightTheme : darkTheme;
+  const mode = preference === "system"
+    ? colorScheme === "light" ? "light" : "dark"
+    : preference;
+  return mode === "light" ? lightTheme : darkTheme;
 }
 
 export const typography = {

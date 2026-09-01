@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { useMemo, useRef, useState } from "react";
-import { FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { SessionRow } from "@/src/components/SessionRow";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
@@ -11,7 +11,8 @@ type Filter = "all" | "running" | "attention";
 
 export default function ChatsScreen() {
   const router = useRouter();
-  const { state, connectionState, refreshHome } = useApp();
+  const theme = useAppTheme();
+  const { state, connectionState, refreshHome, loadMoreSessions } = useApp();
   const dataError = state.error ?? state.sessionsError;
   const searchRef = useRef<TextInput>(null);
   const listRef = useRef<FlatList>(null);
@@ -51,6 +52,8 @@ export default function ChatsScreen() {
         keyboardShouldPersistTaps="handled"
         refreshing={state.refreshing}
         onRefresh={() => void refreshHome()}
+        onEndReached={() => { if (!query.trim() && filter === "all") void loadMoreSessions(); }}
+        onEndReachedThreshold={0.7}
         contentContainerStyle={{ paddingBottom: 30, flexGrow: sessions.length === 0 ? 1 : undefined }}
         ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
           <SearchField inputRef={searchRef} value={query} onChangeText={setQuery} placeholder="Search Chats and Spaces" />
@@ -61,6 +64,7 @@ export default function ChatsScreen() {
           </View>
         </View>}
         ListEmptyComponent={state.booting ? <LoadingRows count={5} /> : dataError ? <EmptyState icon="cloud-off" title="Chats are unavailable" description="Retry above after checking your connection and sign-in session." /> : <EmptyState icon={query || filter !== "all" ? "search" : "messages"} title={query || filter !== "all" ? "No matching Chats" : "No Chats yet"} description={query || filter !== "all" ? "Try another search or filter." : "Start a focused thread inside one of your Spaces."} action={query || filter !== "all" ? "Clear filters" : "New Chat"} onAction={() => { if (query || filter !== "all") { setQuery(""); setFilter("all"); } else router.push("/new-chat"); }} />}
+        ListFooterComponent={state.sessionsLoadingMore ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}
       />
     </Screen>
   );

@@ -96,7 +96,7 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
 export function TopBar({ title, subtitle, left, right }: { title: string; subtitle?: string; left?: ReactNode; right?: ReactNode }) {
   const theme = useAppTheme();
   return (
-    <View style={[styles.topBar, { borderBottomColor: theme.colors.border }]}>
+    <View testID="app-top-bar" style={[styles.topBar, { borderBottomColor: theme.colors.border }]}>
       <View style={styles.topBarLeft}>{left}</View>
       <View style={styles.topBarTitle}>
         <Text numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
@@ -110,7 +110,7 @@ export function TopBar({ title, subtitle, left, right }: { title: string; subtit
 export function DetailTopBar({ title, subtitle, onBack, backLabel = "Back", actions }: { title: string; subtitle?: string; onBack: () => void; backLabel?: string; actions?: ReactNode }) {
   const theme = useAppTheme();
   return (
-    <View style={[styles.detailTopBar, { borderBottomColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
+    <View testID="app-detail-top-bar" style={[styles.detailTopBar, { borderBottomColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
       <IconButton name="arrow-left" label={backLabel} size={40} onPress={onBack} />
       <View style={styles.detailTopBarTitle}>
         <Text accessibilityRole="header" numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
@@ -189,13 +189,14 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
   return <View style={{ paddingHorizontal: 16, gap: 4 }}>{Array.from({ length: count }).map((_, index) => <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}><View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ flex: 1, gap: 9 }}><View style={{ width: `${58 + (index % 3) * 10}%`, height: 12, borderRadius: 6, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ width: `${38 + (index % 2) * 15}%`, height: 10, borderRadius: 5, backgroundColor: theme.colors.surfaceRaised }} /></View></View>)}</View>;
 }
 
-export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel = "Automatic", disabled = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; disabled?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
+export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel = "Automatic", modelStatus = "unknown", disabled = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
   const theme = useAppTheme();
   const canSend = (value.trim().length > 0 || hasAttachment) && !disabled && !running;
   const canStop = running && !disabled && Boolean(onStop);
+  const modelStatusLabel = modelStatus === "available" ? "operational" : modelStatus === "degraded" ? "degraded" : modelStatus === "outage" ? "outage" : "status unavailable";
   return (
     <View style={[styles.composerWrap, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
-      {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}`} disabled={disabled || running} onPress={onModelPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.modelTrigger, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: disabled || running ? 0.5 : 1 }]}><AppIcon name="sparkles" size={14} color={theme.colors.accent} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
+      {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}, ${modelStatusLabel}`} disabled={disabled || running} onPress={onModelPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.modelTrigger, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: disabled || running ? 0.5 : 1 }]}><AppIcon name="sparkles" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
       <View style={[styles.composer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
         <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={disabled || running} />
         <TextInput
@@ -257,13 +258,13 @@ export function useBackButton() {
 
 const styles = StyleSheet.create({
   iconButton: { alignItems: "center", justifyContent: "center" },
-  topBar: { minHeight: 70, paddingHorizontal: 16, paddingVertical: 7, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
-  topBarLeft: { width: 44, alignItems: "flex-start", justifyContent: "center" },
-  topBarTitle: { flex: 1, minWidth: 0, paddingVertical: 2 },
-  topBarRight: { width: 96, alignItems: "flex-end", justifyContent: "center", flexDirection: "row", gap: 2 },
-  detailTopBar: { minHeight: 60, paddingHorizontal: 8, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4, borderBottomWidth: StyleSheet.hairlineWidth },
-  detailTopBarTitle: { flex: 1, minWidth: 0, paddingHorizontal: 2 },
-  detailTopBarActions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 0 },
+  topBar: { height: 70, minHeight: 70, maxHeight: 70, flexShrink: 0, paddingHorizontal: 16, paddingVertical: 7, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
+  topBarLeft: { width: 44, height: 42, alignItems: "flex-start", justifyContent: "center" },
+  topBarTitle: { flex: 1, minWidth: 0, height: 42, justifyContent: "center", paddingVertical: 2 },
+  topBarRight: { width: 96, height: 42, alignItems: "flex-end", justifyContent: "center", flexDirection: "row", gap: 2 },
+  detailTopBar: { height: 60, minHeight: 60, maxHeight: 60, flexShrink: 0, paddingHorizontal: 8, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4, borderBottomWidth: StyleSheet.hairlineWidth },
+  detailTopBarTitle: { flex: 1, minWidth: 0, height: 42, justifyContent: "center", paddingHorizontal: 2 },
+  detailTopBarActions: { height: 42, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 0 },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 22, paddingBottom: 10 },
   emptyState: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, minHeight: 260 },
   emptyIcon: { width: 56, height: 56, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },

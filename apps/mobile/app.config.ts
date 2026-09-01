@@ -21,6 +21,7 @@ function buildNumberFor(version: string) {
 export default ({ config }: ConfigContext): ExpoConfig => {
   const version = config.version?.trim() || "0.0.1";
   const buildNumber = buildNumberFor(version);
+  const googleServicesFile = process.env.COHUB_GOOGLE_SERVICES_FILE?.trim();
   return {
     ...config,
     name: config.name ?? "Cohub",
@@ -29,6 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       ...config.android,
       versionCode: buildNumber,
+      ...(googleServicesFile ? { googleServicesFile } : {}),
     },
     ios: {
       ...config.ios,

@@ -121,13 +121,16 @@ export async function saveMessages(userKey: string, sessionId: string, messages:
   const now = Date.now();
   await db.withTransactionAsync(async () => {
     for (const message of messages) {
+      const meta = message.meta ? { ...message.meta } : null;
+      if (meta) delete meta._mobileLive;
+      const persistable = { ...message, meta };
       await db.runAsync(
         `INSERT OR REPLACE INTO messages (user_key, session_id, message_id, sequence, payload, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
         userKey,
         sessionId,
         message.id,
         message.sequence,
-        JSON.stringify(message),
+        JSON.stringify(persistable),
         now,
       );
     }
