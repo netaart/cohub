@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/markbang/cohub-mobile/compare/v1.3.1...v1.4.0) (2026-09-01)
+
+
+### Features
+
+* **mobile:** complete web parity workflow ([e3aae59](https://github.com/markbang/cohub-mobile/commit/e3aae590946daa092e1e072b18b65550726da263))
+
 ## [1.3.1](https://github.com/markbang/cohub-mobile/compare/v1.3.0...v1.3.1) (2026-08-31)
 
 
