@@ -1,6 +1,6 @@
-import type { AppRecord, CheckpointRecord, TaskRunRecord } from "@neta-art/cohub";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import type { AppRecord, CheckpointRecord, SpaceRecord, TaskRunRecord } from "@neta-art/cohub";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -20,6 +20,7 @@ type Resources = {
 };
 
 const emptyResources: Resources = { checkpoints: [], apps: [], tasks: [] };
+const SPACE_REFRESH_INTERVAL_MS = 60_000;
 
 export default function SpaceScreen() {
   const router = useRouter();
@@ -27,16 +28,54 @@ export default function SpaceScreen() {
   const spaceId = Array.isArray(params.spaceId) ? params.spaceId[0] : params.spaceId;
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { state, client, refreshHome } = useApp();
+  const { state, client, refreshHome, upsertSpace } = useApp();
+  const [loadedSpace, setLoadedSpace] = useState<SpaceRecord | null>(null);
+  const [spaceLoading, setSpaceLoading] = useState(false);
   const [resources, setResources] = useState<Resources>(emptyResources);
   const [loadingResources, setLoadingResources] = useState(false);
   const [spaceActionsOpen, setSpaceActionsOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<SpacePanel | null>(null);
-  const space = state.spaces.find((item) => item.id === spaceId) ?? null;
+  const spaceRefreshAtRef = useRef<{ spaceId: string; at: number } | null>(null);
+  const spaceRefreshInFlightRef = useRef<{ spaceId: string; token: number } | null>(null);
+  const spaceRefreshTokenRef = useRef(0);
+  const cachedSpace = state.spaces.find((item) => item.id === spaceId) ?? null;
+  const cachedSpaceRef = useRef<SpaceRecord | null>(cachedSpace);
+  useEffect(() => {
+    cachedSpaceRef.current = cachedSpace;
+  }, [cachedSpace]);
+  const space = cachedSpace ?? (loadedSpace?.id === spaceId ? loadedSpace : null);
   const sessions = useMemo(
     () => state.sessions.filter((session) => session.spaceId === spaceId),
     [spaceId, state.sessions],
   );
+
+  useFocusEffect(useCallback(() => {
+    if (!client || !spaceId) return undefined;
+    if (spaceRefreshInFlightRef.current?.spaceId === spaceId) return undefined;
+    const lastRefresh = spaceRefreshAtRef.current;
+    if (cachedSpaceRef.current && lastRefresh?.spaceId === spaceId && Date.now() - lastRefresh.at < SPACE_REFRESH_INTERVAL_MS) return undefined;
+    const requestToken = spaceRefreshTokenRef.current + 1;
+    spaceRefreshTokenRef.current = requestToken;
+    spaceRefreshInFlightRef.current = { spaceId, token: requestToken };
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (active) setSpaceLoading(true);
+    });
+    void client.spaces.get(spaceId).then((next) => {
+      if (active) {
+        spaceRefreshAtRef.current = { spaceId, at: Date.now() };
+        setLoadedSpace(next);
+        upsertSpace(next);
+      }
+    }).catch(() => undefined).finally(() => {
+      if (spaceRefreshInFlightRef.current?.token === requestToken) spaceRefreshInFlightRef.current = null;
+      if (active) setSpaceLoading(false);
+    });
+    return () => {
+      active = false;
+      if (spaceRefreshInFlightRef.current?.token === requestToken) spaceRefreshInFlightRef.current = null;
+    };
+  }, [client, spaceId, upsertSpace]));
 
   useEffect(() => {
     if (!client || !spaceId) return;
@@ -62,7 +101,7 @@ export default function SpaceScreen() {
   }, [client, spaceId]);
 
   if (!space) {
-    return <Screen><DetailTopBar title="Space" onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={[typography.body, { color: theme.colors.textMuted }]}>Space unavailable.</Text></View></Screen>;
+    return <Screen><DetailTopBar title="Space" onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={[typography.body, { color: theme.colors.textMuted }]}>{spaceLoading ? "Opening Space…" : "Space unavailable."}</Text></View></Screen>;
   }
 
   const name = displaySpaceName(space);
@@ -76,7 +115,7 @@ export default function SpaceScreen() {
       client={client}
       activePanel={activePanel}
       onActivePanelChange={setActivePanel}
-      onOpenSession={(sessionId) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId } })}
+      onOpenSession={(sessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })}
       onNewChat={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })}
       onOpenFile={(path) => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: space.id, path } })}
       onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}

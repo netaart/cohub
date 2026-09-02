@@ -3,6 +3,7 @@ import Activity from "lucide-react-native/icons/activity";
 import CircleAlert from "lucide-react-native/icons/circle-alert";
 import ArrowLeft from "lucide-react-native/icons/arrow-left";
 import ArrowRight from "lucide-react-native/icons/arrow-right";
+import ArrowDown from "lucide-react-native/icons/arrow-down";
 import ArrowUp from "lucide-react-native/icons/arrow-up";
 import Bell from "lucide-react-native/icons/bell";
 import Brain from "lucide-react-native/icons/brain";
@@ -54,6 +55,7 @@ export const icons = {
   alert: CircleAlert,
   "arrow-left": ArrowLeft,
   "arrow-right": ArrowRight,
+  "arrow-down": ArrowDown,
   "arrow-up": ArrowUp,
   bell: Bell,
   brain: Brain,

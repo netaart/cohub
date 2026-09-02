@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ActivityIndicator, Animated, BackHandler, FlatList, Modal, PanResponder, Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import DrawerLayout, { DrawerLockMode, DrawerPosition, DrawerState, DrawerType, type DrawerLayoutMethods } from "react-native-gesture-handler/ReanimatedDrawerLayout";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SessionSearchRow } from "@/src/components/SearchResultRow";
 import { SessionRow } from "@/src/components/SessionRow";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useAppTheme, typography } from "@/src/theme";
+import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { AppIcon, IconButton, PrimaryButton, SearchField } from "@/src/ui";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
 
@@ -20,7 +22,7 @@ type SpacePanelsProps = {
   client: CohubClient | null;
   activePanel: SpacePanel | null;
   onActivePanelChange: (panel: SpacePanel | null) => void;
-  onOpenSession: (sessionId: string) => void;
+  onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void;
   onNewChat: () => void;
   onOpenFile: (path: string) => void;
   onOpenFilesPage: () => void;
@@ -135,7 +137,7 @@ function NativeSpacePanels({ spaceId, spaceName, sessions, client, activePanel, 
     onDrawerStateChanged={(state, willShow) => handleDrawerStateChanged("chat", state, willShow)}
     onDrawerOpen={() => handleDrawerOpen("chat")}
     onDrawerClose={() => handleDrawerClose("chat")}
-    renderNavigationView={() => drawerSurface("chat", <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={() => closePanel("chat")} onNewChat={() => { closePanel("chat"); onNewChat(); }} onOpenSession={(sessionId) => { closePanel("chat"); onOpenSession(sessionId); }} />)}
+    renderNavigationView={() => drawerSurface("chat", <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={() => closePanel("chat")} onNewChat={() => { closePanel("chat"); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel("chat"); onOpenSession(sessionId, target); }} />)}
   >
     <DrawerLayout
       ref={filesDrawerRef}
@@ -309,7 +311,7 @@ function WebSpacePanels({ spaceId, spaceName, sessions, client, activePanel, onA
       <View style={styles.modalRoot}>
         <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}><Pressable accessibilityRole="button" accessibilityLabel="Close panel" style={styles.fill} onPress={closeDrawer} /></Animated.View>
         <Animated.View collapsable={false} testID={visibleSide ? `space-panel-${visibleSide}` : undefined} {...panelResponder.panHandlers} accessibilityViewIsModal role="dialog" style={[styles.panel, { width: panelWidth, height: Math.max(0, height), paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: theme.colors.background, borderColor: theme.colors.border, ...panelPosition, transform: [{ translateX }] }]}>
-            {visibleSide === "chat" ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={closeDrawer} onNewChat={() => { closeDrawer(); onNewChat(); }} onOpenSession={(sessionId) => { closeDrawer(); onOpenSession(sessionId); }} /> : <FilesPanel spaceId={spaceId} spaceName={spaceName} client={client} onClose={closeDrawer} onOpenFile={(path) => { closeDrawer(); onOpenFile(path); }} onOpenFilesPage={() => { closeDrawer(); onOpenFilesPage(); }} />}
+            {visibleSide === "chat" ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={closeDrawer} onNewChat={() => { closeDrawer(); onNewChat(); }} onOpenSession={(sessionId, target) => { closeDrawer(); onOpenSession(sessionId, target); }} /> : <FilesPanel spaceId={spaceId} spaceName={spaceName} client={client} onClose={closeDrawer} onOpenFile={(path) => { closeDrawer(); onOpenFile(path); }} onOpenFilesPage={() => { closeDrawer(); onOpenFilesPage(); }} />}
         </Animated.View>
       </View>
     </Modal>
@@ -360,7 +362,11 @@ function cursorAfterOldestSession(sessions: UserSessionListItem[]) {
   return `${date ? date.toISOString() : "null"}|${oldest.id}`;
 }
 
-function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string) => void }) {
+type ChatPanelItem =
+  | { kind: "local"; session: UserSessionListItem }
+  | { kind: "remote"; hit: RemoteSessionSearchHit };
+
+function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
   const [query, setQuery] = useState("");
   const [extraSessions, setExtraSessions] = useState<UserSessionListItem[]>([]);
@@ -369,9 +375,21 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
   const [scopeInitialized, setScopeInitialized] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const remoteSearch = useRemoteSearch(client, query, { enabled: Boolean(spaceId), spaceId, types: ["session", "turn"] });
   const displaySessions = useMemo(() => mergePanelSessions(extraSessions, sessions, spaceId, spaceName), [extraSessions, sessions, spaceId, spaceName]);
-  const needle = query.trim().toLowerCase();
-  const filteredSessions = displaySessions.filter((session) => !needle || [session.title, session.latestMessageText, session.space?.name].some((value) => value?.toLowerCase().includes(needle)));
+  const trimmedQuery = normalizeSearchQuery(query);
+  const needle = trimmedQuery.toLowerCase();
+  const filteredSessions = displaySessions.filter((session) => !needle || [session.title, session.latestMessageText, session.space?.name].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false));
+  const listItems = useMemo<ChatPanelItem[]>(() => {
+    if (!trimmedQuery) return filteredSessions.map((session) => ({ kind: "local", session }));
+    const remoteQueryMatches = remoteSearch.query === trimmedQuery;
+    const remoteSessions = remoteQueryMatches ? remoteSearch.sessions : [];
+    const remoteIds = new Set(remoteSessions.map((hit) => hit.sessionId));
+    return [
+      ...remoteSessions.map((hit) => ({ kind: "remote" as const, hit })),
+      ...filteredSessions.filter((session) => !remoteIds.has(session.id)).map((session) => ({ kind: "local" as const, session })),
+    ];
+  }, [filteredSessions, remoteSearch.query, remoteSearch.sessions, trimmedQuery]);
   const loadMore = async () => {
     if (!client || loadingMore || (scopeInitialized && !scopeHasMore)) return;
     setLoadingMore(true);
@@ -389,22 +407,26 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
       setLoadingMore(false);
     }
   };
-  const showLoadMore = Boolean(client && (!scopeInitialized || scopeHasMore));
+  const showLoadMore = Boolean(client && !trimmedQuery && (!scopeInitialized || scopeHasMore));
   return (
     <View style={styles.panelContent}>
       <PanelHeader title="Chats" subtitle={spaceName} onClose={onClose} />
       <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 9 }}>
         <PrimaryButton label="New Chat" icon="plus" onPress={onNewChat} style={{ minHeight: 44 }} />
-        <SearchField value={query} onChangeText={setQuery} placeholder="Search Chats" />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Search Chats" /></View>
+          {remoteSearch.query === trimmedQuery && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
+        </View>
+        {remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
       </View>
       <FlatList
-        data={filteredSessions}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <SessionRow session={item} onPress={() => onOpenSession(item.id)} />}
+        data={listItems}
+        keyExtractor={(item) => item.kind === "remote" ? `remote:${item.hit.sessionId}` : `local:${item.session.id}`}
+        renderItem={({ item }) => item.kind === "remote" ? <SessionSearchRow hit={item.hit} onPress={(target) => onOpenSession(item.hit.sessionId, target)} /> : <SessionRow session={item.session} onPress={() => onOpenSession(item.session.id)} />}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{ paddingBottom: 24, flexGrow: filteredSessions.length === 0 ? 1 : undefined }}
+        contentContainerStyle={{ paddingBottom: 24, flexGrow: listItems.length === 0 ? 1 : undefined }}
         ListFooterComponent={showLoadMore ? <View>{loadMoreError ? <Text selectable style={[typography.micro, { color: theme.colors.danger, marginHorizontal: 14, marginTop: 8 }]}>{loadMoreError}</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel={loadMoreError ? "Retry loading Chats" : "Load more Chats"} disabled={loadingMore} onPress={() => void loadMore()} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 40, marginHorizontal: 14, marginTop: 8, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{loadingMore ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{loadMoreError ? "Retry loading Chats" : "Load more Chats"}</Text>}</Pressable></View> : null}
-        ListEmptyComponent={<View style={styles.emptyPanel}><AppIcon name={query ? "search" : "messages"} size={26} color={theme.colors.textMuted} /><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{query ? "No matching Chats" : "No Chats in this Space yet."}</Text></View>}
+        ListEmptyComponent={<View style={styles.emptyPanel}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <AppIcon name={trimmedQuery ? "search" : "messages"} size={26} color={theme.colors.textMuted} />}<Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{trimmedQuery ? "No matching Chats" : "No Chats in this Space yet."}</Text></View>}
       />
     </View>
   );

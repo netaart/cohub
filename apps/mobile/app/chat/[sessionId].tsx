@@ -10,8 +10,9 @@ import { ModelSelectorSheet } from "@/src/components/ModelSelectorSheet";
 import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
+import { nextChatTailFollowing } from "@/src/data/chat-scroll";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
-import { mergeDisplayMessages, messagesFromTurns, turnSequenceForMessage } from "@/src/data/session-history";
+import { mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage } from "@/src/data/session-history";
 import { useAppTheme, typography } from "@/src/theme";
 import { formatThinkingLevel, modelAvailabilityLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { useNativeVoiceInput } from "@/src/platform/native-voice-input";
@@ -20,6 +21,14 @@ import { displaySessionTitle, displaySpaceName, hasRenderableMessage, isAssistan
 
 type RouteParams = { sessionId?: string | string[]; spaceId?: string | string[]; turn?: string | string[]; turnId?: string | string[] };
 const messageViewabilityConfig = { itemVisiblePercentThreshold: 20 };
+type ChatScrollEvent = {
+  nativeEvent: {
+    contentOffset: { y: number };
+    contentSize: { height: number };
+    layoutMeasurement: { height: number };
+    velocity?: { y?: number };
+  };
+};
 
 export default function ChatScreen() {
   const params = useLocalSearchParams<RouteParams>();
@@ -58,9 +67,55 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const handledDeepLinkTarget = useRef<string | null>(null);
   const listRef = useRef<FlatList>(null);
   const initialScrollDone = useRef(false);
+  const followingTailRef = useRef(true);
+  const [followingTail, setFollowingTailState] = useState(true);
+  const userDraggingRef = useRef(false);
+  const momentumScrollingRef = useRef(false);
+  const followTailFrameRef = useRef<number | null>(null);
+  const turnScrollTargetRef = useRef<number | null>(null);
+  const turnScrollRetriesRef = useRef(new Map<number, number>());
+  const turnScrollRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setFollowingTail = useCallback((next: boolean) => {
+    if (followingTailRef.current === next) return;
+    followingTailRef.current = next;
+    setFollowingTailState(next);
+  }, []);
+  const cancelTurnScroll = useCallback(() => {
+    pendingScrollSequence.current = null;
+    turnScrollTargetRef.current = null;
+    turnScrollRetriesRef.current.clear();
+    if (turnScrollRetryTimerRef.current !== null) {
+      clearTimeout(turnScrollRetryTimerRef.current);
+      turnScrollRetryTimerRef.current = null;
+    }
+  }, []);
+  const requestFollowTail = useCallback((animated = false) => {
+    if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current || pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null || followTailFrameRef.current !== null) return;
+    followTailFrameRef.current = requestAnimationFrame(() => {
+      followTailFrameRef.current = null;
+      if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current || pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null) return;
+      listRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const first = viewableItems.find((item) => item.isViewable && item.item && typeof item.item === "object");
-    if (first && first.item) setCurrentTurnSequence(turnSequenceForMessage(first.item as { meta: Record<string, unknown> | null }));
+    const ordered = viewableItems
+      .filter((item) => item.isViewable && item.item && typeof item.item === "object")
+      .sort((left, right) => (left.index ?? Number.MAX_SAFE_INTEGER) - (right.index ?? Number.MAX_SAFE_INTEGER));
+    const target = turnScrollTargetRef.current;
+    if (target !== null) {
+      if (ordered.some((item) => turnSequenceForMessage((item.item as { meta: Record<string, unknown> | null })) === target)) {
+        turnScrollTargetRef.current = null;
+        turnScrollRetriesRef.current.delete(target);
+        if (turnScrollRetryTimerRef.current !== null) {
+          clearTimeout(turnScrollRetryTimerRef.current);
+          turnScrollRetryTimerRef.current = null;
+        }
+        setCurrentTurnSequence(target);
+      }
+      return;
+    }
+    const first = ordered[0];
+    if (first?.item) setCurrentTurnSequence(turnSequenceForMessage(first.item as { meta: Record<string, unknown> | null }));
   }, []);
   const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
   const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
@@ -108,18 +163,54 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const running = view.sending || view.stream?.status === "pending" || view.stream?.status === "streaming";
   const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
 
-  const scrollToTurn = useCallback((sequence: number) => {
-    const exactIndex = messages.findIndex((message) => turnSequenceForMessage(message) === sequence);
-    const index = exactIndex >= 0 ? exactIndex : messages.findIndex((message) => {
+  const targetMessageIndex = useCallback((sequence: number) => {
+    const exactIndex = messageIndexForTurn(messages, sequence);
+    if (exactIndex >= 0) return exactIndex;
+    return messages.findIndex((message) => {
       const messageSequence = turnSequenceForMessage(message);
       return messageSequence !== null && messageSequence > sequence;
     });
-    if (index < 0) { pendingScrollSequence.current = sequence; return; }
+  }, [messages]);
+  const targetIsLatestMessage = useCallback(() => {
+    const target = turnScrollTargetRef.current;
+    const lastMessage = messages.at(-1);
+    return target !== null && lastMessage !== undefined && turnSequenceForMessage(lastMessage) === target;
+  }, [messages]);
+  const scheduleTurnScrollRetry = useCallback((sequence: number, retry: number) => {
+    if (retry >= 4) {
+      if (turnScrollTargetRef.current === sequence) turnScrollTargetRef.current = null;
+      turnScrollRetriesRef.current.delete(sequence);
+      return;
+    }
+    if (turnScrollRetryTimerRef.current !== null) clearTimeout(turnScrollRetryTimerRef.current);
+    turnScrollRetryTimerRef.current = setTimeout(() => {
+      turnScrollRetryTimerRef.current = null;
+      if (turnScrollTargetRef.current !== sequence) return;
+      const index = targetMessageIndex(sequence);
+      if (index < 0 || !listRef.current) return;
+      turnScrollRetriesRef.current.set(sequence, retry + 1);
+      listRef.current.scrollToIndex({ index, animated: false, viewPosition: 0, viewOffset: 8 });
+    }, retry === 0 ? 120 : 180);
+  }, [targetMessageIndex]);
+  const scrollToTurn = useCallback((sequence: number, retry = 0) => {
+    const index = targetMessageIndex(sequence);
+    turnScrollTargetRef.current = sequence;
+    turnScrollRetriesRef.current.set(sequence, retry);
+    setFollowingTail(false);
+    if (index < 0) {
+      pendingScrollSequence.current = sequence;
+      return;
+    }
+    if (!listRef.current) {
+      pendingScrollSequence.current = sequence;
+      return;
+    }
     pendingScrollSequence.current = null;
     initialScrollDone.current = true;
-    listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.08 });
+    listRef.current.scrollToIndex({ index, animated: retry === 0, viewPosition: 0, viewOffset: 8 });
+    scheduleTurnScrollRetry(sequence, retry);
     setCurrentTurnSequence(sequence);
-  }, [messages]);
+  }, [scheduleTurnScrollRetry, setFollowingTail, targetMessageIndex]);
 
   const handleTurnJump = async (sequence: number) => {
     setLoadingSequence(sequence);
@@ -137,8 +228,26 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   useEffect(() => {
     initialScrollDone.current = false;
     pendingScrollSequence.current = null;
+    userDraggingRef.current = false;
+    momentumScrollingRef.current = false;
+    turnScrollTargetRef.current = null;
+    turnScrollRetriesRef.current.clear();
+    if (turnScrollRetryTimerRef.current !== null) {
+      clearTimeout(turnScrollRetryTimerRef.current);
+      turnScrollRetryTimerRef.current = null;
+    }
     handledDeepLinkTarget.current = null;
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!view.stream || !followingTailRef.current || pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null) return;
+    requestFollowTail();
+  }, [requestFollowTail, view.stream]);
+
+  useEffect(() => () => {
+    if (followTailFrameRef.current !== null) cancelAnimationFrame(followTailFrameRef.current);
+    if (turnScrollRetryTimerRef.current !== null) clearTimeout(turnScrollRetryTimerRef.current);
+  }, []);
 
   useEffect(() => {
     const targetKey = initialTurnId ? `id:${initialTurnId}` : initialTurnSequence !== null ? `sequence:${initialTurnSequence}` : null;
@@ -201,10 +310,101 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const saveRename = async () => {
     try { await renameSession(sessionId, renameValue); setRenameOpen(false); } catch (error) { setNotice({ title: "Rename failed", message: error instanceof Error ? error.message : "Unable to rename this Chat." }); }
   };
+  const handleScroll = useCallback((event: ChatScrollEvent) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceToBottom = Math.max(0, contentSize.height - layoutMeasurement.height - contentOffset.y);
+    setFollowingTail(nextChatTailFollowing({
+      currentlyFollowing: followingTailRef.current,
+      distanceToBottom,
+      userInteracting: userDraggingRef.current || momentumScrollingRef.current,
+      pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()),
+    }));
+    if (initialScrollDone.current && contentOffset.y < 180 && view.hasMoreOlder && !view.loadingOlder) void loadOlderTurns(sessionId);
+    if (distanceToBottom < 180 && view.hasMoreNewer && !view.loadingNewer) void loadNewerTurns(sessionId);
+  }, [loadNewerTurns, loadOlderTurns, sessionId, setFollowingTail, targetIsLatestMessage, view.hasMoreNewer, view.hasMoreOlder, view.loadingNewer, view.loadingOlder]);
+
+  const handleContentSizeChange = useCallback(() => {
+    const pending = pendingScrollSequence.current;
+    if (pending !== null) {
+      scrollToTurn(pending);
+      if (pendingScrollSequence.current !== null) return;
+      initialScrollDone.current = true;
+      return;
+    }
+    if (!initialScrollDone.current && messages.length > 0) {
+      listRef.current?.scrollToEnd({ animated: false });
+      setFollowingTail(true);
+      setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
+      initialScrollDone.current = true;
+      return;
+    }
+    requestFollowTail();
+  }, [messages.length, requestFollowTail, scrollToTurn, setFollowingTail, view.turns]);
+
+  const handleScrollToIndexFailed = useCallback(({ index, averageItemLength }: { index: number; averageItemLength: number }) => {
+    const target = turnScrollTargetRef.current ?? pendingScrollSequence.current;
+    if (target === null) return;
+    const retries = turnScrollRetriesRef.current.get(target) ?? 0;
+    if (retries >= 4) {
+      turnScrollRetriesRef.current.delete(target);
+      turnScrollTargetRef.current = null;
+      if (turnScrollRetryTimerRef.current !== null) {
+        clearTimeout(turnScrollRetryTimerRef.current);
+        turnScrollRetryTimerRef.current = null;
+      }
+      return;
+    }
+    turnScrollRetriesRef.current.set(target, retries + 1);
+    listRef.current?.scrollToOffset({ offset: Math.max(0, index * Math.max(averageItemLength, 1)), animated: false });
+    requestAnimationFrame(() => {
+      if (turnScrollTargetRef.current === target) scrollToTurn(target, retries + 1);
+    });
+  }, [scrollToTurn]);
+
+  const handleScrollBeginDrag = useCallback(() => {
+    userDraggingRef.current = true;
+    momentumScrollingRef.current = false;
+    if (followTailFrameRef.current !== null) {
+      cancelAnimationFrame(followTailFrameRef.current);
+      followTailFrameRef.current = null;
+    }
+    cancelTurnScroll();
+  }, [cancelTurnScroll]);
+
+  const handleScrollEndDrag = useCallback((event: ChatScrollEvent) => {
+    const velocityY = event.nativeEvent.velocity?.y ?? 0;
+    if (Math.abs(velocityY) >= 0.05) {
+      momentumScrollingRef.current = true;
+      return;
+    }
+    userDraggingRef.current = false;
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceToBottom = Math.max(0, contentSize.height - layoutMeasurement.height - contentOffset.y);
+    setFollowingTail(nextChatTailFollowing({ currentlyFollowing: followingTailRef.current, distanceToBottom, userInteracting: false, pendingTarget: pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null }));
+    requestFollowTail();
+  }, [requestFollowTail, setFollowingTail]);
+
+  const handleMomentumScrollBegin = useCallback(() => {
+    if (userDraggingRef.current) momentumScrollingRef.current = true;
+  }, []);
+
+  const handleMomentumScrollEnd = useCallback((event: ChatScrollEvent) => {
+    userDraggingRef.current = false;
+    momentumScrollingRef.current = false;
+    if (pendingScrollSequence.current !== null) return;
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceToBottom = Math.max(0, contentSize.height - layoutMeasurement.height - contentOffset.y);
+    setFollowingTail(nextChatTailFollowing({ currentlyFollowing: followingTailRef.current, distanceToBottom, userInteracting: false, pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()) }));
+    requestFollowTail();
+  }, [requestFollowTail, setFollowingTail, targetIsLatestMessage]);
+
   const submit = async () => {
     if ((!input.trim() && attachments.length === 0) || view.sending) return;
     const text = input;
     const files = attachments;
+    cancelTurnScroll();
+    setFollowingTail(true);
+    requestFollowTail(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInput("");
     setAttachments([]);
@@ -216,15 +416,16 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 
   if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen><DetailTopBar title="Chat" onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={[typography.body, { color: theme.colors.textMuted }]}>Opening Chat…</Text></View></Screen>;
   return <Screen keyboard>
-    <SpacePanels key={spaceId || sessionId} spaceId={spaceId} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId } })} onNewChat={() => spaceId ? router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId } }) : undefined} onOpenFile={(path) => spaceId ? router.push({ pathname: "/space/[spaceId]/file", params: { spaceId, path } }) : undefined} onOpenFilesPage={() => spaceId ? router.push({ pathname: "/space/[spaceId]/files", params: { spaceId } }) : undefined}>
+    <SpacePanels key={spaceId || sessionId} spaceId={spaceId} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => { if (spaceId) router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId } }); }} onOpenFile={(path) => { if (spaceId) router.push({ pathname: "/space/[spaceId]/file", params: { spaceId, path } }); }} onOpenFilesPage={() => { if (spaceId) router.push({ pathname: "/space/[spaceId]/files", params: { spaceId } }); }}>
       <View style={{ flex: 1 }}>
         <DetailTopBar title={session ? displaySessionTitle(session) : "Chat"} subtitle={spaceName} onBack={() => router.back()} actions={<><IconButton name="list-tree" label="Open conversation turns" size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><IconButton name="messages" label="Open Chats" size={38} onPress={() => setActivePanel("chat")} disabled={!spaceId} /><IconButton name="folder-open" label="Open Files" size={38} onPress={() => setActivePanel("files")} disabled={!spaceId} /><IconButton name="more" label="More actions" size={38} onPress={openRename} /></>} />
         <ConnectionBanner state={connectionState} />
         {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>Retry</Text></Pressable> : null}
-        <FlatList ref={listRef} data={messages} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const sequence = turnSequenceForMessage(item); const previousSequence = index > 0 ? turnSequenceForMessage(messages[index - 1]!) : null; const showTurnMarker = sequence !== null && sequence !== previousSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); return <View>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} /></View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={{ minIndexForVisible: 0 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={({ nativeEvent }) => { if (initialScrollDone.current && nativeEvent.contentOffset.y < 180 && view.hasMoreOlder && !view.loadingOlder) void loadOlderTurns(sessionId); const distanceToBottom = nativeEvent.contentSize.height - nativeEvent.layoutMeasurement.height - nativeEvent.contentOffset.y; if (distanceToBottom < 180 && view.hasMoreNewer && !view.loadingNewer) void loadNewerTurns(sessionId); }} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: messages.length === 0 ? 1 : undefined }} onContentSizeChange={() => { const pending = pendingScrollSequence.current; if (pending !== null) { scrollToTurn(pending); if (pendingScrollSequence.current !== null) return; initialScrollDone.current = true; return; } if (!initialScrollDone.current && messages.length > 0) { listRef.current?.scrollToEnd({ animated: false }); setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null); initialScrollDone.current = true; } }} onScrollToIndexFailed={({ index }) => { listRef.current?.scrollToOffset({ offset: Math.max(0, index * 120), animated: false }); requestAnimationFrame(() => { if (pendingScrollSequence.current !== null) scrollToTurn(pendingScrollSequence.current); }); }} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel="Load earlier turns" disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load earlier turns</Text>}</Pressable> : null} ListEmptyComponent={<View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 28 }}><View style={{ width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft }}><AppIcon name="sparkles" size={23} color={theme.colors.accent} /></View><Text style={[typography.heading, { color: theme.colors.text, marginTop: 14 }]}>A fresh Space for thinking</Text><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 6, maxWidth: 290 }]}>Send a prompt to start working with the Agent.</Text></View>} ListFooterComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel="Load newer turns" disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load newer turns</Text>}</Pressable> : null}{view.stream ? <StreamCard content={view.stream.contentBlocks} status={view.stream.status} /> : null}</View>} />
+        <FlatList ref={listRef} data={messages} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const sequence = turnSequenceForMessage(item); const previousSequence = index > 0 ? turnSequenceForMessage(messages[index - 1]!) : null; const showTurnMarker = sequence !== null && sequence !== previousSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); return <View>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} /></View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={{ minIndexForVisible: 0 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: messages.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel="Load earlier turns" disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load earlier turns</Text>}</Pressable> : null} ListEmptyComponent={<View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 28 }}><View style={{ width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft }}><AppIcon name="sparkles" size={23} color={theme.colors.accent} /></View><Text style={[typography.heading, { color: theme.colors.text, marginTop: 14 }]}>A fresh Space for thinking</Text><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 6, maxWidth: 290 }]}>Send a prompt to start working with the Agent.</Text></View>} ListFooterComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel="Load newer turns" disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load newer turns</Text>}</Pressable> : null}{view.stream ? <StreamCard content={view.stream.contentBlocks} status={view.stream.status} /> : null}</View>} />
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
-        <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => setAttachmentMenuOpen(true)} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? "Agent is working…" : "Message the Agent"} />
+        {!followingTail ? <View style={{ alignItems: "flex-end", paddingHorizontal: 16, paddingBottom: 4, backgroundColor: theme.colors.background }}><IconButton name="arrow-down" label="Jump to latest" size={38} tone="accent" onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} /></View> : null}
+        <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => setAttachmentMenuOpen(true)} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? "Agent is working…" : "Message the Agent"} />
         <AdaptiveSheet visible={attachmentMenuOpen} title="Add to Chat" subtitle="Choose what to include with your next message." onClose={() => setAttachmentMenuOpen(false)} scrollable={false} testID="chat-attachment-sheet"><SheetAction icon="images" title="Photo library" detail="Choose one or more images" onPress={() => void pickPhotos()} /><SheetAction icon="camera" title="Take a photo" detail="Use the device camera" onPress={() => void takePhoto()} /><SheetAction icon="paperclip" title="Choose a file" detail="Attach a document or archive" onPress={() => void pickAttachments()} /></AdaptiveSheet>
         <TurnNavigatorSheet visible={turnNavigatorOpen} turns={view.turnIndex} currentSequence={currentTurnSequence} loading={view.turnIndexLoading} loadingSequence={loadingSequence} onClose={() => setTurnNavigatorOpen(false)} onJump={(sequence) => handleTurnJump(sequence)} onRetry={() => void loadTurnIndex(sessionId, { force: true }).catch(() => undefined)} />
         <ModelSelectorSheet key={modelSelectorOpen ? "chat-model-open" : "chat-model-closed"} visible={modelSelectorOpen} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={modelOverride ? selectedModel : recordedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelOverride(true); setModelSelectorOpen(false); }} />
@@ -275,7 +476,7 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
   const modelTriggerLabel = selectedModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(selectedModel.thinkingLevel)}` : modelLabel;
   const selectedStatus = selectedModel ? modelAvailabilityLevel(modelStatus?.models[selectedModel.id]) : "unknown";
   return <Screen keyboard>
-    <SpacePanels key={space.id} spaceId={space.id} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId } })} onNewChat={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} onOpenFile={(path) => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: space.id, path } })} onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}>
+    <SpacePanels key={space.id} spaceId={space.id} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} onOpenFile={(path) => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: space.id, path } })} onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}>
       <View style={{ flex: 1 }}>
         <DetailTopBar title={spaceName} subtitle="Start a conversation" onBack={() => router.back()} actions={<><IconButton name="messages" label="Open Chats" size={38} onPress={() => setActivePanel("chat")} /><IconButton name="folder-open" label="Open Files" size={38} onPress={() => setActivePanel("files")} /></>} />
         <ConnectionBanner state={connectionState} />
@@ -283,7 +484,7 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingBottom: 18 }}><View style={{ width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accentBorder }}><AppIcon name="sparkles" size={26} color={theme.colors.accent} /></View><Text style={[typography.title, { color: theme.colors.text, marginTop: 15, textAlign: "center" }]}>What are you working on?</Text><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 7, textAlign: "center", maxWidth: 320 }]}>Your first message will become the conversation title automatically.</Text></View>
           {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
           {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
-          <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onAttach={() => setAttachmentMenuOpen(true)} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? "Starting Chat…" : "Message the Agent"} />
+          <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onAttach={() => setAttachmentMenuOpen(true)} sending={sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? "Starting Chat…" : "Message the Agent"} />
         </View>
         <ModelSelectorSheet key={modelSelectorOpen ? "draft-model-open" : "draft-model-closed"} visible={modelSelectorOpen} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={selectedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelSelectorOpen(false); }} />
         <AdaptiveSheet visible={attachmentMenuOpen} title="Add to Chat" subtitle="Choose what to include with your first message." onClose={() => setAttachmentMenuOpen(false)} scrollable={false} testID="new-chat-attachment-sheet"><SheetAction icon="images" title="Photo library" detail="Choose one or more images" onPress={() => void pickPhotos()} /><SheetAction icon="camera" title="Take a photo" detail="Use the device camera" onPress={() => void takePhoto()} /><SheetAction icon="paperclip" title="Choose a file" detail="Attach a document or archive" onPress={() => void pickAttachments()} /></AdaptiveSheet>

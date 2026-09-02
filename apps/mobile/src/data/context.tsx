@@ -181,6 +181,8 @@ type Action =
   | { type: "session-page-error"; sessionId: string; message: string }
   | { type: "session-page-end"; sessionId: string; direction: "older" | "newer" }
   | { type: "session-window-success"; sessionId: string; session?: SessionRecord | null; turns: SessionTurnRecord[]; hasMoreOlder: boolean; hasMoreNewer: boolean; oldestCursor?: number | null; newestCursor?: number | null }
+  | { type: "turn-upsert"; sessionId: string; session?: SessionRecord | null; turn: SessionTurnRecord }
+  | { type: "turn-patch"; sessionId: string; turn: Partial<SessionTurnRecord> }
   | { type: "turn-index-start"; sessionId: string }
   | { type: "turn-index"; sessionId: string; turnIndex: SessionTurnIndexItem[] }
   | { type: "turn-index-end"; sessionId: string }
@@ -208,6 +210,33 @@ function mergeMessages(messages: MessageRecord[], incoming: MessageRecord) {
   const previous = byId.get(incoming.id);
   byId.set(incoming.id, previous ? { ...previous, ...incoming } : incoming);
   return [...byId.values()].sort((a, b) => a.sequence - b.sequence);
+}
+
+function turnClientMessageId(turn: { meta?: Record<string, unknown> | null }) {
+  const value = turn.meta?.clientMessageId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function mergeTurnRecords(existing: SessionTurnRecord[], incoming: SessionTurnRecord[]) {
+  const byId = new Map(existing.map((turn) => [turn.id, turn]));
+  for (const turn of incoming) {
+    const clientMessageId = turnClientMessageId(turn);
+    const previous = byId.get(turn.id) ?? (clientMessageId ? [...byId.values()].find((item) => turnClientMessageId(item) === clientMessageId) : undefined);
+    if (previous && previous.id !== turn.id) byId.delete(previous.id);
+    byId.set(turn.id, previous ? { ...previous, ...turn, meta: turn.meta ? { ...(previous.meta ?? {}), ...turn.meta } : previous.meta } : turn);
+  }
+  return [...byId.values()].sort((a, b) => a.sequence - b.sequence);
+}
+
+function patchTurnRecords(existing: SessionTurnRecord[], patch: Partial<SessionTurnRecord>) {
+  const clientMessageId = turnClientMessageId(patch);
+  const index = existing.findIndex((turn) => turn.id === patch.id || (clientMessageId !== null && turnClientMessageId(turn) === clientMessageId));
+  if (index < 0) return existing;
+  const previous = existing[index];
+  if (!previous) return existing;
+  const next = [...existing];
+  next[index] = { ...previous, ...patch, meta: patch.meta ? { ...(previous.meta ?? {}), ...patch.meta } : previous.meta };
+  return next.sort((a, b) => a.sequence - b.sequence);
 }
 
 function updateView(state: AppState, sessionId: string, update: Partial<SessionView>) {
@@ -404,6 +433,40 @@ function reducer(state: AppState, action: Action): AppState {
         newestCursor: turns.at(-1)?.sequence ?? action.newestCursor ?? null,
       });
     }
+    case "turn-upsert": {
+      const current = state.sessionViews[action.sessionId] ?? emptyView();
+      const turns = mergeTurnRecords(current.turns, [action.turn]);
+      const clientMessageId = turnClientMessageId(action.turn);
+      const liveMessages = current.messages.filter((message) => isLiveMessage(message) && (!clientMessageId || message.meta?.clientMessageId !== clientMessageId));
+      const session = action.session
+        ? current.session
+          ? preferNewerSession(current.session, action.session)
+          : action.session
+        : current.session;
+      const sessions = action.session
+        ? state.sessions.map((item) => item.id === action.session?.id ? mergeSessionItem(item, { ...action.session, space: item.space }) : item)
+        : state.sessions;
+      return updateView({ ...state, sessions: sortByRecent(sessions) }, action.sessionId, {
+        ...(session ? { session } : {}),
+        turns,
+        historyLoaded: true,
+        messages: mergeDisplayMessages(messagesFromTurns(turns), liveMessages),
+        oldestCursor: turns[0]?.sequence ?? current.oldestCursor,
+        newestCursor: turns.at(-1)?.sequence ?? current.newestCursor,
+      });
+    }
+    case "turn-patch": {
+      const current = state.sessionViews[action.sessionId] ?? emptyView();
+      const turns = patchTurnRecords(current.turns, action.turn);
+      if (turns === current.turns) return state;
+      return updateView(state, action.sessionId, {
+        turns,
+        historyLoaded: true,
+        messages: mergeDisplayMessages(messagesFromTurns(turns), current.messages.filter(isLiveMessage)),
+        oldestCursor: turns[0]?.sequence ?? current.oldestCursor,
+        newestCursor: turns.at(-1)?.sequence ?? current.newestCursor,
+      });
+    }
     case "turn-index-start":
       return updateView(state, action.sessionId, { turnIndexLoading: true });
     case "turn-index":
@@ -493,6 +556,7 @@ export type AppContextValue = {
   loadModels: (options?: { force?: boolean }) => Promise<ChatModelCatalogItem[]>;
   loadModelStatus: (options?: { force?: boolean }) => Promise<ModelStatusResponse | null>;
   createSpace: (name: string, description?: string) => Promise<SpaceRecord>;
+  upsertSpace: (space: SpaceRecord) => void;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   clearCache: () => Promise<void>;
   activityItems: ActivityItem[];
@@ -533,6 +597,7 @@ export function AppProvider({
   const modelStatusRequestRef = useRef<Promise<ModelStatusResponse | null> | null>(null);
   const modelStatusLoadedAtRef = useRef(0);
   const paginationRequestsRef = useRef(new Map<string, Promise<void>>());
+  const optimisticMessageSequenceRef = useRef(new Map<string, number>());
   const sessionsMoreRequestRef = useRef<Promise<void> | null>(null);
   const userKey = userUuid;
 
@@ -993,11 +1058,14 @@ export function AppProvider({
               dispatch({ type: "message-add", sessionId, message: event.commit.message });
               if (event.commit.isFinal) dispatch({ type: "stream-clear", sessionId });
             },
-            finalized: () => {
+            finalized: (event) => {
+              dispatch({ type: "turn-upsert", sessionId, turn: event.turn });
               dispatch({ type: "stream-clear", sessionId });
               void refreshSession(sessionId);
             },
-            turnUpdated: () => undefined,
+            turnUpdated: (event) => {
+              dispatch({ type: "turn-patch", sessionId, turn: event.turn });
+            },
             lifecycle: () => undefined,
             error: (event) => {
               dispatch({ type: "session-error", sessionId, message: event.message });
@@ -1060,6 +1128,7 @@ export function AppProvider({
     subscriptions.current.get(sessionId)?.();
     subscriptions.current.delete(sessionId);
     openTokens.current.set(sessionId, (openTokens.current.get(sessionId) ?? 0) + 1);
+    optimisticMessageSequenceRef.current.delete(sessionId);
   }, []);
 
   const abortSession = useCallback(
@@ -1095,7 +1164,13 @@ export function AppProvider({
 
       const clientMessageId = newId();
       const optimisticText = text || attachments.map((item) => item.name).join(", ");
-      const currentMax = Math.max(0, ...(view?.messages ?? []).map((message) => message.sequence));
+      const currentMax = Math.max(
+        0,
+        ...(view?.messages ?? []).map((message) => message.sequence),
+        (view?.turns.at(-1)?.sequence ?? 0) * 2,
+        optimisticMessageSequenceRef.current.get(sessionId) ?? 0,
+      );
+      optimisticMessageSequenceRef.current.set(sessionId, currentMax + 1);
       const optimistic: MessageRecord = {
         id: `local-${clientMessageId}`,
         sessionId,
@@ -1121,7 +1196,7 @@ export function AppProvider({
 
       try {
         const content = await buildPromptContent(client, session.spaceId, sessionId, text, attachments);
-        await client.space(session.spaceId).prompt({
+        const response = await client.space(session.spaceId).prompt({
           mode: "agent",
           sessionId,
           content,
@@ -1132,6 +1207,8 @@ export function AppProvider({
           schedule: { mode: "immediate" },
           ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
         });
+        if (response.mode !== "immediate") throw new Error("Message was not accepted immediately");
+        dispatch({ type: "turn-upsert", sessionId, session: response.session, turn: response.turn });
         dispatch({ type: "send-end", sessionId });
       } catch (error) {
         dispatch({ type: "send-failed", sessionId, clientMessageId, message: error instanceof Error ? error.message : "Message failed to send" });
@@ -1217,6 +1294,17 @@ export function AppProvider({
     [client, dispatch, userKey],
   );
 
+  const upsertSpace = useCallback((space: SpaceRecord) => {
+    dispatch({ type: "space-upsert", space });
+    if (Platform.OS !== "web") {
+      const home = stateRef.current;
+      void saveHome(userKey, {
+        spaces: [space, ...home.spaces.filter((item) => item.id !== space.id)],
+        sessions: home.sessions,
+      }).catch(() => undefined);
+    }
+  }, [dispatch, userKey]);
+
   const renameSession = useCallback(
     async (sessionId: string, title: string) => {
       if (!client) throw new Error("Cohub is still connecting");
@@ -1291,6 +1379,7 @@ export function AppProvider({
       loadModels,
       loadModelStatus,
       createSpace,
+      upsertSpace,
       renameSession,
       clearCache,
       activityItems,
@@ -1325,6 +1414,7 @@ export function AppProvider({
       sendMessage,
       sendNewMessage,
       state,
+      upsertSpace,
     ],
   );
 

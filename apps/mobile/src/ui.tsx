@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { icons, type IconName } from "@/src/icons";
+import { getComposerActionState } from "@/src/data/composer-state";
 import { useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem } from "@/src/data/types";
 import { formatRelativeTime, initials } from "@/src/utils";
@@ -189,20 +190,17 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
   return <View style={{ paddingHorizontal: 16, gap: 4 }}>{Array.from({ length: count }).map((_, index) => <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}><View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ flex: 1, gap: 9 }}><View style={{ width: `${58 + (index % 3) * 10}%`, height: 12, borderRadius: 6, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ width: `${38 + (index % 2) * 15}%`, height: 10, borderRadius: 5, backgroundColor: theme.colors.surfaceRaised }} /></View></View>)}</View>;
 }
 
-export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel = "Automatic", modelStatus = "unknown", disabled = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
+export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel = "Automatic", modelStatus = "unknown", disabled = false, sending = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
   const theme = useAppTheme();
-  const canSend = (value.trim().length > 0 || hasAttachment) && !disabled && !running;
-  const canStop = running && !disabled && Boolean(onStop);
+  const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
   const modelStatusLabel = modelStatus === "available" ? "operational" : modelStatus === "degraded" ? "degraded" : modelStatus === "outage" ? "outage" : "status unavailable";
   return (
     <View style={[styles.composerWrap, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
-      {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}, ${modelStatusLabel}`} disabled={disabled || running} onPress={onModelPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.modelTrigger, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: disabled || running ? 0.5 : 1 }]}><AppIcon name="sparkles" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
       <View style={[styles.composer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-        <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={disabled || running} />
         <TextInput
           value={value}
           onChangeText={onChangeText}
-          editable={!disabled && !running}
+          editable={!blocked}
           multiline
           maxLength={12000}
           placeholder={placeholder}
@@ -216,10 +214,15 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           }}
           blurOnSubmit={false}
         />
-        {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={disabled || running || voiceStarting} onPress={onVoice} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent", transform: [{ scale: pressed ? 0.92 : 1 }] }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
-        <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={canStop ? onStop : onSend} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop || canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised, transform: [{ scale: pressed ? 0.92 : 1 }] }]}>
-          <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 16 : 18} color={canStop || canSend ? theme.colors.accentText : theme.colors.textFaint} />
-        </Pressable>
+        <View style={styles.composerToolbar}>
+          <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} />
+          <View style={styles.composerToolbarSpacer} />
+          {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}, ${modelStatusLabel}`} disabled={blocked} onPress={onModelPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
+          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={blocked || voiceStarting} onPress={onVoice} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent", transform: [{ scale: pressed ? 0.92 : 1 }] }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? theme.colors.text : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised, transform: [{ scale: pressed ? 0.92 : 1 }] }]}>
+            <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} />
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -273,10 +276,12 @@ const styles = StyleSheet.create({
   primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   searchField: { minHeight: 44, borderRadius: 12, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 9 },
   composerWrap: { paddingHorizontal: 12, paddingTop: 9, paddingBottom: 10 },
-  modelTrigger: { minHeight: 28, maxWidth: "72%", alignSelf: "flex-start", paddingHorizontal: 7, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 5, overflow: "hidden" },
-  composer: { minHeight: 52, borderWidth: 1, borderRadius: 18, paddingHorizontal: 5, paddingVertical: 5, flexDirection: "row", alignItems: "flex-end", gap: 4 },
-  composerText: { flex: 1, maxHeight: 130, paddingHorizontal: 7, paddingTop: 8, paddingBottom: 8 },
-  sendButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", marginBottom: 2 },
+  composer: { minHeight: 84, borderWidth: 1, borderRadius: 18, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 5, gap: 2 },
+  composerText: { width: "100%", minHeight: 34, maxHeight: 120, paddingHorizontal: 5, paddingTop: 0, paddingBottom: 4, textAlignVertical: "top" },
+  composerToolbar: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: 2 },
+  composerToolbarSpacer: { flex: 1, minWidth: 0 },
+  composerModel: { minHeight: 30, maxWidth: "58%", paddingHorizontal: 5, borderRadius: 9, flexDirection: "row", alignItems: "center", gap: 5, overflow: "hidden" },
+  sendButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   voiceButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center", marginBottom: 2 },
   attachmentChip: { flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 7, maxWidth: "100%" },
 });

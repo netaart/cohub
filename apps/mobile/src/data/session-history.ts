@@ -145,6 +145,12 @@ export function turnSequenceForMessage(message: Pick<MessageRecord, "meta">) {
 	return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
 
+export function messageIndexForTurn(messages: Pick<MessageRecord, "role" | "meta">[], sequence: number) {
+	const userIndex = messages.findIndex((message) => message.role === "user" && turnSequenceForMessage(message) === sequence);
+	if (userIndex >= 0) return userIndex;
+	return messages.findIndex((message) => turnSequenceForMessage(message) === sequence);
+}
+
 export function turnIndexPreview(turn: SessionTurnIndexItem) {
 	const value = turn.userPreview || turn.assistantPreview || "Empty turn";
 	return value.replace(/\s+/g, " ").trim();
