@@ -1,7 +1,9 @@
 /* eslint-disable react-hooks/refs -- PanResponder needs stable mutable gesture state. */
 import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/cohub";
+import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Animated, FlatList, Modal, PanResponder, Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Animated, BackHandler, FlatList, Modal, PanResponder, Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
+import DrawerLayout, { DrawerLockMode, DrawerPosition, DrawerState, DrawerType, type DrawerLayoutMethods } from "react-native-gesture-handler/ReanimatedDrawerLayout";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionRow } from "@/src/components/SessionRow";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
@@ -25,7 +27,6 @@ type SpacePanelsProps = {
   children: ReactNode;
 };
 
-const SYSTEM_BACK_EDGE_PX = 24;
 const PANEL_WIDTH_RATIO = 0.86;
 const MAX_PANEL_WIDTH = 360;
 const OPEN_THRESHOLD = 0.26;
@@ -44,7 +45,120 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
+// Native uses RNGH's drawer handler so nested scroll lists cannot steal horizontal swipes.
+export function SpacePanels(props: SpacePanelsProps) {
+  return Platform.OS === "web" ? <WebSpacePanels {...props} /> : <NativeSpacePanels {...props} />;
+}
+
+function NativeSpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
+  const theme = useAppTheme();
+  const isFocused = useIsFocused();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const panelWidth = Math.min(MAX_PANEL_WIDTH, Math.max(280, width * PANEL_WIDTH_RATIO));
+  const chatDrawerRef = useRef<DrawerLayoutMethods>(null);
+  const filesDrawerRef = useRef<DrawerLayoutMethods>(null);
+  const requestedPanelRef = useRef<SpacePanel | null>(null);
+  const [renderedPanel, setRenderedPanel] = useState<SpacePanel | null>(activePanel);
+  const edgeWidth = Math.max(1, width);
+
+  const closePanel = useCallback((panel: SpacePanel) => {
+    requestedPanelRef.current = null;
+    onActivePanelChange(null);
+    if (panel === "chat") chatDrawerRef.current?.closeDrawer();
+    else filesDrawerRef.current?.closeDrawer();
+  }, [onActivePanelChange]);
+
+  const handleDrawerStateChanged = useCallback((panel: SpacePanel, state: DrawerState, willShow: boolean) => {
+    if (willShow) {
+      setRenderedPanel(panel);
+    } else if (state === DrawerState.IDLE) {
+      setRenderedPanel((current) => current === panel ? null : current);
+    }
+  }, []);
+
+  const handleDrawerOpen = useCallback((panel: SpacePanel) => {
+    requestedPanelRef.current = panel;
+    onActivePanelChange(panel);
+    if (panel === "chat") filesDrawerRef.current?.closeDrawer();
+    else chatDrawerRef.current?.closeDrawer();
+  }, [onActivePanelChange]);
+
+  const handleDrawerClose = useCallback((panel: SpacePanel) => {
+    if (requestedPanelRef.current !== panel) return;
+    requestedPanelRef.current = null;
+    setRenderedPanel((current) => current === panel ? null : current);
+    onActivePanelChange(null);
+  }, [onActivePanelChange]);
+
+  useEffect(() => {
+    if (!isFocused) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      const panel = requestedPanelRef.current ?? renderedPanel;
+      if (!panel) return false;
+      closePanel(panel);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [closePanel, isFocused, renderedPanel]);
+
+  useEffect(() => {
+    if (requestedPanelRef.current === activePanel) return;
+    requestedPanelRef.current = activePanel;
+    if (activePanel === "chat") {
+      filesDrawerRef.current?.closeDrawer();
+      chatDrawerRef.current?.openDrawer();
+    } else if (activePanel === "files") {
+      chatDrawerRef.current?.closeDrawer();
+      filesDrawerRef.current?.openDrawer();
+    } else {
+      chatDrawerRef.current?.closeDrawer();
+      filesDrawerRef.current?.closeDrawer();
+    }
+  }, [activePanel]);
+
+  const drawerSurface = (panel: SpacePanel, content: ReactNode) => {
+    const accessible = renderedPanel === panel;
+    return <View testID={`space-panel-${panel}`} accessibilityElementsHidden={!accessible} importantForAccessibility={accessible ? "yes" : "no-hide-descendants"} style={[styles.nativeDrawerSurface, { backgroundColor: theme.colors.background, borderColor: theme.colors.border, paddingBottom: insets.bottom }]}>{content}</View>;
+  };
+  return <DrawerLayout
+    ref={chatDrawerRef}
+    drawerPosition={DrawerPosition.LEFT}
+    drawerWidth={panelWidth}
+    edgeWidth={edgeWidth}
+    minSwipeDistance={8}
+    drawerType={DrawerType.FRONT}
+    drawerLockMode={activePanel === "files" ? DrawerLockMode.LOCKED_CLOSED : DrawerLockMode.UNLOCKED}
+    drawerBackgroundColor={theme.colors.background}
+    overlayColor="#000000"
+    contentContainerStyle={{ flex: 1 }}
+    onDrawerStateChanged={(state, willShow) => handleDrawerStateChanged("chat", state, willShow)}
+    onDrawerOpen={() => handleDrawerOpen("chat")}
+    onDrawerClose={() => handleDrawerClose("chat")}
+    renderNavigationView={() => drawerSurface("chat", <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={() => closePanel("chat")} onNewChat={() => { closePanel("chat"); onNewChat(); }} onOpenSession={(sessionId) => { closePanel("chat"); onOpenSession(sessionId); }} />)}
+  >
+    <DrawerLayout
+      ref={filesDrawerRef}
+      drawerPosition={DrawerPosition.RIGHT}
+      drawerWidth={panelWidth}
+      edgeWidth={edgeWidth}
+      minSwipeDistance={8}
+      drawerType={DrawerType.FRONT}
+      drawerLockMode={activePanel === "chat" ? DrawerLockMode.LOCKED_CLOSED : DrawerLockMode.UNLOCKED}
+      drawerBackgroundColor={theme.colors.background}
+      overlayColor="#000000"
+      contentContainerStyle={{ flex: 1 }}
+      onDrawerStateChanged={(state, willShow) => handleDrawerStateChanged("files", state, willShow)}
+      onDrawerOpen={() => handleDrawerOpen("files")}
+      onDrawerClose={() => handleDrawerClose("files")}
+      renderNavigationView={() => drawerSurface("files", <FilesPanel enabled={renderedPanel === "files" || activePanel === "files"} spaceId={spaceId} spaceName={spaceName} client={client} onClose={() => closePanel("files")} onOpenFile={(path) => { closePanel("files"); onOpenFile(path); }} onOpenFilesPage={() => { closePanel("files"); onOpenFilesPage(); }} />)}
+    >
+      <View style={{ flex: 1 }}>{children}</View>
+    </DrawerLayout>
+  </DrawerLayout>;
+}
+
+function WebSpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -99,12 +213,9 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const visibleSide = activePanel ?? closingSide ?? gestureSide;
   const drawerMounted = activePanel !== null || closingSide !== null;
 
-  // Keep the native Modal out of the active opening gesture. A lightweight in-tree
-  // preview follows the finger, then the accessible interactive Modal takes over.
   const screenResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => {
       if (controllerRef.current.activePanel || controllerRef.current.visibleSide) return false;
-      if (Platform.OS !== "web" && (gesture.x0 <= SYSTEM_BACK_EDGE_PX || gesture.x0 >= width - SYSTEM_BACK_EDGE_PX)) return false;
       return Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15;
     },
     onPanResponderGrant: () => {
@@ -152,7 +263,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
       });
     },
     onPanResponderTerminationRequest: () => false,
-  }), [animateTo, onActivePanelChange, panelWidth, progress, width]);
+  }), [animateTo, onActivePanelChange, panelWidth, progress]);
 
   const panelResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: (_, gesture) => {
@@ -183,7 +294,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const backdropOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [0, 0.52] });
   const panelPosition = { left: visibleSide === "chat" ? 0 : undefined, right: visibleSide === "files" ? 0 : undefined };
 
-  return <View style={{ flex: 1 }} {...screenResponder.panHandlers}>
+  return <View collapsable={false} style={{ flex: 1 }} {...screenResponder.panHandlers}>
     {children}
     {!drawerMounted && gestureSide ? <View pointerEvents="none" accessibilityElementsHidden style={[styles.gesturePreviewRoot, { top: -insets.top, bottom: -insets.bottom }]}>
       <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
@@ -197,8 +308,8 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     <Modal visible={drawerMounted} transparent animationType="none" statusBarTranslucent navigationBarTranslucent hardwareAccelerated onRequestClose={closeDrawer}>
       <View style={styles.modalRoot}>
         <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}><Pressable accessibilityRole="button" accessibilityLabel="Close panel" style={styles.fill} onPress={closeDrawer} /></Animated.View>
-        <Animated.View {...panelResponder.panHandlers} accessibilityViewIsModal role="dialog" style={[styles.panel, { width: panelWidth, height: Math.max(0, height), paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: theme.colors.background, borderColor: theme.colors.border, ...panelPosition, transform: [{ translateX }] }]}>
-          {visibleSide === "chat" ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={closeDrawer} onNewChat={() => { closeDrawer(); onNewChat(); }} onOpenSession={(sessionId) => { closeDrawer(); onOpenSession(sessionId); }} /> : <FilesPanel spaceId={spaceId} spaceName={spaceName} client={client} onClose={closeDrawer} onOpenFile={(path) => { closeDrawer(); onOpenFile(path); }} onOpenFilesPage={() => { closeDrawer(); onOpenFilesPage(); }} />}
+        <Animated.View collapsable={false} testID={visibleSide ? `space-panel-${visibleSide}` : undefined} {...panelResponder.panHandlers} accessibilityViewIsModal role="dialog" style={[styles.panel, { width: panelWidth, height: Math.max(0, height), paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: theme.colors.background, borderColor: theme.colors.border, ...panelPosition, transform: [{ translateX }] }]}>
+            {visibleSide === "chat" ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={closeDrawer} onNewChat={() => { closeDrawer(); onNewChat(); }} onOpenSession={(sessionId) => { closeDrawer(); onOpenSession(sessionId); }} /> : <FilesPanel spaceId={spaceId} spaceName={spaceName} client={client} onClose={closeDrawer} onOpenFile={(path) => { closeDrawer(); onOpenFile(path); }} onOpenFilesPage={() => { closeDrawer(); onOpenFilesPage(); }} />}
         </Animated.View>
       </View>
     </Modal>
@@ -299,7 +410,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
   );
 }
 
-function FilesPanel({ spaceId, spaceName, client, onClose, onOpenFile, onOpenFilesPage }: { spaceId: string; spaceName: string; client: CohubClient | null; onClose: () => void; onOpenFile: (path: string) => void; onOpenFilesPage: () => void }) {
+function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpenFile, onOpenFilesPage }: { enabled?: boolean; spaceId: string; spaceName: string; client: CohubClient | null; onClose: () => void; onOpenFile: (path: string) => void; onOpenFilesPage: () => void }) {
   const theme = useAppTheme();
   const [path, setPath] = useState("");
   const [entries, setEntries] = useState<SpaceFsEntry[]>([]);
@@ -308,6 +419,7 @@ function FilesPanel({ spaceId, spaceName, client, onClose, onOpenFile, onOpenFil
   const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
+    if (!enabled) return;
     const currentRequest = ++requestIdRef.current;
     if (!client) {
       setEntries([]);
@@ -325,9 +437,10 @@ function FilesPanel({ spaceId, spaceName, client, onClose, onOpenFile, onOpenFil
     } finally {
       if (currentRequest === requestIdRef.current) setLoading(false);
     }
-  }, [client, path, spaceId]);
+  }, [client, enabled, path, spaceId]);
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     void Promise.resolve().then(() => {
       if (active) void load();
@@ -336,7 +449,7 @@ function FilesPanel({ spaceId, spaceName, client, onClose, onOpenFile, onOpenFil
       active = false;
       requestIdRef.current += 1;
     };
-  }, [load]);
+  }, [enabled, load]);
 
   const openEntry = (entry: SpaceFsEntry) => {
     if (entry.type === "dir") {
@@ -368,6 +481,7 @@ function FilesPanel({ spaceId, spaceName, client, onClose, onOpenFile, onOpenFil
 }
 
 const styles = {
+  nativeDrawerSurface: { flex: 1, minHeight: 0, borderLeftWidth: 1, borderRightWidth: 1 } as const,
   modalRoot: { flex: 1 } as const,
   gesturePreviewRoot: { position: "absolute" as const, left: 0, right: 0, zIndex: 20, elevation: 20 },
   fill: { flex: 1 } as const,

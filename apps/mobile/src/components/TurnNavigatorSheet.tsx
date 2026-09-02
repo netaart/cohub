@@ -85,6 +85,7 @@ export function TurnNavigatorSheet({
 			}
 			onClose={onClose}
 			scrollable={false}
+			contentStyle={{ flex: 1, minHeight: 0 }}
 			testID="chat-turn-navigator-sheet"
 		>
 			<SearchField
@@ -147,7 +148,7 @@ export function TurnNavigatorSheet({
 				<FlatList
 					data={filteredTurns}
 					keyExtractor={(turn) => `${turn.sequence}:${turn.id}`}
-					style={{ marginTop: 10, maxHeight: "62%" }}
+					style={{ flex: 1, minHeight: 0, marginTop: 10 }}
 					contentContainerStyle={{ paddingBottom: 12 }}
 					keyboardShouldPersistTaps="handled"
 					renderItem={({ item: turn }) => {

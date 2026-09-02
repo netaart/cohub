@@ -4,6 +4,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { AuthScreen } from "@/src/auth/AuthScreen";
 import { AppUpdateBanner } from "@/src/components/AppUpdateBanner";
@@ -117,21 +118,23 @@ function NativeRoot() {
 
 function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
   return <ThemeProvider value={theme.mode === "dark" ? DarkTheme : DefaultTheme}>
-    <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
-    <NativeInteractionBridge />
-    <View style={{ flex: 1 }}>
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="chat/[sessionId]" options={{ animation: "slide_from_right" }} />
-        <Stack.Screen name="space/[spaceId]" options={{ animation: "slide_from_right" }} />
-        <Stack.Screen name="space/[spaceId]/files" options={{ animation: "slide_from_right" }} />
-        <Stack.Screen name="space/[spaceId]/file" options={{ animation: "slide_from_right" }} />
-        <Stack.Screen name="work/[appId]" options={{ animation: "slide_from_right" }} />
-        <Stack.Screen name="new-chat" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
-        <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
-      </Stack>
-      <AppUpdateBanner />
-    </View>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
+      <NativeInteractionBridge />
+      <View style={{ flex: 1 }}>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="chat/[sessionId]" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="space/[spaceId]" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="space/[spaceId]/files" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="space/[spaceId]/file" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="work/[appId]" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="new-chat" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
+          <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
+        </Stack>
+        <AppUpdateBanner />
+      </View>
+    </GestureHandlerRootView>
   </ThemeProvider>;
 }
 
