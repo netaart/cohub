@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.1](https://github.com/markbang/cohub-mobile/compare/v1.4.0...v1.4.1) (2026-09-02)
+
+
+### Fixes
+
+* **mobile:** complete chat streaming and search parity ([#38](https://github.com/markbang/cohub-mobile/issues/38)) ([fb9d7df](https://github.com/markbang/cohub-mobile/commit/fb9d7df65467d9519239ef4733c2d4f288f46308))
+* **mobile:** restore native panel swipe gestures ([#36](https://github.com/markbang/cohub-mobile/issues/36)) ([5dfd048](https://github.com/markbang/cohub-mobile/commit/5dfd048b18ba19cf5f6298d4febedaf59611092a))
+
 ## [1.4.0](https://github.com/markbang/cohub-mobile/compare/v1.3.1...v1.4.0) (2026-09-01)
 
 
