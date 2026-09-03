@@ -5,9 +5,10 @@ import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { SpaceSearchRow } from "@/src/components/SearchResultRow";
 import { SpaceRow } from "@/src/components/SpaceRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSpaceSearchHit } from "@/src/data/session-search";
+import { filterSpaces, type SpaceFilter } from "@/src/data/space-filters";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { BrandMark, DataError, EmptyState, IconButton, LoadingRows, PrimaryButton, SearchField, SyncStatus, TopBar, Screen } from "@/src/ui";
+import { AppIcon, BrandMark, DataError, EmptyState, IconButton, LoadingRows, PrimaryButton, SearchField, SyncStatus, TopBar, Screen } from "@/src/ui";
 import { displaySpaceName } from "@/src/utils";
 
 type SpaceListItem =
@@ -18,20 +19,24 @@ const SPACE_SEARCH_TYPES = ["space"] as const;
 export default function SpacesScreen() {
   const router = useRouter();
   const theme = useAppTheme();
-  const { state, client, refreshHome, createSpace } = useApp();
+  const { state, client, refreshHome, createSpace, toggleSpacePin } = useApp();
   const dataError = state.error ?? state.spacesError;
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<SpaceFilter>("recent");
+  const [pinningSpaceId, setPinningSpaceId] = useState<string | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const remoteSearch = useRemoteSearch(client, query, { types: SPACE_SEARCH_TYPES });
+  const remoteSearch = useRemoteSearch(client, query, { enabled: filter !== "pinned", types: SPACE_SEARCH_TYPES });
   const trimmedQuery = normalizeSearchQuery(query);
   const spaces = useMemo(() => {
     const needle = trimmedQuery.toLowerCase();
-    return state.spaces.filter((space) => !needle || [displaySpaceName(space), space.description].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false));
-  }, [state.spaces, trimmedQuery]);
+    const candidates = filter === "recent" && trimmedQuery ? state.spaces : filterSpaces(state.spaces, filter);
+    return candidates.filter((space) => !needle || [displaySpaceName(space), space.description].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false));
+  }, [filter, state.spaces, trimmedQuery]);
   const listItems = useMemo<SpaceListItem[]>(() => {
     if (!trimmedQuery) return spaces.map((space) => ({ kind: "local", space }));
     const remoteQueryMatches = remoteSearch.query === trimmedQuery;
@@ -42,6 +47,19 @@ export default function SpacesScreen() {
       ...spaces.filter((space) => !remoteIds.has(space.id)).map((space) => ({ kind: "local" as const, space })),
     ];
   }, [remoteSearch.query, remoteSearch.spaces, spaces, trimmedQuery]);
+
+  const togglePin = async (spaceId: string) => {
+    if (pinningSpaceId) return;
+    setPinningSpaceId(spaceId);
+    setPinError(null);
+    try {
+      await toggleSpacePin(spaceId);
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : "Unable to update Space pin");
+    } finally {
+      setPinningSpaceId(null);
+    }
+  };
 
   const closeCreate = () => {
     if (!creating) setCreateOpen(false);
@@ -65,7 +83,7 @@ export default function SpacesScreen() {
 
   const searchEmpty = remoteSearch.query === trimmedQuery && remoteSearch.loading && trimmedQuery.length >= 2 && listItems.length === 0
     ? <View style={{ flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>Searching Cohub</Text></View>
-    : <EmptyState icon={trimmedQuery ? "search" : "layers"} title={trimmedQuery ? "No matching Spaces" : "No Spaces yet"} description={trimmedQuery ? "Try another name or description." : "Create a Space first, then start a Chat with an Agent."} action={trimmedQuery ? "Clear search" : "Create Space"} onAction={() => trimmedQuery ? setQuery("") : setCreateOpen(true)} />;
+    : <EmptyState icon={filter === "pinned" ? "pin" : trimmedQuery ? "search" : "layers"} title={filter === "pinned" ? "No pinned Spaces" : trimmedQuery ? "No matching Spaces" : "No Spaces yet"} description={filter === "pinned" ? "Pin a Space to keep it in this view." : trimmedQuery ? "Try another name or description." : "Create a Space first, then start a Chat with an Agent."} action={filter === "pinned" || trimmedQuery ? "Clear filters" : "Create Space"} onAction={() => filter === "pinned" || trimmedQuery ? (setFilter("recent"), setQuery("")) : setCreateOpen(true)} />;
 
   return <Screen>
     <TopBar title="Spaces" subtitle={dataError ? "Spaces unavailable" : `${state.spaces.length} workspaces`} left={<BrandMark size={36} />} right={<IconButton name="plus" label="New Space" size={38} tone="accent" onPress={() => { setCreateError(null); setCreateOpen(true); }} />} />
@@ -73,12 +91,12 @@ export default function SpacesScreen() {
     <FlatList
       data={listItems}
       keyExtractor={(item) => item.kind === "remote" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
-      renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} chatCount={state.sessions.filter((session) => session.spaceId === item.space.id).length} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}
+      renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} chatCount={state.sessions.filter((session) => session.spaceId === item.space.id).length} pinning={pinningSpaceId === item.space.id} onTogglePin={client ? () => void togglePin(item.space.id) : undefined} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}
       refreshing={state.refreshing}
       onRefresh={() => void refreshHome()}
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ paddingBottom: 30, flexGrow: listItems.length === 0 ? 1 : undefined }}
-      ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 5 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Find a Space" /></View>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}</View>{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Space search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}<Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 16 }]}>Your workspaces</Text></View>}
+      ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 5 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Find a Space" /></View>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}</View><View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}><SpaceFilterChip label="Recent" selected={filter === "recent"} onPress={() => setFilter("recent")} /><SpaceFilterChip label="All" selected={filter === "all"} onPress={() => setFilter("all")} /><SpaceFilterChip label="Pinned" icon="pin" selected={filter === "pinned"} onPress={() => setFilter("pinned")} /></View>{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Space search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}{pinError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{pinError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Dismiss Space pin error" onPress={() => setPinError(null)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Dismiss</Text></Pressable></View> : null}<Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 16 }]}>Your workspaces</Text></View>}
       ListEmptyComponent={state.booting ? <LoadingRows count={4} /> : dataError ? <EmptyState icon="cloud-off" title="Spaces are unavailable" description="Retry above after checking your connection and sign-in session." /> : searchEmpty}
     />
     <AdaptiveSheet
@@ -97,4 +115,9 @@ export default function SpacesScreen() {
       {createError ? <Text style={[typography.caption, { color: theme.colors.danger, marginTop: 10 }]}>{createError}</Text> : null}
     </AdaptiveSheet>
   </Screen>;
+}
+
+function SpaceFilterChip({ label, icon, selected, onPress }: { label: string; icon?: React.ComponentProps<typeof AppIcon>["name"]; selected: boolean; onPress: () => void }) {
+  const theme = useAppTheme();
+  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 32, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border, backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, flexDirection: "row", alignItems: "center", gap: 5 })}>{icon ? <AppIcon name={icon} size={13} color={selected ? theme.colors.accent : theme.colors.textMuted} /> : null}<Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }

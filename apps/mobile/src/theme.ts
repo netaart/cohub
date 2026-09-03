@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform, useColorScheme } from "react-native";
+import { useColorScheme } from "react-native";
 import { useEffect, useState } from "react";
 
 export type AppTheme = {
@@ -82,6 +82,19 @@ const darkTheme: AppTheme = {
   radius: { sm: 8, md: 12, lg: 18, pill: 999 },
 };
 
+const pureBlackDarkTheme: AppTheme = {
+  ...darkTheme,
+  colors: {
+    ...darkTheme.colors,
+    background: "#000000",
+    surface: "#070809",
+    surfaceRaised: "#15171a",
+    surfacePressed: "#23262b",
+    border: "#25292f",
+    borderStrong: "#3b424d",
+  },
+};
+
 const lightTheme: AppTheme = {
   mode: "light",
   colors: {
@@ -119,10 +132,15 @@ const lightTheme: AppTheme = {
 export type ThemePreference = "system" | "light" | "dark";
 
 const THEME_PREFERENCE_KEY = "cohub:mobile:theme-preference:v1";
+const PURE_BLACK_PREFERENCE_KEY = "cohub:mobile:pure-black:v1";
 let themePreference: ThemePreference = "system";
 let themePreferenceLoaded = false;
 let themePreferenceLoad: Promise<void> | null = null;
 const themePreferenceListeners = new Set<() => void>();
+let pureBlackPreference = false;
+let pureBlackPreferenceLoaded = false;
+let pureBlackPreferenceLoad: Promise<void> | null = null;
+const pureBlackPreferenceListeners = new Set<() => void>();
 
 function isThemePreference(value: string | null): value is ThemePreference {
   return value === "system" || value === "light" || value === "dark";
@@ -174,14 +192,60 @@ export async function setThemePreference(next: ThemePreference) {
   await AsyncStorage.setItem(THEME_PREFERENCE_KEY, next);
 }
 
+function notifyPureBlackPreferenceListeners() {
+  for (const listener of pureBlackPreferenceListeners) listener();
+}
+
+function loadPureBlackPreference() {
+  if (pureBlackPreferenceLoad) return pureBlackPreferenceLoad;
+  pureBlackPreferenceLoad = AsyncStorage.getItem(PURE_BLACK_PREFERENCE_KEY)
+    .then((value) => {
+      if (!pureBlackPreferenceLoaded) pureBlackPreference = value === "true";
+      pureBlackPreferenceLoaded = true;
+      notifyPureBlackPreferenceListeners();
+    })
+    .catch(() => {
+      pureBlackPreferenceLoaded = true;
+    })
+    .finally(() => {
+      pureBlackPreferenceLoad = null;
+    });
+  return pureBlackPreferenceLoad;
+}
+
+export function getPureBlackPreference() {
+  return pureBlackPreference;
+}
+
+export function usePureBlackPreference() {
+  const [enabled, setEnabled] = useState(pureBlackPreference);
+  useEffect(() => {
+    const listener = () => setEnabled(pureBlackPreference);
+    pureBlackPreferenceListeners.add(listener);
+    if (!pureBlackPreferenceLoaded) void loadPureBlackPreference();
+    listener();
+    return () => {
+      pureBlackPreferenceListeners.delete(listener);
+    };
+  }, []);
+  return enabled;
+}
+
+export async function setPureBlackPreference(next: boolean) {
+  pureBlackPreference = next;
+  pureBlackPreferenceLoaded = true;
+  notifyPureBlackPreferenceListeners();
+  await AsyncStorage.setItem(PURE_BLACK_PREFERENCE_KEY, String(next));
+}
+
 export function useAppTheme(): AppTheme {
   const colorScheme = useColorScheme();
   const preference = useThemePreference();
-  if (Platform.OS === "web") return lightTheme;
+  const pureBlack = usePureBlackPreference();
   const mode = preference === "system"
     ? colorScheme === "light" ? "light" : "dark"
     : preference;
-  return mode === "light" ? lightTheme : darkTheme;
+  return mode === "light" ? lightTheme : pureBlack ? pureBlackDarkTheme : darkTheme;
 }
 
 export const typography = {

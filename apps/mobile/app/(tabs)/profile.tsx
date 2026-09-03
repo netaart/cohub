@@ -4,6 +4,7 @@ import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { AppUpdateRow } from "@/src/components/AppUpdateBanner";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import {
@@ -160,6 +161,25 @@ export default function ProfileScreen() {
           icon="fingerprint"
           title="Installation"
           detail={installationId ? `${installationId.slice(0, 8)}…` : "Preparing device identity"}
+        />
+        <AppUpdateRow />
+      </View>
+
+      <SectionHeader title="App" />
+      <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+        <SettingRow
+          icon="palette"
+          title="Appearance"
+          detail="Theme and display"
+          onPress={() => router.push("/appearance")}
+          trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
+        />
+        <SettingRow
+          icon="info"
+          title="About"
+          detail={`Cohub Mobile · ${version}`}
+          onPress={() => router.push("/about")}
+          trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
         />
       </View>
 

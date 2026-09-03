@@ -28,12 +28,14 @@ export default function SpaceScreen() {
   const spaceId = Array.isArray(params.spaceId) ? params.spaceId[0] : params.spaceId;
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { state, client, refreshHome, upsertSpace } = useApp();
+  const { state, client, refreshHome, refreshSpacePin, toggleSpacePin, upsertSpace } = useApp();
   const [loadedSpace, setLoadedSpace] = useState<SpaceRecord | null>(null);
   const [spaceLoading, setSpaceLoading] = useState(false);
   const [resources, setResources] = useState<Resources>(emptyResources);
   const [loadingResources, setLoadingResources] = useState(false);
   const [spaceActionsOpen, setSpaceActionsOpen] = useState(false);
+  const [pinning, setPinning] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SpacePanel | null>(null);
   const spaceRefreshAtRef = useRef<{ spaceId: string; at: number } | null>(null);
   const spaceRefreshInFlightRef = useRef<{ spaceId: string; token: number } | null>(null);
@@ -61,11 +63,18 @@ export default function SpaceScreen() {
     void Promise.resolve().then(() => {
       if (active) setSpaceLoading(true);
     });
-    void client.spaces.get(spaceId).then((next) => {
+    void client.spaces.get(spaceId).then(async (next) => {
+      let pinned: boolean | null = null;
+      try {
+        pinned = await refreshSpacePin(spaceId);
+      } catch {
+        // Space details remain usable when the private pin state is unavailable.
+      }
       if (active) {
+        const resolved = pinned === null ? next : { ...next, isPinned: pinned };
         spaceRefreshAtRef.current = { spaceId, at: Date.now() };
-        setLoadedSpace(next);
-        upsertSpace(next);
+        setLoadedSpace(resolved);
+        upsertSpace(resolved);
       }
     }).catch(() => undefined).finally(() => {
       if (spaceRefreshInFlightRef.current?.token === requestToken) spaceRefreshInFlightRef.current = null;
@@ -75,7 +84,7 @@ export default function SpaceScreen() {
       active = false;
       if (spaceRefreshInFlightRef.current?.token === requestToken) spaceRefreshInFlightRef.current = null;
     };
-  }, [client, spaceId, upsertSpace]));
+  }, [client, refreshSpacePin, spaceId, upsertSpace]));
 
   useEffect(() => {
     if (!client || !spaceId) return;
@@ -105,6 +114,18 @@ export default function SpaceScreen() {
   }
 
   const name = displaySpaceName(space);
+  const togglePin = async () => {
+    if (pinning) return;
+    setPinning(true);
+    setPinError(null);
+    try {
+      await toggleSpacePin(space.id);
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : "Unable to update Space pin");
+    } finally {
+      setPinning(false);
+    }
+  };
   const activeTasks = resources.tasks.filter((task) => task.status === "pending" || task.status === "running").length;
   return <Screen>
     <SpacePanels
@@ -125,8 +146,9 @@ export default function SpaceScreen() {
       title={name}
       subtitle="Space"
       onBack={() => router.back()}
-      actions={<><IconButton name="messages" label="Open Chats" size={38} onPress={() => setActivePanel("chat")} /><IconButton name="more" label="Space actions" size={38} onPress={() => setSpaceActionsOpen(true)} /></>}
+      actions={<><IconButton name="messages" label="Open Chats" size={38} onPress={() => setActivePanel("chat")} /><IconButton name={space.isPinned ? "pin-off" : "pin"} label={space.isPinned ? "Unpin Space" : "Pin Space"} size={38} tone={space.isPinned ? "accent" : "default"} disabled={pinning} onPress={() => void togglePin()} /><IconButton name="more" label="Space actions" size={38} onPress={() => setSpaceActionsOpen(true)} /></>}
     />
+    {pinError ? <Pressable accessibilityRole="button" accessibilityLabel="Dismiss Space pin error" onPress={() => setPinError(null)} style={{ marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10, backgroundColor: theme.colors.dangerSoft }}><Text style={[typography.caption, { color: theme.colors.danger }]}>{pinError}</Text></Pressable> : null}
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.background }}
       contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
@@ -177,6 +199,16 @@ export default function SpaceScreen() {
         onPress={() => {
           setSpaceActionsOpen(false);
           router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } });
+        }}
+      />
+      <SheetAction
+        icon={space.isPinned ? "pin-off" : "pin"}
+        title={space.isPinned ? "Unpin Space" : "Pin Space"}
+        detail={space.isPinned ? "Remove this Space from your pinned view" : "Keep this Space in your pinned view"}
+        disabled={pinning}
+        onPress={() => {
+          void togglePin();
+          setSpaceActionsOpen(false);
         }}
       />
       <SheetAction

@@ -1,6 +1,6 @@
 import type { ModelCatalogEntry, ModelStatusEntry } from "@neta-art/cohub";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import type { ChatModelSelection } from "@/src/data/types";
 import {
@@ -80,44 +80,54 @@ export function ModelSelectorSheet({ visible, models, loading, error, modelStatu
     setThinkingOpenFor(null);
   };
 
+  const renderModel = ({ item: entry }: { item: ModelCatalogEntry }) => {
+    const selected = isCurrent(entry);
+    const key = `${entry.provider}/${entry.id}`;
+    const levels = getSupportedThinkingLevels(entry);
+    const selectedLevel = selected && currentModel?.thinkingLevel ? clampThinkingLevel(entry, currentModel.thinkingLevel) : getDefaultThinkingLevel(entry);
+    const thinkingOpen = thinkingOpenFor === key;
+    const context = modelContextLabel(entry);
+    const cost = modelCostLabel(entry);
+    return <View style={[styles.modelRow, { backgroundColor: selected ? theme.colors.accentSoft : "transparent", borderColor: selected ? theme.colors.accentBorder : theme.colors.border }]}>
+      <Pressable testID={`model-option-${entry.provider}-${entry.id}`} accessibilityRole="button" accessibilityLabel={`Use ${modelDisplayName(entry)}`} accessibilityState={{ selected }} onPress={() => selectEntry(entry, levels.length > 1 ? selectedLevel : undefined)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, opacity: pressed ? 0.72 : 1 })}>
+        <View style={[styles.modelIcon, { backgroundColor: selected ? theme.colors.background : theme.colors.surfaceRaised }]}><AppIcon name={modelSupportsVision(entry) ? "images" : "sparkles"} size={17} color={selected ? theme.colors.accent : theme.colors.textMuted} /></View>
+        <View style={styles.modelText}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{modelDisplayName(entry)}</Text><ModelStatusDot entry={entry} status={modelStatus?.[entry.id] ?? null} /></View>
+          <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textMuted, marginTop: 3 }]}>{entry.provider} · {entry.id}</Text>
+          {context || cost ? <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginTop: 4 }}>{context ? <Text style={[typography.micro, { color: theme.colors.textFaint }]}>{context}</Text> : null}{cost ? <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textFaint, flexShrink: 1 }]}>{cost}</Text> : null}</View> : null}
+        </View>
+        {selected ? <AppIcon name="check" size={17} color={theme.colors.accent} /> : <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />}
+      </Pressable>
+      {levels.length > 1 ? <View style={{ marginTop: 8, paddingLeft: 46 }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Thinking level ${formatThinkingLevel(selectedLevel)}`} accessibilityState={{ expanded: thinkingOpen }} onPress={() => setThinkingOpenFor(thinkingOpen ? null : key)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.thinkingTrigger, { backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.background, borderColor: thinkingOpen ? theme.colors.accentBorder : theme.colors.border }]}>
+          <AppIcon name="brain" size={14} color={theme.colors.accent} /><Text style={[typography.micro, { color: theme.colors.textSecondary, flex: 1 }]}>Thinking · {formatThinkingLevel(selectedLevel)}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} style={{ transform: [{ rotate: thinkingOpen ? "180deg" : "0deg" }] }} />
+        </Pressable>
+        {thinkingOpen ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingTop: 7, paddingBottom: 2 }}>{levels.map((level) => { const active = level === selectedLevel; return <Pressable key={level} accessibilityRole="button" accessibilityLabel={`Use ${formatThinkingLevel(level)} thinking`} accessibilityState={{ selected: active }} onPress={() => selectEntry(entry, level)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 32, paddingHorizontal: 10, borderRadius: 8, justifyContent: "center", borderWidth: 1, borderColor: active ? theme.colors.accentBorder : theme.colors.border, backgroundColor: active ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface })}><Text style={[typography.micro, { color: active ? theme.colors.accent : theme.colors.textMuted }]}>{formatThinkingLevelShort(level)}</Text></Pressable>; })}</ScrollView> : null}
+      </View> : null}
+    </View>;
+  };
+
   return <AdaptiveSheet visible={visible} title="Choose a model" subtitle="Select the model and thinking level for the next message." onClose={onClose} scrollable={false} contentStyle={{ flex: 1, minHeight: 0 }} testID="chat-model-selector-sheet">
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Search models" /></View>
       {modelStatusLoading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
     </View>
-    <Pressable accessibilityRole="button" accessibilityLabel="Use automatic model selection" accessibilityState={{ selected: currentModel === null }} onPress={() => { onSelect(null); setThinkingOpenFor(null); }} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.automaticRow, { backgroundColor: pressed ? theme.colors.surfacePressed : currentModel === null ? theme.colors.accentSoft : theme.colors.surfaceRaised, borderColor: currentModel === null ? theme.colors.accentBorder : theme.colors.border }]}>
+    <Pressable testID="model-option-automatic" accessibilityRole="button" accessibilityLabel="Use automatic model selection" accessibilityState={{ selected: currentModel === null }} onPress={() => { onSelect(null); setThinkingOpenFor(null); }} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.automaticRow, { backgroundColor: pressed ? theme.colors.surfacePressed : currentModel === null ? theme.colors.accentSoft : theme.colors.surfaceRaised, borderColor: currentModel === null ? theme.colors.accentBorder : theme.colors.border }]}>
       <View style={[styles.modelIcon, { backgroundColor: theme.colors.background }]}><AppIcon name="sparkles" size={18} color={theme.colors.accent} /></View>
       <View style={styles.modelText}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Automatic</Text><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>Let Cohub route to an available model</Text></View>
       {currentModel === null ? <AppIcon name="check" size={18} color={theme.colors.accent} /> : <AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
     </Pressable>
-    {loading && visibleModels.length === 0 ? <View style={styles.centerState}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 9 }]}>Loading models</Text></View> : error && visibleModels.length === 0 ? <View style={styles.centerState}><AppIcon name="cloud-off" size={24} color={theme.colors.danger} /><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 9 }]}>{error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry loading models" onPress={onRetry} style={({ pressed }) => ({ marginTop: 12, opacity: pressed ? 0.6 : 1 })}><Text style={[typography.bodyMedium, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : visibleModels.length === 0 ? <View style={styles.centerState}><AppIcon name="search" size={24} color={theme.colors.textMuted} /><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 9 }]}>No matching models</Text></View> : <ScrollView style={{ flex: 1, minHeight: 0, marginTop: 10 }} contentContainerStyle={{ paddingBottom: 14 }} nestedScrollEnabled keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-      {visibleModels.map((entry) => {
-        const selected = isCurrent(entry);
-        const key = `${entry.provider}/${entry.id}`;
-        const levels = getSupportedThinkingLevels(entry);
-        const selectedLevel = selected && currentModel?.thinkingLevel ? clampThinkingLevel(entry, currentModel.thinkingLevel) : getDefaultThinkingLevel(entry);
-        const thinkingOpen = thinkingOpenFor === key;
-        const context = modelContextLabel(entry);
-        const cost = modelCostLabel(entry);
-        return <View key={key} style={[styles.modelRow, { backgroundColor: selected ? theme.colors.accentSoft : "transparent", borderColor: selected ? theme.colors.accentBorder : theme.colors.border }]}>
-          <Pressable accessibilityRole="button" accessibilityLabel={`Use ${modelDisplayName(entry)}`} accessibilityState={{ selected }} onPress={() => selectEntry(entry, levels.length > 1 ? selectedLevel : undefined)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, opacity: pressed ? 0.72 : 1 })}>
-            <View style={[styles.modelIcon, { backgroundColor: selected ? theme.colors.background : theme.colors.surfaceRaised }]}><AppIcon name={modelSupportsVision(entry) ? "images" : "sparkles"} size={17} color={selected ? theme.colors.accent : theme.colors.textMuted} /></View>
-            <View style={styles.modelText}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{modelDisplayName(entry)}</Text><ModelStatusDot entry={entry} status={modelStatus?.[entry.id] ?? null} /></View>
-              <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textMuted, marginTop: 3 }]}>{entry.provider} · {entry.id}</Text>
-              {context || cost ? <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginTop: 4 }}>{context ? <Text style={[typography.micro, { color: theme.colors.textFaint }]}>{context}</Text> : null}{cost ? <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textFaint, flexShrink: 1 }]}>{cost}</Text> : null}</View> : null}
-            </View>
-            {selected ? <AppIcon name="check" size={17} color={theme.colors.accent} /> : <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />}
-          </Pressable>
-          {levels.length > 1 ? <View style={{ marginTop: 8, paddingLeft: 46 }}>
-            <Pressable accessibilityRole="button" accessibilityLabel={`Thinking level ${formatThinkingLevel(selectedLevel)}`} accessibilityState={{ expanded: thinkingOpen }} onPress={() => setThinkingOpenFor(thinkingOpen ? null : key)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.thinkingTrigger, { backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.background, borderColor: thinkingOpen ? theme.colors.accentBorder : theme.colors.border }]}>
-              <AppIcon name="brain" size={14} color={theme.colors.accent} /><Text style={[typography.micro, { color: theme.colors.textSecondary, flex: 1 }]}>Thinking · {formatThinkingLevel(selectedLevel)}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} style={{ transform: [{ rotate: thinkingOpen ? "180deg" : "0deg" }] }} />
-            </Pressable>
-            {thinkingOpen ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingTop: 7, paddingBottom: 2 }}>{levels.map((level) => { const active = level === selectedLevel; return <Pressable key={level} accessibilityRole="button" accessibilityLabel={`Use ${formatThinkingLevel(level)} thinking`} accessibilityState={{ selected: active }} onPress={() => selectEntry(entry, level)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 32, paddingHorizontal: 10, borderRadius: 8, justifyContent: "center", borderWidth: 1, borderColor: active ? theme.colors.accentBorder : theme.colors.border, backgroundColor: active ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface })}><Text style={[typography.micro, { color: active ? theme.colors.accent : theme.colors.textMuted }]}>{formatThinkingLevelShort(level)}</Text></Pressable>; })}</ScrollView> : null}
-          </View> : null}
-        </View>;
-      })}
-    </ScrollView>}
+    {loading && visibleModels.length === 0 ? <View style={styles.centerState}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 9 }]}>Loading models</Text></View> : error && visibleModels.length === 0 ? <View style={styles.centerState}><AppIcon name="cloud-off" size={24} color={theme.colors.danger} /><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 9 }]}>{error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry loading models" onPress={onRetry} style={({ pressed }) => ({ marginTop: 12, opacity: pressed ? 0.6 : 1 })}><Text style={[typography.bodyMedium, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : visibleModels.length === 0 ? <View style={styles.centerState}><AppIcon name="search" size={24} color={theme.colors.textMuted} /><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 9 }]}>No matching models</Text></View> : <FlatList
+      data={visibleModels}
+      keyExtractor={(entry) => `${entry.provider}/${entry.id}`}
+      renderItem={renderModel}
+      style={{ flex: 1, minHeight: 0, marginTop: 10 }}
+      contentContainerStyle={{ paddingBottom: 14 }}
+      nestedScrollEnabled
+      keyboardShouldPersistTaps="always"
+      showsVerticalScrollIndicator={false}
+      removeClippedSubviews={false}
+    />}
   </AdaptiveSheet>;
 }
 

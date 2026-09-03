@@ -6,10 +6,12 @@ import ArrowRight from "lucide-react-native/icons/arrow-right";
 import ArrowDown from "lucide-react-native/icons/arrow-down";
 import ArrowUp from "lucide-react-native/icons/arrow-up";
 import Bell from "lucide-react-native/icons/bell";
+import BookOpen from "lucide-react-native/icons/book-open";
 import Brain from "lucide-react-native/icons/brain";
 import Bookmark from "lucide-react-native/icons/bookmark";
 import Camera from "lucide-react-native/icons/camera";
 import Check from "lucide-react-native/icons/check";
+import Code from "lucide-react-native/icons/code";
 import CircleCheck from "lucide-react-native/icons/circle-check";
 import CircleX from "lucide-react-native/icons/circle-x";
 import ChevronDown from "lucide-react-native/icons/chevron-down";
@@ -25,18 +27,24 @@ import FingerprintPattern from "lucide-react-native/icons/fingerprint-pattern";
 import Folder from "lucide-react-native/icons/folder";
 import FolderOpen from "lucide-react-native/icons/folder-open";
 import Gift from "lucide-react-native/icons/gift";
+import Globe from "lucide-react-native/icons/globe";
 import Images from "lucide-react-native/icons/images";
 import Info from "lucide-react-native/icons/info";
 import Layers2 from "lucide-react-native/icons/layers-2";
 import ListTree from "lucide-react-native/icons/list-tree";
 import MessagesSquare from "lucide-react-native/icons/messages-square";
+import Monitor from "lucide-react-native/icons/monitor";
 import Mic from "lucide-react-native/icons/mic";
 import Paperclip from "lucide-react-native/icons/paperclip";
+import Palette from "lucide-react-native/icons/palette";
+import Pin from "lucide-react-native/icons/pin";
+import PinOff from "lucide-react-native/icons/pin-off";
 import Plus from "lucide-react-native/icons/plus";
 import RefreshCw from "lucide-react-native/icons/refresh-cw";
 import Rocket from "lucide-react-native/icons/rocket";
 import Search from "lucide-react-native/icons/search";
 import Share from "lucide-react-native/icons/share";
+import Shield from "lucide-react-native/icons/shield";
 import Sun from "lucide-react-native/icons/sun";
 import Moon from "lucide-react-native/icons/moon";
 import Settings from "lucide-react-native/icons/settings";
@@ -58,10 +66,12 @@ export const icons = {
   "arrow-down": ArrowDown,
   "arrow-up": ArrowUp,
   bell: Bell,
+  "book-open": BookOpen,
   brain: Brain,
   bookmark: Bookmark,
   camera: Camera,
   check: Check,
+  code: Code,
   "check-circle": CircleCheck,
   "circle-x": CircleX,
   "chevron-down": ChevronDown,
@@ -76,19 +86,25 @@ export const icons = {
   folder: Folder,
   "folder-open": FolderOpen,
   gift: Gift,
+  globe: Globe,
   images: Images,
   info: Info,
   layers: Layers2,
   "list-tree": ListTree,
   messages: MessagesSquare,
+  monitor: Monitor,
   mic: Mic,
   more: Ellipsis,
   paperclip: Paperclip,
+  palette: Palette,
+  pin: Pin,
+  "pin-off": PinOff,
   plus: Plus,
   refresh: RefreshCw,
   rocket: Rocket,
   search: Search,
   share: Share,
+  shield: Shield,
   sun: Sun,
   moon: Moon,
   settings: Settings,

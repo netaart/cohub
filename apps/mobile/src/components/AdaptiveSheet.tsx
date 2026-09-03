@@ -180,6 +180,7 @@ export function AdaptiveSheet({
           style={[styles.stage, compact ? styles.compactStage : styles.desktopStage]}
         >
           <Animated.View
+            collapsable={false}
             accessibilityViewIsModal
             role="dialog"
             style={[
@@ -229,7 +230,7 @@ export function AdaptiveSheet({
                 {children}
               </ScrollView>
             ) : (
-              <View style={resolvedContentStyle}>{children}</View>
+              <View collapsable={false} style={resolvedContentStyle}>{children}</View>
             )}
             {footer ? (
               <View

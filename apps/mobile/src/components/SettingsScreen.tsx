@@ -24,7 +24,9 @@ import {
 	TextInput,
 	View,
 } from "react-native";
+import { AboutContent } from "@/src/components/AboutScreen";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { AppearanceContent } from "@/src/components/AppearanceScreen";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { useApp } from "@/src/data/context";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
@@ -32,13 +34,7 @@ import {
 	registerForPushNotifications,
 	type PushRegistrationResult,
 } from "@/src/platform/notifications";
-import {
-	setThemePreference,
-	type ThemePreference,
-	useAppTheme,
-	useThemePreference,
-	typography,
-} from "@/src/theme";
+import { useAppTheme, typography } from "@/src/theme";
 import {
 	AppIcon,
 	Avatar,
@@ -55,6 +51,7 @@ import { formatNumber, formatRelativeTime } from "@/src/utils";
 type SettingsSection =
 	| "profile"
 	| "appearance"
+	| "about"
 	| "activity"
 	| "notifications"
 	| "rules"
@@ -78,7 +75,8 @@ const sections: {
 	icon: React.ComponentProps<typeof AppIcon>["name"];
 }[] = [
 	{ id: "profile", label: "Profile", icon: "user" },
-	{ id: "appearance", label: "Appearance", icon: "settings" },
+	{ id: "appearance", label: "Appearance", icon: "palette" },
+	{ id: "about", label: "About", icon: "info" },
 	{ id: "activity", label: "Activity", icon: "activity" },
 	{ id: "notifications", label: "Notifications", icon: "bell" },
 	{ id: "rules", label: "Rules", icon: "file-text" },
@@ -213,6 +211,7 @@ export function SettingsScreen({
 					<ProfileSection client={client} onNotice={setNotice} />
 				) : null}
 				{section === "appearance" ? <AppearanceSection /> : null}
+				{section === "about" ? <AboutSection onNotice={setNotice} /> : null}
 				{section === "activity" ? <ActivitySection client={client} /> : null}
 				{section === "notifications" ? (
 					<NotificationsSection
@@ -776,139 +775,11 @@ function ProfileSection({
 }
 
 function AppearanceSection() {
-	const theme = useAppTheme();
-	const preference = useThemePreference();
-	const options: {
-		value: ThemePreference;
-		label: string;
-		detail: string;
-		icon: React.ComponentProps<typeof AppIcon>["name"];
-	}[] = [
-		{
-			value: "system",
-			label: "System",
-			detail: "Follow the device appearance",
-			icon: "settings",
-		},
-		{
-			value: "light",
-			label: "Light",
-			detail: "Use the light Cohub palette",
-			icon: "sun",
-		},
-		{
-			value: "dark",
-			label: "Dark",
-			detail: "Use the dark Cohub palette",
-			icon: "moon",
-		},
-	];
-	return (
-		<View>
-			<SettingsIntro
-				title="Appearance"
-				description="Choose how Cohub looks on this device."
-			/>
-			<SettingsGroup>
-				{options.map((option) => {
-					const active = preference === option.value;
-					return (
-						<Pressable
-							key={option.value}
-							accessibilityRole="radio"
-							accessibilityState={{ selected: active }}
-							onPress={() => void setThemePreference(option.value)}
-							android_ripple={{ color: theme.colors.pressOverlay }}
-							style={({ pressed }) => ({
-								minHeight: 70,
-								paddingHorizontal: 13,
-								flexDirection: "row",
-								alignItems: "center",
-								gap: 11,
-								borderBottomWidth: 1,
-								borderBottomColor: theme.colors.border,
-								backgroundColor: pressed
-									? theme.colors.surfacePressed
-									: active
-										? theme.colors.accentSoft
-										: "transparent",
-							})}
-						>
-							<View
-								style={{
-									width: 34,
-									height: 34,
-									borderRadius: 10,
-									alignItems: "center",
-									justifyContent: "center",
-									backgroundColor: active
-										? theme.colors.background
-										: theme.colors.surfaceRaised,
-								}}
-							>
-								<AppIcon
-									name={option.icon}
-									size={17}
-									color={active ? theme.colors.accent : theme.colors.textMuted}
-								/>
-							</View>
-							<View style={{ flex: 1 }}>
-								<Text
-									style={[typography.bodyMedium, { color: theme.colors.text }]}
-								>
-									{option.label}
-								</Text>
-								<Text
-									style={[
-										typography.caption,
-										{ color: theme.colors.textMuted, marginTop: 2 },
-									]}
-								>
-									{option.detail}
-								</Text>
-							</View>
-							{active ? (
-								<AppIcon name="check" size={18} color={theme.colors.accent} />
-							) : null}
-						</Pressable>
-					);
-				})}
-			</SettingsGroup>
-			<SectionHeader title="Current palette" />
-			<View
-				style={{
-					marginHorizontal: 16,
-					padding: 14,
-					borderWidth: 1,
-					borderColor: theme.colors.border,
-					borderRadius: 13,
-					backgroundColor: theme.colors.surface,
-				}}
-			>
-				<View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-					<View
-						style={{
-							width: 10,
-							height: 10,
-							borderRadius: 5,
-							backgroundColor: theme.colors.accent,
-						}}
-					/>
-					<Text style={[typography.bodyMedium, { color: theme.colors.text }]}>
-						{theme.mode === "dark" ? "Dark" : "Light"}
-					</Text>
-				</View>
-				<Text
-					style={[
-						typography.caption,
-						{ color: theme.colors.textMuted, marginTop: 5 },
-					]}
-				>
-					Applies immediately to navigation, Chat, Files, and settings.
-				</Text>
-			</View>
-		</View>
-	);
+	return <AppearanceContent />;
+}
+
+function AboutSection({ onNotice }: { onNotice: (notice: { title: string; message: string }) => void }) {
+	return <AboutContent onNotice={onNotice} />;
 }
 
 function ActivitySection({ client }: { client: CohubClient | null }) {

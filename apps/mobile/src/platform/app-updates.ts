@@ -13,9 +13,13 @@ const REQUEST_TIMEOUT_MS = 8_000;
 
 export type AppRelease = {
   version: string;
+  title: string | null;
+  publishedAt: string | null;
   url: string;
   notes: string | null;
   downloadUrl: string | null;
+  downloadName: string | null;
+  downloadSize: number | null;
 };
 
 type CachedCheck = {
@@ -45,7 +49,10 @@ function parseVersion(value: string) {
 function isAllowedReleaseUrl(value: string) {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && (url.hostname === "github.com" || url.hostname === "www.github.com");
+    const path = url.pathname.replace(/\/+$/, "");
+    return url.protocol === "https:" &&
+      (url.hostname === "github.com" || url.hostname === "www.github.com") &&
+      (path === "/markbang/cohub-mobile/releases" || path.startsWith("/markbang/cohub-mobile/releases/"));
   } catch {
     return false;
   }
@@ -68,7 +75,8 @@ export function getInstalledAppVersion() {
   return Application.nativeApplicationVersion?.trim() || Constants.expoConfig?.version?.trim() || "0.0.0";
 }
 
-function resolveDownloadUrl(payload: Record<string, unknown>) {
+function resolveDownloadAsset(payload: Record<string, unknown>) {
+  if (Platform.OS !== "android") return null;
   const architectures = (Device.supportedCpuArchitectures ?? []).map((value) => value.toLowerCase());
   const abi = architectures.some((value) => value.includes("arm64") || value.includes("aarch64"))
     ? "arm64-v8a"
@@ -87,7 +95,11 @@ function resolveDownloadUrl(payload: Record<string, unknown>) {
     return name.endsWith(`android-${abi}.apk`) && isAllowedReleaseUrl(url);
   });
   if (!isRecord(asset) || typeof asset.browser_download_url !== "string") return null;
-  return asset.browser_download_url.trim() || null;
+  const url = asset.browser_download_url.trim();
+  if (!url) return null;
+  const name = typeof asset.name === "string" ? asset.name.trim() || null : null;
+  const size = typeof asset.size === "number" && Number.isFinite(asset.size) && asset.size >= 0 ? asset.size : null;
+  return { url, name, size };
 }
 
 function releaseFromPayload(payload: unknown): AppRelease | null {
@@ -97,12 +109,20 @@ function releaseFromPayload(payload: unknown): AppRelease | null {
   const draft = payload.draft === true;
   const prerelease = payload.prerelease === true;
   if (!tag || !url || !isAllowedReleaseUrl(url) || draft || prerelease || !parseVersion(tag)) return null;
+  const download = resolveDownloadAsset(payload);
+  const publishedAt = typeof payload.published_at === "string" && !Number.isNaN(Date.parse(payload.published_at))
+    ? payload.published_at
+    : null;
 
   return {
     version: tag.replace(/^v/, ""),
+    title: typeof payload.name === "string" && payload.name.trim() ? payload.name.trim() : null,
+    publishedAt,
     url,
     notes: typeof payload.body === "string" && payload.body.trim() ? payload.body.trim() : null,
-    downloadUrl: resolveDownloadUrl(payload),
+    downloadUrl: download?.url ?? null,
+    downloadName: download?.name ?? null,
+    downloadSize: download?.size ?? null,
   };
 }
 
@@ -110,12 +130,27 @@ function parseCachedCheck(value: unknown): CachedCheck | null {
   if (!isRecord(value) || typeof value.checkedAt !== "number" || !Number.isFinite(value.checkedAt) || !isRecord(value.release)) return null;
   const rawRelease = value.release;
   const version = typeof rawRelease.version === "string" ? rawRelease.version.trim() : "";
+  const title = typeof rawRelease.title === "string" ? rawRelease.title.trim() || null : null;
+  const publishedAt = typeof rawRelease.publishedAt === "string" && !Number.isNaN(Date.parse(rawRelease.publishedAt))
+    ? rawRelease.publishedAt
+    : null;
   const url = typeof rawRelease.url === "string" ? rawRelease.url.trim() : "";
   const notes = rawRelease.notes == null ? null : typeof rawRelease.notes === "string" ? rawRelease.notes : null;
-  const downloadUrl = rawRelease.downloadUrl == null ? null : typeof rawRelease.downloadUrl === "string" ? rawRelease.downloadUrl.trim() || null : null;
+  const downloadUrl = Platform.OS === "android" && rawRelease.downloadUrl != null
+    ? typeof rawRelease.downloadUrl === "string" ? rawRelease.downloadUrl.trim() || null : null
+    : null;
+  const downloadName = Platform.OS === "android" && typeof rawRelease.downloadName === "string"
+    ? rawRelease.downloadName.trim() || null
+    : null;
+  const downloadSize = Platform.OS === "android" && typeof rawRelease.downloadSize === "number" && Number.isFinite(rawRelease.downloadSize) && rawRelease.downloadSize >= 0
+    ? rawRelease.downloadSize
+    : null;
   if (!version || !parseVersion(version) || !isAllowedReleaseUrl(url)) return null;
   if (downloadUrl && !isAllowedReleaseUrl(downloadUrl)) return null;
-  return { checkedAt: value.checkedAt, release: { version, url, notes, downloadUrl } };
+  return {
+    checkedAt: value.checkedAt,
+    release: { version, title, publishedAt, url, notes, downloadUrl, downloadName, downloadSize },
+  };
 }
 
 async function loadPersistedCache() {
@@ -181,16 +216,17 @@ export async function checkForAppUpdate(options: { force?: boolean } = {}) {
   }
   if (request && !options.force) return request;
 
-  request = requestLatestRelease()
+  const nextRequest = requestLatestRelease()
     .then((latest) => {
       cachedCheck = { checkedAt: Date.now(), release: latest };
       persistCheck(cachedCheck);
       return isNewerAppVersion(currentVersion, latest.version) ? latest : null;
     })
     .finally(() => {
-      request = null;
+      if (request === nextRequest) request = null;
     });
-  return request;
+  request = nextRequest;
+  return nextRequest;
 }
 
 function parseSnooze(value: string | null): SnoozeRecord | null {
