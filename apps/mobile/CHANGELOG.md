@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/markbang/cohub-mobile/compare/v1.4.1...v1.5.0) (2026-09-03)
+
+
+### Features
+
+* **mobile:** complete native settings, navigation, and updates ([#39](https://github.com/markbang/cohub-mobile/issues/39)) ([5e42f4d](https://github.com/markbang/cohub-mobile/commit/5e42f4daffdfbe6616a5d3fe144f861e561981c9))
+
 ## [1.4.1](https://github.com/markbang/cohub-mobile/compare/v1.4.0...v1.4.1) (2026-09-02)
 
 
