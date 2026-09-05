@@ -34,6 +34,7 @@ import type {
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns } from "@/src/data/session-history";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
+import { mockMessages, mockModels, mockSessions, mockSpaces, mockTurnIndex, mockTurns, mockUsage } from "@/src/data/mock";
 import {
   displaySessionTitle,
   displaySpaceName,
@@ -588,7 +589,7 @@ export function AppProvider({
 }) {
   const [installationId, setInstallationId] = useState<string | null>(null);
   const [state, setState] = useState<AppState>(() =>
-    offline ? { ...initialState, booting: false, refreshing: false } : initialState,
+    offline ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, usage: mockUsage } : initialState,
   );
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const stateRef = useRef(state);
@@ -598,7 +599,7 @@ export function AppProvider({
   const installationRequestRef = useRef<Promise<string> | null>(null);
   const clientRef = useRef<CohubClient | null>(null);
   const homeRefreshGenerationRef = useRef(0);
-  const [models, setModels] = useState<ChatModelCatalogItem[]>([]);
+  const [models, setModels] = useState<ChatModelCatalogItem[]>(offline ? mockModels : []);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const modelsRequestRef = useRef<Promise<ChatModelCatalogItem[]> | null>(null);
@@ -1027,6 +1028,7 @@ export function AppProvider({
       ? view?.turns.find((turn) => turn.sequence === target)
       : view?.turns.find((turn) => turn.id === target.turnId || turn.sourceTurnId === target.turnId);
     if (targetTurn) return targetTurn.sequence;
+    if (offline) throw new Error("The requested conversation turn is unavailable in preview mode");
     const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
     const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
     const activeClient = clientRef.current;
@@ -1037,10 +1039,22 @@ export function AppProvider({
     dispatch({ type: "session-window-success", sessionId, session: response.session, turns: response.turns, hasMoreOlder: response.hasMoreOlder, hasMoreNewer: response.hasMoreNewer, oldestCursor: response.oldestCursor, newestCursor: response.newestCursor });
     if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messagesFromTurns(mergeTurns(view?.turns ?? [], response.turns))).catch(() => undefined);
     return sequence;
-  }, [dispatch, userKey]);
+  }, [dispatch, offline, userKey]);
 
   const openSession = useCallback(
     async (sessionId: string) => {
+      if (offline) {
+        const summary = mockSessions.find((item) => item.id === sessionId);
+        const mockSpace = mockSpaces.find((item) => item.id === summary?.spaceId);
+        if (summary && mockSpace) {
+          dispatch({ type: "session-start", sessionId, space: mockSpace, session: summary });
+          const turns = mockTurns[sessionId] ?? [];
+          dispatch({ type: "session-success", sessionId, space: mockSpace, session: summary, messages: turns.length > 0 ? messagesFromTurns(turns) : (mockMessages[sessionId] ?? []), turns, hasMoreOlder: false });
+          dispatch({ type: "turn-index", sessionId, turnIndex: mockTurnIndex[sessionId] ?? [] });
+          if (summary.status === "running") dispatch({ type: "stream-state", sessionId, stream: { status: "streaming", contentBlocks: [{ type: "text", text: "Still working on the launch brief…" }], intermediateMessages: [], turnId: "mock-running-turn", messageId: null } });
+        }
+        return;
+      }
       if (!client) return;
       const token = (openTokens.current.get(sessionId) ?? 0) + 1;
       openTokens.current.set(sessionId, token);
@@ -1163,7 +1177,7 @@ export function AppProvider({
         dispatch({ type: "session-error", sessionId, message: error instanceof Error ? error.message : "Unable to open Chat" });
       }
     },
-    [client, dispatch, loadTurnIndex, refreshSession, userKey],
+    [client, dispatch, loadTurnIndex, offline, refreshSession, userKey],
   );
 
   const closeSession = useCallback((sessionId: string) => {

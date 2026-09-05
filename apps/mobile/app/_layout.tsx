@@ -133,6 +133,7 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
           <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="appearance" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="about" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="qa" options={{ animation: "slide_from_right" }} />
         </Stack>
         <AppUpdateBanner />
       </View>

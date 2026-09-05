@@ -188,6 +188,7 @@ export function AdaptiveSheet({
               compact ? styles.compactPanel : styles.desktopPanel,
               {
                 maxHeight,
+                height: compact ? maxHeight : undefined,
                 backgroundColor: theme.colors.surface,
                 borderColor: theme.colors.border,
               },
@@ -349,10 +350,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   dragArea: {
-    height: 24,
+    height: 30,
+    marginBottom: -2,
     alignItems: "center",
     justifyContent: "center",
     userSelect: "none",
+    zIndex: 2,
   },
   dragHandle: {
     width: 34,
