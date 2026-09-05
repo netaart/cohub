@@ -68,7 +68,7 @@ export function IconButton({ name, onPress, label, size = 42, tone = "default", 
       disabled={disabled}
       onPress={onPress}
       android_ripple={{ color: theme.colors.pressOverlay, borderless: true }}
-      style={({ pressed }) => [styles.iconButton, { width: size, height: size, borderRadius: size / 2, backgroundColor: pressed ? (tone === "accent" ? theme.colors.accentSoft : theme.colors.surfacePressed) : "transparent", opacity: disabled ? 0.45 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] }]}
+      style={({ pressed }) => [styles.iconButton, { width: size, height: size, borderRadius: size / 2, backgroundColor: pressed ? (tone === "accent" ? theme.colors.accentSoft : theme.colors.surfacePressed) : "transparent", opacity: disabled ? 0.45 : 1 }]}
     >
       <AppIcon name={name} size={size * 0.48} color={color} />
     </Pressable>
@@ -167,7 +167,7 @@ export function PrimaryButton({ label, onPress, icon, loading = false, disabled 
   const pressedColor = tone === "danger" ? theme.colors.danger : theme.colors.accentPressed;
   const foreground = tone === "danger" ? theme.colors.dangerText : theme.colors.accentText;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled || loading} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.primaryButton, { backgroundColor: pressed ? pressedColor : color, opacity: disabled || loading ? 0.55 : 1, transform: [{ scale: pressed ? 0.985 : 1 }] }, style]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled || loading} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.primaryButton, { backgroundColor: pressed ? pressedColor : color, opacity: disabled || loading ? 0.55 : 1 }, style]}>
       {loading ? <ActivityIndicator color={foreground} size="small" /> : icon ? <AppIcon name={icon} size={17} color={foreground} /> : null}
       <Text style={[typography.bodyMedium, { color: foreground }]}>{label}</Text>
     </Pressable>
@@ -180,7 +180,7 @@ export function SearchField({ value, onChangeText, placeholder = "Search", input
     <View style={[styles.searchField, { backgroundColor: theme.colors.surfaceRaised }]}>
       <AppIcon name="search" size={18} color={theme.colors.textMuted} />
       <TextInput ref={inputRef} value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { flex: 1, color: theme.colors.text, paddingVertical: 0 }]} returnKeyType="search" />
-      {value ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => onChangeText?.("")} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1, transform: [{ scale: pressed ? 0.9 : 1 }] })}><AppIcon name="circle-x" size={17} color={theme.colors.textFaint} /></Pressable> : null}
+      {value ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => onChangeText?.("")} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1 })}><AppIcon name="circle-x" size={17} color={theme.colors.textFaint} /></Pressable> : null}
     </View>
   );
 }
@@ -218,8 +218,8 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} />
           <View style={styles.composerToolbarSpacer} />
           {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}, ${modelStatusLabel}`} disabled={blocked} onPress={onModelPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
-          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={blocked || voiceStarting} onPress={onVoice} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent", transform: [{ scale: pressed ? 0.92 : 1 }] }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? theme.colors.text : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised, transform: [{ scale: pressed ? 0.92 : 1 }] }]}>
+          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={blocked || voiceStarting} onPress={onVoice} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? theme.colors.text : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
             <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} />
           </Pressable>
         </View>

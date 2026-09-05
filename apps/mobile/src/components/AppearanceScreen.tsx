@@ -168,7 +168,6 @@ function ThemePreviewCard({ label, mode, pureBlack, selected, width, onPress }: 
           borderColor: selected ? theme.colors.accent : colors.border,
           backgroundColor: colors.background,
           opacity: pressed ? 0.82 : 1,
-          transform: [{ scale: pressed ? 0.98 : 1 }],
         })}
       >
         <View style={{ flex: 1, borderRadius: 12, overflow: "hidden", backgroundColor: colors.background }}>
