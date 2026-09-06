@@ -34,7 +34,7 @@ function TextBlock({ value, muted = false }: { value: string; muted?: boolean })
   };
 
   for (const line of lines) {
-    const fence = /^\s*```\s*([^\s`]*)?\s*$/.exec(line);
+    const fence = (code !== null ? /^\s*```\s*$/ : /^\s*```\s*([^\s`]*)?\s*$/).exec(line);
     if (fence) {
       if (code !== null) flushCode();
       else {
