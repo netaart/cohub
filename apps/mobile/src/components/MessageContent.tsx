@@ -8,7 +8,7 @@ import { contentBlockText, hasRenderableContent, hasRenderableMessage } from "@/
 
 function TextBlock({ value, muted = false }: { value: string; muted?: boolean }) {
   const theme = useAppTheme();
-  const lines = value.replace(/\\r\\n/g, "\\n").split("\\n");
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let paragraph: string[] = [];
   let code: string[] | null = null;
@@ -27,13 +27,13 @@ function TextBlock({ value, muted = false }: { value: string; muted?: boolean })
   };
   const flushCode = () => {
     if (code === null) return;
-    blocks.push(<View key={`code-${blocks.length}`} style={{ backgroundColor: theme.colors.background, borderRadius: 10, padding: 11, borderWidth: 1, borderColor: theme.colors.border }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}><AppIcon name="code" size={13} color={theme.colors.textFaint} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{codeLanguage || "code"}</Text></View><Text selectable style={{ color: theme.colors.textSecondary, fontFamily: "SpaceMono", fontSize: 12, lineHeight: 18 }}>{code.join("\\n")}</Text></View>);
+    blocks.push(<View key={`code-${blocks.length}`} style={{ backgroundColor: theme.colors.background, borderRadius: 10, padding: 11, borderWidth: 1, borderColor: theme.colors.border }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}><AppIcon name="code" size={13} color={theme.colors.textFaint} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{codeLanguage || "code"}</Text></View><Text selectable style={{ color: theme.colors.textSecondary, fontFamily: "SpaceMono", fontSize: 12, lineHeight: 18 }}>{code.join("\n")}</Text></View>);
     code = null;
     codeLanguage = "";
   };
 
   for (const line of lines) {
-    const fence = /^\\s*```\\s*([^\\s`]*)?\\s*$/.exec(line);
+    const fence = /^\s*```\s*([^\s`]*)?\s*$/.exec(line);
     if (fence) {
       if (code !== null) flushCode();
       else {
@@ -48,7 +48,7 @@ function TextBlock({ value, muted = false }: { value: string; muted?: boolean })
       code.push(line);
       continue;
     }
-    const heading = /^\\s{0,3}(#{1,6})\\s+(.+?)\\s*#*\\s*$/.exec(line);
+    const heading = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
       flushParagraph();
       flushList();
@@ -56,14 +56,14 @@ function TextBlock({ value, muted = false }: { value: string; muted?: boolean })
       blocks.push(<Text key={`heading-${blocks.length}`} selectable style={{ color: muted ? theme.colors.textMuted : theme.colors.text, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}>{renderInlineMarkdown(heading[2])}</Text>);
       continue;
     }
-    const quote = /^\\s*>\\s?(.*)$/.exec(line);
+    const quote = /^\s*>\s?(.*)$/.exec(line);
     if (quote) {
       flushParagraph();
       flushList();
       blocks.push(<View key={`quote-${blocks.length}`} style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text selectable style={[typography.body, { color: theme.colors.textMuted, lineHeight: 23 }]}>{renderInlineMarkdown(quote[1])}</Text></View>);
       continue;
     }
-    const item = /^\\s*(?:[-*+]\\s+|([0-9]+)[.)]\\s+)(.+)$/.exec(line);
+    const item = /^\s*(?:[-*+]\s+|([0-9]+)[.)]\s+)(.+)$/.exec(line);
     if (item) {
       const ordered = Boolean(item[1]);
       if (!list || list.ordered !== ordered) {

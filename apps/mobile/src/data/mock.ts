@@ -12,13 +12,13 @@ export const mockSpaces = [
 ];
 export const mockSessions: UserSessionListItem[] = [
   session("s-running", "product", "Agent is preparing the launch brief", "running", "Drafting the competitive positioning and launch checklist…"),
-  session("s-attention", "product", "Review the pricing page before publishing", "needs_attention", "I found two copy conflicts that need your decision."),
+  session("s-attention", "product", "Review the pricing page before publishing", "needs_input", "I found two copy conflicts that need your decision."),
   session("s-complete", "research", "Summarize the customer interview notes", "completed", "The summary is ready with five recurring themes."),
   session("s-long", "research", "A very long chat title that should remain readable without pushing actions off screen on a narrow phone", "completed", "A deliberately long preview line to exercise truncation and row height."),
 ];
 export const mockTurns: Record<string, SessionTurnRecord[]> = {};
 export const mockTurnIndex: Record<string, SessionTurnIndexItem[]> = {};
-for (const sessionId of ["s-running", "s-attention", "s-complete"]) {
+for (const sessionId of ["s-running", "s-attention", "s-complete", "s-long"]) {
   const turns = Array.from({ length: sessionId === "s-complete" ? 6 : 3 }, (_, index) => {
     const sequence = index + 1;
     return {

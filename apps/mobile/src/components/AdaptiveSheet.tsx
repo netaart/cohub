@@ -35,6 +35,7 @@ type AdaptiveSheetProps = {
   scrollable?: boolean;
   dismissible?: boolean;
   contentStyle?: StyleProp<ViewStyle>;
+  fullHeight?: boolean;
   testID?: string;
 };
 
@@ -48,6 +49,7 @@ export function AdaptiveSheet({
   scrollable = true,
   dismissible = true,
   contentStyle,
+  fullHeight = false,
   testID,
 }: AdaptiveSheetProps) {
   const theme = useAppTheme();
@@ -188,7 +190,7 @@ export function AdaptiveSheet({
               compact ? styles.compactPanel : styles.desktopPanel,
               {
                 maxHeight,
-                height: compact ? maxHeight : undefined,
+                height: compact && fullHeight ? maxHeight : undefined,
                 backgroundColor: theme.colors.surface,
                 borderColor: theme.colors.border,
               },

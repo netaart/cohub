@@ -117,6 +117,7 @@ function NativeRoot() {
 }
 
 function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
+  const showQa = Platform.OS === "web" || __DEV__;
   return <ThemeProvider value={theme.mode === "dark" ? DarkTheme : DefaultTheme}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
@@ -133,7 +134,7 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
           <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="appearance" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="about" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="qa" options={{ animation: "slide_from_right" }} />
+          {showQa ? <Stack.Screen name="qa" options={{ animation: "slide_from_right" }} /> : null}
         </Stack>
         <AppUpdateBanner />
       </View>

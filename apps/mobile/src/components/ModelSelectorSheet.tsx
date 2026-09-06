@@ -107,7 +107,7 @@ export function ModelSelectorSheet({ visible, models, loading, error, modelStatu
     </View>;
   };
 
-  return <AdaptiveSheet visible={visible} title="Choose a model" subtitle="Select the model and thinking level for the next message." onClose={onClose} scrollable={false} contentStyle={{ flex: 1, minHeight: 0 }} testID="chat-model-selector-sheet">
+  return <AdaptiveSheet visible={visible} title="Choose a model" subtitle="Select the model and thinking level for the next message." onClose={onClose} scrollable={false} contentStyle={{ flex: 1, minHeight: 0 }} fullHeight testID="chat-model-selector-sheet">
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Search models" /></View>
       {modelStatusLoading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}

@@ -86,6 +86,7 @@ export function TurnNavigatorSheet({
 			onClose={onClose}
 			scrollable={false}
 			contentStyle={{ flex: 1, minHeight: 0 }}
+			fullHeight
 			testID="chat-turn-navigator-sheet"
 		>
 			<SearchField

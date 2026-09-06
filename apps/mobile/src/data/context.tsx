@@ -1474,7 +1474,7 @@ export function AppProvider({
 
   const clearCache = useCallback(async () => {
     await clearUserCache(userKey);
-    setModels([]);
+    setModels(offline ? mockModels : []);
     setModelsError(null);
     setModelStatus(null);
     setModelStatusError(null);
@@ -1482,8 +1482,10 @@ export function AppProvider({
     paginationRequestsRef.current.clear();
     spacePinMutationVersionsRef.current.clear();
     spacePinPendingMutationsRef.current.clear();
-    setState({ ...initialState, booting: false, refreshing: false });
-  }, [userKey]);
+    setState(offline
+      ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, usage: mockUsage }
+      : { ...initialState, booting: false, refreshing: false });
+  }, [offline, userKey]);
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     return state.sessions.slice(0, 30).map((session) => {
