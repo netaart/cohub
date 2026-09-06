@@ -117,7 +117,7 @@ function NativeRoot() {
 }
 
 function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
-  const showQa = Platform.OS === "web" || __DEV__;
+  const showQa = Platform.OS === "web";
   return <ThemeProvider value={theme.mode === "dark" ? DarkTheme : DefaultTheme}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />

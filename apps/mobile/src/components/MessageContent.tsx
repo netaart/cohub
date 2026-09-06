@@ -13,7 +13,7 @@ function TextBlock({ value, muted = false }: { value: string; muted?: boolean })
   let paragraph: string[] = [];
   let code: string[] | null = null;
   let codeLanguage = "";
-  let list: { ordered: boolean; items: string[] } | null = null;
+  let list: { ordered: boolean; start: number; items: string[] } | null = null;
 
   const flushParagraph = () => {
     const text = paragraph.join(" ").trim();
@@ -22,7 +22,8 @@ function TextBlock({ value, muted = false }: { value: string; muted?: boolean })
   };
   const flushList = () => {
     if (!list) return;
-    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{list.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.body, { color: theme.colors.accent, lineHeight: 23, minWidth: 18 }]}>{list?.ordered ? `${index + 1}.` : "•"}</Text><Text selectable style={[typography.body, { color: muted ? theme.colors.textMuted : theme.colors.text, lineHeight: 23, flex: 1 }]}>{renderInlineMarkdown(item)}</Text></View>)}</View>);
+    const currentList = list;
+    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{currentList.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.body, { color: theme.colors.accent, lineHeight: 23, minWidth: 18 }]}>{currentList.ordered ? `${currentList.start + index}.` : "•"}</Text><Text selectable style={[typography.body, { color: muted ? theme.colors.textMuted : theme.colors.text, lineHeight: 23, flex: 1 }]}>{renderInlineMarkdown(item)}</Text></View>)}</View>);
     list = null;
   };
   const flushCode = () => {
@@ -69,7 +70,7 @@ function TextBlock({ value, muted = false }: { value: string; muted?: boolean })
       if (!list || list.ordered !== ordered) {
         flushParagraph();
         flushList();
-        list = { ordered, items: [] };
+        list = { ordered, start: ordered ? Number(item[1]) : 1, items: [] };
       }
       list.items.push(item[2]);
       continue;
