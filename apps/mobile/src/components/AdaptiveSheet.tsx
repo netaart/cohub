@@ -379,6 +379,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   scroller: {
+    flex: 1,
     minHeight: 0,
   },
   content: {
