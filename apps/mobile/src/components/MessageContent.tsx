@@ -8,7 +8,7 @@ import { contentBlockText, hasRenderableContent, hasRenderableMessage } from "@/
 
 function TextBlock({ value, muted = false }: { value: string; muted?: boolean }) {
   const theme = useAppTheme();
-  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  const lines = value.replace(/\r\n?/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let paragraph: string[] = [];
   let code: string[] | null = null;
