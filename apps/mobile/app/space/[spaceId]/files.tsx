@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useApp } from "@/src/data/context";
+import { mockFileTree } from "@/src/data/mock";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, DetailTopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
 import {
@@ -25,7 +26,7 @@ export default function FilesScreen() {
   const spaceId = firstParam(params.spaceId);
   const currentPath = normalizeSpacePath(firstParam(params.path));
   const theme = useAppTheme();
-  const { client, state } = useApp();
+  const { client, offline, state } = useApp();
   const space = state.spaces.find((item) => item.id === spaceId);
   const [entries, setEntries] = useState<SpaceFsEntry[]>([]);
   const requestIdRef = useRef(0);
@@ -35,6 +36,12 @@ export default function FilesScreen() {
 
   const loadEntries = useCallback(async () => {
     const requestId = ++requestIdRef.current;
+    if (offline) {
+      setEntries(mockFileTree[currentPath] ?? []);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     if (!client || !spaceId) {
       setEntries([]);
       setLoading(false);
@@ -52,7 +59,7 @@ export default function FilesScreen() {
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [client, currentPath, spaceId]);
+  }, [client, currentPath, offline, spaceId]);
 
   useEffect(() => {
     let active = true;

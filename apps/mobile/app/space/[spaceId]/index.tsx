@@ -28,7 +28,7 @@ export default function SpaceScreen() {
   const spaceId = Array.isArray(params.spaceId) ? params.spaceId[0] : params.spaceId;
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
-  const { state, client, refreshHome, refreshSpacePin, toggleSpacePin, upsertSpace } = useApp();
+  const { state, client, offline, refreshHome, refreshSpacePin, toggleSpacePin, upsertSpace } = useApp();
   const [loadedSpace, setLoadedSpace] = useState<SpaceRecord | null>(null);
   const [spaceLoading, setSpaceLoading] = useState(false);
   const [resources, setResources] = useState<Resources>(emptyResources);
@@ -134,6 +134,7 @@ export default function SpaceScreen() {
       spaceName={name}
       sessions={sessions}
       client={client}
+      offline={offline}
       activePanel={activePanel}
       onActivePanelChange={setActivePanel}
       onOpenSession={(sessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })}

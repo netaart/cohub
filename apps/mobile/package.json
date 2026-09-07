@@ -3,6 +3,7 @@
   "main": "expo-router/entry",
   "version": "1.5.0",
   "dependencies": {
+    "@lobehub/icons-rn": "^2.13.1",
     "@logto/rn": "^1.2.0",
     "@neta-art/cohub": "^8.3.1",
     "@react-native-async-storage/async-storage": "~2.2.0",
@@ -18,6 +19,7 @@
     "expo-font": "~57.0.2",
     "expo-haptics": "~57.0.2",
     "expo-image-picker": "~57.0.16",
+    "expo-linear-gradient": "~57.0.1",
     "expo-linking": "~57.0.9",
     "expo-notifications": "~57.0.17",
     "expo-router": "~57.0.19",

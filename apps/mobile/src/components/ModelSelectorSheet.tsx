@@ -1,3 +1,4 @@
+import { ModelIcon, modelMappings } from "@lobehub/icons-rn";
 import type { ModelCatalogEntry, ModelStatusEntry } from "@neta-art/cohub";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, View } from "react-native";
@@ -49,6 +50,19 @@ function ModelStatusDot({ entry, status }: { entry: ModelCatalogEntry; status: M
   return <View accessibilityLabel={`${modelDisplayName(entry)} status: ${modelAvailabilityLabel(level)}`} style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: color, shadowColor: color, shadowOpacity: level === "unknown" ? 0 : 0.45, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } }} />;
 }
 
+function modelIconModel(entry: ModelCatalogEntry) {
+  const prefixed = `${entry.provider}/${entry.id}`;
+  const matches = (value: string) => modelMappings.some((item) => item.keywords.some((keyword) => new RegExp(keyword, "i").test(value)));
+  if (matches(entry.id)) return entry.id;
+  return matches(prefixed) ? prefixed : null;
+}
+
+function ModelBrandMark({ entry }: { entry: ModelCatalogEntry }) {
+  const theme = useAppTheme();
+  const model = modelIconModel(entry);
+  return model ? <ModelIcon model={model} type="avatar" size={23} shape="square" /> : <AppIcon name={modelSupportsVision(entry) ? "images" : "sparkles"} size={17} color={theme.colors.textMuted} />;
+}
+
 function makeSelection(entry: ModelCatalogEntry, level?: ChatModelSelection["thinkingLevel"]): ChatModelSelection {
   return { provider: entry.provider, id: entry.id, name: modelDisplayName(entry), ...(level ? { thinkingLevel: level } : {}) };
 }
@@ -90,7 +104,7 @@ export function ModelSelectorSheet({ visible, models, loading, error, modelStatu
     const cost = modelCostLabel(entry);
     return <View style={[styles.modelRow, { backgroundColor: selected ? theme.colors.accentSoft : "transparent", borderColor: selected ? theme.colors.accentBorder : theme.colors.border }]}>
       <Pressable testID={`model-option-${entry.provider}-${entry.id}`} accessibilityRole="button" accessibilityLabel={`Use ${modelDisplayName(entry)}`} accessibilityState={{ selected }} onPress={() => selectEntry(entry, levels.length > 1 ? selectedLevel : undefined)} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, opacity: pressed ? 0.72 : 1 })}>
-        <View style={[styles.modelIcon, { backgroundColor: selected ? theme.colors.background : theme.colors.surfaceRaised }]}><AppIcon name={modelSupportsVision(entry) ? "images" : "sparkles"} size={17} color={selected ? theme.colors.accent : theme.colors.textMuted} /></View>
+        <View style={[styles.modelIcon, { backgroundColor: selected ? theme.colors.background : theme.colors.surfaceRaised }]}><ModelBrandMark entry={entry} /></View>
         <View style={styles.modelText}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{modelDisplayName(entry)}</Text><ModelStatusDot entry={entry} status={modelStatus?.[entry.id] ?? null} /></View>
           <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textMuted, marginTop: 3 }]}>{entry.provider} · {entry.id}</Text>

@@ -14,6 +14,7 @@ import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useAppTheme, typography } from "@/src/theme";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { getResourcePinState, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
+import { mockFileTree } from "@/src/data/mock";
 import { PANEL_CLOSE_THRESHOLD, PANEL_OPEN_THRESHOLD, PANEL_SWIPE_VELOCITY, panelForOpeningDelta, panelForSide, shouldClosePanel, shouldOpenPanel, sideForPanel, type PanelName, type PanelSide } from "@/src/data/space-panel-gesture";
 import { AppIcon, IconButton, PrimaryButton, SearchField } from "@/src/ui";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
@@ -25,6 +26,7 @@ type SpacePanelsProps = {
   spaceName: string;
   sessions: UserSessionListItem[];
   client: CohubClient | null;
+  offline?: boolean;
   activePanel: SpacePanel | null;
   onActivePanelChange: (panel: SpacePanel | null) => void;
   onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void;
@@ -62,7 +64,7 @@ export function SpacePanels(props: SpacePanelsProps) {
   return Platform.OS === "web" ? <WebSpacePanels {...props} /> : <NativeSpacePanels {...props} />;
 }
 
-function NativeSpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
+function NativeSpacePanels({ spaceId, spaceName, sessions, client, offline = false, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
   const theme = useAppTheme();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
@@ -332,7 +334,7 @@ function NativeSpacePanels({ spaceId, spaceName, sessions, client, activePanel, 
           {interactive
             ? visiblePanel === "chat"
               ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={() => closePanel("chat")} onNewChat={() => { closePanel("chat"); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel("chat"); onOpenSession(sessionId, target); }} />
-              : <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} onClose={() => closePanel("files")} onOpenFile={(path) => { closePanel("files"); onOpenFile(path); }} onOpenFilesPage={() => { closePanel("files"); onOpenFilesPage(); }} />
+              : <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} offline={offline} onClose={() => closePanel("files")} onOpenFile={(path) => { closePanel("files"); onOpenFile(path); }} onOpenFilesPage={() => { closePanel("files"); onOpenFilesPage(); }} />
             : <PanelGesturePreview panel={visiblePanel} />}
         </Reanimated.View>
       </Reanimated.View> : null}
@@ -340,7 +342,7 @@ function NativeSpacePanels({ spaceId, spaceName, sessions, client, activePanel, 
   </GestureDetector>;
 }
 
-function WebSpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
+function WebSpacePanels({ spaceId, spaceName, sessions, client, offline = false, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -499,7 +501,7 @@ function WebSpacePanels({ spaceId, spaceName, sessions, client, activePanel, onA
       <View style={styles.modalRoot}>
         <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}><Pressable accessibilityRole="button" accessibilityLabel="Close panel" style={styles.fill} onPress={closeDrawer} /></Animated.View>
         <Animated.View collapsable={false} testID={visibleSide ? `space-panel-${visibleSide}` : undefined} {...panelResponder.panHandlers} accessibilityViewIsModal role="dialog" style={[styles.panel, WEB_GESTURE_STYLE, gestureActive ? WEB_NO_SELECT_STYLE : null, { width: panelWidth, height: Math.max(0, height), paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: theme.colors.background, borderColor: theme.colors.border, ...panelPosition, transform: [{ translateX }] }]}>
-            {visibleSide === "chat" ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={closeDrawer} onNewChat={() => { closeDrawer(); onNewChat(); }} onOpenSession={(sessionId, target) => { closeDrawer(); onOpenSession(sessionId, target); }} /> : <FilesPanel spaceId={spaceId} spaceName={spaceName} client={client} onClose={closeDrawer} onOpenFile={(path) => { closeDrawer(); onOpenFile(path); }} onOpenFilesPage={() => { closeDrawer(); onOpenFilesPage(); }} />}
+            {visibleSide === "chat" ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={closeDrawer} onNewChat={() => { closeDrawer(); onNewChat(); }} onOpenSession={(sessionId, target) => { closeDrawer(); onOpenSession(sessionId, target); }} /> : <FilesPanel spaceId={spaceId} spaceName={spaceName} client={client} offline={offline} onClose={closeDrawer} onOpenFile={(path) => { closeDrawer(); onOpenFile(path); }} onOpenFilesPage={() => { closeDrawer(); onOpenFilesPage(); }} />}
         </Animated.View>
       </View>
     </Modal>
@@ -744,7 +746,7 @@ function PanelFilterChip({ label, icon, selected, onPress }: { label: string; ic
   return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 32, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border, backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, flexDirection: "row", alignItems: "center", gap: 5 })}>{icon ? <AppIcon name={icon} size={13} color={selected ? theme.colors.accent : theme.colors.textMuted} /> : null}<Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }
 
-function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpenFile, onOpenFilesPage }: { enabled?: boolean; spaceId: string; spaceName: string; client: CohubClient | null; onClose: () => void; onOpenFile: (path: string) => void; onOpenFilesPage: () => void }) {
+function FilesPanel({ enabled = true, spaceId, spaceName, client, offline = false, onClose, onOpenFile, onOpenFilesPage }: { enabled?: boolean; spaceId: string; spaceName: string; client: CohubClient | null; offline?: boolean; onClose: () => void; onOpenFile: (path: string) => void; onOpenFilesPage: () => void }) {
   const theme = useAppTheme();
   const [path, setPath] = useState("");
   const [entries, setEntries] = useState<SpaceFsEntry[]>([]);
@@ -755,6 +757,12 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
   const load = useCallback(async () => {
     if (!enabled) return;
     const currentRequest = ++requestIdRef.current;
+    if (offline) {
+      setEntries(mockFileTree[normalizeSpacePath(path)] ?? []);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     if (!client) {
       setEntries([]);
       setError("Connect to Cohub to browse Files.");
@@ -771,7 +779,7 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
     } finally {
       if (currentRequest === requestIdRef.current) setLoading(false);
     }
-  }, [client, enabled, path, spaceId]);
+  }, [client, enabled, offline, path, spaceId]);
 
   useEffect(() => {
     if (!enabled) return;

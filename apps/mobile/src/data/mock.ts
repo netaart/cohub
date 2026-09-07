@@ -1,4 +1,4 @@
-import type { MessageRecord, ModelCatalogEntry, SessionTurnIndexItem, SessionTurnRecord, SpaceRecord, UserSessionListItem } from "@neta-art/cohub";
+import type { MessageRecord, ModelCatalogEntry, SessionTurnIndexItem, SessionTurnRecord, SpaceFsEntry, SpaceRecord, UserSessionListItem } from "@neta-art/cohub";
 
 const now = new Date().toISOString();
 const space = (id: string, name: string, description: string, pinned = false): SpaceRecord => ({ id, userUuid: "web-preview", name, slug: id, description, title: name, status: "active", meta: null, createdAt: now, updatedAt: now, lastActivityAt: now, isPinned: pinned });
@@ -40,6 +40,44 @@ export const mockMessages: Record<string, MessageRecord[]> = {
 };
 export const mockUsage = { requestCount: 128, successCount: 119, totalTokens: 84320, hourly: [] } as never;
 export const mockModels: ModelCatalogEntry[] = [
-  { provider: "cohub", id: "atlas", model: { name: "Atlas", description: "Fast general-purpose model", thinkingLevels: ["off", "low", "medium", "high"] } },
-  { provider: "cohub", id: "sage", model: { name: "Sage", description: "Careful reasoning model", thinkingLevels: ["low", "medium", "high"] } },
+  { provider: "openai", id: "gpt-5", model: { name: "GPT-5", description: "OpenAI flagship reasoning model", reasoning: true, contextWindow: 400_000, cost: { input: 1.25, output: 10 } } },
+  { provider: "anthropic", id: "claude-opus-4-1", model: { name: "Claude Opus 4.1", description: "Anthropic most capable model", reasoning: true, contextWindow: 200_000, cost: { input: 15, output: 75 } } },
+  { provider: "google", id: "gemini-2.5-pro", model: { name: "Gemini 2.5 Pro", description: "Google multimodal model", reasoning: true, input: ["image"], contextWindow: 1_000_000, cost: { input: 1.25, output: 10 } } },
+  { provider: "deepseek", id: "deepseek-chat", model: { name: "DeepSeek Chat", description: "Cost-effective general model", contextWindow: 128_000, cost: { input: 0.27, output: 1.1 } } },
+  { provider: "qwen", id: "qwen3-max", model: { name: "Qwen3 Max", description: "Alibaba flagship model", reasoning: true, contextWindow: 256_000 } },
+  { provider: "xai", id: "grok-4", model: { name: "Grok 4", description: "xAI reasoning model", reasoning: true, contextWindow: 256_000 } },
 ];
+
+const file = (path: string, type: SpaceFsEntry["type"], size = 0, mimeType: string | null = null): SpaceFsEntry => ({ name: path.split("/").pop() ?? path, path, type, size, mimeType, mtimeMs: Date.parse("2026-09-01T08:00:00Z") });
+const folder = (path: string): SpaceFsEntry => file(path, "dir");
+
+export const mockFileTree: Record<string, SpaceFsEntry[]> = {
+  "": [
+    folder("docs"),
+    folder("src"),
+    file("README.md", "file", 4821, "text/markdown"),
+    file("package.json", "file", 1263, "application/json"),
+    file("logo.png", "file", 24576, "image/png"),
+    file("demo.mp4", "file", 10485760, "video/mp4"),
+    file("budget.xlsx", "file", 15360, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    file("assets.zip", "file", 5242880, "application/zip"),
+    file("backup.sqlite", "file", 61440, "application/x-sqlite3"),
+  ],
+  docs: [
+    file("notes.md", "file", 2107, "text/markdown"),
+    file("spec.pdf", "file", 209715, "application/pdf"),
+    file("logo-dark.png", "file", 18944, "image/png"),
+  ],
+  src: [
+    folder("components"),
+    file("index.ts", "file", 512, "text/typescript"),
+    file("styles.css", "file", 2048, "text/css"),
+    file("config.yml", "file", 384, "text/yaml"),
+  ],
+  "src/components": [
+    file("Button.tsx", "file", 1229, "text/typescript-tsxx"),
+    file("Header.tsx", "file", 2048, "text/typescript-tsxx"),
+    file("icon.svg", "file", 940, "image/svg+xml"),
+    file("click.wav", "file", 40960, "audio/wav"),
+  ],
+};
