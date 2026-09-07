@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { Pressable, View, type ViewStyle } from "react-native";
+import { View, type StyleProp, type ViewStyle } from "react-native";
 import { useAppTheme } from "@/src/theme";
 import { IconButton } from "@/src/ui";
+import { PressableScale } from "@/src/ui/PressableScale";
 
 type PinnedRowProps = {
   children: ReactNode;
@@ -12,7 +13,8 @@ type PinnedRowProps = {
   pinning: boolean;
   onPress: () => void;
   onTogglePin: () => void;
-  rowStyle: (state: { pressed: boolean }) => ViewStyle;
+  rowStyle: ViewStyle;
+  rowPressedStyle?: StyleProp<ViewStyle>;
 };
 
 export function PinnedRow({
@@ -25,19 +27,21 @@ export function PinnedRow({
   onPress,
   onTogglePin,
   rowStyle,
+  rowPressedStyle,
 }: PinnedRowProps) {
   const theme = useAppTheme();
   return (
     <View style={[styles.shell, { borderBottomColor: theme.colors.border }]}>
-      <Pressable
+      <PressableScale
         accessibilityRole="button"
         accessibilityLabel={openLabel}
         onPress={onPress}
-       
-        style={({ pressed }) => [rowStyle({ pressed }), styles.primary]}
+        haptic
+        style={[rowStyle, styles.primary]}
+        pressedStyle={rowPressedStyle}
       >
         {children}
-      </Pressable>
+      </PressableScale>
       <View style={styles.pinAction}>
         <IconButton
           name={pinned ? "pin-off" : "pin"}

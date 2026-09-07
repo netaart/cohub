@@ -255,5 +255,6 @@ export const typography = {
   body: { fontSize: 15, lineHeight: 22, fontWeight: "400" as const },
   bodyMedium: { fontSize: 15, lineHeight: 22, fontWeight: "600" as const },
   caption: { fontSize: 12, lineHeight: 17, fontWeight: "500" as const },
+  eyebrow: { fontSize: 11, lineHeight: 14, fontWeight: "600" as const, letterSpacing: 0.88 },
   micro: { fontSize: 10, lineHeight: 14, fontWeight: "600" as const },
 };

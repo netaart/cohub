@@ -1,7 +1,8 @@
 import type { UserSessionListItem } from "@neta-art/cohub";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { PinnedRow } from "@/src/components/PinnedRow";
 import { Avatar, AppIcon, StatusPill } from "@/src/ui";
+import { PressableScale } from "@/src/ui/PressableScale";
 import { useAppTheme, typography } from "@/src/theme";
 import { displaySessionTitle, formatRelativeTime, shortPreview } from "@/src/utils";
 import { getSessionStatus, sessionStatusLabels } from "@/src/data/session-status";
@@ -33,9 +34,10 @@ export function SessionRow({ session, onPress, pinned = false, pinning = false, 
     </View>
     <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
   </>;
-  const rowStyle = ({ pressed }: { pressed: boolean }) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" });
+  const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, backgroundColor: "transparent" };
+  const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
   if (!onTogglePin) {
-    return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${displaySessionTitle(session)}`} onPress={onPress} style={rowStyle}>{rowContent}</Pressable>;
+    return <PressableScale accessibilityRole="button" accessibilityLabel={`Open ${displaySessionTitle(session)}`} onPress={onPress} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{rowContent}</PressableScale>;
   }
   return <PinnedRow
     openLabel={`Open ${displaySessionTitle(session)}`}
@@ -46,6 +48,7 @@ export function SessionRow({ session, onPress, pinned = false, pinning = false, 
     onPress={onPress}
     onTogglePin={() => onTogglePin()}
     rowStyle={rowStyle}
+    rowPressedStyle={rowPressedStyle}
   >
     {rowContent}
   </PinnedRow>;

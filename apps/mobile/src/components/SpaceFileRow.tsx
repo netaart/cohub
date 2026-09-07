@@ -9,8 +9,9 @@ import FileSpreadsheet from "lucide-react-native/icons/file-spreadsheet";
 import FileText from "lucide-react-native/icons/file-text";
 import Music from "lucide-react-native/icons/music";
 import Video from "lucide-react-native/icons/video";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { AppIcon, type IconName } from "@/src/ui";
+import { PressableScale } from "@/src/ui/PressableScale";
 import { useAppTheme, typography } from "@/src/theme";
 import { formatRelativeTime } from "@/src/utils";
 
@@ -57,21 +58,21 @@ export function SpaceFileRow({ entry, onPress, compact = false }: SpaceFileRowPr
       : `${entry.mimeType || "File"} · ${formatSpaceFileBytes(entry.size)}`;
 
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityLabel={`${isDirectory ? "Open folder" : "Open file"} ${entry.name}`}
       onPress={onPress}
-     
-      style={({ pressed }) => ({
+      haptic
+      style={{
         minHeight: compact ? 60 : 63,
         flexDirection: "row",
         alignItems: "center",
         gap: compact ? 10 : 11,
         paddingHorizontal: compact ? 14 : 16,
-        backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.border,
-      })}
+      }}
+      pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}
     >
       <View style={{ width: compact ? 33 : 34, height: compact ? 33 : 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: fileType ? `${fileType.color}1f` : isDirectory ? theme.colors.accentSoft : theme.colors.surface }}>
         {fileType ? <fileType.icon size={17} color={fileType.color} /> : <AppIcon name={icon} size={17} color={iconColor} />}
@@ -82,6 +83,6 @@ export function SpaceFileRow({ entry, onPress, compact = false }: SpaceFileRowPr
       </View>
       {!compact ? <Text style={[typography.micro, { color: theme.colors.textFaint }]}>{entry.mtimeMs ? formatRelativeTime(new Date(entry.mtimeMs).toISOString()) : ""}</Text> : null}
       <AppIcon name="chevron-right" size={compact ? 15 : 16} color={theme.colors.textFaint} />
-    </Pressable>
+    </PressableScale>
   );
 }

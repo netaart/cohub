@@ -42,6 +42,10 @@ export type StreamView = {
   }[];
   turnId: string | null;
   messageId: string | null;
+  /** Last lifecycle phase reported by the agent runtime, e.g. llm_call_started. */
+  runtimePhase: "llm_call_started" | null;
+  runtimeProvider: string | null;
+  runtimeModel: string | null;
 };
 
 export type SessionView = {

@@ -3,6 +3,7 @@ import { usePathname } from "expo-router";
 import { useEffect, useState } from "react";
 import { Animated, Easing, Platform, type ColorValue } from "react-native";
 import { icons, type IconName } from "@/src/icons";
+import { motion } from "@/src/motion";
 
 export type AnimatedTabIconName = "messages" | "layers" | "activity" | "user";
 
@@ -30,7 +31,7 @@ export function AnimatedTabIcon({ name, color, size, focused, route }: AnimatedT
   useEffect(() => {
     const animation = Animated.timing(progress, {
       toValue: selected ? 1 : 0,
-      duration: 140,
+      duration: motion.fade.duration,
       easing: Easing.out(Easing.quad),
       useNativeDriver: Platform.OS !== "web",
     });

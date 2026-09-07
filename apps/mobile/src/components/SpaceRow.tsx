@@ -1,7 +1,8 @@
 import type { SpaceRecord } from "@neta-art/cohub";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { PinnedRow } from "@/src/components/PinnedRow";
 import { Avatar, AppIcon, StatusPill } from "@/src/ui";
+import { PressableScale } from "@/src/ui/PressableScale";
 import { useAppTheme, typography } from "@/src/theme";
 import { displaySpaceName, formatRelativeTime } from "@/src/utils";
 
@@ -27,8 +28,9 @@ export function SpaceRow({ space, chatCount, onPress, pinning = false, onToggleP
     </View>
     <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
   </>;
-  const rowStyle = ({ pressed }: { pressed: boolean }) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 13, minHeight: 84, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" });
-  if (!onTogglePin) return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={onPress} style={rowStyle}>{content}</Pressable>;
+  const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 13, minHeight: 84, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: "transparent" };
+  const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
+  if (!onTogglePin) return <PressableScale accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={onPress} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
   return <PinnedRow
     openLabel={`Open ${name}`}
     pinLabel="Pin Space"
@@ -38,6 +40,7 @@ export function SpaceRow({ space, chatCount, onPress, pinning = false, onToggleP
     onPress={onPress}
     onTogglePin={() => onTogglePin()}
     rowStyle={rowStyle}
+    rowPressedStyle={rowPressedStyle}
   >
     {content}
   </PinnedRow>;

@@ -17,6 +17,7 @@ import { getResourcePinState, isResourcePinned, loadResourcePinStates, toggleRes
 import { mockFileTree } from "@/src/data/mock";
 import { PANEL_CLOSE_THRESHOLD, PANEL_OPEN_THRESHOLD, PANEL_SWIPE_VELOCITY, panelForOpeningDelta, panelForSide, shouldClosePanel, shouldOpenPanel, sideForPanel, type PanelName, type PanelSide } from "@/src/data/space-panel-gesture";
 import { AppIcon, IconButton, PrimaryButton, SearchField } from "@/src/ui";
+import { motion } from "@/src/motion";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
 
 export type SpacePanel = "chat" | "files";
@@ -38,7 +39,7 @@ type SpacePanelsProps = {
 
 const PANEL_WIDTH_RATIO = 0.86;
 const MAX_PANEL_WIDTH = 360;
-const ANIMATION_DURATION_MS = 220;
+const ANIMATION_DURATION_MS = motion.glide.duration;
 const USE_NATIVE_DRIVER = Platform.OS !== "web";
 // These CSS properties are supported by React Native Web but are not in the shared RN ViewStyle type.
 const WEB_GESTURE_STYLE: ViewStyle | undefined = Platform.OS === "web"

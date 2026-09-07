@@ -1,6 +1,7 @@
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { PinnedRow } from "@/src/components/PinnedRow";
 import { Avatar, AppIcon } from "@/src/ui";
+import { PressableScale } from "@/src/ui/PressableScale";
 import type { RemoteSessionSearchHit, RemoteSpaceSearchHit, SessionNavigationTarget } from "@/src/data/session-search";
 import { useAppTheme, typography } from "@/src/theme";
 import { formatRelativeTime, shortPreview } from "@/src/utils";
@@ -30,9 +31,10 @@ export function SessionSearchRow({ hit, onPress, pinned = false, pinning = false
     </View>
     <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
   </>;
-  const rowStyle = ({ pressed }: { pressed: boolean }) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" });
+  const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, backgroundColor: "transparent" };
+  const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
   if (!onTogglePin) {
-    return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${hit.title}`} onPress={() => onPress(target)} style={rowStyle}>{content}</Pressable>;
+    return <PressableScale accessibilityRole="button" accessibilityLabel={`Open ${hit.title}`} onPress={() => onPress(target)} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
   }
   return <PinnedRow
     openLabel={`Open ${hit.title}`}
@@ -43,6 +45,7 @@ export function SessionSearchRow({ hit, onPress, pinned = false, pinning = false
     onPress={() => onPress(target)}
     onTogglePin={() => onTogglePin()}
     rowStyle={rowStyle}
+    rowPressedStyle={rowPressedStyle}
   >
     {content}
   </PinnedRow>;
@@ -51,12 +54,13 @@ export function SessionSearchRow({ hit, onPress, pinned = false, pinning = false
 export function SpaceSearchRow({ hit, onPress }: { hit: RemoteSpaceSearchHit; onPress: () => void }) {
   const theme = useAppTheme();
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityLabel={`Open ${hit.title}`}
       onPress={onPress}
-     
-      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 13, minHeight: 84, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}
+      haptic
+      style={{ flexDirection: "row", alignItems: "center", gap: 13, minHeight: 84, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}
+      pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}
     >
       <Avatar name={hit.title} uri={hit.avatarUrl} size={50} />
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -65,6 +69,6 @@ export function SpaceSearchRow({ hit, onPress }: { hit: RemoteSpaceSearchHit; on
         <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 5 }]}>{hit.updatedAt ? `Active ${formatRelativeTime(hit.updatedAt)}` : "Space"}</Text>
       </View>
       <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
-    </Pressable>
+    </PressableScale>
   );
 }

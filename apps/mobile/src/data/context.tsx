@@ -195,6 +195,7 @@ type Action =
   | { type: "send-end"; sessionId: string }
   | { type: "send-failed"; sessionId: string; clientMessageId: string; message: string }
   | { type: "stream-state"; sessionId: string; stream: StreamView }
+  | { type: "stream-lifecycle"; sessionId: string; provider: string | null; model: string | null }
   | { type: "stream-clear"; sessionId: string }
   | { type: "session-upsert"; session: UserSessionListItem }
   | { type: "space-upsert"; space: SpaceRecord };
@@ -511,6 +512,10 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "stream-state":
       return updateView(state, action.sessionId, { stream: action.stream });
+    case "stream-lifecycle":
+      return state.sessionViews[action.sessionId]?.stream
+        ? updateView(state, action.sessionId, { stream: { ...state.sessionViews[action.sessionId]!.stream!, runtimePhase: "llm_call_started", runtimeProvider: action.provider, runtimeModel: action.model } })
+        : state;
     case "stream-clear":
       return updateView(state, action.sessionId, { stream: null });
     case "session-upsert": {
@@ -1055,7 +1060,7 @@ export function AppProvider({
           const turns = mockTurns[sessionId] ?? [];
           dispatch({ type: "session-success", sessionId, space: mockSpace, session: summary, messages: turns.length > 0 ? messagesFromTurns(turns) : (mockMessages[sessionId] ?? []), turns, hasMoreOlder: false });
           dispatch({ type: "turn-index", sessionId, turnIndex: mockTurnIndex[sessionId] ?? [] });
-          if (summary.status === "running") dispatch({ type: "stream-state", sessionId, stream: { status: "streaming", contentBlocks: [{ type: "text", text: "Still working on the launch brief…" }], intermediateMessages: [], turnId: "mock-running-turn", messageId: null } });
+          if (summary.status === "running") dispatch({ type: "stream-state", sessionId, stream: { status: "streaming", contentBlocks: [{ type: "text", text: "Still working on the launch brief…" }], intermediateMessages: [], turnId: "mock-running-turn", messageId: null, runtimePhase: null, runtimeProvider: null, runtimeModel: null } });
         }
         return;
       }
@@ -1111,6 +1116,9 @@ export function AppProvider({
                 intermediateMessages: event.intermediateMessages,
                 turnId: event.state.turnId,
                 messageId: event.messageId,
+                runtimePhase: null,
+                runtimeProvider: null,
+                runtimeModel: null,
               };
               dispatch({ type: "stream-state", sessionId, stream });
             },
@@ -1126,7 +1134,10 @@ export function AppProvider({
             turnUpdated: (event) => {
               dispatch({ type: "turn-patch", sessionId, turn: event.turn });
             },
-            lifecycle: () => undefined,
+            lifecycle: (event) => {
+              if (event.phase !== "llm_call_started") return;
+              dispatch({ type: "stream-lifecycle", sessionId, provider: event.provider, model: event.model });
+            },
             error: (event) => {
               dispatch({ type: "session-error", sessionId, message: event.message });
             },

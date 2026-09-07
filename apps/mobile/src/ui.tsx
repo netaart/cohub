@@ -143,7 +143,7 @@ export function SectionHeader({ title, action, onAction }: { title: string; acti
   const theme = useAppTheme();
   return (
     <View style={styles.sectionHeader}>
-      <Text style={[typography.caption, { color: theme.colors.textMuted, textTransform: "uppercase", letterSpacing: 0.8 }]}>{title}</Text>
+      <Text style={[typography.eyebrow, { color: theme.colors.textMuted, textTransform: "uppercase" }]}>{title}</Text>
       {action && onAction ? <Pressable onPress={onAction} hitSlop={8}><Text style={[typography.caption, { color: theme.colors.accent }]}>{action}</Text></Pressable> : null}
     </View>
   );
