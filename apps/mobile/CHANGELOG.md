@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.6.0](https://github.com/markbang/cohub-mobile/compare/v1.5.0...v1.6.0) (2026-09-07)
+
+
+### Features
+
+* **mobile:** add brand and file type icons ([f0a9c01](https://github.com/markbang/cohub-mobile/commit/f0a9c01d07e677475a44da3b9182ca6c0e17f312))
+* **mobile:** align workspace UI with autonomous agent workflow ([f61712b](https://github.com/markbang/cohub-mobile/commit/f61712b89e2de9b51cda51444493e5c90e7add98))
+* **mobile:** improve chat previews and markdown rendering ([4ce4d17](https://github.com/markbang/cohub-mobile/commit/4ce4d176d68218e579982b9293b47be921990cc8))
+
+
+### Fixes
+
+* **deps:** override decode-uri-component to patched 0.5.0 ([e972a46](https://github.com/markbang/cohub-mobile/commit/e972a469196299eaee50cc1603052a13e757fffe))
+* **mobile:** close remaining review gaps ([c696c04](https://github.com/markbang/cohub-mobile/commit/c696c04185fc5afa5bd1b5d5123212f7aa530db4))
+* **mobile:** guard preview route in production ([e9a2bac](https://github.com/markbang/cohub-mobile/commit/e9a2bacc33af90e07418d92a6715eaa11ba2c265))
+* **mobile:** isolate preview route and list numbering ([105ede1](https://github.com/markbang/cohub-mobile/commit/105ede1a618f20e19b688cacd7ebee9b7ea477a7))
+* **mobile:** keep scrollable sheets bounded ([61263c6](https://github.com/markbang/cohub-mobile/commit/61263c620f0e4a114181e87e620804e17dda5dc6))
+* **mobile:** make press feedback feel native ([1a554d2](https://github.com/markbang/cohub-mobile/commit/1a554d2752948451ba579863a976e2b3b9bd5dbd))
+* **mobile:** normalize markdown line endings ([d6dd567](https://github.com/markbang/cohub-mobile/commit/d6dd567113557ca7199d8fb3954851fc461dadf5))
+* **mobile:** resolve review feedback ([bfd8f1a](https://github.com/markbang/cohub-mobile/commit/bfd8f1ab17196f7c0c648fab4e027b38dcf5935c))
+* **mobile:** restore press feedback for active controls ([7677f0d](https://github.com/markbang/cohub-mobile/commit/7677f0dbed0cc28c42ce4949b210aa9abae80576))
+
+
+### CI
+
+* bump github/codeql-action from 3 to 4 ([#46](https://github.com/markbang/cohub-mobile/issues/46)) ([0951c99](https://github.com/markbang/cohub-mobile/commit/0951c99d411a7981f0fef62966dc59d27c40ca70))
+
 ## [1.5.0](https://github.com/markbang/cohub-mobile/compare/v1.4.1...v1.5.0) (2026-09-03)
 
 
