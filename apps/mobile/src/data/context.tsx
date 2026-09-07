@@ -18,8 +18,10 @@ import {
   clearUserCache,
   hydrateHome,
   loadMessages,
+  loadSessionReadSequence,
   saveHome,
   saveMessages,
+  saveSessionReadSequence,
 } from "@/src/data/local-db";
 import type {
   ActivityItem,
@@ -35,11 +37,10 @@ import { mergeDisplayMessages, mergeTurns, messagesFromTurns } from "@/src/data/
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
 import { mockMessages, mockModels, mockSessions, mockSpaces, mockTurnIndex, mockTurns, mockUsage } from "@/src/data/mock";
+import { getSessionStatus } from "@/src/data/session-status";
 import {
   displaySessionTitle,
   displaySpaceName,
-  isNeedsAttentionStatus,
-  isRunningStatus,
   newId,
   sortByRecent,
 } from "@/src/utils";
@@ -541,6 +542,7 @@ function reducer(state: AppState, action: Action): AppState {
 
 export type AppContextValue = {
   state: AppState;
+  offline: boolean;
   client: CohubClient | null;
   connectionState: ConnectionState;
   installationId: string | null;
@@ -571,6 +573,8 @@ export type AppContextValue = {
   upsertSpace: (space: SpaceRecord) => void;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   clearCache: () => Promise<void>;
+  loadSessionReadSequence: (sessionId: string) => Promise<number | null>;
+  saveSessionReadSequence: (sessionId: string, sequence: number) => Promise<void>;
   activityItems: ActivityItem[];
 };
 
@@ -1472,6 +1476,16 @@ export function AppProvider({
     [client, dispatch],
   );
 
+  const loadSessionReadSequenceForUser = useCallback(
+    (sessionId: string) => loadSessionReadSequence(userKey, sessionId),
+    [userKey],
+  );
+
+  const saveSessionReadSequenceForUser = useCallback(
+    (sessionId: string, sequence: number) => saveSessionReadSequence(userKey, sessionId, sequence),
+    [userKey],
+  );
+
   const clearCache = useCallback(async () => {
     await clearUserCache(userKey);
     setModels(offline ? mockModels : []);
@@ -1489,11 +1503,14 @@ export function AppProvider({
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     return state.sessions.slice(0, 30).map((session) => {
-      const status = isRunningStatus(session.status)
+      const normalizedStatus = getSessionStatus(session.status);
+      const status = normalizedStatus === "running"
         ? "running"
-        : isNeedsAttentionStatus(session.status)
-          ? "attention"
-          : "complete";
+        : normalizedStatus === "failed"
+          ? "failed"
+          : normalizedStatus === "stopped"
+            ? "stopped"
+            : "complete";
       return {
         id: session.id,
         sessionId: session.id,
@@ -1510,6 +1527,7 @@ export function AppProvider({
   const value = useMemo<AppContextValue>(
     () => ({
       state,
+      offline,
       client,
       connectionState,
       installationId,
@@ -1540,6 +1558,8 @@ export function AppProvider({
       upsertSpace,
       renameSession,
       clearCache,
+      loadSessionReadSequence: loadSessionReadSequenceForUser,
+      saveSessionReadSequence: saveSessionReadSequenceForUser,
       activityItems,
     }),
     [
@@ -1547,6 +1567,8 @@ export function AppProvider({
       abortSession,
       clearCache,
       client,
+      loadSessionReadSequenceForUser,
+      saveSessionReadSequenceForUser,
       closeSession,
       connectionState,
       createSpace,
@@ -1568,6 +1590,7 @@ export function AppProvider({
       modelStatusError,
       modelStatusLoading,
       openSession,
+      offline,
       refreshHome,
       refreshSession,
       renameSession,

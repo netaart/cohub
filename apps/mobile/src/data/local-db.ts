@@ -22,6 +22,14 @@ export async function saveMessages(_userKey: string, _sessionId: string, _messag
   return undefined;
 }
 
+export async function loadSessionReadSequence(_userKey: string, _sessionId: string): Promise<number | null> {
+  return null;
+}
+
+export async function saveSessionReadSequence(_userKey: string, _sessionId: string, _sequence: number) {
+  return undefined;
+}
+
 export async function clearUserCache(_userKey: string) {
   return undefined;
 }

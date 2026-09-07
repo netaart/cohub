@@ -4,6 +4,7 @@ import { filterSpaces } from "../src/data/space-filters.ts";
 import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { nextChatTailFollowing } from "../src/data/chat-scroll.ts";
+import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { messageIndexForTurn } from "../src/data/session-history.ts";
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 
@@ -170,6 +171,10 @@ assert.equal(messageIndexForTurn(messages, 7), 1);
 assert.equal(messageIndexForTurn(messages, 8), 3);
 assert.equal(messageIndexForTurn([{ role: "assistant", meta: { turnSequence: 9 } }], 9), 0);
 assert.equal(messageIndexForTurn(messages, 99), -1);
+assert.equal(latestUnreadAssistantIndex(messages, null), 2);
+assert.equal(latestUnreadAssistantIndex(messages, 6), 2);
+assert.equal(latestUnreadAssistantIndex(messages, 7), -1);
+assert.equal(latestUnreadAssistantIndex([{ role: "assistant", sequence: 1, meta: null }], null), -1);
 
 const mapped = mapRemoteSearchResults([
   searchResult({ type: "session", id: "session-1", turnId: null, sequence: null, score: 0.99, title: "Remote Chat" }),

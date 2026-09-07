@@ -95,6 +95,6 @@ export type ActivityItem = {
   title: string;
   spaceName: string;
   preview: string;
-  status: "running" | "attention" | "complete";
+  status: "running" | "failed" | "stopped" | "complete";
   updatedAt: string;
 };

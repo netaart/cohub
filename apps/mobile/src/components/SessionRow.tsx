@@ -3,7 +3,8 @@ import { Pressable, Text, View } from "react-native";
 import { PinnedRow } from "@/src/components/PinnedRow";
 import { Avatar, AppIcon, StatusPill } from "@/src/ui";
 import { useAppTheme, typography } from "@/src/theme";
-import { displaySessionTitle, formatRelativeTime, isNeedsAttentionStatus, isRunningStatus, shortPreview } from "@/src/utils";
+import { displaySessionTitle, formatRelativeTime, shortPreview } from "@/src/utils";
+import { getSessionStatus, sessionStatusLabels } from "@/src/data/session-status";
 
 type SessionRowProps = {
   session: UserSessionListItem;
@@ -16,8 +17,8 @@ type SessionRowProps = {
 export function SessionRow({ session, onPress, pinned = false, pinning = false, onTogglePin }: SessionRowProps) {
   const theme = useAppTheme();
   const spaceName = session.space?.name?.trim() || "Space";
-  const running = isRunningStatus(session.status);
-  const attention = isNeedsAttentionStatus(session.status);
+  const sessionStatus = getSessionStatus(session.status);
+  const running = sessionStatus === "running";
   const rowContent = <>
     <Avatar name={spaceName} uri={session.space?.publicProfile?.avatarUrl} size={48} online={running} />
     <View style={{ flex: 1, minWidth: 0, alignSelf: "stretch", justifyContent: "center" }}>
@@ -27,7 +28,7 @@ export function SessionRow({ session, onPress, pinned = false, pinning = false, 
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
         <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, flex: 1 }]}>{spaceName} · {shortPreview(session.latestMessageText, 84)}</Text>
-        {running ? <StatusPill label="Running" tone="warning" /> : attention ? <StatusPill label="Needs you" tone="danger" /> : null}
+        {sessionStatus === "running" ? <StatusPill label={sessionStatusLabels.running} tone="warning" /> : sessionStatus === "failed" ? <StatusPill label={sessionStatusLabels.failed} tone="danger" /> : sessionStatus === "stopped" ? <StatusPill label={sessionStatusLabels.stopped} tone="neutral" /> : null}
       </View>
     </View>
     <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />

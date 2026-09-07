@@ -12,21 +12,22 @@ export const mockSpaces = [
 ];
 export const mockSessions: UserSessionListItem[] = [
   session("s-running", "product", "Agent is preparing the launch brief", "running", "Drafting the competitive positioning and launch checklist…"),
-  session("s-attention", "product", "Review the pricing page before publishing", "needs_input", "I found two copy conflicts that need your decision."),
+  session("s-failed", "product", "Launch brief generation failed", "failed", "The Agent run failed after preparing the source notes."),
   session("s-complete", "research", "Summarize the customer interview notes", "completed", "The summary is ready with five recurring themes."),
   session("s-long", "research", "A very long chat title that should remain readable without pushing actions off screen on a narrow phone", "completed", "A deliberately long preview line to exercise truncation and row height."),
 ];
 export const mockTurns: Record<string, SessionTurnRecord[]> = {};
 export const mockTurnIndex: Record<string, SessionTurnIndexItem[]> = {};
-for (const sessionId of ["s-running", "s-attention", "s-complete", "s-long"]) {
+for (const sessionId of ["s-running", "s-failed", "s-complete", "s-long"]) {
   const turns = Array.from({ length: sessionId === "s-complete" ? 6 : 3 }, (_, index) => {
     const sequence = index + 1;
+    const failed = sessionId === "s-failed" && sequence === 3;
     return {
       id: `${sessionId}-turn-${sequence}`, sessionId, userUuid: "web-preview", sequence,
-      status: sessionId === "s-running" && sequence === 3 ? "running" : "completed",
+      status: failed ? "failed" : sessionId === "s-running" && sequence === 3 ? "running" : "completed",
       intent: "chat", userContent: [{ type: "text", text: `User request for turn ${sequence}: continue the work.` }], userText: `User request for turn ${sequence}: continue the work.`,
-      assistantContent: [{ type: "text", text: `Assistant response for turn ${sequence}. This longer response gives the locator enough content to scroll to a distinct position.` }], assistantText: `Assistant response for turn ${sequence}. This longer response gives the locator enough content to scroll to a distinct position.`,
-      provider: "cohub", model: "mock-agent", stopReason: "stop", errorMessage: null, finalUsage: null, totalUsage: null, summary: null, intermediateIndex: null, intermediateSummary: null, meta: null, startedAt: now, completedAt: now, durationMs: 420, createdAt: now, updatedAt: now,
+      assistantContent: failed ? null : [{ type: "text", text: `Assistant response for turn ${sequence}. This longer response gives the locator enough content to scroll to a distinct position.` }], assistantText: failed ? null : `Assistant response for turn ${sequence}. This longer response gives the locator enough content to scroll to a distinct position.`,
+      provider: "cohub", model: "mock-agent", stopReason: failed ? null : "stop", errorMessage: failed ? "The Agent run ended before the launch brief could be completed." : null, finalUsage: null, totalUsage: null, summary: null, intermediateIndex: null, intermediateSummary: null, meta: null, startedAt: now, completedAt: now, durationMs: 420, createdAt: now, updatedAt: now,
     } as unknown as SessionTurnRecord;
   });
   mockTurns[sessionId] = turns;
@@ -34,7 +35,7 @@ for (const sessionId of ["s-running", "s-attention", "s-complete", "s-long"]) {
 }
 export const mockMessages: Record<string, MessageRecord[]> = {
   "s-running": [message("s-running-m1", "s-running", "user", 1, "Prepare a concise launch brief for the mobile app."), message("s-running-m2", "s-running", "assistant", 2, "I am comparing the current positioning, launch risks, and the checklist now. This running state should keep the composer and stop action usable.")],
-  "s-attention": [message("s-attention-m1", "s-attention", "user", 1, "Review the pricing page."), message("s-attention-m2", "s-attention", "assistant", 2, "I found two copy conflicts that need your decision before I can finish.")],
+  "s-failed": [message("s-failed-m1", "s-failed", "user", 1, "Prepare the launch brief."), message("s-failed-m2", "s-failed", "assistant", 2, "The Agent run failed after preparing the source notes.")],
   "s-complete": [message("s-complete-m1", "s-complete", "user", 1, "Summarize the interviews."), message("s-complete-m2", "s-complete", "assistant", 2, "The summary is ready with five recurring themes and three follow-up questions.")],
 };
 export const mockUsage = { requestCount: 128, successCount: 119, totalTokens: 84320, hourly: [] } as never;

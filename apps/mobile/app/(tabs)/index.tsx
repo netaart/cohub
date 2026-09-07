@@ -6,11 +6,11 @@ import { SessionRow } from "@/src/components/SessionRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type RemoteSpaceSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { BrandMark, ConnectionBanner, DataError, EmptyState, IconButton, LoadingRows, Screen, SearchField, SyncStatus, TopBar } from "@/src/ui";
-import { isNeedsAttentionStatus, isRunningStatus } from "@/src/utils";
+import { ConnectionBanner, DataError, EmptyState, LoadingRows, Screen, SyncStatus, WorkspaceToolbar } from "@/src/ui";
+import { getSessionStatus } from "@/src/data/session-status";
 import { SpaceRow } from "@/src/components/SpaceRow";
 
-type Filter = "all" | "running" | "attention";
+type Filter = "all" | "running" | "completed";
 type ChatListItem =
   | { kind: "local-session"; session: import("@neta-art/cohub").UserSessionListItem }
   | { kind: "remote-session"; hit: RemoteSessionSearchHit }
@@ -24,21 +24,15 @@ export default function ChatsScreen() {
   const { state, client, connectionState, refreshHome, loadMoreSessions } = useApp();
   const dataError = state.error ?? state.sessionsError;
   const searchRef = useRef<TextInput>(null);
-  const listRef = useRef<FlatList>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const remoteSearch = useRemoteSearch(client, query, { enabled: filter === "all", types: CHAT_SEARCH_TYPES });
   const trimmedQuery = normalizeSearchQuery(query);
 
-  const focusSearch = () => {
-    listRef.current?.scrollToOffset({ offset: 0, animated: false });
-    requestAnimationFrame(() => searchRef.current?.focus());
-  };
-
   const localSessions = useMemo(() => {
     const needle = trimmedQuery.toLowerCase();
     return state.sessions.filter((session) => {
-      const matchesFilter = filter === "all" || (filter === "running" ? isRunningStatus(session.status) : isNeedsAttentionStatus(session.status));
+      const matchesFilter = filter === "all" || getSessionStatus(session.status) === filter;
       if (!matchesFilter) return false;
       if (!needle) return true;
       return [session.title, session.latestMessageText, session.space?.name].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false);
@@ -74,11 +68,10 @@ export default function ChatsScreen() {
 
   return (
     <Screen>
-      <TopBar title="Chats" subtitle={dataError ? "Chats unavailable" : state.sessions.length > 0 ? `${state.sessions.length} recent threads` : "Your work inbox"} left={<BrandMark size={38} />} right={<><IconButton name="search" label="Focus search" size={40} onPress={focusSearch} /><IconButton name="square-pen" label="New Chat" size={40} tone="accent" onPress={() => router.push("/new-chat")} /></>} />
+      <WorkspaceToolbar query={query} onQueryChange={setQuery} queryRef={searchRef} onAccount={() => router.push("/profile")} onCreate={() => router.push("/new-chat")} onSettings={() => router.push("/settings")} />
       <ConnectionBanner state={connectionState} />
       {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
       <FlatList
-        ref={listRef}
         data={listItems}
         keyExtractor={(item) => item.kind === "remote-session" ? `remote-session:${item.hit.sessionId}` : item.kind === "local-session" ? `session:${item.session.id}` : item.kind === "remote-space" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
         renderItem={({ item }) => {
@@ -93,7 +86,7 @@ export default function ChatsScreen() {
         onEndReached={() => { if (!trimmedQuery && filter === "all") void loadMoreSessions(); }}
         onEndReachedThreshold={0.7}
         contentContainerStyle={{ paddingBottom: 30, flexGrow: listItems.length === 0 ? 1 : undefined }}
-        ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><View style={{ flex: 1 }}><SearchField inputRef={searchRef} value={query} onChangeText={setQuery} placeholder="Search Chats and Spaces" /></View>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}</View>{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}<View style={{ flexDirection: "row", gap: 8, paddingTop: 12, paddingBottom: 4 }}><FilterChip label="All" selected={filter === "all"} onPress={() => setFilter("all")} /><FilterChip label="Running" selected={filter === "running"} onPress={() => setFilter("running")} /><FilterChip label="Needs you" selected={filter === "attention"} onPress={() => setFilter("attention")} /></View></View>}
+        ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12 }}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}<View style={{ flexDirection: "row", gap: 8, paddingTop: 12, paddingBottom: 4 }}><FilterChip label="All" selected={filter === "all"} onPress={() => setFilter("all")} /><FilterChip label="Running" selected={filter === "running"} onPress={() => setFilter("running")} /><FilterChip label="Completed" selected={filter === "completed"} onPress={() => setFilter("completed")} /></View></View>}
         ListEmptyComponent={state.booting ? <LoadingRows count={5} /> : dataError ? <EmptyState icon="cloud-off" title="Chats are unavailable" description="Retry above after checking your connection and sign-in session." /> : searchEmpty}
         ListFooterComponent={state.sessionsLoadingMore ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}
       />
@@ -103,5 +96,5 @@ export default function ChatsScreen() {
 
 function FilterChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
   const theme = useAppTheme();
-  return <Pressable onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
+  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }

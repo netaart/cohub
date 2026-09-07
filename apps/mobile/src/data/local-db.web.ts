@@ -21,6 +21,19 @@ export async function saveMessages(_userKey: string, _sessionId: string, _messag
   return undefined;
 }
 
-export async function clearUserCache(_userKey: string) {
+const sessionReadSequences = new Map<string, number>();
+
+export async function loadSessionReadSequence(userKey: string, sessionId: string): Promise<number | null> {
+  return sessionReadSequences.get(`${userKey}:${sessionId}`) ?? null;
+}
+
+export async function saveSessionReadSequence(userKey: string, sessionId: string, sequence: number) {
+  sessionReadSequences.set(`${userKey}:${sessionId}`, sequence);
+}
+
+export async function clearUserCache(userKey: string) {
+  for (const key of sessionReadSequences.keys()) {
+    if (key.startsWith(`${userKey}:`)) sessionReadSequences.delete(key);
+  }
   return undefined;
 }

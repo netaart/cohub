@@ -11,10 +11,10 @@ export default function ActivityScreen() {
   const theme = useAppTheme();
   const { state, activityItems, connectionState, refreshHome } = useApp();
   const dataError = state.error ?? state.sessionsError ?? state.activityError;
-  const [filter, setFilter] = useState<"all" | "running" | "attention">("all");
+  const [filter, setFilter] = useState<"all" | "running" | "complete">("all");
   const items = useMemo(() => filter === "all" ? activityItems : activityItems.filter((item) => item.status === filter), [activityItems, filter]);
   return <Screen scroll refreshing={state.refreshing} onRefresh={() => void refreshHome()}>
-    <TopBar title="Activity" subtitle={dataError ? "Activity unavailable" : "What needs your attention"} left={<BrandMark size={38} />} right={<IconButton name="refresh" label="Refresh activity" size={40} onPress={() => void refreshHome()} />} />
+    <TopBar title="Activity" subtitle={dataError ? "Activity unavailable" : "Agent runs and results"} left={<BrandMark size={38} />} right={<IconButton name="refresh" label="Refresh activity" size={40} onPress={() => void refreshHome()} />} />
     <ConnectionBanner state={connectionState} />
     {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
     <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingTop: 14, gap: 10 }}>
@@ -26,14 +26,14 @@ export default function ActivityScreen() {
     <View style={{ paddingHorizontal: 16, flexDirection: "row", gap: 8 }}>
       <ActivityFilter label="All" selected={filter === "all"} onPress={() => setFilter("all")} />
       <ActivityFilter label="Running" selected={filter === "running"} onPress={() => setFilter("running")} />
-      <ActivityFilter label="Needs you" selected={filter === "attention"} onPress={() => setFilter("attention")} />
+      <ActivityFilter label="Completed" selected={filter === "complete"} onPress={() => setFilter("complete")} />
     </View>
     <View style={{ marginTop: 10 }}>
       {dataError && items.length === 0 ? <EmptyState icon="cloud-off" title="Activity is unavailable" description="Retry above after checking your connection and sign-in session." /> : state.booting ? <LoadingRows count={4} /> : items.length > 0 ? items.map((item) => <Pressable key={item.id} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: item.sessionId } })} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>
-        <View style={[{ width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" }, { backgroundColor: item.status === "running" ? theme.colors.warningSoft : item.status === "attention" ? theme.colors.dangerSoft : theme.colors.successSoft }]}><AppIcon name={item.status === "running" ? "sync" : item.status === "attention" ? "alert" : "check"} size={17} color={item.status === "running" ? theme.colors.warning : item.status === "attention" ? theme.colors.danger : theme.colors.success} /></View>
+        <View style={[{ width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" }, { backgroundColor: item.status === "running" ? theme.colors.warningSoft : item.status === "failed" ? theme.colors.dangerSoft : item.status === "stopped" ? theme.colors.surfaceRaised : theme.colors.successSoft }]}><AppIcon name={item.status === "running" ? "sync" : item.status === "failed" ? "alert" : item.status === "stopped" ? "stop" : "check"} size={17} color={item.status === "running" ? theme.colors.warning : item.status === "failed" ? theme.colors.danger : item.status === "stopped" ? theme.colors.textMuted : theme.colors.success} /></View>
         <View style={{ flex: 1, minWidth: 0 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{item.title}</Text><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{formatRelativeTime(item.updatedAt)}</Text></View><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>{item.spaceName} · {item.preview}</Text></View>
-        <StatusPill label={item.status === "running" ? "Running" : item.status === "attention" ? "Needs you" : "Done"} tone={getStatusTone(item.status)} />
-      </Pressable>) : <EmptyState icon="activity" title="Nothing needs attention" description="Completed and running Agent work will appear here." />}
+        <StatusPill label={item.status === "running" ? "Running" : item.status === "failed" ? "Failed" : item.status === "stopped" ? "Stopped" : "Done"} tone={getStatusTone(item.status)} />
+      </Pressable>) : <EmptyState icon="activity" title="No recent Agent work" description="Completed, running, and failed Agent runs will appear here." />}
     </View>
   </Screen>;
 }

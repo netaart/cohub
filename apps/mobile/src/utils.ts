@@ -37,14 +37,6 @@ export function formatNumber(value: number | null | undefined) {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
-export function isRunningStatus(value: string | null | undefined) {
-  return value === "running" || value === "in_progress" || value === "pending" || value === "abort_requested";
-}
-
-export function isNeedsAttentionStatus(value: string | null | undefined) {
-  return value === "failed" || value === "error" || value === "needs_input" || value === "waiting";
-}
-
 export function contentBlockText(block: ContentBlock | Record<string, unknown>) {
   if (block.type === "text" && typeof (block as { text?: unknown }).text === "string") {
     return (block as { text: string }).text;

@@ -186,7 +186,7 @@ export function MessageBubble({ message, local = false }: { message: MessageReco
   const thinkingLevel = requestedThinkingLevel(message.meta);
   return <View style={{ paddingHorizontal: 16, paddingVertical: 7, alignItems: isUser ? "flex-end" : "stretch" }}>
     {!isUser ? <Text style={[typography.micro, { color: theme.colors.textMuted, marginBottom: 5, marginLeft: 2 }]}>{message.provider || "Agent"}{message.model ? ` · ${message.model}` : ""}{thinkingLevel ? ` · Thinking ${formatThinkingLevel(thinkingLevel)}` : ""}</Text> : null}
-    <View style={{ maxWidth: isUser ? "86%" : "100%", borderRadius: isUser ? 17 : 13, borderTopRightRadius: isUser ? 5 : 13, backgroundColor: isUser ? theme.colors.accentSoft : theme.colors.surface, borderWidth: 1, borderColor: isUser ? theme.colors.accentBorder : theme.colors.border, paddingHorizontal: 13, paddingVertical: 11, opacity: local ? 0.72 : 1 }}>
+    <View style={isUser ? { maxWidth: "86%", borderRadius: 17, borderTopRightRadius: 5, backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accentBorder, paddingHorizontal: 13, paddingVertical: 11, opacity: local ? 0.72 : 1 } : { width: "100%", paddingHorizontal: 0, paddingVertical: 0, opacity: local ? 0.72 : 1 }}>
       {hasRenderableContent(message.content) ? <MessageContent content={message.content} /> : message.text?.trim() ? <TextBlock value={message.text} /> : null}
       {local ? <Text style={[typography.micro, { color: theme.colors.textMuted, marginTop: 7 }]}>Sending…</Text> : null}
       {message.errorMessage ? <Text style={[typography.caption, { color: theme.colors.danger, marginTop: 7 }]}>{message.errorMessage}</Text> : null}

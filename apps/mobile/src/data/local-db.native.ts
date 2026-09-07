@@ -41,6 +41,13 @@ async function database() {
     );
     CREATE INDEX IF NOT EXISTS messages_session_sequence
       ON messages (user_key, session_id, sequence);
+    CREATE TABLE IF NOT EXISTS session_read_state (
+      user_key TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_key, session_id)
+    );
   `);
   return db;
 }
@@ -137,6 +144,27 @@ export async function saveMessages(userKey: string, sessionId: string, messages:
   });
 }
 
+export async function loadSessionReadSequence(userKey: string, sessionId: string): Promise<number | null> {
+  const db = await database();
+  const row = await db.getFirstAsync<{ sequence: number }>(
+    "SELECT sequence FROM session_read_state WHERE user_key = ? AND session_id = ?",
+    userKey,
+    sessionId,
+  );
+  return row?.sequence ?? null;
+}
+
+export async function saveSessionReadSequence(userKey: string, sessionId: string, sequence: number) {
+  const db = await database();
+  await db.runAsync(
+    "INSERT OR REPLACE INTO session_read_state (user_key, session_id, sequence, updated_at) VALUES (?, ?, ?, ?)",
+    userKey,
+    sessionId,
+    sequence,
+    Date.now(),
+  );
+}
+
 export async function clearUserCache(userKey: string) {
   if (Platform.OS === "web") return;
   const db = await database();
@@ -144,5 +172,6 @@ export async function clearUserCache(userKey: string) {
     await db.runAsync("DELETE FROM messages WHERE user_key = ?", userKey);
     await db.runAsync("DELETE FROM sessions WHERE user_key = ?", userKey);
     await db.runAsync("DELETE FROM spaces WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM session_read_state WHERE user_key = ?", userKey);
   });
 }

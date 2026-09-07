@@ -11,7 +11,9 @@ import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
 import { nextChatTailFollowing } from "@/src/data/chat-scroll";
+import { latestUnreadAssistantIndex } from "@/src/data/chat-read-state";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
+import type { MessageRecord } from "@neta-art/cohub";
 import { mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage } from "@/src/data/session-history";
 import { useAppTheme, typography } from "@/src/theme";
 import { formatThinkingLevel, modelAvailabilityLevel, requestedThinkingLevel } from "@/src/model-catalog";
@@ -21,6 +23,7 @@ import { displaySessionTitle, displaySpaceName, hasRenderableMessage, isAssistan
 
 type RouteParams = { sessionId?: string | string[]; spaceId?: string | string[]; turn?: string | string[]; turnId?: string | string[] };
 const messageViewabilityConfig = { itemVisiblePercentThreshold: 20 };
+
 type ChatScrollEvent = {
   nativeEvent: {
     contentOffset: { y: number };
@@ -47,7 +50,7 @@ export default function ChatScreen() {
 function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessionId: string; initialTurnSequence: number | null; initialTurnId: string | null }) {
   const router = useRouter();
   const theme = useAppTheme();
-  const { state, client, connectionState, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError } = useApp();
+  const { state, client, offline, connectionState, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadSessionReadSequence, saveSessionReadSequence } = useApp();
   const view = useSession(sessionId);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
@@ -67,6 +70,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const handledDeepLinkTarget = useRef<string | null>(null);
   const listRef = useRef<FlatList>(null);
   const initialScrollDone = useRef(false);
+  const initialUnreadIndexRef = useRef<number | null>(null);
+  const initialUnreadRetriesRef = useRef(0);
+  const readStateLoadedRef = useRef(false);
+  const readSequenceRef = useRef<number | null>(null);
+  const savedReadSequenceRef = useRef<number | null>(null);
+  const [readSequence, setReadSequence] = useState<number | null>(null);
   const followingTailRef = useRef(true);
   const [followingTail, setFollowingTailState] = useState(true);
   const userDraggingRef = useRef(false);
@@ -101,6 +110,31 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const ordered = viewableItems
       .filter((item) => item.isViewable && item.item && typeof item.item === "object")
       .sort((left, right) => (left.index ?? Number.MAX_SAFE_INTEGER) - (right.index ?? Number.MAX_SAFE_INTEGER));
+    if (initialUnreadIndexRef.current !== null) {
+      const initialUnreadVisible = ordered.some((item) => item.index === initialUnreadIndexRef.current);
+      if (initialUnreadVisible) {
+        initialUnreadIndexRef.current = null;
+        initialUnreadRetriesRef.current = 0;
+      } else {
+        return;
+      }
+    }
+    if (readStateLoadedRef.current && initialScrollDone.current) {
+      const visibleAssistantSequence = ordered.reduce((latest, item) => {
+        const message = item.item as MessageRecord;
+        if (message.role !== "assistant") return latest;
+        const sequence = turnSequenceForMessage(message);
+        return sequence !== null ? Math.max(latest, sequence) : latest;
+      }, readSequenceRef.current ?? 0);
+      if (visibleAssistantSequence > (readSequenceRef.current ?? 0)) {
+        readSequenceRef.current = visibleAssistantSequence;
+        setReadSequence(visibleAssistantSequence);
+        if (visibleAssistantSequence > (savedReadSequenceRef.current ?? 0)) {
+          savedReadSequenceRef.current = visibleAssistantSequence;
+          void saveSessionReadSequence(sessionId, visibleAssistantSequence).catch(() => undefined);
+        }
+      }
+    }
     const target = turnScrollTargetRef.current;
     if (target !== null) {
       if (ordered.some((item) => turnSequenceForMessage((item.item as { meta: Record<string, unknown> | null })) === target)) {
@@ -116,7 +150,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     }
     const first = ordered[0];
     if (first?.item) setCurrentTurnSequence(turnSequenceForMessage(first.item as { meta: Record<string, unknown> | null }));
-  }, []);
+  }, [saveSessionReadSequence, sessionId]);
   const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
   const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
   const spaceId = view.space?.id ?? session?.spaceId ?? sessionSummary?.spaceId ?? "";
@@ -163,6 +197,24 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const running = view.sending || view.stream?.status === "pending" || view.stream?.status === "streaming";
   const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
 
+  useEffect(() => {
+    let active = true;
+    readStateLoadedRef.current = false;
+    readSequenceRef.current = null;
+    savedReadSequenceRef.current = null;
+    void loadSessionReadSequence(sessionId).then((sequence) => {
+      if (!active) return;
+      readSequenceRef.current = sequence;
+      savedReadSequenceRef.current = sequence;
+      setReadSequence(sequence);
+      readStateLoadedRef.current = true;
+    }).catch(() => {
+      if (active) readStateLoadedRef.current = true;
+    });
+    return () => { active = false; };
+  }, [loadSessionReadSequence, sessionId]);
+
+  const hasInitialTurnTarget = initialTurnId !== null || initialTurnSequence !== null;
   const targetMessageIndex = useCallback((sequence: number) => {
     const exactIndex = messageIndexForTurn(messages, sequence);
     if (exactIndex >= 0) return exactIndex;
@@ -176,6 +228,32 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const lastMessage = messages.at(-1);
     return target !== null && lastMessage !== undefined && turnSequenceForMessage(lastMessage) === target;
   }, [messages]);
+  const requestInitialScroll = useCallback(() => {
+    if (!readStateLoadedRef.current || !view.historyLoaded || initialScrollDone.current || messages.length === 0 || hasInitialTurnTarget) return;
+    if (running) {
+      initialScrollDone.current = true;
+      listRef.current?.scrollToEnd({ animated: false });
+      setFollowingTail(true);
+      setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
+      return;
+    }
+    const unreadIndex = latestUnreadAssistantIndex(messages, readSequence);
+    initialScrollDone.current = true;
+    if (unreadIndex < 0) {
+      listRef.current?.scrollToEnd({ animated: false });
+      setFollowingTail(true);
+      setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
+      return;
+    }
+    const unreadMessage = messages[unreadIndex];
+    const unreadSequence = unreadMessage ? turnSequenceForMessage(unreadMessage) : null;
+    initialUnreadIndexRef.current = unreadIndex;
+    initialUnreadRetriesRef.current = 0;
+    setFollowingTail(false);
+    setCurrentTurnSequence(unreadSequence);
+    listRef.current?.scrollToIndex({ index: unreadIndex, animated: false, viewPosition: 0, viewOffset: 8 });
+  }, [hasInitialTurnTarget, messages, readSequence, running, setFollowingTail, view.historyLoaded, view.turns]);
+
   const scheduleTurnScrollRetry = useCallback((sequence: number, retry: number) => {
     if (retry >= 4) {
       if (turnScrollTargetRef.current === sequence) turnScrollTargetRef.current = null;
@@ -227,6 +305,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 
   useEffect(() => {
     initialScrollDone.current = false;
+    initialUnreadIndexRef.current = null;
+    initialUnreadRetriesRef.current = 0;
     pendingScrollSequence.current = null;
     userDraggingRef.current = false;
     momentumScrollingRef.current = false;
@@ -240,6 +320,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   }, [sessionId]);
 
   useEffect(() => {
+    const frame = requestAnimationFrame(requestInitialScroll);
+    return () => cancelAnimationFrame(frame);
+  }, [requestInitialScroll]);
+
+  useEffect(() => {
     if (!view.stream || !followingTailRef.current || pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null) return;
     requestFollowTail();
   }, [requestFollowTail, view.stream]);
@@ -251,20 +336,23 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 
   useEffect(() => {
     const targetKey = initialTurnId ? `id:${initialTurnId}` : initialTurnSequence !== null ? `sequence:${initialTurnSequence}` : null;
-    if (!targetKey || !client || !spaceId || !view.historyLoaded || handledDeepLinkTarget.current === targetKey) return;
+    if (!targetKey || (!client && !offline) || !spaceId || !view.historyLoaded || handledDeepLinkTarget.current === targetKey) return;
     handledDeepLinkTarget.current = targetKey;
     const target = initialTurnId ? { turnId: initialTurnId } : initialTurnSequence;
     if (target === null) return;
+    const localTarget = view.turns.find((turn) => typeof target === "number"
+      ? turn.sequence === target
+      : turn.id === target.turnId || turn.sourceTurnId === target.turnId);
     void (async () => {
       try {
-        const sequence = await jumpToTurn(sessionId, target);
+        const sequence = offline && localTarget ? localTarget.sequence : await jumpToTurn(sessionId, target);
         pendingScrollSequence.current = sequence;
         scrollToTurn(sequence);
       } catch (error) {
         setNotice({ title: "Turn unavailable", message: error instanceof Error ? error.message : "Unable to open the requested part of the Chat." });
       }
     })();
-  }, [client, initialTurnId, initialTurnSequence, jumpToTurn, scrollToTurn, sessionId, spaceId, view.historyLoaded]);
+  }, [client, initialTurnId, initialTurnSequence, jumpToTurn, offline, scrollToTurn, sessionId, spaceId, view.historyLoaded, view.turns]);
 
   useEffect(() => {
     if (turnNavigatorOpen) void loadTurnIndex(sessionId, { force: true }).catch(() => undefined);
@@ -331,17 +419,25 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       initialScrollDone.current = true;
       return;
     }
-    if (!initialScrollDone.current && messages.length > 0) {
-      listRef.current?.scrollToEnd({ animated: false });
-      setFollowingTail(true);
-      setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
-      initialScrollDone.current = true;
-      return;
-    }
+    requestInitialScroll();
     requestFollowTail();
-  }, [messages.length, requestFollowTail, scrollToTurn, setFollowingTail, view.turns]);
+  }, [requestFollowTail, requestInitialScroll, scrollToTurn]);
 
   const handleScrollToIndexFailed = useCallback(({ index, averageItemLength }: { index: number; averageItemLength: number }) => {
+    const initialUnreadIndex = initialUnreadIndexRef.current;
+    if (initialUnreadIndex !== null) {
+      const retries = initialUnreadRetriesRef.current;
+      if (retries >= 4) {
+        initialUnreadIndexRef.current = null;
+        return;
+      }
+      initialUnreadRetriesRef.current = retries + 1;
+      listRef.current?.scrollToOffset({ offset: Math.max(0, index * Math.max(averageItemLength, 1)), animated: false });
+      requestAnimationFrame(() => {
+        if (initialUnreadIndexRef.current === initialUnreadIndex) listRef.current?.scrollToIndex({ index: initialUnreadIndex, animated: false, viewPosition: 0, viewOffset: 8 });
+      });
+      return;
+    }
     const target = turnScrollTargetRef.current ?? pendingScrollSequence.current;
     if (target === null) return;
     const retries = turnScrollRetriesRef.current.get(target) ?? 0;

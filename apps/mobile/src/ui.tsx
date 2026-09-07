@@ -94,6 +94,16 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
+export function WorkspaceToolbar({ query, onQueryChange, queryRef, onAccount, onCreate, onSettings, placeholder = "Search Chats and Spaces" }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; onAccount: () => void; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
+  const theme = useAppTheme();
+  return <View style={[styles.workspaceToolbar, { borderBottomColor: theme.colors.border }]}>
+    <Pressable accessibilityRole="button" accessibilityLabel="Open account" onPress={onAccount} hitSlop={5} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}><Avatar name="Cohub" size={42} /></Pressable>
+    <View style={{ flex: 1, minWidth: 0 }}><SearchField inputRef={queryRef} value={query} onChangeText={onQueryChange} placeholder={placeholder} /></View>
+    <IconButton name="plus" label="Create new" size={42} tone="accent" onPress={onCreate} />
+    <IconButton name="settings" label="Open settings" size={42} onPress={onSettings} />
+  </View>;
+}
+
 export function TopBar({ title, subtitle, left, right }: { title: string; subtitle?: string; left?: ReactNode; right?: ReactNode }) {
   const theme = useAppTheme();
   return (
@@ -251,8 +261,8 @@ export function SyncStatus({ timestamp }: { timestamp: string | null }) {
   return <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 16, paddingTop: 12 }}><AppIcon name="check-circle" size={13} color={theme.colors.success} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>Updated {formatRelativeTime(timestamp)}</Text></View>;
 }
 
-export function getStatusTone(status: ActivityItem["status"]): "success" | "warning" | "danger" {
-  return status === "running" ? "warning" : status === "attention" ? "danger" : "success";
+export function getStatusTone(status: ActivityItem["status"]): "success" | "warning" | "danger" | "neutral" {
+  return status === "running" ? "warning" : status === "failed" ? "danger" : status === "stopped" ? "neutral" : "success";
 }
 
 export function useBackButton() {
@@ -261,6 +271,7 @@ export function useBackButton() {
 
 const styles = StyleSheet.create({
   iconButton: { alignItems: "center", justifyContent: "center" },
+  workspaceToolbar: { minHeight: 66, paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
   topBar: { height: 70, minHeight: 70, maxHeight: 70, flexShrink: 0, paddingHorizontal: 16, paddingVertical: 7, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
   topBarLeft: { width: 44, height: 42, alignItems: "flex-start", justifyContent: "center" },
   topBarTitle: { flex: 1, minWidth: 0, height: 42, justifyContent: "center", paddingVertical: 2 },
