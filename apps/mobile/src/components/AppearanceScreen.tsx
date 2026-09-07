@@ -65,7 +65,7 @@ export function AppearanceContent() {
               accessibilityState={{ selected, checked: selected }}
               aria-checked={selected}
               onPress={() => void setThemePreference(option.value)}
-              android_ripple={{ color: theme.colors.pressOverlay }}
+             
               style={({ pressed }) => [
                 styles.segment,
                 index > 0 ? { borderLeftWidth: 1, borderLeftColor: theme.colors.borderStrong } : null,
@@ -158,7 +158,7 @@ function ThemePreviewCard({ label, mode, pureBlack, selected, width, onPress }: 
         accessibilityState={{ selected, checked: selected }}
         aria-checked={selected}
         onPress={onPress}
-        android_ripple={{ color: theme.colors.pressOverlay }}
+       
         style={({ pressed }) => ({
           width,
           aspectRatio: 0.62,

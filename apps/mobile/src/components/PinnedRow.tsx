@@ -33,7 +33,7 @@ export function PinnedRow({
         accessibilityRole="button"
         accessibilityLabel={openLabel}
         onPress={onPress}
-        android_ripple={{ color: theme.colors.pressOverlay }}
+       
         style={({ pressed }) => [rowStyle({ pressed }), styles.primary]}
       >
         {children}

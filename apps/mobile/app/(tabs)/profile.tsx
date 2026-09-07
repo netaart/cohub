@@ -119,7 +119,7 @@ export default function ProfileScreen() {
       <TopBar
         title="Profile"
         subtitle="Account and device"
-        left={<BrandMark size={38} />}
+        left={<BrandMark size={40} />}
         right={
           <IconButton
             name="settings"
@@ -323,7 +323,7 @@ function SettingRow({
       accessibilityRole="button"
       accessibilityLabel={title}
       onPress={onPress}
-      android_ripple={{ color: theme.colors.pressOverlay }}
+     
       style={({ pressed }) => ({ backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}
     >
       {content}

@@ -116,7 +116,7 @@ function AboutRow({ icon, title, detail, onPress }: { icon: IconName; title: str
       accessibilityRole="link"
       accessibilityLabel={title}
       onPress={onPress}
-      android_ripple={{ color: theme.colors.pressOverlay }}
+     
       style={({ pressed }) => ({ backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}
     >
       {content}

@@ -18,6 +18,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { G, Path, Rect } from "react-native-svg";
 import { icons, type IconName } from "@/src/icons";
 import { getComposerActionState } from "@/src/data/composer-state";
 import { useAppTheme, typography } from "@/src/theme";
@@ -26,19 +27,25 @@ import { formatRelativeTime, initials } from "@/src/utils";
 
 export type { IconName } from "@/src/icons";
 
-export function AppIcon({ name, size = 20, color, strokeWidth = 1.9, style }: { name: IconName; size?: number; color?: ColorValue; strokeWidth?: number; style?: object }) {
+export function AppIcon({ name, size = 20, color, strokeWidth = 1.9, fill, style }: { name: IconName; size?: number; color?: ColorValue; strokeWidth?: number; fill?: string; style?: object }) {
   const theme = useAppTheme();
   const Icon = icons[name];
-  return <Icon size={size} color={color ?? theme.colors.textSecondary} strokeWidth={strokeWidth} absoluteStrokeWidth style={style} />;
+  return <Icon size={size} color={color ?? theme.colors.textSecondary} strokeWidth={strokeWidth} absoluteStrokeWidth style={style} {...(fill ? { fill } : {})} />;
+}
+
+export function CohubLogo({ size = 36 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 192 192">
+      <Rect width={192} height={192} rx={32} fill="#ff4500" />
+      <G transform="translate(0,192) scale(0.1,-0.1)" fill="#ffffff">
+        <Path d="M853 1314 c-63 -23 -128 -86 -164 -160 -27 -54 -33 -79 -37 -157 -10 -196 63 -332 205 -383 53 -18 160 -17 219 3 92 31 184 151 184 240 0 21 -5 23 -45 23 -43 0 -45 -1 -55 -38 -13 -52 -48 -101 -89 -129 -27 -18 -48 -23 -98 -23 -77 0 -120 16 -156 60 -50 59 -61 96 -61 210 -1 89 3 113 22 155 28 61 47 82 95 107 48 24 152 26 195 4 36 -19 80 -69 88 -102 5 -21 12 -24 55 -24 27 0 49 4 49 8 0 5 -7 29 -16 55 -18 54 -74 115 -129 142 -54 25 -203 31 -262 9z" />
+      </G>
+    </Svg>
+  );
 }
 
 export function BrandMark({ size = 36 }: { size?: number }) {
-  const theme = useAppTheme();
-  return (
-    <View style={{ width: size, height: size, borderRadius: size * 0.28, backgroundColor: theme.colors.accent, alignItems: "center", justifyContent: "center" }}>
-      <Text style={{ color: theme.colors.accentText, fontSize: size * 0.45, fontWeight: "800", letterSpacing: 0 }}>C</Text>
-    </View>
-  );
+  return <CohubLogo size={size} />;
 }
 
 export function Avatar({ name, uri, size = 42, online = false }: { name: string; uri?: string | null; size?: number; online?: boolean }) {
@@ -67,7 +74,7 @@ export function IconButton({ name, onPress, label, size = 42, tone = "default", 
       hitSlop={6}
       disabled={disabled}
       onPress={onPress}
-      android_ripple={{ color: theme.colors.pressOverlay, borderless: true }}
+     
       style={({ pressed }) => [styles.iconButton, { width: size, height: size, borderRadius: size / 2, backgroundColor: pressed ? (tone === "accent" ? theme.colors.accentSoft : theme.colors.surfacePressed) : "transparent", opacity: disabled ? 0.45 : 1 }]}
     >
       <AppIcon name={name} size={size * 0.48} color={color} />
@@ -97,7 +104,7 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
 export function WorkspaceToolbar({ query, onQueryChange, queryRef, onAccount, onCreate, onSettings, placeholder = "Search Chats and Spaces" }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; onAccount: () => void; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
   const theme = useAppTheme();
   return <View style={[styles.workspaceToolbar, { borderBottomColor: theme.colors.border }]}>
-    <Pressable accessibilityRole="button" accessibilityLabel="Open account" onPress={onAccount} hitSlop={5} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}><Avatar name="Cohub" size={42} /></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel="Open account" onPress={onAccount} hitSlop={5} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}><BrandMark size={40} /></Pressable>
     <View style={{ flex: 1, minWidth: 0 }}><SearchField inputRef={queryRef} value={query} onChangeText={onQueryChange} placeholder={placeholder} /></View>
     <IconButton name="plus" label="Create new" size={42} tone="accent" onPress={onCreate} />
     <IconButton name="settings" label="Open settings" size={42} onPress={onSettings} />
@@ -177,7 +184,7 @@ export function PrimaryButton({ label, onPress, icon, loading = false, disabled 
   const pressedColor = tone === "danger" ? theme.colors.danger : theme.colors.accentPressed;
   const foreground = tone === "danger" ? theme.colors.dangerText : theme.colors.accentText;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled || loading} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.primaryButton, { backgroundColor: pressed ? pressedColor : color, opacity: disabled || loading ? 0.55 : 1 }, style]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled || loading} onPress={onPress} style={({ pressed }) => [styles.primaryButton, { backgroundColor: pressed ? pressedColor : color, opacity: disabled || loading ? 0.55 : 1 }, style]}>
       {loading ? <ActivityIndicator color={foreground} size="small" /> : icon ? <AppIcon name={icon} size={17} color={foreground} /> : null}
       <Text style={[typography.bodyMedium, { color: foreground }]}>{label}</Text>
     </Pressable>
@@ -227,10 +234,10 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
         <View style={styles.composerToolbar}>
           <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} />
           <View style={styles.composerToolbarSpacer} />
-          {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}, ${modelStatusLabel}`} disabled={blocked} onPress={onModelPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
-          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={blocked || voiceStarting} onPress={onVoice} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} android_ripple={{ color: theme.colors.pressOverlay, borderless: true }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
-            <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} />
+          {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}, ${modelStatusLabel}`} disabled={blocked} onPress={onModelPress} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
+          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
+            <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} fill={canStop ? theme.colors.background : undefined} />
           </Pressable>
         </View>
       </View>
@@ -272,11 +279,11 @@ export function useBackButton() {
 const styles = StyleSheet.create({
   iconButton: { alignItems: "center", justifyContent: "center" },
   workspaceToolbar: { minHeight: 66, paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
-  topBar: { height: 70, minHeight: 70, maxHeight: 70, flexShrink: 0, paddingHorizontal: 16, paddingVertical: 7, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
+  topBar: { height: 66, minHeight: 66, maxHeight: 66, flexShrink: 0, paddingHorizontal: 16, paddingVertical: 7, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
   topBarLeft: { width: 44, height: 42, alignItems: "flex-start", justifyContent: "center" },
   topBarTitle: { flex: 1, minWidth: 0, height: 42, justifyContent: "center", paddingVertical: 2 },
   topBarRight: { width: 96, height: 42, alignItems: "flex-end", justifyContent: "center", flexDirection: "row", gap: 2 },
-  detailTopBar: { height: 60, minHeight: 60, maxHeight: 60, flexShrink: 0, paddingHorizontal: 8, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4, borderBottomWidth: StyleSheet.hairlineWidth },
+  detailTopBar: { height: 66, minHeight: 66, maxHeight: 66, flexShrink: 0, paddingHorizontal: 8, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4, borderBottomWidth: StyleSheet.hairlineWidth },
   detailTopBarTitle: { flex: 1, minWidth: 0, height: 42, justifyContent: "center", paddingHorizontal: 2 },
   detailTopBarActions: { height: 42, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 0 },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 22, paddingBottom: 10 },

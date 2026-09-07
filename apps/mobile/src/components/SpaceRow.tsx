@@ -28,7 +28,7 @@ export function SpaceRow({ space, chatCount, onPress, pinning = false, onToggleP
     <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
   </>;
   const rowStyle = ({ pressed }: { pressed: boolean }) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 13, minHeight: 84, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" });
-  if (!onTogglePin) return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={rowStyle}>{content}</Pressable>;
+  if (!onTogglePin) return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={onPress} style={rowStyle}>{content}</Pressable>;
   return <PinnedRow
     openLabel={`Open ${name}`}
     pinLabel="Pin Space"

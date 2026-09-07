@@ -191,7 +191,7 @@ function DirectoryParentBar({ parentPath, onPress }: { parentPath: string; onPre
       accessibilityRole="button"
       accessibilityLabel={parentPath ? `Back to ${parentPath}` : "Back to Files"}
       onPress={onPress}
-      android_ripple={{ color: theme.colors.pressOverlay }}
+     
       style={({ pressed }) => [
         styles.parentBar,
         { borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.background },

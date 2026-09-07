@@ -1,4 +1,6 @@
 import { Tabs } from "expo-router";
+import type { BottomTabBarButtonProps } from "expo-router/build/react-navigation/bottom-tabs/types";
+import { Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedTabIcon } from "@/src/components/AnimatedTabIcon";
 import { useAppTheme } from "@/src/theme";
@@ -10,10 +12,16 @@ export default function TabLayout() {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
   const bottomSpace = Math.max(insets.bottom, 0) + TAB_BAR_EXTRA_BOTTOM_SPACE;
+  // BottomTabItem hardcodes a borderless platform-colored ripple; re-bind the button to a
+  // plain Pressable so tabs have no ripple at all.
+  const tabBarButton = ({ href: _href, ref: _ref, ...props }: BottomTabBarButtonProps) => (
+    <Pressable {...props} style={[props.style, { borderRadius: 16, overflow: "hidden" }]} />
+  );
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarButton,
         tabBarActiveTintColor: theme.colors.accent,
         tabBarInactiveTintColor: theme.colors.textFaint,
         tabBarActiveBackgroundColor: theme.colors.accentSoft,

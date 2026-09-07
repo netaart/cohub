@@ -162,7 +162,6 @@ export function TurnNavigatorSheet({
 								accessibilityState={{ selected }}
 								disabled={loadingSequence !== null}
 								onPress={() => void onJump(turn.sequence)}
-								android_ripple={{ color: theme.colors.pressOverlay }}
 								style={({ pressed }) => [
 									styles.row,
 									{

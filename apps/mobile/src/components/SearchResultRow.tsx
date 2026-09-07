@@ -32,7 +32,7 @@ export function SessionSearchRow({ hit, onPress, pinned = false, pinning = false
   </>;
   const rowStyle = ({ pressed }: { pressed: boolean }) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" });
   if (!onTogglePin) {
-    return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${hit.title}`} onPress={() => onPress(target)} android_ripple={{ color: theme.colors.pressOverlay }} style={rowStyle}>{content}</Pressable>;
+    return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${hit.title}`} onPress={() => onPress(target)} style={rowStyle}>{content}</Pressable>;
   }
   return <PinnedRow
     openLabel={`Open ${hit.title}`}
@@ -55,7 +55,7 @@ export function SpaceSearchRow({ hit, onPress }: { hit: RemoteSpaceSearchHit; on
       accessibilityRole="button"
       accessibilityLabel={`Open ${hit.title}`}
       onPress={onPress}
-      android_ripple={{ color: theme.colors.pressOverlay }}
+     
       style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 13, minHeight: 84, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}
     >
       <Avatar name={hit.title} uri={hit.avatarUrl} size={50} />

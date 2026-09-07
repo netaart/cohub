@@ -162,7 +162,6 @@ export function SettingsScreen({
 							accessibilityState={{ selected: active }}
 							accessibilityLabel={item.label}
 							onPress={() => setSection(item.id)}
-							android_ripple={{ color: theme.colors.pressOverlay }}
 							style={({ pressed }) => ({
 								minHeight: 36,
 								paddingHorizontal: 11,
@@ -236,7 +235,6 @@ export function SettingsScreen({
 						accessibilityRole="button"
 						accessibilityLabel="Sign out"
 						onPress={() => setSignOutOpen(true)}
-						android_ripple={{ color: theme.colors.dangerSoft }}
 						style={({ pressed }) => ({
 							minHeight: 48,
 							borderWidth: 1,
@@ -465,7 +463,6 @@ function SettingsRow({
 			accessibilityLabel={title}
 			disabled={disabled}
 			onPress={onPress}
-			android_ripple={{ color: theme.colors.pressOverlay }}
 			style={({ pressed }) => ({
 				backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
 				opacity: disabled ? 0.55 : 1,

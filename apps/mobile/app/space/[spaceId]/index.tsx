@@ -167,7 +167,7 @@ export default function SpaceScreen() {
     </View>
     <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 16, marginTop: 18 }}>
       <PrimaryButton label="New Chat" icon="plus" onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} style={{ flex: 1 }} />
-      <Pressable accessibilityRole="button" accessibilityLabel="Open Files panel" onPress={() => setActivePanel("files")} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ minHeight: 46, width: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}><AppIcon name="folder-open" size={19} color={theme.colors.textSecondary} /></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Open Files panel" onPress={() => setActivePanel("files")} style={({ pressed }) => ({ minHeight: 46, width: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}><AppIcon name="folder-open" size={19} color={theme.colors.textSecondary} /></Pressable>
     </View>
 
     <SectionHeader title="Chats" action="New" onAction={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} />
@@ -235,7 +235,7 @@ function SpaceMetric({ icon, label, value }: { icon: React.ComponentProps<typeof
 function ResourceRow({ icon, title, subtitle, trailing, onPress }: { icon: React.ComponentProps<typeof AppIcon>["name"]; title: string; subtitle: string; trailing?: React.ReactNode; onPress?: () => void }) {
   const theme = useAppTheme();
   const content = <View style={{ minHeight: 62, flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 16 }}><View style={{ width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.surface }}><AppIcon name={icon} size={17} color={theme.colors.textMuted} /></View><View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, textTransform: "capitalize" }]}>{title}</Text><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{subtitle}</Text></View>{trailing}{onPress ? <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} /> : null}</View>;
-  return onPress ? <Pressable accessibilityRole="button" onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={({ pressed }) => ({ backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{content}</Pressable> : content;
+  return onPress ? <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => ({ backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{content}</Pressable> : content;
 }
 
 function ResourceEmpty({ text }: { text: string }) {

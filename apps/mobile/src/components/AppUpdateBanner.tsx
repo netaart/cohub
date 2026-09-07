@@ -79,7 +79,7 @@ export function AppUpdateBanner() {
           accessibilityRole="button"
           accessibilityLabel={`Update available: ${release.version}`}
           onPress={() => setDetailsOpen(true)}
-          android_ripple={{ color: theme.colors.pressOverlay }}
+         
           style={({ pressed }) => ({
             ...styles.banner,
             backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface,
@@ -277,7 +277,7 @@ export function AppUpdateRow() {
           if (release) setDetailsOpen(true);
           else void check();
         }}
-        android_ripple={{ color: theme.colors.pressOverlay }}
+       
         style={({ pressed }) => ({
           minHeight: 66,
           paddingHorizontal: 13,

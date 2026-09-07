@@ -35,7 +35,7 @@ export function SessionRow({ session, onPress, pinned = false, pinning = false, 
   </>;
   const rowStyle = ({ pressed }: { pressed: boolean }) => ({ flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" });
   if (!onTogglePin) {
-    return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${displaySessionTitle(session)}`} onPress={onPress} android_ripple={{ color: theme.colors.pressOverlay }} style={rowStyle}>{rowContent}</Pressable>;
+    return <Pressable accessibilityRole="button" accessibilityLabel={`Open ${displaySessionTitle(session)}`} onPress={onPress} style={rowStyle}>{rowContent}</Pressable>;
   }
   return <PinnedRow
     openLabel={`Open ${displaySessionTitle(session)}`}

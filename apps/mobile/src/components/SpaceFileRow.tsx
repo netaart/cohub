@@ -61,7 +61,7 @@ export function SpaceFileRow({ entry, onPress, compact = false }: SpaceFileRowPr
       accessibilityRole="button"
       accessibilityLabel={`${isDirectory ? "Open folder" : "Open file"} ${entry.name}`}
       onPress={onPress}
-      android_ripple={{ color: theme.colors.pressOverlay }}
+     
       style={({ pressed }) => ({
         minHeight: compact ? 60 : 63,
         flexDirection: "row",

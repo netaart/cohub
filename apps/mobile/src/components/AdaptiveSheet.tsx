@@ -279,7 +279,7 @@ export function SheetAction({
       accessibilityLabel={title}
       disabled={disabled}
       onPress={onPress}
-      android_ripple={{ color: theme.colors.pressOverlay }}
+     
       style={({ pressed }) => [
         styles.action,
         {
