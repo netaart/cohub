@@ -1,7 +1,11 @@
 import type { CohubClient, LabelAssignmentRecord, LabelListItem } from "@neta-art/cohub";
 
 export const SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX = "session-source:";
+export const SESSION_USER_LABEL_SYSTEM_KEY_PREFIX = "session-user:";
+export const SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX = "session-channel:";
 export const WEB_APP_SOURCE_LABEL_SYSTEM_KEY = `${SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX}web`;
+
+export type SessionSourceGroup = "web" | "other";
 
 export type SessionLabel = {
   id: string;
@@ -11,15 +15,37 @@ export type SessionLabel = {
   system: boolean;
 };
 
-/** Labels that are session taxonomy (Source tree) rather than user organization. */
-export function isSystemSessionLabel(label: LabelListItem) {
-  if (label.source === "system") return true;
-  const key = label.systemKey?.trim();
-  return Boolean(key && key.startsWith(SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX));
+function hasSessionSystemKey(label: Pick<LabelListItem, "systemKey">) {
+  const systemKey = label.systemKey?.trim();
+  return Boolean(
+    systemKey &&
+      [SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX, SESSION_USER_LABEL_SYSTEM_KEY_PREFIX, SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX].some((prefix) => systemKey.startsWith(prefix)),
+  );
+}
+
+/** Labels that are session taxonomy rather than user organization. */
+export function isSystemSessionLabel(label: LabelListItem, allLabels: LabelListItem[] = []) {
+  if (label.source === "system" || hasSessionSystemKey(label)) return true;
+  if (label.source !== "user") return true;
+  if (label.parentId && allLabels.length > 0) {
+    const parent = allLabels.find((item) => item.id === label.parentId);
+    if (parent && isSystemSessionLabel(parent, allLabels)) return true;
+  }
+  return false;
 }
 
 export function isWebAppSourceLabel(label: LabelListItem) {
   return label.systemKey === WEB_APP_SOURCE_LABEL_SYSTEM_KEY || label.name === "Web App";
+}
+
+/** Natural chat origin, independent of user labels. Missing source follows the web client and counts as Web App. */
+export function isWebSessionSource(session: { source?: string | null }) {
+  const source = session.source?.trim().toLowerCase().replace(/[\s-]+/g, "_") ?? "web";
+  return source === "web" || source === "web_app";
+}
+
+export function sessionSourceGroup(session: { source?: string | null }): SessionSourceGroup {
+  return isWebSessionSource(session) ? "web" : "other";
 }
 
 export function toSessionLabel(label: LabelListItem): SessionLabel {
@@ -29,7 +55,7 @@ export function toSessionLabel(label: LabelListItem): SessionLabel {
 /** Flat user-facing labels (excluding system taxonomy and stray children of system roots). */
 export function toUserSessionLabels(labels: LabelListItem[]): SessionLabel[] {
   return labels
-    .filter((label) => !isSystemSessionLabel(label))
+    .filter((label) => !isSystemSessionLabel(label, labels))
     .map(toSessionLabel)
     .sort((left, right) => left.name.localeCompare(right.name));
 }

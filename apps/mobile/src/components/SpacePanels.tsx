@@ -19,9 +19,10 @@ import {
   fetchLabelSessionIds,
   fetchSessionLabels,
   formatLabelRef,
-  toSourceSessionLabels,
+  sessionSourceGroup,
   toUserSessionLabels,
   type SessionLabel,
+  type SessionSourceGroup,
 } from "@/src/data/session-labels";
 import { PANEL_CLOSE_THRESHOLD, PANEL_OPEN_THRESHOLD, PANEL_SWIPE_VELOCITY, panelForOpeningDelta, panelForSide, shouldClosePanel, shouldOpenPanel, sideForPanel, type PanelName, type PanelSide } from "@/src/data/space-panel-gesture";
 import { AppIcon, IconButton, PrimaryButton, SearchField } from "@/src/ui";
@@ -570,7 +571,10 @@ type ChatPanelItem =
   | { kind: "local"; session: UserSessionListItem }
   | { kind: "remote"; hit: RemoteSessionSearchHit };
 
-type ChatLabelFilter = { kind: "all" } | { kind: "label"; label: SessionLabel; ref: string };
+type ChatListFilter =
+  | { kind: "all" }
+  | { kind: "source"; source: SessionSourceGroup }
+  | { kind: "label"; label: SessionLabel; ref: string };
 
 function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
@@ -581,7 +585,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
   const [scopeInitialized, setScopeInitialized] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
-  const [labelFilter, setLabelFilter] = useState<ChatLabelFilter>({ kind: "all" });
+  const [listFilter, setListFilter] = useState<ChatListFilter>({ kind: "all" });
   const [labels, setLabels] = useState<SessionLabel[]>([]);
   const [labelsError, setLabelsError] = useState<string | null>(null);
   const [labelsReloadToken, setLabelsReloadToken] = useState(0);
@@ -596,7 +600,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
   useEffect(() => {
     setLabels([]);
     setLabelsError(null);
-    setLabelFilter({ kind: "all" });
+    setListFilter({ kind: "all" });
     setLabelSheetSession(null);
   }, [client, spaceId]);
 
@@ -607,9 +611,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
     void fetchSessionLabels(client, spaceId)
       .then((tree) => {
         if (!active) return;
-        const userLabels = toUserSessionLabels(tree);
-        const sourceLabels = toSourceSessionLabels(tree);
-        setLabels([...sourceLabels, ...userLabels]);
+        setLabels(toUserSessionLabels(tree));
       })
       .catch((error) => {
         if (active) setLabelsError(error instanceof Error ? error.message : "Unable to load labels");
@@ -620,7 +622,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
   }, [client, spaceId, labelsReloadToken]);
 
   useEffect(() => {
-    if (!client || !spaceId || labelFilter.kind !== "label") {
+    if (!client || !spaceId || listFilter.kind !== "label") {
       setLabelSessionIds(new Set());
       setLabelSessionsError(null);
       return;
@@ -628,7 +630,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
     let active = true;
     setLabelSessionsLoading(true);
     setLabelSessionsError(null);
-    void fetchLabelSessionIds(client, spaceId, labelFilter.ref)
+    void fetchLabelSessionIds(client, spaceId, listFilter.ref)
       .then((ids) => {
         if (active) setLabelSessionIds(new Set(ids));
       })
@@ -641,32 +643,41 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
     return () => {
       active = false;
     };
-  }, [client, labelFilter, spaceId]);
+  }, [client, listFilter, spaceId]);
 
   const openLabelSheet = useCallback((session: UserSessionListItem) => {
     setLabelSheetSession(session);
   }, []);
   const closeLabelSheet = useCallback(() => setLabelSheetSession(null), []);
 
-  const activeLabelFilter = labelFilter.kind === "label" ? labelFilter : null;
   const trimmedQuery = normalizeSearchQuery(query);
   const needle = trimmedQuery.toLowerCase();
-  const matchesLabelFilter = (sessionId: string) => activeLabelFilter === null || labelSessionIds.has(sessionId);
+  const matchesListFilter = (session: UserSessionListItem) => {
+    if (listFilter.kind === "all") return true;
+    if (listFilter.kind === "source") return sessionSourceGroup(session) === listFilter.source;
+    return labelSessionIds.has(session.id);
+  };
   const filteredSessions = displaySessions.filter((session) =>
     (!needle || [session.title, session.latestMessageText, session.space?.name].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false)) &&
-    matchesLabelFilter(session.id),
+    matchesListFilter(session),
   );
+  const sessionsById = useMemo(() => new Map(displaySessions.map((session) => [session.id, session])), [displaySessions]);
   const listItems = useMemo<ChatPanelItem[]>(() => {
     if (!trimmedQuery) return filteredSessions.map((session) => ({ kind: "local", session }));
     const remoteSessions = remoteQueryMatches
-      ? remoteSearch.sessions.filter((hit) => activeLabelFilter === null || labelSessionIds.has(hit.sessionId))
+      ? remoteSearch.sessions.filter((hit) => {
+        const session = sessionsById.get(hit.sessionId);
+        if (listFilter.kind === "all") return true;
+        if (listFilter.kind === "source") return session ? sessionSourceGroup(session) === listFilter.source : false;
+        return labelSessionIds.has(hit.sessionId);
+      })
       : [];
     const remoteIds = new Set(remoteSessions.map((hit) => hit.sessionId));
     return [
       ...remoteSessions.map((hit) => ({ kind: "remote" as const, hit })),
       ...filteredSessions.filter((session) => !remoteIds.has(session.id)).map((session) => ({ kind: "local" as const, session })),
     ];
-  }, [activeLabelFilter, filteredSessions, labelSessionIds, remoteQueryMatches, remoteSearch.sessions, trimmedQuery]);
+  }, [filteredSessions, labelSessionIds, listFilter, remoteQueryMatches, remoteSearch.sessions, sessionsById, trimmedQuery]);
   const loadMore = async () => {
     if (!client || loadingMore || (scopeInitialized && !scopeHasMore)) return;
     setLoadingMore(true);
@@ -686,13 +697,17 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
   };
   const showLoadMore = Boolean(client && !trimmedQuery && (!scopeInitialized || scopeHasMore));
   const emptyLoading = (remoteQueryMatches && remoteSearch.loading) || labelSessionsLoading;
-  const emptyLabel = activeLabelFilter
-    ? `No Chats labeled “${activeLabelFilter.label.name}”`
+  const emptyLabel = listFilter.kind === "label"
+    ? `No Chats labeled “${listFilter.label.name}”`
+    : listFilter.kind === "source"
+      ? listFilter.source === "web" ? "No Web App Chats" : "No other Chats"
     : trimmedQuery
       ? "No matching Chats"
       : "No Chats in this Space yet.";
-  const labelChips: { key: string; label: string; icon?: React.ComponentProps<typeof AppIcon>["name"]; filter: ChatLabelFilter }[] = [
+  const filterChips: { key: string; label: string; icon?: React.ComponentProps<typeof AppIcon>["name"]; filter: ChatListFilter }[] = [
     { key: "all", label: "All", filter: { kind: "all" } },
+    { key: "web", label: "Web App", icon: "globe", filter: { kind: "source", source: "web" } },
+    { key: "other", label: "Other", icon: "globe", filter: { kind: "source", source: "other" } },
     ...labels.map((label) => ({ key: `label:${label.id}`, label: label.name, filter: { kind: "label" as const, label, ref: formatLabelRef(label) } })),
   ];
   return (
@@ -705,13 +720,13 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
           {remoteQueryMatches && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
-          {labelChips.map((chip) => (
+          {filterChips.map((chip) => (
             <PanelFilterChip
               key={chip.key}
               label={chip.label}
-              icon={chip.filter.kind === "label" && chip.filter.label.system ? "globe" : undefined}
-              selected={labelFilter.kind === "label" ? chip.filter.kind === "label" && labelFilter.label.id === chip.filter.label.id : chip.filter.kind === "all"}
-              onPress={() => setLabelFilter(chip.filter)}
+              icon={chip.icon}
+              selected={chip.filter.kind === "all" ? listFilter.kind === "all" : chip.filter.kind === "source" ? listFilter.kind === "source" && listFilter.source === chip.filter.source : listFilter.kind === "label" && listFilter.label.id === chip.filter.label.id}
+              onPress={() => setListFilter(chip.filter)}
             />
           ))}
           {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel="Retry loading labels" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.caption, { color: theme.colors.accent }]}>Retry labels</Text></Pressable> : null}
@@ -728,7 +743,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 24, flexGrow: listItems.length === 0 ? 1 : undefined }}
         ListFooterComponent={showLoadMore ? <View>{loadMoreError ? <Text selectable style={[typography.micro, { color: theme.colors.danger, marginHorizontal: 14, marginTop: 8 }]}>{loadMoreError}</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel={loadMoreError ? "Retry loading Chats" : "Load more Chats"} disabled={loadingMore} onPress={() => void loadMore()} style={({ pressed }) => ({ minHeight: 40, marginHorizontal: 14, marginTop: 8, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{loadingMore ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{loadMoreError ? "Retry loading Chats" : "Load more Chats"}</Text>}</Pressable></View> : null}
-        ListEmptyComponent={<View style={styles.emptyPanel}>{emptyLoading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <AppIcon name={activeLabelFilter ? "list-tree" : trimmedQuery ? "search" : "messages"} size={26} color={theme.colors.textMuted} />}<Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{emptyLabel}</Text></View>}
+        ListEmptyComponent={<View style={styles.emptyPanel}>{emptyLoading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <AppIcon name={listFilter.kind === "label" ? "tag" : trimmedQuery ? "search" : "messages"} size={26} color={theme.colors.textMuted} />}<Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{emptyLabel}</Text></View>}
       />
       {labelSheetSession && client ? <SessionLabelSheet client={client} spaceId={spaceId} session={labelSheetSession} labels={labels} labelsError={labelsError} onLabelsReload={() => setLabelsReloadToken((value) => value + 1)} onClose={closeLabelSheet} onChanged={() => { setLabelSessionIds(new Set()); setLabelsReloadToken((value) => value + 1); }} /> : null}
     </View>

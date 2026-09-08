@@ -1,6 +1,6 @@
-import type { CohubClient, LabelAssignmentRecord, UserSessionListItem } from "@neta-art/cohub";
+import type { CohubClient, LabelAssignmentRecord } from "@neta-art/cohub";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import {
   attachSessionLabel,
@@ -16,7 +16,7 @@ import { AppIcon } from "@/src/ui";
 type SessionLabelSheetProps = {
   client: CohubClient;
   spaceId: string;
-  session: UserSessionListItem;
+  session: { id: string; title?: string | null };
   labels: SessionLabel[];
   labelsError: string | null;
   onLabelsReload: () => void;
@@ -33,6 +33,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels, labelsErro
   const [busyLabelIds, setBusyLabelIds] = useState<Set<string>>(new Set());
   const [newLabelName, setNewLabelName] = useState("");
   const [creating, setCreating] = useState(false);
+  const userLabels = useMemo(() => labels.filter((label) => !label.system), [labels]);
 
   useEffect(() => {
     let active = true;
@@ -60,7 +61,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels, labelsErro
   const assignedIds = useMemo(() => new Set(assignments.map((item) => item.labelId)), [assignments]);
 
   const toggle = useCallback(async (label: SessionLabel) => {
-    if (busyLabelIds.has(label.id)) return;
+    if (busyLabelIds.has(label.id) || label.system) return;
     const ref = formatLabelRef(label);
     if (!ref) return;
     const wasAssigned = assignedIds.has(label.id);
@@ -105,44 +106,55 @@ export function SessionLabelSheet({ client, spaceId, session, labels, labelsErro
   }, [client, creating, newLabelName, onLabelsReload, spaceId, toggle]);
 
   return (
-    <AdaptiveSheet visible title="Chat labels" subtitle={`Organize “${session.title?.trim() || "this Chat"}”`} onClose={onClose} scrollable={false} contentStyle={{ flex: 1, minHeight: 0 }} testID="session-label-sheet">
+    <AdaptiveSheet
+      visible
+      title="Labels"
+      subtitle={`Organize “${session.title?.trim() || "this Chat"}”`}
+      onClose={onClose}
+      testID="session-label-sheet"
+      footer={
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <TextInput
+              value={newLabelName}
+              onChangeText={setNewLabelName}
+              placeholder="New label name"
+              placeholderTextColor={theme.colors.textFaint}
+              editable={!creating}
+              onSubmitEditing={() => void create()}
+              style={{ minHeight: 42, paddingHorizontal: 12, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.background, color: theme.colors.text, fontSize: 15 }}
+            />
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel="Create label" disabled={!newLabelName.trim() || creating} onPress={() => void create()} style={({ pressed }) => ({ minHeight: 42, paddingHorizontal: 14, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: !newLabelName.trim() || creating ? theme.colors.surfaceRaised : pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: !newLabelName.trim() || creating ? 0.6 : 1 })}>
+            {creating ? <ActivityIndicator size="small" color={theme.colors.accentText} /> : <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>Add</Text>}
+          </Pressable>
+        </View>
+      }
+    >
       {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel="Retry loading labels" onPress={onLabelsReload} style={{ paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.accent }]}>Labels failed to load — tap to retry</Text></Pressable> : null}
-      {loading ? <View style={{ paddingVertical: 24, alignItems: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : (
-        <FlatList
-          data={labels}
-          keyExtractor={(item) => item.id}
-          style={{ flex: 1, minHeight: 0, marginTop: 4 }}
-          contentContainerStyle={{ paddingBottom: 8, gap: 2 }}
-          renderItem={({ item }) => {
-            const assigned = assignedIds.has(item.id);
-            const busy = busyLabelIds.has(item.id);
-            return (
-              <Pressable
-                accessibilityRole="checkbox"
-                accessibilityLabel={`Label ${item.name}`}
-                accessibilityState={{ checked: assigned }}
-                onPress={() => void toggle(item)}
-                disabled={busy}
-                style={({ pressed }) => ({ minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, borderRadius: 11, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}
-              >
-                <View style={{ width: 24, height: 24, borderRadius: 8, borderWidth: 1.5, borderColor: assigned ? theme.colors.accent : theme.colors.borderStrong, backgroundColor: assigned ? theme.colors.accent : "transparent", alignItems: "center", justifyContent: "center" }}>
-                  {assigned ? <AppIcon name="check" size={15} color={theme.colors.accentText} /> : null}
-                </View>
-                <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{item.name}</Text>
-                {item.system ? <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: theme.colors.infoSoft }}><Text style={[typography.micro, { color: theme.colors.info }]}>System</Text></View> : null}
-                {busy ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
-              </Pressable>
-            );
-          }}
-          ListEmptyComponent={<Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 14 }]}>No labels yet — create the first one below.</Text>}
-        />
-      )}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
-        <View style={{ flex: 1 }}><TextInput value={newLabelName} onChangeText={setNewLabelName} placeholder="New label name" placeholderTextColor={theme.colors.textFaint} editable={!creating} onSubmitEditing={() => void create()} style={{ minHeight: 42, paddingHorizontal: 12, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface, color: theme.colors.text, fontSize: 15 }} /></View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Create label" disabled={!newLabelName.trim() || creating} onPress={() => void create()} style={({ pressed }) => ({ minHeight: 42, paddingHorizontal: 14, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: !newLabelName.trim() || creating ? theme.colors.surfaceRaised : pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: !newLabelName.trim() || creating ? 0.6 : 1 })}>
-          {creating ? <ActivityIndicator size="small" color={theme.colors.accentText} /> : <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>Add</Text>}
-        </Pressable>
-      </View>
+      {loading ? <View style={{ paddingVertical: 24, alignItems: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : userLabels.length === 0 ? (
+        <Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 14 }]}>No labels yet — create one below.</Text>
+      ) : userLabels.map((item) => {
+        const assigned = assignedIds.has(item.id);
+        const busy = busyLabelIds.has(item.id);
+        return (
+          <Pressable
+            key={item.id}
+            accessibilityRole="checkbox"
+            accessibilityLabel={`Label ${item.name}`}
+            accessibilityState={{ checked: assigned }}
+            onPress={() => void toggle(item)}
+            disabled={busy}
+            style={({ pressed }) => ({ minHeight: 48, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, borderRadius: 11, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}
+          >
+            <View style={{ width: 24, height: 24, borderRadius: 8, borderWidth: 1.5, borderColor: assigned ? theme.colors.accent : theme.colors.borderStrong, backgroundColor: assigned ? theme.colors.accent : "transparent", alignItems: "center", justifyContent: "center" }}>
+              {assigned ? <AppIcon name="check" size={15} color={theme.colors.accentText} /> : null}
+            </View>
+            <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{item.name}</Text>
+            {busy ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
+          </Pressable>
+        );
+      })}
       {error ? <Text selectable style={[typography.micro, { color: theme.colors.danger, marginTop: 8 }]}>{error}</Text> : null}
     </AdaptiveSheet>
   );

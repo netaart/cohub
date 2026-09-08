@@ -10,7 +10,7 @@ import { copyMessageText, MessageBubble, shareMessageText, StreamCard } from "@/
 import { StreamingTurnProcess, TurnProcess } from "@/src/components/TurnProcess";
 import { ModelSelectorSheet } from "@/src/components/ModelSelectorSheet";
 import { SessionLabelSheet } from "@/src/components/SessionLabelSheet";
-import { fetchSessionLabels, toSessionLabel, type SessionLabel } from "@/src/data/session-labels";
+import { fetchSessionLabels, toUserSessionLabels, type SessionLabel } from "@/src/data/session-labels";
 import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
@@ -426,7 +426,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     setLabelSheetOpen(true);
     if (!client || !spaceId) return;
     void fetchSessionLabels(client, spaceId)
-      .then((tree) => setChatLabels(tree.map(toSessionLabel)))
+      .then((tree) => setChatLabels(toUserSessionLabels(tree)))
       .catch(() => setChatLabels([]));
   };
   const saveRename = async () => {
@@ -558,7 +558,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
         <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => setAttachmentMenuOpen(true)} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? "Agent is working…" : "Message the Agent"} />
-        {labelSheetOpen && client && session && spaceId ? <SessionLabelSheet client={client} spaceId={spaceId} session={session} labels={chatLabels} labelsError={null} onLabelsReload={() => { if (client && spaceId) void fetchSessionLabels(client, spaceId).then((tree) => setChatLabels(tree.map(toSessionLabel))).catch(() => undefined); }} onClose={() => setLabelSheetOpen(false)} onChanged={() => undefined} /> : null}
+        {labelSheetOpen && client && session && spaceId ? <SessionLabelSheet client={client} spaceId={spaceId} session={session} labels={chatLabels} labelsError={null} onLabelsReload={() => { if (client && spaceId) void fetchSessionLabels(client, spaceId).then((tree) => setChatLabels(toUserSessionLabels(tree))).catch(() => undefined); }} onClose={() => setLabelSheetOpen(false)} onChanged={() => undefined} /> : null}
         <AdaptiveSheet visible={attachmentMenuOpen} title="Add to Chat" subtitle="Choose what to include with your next message." onClose={() => setAttachmentMenuOpen(false)} scrollable={false} testID="chat-attachment-sheet"><SheetAction icon="images" title="Photo library" detail="Choose one or more images" onPress={() => void pickPhotos()} /><SheetAction icon="camera" title="Take a photo" detail="Use the device camera" onPress={() => void takePhoto()} /><SheetAction icon="paperclip" title="Choose a file" detail="Attach a document or archive" onPress={() => void pickAttachments()} /></AdaptiveSheet>
         <TurnNavigatorSheet visible={turnNavigatorOpen} turns={view.turnIndex} currentSequence={currentTurnSequence} loading={view.turnIndexLoading} loadingSequence={loadingSequence} onClose={() => setTurnNavigatorOpen(false)} onJump={(sequence) => handleTurnJump(sequence)} onRetry={() => void loadTurnIndex(sessionId, { force: true }).catch(() => undefined)} />
         <ModelSelectorSheet key={modelSelectorOpen ? "chat-model-open" : "chat-model-closed"} visible={modelSelectorOpen} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={modelOverride ? selectedModel : recordedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelOverride(true); setModelSelectorOpen(false); }} />
