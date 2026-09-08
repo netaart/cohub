@@ -1,5 +1,4 @@
 import { Text, View } from "react-native";
-import { PinnedRow } from "@/src/components/PinnedRow";
 import { Avatar, AppIcon } from "@/src/ui";
 import { PressableScale } from "@/src/ui/PressableScale";
 import type { RemoteSessionSearchHit, RemoteSpaceSearchHit, SessionNavigationTarget } from "@/src/data/session-search";
@@ -9,12 +8,9 @@ import { formatRelativeTime, shortPreview } from "@/src/utils";
 type SessionSearchRowProps = {
   hit: RemoteSessionSearchHit;
   onPress: (target?: SessionNavigationTarget) => void;
-  pinned?: boolean;
-  pinning?: boolean;
-  onTogglePin?: () => void;
 };
 
-export function SessionSearchRow({ hit, onPress, pinned = false, pinning = false, onTogglePin }: SessionSearchRowProps) {
+export function SessionSearchRow({ hit, onPress }: SessionSearchRowProps) {
   const theme = useAppTheme();
   const spaceName = hit.spaceName?.trim() || "Space";
   const target = hit.turnSequence == null && !hit.turnId ? undefined : { ...(hit.turnSequence != null ? { turn: hit.turnSequence } : {}), ...(hit.turnId ? { turnId: hit.turnId } : {}) };
@@ -33,22 +29,7 @@ export function SessionSearchRow({ hit, onPress, pinned = false, pinning = false
   </>;
   const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, backgroundColor: "transparent" };
   const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
-  if (!onTogglePin) {
-    return <PressableScale accessibilityRole="button" accessibilityLabel={`Open ${hit.title}`} onPress={() => onPress(target)} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
-  }
-  return <PinnedRow
-    openLabel={`Open ${hit.title}`}
-    pinLabel="Pin Chat"
-    unpinLabel="Unpin Chat"
-    pinned={pinned}
-    pinning={pinning}
-    onPress={() => onPress(target)}
-    onTogglePin={() => onTogglePin()}
-    rowStyle={rowStyle}
-    rowPressedStyle={rowPressedStyle}
-  >
-    {content}
-  </PinnedRow>;
+  return <PressableScale accessibilityRole="button" accessibilityLabel={`Open ${hit.title}`} onPress={() => onPress(target)} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
 }
 
 export function SpaceSearchRow({ hit, onPress }: { hit: RemoteSpaceSearchHit; onPress: () => void }) {

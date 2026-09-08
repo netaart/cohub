@@ -49,6 +49,7 @@ import Sun from "lucide-react-native/icons/sun";
 import Moon from "lucide-react-native/icons/moon";
 import Settings from "lucide-react-native/icons/settings";
 import Sparkles from "lucide-react-native/icons/sparkles";
+import Tag from "lucide-react-native/icons/tag";
 import Square from "lucide-react-native/icons/square";
 import SquarePen from "lucide-react-native/icons/square-pen";
 import Terminal from "lucide-react-native/icons/terminal";
@@ -109,6 +110,7 @@ export const icons = {
   moon: Moon,
   settings: Settings,
   sparkles: Sparkles,
+  tag: Tag,
   "square-pen": SquarePen,
   stop: Square,
   sync: RefreshCw,

@@ -56,7 +56,7 @@ export function PressableScale({
   };
 
   return (
-    <Animated.View style={[style, scale && !disabled ? { transform: [{ scale: progress }] } : null]}>
+    <Animated.View style={scale && !disabled ? { transform: [{ scale: progress }] } : null}>
       <Pressable
         accessibilityLabel={accessibilityLabel}
         accessibilityRole={accessibilityRole}
@@ -75,7 +75,11 @@ export function PressableScale({
           if (scale) settle(1);
         }}
       >
-        {({ pressed }) => <View style={[pressed && !scale ? { opacity: 0.72 } : null, pressed ? pressedStyle : null]}>{children}</View>}
+        {({ pressed }) => (
+          <View style={[style, pressed ? pressedStyle : null, pressed && !scale ? { opacity: 0.72 } : null]}>
+            {children}
+          </View>
+        )}
       </Pressable>
     </Animated.View>
   );

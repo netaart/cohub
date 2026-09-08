@@ -4,17 +4,25 @@
 import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/cohub";
 import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Animated, BackHandler, FlatList, Modal, PanResponder, Platform, Pressable, Text, View, useWindowDimensions, type ViewStyle } from "react-native";
+import { ActivityIndicator, Animated, BackHandler, FlatList, Modal, PanResponder, Platform, Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, { cancelAnimation, Extrapolation, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionSearchRow } from "@/src/components/SearchResultRow";
 import { SessionRow } from "@/src/components/SessionRow";
+import { SessionLabelSheet } from "@/src/components/SessionLabelSheet";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useAppTheme, typography } from "@/src/theme";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
-import { getResourcePinState, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { mockFileTree } from "@/src/data/mock";
+import {
+  fetchLabelSessionIds,
+  fetchSessionLabels,
+  formatLabelRef,
+  toSourceSessionLabels,
+  toUserSessionLabels,
+  type SessionLabel,
+} from "@/src/data/session-labels";
 import { PANEL_CLOSE_THRESHOLD, PANEL_OPEN_THRESHOLD, PANEL_SWIPE_VELOCITY, panelForOpeningDelta, panelForSide, shouldClosePanel, shouldOpenPanel, sideForPanel, type PanelName, type PanelSide } from "@/src/data/space-panel-gesture";
 import { AppIcon, IconButton, PrimaryButton, SearchField } from "@/src/ui";
 import { motion } from "@/src/motion";
@@ -562,7 +570,7 @@ type ChatPanelItem =
   | { kind: "local"; session: UserSessionListItem }
   | { kind: "remote"; hit: RemoteSessionSearchHit };
 
-type ChatPinFilter = "all" | "pinned";
+type ChatLabelFilter = { kind: "all" } | { kind: "label"; label: SessionLabel; ref: string };
 
 function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
@@ -573,120 +581,92 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
   const [scopeInitialized, setScopeInitialized] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
-  const [pinFilter, setPinFilter] = useState<ChatPinFilter>("all");
-  const [pinStates, setPinStates] = useState<Record<string, boolean>>({});
-  const [pinLoading, setPinLoading] = useState(false);
-  const [pinError, setPinError] = useState<string | null>(null);
-  const [pinRetryToken, setPinRetryToken] = useState(0);
-  const pinStatesRef = useRef<Record<string, boolean>>({});
-  const pinningIdsRef = useRef(new Set<string>());
-  const pinMutationVersionsRef = useRef(new Map<string, number>());
-  const [pinningIds, setPinningIds] = useState<Set<string>>(new Set());
+  const [labelFilter, setLabelFilter] = useState<ChatLabelFilter>({ kind: "all" });
+  const [labels, setLabels] = useState<SessionLabel[]>([]);
+  const [labelsError, setLabelsError] = useState<string | null>(null);
+  const [labelsReloadToken, setLabelsReloadToken] = useState(0);
+  const [labelSessionIds, setLabelSessionIds] = useState<Set<string>>(new Set());
+  const [labelSessionsLoading, setLabelSessionsLoading] = useState(false);
+  const [labelSessionsError, setLabelSessionsError] = useState<string | null>(null);
+  const [labelSheetSession, setLabelSheetSession] = useState<UserSessionListItem | null>(null);
   const remoteSearch = useRemoteSearch(client, query, { enabled: Boolean(spaceId), spaceId, types: ["session", "turn"] });
   const displaySessions = useMemo(() => mergePanelSessions(extraSessions, sessions, spaceId, spaceName), [extraSessions, sessions, spaceId, spaceName]);
   const remoteQueryMatches = remoteSearch.query === normalizeSearchQuery(query);
-  const pinCandidateIds = useMemo(() => [...new Set([
-    ...displaySessions.map((session) => session.id),
-    ...(remoteQueryMatches ? remoteSearch.sessions.map((hit) => hit.sessionId) : []),
-  ])], [displaySessions, remoteQueryMatches, remoteSearch.sessions]);
-  const pinCandidateKey = pinCandidateIds.join("|");
-  const updatePinStates = useCallback((next: Record<string, boolean>) => {
-    pinStatesRef.current = { ...pinStatesRef.current, ...next };
-    setPinStates((current) => ({ ...current, ...next }));
-  }, []);
 
   useEffect(() => {
-    pinStatesRef.current = {};
-    pinningIdsRef.current.clear();
-    pinMutationVersionsRef.current.clear();
-    setPinStates({});
-    setPinningIds(new Set());
-    setPinError(null);
+    setLabels([]);
+    setLabelsError(null);
+    setLabelFilter({ kind: "all" });
+    setLabelSheetSession(null);
   }, [client, spaceId]);
 
   useEffect(() => {
-    if (!client || pinCandidateIds.length === 0) return;
-    const missing = pinCandidateIds.filter((id) => pinStatesRef.current[id] === undefined);
-    if (missing.length === 0) {
-      setPinLoading(false);
-      return;
-    }
+    if (!client || !spaceId) return;
     let active = true;
-    const requestVersions = new Map(missing.map((id) => [id, pinMutationVersionsRef.current.get(id) ?? 0]));
-    setPinLoading(true);
-    setPinError(null);
-    void loadResourcePinStates(client, "session", missing, { force: true }).then((next) => {
-      if (!active) return;
-      const withoutMutations = Object.fromEntries(Object.entries(next).filter(([id]) =>
-        !pinningIdsRef.current.has(id) && (pinMutationVersionsRef.current.get(id) ?? 0) === requestVersions.get(id),
-      ));
-      updatePinStates(withoutMutations);
-    }).catch((error) => {
-      if (active) setPinError(error instanceof Error ? error.message : "Unable to load Chat pins");
-    }).finally(() => {
-      if (active) setPinLoading(false);
-    });
+    setLabelsError(null);
+    void fetchSessionLabels(client, spaceId)
+      .then((tree) => {
+        if (!active) return;
+        const userLabels = toUserSessionLabels(tree);
+        const sourceLabels = toSourceSessionLabels(tree);
+        setLabels([...sourceLabels, ...userLabels]);
+      })
+      .catch((error) => {
+        if (active) setLabelsError(error instanceof Error ? error.message : "Unable to load labels");
+      });
     return () => {
       active = false;
     };
-  }, [client, pinCandidateKey, pinCandidateIds, pinRetryToken, updatePinStates]);
+  }, [client, spaceId, labelsReloadToken]);
 
   useEffect(() => {
-    if (!client) return;
-    return client.onUserEvent((event) => {
-      if (event.type !== "label.assignments.updated") return;
-      const payload = event.payload as { resourceType?: unknown; resourceRef?: unknown; assignments?: unknown };
-      if (payload.resourceType !== "session" || typeof payload.resourceRef !== "string" || !Array.isArray(payload.assignments)) return;
-      if (!pinCandidateIds.includes(payload.resourceRef)) return;
-      updatePinStates({ [payload.resourceRef]: isResourcePinned(payload.assignments as { labelSystemKey?: string | null }[]) });
-    });
-  }, [client, pinCandidateIds, updatePinStates]);
-
-  const togglePin = useCallback(async (sessionId: string) => {
-    if (!client || pinningIdsRef.current.has(sessionId)) return;
-    pinningIdsRef.current.add(sessionId);
-    const mutationVersion = (pinMutationVersionsRef.current.get(sessionId) ?? 0) + 1;
-    pinMutationVersionsRef.current.set(sessionId, mutationVersion);
-    setPinningIds((current) => new Set([...current, sessionId]));
-    setPinError(null);
-    let previous = pinStatesRef.current[sessionId];
-    try {
-      if (previous === undefined) {
-        previous = await getResourcePinState(client, "session", sessionId, { force: true });
-        if ((pinMutationVersionsRef.current.get(sessionId) ?? 0) !== mutationVersion) return;
-        updatePinStates({ [sessionId]: previous });
-      }
-      const optimistic = !previous;
-      updatePinStates({ [sessionId]: optimistic });
-      const resolved = await toggleResourcePin(client, "session", sessionId, previous);
-      if ((pinMutationVersionsRef.current.get(sessionId) ?? 0) === mutationVersion) updatePinStates({ [sessionId]: resolved });
-    } catch (error) {
-      if ((pinMutationVersionsRef.current.get(sessionId) ?? 0) !== mutationVersion) return;
-      if (previous !== undefined) updatePinStates({ [sessionId]: previous });
-      setPinError(error instanceof Error ? error.message : "Unable to update Chat pin");
-    } finally {
-      pinningIdsRef.current.delete(sessionId);
-      setPinningIds((current) => new Set([...current].filter((id) => id !== sessionId)));
+    if (!client || !spaceId || labelFilter.kind !== "label") {
+      setLabelSessionIds(new Set());
+      setLabelSessionsError(null);
+      return;
     }
-  }, [client, updatePinStates]);
+    let active = true;
+    setLabelSessionsLoading(true);
+    setLabelSessionsError(null);
+    void fetchLabelSessionIds(client, spaceId, labelFilter.ref)
+      .then((ids) => {
+        if (active) setLabelSessionIds(new Set(ids));
+      })
+      .catch((error) => {
+        if (active) setLabelSessionsError(error instanceof Error ? error.message : "Unable to load labeled Chats");
+      })
+      .finally(() => {
+        if (active) setLabelSessionsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, labelFilter, spaceId]);
 
+  const openLabelSheet = useCallback((session: UserSessionListItem) => {
+    setLabelSheetSession(session);
+  }, []);
+  const closeLabelSheet = useCallback(() => setLabelSheetSession(null), []);
+
+  const activeLabelFilter = labelFilter.kind === "label" ? labelFilter : null;
   const trimmedQuery = normalizeSearchQuery(query);
   const needle = trimmedQuery.toLowerCase();
+  const matchesLabelFilter = (sessionId: string) => activeLabelFilter === null || labelSessionIds.has(sessionId);
   const filteredSessions = displaySessions.filter((session) =>
     (!needle || [session.title, session.latestMessageText, session.space?.name].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false)) &&
-    (pinFilter === "all" || pinStates[session.id] === true),
+    matchesLabelFilter(session.id),
   );
   const listItems = useMemo<ChatPanelItem[]>(() => {
     if (!trimmedQuery) return filteredSessions.map((session) => ({ kind: "local", session }));
     const remoteSessions = remoteQueryMatches
-      ? remoteSearch.sessions.filter((hit) => pinFilter === "all" || pinStates[hit.sessionId] === true)
+      ? remoteSearch.sessions.filter((hit) => activeLabelFilter === null || labelSessionIds.has(hit.sessionId))
       : [];
     const remoteIds = new Set(remoteSessions.map((hit) => hit.sessionId));
     return [
       ...remoteSessions.map((hit) => ({ kind: "remote" as const, hit })),
       ...filteredSessions.filter((session) => !remoteIds.has(session.id)).map((session) => ({ kind: "local" as const, session })),
     ];
-  }, [filteredSessions, pinFilter, pinStates, remoteQueryMatches, remoteSearch.sessions, trimmedQuery]);
+  }, [activeLabelFilter, filteredSessions, labelSessionIds, remoteQueryMatches, remoteSearch.sessions, trimmedQuery]);
   const loadMore = async () => {
     if (!client || loadingMore || (scopeInitialized && !scopeHasMore)) return;
     setLoadingMore(true);
@@ -705,12 +685,16 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
     }
   };
   const showLoadMore = Boolean(client && !trimmedQuery && (!scopeInitialized || scopeHasMore));
-  const emptyLoading = (remoteQueryMatches && remoteSearch.loading) || (pinFilter === "pinned" && pinLoading);
-  const emptyLabel = pinFilter === "pinned"
-    ? "No pinned Chats"
+  const emptyLoading = (remoteQueryMatches && remoteSearch.loading) || labelSessionsLoading;
+  const emptyLabel = activeLabelFilter
+    ? `No Chats labeled “${activeLabelFilter.label.name}”`
     : trimmedQuery
       ? "No matching Chats"
       : "No Chats in this Space yet.";
+  const labelChips: { key: string; label: string; icon?: React.ComponentProps<typeof AppIcon>["name"]; filter: ChatLabelFilter }[] = [
+    { key: "all", label: "All", filter: { kind: "all" } },
+    ...labels.map((label) => ({ key: `label:${label.id}`, label: label.name, filter: { kind: "label" as const, label, ref: formatLabelRef(label) } })),
+  ];
   return (
     <View style={styles.panelContent}>
       <PanelHeader title="Chats" subtitle={spaceName} onClose={onClose} />
@@ -720,24 +704,33 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
           <View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Search Chats" /></View>
           {remoteQueryMatches && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
         </View>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <PanelFilterChip label="All" selected={pinFilter === "all"} onPress={() => setPinFilter("all")} />
-          <PanelFilterChip label="Pinned" icon="pin" selected={pinFilter === "pinned"} onPress={() => setPinFilter("pinned")} />
-        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+          {labelChips.map((chip) => (
+            <PanelFilterChip
+              key={chip.key}
+              label={chip.label}
+              icon={chip.filter.kind === "label" && chip.filter.label.system ? "globe" : undefined}
+              selected={labelFilter.kind === "label" ? chip.filter.kind === "label" && labelFilter.label.id === chip.filter.label.id : chip.filter.kind === "all"}
+              onPress={() => setLabelFilter(chip.filter)}
+            />
+          ))}
+          {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel="Retry loading labels" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.caption, { color: theme.colors.accent }]}>Retry labels</Text></Pressable> : null}
+        </ScrollView>
         {remoteQueryMatches && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
-        {pinError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{pinError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat pins" onPress={() => setPinRetryToken((value) => value + 1)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
+        {labelSessionsError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{labelSessionsError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry loading labeled Chats" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
       </View>
       <FlatList
         data={listItems}
         keyExtractor={(item) => item.kind === "remote" ? `remote:${item.hit.sessionId}` : `local:${item.session.id}`}
         renderItem={({ item }) => item.kind === "remote"
-          ? <SessionSearchRow hit={item.hit} pinned={pinStates[item.hit.sessionId] === true} pinning={pinningIds.has(item.hit.sessionId)} onTogglePin={client ? () => void togglePin(item.hit.sessionId) : undefined} onPress={(target) => onOpenSession(item.hit.sessionId, target)} />
-          : <SessionRow session={item.session} pinned={pinStates[item.session.id] === true} pinning={pinningIds.has(item.session.id)} onTogglePin={client ? () => void togglePin(item.session.id) : undefined} onPress={() => onOpenSession(item.session.id)} />}
+          ? <SessionSearchRow hit={item.hit} onPress={(target) => onOpenSession(item.hit.sessionId, target)} />
+          : <SessionRow session={item.session} onPress={() => onOpenSession(item.session.id)} onLongPress={client ? () => openLabelSheet(item.session) : undefined} />}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 24, flexGrow: listItems.length === 0 ? 1 : undefined }}
         ListFooterComponent={showLoadMore ? <View>{loadMoreError ? <Text selectable style={[typography.micro, { color: theme.colors.danger, marginHorizontal: 14, marginTop: 8 }]}>{loadMoreError}</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel={loadMoreError ? "Retry loading Chats" : "Load more Chats"} disabled={loadingMore} onPress={() => void loadMore()} style={({ pressed }) => ({ minHeight: 40, marginHorizontal: 14, marginTop: 8, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{loadingMore ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{loadMoreError ? "Retry loading Chats" : "Load more Chats"}</Text>}</Pressable></View> : null}
-        ListEmptyComponent={<View style={styles.emptyPanel}>{emptyLoading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <AppIcon name={pinFilter === "pinned" ? "pin" : trimmedQuery ? "search" : "messages"} size={26} color={theme.colors.textMuted} />}<Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{emptyLabel}</Text></View>}
+        ListEmptyComponent={<View style={styles.emptyPanel}>{emptyLoading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <AppIcon name={activeLabelFilter ? "list-tree" : trimmedQuery ? "search" : "messages"} size={26} color={theme.colors.textMuted} />}<Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{emptyLabel}</Text></View>}
       />
+      {labelSheetSession && client ? <SessionLabelSheet client={client} spaceId={spaceId} session={labelSheetSession} labels={labels} labelsError={labelsError} onLabelsReload={() => setLabelsReloadToken((value) => value + 1)} onClose={closeLabelSheet} onChanged={() => { setLabelSessionIds(new Set()); setLabelsReloadToken((value) => value + 1); }} /> : null}
     </View>
   );
 }
