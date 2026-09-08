@@ -11,6 +11,7 @@ import Brain from "lucide-react-native/icons/brain";
 import Bookmark from "lucide-react-native/icons/bookmark";
 import Camera from "lucide-react-native/icons/camera";
 import Check from "lucide-react-native/icons/check";
+import CheckCheck from "lucide-react-native/icons/check-check";
 import Code from "lucide-react-native/icons/code";
 import CircleCheck from "lucide-react-native/icons/circle-check";
 import CircleX from "lucide-react-native/icons/circle-x";
@@ -72,6 +73,7 @@ export const icons = {
   bookmark: Bookmark,
   camera: Camera,
   check: Check,
+  "check-check": CheckCheck,
   code: Code,
   "check-circle": CircleCheck,
   "circle-x": CircleX,

@@ -1,11 +1,55 @@
 import assert from "node:assert/strict";
+import { mock } from "node:test";
+import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
+import { formatMessageClock } from "../src/data/chat-format.ts";
+import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
+
+const measurements = new MessageMeasurements();
+const measuredRows = [{ id: "a", revision: "1" }, { id: "b", revision: "1" }];
+measurements.configure("360:1:light", measuredRows);
+measurements.measure(measuredRows[0], 200);
+assert.equal(measurements.estimateOffset(measuredRows, 2, 80), 280);
+const revisedRows = [{ id: "a", revision: "2" }, measuredRows[1]];
+assert.equal(measurements.estimateOffset(revisedRows, 2, 80), 160);
+measurements.configure("720:1:light", measuredRows);
+assert.equal(measurements.estimateOffset(measuredRows, 2, 80), 160);
+measurements.measure(measuredRows[0], 200);
+measurements.configure("720:1:light", []);
+assert.equal(measurements.estimateOffset(measuredRows, 1, 80), 80);
+assert.throws(() => measurements.measure(measuredRows[0], NaN), /positive and finite/);
+
+mock.timers.enable({ apis: ["setTimeout"] });
+try {
+  const published = [];
+  const batch = createStreamBatch((value) => published.push(value));
+  batch.push("first");
+  batch.push("latest");
+  mock.timers.tick(31);
+  assert.deepEqual(published, []);
+  mock.timers.tick(1);
+  assert.deepEqual(published, ["latest"]);
+  batch.push("before lifecycle");
+  batch.flush();
+  assert.deepEqual(published, ["latest", "before lifecycle"]);
+  batch.push("stale after completion");
+  batch.cancel();
+  mock.timers.tick(100);
+  assert.deepEqual(published, ["latest", "before lifecycle"]);
+} finally {
+  mock.timers.reset();
+}
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { filterSpaces } from "../src/data/space-filters.ts";
 import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { nextChatTailFollowing } from "../src/data/chat-scroll.ts";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
-import { messageIndexForTurn } from "../src/data/session-history.ts";
+import { mergeDisplayMessages, messageIndexForTurn } from "../src/data/session-history.ts";
+
+const finalReply = { id: "final", role: "assistant", sequence: 2, meta: { turnId: "turn-1" }, text: "Final reply" };
+const intermediateReply = { id: "step", role: "assistant", sequence: 1, meta: { turnId: "turn-1", messageKind: "assistant_intermediate" }, text: "Working" };
+assert.deepEqual(mergeDisplayMessages([finalReply], [intermediateReply]), [finalReply]);
+assert.deepEqual(mergeDisplayMessages([], [intermediateReply, finalReply]), [finalReply]);
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 
 assert.equal(normalizeSearchQuery("  server   result  "), "server result");
@@ -184,5 +228,15 @@ assert.equal(mapped.sessions.length, 1);
 assert.equal(mapped.sessions[0]?.sessionId, "session-1");
 assert.equal(mapped.sessions[0]?.turnSequence, 7);
 assert.equal(mapped.sessions[0]?.turnId, "turn-7");
+
+assert.equal(toolCallPreview("skill_view", { skill: "github-pr-workflow" }), "github-pr-workflow");
+assert.equal(toolCallPreview("terminal", { command: "git status --short --branch && git rebase" }), "git status --short --branch && git rebase");
+assert.equal(toolCallPreview("bash", { command: { preview: "git pull --rebase origin main" } }), "git pull --rebase origin main");
+assert.equal(toolCallPreview("read", { path: "src/app.ts" }), "src/app.ts");
+assert.equal(toolCallPreview("unknown", {}), "");
+assert.equal(formatToolCallCaption("skill_view", { skill: "github-pr-workflow" }), "skill_view: \"github-pr-workflow\"");
+assert.equal(formatToolCallCaption("terminal", {}), "terminal");
+assert.equal(formatMessageClock(new Date(2026, 0, 1, 19, 3).toISOString()), "19:03");
+assert.equal(formatMessageClock("not-a-date"), "");
 
 console.log("Chat workflow checks passed");

@@ -22,11 +22,24 @@ for (const sessionId of ["s-running", "s-failed", "s-complete", "s-long"]) {
   const turns = Array.from({ length: sessionId === "s-complete" ? 6 : 3 }, (_, index) => {
     const sequence = index + 1;
     const failed = sessionId === "s-failed" && sequence === 3;
+    const toolDemo = sessionId === "s-complete" && sequence === 6;
+    const toolCalls = [
+      { type: "tool_use" as const, id: "skill-1", name: "skill_view", input: { skill: "github-pr-workflow" } },
+      { type: "tool_result" as const, tool_use_id: "skill-1", content: "loaded" },
+      { type: "tool_use" as const, id: "term-1", name: "terminal", input: { command: "git status --short --branch && git rebase" } },
+      { type: "tool_result" as const, tool_use_id: "term-1", content: "## main" },
+      { type: "tool_use" as const, id: "term-2", name: "terminal", input: { command: "git add public/img/20260325-ai-frontend.webp" } },
+      { type: "tool_result" as const, tool_use_id: "term-2", content: "ok" },
+      { type: "tool_use" as const, id: "term-3", name: "terminal", input: { command: "git pull --rebase origin main && git push" } },
+      { type: "tool_result" as const, tool_use_id: "term-3", content: "ok" },
+      { type: "tool_use" as const, id: "term-4", name: "terminal", input: { command: "git status --short --branch && git rebase" } },
+      { type: "tool_result" as const, tool_use_id: "term-4", content: "ok" },
+    ];
     return {
       id: `${sessionId}-turn-${sequence}`, sessionId, userUuid: "web-preview", sequence,
       status: failed ? "failed" : sessionId === "s-running" && sequence === 3 ? "running" : "completed",
-      intent: "chat", userContent: [{ type: "text", text: `User request for turn ${sequence}: continue the work.` }], userText: `User request for turn ${sequence}: continue the work.`,
-      assistantContent: failed ? null : [{ type: "text", text: `Assistant response for turn ${sequence}. This longer response gives the locator enough content to scroll to a distinct position.` }], assistantText: failed ? null : `Assistant response for turn ${sequence}. This longer response gives the locator enough content to scroll to a distinct position.`,
+      intent: "chat", userContent: [{ type: "text", text: toolDemo ? "ok 帮我 push 吧" : `User request for turn ${sequence}: continue the work.` }], userText: toolDemo ? "ok 帮我 push 吧" : `User request for turn ${sequence}: continue the work.`,
+      assistantContent: failed ? null : toolDemo ? toolCalls : [{ type: "text", text: `Assistant response for turn ${sequence}. This longer response gives the locator enough content to scroll to a distinct position.` }], assistantText: failed ? null : toolDemo ? "" : `Assistant response for turn ${sequence}. This longer response gives the locator enough content to scroll to a distinct position.`,
       provider: "cohub", model: "mock-agent", stopReason: failed ? null : "stop", errorMessage: failed ? "The Agent run ended before the launch brief could be completed." : null, finalUsage: null, totalUsage: null, summary: null, intermediateIndex: null, intermediateSummary: null, meta: null, startedAt: now, completedAt: now, durationMs: 420, createdAt: now, updatedAt: now,
     } as unknown as SessionTurnRecord;
   });

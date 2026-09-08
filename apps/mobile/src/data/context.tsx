@@ -14,6 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { AppState as NativeAppState, Platform } from "react-native";
 import { File as ExpoFile } from "expo-file-system";
 import { createMobileClient } from "@/src/data/client";
+import { createStreamBatch } from "@/src/data/chat-rendering";
 import {
   clearUserCache,
   hydrateHome,
@@ -1107,6 +1108,7 @@ export function AppProvider({
         dispatch({ type: "session-start", sessionId, space, session });
         subscriptions.current.get(sessionId)?.();
         const sessionClient = client.space(spaceId).session(sessionId);
+        const streamBatch = createStreamBatch<StreamView>((stream) => dispatch({ type: "stream-state", sessionId, stream }));
         const stopGeneration = sessionClient.subscribeGeneration(
           {
             state: (event) => {
@@ -1120,13 +1122,20 @@ export function AppProvider({
                 runtimeProvider: null,
                 runtimeModel: null,
               };
-              dispatch({ type: "stream-state", sessionId, stream });
+              if (stream.status === "streaming") streamBatch.push(stream);
+              else {
+                streamBatch.cancel();
+                dispatch({ type: "stream-state", sessionId, stream });
+              }
             },
             commit: (event) => {
+              if (event.commit.isFinal) streamBatch.cancel();
+              else streamBatch.flush();
               dispatch({ type: "message-add", sessionId, message: event.commit.message });
               if (event.commit.isFinal) dispatch({ type: "stream-clear", sessionId });
             },
             finalized: (event) => {
+              streamBatch.cancel();
               dispatch({ type: "turn-upsert", sessionId, turn: event.turn });
               dispatch({ type: "stream-clear", sessionId });
               void refreshSession(sessionId);
@@ -1136,9 +1145,11 @@ export function AppProvider({
             },
             lifecycle: (event) => {
               if (event.phase !== "llm_call_started") return;
+              streamBatch.flush();
               dispatch({ type: "stream-lifecycle", sessionId, provider: event.provider, model: event.model });
             },
             error: (event) => {
+              streamBatch.flush();
               dispatch({ type: "session-error", sessionId, message: event.message });
             },
             outOfSync: () => {
@@ -1175,6 +1186,7 @@ export function AppProvider({
           },
         });
         const stop = () => {
+          streamBatch.cancel();
           stopGeneration();
           stopPersisted();
         };

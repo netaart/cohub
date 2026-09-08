@@ -1,14 +1,17 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
-import { Image, Linking, Text, View } from "react-native";
-import type { ReactNode } from "react";
-import { AppIcon } from "@/src/ui";
+import { Image, Linking, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
+import { useState, type ReactNode } from "react";
+import { AppIcon, type IconName } from "@/src/ui";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
-import { useAppTheme, typography } from "@/src/theme";
+import { useAppTheme, typography, type AppTheme } from "@/src/theme";
+import { formatMessageClock } from "@/src/data/chat-format";
+import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
-import { contentBlockText, hasRenderableContent, hasRenderableMessage } from "@/src/utils";
+import { hasRenderableContent, hasRenderableMessage } from "@/src/utils";
 
-function TextBlock({ value, muted = false, accent }: { value: string; muted?: boolean; accent: string }) {
+function TextBlock({ value, muted = false, accent, color }: { value: string; muted?: boolean; accent: string; color?: string }) {
   const theme = useAppTheme();
+  const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
   const lines = value.replace(/\r\n?/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let paragraph: string[] = [];
@@ -18,13 +21,13 @@ function TextBlock({ value, muted = false, accent }: { value: string; muted?: bo
 
   const flushParagraph = () => {
     const text = paragraph.join(" ").trim();
-    if (text) blocks.push(<Text key={`paragraph-${blocks.length}`} selectable style={[typography.body, { color: muted ? theme.colors.textMuted : theme.colors.text, lineHeight: 23 }]}>{renderInlineMarkdown(text, accent)}</Text>);
+    if (text) blocks.push(<Text key={`paragraph-${blocks.length}`} selectable style={[typography.body, { color: textColor, lineHeight: 23 }]}>{renderInlineMarkdown(text, accent)}</Text>);
     paragraph = [];
   };
   const flushList = () => {
     if (!list) return;
     const currentList = list;
-    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{currentList.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.body, { color: theme.colors.accent, lineHeight: 23, minWidth: 18 }]}>{currentList.ordered ? `${currentList.start + index}.` : "•"}</Text><Text selectable style={[typography.body, { color: muted ? theme.colors.textMuted : theme.colors.text, lineHeight: 23, flex: 1 }]}>{renderInlineMarkdown(item, accent)}</Text></View>)}</View>);
+    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{currentList.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.body, { color: accent, lineHeight: 23, minWidth: 18 }]}>{currentList.ordered ? `${currentList.start + index}.` : "•"}</Text><Text selectable style={[typography.body, { color: textColor, lineHeight: 23, flex: 1 }]}>{renderInlineMarkdown(item, accent)}</Text></View>)}</View>);
     list = null;
   };
   const flushCode = () => {
@@ -55,7 +58,7 @@ function TextBlock({ value, muted = false, accent }: { value: string; muted?: bo
       flushParagraph();
       flushList();
       const size = heading[1].length <= 2 ? 19 : heading[1].length <= 4 ? 17 : 15;
-      blocks.push(<Text key={`heading-${blocks.length}`} selectable style={{ color: muted ? theme.colors.textMuted : theme.colors.text, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}>{renderInlineMarkdown(heading[2], accent)}</Text>);
+      blocks.push(<Text key={`heading-${blocks.length}`} selectable style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}>{renderInlineMarkdown(heading[2], accent)}</Text>);
       continue;
     }
     const quote = /^\s*>\s?(.*)$/.exec(line);
@@ -189,24 +192,95 @@ function renderInlineMarkdown(value: string, accent: string): ReactNode {
   return nodes;
 }
 
-function Block({ block }: { block: ContentBlock }) {
+function Block({ block, color }: { block: ContentBlock; color?: string }) {
   const theme = useAppTheme();
-  if (block.type === "text") return <TextBlock value={block.text} accent={theme.colors.accent} />;
-  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={theme.colors.accent} />;
+  const accent = color ?? theme.colors.accent;
+  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} />;
+  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} />;
   if (block.type === "image" && block.source?.type === "url") {
     return <Image source={{ uri: block.source.url }} resizeMode="contain" style={{ width: "100%", height: 220, borderRadius: 12, backgroundColor: theme.colors.surfaceRaised }} />;
   }
-  if (block.type === "tool_use") {
-    return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 }}><AppIcon name="terminal" size={15} color={theme.colors.info} /><Text style={[typography.caption, { color: theme.colors.info }]}>{block.name || "Using a tool"}</Text></View>;
-  }
-  if (block.type === "tool_result") {
-    return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7 }}><AppIcon name="check-circle" size={15} color={theme.colors.success} /><Text style={[typography.caption, { color: theme.colors.textMuted }]}>{contentBlockText(block)}</Text></View>;
-  }
+  if (block.type === "tool_use") return <ToolCall block={block} />;
+  if (block.type === "tool_result") return <ToolOutput block={block} />;
   return null;
 }
 
-export function MessageContent({ content }: { content: ContentBlock[] | null | undefined }) {
-  return <View style={{ gap: 6 }}>{(content ?? []).map((block, index) => <Block key={`${block.type}-${index}`} block={block} />)}</View>;
+function toolIcon(name: string): IconName {
+  const key = name.toLowerCase();
+  if (key.includes("skill")) return "book-open";
+  if (key.includes("bash") || key.includes("terminal") || key.includes("shell") || key.includes("command")) return "terminal";
+  if (key.includes("write") || key.includes("edit") || key.includes("patch")) return "square-pen";
+  if (key.includes("read") || key.includes("file")) return "file-text";
+  if (key.includes("grep") || key.includes("find") || key.includes("search") || key.includes("glob")) return "search";
+  if (key === "ls" || key.includes("list") || key.includes("folder")) return "folder";
+  if (key.includes("web") || key.includes("fetch") || key.includes("http")) return "globe";
+  if (key.includes("think")) return "brain";
+  return "code";
+}
+
+function ToolOutput({ block }: { block: Extract<ContentBlock, { type: "tool_result" }> }) {
+  const theme = useAppTheme();
+  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <ScrollView horizontal><Text selectable style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.text }}>{block.content || "(empty output)"}</Text></ScrollView> : <MessageContent content={block.content} />}</View>;
+}
+
+function ToolCall({ block, result, active = false }: { block: Extract<ContentBlock, { type: "tool_use" }>; result?: Extract<ContentBlock, { type: "tool_result" }>; active?: boolean }) {
+  const theme = useAppTheme();
+  const [expanded, setExpanded] = useState(false);
+  const status = result ? result.is_error ? "error" : "done" : active ? "running" : "no result";
+  const iconColor = result?.is_error ? theme.colors.danger : active && !result ? theme.colors.accent : theme.colors.textMuted;
+  const preview = toolCallPreview(block.name, block.input);
+  const caption = formatToolCallCaption(block.name, block.input);
+  const edits = Array.isArray(block.input.edits) ? block.input.edits.filter((edit): edit is { oldText: string; newText: string } => typeof edit === "object" && edit !== null && typeof edit.oldText === "string" && typeof edit.newText === "string") : [];
+  return <View>
+    <Pressable accessibilityRole="button" accessibilityLabel={`${caption}: ${status}`} accessibilityState={{ expanded }} hitSlop={8} onPress={() => setExpanded(!expanded)} style={{ minHeight: 22, flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2 }}>
+      <AppIcon name={toolIcon(block.name)} size={14} color={iconColor} />
+      <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, lineHeight: 18 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: "500" }}>{block.name}</Text>
+        {preview ? <Text style={{ color: theme.colors.textMuted }}>{`: "${preview}"`}</Text> : null}
+      </Text>
+    </Pressable>
+    {expanded ? <View style={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, gap: 8, marginTop: 4 }}>
+      <Text style={[typography.micro, { color: theme.colors.textMuted }]}>IN</Text>
+      <ScrollView horizontal><Text selectable style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.text }}>{JSON.stringify(block.input, null, 2)}</Text></ScrollView>
+      {edits.map((edit, index) => <ScrollView horizontal key={index}><View><Text selectable style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text selectable style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.success }}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View></ScrollView>)}
+      {result ? <ToolOutput block={result} /> : null}
+    </View> : null}
+  </View>;
+}
+
+export function MessageContent({ content, active = false, color }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string }) {
+  const blocks = content ?? [];
+  const calls = new Set(blocks.filter((block) => block.type === "tool_use").map((block) => block.id));
+  return <View style={{ gap: 3 }}>{blocks.map((block, index) => {
+    if (block.type === "tool_result" && calls.has(block.tool_use_id)) return null;
+    if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={blocks.find((item): item is Extract<ContentBlock, { type: "tool_result" }> => item.type === "tool_result" && item.tool_use_id === block.id)} />;
+    return <Block key={`${block.type}-${index}`} block={block} color={color} />;
+  })}</View>;
+}
+
+function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false): ViewStyle {
+  return {
+    maxWidth: side === "user" ? "78%" : "86%",
+    borderRadius: theme.radius.lg,
+    borderCurve: "continuous",
+    backgroundColor: side === "user" ? theme.colors.userBubble : theme.colors.assistantBubble,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 6,
+    opacity: local ? 0.72 : 1,
+  };
+}
+
+function BubbleMeta({ clock, local = false, side, live = false }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean }) {
+  const theme = useAppTheme();
+  const color = side === "user" ? theme.colors.userBubbleMeta : theme.colors.textFaint;
+  if (!clock && !local && !live) return null;
+  return <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 3, marginTop: 4 }}>
+    {live ? <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: theme.colors.accent, marginRight: 2 }} /> : null}
+    {local ? <Text style={[typography.micro, { color }]}>Sending</Text> : null}
+    {clock ? <Text style={[typography.micro, { color, fontVariant: ["tabular-nums"] }]}>{clock}</Text> : null}
+    {side === "user" && !local ? <AppIcon name="check-check" size={11} color={color} strokeWidth={2.4} /> : null}
+  </View>;
 }
 
 export function MessageBubble({ message, local = false }: { message: MessageRecord; local?: boolean }) {
@@ -216,19 +290,23 @@ export function MessageBubble({ message, local = false }: { message: MessageReco
   const isSystem = message.role === "system";
   if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || "System update"}</Text></View>;
   const thinkingLevel = requestedThinkingLevel(message.meta);
-  return <View style={{ paddingHorizontal: 18, paddingVertical: 8, alignItems: isUser ? "flex-end" : "stretch" }}>
-    {!isUser ? <Text style={[typography.micro, { color: theme.colors.textMuted, marginBottom: 5, marginLeft: 2 }]}>{message.provider || "Agent"}{message.model ? ` · ${message.model}` : ""}{thinkingLevel ? ` · Thinking ${formatThinkingLevel(thinkingLevel)}` : ""}</Text> : null}
-    <View style={isUser ? { maxWidth: "86%", borderRadius: 17, borderTopRightRadius: 5, backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accentBorder, paddingHorizontal: 13, paddingVertical: 11, opacity: local ? 0.72 : 1 } : { width: "100%", paddingHorizontal: 0, paddingVertical: 0, opacity: local ? 0.72 : 1 }}>
-      {hasRenderableContent(message.content) ? <MessageContent content={message.content} /> : message.text?.trim() ? <TextBlock value={message.text} accent={theme.colors.accent} /> : null}
-      {local ? <Text style={[typography.micro, { color: theme.colors.textMuted, marginTop: 7 }]}>Sending…</Text> : null}
-      {message.errorMessage ? <Text style={[typography.caption, { color: theme.colors.danger, marginTop: 7 }]}>{message.errorMessage}</Text> : null}
+  const side = isUser ? "user" : "assistant";
+  const textColor = isUser ? theme.colors.userBubbleText : undefined;
+  const accent = isUser ? theme.colors.userBubbleText : theme.colors.accent;
+  return <View style={{ paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
+    <View style={chatBubbleStyle(theme, side, local)}>
+      {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
+      {message.errorMessage ? <Text style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
+      <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} />
     </View>
+    {!isUser && (message.model || thinkingLevel) ? <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}</Text> : null}
   </View>;
 }
 
-export function StreamCard({ content, status, runtimePhase = null, runtimeModel = null }: { content: ContentBlock[]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null }) {
+export function StreamCard({ content, intermediateMessages = [], status, runtimePhase = null, runtimeModel = null }: { content: ContentBlock[]; intermediateMessages?: StreamView["intermediateMessages"]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null }) {
   const theme = useAppTheme();
-  const hasLivePreview = content.some((block) => (block.type === "text" && block.text.trim().length > 0) || (block.type === "thinking" && block.thinking.trim().length > 0));
+  const liveContent = [...intermediateMessages.flatMap((message) => message.content.length ? message.content : message.text ? [{ type: "text" as const, text: message.text }] : []), ...content];
+  const hasLivePreview = liveContent.some((block) => (block.type === "text" && block.text.trim().length > 0) || (block.type === "thinking" && block.thinking.trim().length > 0) || block.type === "tool_use");
   // Mirrors the web turn footer: live content is the status itself; otherwise surface
   // what the runtime is doing so quiet gaps (agent launch, model latency) don't look frozen.
   const runtimeLabel = !hasLivePreview && (status === "pending" || status === "streaming")
@@ -236,17 +314,19 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
       ? runtimeModel?.trim()
         ? `waiting ${runtimeModel.trim()}…`
         : "waiting model…"
-      : status === "pending" && !hasRenderableContent(content)
+      : status === "pending" && !hasRenderableContent(liveContent)
         ? "starting agent…"
         : null
     : null;
-  const hasContent = hasRenderableContent(content);
-  const label = status === "pending"
-    ? "Starting"
-    : status === "failed"
-      ? "Agent failed"
-      : status === "interrupted"
-        ? "Generation stopped"
-        : "Agent is working";
-  return <View style={{ marginHorizontal: 18, marginVertical: 9, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised, padding: 12 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: hasContent ? 8 : 0 }}><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.colors.info }} /><Text style={[typography.caption, { color: theme.colors.info }]}>{label}</Text></View>{runtimeLabel ? <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: hasContent ? 0 : 8 }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.colors.accent, opacity: 0.7 }} /><Text style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</Text></View> : null}{hasContent ? <MessageContent content={content} /> : null}</View>;
+  const failed = status === "failed" || status === "interrupted";
+  const statusLabel = status === "failed" ? "Agent failed" : status === "interrupted" ? "Generation stopped" : null;
+  const live = status === "pending" || status === "streaming";
+  return <View style={{ paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
+    <View style={chatBubbleStyle(theme, "assistant")}>
+      {statusLabel ? <Text style={[typography.caption, { color: theme.colors.danger, marginBottom: hasLivePreview || runtimeLabel ? 6 : 0 }]}>{statusLabel}</Text> : null}
+      {runtimeLabel ? <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</Text> : null}
+      {hasLivePreview || hasRenderableContent(liveContent) ? <MessageContent active={live} content={liveContent} /> : null}
+      <BubbleMeta clock={failed ? undefined : live ? "now" : undefined} side="assistant" live={live && !failed} />
+    </View>
+  </View>;
 }

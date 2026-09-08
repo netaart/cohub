@@ -21,6 +21,10 @@ export type AppTheme = {
     accentSoft: string;
     accentBorder: string;
     accentText: string;
+    userBubble: string;
+    userBubbleText: string;
+    userBubbleMeta: string;
+    assistantBubble: string;
     success: string;
     successSoft: string;
     warning: string;
@@ -67,6 +71,10 @@ const darkTheme: AppTheme = {
     accentSoft: "#36251e",
     accentBorder: "#865038",
     accentText: "#2a150c",
+    userBubble: "#c45d32",
+    userBubbleText: "#fff6f0",
+    userBubbleMeta: "rgba(255, 246, 240, 0.64)",
+    assistantBubble: "#22262e",
     success: "#62c994",
     successSoft: "#1d3329",
     warning: "#e6b85c",
@@ -92,6 +100,7 @@ const pureBlackDarkTheme: AppTheme = {
     surfacePressed: "#23262b",
     border: "#25292f",
     borderStrong: "#3b424d",
+    assistantBubble: "#15171a",
   },
 };
 
@@ -114,6 +123,10 @@ const lightTheme: AppTheme = {
     accentSoft: "#fff0e8",
     accentBorder: "#e9b49a",
     accentText: "#ffffff",
+    userBubble: "#b85427",
+    userBubbleText: "#ffffff",
+    userBubbleMeta: "rgba(255, 255, 255, 0.72)",
+    assistantBubble: "#eceee9",
     success: "#238552",
     successSoft: "#e7f5ed",
     warning: "#986b12",

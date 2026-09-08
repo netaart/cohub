@@ -3,9 +3,10 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Modal, Pressable, Text, TextInput, View, type ViewToken } from "react-native";
+import { ActivityIndicator, FlatList, Modal, Pressable, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
 import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
 import { MessageBubble, StreamCard } from "@/src/components/MessageContent";
+import { TurnProcess } from "@/src/components/TurnProcess";
 import { ModelSelectorSheet } from "@/src/components/ModelSelectorSheet";
 import { SessionLabelSheet } from "@/src/components/SessionLabelSheet";
 import { fetchSessionLabels, toSessionLabel, type SessionLabel } from "@/src/data/session-labels";
@@ -13,6 +14,7 @@ import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
 import { nextChatTailFollowing } from "@/src/data/chat-scroll";
+import { MessageMeasurements } from "@/src/data/chat-rendering";
 import { latestUnreadAssistantIndex } from "@/src/data/chat-read-state";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
 import type { MessageRecord } from "@neta-art/cohub";
@@ -166,6 +168,23 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message))
       .sort((a, b) => a.sequence - b.sequence);
   }, [view.messages, view.turns]);
+  const { fontScale } = useWindowDimensions();
+  const [listWidth, setListWidth] = useState(0);
+  const measurements = useMemo(() => {
+    const cache = new MessageMeasurements();
+    cache.configure(`${listWidth}:${fontScale}:${theme.mode}`, []);
+    return cache;
+  }, [listWidth, fontScale, theme.mode]);
+  const measuredMessages = useMemo(() => messages.map((message, index) => ({
+    id: message.id,
+    revision: JSON.stringify([message, index > 0 ? turnSequenceForMessage(messages[index - 1]!) : null]),
+  })), [messages]);
+  useEffect(() => {
+    measurements.configure(`${listWidth}:${fontScale}:${theme.mode}`, measuredMessages);
+  }, [measurements, measuredMessages, listWidth, fontScale, theme.mode]);
+  const estimatedOffset = useCallback((index: number, averageHeight: number) =>
+    12 + (view.hasMoreOlder ? 50 : 0) + measurements.estimateOffset(measuredMessages, index, averageHeight),
+  [measurements, measuredMessages, view.hasMoreOlder]);
   let recordedModel: ChatModelSelection | null = null;
   let hasRelevantTurn = false;
   for (const turn of [...view.turns].reverse()) {
@@ -443,7 +462,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         return;
       }
       initialUnreadRetriesRef.current = retries + 1;
-      listRef.current?.scrollToOffset({ offset: Math.max(0, index * Math.max(averageItemLength, 1)), animated: false });
+      listRef.current?.scrollToOffset({ offset: estimatedOffset(index, averageItemLength), animated: false });
       requestAnimationFrame(() => {
         if (initialUnreadIndexRef.current === initialUnreadIndex) listRef.current?.scrollToIndex({ index: initialUnreadIndex, animated: false, viewPosition: 0, viewOffset: 8 });
       });
@@ -462,11 +481,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       return;
     }
     turnScrollRetriesRef.current.set(target, retries + 1);
-    listRef.current?.scrollToOffset({ offset: Math.max(0, index * Math.max(averageItemLength, 1)), animated: false });
+    listRef.current?.scrollToOffset({ offset: estimatedOffset(index, averageItemLength), animated: false });
     requestAnimationFrame(() => {
       if (turnScrollTargetRef.current === target) scrollToTurn(target, retries + 1);
     });
-  }, [scrollToTurn]);
+  }, [estimatedOffset, scrollToTurn]);
 
   const handleScrollBeginDrag = useCallback(() => {
     userDraggingRef.current = true;
@@ -528,7 +547,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         <DetailTopBar title={session ? displaySessionTitle(session) : "Chat"} subtitle={spaceName} onBack={() => router.back()} actions={<><IconButton name="list-tree" label="Open conversation turns" size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><IconButton name="messages" label="Open Chats" size={38} onPress={() => setActivePanel("chat")} disabled={!spaceId} /><IconButton name="folder-open" label="Open Files" size={38} onPress={() => setActivePanel("files")} disabled={!spaceId} /><IconButton name="tag" label="Manage labels" size={38} onPress={openLabelSheet} disabled={!client || !spaceId} /><IconButton name="more" label="More actions" size={38} onPress={openRename} /></>} />
         <ConnectionBanner state={connectionState} />
         {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>Retry</Text></Pressable> : null}
-        <FlatList ref={listRef} data={messages} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const sequence = turnSequenceForMessage(item); const previousSequence = index > 0 ? turnSequenceForMessage(messages[index - 1]!) : null; const showTurnMarker = sequence !== null && sequence !== previousSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); return <View>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} /></View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={{ minIndexForVisible: 0 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: messages.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel="Load earlier turns" disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load earlier turns</Text>}</Pressable> : null} ListEmptyComponent={<View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 28 }}><View style={{ width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft }}><AppIcon name="sparkles" size={23} color={theme.colors.accent} /></View><Text style={[typography.heading, { color: theme.colors.text, marginTop: 14 }]}>A fresh Space for thinking</Text><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 6, maxWidth: 290 }]}>Send a prompt to start working with the Agent.</Text></View>} ListFooterComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel="Load newer turns" disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load newer turns</Text>}</Pressable> : null}{view.stream ? <StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /> : view.sending ? <StreamCard content={[]} status="pending" /> : null}</View>} />
+        <FlatList ref={listRef} initialNumToRender={8} maxToRenderPerBatch={6} updateCellsBatchingPeriod={32} windowSize={9} onLayout={(event) => setListWidth(event.nativeEvent.layout.width)} data={messages} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const sequence = turnSequenceForMessage(item); const previousSequence = index > 0 ? turnSequenceForMessage(messages[index - 1]!) : null; const showTurnMarker = sequence !== null && sequence !== previousSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); return <View onLayout={(event) => measurements.measure(measuredMessages[index]!, event.nativeEvent.layout.height)}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} />{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence && entry.id !== view.stream?.turnId).map((entry) => <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={{ minIndexForVisible: 0 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: messages.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel="Load earlier turns" disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load earlier turns</Text>}</Pressable> : null} ListEmptyComponent={<View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 28 }}><View style={{ width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft }}><AppIcon name="sparkles" size={23} color={theme.colors.accent} /></View><Text style={[typography.heading, { color: theme.colors.text, marginTop: 14 }]}>A fresh Space for thinking</Text><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 6, maxWidth: 290 }]}>Send a prompt to start working with the Agent.</Text></View>} ListFooterComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel="Load newer turns" disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load newer turns</Text>}</Pressable> : null}{view.stream ? <StreamCard content={view.stream.contentBlocks} intermediateMessages={view.stream.intermediateMessages} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /> : view.sending ? <StreamCard content={[]} status="pending" /> : null}</View>} />
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
         {!followingTail ? <View style={{ alignItems: "flex-end", paddingHorizontal: 16, paddingBottom: 4, backgroundColor: theme.colors.background }}><IconButton name="arrow-down" label="Jump to latest" size={38} tone="accent" onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} /></View> : null}

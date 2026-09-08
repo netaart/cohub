@@ -116,6 +116,8 @@ export function mergeDisplayMessages(
 		else result.push(message);
 	}
 	for (const message of live) {
+		// Intermediate events belong to the execution trace, not the final reply slot.
+		if (message.meta?.messageKind === "assistant_intermediate") continue;
 		const turnId = message.meta?.turnId;
 		if (typeof turnId === "string") {
 			byTurnRole.set(`${turnId}:${message.role}`, message);
