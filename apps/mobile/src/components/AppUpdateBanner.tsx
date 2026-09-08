@@ -7,6 +7,9 @@ import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, PrimaryButton } from "@/src/ui";
 import {
   checkForAppUpdate,
+  downloadAndInstallAndroidUpdate,
+  openAndroidInstallPermissionSettings,
+  type ApkUpdateProgress,
   getInstalledAppVersion,
   isUpdateSnoozed,
   snoozeAppUpdate,
@@ -44,7 +47,8 @@ export function AppUpdateBanner() {
             current.notes === latest.notes &&
             current.downloadUrl === latest.downloadUrl &&
             current.downloadName === latest.downloadName &&
-            current.downloadSize === latest.downloadSize
+            current.downloadSize === latest.downloadSize &&
+            current.downloadSha256 === latest.downloadSha256
             ? current
             : latest;
         });
@@ -99,12 +103,11 @@ export function AppUpdateBanner() {
       </View>
 
       <AppUpdateDetailsSheet
-        key={`banner-${release.version}-${detailsOpen ? "open" : "closed"}`}
+        key={`banner-${release.version}`}
         release={release}
         visible={detailsOpen}
         onClose={() => setDetailsOpen(false)}
         onLater={dismiss}
-        onPrimarySuccess={dismiss}
       />
     </>
   );
@@ -115,44 +118,49 @@ export function AppUpdateDetailsSheet({
   visible,
   onClose,
   onLater,
-  onPrimarySuccess,
 }: {
   release: AppRelease;
   visible: boolean;
   onClose: () => void;
   onLater?: () => void;
-  onPrimarySuccess?: () => void;
 }) {
   const theme = useAppTheme();
   const [opening, setOpening] = useState(false);
+  const [progress, setProgress] = useState<ApkUpdateProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [installerReturned, setInstallerReturned] = useState(false);
+  const operation = useRef<AbortController | null>(null);
+  useEffect(() => () => operation.current?.abort(), []);
   const releaseDate = formatReleaseDate(release.publishedAt);
   const assetDetail = release.downloadName
     ? `${release.downloadName}${release.downloadSize !== null ? ` · ${formatBytes(release.downloadSize)}` : ""}`
     : null;
 
-  const openUrl = async (url: string, closeAfter = false, fallbackUrl?: string) => {
-    if (opening) return;
+  const runOperation = async (action: (signal: AbortSignal) => Promise<void>) => {
+    if (operation.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
     setOpening(true);
     setError(null);
     try {
-      await Linking.openURL(url);
-      if (closeAfter) (onPrimarySuccess ?? onClose)();
+      await action(controller.signal);
     } catch (caught) {
-      if (fallbackUrl && fallbackUrl !== url) {
-        try {
-          await Linking.openURL(fallbackUrl);
-          if (closeAfter) (onPrimarySuccess ?? onClose)();
-          return;
-        } catch {
-          // Surface the original failure when neither link can be opened.
-        }
-      }
-      setError(caught instanceof Error ? caught.message : "Unable to open the release link.");
+      if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Update failed. Try again.");
     } finally {
+      if (operation.current === controller) operation.current = null;
       setOpening(false);
+      setProgress(null);
     }
   };
+
+  const installUpdate = () => runOperation(async (signal) => {
+    setInstallerReturned(false);
+    setProgress({ phase: "downloading", fraction: 0 });
+    await downloadAndInstallAndroidUpdate(release, { signal, onProgress: setProgress });
+    if (!signal.aborted) setInstallerReturned(true);
+  });
+  const downloading = progress?.phase === "downloading";
+  const isAndroid = Platform.OS === "android";
 
   return (
     <AdaptiveSheet
@@ -160,23 +168,28 @@ export function AppUpdateDetailsSheet({
       title="Update available"
       subtitle={`Cohub ${release.version}`}
       onClose={onClose}
+      dismissible={!opening}
       scrollable
       footer={
         <View style={styles.footer}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Not now"
-            onPress={onLater ?? onClose}
-            disabled={opening}
-            style={({ pressed }) => ({ ...styles.laterButton, opacity: pressed || opening ? 0.6 : 1 })}
+            accessibilityLabel={downloading ? "Cancel download" : "Not now"}
+            onPress={() => {
+              if (downloading) operation.current?.abort();
+              else (onLater ?? onClose)();
+            }}
+            disabled={opening && !downloading}
+            style={({ pressed }) => ({ ...styles.laterButton, opacity: pressed ? 0.6 : 1 })}
           >
-            <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>Not now</Text>
+            <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>{downloading ? "Cancel" : "Not now"}</Text>
           </Pressable>
           <PrimaryButton
-            label={release.downloadUrl ? "Download update" : "Open release"}
-            icon={release.downloadUrl ? "download" : "external-link"}
+            label={isAndroid ? "Install update" : "Open release"}
+            icon={isAndroid ? "download" : "external-link"}
             loading={opening}
-            onPress={() => void openUrl(release.downloadUrl ?? release.url, true, release.url)}
+            disabled={isAndroid && !release.downloadUrl}
+            onPress={() => void (isAndroid ? installUpdate() : runOperation(() => Linking.openURL(release.url)))}
             style={{ flex: 1, minWidth: 0, minHeight: 46, paddingHorizontal: 14 }}
           />
         </View>
@@ -199,11 +212,28 @@ export function AppUpdateDetailsSheet({
       <View style={[styles.releaseNotice, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}>
         <AppIcon name="info" size={17} color={theme.colors.accent} />
         <Text style={[typography.body, { color: theme.colors.textSecondary, flex: 1 }]}>
-          {release.downloadUrl
-            ? "Download the signed APK for this device, then open it from your Downloads to install it over the current app."
-            : "Open the GitHub release page to view the published update."}
+          {progress?.phase === "downloading" ? `Downloading APK: ${Math.round(progress.fraction * 100)}%`
+            : progress?.phase === "verifying" ? "Verifying APK..."
+            : progress?.phase === "installing" ? "Waiting for Android installer..."
+            : installerReturned ? "Installer closed. Update not confirmed."
+            : isAndroid ? release.downloadUrl ? "APK ready for download" : "No APK published for this device yet."
+            : "Release notes available"}
         </Text>
       </View>
+
+      {isAndroid ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Installation permission"
+          disabled={opening}
+          onPress={() => void runOperation(() => openAndroidInstallPermissionSettings())}
+          style={({ pressed }) => [styles.githubLink, { borderColor: theme.colors.border, opacity: pressed || opening ? 0.55 : 1 }]}
+        >
+          <AppIcon name="shield" size={16} color={theme.colors.accent} />
+          <Text style={[typography.bodyMedium, { color: theme.colors.accent, flex: 1 }]}>Installation permission</Text>
+          <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
+        </Pressable>
+      ) : null}
 
       <View style={{ marginTop: 18 }}>
         <ReleaseNotes content={release.notes} />
@@ -212,7 +242,7 @@ export function AppUpdateDetailsSheet({
       <Pressable
         accessibilityRole="link"
         accessibilityLabel="Open release on GitHub"
-        onPress={() => void openUrl(release.url)}
+        onPress={() => void runOperation(() => Linking.openURL(release.url))}
         disabled={opening}
         style={({ pressed }) => [styles.githubLink, { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: opening ? 0.55 : 1 }]}
       >
@@ -273,10 +303,7 @@ export function AppUpdateRow() {
         accessibilityLabel={release ? `View Cohub ${release.version} update` : "Check for app updates"}
         accessibilityState={{ busy: checking }}
         disabled={checking}
-        onPress={() => {
-          if (release) setDetailsOpen(true);
-          else void check();
-        }}
+        onPress={() => void check()}
        
         style={({ pressed }) => ({
           minHeight: 66,
@@ -298,7 +325,7 @@ export function AppUpdateRow() {
         </View>
         {!checking ? <AppIcon name={release ? "external-link" : "chevron-right"} size={17} color={theme.colors.textFaint} /> : null}
       </Pressable>
-      {release ? <AppUpdateDetailsSheet key={`row-${release.version}-${detailsOpen ? "open" : "closed"}`} release={release} visible={detailsOpen} onClose={() => setDetailsOpen(false)} /> : null}
+      {release ? <AppUpdateDetailsSheet key={`row-${release.version}`} release={release} visible={detailsOpen} onClose={() => setDetailsOpen(false)} /> : null}
     </>
   );
 }

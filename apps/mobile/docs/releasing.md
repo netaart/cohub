@@ -5,9 +5,11 @@
 The repository does not require Expo Application Services (EAS) for builds.
 
 1. `CI` validates every PR and push to `main`, then exports Web, Android, and iOS JavaScript bundles.
-2. `Native CI` compiles an Android debug APK on a GitHub Linux runner and an iOS simulator app on a GitHub macOS runner for internal validation only.
+2. `Native CI` runs for pull requests targeting `main` and manual dispatches. It compiles Android debug APKs and an iOS simulator app for internal validation, without repeating the builds on the subsequent `main` push.
 3. `Release Please` maintains a version/changelog PR from Conventional Commits.
-4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. When the repository variable `NATIVE_AUTO_RELEASE_ENABLED` is `true` and the Android release keystore secrets are configured, the release also builds signed Android distribution APKs and attaches them to that GitHub Release. iOS and store submissions are not part of this automatic path.
+4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. It does not build APKs. Signed Android packages are produced by the manual Native Release workflow when SDK or native code changes. Set `NATIVE_RELEASE_ON_VERSION_TAG=true` only if a version tag must also attach APKs.
+
+An ordinary `main` push runs quality checks, bundle exports, security checks, and Release Please. It does not compile native packages or publish OTA updates. JS, UI, and business-logic changes go out through Actions > Publish OTA. Native CI remains available through Actions > Native CI > Run workflow for pull requests and manual native validation.
 
 Expo is used as the open-source React Native toolchain and for native modules. `expo prebuild` generates standard Gradle and Xcode projects inside CI. No Expo subscription or EAS project is required.
 
@@ -40,7 +42,7 @@ gh secret set ANDROID_KEY_PASSWORD --repo markbang/cohub-mobile
 
 The two password commands read their values interactively. Do not commit `cohub-release.keystore` or put it in the repository. Losing this keystore means future APKs cannot update an installed version.
 
-If `NATIVE_AUTO_RELEASE_ENABLED=true` before all four Android signing secrets exist, the release gate logs a notice and skips the APK build; it does not fail the GitHub Release. Add all four secrets before expecting APKs.
+Signing secrets are still required for the manual Native Release path. Version tags do not build APKs unless `NATIVE_RELEASE_ON_VERSION_TAG=true`.
 
 After the secrets are configured, enable automatic formal APK builds:
 
@@ -60,6 +62,29 @@ cohub-vX.Y.Z-android-x86_64.apk
 Each APK contains only its own native libraries, so each download is much smaller than one universal APK. The files are named directly, so the downloaded filename includes the ABI. This is direct APK distribution, not a Google Play upload. The automatic path does not build iOS and does not use a Google Play service account.
 
 The first formally signed package must be produced by a new release created after this distribution workflow is merged. The existing `v1.1.0` APKs were produced before formal signing was enabled and use the old debug key; uninstall them before installing the first formally signed release. The manual run produces Actions artifacts and does not modify an existing GitHub Release.
+
+### In-app Android updates
+
+About > Application and the existing update banner use GitHub's latest stable release. The app selects the device ABI, downloads the APK into its private cache, verifies its published size and GitHub `sha256:` digest, and grants Android's package installer temporary access through a `content://` URI. The primary update action does not open a browser. Missing or malformed digests block installation.
+
+Downloads show progress and can be cancelled. Failed or cancelled downloads are removed; a verified APK is retained for installation retries. Closing the installer does not snooze the release or count as a successful update. Android checks package/signature compatibility and requires user confirmation. The update sheet includes an Installation permission action for Android's "Install unknown apps" setting. Keep the same signing key for every release.
+
+Migration: users must install a new signed native APK containing `expo-intent-launcher`, `expo-updates`, and `REQUEST_INSTALL_PACKAGES` once before they can use this flow. Existing installations cannot acquire these native capabilities through OTA. iOS package distribution is unchanged.
+
+### Optional OTA service
+
+`expo-updates` is installed, but OTA is disabled until `EXPO_PUBLIC_UPDATES_URL` is set to an absolute HTTPS Expo Updates protocol endpoint at native build time. `Native Release` reads the same-named GitHub repository variable for Android builds. A GitHub Release URL or ordinary JSON version manifest is not an OTA service.
+
+- The client uses `ON_LOAD` with a zero startup wait: launch cached/embedded code, download an update in the background, and load it on a subsequent cold launch. It does not reload an active chat.
+- `runtimeVersion` uses the `fingerprint` policy. JS-only commits keep the same native runtime as the installed APK and can OTA. Changing Expo SDK, native dependencies, permissions, or other native configuration changes the fingerprint and requires a new APK.
+- Use the same production environment values when building the APK and exporting OTA bundles. `EXPO_PUBLIC_*` values are public.
+- The deployed service is [markbang/cloudflare-expo-ota-updates](https://github.com/markbang/cloudflare-expo-ota-updates). The manifest endpoint is `https://expo-ota.talesofai.com/manifest`; assets are served from the existing R2 bucket `expo-updates` at `https://expo-updates.talesofai.com`. Repository variables `EXPO_PUBLIC_UPDATES_URL` and `OTA_SERVER` are configured. See the service's `docs/COHUB.md` for redeployment.
+- Publish Android OTA from Actions > Publish OTA on `main`. Choose a full commit SHA and `staging` or `production`. The workflow exports that commit, compares its Android native fingerprint to `cohub-android-native-fingerprint.txt` on the latest native GitHub Release, then uploads the exported artifact. It does not export again after approval. `production` uses the `ota-production` environment and waits for a required reviewer. `main` pushes never publish OTA.
+- Native Release attaches `cohub-android-native-fingerprint.txt` to signed Android distributions. Bootstrap once with an OTA-capable APK; after that, JS-only work does not need a new package. Native-incompatible commits fail closed; do not bypass the fingerprint check.
+- Mobile publication needs `OTA_API_KEY` and `OTA_SERVER`. The CLI is the pinned `markbang/cloudflare-expo-ota-updates` revision in `.github/workflows/publish-ota.yml`, not the unmodified npm `easc` package.
+- When OTA is enabled, `app.config.ts` sends app ID `cohub-mobile` and channel `production`, and requires manifests signed against `certs/ota-certificate.crt`. The matching private key is held in the server repository's `OTA_SIGNING_PRIVATE_KEY` secret and installed as the Worker secret `CODE_SIGNING_PRIVATE_KEY`. Never put the private key in this repository or replace the certificate without a native migration.
+- The publishing credential is stored in this repository's `OTA_API_KEY` Actions secret. It is not an app environment variable and must never use an `EXPO_PUBLIC_*` name. The fork's CLI supports function-based Expo configuration and Android-only publishing; use a reviewed, pinned fork revision rather than the unmodified npm CLI.
+- Validate on two same-key Android release builds: deny/grant installation permission, cancel/retry downloads, return from the installer without installing, then install the newer APK. For OTA, test offline launch, matching/mismatching runtime versions, failed downloads, and server rollback. Expo Go and browser previews cannot verify these native paths.
 
 ### Android remote push later
 
@@ -110,7 +135,7 @@ Register `cohub://callback` in the Native Logto application. Logto credentials a
 4. Confirm the required CI, Security, and Native CI checks are green.
 5. Merge the Release Please PR.
 6. GitHub creates the `vX.Y.Z` tag and release.
-7. If `NATIVE_AUTO_RELEASE_ENABLED=true` and the Android release keystore secrets exist, the same workflow builds four signed ABI-specific Android distribution APKs and attaches them to the GitHub Release. It does not build iOS or upload to Google Play/TestFlight. With the variable unset or `false`, only the GitHub Release is created.
+7. GitHub creates the `vX.Y.Z` tag and release without APKs. JS-only updates go out through Publish OTA. When SDK or native code changes, run Native Release and attach the signed APKs to that tag.
 
 The release workflow validates that the tag is exactly `v<package version>`, and that `package.json` and `app.json` have identical versions. Native build numbers are derived deterministically from the app version in `app.config.ts`.
 
@@ -138,7 +163,7 @@ The iOS command requires macOS and Xcode. The Android command requires the Andro
 
 ## Recovery
 
-If the automatic Android distribution build fails, inspect the build error and rerun `Native Release` with `release_tag` set to the existing post-distribution `vX.Y.Z` tag, `platform=android`, `profile=distribution`, and `submit=false`. The manual rerun produces downloadable Actions artifacts; it does not attach them to the GitHub Release. Keep the same release keystore and passwords for all future versions.
+If a Native Release APK build fails, inspect the build error and rerun `Native Release` with `release_tag` set to the existing `vX.Y.Z` tag, `platform=android`, `profile=distribution`, and `submit=false`. The manual rerun produces downloadable Actions artifacts; it does not attach them to the GitHub Release. Keep the same release keystore and passwords for all future versions.
 
 For a Google Play failure, configure the Android signing and Play service-account secrets first, then rerun `Native Release` with:
 

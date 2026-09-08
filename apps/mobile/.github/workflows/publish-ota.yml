@@ -1,0 +1,203 @@
+name: Publish OTA
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full 40-character commit SHA from origin/main
+        required: true
+        type: string
+      channel:
+        description: OTA channel. production waits for environment approval after export.
+        required: true
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ota-publish-${{ inputs.channel }}
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  EXPO_NO_TELEMETRY: "1"
+  OTA_CLI_REPOSITORY: https://github.com/markbang/cloudflare-expo-ota-updates.git
+  OTA_CLI_REVISION: fab754606dfe747abee8faef24d84981789f8064
+
+jobs:
+  prepare:
+    name: Export and verify
+    if: github.repository == 'markbang/cohub-mobile' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      runtime: ${{ steps.fingerprint.outputs.runtime }}
+      fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
+      subject: ${{ steps.target.outputs.subject }}
+    steps:
+      - name: Checkout main history
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate target commit
+        id: target
+        env:
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          sha=$(node --input-type=module -e 'import { parseCommitSha } from "./scripts/ota-publish.mjs"; process.stdout.write(parseCommitSha(process.env.COMMIT))')
+          git merge-base --is-ancestor "$sha" origin/main
+          git checkout --force --detach "$sha"
+          {
+            echo "sha=$sha"
+            echo "subject<<SUBJECT_EOF"
+            git log -1 --format=%s "$sha"
+            echo "SUBJECT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality checks
+        run: npm run check
+
+      - name: Compute and compare native fingerprint
+        id: fingerprint
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+        run: |
+          set -euo pipefail
+          fingerprint=$(npx @expo/fingerprint fingerprint:generate --platform android | node --input-type=module -e 'import { fingerprintFromCliJson } from "./scripts/ota-publish.mjs"; process.stdout.write(fingerprintFromCliJson(await new Response(process.stdin).text(), "fingerprint:generate"))')
+          mkdir -p "$RUNNER_TEMP/native-fingerprint"
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[].tagName' | while read -r candidate; do
+            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq cohub-android-native-fingerprint.txt; then
+              printf '%s\n' "$candidate"
+              break
+            fi
+          done)
+          if [[ -z "$tag" ]]; then
+            echo "No Android native fingerprint has been published. Build one OTA-capable APK with Native Release first; JS-only changes can OTA after that."
+            exit 1
+          fi
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern cohub-android-native-fingerprint.txt --dir "$RUNNER_TEMP/native-fingerprint"
+          expected=$(tr -d '[:space:]' < "$RUNNER_TEMP/native-fingerprint/cohub-android-native-fingerprint.txt")
+          EXPECTED="$expected" ACTUAL="$fingerprint" node --input-type=module -e 'import { assertFingerprintsMatch } from "./scripts/ota-publish.mjs"; assertFingerprintsMatch(process.env.EXPECTED, process.env.ACTUAL)'
+          {
+            echo "runtime=$fingerprint"
+            echo "fingerprint=$fingerprint"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Export Android bundle
+        env:
+          EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+        run: npx expo export --platform android --output-dir dist/android
+
+      - name: Upload export
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-ota-${{ inputs.channel }}-${{ steps.target.outputs.sha }}
+          path: dist/android
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize candidate
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SHA: ${{ steps.target.outputs.sha }}
+          SUBJECT: ${{ steps.target.outputs.subject }}
+          RUNTIME: ${{ steps.fingerprint.outputs.runtime }}
+          FINGERPRINT: ${{ steps.fingerprint.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## OTA candidate"
+            echo
+            echo "- Channel: \`$CHANNEL\`"
+            echo "- Commit: \`$SHA\`"
+            echo "- Subject: $SUBJECT"
+            echo "- Runtime: \`$RUNTIME\`"
+            echo "- Native fingerprint: \`$FINGERPRINT\`"
+            echo
+            echo "This job exported the Android bundle. The publish job uploads that artifact; it does not export again."
+            if [[ "$CHANNEL" == "production" ]]; then
+              echo "production publishing waits for the \`ota-production\` environment review."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Upload ${{ inputs.channel }}
+    needs: prepare
+    if: github.repository == 'markbang/cohub-mobile' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: ota-${{ inputs.channel }}
+      url: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Download export
+        uses: actions/download-artifact@v8
+        with:
+          name: cohub-ota-${{ inputs.channel }}-${{ needs.prepare.outputs.sha }}
+          path: dist/android
+
+      - name: Install pinned OTA CLI
+        env:
+          OTA_CLI_REPOSITORY: ${{ env.OTA_CLI_REPOSITORY }}
+          OTA_CLI_REVISION: ${{ env.OTA_CLI_REVISION }}
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout "$OTA_CLI_REPOSITORY" "$RUNNER_TEMP/ota-cli"
+          git -C "$RUNNER_TEMP/ota-cli" fetch --depth 1 origin "$OTA_CLI_REVISION"
+          git -C "$RUNNER_TEMP/ota-cli" checkout --force "$OTA_CLI_REVISION"
+          test "$(git -C "$RUNNER_TEMP/ota-cli" rev-parse HEAD)" = "$OTA_CLI_REVISION"
+          bun install --frozen-lockfile --cwd "$RUNNER_TEMP/ota-cli"
+
+      - name: Publish exported bundle
+        env:
+          OTA_SERVER: ${{ vars.OTA_SERVER }}
+          OTA_API_KEY: ${{ secrets.OTA_API_KEY }}
+          CHANNEL: ${{ inputs.channel }}
+          EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$OTA_API_KEY" || { echo "OTA_API_KEY is required."; exit 1; }
+          origin=$(OTA_SERVER="$OTA_SERVER" node --input-type=module -e 'import { parseHttpsOrigin } from "./scripts/ota-publish.mjs"; process.stdout.write(parseHttpsOrigin(process.env.OTA_SERVER, "OTA_SERVER"))')
+          test -d dist/android
+          OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/apps/easc/bin/easc.js" update \
+            --channel "$CHANNEL" \
+            --platform android \
+            --skip-build \
+            --export-dir dist/android \
+            --non-interactive

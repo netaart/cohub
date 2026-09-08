@@ -147,6 +147,8 @@ jobs:
     if: inputs.platform == 'all' || inputs.platform == 'android'
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    env:
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
     steps:
       - name: Checkout validated ref
         uses: actions/checkout@v7
@@ -162,6 +164,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Record native fingerprint
+        run: |
+          set -euo pipefail
+          mkdir -p build/native-release
+          fingerprint=$(npx @expo/fingerprint fingerprint:generate --platform android | node -e 'let raw="";process.stdin.on("data",chunk=>raw+=chunk).on("end",()=>{const hash=String(JSON.parse(raw).hash||"").trim().toLowerCase(); if(!/^[a-f0-9]{40,64}$/.test(hash)) process.exit(1); process.stdout.write(hash)})')
+          printf '%s\n' "$fingerprint" > build/native-release/cohub-android-native-fingerprint.txt
 
       - name: Validate source metadata
         env:
@@ -259,7 +268,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cohub-android-${{ inputs.profile }}-${{ github.run_id }}
-          path: ${{ inputs.profile == 'production' && 'android/app/build/outputs/bundle/release/app-release.aab' || 'android/app/build/outputs/apk/release/app-*-release.apk' }}
+          path: |
+            ${{ inputs.profile == 'production' && 'android/app/build/outputs/bundle/release/app-release.aab' || 'android/app/build/outputs/apk/release/app-*-release.apk' }}
+            build/native-release/cohub-android-native-fingerprint.txt
           if-no-files-found: error
           retention-days: 30
 

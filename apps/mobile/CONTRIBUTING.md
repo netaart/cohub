@@ -24,8 +24,8 @@ ci: tighten release validation
 
 ## Pull requests
 
-Keep changes focused. CI must pass Quality, all three Bundle jobs, and the relevant Native CI job. Do not commit `.env`, native signing files, generated `ios/` or `android/` directories, or Expo credentials.
+Keep changes focused. CI must pass Quality, all three Bundle jobs, and Native CI on the pull request. Native CI does not rerun on the subsequent `main` push. Do not commit `.env`, native signing files, generated `ios/` or `android/` directories, or Expo credentials.
 
 ## Releases
 
-See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR is the release approval action; it creates the tag and GitHub Release. When `NATIVE_AUTO_RELEASE_ENABLED=true` and the Android release keystore secrets are configured, it also builds and attaches four signed Android distribution APKs. iOS builds and store submissions remain manual.
+See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR creates the GitHub Release and changelog. It does not build APKs. JS-only changes go out through Actions > Publish OTA. Run Native Release when Expo SDK, native dependencies, or native configuration change. iOS builds and store submissions remain manual.

@@ -45,15 +45,16 @@ jobs:
         id: gate
         env:
           AUTO_RELEASE: ${{ vars.NATIVE_AUTO_RELEASE_ENABLED }}
+          RELEASE_ON_VERSION_TAG: ${{ vars.NATIVE_RELEASE_ON_VERSION_TAG }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ "$AUTO_RELEASE" != "true" ]]; then
+          if [[ "$AUTO_RELEASE" != "true" || "$RELEASE_ON_VERSION_TAG" != "true" ]]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Automatic Android distribution is disabled."
+            echo "Automatic Android distribution on version tags is disabled. Use Native Release when SDK or native code changes."
           elif [[ -z "$KEYSTORE_BASE64" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Automatic Android distribution is enabled but signing secrets are incomplete; skipping the APK build."
@@ -98,6 +99,8 @@ jobs:
           shopt -s nullglob
           apks=(build/release/*.apk)
           test "${#apks[@]}" -eq 4 || { echo "Expected four Android ABI APKs, found ${#apks[@]}"; exit 1; }
+          fingerprint=(build/release/cohub-android-native-fingerprint.txt)
+          test "${#fingerprint[@]}" -eq 1 || { echo "Expected one native fingerprint file, found ${#fingerprint[@]}"; exit 1; }
           for apk in "${apks[@]}"; do
             abi=$(basename "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
             case "$abi" in
@@ -110,6 +113,9 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --clobber
           done
+          gh release upload "$RELEASE_TAG" "${fingerprint[0]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
 
   native-release-not-configured:
     name: Native release is not configured
@@ -122,4 +128,4 @@ jobs:
       - name: Explain release gate
         run: |
           echo "::notice::GitHub Release created without Android distribution APKs."
-          echo "Set NATIVE_AUTO_RELEASE_ENABLED=true and configure all four Android release keystore secrets to build and attach formal APKs."
+          echo "Version tags no longer build APKs. Run Native Release when SDK or native code changes, and set NATIVE_RELEASE_ON_VERSION_TAG=true only if a version tag must also attach APKs."

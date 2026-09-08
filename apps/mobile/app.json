@@ -46,7 +46,8 @@
       ],
       "permissions": [
         "POST_NOTIFICATIONS",
-        "VIBRATE"
+        "VIBRATE",
+        "REQUEST_INSTALL_PACKAGES"
       ]
     },
     "web": {

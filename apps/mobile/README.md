@@ -30,6 +30,8 @@ The app uses native screens for Chats, Spaces, Activity, Profile, session timeli
 - SecureStore for the installation identity and native auth storage
 - Logto React Native SDK for PKCE sign-in
 - APNs / FCM device permission plumbing
+- In-app Android APK downloads with SHA-256 verification and system installation
+- Optional Expo OTA updates, downloaded in the background for the next app launch
 
 ## Run
 
@@ -62,13 +64,14 @@ npm run native:ios
 ## CI and releases
 
 - `CI` runs lint, strict TypeScript, release metadata validation, Expo Doctor, dependency audit, and three-platform JavaScript exports.
-- `Native CI` compiles Android and iOS debug artifacts on GitHub-hosted Linux/macOS runners.
+- `Native CI` compiles Android and iOS debug artifacts for pull requests and manual runs; it does not run on every `main` push.
+- `Publish OTA` exports a selected `main` commit and publishes it to staging or production after fingerprint checks; production waits for environment approval.
 - `Security` runs dependency review and CodeQL.
 - Release Please maintains `CHANGELOG.md`, synchronizes the Expo and npm versions, and creates `vX.Y.Z` GitHub Releases.
-- When `NATIVE_AUTO_RELEASE_ENABLED=true` and the Android release keystore secrets are configured, a created release builds four signed standalone ABI-specific Android release APKs (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`) and attaches them to the GitHub Release; iOS and store uploads remain manual. EAS is not required.
+- Version tags create GitHub Releases without APKs. Signed Android APKs are built by the manual Native Release workflow when SDK or native code changes. JS-only updates go out through Publish OTA.
 - Dependabot updates npm and GitHub Actions dependencies weekly.
 
-See [docs/releasing.md](docs/releasing.md) for signing secrets, store credentials, native runner details, normal releases, manual builds, and recovery.
+See [docs/releasing.md](docs/releasing.md) for signing secrets, store credentials, native runner details, normal releases, manual builds, and recovery. Android updates download directly in the app; users still confirm installation in Android. OTA requires an Expo Updates protocol service configured through `EXPO_PUBLIC_UPDATES_URL` at build time and is disabled without one. OTA publication is separate and manual; `main` pushes do not automatically publish updates.
 
 ## Logto setup
 

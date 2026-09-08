@@ -22,11 +22,36 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const version = config.version?.trim() || "0.0.1";
   const buildNumber = buildNumberFor(version);
   const googleServicesFile = process.env.COHUB_GOOGLE_SERVICES_FILE?.trim();
+  const updatesUrl = process.env.EXPO_PUBLIC_UPDATES_URL?.trim();
+  if (updatesUrl) {
+    let url: URL;
+    try {
+      url = new URL(updatesUrl);
+    } catch {
+      throw new Error("EXPO_PUBLIC_UPDATES_URL must be an absolute HTTPS Expo Updates endpoint.");
+    }
+    if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+      throw new Error("EXPO_PUBLIC_UPDATES_URL must use HTTPS without credentials or a fragment.");
+    }
+  }
   return {
     ...config,
     name: config.name ?? "Cohub",
     slug: config.slug ?? "cohub-mobile",
     version,
+    runtimeVersion: { policy: "fingerprint" },
+    updates: updatesUrl
+      ? {
+          ...config.updates,
+          enabled: true,
+          url: updatesUrl,
+          checkAutomatically: "ON_LOAD",
+          fallbackToCacheTimeout: 0,
+          requestHeaders: { "expo-app-id": "cohub-mobile", "expo-channel-name": "production" },
+          codeSigningCertificate: "./certs/ota-certificate.crt",
+          codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" },
+        }
+      : { enabled: false },
     android: {
       ...config.android,
       versionCode: buildNumber,

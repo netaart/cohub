@@ -4,8 +4,9 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { Platform } from "react-native";
 import { config } from "@/src/config";
+import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "@/src/data/update-assets";
 
-const CACHE_KEY = "cohub:mobile-update-check:v1";
+const CACHE_KEY = "cohub:mobile-update-check:v2";
 const SNOOZE_KEY = "cohub:mobile-update-snooze:v1";
 const CHECK_TTL_MS = 6 * 60 * 60 * 1000;
 const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -20,6 +21,7 @@ export type AppRelease = {
   downloadUrl: string | null;
   downloadName: string | null;
   downloadSize: number | null;
+  downloadSha256: string | null;
 };
 
 type CachedCheck = {
@@ -99,7 +101,10 @@ function resolveDownloadAsset(payload: Record<string, unknown>) {
   if (!url) return null;
   const name = typeof asset.name === "string" ? asset.name.trim() || null : null;
   const size = typeof asset.size === "number" && Number.isFinite(asset.size) && asset.size >= 0 ? asset.size : null;
-  return { url, name, size };
+  const sha256 = typeof asset.digest === "string"
+    ? /^sha256:([a-f0-9]{64})$/i.exec(asset.digest)?.[1].toLowerCase() ?? null
+    : null;
+  return { url, name, size, sha256 };
 }
 
 function releaseFromPayload(payload: unknown): AppRelease | null {
@@ -123,6 +128,7 @@ function releaseFromPayload(payload: unknown): AppRelease | null {
     downloadUrl: download?.url ?? null,
     downloadName: download?.name ?? null,
     downloadSize: download?.size ?? null,
+    downloadSha256: download?.sha256 ?? null,
   };
 }
 
@@ -145,11 +151,14 @@ function parseCachedCheck(value: unknown): CachedCheck | null {
   const downloadSize = Platform.OS === "android" && typeof rawRelease.downloadSize === "number" && Number.isFinite(rawRelease.downloadSize) && rawRelease.downloadSize >= 0
     ? rawRelease.downloadSize
     : null;
+  const downloadSha256 = typeof rawRelease.downloadSha256 === "string" && /^[a-f0-9]{64}$/i.test(rawRelease.downloadSha256)
+    ? rawRelease.downloadSha256.toLowerCase()
+    : null;
   if (!version || !parseVersion(version) || !isAllowedReleaseUrl(url)) return null;
   if (downloadUrl && !isAllowedReleaseUrl(downloadUrl)) return null;
   return {
     checkedAt: value.checkedAt,
-    release: { version, title, publishedAt, url, notes, downloadUrl, downloadName, downloadSize },
+    release: { version, title, publishedAt, url, notes, downloadUrl, downloadName, downloadSize, downloadSha256 },
   };
 }
 
@@ -206,6 +215,7 @@ export async function checkForAppUpdate(options: { force?: boolean } = {}) {
     await loadPersistedCache();
     if (
       cachedCheck &&
+      (Platform.OS !== "android" || cachedCheck.release.downloadSha256 !== null) &&
       cachedCheck.checkedAt <= Date.now() &&
       Date.now() - cachedCheck.checkedAt < CHECK_TTL_MS
     ) {
@@ -257,4 +267,80 @@ export async function snoozeAppUpdate(version: string) {
     version,
     until: Date.now() + SNOOZE_DURATION_MS,
   } satisfies SnoozeRecord));
+}
+
+export async function openAndroidInstallPermissionSettings(): Promise<void> {
+  if (Platform.OS !== "android" || Constants.executionEnvironment === "storeClient") {
+    throw new Error("Installation permission requires a standalone Android build.");
+  }
+  if (!Application.applicationId) throw new Error("The installed Android package identifier is unavailable.");
+  const IntentLauncher = await import("expo-intent-launcher");
+  await IntentLauncher.startActivityAsync("android.settings.MANAGE_UNKNOWN_APP_SOURCES", {
+    data: `package:${Application.applicationId}`,
+  });
+}
+
+export type ApkUpdateProgress =
+  | { phase: "downloading"; fraction: number }
+  | { phase: "verifying" | "installing" };
+
+let apkUpdateInProgress = false;
+
+export async function downloadAndInstallAndroidUpdate(
+  release: AppRelease,
+  options: { signal: AbortSignal; onProgress: (progress: ApkUpdateProgress) => void },
+): Promise<void> {
+  if (Platform.OS !== "android" || Constants.executionEnvironment === "storeClient") {
+    throw new Error("APK installation requires a standalone Android build, not Expo Go.");
+  }
+  if (apkUpdateInProgress) throw new Error("An update is already in progress. Finish or cancel it first.");
+  if (!isNewerAppVersion(getInstalledAppVersion(), release.version)) {
+    throw new Error("This release is not newer than the installed app. Check for updates again.");
+  }
+  const asset = validateAndroidUpdateAsset(release);
+  apkUpdateInProgress = true;
+  try {
+    const { Directory, File, Paths } = await import("expo-file-system");
+    const Crypto = await import("expo-crypto");
+    const IntentLauncher = await import("expo-intent-launcher");
+    const directory = new Directory(Paths.cache, "app-updates");
+    const file = new File(directory, `${asset.sha256}.apk`);
+    let verified = false;
+    try {
+      if (options.signal.aborted) return;
+      directory.create({ idempotent: true, intermediates: true });
+      for (const entry of directory.list()) {
+        if (entry.uri !== file.uri) entry.delete();
+      }
+      if (!file.exists) {
+        await File.downloadFileAsync(asset.url, file, {
+          signal: options.signal,
+          onProgress: ({ bytesWritten }) => options.onProgress({
+            phase: "downloading",
+            fraction: Math.min(1, Math.max(0, bytesWritten / asset.size)),
+          }),
+        });
+      }
+      if (options.signal.aborted) return;
+      options.onProgress({ phase: "verifying" });
+      if (file.size !== asset.size) throw new Error("APK size verification failed. Retry the download.");
+      const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, await file.arrayBuffer());
+      const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      verifyAndroidUpdateIntegrity(asset, { size: file.size, sha256 });
+      verified = true;
+      if (options.signal.aborted) return;
+      options.onProgress({ phase: "installing" });
+      await IntentLauncher.startActivityAsync("android.intent.action.VIEW", {
+        data: file.contentUri,
+        type: "application/vnd.android.package-archive",
+        // Grant temporary read access without NEW_TASK, so the installer can return to Cohub.
+        flags: 1,
+      });
+      // Returning is not proof of installation. Keep the verified APK for a retry.
+    } finally {
+      if (!verified && file.exists) file.delete();
+    }
+  } finally {
+    apkUpdateInProgress = false;
+  }
 }

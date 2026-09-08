@@ -11,6 +11,7 @@ import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/sessio
 import { filterSpaces } from "../src/data/space-filters.ts";
 import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
+import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
 
 const measurements = new MessageMeasurements();
 const measuredRows = [{ id: "a", revision: "1" }, { id: "b", revision: "1" }];
@@ -238,5 +239,37 @@ assert.equal(formatToolCallCaption("skill_view", { skill: "github-pr-workflow" }
 assert.equal(formatToolCallCaption("terminal", {}), "terminal");
 assert.equal(formatMessageClock(new Date(2026, 0, 1, 19, 3).toISOString()), "19:03");
 assert.equal(formatMessageClock("not-a-date"), "");
+
+const apkRelease = {
+  version: "1.6.1",
+  downloadUrl: "https://github.com/markbang/cohub-mobile/releases/download/v1.6.1/cohub-v1.6.1-android-arm64-v8a.apk",
+  downloadName: "cohub-v1.6.1-android-arm64-v8a.apk",
+  downloadSize: 123,
+  downloadSha256: "A".repeat(64),
+};
+for (const abi of ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]) {
+  const name = `cohub-v1.6.1-android-${abi}.apk`;
+  const url = `https://github.com/markbang/cohub-mobile/releases/download/v1.6.1/${name}`;
+  assert.deepEqual(validateAndroidUpdateAsset({ ...apkRelease, downloadName: name, downloadUrl: url }), {
+    name, url, size: 123, sha256: "a".repeat(64),
+  });
+}
+for (const invalid of [
+  { version: "1.6.1-beta" },
+  { downloadUrl: "https://github.com/other/repo/releases/download/v1.6.1/update.apk" },
+  { downloadUrl: apkRelease.downloadUrl.replace("https:", "http:") },
+  { downloadUrl: `${apkRelease.downloadUrl}?redirect=elsewhere` },
+  { downloadName: "../update.apk" },
+  { downloadName: "cohub-v1.6.0-android-arm64-v8a.apk" },
+  { downloadSize: 0 },
+  { downloadSize: NaN },
+  { downloadSize: 1.5 },
+  { downloadSha256: null },
+  { downloadSha256: "invalid" },
+]) assert.throws(() => validateAndroidUpdateAsset({ ...apkRelease, ...invalid }));
+const apkAsset = validateAndroidUpdateAsset(apkRelease);
+assert.doesNotThrow(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sha256: "a".repeat(64) }));
+assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 124, sha256: apkAsset.sha256 }), /verification/);
+assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sha256: "b".repeat(64) }), /verification/);
 
 console.log("Chat workflow checks passed");
