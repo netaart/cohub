@@ -1,8 +1,10 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Haptics from "expo-haptics";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type GestureResponderEvent, type ViewStyle } from "react-native";
+import { CodeBlock } from "@/src/components/CodeBlock";
 import { formatMessageClock } from "@/src/data/chat-format";
+import { parseMarkdown, type MarkdownBlock, type MarkdownInline, type MarkdownTableAlignment } from "@/src/data/markdown";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
@@ -10,187 +12,63 @@ import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme 
 import { AppIcon, type IconName } from "@/src/ui";
 import { contentText, hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
+function InlineNodes({ nodes, accent, color }: { nodes: MarkdownInline[]; accent: string; color: string }) {
+  const theme = useAppTheme();
+  return <>{nodes.map((node, index) => {
+    if (node.type === "text") return node.value;
+    if (node.type === "code") {
+      return <Text key={`code-${index}`} style={{ fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color, backgroundColor: theme.colors.background }}>{node.value}</Text>;
+    }
+    if (node.type === "link") {
+      return <Text key={`link-${index}`} style={{ color: accent, textDecorationLine: "underline" }} onPress={() => void Linking.openURL(node.url).catch(() => undefined)}>{node.value}</Text>;
+    }
+    return <Text key={`${node.type}-${index}`} style={node.type === "strong" ? { fontWeight: "700" } : { fontStyle: "italic" }}>{node.value}</Text>;
+  })}</>;
+}
+
+function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignments: MarkdownTableAlignment[]; header: MarkdownInline[][]; rows: MarkdownInline[][][]; accent: string; textColor: string }) {
+  const theme = useAppTheme();
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const tableWidth = Math.max(viewportWidth, header.length * 112);
+  return <ScrollView horizontal showsHorizontalScrollIndicator={false} onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}>
+    <View style={{ width: tableWidth, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, overflow: "hidden" }}>
+      {[header, ...rows].map((row, rowIndex) => (
+        <View key={rowIndex} style={{ flexDirection: "row", backgroundColor: rowIndex === 0 ? theme.colors.surfaceRaised : "transparent" }}>
+          {row.map((cell, cellIndex) => (
+            <View key={cellIndex} style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 7, borderTopWidth: rowIndex === 0 ? 0 : 1, borderLeftWidth: cellIndex === 0 ? 0 : 1, borderColor: theme.colors.border }}>
+              <Text style={[typography.chatBody, { color: textColor, fontWeight: rowIndex === 0 ? "600" : "400", textAlign: alignments[cellIndex] ?? "left" }]}>
+                <InlineNodes nodes={cell} accent={accent} color={textColor} />
+              </Text>
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  </ScrollView>;
+}
+
+function MarkdownBlockView({ block, accent, textColor }: { block: MarkdownBlock; accent: string; textColor: string }) {
+  const theme = useAppTheme();
+  if (block.type === "code") return <CodeBlock code={block.code} language={block.language} streaming={!block.closed} />;
+  if (block.type === "table") return <MarkdownTable alignments={block.alignments} header={block.header} rows={block.rows} accent={accent} textColor={textColor} />;
+  if (block.type === "heading") {
+    const size = scaleFontSize(block.level <= 2 ? 19 : block.level <= 4 ? 17 : 15);
+    return <Text style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} /></Text>;
+  }
+  if (block.type === "quote") {
+    return <View style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text style={[typography.chatBody, { color: theme.colors.textMuted }]}><InlineNodes nodes={block.inlines} accent={accent} color={theme.colors.textMuted} /></Text></View>;
+  }
+  if (block.type === "list") {
+    return <View style={{ gap: 6 }}>{block.items.map((item, index) => <View key={index} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.chatBody, { color: accent, minWidth: 18 }]}>{block.ordered ? `${block.start + index}.` : "•"}</Text><Text style={[typography.chatBody, { color: textColor, flex: 1 }]}><InlineNodes nodes={item} accent={accent} color={textColor} /></Text></View>)}</View>;
+  }
+  return <Text style={[typography.chatBody, { color: textColor }]}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} /></Text>;
+}
+
 function TextBlock({ value, muted = false, accent, color }: { value: string; muted?: boolean; accent: string; color?: string }) {
   const theme = useAppTheme();
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
-  const lines = value.replace(/\r\n?/g, "\n").split("\n");
-  const blocks: ReactNode[] = [];
-  let paragraph: string[] = [];
-  let code: string[] | null = null;
-  let codeLanguage = "";
-  let list: { ordered: boolean; start: number; items: string[] } | null = null;
-
-  const flushParagraph = () => {
-    const text = paragraph.join(" ").trim();
-    if (text) blocks.push(<Text key={`paragraph-${blocks.length}`} style={[typography.chatBody, { color: textColor }]}>{renderInlineMarkdown(text, accent)}</Text>);
-    paragraph = [];
-  };
-  const flushList = () => {
-    if (!list) return;
-    const currentList = list;
-    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{currentList.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.chatBody, { color: accent, minWidth: 18 }]}>{currentList.ordered ? `${currentList.start + index}.` : "•"}</Text><Text style={[typography.chatBody, { color: textColor, flex: 1 }]}>{renderInlineMarkdown(item, accent)}</Text></View>)}</View>);
-    list = null;
-  };
-  const flushCode = () => {
-    if (code === null) return;
-    blocks.push(<View key={`code-${blocks.length}`} style={{ backgroundColor: theme.colors.background, borderRadius: 10, padding: 11, borderWidth: 1, borderColor: theme.colors.border }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}><AppIcon name="code" size={13} color={theme.colors.textFaint} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{codeLanguage || "code"}</Text></View><Text style={[typography.code, { color: theme.colors.textSecondary, fontFamily: "SpaceMono" }]}>{code.join("\n")}</Text></View>);
-    code = null;
-    codeLanguage = "";
-  };
-
-  for (const line of lines) {
-    const fence = (code !== null ? /^\s*```\s*$/ : /^\s*```\s*([^\s`]*)?\s*$/).exec(line);
-    if (fence) {
-      if (code !== null) flushCode();
-      else {
-        flushParagraph();
-        flushList();
-        code = [];
-        codeLanguage = fence[1] ?? "";
-      }
-      continue;
-    }
-    if (code !== null) {
-      code.push(line);
-      continue;
-    }
-    const heading = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      const size = scaleFontSize(heading[1].length <= 2 ? 19 : heading[1].length <= 4 ? 17 : 15);
-      blocks.push(<Text key={`heading-${blocks.length}`} style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}>{renderInlineMarkdown(heading[2], accent)}</Text>);
-      continue;
-    }
-    const quote = /^\s*>\s?(.*)$/.exec(line);
-    if (quote) {
-      flushParagraph();
-      flushList();
-      blocks.push(<View key={`quote-${blocks.length}`} style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text style={[typography.chatBody, { color: theme.colors.textMuted }]}>{renderInlineMarkdown(quote[1], accent)}</Text></View>);
-      continue;
-    }
-    const item = /^\s*(?:[-*+]\s+|([0-9]+)[.)]\s+)(.+)$/.exec(line);
-    if (item) {
-      const ordered = Boolean(item[1]);
-      if (!list || list.ordered !== ordered) {
-        flushParagraph();
-        flushList();
-        list = { ordered, start: ordered ? Number(item[1]) : 1, items: [] };
-      }
-      list.items.push(item[2]);
-      continue;
-    }
-    if (!line.trim()) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-    flushList();
-    paragraph.push(line.trim());
-  }
-  if (code !== null) flushCode();
-  flushParagraph();
-  flushList();
-  return <View style={{ gap: 9 }}>{blocks}</View>;
-}
-
-type InlineEmphasis = {
-  start: number;
-  end: number;
-  content: string;
-  kind: "bold" | "italic" | "link";
-  url?: string;
-};
-
-function isWordCharacter(value: string | undefined) {
-  return value !== undefined && /[A-Za-z0-9]/.test(value);
-}
-
-function findInlineLink(value: string, startAt: number): InlineEmphasis | null {
-  const start = value.indexOf("[", startAt);
-  if (start < 0 || value[start - 1] === "\\") return null;
-  const labelEnd = value.indexOf("](", start + 1);
-  if (labelEnd < 0) return null;
-  const urlStart = labelEnd + 2;
-  const urlEnd = value.indexOf(")", urlStart);
-  if (urlEnd < 0) return null;
-  const url = value.slice(urlStart, urlEnd).trim();
-  if (!/^(https?:\/\/|\/)/.test(url)) return null;
-  const content = value.slice(start + 1, labelEnd);
-  if (findInlineEmphasis(content, 0)) return null;
-  return { start, end: urlEnd + 1, content, kind: "link", url };
-}
-
-function findInlineEmphasis(value: string, startAt: number): InlineEmphasis | null {
-  for (let index = startAt; index < value.length; index += 1) {
-    const marker = value[index];
-    if (marker !== "*" && marker !== "_") continue;
-    if (value[index - 1] === "\\") continue;
-
-    const isBold = marker === "*" && value[index + 1] === "*";
-    const markerLength = isBold ? 2 : 1;
-    if (marker === "*" && !isBold && (value[index - 1] === "*" || value[index + 1] === "*")) continue;
-    if (marker === "_" && (value[index - 1] === "_" || value[index + 1] === "_" || isWordCharacter(value[index - 1]))) continue;
-
-    const contentStart = index + markerLength;
-    if (!value[contentStart] || /\s/.test(value[contentStart])) continue;
-    const closingMarker = marker.repeat(markerLength);
-    let closing = value.indexOf(closingMarker, contentStart);
-    while (closing >= 0) {
-      if (value[closing - 1] === "\\") {
-        closing = value.indexOf(closingMarker, closing + markerLength);
-        continue;
-      }
-      const content = value.slice(contentStart, closing);
-      const lastContentCharacter = content[content.length - 1];
-      const closingAfter = value[closing + markerLength];
-      const validEnd = Boolean(content) && !/\s/.test(lastContentCharacter ?? "") &&
-        !(marker === "_" && (closingAfter === "_" || isWordCharacter(closingAfter))) &&
-        !(marker === "*" && !isBold && (value[closing - 1] === "*" || closingAfter === "*"));
-      if (validEnd) {
-        return { start: index, end: closing + markerLength, content, kind: isBold ? "bold" : "italic" };
-      }
-      closing = value.indexOf(closingMarker, closing + markerLength);
-    }
-  }
-  return null;
-}
-
-function renderInlineMarkdown(value: string, accent: string): ReactNode {
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  let nodeIndex = 0;
-  while (cursor < value.length) {
-    const emphasis = findInlineEmphasis(value, cursor);
-    const link = findInlineLink(value, cursor);
-    if (!emphasis && !link) {
-      nodes.push(value.slice(cursor));
-      break;
-    }
-    const next = (emphasis && (!link || emphasis.start <= link.start)) ? emphasis : link;
-    if (!next) {
-      nodes.push(value.slice(cursor));
-      break;
-    }
-    if (next.start > cursor) nodes.push(value.slice(cursor, next.start));
-    if (next.kind === "bold" || next.kind === "italic") {
-      nodes.push(
-        <Text key={`${nodeIndex}-${next.start}`} style={next.kind === "bold" ? { fontWeight: "700" } : { fontStyle: "italic" }}>
-          {next.content}
-        </Text>,
-      );
-    } else {
-      const label = next.content.trim() || next.url;
-      nodes.push(
-        <Text key={`${nodeIndex}-${next.start}`} style={{ color: accent, textDecorationLine: "underline" }} onPress={() => void Linking.openURL(next.url!).catch(() => undefined)}>
-          {label}
-        </Text>,
-      );
-    }
-    nodeIndex += 1;
-    cursor = next.end;
-  }
-  return nodes;
+  const blocks = useMemo(() => parseMarkdown(value), [value]);
+  return <View style={{ gap: 9 }}>{blocks.map((block, index) => <MarkdownBlockView key={index} block={block} accent={accent} textColor={textColor} />)}</View>;
 }
 
 function Block({ block, color }: { block: ContentBlock; color?: string }) {

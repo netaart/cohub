@@ -1,5 +1,6 @@
 import { Linking, Text, View, type ColorValue } from "react-native";
 import type { ReactNode } from "react";
+import { CodeBlock } from "@/src/components/CodeBlock";
 import { useAppTheme, typography } from "@/src/theme";
 
 type ReleaseNotesProps = {
@@ -120,12 +121,7 @@ function ReleaseBlockView({ block }: { block: ReleaseBlock }) {
     return <View style={{ height: 1, backgroundColor: theme.colors.border }} />;
   }
   if (block.kind === "code") {
-    return (
-      <View style={[styles.codeBlock, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
-        {block.language ? <Text style={[typography.micro, { color: theme.colors.textFaint, marginBottom: 7 }]}>{block.language}</Text> : null}
-        <Text selectable style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.textSecondary }]}>{block.content || " "}</Text>
-      </View>
-    );
+    return <CodeBlock code={block.content || " "} language={block.language} />;
   }
   if (block.kind === "heading") {
     const headingStyle = block.level === 1 ? typography.heading : block.level === 2 ? typography.bodyMedium : typography.bodyMedium;
@@ -188,8 +184,3 @@ function renderInline(value: string, linkColor: ColorValue): ReactNode[] {
   if (cursor < value.length) nodes.push(value.slice(cursor));
   return nodes;
 }
-
-const styles = {
-  codeBlock: { padding: 11, borderWidth: 1, borderRadius: 10 },
-
-} satisfies Record<string, object>;

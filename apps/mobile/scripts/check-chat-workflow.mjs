@@ -13,6 +13,9 @@ import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/sessio
 import { filterSpaces } from "../src/data/space-filters.ts";
 import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch } from "../src/data/session-status.ts";
 import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-queue.ts";
+import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
+import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
+import { parseInlineMarkdown, parseMarkdown } from "../src/data/markdown.ts";
 import { createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
 import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
@@ -550,5 +553,52 @@ assert.deepEqual(queuedFollowupTurns([queuedFollowup("active", 7)], "active"), [
 assert.equal(followupPreviewText({ userText: "  hello\n\n world  " }), "hello world");
 assert.equal(followupPreviewText({ userText: "   " }), "Follow-up");
 assert.equal(followupPreviewText({ userText: null }), "Follow-up");
+
+const tableBlocks = parseMarkdown("| Name | Value |\n| :--- | ---: |\n| a | `1` |\n| b | 2 |\n\ntail");
+assert.deepEqual(tableBlocks[0], {
+  type: "table",
+  alignments: ["left", "right"],
+  header: [[{ type: "text", value: "Name" }], [{ type: "text", value: "Value" }]],
+  rows: [
+    [[{ type: "text", value: "a" }], [{ type: "code", value: "1" }]],
+    [[{ type: "text", value: "b" }], [{ type: "text", value: "2" }]],
+  ],
+});
+assert.deepEqual(tableBlocks[1], { type: "paragraph", inlines: [{ type: "text", value: "tail" }] });
+const unclosedCode = parseMarkdown("before\n```ts\nconst x = 1");
+assert.deepEqual(unclosedCode[1], { type: "code", language: "ts", code: "const x = 1", closed: false });
+assert.deepEqual(parseMarkdown("```ts\nconst x = 1\n```")[0], { type: "code", language: "ts", code: "const x = 1", closed: true });
+assert.deepEqual(parseInlineMarkdown("a **b** _c_ `d` [e](https://f)"), [
+  { type: "text", value: "a " },
+  { type: "strong", value: "b" },
+  { type: "text", value: " " },
+  { type: "emphasis", value: "c" },
+  { type: "text", value: " " },
+  { type: "code", value: "d" },
+  { type: "text", value: " " },
+  { type: "link", url: "https://f", value: "e" },
+]);
+
+assert.equal(detectCodeLanguage("src/components/App.tsx"), "tsx");
+assert.equal(detectCodeLanguage("docs/readme.md"), "markdown");
+assert.equal(detectCodeLanguage("Dockerfile"), "dockerfile");
+assert.equal(detectCodeLanguage("Makefile"), null);
+assert.equal(resolveCodeLanguage("ts"), "typescript");
+assert.equal(resolveCodeLanguage("C++"), "cpp");
+assert.equal(resolveCodeLanguage("unknown"), null);
+
+const textFile = { path: "a.ts", name: "a.ts", size: 10, mimeType: "text/plain", mtimeMs: 1, kind: "text", encoding: "utf-8", content: "const a" };
+assert.equal(isEditableTextFile(textFile), true);
+assert.equal(isEditableTextFile({ ...textFile, delivery: "url" }), false);
+assert.equal(isEditableTextFile({ ...textFile, encoding: "base64" }), false);
+assert.equal(isEditableTextFile({ ...textFile, kind: "binary" }), false);
+assert.equal(isEditableTextFile({ ...textFile, size: 512 * 1024 + 1 }), false);
+assert.equal(classifySaveConflict({ ...textFile, content: "draft" }, "base", "draft"), "already-saved");
+assert.equal(classifySaveConflict({ ...textFile, content: "base" }, "base", "draft"), "retry");
+assert.equal(classifySaveConflict({ ...textFile, content: "other" }, "base", "draft"), "conflict");
+assert.equal(classifySaveConflict(null, "base", "draft"), "conflict");
+assert.equal(isFileConflictError({ status: 409 }), true);
+assert.equal(isFileConflictError({ code: "file_conflict" }), true);
+assert.equal(isFileConflictError(new Error("nope")), false);
 
 console.log("Chat workflow checks passed");

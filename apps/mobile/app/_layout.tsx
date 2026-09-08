@@ -1,4 +1,5 @@
 import { LogtoProvider, useLogto } from "@logto/rn";
+import { useFonts } from "expo-font";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
@@ -38,6 +39,10 @@ function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 10_000) 
 }
 
 export default function RootLayout() {
+  // Code blocks, the file viewer, and the code editor all reference "SpaceMono";
+  // keep the splash up until the bundled font is registered.
+  const [fontsLoaded, fontError] = useFonts({ SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf") });
+  if (!fontsLoaded && !fontError) return null;
   // Logto's native storage adapter is intentionally not constructed during
   // Expo web static rendering. Native builds take the authenticated path.
   return Platform.OS === "web" ? <WebPreviewRoot /> : <LogtoProvider config={logtoConfig}><NativeRoot /></LogtoProvider>;
