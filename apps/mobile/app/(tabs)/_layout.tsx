@@ -15,7 +15,7 @@ export default function TabLayout() {
   // BottomTabItem hardcodes a borderless platform-colored ripple; re-bind the button to a
   // plain Pressable so tabs have no ripple at all.
   const tabBarButton = ({ href: _href, ref: _ref, ...props }: BottomTabBarButtonProps) => (
-    <Pressable {...props} style={[props.style, { borderRadius: 16, overflow: "hidden" }]} />
+    <Pressable {...props} style={[props.style, { borderRadius: 10, overflow: "hidden" }]} />
   );
   return (
     <Tabs
@@ -24,7 +24,7 @@ export default function TabLayout() {
         tabBarButton,
         tabBarActiveTintColor: theme.colors.accent,
         tabBarInactiveTintColor: theme.colors.textFaint,
-        tabBarActiveBackgroundColor: theme.colors.accentSoft,
+        tabBarActiveBackgroundColor: "transparent",
         tabBarInactiveBackgroundColor: "transparent",
         tabBarStyle: {
           backgroundColor: theme.colors.background,
@@ -32,7 +32,7 @@ export default function TabLayout() {
           height: TAB_BAR_CONTENT_HEIGHT + bottomSpace,
           paddingTop: 7,
           paddingBottom: bottomSpace,
-          paddingHorizontal: 10,
+          paddingHorizontal: 6,
           shadowColor: theme.colors.shadow,
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.08,
@@ -40,7 +40,7 @@ export default function TabLayout() {
           elevation: 3,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600", marginBottom: 1 },
-        tabBarItemStyle: { minHeight: 50, marginHorizontal: 3, marginVertical: 3, borderRadius: 16, backgroundColor: theme.colors.surface },
+        tabBarItemStyle: { minHeight: 50, marginHorizontal: 3, marginVertical: 3, borderRadius: 10, backgroundColor: "transparent" },
         tabBarHideOnKeyboard: true,
       }}
     >

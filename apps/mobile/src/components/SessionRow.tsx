@@ -40,7 +40,7 @@ export function SessionRow({ session, onPress, onLongPress, labels = [] }: Sessi
     </View>
     <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
   </>;
-  const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, backgroundColor: "transparent" };
+  const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 76, paddingHorizontal: 18, paddingVertical: 10, backgroundColor: "transparent", borderBottomWidth: 1, borderBottomColor: theme.colors.border };
   const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
   return <PressableScale accessibilityRole="button" accessibilityLabel={`Open ${displaySessionTitle(session)}`} onPress={onPress} onLongPress={onLongPress} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{rowContent}</PressableScale>;
 }
