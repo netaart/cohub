@@ -14,6 +14,7 @@ import { SessionLabelSheet } from "@/src/components/SessionLabelSheet";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useAppTheme, typography } from "@/src/theme";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
+import { useApp } from "@/src/data/context";
 import { mockFileTree } from "@/src/data/mock";
 import {
   fetchLabelSessionIds,
@@ -578,6 +579,7 @@ type ChatListFilter =
 
 function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
+  const { state, refreshSessionStatuses } = useApp();
   const [query, setQuery] = useState("");
   const [extraSessions, setExtraSessions] = useState<UserSessionListItem[]>([]);
   const [scopeCursor, setScopeCursor] = useState<string | null>(null);
@@ -686,6 +688,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
       const cursor = scopeCursor ?? cursorAfterOldestSession(sessions);
       const response = await client.space(spaceId).sessions.list({ limit: 60, ...(cursor ? { cursor } : {}) });
       setExtraSessions((current) => mergePanelSessions(current, response.sessions, spaceId, spaceName));
+      void refreshSessionStatuses(response.sessions);
       setScopeCursor(response.pageInfo?.nextCursor ?? null);
       setScopeHasMore(Boolean(response.pageInfo?.hasMore));
       setScopeInitialized(true);
@@ -732,6 +735,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
           {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel="Retry loading labels" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.caption, { color: theme.colors.accent }]}>Retry labels</Text></Pressable> : null}
         </ScrollView>
         {remoteQueryMatches && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
+        {state.sessionStatusError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{state.sessionStatusError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat statuses" onPress={() => void refreshSessionStatuses(displaySessions)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
         {labelSessionsError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{labelSessionsError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry loading labeled Chats" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
       </View>
       <FlatList

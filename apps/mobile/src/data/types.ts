@@ -11,6 +11,8 @@ import type {
   UserSessionListItem,
 } from "@neta-art/cohub";
 
+import type { LatestSessionTurn } from "./session-status";
+
 export type ConnectionState = "idle" | "connecting" | "reconnecting" | "open" | "closed" | "error";
 
 export type AttachmentDraft = {
@@ -88,6 +90,9 @@ export type AppState = {
   sessionsHasMore: boolean;
   sessionsCursor: string | null;
   sessionsLoadingMore: boolean;
+  sessionLatestTurns: Record<string, LatestSessionTurn | null>;
+  sessionStatusRequests: number;
+  sessionStatusError: string | null;
   sessionViews: Record<string, SessionView>;
   usage: UsageSummary;
 };

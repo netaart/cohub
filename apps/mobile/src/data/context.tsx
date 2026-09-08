@@ -39,7 +39,7 @@ import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, 
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
 import { mockMessages, mockModels, mockSessions, mockSpaces, mockTurnIndex, mockTurns, mockUsage } from "@/src/data/mock";
-import { getSessionStatus } from "@/src/data/session-status";
+import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, type LatestSessionTurn } from "@/src/data/session-status";
 import {
   displaySessionTitle,
   displaySpaceName,
@@ -48,6 +48,7 @@ import {
 } from "@/src/utils";
 
 const HOME_REQUEST_TIMEOUT_MS = 15_000;
+const mockLatestTurns = Object.fromEntries(Object.entries(mockTurns).map(([id, turns]) => [id, latestTurn(turns)]));
 
 function withTimeout<T>(promise: Promise<T>, label: string) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -159,6 +160,9 @@ const initialState: AppState = {
   sessionsHasMore: false,
   sessionsCursor: null,
   sessionsLoadingMore: false,
+  sessionLatestTurns: {},
+  sessionStatusRequests: 0,
+  sessionStatusError: null,
   sessionViews: {},
   usage: null,
 };
@@ -170,6 +174,10 @@ type Action =
   | { type: "sessions-more-start" }
   | { type: "sessions-more-success"; sessions: UserSessionListItem[]; hasMore: boolean; cursor: string | null }
   | { type: "sessions-more-error"; message: string }
+  | { type: "session-status-start" }
+  | { type: "session-status-reset" }
+  | { type: "session-status-end"; error?: string | null }
+  | { type: "session-latest-turn"; sessionId: string; turn: LatestSessionTurn | null }
   | { type: "home-error"; message: string }
   | { type: "usage-start" }
   | { type: "usage"; usage: SpaceUsageSummary }
@@ -243,6 +251,13 @@ function patchTurnRecords(existing: SessionTurnRecord[], patch: Partial<SessionT
   const next = [...existing];
   next[index] = { ...previous, ...patch, meta: patch.meta ? { ...(previous.meta ?? {}), ...patch.meta } : previous.meta };
   return next.sort((a, b) => a.sequence - b.sequence);
+}
+
+function updateLatestTurn(state: AppState, sessionId: string, turn: LatestSessionTurn | null): AppState {
+  return {
+    ...state,
+    sessionLatestTurns: { ...state.sessionLatestTurns, [sessionId]: reconcileLatestTurn(state.sessionLatestTurns[sessionId], turn) },
+  };
 }
 
 function updateView(state: AppState, sessionId: string, update: Partial<SessionView>) {
@@ -326,6 +341,14 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "sessions-more-error":
       return { ...state, sessionsLoadingMore: false, sessionsError: action.message };
+    case "session-status-start":
+      return { ...state, sessionStatusRequests: state.sessionStatusRequests + 1, sessionStatusError: state.sessionStatusRequests === 0 ? null : state.sessionStatusError };
+    case "session-status-reset":
+      return { ...state, sessionLatestTurns: {}, sessionStatusRequests: 0, sessionStatusError: null };
+    case "session-status-end":
+      return { ...state, sessionStatusRequests: state.sessionStatusRequests - 1, sessionStatusError: action.error ?? null };
+    case "session-latest-turn":
+      return updateLatestTurn(state, action.sessionId, action.turn);
     case "home-error":
       return { ...state, booting: false, refreshing: false, activityLoading: false, error: action.message, spacesError: action.message, sessionsError: action.message, activityError: action.message };
     case "usage-start":
@@ -357,14 +380,18 @@ function reducer(state: AppState, action: Action): AppState {
         action.session,
       );
       return updateView(
-        {
-          ...state,
-          sessions: state.sessions.map((item) =>
-            item.id === session.id
-              ? { ...mergeSessionItem(item, session as UserSessionListItem), space: item.space ?? { id: action.space.id, name: displaySpaceName(action.space), slug: action.space.slug, publicProfile: action.space.publicProfile ?? null } }
-              : item,
-          ),
-        },
+        updateLatestTurn(
+          {
+            ...state,
+            sessions: state.sessions.map((item) =>
+              item.id === session.id
+                ? { ...mergeSessionItem(item, session as UserSessionListItem), space: item.space ?? { id: action.space.id, name: displaySpaceName(action.space), slug: action.space.slug, publicProfile: action.space.publicProfile ?? null } }
+                : item,
+            ),
+          },
+          action.sessionId,
+          latestTurn(action.turns),
+        ),
         action.sessionId,
         {
           loading: false,
@@ -393,7 +420,7 @@ function reducer(state: AppState, action: Action): AppState {
       const session = action.session && current?.session
         ? preferNewerSession(current.session, action.session)
         : action.session;
-      return updateView(state, action.sessionId, {
+      return updateView(action.turns ? updateLatestTurn(state, action.sessionId, latestTurn(action.turns)) : state, action.sessionId, {
         refreshing: false,
         ...(session ? { session } : {}),
         ...(action.messages ? { messages: action.messages } : {}),
@@ -411,7 +438,7 @@ function reducer(state: AppState, action: Action): AppState {
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = mergeTurns(current.turns, action.turns);
       const session = action.session && current.session ? preferNewerSession(current.session, action.session) : action.session;
-      return updateView(state, action.sessionId, {
+      return updateView(updateLatestTurn(state, action.sessionId, latestTurn(turns)), action.sessionId, {
         error: null,
         ...(session ? { session } : {}),
         turns,
@@ -433,7 +460,7 @@ function reducer(state: AppState, action: Action): AppState {
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = mergeTurns(current.turns, action.turns);
       const session = action.session && current.session ? preferNewerSession(current.session, action.session) : action.session;
-      return updateView(state, action.sessionId, {
+      return updateView(updateLatestTurn(state, action.sessionId, latestTurn(turns)), action.sessionId, {
         error: null,
         ...(session ? { session } : {}),
         turns,
@@ -466,7 +493,7 @@ function reducer(state: AppState, action: Action): AppState {
       const sessions = action.session
         ? state.sessions.map((item) => item.id === action.session?.id ? mergeSessionItem(item, { ...action.session, space: item.space }) : item)
         : state.sessions;
-      return updateView({ ...state, sessions: sortByRecent(sessions) }, action.sessionId, {
+      return updateView(updateLatestTurn({ ...state, sessions: sortByRecent(sessions) }, action.sessionId, latestTurn(turns)), action.sessionId, {
         ...(session ? { session } : {}),
         turns,
         historyLoaded: true,
@@ -480,9 +507,10 @@ function reducer(state: AppState, action: Action): AppState {
     case "turn-patch": {
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = patchTurnRecords(current.turns, action.turn);
-      if (turns === current.turns) return state;
+      const nextState = updateLatestTurn(state, action.sessionId, reconcileTurnStatusPatch(state.sessionLatestTurns[action.sessionId], action.turn));
+      if (turns === current.turns) return nextState;
       const patched = turns.find((turn) => turn.id === action.turn.id || turn.id === current.stream?.turnId);
-      return updateView(state, action.sessionId, {
+      return updateView(nextState, action.sessionId, {
         turns,
         historyLoaded: true,
         messages: mergeDisplayMessages(messagesFromTurns(turns), current.messages.filter(isLiveMessage)),
@@ -494,7 +522,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "turn-index-start":
       return updateView(state, action.sessionId, { turnIndexLoading: true });
     case "turn-index":
-      return updateView(state, action.sessionId, { turnIndex: action.turnIndex });
+      return updateView(updateLatestTurn(state, action.sessionId, latestTurn(action.turnIndex)), action.sessionId, { turnIndex: action.turnIndex });
     case "turn-index-end":
       return updateView(state, action.sessionId, { turnIndexLoading: false });
     case "message-add": {
@@ -577,6 +605,7 @@ export type AppContextValue = {
   installationId: string | null;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
   refreshHome: () => Promise<void>;
+  refreshSessionStatuses: (sessions: Pick<UserSessionListItem, "id" | "spaceId">[]) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   openSession: (sessionId: string) => Promise<void>;
   closeSession: (sessionId: string) => void;
@@ -622,7 +651,7 @@ export function AppProvider({
 }) {
   const [installationId, setInstallationId] = useState<string | null>(null);
   const [state, setState] = useState<AppState>(() =>
-    offline ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, usage: mockUsage } : initialState,
+    offline ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, sessionLatestTurns: mockLatestTurns, usage: mockUsage } : initialState,
   );
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const stateRef = useRef(state);
@@ -632,6 +661,7 @@ export function AppProvider({
   const installationRequestRef = useRef<Promise<string> | null>(null);
   const clientRef = useRef<CohubClient | null>(null);
   const homeRefreshGenerationRef = useRef(0);
+  const statusGenerationRef = useRef(0);
   const [models, setModels] = useState<ChatModelCatalogItem[]>(offline ? mockModels : []);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -747,6 +777,23 @@ export function AppProvider({
     return request;
   }, [modelStatus, offline]);
 
+  const refreshSessionStatuses = useCallback(async (sessions: Pick<UserSessionListItem, "id" | "spaceId">[]) => {
+    const activeClient = clientRef.current;
+    if (offline || !activeClient || sessions.length === 0) return;
+    const generation = statusGenerationRef.current;
+    dispatch({ type: "session-status-start" });
+    let statusError: string | undefined;
+    try {
+      await loadSessionLatestTurns(activeClient, sessions, (sessionId, turn) => {
+        if (generation === statusGenerationRef.current) dispatch({ type: "session-latest-turn", sessionId, turn });
+      });
+    } catch (error) {
+      statusError = errorMessage(error, "Unable to refresh Chat statuses. Pull to refresh and retry.");
+    } finally {
+      if (generation === statusGenerationRef.current) dispatch({ type: "session-status-end", error: statusError });
+    }
+  }, [dispatch, offline]);
+
   const refreshHome = useCallback(async () => {
     if (offline) return;
     const generation = homeRefreshGenerationRef.current + 1;
@@ -812,6 +859,7 @@ export function AppProvider({
         ? `Chats could not be refreshed: ${errorMessage(sessionsResult.reason, "Request failed")}`
         : undefined;
       dispatch({ type: "home-success", spaces, sessions, sessionsHasMore, sessionsCursor, spacesError, sessionsError });
+      void refreshSessionStatuses(sessions);
       dispatch({ type: "usage-start" });
       if (Platform.OS !== "web") {
         void saveHome(userKey, { spaces, sessions }).catch((error) => {
@@ -830,7 +878,7 @@ export function AppProvider({
         dispatch({ type: "home-error", message: errorMessage(error, "Unable to load Cohub") });
       }
     }
-  }, [dispatch, ensureInstallation, getAccessToken, offline, userKey]);
+  }, [dispatch, ensureInstallation, getAccessToken, offline, refreshSessionStatuses, userKey]);
 
   const loadMoreSessions = useCallback(async () => {
     if (sessionsMoreRequestRef.current) return sessionsMoreRequestRef.current;
@@ -846,6 +894,7 @@ export function AppProvider({
         }
         const nextSessions = response.sessions ?? [];
         dispatch({ type: "sessions-more-success", sessions: nextSessions, hasMore: Boolean(response.pageInfo?.hasMore), cursor: response.pageInfo?.nextCursor ?? null });
+        void refreshSessionStatuses(nextSessions);
         if (Platform.OS !== "web") {
           const merged = [...stateRef.current.sessions, ...nextSessions.filter((item) => !stateRef.current.sessions.some((currentItem) => currentItem.id === item.id))];
           void saveHome(userKey, { spaces: stateRef.current.spaces, sessions: merged }).catch(() => undefined);
@@ -859,7 +908,7 @@ export function AppProvider({
       if (sessionsMoreRequestRef.current === task) sessionsMoreRequestRef.current = null;
     }).catch(() => undefined);
     return task;
-  }, [client, dispatch, userKey]);
+  }, [client, dispatch, refreshSessionStatuses, userKey]);
 
   useEffect(() => {
     if (offline) return;
@@ -889,6 +938,9 @@ export function AppProvider({
     });
     return () => {
       active = false;
+      homeRefreshGenerationRef.current += 1;
+      statusGenerationRef.current += 1;
+      dispatch({ type: "session-status-reset" });
       for (const stop of activeSubscriptions.values()) stop();
       activeSubscriptions.clear();
     };
@@ -1550,6 +1602,8 @@ export function AppProvider({
   );
 
   const clearCache = useCallback(async () => {
+    homeRefreshGenerationRef.current += 1;
+    statusGenerationRef.current += 1;
     await clearUserCache(userKey);
     setModels(offline ? mockModels : []);
     setModelsError(null);
@@ -1560,13 +1614,14 @@ export function AppProvider({
     spacePinMutationVersionsRef.current.clear();
     spacePinPendingMutationsRef.current.clear();
     setState(offline
-      ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, usage: mockUsage }
+      ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, sessionLatestTurns: mockLatestTurns, usage: mockUsage }
       : { ...initialState, booting: false, refreshing: false });
   }, [offline, userKey]);
 
   const activityItems = useMemo<ActivityItem[]>(() => {
-    return state.sessions.slice(0, 30).map((session) => {
-      const normalizedStatus = getSessionStatus(session.status);
+    return state.sessions.slice(0, 30).flatMap((session) => {
+      const normalizedStatus = getSessionStatus(state.sessionLatestTurns[session.id]?.status);
+      if (normalizedStatus === "idle") return [];
       const status = normalizedStatus === "running"
         ? "running"
         : normalizedStatus === "failed"
@@ -1585,7 +1640,7 @@ export function AppProvider({
         updatedAt: session.lastMessageAt ?? session.updatedAt,
       };
     });
-  }, [state.sessions]);
+  }, [state.sessionLatestTurns, state.sessions]);
 
   const value = useMemo<AppContextValue>(
     () => ({
@@ -1596,6 +1651,7 @@ export function AppProvider({
       installationId,
       getAccessToken,
       refreshHome,
+      refreshSessionStatuses,
       loadMoreSessions,
       openSession,
       closeSession,
@@ -1655,6 +1711,7 @@ export function AppProvider({
       openSession,
       offline,
       refreshHome,
+      refreshSessionStatuses,
       refreshSession,
       renameSession,
       sendMessage,

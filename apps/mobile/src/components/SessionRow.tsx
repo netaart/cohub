@@ -5,6 +5,7 @@ import { PressableScale } from "@/src/ui/PressableScale";
 import { useAppTheme, typography } from "@/src/theme";
 import { displaySessionTitle, formatRelativeTime, shortPreview } from "@/src/utils";
 import { getSessionStatus, sessionStatusLabels } from "@/src/data/session-status";
+import { useApp } from "@/src/data/context";
 
 type SessionRowProps = {
   session: UserSessionListItem;
@@ -17,8 +18,9 @@ type SessionRowProps = {
 
 export function SessionRow({ session, onPress, onLongPress, labels = [] }: SessionRowProps) {
   const theme = useAppTheme();
+  const { state } = useApp();
   const spaceName = session.space?.name?.trim() || "Space";
-  const sessionStatus = getSessionStatus(session.status);
+  const sessionStatus = getSessionStatus(state.sessionLatestTurns[session.id]?.status);
   const running = sessionStatus === "running";
   const rowContent = <>
     <Avatar name={spaceName} uri={session.space?.publicProfile?.avatarUrl} size={48} online={running} />

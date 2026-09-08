@@ -230,7 +230,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const modelLabel = activeModel?.name || activeModel?.id || "Automatic";
   const modelTriggerLabel = activeModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(activeModel.thinkingLevel)}` : modelLabel;
   const liveStream = shouldShowLiveStream(view.stream, messages);
-  const running = view.sending || (liveStream && isLiveStreamStatus(view.stream?.status ?? ""));
+  const running = state.sessionLatestTurns[sessionId]?.status === "running" || view.sending || (liveStream && isLiveStreamStatus(view.stream?.status ?? ""));
   const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
 
   useEffect(() => {
