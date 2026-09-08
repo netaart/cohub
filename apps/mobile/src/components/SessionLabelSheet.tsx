@@ -142,7 +142,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
                 placeholderTextColor={theme.colors.textFaint}
                 editable={!creating}
                 onSubmitEditing={() => void create()}
-                style={{ minHeight: 42, paddingHorizontal: 12, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.background, color: theme.colors.text, fontSize: 15 }}
+                style={{ minHeight: 42, paddingHorizontal: 12, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.background, color: theme.colors.text, fontSize: typography.body.fontSize }}
               />
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel="Create label" disabled={!newLabelName.trim() || creating} onPress={() => void create()} style={({ pressed }) => ({ minHeight: 42, paddingHorizontal: 14, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: !newLabelName.trim() || creating ? theme.colors.surfaceRaised : pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: !newLabelName.trim() || creating ? 0.6 : 1 })}>

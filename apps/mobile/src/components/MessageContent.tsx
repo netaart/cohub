@@ -6,7 +6,7 @@ import { formatMessageClock } from "@/src/data/chat-format";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
-import { useAppTheme, typography, type AppTheme } from "@/src/theme";
+import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme } from "@/src/theme";
 import { AppIcon, type IconName } from "@/src/ui";
 import { contentText, hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
@@ -22,18 +22,18 @@ function TextBlock({ value, muted = false, accent, color }: { value: string; mut
 
   const flushParagraph = () => {
     const text = paragraph.join(" ").trim();
-    if (text) blocks.push(<Text key={`paragraph-${blocks.length}`} style={[typography.body, { color: textColor, lineHeight: 23 }]}>{renderInlineMarkdown(text, accent)}</Text>);
+    if (text) blocks.push(<Text key={`paragraph-${blocks.length}`} style={[typography.chatBody, { color: textColor }]}>{renderInlineMarkdown(text, accent)}</Text>);
     paragraph = [];
   };
   const flushList = () => {
     if (!list) return;
     const currentList = list;
-    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{currentList.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.body, { color: accent, lineHeight: 23, minWidth: 18 }]}>{currentList.ordered ? `${currentList.start + index}.` : "•"}</Text><Text style={[typography.body, { color: textColor, lineHeight: 23, flex: 1 }]}>{renderInlineMarkdown(item, accent)}</Text></View>)}</View>);
+    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{currentList.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.chatBody, { color: accent, minWidth: 18 }]}>{currentList.ordered ? `${currentList.start + index}.` : "•"}</Text><Text style={[typography.chatBody, { color: textColor, flex: 1 }]}>{renderInlineMarkdown(item, accent)}</Text></View>)}</View>);
     list = null;
   };
   const flushCode = () => {
     if (code === null) return;
-    blocks.push(<View key={`code-${blocks.length}`} style={{ backgroundColor: theme.colors.background, borderRadius: 10, padding: 11, borderWidth: 1, borderColor: theme.colors.border }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}><AppIcon name="code" size={13} color={theme.colors.textFaint} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{codeLanguage || "code"}</Text></View><Text style={{ color: theme.colors.textSecondary, fontFamily: "SpaceMono", fontSize: 12, lineHeight: 18 }}>{code.join("\n")}</Text></View>);
+    blocks.push(<View key={`code-${blocks.length}`} style={{ backgroundColor: theme.colors.background, borderRadius: 10, padding: 11, borderWidth: 1, borderColor: theme.colors.border }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}><AppIcon name="code" size={13} color={theme.colors.textFaint} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{codeLanguage || "code"}</Text></View><Text style={[typography.code, { color: theme.colors.textSecondary, fontFamily: "SpaceMono" }]}>{code.join("\n")}</Text></View>);
     code = null;
     codeLanguage = "";
   };
@@ -58,7 +58,7 @@ function TextBlock({ value, muted = false, accent, color }: { value: string; mut
     if (heading) {
       flushParagraph();
       flushList();
-      const size = heading[1].length <= 2 ? 19 : heading[1].length <= 4 ? 17 : 15;
+      const size = scaleFontSize(heading[1].length <= 2 ? 19 : heading[1].length <= 4 ? 17 : 15);
       blocks.push(<Text key={`heading-${blocks.length}`} style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}>{renderInlineMarkdown(heading[2], accent)}</Text>);
       continue;
     }
@@ -66,7 +66,7 @@ function TextBlock({ value, muted = false, accent, color }: { value: string; mut
     if (quote) {
       flushParagraph();
       flushList();
-      blocks.push(<View key={`quote-${blocks.length}`} style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text style={[typography.body, { color: theme.colors.textMuted, lineHeight: 23 }]}>{renderInlineMarkdown(quote[1], accent)}</Text></View>);
+      blocks.push(<View key={`quote-${blocks.length}`} style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text style={[typography.chatBody, { color: theme.colors.textMuted }]}>{renderInlineMarkdown(quote[1], accent)}</Text></View>);
       continue;
     }
     const item = /^\s*(?:[-*+]\s+|([0-9]+)[.)]\s+)(.+)$/.exec(line);
@@ -227,7 +227,7 @@ function toolIcon(name: string): IconName {
 
 function ToolOutput({ block }: { block: Extract<ContentBlock, { type: "tool_result" }> }) {
   const theme = useAppTheme();
-  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <ScrollView horizontal><Text style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.text }}>{block.content || "(empty output)"}</Text></ScrollView> : <MessageContent content={block.content} />}</View>;
+  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <ScrollView horizontal><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.text }]}>{block.content || "(empty output)"}</Text></ScrollView> : <MessageContent content={block.content} />}</View>;
 }
 
 function ToolCall({ block, result, active = false }: { block: Extract<ContentBlock, { type: "tool_use" }>; result?: Extract<ContentBlock, { type: "tool_result" }>; active?: boolean }) {
@@ -241,15 +241,15 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
   return <View>
     <Pressable accessibilityRole="button" accessibilityLabel={`${caption}: ${status}`} accessibilityState={{ expanded }} hitSlop={8} onPress={() => setExpanded(!expanded)} style={{ minHeight: 22, flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2 }}>
       <AppIcon name={toolIcon(block.name)} size={14} color={iconColor} />
-      <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, lineHeight: 18 }}>
+      <Text numberOfLines={1} style={{ flex: 1, fontSize: scaleFontSize(13), lineHeight: scaleLineHeight(18) }}>
         <Text style={{ color: theme.colors.text, fontWeight: "500" }}>{block.name}</Text>
         {preview ? <Text style={{ color: theme.colors.textMuted }}>{`: "${preview}"`}</Text> : null}
       </Text>
     </Pressable>
     {expanded ? <View style={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, gap: 8, marginTop: 4 }}>
       <Text style={[typography.micro, { color: theme.colors.textMuted }]}>IN</Text>
-      <ScrollView horizontal><Text style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.text }}>{JSON.stringify(block.input, null, 2)}</Text></ScrollView>
-      {edits.map((edit, index) => <ScrollView horizontal key={index}><View><Text style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.success }}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View></ScrollView>)}
+      <ScrollView horizontal><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.text }]}>{JSON.stringify(block.input, null, 2)}</Text></ScrollView>
+      {edits.map((edit, index) => <ScrollView horizontal key={index}><View><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }]}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.success }]}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View></ScrollView>)}
       {result ? <ToolOutput block={result} /> : null}
     </View> : null}
   </View>;

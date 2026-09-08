@@ -55,6 +55,7 @@ import Tag from "lucide-react-native/icons/tag";
 import Square from "lucide-react-native/icons/square";
 import SquarePen from "lucide-react-native/icons/square-pen";
 import Terminal from "lucide-react-native/icons/terminal";
+import Type from "lucide-react-native/icons/type";
 import Trash2 from "lucide-react-native/icons/trash-2";
 import UserRound from "lucide-react-native/icons/user-round";
 import Wifi from "lucide-react-native/icons/wifi";
@@ -120,6 +121,7 @@ export const icons = {
   sync: RefreshCw,
   terminal: Terminal,
   trash: Trash2,
+  type: Type,
   user: UserRound,
   wifi: Wifi,
   x: X,

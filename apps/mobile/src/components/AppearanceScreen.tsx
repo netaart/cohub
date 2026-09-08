@@ -2,11 +2,14 @@ import { useRouter } from "expo-router";
 import { Pressable, ScrollView, Switch, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
+  setFontScalePreference,
   setPureBlackPreference,
   setThemePreference,
   type AppTheme,
+  type FontScalePreference,
   type ThemePreference,
   useAppTheme,
+  useFontScalePreference,
   usePureBlackPreference,
   useThemePreference,
   typography,
@@ -17,6 +20,13 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: "monitor" | 
   { value: "system", label: "System", icon: "monitor" },
   { value: "light", label: "Light", icon: "sun" },
   { value: "dark", label: "Dark", icon: "moon" },
+];
+
+const TEXT_SIZE_OPTIONS: { value: FontScalePreference; label: string }[] = [
+  { value: "small", label: "Small" },
+  { value: "default", label: "Default" },
+  { value: "large", label: "Large" },
+  { value: "xlarge", label: "XL" },
 ];
 
 type PreviewColors = Pick<AppTheme["colors"], "background" | "surface" | "surfaceRaised" | "border" | "accent" | "text" | "textMuted">;
@@ -43,6 +53,7 @@ export function AppearanceContent() {
   const theme = useAppTheme();
   const preference = useThemePreference();
   const pureBlack = usePureBlackPreference();
+  const fontScalePreference = useFontScalePreference();
   const { width } = useWindowDimensions();
   const previewWidth = Math.max(108, Math.min(124, (width - 48) / 3.05));
 
@@ -119,6 +130,41 @@ export function AppearanceContent() {
             thumbColor={pureBlack ? theme.colors.accent : theme.colors.textFaint}
             ios_backgroundColor={theme.colors.borderStrong}
           />
+        </View>
+      </View>
+
+      <SectionHeader title="Text size" />
+      <View style={[styles.segmented, { marginHorizontal: 16, borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.background }]}>
+        {TEXT_SIZE_OPTIONS.map((option, index) => {
+          const selected = fontScalePreference === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="radio"
+              accessibilityLabel={`${option.label} text size`}
+              accessibilityState={{ selected, checked: selected }}
+              aria-checked={selected}
+              onPress={() => void setFontScalePreference(option.value)}
+              style={({ pressed }) => [
+                styles.segment,
+                index > 0 ? { borderLeftWidth: 1, borderLeftColor: theme.colors.borderStrong } : null,
+                { backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent" },
+              ]}
+            >
+              <Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textSecondary }]}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <View style={[styles.group, { marginTop: 12, marginHorizontal: 16, borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+        <View style={[styles.settingRow, { borderBottomWidth: 0 }]}>
+          <View style={[styles.settingIcon, { backgroundColor: theme.colors.surfaceRaised }]}>
+            <AppIcon name="type" size={17} color={theme.colors.textMuted} />
+          </View>
+          <View style={styles.settingText}>
+            <Text style={[typography.chatBody, { color: theme.colors.text }]}>The Agent is working on your request…</Text>
+            <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>Applies to Chats, Spaces, and settings.</Text>
+          </View>
         </View>
       </View>
 

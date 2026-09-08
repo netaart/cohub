@@ -3,7 +3,7 @@ import type { BottomTabBarButtonProps } from "expo-router/build/react-navigation
 import { Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedTabIcon } from "@/src/components/AnimatedTabIcon";
-import { useAppTheme } from "@/src/theme";
+import { typography, useAppTheme } from "@/src/theme";
 
 const TAB_BAR_EXTRA_BOTTOM_SPACE = 10;
 const TAB_BAR_CONTENT_HEIGHT = 64;
@@ -39,7 +39,7 @@ export default function TabLayout() {
           shadowRadius: 5,
           elevation: 3,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: "600", marginBottom: 1 },
+        tabBarLabelStyle: { fontSize: typography.micro.fontSize + 1, fontWeight: "600", marginBottom: 1 },
         tabBarItemStyle: { minHeight: 50, marginHorizontal: 3, marginVertical: 3, borderRadius: 10, backgroundColor: "transparent" },
         tabBarHideOnKeyboard: true,
       }}

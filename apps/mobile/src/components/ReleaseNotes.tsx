@@ -123,7 +123,7 @@ function ReleaseBlockView({ block }: { block: ReleaseBlock }) {
     return (
       <View style={[styles.codeBlock, { backgroundColor: theme.colors.background, borderColor: theme.colors.border }]}>
         {block.language ? <Text style={[typography.micro, { color: theme.colors.textFaint, marginBottom: 7 }]}>{block.language}</Text> : null}
-        <Text selectable style={[styles.codeText, { color: theme.colors.textSecondary }]}>{block.content || " "}</Text>
+        <Text selectable style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.textSecondary }]}>{block.content || " "}</Text>
       </View>
     );
   }
@@ -171,7 +171,7 @@ function renderInline(value: string, linkColor: ColorValue): ReactNode[] {
         </Text>,
       );
     } else if (match[4]) {
-      nodes.push(<Text key={`code-${key}`} style={styles.inlineCode}>{match[4]}</Text>);
+      nodes.push(<Text key={`code-${key}`} style={[typography.code, { fontFamily: "SpaceMono" }]}>{match[4]}</Text>);
     } else if (match[5] || match[6]) {
       nodes.push(<Text key={`bold-${key}`} style={{ fontWeight: "700" }}>{match[5] ?? match[6]}</Text>);
     } else if (match[7]) {
@@ -191,6 +191,5 @@ function renderInline(value: string, linkColor: ColorValue): ReactNode[] {
 
 const styles = {
   codeBlock: { padding: 11, borderWidth: 1, borderRadius: 10 },
-  codeText: { fontFamily: "SpaceMono", fontSize: 12, lineHeight: 18 },
-  inlineCode: { fontFamily: "SpaceMono", fontSize: 12 },
+
 } satisfies Record<string, object>;

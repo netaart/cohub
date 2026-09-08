@@ -709,6 +709,7 @@ function ProfileSection({
 										color: theme.colors.text,
 										borderColor: theme.colors.border,
 										backgroundColor: theme.colors.background,
+										fontSize: typography.body.fontSize,
 									},
 								]}
 							/>
@@ -737,6 +738,7 @@ function ProfileSection({
 										color: theme.colors.text,
 										borderColor: theme.colors.border,
 										backgroundColor: theme.colors.background,
+										fontSize: typography.body.fontSize,
 									},
 								]}
 							/>
@@ -1164,12 +1166,13 @@ function RulesSection({ client }: { client: CohubClient | null }) {
 						>
 							<Text
 								selectable
-								style={{
-									color: theme.colors.textSecondary,
-									fontFamily: "SpaceMono",
-									fontSize: 12,
-									lineHeight: 19,
-								}}
+								style={[
+									typography.code,
+									{
+										color: theme.colors.textSecondary,
+										fontFamily: "SpaceMono",
+									},
+								]}
 							>
 								{data?.content?.trim() || "No published user rules."}
 							</Text>
@@ -1809,6 +1812,5 @@ const styles = {
 		borderWidth: 1,
 		borderRadius: 10,
 		paddingHorizontal: 12,
-		fontSize: 15,
 	},
 } satisfies Record<string, object>;

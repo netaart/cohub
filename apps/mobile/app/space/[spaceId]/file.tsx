@@ -102,7 +102,7 @@ export default function FileScreen() {
         />
       ) : file ? (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
-          <Text selectable style={[styles.fileContent, { color: theme.colors.textSecondary }]}>
+          <Text selectable style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.textSecondary }]}>
             {file.content}
           </Text>
         </ScrollView>
@@ -144,11 +144,6 @@ function isText(mimeType: string | null) {
 }
 
 const styles = {
-  fileContent: {
-    fontFamily: "SpaceMono",
-    fontSize: 12,
-    lineHeight: 19,
-  },
   errorState: {
     flex: 1,
     alignItems: "center" as const,

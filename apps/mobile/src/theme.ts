@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColorScheme } from "react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export type AppTheme = {
   mode: "light" | "dark";
@@ -255,19 +255,139 @@ export function useAppTheme(): AppTheme {
   const colorScheme = useColorScheme();
   const preference = useThemePreference();
   const pureBlack = usePureBlackPreference();
+  const fontScale = useFontScalePreference();
   const mode = preference === "system"
     ? colorScheme === "light" ? "light" : "dark"
     : preference;
-  return mode === "light" ? lightTheme : pureBlack ? pureBlackDarkTheme : darkTheme;
+  const base = mode === "light" ? lightTheme : pureBlack ? pureBlackDarkTheme : darkTheme;
+  // A new theme identity re-renders themed components so they pick up the scaled typography tokens.
+  return useMemo(() => (fontScale === "default" ? base : { ...base }), [base, fontScale]);
 }
 
-export const typography = {
-  display: { fontSize: 30, lineHeight: 36, fontWeight: "700" as const },
-  title: { fontSize: 22, lineHeight: 28, fontWeight: "700" as const },
-  heading: { fontSize: 17, lineHeight: 22, fontWeight: "700" as const },
-  body: { fontSize: 15, lineHeight: 22, fontWeight: "400" as const },
-  bodyMedium: { fontSize: 15, lineHeight: 22, fontWeight: "600" as const },
-  caption: { fontSize: 12, lineHeight: 17, fontWeight: "500" as const },
-  eyebrow: { fontSize: 11, lineHeight: 14, fontWeight: "600" as const, letterSpacing: 0.88 },
-  micro: { fontSize: 10, lineHeight: 14, fontWeight: "600" as const },
+export type FontScalePreference = "small" | "default" | "large" | "xlarge";
+
+export const FONT_SCALE_VALUES: Record<FontScalePreference, number> = {
+  small: 0.9,
+  default: 1,
+  large: 1.12,
+  xlarge: 1.25,
 };
+
+const FONT_SCALE_PREFERENCE_KEY = "cohub:mobile:font-scale:v1";
+let fontScalePreference: FontScalePreference = "default";
+let fontScalePreferenceLoaded = false;
+let fontScalePreferenceLoad: Promise<void> | null = null;
+const fontScalePreferenceListeners = new Set<() => void>();
+
+function isFontScalePreference(value: string | null): value is FontScalePreference {
+  return value === "small" || value === "default" || value === "large" || value === "xlarge";
+}
+
+function notifyFontScalePreferenceListeners() {
+  for (const listener of fontScalePreferenceListeners) listener();
+}
+
+function loadFontScalePreference() {
+  if (fontScalePreferenceLoad) return fontScalePreferenceLoad;
+  fontScalePreferenceLoad = AsyncStorage.getItem(FONT_SCALE_PREFERENCE_KEY)
+    .then((value) => {
+      if (!fontScalePreferenceLoaded && isFontScalePreference(value)) {
+        fontScalePreference = value;
+        applyFontScale(FONT_SCALE_VALUES[value]);
+      }
+      fontScalePreferenceLoaded = true;
+      notifyFontScalePreferenceListeners();
+    })
+    .catch(() => {
+      fontScalePreferenceLoaded = true;
+    })
+    .finally(() => {
+      fontScalePreferenceLoad = null;
+    });
+  return fontScalePreferenceLoad;
+}
+
+export function getFontScalePreference(): FontScalePreference {
+  return fontScalePreference;
+}
+
+export function useFontScalePreference(): FontScalePreference {
+  const [preference, setPreference] = useState(fontScalePreference);
+  useEffect(() => {
+    const listener = () => setPreference(fontScalePreference);
+    fontScalePreferenceListeners.add(listener);
+    if (!fontScalePreferenceLoaded) void loadFontScalePreference();
+    listener();
+    return () => {
+      fontScalePreferenceListeners.delete(listener);
+    };
+  }, []);
+  return preference;
+}
+
+export async function setFontScalePreference(next: FontScalePreference) {
+  fontScalePreference = next;
+  fontScalePreferenceLoaded = true;
+  applyFontScale(FONT_SCALE_VALUES[next]);
+  notifyFontScalePreferenceListeners();
+  await AsyncStorage.setItem(FONT_SCALE_PREFERENCE_KEY, next);
+}
+
+export type TypographyToken =
+  | "display"
+  | "title"
+  | "heading"
+  | "body"
+  | "bodyMedium"
+  | "chatBody"
+  | "caption"
+  | "eyebrow"
+  | "micro"
+  | "code";
+
+type TypographyStyle = {
+  fontSize: number;
+  lineHeight: number;
+  fontWeight: "400" | "500" | "600" | "700";
+  letterSpacing?: number;
+};
+
+const BASE_TYPOGRAPHY: Record<TypographyToken, TypographyStyle> = {
+  display: { fontSize: 30, lineHeight: 36, fontWeight: "700" },
+  title: { fontSize: 22, lineHeight: 28, fontWeight: "700" },
+  heading: { fontSize: 17, lineHeight: 22, fontWeight: "700" },
+  body: { fontSize: 15, lineHeight: 22, fontWeight: "400" },
+  bodyMedium: { fontSize: 15, lineHeight: 22, fontWeight: "600" },
+  chatBody: { fontSize: 15, lineHeight: 23, fontWeight: "400" },
+  caption: { fontSize: 12, lineHeight: 17, fontWeight: "500" },
+  eyebrow: { fontSize: 11, lineHeight: 14, fontWeight: "600", letterSpacing: 0.88 },
+  micro: { fontSize: 10, lineHeight: 14, fontWeight: "600" },
+  code: { fontSize: 12, lineHeight: 19, fontWeight: "400" },
+};
+
+/** Mutable tokens: components read them at render time, so a scale change re-renders with new metrics. */
+export const typography: Record<TypographyToken, TypographyStyle> = { ...BASE_TYPOGRAPHY };
+
+function applyFontScale(scale: number) {
+  for (const token of Object.keys(BASE_TYPOGRAPHY) as TypographyToken[]) {
+    const base = BASE_TYPOGRAPHY[token];
+    typography[token] = {
+      ...base,
+      fontSize: Math.round(base.fontSize * scale * 2) / 2,
+      lineHeight: Math.round(base.lineHeight * scale),
+      ...(base.letterSpacing === undefined ? null : { letterSpacing: Math.round(base.letterSpacing * scale * 100) / 100 }),
+    };
+  }
+}
+
+export function getFontScale() {
+  return FONT_SCALE_VALUES[fontScalePreference];
+}
+
+export function scaleFontSize(size: number) {
+  return Math.round(size * getFontScale() * 2) / 2;
+}
+
+export function scaleLineHeight(size: number) {
+  return Math.round(size * getFontScale());
+}
