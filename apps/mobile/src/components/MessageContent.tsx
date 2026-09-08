@@ -1,7 +1,7 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Haptics from "expo-haptics";
 import { useState, type ReactNode } from "react";
-import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, type GestureResponderEvent, type ViewStyle } from "react-native";
+import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type GestureResponderEvent, type ViewStyle } from "react-native";
 import { formatMessageClock } from "@/src/data/chat-format";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
@@ -265,9 +265,10 @@ export function MessageContent({ content, active = false, color }: { content: Co
   })}</View>;
 }
 
-function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false): ViewStyle {
+function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number): ViewStyle {
   return {
-    maxWidth: side === "user" ? "78%" : "86%",
+    maxWidth,
+    alignSelf: side === "user" ? "flex-end" : "flex-start",
     borderRadius: theme.radius.lg,
     borderCurve: "continuous",
     backgroundColor: side === "user" ? theme.colors.userBubble : theme.colors.assistantBubble,
@@ -293,7 +294,9 @@ function ChatBubbleFrame({
   children: ReactNode;
 }) {
   const theme = useAppTheme();
-  const style = chatBubbleStyle(theme, side, local);
+  const { width } = useWindowDimensions();
+  const maxWidth = Math.max(196, Math.round(width * (side === "user" ? 0.78 : 0.86)) - 24);
+  const style = chatBubbleStyle(theme, side, local, maxWidth);
   // Native text selection on the timeline captures the panel swipe; copy from the long-press menu instead.
   if (!copyText || !onLongPress) return <View style={style}>{children}</View>;
   return <Pressable accessible={false} delayLongPress={500} android_ripple={{ color: "transparent" }} onLongPress={(event: GestureResponderEvent) => {
@@ -325,7 +328,7 @@ export function MessageBubble({ message, local = false, onLongPress }: { message
   const textColor = isUser ? theme.colors.userBubbleText : undefined;
   const accent = isUser ? theme.colors.userBubbleText : theme.colors.accent;
   const copyText = messageText(message);
-  return <View style={{ paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
+  return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
     <ChatBubbleFrame side={side} local={local} copyText={copyText} onLongPress={onLongPress}>
       {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
       {message.errorMessage ? <Text style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
@@ -353,7 +356,7 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
   const failed = status === "failed" || status === "interrupted";
   const statusLabel = status === "failed" ? "Agent failed" : status === "interrupted" ? "Generation stopped" : null;
   const live = status === "pending" || status === "streaming";
-  return <View style={{ paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
+  return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
     <ChatBubbleFrame side="assistant" copyText={contentText(liveContent).trim()} onLongPress={onLongPress}>
       {statusLabel ? <Text style={[typography.caption, { color: theme.colors.danger, marginBottom: hasLivePreview || runtimeLabel ? 6 : 0 }]}>{statusLabel}</Text> : null}
       {runtimeLabel ? <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</Text> : null}
