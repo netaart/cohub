@@ -1,13 +1,15 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
-import { Image, Linking, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
+import * as Haptics from "expo-haptics";
 import { useState, type ReactNode } from "react";
-import { AppIcon, type IconName } from "@/src/ui";
-import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
-import { useAppTheme, typography, type AppTheme } from "@/src/theme";
+import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, type ViewStyle } from "react-native";
+import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
 import { formatMessageClock } from "@/src/data/chat-format";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
-import { hasRenderableContent, hasRenderableMessage } from "@/src/utils";
+import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
+import { useAppTheme, typography, type AppTheme } from "@/src/theme";
+import { AppIcon, type IconName } from "@/src/ui";
+import { contentText, hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
 function TextBlock({ value, muted = false, accent, color }: { value: string; muted?: boolean; accent: string; color?: string }) {
   const theme = useAppTheme();
@@ -21,18 +23,18 @@ function TextBlock({ value, muted = false, accent, color }: { value: string; mut
 
   const flushParagraph = () => {
     const text = paragraph.join(" ").trim();
-    if (text) blocks.push(<Text key={`paragraph-${blocks.length}`} selectable style={[typography.body, { color: textColor, lineHeight: 23 }]}>{renderInlineMarkdown(text, accent)}</Text>);
+    if (text) blocks.push(<Text key={`paragraph-${blocks.length}`} style={[typography.body, { color: textColor, lineHeight: 23 }]}>{renderInlineMarkdown(text, accent)}</Text>);
     paragraph = [];
   };
   const flushList = () => {
     if (!list) return;
     const currentList = list;
-    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{currentList.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.body, { color: accent, lineHeight: 23, minWidth: 18 }]}>{currentList.ordered ? `${currentList.start + index}.` : "•"}</Text><Text selectable style={[typography.body, { color: textColor, lineHeight: 23, flex: 1 }]}>{renderInlineMarkdown(item, accent)}</Text></View>)}</View>);
+    blocks.push(<View key={`list-${blocks.length}`} style={{ gap: 6 }}>{currentList.items.map((item, index) => <View key={`${index}-${item.slice(0, 12)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.body, { color: accent, lineHeight: 23, minWidth: 18 }]}>{currentList.ordered ? `${currentList.start + index}.` : "•"}</Text><Text style={[typography.body, { color: textColor, lineHeight: 23, flex: 1 }]}>{renderInlineMarkdown(item, accent)}</Text></View>)}</View>);
     list = null;
   };
   const flushCode = () => {
     if (code === null) return;
-    blocks.push(<View key={`code-${blocks.length}`} style={{ backgroundColor: theme.colors.background, borderRadius: 10, padding: 11, borderWidth: 1, borderColor: theme.colors.border }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}><AppIcon name="code" size={13} color={theme.colors.textFaint} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{codeLanguage || "code"}</Text></View><Text selectable style={{ color: theme.colors.textSecondary, fontFamily: "SpaceMono", fontSize: 12, lineHeight: 18 }}>{code.join("\n")}</Text></View>);
+    blocks.push(<View key={`code-${blocks.length}`} style={{ backgroundColor: theme.colors.background, borderRadius: 10, padding: 11, borderWidth: 1, borderColor: theme.colors.border }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}><AppIcon name="code" size={13} color={theme.colors.textFaint} /><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{codeLanguage || "code"}</Text></View><Text style={{ color: theme.colors.textSecondary, fontFamily: "SpaceMono", fontSize: 12, lineHeight: 18 }}>{code.join("\n")}</Text></View>);
     code = null;
     codeLanguage = "";
   };
@@ -58,14 +60,14 @@ function TextBlock({ value, muted = false, accent, color }: { value: string; mut
       flushParagraph();
       flushList();
       const size = heading[1].length <= 2 ? 19 : heading[1].length <= 4 ? 17 : 15;
-      blocks.push(<Text key={`heading-${blocks.length}`} selectable style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}>{renderInlineMarkdown(heading[2], accent)}</Text>);
+      blocks.push(<Text key={`heading-${blocks.length}`} style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}>{renderInlineMarkdown(heading[2], accent)}</Text>);
       continue;
     }
     const quote = /^\s*>\s?(.*)$/.exec(line);
     if (quote) {
       flushParagraph();
       flushList();
-      blocks.push(<View key={`quote-${blocks.length}`} style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text selectable style={[typography.body, { color: theme.colors.textMuted, lineHeight: 23 }]}>{renderInlineMarkdown(quote[1], accent)}</Text></View>);
+      blocks.push(<View key={`quote-${blocks.length}`} style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text style={[typography.body, { color: theme.colors.textMuted, lineHeight: 23 }]}>{renderInlineMarkdown(quote[1], accent)}</Text></View>);
       continue;
     }
     const item = /^\s*(?:[-*+]\s+|([0-9]+)[.)]\s+)(.+)$/.exec(line);
@@ -220,7 +222,7 @@ function toolIcon(name: string): IconName {
 
 function ToolOutput({ block }: { block: Extract<ContentBlock, { type: "tool_result" }> }) {
   const theme = useAppTheme();
-  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <ScrollView horizontal><Text selectable style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.text }}>{block.content || "(empty output)"}</Text></ScrollView> : <MessageContent content={block.content} />}</View>;
+  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <ScrollView horizontal><Text style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.text }}>{block.content || "(empty output)"}</Text></ScrollView> : <MessageContent content={block.content} />}</View>;
 }
 
 function ToolCall({ block, result, active = false }: { block: Extract<ContentBlock, { type: "tool_use" }>; result?: Extract<ContentBlock, { type: "tool_result" }>; active?: boolean }) {
@@ -241,8 +243,8 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
     </Pressable>
     {expanded ? <View style={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, gap: 8, marginTop: 4 }}>
       <Text style={[typography.micro, { color: theme.colors.textMuted }]}>IN</Text>
-      <ScrollView horizontal><Text selectable style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.text }}>{JSON.stringify(block.input, null, 2)}</Text></ScrollView>
-      {edits.map((edit, index) => <ScrollView horizontal key={index}><View><Text selectable style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text selectable style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.success }}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View></ScrollView>)}
+      <ScrollView horizontal><Text style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.text }}>{JSON.stringify(block.input, null, 2)}</Text></ScrollView>
+      {edits.map((edit, index) => <ScrollView horizontal key={index}><View><Text style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text style={{ fontFamily: "SpaceMono", fontSize: 12, lineHeight: 19, color: theme.colors.success }}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View></ScrollView>)}
       {result ? <ToolOutput block={result} /> : null}
     </View> : null}
   </View>;
@@ -268,7 +270,31 @@ function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = fa
     paddingTop: 8,
     paddingBottom: 6,
     opacity: local ? 0.72 : 1,
+    ...(Platform.OS === "web" ? { userSelect: "none" as const } : null),
   };
+}
+
+function ChatBubbleFrame({
+  side,
+  local = false,
+  copyText,
+  onLongPress,
+  children,
+}: {
+  side: "user" | "assistant";
+  local?: boolean;
+  copyText: string;
+  onLongPress?: (text: string) => void;
+  children: ReactNode;
+}) {
+  const theme = useAppTheme();
+  const style = chatBubbleStyle(theme, side, local);
+  // Native text selection on the timeline captures the panel swipe; copy from the long-press sheet instead.
+  if (!copyText || !onLongPress) return <View style={style}>{children}</View>;
+  return <Pressable accessible={false} delayLongPress={500} android_ripple={{ color: "transparent" }} onLongPress={() => {
+    if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    onLongPress(copyText);
+  }} style={style}>{children}</Pressable>;
 }
 
 function BubbleMeta({ clock, local = false, side, live = false }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean }) {
@@ -283,7 +309,7 @@ function BubbleMeta({ clock, local = false, side, live = false }: { clock?: stri
   </View>;
 }
 
-export function MessageBubble({ message, local = false }: { message: MessageRecord; local?: boolean }) {
+export function MessageBubble({ message, local = false, onLongPress }: { message: MessageRecord; local?: boolean; onLongPress?: (text: string) => void }) {
   const theme = useAppTheme();
   if (!hasRenderableMessage(message)) return null;
   const isUser = message.role === "user";
@@ -293,17 +319,18 @@ export function MessageBubble({ message, local = false }: { message: MessageReco
   const side = isUser ? "user" : "assistant";
   const textColor = isUser ? theme.colors.userBubbleText : undefined;
   const accent = isUser ? theme.colors.userBubbleText : theme.colors.accent;
+  const copyText = messageText(message);
   return <View style={{ paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
-    <View style={chatBubbleStyle(theme, side, local)}>
+    <ChatBubbleFrame side={side} local={local} copyText={copyText} onLongPress={onLongPress}>
       {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
       {message.errorMessage ? <Text style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
       <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} />
-    </View>
+    </ChatBubbleFrame>
     {!isUser && (message.model || thinkingLevel) ? <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}</Text> : null}
   </View>;
 }
 
-export function StreamCard({ content, intermediateMessages = [], status, runtimePhase = null, runtimeModel = null }: { content: ContentBlock[]; intermediateMessages?: StreamView["intermediateMessages"]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null }) {
+export function StreamCard({ content, intermediateMessages = [], status, runtimePhase = null, runtimeModel = null, onLongPress }: { content: ContentBlock[]; intermediateMessages?: StreamView["intermediateMessages"]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null; onLongPress?: (text: string) => void }) {
   const theme = useAppTheme();
   const liveContent = [...intermediateMessages.flatMap((message) => message.content.length ? message.content : message.text ? [{ type: "text" as const, text: message.text }] : []), ...content];
   const hasLivePreview = liveContent.some((block) => (block.type === "text" && block.text.trim().length > 0) || (block.type === "thinking" && block.thinking.trim().length > 0) || block.type === "tool_use");
@@ -322,11 +349,23 @@ export function StreamCard({ content, intermediateMessages = [], status, runtime
   const statusLabel = status === "failed" ? "Agent failed" : status === "interrupted" ? "Generation stopped" : null;
   const live = status === "pending" || status === "streaming";
   return <View style={{ paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
-    <View style={chatBubbleStyle(theme, "assistant")}>
+    <ChatBubbleFrame side="assistant" copyText={contentText(liveContent).trim()} onLongPress={onLongPress}>
       {statusLabel ? <Text style={[typography.caption, { color: theme.colors.danger, marginBottom: hasLivePreview || runtimeLabel ? 6 : 0 }]}>{statusLabel}</Text> : null}
       {runtimeLabel ? <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</Text> : null}
       {hasLivePreview || hasRenderableContent(liveContent) ? <MessageContent active={live} content={liveContent} /> : null}
       <BubbleMeta clock={failed ? undefined : live ? "now" : undefined} side="assistant" live={live && !failed} />
-    </View>
+    </ChatBubbleFrame>
   </View>;
+}
+
+export function ChatMessageActionSheet({ text, onClose }: { text: string | null; onClose: () => void }) {
+  const theme = useAppTheme();
+  return <AdaptiveSheet visible={text !== null} title="Copy message" subtitle="Select the text you want, or share the whole message." onClose={onClose} testID="chat-message-actions">
+    <Text selectable style={[typography.body, { color: theme.colors.text, lineHeight: 23 }]}>{text ?? ""}</Text>
+    <SheetAction icon="share" title="Share" detail="Send this message to another app" onPress={() => {
+      const value = text;
+      onClose();
+      if (value) void Share.share({ message: value }).catch(() => undefined);
+    }} />
+  </AdaptiveSheet>;
 }
