@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.7.0](https://github.com/markbang/cohub-mobile/compare/v1.6.0...v1.7.0) (2026-09-08)
+
+
+### Features
+
+* **android:** add in-app APK updates and signed OTA ([#50](https://github.com/markbang/cohub-mobile/issues/50)) ([3484e17](https://github.com/markbang/cohub-mobile/commit/3484e17d52d211c01e54001710f713d779898bfc))
+* **chat:** use messenger-style bubbles for tools and replies ([#48](https://github.com/markbang/cohub-mobile/issues/48)) ([da2633f](https://github.com/markbang/cohub-mobile/commit/da2633f648036604f7d6eefc46d0cacf29c4a7d1))
+* **mobile:** add native-feeling press feedback and motion tokens ([50f889e](https://github.com/markbang/cohub-mobile/commit/50f889e957c52ba838cc545dff98a2a0fdec6f87))
+* **mobile:** adopt official logo and remove ripple feedback ([449d225](https://github.com/markbang/cohub-mobile/commit/449d225922a26a89940ef993e40d2618b5d061c8))
+* **mobile:** organize chats by labels instead of pin ([5fa5437](https://github.com/markbang/cohub-mobile/commit/5fa5437d927e5940d8144ba68284de78c68c5617))
+* **ui:** refine native-inspired chat surfaces ([cf765f3](https://github.com/markbang/cohub-mobile/commit/cf765f35e27543d5e55cc2ab4431792ef3e1763c))
+
+
+### Fixes
+
+* **chat:** satisfy check for turn details and workflow imports ([#49](https://github.com/markbang/cohub-mobile/issues/49)) ([f9f0c8a](https://github.com/markbang/cohub-mobile/commit/f9f0c8aea68760267817013c81439552b8489c82))
+
 ## [1.6.0](https://github.com/markbang/cohub-mobile/compare/v1.5.0...v1.6.0) (2026-09-07)
 
 
