@@ -7,7 +7,7 @@ import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream } from "../src/data/chat-stream.ts";
-import { isWebSessionSource, sessionSourceGroup } from "../src/data/session-labels.ts";
+import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
 import { mergeDisplayMessages, messageIndexForTurn, nextTurnSequence, withFallbackUserContent } from "../src/data/session-history.ts";
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 import { filterSpaces } from "../src/data/space-filters.ts";
@@ -79,6 +79,10 @@ assert.equal(isWebSessionSource({ source: null }), true);
 assert.equal(isWebSessionSource({ source: "mobile" }), false);
 assert.equal(sessionSourceGroup({ source: "mobile" }), "other");
 assert.equal(sessionSourceGroup({ source: "Web App" }), "web");
+assert.deepEqual(toUserSessionLabels([
+  { id: "src", name: "Source", source: "system", systemKey: null, children: [{ id: "web", name: "Web App", source: "system", systemKey: "session-source:web", children: [] }] },
+  { id: "work", name: "Work", source: "user", systemKey: null, children: [{ id: "urgent", name: "Urgent", source: "user", systemKey: null, children: [] }] },
+]).map((label) => label.ref), ["Work/Urgent", "Work"]);
 assert.equal(normalizeSearchQuery("  server   result  "), "server result");
 assert.equal(isResourcePinned([{ labelSystemKey: "user:pinned" }]), true);
 assert.equal(isResourcePinned([{ labelSystemKey: "other" }]), false);

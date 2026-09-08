@@ -10,6 +10,7 @@ export type SessionSourceGroup = "web" | "other";
 export type SessionLabel = {
   id: string;
   name: string;
+  ref: string;
   systemKey: string | null;
   /** true for server-owned taxonomy labels (Source → Web App, User root, …). */
   system: boolean;
@@ -48,15 +49,24 @@ export function sessionSourceGroup(session: { source?: string | null }): Session
   return isWebSessionSource(session) ? "web" : "other";
 }
 
-export function toSessionLabel(label: LabelListItem): SessionLabel {
-  return { id: label.id, name: label.name, systemKey: label.systemKey ?? null, system: isSystemSessionLabel(label) };
+export function toSessionLabel(label: LabelListItem, ref = label.name): SessionLabel {
+  return { id: label.id, name: label.name, ref, systemKey: label.systemKey ?? null, system: label.source !== "user" };
 }
 
-/** Flat user-facing labels (excluding system taxonomy and stray children of system roots). */
+export function flattenLabelsWithRefs(labels: LabelListItem[], parentRef = ""): SessionLabel[] {
+  const result: SessionLabel[] = [];
+  for (const label of labels) {
+    const ref = parentRef ? `${parentRef}/${label.name}` : label.name;
+    result.push(toSessionLabel(label, ref));
+    if (label.children?.length) result.push(...flattenLabelsWithRefs(label.children, ref));
+  }
+  return result;
+}
+
+/** User-created labels from the whole tree. Source/User/Channel taxonomy is excluded. */
 export function toUserSessionLabels(labels: LabelListItem[]): SessionLabel[] {
-  return labels
-    .filter((label) => !isSystemSessionLabel(label, labels))
-    .map(toSessionLabel)
+  return flattenLabelsWithRefs(labels)
+    .filter((label) => !label.system)
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
@@ -74,7 +84,7 @@ export function toSourceSessionLabels(labels: LabelListItem[]): SessionLabel[] {
       if (left.rank !== right.rank) return left.rank - right.rank;
       return left.name.localeCompare(right.name);
     })
-    .map(toSessionLabel);
+    .map((label) => toSessionLabel(label));
 }
 
 export async function fetchSessionLabels(client: CohubClient, spaceId: string): Promise<LabelListItem[]> {
@@ -102,7 +112,7 @@ export async function detachSessionLabel(client: CohubClient, spaceId: string, l
 export async function createSessionLabel(client: CohubClient, spaceId: string, name: string): Promise<SessionLabel | null> {
   const result = await client.space(spaceId).labels.create(name);
   const created = result.labels[0];
-  return created ? toSessionLabel(created) : null;
+  return created ? toSessionLabel(created, created.name) : null;
 }
 
 export async function fetchLabelSessionIds(
@@ -117,7 +127,6 @@ export async function fetchLabelSessionIds(
   return [...refSet];
 }
 
-export function formatLabelRef(label: { name: string; id?: string }) {
-  const name = label.name.trim();
-  return name || label.id || "";
+export function formatLabelRef(label: { ref?: string; name: string; id?: string }) {
+  return label.ref?.trim() || label.name.trim() || label.id || "";
 }
