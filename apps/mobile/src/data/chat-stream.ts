@@ -1,4 +1,4 @@
-import type { MessageRecord } from "@neta-art/cohub";
+import type { MessageRecord, SessionTurnRecord } from "@neta-art/cohub";
 
 export function isLiveStreamStatus(status: string | null | undefined) {
   return status === "pending" || status === "streaming";
@@ -54,4 +54,29 @@ export function shouldShowLiveStream(stream: { status: string; turnId: string | 
   if (!stream) return false;
   if (hasFinalAssistantForTurn(messages, stream.turnId)) return false;
   return isLiveStreamStatus(stream.status) || stream.status === "failed" || stream.status === "interrupted";
+}
+
+/**
+ * Reconcile the live-stream overlay against an authoritative turn tail after a
+ * reconnect/foreground gap. Returns `clear` when the overlay is stale, `pending`
+ * when a still-running turn lost its overlay, or `null` to leave it untouched.
+ */
+export function streamRecoveryFromTail(input: {
+  stream: { turnId: string | null } | null | undefined;
+  tail: Pick<SessionTurnRecord, "id" | "sequence" | "status"> | null;
+  turns: Pick<SessionTurnRecord, "id" | "sequence" | "status">[];
+  messages: MessageRecord[];
+}): "clear" | "pending" | null {
+  const { tail } = input;
+  if (!tail) return null;
+  const stream = input.stream ?? null;
+  if (stream) {
+    const streamTurn = stream.turnId ? input.turns.find((turn) => turn.id === stream.turnId) : undefined;
+    // A finished tail means no overlay can still be live unless it already tracks a
+    // newer turn the fetched window has not caught up with yet; an unknown turn id is
+    // treated the same way rather than dropping a possibly fresh overlay.
+    const mayTrackNewerTurn = stream.turnId !== null && (streamTurn === undefined || streamTurn.sequence > tail.sequence);
+    return isTerminalTurnStatus(tail.status) && !mayTrackNewerTurn ? "clear" : null;
+  }
+  return isActiveTurnStatus(tail.status) && !hasFinalAssistantForTurn(input.messages, tail.id) ? "pending" : null;
 }

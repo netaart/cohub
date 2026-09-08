@@ -6,12 +6,13 @@ import { invertedListDistances, nextChatTailFollowing, reverseListIndex } from "
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
-import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream } from "../src/data/chat-stream.ts";
+import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
 import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
 import { mergeDisplayMessages, messageIndexForTurn, nextTurnSequence, withFallbackUserContent, withTurnSequences } from "../src/data/session-history.ts";
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 import { filterSpaces } from "../src/data/space-filters.ts";
 import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch } from "../src/data/session-status.ts";
+import { createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
 import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
@@ -78,6 +79,20 @@ const liveStream = { status: "streaming", contentBlocks: [{ type: "thinking", th
 assert.equal(shouldShowLiveStream(liveStream, [finalReply]), false);
 assert.equal(shouldShowLiveStream(liveStream, []), true);
 assert.equal(shouldShowLiveStream({ ...liveStream, status: "pending" }, [finalReply]), false);
+
+// Stream overlay vs. authoritative tail after a reconnect/foreground gap.
+const runningTail = [{ id: "turn-2", sequence: 2, status: "running" }];
+const finishedTail = [{ id: "turn-2", sequence: 2, status: "completed" }];
+const twoTurns = [{ id: "turn-1", sequence: 1, status: "completed" }, { id: "turn-2", sequence: 2, status: "completed" }];
+assert.equal(streamRecoveryFromTail({ stream: { turnId: "turn-2" }, tail: finishedTail[0], turns: finishedTail, messages: [] }), "clear");
+assert.equal(streamRecoveryFromTail({ stream: { turnId: "turn-1" }, tail: twoTurns[1], turns: twoTurns, messages: [] }), "clear");
+assert.equal(streamRecoveryFromTail({ stream: { turnId: null }, tail: finishedTail[0], turns: finishedTail, messages: [] }), "clear");
+assert.equal(streamRecoveryFromTail({ stream: { turnId: "turn-2" }, tail: runningTail[0], turns: runningTail, messages: [] }), null);
+assert.equal(streamRecoveryFromTail({ stream: null, tail: runningTail[0], turns: runningTail, messages: [] }), "pending");
+assert.equal(streamRecoveryFromTail({ stream: null, tail: runningTail[0], turns: runningTail, messages: [{ ...finalReply, meta: { turnId: "turn-2" } }] }), null);
+assert.equal(streamRecoveryFromTail({ stream: null, tail: null, turns: [], messages: [] }), null);
+// An overlay already tracking a turn newer than the fetched tail must survive.
+assert.equal(streamRecoveryFromTail({ stream: { turnId: "turn-3" }, tail: twoTurns[1], turns: twoTurns, messages: [] }), null);
 
 const runningTurn = { id: "t9", sequence: 9, status: "running", updatedAt: "2026-09-01T00:00:00.000Z" };
 const completedTurn = { ...runningTurn, status: "completed", updatedAt: "2026-09-01T00:01:00.000Z" };
@@ -173,6 +188,118 @@ try {
 } finally {
   mock.timers.reset();
 }
+assert.equal(isTransportRecovery("reconnecting", "open"), true);
+assert.equal(isTransportRecovery("closed", "open"), true);
+assert.equal(isTransportRecovery("error", "open"), true);
+assert.equal(isTransportRecovery("idle", "open"), false);
+assert.equal(isTransportRecovery("connecting", "open"), false);
+assert.equal(isTransportRecovery("open", "open"), false);
+assert.equal(isTransportRecovery("open", "reconnecting"), false);
+
+mock.timers.enable({ apis: ["setTimeout"] });
+try {
+  const resyncRuns = [];
+  const resyncResolvers = [];
+  const resync = createSessionResyncCoordinator({
+    debounceMs: 250,
+    run: (sessionId, reason) => new Promise((resolve) => {
+      resyncRuns.push({ sessionId, reason });
+    resyncResolvers.push(resolve);
+    }),
+  });
+  // `open` and `active` firing back-to-back collapse into one run with the latest reason.
+  resync.request("s1", "transport-open");
+  resync.request("s1", "foreground");
+  mock.timers.tick(249);
+  assert.deepEqual(resyncRuns, []);
+  mock.timers.tick(1);
+  assert.deepEqual(resyncRuns, [{ sessionId: "s1", reason: "foreground" }]);
+  // A trigger during an in-flight resync queues exactly one follow-up.
+  resync.request("s1", "out-of-sync");
+  resync.request("s1", "transport-open");
+  mock.timers.tick(250);
+  assert.equal(resyncRuns.length, 1);
+  resyncResolvers.shift()();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(resyncRuns.at(-1), { sessionId: "s1", reason: "transport-open" });
+  assert.equal(resyncRuns.length, 2);
+  // Other sessions are independent.
+  resync.request("s2", "foreground");
+  mock.timers.tick(250);
+  assert.equal(resyncRuns.length, 3);
+  // Cancel drops a pending trigger; a rejected run must not break later runs.
+  resync.request("s3", "foreground");
+  resync.cancel("s3");
+  mock.timers.tick(250);
+  assert.equal(resyncRuns.filter((run) => run.sessionId === "s3").length, 0);
+  const failing = createSessionResyncCoordinator({ debounceMs: 0, run: async () => { throw new Error("boom"); } });
+  failing.request("s4", "foreground");
+  mock.timers.tick(0);
+  await Promise.resolve();
+  await Promise.resolve();
+  failing.request("s4", "foreground");
+  mock.timers.tick(0);
+  // Disposal cancels pending triggers and ignores new ones.
+  resync.request("s5", "foreground");
+  resync.dispose();
+  resync.request("s6", "foreground");
+  mock.timers.tick(250);
+  assert.equal(resyncRuns.filter((run) => run.sessionId === "s5" || run.sessionId === "s6").length, 0);
+  for (const resolve of resyncResolvers) resolve();
+} finally {
+  mock.timers.reset();
+}
+
+mock.timers.enable({ apis: ["setTimeout"] });
+try {
+  const flush = async () => { for (let index = 0; index < 4; index += 1) await Promise.resolve(); };
+  let clock = 1_000;
+  const gatedRuns = [];
+  const gated = createSessionResyncCoordinator({
+    debounceMs: 0,
+    cooldowns: { "out-of-sync": 15_000 },
+    now: () => clock,
+    run: async (sessionId, reason) => { gatedRuns.push({ sessionId, reason }); },
+  });
+  assert.equal(gated.request("s7", "out-of-sync"), true);
+  mock.timers.tick(0);
+  await flush();
+  assert.deepEqual(gatedRuns, [{ sessionId: "s7", reason: "out-of-sync" }]);
+  // Repeated drift inside the window is suppressed so a broken server cannot loop snapshots.
+  assert.equal(gated.request("s7", "out-of-sync"), false);
+  mock.timers.tick(0);
+  await flush();
+  assert.equal(gatedRuns.length, 1);
+  // The window is per session.
+  assert.equal(gated.request("s8", "out-of-sync"), true);
+  mock.timers.tick(0);
+  await flush();
+  assert.equal(gatedRuns.length, 2);
+  // Reconnect recovery is never throttled, even right after a re-seed.
+  assert.equal(gated.request("s7", "transport-open"), true);
+  mock.timers.tick(0);
+  await flush();
+  assert.deepEqual(gatedRuns.at(-1), { sessionId: "s7", reason: "transport-open" });
+  // Once the window elapses another drift re-seed is allowed.
+  clock += 15_000;
+  assert.equal(gated.request("s7", "out-of-sync"), true);
+  mock.timers.tick(0);
+  await flush();
+  assert.deepEqual(gatedRuns.at(-1), { sessionId: "s7", reason: "out-of-sync" });
+  // Closing the Chat clears the window so reopening can re-seed immediately.
+  gated.request("s7", "out-of-sync");
+  gated.cancel("s7");
+  assert.equal(gated.request("s7", "out-of-sync"), true);
+  mock.timers.tick(0);
+  await flush();
+  assert.equal(gatedRuns.filter((run) => run.sessionId === "s7" && run.reason === "out-of-sync").length, 3);
+  gated.dispose();
+} finally {
+  mock.timers.reset();
+}
+
 assert.equal(isWebSessionSource({ source: "web" }), true);
 assert.equal(isWebSessionSource({ source: "web_app" }), true);
 assert.equal(isWebSessionSource({ source: null }), true);
@@ -406,5 +533,6 @@ const apkAsset = validateAndroidUpdateAsset(apkRelease);
 assert.doesNotThrow(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sha256: "a".repeat(64) }));
 assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 124, sha256: apkAsset.sha256 }), /verification/);
 assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sha256: "b".repeat(64) }), /verification/);
+
 
 console.log("Chat workflow checks passed");

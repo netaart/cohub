@@ -34,12 +34,13 @@ import type {
   SessionView,
   StreamView,
 } from "@/src/data/types";
-import { hasFinalAssistantForTurn, isActiveTurnStatus, isTerminalTurnStatus, liveStreamStatusFromPatch, pendingStreamForTurn } from "@/src/data/chat-stream";
+import { hasFinalAssistantForTurn, isActiveTurnStatus, isTerminalTurnStatus, liveStreamStatusFromPatch, pendingStreamForTurn, streamRecoveryFromTail } from "@/src/data/chat-stream";
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, turnSequenceForMessage, withFallbackUserContent } from "@/src/data/session-history";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
 import { mockMessages, mockModels, mockSessions, mockSpaces, mockTurnIndex, mockTurns, mockUsage } from "@/src/data/mock";
 import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, type LatestSessionTurn } from "@/src/data/session-status";
+import { createSessionResyncCoordinator, isTransportRecovery, type SessionResyncReason } from "@/src/data/session-reconnect";
 import {
   displaySessionTitle,
   displaySpaceName,
@@ -48,6 +49,10 @@ import {
 } from "@/src/utils";
 
 const HOME_REQUEST_TIMEOUT_MS = 15_000;
+// Reconnect `open` and AppState `active` usually fire together; collapse them into one resync.
+const SESSION_RESYNC_DEBOUNCE_MS = 250;
+// Mirrors the web client: never re-seed the same session's stream more than once per window.
+const OUT_OF_SYNC_RESYNC_COOLDOWN_MS = 15_000;
 const mockLatestTurns = Object.fromEntries(Object.entries(mockTurns).map(([id, turns]) => [id, latestTurn(turns)]));
 
 function withTimeout<T>(promise: Promise<T>, label: string) {
@@ -187,8 +192,8 @@ type Action =
   | { type: "session-cache"; sessionId: string; messages: MessageRecord[] }
   | { type: "session-success"; sessionId: string; space: SpaceRecord; session: SessionRecord; messages: MessageRecord[]; turns: SessionTurnRecord[]; hasMoreOlder: boolean; hasMoreNewer?: boolean; oldestCursor?: number | null; newestCursor?: number | null }
   | { type: "session-error"; sessionId: string; message: string }
-  | { type: "session-refresh-start"; sessionId: string }
-  | { type: "session-refresh-end"; sessionId: string; session?: SessionRecord; messages?: MessageRecord[]; turns?: SessionTurnRecord[]; hasMoreOlder?: boolean; hasMoreNewer?: boolean; oldestCursor?: number | null; newestCursor?: number | null; error?: string }
+  | { type: "session-refresh-start"; sessionId: string; silent?: boolean }
+  | { type: "session-refresh-end"; sessionId: string; silent?: boolean; session?: SessionRecord; messages?: MessageRecord[]; turns?: SessionTurnRecord[]; hasMoreOlder?: boolean; hasMoreNewer?: boolean; oldestCursor?: number | null; newestCursor?: number | null; error?: string }
   | { type: "session-page-start"; sessionId: string; direction: "older" | "newer" }
   | { type: "session-page-success"; sessionId: string; session?: SessionRecord | null; turns: SessionTurnRecord[]; hasMore: boolean; direction: "older" | "newer" }
   | { type: "session-page-error"; sessionId: string; message: string }
@@ -414,17 +419,27 @@ function reducer(state: AppState, action: Action): AppState {
     case "session-error":
       return updateView(state, action.sessionId, { loading: false, refreshing: false, error: action.message });
     case "session-refresh-start":
-      return updateView(state, action.sessionId, { refreshing: true, error: null });
+      return updateView(state, action.sessionId, action.silent ? { error: null } : { refreshing: true, error: null });
     case "session-refresh-end": {
       const current = state.sessionViews[action.sessionId];
       const session = action.session && current?.session
         ? preferNewerSession(current.session, action.session)
         : action.session;
-      return updateView(action.turns ? updateLatestTurn(state, action.sessionId, latestTurn(action.turns)) : state, action.sessionId, {
-        refreshing: false,
+      const tail = action.turns ? latestTurn(action.turns) : null;
+      // After a gap the local stream can be stale either way: the turn finished
+      // while we were away, or it is still running and the overlay was lost.
+      const streamRecovery = streamRecoveryFromTail({
+        stream: current?.stream,
+        tail,
+        turns: action.turns ?? current?.turns ?? [],
+        messages: action.messages ?? current?.messages ?? [],
+      });
+      return updateView(action.turns ? updateLatestTurn(state, action.sessionId, tail) : state, action.sessionId, {
+        ...(action.silent ? {} : { refreshing: false }),
         ...(session ? { session } : {}),
         ...(action.messages ? { messages: action.messages } : {}),
         ...(action.turns ? { turns: action.turns, historyLoaded: true } : {}),
+        ...(streamRecovery === "clear" ? { stream: null } : streamRecovery === "pending" && tail ? { stream: pendingStreamForTurn(tail.id) } : {}),
         ...(action.hasMoreOlder !== undefined ? { hasMoreOlder: action.hasMoreOlder } : {}),
         ...(action.hasMoreNewer !== undefined ? { hasMoreNewer: action.hasMoreNewer } : {}),
         ...(action.oldestCursor !== undefined ? { oldestCursor: action.oldestCursor } : {}),
@@ -654,14 +669,23 @@ export function AppProvider({
     offline ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, sessionLatestTurns: mockLatestTurns, usage: mockUsage } : initialState,
   );
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
+  const connectionStateRef = useRef<ConnectionState>("idle");
   const stateRef = useRef(state);
   const subscriptions = useRef(new Map<string, () => void>());
+  const sessionSpaces = useRef(new Map<string, string>());
   const openTokens = useRef(new Map<string, number>());
   const installationIdRef = useRef<string | null>(null);
   const installationRequestRef = useRef<Promise<string> | null>(null);
   const clientRef = useRef<CohubClient | null>(null);
   const homeRefreshGenerationRef = useRef(0);
   const statusGenerationRef = useRef(0);
+  const resyncRunRef = useRef<(sessionId: string, reason: SessionResyncReason) => Promise<void>>(async () => undefined);
+  // A ref keeps one coordinator instance for the provider without participating in hook dependencies.
+  const resyncCoordinatorRef = useRef(createSessionResyncCoordinator({
+    debounceMs: SESSION_RESYNC_DEBOUNCE_MS,
+    cooldowns: { "out-of-sync": OUT_OF_SYNC_RESYNC_COOLDOWN_MS },
+    run: (sessionId, reason) => resyncRunRef.current(sessionId, reason),
+  }));
   const [models, setModels] = useState<ChatModelCatalogItem[]>(offline ? mockModels : []);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -914,6 +938,8 @@ export function AppProvider({
     if (offline) return;
     let active = true;
     const activeSubscriptions = subscriptions.current;
+    const activeSessionSpaces = sessionSpaces.current;
+    const activeResyncCoordinator = resyncCoordinatorRef.current;
     void (async () => {
       if (Platform.OS !== "web") {
         try {
@@ -941,31 +967,51 @@ export function AppProvider({
       homeRefreshGenerationRef.current += 1;
       statusGenerationRef.current += 1;
       dispatch({ type: "session-status-reset" });
+      for (const sessionId of activeSubscriptions.keys()) activeResyncCoordinator.cancel(sessionId);
       for (const stop of activeSubscriptions.values()) stop();
       activeSubscriptions.clear();
+      activeSessionSpaces.clear();
     };
   }, [dispatch, offline, refreshHome, userKey]);
 
   useEffect(() => {
     if (!client) return;
-    return client.onConnection((snapshot) => setConnectionState(snapshot.state));
-  }, [client]);
+    return client.onConnection((snapshot) => {
+      const previous = connectionStateRef.current;
+      connectionStateRef.current = snapshot.state;
+      setConnectionState(snapshot.state);
+      if (!isTransportRecovery(previous, snapshot.state)) return;
+      for (const sessionId of subscriptions.current.keys()) resyncCoordinatorRef.current.request(sessionId, "transport-open");
+      // Running badges on the list are derived from turn status; refresh them for recent Chats.
+      void refreshSessionStatuses(stateRef.current.sessions);
+    });
+  }, [client, refreshSessionStatuses]);
 
   useEffect(() => {
     const subscription = NativeAppState.addEventListener("change", (next) => {
-      if (next === "active") void refreshHome();
+      if (next !== "active") return;
+      void refreshHome();
+      // iOS suspends the socket in the background without a close event; the
+      // stream reducer is stale even when the transport still reports `open`.
+      for (const sessionId of subscriptions.current.keys()) resyncCoordinatorRef.current.request(sessionId, "foreground");
     });
     return () => subscription.remove();
   }, [refreshHome]);
 
+  useEffect(() => {
+    const coordinator = resyncCoordinatorRef.current;
+    return () => coordinator.dispose();
+  }, []);
+
   const refreshSession = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, options: { silent?: boolean } = {}) => {
       if (!client) return;
       const view = stateRef.current.sessionViews[sessionId];
       const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
       const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
       if (!spaceId) return;
-      dispatch({ type: "session-refresh-start", sessionId });
+      // Recovery resyncs must not flash the pull-to-refresh spinner.
+      dispatch({ type: "session-refresh-start", sessionId, ...(options.silent ? { silent: true } : {}) });
       try {
         const response = await client.space(spaceId).session(sessionId).turns.listPaginated({ limit: 30 });
         const current = stateRef.current.sessionViews[sessionId];
@@ -975,6 +1021,7 @@ export function AppProvider({
         dispatch({
           type: "session-refresh-end",
           sessionId,
+          ...(options.silent ? { silent: true } : {}),
           session: response.session,
           messages,
           turns,
@@ -988,6 +1035,7 @@ export function AppProvider({
         dispatch({
           type: "session-refresh-end",
           sessionId,
+          ...(options.silent ? { silent: true } : {}),
           error: error instanceof Error ? error.message : "Unable to refresh Chat",
         });
       }
@@ -1126,6 +1174,128 @@ export function AppProvider({
     return sequence;
   }, [dispatch, offline, userKey]);
 
+  /**
+   * (Re)attach realtime subscriptions for an open Chat. `recover: true` seeds the
+   * stream reducer from the server snapshot, which is what lets a resubscribe pick
+   * up mid-turn streaming after the socket dropped or the app was backgrounded.
+   */
+  const attachSessionRealtime = useCallback((client: CohubClient, spaceId: string, sessionId: string) => {
+    subscriptions.current.get(sessionId)?.();
+    sessionSpaces.current.set(sessionId, spaceId);
+    const sessionClient = client.space(spaceId).session(sessionId);
+    const streamBatch = createStreamBatch<StreamView>((stream) => dispatch({ type: "stream-state", sessionId, stream }));
+    const stopGeneration = sessionClient.subscribeGeneration(
+      {
+        state: (event) => {
+          const status = liveStreamStatusFromPatch(event.state.status);
+          if (!status) {
+            streamBatch.cancel();
+            dispatch({ type: "stream-clear", sessionId });
+            return;
+          }
+          const stream: StreamView = {
+            status,
+            contentBlocks: event.state.contentBlocks,
+            intermediateMessages: event.intermediateMessages,
+            turnId: event.state.turnId,
+            messageId: event.messageId,
+            runtimePhase: null,
+            runtimeProvider: null,
+            runtimeModel: null,
+          };
+          if (stream.status === "streaming") streamBatch.push(stream);
+          else {
+            streamBatch.cancel();
+            dispatch({ type: "stream-state", sessionId, stream });
+          }
+        },
+        commit: (event) => {
+          if (event.commit.isFinal) streamBatch.cancel();
+          else streamBatch.flush();
+          dispatch({ type: "message-add", sessionId, message: event.commit.message });
+          if (event.commit.isFinal) dispatch({ type: "stream-clear", sessionId });
+        },
+        finalized: (event) => {
+          streamBatch.cancel();
+          dispatch({ type: "turn-upsert", sessionId, turn: event.turn });
+          dispatch({ type: "stream-clear", sessionId });
+          void refreshSession(sessionId);
+        },
+        turnUpdated: (event) => {
+          dispatch({ type: "turn-patch", sessionId, turn: event.turn });
+        },
+        lifecycle: (event) => {
+          if (event.phase !== "llm_call_started") return;
+          streamBatch.flush();
+          dispatch({ type: "stream-lifecycle", sessionId, provider: event.provider, model: event.model });
+        },
+        error: (event) => {
+          streamBatch.flush();
+          dispatch({ type: "session-error", sessionId, message: event.message });
+        },
+        outOfSync: (event) => {
+          // Only a patch whose base sequence drifted needs a fresh snapshot-seeded
+          // subscription; anything else just needs the turn tail reconciled.
+          const drifted = event.reason === "version_mismatch" && event.source === "patch";
+          if (!drifted || !resyncCoordinatorRef.current.request(sessionId, "out-of-sync")) {
+            void refreshSession(sessionId, { silent: true });
+          }
+        },
+      },
+      { recover: true },
+    );
+    const stopPersisted = sessionClient.subscribe({
+      event: (event) => {
+        if (event.type !== "session.updated") return;
+        const currentSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
+        const current = stateRef.current.sessionViews[sessionId]?.session
+          ?? currentSummary;
+        if (!current) return;
+        const payload = event.payload as { session?: Partial<SessionRecord> };
+        if (!payload.session || payload.session.id !== sessionId) return;
+        const updated = preferNewerSession(current, { ...current, ...payload.session });
+        dispatch({
+          type: "session-upsert",
+          session: {
+            ...updated,
+            space: currentSummary?.space ?? null,
+          },
+        });
+        const currentView = stateRef.current.sessionViews[sessionId];
+        if (currentView) dispatch({ type: "session-meta", sessionId, session: updated, space: currentView.space });
+      },
+      persisted: (event) => {
+        if (event.type !== "session.message.persisted") return;
+        const message = (event.payload as { message?: MessageRecord }).message;
+        if (!message) return;
+        dispatch({ type: "message-add", sessionId, message });
+      },
+    });
+    const stop = () => {
+      streamBatch.cancel();
+      stopGeneration();
+      stopPersisted();
+    };
+    subscriptions.current.set(sessionId, stop);
+  }, [dispatch, refreshSession]);
+
+  /**
+   * Recover an open Chat after a transport/foreground gap: rebuild the generation
+   * subscription (snapshot-seeded) so mid-turn streaming resumes, then reconcile the
+   * turn tail so anything that finished while offline lands as history.
+   */
+  const resyncSession = useCallback(async (sessionId: string, _reason: SessionResyncReason) => {
+    const activeClient = clientRef.current;
+    const spaceId = sessionSpaces.current.get(sessionId);
+    if (offline || !activeClient || !spaceId || !subscriptions.current.has(sessionId)) return;
+    attachSessionRealtime(activeClient, spaceId, sessionId);
+    await refreshSession(sessionId, { silent: true });
+  }, [attachSessionRealtime, offline, refreshSession]);
+
+  useEffect(() => {
+    resyncRunRef.current = resyncSession;
+  }, [resyncSession]);
+
   const openSession = useCallback(
     async (sessionId: string) => {
       if (offline) {
@@ -1181,97 +1351,8 @@ export function AppProvider({
         }
         if (!spaceId || !space || !session || openTokens.current.get(sessionId) !== token) return;
         dispatch({ type: "session-start", sessionId, space, session });
-        subscriptions.current.get(sessionId)?.();
-        const sessionClient = client.space(spaceId).session(sessionId);
-        const streamBatch = createStreamBatch<StreamView>((stream) => dispatch({ type: "stream-state", sessionId, stream }));
-        const stopGeneration = sessionClient.subscribeGeneration(
-          {
-            state: (event) => {
-              const status = liveStreamStatusFromPatch(event.state.status);
-              if (!status) {
-                streamBatch.cancel();
-                dispatch({ type: "stream-clear", sessionId });
-                return;
-              }
-              const stream: StreamView = {
-                status,
-                contentBlocks: event.state.contentBlocks,
-                intermediateMessages: event.intermediateMessages,
-                turnId: event.state.turnId,
-                messageId: event.messageId,
-                runtimePhase: null,
-                runtimeProvider: null,
-                runtimeModel: null,
-              };
-              if (stream.status === "streaming") streamBatch.push(stream);
-              else {
-                streamBatch.cancel();
-                dispatch({ type: "stream-state", sessionId, stream });
-              }
-            },
-            commit: (event) => {
-              if (event.commit.isFinal) streamBatch.cancel();
-              else streamBatch.flush();
-              dispatch({ type: "message-add", sessionId, message: event.commit.message });
-              if (event.commit.isFinal) dispatch({ type: "stream-clear", sessionId });
-            },
-            finalized: (event) => {
-              streamBatch.cancel();
-              dispatch({ type: "turn-upsert", sessionId, turn: event.turn });
-              dispatch({ type: "stream-clear", sessionId });
-              void refreshSession(sessionId);
-            },
-            turnUpdated: (event) => {
-              dispatch({ type: "turn-patch", sessionId, turn: event.turn });
-            },
-            lifecycle: (event) => {
-              if (event.phase !== "llm_call_started") return;
-              streamBatch.flush();
-              dispatch({ type: "stream-lifecycle", sessionId, provider: event.provider, model: event.model });
-            },
-            error: (event) => {
-              streamBatch.flush();
-              dispatch({ type: "session-error", sessionId, message: event.message });
-            },
-            outOfSync: () => {
-              void refreshSession(sessionId);
-            },
-          },
-          { recover: true },
-        );
-        const stopPersisted = sessionClient.subscribe({
-          event: (event) => {
-            if (event.type !== "session.updated") return;
-            const currentSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
-            const current = stateRef.current.sessionViews[sessionId]?.session
-              ?? currentSummary;
-            if (!current) return;
-            const payload = event.payload as { session?: Partial<SessionRecord> };
-            if (!payload.session || payload.session.id !== sessionId) return;
-            const updated = preferNewerSession(current, { ...current, ...payload.session });
-            dispatch({
-              type: "session-upsert",
-              session: {
-                ...updated,
-                space: currentSummary?.space ?? null,
-              },
-            });
-            const currentView = stateRef.current.sessionViews[sessionId];
-            if (currentView) dispatch({ type: "session-meta", sessionId, session: updated, space: currentView.space });
-          },
-          persisted: (event) => {
-            if (event.type !== "session.message.persisted") return;
-            const message = (event.payload as { message?: MessageRecord }).message;
-            if (!message) return;
-            dispatch({ type: "message-add", sessionId, message });
-          },
-        });
-        const stop = () => {
-          streamBatch.cancel();
-          stopGeneration();
-          stopPersisted();
-        };
-        subscriptions.current.set(sessionId, stop);
+        attachSessionRealtime(client, spaceId, sessionId);
+   const sessionClient = client.space(spaceId).session(sessionId);
         const response = await sessionClient.turns.listPaginated({ limit: 30 });
         if (openTokens.current.get(sessionId) !== token) return;
         const messages = messagesFromTurns(response.turns);
@@ -1285,12 +1366,14 @@ export function AppProvider({
         dispatch({ type: "session-error", sessionId, message: error instanceof Error ? error.message : "Unable to open Chat" });
       }
     },
-    [client, dispatch, loadTurnIndex, offline, refreshSession, userKey],
+    [attachSessionRealtime, client, dispatch, loadTurnIndex, offline, userKey],
   );
 
   const closeSession = useCallback((sessionId: string) => {
+    resyncCoordinatorRef.current.cancel(sessionId);
     subscriptions.current.get(sessionId)?.();
     subscriptions.current.delete(sessionId);
+    sessionSpaces.current.delete(sessionId);
     openTokens.current.set(sessionId, (openTokens.current.get(sessionId) ?? 0) + 1);
     optimisticMessageSequenceRef.current.delete(sessionId);
   }, []);
