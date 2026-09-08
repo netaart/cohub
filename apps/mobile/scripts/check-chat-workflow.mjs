@@ -303,8 +303,8 @@ try {
 assert.equal(isWebSessionSource({ source: "web" }), true);
 assert.equal(isWebSessionSource({ source: "web_app" }), true);
 assert.equal(isWebSessionSource({ source: null }), true);
-assert.equal(isWebSessionSource({ source: "mobile" }), false);
-assert.equal(sessionSourceGroup({ source: "mobile" }), "other");
+assert.equal(isWebSessionSource({ source: "mobile" }), true);
+assert.equal(sessionSourceGroup({ source: "mobile" }), "web");
 assert.equal(sessionSourceGroup({ source: "Web App" }), "web");
 assert.deepEqual(toUserSessionLabels([
   { id: "src", name: "Source", source: "system", systemKey: null, children: [{ id: "web", name: "Web App", source: "system", systemKey: "session-source:web", children: [] }] },

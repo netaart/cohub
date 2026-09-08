@@ -1458,7 +1458,8 @@ export function AppProvider({
           mode: "agent",
           sessionId,
           content,
-          source: "mobile",
+          // First-party app sessions belong to the Web App source bucket; request provenance still reports via=mobile.
+          source: "web",
           clientMessageId,
           accessMode: "full_access",
           intent: "followup",
@@ -1493,7 +1494,7 @@ export function AppProvider({
       const result = await client.space(spaceId).prompt({
         mode: "agent",
         content,
-        source: "mobile",
+        source: "web",
         clientMessageId,
         accessMode: "full_access",
         intent: "followup",

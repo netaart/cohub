@@ -39,10 +39,10 @@ export function isWebAppSourceLabel(label: LabelListItem) {
   return label.systemKey === WEB_APP_SOURCE_LABEL_SYSTEM_KEY || label.name === "Web App";
 }
 
-/** Natural chat origin, independent of user labels. Missing source follows the web client and counts as Web App. */
+/** Natural chat origin, independent of user labels. Missing source follows the web client; the server taxonomy has no mobile bucket, so first-party app sessions count as Web App. */
 export function isWebSessionSource(session: { source?: string | null }) {
   const source = session.source?.trim().toLowerCase().replace(/[\s-]+/g, "_") ?? "web";
-  return source === "web" || source === "web_app";
+  return source === "web" || source === "web_app" || source === "mobile";
 }
 
 export function sessionSourceGroup(session: { source?: string | null }): SessionSourceGroup {
