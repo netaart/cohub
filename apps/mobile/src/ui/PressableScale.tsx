@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { Animated, Easing, Platform, Pressable, View, type PressableAndroidRippleConfig, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Easing, Platform, Pressable, StyleSheet, View, type PressableAndroidRippleConfig, type StyleProp, type ViewStyle } from "react-native";
 import * as Haptics from "expo-haptics";
 import { motion, press } from "@/src/motion";
 
@@ -44,6 +44,10 @@ export function PressableScale({
   androidRipple,
 }: PressableScaleProps) {
   const progress = useMemo(() => new Animated.Value(1), []);
+  // Parent-layout flex has to live on the outer wrapper. Child layout
+  // (flexDirection, padding, gap) stays on the inner view so rows keep their direction.
+  const flex = StyleSheet.flatten(style)?.flex;
+  const fill = flex == null ? null : { flex: 1, minWidth: 0 as const };
 
   const settle = (toValue: number) => {
     progress.stopAnimation();
@@ -56,7 +60,7 @@ export function PressableScale({
   };
 
   return (
-    <Animated.View style={scale && !disabled ? { transform: [{ scale: progress }] } : null}>
+    <Animated.View style={[flex == null ? null : { flex, minWidth: 0 }, scale && !disabled ? { transform: [{ scale: progress }] } : null]}>
       <Pressable
         accessibilityLabel={accessibilityLabel}
         accessibilityRole={accessibilityRole}
@@ -67,6 +71,7 @@ export function PressableScale({
         onPress={onPress}
         onLongPress={onLongPress}
         android_ripple={androidRipple}
+        style={fill ?? undefined}
         onPressIn={() => {
           if (scale) settle(press.scale);
           if (haptic && Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
@@ -76,7 +81,7 @@ export function PressableScale({
         }}
       >
         {({ pressed }) => (
-          <View style={[style, pressed ? pressedStyle : null, pressed && !scale ? { opacity: 0.72 } : null]}>
+          <View style={[style, fill, pressed ? pressedStyle : null, pressed && !scale ? { opacity: 0.72 } : null]}>
             {children}
           </View>
         )}
