@@ -605,7 +605,7 @@ export type AppContextValue = {
   installationId: string | null;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
   refreshHome: () => Promise<void>;
-  refreshSessionStatuses: (sessions: Pick<UserSessionListItem, "id" | "spaceId">[]) => Promise<void>;
+  refreshSessionStatuses: (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "updatedAt">[]) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   openSession: (sessionId: string) => Promise<void>;
   closeSession: (sessionId: string) => void;
@@ -777,7 +777,7 @@ export function AppProvider({
     return request;
   }, [modelStatus, offline]);
 
-  const refreshSessionStatuses = useCallback(async (sessions: Pick<UserSessionListItem, "id" | "spaceId">[]) => {
+  const refreshSessionStatuses = useCallback(async (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "updatedAt">[]) => {
     const activeClient = clientRef.current;
     if (offline || !activeClient || sessions.length === 0) return;
     const generation = statusGenerationRef.current;

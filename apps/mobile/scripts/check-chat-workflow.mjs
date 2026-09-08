@@ -98,13 +98,42 @@ assert.deepEqual(reconcileTurnStatusPatch(runningTurn, { id: "t9", status: "comp
 assert.equal(reconcileTurnStatusPatch(completedTurn, { id: "t8", status: "running" }), completedTurn);
 assert.deepEqual(reconcileTurnStatusPatch(null, runningTurn), runningTurn);
 
+mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-08T12:00:00.000Z") });
+try {
+  const recentStatusCalls = [];
+  const recentStatusResults = [];
+  const recentStatusClient = { space: () => ({ session: (id) => ({ turns: { listPaginated: async () => {
+    recentStatusCalls.push(id);
+    return { turns: [runningTurn] };
+  } } }) }) };
+  const sessions = [
+    { id: "recent", spaceId: "space1", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-09-08T11:59:00.000Z" },
+    { id: "boundary", spaceId: "space1", updatedAt: "2026-09-08T11:30:00.000Z" },
+    { id: "old", spaceId: "space1", status: "running", updatedAt: "2026-09-08T11:29:59.999Z" },
+  ];
+  await loadSessionLatestTurns(recentStatusClient, sessions, (id) => recentStatusResults.push(id));
+  assert.deepEqual(recentStatusCalls, ["recent", "boundary"]);
+  assert.deepEqual(recentStatusResults, ["recent", "boundary"]);
+  recentStatusCalls.length = 0;
+  await loadSessionLatestTurns(recentStatusClient, [sessions[2]], () => assert.fail("Old sessions must not publish a status"));
+  assert.deepEqual(recentStatusCalls, []);
+  await assert.rejects(loadSessionLatestTurns(recentStatusClient, [{ id: "invalid", spaceId: "space1", updatedAt: "not-a-date" }], () => assert.fail("Invalid activity dates must not publish a status")), /Invalid updatedAt for Chat invalid/);
+  assert.deepEqual(recentStatusCalls, []);
+  mock.timers.tick(31 * 60 * 1000);
+  await loadSessionLatestTurns(recentStatusClient, sessions, () => assert.fail("The recent window must advance on every refresh"));
+  assert.deepEqual(recentStatusCalls, []);
+} finally {
+  mock.timers.reset();
+}
+
 const statusCalls = [];
 const statusResults = new Map();
+const recentSession = { spaceId: "space1", updatedAt: new Date().toISOString() };
 const statusClient = { space: (spaceId) => ({ session: (sessionId) => ({ turns: { listPaginated: async (options) => {
   statusCalls.push({ spaceId, sessionId, options });
   return { turns: sessionId === "empty" ? [] : [runningTurn] };
 } } }) }) };
-await loadSessionLatestTurns(statusClient, [{ id: "s1", spaceId: "space1", status: "idle" }, { id: "empty", spaceId: "space1", status: "running" }], (id, turn) => statusResults.set(id, turn));
+await loadSessionLatestTurns(statusClient, [{ ...recentSession, id: "s1", status: "idle" }, { ...recentSession, id: "empty", status: "running" }], (id, turn) => statusResults.set(id, turn));
 assert.equal(statusResults.get("s1")?.status, "running");
 assert.equal(statusResults.get("empty"), null);
 assert.deepEqual(statusCalls[0], { spaceId: "space1", sessionId: "s1", options: { limit: 1, direction: "older" } });
@@ -118,26 +147,26 @@ await loadSessionLatestTurns({ space: () => ({ session: () => ({ turns: { listPa
   await new Promise((resolve) => setTimeout(resolve, 0));
   inFlightStatuses -= 1;
   return { turns: [runningTurn] };
-} } }) }) }, Array.from({ length: 15 }, (_, id) => ({ id: String(id), spaceId: "space1" })), () => { completedStatuses += 1; });
+} } }) }) }, Array.from({ length: 15 }, (_, id) => ({ ...recentSession, id: String(id) })), () => { completedStatuses += 1; });
 assert.equal(maxInFlightStatuses, 6);
 assert.equal(completedStatuses, 15);
 const failedStatusResults = [];
 await assert.rejects(loadSessionLatestTurns({ space: () => ({ session: (id) => ({ turns: { listPaginated: async () => {
   if (id === "failed") throw new Error("Network unavailable");
   return { turns: [runningTurn] };
-} } }) }) }, [{ id: "failed", spaceId: "space1", status: "running" }, { id: "ok", spaceId: "space1" }], (id) => failedStatusResults.push(id)), /Could not refresh 1 Chat status/);
+} } }) }) }, [{ ...recentSession, id: "failed", status: "running" }, { ...recentSession, id: "ok" }], (id) => failedStatusResults.push(id)), /Could not refresh 1 Chat status/);
 assert.deepEqual(failedStatusResults, ["ok"]);
 
 let resolveOldStatus;
 let reconciledStatus = runningTurn;
-const staleStatusRequest = loadSessionLatestTurns({ space: () => ({ session: () => ({ turns: { listPaginated: () => new Promise((resolve) => { resolveOldStatus = resolve; }) } }) }) }, [{ id: "s1", spaceId: "space1" }], (_id, turn) => { reconciledStatus = reconcileLatestTurn(reconciledStatus, turn); });
+const staleStatusRequest = loadSessionLatestTurns({ space: () => ({ session: () => ({ turns: { listPaginated: () => new Promise((resolve) => { resolveOldStatus = resolve; }) } }) }) }, [{ ...recentSession, id: "s1" }], (_id, turn) => { reconciledStatus = reconcileLatestTurn(reconciledStatus, turn); });
 reconciledStatus = reconcileTurnStatusPatch(reconciledStatus, completedTurn);
 resolveOldStatus({ turns: [runningTurn] });
 await staleStatusRequest;
 assert.equal(reconciledStatus.status, "completed");
 mock.timers.enable({ apis: ["setTimeout"] });
 try {
-  const timedOutStatuses = loadSessionLatestTurns({ space: () => ({ session: () => ({ turns: { listPaginated: () => new Promise(() => {}) } }) }) }, [{ id: "s1", spaceId: "space1" }], () => assert.fail("A timeout must not publish a status"));
+  const timedOutStatuses = loadSessionLatestTurns({ space: () => ({ session: () => ({ turns: { listPaginated: () => new Promise(() => {}) } }) }) }, [{ ...recentSession, id: "s1" }], () => assert.fail("A timeout must not publish a status"));
   const rejection = assert.rejects(timedOutStatuses, /Could not refresh 1 Chat status/);
   mock.timers.tick(15_000);
   await rejection;

@@ -1,6 +1,7 @@
 import type { CohubClient, SessionTurnRecord, UserSessionListItem } from "@neta-art/cohub";
 
 const STATUS_REQUEST_TIMEOUT_MS = 15_000;
+const SESSION_STATUS_LOOKBACK_MS = 30 * 60 * 1000;
 
 function withTimeout<T>(promise: Promise<T>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -43,14 +44,20 @@ export function reconcileTurnStatusPatch(current: LatestSessionTurn | null | und
 
 export async function loadSessionLatestTurns(
   client: CohubClient,
-  sessions: Pick<UserSessionListItem, "id" | "spaceId">[],
+  sessions: Pick<UserSessionListItem, "id" | "spaceId" | "updatedAt">[],
   onTurn: (sessionId: string, turn: LatestSessionTurn | null) => void,
 ): Promise<void> {
+  const cutoff = Date.now() - SESSION_STATUS_LOOKBACK_MS;
+  const recentSessions = sessions.filter((session) => {
+    const updatedAt = Date.parse(session.updatedAt);
+    if (!Number.isFinite(updatedAt)) throw new Error(`Invalid updatedAt for Chat ${session.id}. Refresh Chats and retry.`);
+    return updatedAt >= cutoff;
+  });
   let next = 0;
   const errors: unknown[] = [];
-  await Promise.all(Array.from({ length: Math.min(6, sessions.length) }, async () => {
-    while (next < sessions.length) {
-      const session = sessions[next++]!;
+  await Promise.all(Array.from({ length: Math.min(6, recentSessions.length) }, async () => {
+    while (next < recentSessions.length) {
+      const session = recentSessions[next++]!;
       try {
         const response = await withTimeout(client.space(session.spaceId).session(session.id).turns.listPaginated({ limit: 1, direction: "older" }));
         onTurn(session.id, latestTurn(response.turns));
