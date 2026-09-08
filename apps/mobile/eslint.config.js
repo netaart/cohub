@@ -8,6 +8,7 @@ module.exports = defineConfig([
     ".expo/**",
     "android/**",
     "ios/**",
+    "reference/**",
     "coverage/**",
   ]),
   {
