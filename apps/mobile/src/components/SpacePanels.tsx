@@ -5,7 +5,7 @@ import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/c
 import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Animated, BackHandler, FlatList, Modal, PanResponder, Platform, Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, type GestureType } from "react-native-gesture-handler";
 import Reanimated, { cancelAnimation, Extrapolation, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionSearchRow } from "@/src/components/SearchResultRow";
@@ -193,9 +193,12 @@ function NativeSpacePanels({ spaceId, spaceName, sessions, client, offline = fal
     return () => subscription.remove();
   }, [closePanel, isFocused]);
 
+  // The chip row is a native horizontal ScrollView. Let it win over the panel swipe while a touch starts there.
+  const chipsGesture = useMemo(() => Gesture.Native(), []);
   const panGesture = useMemo(() => Gesture.Pan()
     .activeOffsetX([-8, 8])
     .failOffsetY([-15, 15])
+    .requireExternalGestureToFail(chipsGesture)
     .onStart(() => {
       "worklet";
       gestureActive.value = true;
@@ -314,7 +317,7 @@ function NativeSpacePanels({ spaceId, spaceName, sessions, client, offline = fal
           if (canceledSide !== 0) runOnJS(clearClosedPanel)(panelForSide(canceledSide));
         }
       });
-    }), [activeSide, animationId, clearClosedPanel, commitClose, commitOpen, finishClosedPanel, gestureActive, gestureSide, gestureStartProgress, gestureStartSide, panelWidth, progress, showGesturePanel]);
+    }), [activeSide, animationId, chipsGesture, clearClosedPanel, commitClose, commitOpen, finishClosedPanel, gestureActive, gestureSide, gestureStartProgress, gestureStartSide, panelWidth, progress, showGesturePanel]);
 
   const panelStyle = useAnimatedStyle(() => {
     const side = activeSide.value === 0 ? gestureSide.value : activeSide.value;
@@ -344,7 +347,7 @@ function NativeSpacePanels({ spaceId, spaceName, sessions, client, offline = fal
         >
           {interactive
             ? visiblePanel === "chat"
-              ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={() => closePanel("chat")} onNewChat={() => { closePanel("chat"); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel("chat"); onOpenSession(sessionId, target); }} />
+              ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} chipsGesture={chipsGesture} onClose={() => closePanel("chat")} onNewChat={() => { closePanel("chat"); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel("chat"); onOpenSession(sessionId, target); }} />
               : <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} offline={offline} onClose={() => closePanel("files")} onOpenFile={(path) => { closePanel("files"); onOpenFile(path); }} onOpenFilesPage={() => { closePanel("files"); onOpenFilesPage(); }} />
             : <PanelGesturePreview panel={visiblePanel} />}
         </Reanimated.View>
@@ -577,7 +580,7 @@ type ChatListFilter =
   | { kind: "source"; source: SessionSourceGroup }
   | { kind: "label"; label: SessionLabel; ref: string };
 
-function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
+function ChatPanel({ spaceId, spaceName, sessions, client, chipsGesture, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; chipsGesture?: GestureType; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
   const { state, refreshSessionStatuses } = useApp();
   const [query, setQuery] = useState("");
@@ -713,6 +716,18 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
     { key: "other", label: "Other", icon: "globe", filter: { kind: "source", source: "other" } },
     ...labels.map((label) => ({ key: `label:${label.id}`, label: label.name, filter: { kind: "label" as const, label, ref: formatLabelRef(label) } })),
   ];
+  const chipRow = <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+    {filterChips.map((chip) => (
+      <PanelFilterChip
+        key={chip.key}
+        label={chip.label}
+        icon={chip.icon}
+        selected={chip.filter.kind === "all" ? listFilter.kind === "all" : chip.filter.kind === "source" ? listFilter.kind === "source" && listFilter.source === chip.filter.source : listFilter.kind === "label" && listFilter.label.id === chip.filter.label.id}
+        onPress={() => setListFilter(chip.filter)}
+      />
+    ))}
+    {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel="Retry loading labels" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.caption, { color: theme.colors.accent }]}>Retry labels</Text></Pressable> : null}
+  </ScrollView>;
   return (
     <View style={styles.panelContent}>
       <PanelHeader title="Chats" subtitle={spaceName} onClose={onClose} />
@@ -722,18 +737,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onClose, onNewChat, o
           <View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Search Chats" /></View>
           {remoteQueryMatches && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
-          {filterChips.map((chip) => (
-            <PanelFilterChip
-              key={chip.key}
-              label={chip.label}
-              icon={chip.icon}
-              selected={chip.filter.kind === "all" ? listFilter.kind === "all" : chip.filter.kind === "source" ? listFilter.kind === "source" && listFilter.source === chip.filter.source : listFilter.kind === "label" && listFilter.label.id === chip.filter.label.id}
-              onPress={() => setListFilter(chip.filter)}
-            />
-          ))}
-          {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel="Retry loading labels" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.caption, { color: theme.colors.accent }]}>Retry labels</Text></Pressable> : null}
-        </ScrollView>
+        {chipsGesture ? <GestureDetector gesture={chipsGesture} touchAction="pan-x">{chipRow}</GestureDetector> : chipRow}
         {remoteQueryMatches && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
         {state.sessionStatusError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{state.sessionStatusError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat statuses" onPress={() => void refreshSessionStatuses(displaySessions)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
         {labelSessionsError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{labelSessionsError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry loading labeled Chats" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
