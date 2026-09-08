@@ -48,7 +48,8 @@ assert.match(JSON.stringify(ota.jobs.publish.steps), /COHUB_OTA_RUNTIME_VERSION/
 assert.match(JSON.stringify(ota.jobs.publish.steps), /cohub-ota-export/);
 assert.match(JSON.stringify(ota.jobs.publish.steps), /--export-dir/);
 assert.equal(JSON.stringify(ota.jobs.publish.steps).includes("dist/android"), false);
-assert.match(JSON.stringify(ota.jobs.prepare.steps), /cohub-android-native-fingerprint.txt/);
+assert.match(JSON.stringify(ota.jobs.prepare.steps), /assets\/fingerprint/);
+assert.match(JSON.stringify(ota.jobs.prepare.steps), /arm64-v8a/);
 assert.match(JSON.stringify(ota.jobs.prepare.steps), /--platform android/);
 
 const nativeCi = parse(".github/workflows/native-ci.yml");

@@ -73,31 +73,34 @@ jobs:
       - name: Run quality checks
         run: npm run check
 
-      - name: Compute and compare native fingerprint
+      - name: Resolve installed APK runtime
         id: fingerprint
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
         run: |
           set -euo pipefail
-          fingerprint=$(npx @expo/fingerprint fingerprint:generate --platform android | node --input-type=module -e 'import { fingerprintFromCliJson } from "./scripts/ota-publish.mjs"; process.stdout.write(fingerprintFromCliJson(await new Response(process.stdin).text(), "fingerprint:generate"))')
-          mkdir -p "$RUNNER_TEMP/native-fingerprint"
+          mkdir -p "$RUNNER_TEMP/native-apk"
           tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[].tagName' | while read -r candidate; do
-            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq cohub-android-native-fingerprint.txt; then
+            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Eq '^cohub-v.+-android-arm64-v8a\.apk$'; then
               printf '%s\n' "$candidate"
               break
             fi
           done)
           if [[ -z "$tag" ]]; then
-            echo "No Android native fingerprint has been published. Build one OTA-capable APK with Native Release first; JS-only changes can OTA after that."
+            echo "No Android APK has been published. Build one OTA-capable APK with Native Release first; JS-only changes can OTA after that."
             exit 1
           fi
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern cohub-android-native-fingerprint.txt --dir "$RUNNER_TEMP/native-fingerprint"
-          expected=$(tr -d '[:space:]' < "$RUNNER_TEMP/native-fingerprint/cohub-android-native-fingerprint.txt")
-          EXPECTED="$expected" ACTUAL="$fingerprint" node --input-type=module -e 'import { assertFingerprintsMatch } from "./scripts/ota-publish.mjs"; assertFingerprintsMatch(process.env.EXPECTED, process.env.ACTUAL)'
+          asset=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name | select(endswith("-android-arm64-v8a.apk"))')
+          test -n "$asset" || { echo "arm64 APK missing from $tag."; exit 1; }
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir "$RUNNER_TEMP/native-apk"
+          apk="$RUNNER_TEMP/native-apk/$asset"
+          test -f "$apk" || { echo "Failed to download $asset from $tag."; exit 1; }
+          runtime=$(unzip -p "$apk" assets/fingerprint | tr -d '[:space:]' | tr 'A-F' 'a-f')
+          runtime=$(RUNTIME="$runtime" node --input-type=module -e 'import { parseFingerprintHash } from "./scripts/ota-publish.mjs"; process.stdout.write(parseFingerprintHash(process.env.RUNTIME, "installed APK assets/fingerprint"))')
+          echo "Using $tag APK runtime $runtime"
           {
-            echo "runtime=$fingerprint"
-            echo "fingerprint=$fingerprint"
+            echo "runtime=$runtime"
+            echo "fingerprint=$runtime"
           } >> "$GITHUB_OUTPUT"
 
       - name: Export Android bundle
