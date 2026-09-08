@@ -1,8 +1,7 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Haptics from "expo-haptics";
 import { useState, type ReactNode } from "react";
-import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, type ViewStyle } from "react-native";
-import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
+import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, type GestureResponderEvent, type ViewStyle } from "react-native";
 import { formatMessageClock } from "@/src/data/chat-format";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
@@ -284,16 +283,16 @@ function ChatBubbleFrame({
   side: "user" | "assistant";
   local?: boolean;
   copyText: string;
-  onLongPress?: (text: string) => void;
+  onLongPress?: (text: string, origin: { x: number; y: number }) => void;
   children: ReactNode;
 }) {
   const theme = useAppTheme();
   const style = chatBubbleStyle(theme, side, local);
-  // Native text selection on the timeline captures the panel swipe; copy from the long-press sheet instead.
+  // Native text selection on the timeline captures the panel swipe; copy from the long-press menu instead.
   if (!copyText || !onLongPress) return <View style={style}>{children}</View>;
-  return <Pressable accessible={false} delayLongPress={500} android_ripple={{ color: "transparent" }} onLongPress={() => {
+  return <Pressable accessible={false} delayLongPress={500} android_ripple={{ color: "transparent" }} onLongPress={(event: GestureResponderEvent) => {
     if (Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
-    onLongPress(copyText);
+    onLongPress(copyText, { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY });
   }} style={style}>{children}</Pressable>;
 }
 
@@ -309,7 +308,7 @@ function BubbleMeta({ clock, local = false, side, live = false }: { clock?: stri
   </View>;
 }
 
-export function MessageBubble({ message, local = false, onLongPress }: { message: MessageRecord; local?: boolean; onLongPress?: (text: string) => void }) {
+export function MessageBubble({ message, local = false, onLongPress }: { message: MessageRecord; local?: boolean; onLongPress?: (text: string, origin: { x: number; y: number }) => void }) {
   const theme = useAppTheme();
   if (!hasRenderableMessage(message)) return null;
   const isUser = message.role === "user";
@@ -330,7 +329,7 @@ export function MessageBubble({ message, local = false, onLongPress }: { message
   </View>;
 }
 
-export function StreamCard({ content, intermediateMessages = [], status, runtimePhase = null, runtimeModel = null, onLongPress }: { content: ContentBlock[]; intermediateMessages?: StreamView["intermediateMessages"]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null; onLongPress?: (text: string) => void }) {
+export function StreamCard({ content, intermediateMessages = [], status, runtimePhase = null, runtimeModel = null, onLongPress }: { content: ContentBlock[]; intermediateMessages?: StreamView["intermediateMessages"]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null; onLongPress?: (text: string, origin: { x: number; y: number }) => void }) {
   const theme = useAppTheme();
   const liveContent = [...intermediateMessages.flatMap((message) => message.content.length ? message.content : message.text ? [{ type: "text" as const, text: message.text }] : []), ...content];
   const hasLivePreview = liveContent.some((block) => (block.type === "text" && block.text.trim().length > 0) || (block.type === "thinking" && block.thinking.trim().length > 0) || block.type === "tool_use");
@@ -358,30 +357,15 @@ export function StreamCard({ content, intermediateMessages = [], status, runtime
   </View>;
 }
 
-async function shareMessageText(value: string) {
+export async function shareMessageText(value: string) {
   await Share.share({ message: value });
 }
 
-async function copyMessageText(value: string) {
+export async function copyMessageText(value: string) {
   const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
   if (clipboard?.writeText) {
     await clipboard.writeText(value);
     return;
   }
   await shareMessageText(value);
-}
-
-export function ChatMessageActionSheet({ text, onClose }: { text: string | null; onClose: () => void }) {
-  return <AdaptiveSheet visible={text !== null} title="Message" onClose={onClose} scrollable={false} testID="chat-message-actions">
-    <SheetAction icon="copy" title="Copy" detail="Copy this message" onPress={() => {
-      const value = text;
-      onClose();
-      if (value) void copyMessageText(value).catch(() => undefined);
-    }} />
-    <SheetAction icon="share" title="Share" detail="Send this message to another app" onPress={() => {
-      const value = text;
-      onClose();
-      if (value) void shareMessageText(value).catch(() => undefined);
-    }} />
-  </AdaptiveSheet>;
 }

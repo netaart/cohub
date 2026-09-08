@@ -34,6 +34,7 @@ import type {
   SessionView,
   StreamView,
 } from "@/src/data/types";
+import { hasFinalAssistantForTurn, isTerminalTurnStatus, liveStreamStatusFromPatch } from "@/src/data/chat-stream";
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns } from "@/src/data/session-history";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
@@ -466,18 +467,21 @@ function reducer(state: AppState, action: Action): AppState {
         messages: mergeDisplayMessages(messagesFromTurns(turns), liveMessages),
         oldestCursor: turns[0]?.sequence ?? current.oldestCursor,
         newestCursor: turns.at(-1)?.sequence ?? current.newestCursor,
+        ...(isTerminalTurnStatus(action.turn.status) && current.stream?.turnId === action.turn.id ? { stream: null } : {}),
       });
     }
     case "turn-patch": {
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = patchTurnRecords(current.turns, action.turn);
       if (turns === current.turns) return state;
+      const patched = turns.find((turn) => turn.id === action.turn.id || turn.id === current.stream?.turnId);
       return updateView(state, action.sessionId, {
         turns,
         historyLoaded: true,
         messages: mergeDisplayMessages(messagesFromTurns(turns), current.messages.filter(isLiveMessage)),
         oldestCursor: turns[0]?.sequence ?? current.oldestCursor,
         newestCursor: turns.at(-1)?.sequence ?? current.newestCursor,
+        ...(isTerminalTurnStatus(patched?.status) && current.stream?.turnId === patched?.id ? { stream: null } : {}),
       });
     }
     case "turn-index-start":
@@ -488,9 +492,14 @@ function reducer(state: AppState, action: Action): AppState {
       return updateView(state, action.sessionId, { turnIndexLoading: false });
     case "message-add": {
       const view = state.sessionViews[action.sessionId] ?? emptyView();
-      const message = { ...action.message, meta: { ...(action.message.meta ?? {}), _mobileLive: true } };
+      const incomingMeta = action.message.meta ?? {};
+      const message = { ...action.message, meta: { ...incomingMeta, _mobileLive: true } };
+      const messages = mergeMessages(view.messages, message);
+      const turnId = typeof incomingMeta.turnId === "string" ? incomingMeta.turnId : null;
+      const streamDone = action.message.role === "assistant" && incomingMeta.messageKind !== "assistant_intermediate" && hasFinalAssistantForTurn(messages, view.stream?.turnId ?? turnId);
       return updateView(state, action.sessionId, {
-        messages: mergeMessages(view.messages, message),
+        messages,
+        ...(streamDone ? { stream: null } : {}),
       });
     }
     case "message-optimistic": {
@@ -511,8 +520,14 @@ function reducer(state: AppState, action: Action): AppState {
       });
       return updateView(state, action.sessionId, { sending: false, error: action.message, messages });
     }
-    case "stream-state":
+    case "stream-state": {
+      const view = state.sessionViews[action.sessionId] ?? emptyView();
+      if (!liveStreamStatusFromPatch(action.stream.status)) {
+        return view.stream ? updateView(state, action.sessionId, { stream: null }) : state;
+      }
+      if (hasFinalAssistantForTurn(view.messages, action.stream.turnId)) return view.stream ? updateView(state, action.sessionId, { stream: null }) : state;
       return updateView(state, action.sessionId, { stream: action.stream });
+    }
     case "stream-lifecycle":
       return state.sessionViews[action.sessionId]?.stream
         ? updateView(state, action.sessionId, { stream: { ...state.sessionViews[action.sessionId]!.stream!, runtimePhase: "llm_call_started", runtimeProvider: action.provider, runtimeModel: action.model } })
@@ -1112,8 +1127,14 @@ export function AppProvider({
         const stopGeneration = sessionClient.subscribeGeneration(
           {
             state: (event) => {
+              const status = liveStreamStatusFromPatch(event.state.status);
+              if (!status) {
+                streamBatch.cancel();
+                dispatch({ type: "stream-clear", sessionId });
+                return;
+              }
               const stream: StreamView = {
-                status: event.state.status === "idle" ? "pending" : event.state.status,
+                status,
                 contentBlocks: event.state.contentBlocks,
                 intermediateMessages: event.intermediateMessages,
                 turnId: event.state.turnId,
