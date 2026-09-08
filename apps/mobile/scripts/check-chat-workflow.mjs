@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mock } from "node:test";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
-import { nextChatTailFollowing } from "../src/data/chat-scroll.ts";
+import { invertedListDistances, nextChatTailFollowing, reverseListIndex } from "../src/data/chat-scroll.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
@@ -240,6 +240,11 @@ assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom:
 assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom: 20, userInteracting: true, pendingTarget: false }), true);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom: 20, userInteracting: false, pendingTarget: true }), false);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom: 20, userInteracting: false, pendingTarget: true }), false);
+assert.equal(reverseListIndex(0, 10), 9);
+assert.equal(reverseListIndex(9, 10), 0);
+assert.equal(reverseListIndex(-1, 10), -1);
+assert.deepEqual(invertedListDistances(0, 4000, 700), { distanceToLatest: 0, distanceToOldest: 3300 });
+assert.deepEqual(invertedListDistances(3280, 4000, 700), { distanceToLatest: 3280, distanceToOldest: 20 });
 
 const messages = [
   { role: "assistant", meta: { turnSequence: 6 } },

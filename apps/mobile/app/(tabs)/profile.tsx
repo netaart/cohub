@@ -16,7 +16,6 @@ import {
   Screen,
   SectionHeader,
   StatusPill,
-  SyncStatus,
   TopBar,
 } from "@/src/ui";
 
@@ -139,7 +138,7 @@ export default function ProfileScreen() {
           </Text>
         ) : null}
       </View>
-      {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
+      {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
 
       <SectionHeader title="Device" />
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>

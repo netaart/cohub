@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, BrandMark, ConnectionBanner, DataError, EmptyState, IconButton, LoadingRows, Screen, SectionHeader, StatusPill, SyncStatus, TopBar, getStatusTone } from "@/src/ui";
+import { AppIcon, BrandMark, ConnectionBanner, DataError, EmptyState, IconButton, LoadingRows, Screen, SectionHeader, StatusPill, TopBar, getStatusTone } from "@/src/ui";
 import { formatNumber, formatRelativeTime } from "@/src/utils";
 import { PressableScale } from "@/src/ui/PressableScale";
 
@@ -17,7 +17,7 @@ export default function ActivityScreen() {
   return <Screen scroll refreshing={state.refreshing} onRefresh={() => void refreshHome()}>
     <TopBar title="Activity" subtitle={dataError ? "Activity unavailable" : "Agent runs and results"} left={<BrandMark size={40} />} right={<IconButton name="refresh" label="Refresh activity" size={40} onPress={() => void refreshHome()} />} />
     <ConnectionBanner state={connectionState} />
-    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
+    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
     <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingTop: 14, gap: 10 }}>
       <Metric label="Requests" value={state.activityLoading ? "…" : formatNumber(state.usage?.requestCount)} icon="zap" />
       <Metric label="Successful" value={state.activityLoading ? "…" : formatNumber(state.usage?.successCount)} icon="check-circle" tone="success" />

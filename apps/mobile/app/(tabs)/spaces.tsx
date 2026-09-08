@@ -8,7 +8,7 @@ import { normalizeSearchQuery, useRemoteSearch, type RemoteSpaceSearchHit } from
 import { filterSpaces, type SpaceFilter } from "@/src/data/space-filters";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, DataError, EmptyState, LoadingRows, PrimaryButton, SyncStatus, WorkspaceToolbar, Screen } from "@/src/ui";
+import { AppIcon, DataError, EmptyState, LoadingRows, PrimaryButton, WorkspaceToolbar, Screen } from "@/src/ui";
 import { displaySpaceName } from "@/src/utils";
 
 type SpaceListItem =
@@ -87,7 +87,7 @@ export default function SpacesScreen() {
 
   return <Screen>
     <WorkspaceToolbar query={query} onQueryChange={setQuery} onAccount={() => router.push("/profile")} onCreate={() => { setCreateError(null); setCreateOpen(true); }} onSettings={() => router.push("/settings")} placeholder="Find a Space" />
-    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : <SyncStatus timestamp={state.lastSyncedAt} />}
+    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
     <FlatList
       data={listItems}
       keyExtractor={(item) => item.kind === "remote" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
