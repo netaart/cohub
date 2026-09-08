@@ -358,14 +358,30 @@ export function StreamCard({ content, intermediateMessages = [], status, runtime
   </View>;
 }
 
+async function shareMessageText(value: string) {
+  await Share.share({ message: value });
+}
+
+async function copyMessageText(value: string) {
+  const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+  if (clipboard?.writeText) {
+    await clipboard.writeText(value);
+    return;
+  }
+  await shareMessageText(value);
+}
+
 export function ChatMessageActionSheet({ text, onClose }: { text: string | null; onClose: () => void }) {
-  const theme = useAppTheme();
-  return <AdaptiveSheet visible={text !== null} title="Copy message" subtitle="Select the text you want, or share the whole message." onClose={onClose} testID="chat-message-actions">
-    <Text selectable style={[typography.body, { color: theme.colors.text, lineHeight: 23 }]}>{text ?? ""}</Text>
+  return <AdaptiveSheet visible={text !== null} title="Message" onClose={onClose} scrollable={false} testID="chat-message-actions">
+    <SheetAction icon="copy" title="Copy" detail="Copy this message" onPress={() => {
+      const value = text;
+      onClose();
+      if (value) void copyMessageText(value).catch(() => undefined);
+    }} />
     <SheetAction icon="share" title="Share" detail="Send this message to another app" onPress={() => {
       const value = text;
       onClose();
-      if (value) void Share.share({ message: value }).catch(() => undefined);
+      if (value) void shareMessageText(value).catch(() => undefined);
     }} />
   </AdaptiveSheet>;
 }
