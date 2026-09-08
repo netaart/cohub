@@ -157,7 +157,7 @@ export function AdaptiveSheet({
     : Math.max(0, Math.min(height - 48, 760));
   const bottomPadding = Math.max(insets.bottom, theme.spacing.lg);
   // Wrap-content sheets only have maxHeight. A flex:1 scroller then collapses to 0 and hides the body.
-  const bodyMaxHeight = Math.max(160, maxHeight - (compact ? 102 : 82) - (footer ? 108 : 20));
+  const bodyMaxHeight = Math.max(160, maxHeight - (compact ? 100 : 82) - (footer ? 130 : 20));
   const resolvedContentStyle = [
     styles.content,
     { paddingBottom: footer ? theme.spacing.lg : bottomPadding },
