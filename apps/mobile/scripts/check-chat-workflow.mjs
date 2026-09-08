@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { mock } from "node:test";
+import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
+import { nextChatTailFollowing } from "../src/data/chat-scroll.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
+import { getComposerActionState } from "../src/data/composer-state.ts";
+import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
+import { mergeDisplayMessages, messageIndexForTurn } from "../src/data/session-history.ts";
+import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
+import { filterSpaces } from "../src/data/space-filters.ts";
+import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
 
 const measurements = new MessageMeasurements();
@@ -38,19 +46,11 @@ try {
 } finally {
   mock.timers.reset();
 }
-import { getComposerActionState } from "../src/data/composer-state.ts";
-import { filterSpaces } from "../src/data/space-filters.ts";
-import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
-import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
-import { nextChatTailFollowing } from "../src/data/chat-scroll.ts";
-import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
-import { mergeDisplayMessages, messageIndexForTurn } from "../src/data/session-history.ts";
 
 const finalReply = { id: "final", role: "assistant", sequence: 2, meta: { turnId: "turn-1" }, text: "Final reply" };
 const intermediateReply = { id: "step", role: "assistant", sequence: 1, meta: { turnId: "turn-1", messageKind: "assistant_intermediate" }, text: "Working" };
 assert.deepEqual(mergeDisplayMessages([finalReply], [intermediateReply]), [finalReply]);
 assert.deepEqual(mergeDisplayMessages([], [intermediateReply, finalReply]), [finalReply]);
-import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 
 assert.equal(normalizeSearchQuery("  server   result  "), "server result");
 assert.equal(isResourcePinned([{ labelSystemKey: "user:pinned" }]), true);
