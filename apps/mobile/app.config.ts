@@ -1,5 +1,14 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
+function otaRuntimeVersion() {
+  const override = process.env.COHUB_OTA_RUNTIME_VERSION?.trim();
+  if (!override) return { policy: "fingerprint" } as const;
+  if (!/^[a-f0-9]{40,64}$/.test(override)) {
+    throw new Error("COHUB_OTA_RUNTIME_VERSION must be the native fingerprint hash from the installed APK.");
+  }
+  return override;
+}
+
 function buildNumberFor(version: string) {
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version.trim());
   if (!match) {
@@ -39,7 +48,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     name: config.name ?? "Cohub",
     slug: config.slug ?? "cohub-mobile",
     version,
-    runtimeVersion: { policy: "fingerprint" },
+    runtimeVersion: otaRuntimeVersion(),
     updates: updatesUrl
       ? {
           ...config.updates,

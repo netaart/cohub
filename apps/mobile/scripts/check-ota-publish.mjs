@@ -44,6 +44,10 @@ assert.equal(ota.jobs.publish.environment.name, "ota-${{ inputs.channel }}");
 assert.match(JSON.stringify(ota.jobs.publish.steps), /--skip-build/);
 assert.equal(JSON.stringify(ota.jobs.publish.steps).includes("dangerously-ignore-fingerprint-check"), false);
 assert.match(JSON.stringify(ota.jobs.publish.steps), /--platform android/);
+assert.match(JSON.stringify(ota.jobs.publish.steps), /COHUB_OTA_RUNTIME_VERSION/);
+assert.match(JSON.stringify(ota.jobs.publish.steps), /cohub-ota-export/);
+assert.match(JSON.stringify(ota.jobs.publish.steps), /--export-dir/);
+assert.equal(JSON.stringify(ota.jobs.publish.steps).includes("dist/android"), false);
 assert.match(JSON.stringify(ota.jobs.prepare.steps), /cohub-android-native-fingerprint.txt/);
 assert.match(JSON.stringify(ota.jobs.prepare.steps), /--platform android/);
 

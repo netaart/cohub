@@ -170,7 +170,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: cohub-ota-${{ inputs.channel }}-${{ needs.prepare.outputs.sha }}
-          path: dist/android
+          path: ${{ runner.temp }}/cohub-ota-export
 
       - name: Install pinned OTA CLI
         env:
@@ -190,14 +190,17 @@ jobs:
           OTA_API_KEY: ${{ secrets.OTA_API_KEY }}
           CHANNEL: ${{ inputs.channel }}
           EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+          COHUB_OTA_RUNTIME_VERSION: ${{ needs.prepare.outputs.runtime }}
+          OTA_EXPORT_DIR: ${{ runner.temp }}/cohub-ota-export
         run: |
           set -euo pipefail
           test -n "$OTA_API_KEY" || { echo "OTA_API_KEY is required."; exit 1; }
           origin=$(OTA_SERVER="$OTA_SERVER" node --input-type=module -e 'import { parseHttpsOrigin } from "./scripts/ota-publish.mjs"; process.stdout.write(parseHttpsOrigin(process.env.OTA_SERVER, "OTA_SERVER"))')
-          test -d dist/android
-          OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/apps/easc/bin/easc.js" update \
+          runtime=$(COHUB_OTA_RUNTIME_VERSION="$COHUB_OTA_RUNTIME_VERSION" node --input-type=module -e 'import { parseFingerprintHash } from "./scripts/ota-publish.mjs"; process.stdout.write(parseFingerprintHash(process.env.COHUB_OTA_RUNTIME_VERSION, "prepare runtime"))')
+          test -d "$OTA_EXPORT_DIR"
+          COHUB_OTA_RUNTIME_VERSION="$runtime" OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/apps/easc/bin/easc.js" update \
             --channel "$CHANNEL" \
             --platform android \
             --skip-build \
-            --export-dir dist/android \
+            --export-dir "$OTA_EXPORT_DIR" \
             --non-interactive
