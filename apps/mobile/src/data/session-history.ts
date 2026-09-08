@@ -120,7 +120,17 @@ export function mergeDisplayMessages(
 		if (message.meta?.messageKind === "assistant_intermediate") continue;
 		const turnId = message.meta?.turnId;
 		if (typeof turnId === "string") {
-			byTurnRole.set(`${turnId}:${message.role}`, message);
+			const key = `${turnId}:${message.role}`;
+			const previous = byTurnRole.get(key);
+			byTurnRole.set(key, previous ? {
+				...previous,
+				...message,
+				meta: {
+					...(previous.meta ?? {}),
+					...(message.meta ?? {}),
+					turnSequence: turnSequenceForMessage(message) ?? turnSequenceForMessage(previous),
+				},
+			} : message);
 		} else {
 			const index = result.findIndex((item) => item.id === message.id);
 			if (index >= 0) result[index] = message;
@@ -189,7 +199,24 @@ export function mergeTurns(
 
 export function turnSequenceForMessage(message: Pick<MessageRecord, "meta">) {
 	const value = message.meta?.turnSequence;
-	return typeof value === "number" && Number.isInteger(value) ? value : null;
+	if (typeof value === "number" && Number.isInteger(value)) return value;
+	const turn = message.meta?.turn;
+	if (turn && typeof turn === "object" && "sequence" in turn && typeof turn.sequence === "number" && Number.isInteger(turn.sequence)) {
+		return turn.sequence;
+	}
+	return null;
+}
+
+export function withTurnSequences(messages: MessageRecord[], turns: SessionTurnRecord[]) {
+	const sequenceByTurnId = new Map(turns.map((turn) => [turn.id, turn.sequence]));
+	return messages.map((message) => {
+		if (turnSequenceForMessage(message) !== null) return message;
+		const turnId = message.meta?.turnId;
+		if (typeof turnId !== "string") return message;
+		const sequence = sequenceByTurnId.get(turnId);
+		if (sequence == null) return message;
+		return { ...message, meta: { ...(message.meta ?? {}), turnSequence: sequence } };
+	});
 }
 
 export function messageIndexForTurn(messages: Pick<MessageRecord, "role" | "meta">[], sequence: number) {

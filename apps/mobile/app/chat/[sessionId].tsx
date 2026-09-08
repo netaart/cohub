@@ -20,7 +20,7 @@ import { MessageMeasurements } from "@/src/data/chat-rendering";
 import { latestUnreadAssistantIndex } from "@/src/data/chat-read-state";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
 import type { MessageRecord } from "@neta-art/cohub";
-import { mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage } from "@/src/data/session-history";
+import { mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage, withTurnSequences } from "@/src/data/session-history";
 import { useAppTheme, typography } from "@/src/theme";
 import { formatThinkingLevel, modelAvailabilityLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { useNativeVoiceInput } from "@/src/platform/native-voice-input";
@@ -167,9 +167,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const spaceSessions = useMemo(() => state.sessions.filter((item) => item.spaceId === spaceId), [spaceId, state.sessions]);
   const messages = useMemo(() => {
     const history = messagesFromTurns(view.turns);
-    return mergeDisplayMessages(history.length > 0 ? history : view.messages, history.length > 0 ? view.messages : [])
-      .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message))
-      .sort((a, b) => a.sequence - b.sequence);
+    return withTurnSequences(
+      mergeDisplayMessages(history.length > 0 ? history : view.messages, history.length > 0 ? view.messages : [])
+        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message))
+        .sort((a, b) => a.sequence - b.sequence),
+      view.turns,
+    );
   }, [view.messages, view.turns]);
   const { fontScale } = useWindowDimensions();
   const [listWidth, setListWidth] = useState(0);

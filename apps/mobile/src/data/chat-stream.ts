@@ -5,7 +5,33 @@ export function isLiveStreamStatus(status: string | null | undefined) {
 }
 
 export function isTerminalTurnStatus(status: string | null | undefined) {
-  return status === "completed" || status === "failed" || status === "interrupted";
+  return status === "completed" || status === "failed" || status === "interrupted" || status === "merged" || status === "cancelled";
+}
+
+export function isActiveTurnStatus(status: string | null | undefined) {
+  return status === "queued" || status === "running" || status === "abort_requested";
+}
+
+export function pendingStreamForTurn(turnId: string | null): {
+  status: "pending";
+  contentBlocks: [];
+  intermediateMessages: [];
+  turnId: string | null;
+  messageId: null;
+  runtimePhase: null;
+  runtimeProvider: null;
+  runtimeModel: null;
+} {
+  return {
+    status: "pending",
+    contentBlocks: [],
+    intermediateMessages: [],
+    turnId,
+    messageId: null,
+    runtimePhase: null,
+    runtimeProvider: null,
+    runtimeModel: null,
+  };
 }
 
 /** Idle/completed patches are finished; they must not keep a live working overlay. */

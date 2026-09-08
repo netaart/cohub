@@ -34,7 +34,7 @@ import type {
   SessionView,
   StreamView,
 } from "@/src/data/types";
-import { hasFinalAssistantForTurn, isTerminalTurnStatus, liveStreamStatusFromPatch } from "@/src/data/chat-stream";
+import { hasFinalAssistantForTurn, isActiveTurnStatus, isTerminalTurnStatus, liveStreamStatusFromPatch, pendingStreamForTurn } from "@/src/data/chat-stream";
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, turnSequenceForMessage, withFallbackUserContent } from "@/src/data/session-history";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
@@ -451,10 +451,12 @@ function reducer(state: AppState, action: Action): AppState {
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = mergeTurnRecords(current.turns, [action.turn]);
       const clientMessageId = turnClientMessageId(action.turn);
+      const projected = messagesFromTurns(turns);
+      const hasProjectedUser = projected.some((message) => message.role === "user" && (turnSequenceForMessage(message) === action.turn.sequence || message.meta?.turnId === action.turn.id));
       const liveMessages = current.messages.filter((message) => {
         if (!isLiveMessage(message)) return false;
-        if (clientMessageId && message.meta?.clientMessageId === clientMessageId) return false;
-        return !(message.meta?.optimistic === true && message.role === "user" && turnSequenceForMessage(message) === action.turn.sequence);
+        if (clientMessageId && message.meta?.clientMessageId === clientMessageId && hasProjectedUser) return false;
+        return !(hasProjectedUser && message.meta?.optimistic === true && message.role === "user" && turnSequenceForMessage(message) === action.turn.sequence);
       });
       const session = action.session
         ? current.session
@@ -468,10 +470,11 @@ function reducer(state: AppState, action: Action): AppState {
         ...(session ? { session } : {}),
         turns,
         historyLoaded: true,
-        messages: mergeDisplayMessages(messagesFromTurns(turns), liveMessages),
+        messages: mergeDisplayMessages(projected, liveMessages),
         oldestCursor: turns[0]?.sequence ?? current.oldestCursor,
         newestCursor: turns.at(-1)?.sequence ?? current.newestCursor,
-        ...(isTerminalTurnStatus(action.turn.status) && current.stream?.turnId === action.turn.id ? { stream: null } : {}),
+        ...(isTerminalTurnStatus(action.turn.status) && (current.stream?.turnId === action.turn.id || !current.stream) ? { stream: null } : {}),
+        ...(isActiveTurnStatus(action.turn.status) && !current.stream ? { stream: pendingStreamForTurn(action.turn.id) } : {}),
       });
     }
     case "turn-patch": {
@@ -497,9 +500,10 @@ function reducer(state: AppState, action: Action): AppState {
     case "message-add": {
       const view = state.sessionViews[action.sessionId] ?? emptyView();
       const incomingMeta = action.message.meta ?? {};
-      const message = { ...action.message, meta: { ...incomingMeta, _mobileLive: true } };
-      const messages = mergeMessages(view.messages, message);
       const turnId = typeof incomingMeta.turnId === "string" ? incomingMeta.turnId : null;
+      const turnSequence = typeof incomingMeta.turnSequence === "number" ? incomingMeta.turnSequence : view.turns.find((turn) => turn.id === turnId)?.sequence;
+      const message = { ...action.message, meta: { ...incomingMeta, ...(turnSequence != null ? { turnSequence } : {}), _mobileLive: true } };
+      const messages = mergeMessages(view.messages, message);
       const streamDone = action.message.role === "assistant" && incomingMeta.messageKind !== "assistant_intermediate" && hasFinalAssistantForTurn(messages, view.stream?.turnId ?? turnId);
       return updateView(state, action.sessionId, {
         messages,
