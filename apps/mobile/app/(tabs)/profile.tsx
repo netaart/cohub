@@ -4,7 +4,6 @@ import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
-import { AppUpdateRow } from "@/src/components/AppUpdateBanner";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import {
@@ -162,7 +161,6 @@ export default function ProfileScreen() {
           title="Installation"
           detail={installationId ? `${installationId.slice(0, 8)}…` : "Preparing device identity"}
         />
-        <AppUpdateRow />
       </View>
 
       <SectionHeader title="App" />

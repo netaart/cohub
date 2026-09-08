@@ -7,7 +7,6 @@ import { ActivityIndicator, Platform, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { AuthScreen } from "@/src/auth/AuthScreen";
-import { AppUpdateBanner } from "@/src/components/AppUpdateBanner";
 import { config } from "@/src/config";
 import { AppProvider } from "@/src/data/context";
 import { useAppTheme } from "@/src/theme";
@@ -136,7 +135,6 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
           <Stack.Screen name="about" options={{ animation: "slide_from_right" }} />
           {showQa ? <Stack.Screen name="qa" options={{ animation: "slide_from_right" }} /> : null}
         </Stack>
-        <AppUpdateBanner />
       </View>
     </GestureHandlerRootView>
   </ThemeProvider>;

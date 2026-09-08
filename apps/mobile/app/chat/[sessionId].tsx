@@ -17,7 +17,6 @@ import { useApp, useSession } from "@/src/data/context";
 import { nextChatTailFollowing } from "@/src/data/chat-scroll";
 import { isLiveStreamStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
 import { MessageMeasurements } from "@/src/data/chat-rendering";
-import { latestUnreadAssistantIndex } from "@/src/data/chat-read-state";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
 import type { MessageRecord } from "@neta-art/cohub";
 import { mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage, withTurnSequences } from "@/src/data/session-history";
@@ -84,7 +83,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const readStateLoadedRef = useRef(false);
   const readSequenceRef = useRef<number | null>(null);
   const savedReadSequenceRef = useRef<number | null>(null);
-  const [readSequence, setReadSequence] = useState<number | null>(null);
   const followingTailRef = useRef(true);
   const [followingTail, setFollowingTailState] = useState(true);
   const userDraggingRef = useRef(false);
@@ -137,7 +135,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       }, readSequenceRef.current ?? 0);
       if (visibleAssistantSequence > (readSequenceRef.current ?? 0)) {
         readSequenceRef.current = visibleAssistantSequence;
-        setReadSequence(visibleAssistantSequence);
         if (visibleAssistantSequence > (savedReadSequenceRef.current ?? 0)) {
           savedReadSequenceRef.current = visibleAssistantSequence;
           void saveSessionReadSequence(sessionId, visibleAssistantSequence).catch(() => undefined);
@@ -236,7 +233,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       if (!active) return;
       readSequenceRef.current = sequence;
       savedReadSequenceRef.current = sequence;
-      setReadSequence(sequence);
       readStateLoadedRef.current = true;
     }).catch(() => {
       if (active) readStateLoadedRef.current = true;
@@ -259,30 +255,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     return target !== null && lastMessage !== undefined && turnSequenceForMessage(lastMessage) === target;
   }, [messages]);
   const requestInitialScroll = useCallback(() => {
-    if (!readStateLoadedRef.current || !view.historyLoaded || initialScrollDone.current || messages.length === 0 || hasInitialTurnTarget) return;
-    if (running) {
-      initialScrollDone.current = true;
-      listRef.current?.scrollToEnd({ animated: false });
-      setFollowingTail(true);
-      setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
-      return;
-    }
-    const unreadIndex = latestUnreadAssistantIndex(messages, readSequence);
+    if (!view.historyLoaded || initialScrollDone.current || messages.length === 0 || hasInitialTurnTarget) return;
     initialScrollDone.current = true;
-    if (unreadIndex < 0) {
-      listRef.current?.scrollToEnd({ animated: false });
-      setFollowingTail(true);
-      setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
-      return;
-    }
-    const unreadMessage = messages[unreadIndex];
-    const unreadSequence = unreadMessage ? turnSequenceForMessage(unreadMessage) : null;
-    initialUnreadIndexRef.current = unreadIndex;
-    initialUnreadRetriesRef.current = 0;
-    setFollowingTail(false);
-    setCurrentTurnSequence(unreadSequence);
-    listRef.current?.scrollToIndex({ index: unreadIndex, animated: false, viewPosition: 0, viewOffset: 8 });
-  }, [hasInitialTurnTarget, messages, readSequence, running, setFollowingTail, view.historyLoaded, view.turns]);
+    listRef.current?.scrollToEnd({ animated: false });
+    setFollowingTail(true);
+    setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
+  }, [hasInitialTurnTarget, messages.length, setFollowingTail, view.historyLoaded, view.turns]);
 
   const scheduleTurnScrollRetry = useCallback((sequence: number, retry: number) => {
     if (retry >= 4) {
