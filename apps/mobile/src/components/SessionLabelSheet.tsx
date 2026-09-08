@@ -28,7 +28,7 @@ type SessionLabelSheetProps = {
 
 export function SessionLabelSheet({ client, spaceId, session, labels = [], labelsError = null, onLabelsReload, onClose, onChanged }: SessionLabelSheetProps) {
   const theme = useAppTheme();
-  const [catalog, setCatalog] = useState<SessionLabel[]>(labels);
+  const [fetchedCatalog, setFetchedCatalog] = useState<SessionLabel[]>([]);
   const [assignments, setAssignments] = useState<LabelAssignmentRecord[]>([]);
   const [loading, setLoading] = useState(labels.length === 0);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +36,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
   const [newLabelName, setNewLabelName] = useState("");
   const [creating, setCreating] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const catalog = fetchedCatalog.length > 0 ? fetchedCatalog : labels;
 
   useEffect(() => {
     let active = true;
@@ -51,7 +52,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
     ])
       .then(([tree, assigned]) => {
         if (!active) return;
-        setCatalog(toUserSessionLabels(tree));
+        setFetchedCatalog(toUserSessionLabels(tree));
         setAssignments(assigned);
       })
       .catch((caught) => {
@@ -111,7 +112,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
       setNewLabelName("");
       const tree = await fetchSessionLabels(client, spaceId);
       const nextCatalog = toUserSessionLabels(tree);
-      setCatalog(nextCatalog);
+      setFetchedCatalog(nextCatalog);
       onLabelsReload?.();
       const createdLabel = created ? nextCatalog.find((item) => item.id === created.id) ?? created : null;
       if (createdLabel) await toggle(createdLabel);
