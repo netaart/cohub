@@ -31,16 +31,16 @@ assert.throws(() => parseFingerprintHash("nope", "test"), /Invalid native finger
 
 const parse = (file) => YAML.parse(readFileSync(file, "utf8"), { uniqueKeys: true });
 const ota = parse(".github/workflows/publish-ota.yml");
-assert.equal(Object.hasOwn(ota.on, "push"), false);
+assert.deepEqual(ota.on.push.branches, ["main"]);
 assert.ok(Object.hasOwn(ota.on, "workflow_dispatch"));
 assert.deepEqual(ota.on.workflow_dispatch.inputs.channel.options, ["staging", "production"]);
-assert.equal(ota.on.workflow_dispatch.inputs.channel.default, "staging");
+assert.equal(ota.on.workflow_dispatch.inputs.channel.default, "production");
 assert.equal(ota.concurrency["cancel-in-progress"], false);
-assert.equal(ota.concurrency.group, "ota-publish-${{ inputs.channel }}");
+assert.equal(ota.concurrency.group, "ota-publish-${{ github.event.inputs.channel || 'production' }}");
 assert.equal(ota.env.OTA_CLI_REPOSITORY, OTA_CLI_REPOSITORY);
 assert.equal(ota.env.OTA_CLI_REVISION, OTA_CLI_REVISION);
 assert.match(ota.jobs.prepare.if, /refs\/heads\/main/);
-assert.equal(ota.jobs.publish.environment.name, "ota-${{ inputs.channel }}");
+assert.equal(Object.hasOwn(ota.jobs.publish, "environment"), false);
 assert.match(JSON.stringify(ota.jobs.publish.steps), /--skip-build/);
 assert.equal(JSON.stringify(ota.jobs.publish.steps).includes("dangerously-ignore-fingerprint-check"), false);
 assert.match(JSON.stringify(ota.jobs.publish.steps), /--platform android/);

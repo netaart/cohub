@@ -1,24 +1,26 @@
 name: Publish OTA
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       commit:
-        description: Full 40-character commit SHA from origin/main
-        required: true
+        description: Full 40-character commit SHA from origin/main. Main pushes publish github.sha.
+        required: false
         type: string
       channel:
-        description: OTA channel. production waits for environment approval after export.
+        description: OTA channel. Main pushes always publish production.
         required: true
         type: choice
         options: [staging, production]
-        default: staging
+        default: production
 
 permissions:
   contents: read
 
 concurrency:
-  group: ota-publish-${{ inputs.channel }}
+  group: ota-publish-${{ github.event.inputs.channel || 'production' }}
   cancel-in-progress: false
 
 env:
@@ -35,6 +37,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       sha: ${{ steps.target.outputs.sha }}
+      channel: ${{ steps.target.outputs.channel }}
       runtime: ${{ steps.fingerprint.outputs.runtime }}
       fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
       subject: ${{ steps.target.outputs.subject }}
@@ -48,14 +51,17 @@ jobs:
       - name: Validate target commit
         id: target
         env:
-          COMMIT: ${{ inputs.commit }}
+          COMMIT: ${{ github.event.inputs.commit || github.sha }}
+          CHANNEL: ${{ github.event.inputs.channel || 'production' }}
         run: |
           set -euo pipefail
           sha=$(node --input-type=module -e 'import { parseCommitSha } from "./scripts/ota-publish.mjs"; process.stdout.write(parseCommitSha(process.env.COMMIT))')
+          channel=$(CHANNEL="$CHANNEL" node --input-type=module -e 'import { parseChannel } from "./scripts/ota-publish.mjs"; process.stdout.write(parseChannel(process.env.CHANNEL))')
           git merge-base --is-ancestor "$sha" origin/main
           git checkout --force --detach "$sha"
           {
             echo "sha=$sha"
+            echo "channel=$channel"
             echo "subject<<SUBJECT_EOF"
             git log -1 --format=%s "$sha"
             echo "SUBJECT_EOF"
@@ -111,14 +117,14 @@ jobs:
       - name: Upload export
         uses: actions/upload-artifact@v7
         with:
-          name: cohub-ota-${{ inputs.channel }}-${{ steps.target.outputs.sha }}
+          name: cohub-ota-${{ steps.target.outputs.channel }}-${{ steps.target.outputs.sha }}
           path: dist/android
           if-no-files-found: error
           retention-days: 14
 
       - name: Summarize candidate
         env:
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ steps.target.outputs.channel }}
           SHA: ${{ steps.target.outputs.sha }}
           SUBJECT: ${{ steps.target.outputs.subject }}
           RUNTIME: ${{ steps.fingerprint.outputs.runtime }}
@@ -134,21 +140,15 @@ jobs:
             echo "- Runtime: \`$RUNTIME\`"
             echo "- Native fingerprint: \`$FINGERPRINT\`"
             echo
-            echo "This job exported the Android bundle. The publish job uploads that artifact; it does not export again."
-            if [[ "$CHANNEL" == "production" ]]; then
-              echo "production publishing waits for the \`ota-production\` environment review."
-            fi
+            echo "This job exported the Android bundle. The publish job uploads that artifact immediately; it does not export again."
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
-    name: Upload ${{ inputs.channel }}
+    name: Upload ${{ needs.prepare.outputs.channel }}
     needs: prepare
     if: github.repository == 'markbang/cohub-mobile' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment:
-      name: ota-${{ inputs.channel }}
-      url: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
     steps:
       - name: Checkout selected commit
         uses: actions/checkout@v7
@@ -172,7 +172,7 @@ jobs:
       - name: Download export
         uses: actions/download-artifact@v8
         with:
-          name: cohub-ota-${{ inputs.channel }}-${{ needs.prepare.outputs.sha }}
+          name: cohub-ota-${{ needs.prepare.outputs.channel }}-${{ needs.prepare.outputs.sha }}
           path: ${{ runner.temp }}/cohub-ota-export
 
       - name: Install pinned OTA CLI
@@ -191,7 +191,7 @@ jobs:
         env:
           OTA_SERVER: ${{ vars.OTA_SERVER }}
           OTA_API_KEY: ${{ secrets.OTA_API_KEY }}
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
           EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
           COHUB_OTA_RUNTIME_VERSION: ${{ needs.prepare.outputs.runtime }}
           OTA_EXPORT_DIR: ${{ runner.temp }}/cohub-ota-export

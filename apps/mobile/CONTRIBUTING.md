@@ -28,4 +28,4 @@ Keep changes focused. CI must pass Quality, all three Bundle jobs, and Native CI
 
 ## Releases
 
-See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR creates the GitHub Release and changelog. It does not build APKs. JS-only changes go out through Actions > Publish OTA. Run Native Release when Expo SDK, native dependencies, or native configuration change. iOS builds and store submissions remain manual.
+See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR creates the GitHub Release and changelog. It does not build APKs. JS-only changes publish as production OTA when they land on `main`. Run Native Release when Expo SDK, native dependencies, or native configuration change. iOS builds and store submissions remain manual.

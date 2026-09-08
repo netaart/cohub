@@ -9,7 +9,7 @@ The repository does not require Expo Application Services (EAS) for builds.
 3. `Release Please` maintains a version/changelog PR from Conventional Commits.
 4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. It does not build APKs. Signed Android packages are produced by the manual Native Release workflow when SDK or native code changes. Set `NATIVE_RELEASE_ON_VERSION_TAG=true` only if a version tag must also attach APKs.
 
-An ordinary `main` push runs quality checks, bundle exports, security checks, and Release Please. It does not compile native packages or publish OTA updates. JS, UI, and business-logic changes go out through Actions > Publish OTA. Native CI remains available through Actions > Native CI > Run workflow for pull requests and manual native validation.
+An ordinary `main` push runs quality checks, bundle exports, security checks, Release Please, and production Android OTA. It does not compile native packages. Native CI remains available through Actions > Native CI > Run workflow for pull requests and manual native validation.
 
 Expo is used as the open-source React Native toolchain and for native modules. `expo prebuild` generates standard Gradle and Xcode projects inside CI. No Expo subscription or EAS project is required.
 
@@ -79,8 +79,8 @@ Migration: users must install a new signed native APK containing `expo-intent-la
 - `runtimeVersion` uses the `fingerprint` policy. JS-only commits keep the same native runtime as the installed APK and can OTA. Changing Expo SDK, native dependencies, permissions, or other native configuration changes the fingerprint and requires a new APK.
 - Use the same production environment values when building the APK and exporting OTA bundles. `EXPO_PUBLIC_*` values are public.
 - The deployed service is [markbang/cloudflare-expo-ota-updates](https://github.com/markbang/cloudflare-expo-ota-updates). The manifest endpoint is `https://expo-ota.talesofai.com/manifest`; assets are served from the existing R2 bucket `expo-updates` at `https://expo-updates.talesofai.com`. Repository variables `EXPO_PUBLIC_UPDATES_URL` and `OTA_SERVER` are configured. See the service's `docs/COHUB.md` for redeployment.
-- Publish Android OTA from Actions > Publish OTA on `main`. Choose a full commit SHA and `staging` or `production`. The workflow exports that commit, compares its Android native fingerprint to `cohub-android-native-fingerprint.txt` on the latest native GitHub Release, then uploads the exported artifact. It does not export again after approval. `production` uses the `ota-production` environment and waits for a required reviewer. `main` pushes never publish OTA.
-- Native Release attaches `cohub-android-native-fingerprint.txt` to signed Android distributions. Bootstrap once with an OTA-capable APK; after that, JS-only work does not need a new package. Native-incompatible commits fail closed; do not bypass the fingerprint check.
+- A push to `main` publishes production Android OTA automatically. The workflow exports that commit, reads `assets/fingerprint` from the latest arm64 APK as the runtime phones request, then uploads immediately. Manual Actions > Publish OTA remains for staging or a specific SHA. There is no environment approval gate.
+- Native Release attaches `cohub-android-native-fingerprint.txt` to signed Android distributions. Bootstrap once with an OTA-capable APK; after that, JS-only work does not need a new package. OTA is indexed with `assets/fingerprint` from that APK so installed devices can receive it.
 - Mobile publication needs `OTA_API_KEY` and `OTA_SERVER`. The CLI is the pinned `markbang/cloudflare-expo-ota-updates` revision in `.github/workflows/publish-ota.yml`, not the unmodified npm `easc` package.
 - When OTA is enabled, `app.config.ts` sends app ID `cohub-mobile` and channel `production`, and requires manifests signed against `certs/ota-certificate.crt`. The matching private key is held in the server repository's `OTA_SIGNING_PRIVATE_KEY` secret and installed as the Worker secret `CODE_SIGNING_PRIVATE_KEY`. Never put the private key in this repository or replace the certificate without a native migration.
 - The publishing credential is stored in this repository's `OTA_API_KEY` Actions secret. It is not an app environment variable and must never use an `EXPO_PUBLIC_*` name. The fork's CLI supports function-based Expo configuration and Android-only publishing; use a reviewed, pinned fork revision rather than the unmodified npm CLI.
@@ -135,7 +135,7 @@ Register `cohub://callback` in the Native Logto application. Logto credentials a
 4. Confirm the required CI, Security, and Native CI checks are green.
 5. Merge the Release Please PR.
 6. GitHub creates the `vX.Y.Z` tag and release.
-7. GitHub creates the `vX.Y.Z` tag and release without APKs. JS-only updates go out through Publish OTA. When SDK or native code changes, run Native Release and attach the signed APKs to that tag.
+7. GitHub creates the `vX.Y.Z` tag and release without APKs. JS-only updates publish as production OTA on the `main` push. When SDK or native code changes, run Native Release and attach the signed APKs to that tag.
 
 The release workflow validates that the tag is exactly `v<package version>`, and that `package.json` and `app.json` have identical versions. Native build numbers are derived deterministically from the app version in `app.config.ts`.
 
