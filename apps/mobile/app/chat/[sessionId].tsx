@@ -15,6 +15,7 @@ import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
 import { CHAT_PAGE_THRESHOLD, invertedListDistances, nextChatTailFollowing, reverseListIndex } from "@/src/data/chat-scroll";
+import { cancelQueuedFollowup, followupPreviewText, queuedFollowupTurns, steerQueuedFollowup } from "@/src/data/followup-queue";
 import { isLiveStreamStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
 import { MessageMeasurements } from "@/src/data/chat-rendering";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
@@ -65,6 +66,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const [chatLabels, setChatLabels] = useState<SessionLabel[]>([]);
   const [renameValue, setRenameValue] = useState("");
   const [stopping, setStopping] = useState(false);
+  const [pendingFollowupAction, setPendingFollowupAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ChatModelSelection | null>(null);
@@ -167,30 +169,34 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const spaceId = view.space?.id ?? session?.spaceId ?? sessionSummary?.spaceId ?? "";
   const spaceName = view.space ? displaySpaceName(view.space) : sessionSummary?.space?.name || "Space";
   const spaceSessions = useMemo(() => state.sessions.filter((item) => item.spaceId === spaceId), [spaceId, state.sessions]);
+  const queuedFollowups = useMemo(() => queuedFollowupTurns(view.turns, view.stream?.turnId), [view.stream?.turnId, view.turns]);
+  const queuedFollowupIds = useMemo(() => new Set(queuedFollowups.map((turn) => turn.id)), [queuedFollowups]);
   const messages = useMemo(() => {
     const history = messagesFromTurns(view.turns);
     return withTurnSequences(
       mergeDisplayMessages(history.length > 0 ? history : view.messages, history.length > 0 ? view.messages : [])
-        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message))
+        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message) && !(typeof message.meta?.turnId === "string" && queuedFollowupIds.has(message.meta.turnId)))
         .sort((a, b) => a.sequence - b.sequence),
       view.turns,
     );
-  }, [view.messages, view.turns]);
+  }, [queuedFollowupIds, view.messages, view.turns]);
   const timeline = useMemo(() => messages.slice().reverse(), [messages]);
   const { fontScale } = useWindowDimensions();
+  // App text size changes row heights, so it participates in the measurement cache key.
+  const textSizeToken = typography.chatBody.fontSize;
   const [listWidth, setListWidth] = useState(0);
   const measurements = useMemo(() => {
     const cache = new MessageMeasurements();
-    cache.configure(`${listWidth}:${fontScale}:${theme.mode}`, []);
+    cache.configure(`${listWidth}:${fontScale}:${theme.mode}:${textSizeToken}`, []);
     return cache;
-  }, [listWidth, fontScale, theme.mode]);
+  }, [listWidth, fontScale, textSizeToken, theme.mode]);
   const measuredMessages = useMemo(() => messages.map((message, index) => ({
     id: message.id,
     revision: JSON.stringify([message, index > 0 ? turnSequenceForMessage(messages[index - 1]!) : null]),
   })), [messages]);
   useEffect(() => {
-    measurements.configure(`${listWidth}:${fontScale}:${theme.mode}`, measuredMessages);
-  }, [measurements, measuredMessages, listWidth, fontScale, theme.mode]);
+    measurements.configure(`${listWidth}:${fontScale}:${theme.mode}:${textSizeToken}`, measuredMessages);
+  }, [measurements, measuredMessages, listWidth, fontScale, textSizeToken, theme.mode]);
   const estimatedOffset = useCallback((timelineIndex: number, averageHeight: number) => {
     const chronologicalIndex = reverseListIndex(timelineIndex, measuredMessages.length);
     const fromOldest = chronologicalIndex < 0 ? 0 : measurements.estimateOffset(measuredMessages, chronologicalIndex, averageHeight);
@@ -411,6 +417,21 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try { await abortSession(sessionId); } catch (error) { setNotice({ title: "Unable to stop", message: error instanceof Error ? error.message : "The Agent could not be stopped." }); } finally { setStopping(false); }
   };
+  const runFollowupAction = async (turnId: string, action: "steer" | "cancel") => {
+    if (!client || !spaceId || pendingFollowupAction !== null) return;
+    setPendingFollowupAction(turnId);
+    if (action === "steer") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      if (action === "steer") await steerQueuedFollowup(client, spaceId, sessionId, turnId);
+      else await cancelQueuedFollowup(client, spaceId, sessionId, turnId);
+      await refreshSession(sessionId);
+    } catch (error) {
+      setNotice({ title: action === "steer" ? "Unable to steer" : "Unable to cancel", message: error instanceof Error ? error.message : "Please try again." });
+      void refreshSession(sessionId).catch(() => undefined);
+    } finally {
+      setPendingFollowupAction(null);
+    }
+  };
   const openRename = () => { setRenameValue(session ? displaySessionTitle(session) : ""); setRenameOpen(true); };
   const openLabelSheet = () => {
     setLabelSheetOpen(true);
@@ -545,6 +566,20 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         <FlatList ref={listRef} inverted initialNumToRender={16} maxToRenderPerBatch={8} updateCellsBatchingPeriod={32} windowSize={11} onLayout={(event) => setListWidth(event.nativeEvent.layout.width)} data={timeline} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const chronologicalIndex = reverseListIndex(index, messages.length); const sequence = turnSequenceForMessage(item); const older = timeline[index + 1]; const olderSequence = older ? turnSequenceForMessage(older) : null; const showTurnMarker = sequence !== null && sequence !== olderSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); return <View onLayout={(event) => { if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} onLongPress={(text, origin) => setMessageAction({ text, ...origin })} />{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence).map((entry) => entry.id === view.stream?.turnId ? <StreamingTurnProcess key={entry.id} messages={view.stream.intermediateMessages} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 80 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: timeline.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel="Load newer turns" disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load newer turns</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} onLongPress={(text, origin) => setMessageAction({ text, ...origin })} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" onLongPress={(text, origin) => setMessageAction({ text, ...origin })} /> : null}</View>} ListEmptyComponent={<View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 28, transform: [{ scaleY: -1 }] }}><View style={{ width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft }}><AppIcon name="sparkles" size={23} color={theme.colors.accent} /></View><Text style={[typography.heading, { color: theme.colors.text, marginTop: 14 }]}>A fresh Space for thinking</Text><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 6, maxWidth: 290 }]}>Send a prompt to start working with the Agent.</Text></View>} ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel="Load earlier turns" disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load earlier turns</Text>}</Pressable> : null} />
         {!followingTail ? <Pressable accessibilityRole="button" accessibilityLabel="Jump to latest" onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} style={({ pressed }) => ({ position: "absolute", right: 16, bottom: 12, zIndex: 4, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, borderWidth: 1, borderColor: theme.colors.border, shadowColor: theme.colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5, elevation: 4 })}><AppIcon name="arrow-down" size={18} color={theme.colors.accent} /></Pressable> : null}
         </View>
+        {queuedFollowups.length > 0 ? <View style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, backgroundColor: theme.colors.background, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6, gap: 6 }}>
+          <Text style={[typography.micro, { color: theme.colors.textMuted }]}>Follow-ups · {queuedFollowups.length} queued</Text>
+          {queuedFollowups.map((turn) => {
+            const pending = pendingFollowupAction === turn.id;
+            const preview = followupPreviewText(turn);
+            return <View key={turn.id} style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 10, paddingLeft: 10, paddingRight: 6, paddingVertical: 5, backgroundColor: theme.colors.surface }}>
+              <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>{preview}</Text>
+              {pending ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Steer now: ${preview}`} onPress={() => void runFollowupAction(turn.id, "steer")} hitSlop={6} style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.accentSoft })}><Text style={[typography.caption, { color: theme.colors.accent }]}>Steer now</Text></Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel={`Cancel follow-up: ${preview}`} onPress={() => void runFollowupAction(turn.id, "cancel")} hitSlop={6} style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}><Text style={[typography.caption, { color: theme.colors.textMuted }]}>Cancel</Text></Pressable>
+              </>}
+            </View>;
+          })}
+        </View> : null}
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
         <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => setAttachmentMenuOpen(true)} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? "Agent is working…" : "Message the Agent"} />

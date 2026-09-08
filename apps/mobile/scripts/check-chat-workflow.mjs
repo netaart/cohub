@@ -12,6 +12,7 @@ import { mergeDisplayMessages, messageIndexForTurn, nextTurnSequence, withFallba
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 import { filterSpaces } from "../src/data/space-filters.ts";
 import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch } from "../src/data/session-status.ts";
+import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-queue.ts";
 import { createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
 import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
@@ -534,5 +535,20 @@ assert.doesNotThrow(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sh
 assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 124, sha256: apkAsset.sha256 }), /verification/);
 assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sha256: "b".repeat(64) }), /verification/);
 
+const queuedFollowup = (id, sequence, overrides = {}) => ({ id, sequence, status: "queued", intent: "followup", userText: `Follow-up ${id}`, createdAt: "2026-09-01T00:00:00.000Z", ...overrides });
+assert.deepEqual(
+  queuedFollowupTurns([
+    { id: "running", sequence: 2, status: "running", intent: "followup", userText: "now", createdAt: "2026-09-01T00:00:00.000Z" },
+    queuedFollowup("b", 4),
+    queuedFollowup("a", 3),
+    queuedFollowup("steer", 5, { intent: "steer" }),
+    queuedFollowup("done", 6, { status: "cancelled" }),
+  ], "running").map((turn) => turn.id),
+  ["a", "b"],
+);
+assert.deepEqual(queuedFollowupTurns([queuedFollowup("active", 7)], "active"), []);
+assert.equal(followupPreviewText({ userText: "  hello\n\n world  " }), "hello world");
+assert.equal(followupPreviewText({ userText: "   " }), "Follow-up");
+assert.equal(followupPreviewText({ userText: null }), "Follow-up");
 
 console.log("Chat workflow checks passed");
