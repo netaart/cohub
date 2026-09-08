@@ -2,6 +2,7 @@ import type { CohubClient, ContentBlock, SessionTurnRecord } from "@neta-art/coh
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { MessageContent } from "@/src/components/MessageContent";
+import type { StreamView } from "@/src/data/types";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon } from "@/src/ui";
 
@@ -46,6 +47,23 @@ export function TurnProcess({ turn, client, spaceId }: { turn: SessionTurnRecord
     </Pressable>
     {expanded ? <View style={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, gap: 8 }}>
       {errorMessage ? <Pressable accessibilityRole="button" onPress={() => setAttempt(attempt + 1)}><Text style={[typography.caption, { color: theme.colors.danger }]}>{errorMessage} Retry</Text></Pressable> : !objectKey ? <Text style={[typography.caption, { color: theme.colors.textMuted }]}>Execution details were not archived.</Text> : content === null ? <ActivityIndicator color={theme.colors.accent} /> : content.length ? <MessageContent content={content} /> : <Text style={[typography.caption, { color: theme.colors.textMuted }]}>No execution details.</Text>}
+    </View> : null}
+  </View>;
+}
+
+export function StreamingTurnProcess({ messages }: { messages: StreamView["intermediateMessages"] }) {
+  const theme = useAppTheme();
+  const [expanded, setExpanded] = useState(false);
+  if (messages.length === 0) return null;
+  const toolCount = messages.reduce((count, message) => count + message.content.filter((block) => block.type === "tool_use").length, 0);
+  const content = messages.flatMap((message) => message.content.length ? message.content : message.text ? [{ type: "text" as const, text: message.text }] : []);
+  return <View style={{ marginHorizontal: 18, marginVertical: 6 }}>
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded(!expanded)} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <AppIcon name={expanded ? "chevron-down" : "chevron-right"} size={16} />
+      <Text style={[typography.caption, { color: theme.colors.textMuted, flex: 1 }]}>{messages.length} steps · {toolCount} tools</Text>
+    </Pressable>
+    {expanded ? <View style={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, gap: 8 }}>
+      {content.length ? <MessageContent content={content} /> : <Text style={[typography.caption, { color: theme.colors.textMuted }]}>No execution details.</Text>}
     </View> : null}
   </View>;
 }

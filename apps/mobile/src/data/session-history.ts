@@ -129,7 +129,52 @@ export function mergeDisplayMessages(
 	}
 	result.push(...byTurnRole.values());
 	const byId = new Map(result.map((message) => [message.id, message]));
-	return [...byId.values()].sort((a, b) => a.sequence - b.sequence);
+	const merged = [...byId.values()];
+	const confirmed = new Set<string>();
+	for (const message of merged) {
+		if (message.meta?.optimistic === true) continue;
+		const clientMessageId = message.meta?.clientMessageId;
+		if (typeof clientMessageId === "string") confirmed.add(`client:${clientMessageId}`);
+		const sequence = turnSequenceForMessage(message);
+		if (sequence !== null) confirmed.add(`seq:${sequence}:${message.role}`);
+	}
+	return merged
+		.filter((message) => {
+			if (message.meta?.optimistic !== true) return true;
+			const clientMessageId = message.meta?.clientMessageId;
+			if (typeof clientMessageId === "string" && confirmed.has(`client:${clientMessageId}`)) return false;
+			const sequence = turnSequenceForMessage(message);
+			return !(sequence !== null && confirmed.has(`seq:${sequence}:${message.role}`));
+		})
+		.sort((a, b) => a.sequence - b.sequence);
+}
+
+export function nextTurnSequence(
+	turns: Pick<SessionTurnRecord, "sequence">[],
+	messages: Pick<MessageRecord, "meta">[],
+) {
+	const fromTurns = turns.reduce((max, turn) => Math.max(max, turn.sequence), 0);
+	const fromMessages = messages.reduce((max, message) => {
+		const sequence = turnSequenceForMessage(message);
+		return sequence !== null ? Math.max(max, sequence) : max;
+	}, 0);
+	return Math.max(fromTurns, fromMessages) + 1;
+}
+
+export function withFallbackUserContent(
+	turn: SessionTurnRecord,
+	content: ContentBlock[],
+	text: string,
+) {
+	const existing = turn.userContent ?? [];
+	const existingHasImage = existing.some((block) => block.type === "image");
+	const fallbackHasImage = content.some((block) => block.type === "image");
+	if (existingHasImage || !fallbackHasImage) return turn;
+	return {
+		...turn,
+		userContent: content,
+		userText: turn.userText?.trim() || text || turn.userText,
+	};
 }
 
 export function mergeTurns(

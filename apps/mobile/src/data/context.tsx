@@ -35,7 +35,7 @@ import type {
   StreamView,
 } from "@/src/data/types";
 import { hasFinalAssistantForTurn, isTerminalTurnStatus, liveStreamStatusFromPatch } from "@/src/data/chat-stream";
-import { mergeDisplayMessages, mergeTurns, messagesFromTurns } from "@/src/data/session-history";
+import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, turnSequenceForMessage, withFallbackUserContent } from "@/src/data/session-history";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
 import { mockMessages, mockModels, mockSessions, mockSpaces, mockTurnIndex, mockTurns, mockUsage } from "@/src/data/mock";
@@ -451,7 +451,11 @@ function reducer(state: AppState, action: Action): AppState {
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = mergeTurnRecords(current.turns, [action.turn]);
       const clientMessageId = turnClientMessageId(action.turn);
-      const liveMessages = current.messages.filter((message) => isLiveMessage(message) && (!clientMessageId || message.meta?.clientMessageId !== clientMessageId));
+      const liveMessages = current.messages.filter((message) => {
+        if (!isLiveMessage(message)) return false;
+        if (clientMessageId && message.meta?.clientMessageId === clientMessageId) return false;
+        return !(message.meta?.optimistic === true && message.role === "user" && turnSequenceForMessage(message) === action.turn.sequence);
+      });
       const session = action.session
         ? current.session
           ? preferNewerSession(current.session, action.session)
@@ -1268,26 +1272,36 @@ export function AppProvider({
 
       const clientMessageId = newId();
       const optimisticText = text || attachments.map((item) => item.name).join(", ");
+      const turnSequence = nextTurnSequence(view?.turns ?? [], view?.messages ?? []);
       const currentMax = Math.max(
         0,
         ...(view?.messages ?? []).map((message) => message.sequence),
         (view?.turns.at(-1)?.sequence ?? 0) * 2,
         optimisticMessageSequenceRef.current.get(sessionId) ?? 0,
+        turnSequence * 2 - 1,
       );
-      optimisticMessageSequenceRef.current.set(sessionId, currentMax + 1);
+      optimisticMessageSequenceRef.current.set(sessionId, currentMax);
       const optimistic: MessageRecord = {
         id: `local-${clientMessageId}`,
         sessionId,
         role: "user",
-        content: [{ type: "text", text: optimisticText }],
+        content: [
+          ...(text ? [{ type: "text" as const, text }] : []),
+          ...attachments.filter((item) => item.mimeType.startsWith("image/")).map((item) => ({
+            type: "image" as const,
+            source: { type: "url" as const, url: item.uri },
+            _meta: { filename: item.name, mediaType: item.mimeType, size: item.size },
+          })),
+          ...(!text && attachments.some((item) => !item.mimeType.startsWith("image/")) ? [{ type: "text" as const, text: optimisticText }] : []),
+        ],
         text: optimisticText,
-        sequence: currentMax + 1,
+        sequence: turnSequence * 2 - 1,
         provider: options.model?.provider ?? null,
         model: options.model?.id ?? null,
         stopReason: null,
         errorMessage: null,
         usage: null,
-        meta: { optimistic: true, clientMessageId, ...(options.model?.thinkingLevel ? { requestedThinkingLevel: options.model.thinkingLevel } : {}) },
+        meta: { optimistic: true, clientMessageId, turnSequence, ...(options.model?.thinkingLevel ? { requestedThinkingLevel: options.model.thinkingLevel } : {}) },
         authorUuid: userUuid,
         authorProfile: null,
         startedAt: null,
@@ -1300,6 +1314,7 @@ export function AppProvider({
 
       try {
         const content = await buildPromptContent(client, session.spaceId, sessionId, text, attachments);
+        dispatch({ type: "message-optimistic", sessionId, message: { ...optimistic, content, text: text || optimistic.text } });
         const response = await client.space(session.spaceId).prompt({
           mode: "agent",
           sessionId,
@@ -1312,7 +1327,7 @@ export function AppProvider({
           ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
         });
         if (response.mode !== "immediate") throw new Error("Message was not accepted immediately");
-        dispatch({ type: "turn-upsert", sessionId, session: response.session, turn: response.turn });
+        dispatch({ type: "turn-upsert", sessionId, session: response.session, turn: withFallbackUserContent(response.turn, content, text) });
         dispatch({ type: "send-end", sessionId });
       } catch (error) {
         dispatch({ type: "send-failed", sessionId, clientMessageId, message: error instanceof Error ? error.message : "Message failed to send" });

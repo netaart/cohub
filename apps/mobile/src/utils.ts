@@ -62,7 +62,11 @@ export function hasRenderableContent(content: ContentBlock[] | null | undefined)
   return (content ?? []).some((block) => {
     if (block.type === "text") return typeof block.text === "string" && block.text.trim().length > 0;
     if (block.type === "thinking") return typeof block.thinking === "string" && block.thinking.trim().length > 0;
-    if (block.type === "image") return block.source?.type === "url" && Boolean(block.source.url);
+    if (block.type === "image") {
+      if (block.source?.type === "url") return Boolean(block.source.url);
+      if (block.source?.type === "base64") return Boolean(block.source.data);
+      return false;
+    }
     if (block.type === "tool_use") return true;
     if (block.type === "tool_result") return true;
     return false;

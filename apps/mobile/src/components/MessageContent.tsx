@@ -198,8 +198,14 @@ function Block({ block, color }: { block: ContentBlock; color?: string }) {
   const accent = color ?? theme.colors.accent;
   if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} />;
   if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} />;
-  if (block.type === "image" && block.source?.type === "url") {
-    return <Image source={{ uri: block.source.url }} resizeMode="contain" style={{ width: "100%", height: 220, borderRadius: 12, backgroundColor: theme.colors.surfaceRaised }} />;
+  if (block.type === "image") {
+    const uri = block.source?.type === "url"
+      ? block.source.url
+      : block.source?.type === "base64"
+        ? `data:${block.source.media_type};base64,${block.source.data}`
+        : null;
+    if (!uri) return null;
+    return <Image source={{ uri }} resizeMode="contain" style={{ width: "100%", height: 220, borderRadius: 12, backgroundColor: theme.colors.surfaceRaised }} />;
   }
   if (block.type === "tool_use") return <ToolCall block={block} />;
   if (block.type === "tool_result") return <ToolOutput block={block} />;
@@ -329,9 +335,9 @@ export function MessageBubble({ message, local = false, onLongPress }: { message
   </View>;
 }
 
-export function StreamCard({ content, intermediateMessages = [], status, runtimePhase = null, runtimeModel = null, onLongPress }: { content: ContentBlock[]; intermediateMessages?: StreamView["intermediateMessages"]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null; onLongPress?: (text: string, origin: { x: number; y: number }) => void }) {
+export function StreamCard({ content, status, runtimePhase = null, runtimeModel = null, onLongPress }: { content: ContentBlock[]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null; onLongPress?: (text: string, origin: { x: number; y: number }) => void }) {
   const theme = useAppTheme();
-  const liveContent = [...intermediateMessages.flatMap((message) => message.content.length ? message.content : message.text ? [{ type: "text" as const, text: message.text }] : []), ...content];
+  const liveContent = content;
   const hasLivePreview = liveContent.some((block) => (block.type === "text" && block.text.trim().length > 0) || (block.type === "thinking" && block.thinking.trim().length > 0) || block.type === "tool_use");
   // Mirrors the web turn footer: live content is the status itself; otherwise surface
   // what the runtime is doing so quiet gaps (agent launch, model latency) don't look frozen.
