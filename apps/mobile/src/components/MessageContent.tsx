@@ -1,7 +1,7 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Haptics from "expo-haptics";
 import { memo, useMemo, useState, type ReactNode } from "react";
-import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type GestureResponderEvent, type ViewStyle } from "react-native";
+import { FlatList, Image, Linking, Modal, Platform, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type GestureResponderEvent, type ViewStyle } from "react-native";
 import { CodeBlock } from "@/src/components/CodeBlock";
 import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
 import { formatMessageClock } from "@/src/data/chat-format";
@@ -88,20 +88,50 @@ function TextBlock({ value, muted = false, accent, color, streaming = false }: {
   return <View style={{ gap: 9, width: "100%", minWidth: 0 }}><MarkdownBody source={displayed} accent={accent} textColor={textColor} /></View>;
 }
 
+function imageUri(block: Extract<ContentBlock, { type: "image" }>) {
+  if (block.source?.type === "url") return block.source.url;
+  if (block.source?.type === "base64") return `data:${block.source.media_type};base64,${block.source.data}`;
+  return null;
+}
+
+function ImageGallery({ uris }: { uris: string[] }) {
+  const theme = useAppTheme();
+  const { width, height } = useWindowDimensions();
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const thumbnailWidth = Math.min(164, Math.max(124, width * 0.42));
+  const viewerWidth = Math.max(1, width);
+
+  return <>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+      {uris.map((uri, index) => <Pressable key={`${uri}-${index}`} accessibilityRole="button" accessibilityLabel={`Open image ${index + 1} of ${uris.length}`} onPress={() => setSelectedIndex(index)} style={({ pressed }) => ({ width: thumbnailWidth, height: thumbnailWidth, borderRadius: 12, overflow: "hidden", backgroundColor: theme.colors.surfaceRaised, opacity: pressed ? 0.78 : 1 })}>
+        <Image source={{ uri }} resizeMode="cover" style={{ width: "100%", height: "100%" }} />
+      </Pressable>)}
+    </ScrollView>
+    <Modal visible={selectedIndex !== null} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={() => setSelectedIndex(null)}>
+      <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.96)" }}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Close image viewer" onPress={() => setSelectedIndex(null)} style={{ position: "absolute", zIndex: 2, top: 18, right: 18, width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.14)" }}>
+          <AppIcon name="x" size={22} color="#ffffff" />
+        </Pressable>
+        <FlatList
+          data={uris}
+          horizontal
+          pagingEnabled
+          initialScrollIndex={selectedIndex ?? 0}
+          getItemLayout={(_, index) => ({ length: viewerWidth, offset: viewerWidth * index, index })}
+          keyExtractor={(uri, index) => `${uri}-${index}`}
+          showsHorizontalScrollIndicator={false}
+          renderItem={({ item: uri }) => <View style={{ width: viewerWidth, height, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}><Image source={{ uri }} resizeMode="contain" style={{ width: "100%", height: "82%" }} /></View>}
+        />
+      </View>
+    </Modal>
+  </>;
+}
+
 function Block({ block, color, streaming = false }: { block: ContentBlock; color?: string; streaming?: boolean }) {
   const theme = useAppTheme();
   const accent = color ?? theme.colors.accent;
   if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} streaming={streaming} />;
   if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} streaming={streaming} />;
-  if (block.type === "image") {
-    const uri = block.source?.type === "url"
-      ? block.source.url
-      : block.source?.type === "base64"
-        ? `data:${block.source.media_type};base64,${block.source.data}`
-        : null;
-    if (!uri) return null;
-    return <Image source={{ uri }} resizeMode="contain" style={{ width: "100%", height: 220, borderRadius: 12, backgroundColor: theme.colors.surfaceRaised }} />;
-  }
   return null;
 }
 
@@ -182,6 +212,8 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
 
 export function MessageContent({ content, active = false, color }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string }) {
   const blocks = content ?? [];
+  const imageUris = blocks.flatMap((block) => block.type === "image" ? [imageUri(block)].filter((uri): uri is string => Boolean(uri)) : []);
+  const firstImageIndex = blocks.findIndex((block) => block.type === "image" && imageUri(block) !== null);
   return <View style={{ gap: 3, width: "100%", minWidth: 0 }}>{blocks.map((block, index) => {
     // Tool results never render standalone. A paired one is shown inside its
     // ToolCall; a streaming message boundary can leave a partial result whose
@@ -189,6 +221,10 @@ export function MessageContent({ content, active = false, color }: { content: Co
     // output into the bubble grows its height for as long as the tool runs.
     if (block.type === "tool_result") return null;
     if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={blocks.find((item): item is Extract<ContentBlock, { type: "tool_result" }> => item.type === "tool_result" && item.tool_use_id === block.id)} />;
+    if (block.type === "image") {
+      if (index !== firstImageIndex) return null;
+      return imageUris.length > 0 ? <ImageGallery key="image-gallery" uris={imageUris} /> : null;
+    }
     return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} />;
   })}</View>;
 }
