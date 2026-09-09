@@ -14,6 +14,7 @@
         "applinks:cohub.live"
       ],
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Cohub uses the camera to attach references to a Chat.",
         "NSMicrophoneUsageDescription": "Cohub uses the microphone for voice input.",
         "NSPhotoLibraryUsageDescription": "Cohub uses your photo library to attach references to a Chat."

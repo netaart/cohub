@@ -419,7 +419,6 @@ jobs:
           api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           wait-for-processing: "true"
-          uses-non-exempt-encryption: "false"
 
   attach-ios-fingerprint:
     name: Attach iOS OTA fingerprint

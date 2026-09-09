@@ -124,7 +124,7 @@ Create an App Store Connect API key with App Manager access, an App Store distri
 | Actions secret | `APPSTORE_CERTIFICATES_FILE_BASE64` | Base64-encoded distribution `.p12` |
 | Actions secret | `APPSTORE_CERTIFICATES_PASSWORD` | `.p12` password |
 
-The native workflow uses `apple-actions/import-codesign-certs`, `apple-actions/download-provisioning-profiles`, and `apple-actions/upload-testflight-build`. The bundle identifier is `io.github.markbang.cohubmobile`.
+The native workflow uses `apple-actions/import-codesign-certs`, `apple-actions/download-provisioning-profiles`, and `apple-actions/upload-testflight-build`. The bundle identifier is `io.github.markbang.cohubmobile`. `app.json` declares `ITSAppUsesNonExemptEncryption=false`, so each build carries its export-compliance answer and the upload action does not patch build metadata through the App Store Connect API (that request needs an App Manager or Admin key).
 
 Register `cohub://callback` in the Native Logto application. Logto credentials are runtime application configuration, not build-service credentials.
 
