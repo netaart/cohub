@@ -1,7 +1,14 @@
 /* eslint-disable react-hooks/immutability */
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
-import { Keyboard, Pressable, Text, TextInput, View } from "react-native";
-import Reanimated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { Keyboard, Pressable, TextInput, View } from "react-native";
+import Reanimated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  useDerivedValue,
+  interpolate,
+  runOnJS,
+} from "react-native-reanimated";
 import { AppIcon } from "@/src/ui";
 import { useAppTheme, typography } from "@/src/theme";
 
@@ -17,8 +24,8 @@ type ExpandableSearchBarProps = {
 };
 
 const SPRING_CONFIG = {
-  damping: 20,
-  stiffness: 300,
+  damping: 25,
+  stiffness: 400,
 };
 
 export function ExpandableSearchBar({
@@ -33,22 +40,24 @@ export function ExpandableSearchBar({
 }: ExpandableSearchBarProps) {
   const theme = useAppTheme();
   const inputRef = useRef<TextInput>(null);
-  const isExpanded = useSharedValue(0);
-  const searchBarWidth = useSharedValue(0);
-  const borderRadius = useSharedValue(999);
+  const progress = useSharedValue(0); // 0 = collapsed, 1 = expanded
+  const containerWidth = useSharedValue(300);
+
+  const focusInput = useCallback(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const expand = useCallback(() => {
-    isExpanded.value = withSpring(1, SPRING_CONFIG);
-    borderRadius.value = withSpring(12, SPRING_CONFIG);
-    setTimeout(() => inputRef.current?.focus(), 100);
-  }, [isExpanded, borderRadius]);
+    progress.value = withSpring(1, SPRING_CONFIG, () => {
+      runOnJS(focusInput)();
+    });
+  }, [progress, focusInput]);
 
   const collapse = useCallback(() => {
-    isExpanded.value = withSpring(0, SPRING_CONFIG);
-    borderRadius.value = withSpring(999, SPRING_CONFIG);
+    progress.value = withSpring(0, SPRING_CONFIG);
     Keyboard.dismiss();
     if (query) onQueryChange("");
-  }, [isExpanded, borderRadius, query, onQueryChange]);
+  }, [progress, query, onQueryChange]);
 
   useEffect(() => {
     if (queryRef && inputRef.current) {
@@ -56,20 +65,30 @@ export function ExpandableSearchBar({
     }
   }, [queryRef]);
 
-  const searchBarStyle = useAnimatedStyle(() => ({
-    width: isExpanded.value === 0 ? undefined : searchBarWidth.value,
-    borderRadius: borderRadius.value,
+  const searchBarStyle = useAnimatedStyle(() => {
+    const width = interpolate(
+      progress.value,
+      [0, 1],
+      [containerWidth.value * 0.6, containerWidth.value - 32]
+    );
+    const radius = interpolate(progress.value, [0, 1], [999, 12]);
+    return {
+      width,
+      borderRadius: radius,
+    };
+  });
+
+  const leftButtonStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: progress.value }],
   }));
 
-  const leftIconStyle = useAnimatedStyle(() => ({
-    opacity: isExpanded.value,
+  const rightGroupStyle = useAnimatedStyle(() => ({
+    opacity: 1 - progress.value,
+    transform: [{ scale: 1 - progress.value * 0.3 }],
   }));
 
-  const rightIconsStyle = useAnimatedStyle(() => ({
-    opacity: 1 - isExpanded.value,
-  }));
-
-  const expanded = isExpanded.value > 0.5;
+  const isExpanded = useDerivedValue(() => progress.value > 0.5);
 
   return (
     <View
@@ -84,36 +103,45 @@ export function ExpandableSearchBar({
         borderBottomColor: theme.colors.border,
       }}
       onLayout={(e) => {
-        searchBarWidth.value = e.nativeEvent.layout.width - 32;
+        containerWidth.value = e.nativeEvent.layout.width;
       }}
     >
-      {/* Left side: Menu or Back */}
-      <Reanimated.View style={[{ position: expanded ? "absolute" : "relative", left: expanded ? 16 : undefined, zIndex: 2 }, leftIconStyle]}>
-        {expanded && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close search"
-            hitSlop={6}
-            onPress={collapse}
-            style={({ pressed }) => ({
-              width: 42,
-              height: 42,
-              borderRadius: 21,
-              backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
-              alignItems: "center",
-              justifyContent: "center",
-            })}
-          >
-            <AppIcon name="arrow-left" size={20} color={theme.colors.textSecondary} />
-          </Pressable>
-        )}
+      {/* Back button - overlays when expanded */}
+      <Reanimated.View
+        style={[
+          {
+            position: "absolute",
+            left: 16,
+            zIndex: 10,
+          },
+          leftButtonStyle,
+        ]}
+        pointerEvents={isExpanded.value ? "auto" : "none"}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close search"
+          hitSlop={8}
+          onPress={collapse}
+          style={({ pressed }) => ({
+            width: 42,
+            height: 42,
+            borderRadius: 21,
+            backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
+            alignItems: "center",
+            justifyContent: "center",
+          })}
+        >
+          <AppIcon name="arrow-left" size={20} color={theme.colors.text} />
+        </Pressable>
       </Reanimated.View>
 
-      {!expanded && (
+      {/* Menu button */}
+      <Reanimated.View style={rightGroupStyle} pointerEvents={isExpanded.value ? "none" : "auto"}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Menu"
-          hitSlop={6}
+          hitSlop={8}
           onPress={onMenuPress}
           style={({ pressed }) => ({
             width: 42,
@@ -126,13 +154,12 @@ export function ExpandableSearchBar({
         >
           <AppIcon name="more" size={20} color={theme.colors.textSecondary} />
         </Pressable>
-      )}
+      </Reanimated.View>
 
-      {/* Search bar */}
+      {/* Search bar capsule */}
       <Reanimated.View
         style={[
           {
-            flex: expanded ? undefined : 1,
             height: 46,
             backgroundColor: theme.colors.surface,
             borderWidth: 1,
@@ -141,46 +168,37 @@ export function ExpandableSearchBar({
             alignItems: "center",
             paddingHorizontal: 14,
             gap: 10,
+            overflow: "hidden",
           },
           searchBarStyle,
         ]}
       >
         <AppIcon name="search" size={18} color={theme.colors.textMuted} />
-        {expanded ? (
-          <TextInput
-            ref={inputRef}
-            value={query}
-            onChangeText={onQueryChange}
-            placeholder={placeholder}
-            placeholderTextColor={theme.colors.textFaint}
-            style={[
-              typography.body,
-              {
-                flex: 1,
-                height: 44,
-                color: theme.colors.text,
-                padding: 0,
-              },
-            ]}
-            returnKeyType="search"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        ) : (
-          <Pressable
-            style={{ flex: 1, height: 44, justifyContent: "center" }}
-            onPress={expand}
-            accessibilityRole="button"
-            accessibilityLabel="Search"
-          >
-            <Text style={[typography.body, { color: theme.colors.textFaint }]}>{placeholder}</Text>
-          </Pressable>
-        )}
-        {expanded && query.length > 0 && (
+        <TextInput
+          ref={inputRef}
+          value={query}
+          onChangeText={onQueryChange}
+          placeholder={placeholder}
+          placeholderTextColor={theme.colors.textFaint}
+          style={[
+            typography.body,
+            {
+              flex: 1,
+              height: 44,
+              color: theme.colors.text,
+              padding: 0,
+            },
+          ]}
+          returnKeyType="search"
+          autoCapitalize="none"
+          autoCorrect={false}
+          onFocus={expand}
+        />
+        {query.length > 0 && (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Clear search"
-            hitSlop={6}
+            hitSlop={8}
             onPress={() => onQueryChange("")}
             style={({ pressed }) => ({
               width: 28,
@@ -197,43 +215,44 @@ export function ExpandableSearchBar({
       </Reanimated.View>
 
       {/* Right side: Avatar, Plus, Settings */}
-      {!expanded && (
-        <Reanimated.View style={[{ flexDirection: "row", alignItems: "center", gap: 8 }, rightIconsStyle]}>
-          {account}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Create new"
-            hitSlop={6}
-            onPress={onCreate}
-            style={({ pressed }) => ({
-              width: 42,
-              height: 42,
-              borderRadius: 21,
-              backgroundColor: pressed ? theme.colors.accentSoft : "transparent",
-              alignItems: "center",
-              justifyContent: "center",
-            })}
-          >
-            <AppIcon name="plus" size={20} color={theme.colors.accent} />
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-            hitSlop={6}
-            onPress={onSettingsPress}
-            style={({ pressed }) => ({
-              width: 42,
-              height: 42,
-              borderRadius: 21,
-              backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
-              alignItems: "center",
-              justifyContent: "center",
-            })}
-          >
-            <AppIcon name="settings" size={20} color={theme.colors.textSecondary} />
-          </Pressable>
-        </Reanimated.View>
-      )}
+      <Reanimated.View
+        style={[{ flexDirection: "row", alignItems: "center", gap: 8 }, rightGroupStyle]}
+        pointerEvents={isExpanded.value ? "none" : "auto"}
+      >
+        {account}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Create new"
+          hitSlop={8}
+          onPress={onCreate}
+          style={({ pressed }) => ({
+            width: 42,
+            height: 42,
+            borderRadius: 21,
+            backgroundColor: pressed ? theme.colors.accentSoft : "transparent",
+            alignItems: "center",
+            justifyContent: "center",
+          })}
+        >
+          <AppIcon name="plus" size={20} color={theme.colors.accent} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          hitSlop={8}
+          onPress={onSettingsPress}
+          style={({ pressed }) => ({
+            width: 42,
+            height: 42,
+            borderRadius: 21,
+            backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
+            alignItems: "center",
+            justifyContent: "center",
+          })}
+        >
+          <AppIcon name="settings" size={20} color={theme.colors.textSecondary} />
+        </Pressable>
+      </Reanimated.View>
     </View>
   );
 }
