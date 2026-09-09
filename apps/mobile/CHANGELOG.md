@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.0](https://github.com/markbang/cohub-mobile/compare/v1.9.0...v2.0.0) (2026-09-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ui:** Web platform removed. This app now targets iOS and Android only.
+
+### Features
+
+* **ui:** migrate to NativeTabs and remove web support ([f03a0dc](https://github.com/markbang/cohub-mobile/commit/f03a0dcaba3927262a31effa3320d094513c8540))
+
+
+### Fixes
+
+* **ota:** report fingerprint mismatch as an expected skip ([1dc4460](https://github.com/markbang/cohub-mobile/commit/1dc44607c1c98207c84b2faf21138156d90987bd))
+
+
+### CI
+
+* drop the removed web bundle job ([0342303](https://github.com/markbang/cohub-mobile/commit/03423035180b54e38c5526c1593e6cbc1552d46d))
+
 ## [1.9.0](https://github.com/markbang/cohub-mobile/compare/v1.8.2...v1.9.0) (2026-09-09)
 
 
