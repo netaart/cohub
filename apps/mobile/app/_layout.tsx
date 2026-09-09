@@ -120,23 +120,27 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
       <NativeInteractionBridge />
       <View style={{ flex: 1 }}>
+        {/* Deeper screens use the platform transition: the iOS push (with its interactive back
+            swipe) and Android's own forward animation. Overriding it replaces a platform behavior
+            with an imitation. */}
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="chat/[sessionId]" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="space/[spaceId]" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="space/[spaceId]/files" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="space/[spaceId]/file" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="work/[appId]" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="chat/[sessionId]" />
+          <Stack.Screen name="space/[spaceId]" />
+          <Stack.Screen name="space/[spaceId]/files" />
+          <Stack.Screen name="space/[spaceId]/file" />
+          <Stack.Screen name="work/[appId]" />
+          <Stack.Screen name="image-viewer" options={{ contentStyle: { backgroundColor: "#000000" } }} />
           <Stack.Screen name="new-chat" options={{ title: "New Chat", presentation: "modal", animation: "slide_from_bottom" }} />
-          <Stack.Screen name="profile" options={{ title: "Profile", animation: "slide_from_right" }} />
-          <Stack.Screen name="settings" options={{ title: "Settings", animation: "slide_from_right" }} />
-          <Stack.Screen name="appearance" options={{ title: "Appearance", animation: "slide_from_right" }} />
-          <Stack.Screen name="about" options={{ title: "About", animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/index" options={{ title: "Debug", animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/streaming" options={{ title: "Streaming", animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/tools" options={{ title: "Tools", animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/markdown" options={{ title: "Markdown", animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/list" options={{ title: "Long List", animation: "slide_from_right" }} />
+          <Stack.Screen name="profile" options={{ title: "Profile" }} />
+          <Stack.Screen name="settings" options={{ title: "Settings" }} />
+          <Stack.Screen name="appearance" options={{ title: "Appearance" }} />
+          <Stack.Screen name="about" options={{ title: "About" }} />
+          <Stack.Screen name="debug/index" options={{ title: "Debug" }} />
+          <Stack.Screen name="debug/streaming" options={{ title: "Streaming" }} />
+          <Stack.Screen name="debug/tools" options={{ title: "Tools" }} />
+          <Stack.Screen name="debug/markdown" options={{ title: "Markdown" }} />
+          <Stack.Screen name="debug/list" options={{ title: "Long List" }} />
         </Stack>
         <AppUpdateBanner />
       </View>

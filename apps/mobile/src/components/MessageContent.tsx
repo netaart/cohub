@@ -1,13 +1,15 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Clipboard from "expo-clipboard";
+import { Link } from "expo-router";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CodeBlock } from "@/src/components/CodeBlock";
 import { StreamingGlyph } from "@/src/components/StreamingGlyph";
 import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
+import Reanimated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming, type SharedValue } from "react-native-reanimated";
 import { formatMessageClock } from "@/src/data/chat-format";
+import { setImageViewerPayload } from "@/src/data/image-viewer";
 import type { MarkdownBlock, MarkdownInline, MarkdownTableAlignment } from "@/src/data/markdown";
 import { graphemeLength, splitGraphemes } from "@/src/data/stream-reveal";
 import { parseMarkdownEntries, StreamingMarkdownCache, type MarkdownBlockEntry } from "@/src/data/stream-markdown-cache";
@@ -138,21 +140,13 @@ function imageUri(block: Extract<ContentBlock, { type: "image" }>) {
 
 function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number }) {
   const theme = useAppTheme();
-  const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [viewerKey, setViewerKey] = useState(0);
+  const { width } = useWindowDimensions();
   const galleryWidth = maxWidth ?? width;
   const thumbnailWidth = Math.min(164, Math.max(124, Math.min(width * 0.42, galleryWidth)));
-  const viewerWidth = Math.max(1, width);
 
   const galleryGesture = useMemo(() => Gesture.Native().disallowInterruption(true), []);
-  const openImage = (index: number) => {
-    setViewerKey((current) => current + 1);
-    setSelectedIndex(index);
-  };
 
-  return <>
+  return (
     <GestureDetector gesture={galleryGesture}>
       <FlatList
         data={uris}
@@ -164,32 +158,18 @@ function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number })
         style={{ width: galleryWidth, maxWidth: "100%", height: thumbnailWidth, flexGrow: 0, flexShrink: 1 }}
         contentContainerStyle={{ gap: 8, paddingRight: 4 }}
         keyExtractor={(uri, index) => `${uri}-${index}`}
-        renderItem={({ item: uri, index }) => <Pressable accessibilityRole="button" accessibilityLabel={`Open image ${index + 1} of ${uris.length}`} onPress={() => openImage(index)} style={({ pressed }) => ({ width: thumbnailWidth, height: thumbnailWidth, borderRadius: 12, overflow: "hidden", backgroundColor: theme.colors.surfaceRaised, opacity: pressed ? 0.78 : 1 })}>
-          <Image source={{ uri }} resizeMode="cover" style={{ width: "100%", height: "100%" }} />
-        </Pressable>}
+        renderItem={({ item: uri, index }) => (
+          <Link href="/image-viewer" asChild onPress={() => setImageViewerPayload({ uris, index })}>
+            <Link.Trigger withAppleZoom>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Open image ${index + 1} of ${uris.length}`} style={({ pressed }) => ({ width: thumbnailWidth, height: thumbnailWidth, borderRadius: 12, overflow: "hidden", backgroundColor: theme.colors.surfaceRaised, opacity: pressed ? 0.78 : 1 })}>
+                <Image source={{ uri }} resizeMode="cover" style={{ width: "100%", height: "100%" }} />
+              </Pressable>
+            </Link.Trigger>
+          </Link>
+        )}
       />
     </GestureDetector>
-    <Modal visible={selectedIndex !== null} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={() => setSelectedIndex(null)}>
-      <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.96)" }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Close image viewer" onPress={() => setSelectedIndex(null)} style={{ position: "absolute", zIndex: 2, top: insets.top + 8, right: 14, width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.14)" }}>
-          <AppIcon name="x" size={22} color="#ffffff" />
-        </Pressable>
-        <View pointerEvents="none" style={{ position: "absolute", zIndex: 2, top: insets.top + 19, left: 18 }}><Text style={[typography.caption, { color: "#ffffff" }]}>{(selectedIndex ?? 0) + 1} / {uris.length}</Text></View>
-        <FlatList
-          key={`image-viewer-${viewerKey}`}
-          data={uris}
-          horizontal
-          pagingEnabled
-          initialScrollIndex={selectedIndex ?? 0}
-          getItemLayout={(_, index) => ({ length: viewerWidth, offset: viewerWidth * index, index })}
-          onMomentumScrollEnd={(event) => setSelectedIndex(Math.round(event.nativeEvent.contentOffset.x / viewerWidth))}
-          keyExtractor={(uri, index) => `${uri}-${index}`}
-          showsHorizontalScrollIndicator={false}
-          renderItem={({ item: uri }) => <View style={{ width: viewerWidth, height, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}><Image source={{ uri }} resizeMode="contain" style={{ width: "100%", height: "82%" }} /></View>}
-        />
-      </View>
-    </Modal>
-  </>;
+  );
 }
 
 function Block({ block, color, streaming = false }: { block: ContentBlock; color?: string; streaming?: boolean }) {
@@ -278,7 +258,7 @@ export function MessageContent({ content, active = false, color, imageMaxWidth }
 function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number, fitContent = false, fillUserWidth = false): ViewStyle {
   return {
     maxWidth,
-    ...(side === "assistant" && !fitContent ? { width: maxWidth } : side === "user" && fillUserWidth ? { width: maxWidth } : null),
+    ...(side === "assistant" && !fitContent ? { width: maxWidth } : side === "user" ? { width: fillUserWidth ? maxWidth : Math.min(maxWidth, 132) } : null),
     minWidth: 0,
     position: "relative",
     alignSelf: side === "user" ? "flex-end" : "flex-start",
@@ -313,6 +293,25 @@ function ChatBubbleFrame({
   return <View style={style}>{children}</View>;
 }
 
+function TypingDot({ progress, index, color }: { progress: SharedValue<number>; index: number; color: string }) {
+  const style = useAnimatedStyle(() => ({
+    opacity: 0.35 + progress.value * (index === 1 ? 0.65 : 0.35),
+    transform: [{ translateY: progress.value * (index === 1 ? -3 : -1) }],
+  }));
+  return <Reanimated.View style={[{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }, style]} />;
+}
+
+function TypingIndicator() {
+  const theme = useAppTheme();
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withRepeat(withSequence(withTiming(1, { duration: 420 }), withTiming(0, { duration: 420 })), -1, true);
+  }, [progress]);
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 42, minHeight: 20 }}>
+    {[0, 1, 2].map((index) => <TypingDot key={index} progress={progress} index={index} color={theme.colors.textMuted} />)}
+  </View>;
+}
+
 function BubbleMeta({ clock, local = false, side, live = false }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean }) {
   const theme = useAppTheme();
   const color = side === "user" ? theme.colors.userBubbleMeta : theme.colors.textFaint;
@@ -339,7 +338,9 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const isSystem = message.role === "system";
   if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || "System update"}</Text></View>;
   const thinkingLevel = requestedThinkingLevel(message.meta);
-  const inputTokens = typeof message.usage?.input === "number" && Number.isFinite(message.usage.input) && message.usage.input > 0 ? formatNumber(message.usage.input) : null;
+  const inputTokenValue = (message.usage?.input ?? 0) + (message.usage?.cacheRead ?? 0);
+  const cachedInputTokens = typeof message.usage?.cacheRead === "number" && Number.isFinite(message.usage.cacheRead) && message.usage.cacheRead > 0 ? formatNumber(message.usage.cacheRead) : null;
+  const inputTokens = inputTokenValue > 0 ? formatNumber(inputTokenValue) : null;
   const outputTokens = typeof message.usage?.output === "number" && Number.isFinite(message.usage.output) && message.usage.output > 0 ? formatNumber(message.usage.output) : null;
   const side = isUser ? "user" : "assistant";
   const textColor = isUser ? theme.colors.userBubbleText : undefined;
@@ -353,7 +354,7 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
       {message.errorMessage ? <Text selectable style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
       <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} />
     </ChatBubbleFrame>
-    {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}{inputTokens ? ` · ↑${inputTokens}` : ""}{outputTokens ? ` · ↓${outputTokens}` : ""}</Text> : null}
+    {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}{inputTokens ? ` · ↑${inputTokens}${cachedInputTokens ? ` (${cachedInputTokens} cached)` : ""}` : ""}{outputTokens ? ` · ↓${outputTokens}` : ""}</Text> : null}
     {copyText && !isUser ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3, marginLeft: side === "assistant" ? 4 : 0, marginRight: side === "user" ? 4 : 0 }}>
       {onCopy ? <Pressable accessibilityRole="button" accessibilityLabel={copied ? "Message copied" : "Copy message"} onPress={() => { onCopy(copyText); setCopied(true); }} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}><AppIcon name={copied ? "check" : "copy"} size={14} color={copied ? theme.colors.success : theme.colors.textFaint} /></Pressable> : null}
       {!isUser && onFork && typeof message.meta?.turnId === "string" ? <Pressable accessibilityRole="button" accessibilityLabel="Fork conversation here" disabled={forkDisabled} onPress={() => onFork(message)} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: forkDisabled ? 0.45 : pressed ? 0.55 : 1 })}>{forking ? <ActivityIndicator size="small" color={theme.colors.textFaint} /> : <AppIcon name="git-fork" size={14} color={theme.colors.textFaint} />}</Pressable> : null}
@@ -381,6 +382,7 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
   const live = status === "pending" || status === "streaming";
   return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
     <ChatBubbleFrame side="assistant" fitContent={!hasLivePreview && !hasRenderableContent(liveContent)}>
+      {!statusLabel && !hasLivePreview && !hasRenderableContent(liveContent) ? <TypingIndicator /> : null}
       {statusLabel ? <Text style={[typography.caption, { color: theme.colors.danger, marginBottom: hasLivePreview || runtimeLabel ? 6 : 0 }]}>{statusLabel}</Text> : null}
       {runtimeLabel ? <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</Text> : null}
       {hasLivePreview || hasRenderableContent(liveContent) ? <MessageContent active={live} content={liveContent} /> : null}

@@ -169,7 +169,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   // The chip row is a native horizontal ScrollView. Touch-start inside it must scroll the row instead of swiping the panel.
   const chipsRect = useSharedValue<ChipsRect>({ x: -1, y: -1, width: 0, height: 0 });
   const panGesture = useMemo(() => Gesture.Pan()
-    .activeOffsetX([-8, 8])
+    .activeOffsetX([-4, 4])
     .failOffsetY([-15, 15])
     .onTouchesDown((event, manager) => {
       "worklet";

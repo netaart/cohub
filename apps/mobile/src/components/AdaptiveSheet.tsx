@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  Animated,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
-  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -15,13 +13,15 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Reanimated, { cancelAnimation, ReduceMotion, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { scheduleOnRN } from "react-native-worklets";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, IconButton, type IconName } from "@/src/ui";
 
 const COMPACT_BREAKPOINT = 720;
 const OPEN_DURATION_MS = 220;
-const CLOSE_DURATION_MS = 170;
 
 type AdaptiveSheetProps = {
   visible: boolean;
@@ -54,54 +54,51 @@ export function AdaptiveSheet({
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const compact = Math.min(width, height) < COMPACT_BREAKPOINT;
-  const [progress] = useState(() => new Animated.Value(0));
-  const [dragOffset] = useState(() => new Animated.Value(0));
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const hiddenOffset = Math.min(height * 0.56, 520);
+  const progress = useSharedValue(0);
+  const dragY = useSharedValue(0);
+  const dragContext = useSharedValue(0);
+  const revealDistance = useSharedValue(hiddenOffset);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const requestClose = useCallback(() => {
     if (dismissible) onClose();
   }, [dismissible, onClose]);
 
-  const restorePanel = useCallback(() => {
-    Animated.spring(dragOffset, {
-      toValue: 0,
-      damping: 24,
-      stiffness: 260,
-      mass: 0.9,
-      useNativeDriver: true,
-    }).start();
-  }, [dragOffset]);
-
-  const panResponder = useMemo(
+  const pan = useMemo(
     () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          compact &&
-          dismissible &&
-          gesture.dy > 6 &&
-          Math.abs(gesture.dy) > Math.abs(gesture.dx),
-        onPanResponderMove: (_, gesture) => {
-          dragOffset.setValue(Math.max(0, gesture.dy));
-        },
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.dy > 88 || gesture.vy > 0.85) {
-            Animated.timing(dragOffset, {
-              toValue: height,
-              duration: CLOSE_DURATION_MS,
-              useNativeDriver: true,
-            }).start(({ finished }) => {
-              if (finished) requestClose();
-            });
+      Gesture.Pan()
+        .enabled(compact && dismissible)
+        .activeOffsetY([-8, 8])
+        .failOffsetX([-12, 12])
+        .onStart(() => {
+          // Grabbing a sheet mid-flight must continue from where the eye last saw it.
+          cancelAnimation(dragY);
+          dragContext.set(dragY.get());
+        })
+        .onUpdate((event) => {
+          dragY.set(Math.max(0, dragContext.get() + event.translationY));
+        })
+        .onEnd((event) => {
+          if (event.translationY > 88 || event.velocityY > 850) {
+            dragY.set(
+              withSpring(height, { duration: 300, dampingRatio: 1, velocity: event.velocityY, overshootClamping: true, reduceMotion: ReduceMotion.System }, (finished) => {
+                if (finished) scheduleOnRN(requestClose);
+              }),
+            );
             return;
           }
-          restorePanel();
-        },
-        onPanResponderTerminate: restorePanel,
-        onPanResponderTerminationRequest: () => false,
-      }),
-    [compact, dismissible, dragOffset, height, requestClose, restorePanel],
+          dragY.set(withSpring(0, { duration: 300, dampingRatio: 0.8, velocity: event.velocityY, reduceMotion: ReduceMotion.System }));
+        })
+        .onFinalize((_event, success) => {
+          if (!success) dragY.set(withSpring(0, { duration: 300, dampingRatio: 0.8, reduceMotion: ReduceMotion.System }));
+        }),
+    [compact, dismissible, dragContext, dragY, height, requestClose],
   );
+
+  useEffect(() => {
+    revealDistance.set(hiddenOffset);
+  }, [hiddenOffset, revealDistance]);
 
   useEffect(() => {
     if (!visible) return;
@@ -116,51 +113,34 @@ export function AdaptiveSheet({
   }, [visible]);
 
   useEffect(() => {
-    progress.stopAnimation();
-    dragOffset.stopAnimation();
-    dragOffset.setValue(0);
+    cancelAnimation(progress);
+    cancelAnimation(dragY);
+    dragY.set(0);
+    dragContext.set(0);
 
     if (!visible) {
-      progress.setValue(0);
+      progress.set(0);
       return;
     }
 
     const frame = requestAnimationFrame(() => {
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: OPEN_DURATION_MS,
-        useNativeDriver: true,
-      }).start();
+      progress.set(withTiming(1, { duration: OPEN_DURATION_MS, reduceMotion: ReduceMotion.System }));
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [dragOffset, progress, visible]);
+  }, [dragContext, dragY, progress, visible]);
 
-  const backdropOpacity = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 0.56],
-  });
-  const revealOffset = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [hiddenOffset, 0],
-  });
-  const desktopOffset = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [14, 0],
-  });
-  const desktopScale = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.98, 1],
-  });
-  const animatedPanelStyle = compact
-    ? {
-        opacity: progress,
-        transform: [{ translateY: Animated.add(revealOffset, dragOffset) }],
-      }
-    : {
-        opacity: progress,
-        transform: [{ translateY: desktopOffset }, { scale: desktopScale }],
-      };
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: progress.get() * 0.56,
+  }));
+  const compactPanelStyle = useAnimatedStyle(() => ({
+    opacity: progress.get(),
+    transform: [{ translateY: (1 - progress.get()) * revealDistance.get() + dragY.get() }],
+  }));
+  const desktopPanelStyle = useAnimatedStyle(() => ({
+    opacity: progress.get(),
+    transform: [{ translateY: (1 - progress.get()) * 14 }, { scale: 0.98 + progress.get() * 0.02 }],
+  }));
   const availableHeight = Math.max(0, height - keyboardHeight);
   const maxHeight = compact
     ? Math.max(0, availableHeight - insets.top - 12)
@@ -184,16 +164,16 @@ export function AdaptiveSheet({
       hardwareAccelerated
       onRequestClose={requestClose}
     >
-      <View style={styles.overlay} testID={testID}>
-        <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
+      <GestureHandlerRootView style={styles.overlay} testID={testID}>
+        <Reanimated.View style={[styles.backdrop, backdropStyle]}>
           <Pressable accessible={false} aria-hidden tabIndex={-1} style={styles.fill} onPress={requestClose} />
-        </Animated.View>
+        </Reanimated.View>
         <KeyboardAvoidingView
           pointerEvents="box-none"
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={[styles.stage, compact ? styles.compactStage : styles.desktopStage]}
         >
-          <Animated.View
+          <Reanimated.View
             collapsable={false}
             accessibilityViewIsModal
             role="dialog"
@@ -206,17 +186,15 @@ export function AdaptiveSheet({
                 backgroundColor: theme.colors.surface,
                 borderColor: theme.colors.border,
               },
-              animatedPanelStyle,
+              compact ? compactPanelStyle : desktopPanelStyle,
             ]}
           >
             {compact ? (
-              <View
-                testID={dismissible && testID ? `${testID}-drag-handle` : undefined}
-                style={styles.dragArea}
-                {...(dismissible ? panResponder.panHandlers : {})}
-              >
-                {dismissible ? <View style={[styles.dragHandle, { backgroundColor: theme.colors.borderStrong }]} /> : null}
-              </View>
+              <GestureDetector gesture={pan}>
+                <View testID={dismissible && testID ? `${testID}-drag-handle` : undefined} style={styles.dragArea}>
+                  {dismissible ? <View style={[styles.dragHandle, { backgroundColor: theme.colors.borderStrong }]} /> : null}
+                </View>
+              </GestureDetector>
             ) : null}
             <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
               <View style={styles.headerText}>
@@ -260,9 +238,9 @@ export function AdaptiveSheet({
                 {footer}
               </View>
             ) : null}
-          </Animated.View>
+          </Reanimated.View>
         </KeyboardAvoidingView>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

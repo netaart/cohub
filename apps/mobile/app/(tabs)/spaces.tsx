@@ -1,5 +1,5 @@
-import { useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useRouter, useScrollToTop } from "expo-router";
+import { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
@@ -25,6 +25,8 @@ export default function SpacesScreen() {
   const { state, client, refreshHome, createSpace, toggleSpacePin } = useApp();
   const dataError = state.error ?? state.spacesError;
   const [query, setQuery] = useState("");
+  const listRef = useRef<FlatList<SpaceListItem>>(null);
+  useScrollToTop(listRef);
   const [filter, setFilter] = useState<SpaceFilter>("recent");
   const [pinningSpaceId, setPinningSpaceId] = useState<string | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);
@@ -93,11 +95,12 @@ export default function SpacesScreen() {
       query={query}
       onQueryChange={setQuery}
       placeholder="Find a Space"
-      account={<AccountAvatar onPress={() => router.push("/profile")} />}
+      account={<AccountAvatar />}
       onCreate={() => { setCreateError(null); setCreateOpen(true); }}
     />
     {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
     <FlatList
+      ref={listRef}
       data={listItems}
       keyExtractor={(item) => item.kind === "remote" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
       renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} chatCount={state.sessions.filter((session) => session.spaceId === item.space.id).length} pinning={pinningSpaceId === item.space.id} onTogglePin={client ? () => void togglePin(item.space.id) : undefined} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}

@@ -1,4 +1,4 @@
-import { useIsFocused, useRouter } from "expo-router";
+import { useIsFocused, useRouter, useScrollToTop } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
@@ -28,6 +28,8 @@ export default function ChatsScreen() {
   const { state, client, connectionState, refreshHome, refreshSessionStatuses, loadMoreSessions } = useApp();
   const dataError = state.error ?? state.sessionsError ?? state.sessionStatusError;
   const searchRef = useRef<TextInput>(null);
+  const listRef = useRef<FlatList<ChatListItem>>(null);
+  useScrollToTop(listRef);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const remoteSearch = useRemoteSearch(client, query, { enabled: filter === "all", types: CHAT_SEARCH_TYPES });
@@ -82,12 +84,13 @@ export default function ChatsScreen() {
         query={query}
         onQueryChange={setQuery}
         queryRef={searchRef}
-        account={<AccountAvatar onPress={() => router.push("/profile")} />}
+        account={<AccountAvatar />}
         onCreate={() => router.push("/new-chat")}
       />
       <ConnectionBanner state={connectionState} />
       {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
       <FlatList
+        ref={listRef}
         data={listItems}
         keyExtractor={(item) => item.kind === "remote-session" ? `remote-session:${item.hit.sessionId}` : item.kind === "local-session" ? `session:${item.session.id}` : item.kind === "remote-space" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
         renderItem={({ item }) => {

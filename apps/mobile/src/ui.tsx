@@ -84,11 +84,12 @@ export function IconButton({ name, onPress, label, size = 42, tone = "default", 
   );
 }
 
-export function Screen({ children, scroll = false, refreshing = false, onRefresh, contentStyle, keyboard = false }: { children: ReactNode; scroll?: boolean; refreshing?: boolean; onRefresh?: () => void; contentStyle?: ViewStyle; keyboard?: boolean }) {
+export function Screen({ children, scroll = false, refreshing = false, onRefresh, contentStyle, keyboard = false, scrollRef }: { children: ReactNode; scroll?: boolean; refreshing?: boolean; onRefresh?: () => void; contentStyle?: ViewStyle; keyboard?: boolean; scrollRef?: React.RefObject<ScrollView | null> }) {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
   const body = scroll ? (
     <ScrollView
+      ref={scrollRef}
       style={{ flex: 1, backgroundColor: theme.colors.background }}
       contentContainerStyle={[{ paddingBottom: insets.bottom + 28 }, contentStyle]}
       refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} colors={[theme.colors.accent]} /> : undefined}

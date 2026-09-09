@@ -1,6 +1,6 @@
-import { useRouter } from "expo-router";
-import { useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import { useRouter, useScrollToTop } from "expo-router";
+import { useMemo, useRef, useState } from "react";
+import { ScrollView, Text, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { useApp } from "@/src/data/context";
@@ -16,9 +16,11 @@ export default function ActivityScreen() {
   const { state, activityItems, connectionState, refreshHome } = useApp();
   const dataError = state.error ?? state.sessionsError ?? state.sessionStatusError ?? state.activityError;
   const [filter, setFilter] = useState<"all" | "running" | "complete">("all");
+  const scrollRef = useRef<ScrollView>(null);
+  useScrollToTop(scrollRef);
   const items = useMemo(() => filter === "all" ? activityItems : activityItems.filter((item) => item.status === filter), [activityItems, filter]);
-  return <Screen scroll refreshing={state.refreshing} onRefresh={() => void refreshHome()} contentStyle={{ paddingBottom: tabBarInset }}>
-    <TopBar title="Activity" subtitle={dataError ? "Activity unavailable" : "Agent runs and results"} left={<AccountAvatar onPress={() => router.push("/profile")} size={40} />} right={<IconButton name="refresh" label="Refresh activity" size={40} onPress={() => void refreshHome()} />} />
+  return <Screen scroll scrollRef={scrollRef} refreshing={state.refreshing} onRefresh={() => void refreshHome()} contentStyle={{ paddingBottom: tabBarInset }}>
+    <TopBar title="Activity" subtitle={dataError ? "Activity unavailable" : "Agent runs and results"} left={<AccountAvatar size={40} />} right={<IconButton name="refresh" label="Refresh activity" size={40} onPress={() => void refreshHome()} />} />
     <ConnectionBanner state={connectionState} />
     {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
     <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingTop: 14, gap: 10 }}>

@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useCallback, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -84,7 +84,9 @@ export default function ProfileScreen() {
   return (
     <Screen scroll>
       <View style={styles.profileHeader}>
-        <Avatar name={name} uri={avatar} size={76} online={connectionState === "open"} />
+        <Link.AppleZoomTarget>
+          <Avatar name={name} uri={avatar} size={76} online={connectionState === "open"} />
+        </Link.AppleZoomTarget>
         <Text style={[typography.title, { color: theme.colors.text, marginTop: 12 }]}>
           {name}
         </Text>
