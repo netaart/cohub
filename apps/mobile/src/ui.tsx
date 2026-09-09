@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -18,6 +18,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Reanimated, { LinearTransition } from "react-native-reanimated";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { icons, type IconName } from "@/src/icons";
 import { getComposerActionState } from "@/src/data/composer-state";
@@ -209,11 +210,14 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
 
 export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel = "Automatic", modelStatus = "unknown", disabled = false, sending = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
   const theme = useAppTheme();
+  const [focused, setFocused] = useState(false);
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
+  const expanded = focused || value.length > 0 || hasAttachment || voiceActive;
   const modelStatusLabel = modelStatus === "available" ? "operational" : modelStatus === "degraded" ? "degraded" : modelStatus === "outage" ? "outage" : "status unavailable";
   return (
     <View style={[styles.composerWrap, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
-      <View style={[styles.composer, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+      <Reanimated.View layout={LinearTransition.duration(220)} style={[styles.composer, expanded ? styles.composerExpanded : styles.composerCompact, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
+        {!expanded ? <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} /> : null}
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -222,7 +226,9 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           maxLength={12000}
           placeholder={placeholder}
           placeholderTextColor={theme.colors.textFaint}
-          style={[typography.body, styles.composerText, { color: theme.colors.text }]}
+          style={[typography.body, styles.composerText, expanded ? styles.composerTextExpanded : styles.composerTextCompact, { color: theme.colors.text }]}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onSubmitEditing={(event) => {
             if (Platform.OS === "web" && canSend) {
               event.preventDefault();
@@ -231,7 +237,7 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           }}
           blurOnSubmit={false}
         />
-        <View style={styles.composerToolbar}>
+        {expanded ? <View style={styles.composerToolbar}>
           <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} />
           <View style={styles.composerToolbarSpacer} />
           {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}, ${modelStatusLabel}`} disabled={blocked} onPress={onModelPress} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
@@ -239,8 +245,13 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
             <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} fill={canStop ? theme.colors.background : undefined} />
           </Pressable>
-        </View>
-      </View>
+        </View> : <View style={styles.composerCompactActions}>
+          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
+            <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} fill={canStop ? theme.colors.background : undefined} />
+          </Pressable>
+        </View>}
+      </Reanimated.View>
     </View>
   );
 }
@@ -288,9 +299,14 @@ const styles = StyleSheet.create({
   primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   searchField: { minHeight: 48, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10 },
   composerWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10, borderTopWidth: 1 },
-  composer: { minHeight: 84, borderWidth: 1, borderRadius: 14, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 5, gap: 2 },
-  composerText: { width: "100%", minHeight: 34, maxHeight: 120, paddingHorizontal: 5, paddingTop: 0, paddingBottom: 4, textAlignVertical: "top" },
+  composer: { borderWidth: 1, paddingHorizontal: 8, gap: 2, overflow: "hidden" },
+  composerCompact: { minHeight: 56, borderRadius: 28, flexDirection: "row", alignItems: "center", paddingVertical: 6 },
+  composerExpanded: { minHeight: 84, borderRadius: 18, paddingTop: 8, paddingBottom: 5 },
+  composerText: { minHeight: 34, maxHeight: 120, paddingHorizontal: 5, paddingTop: 0, paddingBottom: 4, textAlignVertical: "top" },
+  composerTextCompact: { flex: 1, minWidth: 0, maxHeight: 42, paddingVertical: 3 },
+  composerTextExpanded: { width: "100%", minHeight: 34 },
   composerToolbar: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: 3 },
+  composerCompactActions: { flexDirection: "row", alignItems: "center", gap: 3 },
   composerToolbarSpacer: { flex: 1, minWidth: 0 },
   composerModel: { minHeight: 30, maxWidth: "58%", paddingHorizontal: 5, borderRadius: 9, flexDirection: "row", alignItems: "center", gap: 5, overflow: "hidden" },
   sendButton: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center" },

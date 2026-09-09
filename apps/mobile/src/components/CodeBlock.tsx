@@ -134,7 +134,7 @@ export function CodeBlock({
               {gutter}
             </Text>
           ) : null}
-          <Text style={[codeTextStyle, { flex: 1 }]}>{renderLines(lines, fallbackColor)}</Text>
+          <Text selectable style={[codeTextStyle, { flex: 1 }]}>{renderLines(lines, fallbackColor)}</Text>
         </View>
       </View>
     </View>

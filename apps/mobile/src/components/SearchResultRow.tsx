@@ -8,21 +8,22 @@ import { formatRelativeTime, shortPreview } from "@/src/utils";
 type SessionSearchRowProps = {
   hit: RemoteSessionSearchHit;
   onPress: (target?: SessionNavigationTarget) => void;
+  showSpace?: boolean;
 };
 
-export function SessionSearchRow({ hit, onPress }: SessionSearchRowProps) {
+export function SessionSearchRow({ hit, onPress, showSpace = true }: SessionSearchRowProps) {
   const theme = useAppTheme();
   const spaceName = hit.spaceName?.trim() || "Space";
   const target = hit.turnSequence == null && !hit.turnId ? undefined : { ...(hit.turnSequence != null ? { turn: hit.turnSequence } : {}), ...(hit.turnId ? { turnId: hit.turnId } : {}) };
   const content = <>
-    <Avatar name={spaceName} uri={hit.spaceAvatarUrl} size={48} />
+    {showSpace ? <Avatar name={spaceName} uri={hit.spaceAvatarUrl} size={48} /> : null}
     <View style={{ flex: 1, minWidth: 0, alignSelf: "stretch", justifyContent: "center" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{hit.title}</Text>
         <Text style={[typography.micro, { color: theme.colors.textFaint }]}>{formatRelativeTime(hit.updatedAt)}</Text>
       </View>
       <Text numberOfLines={2} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 4 }]}>
-        {spaceName} · {shortPreview(hit.preview, 84)}
+        {showSpace ? `${spaceName} · ` : ""}{shortPreview(hit.preview, 84)}
       </Text>
     </View>
     <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />

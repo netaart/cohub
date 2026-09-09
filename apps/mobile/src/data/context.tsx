@@ -36,6 +36,7 @@ import type {
 } from "@/src/data/types";
 import { hasFinalAssistantForTurn, isActiveTurnStatus, isTerminalTurnStatus, liveStreamStatusFromPatch, pendingStreamForTurn, streamRecoveryFromTail } from "@/src/data/chat-stream";
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, turnSequenceForMessage, withFallbackUserContent } from "@/src/data/session-history";
+import { forkSessionTurn } from "@/src/data/session-fork";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
 import { mockMessages, mockModels, mockSessions, mockSpaces, mockTurnIndex, mockTurns, mockUsage } from "@/src/data/mock";
@@ -645,6 +646,7 @@ export type AppContextValue = {
   toggleSpacePin: (spaceId: string) => Promise<boolean>;
   upsertSpace: (space: SpaceRecord) => void;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  forkSession: (spaceId: string, sessionId: string, turn: Pick<SessionTurnRecord, "id" | "sourceTurnId">) => Promise<SessionRecord>;
   clearCache: () => Promise<void>;
   loadSessionReadSequence: (sessionId: string) => Promise<number | null>;
   saveSessionReadSequence: (sessionId: string, sequence: number) => Promise<void>;
@@ -1661,6 +1663,19 @@ export function AppProvider({
     }
   }, [dispatch, userKey]);
 
+  const forkSession = useCallback(async (spaceId: string, sessionId: string, turn: Pick<SessionTurnRecord, "id" | "sourceTurnId">) => {
+    if (!client) throw new Error("Cohub is still connecting");
+    const result = await forkSessionTurn(client, spaceId, sessionId, turn);
+    const parent = stateRef.current.sessions.find((item) => item.id === sessionId);
+    const session = { ...result, space: parent?.space ?? null };
+    dispatch({ type: "session-upsert", session });
+    if (Platform.OS !== "web") {
+      const home = stateRef.current;
+      void saveHome(userKey, { spaces: home.spaces, sessions: [session, ...home.sessions.filter((item) => item.id !== session.id)] }).catch(() => undefined);
+    }
+    return result;
+  }, [client, dispatch, userKey]);
+
   const renameSession = useCallback(
     async (sessionId: string, title: string) => {
       if (!client) throw new Error("Cohub is still connecting");
@@ -1761,6 +1776,7 @@ export function AppProvider({
       toggleSpacePin,
       upsertSpace,
       renameSession,
+      forkSession,
       clearCache,
       loadSessionReadSequence: loadSessionReadSequenceForUser,
       saveSessionReadSequence: saveSessionReadSequenceForUser,
@@ -1799,6 +1815,7 @@ export function AppProvider({
       refreshSessionStatuses,
       refreshSession,
       renameSession,
+      forkSession,
       sendMessage,
       sendNewMessage,
       state,

@@ -29,6 +29,7 @@ import FingerprintPattern from "lucide-react-native/icons/fingerprint-pattern";
 import Folder from "lucide-react-native/icons/folder";
 import FolderOpen from "lucide-react-native/icons/folder-open";
 import Gift from "lucide-react-native/icons/gift";
+import GitFork from "lucide-react-native/icons/git-fork";
 import Globe from "lucide-react-native/icons/globe";
 import Images from "lucide-react-native/icons/images";
 import Info from "lucide-react-native/icons/info";
@@ -92,6 +93,7 @@ export const icons = {
   folder: Folder,
   "folder-open": FolderOpen,
   gift: Gift,
+  "git-fork": GitFork,
   globe: Globe,
   images: Images,
   info: Info,

@@ -16,11 +16,31 @@ import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-q
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
 import { markdownBlockSignature, parseInlineMarkdown, parseMarkdown } from "../src/data/markdown.ts";
+import { splitStreamingMarkdown } from "../src/data/stream-markdown.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
 import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
+import { forkSessionTurn } from "../src/data/session-fork.ts";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
+
+const forkCalls = [];
+const forkClient = {
+  space: (spaceId) => ({
+    session: (sessionId) => ({
+      turn: (turnId) => ({
+        fork: async () => {
+          forkCalls.push({ spaceId, sessionId, turnId });
+          return { session: { id: "forked-session" }, fork: {} };
+        },
+      }),
+    }),
+  }),
+};
+const forkedSession = await forkSessionTurn(forkClient, "space-1", "session-1", { id: "child-turn", sourceTurnId: "source-turn" });
+assert.equal(forkedSession.id, "forked-session");
+assert.deepEqual(forkCalls, [{ spaceId: "space-1", sessionId: "session-1", turnId: "source-turn" }]);
+await assert.rejects(() => forkSessionTurn(forkClient, "", "session-1", { id: "turn-1", sourceTurnId: null }), /Cannot fork/);
 
 const measurements = new MessageMeasurements();
 const measuredRows = [{ id: "a", revision: "1" }, { id: "b", revision: "1" }];
@@ -65,6 +85,9 @@ try {
   // First content is authoritative and shows whole instead of animating from empty.
   revealed.setTarget("你好");
   assert.deepEqual(revealedValues, ["你好"]);
+  assert.ok(revealed.getFadeTailCount() > 0, "first content fades in");
+  mock.timers.tick(200);
+  assert.equal(revealed.getFadeTailCount(), 0, "fade window closes");
   // A ZWJ emoji arrives as one grapheme; a multi-grapheme append paces in commits.
   revealed.setTarget("你好👩🏽‍💻");
   mock.timers.tick(50);
@@ -73,6 +96,7 @@ try {
   const beforePacing = revealedValues.length;
   mock.timers.tick(50);
   assert.ok(revealedValues.length > beforePacing, "appends commit over multiple frames");
+  assert.ok(revealed.getFadeTailCount() > 0, "revealed graphemes are inside the fade window");
   mock.timers.tick(50);
   assert.ok(revealedValues.length > beforePacing + 1, "a long append takes more than one commit");
   for (const value of revealedValues) assert.ok(revealed.getDisplayed().startsWith(value), `revealed value is a prefix: ${value}`);
@@ -98,6 +122,17 @@ try {
   revealed.stop();
   mock.timers.reset();
 }
+
+// Streaming markdown: only the tail re-parses, so the split must stay stable
+// across appends and must never cut a fence or a loose list in half.
+assert.deepEqual(splitStreamingMarkdown("one"), { stable: "", tail: "one" });
+assert.deepEqual(splitStreamingMarkdown("a\n\nb"), { stable: "a\n\n", tail: "b" });
+assert.deepEqual(splitStreamingMarkdown("a\n\nb\n\nc"), { stable: "a\n\nb\n\n", tail: "c" });
+assert.deepEqual(splitStreamingMarkdown("```\ncode\n\nmore\n```\n\nafter"), { stable: "```\ncode\n\nmore\n```\n\n", tail: "after" });
+assert.deepEqual(splitStreamingMarkdown("- a\n\n- b\n\nc"), { stable: "- a\n\n- b\n\n", tail: "c" });
+const firstSplit = splitStreamingMarkdown("a\n\nb");
+assert.deepEqual(splitStreamingMarkdown("a\n\nb\n\nc", firstSplit), { stable: "a\n\nb\n\n", tail: "c" });
+assert.deepEqual(splitStreamingMarkdown("a\n\nbc", firstSplit), { stable: "a\n\n", tail: "bc" });
 
 const finalReply = { id: "final", role: "assistant", sequence: 2, meta: { turnId: "turn-1" }, text: "Final reply" };
 const intermediateReply = { id: "step", role: "assistant", sequence: 1, meta: { turnId: "turn-1", messageKind: "assistant_intermediate" }, text: "Working" };

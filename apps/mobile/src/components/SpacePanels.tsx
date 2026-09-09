@@ -26,7 +26,7 @@ import {
   type SessionSourceGroup,
 } from "@/src/data/session-labels";
 import { PANEL_CLOSE_THRESHOLD, PANEL_OPEN_THRESHOLD, PANEL_SWIPE_VELOCITY, panelForOpeningDelta, panelForSide, shouldClosePanel, shouldOpenPanel, sideForPanel, type PanelName, type PanelSide } from "@/src/data/space-panel-gesture";
-import { AppIcon, IconButton, PrimaryButton, SearchField } from "@/src/ui";
+import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField } from "@/src/ui";
 import { motion } from "@/src/motion";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
 
@@ -533,10 +533,11 @@ function PanelGesturePreview({ panel }: { panel: SpacePanel }) {
   return <View style={styles.panelContent} accessibilityElementsHidden><View style={[styles.header, { borderBottomColor: theme.colors.border }]}><AppIcon name={panel === "chat" ? "messages" : "folder-open"} size={19} color={theme.colors.accent} /><Text style={[typography.heading, { color: theme.colors.text }]}>{panel === "chat" ? "Chats" : "Files"}</Text></View></View>;
 }
 
-function PanelHeader({ title, subtitle, onClose, action }: { title: string; subtitle?: string; onClose: () => void; action?: ReactNode }) {
+function PanelHeader({ title, subtitle, onClose, action, avatar }: { title: string; subtitle?: string; onClose: () => void; action?: ReactNode; avatar?: ReactNode }) {
   const theme = useAppTheme();
   return (
     <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
+      {avatar}
       <View style={styles.headerText}>
         <Text numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
         {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{subtitle}</Text> : null}
@@ -750,7 +751,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, chipsRect, onClose, o
   </ScrollView>;
   return (
     <View style={styles.panelContent}>
-      <PanelHeader title="Chats" subtitle={spaceName} onClose={onClose} />
+      <PanelHeader title={spaceName} subtitle="Chats" onClose={onClose} avatar={<Avatar name={spaceName} uri={displaySessions.find((session) => session.space?.publicProfile?.avatarUrl)?.space?.publicProfile?.avatarUrl} size={38} />} />
       <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 9 }}>
         <PrimaryButton label="New Chat" icon="plus" onPress={onNewChat} style={{ minHeight: 44 }} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -766,8 +767,8 @@ function ChatPanel({ spaceId, spaceName, sessions, client, chipsRect, onClose, o
         data={listItems}
         keyExtractor={(item) => item.kind === "remote" ? `remote:${item.hit.sessionId}` : `local:${item.session.id}`}
         renderItem={({ item }) => item.kind === "remote"
-          ? <SessionSearchRow hit={item.hit} onPress={(target) => onOpenSession(item.hit.sessionId, target)} />
-          : <SessionRow session={item.session} onPress={() => onOpenSession(item.session.id)} onLongPress={client ? () => openLabelSheet(item.session) : undefined} />}
+          ? <SessionSearchRow hit={item.hit} showSpace={false} onPress={(target) => onOpenSession(item.hit.sessionId, target)} />
+          : <SessionRow session={item.session} showSpace={false} onPress={() => onOpenSession(item.session.id)} onLongPress={client ? () => openLabelSheet(item.session) : undefined} />}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 24, flexGrow: listItems.length === 0 ? 1 : undefined }}
         ListFooterComponent={showLoadMore ? <View>{loadMoreError ? <Text selectable style={[typography.micro, { color: theme.colors.danger, marginHorizontal: 14, marginTop: 8 }]}>{loadMoreError}</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel={loadMoreError ? "Retry loading Chats" : "Load more Chats"} disabled={loadingMore} onPress={() => void loadMore()} style={({ pressed }) => ({ minHeight: 40, marginHorizontal: 14, marginTop: 8, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{loadingMore ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{loadMoreError ? "Retry loading Chats" : "Load more Chats"}</Text>}</Pressable></View> : null}

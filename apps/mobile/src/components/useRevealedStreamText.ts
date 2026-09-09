@@ -3,7 +3,8 @@ import { StreamRevealController } from "@/src/data/stream-reveal";
 
 /**
  * Advances streamed text by grapheme at a bounded, adaptive pace instead of
- * rendering every network chunk. Non-streaming text passes through untouched,
+ * rendering every network chunk, and reports how many trailing graphemes are
+ * still inside the fade window. Non-streaming text passes through untouched,
  * and a rewrite (correction, history reload) shows in full without replaying.
  *
  * The target is synced in a layout effect so the first painted frame already
@@ -21,6 +22,9 @@ export function useRevealedStreamText(source: string, streaming: boolean) {
 
   useLayoutEffect(() => () => controller.stop(), [controller]);
 
-  if (!streaming) return source;
-  return source.startsWith(displayed) ? displayed : source;
+  if (!streaming) return { text: source, fadeTail: 0 };
+  return {
+    text: source.startsWith(displayed) ? displayed : source,
+    fadeTail: controller.getFadeTailCount(),
+  };
 }
