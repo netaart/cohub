@@ -285,7 +285,7 @@ export function MessageContent({ content, active = false, color, imageMaxWidth }
 function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number, fitContent = false, fillUserWidth = false): ViewStyle {
   return {
     maxWidth,
-    ...(side === "assistant" && !fitContent ? { width: maxWidth } : side === "user" ? { width: fillUserWidth ? maxWidth : Math.min(maxWidth, 132) } : null),
+    ...(side === "assistant" && !fitContent ? { width: maxWidth } : side === "user" && fillUserWidth ? { width: maxWidth } : null),
     minWidth: 0,
     position: "relative",
     alignSelf: side === "user" ? "flex-end" : "flex-start",
