@@ -6,11 +6,13 @@ import { Platform } from "react-native";
 import { config } from "@/src/config";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "@/src/data/update-assets";
 
-const CACHE_KEY = "cohub:mobile-update-check:v2";
+const CACHE_KEY = "cohub:mobile-update-check:v3";
 const SNOOZE_KEY = "cohub:mobile-update-snooze:v1";
 const CHECK_TTL_MS = 6 * 60 * 60 * 1000;
 const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 8_000;
+// Enough releases to find the newest native build behind any number of JS-only releases.
+const NATIVE_RELEASE_SCAN_LIMIT = 20;
 
 export type AppRelease = {
   version: string;
@@ -26,7 +28,7 @@ export type AppRelease = {
 
 type CachedCheck = {
   checkedAt: number;
-  release: AppRelease;
+  release: AppRelease | null;
 };
 
 type SnoozeRecord = {
@@ -133,7 +135,9 @@ function releaseFromPayload(payload: unknown): AppRelease | null {
 }
 
 function parseCachedCheck(value: unknown): CachedCheck | null {
-  if (!isRecord(value) || typeof value.checkedAt !== "number" || !Number.isFinite(value.checkedAt) || !isRecord(value.release)) return null;
+  if (!isRecord(value) || typeof value.checkedAt !== "number" || !Number.isFinite(value.checkedAt)) return null;
+  if (value.release === null) return { checkedAt: value.checkedAt, release: null };
+  if (!isRecord(value.release)) return null;
   const rawRelease = value.release;
   const version = typeof rawRelease.version === "string" ? rawRelease.version.trim() : "";
   const title = typeof rawRelease.title === "string" ? rawRelease.title.trim() || null : null;
@@ -192,18 +196,25 @@ function persistCheck(value: CachedCheck) {
   void AsyncStorage.setItem(CACHE_KEY, JSON.stringify(value)).catch(() => undefined);
 }
 
-async function requestLatestRelease() {
+async function requestNativeRelease(): Promise<AppRelease | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(config.updateApiUrl, {
+    const response = await fetch(`${config.releasesApiUrl}?per_page=${NATIVE_RELEASE_SCAN_LIMIT}`, {
       headers: { Accept: "application/vnd.github+json" },
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Update check failed with HTTP ${response.status}`);
-    const release = releaseFromPayload(await response.json());
-    if (!release) throw new Error("Update response did not contain a stable release");
-    return release;
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) throw new Error("Update response did not contain a release list");
+    // Only a release with an APK for this device requires a new native build; JS-only releases ride OTA.
+    let newest: AppRelease | null = null;
+    for (const item of payload) {
+      const release = releaseFromPayload(item);
+      if (!release?.downloadUrl) continue;
+      if (!newest || isNewerAppVersion(newest.version, release.version)) newest = release;
+    }
+    return newest;
   } finally {
     clearTimeout(timeout);
   }
@@ -215,22 +226,21 @@ export async function checkForAppUpdate(options: { force?: boolean } = {}) {
     await loadPersistedCache();
     if (
       cachedCheck &&
-      (Platform.OS !== "android" || cachedCheck.release.downloadSha256 !== null) &&
       cachedCheck.checkedAt <= Date.now() &&
       Date.now() - cachedCheck.checkedAt < CHECK_TTL_MS
     ) {
-      return isNewerAppVersion(currentVersion, cachedCheck.release.version)
+      return cachedCheck.release && isNewerAppVersion(currentVersion, cachedCheck.release.version)
         ? cachedCheck.release
         : null;
     }
   }
   if (request && !options.force) return request;
 
-  const nextRequest = requestLatestRelease()
+  const nextRequest = requestNativeRelease()
     .then((latest) => {
       cachedCheck = { checkedAt: Date.now(), release: latest };
       persistCheck(cachedCheck);
-      return isNewerAppVersion(currentVersion, latest.version) ? latest : null;
+      return latest && isNewerAppVersion(currentVersion, latest.version) ? latest : null;
     })
     .finally(() => {
       if (request === nextRequest) request = null;

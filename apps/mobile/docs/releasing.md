@@ -65,7 +65,7 @@ The first formally signed package must be produced by a new release created afte
 
 ### In-app Android updates
 
-About > Application and the existing update banner use GitHub's latest stable release. The app selects the device ABI, downloads the APK into its private cache, verifies its published size and GitHub `sha256:` digest, and grants Android's package installer temporary access through a `content://` URI. The primary update action does not open a browser. Missing or malformed digests block installation.
+About > Application and the in-app update banner scan recent GitHub releases for the newest one that carries a signed APK for the device, so they only prompt when a new native package is required; JS-only releases stay silent and arrive through OTA. The app selects the device ABI, downloads the APK into its private cache, verifies its published size and GitHub `sha256:` digest, and grants Android's package installer temporary access through a `content://` URI. The primary update action does not open a browser. Missing or malformed digests block installation.
 
 Downloads show progress and can be cancelled. Failed or cancelled downloads are removed; a verified APK is retained for installation retries. Closing the installer does not snooze the release or count as a successful update. Android checks package/signature compatibility and requires user confirmation. The update sheet includes an Installation permission action for Android's "Install unknown apps" setting. Keep the same signing key for every release.
 

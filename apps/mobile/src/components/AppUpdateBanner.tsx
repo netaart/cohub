@@ -262,7 +262,7 @@ export function AppUpdateRow() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [status, setStatus] = useState<"idle" | "current" | "error">("idle");
 
-  if (Platform.OS === "web") return null;
+  if (Platform.OS !== "android") return null;
 
   const check = async () => {
     if (checking) return;

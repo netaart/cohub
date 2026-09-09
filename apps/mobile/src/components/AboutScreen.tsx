@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { Image, Linking, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { AppUpdateRow } from "@/src/components/AppUpdateBanner";
 import { useDebugUnlock } from "@/src/components/useDebugUnlock";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { AppIcon, DetailTopBar, Screen, SectionHeader } from "@/src/ui";
@@ -64,6 +65,8 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
       <SectionHeader title="Application" />
       <View style={[styles.group, { marginHorizontal: 16, borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <AboutRow icon="info" title="Version" detail={version} />
+        <View style={[styles.separator, { backgroundColor: theme.colors.border }]} />
+        <AppUpdateRow />
       </View>
 
       <SectionHeader title="Links" />
