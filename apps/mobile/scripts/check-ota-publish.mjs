@@ -59,6 +59,13 @@ for (const publish of [publishAndroid, publishIos]) {
   assert.match(JSON.stringify(publish.steps), /COHUB_OTA_RUNTIME_VERSION/);
   assert.match(JSON.stringify(publish.steps), /cohub-ota-export/);
   assert.match(JSON.stringify(publish.steps), /--export-dir/);
+  const publishStep = publish.steps.find((step) => step.name === "Publish exported bundle");
+  assert.ok(publishStep, "Each platform must publish through an explicit step");
+  assert.match(publishStep.run, /PIPESTATUS/, "The publish step must capture the CLI exit status before deciding");
+  assert.match(publishStep.run, /Fingerprint mismatch/, "A fingerprint-mismatch rejection must be reported as an expected skip, not a pipeline failure");
+  assert.match(publishStep.run, /GITHUB_STEP_SUMMARY/, "A skipped publish must explain itself in the run summary");
+  assert.match(publishStep.run, /::warning/, "A skipped publish must surface a warning annotation");
+  assert.match(publishStep.run, /exit "\$status"/, "Any other CLI failure must still fail the job");
 }
 assert.match(JSON.stringify(publishAndroid.steps), /--platform android/);
 assert.match(JSON.stringify(publishIos.steps), /--platform ios/);

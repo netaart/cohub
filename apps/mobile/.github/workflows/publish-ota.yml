@@ -310,12 +310,34 @@ jobs:
           origin=$(OTA_SERVER="$OTA_SERVER" node --input-type=module -e 'import { parseHttpsOrigin } from "./scripts/ota-publish.mjs"; process.stdout.write(parseHttpsOrigin(process.env.OTA_SERVER, "OTA_SERVER"))')
           runtime=$(COHUB_OTA_RUNTIME_VERSION="$COHUB_OTA_RUNTIME_VERSION" node --input-type=module -e 'import { parseFingerprintHash } from "./scripts/ota-publish.mjs"; process.stdout.write(parseFingerprintHash(process.env.COHUB_OTA_RUNTIME_VERSION, "prepare runtime"))')
           test -d "$OTA_EXPORT_DIR"
+          # The server rejects a bundle whose fingerprint differs from the latest update
+          # on this runtime (HTTP 409). That is the correct outcome for a commit with
+          # native/SDK changes: it cannot ride the installed binary until Native Release
+          # publishes a matching native distribution. Report the skip instead of failing
+          # the pipeline, so a release run shows the real state and the next steps.
+          set +e
           COHUB_OTA_RUNTIME_VERSION="$runtime" OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/apps/easc/bin/easc.js" update \
             --channel "$CHANNEL" \
             --platform android \
             --skip-build \
             --export-dir "$OTA_EXPORT_DIR" \
-            --non-interactive
+            --non-interactive 2>&1 | tee "$RUNNER_TEMP/ota-publish.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ $status -eq 0 ]]; then exit 0; fi
+          if grep -q "Fingerprint mismatch" "$RUNNER_TEMP/ota-publish.log"; then
+            {
+              echo "## OTA skipped (Android)"
+              echo
+              echo "The OTA server rejected this bundle because its native fingerprint differs from the latest update on runtime \`$runtime\`."
+              echo "This commit changed native/SDK code, so it cannot ride the installed binary."
+              echo
+              echo "Run **Native Release** with \`platform=android\`, \`profile=distribution\`, and the release tag to publish a matching native distribution; JS-only commits publish again afterwards."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=Android OTA skipped::Native fingerprint changed; ship a new native distribution first."
+            exit 0
+          fi
+          exit "$status"
 
   publish-ios:
     name: Upload iOS ${{ needs.prepare.outputs.channel }}
@@ -375,9 +397,28 @@ jobs:
           origin=$(OTA_SERVER="$OTA_SERVER" node --input-type=module -e 'import { parseHttpsOrigin } from "./scripts/ota-publish.mjs"; process.stdout.write(parseHttpsOrigin(process.env.OTA_SERVER, "OTA_SERVER"))')
           runtime=$(COHUB_OTA_RUNTIME_VERSION="$COHUB_OTA_RUNTIME_VERSION" node --input-type=module -e 'import { parseFingerprintHash } from "./scripts/ota-publish.mjs"; process.stdout.write(parseFingerprintHash(process.env.COHUB_OTA_RUNTIME_VERSION, "prepare runtime"))')
           test -d "$OTA_EXPORT_DIR"
+          # Mirrors the Android publish: a fingerprint-mismatch rejection means this
+          # commit needs a new native distribution, not that the pipeline is broken.
+          set +e
           COHUB_OTA_RUNTIME_VERSION="$runtime" OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/apps/easc/bin/easc.js" update \
             --channel "$CHANNEL" \
             --platform ios \
             --skip-build \
             --export-dir "$OTA_EXPORT_DIR" \
-            --non-interactive
+            --non-interactive 2>&1 | tee "$RUNNER_TEMP/ota-publish.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ $status -eq 0 ]]; then exit 0; fi
+          if grep -q "Fingerprint mismatch" "$RUNNER_TEMP/ota-publish.log"; then
+            {
+              echo "## OTA skipped (iOS)"
+              echo
+              echo "The OTA server rejected this bundle because its native fingerprint differs from the latest update on runtime \`$runtime\`."
+              echo "This commit changed native/SDK code, so it cannot ride the installed binary."
+              echo
+              echo "Run **Native Release** with \`platform=ios\`, \`profile=production\`, and \`submit=true\` to publish a matching TestFlight build; JS-only commits publish again afterwards."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=iOS OTA skipped::Native fingerprint changed; ship a new native distribution first."
+            exit 0
+          fi
+          exit "$status"
