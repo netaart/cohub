@@ -18,7 +18,13 @@ import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme } from "@/src/theme";
 import { AppIcon, type IconName } from "@/src/ui";
-import { formatNumber, hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
+import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
+
+function formatTokenCount(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+}
 
 function fadedValue(value: string, start: number, fadeFrom: number, style: StyleProp<TextStyle>, keyPrefix: string) {
   if (start >= fadeFrom) return value;
@@ -138,8 +144,37 @@ function imageUri(block: Extract<ContentBlock, { type: "image" }>) {
   return null;
 }
 
-function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number }) {
+function GalleryThumbnail({ uri, index, total, size, onOpen }: { uri: string; index: number; total: number; size: number; onOpen: () => void }) {
   const theme = useAppTheme();
+  const [pressed, setPressed] = useState(false);
+  // Link.Trigger slots its child, and slotting spreads the child's style prop: a function
+  // style would be flattened to {}. Track pressed state and pass a plain object instead.
+  const style = {
+    width: size,
+    height: size,
+    borderRadius: 12,
+    overflow: "hidden" as const,
+    backgroundColor: theme.colors.surfaceRaised,
+    opacity: pressed ? 0.78 : 1,
+  };
+  return (
+    <Link href="/image-viewer" asChild onPress={onOpen}>
+      <Link.Trigger withAppleZoom>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open image ${index + 1} of ${total}`}
+          onPressIn={() => setPressed(true)}
+          onPressOut={() => setPressed(false)}
+          style={style}
+        >
+          <Image source={{ uri }} resizeMode="cover" style={{ width: "100%", height: "100%" }} />
+        </Pressable>
+      </Link.Trigger>
+    </Link>
+  );
+}
+
+function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number }) {
   const { width } = useWindowDimensions();
   const galleryWidth = maxWidth ?? width;
   const thumbnailWidth = Math.min(164, Math.max(124, Math.min(width * 0.42, galleryWidth)));
@@ -158,15 +193,7 @@ function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number })
         style={{ width: galleryWidth, maxWidth: "100%", height: thumbnailWidth, flexGrow: 0, flexShrink: 1 }}
         contentContainerStyle={{ gap: 8, paddingRight: 4 }}
         keyExtractor={(uri, index) => `${uri}-${index}`}
-        renderItem={({ item: uri, index }) => (
-          <Link href="/image-viewer" asChild onPress={() => setImageViewerPayload({ uris, index })}>
-            <Link.Trigger withAppleZoom>
-              <Pressable accessibilityRole="button" accessibilityLabel={`Open image ${index + 1} of ${uris.length}`} style={({ pressed }) => ({ width: thumbnailWidth, height: thumbnailWidth, borderRadius: 12, overflow: "hidden", backgroundColor: theme.colors.surfaceRaised, opacity: pressed ? 0.78 : 1 })}>
-                <Image source={{ uri }} resizeMode="cover" style={{ width: "100%", height: "100%" }} />
-              </Pressable>
-            </Link.Trigger>
-          </Link>
-        )}
+        renderItem={({ item: uri, index }) => <GalleryThumbnail uri={uri} index={index} total={uris.length} size={thumbnailWidth} onOpen={() => setImageViewerPayload({ uris, index })} />}
       />
     </GestureDetector>
   );
@@ -339,9 +366,9 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || "System update"}</Text></View>;
   const thinkingLevel = requestedThinkingLevel(message.meta);
   const inputTokenValue = (message.usage?.input ?? 0) + (message.usage?.cacheRead ?? 0);
-  const cachedInputTokens = typeof message.usage?.cacheRead === "number" && Number.isFinite(message.usage.cacheRead) && message.usage.cacheRead > 0 ? formatNumber(message.usage.cacheRead) : null;
-  const inputTokens = inputTokenValue > 0 ? formatNumber(inputTokenValue) : null;
-  const outputTokens = typeof message.usage?.output === "number" && Number.isFinite(message.usage.output) && message.usage.output > 0 ? formatNumber(message.usage.output) : null;
+  const cachedInputTokens = typeof message.usage?.cacheRead === "number" && Number.isFinite(message.usage.cacheRead) && message.usage.cacheRead > 0 ? formatTokenCount(message.usage.cacheRead) : null;
+  const inputTokens = inputTokenValue > 0 ? formatTokenCount(inputTokenValue) : null;
+  const outputTokens = typeof message.usage?.output === "number" && Number.isFinite(message.usage.output) && message.usage.output > 0 ? formatTokenCount(message.usage.output) : null;
   const side = isUser ? "user" : "assistant";
   const textColor = isUser ? theme.colors.userBubbleText : undefined;
   const accent = isUser ? theme.colors.userBubbleText : theme.colors.accent;

@@ -38,6 +38,10 @@ export default function ImageViewerScreen() {
     backgroundColor: "rgba(255,255,255,0.14)",
   };
 
+  // Explicit dimensions: the native Link.AppleZoomTarget wrapper is content-sized, so
+  // percentage-sized children would collapse inside it.
+  const imageStyle = { width: width - 24, height: height * 0.82 };
+
   if (!payload || payload.uris.length === 0) {
     return (
       <View style={{ flex: 1, backgroundColor: "#000000" }}>
@@ -65,10 +69,10 @@ export default function ImageViewerScreen() {
           <View style={{ width, height, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}>
             {itemIndex === payload.index ? (
               <Link.AppleZoomTarget>
-                <Image source={{ uri }} resizeMode="contain" style={{ width: "100%", height: "82%" }} />
+                <Image source={{ uri }} resizeMode="contain" style={imageStyle} />
               </Link.AppleZoomTarget>
             ) : (
-              <Image source={{ uri }} resizeMode="contain" style={{ width: "100%", height: "82%" }} />
+              <Image source={{ uri }} resizeMode="contain" style={imageStyle} />
             )}
           </View>
         )}
