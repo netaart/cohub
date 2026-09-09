@@ -7,7 +7,7 @@ import { SessionRow } from "@/src/components/SessionRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type RemoteSpaceSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { ConnectionBanner, DataError, EmptyState, LoadingRows, Screen, WorkspaceToolbar } from "@/src/ui";
+import { ConnectionBanner, DataError, EmptyState, ExpandableSearchBar, LoadingRows, Screen } from "@/src/ui";
 import { getSessionStatus } from "@/src/data/session-status";
 import { SpaceRow } from "@/src/components/SpaceRow";
 
@@ -76,7 +76,15 @@ export default function ChatsScreen() {
 
   return (
     <Screen>
-      <WorkspaceToolbar query={query} onQueryChange={setQuery} queryRef={searchRef} account={<AccountAvatar onPress={() => router.push("/profile")} />} onCreate={() => router.push("/new-chat")} onSettings={() => router.push("/settings")} />
+      <ExpandableSearchBar
+        query={query}
+        onQueryChange={setQuery}
+        queryRef={searchRef}
+        account={<AccountAvatar onPress={() => router.push("/profile")} />}
+        onMenuPress={() => router.push("/settings")}
+        onCreate={() => router.push("/new-chat")}
+        onSettingsPress={() => router.push("/settings")}
+      />
       <ConnectionBanner state={connectionState} />
       {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
       <FlatList

@@ -26,6 +26,7 @@ import { useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem } from "@/src/data/types";
 import { initials } from "@/src/utils";
 
+export { ExpandableSearchBar } from "@/src/ui/ExpandableSearchBar";
 export type { IconName } from "@/src/icons";
 
 export function AppIcon({ name, size = 20, color, strokeWidth = 1.9, fill, style }: { name: IconName; size?: number; color?: ColorValue; strokeWidth?: number; fill?: string; style?: object }) {
@@ -210,12 +211,13 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
 
 export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel = "Automatic", modelStatus = "unknown", disabled = false, sending = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
   const [focused, setFocused] = useState(false);
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
   const expanded = focused || value.length > 0 || hasAttachment || voiceActive;
   const modelStatusLabel = modelStatus === "available" ? "operational" : modelStatus === "degraded" ? "degraded" : modelStatus === "outage" ? "outage" : "status unavailable";
   return (
-    <View style={[styles.composerWrap, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
+    <View style={[styles.composerWrap, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background, paddingBottom: insets.bottom + 10 }]}>
       <Reanimated.View layout={LinearTransition.duration(220)} style={[styles.composer, expanded ? styles.composerExpanded : styles.composerCompact, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
         {!expanded ? <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} /> : null}
         <TextInput
@@ -277,7 +279,7 @@ export function useBackButton() {
 
 const styles = StyleSheet.create({
   iconButton: { alignItems: "center", justifyContent: "center" },
-  workspaceToolbar: { minHeight: 66, paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  workspaceToolbar: { height: 66, minHeight: 66, paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
   topBar: { height: 66, minHeight: 66, maxHeight: 66, flexShrink: 0, paddingHorizontal: 16, paddingVertical: 7, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
   topBarLeft: { width: 44, height: 42, alignItems: "flex-start", justifyContent: "center" },
   topBarTitle: { flex: 1, minWidth: 0, height: 42, justifyContent: "center", paddingVertical: 2 },

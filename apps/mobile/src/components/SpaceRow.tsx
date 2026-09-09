@@ -23,12 +23,12 @@ export function SpaceRow({ space, chatCount, onPress, pinning = false, onToggleP
     <Avatar name={name} uri={space.publicProfile?.avatarUrl} size={50} online={active} />
     <View style={{ flex: 1, minWidth: 0 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{name}</Text>{active ? <StatusPill label="Active" tone="success" /> : null}</View>
-      <Text numberOfLines={2} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 4 }]}>{space.description?.trim() || `${chatCount} ${chatCount === 1 ? "Chat" : "Chats"}`}</Text>
-      <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 5 }]}>{space.lastActivityAt ? `Active ${formatRelativeTime(space.lastActivityAt)} ago` : "Ready for work"}</Text>
+      <Text numberOfLines={2} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>{space.description?.trim() || `${chatCount} ${chatCount === 1 ? "Chat" : "Chats"}`}</Text>
+      <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 3 }]}>{space.lastActivityAt ? `Active ${formatRelativeTime(space.lastActivityAt)} ago` : "Ready for work"}</Text>
     </View>
     <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
   </>;
-  const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 13, minHeight: 84, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: "transparent" };
+  const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 13, minHeight: 80, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "transparent" };
   const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
   if (!onTogglePin) return <PressableScale accessibilityRole="button" accessibilityLabel={`Open ${name}`} onPress={onPress} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
   return <PinnedRow
