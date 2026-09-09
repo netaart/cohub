@@ -214,10 +214,10 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
   const insets = useSafeAreaInsets();
   const [focused, setFocused] = useState(false);
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
-  const expanded = focused || value.length > 0 || hasAttachment || voiceActive;
+  const expanded = focused || hasAttachment || voiceActive;
   const modelStatusLabel = modelStatus === "available" ? "operational" : modelStatus === "degraded" ? "degraded" : modelStatus === "outage" ? "outage" : "status unavailable";
   return (
-    <View style={[styles.composerWrap, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background, paddingBottom: insets.bottom + 10 }]}>
+    <View style={[styles.composerWrap, { paddingBottom: insets.bottom + 10 }]}>
       <Reanimated.View layout={LinearTransition.duration(220)} style={[styles.composer, expanded ? styles.composerExpanded : styles.composerCompact, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
         {!expanded ? <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} /> : null}
         <TextInput
@@ -294,17 +294,17 @@ const styles = StyleSheet.create({
   dataErrorIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   searchField: { minHeight: 48, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10 },
-  composerWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10, borderTopWidth: 1 },
-  composer: { borderWidth: 1, paddingHorizontal: 8, gap: 2, overflow: "hidden" },
-  composerCompact: { minHeight: 56, borderRadius: 28, flexDirection: "row", alignItems: "center", paddingVertical: 6 },
-  composerExpanded: { minHeight: 84, borderRadius: 18, paddingTop: 8, paddingBottom: 5 },
+  composerWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10 },
+  composer: { paddingHorizontal: 8, gap: 2, overflow: "hidden" },
+  composerCompact: { minHeight: 56, borderRadius: 28, borderWidth: 1, flexDirection: "row", alignItems: "center", paddingVertical: 6 },
+  composerExpanded: { minHeight: 84, borderRadius: 18, borderWidth: 1, paddingTop: 6, paddingBottom: 6 },
   composerText: { minHeight: 34, maxHeight: 120, paddingHorizontal: 5, paddingTop: 0, paddingBottom: 4, textAlignVertical: "top" },
   composerTextCompact: { flex: 1, minWidth: 0, maxHeight: 42, paddingVertical: 3 },
   composerTextExpanded: { width: "100%", minHeight: 34 },
-  composerToolbar: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: 3 },
+  composerToolbar: { height: 36, flexDirection: "row", alignItems: "center", gap: 3 },
   composerCompactActions: { flexDirection: "row", alignItems: "center", gap: 3 },
   composerToolbarSpacer: { flex: 1, minWidth: 0 },
-  composerModel: { minHeight: 30, maxWidth: "58%", paddingHorizontal: 5, borderRadius: 9, flexDirection: "row", alignItems: "center", gap: 5, overflow: "hidden" },
+  composerModel: { height: 30, maxWidth: "58%", paddingHorizontal: 5, borderRadius: 9, flexDirection: "row", alignItems: "center", gap: 5, overflow: "hidden" },
   sendButton: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   voiceButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center", marginBottom: 2 },
   attachmentChip: { flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 7, maxWidth: "100%" },

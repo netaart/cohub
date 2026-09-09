@@ -61,6 +61,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [labelSheetOpen, setLabelSheetOpen] = useState(false);
   const [chatLabels, setChatLabels] = useState<SessionLabel[]>([]);
   const [renameValue, setRenameValue] = useState("");
@@ -169,16 +170,15 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const spaceName = view.space ? displaySpaceName(view.space) : sessionSummary?.space?.name || "Space";
   const spaceSessions = useMemo(() => state.sessions.filter((item) => item.spaceId === spaceId), [spaceId, state.sessions]);
   const queuedFollowups = useMemo(() => queuedFollowupTurns(view.turns, view.stream?.turnId), [view.stream?.turnId, view.turns]);
-  const queuedFollowupIds = useMemo(() => new Set(queuedFollowups.map((turn) => turn.id)), [queuedFollowups]);
   const messages = useMemo(() => {
     const history = messagesFromTurns(view.turns);
     return withTurnSequences(
       mergeDisplayMessages(history.length > 0 ? history : view.messages, history.length > 0 ? view.messages : [])
-        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message) && !(typeof message.meta?.turnId === "string" && queuedFollowupIds.has(message.meta.turnId)))
+        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message))
         .sort((a, b) => a.sequence - b.sequence),
       view.turns,
     );
-  }, [queuedFollowupIds, view.messages, view.turns]);
+  }, [view.messages, view.turns]);
   const timeline = useMemo(() => messages.slice().reverse(), [messages]);
   const { fontScale } = useWindowDimensions();
   // App text size changes row heights, so it participates in the measurement cache key.
@@ -429,8 +429,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       setPendingFollowupAction(null);
     }
   };
-  const openRename = () => { setRenameValue(session ? displaySessionTitle(session) : ""); setRenameOpen(true); };
+  const openRename = () => { setMoreOpen(false); setRenameValue(session ? displaySessionTitle(session) : ""); setRenameOpen(true); };
   const openLabelSheet = () => {
+    setMoreOpen(false);
     setLabelSheetOpen(true);
     if (!client || !spaceId) return;
     void fetchSessionLabels(client, spaceId)
@@ -579,7 +580,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   return <Screen keyboard>
     <SpacePanels key={spaceId || sessionId} spaceId={spaceId} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => { if (spaceId) router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId } }); }} onOpenFile={(path) => { if (spaceId) router.push({ pathname: "/space/[spaceId]/file", params: { spaceId, path } }); }} onOpenFilesPage={() => { if (spaceId) router.push({ pathname: "/space/[spaceId]/files", params: { spaceId } }); }}>
       <View style={{ flex: 1 }}>
-        <DetailTopBar title={session ? displaySessionTitle(session) : "Chat"} subtitle={spaceName} onBack={() => router.back()} actions={<><IconButton name="list-tree" label="Open conversation turns" size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><IconButton name="messages" label="Open Chats" size={38} onPress={() => setActivePanel("chat")} disabled={!spaceId} /><IconButton name="folder-open" label="Open Files" size={38} onPress={() => setActivePanel("files")} disabled={!spaceId} /><IconButton name="tag" label="Manage labels" size={38} onPress={openLabelSheet} disabled={!client || !spaceId} /><IconButton name="more" label="More actions" size={38} onPress={openRename} /></>} />
+        <DetailTopBar title={session ? displaySessionTitle(session) : "Chat"} subtitle={spaceName} onBack={() => router.back()} actions={<><IconButton name="list-tree" label="Open conversation turns" size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><IconButton name="more" label="More actions" size={38} onPress={() => setMoreOpen(true)} /></>} />
         <ConnectionBanner state={connectionState} />
         {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>Retry</Text></Pressable> : null}
         <View style={{ flex: 1 }}>
@@ -604,6 +605,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
         <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => setAttachmentMenuOpen(true)} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? "Agent is working…" : "Message the Agent"} />
+        <AdaptiveSheet visible={moreOpen} title="Chat actions" onClose={() => setMoreOpen(false)} scrollable={false} testID="chat-actions-sheet">
+          <SheetAction icon="messages" title="Open Chats" detail="Browse conversations in this Space" disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("chat"); }} />
+          <SheetAction icon="folder-open" title="Open Files" detail="Browse files in this Space" disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("files"); }} />
+          <SheetAction icon="tag" title="Manage labels" detail="Organize this Chat" disabled={!client || !spaceId} onPress={openLabelSheet} />
+          <SheetAction icon="square-pen" title="Rename Chat" detail="Change the Chat title" onPress={openRename} />
+        </AdaptiveSheet>
         {labelSheetOpen && client && session && spaceId ? <SessionLabelSheet client={client} spaceId={spaceId} session={session} labels={chatLabels} labelsError={null} onLabelsReload={() => { if (client && spaceId) void fetchSessionLabels(client, spaceId).then((tree) => setChatLabels(toUserSessionLabels(tree))).catch(() => undefined); }} onClose={() => setLabelSheetOpen(false)} onChanged={() => undefined} /> : null}
         <AdaptiveSheet visible={attachmentMenuOpen} title="Add to Chat" subtitle="Choose what to include with your next message." onClose={() => setAttachmentMenuOpen(false)} scrollable={false} testID="chat-attachment-sheet"><SheetAction icon="images" title="Photo library" detail="Choose one or more images" onPress={() => void pickPhotos()} /><SheetAction icon="camera" title="Take a photo" detail="Use the device camera" onPress={() => void takePhoto()} /><SheetAction icon="paperclip" title="Choose a file" detail="Attach a document or archive" onPress={() => void pickAttachments()} /></AdaptiveSheet>
         <TurnNavigatorSheet visible={turnNavigatorOpen} turns={view.turnIndex} currentSequence={currentTurnSequence} loading={view.turnIndexLoading} loadingSequence={loadingSequence} onClose={() => setTurnNavigatorOpen(false)} onJump={(sequence) => handleTurnJump(sequence)} onRetry={() => void loadTurnIndex(sessionId, { force: true }).catch(() => undefined)} />

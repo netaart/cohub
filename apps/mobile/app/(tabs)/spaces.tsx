@@ -94,9 +94,7 @@ export default function SpacesScreen() {
       onQueryChange={setQuery}
       placeholder="Find a Space"
       account={<AccountAvatar onPress={() => router.push("/profile")} />}
-      onMenuPress={() => router.push("/settings")}
       onCreate={() => { setCreateError(null); setCreateOpen(true); }}
-      onSettingsPress={() => router.push("/settings")}
     />
     {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
     <FlatList

@@ -83,9 +83,7 @@ export default function ChatsScreen() {
         onQueryChange={setQuery}
         queryRef={searchRef}
         account={<AccountAvatar onPress={() => router.push("/profile")} />}
-        onMenuPress={() => router.push("/settings")}
         onCreate={() => router.push("/new-chat")}
-        onSettingsPress={() => router.push("/settings")}
       />
       <ConnectionBanner state={connectionState} />
       {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
