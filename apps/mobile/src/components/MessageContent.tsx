@@ -3,9 +3,8 @@ import * as Haptics from "expo-haptics";
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type GestureResponderEvent, type ViewStyle } from "react-native";
 import { CodeBlock } from "@/src/components/CodeBlock";
-import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
 import { formatMessageClock } from "@/src/data/chat-format";
-import { parseMarkdown, repairStreamingMarkdown, splitStreamingMarkdown, type MarkdownBlock, type MarkdownInline, type MarkdownTableAlignment } from "@/src/data/markdown";
+import { markdownBlockSignature, parseMarkdown, type MarkdownBlock, type MarkdownInline, type MarkdownTableAlignment } from "@/src/data/markdown";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
@@ -65,33 +64,31 @@ function MarkdownBlockView({ block, accent, textColor }: { block: MarkdownBlock;
   return <Text style={[typography.chatBody, { color: textColor }]}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} /></Text>;
 }
 
-// Completed blocks only change when a new block boundary is crossed, so the
-// memo keeps the whole stable prefix out of the streaming render path.
+// Every stream patch re-parses the whole message; memoizing per block keeps
+// completed blocks from re-rendering and leaves only the growing block live.
+const MemoBlock = memo(
+  function MemoBlock(props: { block: MarkdownBlock; signature: string; accent: string; textColor: string }) {
+    return <MarkdownBlockView block={props.block} accent={props.accent} textColor={props.textColor} />;
+  },
+  (previous, next) => previous.signature === next.signature && previous.accent === next.accent && previous.textColor === next.textColor,
+);
+
 const MarkdownBody = memo(function MarkdownBody({ source, accent, textColor }: { source: string; accent: string; textColor: string }) {
-  const blocks = useMemo(() => parseMarkdown(source), [source]);
-  return <>{blocks.map((block, index) => <MarkdownBlockView key={index} block={block} accent={accent} textColor={textColor} />)}</>;
+  const entries = useMemo(() => parseMarkdown(source).map((block) => ({ block, signature: markdownBlockSignature(block) })), [source]);
+  return <>{entries.map((entry, index) => <MemoBlock key={index} block={entry.block} signature={entry.signature} accent={accent} textColor={textColor} />)}</>;
 });
 
-function TextBlock({ value, muted = false, accent, color, streaming = false }: { value: string; muted?: boolean; accent: string; color?: string; streaming?: boolean }) {
+function TextBlock({ value, muted = false, accent, color }: { value: string; muted?: boolean; accent: string; color?: string }) {
   const theme = useAppTheme();
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
-  const revealed = useRevealedStreamText(value, streaming);
-  const { stable, tail } = useMemo(
-    () => streaming ? splitStreamingMarkdown(revealed) : { stable: revealed, tail: "" },
-    [revealed, streaming],
-  );
-  const repairedTail = useMemo(() => tail ? repairStreamingMarkdown(tail) : "", [tail]);
-  return <View style={{ gap: 9 }}>
-    {stable ? <MarkdownBody source={stable} accent={accent} textColor={textColor} /> : null}
-    {repairedTail ? <MarkdownBody source={repairedTail} accent={accent} textColor={textColor} /> : null}
-  </View>;
+  return <View style={{ gap: 9 }}><MarkdownBody source={value} accent={accent} textColor={textColor} /></View>;
 }
 
-function Block({ block, color, streaming = false }: { block: ContentBlock; color?: string; streaming?: boolean }) {
+function Block({ block, color }: { block: ContentBlock; color?: string }) {
   const theme = useAppTheme();
   const accent = color ?? theme.colors.accent;
-  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} streaming={streaming} />;
-  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} streaming={streaming} />;
+  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} />;
+  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} />;
   if (block.type === "image") {
     const uri = block.source?.type === "url"
       ? block.source.url
@@ -142,8 +139,8 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
     </Pressable>
     {expanded ? <View style={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, gap: 8, marginTop: 4 }}>
       <Text style={[typography.micro, { color: theme.colors.textMuted }]}>IN</Text>
-      <ScrollView horizontal><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.text }]}>{JSON.stringify(block.input, null, 2)}</Text></ScrollView>
-      {edits.map((edit, index) => <ScrollView horizontal key={index}><View><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }]}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.success }]}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View></ScrollView>)}
+      <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.text }]}>{JSON.stringify(block.input, null, 2)}</Text></ScrollView>
+      {edits.map((edit, index) => <View key={index}><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }]}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.success }]}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View>)}
       {result ? <ToolOutput block={result} /> : null}
     </View> : null}
   </View>;
@@ -158,7 +155,7 @@ export function MessageContent({ content, active = false, color }: { content: Co
     // output into the bubble grows its height for as long as the tool runs.
     if (block.type === "tool_result") return null;
     if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={blocks.find((item): item is Extract<ContentBlock, { type: "tool_result" }> => item.type === "tool_result" && item.tool_use_id === block.id)} />;
-    return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} />;
+    return <Block key={`${block.type}-${index}`} block={block} color={color} />;
   })}</View>;
 }
 

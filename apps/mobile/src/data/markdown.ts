@@ -1,5 +1,3 @@
-import remend from "remend";
-
 export type MarkdownInline =
   | { type: "text"; value: string }
   | { type: "strong"; value: string }
@@ -280,40 +278,10 @@ export function parseMarkdown(value: string): MarkdownBlock[] {
 }
 
 /**
- * Split streaming markdown into completed blocks and the in-progress tail at
- * the last blank line outside a code fence. Callers can memoize `stable` so
- * only `tail` re-renders as text arrives.
+ * Stable identity for a parsed block. Streaming re-parses the whole message on
+ * every patch, so renderers memoize per block and only the growing tail block
+ * sees a new signature.
  */
-export function splitStreamingMarkdown(value: string): { stable: string; tail: string } {
-  const source = value.replace(/\r\n?/g, "\n");
-  let insideFence = false;
-  let boundary = -1;
-  let index = 0;
-
-  while (index <= source.length) {
-    const lineEnd = source.indexOf("\n", index);
-    const end = lineEnd === -1 ? source.length : lineEnd;
-    const trimmed = source.slice(index, end).trim();
-    if (insideFence) {
-      if (trimmed.startsWith("```")) insideFence = false;
-    } else if (trimmed.startsWith("```")) {
-      insideFence = true;
-    } else if (trimmed === "" && lineEnd !== -1) {
-      boundary = lineEnd + 1;
-    }
-    if (lineEnd === -1) break;
-    index = lineEnd + 1;
-  }
-
-  if (boundary <= 0) return { stable: "", tail: source };
-  if (boundary >= source.length) return { stable: source, tail: "" };
-  return { stable: source.slice(0, boundary), tail: source.slice(boundary) };
-}
-
-/**
- * Complete half-typed inline markdown (bold, code, links) so a streaming tail
- * keeps its styling instead of flipping when the closing marker arrives.
- */
-export function repairStreamingMarkdown(value: string) {
-  return remend(value, { images: false, katex: false, inlineKatex: false, linkMode: "text-only" });
+export function markdownBlockSignature(block: MarkdownBlock) {
+  return JSON.stringify(block);
 }

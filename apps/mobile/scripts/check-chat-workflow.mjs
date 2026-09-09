@@ -15,8 +15,7 @@ import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTu
 import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-queue.ts";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
-import { parseInlineMarkdown, parseMarkdown, repairStreamingMarkdown, splitStreamingMarkdown } from "../src/data/markdown.ts";
-import { advanceByWord, StreamRevealController } from "../src/data/stream-reveal.ts";
+import { markdownBlockSignature, parseInlineMarkdown, parseMarkdown } from "../src/data/markdown.ts";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
 import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
@@ -588,40 +587,10 @@ assert.deepEqual(parseInlineMarkdown("a **b** _c_ `d` [e](https://f)"), [
   { type: "link", url: "https://f", value: "e" },
 ]);
 
-assert.deepEqual(splitStreamingMarkdown("one\n\ntwo"), { stable: "one\n\n", tail: "two" });
-assert.deepEqual(splitStreamingMarkdown("no boundary yet"), { stable: "", tail: "no boundary yet" });
-assert.deepEqual(
-  splitStreamingMarkdown("```ts\nconst a = 1\n\nconst b = 2\n```\n\nafter"),
-  { stable: "```ts\nconst a = 1\n\nconst b = 2\n```\n\n", tail: "after" },
-);
-assert.equal(repairStreamingMarkdown("half **bold"), "half **bold**");
-assert.equal(repairStreamingMarkdown("half `code"), "half `code`");
-assert.equal(repairStreamingMarkdown("done **bold**"), "done **bold**");
-assert.equal(advanceByWord("hello world", 0, 2), 6);
-assert.equal(advanceByWord("abcdefghij", 0, 5), 5);
-
-mock.timers.enable({ apis: ["setTimeout"] });
-try {
-  const revealed = [];
-  const controller = new StreamRevealController();
-  const unsubscribe = controller.subscribe((value) => revealed.push(value));
-  controller.setTarget("Hello world");
-  mock.timers.tick(0);
-  assert.deepEqual(revealed, ["Hello world"]);
-  controller.setTarget("Hello world and more text");
-  mock.timers.tick(24);
-  assert.equal(revealed.length, 1);
-  mock.timers.tick(80);
-  assert.ok(revealed.length >= 2);
-  assert.ok("Hello world and more text".startsWith(revealed.at(-1)));
-  controller.flush();
-  mock.timers.tick(0);
-  assert.equal(revealed.at(-1), "Hello world and more text");
-  unsubscribe();
-  controller.dispose();
-} finally {
-  mock.timers.reset();
-}
+const stableBlocks = parseMarkdown("one\n\ntwo");
+const grownBlocks = parseMarkdown("one\n\ntwo and more");
+assert.equal(markdownBlockSignature(stableBlocks[0]), markdownBlockSignature(grownBlocks[0]));
+assert.notEqual(markdownBlockSignature(stableBlocks[1]), markdownBlockSignature(grownBlocks[1]));
 
 assert.equal(detectCodeLanguage("src/components/App.tsx"), "tsx");
 assert.equal(detectCodeLanguage("docs/readme.md"), "markdown");
