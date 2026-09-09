@@ -9,7 +9,7 @@ The repository does not require Expo Application Services (EAS) for builds.
 3. `Release Please` maintains a version/changelog PR from Conventional Commits.
 4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. It does not build APKs. Signed Android packages are produced by the manual Native Release workflow when SDK or native code changes. Set `NATIVE_RELEASE_ON_VERSION_TAG=true` only if a version tag must also attach APKs.
 
-An ordinary `main` push runs quality checks, bundle exports, security checks, Release Please, and production Android OTA. It does not compile native packages. Native CI remains available through Actions > Native CI > Run workflow for pull requests and manual native validation.
+An ordinary `main` push runs quality checks, bundle exports, security checks, Release Please, and production Android and iOS OTA. It does not compile native packages. Native CI remains available through Actions > Native CI > Run workflow for pull requests and manual native validation.
 
 Expo is used as the open-source React Native toolchain and for native modules. `expo prebuild` generates standard Gradle and Xcode projects inside CI. No Expo subscription or EAS project is required.
 
@@ -73,18 +73,19 @@ Migration: users must install a new signed native APK containing `expo-intent-la
 
 ### Optional OTA service
 
-`expo-updates` is installed, but OTA is disabled until `EXPO_PUBLIC_UPDATES_URL` is set to an absolute HTTPS Expo Updates protocol endpoint at native build time. `Native Release` reads the same-named GitHub repository variable for Android builds. A GitHub Release URL or ordinary JSON version manifest is not an OTA service.
+`expo-updates` is installed, but OTA is disabled until `EXPO_PUBLIC_UPDATES_URL` is set to an absolute HTTPS Expo Updates protocol endpoint at native build time. `Native Release` reads the same-named GitHub repository variable for Android and iOS builds. A GitHub Release URL or ordinary JSON version manifest is not an OTA service.
 
 - The client uses `ON_LOAD` with a zero startup wait: launch cached/embedded code, download an update in the background, and load it on a subsequent cold launch. It does not reload an active chat.
-- `runtimeVersion` uses the `fingerprint` policy. JS-only commits keep the same native runtime as the installed APK and can OTA. Changing Expo SDK, native dependencies, permissions, or other native configuration changes the fingerprint and requires a new APK.
-- Use the same production environment values when building the APK and exporting OTA bundles. `EXPO_PUBLIC_*` values are public.
+- `runtimeVersion` uses the `fingerprint` policy. JS-only commits keep the same native runtime as the installed binary and can OTA. Changing Expo SDK, native dependencies, permissions, or other native configuration changes the fingerprint and requires a new APK or TestFlight build. Android and iOS fingerprints differ, so each platform publishes its own runtime.
+- Use the same production environment values when building the native binary and exporting OTA bundles. `EXPO_PUBLIC_*` values are public.
 - The deployed service is [markbang/cloudflare-expo-ota-updates](https://github.com/markbang/cloudflare-expo-ota-updates). The manifest endpoint is `https://expo-ota.talesofai.com/manifest`; assets are served from the existing R2 bucket `expo-updates` at `https://expo-updates.talesofai.com`. Repository variables `EXPO_PUBLIC_UPDATES_URL` and `OTA_SERVER` are configured. See the service's `docs/COHUB.md` for redeployment.
-- A push to `main` publishes production Android OTA automatically. The workflow exports that commit, reads `assets/fingerprint` from the latest arm64 APK as the runtime phones request, then uploads immediately. Manual Actions > Publish OTA remains for staging or a specific SHA. There is no environment approval gate.
-- Native Release attaches `cohub-android-native-fingerprint.txt` to signed Android distributions. Bootstrap once with an OTA-capable APK; after that, JS-only work does not need a new package. OTA is indexed with `assets/fingerprint` from that APK so installed devices can receive it.
+- A push to `main` publishes production Android and iOS OTA automatically. The workflow exports that commit, resolves each platform's runtime from its installed native binary (`assets/fingerprint` in the latest arm64 APK, `cohub-ios-native-fingerprint.txt` from the newest release that has it), then uploads both platforms immediately. A missing iOS fingerprint fails the iOS export job only; Android publishing still completes. Manual Actions > Publish OTA remains for staging or a specific SHA. There is no environment approval gate.
+- Native Release attaches `cohub-android-native-fingerprint.txt` to signed Android distributions and `cohub-ios-native-fingerprint.txt` to the GitHub Release when a production iOS build is submitted to TestFlight. Bootstrap each platform once with an OTA-capable native binary; after that, JS-only work does not need a new package. OTA is indexed with the runtime embedded in that binary (`assets/fingerprint` in the APK, `EXUpdates.bundle/fingerprint` in the IPA) so installed devices can receive it.
+- An existing iOS build cannot gain `expo-updates` configuration through OTA. Ship one new TestFlight build with `EXPO_PUBLIC_UPDATES_URL` set before iOS OTA can serve devices.
 - Mobile publication needs `OTA_API_KEY` and `OTA_SERVER`. The CLI is the pinned `markbang/cloudflare-expo-ota-updates` revision in `.github/workflows/publish-ota.yml`, not the unmodified npm `easc` package.
 - When OTA is enabled, `app.config.ts` sends app ID `cohub-mobile` and channel `production`, and requires manifests signed against `certs/ota-certificate.crt`. The matching private key is held in the server repository's `OTA_SIGNING_PRIVATE_KEY` secret and installed as the Worker secret `CODE_SIGNING_PRIVATE_KEY`. Never put the private key in this repository or replace the certificate without a native migration.
-- The publishing credential is stored in this repository's `OTA_API_KEY` Actions secret. It is not an app environment variable and must never use an `EXPO_PUBLIC_*` name. The fork's CLI supports function-based Expo configuration and Android-only publishing; use a reviewed, pinned fork revision rather than the unmodified npm CLI.
-- Validate on two same-key Android release builds: deny/grant installation permission, cancel/retry downloads, return from the installer without installing, then install the newer APK. For OTA, test offline launch, matching/mismatching runtime versions, failed downloads, and server rollback. Expo Go and browser previews cannot verify these native paths.
+- The publishing credential is stored in this repository's `OTA_API_KEY` Actions secret. It is not an app environment variable and must never use an `EXPO_PUBLIC_*` name. The fork's CLI supports function-based Expo configuration and per-platform publishing; use a reviewed, pinned fork revision rather than the unmodified npm CLI.
+- Validate on two same-key Android release builds: deny/grant installation permission, cancel/retry downloads, return from the installer without installing, then install the newer APK. For OTA, test offline launch, matching/mismatching runtime versions, failed downloads, and server rollback on both platforms; iOS requires a TestFlight build. Expo Go and browser previews cannot verify these native paths.
 
 ### Android remote push later
 
@@ -135,7 +136,7 @@ Register `cohub://callback` in the Native Logto application. Logto credentials a
 4. Confirm the required CI, Security, and Native CI checks are green.
 5. Merge the Release Please PR.
 6. GitHub creates the `vX.Y.Z` tag and release.
-7. GitHub creates the `vX.Y.Z` tag and release without APKs. JS-only updates publish as production OTA on the `main` push. When SDK or native code changes, run Native Release and attach the signed APKs to that tag.
+7. GitHub creates the `vX.Y.Z` tag and release without APKs. JS-only updates publish as production Android and iOS OTA on the `main` push. When SDK or native code changes, run Native Release to attach signed APKs to that tag and to ship a new iOS TestFlight build whose fingerprint is attached to the release.
 
 The release workflow validates that the tag is exactly `v<package version>`, and that `package.json` and `app.json` have identical versions. Native build numbers are derived deterministically from the app version in `app.config.ts`.
 

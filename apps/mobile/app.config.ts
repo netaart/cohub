@@ -4,7 +4,7 @@ function otaRuntimeVersion() {
   const override = process.env.COHUB_OTA_RUNTIME_VERSION?.trim();
   if (!override) return { policy: "fingerprint" } as const;
   if (!/^[a-f0-9]{40,64}$/.test(override)) {
-    throw new Error("COHUB_OTA_RUNTIME_VERSION must be the native fingerprint hash from the installed APK.");
+    throw new Error("COHUB_OTA_RUNTIME_VERSION must be the native fingerprint hash from the installed native build.");
   }
   return override;
 }

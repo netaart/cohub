@@ -297,6 +297,8 @@ jobs:
     if: inputs.profile == 'production' && (inputs.platform == 'all' || inputs.platform == 'ios')
     runs-on: macos-latest
     timeout-minutes: 65
+    env:
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
     steps:
       - name: Checkout validated ref
         uses: actions/checkout@v7
@@ -382,11 +384,29 @@ jobs:
         if: inputs.profile == 'production'
         run: npm run native:ios:release
 
+      # Publish OTA resolves the iOS runtime from this file, mirroring assets/fingerprint in the Android APK.
+      - name: Record iOS OTA fingerprint
+        run: |
+          set -euo pipefail
+          mkdir -p build/native-release
+          unzip -q build/export/Cohub.ipa -d "$RUNNER_TEMP/ios-ipa"
+          fingerprint_file=$(find "$RUNNER_TEMP/ios-ipa" -type f -path '*EXUpdates.bundle*' -name fingerprint -print -quit)
+          test -n "$fingerprint_file" || { echo "The built IPA does not embed an Expo Updates fingerprint. Confirm expo-updates is included in the iOS build."; exit 1; }
+          fingerprint=$(tr -d '[:space:]' < "$fingerprint_file" | tr 'A-F' 'a-f')
+          if [[ ! "$fingerprint" =~ ^[a-f0-9]{40,64}$ ]]; then
+            echo "The built IPA embeds an invalid Expo Updates fingerprint: $fingerprint"
+            exit 1
+          fi
+          printf '%s\n' "$fingerprint" > build/native-release/cohub-ios-native-fingerprint.txt
+          echo "Recorded iOS OTA fingerprint $fingerprint"
+
       - name: Upload iOS artifact
         uses: actions/upload-artifact@v7
         with:
           name: cohub-ios-${{ inputs.profile }}-${{ github.run_id }}
-          path: build/export/Cohub.ipa
+          path: |
+            build/export/Cohub.ipa
+            build/native-release/cohub-ios-native-fingerprint.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -400,3 +420,28 @@ jobs:
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           wait-for-processing: "true"
           uses-non-exempt-encryption: "false"
+
+  attach-ios-fingerprint:
+    name: Attach iOS OTA fingerprint
+    needs: ios
+    if: inputs.submit == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download iOS artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: cohub-ios-${{ inputs.profile }}-${{ github.run_id }}
+          path: build/ios-artifact
+
+      # Only a submitted TestFlight build is distributed, so only its fingerprint may claim the release's iOS runtime.
+      - name: Upload fingerprint to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          fingerprint=$(find build/ios-artifact -type f -name cohub-ios-native-fingerprint.txt -print -quit)
+          test -n "$fingerprint" || { echo "The iOS artifact is missing cohub-ios-native-fingerprint.txt."; exit 1; }
+          gh release upload "$RELEASE_TAG" "$fingerprint" --repo "$GITHUB_REPOSITORY" --clobber

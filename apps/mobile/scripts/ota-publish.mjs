@@ -39,7 +39,7 @@ export function parseHttpsOrigin(value, name) {
 export function parseFingerprintHash(value, source) {
   const hash = String(value ?? "").trim().toLowerCase();
   if (!FINGERPRINT_HASH.test(hash)) {
-    throw new Error(`Invalid native fingerprint in ${source}. Rebuild the matching Android distribution.`);
+    throw new Error(`Invalid native fingerprint in ${source}. Rebuild the matching native distribution.`);
   }
   return hash;
 }
@@ -55,6 +55,7 @@ export function fingerprintFromCliJson(raw, source) {
 }
 
 export const NATIVE_FINGERPRINT_ASSET = "cohub-android-native-fingerprint.txt";
+export const IOS_NATIVE_FINGERPRINT_ASSET = "cohub-ios-native-fingerprint.txt";
 
 export function fingerprintAssetName(releaseTag) {
   const version = String(releaseTag ?? "").trim().replace(/^v/, "");
@@ -83,11 +84,11 @@ export function assertReachableFromMain(sha) {
 }
 
 export function assertFingerprintsMatch(expected, actual) {
-  const native = parseFingerprintHash(expected, "the latest Android distribution");
+  const native = parseFingerprintHash(expected, "the latest native distribution");
   const current = parseFingerprintHash(actual, "the selected commit");
   if (native !== current) {
     throw new Error(
-      `Native fingerprint mismatch. This commit changed native/SDK code and cannot ride the installed APK. Ship a new Android distribution; JS-only work can OTA. expected=${native} actual=${current}`,
+      `Native fingerprint mismatch. This commit changed native/SDK code and cannot ride the installed binary. Ship a new native distribution; JS-only work can OTA. expected=${native} actual=${current}`,
     );
   }
 }

@@ -65,13 +65,13 @@ npm run native:ios
 
 - `CI` runs lint, strict TypeScript, release metadata validation, Expo Doctor, dependency audit, and three-platform JavaScript exports.
 - `Native CI` compiles Android and iOS debug artifacts for pull requests and manual runs; it does not run on every `main` push.
-- `Publish OTA` runs on every `main` push and publishes production Android JS updates against the installed APK runtime. Manual dispatch can still target staging or a specific SHA.
+- `Publish OTA` runs on every `main` push and publishes production Android and iOS JS updates against the installed native runtimes. Manual dispatch can still target staging or a specific SHA.
 - `Security` runs dependency review and CodeQL.
 - Release Please maintains `CHANGELOG.md`, synchronizes the Expo and npm versions, and creates `vX.Y.Z` GitHub Releases.
-- Version tags create GitHub Releases without APKs. Signed Android APKs are built by the manual Native Release workflow when SDK or native code changes. JS-only updates publish as production OTA on `main`.
+- Version tags create GitHub Releases without APKs. Signed Android APKs are built by the manual Native Release workflow when SDK or native code changes. JS-only updates publish as production Android and iOS OTA on `main`.
 - Dependabot updates npm and GitHub Actions dependencies weekly.
 
-See [docs/releasing.md](docs/releasing.md) for signing secrets, store credentials, native runner details, normal releases, manual builds, and recovery. Android updates download directly in the app; users still confirm installation in Android. OTA requires an Expo Updates protocol service configured through `EXPO_PUBLIC_UPDATES_URL` at build time and is disabled without one. OTA publication is separate and manual; `main` pushes do not automatically publish updates.
+See [docs/releasing.md](docs/releasing.md) for signing secrets, store credentials, native runner details, normal releases, manual builds, and recovery. Android updates download directly in the app; users still confirm installation in Android. OTA requires an Expo Updates protocol service configured through `EXPO_PUBLIC_UPDATES_URL` at build time and is disabled without one. A `main` push publishes both platforms automatically; manual dispatch can target staging or a specific SHA.
 
 ## Logto setup
 
