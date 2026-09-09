@@ -116,11 +116,41 @@ function toolIcon(name: string): IconName {
   return "code";
 }
 
+// Long tool bodies are height-capped and scroll internally. The cap is applied via
+// ScrollView only once the content actually overflows it: inside the inverted chat
+// list (scale(-1) cells on Android) a nested scroller measures at its full
+// maxHeight and leaves a blank gap under short content.
+const TOOL_OUTPUT_MAX_HEIGHT = 220;
+
+function CappedCodeText({ value, color }: { value: string; color: string }) {
+  const [overflows, setOverflows] = useState(false);
+  const text = value || "(empty output)";
+  const textStyle = [typography.code, { fontFamily: "SpaceMono", color }];
+  if (overflows) {
+    return (
+      <ScrollView nestedScrollEnabled style={{ maxHeight: TOOL_OUTPUT_MAX_HEIGHT }}>
+        <Text style={textStyle}>{text}</Text>
+      </ScrollView>
+    );
+  }
+  return (
+    <Text
+      onLayout={(event) => {
+        const height = event.nativeEvent.layout.height;
+        if (height > TOOL_OUTPUT_MAX_HEIGHT) setOverflows(true);
+      }}
+      style={textStyle}
+    >
+      {text}
+    </Text>
+  );
+}
+
 function ToolOutput({ block }: { block: Extract<ContentBlock, { type: "tool_result" }> }) {
   const theme = useAppTheme();
   // Running tools keep appending to `content`; the body must be height-capped
   // (mirroring the web's tail view) or an expanded bubble grows forever.
-  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.text }]}>{block.content || "(empty output)"}</Text></ScrollView> : <MessageContent content={block.content} />}</View>;
+  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <CappedCodeText value={block.content} color={theme.colors.text} /> : <MessageContent content={block.content} />}</View>;
 }
 
 function ToolCall({ block, result, active = false }: { block: Extract<ContentBlock, { type: "tool_use" }>; result?: Extract<ContentBlock, { type: "tool_result" }>; active?: boolean }) {
@@ -141,7 +171,7 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
     </Pressable>
     {expanded ? <View style={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, gap: 8, marginTop: 4 }}>
       <Text style={[typography.micro, { color: theme.colors.textMuted }]}>IN</Text>
-      <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.text }]}>{JSON.stringify(block.input, null, 2)}</Text></ScrollView>
+      <CappedCodeText value={JSON.stringify(block.input, null, 2)} color={theme.colors.text} />
       {edits.map((edit, index) => <View key={index}><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }]}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.success }]}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View>)}
       {result ? <ToolOutput block={result} /> : null}
     </View> : null}
