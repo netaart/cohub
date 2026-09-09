@@ -16,7 +16,6 @@ import {
   PrimaryButton,
   Screen,
   SectionHeader,
-  StatusPill,
 } from "@/src/ui";
 
 type ProfileSheet = "clear-cache" | "sign-out" | null;
@@ -26,7 +25,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { signOut } = useProfileSession();
   const { name, email, avatar } = useCurrentUser();
-  const { state, connectionState, clearCache, installationId, refreshHome } = useApp();
+  const { state, connectionState, clearCache, refreshHome } = useApp();
   const dataError = state.error ?? state.spacesError ?? state.sessionsError;
   const [sheet, setSheet] = useState<ProfileSheet>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
@@ -82,8 +81,6 @@ export default function ProfileScreen() {
     }
   };
 
-  const notificationDetail = "Permission, device registration, and delivery status";
-
   return (
     <Screen scroll>
       <View style={styles.profileHeader}>
@@ -99,30 +96,15 @@ export default function ProfileScreen() {
       </View>
       {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
 
-      <SectionHeader title="Device" />
-      <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-        <SettingRow
-          icon="wifi"
-          title="Connection"
-          detail={connectionState === "open" ? "Connected to Cohub" : connectionState}
-          trailing={<StatusPill label={connectionState === "open" ? "Online" : "Offline"} tone={connectionState === "open" ? "success" : "neutral"} />}
-        />
-        <SettingRow
-          icon="bell"
-          title="Agent notifications"
-          detail={notificationDetail}
-          onPress={() => router.push({ pathname: "/settings", params: { section: "notifications" } })}
-          trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
-        />
-        <SettingRow
-          icon="fingerprint"
-          title="Installation"
-          detail={installationId ? `${installationId.slice(0, 8)}…` : "Preparing device identity"}
-        />
-      </View>
-
       <SectionHeader title="App" />
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+        <SettingRow
+          icon="settings"
+          title="Settings"
+          detail="Account and notification preferences"
+          onPress={() => router.push("/settings")}
+          trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
+        />
         <SettingRow
           icon="palette"
           title="Appearance"

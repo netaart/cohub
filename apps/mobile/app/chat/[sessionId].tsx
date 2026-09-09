@@ -3,7 +3,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Modal, Pressable, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
+import { ActivityIndicator, FlatList, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
 import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
 import { copyMessageText, MessageBubble, StreamCard } from "@/src/components/MessageContent";
 import { StreamingTurnProcess, TurnProcess } from "@/src/components/TurnProcess";
@@ -429,6 +429,16 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       setPendingFollowupAction(null);
     }
   };
+  const shareChat = async () => {
+    setMoreOpen(false);
+    const title = session ? displaySessionTitle(session) : "Chat";
+    if (!spaceId) {
+      setNotice({ title: "Unable to share Chat", message: "This Chat is not associated with a Space yet." });
+      return;
+    }
+    const url = `https://cohub.live/spaces/${encodeURIComponent(spaceId)}/sessions/${encodeURIComponent(sessionId)}`;
+    await Share.share({ message: `${title}\n${url}`, url, title });
+  };
   const openRename = () => { setMoreOpen(false); setRenameValue(session ? displaySessionTitle(session) : ""); setRenameOpen(true); };
   const openLabelSheet = () => {
     setMoreOpen(false);
@@ -606,6 +616,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
         <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => setAttachmentMenuOpen(true)} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? "Agent is working…" : "Message the Agent"} />
         <AdaptiveSheet visible={moreOpen} title="Chat actions" onClose={() => setMoreOpen(false)} scrollable={false} testID="chat-actions-sheet">
+          <SheetAction icon="share" title="Share" detail="Share a link to this Chat" onPress={() => void shareChat()} />
           <SheetAction icon="messages" title="Open Chats" detail="Browse conversations in this Space" disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("chat"); }} />
           <SheetAction icon="folder-open" title="Open Files" detail="Browse files in this Space" disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("files"); }} />
           <SheetAction icon="tag" title="Manage labels" detail="Organize this Chat" disabled={!client || !spaceId} onPress={openLabelSheet} />

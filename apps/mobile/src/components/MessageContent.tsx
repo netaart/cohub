@@ -16,7 +16,7 @@ import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme } from "@/src/theme";
 import { AppIcon, type IconName } from "@/src/ui";
-import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
+import { formatNumber, hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
 function fadedValue(value: string, start: number, fadeFrom: number, style: StyleProp<TextStyle>, keyPrefix: string) {
   if (start >= fadeFrom) return value;
@@ -136,13 +136,14 @@ function imageUri(block: Extract<ContentBlock, { type: "image" }>) {
   return null;
 }
 
-function ImageGallery({ uris }: { uris: string[] }) {
+function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number }) {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [viewerKey, setViewerKey] = useState(0);
-  const thumbnailWidth = Math.min(164, Math.max(124, width * 0.42));
+  const galleryWidth = maxWidth ?? width;
+  const thumbnailWidth = Math.min(164, Math.max(124, Math.min(width * 0.42, galleryWidth)));
   const viewerWidth = Math.max(1, width);
 
   const galleryGesture = useMemo(() => Gesture.Native().disallowInterruption(true), []);
@@ -160,7 +161,7 @@ function ImageGallery({ uris }: { uris: string[] }) {
         directionalLockEnabled
         alwaysBounceHorizontal
         showsHorizontalScrollIndicator={false}
-        style={{ width: "100%", height: thumbnailWidth, flexGrow: 0 }}
+        style={{ width: galleryWidth, maxWidth: "100%", height: thumbnailWidth, flexGrow: 0, flexShrink: 1 }}
         contentContainerStyle={{ gap: 8, paddingRight: 4 }}
         keyExtractor={(uri, index) => `${uri}-${index}`}
         renderItem={({ item: uri, index }) => <Pressable accessibilityRole="button" accessibilityLabel={`Open image ${index + 1} of ${uris.length}`} onPress={() => openImage(index)} style={({ pressed }) => ({ width: thumbnailWidth, height: thumbnailWidth, borderRadius: 12, overflow: "hidden", backgroundColor: theme.colors.surfaceRaised, opacity: pressed ? 0.78 : 1 })}>
@@ -255,7 +256,7 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
   </View>;
 }
 
-export function MessageContent({ content, active = false, color }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string }) {
+export function MessageContent({ content, active = false, color, imageMaxWidth }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string; imageMaxWidth?: number }) {
   const blocks = content ?? [];
   const imageUris = blocks.flatMap((block) => block.type === "image" ? [imageUri(block)].filter((uri): uri is string => Boolean(uri)) : []);
   const firstImageIndex = blocks.findIndex((block) => block.type === "image" && imageUri(block) !== null);
@@ -268,24 +269,25 @@ export function MessageContent({ content, active = false, color }: { content: Co
     if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={blocks.find((item): item is Extract<ContentBlock, { type: "tool_result" }> => item.type === "tool_result" && item.tool_use_id === block.id)} />;
     if (block.type === "image") {
       if (index !== firstImageIndex) return null;
-      return imageUris.length > 0 ? <ImageGallery key="image-gallery" uris={imageUris} /> : null;
+      return imageUris.length > 0 ? <ImageGallery key="image-gallery" uris={imageUris} maxWidth={imageMaxWidth} /> : null;
     }
     return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} />;
   })}</View>;
 }
 
-function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number): ViewStyle {
+function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number, fitContent = false, fillUserWidth = false): ViewStyle {
   return {
     maxWidth,
-    ...(side === "assistant" ? { width: maxWidth } : null),
+    ...(side === "assistant" && !fitContent ? { width: maxWidth } : side === "user" && fillUserWidth ? { width: maxWidth } : null),
     minWidth: 0,
+    position: "relative",
     alignSelf: side === "user" ? "flex-end" : "flex-start",
     borderRadius: theme.radius.lg,
     borderCurve: "continuous",
     backgroundColor: side === "user" ? theme.colors.userBubble : theme.colors.assistantBubble,
     paddingHorizontal: 12,
     paddingTop: 8,
-    paddingBottom: 6,
+    paddingBottom: 18,
     opacity: local ? 0.72 : 1,
   };
 }
@@ -294,15 +296,19 @@ function ChatBubbleFrame({
   side,
   local = false,
   children,
+  fitContent = false,
+  fillUserWidth = false,
 }: {
   side: "user" | "assistant";
   local?: boolean;
   children: ReactNode;
+  fitContent?: boolean;
+  fillUserWidth?: boolean;
 }) {
   const theme = useAppTheme();
   const { width } = useWindowDimensions();
   const maxWidth = Math.max(196, Math.round(width * (side === "user" ? 0.78 : 0.86)) - 24);
-  const style = chatBubbleStyle(theme, side, local, maxWidth);
+  const style = chatBubbleStyle(theme, side, local, maxWidth, fitContent, fillUserWidth);
   // Native text selection on the timeline captures the panel swipe; copy from the long-press menu instead.
   return <View style={style}>{children}</View>;
 }
@@ -311,7 +317,7 @@ function BubbleMeta({ clock, local = false, side, live = false }: { clock?: stri
   const theme = useAppTheme();
   const color = side === "user" ? theme.colors.userBubbleMeta : theme.colors.textFaint;
   if (!clock && !local && !live) return null;
-  return <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 3, marginTop: 4 }}>
+  return <View style={{ position: "absolute", right: 12, bottom: 5, flexDirection: "row", alignItems: "center", gap: 3 }}>
     {live ? <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: theme.colors.accent, marginRight: 2 }} /> : null}
     {local ? <Text style={[typography.micro, { color }]}>Sending</Text> : null}
     {clock ? <Text style={[typography.micro, { color, fontVariant: ["tabular-nums"] }]}>{clock}</Text> : null}
@@ -321,6 +327,7 @@ function BubbleMeta({ clock, local = false, side, live = false }: { clock?: stri
 
 export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean }) {
   const theme = useAppTheme();
+  const { width } = useWindowDimensions();
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -332,17 +339,20 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const isSystem = message.role === "system";
   if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || "System update"}</Text></View>;
   const thinkingLevel = requestedThinkingLevel(message.meta);
+  const contextTokens = typeof message.usage?.input === "number" && Number.isFinite(message.usage.input) ? formatNumber(message.usage.input) : null;
   const side = isUser ? "user" : "assistant";
   const textColor = isUser ? theme.colors.userBubbleText : undefined;
   const accent = isUser ? theme.colors.userBubbleText : theme.colors.accent;
   const copyText = messageText(message);
+  const maxWidth = Math.max(196, Math.round(width * (isUser ? 0.78 : 0.86)) - 24);
+  const fillUserWidth = isUser && Boolean(message.text?.includes("\n"));
   return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
-    <ChatBubbleFrame side={side} local={local}>
-      {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
+    <ChatBubbleFrame side={side} local={local} fillUserWidth={fillUserWidth}>
+      {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
       {message.errorMessage ? <Text style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
       <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} />
     </ChatBubbleFrame>
-    {!isUser && (message.model || thinkingLevel) ? <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}</Text> : null}
+    {!isUser && (message.model || thinkingLevel || contextTokens) ? <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}{contextTokens ? ` · Context ${contextTokens}` : ""}</Text> : null}
     {copyText && !isUser ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3, marginLeft: side === "assistant" ? 4 : 0, marginRight: side === "user" ? 4 : 0 }}>
       {onCopy ? <Pressable accessibilityRole="button" accessibilityLabel={copied ? "Message copied" : "Copy message"} onPress={() => { onCopy(copyText); setCopied(true); }} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}><AppIcon name={copied ? "check" : "copy"} size={14} color={copied ? theme.colors.success : theme.colors.textFaint} /></Pressable> : null}
       {!isUser && onFork && typeof message.meta?.turnId === "string" ? <Pressable accessibilityRole="button" accessibilityLabel="Fork conversation here" disabled={forkDisabled} onPress={() => onFork(message)} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: forkDisabled ? 0.45 : pressed ? 0.55 : 1 })}>{forking ? <ActivityIndicator size="small" color={theme.colors.textFaint} /> : <AppIcon name="git-fork" size={14} color={theme.colors.textFaint} />}</Pressable> : null}
@@ -369,11 +379,11 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
   const statusLabel = status === "failed" ? "Agent failed" : status === "interrupted" ? "Generation stopped" : null;
   const live = status === "pending" || status === "streaming";
   return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
-    <ChatBubbleFrame side="assistant">
+    <ChatBubbleFrame side="assistant" fitContent={!hasLivePreview && !hasRenderableContent(liveContent)}>
       {statusLabel ? <Text style={[typography.caption, { color: theme.colors.danger, marginBottom: hasLivePreview || runtimeLabel ? 6 : 0 }]}>{statusLabel}</Text> : null}
       {runtimeLabel ? <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</Text> : null}
       {hasLivePreview || hasRenderableContent(liveContent) ? <MessageContent active={live} content={liveContent} /> : null}
-      <BubbleMeta clock={failed ? undefined : live ? "now" : undefined} side="assistant" live={live && !failed} />
+      <BubbleMeta clock={failed ? undefined : live ? formatMessageClock(new Date().toISOString()) : undefined} side="assistant" live={live && !failed} />
     </ChatBubbleFrame>
   </View>;
 }

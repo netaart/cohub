@@ -4,7 +4,7 @@ import { Keyboard, Pressable, TextInput, View } from "react-native";
 import Reanimated, {
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
+  withTiming,
   interpolate,
 } from "react-native-reanimated"
 import { AppIcon } from "@/src/ui";
@@ -19,10 +19,7 @@ type ExpandableSearchBarProps = {
   onCreate: () => void;
 };
 
-const SPRING_CONFIG = {
-  damping: 25,
-  stiffness: 400,
-};
+const EXPAND_DURATION = 180;
 
 const BUTTON_SIZE = 42;
 const GAP = 8;
@@ -45,14 +42,14 @@ export function ExpandableSearchBar({
     if (expandedRef.current) return;
     expandedRef.current = true;
     setExpanded(true);
-    progress.value = withSpring(1, SPRING_CONFIG);
+    progress.value = withTiming(1, { duration: EXPAND_DURATION });
   }, [progress]);
 
   const collapse = useCallback(() => {
     if (!expandedRef.current) return;
     expandedRef.current = false;
     setExpanded(false);
-    progress.value = withSpring(0, SPRING_CONFIG);
+    progress.value = withTiming(0, { duration: EXPAND_DURATION });
     Keyboard.dismiss();
     if (query) onQueryChange("");
   }, [progress, query, onQueryChange]);
