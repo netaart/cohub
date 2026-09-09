@@ -1,10 +1,11 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Haptics from "expo-haptics";
-import { useMemo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type GestureResponderEvent, type ViewStyle } from "react-native";
 import { CodeBlock } from "@/src/components/CodeBlock";
+import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
 import { formatMessageClock } from "@/src/data/chat-format";
-import { parseMarkdown, type MarkdownBlock, type MarkdownInline, type MarkdownTableAlignment } from "@/src/data/markdown";
+import { parseMarkdown, repairStreamingMarkdown, splitStreamingMarkdown, type MarkdownBlock, type MarkdownInline, type MarkdownTableAlignment } from "@/src/data/markdown";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
@@ -64,18 +65,33 @@ function MarkdownBlockView({ block, accent, textColor }: { block: MarkdownBlock;
   return <Text style={[typography.chatBody, { color: textColor }]}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} /></Text>;
 }
 
-function TextBlock({ value, muted = false, accent, color }: { value: string; muted?: boolean; accent: string; color?: string }) {
+// Completed blocks only change when a new block boundary is crossed, so the
+// memo keeps the whole stable prefix out of the streaming render path.
+const MarkdownBody = memo(function MarkdownBody({ source, accent, textColor }: { source: string; accent: string; textColor: string }) {
+  const blocks = useMemo(() => parseMarkdown(source), [source]);
+  return <>{blocks.map((block, index) => <MarkdownBlockView key={index} block={block} accent={accent} textColor={textColor} />)}</>;
+});
+
+function TextBlock({ value, muted = false, accent, color, streaming = false }: { value: string; muted?: boolean; accent: string; color?: string; streaming?: boolean }) {
   const theme = useAppTheme();
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
-  const blocks = useMemo(() => parseMarkdown(value), [value]);
-  return <View style={{ gap: 9 }}>{blocks.map((block, index) => <MarkdownBlockView key={index} block={block} accent={accent} textColor={textColor} />)}</View>;
+  const revealed = useRevealedStreamText(value, streaming);
+  const { stable, tail } = useMemo(
+    () => streaming ? splitStreamingMarkdown(revealed) : { stable: revealed, tail: "" },
+    [revealed, streaming],
+  );
+  const repairedTail = useMemo(() => tail ? repairStreamingMarkdown(tail) : "", [tail]);
+  return <View style={{ gap: 9 }}>
+    {stable ? <MarkdownBody source={stable} accent={accent} textColor={textColor} /> : null}
+    {repairedTail ? <MarkdownBody source={repairedTail} accent={accent} textColor={textColor} /> : null}
+  </View>;
 }
 
-function Block({ block, color }: { block: ContentBlock; color?: string }) {
+function Block({ block, color, streaming = false }: { block: ContentBlock; color?: string; streaming?: boolean }) {
   const theme = useAppTheme();
   const accent = color ?? theme.colors.accent;
-  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} />;
-  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} />;
+  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} streaming={streaming} />;
+  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} streaming={streaming} />;
   if (block.type === "image") {
     const uri = block.source?.type === "url"
       ? block.source.url
@@ -85,8 +101,6 @@ function Block({ block, color }: { block: ContentBlock; color?: string }) {
     if (!uri) return null;
     return <Image source={{ uri }} resizeMode="contain" style={{ width: "100%", height: 220, borderRadius: 12, backgroundColor: theme.colors.surfaceRaised }} />;
   }
-  if (block.type === "tool_use") return <ToolCall block={block} />;
-  if (block.type === "tool_result") return <ToolOutput block={block} />;
   return null;
 }
 
@@ -105,7 +119,9 @@ function toolIcon(name: string): IconName {
 
 function ToolOutput({ block }: { block: Extract<ContentBlock, { type: "tool_result" }> }) {
   const theme = useAppTheme();
-  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <ScrollView horizontal><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.text }]}>{block.content || "(empty output)"}</Text></ScrollView> : <MessageContent content={block.content} />}</View>;
+  // Running tools keep appending to `content`; the body must be height-capped
+  // (mirroring the web's tail view) or an expanded bubble grows forever.
+  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.text }]}>{block.content || "(empty output)"}</Text></ScrollView> : <MessageContent content={block.content} />}</View>;
 }
 
 function ToolCall({ block, result, active = false }: { block: Extract<ContentBlock, { type: "tool_use" }>; result?: Extract<ContentBlock, { type: "tool_result" }>; active?: boolean }) {
@@ -135,11 +151,14 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
 
 export function MessageContent({ content, active = false, color }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string }) {
   const blocks = content ?? [];
-  const calls = new Set(blocks.filter((block) => block.type === "tool_use").map((block) => block.id));
   return <View style={{ gap: 3 }}>{blocks.map((block, index) => {
-    if (block.type === "tool_result" && calls.has(block.tool_use_id)) return null;
+    // Tool results never render standalone. A paired one is shown inside its
+    // ToolCall; a streaming message boundary can leave a partial result whose
+    // tool_use was committed with the previous message, and dumping that raw
+    // output into the bubble grows its height for as long as the tool runs.
+    if (block.type === "tool_result") return null;
     if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={blocks.find((item): item is Extract<ContentBlock, { type: "tool_result" }> => item.type === "tool_result" && item.tool_use_id === block.id)} />;
-    return <Block key={`${block.type}-${index}`} block={block} color={color} />;
+    return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} />;
   })}</View>;
 }
 
@@ -195,7 +214,7 @@ function BubbleMeta({ clock, local = false, side, live = false }: { clock?: stri
   </View>;
 }
 
-export function MessageBubble({ message, local = false, onLongPress }: { message: MessageRecord; local?: boolean; onLongPress?: (text: string, origin: { x: number; y: number }) => void }) {
+export const MessageBubble = memo(function MessageBubble({ message, local = false, onLongPress }: { message: MessageRecord; local?: boolean; onLongPress?: (text: string, origin: { x: number; y: number }) => void }) {
   const theme = useAppTheme();
   if (!hasRenderableMessage(message)) return null;
   const isUser = message.role === "user";
@@ -214,7 +233,7 @@ export function MessageBubble({ message, local = false, onLongPress }: { message
     </ChatBubbleFrame>
     {!isUser && (message.model || thinkingLevel) ? <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}</Text> : null}
   </View>;
-}
+});
 
 export function StreamCard({ content, status, runtimePhase = null, runtimeModel = null, onLongPress }: { content: ContentBlock[]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null; onLongPress?: (text: string, origin: { x: number; y: number }) => void }) {
   const theme = useAppTheme();
