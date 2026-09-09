@@ -51,10 +51,16 @@ function ModelStatusDot({ entry, status }: { entry: ModelCatalogEntry; status: M
 }
 
 function modelIconModel(entry: ModelCatalogEntry) {
-  const prefixed = `${entry.provider}/${entry.id}`;
+  const id = modelIconLookupId(entry.id);
+  const prefixed = `${entry.provider}/${id}`;
   const matches = (value: string) => modelMappings.some((item) => item.keywords.some((keyword) => new RegExp(keyword, "i").test(value)));
-  if (matches(entry.id)) return entry.id;
+  if (matches(id)) return id;
   return matches(prefixed) ? prefixed : null;
+}
+
+// LobeHub treats any "gpt-5" substring as the GPT-5 pink avatar. GPT-5.6+ should use the generic ChatGPT mark, same as gpt-6.
+function modelIconLookupId(id: string) {
+  return /gpt-5\.(?:[6-9]|\d{2,})/i.test(id) ? "openai" : id;
 }
 
 function ModelBrandMark({ entry }: { entry: ModelCatalogEntry }) {
