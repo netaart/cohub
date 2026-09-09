@@ -196,6 +196,7 @@ export function MessageContent({ content, active = false, color }: { content: Co
 function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number): ViewStyle {
   return {
     maxWidth,
+    ...(side === "assistant" ? { width: maxWidth } : null),
     minWidth: 0,
     alignSelf: side === "user" ? "flex-end" : "flex-start",
     borderRadius: theme.radius.lg,
