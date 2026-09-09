@@ -52,7 +52,7 @@ on:
         description: Platform to build
         required: true
         type: choice
-        options: [android, all]
+        options: [android, ios, all]
         default: android
       profile:
         description: Native build profile
@@ -398,5 +398,5 @@ jobs:
           issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
           api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
-          wait-for-processing: "false"
+          wait-for-processing: "true"
           uses-non-exempt-encryption: "false"
