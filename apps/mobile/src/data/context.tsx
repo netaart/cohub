@@ -40,7 +40,7 @@ import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, load
 import { getInstallationId } from "@/src/platform/installation";
 import { mockMessages, mockModels, mockSessions, mockSpaces, mockTurnIndex, mockTurns, mockUsage } from "@/src/data/mock";
 import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, type LatestSessionTurn } from "@/src/data/session-status";
-import { createSessionResyncCoordinator, isTransportRecovery, type SessionResyncReason } from "@/src/data/session-reconnect";
+import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery, type SessionResyncReason } from "@/src/data/session-reconnect";
 import {
   displaySessionTitle,
   displaySpaceName,
@@ -979,7 +979,8 @@ export function AppProvider({
     return client.onConnection((snapshot) => {
       const previous = connectionStateRef.current;
       connectionStateRef.current = snapshot.state;
-      setConnectionState(snapshot.state);
+      const displayState = connectionDisplayState(snapshot);
+      if (displayState) setConnectionState(displayState);
       if (!isTransportRecovery(previous, snapshot.state)) return;
       for (const sessionId of subscriptions.current.keys()) resyncCoordinatorRef.current.request(sessionId, "transport-open");
       // Running badges on the list are derived from turn status; refresh them for recent Chats.

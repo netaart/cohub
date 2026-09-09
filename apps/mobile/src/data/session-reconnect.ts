@@ -1,5 +1,26 @@
 import type { ConnectionState } from "@/src/data/types";
 
+export type ConnectionStateSnapshot = {
+  state: ConnectionState;
+  willReconnect?: boolean;
+  recoverable?: boolean;
+};
+
+/**
+ * Maps an SDK connection snapshot to the state the app should display.
+ *
+ * Recoverable `error` events (a dropped compact patch, an unreadable frame)
+ * leave the socket open, so they must not be surfaced as an outage. `closed`
+ * with a pending reconnect is immediately followed by `reconnecting`, so it
+ * reports as reconnecting rather than unavailable. Returns null when the
+ * snapshot should not change the displayed state.
+ */
+export function connectionDisplayState(snapshot: ConnectionStateSnapshot): ConnectionState | null {
+  if (snapshot.state === "error" && snapshot.recoverable === true) return null;
+  if (snapshot.state === "closed" && snapshot.willReconnect === true) return "reconnecting";
+  return snapshot.state;
+}
+
 /**
  * A transport handoff happened when the socket reaches `open` after any
  * state that could have dropped realtime events. The very first `open`
