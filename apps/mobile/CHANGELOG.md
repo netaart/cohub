@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.9.0](https://github.com/markbang/cohub-mobile/compare/v1.8.2...v1.9.0) (2026-09-09)
+
+
+### Features
+
+* add swipeable message image gallery ([d47cbd4](https://github.com/markbang/cohub-mobile/commit/d47cbd4ffa56f2b4d20df0094f9cd8a957a474c7))
+* **android:** prompt only when a new native build is available ([b23f3b0](https://github.com/markbang/cohub-mobile/commit/b23f3b03adb32f36cd5c4e10074f29e53e0ea6bb))
+* **chat:** message actions, selectable text, image gallery, and streaming markdown ([0d17ce4](https://github.com/markbang/cohub-mobile/commit/0d17ce413a9e5c3524a92aa9d076065198fa7099))
+* **chat:** pace streamed text by grapheme ([632c3a4](https://github.com/markbang/cohub-mobile/commit/632c3a4200eebe7d00cff2fc0986d11fe3aace39))
+
+
+### Fixes
+
+* constrain mobile message bubble layout ([c370624](https://github.com/markbang/cohub-mobile/commit/c37062498c42e455582acd0853694cf44d8e6e48))
+* polish chat rendering and model search ([d3068e8](https://github.com/markbang/cohub-mobile/commit/d3068e8b2e0a77420864c9533575ec79d66487ac))
+* stabilize assistant bubble width on mobile ([a17287c](https://github.com/markbang/cohub-mobile/commit/a17287ccf60cf64bb095062d5cfeaaaccf43096b))
+* **ui:** use the generic mark for GPT-5.6 and newer ([d66fc1e](https://github.com/markbang/cohub-mobile/commit/d66fc1e65713981ce743e2d64fd31ff6b0fd4fb9))
+
 ## [1.8.2](https://github.com/markbang/cohub-mobile/compare/v1.8.1...v1.8.2) (2026-09-09)
 
 
