@@ -1,10 +1,10 @@
-/* eslint-disable react-hooks/refs -- PanResponder needs stable mutable gesture state. */
+/* eslint-disable react-hooks/refs -- gesture callbacks read panel refs that are written outside render. */
 /* eslint-disable react-hooks/immutability -- Reanimated shared values are intentionally mutated by gesture worklets. */
 /* eslint-disable react-hooks/set-state-in-effect -- controlled panel state synchronizes the native animation surface. */
 import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/cohub";
 import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Animated, BackHandler, FlatList, Modal, PanResponder, Platform, Pressable, ScrollView, Text, View, useWindowDimensions, type ViewStyle } from "react-native";
+import { ActivityIndicator, BackHandler, FlatList, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, { cancelAnimation, Extrapolation, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,7 +15,6 @@ import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useAppTheme, typography } from "@/src/theme";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { useApp } from "@/src/data/context";
-import { mockFileTree } from "@/src/data/mock";
 import {
   fetchLabelSessionIds,
   fetchSessionLabels,
@@ -25,9 +24,8 @@ import {
   type SessionLabel,
   type SessionSourceGroup,
 } from "@/src/data/session-labels";
-import { PANEL_CLOSE_THRESHOLD, PANEL_OPEN_THRESHOLD, PANEL_SWIPE_VELOCITY, panelForOpeningDelta, panelForSide, shouldClosePanel, shouldOpenPanel, sideForPanel, type PanelName, type PanelSide } from "@/src/data/space-panel-gesture";
+import { panelForOpeningDelta, panelForSide, shouldClosePanel, shouldOpenPanel, sideForPanel, type PanelName, type PanelSide } from "@/src/data/space-panel-gesture";
 import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField } from "@/src/ui";
-import { motion } from "@/src/motion";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
 
 export type SpacePanel = "chat" | "files";
@@ -37,7 +35,6 @@ type SpacePanelsProps = {
   spaceName: string;
   sessions: UserSessionListItem[];
   client: CohubClient | null;
-  offline?: boolean;
   activePanel: SpacePanel | null;
   onActivePanelChange: (panel: SpacePanel | null) => void;
   onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void;
@@ -49,33 +46,9 @@ type SpacePanelsProps = {
 
 const PANEL_WIDTH_RATIO = 0.86;
 const MAX_PANEL_WIDTH = 360;
-const ANIMATION_DURATION_MS = motion.glide.duration;
-const USE_NATIVE_DRIVER = Platform.OS !== "web";
-// These CSS properties are supported by React Native Web but are not in the shared RN ViewStyle type.
-const WEB_GESTURE_STYLE: ViewStyle | undefined = Platform.OS === "web"
-  ? ({ touchAction: "pan-y" } as unknown as ViewStyle)
-  : undefined;
-const WEB_NO_SELECT_STYLE: ViewStyle | undefined = Platform.OS === "web"
-  ? ({ userSelect: "none" } as unknown as ViewStyle)
-  : undefined;
 
-type GestureController = {
-  activePanel: SpacePanel | null;
-  visibleSide: SpacePanel | null;
-  gestureSide: SpacePanel | null;
-  gestureDistance: number;
-};
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-// Native uses one RNGH pan surface so the two panel directions cannot compete.
-export function SpacePanels(props: SpacePanelsProps) {
-  return Platform.OS === "web" ? <WebSpacePanels {...props} /> : <NativeSpacePanels {...props} />;
-}
-
-function NativeSpacePanels({ spaceId, spaceName, sessions, client, offline = false, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
+// One RNGH pan surface so the two panel directions cannot compete.
+export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
   const theme = useAppTheme();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
@@ -354,178 +327,12 @@ function NativeSpacePanels({ spaceId, spaceName, sessions, client, offline = fal
           {interactive
             ? visiblePanel === "chat"
               ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} chipsRect={chipsRect} onClose={() => closePanel("chat")} onNewChat={() => { closePanel("chat"); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel("chat"); onOpenSession(sessionId, target); }} />
-              : <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} offline={offline} onClose={() => closePanel("files")} onOpenFile={(path) => { closePanel("files"); onOpenFile(path); }} onOpenFilesPage={() => { closePanel("files"); onOpenFilesPage(); }} />
+              : <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} onClose={() => closePanel("files")} onOpenFile={(path) => { closePanel("files"); onOpenFile(path); }} onOpenFilesPage={() => { closePanel("files"); onOpenFilesPage(); }} />
             : <PanelGesturePreview panel={visiblePanel} />}
         </Reanimated.View>
       </Reanimated.View> : null}
     </View>
   </GestureDetector>;
-}
-
-function WebSpacePanels({ spaceId, spaceName, sessions, client, offline = false, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
-  const theme = useAppTheme();
-  const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
-  const panelWidth = Math.min(MAX_PANEL_WIDTH, Math.max(280, width * PANEL_WIDTH_RATIO));
-  const [progress] = useState(() => new Animated.Value(0));
-  const [closingSide, setClosingSide] = useState<SpacePanel | null>(null);
-  const [gestureSide, setGestureSide] = useState<SpacePanel | null>(null);
-  const [gestureActive, setGestureActive] = useState(false);
-  const gestureOpeningRef = useRef(false);
-  const controllerRef = useRef<GestureController>({ activePanel, visibleSide: activePanel, gestureSide: null, gestureDistance: 0 });
-
-  useEffect(() => {
-    controllerRef.current.activePanel = activePanel;
-  }, [activePanel]);
-
-  const animateTo = useCallback((value: number, onFinished?: () => void) => {
-    progress.stopAnimation();
-    Animated.timing(progress, { toValue: value, duration: ANIMATION_DURATION_MS, useNativeDriver: USE_NATIVE_DRIVER }).start(({ finished }) => {
-      if (finished) onFinished?.();
-    });
-  }, [progress]);
-
-  useEffect(() => {
-    if (!activePanel) return;
-    const openedFromGesture = gestureOpeningRef.current;
-    gestureOpeningRef.current = false;
-    controllerRef.current.activePanel = activePanel;
-    controllerRef.current.visibleSide = activePanel;
-    if (openedFromGesture) setGestureSide(null);
-    else {
-      progress.stopAnimation();
-      progress.setValue(0);
-    }
-    const frame = requestAnimationFrame(() => animateTo(1));
-    return () => cancelAnimationFrame(frame);
-  }, [activePanel, animateTo, progress]);
-
-  const closeDrawer = useCallback(() => {
-    const side = activePanel ?? controllerRef.current.visibleSide;
-    if (!side) return;
-    controllerRef.current.visibleSide = side;
-    controllerRef.current.gestureSide = null;
-    setClosingSide(side);
-    onActivePanelChange(null);
-    animateTo(0, () => {
-      if (controllerRef.current.activePanel === null) {
-        controllerRef.current.visibleSide = null;
-        setClosingSide(null);
-      }
-    });
-  }, [activePanel, animateTo, onActivePanelChange]);
-
-  const visibleSide = activePanel ?? closingSide ?? gestureSide;
-  const drawerMounted = activePanel !== null || closingSide !== null;
-
-  const screenResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponderCapture: (_, gesture) => {
-      if (controllerRef.current.activePanel || controllerRef.current.visibleSide) return false;
-      return Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15;
-    },
-    onPanResponderGrant: () => {
-      setGestureActive(true);
-      controllerRef.current.gestureSide = null;
-      controllerRef.current.gestureDistance = 0;
-      controllerRef.current.visibleSide = null;
-      setClosingSide(null);
-      setGestureSide(null);
-      progress.stopAnimation();
-      progress.setValue(0);
-    },
-    onPanResponderMove: (_, gesture) => {
-      let side = controllerRef.current.gestureSide;
-      if (!side) {
-        side = gesture.dx >= 0 ? "chat" : "files";
-        controllerRef.current.gestureSide = side;
-        controllerRef.current.visibleSide = side;
-        setGestureSide(side);
-      }
-      const distance = side === "chat" ? Math.max(0, gesture.dx) : Math.max(0, -gesture.dx);
-      controllerRef.current.gestureDistance = distance;
-      progress.setValue(clamp(distance / panelWidth, 0, 1));
-    },
-    onPanResponderRelease: (_, gesture) => {
-      setGestureActive(false);
-      const side = controllerRef.current.gestureSide;
-      if (!side) return;
-      const distance = controllerRef.current.gestureDistance;
-      const velocity = side === "chat" ? gesture.vx : -gesture.vx;
-      controllerRef.current.gestureSide = null;
-      if (distance / panelWidth >= PANEL_OPEN_THRESHOLD || velocity >= PANEL_SWIPE_VELOCITY) {
-        gestureOpeningRef.current = true;
-        onActivePanelChange(side);
-      } else {
-        animateTo(0, () => {
-          setGestureSide(null);
-          controllerRef.current.visibleSide = null;
-        });
-      }
-    },
-    onPanResponderTerminate: () => {
-      setGestureActive(false);
-      controllerRef.current.gestureSide = null;
-      animateTo(0, () => {
-        setGestureSide(null);
-        controllerRef.current.visibleSide = null;
-      });
-    },
-    onPanResponderTerminationRequest: () => false,
-  }), [animateTo, onActivePanelChange, panelWidth, progress]);
-
-  const panelResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponderCapture: (_, gesture) => {
-      const side = controllerRef.current.visibleSide;
-      if (!side || !controllerRef.current.activePanel) return false;
-      const closing = side === "chat" ? gesture.dx < -8 : gesture.dx > 8;
-      return closing && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15;
-    },
-    onPanResponderMove: (_, gesture) => {
-      const side = controllerRef.current.visibleSide;
-      if (!side) return;
-      const distance = side === "chat" ? Math.max(0, -gesture.dx) : Math.max(0, gesture.dx);
-      progress.setValue(clamp(1 - distance / panelWidth, 0, 1));
-    },
-    onPanResponderRelease: (_, gesture) => {
-      setGestureActive(false);
-      const side = controllerRef.current.visibleSide;
-      if (!side) return;
-      const distance = side === "chat" ? Math.max(0, -gesture.dx) : Math.max(0, gesture.dx);
-      const velocity = side === "chat" ? -gesture.vx : gesture.vx;
-      if (distance / panelWidth >= PANEL_CLOSE_THRESHOLD || velocity >= PANEL_SWIPE_VELOCITY) closeDrawer();
-      else animateTo(1);
-    },
-    onPanResponderTerminate: () => {
-      setGestureActive(false);
-      animateTo(1);
-    },
-    onPanResponderTerminationRequest: () => false,
-  }), [animateTo, closeDrawer, panelWidth, progress]);
-
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: visibleSide === "files" ? [panelWidth, 0] : [-panelWidth, 0] });
-  const backdropOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [0, 0.52] });
-  const panelPosition = { left: visibleSide === "chat" ? 0 : undefined, right: visibleSide === "files" ? 0 : undefined };
-
-  return <View collapsable={false} style={[{ flex: 1 }, WEB_GESTURE_STYLE, gestureActive ? WEB_NO_SELECT_STYLE : null]} {...screenResponder.panHandlers}>
-    {children}
-    {!drawerMounted && gestureSide ? <View pointerEvents="none" accessibilityElementsHidden style={[styles.gesturePreviewRoot, { top: -insets.top, bottom: -insets.bottom }]}>
-      <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
-      <Animated.View style={[styles.panel, { width: panelWidth, paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: theme.colors.background, borderColor: theme.colors.border, ...panelPosition, transform: [{ translateX }] }]}>
-        <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-          <AppIcon name={gestureSide === "chat" ? "messages" : "folder-open"} size={19} color={theme.colors.accent} />
-          <Text style={[typography.heading, { color: theme.colors.text }]}>{gestureSide === "chat" ? "Chats" : "Files"}</Text>
-        </View>
-      </Animated.View>
-    </View> : null}
-    <Modal visible={drawerMounted} transparent animationType="none" statusBarTranslucent navigationBarTranslucent hardwareAccelerated onRequestClose={closeDrawer}>
-      <View style={styles.modalRoot}>
-        <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}><Pressable accessibilityRole="button" accessibilityLabel="Close panel" style={styles.fill} onPress={closeDrawer} /></Animated.View>
-        <Animated.View collapsable={false} testID={visibleSide ? `space-panel-${visibleSide}` : undefined} {...panelResponder.panHandlers} accessibilityViewIsModal role="dialog" style={[styles.panel, WEB_GESTURE_STYLE, gestureActive ? WEB_NO_SELECT_STYLE : null, { width: panelWidth, height: Math.max(0, height), paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: theme.colors.background, borderColor: theme.colors.border, ...panelPosition, transform: [{ translateX }] }]}>
-            {visibleSide === "chat" ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onClose={closeDrawer} onNewChat={() => { closeDrawer(); onNewChat(); }} onOpenSession={(sessionId, target) => { closeDrawer(); onOpenSession(sessionId, target); }} /> : <FilesPanel spaceId={spaceId} spaceName={spaceName} client={client} offline={offline} onClose={closeDrawer} onOpenFile={(path) => { closeDrawer(); onOpenFile(path); }} onOpenFilesPage={() => { closeDrawer(); onOpenFilesPage(); }} />}
-        </Animated.View>
-      </View>
-    </Modal>
-  </View>;
 }
 
 function PanelGesturePreview({ panel }: { panel: SpacePanel }) {
@@ -784,7 +591,7 @@ function PanelFilterChip({ label, icon, selected, onPress }: { label: string; ic
   return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => ({ minHeight: 32, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border, backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, flexDirection: "row", alignItems: "center", gap: 5 })}>{icon ? <AppIcon name={icon} size={13} color={selected ? theme.colors.accent : theme.colors.textMuted} /> : null}<Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }
 
-function FilesPanel({ enabled = true, spaceId, spaceName, client, offline = false, onClose, onOpenFile, onOpenFilesPage }: { enabled?: boolean; spaceId: string; spaceName: string; client: CohubClient | null; offline?: boolean; onClose: () => void; onOpenFile: (path: string) => void; onOpenFilesPage: () => void }) {
+function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpenFile, onOpenFilesPage }: { enabled?: boolean; spaceId: string; spaceName: string; client: CohubClient | null; onClose: () => void; onOpenFile: (path: string) => void; onOpenFilesPage: () => void }) {
   const theme = useAppTheme();
   const [path, setPath] = useState("");
   const [entries, setEntries] = useState<SpaceFsEntry[]>([]);
@@ -795,12 +602,6 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, offline = fals
   const load = useCallback(async () => {
     if (!enabled) return;
     const currentRequest = ++requestIdRef.current;
-    if (offline) {
-      setEntries(mockFileTree[normalizeSpacePath(path)] ?? []);
-      setError(null);
-      setLoading(false);
-      return;
-    }
     if (!client) {
       setEntries([]);
       setError("Connect to Cohub to browse Files.");
@@ -817,7 +618,7 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, offline = fals
     } finally {
       if (currentRequest === requestIdRef.current) setLoading(false);
     }
-  }, [client, enabled, offline, path, spaceId]);
+  }, [client, enabled, path, spaceId]);
 
   useEffect(() => {
     if (!enabled) return;

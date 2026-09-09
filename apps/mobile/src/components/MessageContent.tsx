@@ -1,7 +1,7 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Clipboard from "expo-clipboard";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, FlatList, Image, Linking, Modal, Platform, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CodeBlock } from "@/src/components/CodeBlock";
@@ -287,7 +287,6 @@ function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = fa
     paddingTop: 8,
     paddingBottom: 6,
     opacity: local ? 0.72 : 1,
-    ...(Platform.OS === "web" ? { userSelect: "none" as const } : null),
   };
 }
 

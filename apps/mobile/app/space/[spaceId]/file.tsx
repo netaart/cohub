@@ -23,7 +23,7 @@ export default function FileScreen() {
   const spaceId = firstParam(params.spaceId);
   const path = Array.isArray(params.path) ? params.path.join("/") : params.path ?? "";
   const theme = useAppTheme();
-  const { client, offline } = useApp();
+  const { client } = useApp();
   const [file, setFile] = useState<SpaceFsFileResponse | null>(null);
   const requestIdRef = useRef(0);
   const [url, setUrl] = useState<string | null>(null);
@@ -83,7 +83,7 @@ export default function FileScreen() {
   const inlineContent = file && file.kind === "text" && file.delivery !== "url" ? file.content : null;
   const editing = draft !== null;
   const dirty = editing && file !== null && draft !== file.content;
-  const editable = !offline && isEditableTextFile(file);
+  const editable = isEditableTextFile(file);
 
   const exitEditing = useCallback(() => {
     setDraft(null);

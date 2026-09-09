@@ -1,9 +1,8 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
-import { useRouter } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { MessageBubble } from "@/src/components/MessageContent";
 import { typography, useAppTheme } from "@/src/theme";
-import { DetailTopBar, Screen } from "@/src/ui";
+import { Screen } from "@/src/ui";
 
 const NOW = new Date().toISOString();
 
@@ -57,11 +56,9 @@ const MESSAGE = {
 } as MessageRecord;
 
 export default function DebugToolsScreen() {
-  const router = useRouter();
   const theme = useAppTheme();
   return (
     <Screen>
-      <DetailTopBar title="工具展开验收" subtitle="长输出 / 报错 / 编辑 diff" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ paddingVertical: 12 }} keyboardShouldPersistTaps="handled">
         <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
           <Text style={[typography.caption, { color: theme.colors.textMuted }]}>

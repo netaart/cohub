@@ -1,7 +1,6 @@
 import { fromUint8Array } from "js-base64";
 import { requestRecordingPermissionsAsync, useAudioStream } from "expo-audio";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Platform } from "react-native";
 import { config } from "@/src/config";
 
 type VoiceCallbacks = {
@@ -95,7 +94,7 @@ export function useNativeVoiceInput({ getAccessToken, onFinal }: VoiceCallbacks)
   }, [stopOwnedStream]);
 
   const start = useCallback(async () => {
-    if (Platform.OS === "web" || startInFlightRef.current || isStarting || isRecording) return;
+    if (startInFlightRef.current || isStarting || isRecording) return;
     if (streamStartedRef.current) return;
 
     const operation = operationRef.current + 1;

@@ -229,12 +229,6 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           style={[typography.body, styles.composerText, expanded ? styles.composerTextExpanded : styles.composerTextCompact, { color: theme.colors.text }]}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          onSubmitEditing={(event) => {
-            if (Platform.OS === "web" && canSend) {
-              event.preventDefault();
-              onSend();
-            }
-          }}
           blurOnSubmit={false}
         />
         {expanded ? <View style={styles.composerToolbar}>

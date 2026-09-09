@@ -1,10 +1,9 @@
 import type { MessageRecord } from "@neta-art/cohub";
-import { useRouter } from "expo-router";
 import { useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { MessageBubble } from "@/src/components/MessageContent";
 import { typography, useAppTheme } from "@/src/theme";
-import { DetailTopBar, Screen } from "@/src/ui";
+import { Screen } from "@/src/ui";
 
 const NOW = new Date().toISOString();
 const SIZES = [500, 2000, 10000] as const;
@@ -37,7 +36,6 @@ function debugMessage(index: number): MessageRecord {
 }
 
 export default function DebugListScreen() {
-  const router = useRouter();
   const theme = useAppTheme();
   const listRef = useRef<FlatList<MessageRecord>>(null);
   const [count, setCount] = useState<(typeof SIZES)[number]>(500);
@@ -45,7 +43,6 @@ export default function DebugListScreen() {
 
   return (
     <Screen>
-      <DetailTopBar title="长列表性能" subtitle={`${count} 条消息`} onBack={() => router.back()} />
       <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
         {SIZES.map((size) => (
           <Pressable key={size} accessibilityRole="tab" accessibilityState={{ selected: count === size }} onPress={() => setCount(size)} style={({ pressed }) => ({ minHeight: 32, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: count === size ? theme.colors.accentBorder : theme.colors.border, backgroundColor: count === size ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, justifyContent: "center" })}>

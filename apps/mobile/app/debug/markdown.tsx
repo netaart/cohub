@@ -1,9 +1,8 @@
 import type { MessageRecord } from "@neta-art/cohub";
-import { useRouter } from "expo-router";
 import { ScrollView, Text, View } from "react-native";
 import { MessageBubble } from "@/src/components/MessageContent";
 import { typography, useAppTheme } from "@/src/theme";
-import { DetailTopBar, Screen } from "@/src/ui";
+import { Screen } from "@/src/ui";
 
 const NOW = new Date().toISOString();
 
@@ -64,11 +63,9 @@ const MESSAGE = {
 } as MessageRecord;
 
 export default function DebugMarkdownScreen() {
-  const router = useRouter();
   const theme = useAppTheme();
   return (
     <Screen>
-      <DetailTopBar title="Markdown 渲染验收" subtitle="标题 / 表格 / 代码 / 列表 / 引用" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={{ paddingVertical: 12 }} keyboardShouldPersistTaps="handled">
         <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
           <Text style={[typography.caption, { color: theme.colors.textMuted }]}>

@@ -1,7 +1,6 @@
 import * as ExpoLinking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect } from "react";
-import { Platform } from "react-native";
 import {
   getInitialNotificationUrl,
   subscribeToNotificationResponses,
@@ -46,7 +45,6 @@ export function NativeInteractionBridge() {
   }, [router]);
 
   useEffect(() => {
-    if (Platform.OS === "web") return;
     let active = true;
     let notificationCleanup: (() => void) | null = null;
     const linkingSubscription = ExpoLinking.addEventListener("url", ({ url }) => openUrl(url));

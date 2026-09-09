@@ -5,7 +5,6 @@
 ```bash
 npm ci
 npm run check
-npm run export:web
 npm run export:android
 npm run export:ios
 npm run native:android

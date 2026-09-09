@@ -29,13 +29,13 @@ Load bundled references as needed. Mentions of uninstalled sibling skills do not
 
 ## Ownership
 
-This repository is the native iOS/Android client. Expo web is a lightweight preview, not the product's acceptance target.
+This repository is the native iOS/Android client. There is no web target.
 
 - `app/`: Expo Router routes, layouts, navigation, and screen composition.
 - `src/components/`, `src/ui/`, `src/ui.tsx`: reusable presentation. Reuse `src/theme.ts`, `src/motion.ts`, and `src/icons.ts` conventions before adding styling or motion primitives.
 - `src/data/context.tsx`: shared application state, cache hydration, SDK operations, subscriptions, optimistic updates, and reconciliation. Keep protocol/state transitions out of presentation code.
 - `src/data/`: framework-free workflow helpers, app-facing types, SDK client setup, and local persistence. Extend existing helpers where the behavior belongs.
-- `src/auth/`, `src/platform/`: authentication and platform integrations. Respect existing `.native.ts` and `.web.ts` module boundaries.
+- `src/auth/`, `src/platform/`: authentication and platform integrations. Keep native-only APIs inside these modules.
 - `scripts/`: repository checks and native build tooling. Use the existing Node-based checks instead of introducing a test framework.
 
 ## Cohub Reference Source
@@ -54,7 +54,7 @@ This repository is the native iOS/Android client. Expo web is a lightweight prev
 - Preserve cache-first rendering with server-authoritative reconciliation. Cached data improves startup and navigation; it must not override newer server state.
 - Keep caches scoped to the authenticated user and clear them on sign out. Account changes must not expose the previous user's data or retain their subscriptions.
 - For chat changes, preserve optimistic-send reconciliation, stream cleanup, turn ordering, pagination cursors, read state, and scroll position. Check the affected transitions, not just the final rendered message.
-- Keep mock/demo data confined to its explicit mode. Do not substitute mock success for network, authentication, or persistence failures.
+- Do not substitute mock or demo data for network, authentication, or persistence failures.
 - Keep credentials in the existing authentication/platform storage paths. `EXPO_PUBLIC_*` values are public; never put secrets there or log tokens, private message content, or signing material.
 - Treat notification payloads and deep links as untrusted routing inputs. Fetch authoritative data with the current user's permissions.
 - Keep Work previews origin-constrained and avoid unrestricted native bridge access. The WebView is for published web content, not a replacement for native screens.
@@ -72,7 +72,7 @@ This repository is the native iOS/Android client. Expo web is a lightweight prev
 1. Inspect `git status` before work and review the final diff, including submodule pointers. Change only files needed for the task.
 2. For code changes, run `npm run lint` and `npm run typecheck`. For workflow behavior changes, extend the focused assertions in `scripts/check-chat-workflow.mjs` and run `npm run test:workflow`.
 3. Before PR handoff, run `npm run check` when the environment permits. Use the relevant export and native build commands from `CONTRIBUTING.md` for bundling, dependencies, configuration, or native integration changes. Do not bypass a failing check to claim success.
-4. Verify user-facing changes in the affected flow, including relevant loading, empty, error, and reconnect states. Report the platform/device actually checked; distinguish web preview evidence from native verification.
+4. Verify user-facing changes in the affected flow, including relevant loading, empty, error, and reconnect states. Report the platform/device actually checked.
 5. Report what changed, checks run and their results, and any blockers or unverified behavior. Distinguish pre-existing failures from regressions. For breaking changes, include a concise migration note.
 
 For documentation-only changes, verify referenced paths, commands, and consistency with the repository; application builds are not required.

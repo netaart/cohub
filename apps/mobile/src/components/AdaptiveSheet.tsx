@@ -22,9 +22,6 @@ import { AppIcon, IconButton, type IconName } from "@/src/ui";
 const COMPACT_BREAKPOINT = 720;
 const OPEN_DURATION_MS = 220;
 const CLOSE_DURATION_MS = 170;
-const USE_NATIVE_DRIVER = Platform.OS !== "web";
-const WEB_DRAG_STYLE: (ViewStyle & { touchAction: "none" }) | undefined =
-  Platform.OS === "web" ? { touchAction: "none" } : undefined;
 
 type AdaptiveSheetProps = {
   visible: boolean;
@@ -56,9 +53,7 @@ export function AdaptiveSheet({
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const compact = Platform.OS === "web"
-    ? width < COMPACT_BREAKPOINT
-    : Math.min(width, height) < COMPACT_BREAKPOINT;
+  const compact = Math.min(width, height) < COMPACT_BREAKPOINT;
   const [progress] = useState(() => new Animated.Value(0));
   const [dragOffset] = useState(() => new Animated.Value(0));
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -74,7 +69,7 @@ export function AdaptiveSheet({
       damping: 24,
       stiffness: 260,
       mass: 0.9,
-      useNativeDriver: USE_NATIVE_DRIVER,
+      useNativeDriver: true,
     }).start();
   }, [dragOffset]);
 
@@ -94,7 +89,7 @@ export function AdaptiveSheet({
             Animated.timing(dragOffset, {
               toValue: height,
               duration: CLOSE_DURATION_MS,
-              useNativeDriver: USE_NATIVE_DRIVER,
+              useNativeDriver: true,
             }).start(({ finished }) => {
               if (finished) requestClose();
             });
@@ -134,7 +129,7 @@ export function AdaptiveSheet({
       Animated.timing(progress, {
         toValue: 1,
         duration: OPEN_DURATION_MS,
-        useNativeDriver: USE_NATIVE_DRIVER,
+        useNativeDriver: true,
       }).start();
     });
 
@@ -195,7 +190,7 @@ export function AdaptiveSheet({
         </Animated.View>
         <KeyboardAvoidingView
           pointerEvents="box-none"
-          behavior={Platform.OS === "ios" ? "padding" : Platform.OS === "android" ? "height" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={[styles.stage, compact ? styles.compactStage : styles.desktopStage]}
         >
           <Animated.View
@@ -217,7 +212,7 @@ export function AdaptiveSheet({
             {compact ? (
               <View
                 testID={dismissible && testID ? `${testID}-drag-handle` : undefined}
-                style={[styles.dragArea, WEB_DRAG_STYLE]}
+                style={styles.dragArea}
                 {...(dismissible ? panResponder.panHandlers : {})}
               >
                 {dismissible ? <View style={[styles.dragHandle, { backgroundColor: theme.colors.borderStrong }]} /> : null}

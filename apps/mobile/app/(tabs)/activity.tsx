@@ -2,7 +2,6 @@ import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
-import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, ConnectionBanner, DataError, EmptyState, IconButton, LoadingRows, Screen, SectionHeader, StatusPill, TopBar, getStatusTone } from "@/src/ui";
@@ -12,12 +11,11 @@ import { PressableScale } from "@/src/ui/PressableScale";
 export default function ActivityScreen() {
   const router = useRouter();
   const theme = useAppTheme();
-  const tabBarInset = useFloatingTabBarInset();
   const { state, activityItems, connectionState, refreshHome } = useApp();
   const dataError = state.error ?? state.sessionsError ?? state.sessionStatusError ?? state.activityError;
   const [filter, setFilter] = useState<"all" | "running" | "complete">("all");
   const items = useMemo(() => filter === "all" ? activityItems : activityItems.filter((item) => item.status === filter), [activityItems, filter]);
-  return <Screen scroll refreshing={state.refreshing} onRefresh={() => void refreshHome()} contentStyle={{ paddingBottom: tabBarInset }}>
+  return <Screen scroll refreshing={state.refreshing} onRefresh={() => void refreshHome()}>
     <TopBar title="Activity" subtitle={dataError ? "Activity unavailable" : "Agent runs and results"} left={<AccountAvatar onPress={() => router.push("/profile")} size={40} />} right={<IconButton name="refresh" label="Refresh activity" size={40} onPress={() => void refreshHome()} />} />
     <ConnectionBanner state={connectionState} />
     {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, Avatar, Screen, TopBar } from "@/src/ui";
+import { AppIcon, Avatar, Screen } from "@/src/ui";
 import { displaySpaceName } from "@/src/utils";
 
 type Params = { spaceId?: string | string[] };
@@ -22,7 +22,6 @@ export default function NewChatScreen() {
   };
 
   return <Screen>
-    <TopBar title="Choose a Space" subtitle="Start a conversation where your work lives" left={<Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => router.back()} hitSlop={8} style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}><AppIcon name="x" size={22} color={theme.colors.textSecondary} /></Pressable>} />
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, paddingBottom: 30 }}>
       <Text style={[typography.body, { color: theme.colors.textMuted }]}>Choose a Space to open its conversation composer. The first message will give the Chat its title automatically.</Text>
       <View style={{ marginTop: 16, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 14, overflow: "hidden", backgroundColor: theme.colors.surface }}>

@@ -1,10 +1,9 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
-import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, Text, View, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { MessageBubble, StreamCard } from "@/src/components/MessageContent";
 import { typography, useAppTheme } from "@/src/theme";
-import { AppIcon, DetailTopBar, Screen, type IconName } from "@/src/ui";
+import { AppIcon, Screen, type IconName } from "@/src/ui";
 
 const INTRO = "先确认一下当前改动，再决定从哪里开始修。";
 const BODY = `## 发现的问题
@@ -67,7 +66,6 @@ function RenderProbe({ onRender }: { onRender: () => void }) {
 }
 
 export default function DebugStreamingScreen() {
-  const router = useRouter();
   const theme = useAppTheme();
   const listRef = useRef<FlatList<MessageRecord>>(null);
   const followingRef = useRef(true);
@@ -79,7 +77,6 @@ export default function DebugStreamingScreen() {
   const [speed, setSpeed] = useState(2);
   const [tools, setTools] = useState(true);
   const totalChars = INTRO.length + 2 + BODY.length;
-  const streaming = started && visible < totalChars;
 
   const messages = useMemo(() => [
     debugMessage("debug-user", "user", "帮我把 typecheck 修一下。"),
@@ -137,7 +134,6 @@ export default function DebugStreamingScreen() {
 
   return (
     <Screen>
-      <DetailTopBar title="流式渲染验收" subtitle={`${visible}/${totalChars} 字 · ${streaming ? "streaming" : "done"}`} onBack={() => router.back()} />
       <RenderProbe onRender={markRender} />
       <FlatList
         ref={listRef}

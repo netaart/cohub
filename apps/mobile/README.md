@@ -48,13 +48,10 @@ npm run ios
 npm run android
 ```
 
-The web command is only a lightweight preview. The product target is native iOS/Android.
-
 Run the same checks as CI before opening a PR:
 
 ```bash
 npm run check
-npm run export:web
 npm run export:android
 npm run export:ios
 npm run native:android

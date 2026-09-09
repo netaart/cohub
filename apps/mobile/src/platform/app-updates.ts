@@ -75,7 +75,6 @@ export function isNewerAppVersion(current: string, latest: string) {
 }
 
 export function getInstalledAppVersion() {
-  if (Platform.OS === "web") return Constants.expoConfig?.version?.trim() || "0.0.0";
   return Application.nativeApplicationVersion?.trim() || Constants.expoConfig?.version?.trim() || "0.0.0";
 }
 
@@ -334,7 +333,8 @@ export async function downloadAndInstallAndroidUpdate(
       if (options.signal.aborted) return;
       options.onProgress({ phase: "verifying" });
       if (file.size !== asset.size) throw new Error("APK size verification failed. Retry the download.");
-      const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, await file.arrayBuffer());
+      // expo-crypto's Android binding only accepts a TypedArray; a bare ArrayBuffer fails to convert.
+      const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, new Uint8Array(await file.arrayBuffer()));
       const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
       verifyAndroidUpdateIntegrity(asset, { size: file.size, sha256 });
       verified = true;

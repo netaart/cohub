@@ -3,7 +3,6 @@ import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
-import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { SpaceSearchRow } from "@/src/components/SearchResultRow";
 import { SpaceRow } from "@/src/components/SpaceRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSpaceSearchHit } from "@/src/data/session-search";
@@ -21,7 +20,6 @@ const SPACE_SEARCH_TYPES = ["space"] as const;
 export default function SpacesScreen() {
   const router = useRouter();
   const theme = useAppTheme();
-  const tabBarInset = useFloatingTabBarInset();
   const { state, client, refreshHome, createSpace, toggleSpacePin } = useApp();
   const dataError = state.error ?? state.spacesError;
   const [query, setQuery] = useState("");
@@ -98,7 +96,7 @@ export default function SpacesScreen() {
       refreshing={state.refreshing}
       onRefresh={() => void refreshHome()}
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
+contentContainerStyle={{ flexGrow: listItems.length === 0 ? 1 : undefined }}
       ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 5 }}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}<View style={{ flexDirection: "row", gap: 8, paddingTop: 12 }}><SpaceFilterChip label="Recent" selected={filter === "recent"} onPress={() => setFilter("recent")} /><SpaceFilterChip label="All" selected={filter === "all"} onPress={() => setFilter("all")} /><SpaceFilterChip label="Pinned" icon="pin" selected={filter === "pinned"} onPress={() => setFilter("pinned")} /></View>{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Space search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}{pinError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{pinError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Dismiss Space pin error" onPress={() => setPinError(null)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Dismiss</Text></Pressable></View> : null}<Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 16 }]}>Your workspaces</Text></View>}
       ListEmptyComponent={state.booting ? <LoadingRows count={4} /> : dataError ? <EmptyState icon="cloud-off" title="Spaces are unavailable" description="Retry above after checking your connection and sign-in session." /> : searchEmpty}
     />

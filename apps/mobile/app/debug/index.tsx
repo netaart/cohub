@@ -4,10 +4,9 @@ import { Platform, Pressable, Text, View } from "react-native";
 import { useApp } from "@/src/data/context";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useAppTheme, useFontScalePreference, typography } from "@/src/theme";
-import { AppIcon, DetailTopBar, Screen, SectionHeader, type IconName } from "@/src/ui";
+import { AppIcon, Screen, SectionHeader, type IconName } from "@/src/ui";
 
 function updateInfo() {
-  if (Platform.OS === "web") return { runtime: "web", update: "web" };
   try {
     return {
       runtime: Updates.runtimeVersion ?? "—",
@@ -28,7 +27,6 @@ export default function DebugMenuScreen() {
 
   return (
     <Screen scroll>
-      <DetailTopBar title="Debug" subtitle="验收与性能工具" onBack={() => router.back()} />
 
       <SectionHeader title="渲染验收" />
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>

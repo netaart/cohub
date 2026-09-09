@@ -11,7 +11,7 @@ import type {
   UserSessionListItem,
 } from "@neta-art/cohub";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AppState as NativeAppState, Platform } from "react-native";
+import { AppState as NativeAppState } from "react-native";
 import { File as ExpoFile } from "expo-file-system";
 import { createMobileClient } from "@/src/data/client";
 import { createStreamBatch } from "@/src/data/chat-rendering";
@@ -39,7 +39,6 @@ import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, 
 import { forkSessionTurn } from "@/src/data/session-fork";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
-import { mockMessages, mockModels, mockSessions, mockSpaces, mockTurnIndex, mockTurns, mockUsage } from "@/src/data/mock";
 import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, type LatestSessionTurn } from "@/src/data/session-status";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery, type SessionResyncReason } from "@/src/data/session-reconnect";
 import {
@@ -54,7 +53,6 @@ const HOME_REQUEST_TIMEOUT_MS = 15_000;
 const SESSION_RESYNC_DEBOUNCE_MS = 250;
 // Mirrors the web client: never re-seed the same session's stream more than once per window.
 const OUT_OF_SYNC_RESYNC_COOLDOWN_MS = 15_000;
-const mockLatestTurns = Object.fromEntries(Object.entries(mockTurns).map(([id, turns]) => [id, latestTurn(turns)]));
 
 function withTimeout<T>(promise: Promise<T>, label: string) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -86,9 +84,7 @@ async function buildPromptContent(
   const content: ContentBlock[] = [];
   const imageBlocks: ContentBlock[] = [];
   for (const attachment of attachments) {
-    const blob: Blob = Platform.OS === "web"
-      ? await (await fetch(attachment.uri)).blob()
-      : new ExpoFile(attachment.uri);
+    const blob: Blob = new ExpoFile(attachment.uri);
     const uploaded = await client.publicAssets.uploadChatAttachment({
       spaceId,
       sessionId,
@@ -615,7 +611,6 @@ function reducer(state: AppState, action: Action): AppState {
 
 export type AppContextValue = {
   state: AppState;
-  offline: boolean;
   client: CohubClient | null;
   connectionState: ConnectionState;
   installationId: string | null;
@@ -658,18 +653,14 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({
   userUuid,
   getAccessToken,
-  offline = false,
   children,
 }: {
   userUuid: string;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
-  offline?: boolean;
   children: ReactNode;
 }) {
   const [installationId, setInstallationId] = useState<string | null>(null);
-  const [state, setState] = useState<AppState>(() =>
-    offline ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, sessionLatestTurns: mockLatestTurns, usage: mockUsage } : initialState,
-  );
+  const [state, setState] = useState<AppState>(initialState);
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const connectionStateRef = useRef<ConnectionState>("idle");
   const stateRef = useRef(state);
@@ -688,7 +679,7 @@ export function AppProvider({
     cooldowns: { "out-of-sync": OUT_OF_SYNC_RESYNC_COOLDOWN_MS },
     run: (sessionId, reason) => resyncRunRef.current(sessionId, reason),
   }));
-  const [models, setModels] = useState<ChatModelCatalogItem[]>(offline ? mockModels : []);
+  const [models, setModels] = useState<ChatModelCatalogItem[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const modelsRequestRef = useRef<Promise<ChatModelCatalogItem[]> | null>(null);
@@ -736,11 +727,8 @@ export function AppProvider({
   }, [installationId]);
 
   const client = useMemo(
-    () =>
-      !offline && installationId
-        ? createMobileClient(getAccessToken, installationId)
-        : null,
-    [getAccessToken, installationId, offline],
+    () => installationId ? createMobileClient(getAccessToken, installationId) : null,
+[getAccessToken, installationId],
   );
 
   useEffect(() => {
@@ -748,7 +736,6 @@ export function AppProvider({
   }, [client]);
 
   const loadModels = useCallback(async (options: { force?: boolean } = {}) => {
-    if (offline) return [];
     if (models.length > 0 && !options.force) return models;
     if (modelsRequestRef.current && !options.force) return modelsRequestRef.current;
     const activeClient = clientRef.current;
@@ -773,10 +760,9 @@ export function AppProvider({
       });
     modelsRequestRef.current = request;
     return request;
-  }, [models, offline]);
+  }, [models]);
 
   const loadModelStatus = useCallback(async (options: { force?: boolean } = {}) => {
-    if (offline) return null;
     if (!options.force && modelStatus && Date.now() - modelStatusLoadedAtRef.current < 60_000) return modelStatus;
     if (modelStatusRequestRef.current && !options.force) return modelStatusRequestRef.current;
     const activeClient = clientRef.current;
@@ -801,11 +787,11 @@ export function AppProvider({
       });
     modelStatusRequestRef.current = request;
     return request;
-  }, [modelStatus, offline]);
+  }, [modelStatus]);
 
   const refreshSessionStatuses = useCallback(async (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "updatedAt">[]) => {
     const activeClient = clientRef.current;
-    if (offline || !activeClient || sessions.length === 0) return;
+    if (!activeClient || sessions.length === 0) return;
     const generation = statusGenerationRef.current;
     dispatch({ type: "session-status-start" });
     let statusError: string | undefined;
@@ -818,10 +804,9 @@ export function AppProvider({
     } finally {
       if (generation === statusGenerationRef.current) dispatch({ type: "session-status-end", error: statusError });
     }
-  }, [dispatch, offline]);
+  }, [dispatch]);
 
   const refreshHome = useCallback(async () => {
-    if (offline) return;
     const generation = homeRefreshGenerationRef.current + 1;
     homeRefreshGenerationRef.current = generation;
     dispatch({ type: "home-start" });
@@ -887,11 +872,9 @@ export function AppProvider({
       dispatch({ type: "home-success", spaces, sessions, sessionsHasMore, sessionsCursor, spacesError, sessionsError });
       void refreshSessionStatuses(sessions);
       dispatch({ type: "usage-start" });
-      if (Platform.OS !== "web") {
-        void saveHome(userKey, { spaces, sessions }).catch((error) => {
-          console.warn("[mobile-cache] failed to save home", error);
-        });
-      }
+      void saveHome(userKey, { spaces, sessions }).catch((error) => {
+        console.warn("[mobile-cache] failed to save home", error);
+      });
       void withTimeout(activeClient.user.getActivity({ days: 7 }), "Loading activity")
         .then((activity) => {
           if (generation === homeRefreshGenerationRef.current) dispatch({ type: "usage", usage: activity.summary });
@@ -904,7 +887,7 @@ export function AppProvider({
         dispatch({ type: "home-error", message: errorMessage(error, "Unable to load Cohub") });
       }
     }
-  }, [dispatch, ensureInstallation, getAccessToken, offline, refreshSessionStatuses, userKey]);
+  }, [dispatch, ensureInstallation, getAccessToken, refreshSessionStatuses, userKey]);
 
   const loadMoreSessions = useCallback(async () => {
     if (sessionsMoreRequestRef.current) return sessionsMoreRequestRef.current;
@@ -921,10 +904,8 @@ export function AppProvider({
         const nextSessions = response.sessions ?? [];
         dispatch({ type: "sessions-more-success", sessions: nextSessions, hasMore: Boolean(response.pageInfo?.hasMore), cursor: response.pageInfo?.nextCursor ?? null });
         void refreshSessionStatuses(nextSessions);
-        if (Platform.OS !== "web") {
-          const merged = [...stateRef.current.sessions, ...nextSessions.filter((item) => !stateRef.current.sessions.some((currentItem) => currentItem.id === item.id))];
-          void saveHome(userKey, { spaces: stateRef.current.spaces, sessions: merged }).catch(() => undefined);
-        }
+        const merged = [...stateRef.current.sessions, ...nextSessions.filter((item) => !stateRef.current.sessions.some((currentItem) => currentItem.id === item.id))];
+        void saveHome(userKey, { spaces: stateRef.current.spaces, sessions: merged }).catch(() => undefined);
       } catch (error) {
         dispatch({ type: "sessions-more-error", message: errorMessage(error, "Chats could not be loaded") });
       }
@@ -937,21 +918,18 @@ export function AppProvider({
   }, [client, dispatch, refreshSessionStatuses, userKey]);
 
   useEffect(() => {
-    if (offline) return;
     let active = true;
     const activeSubscriptions = subscriptions.current;
     const activeSessionSpaces = sessionSpaces.current;
     const activeResyncCoordinator = resyncCoordinatorRef.current;
     void (async () => {
-      if (Platform.OS !== "web") {
-        try {
-          const cached = await hydrateHome(userKey);
-          if (active && (cached.spaces.length > 0 || cached.sessions.length > 0)) {
-            dispatch({ type: "hydrate", ...cached });
-          }
-        } catch (error) {
-          console.warn("[mobile-cache] failed to hydrate home", error);
+      try {
+        const cached = await hydrateHome(userKey);
+        if (active && (cached.spaces.length > 0 || cached.sessions.length > 0)) {
+          dispatch({ type: "hydrate", ...cached });
         }
+      } catch (error) {
+        console.warn("[mobile-cache] failed to hydrate home", error);
       }
       if (active) {
         await refreshHome();
@@ -974,7 +952,7 @@ export function AppProvider({
       activeSubscriptions.clear();
       activeSessionSpaces.clear();
     };
-  }, [dispatch, offline, refreshHome, userKey]);
+  }, [dispatch, refreshHome, userKey]);
 
   useEffect(() => {
     if (!client) return;
@@ -1033,7 +1011,7 @@ export function AppProvider({
           oldestCursor: turns[0]?.sequence ?? null,
           newestCursor: turns.at(-1)?.sequence ?? null,
         });
-        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messages).catch(() => undefined);
+        void saveMessages(userKey, sessionId, messages).catch(() => undefined);
       } catch (error) {
         dispatch({
           type: "session-refresh-end",
@@ -1105,7 +1083,7 @@ export function AppProvider({
         }
         dispatch({ type: "session-page-success", sessionId, session: response.session, turns: response.turns, hasMore: response.hasMore, direction: "older" });
         const merged = mergeTurns(stateRef.current.sessionViews[sessionId]?.turns ?? [], response.turns);
-        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messagesFromTurns(merged)).catch(() => undefined);
+        void saveMessages(userKey, sessionId, messagesFromTurns(merged)).catch(() => undefined);
       } catch (error) {
         if (!isCurrentRequest()) {
           dispatch({ type: "session-page-end", sessionId, direction: "older" });
@@ -1142,7 +1120,7 @@ export function AppProvider({
         }
         dispatch({ type: "session-page-success", sessionId, session: response.session, turns: response.turns, hasMore: response.hasMore, direction: "newer" });
         const merged = mergeTurns(stateRef.current.sessionViews[sessionId]?.turns ?? [], response.turns);
-        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messagesFromTurns(merged)).catch(() => undefined);
+        void saveMessages(userKey, sessionId, messagesFromTurns(merged)).catch(() => undefined);
       } catch (error) {
         if (!isCurrentRequest()) {
           dispatch({ type: "session-page-end", sessionId, direction: "newer" });
@@ -1164,7 +1142,6 @@ export function AppProvider({
       ? view?.turns.find((turn) => turn.sequence === target)
       : view?.turns.find((turn) => turn.id === target.turnId || turn.sourceTurnId === target.turnId);
     if (targetTurn) return targetTurn.sequence;
-    if (offline) throw new Error("The requested conversation turn is unavailable in preview mode");
     const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
     const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
     const activeClient = clientRef.current;
@@ -1173,9 +1150,9 @@ export function AppProvider({
     const sequence = response.anchorSequence ?? response.turns.find((turn) => (typeof target === "number" && turn.sequence === target) || (typeof target !== "number" && (turn.id === target.turnId || turn.sourceTurnId === target.turnId)))?.sequence;
     if (sequence == null) throw new Error("The requested conversation turn is unavailable");
     dispatch({ type: "session-window-success", sessionId, session: response.session, turns: response.turns, hasMoreOlder: response.hasMoreOlder, hasMoreNewer: response.hasMoreNewer, oldestCursor: response.oldestCursor, newestCursor: response.newestCursor });
-    if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messagesFromTurns(mergeTurns(view?.turns ?? [], response.turns))).catch(() => undefined);
+    void saveMessages(userKey, sessionId, messagesFromTurns(mergeTurns(view?.turns ?? [], response.turns))).catch(() => undefined);
     return sequence;
-  }, [dispatch, offline, userKey]);
+  }, [dispatch, userKey]);
 
   /**
    * (Re)attach realtime subscriptions for an open Chat. `recover: true` seeds the
@@ -1290,10 +1267,10 @@ export function AppProvider({
   const resyncSession = useCallback(async (sessionId: string, _reason: SessionResyncReason) => {
     const activeClient = clientRef.current;
     const spaceId = sessionSpaces.current.get(sessionId);
-    if (offline || !activeClient || !spaceId || !subscriptions.current.has(sessionId)) return;
+    if (!activeClient || !spaceId || !subscriptions.current.has(sessionId)) return;
     attachSessionRealtime(activeClient, spaceId, sessionId);
     await refreshSession(sessionId, { silent: true });
-  }, [attachSessionRealtime, offline, refreshSession]);
+  }, [attachSessionRealtime, refreshSession]);
 
   useEffect(() => {
     resyncRunRef.current = resyncSession;
@@ -1301,33 +1278,19 @@ export function AppProvider({
 
   const openSession = useCallback(
     async (sessionId: string) => {
-      if (offline) {
-        const summary = mockSessions.find((item) => item.id === sessionId);
-        const mockSpace = mockSpaces.find((item) => item.id === summary?.spaceId);
-        if (summary && mockSpace) {
-          dispatch({ type: "session-start", sessionId, space: mockSpace, session: summary });
-          const turns = mockTurns[sessionId] ?? [];
-          dispatch({ type: "session-success", sessionId, space: mockSpace, session: summary, messages: turns.length > 0 ? messagesFromTurns(turns) : (mockMessages[sessionId] ?? []), turns, hasMoreOlder: false });
-          dispatch({ type: "turn-index", sessionId, turnIndex: mockTurnIndex[sessionId] ?? [] });
-          if (summary.status === "running") dispatch({ type: "stream-state", sessionId, stream: { status: "streaming", contentBlocks: [{ type: "text", text: "Still working on the launch brief…" }], intermediateMessages: [], turnId: "mock-running-turn", messageId: null, runtimePhase: null, runtimeProvider: null, runtimeModel: null } });
-        }
-        return;
-      }
       if (!client) return;
       const token = (openTokens.current.get(sessionId) ?? 0) + 1;
       openTokens.current.set(sessionId, token);
       const summary = stateRef.current.sessions.find((item) => item.id === sessionId);
       dispatch({ type: "session-start", sessionId, session: summary ?? null });
 
-      if (Platform.OS !== "web") {
-        try {
-          const cachedMessages = await loadMessages(userKey, sessionId);
-          if (openTokens.current.get(sessionId) === token && cachedMessages.length > 0) {
-            dispatch({ type: "session-cache", sessionId, messages: cachedMessages });
-          }
-        } catch (error) {
-          console.warn("[mobile-cache] failed to load Chat", error);
+      try {
+        const cachedMessages = await loadMessages(userKey, sessionId);
+        if (openTokens.current.get(sessionId) === token && cachedMessages.length > 0) {
+          dispatch({ type: "session-cache", sessionId, messages: cachedMessages });
         }
+      } catch (error) {
+        console.warn("[mobile-cache] failed to load Chat", error);
       }
 
       let spaceId = summary?.spaceId;
@@ -1363,13 +1326,13 @@ export function AppProvider({
         const liveMessages = cachedMessages.filter(isLiveMessage);
         dispatch({ type: "session-success", sessionId, space, session: response.session ?? session, messages: mergeDisplayMessages(messages, liveMessages), turns: response.turns, hasMoreOlder: response.hasMore, hasMoreNewer: false, oldestCursor: response.turns[0]?.sequence ?? null, newestCursor: response.turns.at(-1)?.sequence ?? null });
         void loadTurnIndex(sessionId).catch(() => undefined);
-        if (Platform.OS !== "web") void saveMessages(userKey, sessionId, messages).catch(() => undefined);
+        void saveMessages(userKey, sessionId, messages).catch(() => undefined);
       } catch (error) {
         if (openTokens.current.get(sessionId) !== token) return;
         dispatch({ type: "session-error", sessionId, message: error instanceof Error ? error.message : "Unable to open Chat" });
       }
     },
-    [attachSessionRealtime, client, dispatch, loadTurnIndex, offline, userKey],
+    [attachSessionRealtime, client, dispatch, loadTurnIndex, userKey],
   );
 
   const closeSession = useCallback((sessionId: string) => {
@@ -1521,13 +1484,11 @@ export function AppProvider({
           : null,
       };
       dispatch({ type: "session-upsert", session });
-      if (Platform.OS !== "web") {
-        const home = stateRef.current;
-        void saveHome(userKey, {
-          spaces: home.spaces,
-          sessions: [session, ...home.sessions.filter((item) => item.id !== session.id)],
-        }).catch(() => undefined);
-      }
+      const home = stateRef.current;
+      void saveHome(userKey, {
+        spaces: home.spaces,
+        sessions: [session, ...home.sessions.filter((item) => item.id !== session.id)],
+      }).catch(() => undefined);
       return result.session;
     },
     [client, dispatch, userKey],
@@ -1544,13 +1505,11 @@ export function AppProvider({
         source: "mobile",
       });
       dispatch({ type: "space-upsert", space: result.space });
-      if (Platform.OS !== "web") {
-        const home = stateRef.current;
-        void saveHome(userKey, {
-          spaces: [result.space, ...home.spaces.filter((space) => space.id !== result.space.id)],
-          sessions: home.sessions,
-        }).catch(() => undefined);
-      }
+      const home = stateRef.current;
+      void saveHome(userKey, {
+        spaces: [result.space, ...home.spaces.filter((space) => space.id !== result.space.id)],
+        sessions: home.sessions,
+      }).catch(() => undefined);
       return result.space;
     },
     [client, dispatch, userKey],
@@ -1572,13 +1531,11 @@ export function AppProvider({
     if (current) {
       const next = { ...current, isPinned: pinned };
       dispatch({ type: "space-upsert", space: next });
-      if (Platform.OS !== "web") {
-        const home = stateRef.current;
-        void saveHome(userKey, {
-          spaces: [next, ...home.spaces.filter((space) => space.id !== spaceId)],
-          sessions: home.sessions,
-        }).catch(() => undefined);
-      }
+      const home = stateRef.current;
+      void saveHome(userKey, {
+        spaces: [next, ...home.spaces.filter((space) => space.id !== spaceId)],
+        sessions: home.sessions,
+      }).catch(() => undefined);
     }
     return pinned;
   }, [client, dispatch, userKey]);
@@ -1605,13 +1562,11 @@ export function AppProvider({
       if (latest) {
         const next = { ...latest, isPinned: pinned };
         dispatch({ type: "space-upsert", space: next });
-        if (Platform.OS !== "web") {
-          const home = stateRef.current;
-          void saveHome(userKey, {
-            spaces: [next, ...home.spaces.filter((space) => space.id !== spaceId)],
-            sessions: home.sessions,
-          }).catch(() => undefined);
-        }
+        const home = stateRef.current;
+        void saveHome(userKey, {
+          spaces: [next, ...home.spaces.filter((space) => space.id !== spaceId)],
+          sessions: home.sessions,
+        }).catch(() => undefined);
       }
       return pinned;
     } catch (error) {
@@ -1642,25 +1597,21 @@ export function AppProvider({
       const pinned = isResourcePinned(payload.assignments as { labelSystemKey?: string | null }[]);
       const next = { ...current, isPinned: pinned };
       dispatch({ type: "space-upsert", space: next });
-      if (Platform.OS !== "web") {
-        const home = stateRef.current;
-        void saveHome(userKey, {
-          spaces: [next, ...home.spaces.filter((space) => space.id !== next.id)],
-          sessions: home.sessions,
-        }).catch(() => undefined);
-      }
+      const home = stateRef.current;
+      void saveHome(userKey, {
+        spaces: [next, ...home.spaces.filter((space) => space.id !== next.id)],
+        sessions: home.sessions,
+      }).catch(() => undefined);
     });
   }, [client, dispatch, userKey]);
 
   const upsertSpace = useCallback((space: SpaceRecord) => {
     dispatch({ type: "space-upsert", space });
-    if (Platform.OS !== "web") {
-      const home = stateRef.current;
-      void saveHome(userKey, {
-        spaces: [space, ...home.spaces.filter((item) => item.id !== space.id)],
-        sessions: home.sessions,
-      }).catch(() => undefined);
-    }
+    const home = stateRef.current;
+    void saveHome(userKey, {
+      spaces: [space, ...home.spaces.filter((item) => item.id !== space.id)],
+      sessions: home.sessions,
+    }).catch(() => undefined);
   }, [dispatch, userKey]);
 
   const forkSession = useCallback(async (spaceId: string, sessionId: string, turn: Pick<SessionTurnRecord, "id" | "sourceTurnId">) => {
@@ -1669,10 +1620,8 @@ export function AppProvider({
     const parent = stateRef.current.sessions.find((item) => item.id === sessionId);
     const session = { ...result, space: parent?.space ?? null };
     dispatch({ type: "session-upsert", session });
-    if (Platform.OS !== "web") {
-      const home = stateRef.current;
-      void saveHome(userKey, { spaces: home.spaces, sessions: [session, ...home.sessions.filter((item) => item.id !== session.id)] }).catch(() => undefined);
-    }
+    const home = stateRef.current;
+    void saveHome(userKey, { spaces: home.spaces, sessions: [session, ...home.sessions.filter((item) => item.id !== session.id)] }).catch(() => undefined);
     return result;
   }, [client, dispatch, userKey]);
 
@@ -1705,7 +1654,7 @@ export function AppProvider({
     homeRefreshGenerationRef.current += 1;
     statusGenerationRef.current += 1;
     await clearUserCache(userKey);
-    setModels(offline ? mockModels : []);
+    setModels([]);
     setModelsError(null);
     setModelStatus(null);
     setModelStatusError(null);
@@ -1713,10 +1662,8 @@ export function AppProvider({
     paginationRequestsRef.current.clear();
     spacePinMutationVersionsRef.current.clear();
     spacePinPendingMutationsRef.current.clear();
-    setState(offline
-      ? { ...initialState, booting: false, refreshing: false, spaces: mockSpaces, sessions: mockSessions, sessionLatestTurns: mockLatestTurns, usage: mockUsage }
-      : { ...initialState, booting: false, refreshing: false });
-  }, [offline, userKey]);
+    setState({ ...initialState, booting: false, refreshing: false });
+  }, [userKey]);
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     return state.sessions.slice(0, 30).flatMap((session) => {
@@ -1745,7 +1692,6 @@ export function AppProvider({
   const value = useMemo<AppContextValue>(
     () => ({
       state,
-      offline,
       client,
       connectionState,
       installationId,
@@ -1810,7 +1756,6 @@ export function AppProvider({
       modelStatusError,
       modelStatusLoading,
       openSession,
-      offline,
       refreshHome,
       refreshSessionStatuses,
       refreshSession,
@@ -1838,5 +1783,5 @@ export function useSession(sessionId: string) {
     void openSession(sessionId);
     return () => closeSession(sessionId);
   }, [closeSession, openSession, sessionId]);
-  return state.sessionViews[sessionId] ?? emptyView();
+  return state.sessionViews[sessionId] ?? { ...emptyView(), loading: true };
 }

@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useCallback, useState, type ReactNode } from "react";
-import { Platform, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useCurrentUser } from "@/src/auth/current-user";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
@@ -13,8 +13,6 @@ import {
   AppIcon,
   Avatar,
   DataError,
-  DetailTopBar,
-  IconButton,
   PrimaryButton,
   Screen,
   SectionHeader,
@@ -37,7 +35,7 @@ export default function ProfileScreen() {
 
   const version = getInstalledAppVersion();
   const openDebug = useCallback(() => {
-    if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
     router.push("/debug");
   }, [router]);
   const unlockDebug = useDebugUnlock(openDebug);
@@ -88,19 +86,6 @@ export default function ProfileScreen() {
 
   return (
     <Screen scroll>
-      <DetailTopBar
-        title="Profile"
-        subtitle="Account and device"
-        onBack={() => router.back()}
-        actions={
-          <IconButton
-            name="settings"
-            label="Open settings"
-            size={40}
-            onPress={() => router.push({ pathname: "/settings", params: { section: "profile" } })}
-          />
-        }
-      />
       <View style={styles.profileHeader}>
         <Avatar name={name} uri={avatar} size={76} online={connectionState === "open"} />
         <Text style={[typography.title, { color: theme.colors.text, marginTop: 12 }]}>

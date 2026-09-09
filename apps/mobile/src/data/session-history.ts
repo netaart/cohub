@@ -229,3 +229,16 @@ export function turnIndexPreview(turn: SessionTurnIndexItem) {
 	const value = turn.userPreview || turn.assistantPreview || "Empty turn";
 	return value.replace(/\s+/g, " ").trim();
 }
+
+/** Cached or in-flight threads must not look like a brand-new empty Chat. */
+export function chatThreadPlaceholder(input: {
+	messageCount: number;
+	historyLoaded: boolean;
+	error?: string | null;
+	hasLiveActivity?: boolean;
+}): "opening" | "empty" | null {
+	if (input.messageCount > 0 || input.hasLiveActivity) return null;
+	if (input.historyLoaded) return "empty";
+	if (input.error) return null;
+	return "opening";
+}

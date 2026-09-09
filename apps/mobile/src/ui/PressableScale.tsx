@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { Animated, Easing, Platform, Pressable, StyleSheet, View, type PressableAndroidRippleConfig, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet, View, type PressableAndroidRippleConfig, type StyleProp, type ViewStyle } from "react-native";
 import * as Haptics from "expo-haptics";
 import { motion, press } from "@/src/motion";
 
@@ -74,7 +74,7 @@ export function PressableScale({
         style={fill ?? undefined}
         onPressIn={() => {
           if (scale) settle(press.scale);
-          if (haptic && Platform.OS !== "web") void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+          if (haptic) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
         }}
         onPressOut={() => {
           if (scale) settle(1);

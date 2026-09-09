@@ -1,7 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
-import { Platform } from "react-native";
 
 const INSTALLATION_KEY = "cohub:mobile:installation-id:v1";
 
@@ -14,7 +13,6 @@ async function mirrorInstallationId(value: string) {
 }
 
 async function readStoredInstallationId() {
-  if (Platform.OS === "web") return AsyncStorage.getItem(INSTALLATION_KEY);
   try {
     const secureValue = await SecureStore.getItemAsync(INSTALLATION_KEY);
     if (secureValue?.trim()) {
@@ -28,10 +26,6 @@ async function readStoredInstallationId() {
 }
 
 async function storeInstallationId(value: string) {
-  if (Platform.OS === "web") {
-    await AsyncStorage.setItem(INSTALLATION_KEY, value);
-    return;
-  }
   try {
     await SecureStore.setItemAsync(INSTALLATION_KEY, value);
     await mirrorInstallationId(value);

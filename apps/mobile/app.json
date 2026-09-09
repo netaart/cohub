@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cohub",
     "slug": "cohub-mobile",
-    "version": "1.9.0",
+    "version": "1.8.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "cohub",
@@ -50,11 +50,6 @@
         "VIBRATE",
         "REQUEST_INSTALL_PACKAGES"
       ]
-    },
-    "web": {
-      "bundler": "metro",
-      "output": "single",
-      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",

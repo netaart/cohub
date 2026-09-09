@@ -8,7 +8,6 @@ type NotificationsModule = typeof import("expo-notifications");
 type NotificationRecord = Record<string, unknown>;
 
 type PushUnavailableReason =
-  | "web"
   | "expo-go"
   | "simulator"
   | "permission-denied"
@@ -60,7 +59,7 @@ function notificationDeepLink(response: unknown): string | null {
 }
 
 async function loadNotifications(): Promise<NotificationsModule | null> {
-  if (Platform.OS === "web" || isRunningInExpoGo()) return null;
+  if (isRunningInExpoGo()) return null;
   if (notificationsModulePromise) return notificationsModulePromise;
 
   notificationsModulePromise = import("expo-notifications")
@@ -107,7 +106,6 @@ async function readErrorMessage(response: Response) {
 }
 
 export async function registerForPushNotifications(options: PushRegistrationOptions): Promise<PushRegistrationResult> {
-  if (Platform.OS === "web") return unavailable("web", "Push notifications are not available in the web preview.");
   if (isRunningInExpoGo()) return unavailable("expo-go", "Expo Go cannot issue remote push tokens on Android. Install a formal Cohub build.");
   if (!Device.isDevice) return unavailable("simulator", "Push notifications require a physical device.");
   if (!options.installationId?.trim()) return unavailable("missing-installation", "The device installation identity is not ready. Restart Cohub and try again.");

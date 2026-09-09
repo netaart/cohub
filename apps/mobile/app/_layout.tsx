@@ -4,7 +4,7 @@ import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Platform, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { AuthScreen } from "@/src/auth/AuthScreen";
@@ -44,14 +44,7 @@ export default function RootLayout() {
   // keep the splash up until the bundled font is registered.
   const [fontsLoaded, fontError] = useFonts({ SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf") });
   if (!fontsLoaded && !fontError) return null;
-  // Logto's native storage adapter is intentionally not constructed during
-  // Expo web static rendering. Native builds take the authenticated path.
-  return Platform.OS === "web" ? <WebPreviewRoot /> : <LogtoProvider config={logtoConfig}><NativeRoot /></LogtoProvider>;
-}
-
-function WebPreviewRoot() {
-  const theme = useAppTheme();
-  return <AppProvider userUuid="web-preview" getAccessToken={async () => null} offline><Navigation theme={theme} /></AppProvider>;
+  return <LogtoProvider config={logtoConfig}><NativeRoot /></LogtoProvider>;
 }
 
 function NativeRoot() {
@@ -122,7 +115,6 @@ function NativeRoot() {
 }
 
 function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
-  const showQa = __DEV__;
   return <ThemeProvider value={theme.mode === "dark" ? DarkTheme : DefaultTheme}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
@@ -135,17 +127,16 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
           <Stack.Screen name="space/[spaceId]/files" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="space/[spaceId]/file" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="work/[appId]" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="new-chat" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
-          <Stack.Screen name="profile" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="appearance" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="about" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/index" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/streaming" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/tools" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/markdown" options={{ animation: "slide_from_right" }} />
-          <Stack.Screen name="debug/list" options={{ animation: "slide_from_right" }} />
-          {showQa ? <Stack.Screen name="qa" options={{ animation: "slide_from_right" }} /> : null}
+          <Stack.Screen name="new-chat" options={{ title: "New Chat", presentation: "modal", animation: "slide_from_bottom" }} />
+          <Stack.Screen name="profile" options={{ title: "Profile", animation: "slide_from_right" }} />
+          <Stack.Screen name="settings" options={{ title: "Settings", animation: "slide_from_right" }} />
+          <Stack.Screen name="appearance" options={{ title: "Appearance", animation: "slide_from_right" }} />
+          <Stack.Screen name="about" options={{ title: "About", animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/index" options={{ title: "Debug", animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/streaming" options={{ title: "Streaming", animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/tools" options={{ title: "Tools", animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/markdown" options={{ title: "Markdown", animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/list" options={{ title: "Long List", animation: "slide_from_right" }} />
         </Stack>
         <AppUpdateBanner />
       </View>
