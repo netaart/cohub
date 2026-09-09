@@ -18,7 +18,7 @@ function InlineNodes({ nodes, accent, color }: { nodes: MarkdownInline[]; accent
   return <>{nodes.map((node, index) => {
     if (node.type === "text") return node.value;
     if (node.type === "code") {
-      return <Text key={`code-${index}`} style={{ fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color, backgroundColor: theme.colors.background }}>{node.value}</Text>;
+      return <Text key={`code-${index}`} style={{ fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color, backgroundColor: theme.colors.surfaceRaised, borderRadius: 4, paddingHorizontal: 4 }}>{node.value}</Text>;
     }
     if (node.type === "link") {
       return <Text key={`link-${index}`} style={{ color: accent, textDecorationLine: "underline" }} onPress={() => void Linking.openURL(node.url).catch(() => undefined)}>{node.value}</Text>;
@@ -30,15 +30,15 @@ function InlineNodes({ nodes, accent, color }: { nodes: MarkdownInline[]; accent
 function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignments: MarkdownTableAlignment[]; header: MarkdownInline[][]; rows: MarkdownInline[][][]; accent: string; textColor: string }) {
   const theme = useAppTheme();
   const [viewportWidth, setViewportWidth] = useState(0);
-  const tableWidth = Math.max(viewportWidth, header.length * 112);
-  // No horizontal ScrollView here either: inside the inverted chat list a nested
-  // horizontal scroller mis-measures its cell (same failure as code blocks).
+  const columnCount = Math.max(header.length, alignments.length, ...rows.map((row) => row.length), 1);
+  // Keep the table inside the message width. A nested horizontal scroller is
+  // unreliable inside the inverted chat list on Android.
   return <View onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}>
-    <View style={{ width: tableWidth, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, overflow: "hidden" }}>
+    <View style={{ width: viewportWidth || "100%", borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, overflow: "hidden" }}>
       {[header, ...rows].map((row, rowIndex) => (
         <View key={rowIndex} style={{ flexDirection: "row", backgroundColor: rowIndex === 0 ? theme.colors.surfaceRaised : "transparent" }}>
-          {row.map((cell, cellIndex) => (
-            <View key={cellIndex} style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 7, borderTopWidth: rowIndex === 0 ? 0 : 1, borderLeftWidth: cellIndex === 0 ? 0 : 1, borderColor: theme.colors.border }}>
+          {Array.from({ length: columnCount }, (_, cellIndex) => row[cellIndex] ?? []).map((cell, cellIndex) => (
+            <View key={cellIndex} style={{ flex: 1, minWidth: 0, paddingHorizontal: 10, paddingVertical: 7, borderTopWidth: rowIndex === 0 ? 0 : 1, borderLeftWidth: cellIndex === 0 ? 0 : 1, borderColor: theme.colors.border }}>
               <Text style={[typography.chatBody, { color: textColor, fontWeight: rowIndex === 0 ? "600" : "400", textAlign: alignments[cellIndex] ?? "left" }]}>
                 <InlineNodes nodes={cell} accent={accent} color={textColor} />
               </Text>

@@ -98,8 +98,8 @@ export function CodeBlock({
     <View
       style={[
         {
-          backgroundColor: theme.colors.background,
-          borderRadius: 10,
+          backgroundColor: theme.colors.surfaceRaised,
+          borderRadius: 12,
           borderWidth: 1,
           borderColor: theme.colors.border,
           overflow: "hidden",
@@ -115,10 +115,8 @@ export function CodeBlock({
           </Text>
         </View>
       ) : null}
-      {/* No horizontal ScrollView: inside the inverted chat list (scale(-1) cells on
-          Android) a nested horizontal scroller mis-measures and grows a blank cell
-          for every message that contains a code block. Lines wrap to the bubble
-          width instead, matching the tool IN/OUT treatment. */}
+      {/* Keep code inside the message width; nested horizontal scrollers mis-measure
+          inside the inverted chat list on Android. */}
       <View style={{ padding: 11 }}>
         <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
           {gutter ? (

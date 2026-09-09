@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Animated,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   PanResponder,
@@ -60,6 +61,7 @@ export function AdaptiveSheet({
     : Math.min(width, height) < COMPACT_BREAKPOINT;
   const [progress] = useState(() => new Animated.Value(0));
   const [dragOffset] = useState(() => new Animated.Value(0));
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const hiddenOffset = Math.min(height * 0.56, 520);
 
   const requestClose = useCallback(() => {
@@ -107,6 +109,18 @@ export function AdaptiveSheet({
   );
 
   useEffect(() => {
+    if (!visible) return;
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, (event) => setKeyboardHeight(event.endCoordinates.height));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [visible]);
+
+  useEffect(() => {
     progress.stopAnimation();
     dragOffset.stopAnimation();
     dragOffset.setValue(0);
@@ -152,9 +166,10 @@ export function AdaptiveSheet({
         opacity: progress,
         transform: [{ translateY: desktopOffset }, { scale: desktopScale }],
       };
+  const availableHeight = Math.max(0, height - keyboardHeight);
   const maxHeight = compact
-    ? Math.max(0, height - insets.top - 12)
-    : Math.max(0, Math.min(height - 48, 760));
+    ? Math.max(0, availableHeight - insets.top - 12)
+    : Math.max(0, Math.min(availableHeight - 48, 760));
   const bottomPadding = Math.max(insets.bottom, theme.spacing.lg);
   // Wrap-content sheets only have maxHeight. A flex:1 scroller then collapses to 0 and hides the body.
   const bodyMaxHeight = Math.max(160, maxHeight - (compact ? 100 : 82) - (footer ? 130 : 20));
