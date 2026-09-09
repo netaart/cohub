@@ -85,7 +85,7 @@ function TextBlock({ value, muted = false, accent, color, streaming = false }: {
   const theme = useAppTheme();
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
   const displayed = useRevealedStreamText(value, streaming);
-  return <View style={{ gap: 9 }}><MarkdownBody source={displayed} accent={accent} textColor={textColor} /></View>;
+  return <View style={{ gap: 9, width: "100%", minWidth: 0 }}><MarkdownBody source={displayed} accent={accent} textColor={textColor} /></View>;
 }
 
 function Block({ block, color, streaming = false }: { block: ContentBlock; color?: string; streaming?: boolean }) {
@@ -182,7 +182,7 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
 
 export function MessageContent({ content, active = false, color }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string }) {
   const blocks = content ?? [];
-  return <View style={{ gap: 3 }}>{blocks.map((block, index) => {
+  return <View style={{ gap: 3, width: "100%", minWidth: 0 }}>{blocks.map((block, index) => {
     // Tool results never render standalone. A paired one is shown inside its
     // ToolCall; a streaming message boundary can leave a partial result whose
     // tool_use was committed with the previous message, and dumping that raw
@@ -196,6 +196,7 @@ export function MessageContent({ content, active = false, color }: { content: Co
 function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number): ViewStyle {
   return {
     maxWidth,
+    minWidth: 0,
     alignSelf: side === "user" ? "flex-end" : "flex-start",
     borderRadius: theme.radius.lg,
     borderCurve: "continuous",
