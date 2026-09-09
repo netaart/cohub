@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/markbang/cohub-mobile/compare/v1.8.0...v1.8.1) (2026-09-09)
+
+
+### Fixes
+
+* **ota:** keep the runtime stable across release version bumps ([9932eb5](https://github.com/markbang/cohub-mobile/commit/9932eb5f1d7032100324e256ec77980706b12b15))
+
 ## [1.8.0](https://github.com/markbang/cohub-mobile/compare/v1.7.0...v1.8.0) (2026-09-09)
 
 
