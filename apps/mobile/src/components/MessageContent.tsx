@@ -6,6 +6,7 @@ import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Sha
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { CodeBlock } from "@/src/components/CodeBlock";
 import { StreamingGlyph } from "@/src/components/StreamingGlyph";
+import { TextSelectionProvider, useTextSelection } from "@/src/components/text-selection";
 import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
 import Reanimated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming, type SharedValue } from "react-native-reanimated";
 import { formatMessageClock } from "@/src/data/chat-format";
@@ -61,6 +62,7 @@ function InlineNodes({ nodes, accent, color, fadeTail = 0 }: { nodes: MarkdownIn
 
 function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignments: MarkdownTableAlignment[]; header: MarkdownInline[][]; rows: MarkdownInline[][][]; accent: string; textColor: string }) {
   const theme = useAppTheme();
+  const { selectable } = useTextSelection();
   const [viewportWidth, setViewportWidth] = useState(0);
   const columnCount = Math.max(header.length, alignments.length, ...rows.map((row) => row.length), 1);
   // Keep the table inside the message width. A nested horizontal scroller is
@@ -71,7 +73,7 @@ function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignm
         <View key={rowIndex} style={{ flexDirection: "row", backgroundColor: rowIndex === 0 ? theme.colors.surfaceRaised : "transparent" }}>
           {Array.from({ length: columnCount }, (_, cellIndex) => row[cellIndex] ?? []).map((cell, cellIndex) => (
             <View key={cellIndex} style={{ flex: 1, minWidth: 0, paddingHorizontal: 10, paddingVertical: 7, borderTopWidth: rowIndex === 0 ? 0 : 1, borderLeftWidth: cellIndex === 0 ? 0 : 1, borderColor: theme.colors.border }}>
-              <Text selectable style={[typography.chatBody, { color: textColor, fontWeight: rowIndex === 0 ? "600" : "400", textAlign: alignments[cellIndex] ?? "left" }]}>
+              <Text selectable={selectable} style={[typography.chatBody, { color: textColor, fontWeight: rowIndex === 0 ? "600" : "400", textAlign: alignments[cellIndex] ?? "left" }]}>
                 <InlineNodes nodes={cell} accent={accent} color={textColor} />
               </Text>
             </View>
@@ -84,19 +86,20 @@ function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignm
 
 function MarkdownBlockView({ block, accent, textColor, fadeTail = 0 }: { block: MarkdownBlock; accent: string; textColor: string; fadeTail?: number }) {
   const theme = useAppTheme();
+  const { selectable, onRequestSelect } = useTextSelection();
   if (block.type === "code") return <CodeBlock code={block.code} language={block.language} streaming={!block.closed} />;
   if (block.type === "table") return <MarkdownTable alignments={block.alignments} header={block.header} rows={block.rows} accent={accent} textColor={textColor} />;
   if (block.type === "heading") {
     const size = scaleFontSize(block.level <= 2 ? 19 : block.level <= 4 ? 17 : 15);
-    return <Text selectable style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} fadeTail={fadeTail} /></Text>;
+    return <Text selectable={selectable} onLongPress={onRequestSelect} style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} fadeTail={fadeTail} /></Text>;
   }
   if (block.type === "quote") {
-    return <View style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text selectable style={[typography.chatBody, { color: theme.colors.textMuted }]}><InlineNodes nodes={block.inlines} accent={accent} color={theme.colors.textMuted} fadeTail={fadeTail} /></Text></View>;
+    return <View style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text selectable={selectable} onLongPress={onRequestSelect} style={[typography.chatBody, { color: theme.colors.textMuted }]}><InlineNodes nodes={block.inlines} accent={accent} color={theme.colors.textMuted} fadeTail={fadeTail} /></Text></View>;
   }
   if (block.type === "list") {
-    return <View style={{ gap: 6 }}>{block.items.map((item, index) => <View key={index} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.chatBody, { color: accent, minWidth: 18 }]}>{block.ordered ? `${block.start + index}.` : "•"}</Text><Text selectable style={[typography.chatBody, { color: textColor, flex: 1 }]}><InlineNodes nodes={item} accent={accent} color={textColor} fadeTail={index === block.items.length - 1 ? fadeTail : 0} /></Text></View>)}</View>;
+    return <View style={{ gap: 6 }}>{block.items.map((item, index) => <View key={index} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.chatBody, { color: accent, minWidth: 18 }]}>{block.ordered ? `${block.start + index}.` : "•"}</Text><Text selectable={selectable} onLongPress={onRequestSelect} style={[typography.chatBody, { color: textColor, flex: 1 }]}><InlineNodes nodes={item} accent={accent} color={textColor} fadeTail={index === block.items.length - 1 ? fadeTail : 0} /></Text></View>)}</View>;
   }
-  return <Text selectable style={[typography.chatBody, { color: textColor }]}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} fadeTail={fadeTail} /></Text>;
+  return <Text selectable={selectable} onLongPress={onRequestSelect} style={[typography.chatBody, { color: textColor }]}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} fadeTail={fadeTail} /></Text>;
 }
 
 // Streaming re-parses only the tail, so completed blocks keep their identity and
@@ -227,15 +230,17 @@ function toolIcon(name: string): IconName {
 const TOOL_DETAILS_MAX_HEIGHT = 420;
 
 function CappedCodeText({ value, color }: { value: string; color: string }) {
+  const { selectable, onRequestSelect } = useTextSelection();
   const text = value || "(empty output)";
-  return <Text selectable style={[typography.code, { fontFamily: "SpaceMono", color }]}>{text}</Text>;
+  return <Text selectable={selectable} onLongPress={onRequestSelect} style={[typography.code, { fontFamily: "SpaceMono", color }]}>{text}</Text>;
 }
 
 function ToolOutput({ block }: { block: Extract<ContentBlock, { type: "tool_result" }> }) {
   const theme = useAppTheme();
+  const selection = useTextSelection();
   // Running tools keep appending to `content`; the body must be height-capped
   // (mirroring the web's tail view) or an expanded bubble grows forever.
-  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <CappedCodeText value={block.content} color={theme.colors.text} /> : <MessageContent content={block.content} />}</View>;
+  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <CappedCodeText value={block.content} color={theme.colors.text} /> : <MessageContent content={block.content} selectable={selection.selectable} onRequestSelect={selection.onRequestSelect} />}</View>;
 }
 
 function ToolCall({ block, result, active = false }: { block: Extract<ContentBlock, { type: "tool_use" }>; result?: Extract<ContentBlock, { type: "tool_result" }>; active?: boolean }) {
@@ -263,11 +268,13 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
   </View>;
 }
 
-export function MessageContent({ content, active = false, color, imageMaxWidth }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string; imageMaxWidth?: number }) {
+export function MessageContent({ content, active = false, color, imageMaxWidth, selectable = false, onRequestSelect }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string; imageMaxWidth?: number; selectable?: boolean; onRequestSelect?: () => void }) {
   const blocks = content ?? [];
   const imageUris = blocks.flatMap((block) => block.type === "image" ? [imageUri(block)].filter((uri): uri is string => Boolean(uri)) : []);
   const firstImageIndex = blocks.findIndex((block) => block.type === "image" && imageUri(block) !== null);
-  return <View style={{ gap: 3, width: "100%", minWidth: 0 }}>{blocks.map((block, index) => {
+  // Stable identity keeps memoized markdown blocks from re-rendering on every parent render.
+  const selection = useMemo(() => ({ selectable, onRequestSelect }), [onRequestSelect, selectable]);
+  return <TextSelectionProvider value={selection}><View style={{ gap: 3, width: "100%", minWidth: 0 }}>{blocks.map((block, index) => {
     // Tool results never render standalone. A paired one is shown inside its
     // ToolCall; a streaming message boundary can leave a partial result whose
     // tool_use was committed with the previous message, and dumping that raw
@@ -279,7 +286,7 @@ export function MessageContent({ content, active = false, color, imageMaxWidth }
       return imageUris.length > 0 ? <ImageGallery key="image-gallery" uris={imageUris} maxWidth={imageMaxWidth} /> : null;
     }
     return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} />;
-  })}</View>;
+  })}</View></TextSelectionProvider>;
 }
 
 function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number, fitContent = false, fillUserWidth = false): ViewStyle {
@@ -351,10 +358,12 @@ function BubbleMeta({ clock, local = false, side, live = false }: { clock?: stri
   </View>;
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean }) {
+export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, selectable = false, onRequestSelect }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; selectable?: boolean; onRequestSelect?: (messageId: string) => void }) {
   const theme = useAppTheme();
   const { width } = useWindowDimensions();
   const [copied, setCopied] = useState(false);
+  const requestSelect = useMemo(() => (!selectable && onRequestSelect ? () => onRequestSelect(message.id) : undefined), [message.id, onRequestSelect, selectable]);
+  const selection = useMemo(() => ({ selectable, onRequestSelect: requestSelect }), [requestSelect, selectable]);
   useEffect(() => {
     if (!copied) return;
     const timeout = setTimeout(() => setCopied(false), 1600);
@@ -377,11 +386,13 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const fillUserWidth = isUser && Boolean(message.text?.includes("\n"));
   return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
     <ChatBubbleFrame side={side} local={local} fillUserWidth={fillUserWidth}>
-      {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
-      {message.errorMessage ? <Text selectable style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
+      <TextSelectionProvider value={selection}>
+        {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} selectable={selectable} onRequestSelect={requestSelect} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
+        {message.errorMessage ? <Text selectable={selectable} onLongPress={requestSelect} style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
+      </TextSelectionProvider>
       <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} />
     </ChatBubbleFrame>
-    {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}{inputTokens ? ` · ↑${inputTokens}${cachedInputTokens ? ` (${cachedInputTokens} cached)` : ""}` : ""}{outputTokens ? ` · ↓${outputTokens}` : ""}</Text> : null}
+    {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable={selectable} onLongPress={requestSelect} style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}{inputTokens ? ` · ↑${inputTokens}${cachedInputTokens ? ` (${cachedInputTokens} cached)` : ""}` : ""}{outputTokens ? ` · ↓${outputTokens}` : ""}</Text> : null}
     {copyText && !isUser ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3, marginLeft: side === "assistant" ? 4 : 0, marginRight: side === "user" ? 4 : 0 }}>
       {onCopy ? <Pressable accessibilityRole="button" accessibilityLabel={copied ? "Message copied" : "Copy message"} onPress={() => { onCopy(copyText); setCopied(true); }} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}><AppIcon name={copied ? "check" : "copy"} size={14} color={copied ? theme.colors.success : theme.colors.textFaint} /></Pressable> : null}
       {!isUser && onFork && typeof message.meta?.turnId === "string" ? <Pressable accessibilityRole="button" accessibilityLabel="Fork conversation here" disabled={forkDisabled} onPress={() => onFork(message)} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: forkDisabled ? 0.45 : pressed ? 0.55 : 1 })}>{forking ? <ActivityIndicator size="small" color={theme.colors.textFaint} /> : <AppIcon name="git-fork" size={14} color={theme.colors.textFaint} />}</Pressable> : null}

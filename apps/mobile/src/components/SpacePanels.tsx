@@ -41,6 +41,8 @@ type SpacePanelsProps = {
   onNewChat: () => void;
   onOpenFile: (path: string) => void;
   onOpenFilesPage: () => void;
+  /** False while the timeline owns the gesture, e.g. selecting message text. */
+  swipeEnabled?: boolean;
   children: ReactNode;
 };
 
@@ -48,7 +50,7 @@ const PANEL_WIDTH_RATIO = 0.86;
 const MAX_PANEL_WIDTH = 360;
 
 // One RNGH pan surface so the two panel directions cannot compete.
-export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
+export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, swipeEnabled = true, children }: SpacePanelsProps) {
   const theme = useAppTheme();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
@@ -169,6 +171,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   // The chip row is a native horizontal ScrollView. Touch-start inside it must scroll the row instead of swiping the panel.
   const chipsRect = useSharedValue<ChipsRect>({ x: -1, y: -1, width: 0, height: 0 });
   const panGesture = useMemo(() => Gesture.Pan()
+    .enabled(swipeEnabled)
     .activeOffsetX([-4, 4])
     .failOffsetY([-15, 15])
     .onTouchesDown((event, manager) => {
@@ -296,7 +299,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
           if (canceledSide !== 0) runOnJS(clearClosedPanel)(panelForSide(canceledSide));
         }
       });
-    }), [activeSide, animationId, chipsRect, clearClosedPanel, commitClose, commitOpen, finishClosedPanel, gestureActive, gestureSide, gestureStartProgress, gestureStartSide, panelWidth, progress, showGesturePanel]);
+    }), [activeSide, animationId, chipsRect, clearClosedPanel, commitClose, commitOpen, finishClosedPanel, gestureActive, gestureSide, gestureStartProgress, gestureStartSide, panelWidth, progress, showGesturePanel, swipeEnabled]);
 
   const panelStyle = useAnimatedStyle(() => {
     const side = activeSide.value === 0 ? gestureSide.value : activeSide.value;

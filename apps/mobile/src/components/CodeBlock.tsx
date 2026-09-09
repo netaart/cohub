@@ -7,6 +7,7 @@ import {
   type HighlightedCode,
 } from "@/src/data/code-highlight";
 import { codeLanguageLabel, resolveCodeLanguage } from "@/src/data/code-language";
+import { useTextSelection } from "@/src/components/text-selection";
 import { typography, useAppTheme } from "@/src/theme";
 import { AppIcon } from "@/src/ui";
 
@@ -60,6 +61,7 @@ export function CodeBlock({
   style?: StyleProp<ViewStyle>;
 }) {
   const theme = useAppTheme();
+  const { selectable, onRequestSelect } = useTextSelection();
   const highlightTheme: CodeHighlightTheme = theme.mode === "dark" ? "github-dark" : "github-light";
   const languageId = resolveCodeLanguage(language);
   const cachedHighlight = useMemo(() => {
@@ -134,7 +136,7 @@ export function CodeBlock({
               {gutter}
             </Text>
           ) : null}
-          <Text selectable style={[codeTextStyle, { flex: 1 }]}>{renderLines(lines, fallbackColor)}</Text>
+          <Text selectable={selectable} onLongPress={onRequestSelect} style={[codeTextStyle, { flex: 1 }]}>{renderLines(lines, fallbackColor)}</Text>
         </View>
       </View>
     </View>
