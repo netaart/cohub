@@ -105,6 +105,10 @@ assert.match(nativeRelease.jobs.android.steps.find((step) => step.uses === "acti
 const releasePlease = parse(".github/workflows/release-please.yml");
 assert.match(JSON.stringify(releasePlease.jobs["publish-android"].steps), /cohub-android-native-fingerprint.txt/);
 assert.match(JSON.stringify(releasePlease.jobs["native-release-gate"].steps), /NATIVE_RELEASE_ON_VERSION_TAG/);
+const publishApkStep = releasePlease.jobs["publish-android"].steps.find((step) => step.name === "Upload formal APKs to GitHub Release");
+assert.ok(publishApkStep, "The release workflow must attach formal Android APKs to the GitHub Release");
+assert.match(publishApkStep.run, /find build\/release/, "Artifact downloads keep their directory layout, so the publish step must locate APKs recursively");
+assert.equal(publishApkStep.run.includes("build/release/*.apk"), false, "A flat glob misses APKs nested under android/app/build/outputs");
 
 assert.equal(OTA_CLI_REVISION.length, 40);
 

@@ -96,11 +96,12 @@ jobs:
           RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          apks=(build/release/*.apk)
+          # actions/download-artifact preserves the uploaded directory layout, so the
+          # APKs arrive under android/app/build/outputs/apk/release/, not flat.
+          mapfile -t apks < <(find build/release -type f -name 'app-*-release.apk' | sort)
           test "${#apks[@]}" -eq 4 || { echo "Expected four Android ABI APKs, found ${#apks[@]}"; exit 1; }
-          fingerprint=(build/release/cohub-android-native-fingerprint.txt)
-          test "${#fingerprint[@]}" -eq 1 || { echo "Expected one native fingerprint file, found ${#fingerprint[@]}"; exit 1; }
+          fingerprint=$(find build/release -type f -name 'cohub-android-native-fingerprint.txt')
+          test -n "$fingerprint" || { echo "Expected one native fingerprint file, found none"; exit 1; }
           for apk in "${apks[@]}"; do
             abi=$(basename "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
             case "$abi" in
@@ -113,7 +114,7 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --clobber
           done
-          gh release upload "$RELEASE_TAG" "${fingerprint[0]}" \
+          gh release upload "$RELEASE_TAG" "$fingerprint" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
