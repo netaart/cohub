@@ -1,27 +1,34 @@
-import { NativeTabs } from "expo-router/unstable-native-tabs";
-import { useAppTheme } from "@/src/theme";
+import { Tabs } from "expo-router";
+import { AnimatedTabIcon } from "@/src/components/AnimatedTabIcon";
+import { FloatingTabBar } from "@/src/components/FloatingTabBar";
 
 export default function TabLayout() {
-  const theme = useAppTheme();
   return (
-    <NativeTabs
-      tintColor={theme.colors.accent}
-      iconColor={{ default: theme.colors.textMuted, selected: theme.colors.accent }}
-      labelStyle={{ default: { color: theme.colors.textMuted }, selected: { color: theme.colors.accent } }}
-      minimizeBehavior="onScrollDown"
+    <Tabs
+      screenOptions={{ headerShown: false }}
+      tabBar={(props) => <FloatingTabBar {...props} />}
     >
-       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Icon sf={{ default: "bubble.left.and.bubble.right", selected: "bubble.left.and.bubble.right.fill" }} md="forum" />
-        <NativeTabs.Trigger.Label>Chats</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="spaces">
-        <NativeTabs.Trigger.Icon sf={{ default: "square.stack.3d.up", selected: "square.stack.3d.up.fill" }} md="layers" />
-        <NativeTabs.Trigger.Label>Spaces</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="activity">
-        <NativeTabs.Trigger.Icon sf="waveform.path.ecg" md="monitoring" />
-        <NativeTabs.Trigger.Label>Activity</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: "Chats",
+          tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="messages" color={color} size={size} focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="spaces"
+        options={{
+          title: "Spaces",
+          tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="layers" color={color} size={size} focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="activity"
+        options={{
+          title: "Activity",
+          tabBarIcon: ({ color, size, focused }) => <AnimatedTabIcon name="activity" color={color} size={size} focused={focused} />,
+        }}
+      />
+    </Tabs>
   );
 }
