@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.8.0](https://github.com/markbang/cohub-mobile/compare/v1.7.0...v1.8.0) (2026-09-09)
+
+
+### Features
+
+* **app:** add a hidden Debug screen for render acceptance ([3d0b589](https://github.com/markbang/cohub-mobile/commit/3d0b589b0b02951b39d2d543cf3002752292cc40))
+* **app:** add an app-wide text size setting ([2671949](https://github.com/markbang/cohub-mobile/commit/2671949d0027299ee59007fa8fd51e009a723e93))
+* **app:** highlight code with shiki and edit workspace files ([bbce6de](https://github.com/markbang/cohub-mobile/commit/bbce6de36ded9ad1103ea3e99b7b850c5b46a2c3))
+* **chat:** steer or cancel queued follow-ups ([8790104](https://github.com/markbang/cohub-mobile/commit/87901045b5b1fb7c6c1dddf8b8fe151e1c3f99f4))
+* **ota:** publish production iOS updates on main pushes ([6780ade](https://github.com/markbang/cohub-mobile/commit/6780ade12891d88142a427dfc7cfb3cbb429ea1f))
+* **ota:** publish production updates on main automatically ([#56](https://github.com/markbang/cohub-mobile/issues/56)) ([deb23cc](https://github.com/markbang/cohub-mobile/commit/deb23cce804d4bbd20a93e5ddd285b0c548922ae))
+* **ui:** move profile out of tabs and add a floating tab bar ([fdc8633](https://github.com/markbang/cohub-mobile/commit/fdc8633c760eeb5d51273cf29c2d76746d3d413c))
+
+
+### Fixes
+
+* **app:** stop flagging recoverable realtime errors as outages ([2491151](https://github.com/markbang/cohub-mobile/commit/2491151a56dc2c44df113ee858ad825dd59b9f5f))
+* **chat:** drop the blank gap under expanded tool bodies ([b90f1c8](https://github.com/markbang/cohub-mobile/commit/b90f1c82e2f416d53b9fb3f47a0f88f626071f7a))
+* **chat:** keep new messages on screen and size bubbles correctly ([050aeca](https://github.com/markbang/cohub-mobile/commit/050aeca43dee2fa576fd20e6c91a7c95efd1d952))
+* **chat:** keep panel swipe from selecting message text ([7cb2ffb](https://github.com/markbang/cohub-mobile/commit/7cb2ffb5e48a8a704cac16bf00600cabb41dc0b4))
+* **chat:** keep send preview aligned with the final turn ([b51752b](https://github.com/markbang/cohub-mobile/commit/b51752b5c1d27faa52d5c82518c96109e056c3c4))
+* **chat:** keep streaming bubbles from re-rendering and growing ([0b86b72](https://github.com/markbang/cohub-mobile/commit/0b86b72694072a1f9354f1c2892b21409cee6f59))
+* **chat:** keep turn markers and working state after send ([53aa13c](https://github.com/markbang/cohub-mobile/commit/53aa13c4424aad1b973dfaecae115ea37d29f02f))
+* **chat:** list existing labels so a session can be assigned ([7f3ca3b](https://github.com/markbang/cohub-mobile/commit/7f3ca3b09cbc8c0f4d26d03029f372e36e6f4efd))
+* **chat:** open at the latest turn and hide update prompts ([a722a9e](https://github.com/markbang/cohub-mobile/commit/a722a9e24fceebec29674dccfbde72638343646b))
+* **chat:** reconcile finished turns and use a context menu ([89193ca](https://github.com/markbang/cohub-mobile/commit/89193ca8a8ba13766459c3afd1114ad14fe9bed9))
+* **chat:** recover live streams and turns after reconnect ([b076c70](https://github.com/markbang/cohub-mobile/commit/b076c7077a90aa5b5d64d470b343ac24e124bd18))
+* **chat:** render from the latest turn and hide sync status ([bebaa35](https://github.com/markbang/cohub-mobile/commit/bebaa35d530cf5bc1ddce6d67a9a64b6393c3447))
+* **chat:** render streamed markdown incrementally per block ([714c8e7](https://github.com/markbang/cohub-mobile/commit/714c8e7f12a772e27bd485d2d74fd7f67abac708))
+* **chats:** classify mobile sessions as Web App ([75ed57f](https://github.com/markbang/cohub-mobile/commit/75ed57f34118bd2dd01e6de1b00dce8f3c40eee0))
+* **chats:** derive running state from the latest turn ([567dd62](https://github.com/markbang/cohub-mobile/commit/567dd62092c0b76d186ad903529babbe9f9fb032))
+* **chat:** separate source filters from labels ([e708cf3](https://github.com/markbang/cohub-mobile/commit/e708cf332e4affb586dbfa977b34b7c1c92bd13d))
+* **chat:** show existing labels in the assignment sheet ([9391aca](https://github.com/markbang/cohub-mobile/commit/9391aca979b6b8e7528a6d628966611dcee06f41))
+* **chats:** only poll turn status for recently updated sessions ([a5a692e](https://github.com/markbang/cohub-mobile/commit/a5a692ed26f02f696a57ab6a0d69d8ec2958c1e5))
+* **chat:** use a compact message action sheet on long-press ([9a9d2c4](https://github.com/markbang/cohub-mobile/commit/9a9d2c430838665f062599acc6cf161d5725c859))
+* **chat:** wrap code blocks instead of horizontal scrolling ([a01af9e](https://github.com/markbang/cohub-mobile/commit/a01af9e32f4be90dc906bec61c1d887534130b6b))
+* enable iOS-only releases and complete TestFlight processing ([#51](https://github.com/markbang/cohub-mobile/issues/51)) ([0928fae](https://github.com/markbang/cohub-mobile/commit/0928faeea2ec26dae8a971abbd81a65dc0a28c7a))
+* **ota:** index updates with the APK-embedded runtime ([#55](https://github.com/markbang/cohub-mobile/issues/55)) ([db422f0](https://github.com/markbang/cohub-mobile/commit/db422f0e55823c44033c0f1d9d1e244c8b7f8d8d))
+* **ota:** publish updates under the installed APK fingerprint ([#54](https://github.com/markbang/cohub-mobile/issues/54)) ([8e1c8af](https://github.com/markbang/cohub-mobile/commit/8e1c8af1343755cb794413ba14a1cfa7155da5e5))
+* **ui:** leave room for the footer when capping sheet bodies ([f1da355](https://github.com/markbang/cohub-mobile/commit/f1da3557120e100a9df0ec579a461e1ec7f3f5b4))
+* **ui:** let the chat panel label row scroll horizontally ([140b748](https://github.com/markbang/cohub-mobile/commit/140b7482e21736e07d9e31199dbf32ab9812f067))
+* **ui:** make the chat panel label row scroll reliably ([42790da](https://github.com/markbang/cohub-mobile/commit/42790da94e2305c1b0343ba2047f0b7c44cab0ee))
+* **ui:** preserve PressableScale flex for pinned space rows ([#52](https://github.com/markbang/cohub-mobile/issues/52)) ([c4aa5d8](https://github.com/markbang/cohub-mobile/commit/c4aa5d8afdbcd0c81055386899a176c6fba00449))
+
+
+### CI
+
+* keep Expo 57.0.20 so production OTA matches the installed APK ([347f1db](https://github.com/markbang/cohub-mobile/commit/347f1db7ee8902f3d0e17ad2295ef13269537735))
+
 ## [1.7.0](https://github.com/markbang/cohub-mobile/compare/v1.6.0...v1.7.0) (2026-09-08)
 
 
