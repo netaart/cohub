@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { Image, Linking, Platform, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type GestureResponderEvent, type ViewStyle } from "react-native";
 import { CodeBlock } from "@/src/components/CodeBlock";
+import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
 import { formatMessageClock } from "@/src/data/chat-format";
 import { markdownBlockSignature, parseMarkdown, type MarkdownBlock, type MarkdownInline, type MarkdownTableAlignment } from "@/src/data/markdown";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
@@ -80,17 +81,18 @@ const MarkdownBody = memo(function MarkdownBody({ source, accent, textColor }: {
   return <>{entries.map((entry, index) => <MemoBlock key={index} block={entry.block} signature={entry.signature} accent={accent} textColor={textColor} />)}</>;
 });
 
-function TextBlock({ value, muted = false, accent, color }: { value: string; muted?: boolean; accent: string; color?: string }) {
+function TextBlock({ value, muted = false, accent, color, streaming = false }: { value: string; muted?: boolean; accent: string; color?: string; streaming?: boolean }) {
   const theme = useAppTheme();
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
-  return <View style={{ gap: 9 }}><MarkdownBody source={value} accent={accent} textColor={textColor} /></View>;
+  const displayed = useRevealedStreamText(value, streaming);
+  return <View style={{ gap: 9 }}><MarkdownBody source={displayed} accent={accent} textColor={textColor} /></View>;
 }
 
-function Block({ block, color }: { block: ContentBlock; color?: string }) {
+function Block({ block, color, streaming = false }: { block: ContentBlock; color?: string; streaming?: boolean }) {
   const theme = useAppTheme();
   const accent = color ?? theme.colors.accent;
-  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} />;
-  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} />;
+  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} streaming={streaming} />;
+  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} streaming={streaming} />;
   if (block.type === "image") {
     const uri = block.source?.type === "url"
       ? block.source.url
@@ -187,7 +189,7 @@ export function MessageContent({ content, active = false, color }: { content: Co
     // output into the bubble grows its height for as long as the tool runs.
     if (block.type === "tool_result") return null;
     if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={blocks.find((item): item is Extract<ContentBlock, { type: "tool_result" }> => item.type === "tool_result" && item.tool_use_id === block.id)} />;
-    return <Block key={`${block.type}-${index}`} block={block} color={color} />;
+    return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} />;
   })}</View>;
 }
 
