@@ -101,10 +101,10 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
-export function WorkspaceToolbar({ query, onQueryChange, queryRef, onAccount, onCreate, onSettings, placeholder = "Search Chats and Spaces" }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; onAccount: () => void; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
+export function WorkspaceToolbar({ query, onQueryChange, queryRef, account, onCreate, onSettings, placeholder = "Search Chats and Spaces" }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; account: ReactNode; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
   const theme = useAppTheme();
   return <View style={[styles.workspaceToolbar, { borderBottomColor: theme.colors.border }]}>
-    <Pressable accessibilityRole="button" accessibilityLabel="Open account" onPress={onAccount} hitSlop={5} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}><BrandMark size={40} /></Pressable>
+    {account}
     <View style={{ flex: 1, minWidth: 0 }}><SearchField inputRef={queryRef} value={query} onChangeText={onQueryChange} placeholder={placeholder} /></View>
     <IconButton name="plus" label="Create new" size={42} tone="accent" onPress={onCreate} />
     <IconButton name="settings" label="Open settings" size={42} onPress={onSettings} />

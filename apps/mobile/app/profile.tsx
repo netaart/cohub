@@ -1,72 +1,39 @@
-import { useProfileSession } from "@/src/auth/profile-session";
 import { useRouter } from "expo-router";
-import { getInstalledAppVersion } from "@/src/platform/app-updates";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
+import { useCurrentUser } from "@/src/auth/current-user";
+import { useProfileSession } from "@/src/auth/profile-session";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useApp } from "@/src/data/context";
+import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useAppTheme, typography } from "@/src/theme";
 import {
   AppIcon,
   Avatar,
-  BrandMark,
   DataError,
+  DetailTopBar,
   IconButton,
   PrimaryButton,
   Screen,
   SectionHeader,
   StatusPill,
-  TopBar,
 } from "@/src/ui";
 
 type ProfileSheet = "clear-cache" | "sign-out" | null;
 
-type ProfileData = {
-  name: string;
-  email: string | null;
-  avatar: string | null;
-};
-
 export default function ProfileScreen() {
   const theme = useAppTheme();
   const router = useRouter();
-  const { getClaims, signOut } = useProfileSession();
+  const { signOut } = useProfileSession();
+  const { name, email, avatar } = useCurrentUser();
   const { state, connectionState, clearCache, installationId, refreshHome } = useApp();
   const dataError = state.error ?? state.spacesError ?? state.sessionsError;
-  const [profile, setProfile] = useState<ProfileData>({
-    name: "Cohub user",
-    email: null,
-    avatar: null,
-  });
   const [sheet, setSheet] = useState<ProfileSheet>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
   const version = getInstalledAppVersion();
-
-  useEffect(() => {
-    let active = true;
-    void getClaims()
-      .then((claims) => {
-        if (!active) return;
-        const name =
-          typeof claims.name === "string" && claims.name.trim()
-            ? claims.name
-            : typeof claims.username === "string" && claims.username.trim()
-              ? claims.username
-              : "Cohub user";
-        setProfile({
-          name,
-          email: typeof claims.email === "string" ? claims.email : null,
-          avatar: typeof claims.picture === "string" ? claims.picture : null,
-        });
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [getClaims]);
 
   const openSheet = (nextSheet: Exclude<ProfileSheet, null>) => {
     setSheetError(null);
@@ -114,11 +81,11 @@ export default function ProfileScreen() {
 
   return (
     <Screen scroll>
-      <TopBar
+      <DetailTopBar
         title="Profile"
         subtitle="Account and device"
-        left={<BrandMark size={40} />}
-        right={
+        onBack={() => router.back()}
+        actions={
           <IconButton
             name="settings"
             label="Open settings"
@@ -128,13 +95,13 @@ export default function ProfileScreen() {
         }
       />
       <View style={styles.profileHeader}>
-        <Avatar name={profile.name} uri={profile.avatar} size={76} online={connectionState === "open"} />
+        <Avatar name={name} uri={avatar} size={76} online={connectionState === "open"} />
         <Text style={[typography.title, { color: theme.colors.text, marginTop: 12 }]}>
-          {profile.name}
+          {name}
         </Text>
-        {profile.email ? (
+        {email ? (
           <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 4 }]}>
-            {profile.email}
+            {email}
           </Text>
         ) : null}
       </View>
