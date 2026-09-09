@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ScrollView, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import {
   getCachedHighlightedCode,
   highlightCode,
@@ -115,7 +115,11 @@ export function CodeBlock({
           </Text>
         </View>
       ) : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 11 }}>
+      {/* No horizontal ScrollView: inside the inverted chat list (scale(-1) cells on
+          Android) a nested horizontal scroller mis-measures and grows a blank cell
+          for every message that contains a code block. Lines wrap to the bubble
+          width instead, matching the tool IN/OUT treatment. */}
+      <View style={{ padding: 11 }}>
         <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
           {gutter ? (
             <Text
@@ -132,11 +136,9 @@ export function CodeBlock({
               {gutter}
             </Text>
           ) : null}
-          <Text selectable style={codeTextStyle}>
-            {renderLines(lines, fallbackColor)}
-          </Text>
+          <Text style={[codeTextStyle, { flex: 1 }]}>{renderLines(lines, fallbackColor)}</Text>
         </View>
-      </ScrollView>
+      </View>
     </View>
   );
 }

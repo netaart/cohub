@@ -30,7 +30,9 @@ function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignm
   const theme = useAppTheme();
   const [viewportWidth, setViewportWidth] = useState(0);
   const tableWidth = Math.max(viewportWidth, header.length * 112);
-  return <ScrollView horizontal showsHorizontalScrollIndicator={false} onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}>
+  // No horizontal ScrollView here either: inside the inverted chat list a nested
+  // horizontal scroller mis-measures its cell (same failure as code blocks).
+  return <View onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}>
     <View style={{ width: tableWidth, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, overflow: "hidden" }}>
       {[header, ...rows].map((row, rowIndex) => (
         <View key={rowIndex} style={{ flexDirection: "row", backgroundColor: rowIndex === 0 ? theme.colors.surfaceRaised : "transparent" }}>
@@ -44,7 +46,7 @@ function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignm
         </View>
       ))}
     </View>
-  </ScrollView>;
+  </View>;
 }
 
 function MarkdownBlockView({ block, accent, textColor }: { block: MarkdownBlock; accent: string; textColor: string }) {
