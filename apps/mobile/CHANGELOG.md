@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.2](https://github.com/markbang/cohub-mobile/compare/v1.8.1...v1.8.2) (2026-09-09)
+
+
+### Fixes
+
+* **ios:** declare export compliance in Info.plist ([a7f1f61](https://github.com/markbang/cohub-mobile/commit/a7f1f612a2e5135e2b713478aeb79bc1ec9c4f35))
+
 ## [1.8.1](https://github.com/markbang/cohub-mobile/compare/v1.8.0...v1.8.1) (2026-09-09)
 
 
