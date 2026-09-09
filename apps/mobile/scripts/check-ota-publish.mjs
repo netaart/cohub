@@ -30,6 +30,13 @@ assert.doesNotThrow(() => assertFingerprintsMatch("b".repeat(40), "B".repeat(40)
 assert.throws(() => assertFingerprintsMatch("a".repeat(40), "b".repeat(40)), /mismatch/);
 assert.throws(() => parseFingerprintHash("nope", "test"), /Invalid native fingerprint/);
 
+const fingerprintConfig = createRequire(import.meta.url)("../fingerprint.config.js");
+assert.ok(
+  fingerprintConfig.sourceSkips.includes("ExpoConfigVersions"),
+  "Release version bumps must not change the OTA runtime fingerprint",
+);
+assert.ok(fingerprintConfig.sourceSkips.includes("PackageJsonAndroidAndIosScriptsIfNotContainRun"));
+
 const parse = (file) => YAML.parse(readFileSync(file, "utf8"), { uniqueKeys: true });
 const ota = parse(".github/workflows/publish-ota.yml");
 assert.deepEqual(ota.on.push.branches, ["main"]);
