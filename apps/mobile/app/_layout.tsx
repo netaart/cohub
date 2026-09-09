@@ -139,6 +139,11 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
           <Stack.Screen name="settings" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="appearance" options={{ animation: "slide_from_right" }} />
           <Stack.Screen name="about" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/index" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/streaming" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/tools" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/markdown" options={{ animation: "slide_from_right" }} />
+          <Stack.Screen name="debug/list" options={{ animation: "slide_from_right" }} />
           {showQa ? <Stack.Screen name="qa" options={{ animation: "slide_from_right" }} /> : null}
         </Stack>
       </View>

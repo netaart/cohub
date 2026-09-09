@@ -1,9 +1,11 @@
 import { useRouter } from "expo-router";
-import { useState, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import * as Haptics from "expo-haptics";
+import { useCallback, useState, type ReactNode } from "react";
+import { Platform, Pressable, Text, View } from "react-native";
 import { useCurrentUser } from "@/src/auth/current-user";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { useDebugUnlock } from "@/src/components/useDebugUnlock";
 import { useApp } from "@/src/data/context";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useAppTheme, typography } from "@/src/theme";
@@ -34,6 +36,11 @@ export default function ProfileScreen() {
   const [signingOut, setSigningOut] = useState(false);
 
   const version = getInstalledAppVersion();
+  const openDebug = useCallback(() => {
+    if (Platform.OS !== "web") void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+    router.push("/debug");
+  }, [router]);
+  const unlockDebug = useDebugUnlock(openDebug);
 
   const openSheet = (nextSheet: Exclude<ProfileSheet, null>) => {
     setSheetError(null);
@@ -182,9 +189,11 @@ export default function ProfileScreen() {
           {signingOut ? "Signing out…" : "Sign out"}
         </Text>
       </Pressable>
-      <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center", marginTop: 22, marginBottom: 8 }]}>
-        Cohub Mobile · {version}
-      </Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="App version" onPress={unlockDebug} hitSlop={10}>
+        <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center", marginTop: 22, marginBottom: 8 }]}>
+          Cohub Mobile · {version}
+        </Text>
+      </Pressable>
 
       <AdaptiveSheet
         visible={sheet === "clear-cache"}

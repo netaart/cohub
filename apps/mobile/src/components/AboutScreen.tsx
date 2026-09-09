@@ -1,8 +1,9 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Image, Linking, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { useDebugUnlock } from "@/src/components/useDebugUnlock";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { AppIcon, DetailTopBar, Screen, SectionHeader } from "@/src/ui";
 import { useAppTheme, typography } from "@/src/theme";
@@ -32,8 +33,10 @@ export function AboutScreen() {
 
 export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string; message: string }) => void } = {}) {
   const theme = useAppTheme();
+  const router = useRouter();
   const [notice, setNotice] = useState<Notice | null>(null);
   const version = getInstalledAppVersion();
+  const unlockDebug = useDebugUnlock(useCallback(() => router.push("/debug"), [router]));
 
   const openExternal = async (url: string, title: string) => {
     try {
@@ -51,9 +54,11 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
         <Image source={require("../../assets/images/icon.png")} resizeMode="contain" style={styles.logo} />
         <Text style={[typography.title, { color: theme.colors.text, marginTop: 14 }]}>Cohub Mobile</Text>
         <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 5, textAlign: "center" }]}>A native client for Cohub</Text>
-        <View style={[styles.versionPill, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}>
-          <Text style={[typography.caption, { color: theme.colors.accent }]}>Version {version}</Text>
-        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Version ${version}`} onPress={unlockDebug} hitSlop={8}>
+          <View style={[styles.versionPill, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}>
+            <Text style={[typography.caption, { color: theme.colors.accent }]}>Version {version}</Text>
+          </View>
+        </Pressable>
       </View>
 
       <SectionHeader title="Application" />
