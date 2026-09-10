@@ -1,6 +1,8 @@
+import type { ContentBlock } from "@neta-art/cohub";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { MessageBubble } from "@/src/components/MessageContent";
+import { compactionFromMessage } from "@/src/data/compaction";
 import { useApp } from "@/src/data/context";
 import { mergeDisplayMessages, messagesFromTurns } from "@/src/data/session-history";
 import { typography, useAppTheme } from "@/src/theme";
@@ -11,6 +13,23 @@ function formatTokenCount(value: number) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return String(value);
+}
+
+function blockSummary(block: ContentBlock): string {
+  if (block.type === "text") return `text:${block.text.length}`;
+  if (block.type === "thinking") return `thinking:${block.thinking.length}`;
+  if (block.type === "tool_use") return `tool_use:${block.name}`;
+  if (block.type === "tool_result") return "tool_result";
+  if (block.type === "image") return "image";
+  if (block.type === "shell_command") return `shell:${block.command.length}`;
+  return `note:${block.note_type}`;
+}
+
+function contentSummary(content: ContentBlock[] | null | undefined): string {
+  if (content == null) return "null";
+  if (!Array.isArray(content)) return typeof content;
+  if (content.length === 0) return "[]";
+  return `[${content.map(blockSummary).join(", ")}]`;
 }
 
 /**
@@ -83,6 +102,12 @@ export default function DebugMessagesScreen() {
             return <View key={message.id} style={{ marginTop: 12 }}>
               <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginHorizontal: 16 }]}>{`#${message.sequence} · ${String(message.meta?.messageKind ?? "?")} · ${message.model ?? "—"}`}</Text>
               <Text selectable style={[typography.code, { color: theme.colors.textSecondary, marginHorizontal: 16, marginTop: 4 }]}>{usage ? JSON.stringify(usage) : "usage: null"}</Text>
+              <Text selectable style={[typography.code, { color: theme.colors.textMuted, marginHorizontal: 16, marginTop: 3 }]}>
+                {`live=${message.meta?._mobileLive === true ? "y" : "n"} text=${message.text == null ? "null" : `${message.text.length}c`} content=${contentSummary(message.content)} notice=${compactionFromMessage(message) ? "y" : "n"} render=${hasRenderableMessage(message) ? "y" : "n"}`}
+              </Text>
+              <Text selectable style={[typography.code, { color: theme.colors.textFaint, marginHorizontal: 16, marginTop: 3 }]}>
+                {`keys: ${Object.keys(message).join(",")}${message.meta ? ` · meta: ${Object.keys(message.meta).join(",")}` : ""}`}
+              </Text>
               <Text selectable style={[typography.caption, { color: output ? theme.colors.success : theme.colors.danger, marginHorizontal: 16, marginTop: 3 }]}>
                 {`tokens → input ${input ?? "—"} / cached ${cached ?? "—"} / output ${output ? `↓${output}` : "MISSING"}`}
               </Text>
