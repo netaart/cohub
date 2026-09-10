@@ -10,7 +10,7 @@ import type {
   SpaceUsageSummary,
   UserSessionListItem,
 } from "@neta-art/cohub";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState as NativeAppState } from "react-native";
 import { File as ExpoFile } from "expo-file-system";
 import { translate } from "@/src/i18n/core";
@@ -44,7 +44,8 @@ import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, 
 import { forkSessionTurn } from "@/src/data/session-fork";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
-import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, type LatestSessionTurn } from "@/src/data/session-status";
+import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, sessionPageState, type LatestSessionTurn, type SessionPageBoundary } from "@/src/data/session-status";
+import { loadSessionFilterMinutes } from "@/src/data/session-filter-preference";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery, type SessionResyncReason } from "@/src/data/session-reconnect";
 import {
   displaySessionTitle,
@@ -170,6 +171,7 @@ const initialState: AppState = {
   sessions: [],
   sessionsHasMore: false,
   sessionsCursor: null,
+  sessionsPageBoundary: null,
   sessionsLoadingMore: false,
   sessionLatestTurns: {},
   sessionStatusRequests: 0,
@@ -181,9 +183,9 @@ const initialState: AppState = {
 type Action =
   | { type: "hydrate"; spaces: SpaceRecord[]; sessions: UserSessionListItem[] }
   | { type: "home-start" }
-  | { type: "home-success"; spaces: SpaceRecord[]; sessions: UserSessionListItem[]; sessionsHasMore?: boolean; sessionsCursor?: string | null; spacesError?: string; sessionsError?: string }
+  | { type: "home-success"; spaces: SpaceRecord[]; sessions: UserSessionListItem[]; sessionsHasMore?: boolean; sessionsCursor?: string | null; sessionsPageBoundary: SessionPageBoundary | null; spacesError?: string; sessionsError?: string }
   | { type: "sessions-more-start" }
-  | { type: "sessions-more-success"; sessions: UserSessionListItem[]; hasMore: boolean; cursor: string | null }
+  | { type: "sessions-more-success"; sessions: UserSessionListItem[]; hasMore: boolean; cursor: string | null; boundary: SessionPageBoundary | null }
   | { type: "sessions-more-error"; message: string }
   | { type: "session-status-start" }
   | { type: "session-status-reset" }
@@ -315,7 +317,7 @@ function reducer(state: AppState, action: Action): AppState {
         booting: false,
       };
     case "home-start":
-      return { ...state, refreshing: true, error: null, spacesError: null, sessionsError: null, activityLoading: true, activityError: null };
+      return { ...state, refreshing: true, sessionsLoadingMore: false, error: null, spacesError: null, sessionsError: null, activityLoading: true, activityError: null };
     case "home-success": {
       const existingSpaces = new Map(state.spaces.map((space) => [space.id, space]));
       const refreshedSpaces = action.spaces.map((space) => preserveSpacePin(existingSpaces.get(space.id), space));
@@ -333,6 +335,7 @@ function reducer(state: AppState, action: Action): AppState {
         sessions: sortByRecent(refreshedSessions),
         sessionsHasMore: action.sessionsHasMore ?? false,
         sessionsCursor: action.sessionsCursor ?? null,
+        sessionsPageBoundary: action.sessionsPageBoundary,
         sessionsLoadingMore: false,
       };
     }
@@ -348,7 +351,7 @@ function reducer(state: AppState, action: Action): AppState {
         }),
         ...action.sessions.filter((session) => !existingIds.has(session.id)),
       ];
-      return { ...state, sessionsLoadingMore: false, sessions: sortByRecent(merged), sessionsHasMore: action.hasMore, sessionsCursor: action.cursor };
+      return { ...state, sessionsLoadingMore: false, sessions: sortByRecent(merged), sessionsHasMore: action.hasMore, sessionsCursor: action.cursor, sessionsPageBoundary: action.boundary };
     }
     case "sessions-more-error":
       return { ...state, sessionsLoadingMore: false, sessionsError: action.message };
@@ -626,7 +629,7 @@ export type AppContextValue = {
   installationId: string | null;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
   refreshHome: () => Promise<void>;
-  refreshSessionStatuses: (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "updatedAt">[]) => Promise<void>;
+  refreshSessionStatuses: (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "lastMessageAt">[]) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   openSession: (sessionId: string) => Promise<void>;
   closeSession: (sessionId: string) => void;
@@ -707,7 +710,8 @@ export function AppProvider({
   const spacePinMutationSequenceRef = useRef(0);
   const userKey = userUuid;
 
-  useEffect(() => {
+  // Child pagination effects must see this commit, not the previous page's loading flag.
+  useLayoutEffect(() => {
     stateRef.current = state;
   }, [state]);
 
@@ -800,16 +804,17 @@ export function AppProvider({
     return request;
   }, [modelStatus]);
 
-  const refreshSessionStatuses = useCallback(async (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "updatedAt">[]) => {
+  const refreshSessionStatuses = useCallback(async (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "lastMessageAt">[]) => {
     const activeClient = clientRef.current;
     if (!activeClient || sessions.length === 0) return;
     const generation = statusGenerationRef.current;
     dispatch({ type: "session-status-start" });
     let statusError: string | undefined;
     try {
+      const minutes = await loadSessionFilterMinutes();
       await loadSessionLatestTurns(activeClient, sessions, (sessionId, turn) => {
         if (generation === statusGenerationRef.current) dispatch({ type: "session-latest-turn", sessionId, turn });
-      });
+      }, minutes);
     } catch (error) {
       statusError = errorMessage(error, "Unable to refresh Chat statuses. Pull to refresh and retry.");
     } finally {
@@ -820,6 +825,7 @@ export function AppProvider({
   const refreshHome = useCallback(async () => {
     const generation = homeRefreshGenerationRef.current + 1;
     homeRefreshGenerationRef.current = generation;
+    sessionsMoreRequestRef.current = null;
     dispatch({ type: "home-start" });
     try {
       const resolvedInstallationId = await ensureInstallation();
@@ -833,6 +839,8 @@ export function AppProvider({
           (reason: unknown) => ({ status: "rejected" as const, reason }),
         ),
         withTimeout(activeClient.user.listSessions({ limit: 60 }), "Loading Chats").then(
+          (sessions) => ({ ...sessions, page: sessionPageState(sessions) }),
+        ).then(
           (sessions) => ({ status: "fulfilled" as const, value: sessions }),
           (reason: unknown) => ({ status: "rejected" as const, reason }),
         ),
@@ -875,12 +883,13 @@ export function AppProvider({
         return pinned === undefined ? space : { ...space, isPinned: pinned };
       });
       const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value.sessions ?? [] : stateRef.current.sessions;
-      const sessionsHasMore = sessionsResult.status === "fulfilled" ? Boolean(sessionsResult.value.pageInfo?.hasMore) : stateRef.current.sessionsHasMore;
-      const sessionsCursor = sessionsResult.status === "fulfilled" ? (sessionsResult.value.pageInfo?.nextCursor ?? null) : stateRef.current.sessionsCursor;
+      const sessionsHasMore = sessionsResult.status === "fulfilled" ? sessionsResult.value.page.hasMore : stateRef.current.sessionsHasMore;
+      const sessionsCursor = sessionsResult.status === "fulfilled" ? sessionsResult.value.page.cursor : stateRef.current.sessionsCursor;
+      const sessionsPageBoundary = sessionsResult.status === "fulfilled" ? sessionsResult.value.page.boundary : stateRef.current.sessionsPageBoundary;
       const sessionsError = sessionsResult.status === "rejected"
         ? `Chats could not be refreshed: ${errorMessage(sessionsResult.reason, translate("data.requestFailed"))}`
         : undefined;
-      dispatch({ type: "home-success", spaces, sessions, sessionsHasMore, sessionsCursor, spacesError, sessionsError });
+      dispatch({ type: "home-success", spaces, sessions, sessionsHasMore, sessionsCursor, sessionsPageBoundary, spacesError, sessionsError });
       void refreshSessionStatuses(sessions);
       dispatch({ type: "usage-start" });
       void saveHome(userKey, { spaces, sessions }).catch((error) => {
@@ -903,21 +912,20 @@ export function AppProvider({
   const loadMoreSessions = useCallback(async () => {
     if (sessionsMoreRequestRef.current) return sessionsMoreRequestRef.current;
     const current = stateRef.current;
-    if (!client || !current.sessionsHasMore || !current.sessionsCursor || current.sessionsLoadingMore) return;
+    if (!client || current.refreshing || !current.sessionsHasMore || !current.sessionsCursor || current.sessionsLoadingMore) return;
+    const generation = homeRefreshGenerationRef.current;
     const task = (async () => {
       dispatch({ type: "sessions-more-start" });
       try {
-        const response = await client.user.listSessions({ limit: 60, cursor: current.sessionsCursor });
-        if (stateRef.current.sessionsCursor !== current.sessionsCursor) {
-          dispatch({ type: "sessions-more-success", sessions: [], hasMore: stateRef.current.sessionsHasMore, cursor: stateRef.current.sessionsCursor });
-          return;
-        }
-        const nextSessions = response.sessions ?? [];
-        dispatch({ type: "sessions-more-success", sessions: nextSessions, hasMore: Boolean(response.pageInfo?.hasMore), cursor: response.pageInfo?.nextCursor ?? null });
+        const response = await withTimeout(client.user.listSessions({ limit: 60, cursor: current.sessionsCursor }), "Loading more Chats");
+        if (generation !== homeRefreshGenerationRef.current) return;
+        const page = sessionPageState(response, current.sessionsCursor, current.sessionsPageBoundary);
+        const nextSessions = response.sessions;
+        dispatch({ type: "sessions-more-success", sessions: nextSessions, ...page });
         void refreshSessionStatuses(nextSessions);
         void saveSessions(userKey, nextSessions).catch(() => undefined);
       } catch (error) {
-        dispatch({ type: "sessions-more-error", message: errorMessage(error, translate("data.chatsLoadFailed")) });
+        if (generation === homeRefreshGenerationRef.current) dispatch({ type: "sessions-more-error", message: errorMessage(error, translate("data.chatsLoadFailed")) });
       }
     })();
     sessionsMoreRequestRef.current = task;

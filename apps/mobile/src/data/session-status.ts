@@ -1,7 +1,55 @@
-import type { CohubClient, SessionTurnRecord, UserSessionListItem } from "@neta-art/cohub";
+import type { CohubClient, SessionTurnRecord, UserSessionListItem, UserSessionsResponse } from "@neta-art/cohub";
+
+export const DEFAULT_SESSION_FILTER_MINUTES = 30;
+export const MAX_SESSION_FILTER_MINUTES = 1440;
+export type SessionPageBoundary = Pick<UserSessionListItem, "lastMessageAt">;
+
+export function parseSessionFilterMinutes(value: string): number {
+  const minutes = Number(value.trim());
+  if (!/^\d+$/.test(value.trim()) || !Number.isSafeInteger(minutes) || minutes < 1 || minutes > MAX_SESSION_FILTER_MINUTES) {
+    throw new Error(`Enter a whole number of minutes between 1 and ${MAX_SESSION_FILTER_MINUTES}.`);
+  }
+  return minutes;
+}
+
+export function sessionFilterCutoff(minutes: number, now: number): number {
+  return now - parseSessionFilterMinutes(String(minutes)) * 60_000;
+}
+
+export function isSessionInFilterWindow(session: SessionPageBoundary, cutoff: number): boolean {
+  return session.lastMessageAt !== null && Date.parse(session.lastMessageAt) >= cutoff;
+}
+
+export function hasMoreRecentSessions(input: {
+  hasMore: boolean;
+  cursor: string | null;
+  boundary: SessionPageBoundary | null;
+  cutoff: number;
+}): boolean {
+  return input.hasMore && input.cursor !== null && (input.boundary === null || isSessionInFilterWindow(input.boundary, input.cutoff));
+}
+
+export function sessionPageState(response: UserSessionsResponse, previousCursor: string | null = null, previousBoundary: SessionPageBoundary | null = null): {
+  hasMore: boolean;
+  cursor: string | null;
+  boundary: SessionPageBoundary | null;
+} {
+  const hasMore = response.pageInfo?.hasMore === true;
+  const cursor = response.pageInfo?.nextCursor ?? null;
+  if (hasMore && (!cursor || cursor === previousCursor)) {
+    throw new Error("Chat pagination did not advance. Pull to refresh and retry.");
+  }
+  for (const session of response.sessions) {
+    if (session.lastMessageAt !== null && !Number.isFinite(Date.parse(session.lastMessageAt))) {
+      throw new Error(`Invalid lastMessageAt for Chat ${session.id}. Refresh Chats and retry.`);
+    }
+  }
+  const last = response.sessions.at(-1);
+  // Use the server page boundary, not the merged cache or realtime-reordered list.
+  return { hasMore, cursor: hasMore ? cursor : null, boundary: last ? { lastMessageAt: last.lastMessageAt } : previousBoundary };
+}
 
 const STATUS_REQUEST_TIMEOUT_MS = 15_000;
-const SESSION_STATUS_LOOKBACK_MS = 30 * 60 * 1000;
 
 function withTimeout<T>(promise: Promise<T>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -44,14 +92,14 @@ export function reconcileTurnStatusPatch(current: LatestSessionTurn | null | und
 
 export async function loadSessionLatestTurns(
   client: CohubClient,
-  sessions: Pick<UserSessionListItem, "id" | "spaceId" | "updatedAt">[],
+  sessions: Pick<UserSessionListItem, "id" | "spaceId" | "lastMessageAt">[],
   onTurn: (sessionId: string, turn: LatestSessionTurn | null) => void,
+  lookbackMinutes = DEFAULT_SESSION_FILTER_MINUTES,
 ): Promise<void> {
-  const cutoff = Date.now() - SESSION_STATUS_LOOKBACK_MS;
+  const cutoff = sessionFilterCutoff(lookbackMinutes, Date.now());
   const recentSessions = sessions.filter((session) => {
-    const updatedAt = Date.parse(session.updatedAt);
-    if (!Number.isFinite(updatedAt)) throw new Error(`Invalid updatedAt for Chat ${session.id}. Refresh Chats and retry.`);
-    return updatedAt >= cutoff;
+    if (session.lastMessageAt !== null && !Number.isFinite(Date.parse(session.lastMessageAt))) throw new Error(`Invalid lastMessageAt for Chat ${session.id}. Refresh Chats and retry.`);
+    return isSessionInFilterWindow(session, cutoff);
   });
   let next = 0;
   const errors: unknown[] = [];

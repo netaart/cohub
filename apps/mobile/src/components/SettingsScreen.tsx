@@ -25,6 +25,7 @@ import {
 	View,
 } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { ChatFilterSettings } from "@/src/components/ChatFilterSettings";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { useApp } from "@/src/data/context";
 import { useTranslation, type TranslationKey } from "@/src/i18n";
@@ -49,6 +50,7 @@ import { formatNumber, formatRelativeTime } from "@/src/utils";
 
 type SettingsSection =
 	| "profile"
+	| "chats"
 	| "activity"
 	| "notifications"
 	| "rules"
@@ -72,6 +74,7 @@ const sections: {
 	icon: React.ComponentProps<typeof AppIcon>["name"];
 }[] = [
 	{ id: "profile", labelKey: "settings.section.profile", icon: "user" },
+	{ id: "chats", labelKey: "settings.section.chats", icon: "messages" },
 	{ id: "activity", labelKey: "settings.section.activity", icon: "activity" },
 	{ id: "notifications", labelKey: "settings.section.notifications", icon: "bell" },
 	{ id: "rules", labelKey: "settings.section.rules", icon: "file-text" },
@@ -128,7 +131,7 @@ export function SettingsScreen({
 	};
 
 	return (
-		<Screen>
+		<Screen keyboard={section === "chats"}>
 				<DetailTopBar
 					title={t("settings.title")}
 					subtitle={t("settings.subtitle")}
@@ -206,6 +209,7 @@ export function SettingsScreen({
 				{section === "profile" ? (
 					<ProfileSection client={client} onNotice={setNotice} />
 				) : null}
+				{section === "chats" ? <ChatFilterSettings /> : null}
 				{section === "activity" ? <ActivitySection client={client} /> : null}
 				{section === "notifications" ? (
 					<NotificationsSection

@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mock } from "node:test";
+import ts from "typescript";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
 import { invertedListDistances, nextChatTailFollowing, reverseListIndex } from "../src/data/chat-scroll.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { getComposerLayout } from "../src/ui/composer-layout.ts";
+import { getUserBubbleLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
@@ -14,7 +17,7 @@ import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messa
 import { compactionFromMessage, compactionStats } from "../src/data/compaction.ts";
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 import { filterSpaces } from "../src/data/space-filters.ts";
-import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch } from "../src/data/session-status.ts";
+import { DEFAULT_SESSION_FILTER_MINUTES, getSessionStatus, hasMoreRecentSessions, isSessionInFilterWindow, latestTurn, loadSessionLatestTurns, parseSessionFilterMinutes, reconcileLatestTurn, reconcileTurnStatusPatch, sessionFilterCutoff, sessionPageState } from "../src/data/session-status.ts";
 import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-queue.ts";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
@@ -29,6 +32,19 @@ import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts
 import { forkSessionTurn } from "../src/data/session-fork.ts";
 import { resolveMessageLink } from "../src/data/message-links.ts";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
+
+const bubbleText = "好的呀，等我做完别的优化，我们可以直接发一个新版 APK，没问题";
+for (const text of [bubbleText, "第一行\n第二行", "好的", "a".repeat(24), "a".repeat(25)]) {
+  const content = [{ type: "text", text }];
+  const expected = { fillUserWidth: text.includes("\n"), inlineUserMeta: !text.includes("\n") && text.length <= 24 };
+  for (const summary of [null, "", text]) {
+    assert.deepEqual(getUserBubbleLayout({ content, text: summary }), expected, "content-only and hydrated messages keep the same layout");
+  }
+  assert.deepEqual(getUserBubbleLayout({ content: [], text }), expected, "text-only messages retain their layout");
+}
+assert.equal(getUserBubbleLayout({ content: [{ type: "text", text: bubbleText }], text: "short summary" }).inlineUserMeta, false);
+assert.equal(getUserBubbleLayout({ content: [{ type: "text", text: "one" }, { type: "text", text: "two" }], text: null }).fillUserWidth, true);
+assert.equal(getUserBubbleLayout({ content: [{ type: "image", source: { type: "url", url: "https://example.com/image.png" } }], text: null }).inlineUserMeta, false);
 
 const forkCalls = [];
 const forkClient = {
@@ -251,9 +267,10 @@ try {
     return { turns: [runningTurn] };
   } } }) }) };
   const sessions = [
-    { id: "recent", spaceId: "space1", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-09-08T11:59:00.000Z" },
-    { id: "boundary", spaceId: "space1", updatedAt: "2026-09-08T11:30:00.000Z" },
-    { id: "old", spaceId: "space1", status: "running", updatedAt: "2026-09-08T11:29:59.999Z" },
+    { id: "recent", spaceId: "space1", createdAt: "2026-01-01T00:00:00.000Z", lastMessageAt: "2026-09-08T11:59:00.000Z" },
+    { id: "boundary", spaceId: "space1", lastMessageAt: "2026-09-08T11:30:00.000Z" },
+    { id: "old", spaceId: "space1", status: "running", lastMessageAt: "2026-09-08T11:29:59.999Z", updatedAt: "2026-09-08T11:59:00.000Z" },
+    { id: "no-messages", spaceId: "space1", lastMessageAt: null },
   ];
   await loadSessionLatestTurns(recentStatusClient, sessions, (id) => recentStatusResults.push(id));
   assert.deepEqual(recentStatusCalls, ["recent", "boundary"]);
@@ -261,8 +278,14 @@ try {
   recentStatusCalls.length = 0;
   await loadSessionLatestTurns(recentStatusClient, [sessions[2]], () => assert.fail("Old sessions must not publish a status"));
   assert.deepEqual(recentStatusCalls, []);
-  await assert.rejects(loadSessionLatestTurns(recentStatusClient, [{ id: "invalid", spaceId: "space1", updatedAt: "not-a-date" }], () => assert.fail("Invalid activity dates must not publish a status")), /Invalid updatedAt for Chat invalid/);
+  await assert.rejects(loadSessionLatestTurns(recentStatusClient, [{ id: "invalid", spaceId: "space1", lastMessageAt: "not-a-date" }], () => assert.fail("Invalid activity dates must not publish a status")), /Invalid lastMessageAt for Chat invalid/);
   assert.deepEqual(recentStatusCalls, []);
+  await loadSessionLatestTurns(recentStatusClient, sessions, () => undefined, 60);
+  assert.deepEqual(recentStatusCalls, ["recent", "boundary", "old"], "a wider setting queries older message activity");
+  recentStatusCalls.length = 0;
+  await loadSessionLatestTurns(recentStatusClient, sessions, () => undefined, 5);
+  assert.deepEqual(recentStatusCalls, ["recent"], "a shorter setting narrows status requests");
+  recentStatusCalls.length = 0;
   mock.timers.tick(31 * 60 * 1000);
   await loadSessionLatestTurns(recentStatusClient, sessions, () => assert.fail("The recent window must advance on every refresh"));
   assert.deepEqual(recentStatusCalls, []);
@@ -270,9 +293,137 @@ try {
   mock.timers.reset();
 }
 
+assert.equal(DEFAULT_SESSION_FILTER_MINUTES, 30);
+assert.equal(parseSessionFilterMinutes(" 45 "), 45);
+assert.equal(parseSessionFilterMinutes("1"), 1);
+assert.equal(parseSessionFilterMinutes("1440"), 1440);
+for (const invalid of ["", "0", "-1", "1.5", "1441", "1e2", "30minutes", "Infinity"]) {
+  assert.throws(() => parseSessionFilterMinutes(invalid), /whole number of minutes/);
+}
+const filterNow = Date.parse("2026-09-10T12:00:00.000Z");
+const filterCutoff = sessionFilterCutoff(30, filterNow);
+const recentBoundary = { lastMessageAt: "2026-09-10T11:30:00.000Z" };
+const oldBoundary = { lastMessageAt: "2026-09-10T11:29:59.999Z" };
+assert.equal(isSessionInFilterWindow(recentBoundary, filterCutoff), true);
+assert.equal(isSessionInFilterWindow(oldBoundary, filterCutoff), false);
+assert.equal(isSessionInFilterWindow({ lastMessageAt: null }, filterCutoff), false);
+assert.equal(isSessionInFilterWindow(oldBoundary, sessionFilterCutoff(60, filterNow)), true);
+assert.equal(isSessionInFilterWindow(recentBoundary, sessionFilterCutoff(30, filterNow + 1)), false, "entries expire as time advances");
+const recentPaging = { hasMore: true, cursor: "next-page", boundary: recentBoundary, cutoff: filterCutoff };
+assert.equal(hasMoreRecentSessions(recentPaging), true);
+assert.equal(hasMoreRecentSessions({ ...recentPaging, boundary: oldBoundary }), false, "an old page stops filtered pagination even if older history remains");
+assert.equal(hasMoreRecentSessions({ ...recentPaging, cursor: null }), false, "no unserviceable loading indicator without a cursor");
+assert.equal(hasMoreRecentSessions({ ...recentPaging, hasMore: false }), false);
+assert.equal(hasMoreRecentSessions({ ...recentPaging, boundary: { lastMessageAt: null } }), false, "null activity rows are last in server order");
+assert.equal(hasMoreRecentSessions({ ...recentPaging, boundary: null }), true, "an empty permission-filtered page may still have recent results beyond it");
+const recentPage = sessionPageState({ sessions: [recentBoundary], pageInfo: { hasMore: true, nextCursor: "recent-cursor" } });
+const emptyVisiblePage = sessionPageState({ sessions: [], pageInfo: { hasMore: true, nextCursor: "gap-cursor" } }, recentPage.cursor, recentPage.boundary);
+assert.deepEqual(emptyVisiblePage, { hasMore: true, cursor: "gap-cursor", boundary: recentBoundary });
+const oldPage = sessionPageState({ sessions: [oldBoundary], pageInfo: { hasMore: true, nextCursor: "old-cursor" } }, emptyVisiblePage.cursor, emptyVisiblePage.boundary);
+assert.equal(hasMoreRecentSessions({ ...oldPage, cutoff: filterCutoff }), false, "recent, permission-gap, old-page traversal terminates");
+assert.equal(oldPage.hasMore, true, "All still has access to older pages");
+assert.throws(() => sessionPageState({ sessions: [], pageInfo: { hasMore: true, nextCursor: null } }), /pagination did not advance/);
+assert.throws(() => sessionPageState({ sessions: [], pageInfo: { hasMore: true, nextCursor: "same" } }, "same"), /pagination did not advance/);
+assert.throws(() => sessionPageState({ sessions: [{ id: "broken", lastMessageAt: "not-a-date" }] }), /Invalid lastMessageAt/);
+assert.deepEqual(sessionPageState({ sessions: [], pageInfo: { hasMore: false, nextCursor: null } }), { hasMore: false, cursor: null, boundary: null });
+
+// Exercise the provider's real pagination callback with React's child-before-parent passive effect order.
+const contextSource = ts.createSourceFile("context.tsx", readFileSync(new URL("../src/data/context.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let paginationCallback;
+let stateSyncHook;
+let timeoutSource;
+function inspectPagination(node) {
+  if (ts.isVariableDeclaration(node) && node.name.getText(contextSource) === "loadMoreSessions") paginationCallback = node.initializer.arguments[0].getText(contextSource);
+  if (ts.isCallExpression(node) && ["useEffect", "useLayoutEffect"].includes(node.expression.getText(contextSource)) && node.arguments[0]?.getText(contextSource).includes("stateRef.current = state;")) stateSyncHook = node.expression.getText(contextSource);
+  if (ts.isFunctionDeclaration(node) && node.name?.text === "withTimeout") timeoutSource = node.getText(contextSource);
+  ts.forEachChild(node, inspectPagination);
+}
+inspectPagination(contextSource);
+assert.ok(paginationCallback && stateSyncHook && timeoutSource);
+const pageTimeout = new Function("HOME_REQUEST_TIMEOUT_MS", "translate", `${ts.transpileModule(timeoutSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}; return withTimeout;`)(15000, (_key, values) => `Timed out: ${values.label}`);
+function paginationHarness(listSessions) {
+  const stateRef = { current: { sessionsLoadingMore: true, sessionsHasMore: true, sessionsCursor: "old-page", refreshing: false, sessionsPageBoundary: recentBoundary } };
+  const calls = [];
+  const actions = [];
+  const requestRef = { current: null };
+  const generationRef = { current: 1 };
+  const client = { user: { listSessions: (options) => { calls.push(options.cursor); return listSessions(options); } } };
+  const load = new Function("stateRef", "client", "sessionsMoreRequestRef", "homeRefreshGenerationRef", "dispatch", "withTimeout", "sessionPageState", "refreshSessionStatuses", "saveSessions", "userKey", "errorMessage", "translate", `return ${paginationCallback}`)(stateRef, client, requestRef, generationRef, (action) => actions.push(action), pageTimeout, sessionPageState, () => {}, async () => {}, "test-user", (error) => error.message, (key) => key);
+  return { load, calls, actions, requestRef, generationRef, stateRef };
+}
+const handoff = paginationHarness(async () => ({ sessions: [], pageInfo: { hasMore: false, nextCursor: null } }));
+const nextPageState = { ...handoff.stateRef.current, sessionsLoadingMore: false, sessionsCursor: "next-page" };
+if (stateSyncHook === "useLayoutEffect") handoff.stateRef.current = nextPageState;
+await handoff.load();
+if (stateSyncHook === "useEffect") handoff.stateRef.current = nextPageState;
+assert.deepEqual(handoff.calls, ["next-page"], "a completed page must request the next page instead of leaving a spinner with no active request");
+assert.equal(handoff.actions.at(-1).type, "sessions-more-success");
+assert.equal(handoff.requestRef.current, null);
+
+mock.timers.enable({ apis: ["setTimeout"] });
+try {
+  const stalledPage = paginationHarness(() => new Promise(() => {}));
+  stalledPage.stateRef.current = nextPageState;
+  const pendingPage = stalledPage.load();
+  mock.timers.tick(15000);
+  await pendingPage;
+  assert.equal(stalledPage.actions.at(-1).type, "sessions-more-error");
+  assert.match(stalledPage.actions.at(-1).message, /Timed out/);
+  assert.equal(stalledPage.requestRef.current, null, "timeouts release the pagination request for retry");
+} finally {
+  mock.timers.reset();
+}
+let resolveStalePage;
+const stalePage = paginationHarness(() => new Promise((resolve) => { resolveStalePage = resolve; }));
+stalePage.stateRef.current = nextPageState;
+const pendingStalePage = stalePage.load();
+stalePage.generationRef.current += 1;
+resolveStalePage({ sessions: [oldBoundary], pageInfo: { hasMore: false, nextCursor: null } });
+await pendingStalePage;
+assert.deepEqual(stalePage.actions.map((action) => action.type), ["sessions-more-start"], "an old page cannot replace a newly refreshed list or cursor");
+
+const preferenceSource = ts.transpileModule(readFileSync(new URL("../src/data/session-filter-preference.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
+function loadPreferenceModule(storage) {
+  const exports = {};
+  new Function("require", "exports", preferenceSource)((name) => {
+    if (name === "@react-native-async-storage/async-storage") return storage;
+    if (name === "./session-status") return { DEFAULT_SESSION_FILTER_MINUTES, parseSessionFilterMinutes };
+    if (name === "react") return {};
+    throw new Error(`Unexpected preference dependency: ${name}`);
+  }, exports);
+  return exports;
+}
+let storedFilterMinutes = null;
+let rejectPreferenceWrite = false;
+const filterStorage = {
+  getItem: async () => storedFilterMinutes,
+  setItem: async (_key, value) => {
+    if (rejectPreferenceWrite) throw new Error("Storage unavailable");
+    storedFilterMinutes = value;
+  },
+};
+const filterPreference = loadPreferenceModule(filterStorage);
+assert.equal(await filterPreference.loadSessionFilterMinutes(), 30, "missing preference defaults to 30 minutes");
+await filterPreference.saveSessionFilterMinutes(45);
+assert.equal(storedFilterMinutes, "45");
+assert.equal(await filterPreference.loadSessionFilterMinutes(), 45);
+assert.equal(await loadPreferenceModule(filterStorage).loadSessionFilterMinutes(), 45, "a new module instance restores the saved window");
+rejectPreferenceWrite = true;
+await assert.rejects(filterPreference.saveSessionFilterMinutes(90), /Storage unavailable/);
+assert.equal(await filterPreference.loadSessionFilterMinutes(), 45, "failed saves do not replace the active preference");
+await assert.rejects(filterPreference.saveSessionFilterMinutes(0), /whole number/);
+let finishPreferenceRead;
+const concurrentPreference = loadPreferenceModule({ ...filterStorage, getItem: () => new Promise((resolve) => { finishPreferenceRead = resolve; }), setItem: async () => {} });
+const pendingPreferenceRead = concurrentPreference.loadSessionFilterMinutes();
+await concurrentPreference.saveSessionFilterMinutes(90);
+finishPreferenceRead("15");
+assert.equal(await pendingPreferenceRead, 90, "a late stored snapshot cannot overwrite a user save");
+const invalidPreference = loadPreferenceModule({ ...filterStorage, getItem: async () => "30minutes" });
+await assert.rejects(invalidPreference.loadSessionFilterMinutes(), /whole number/);
+
 const statusCalls = [];
 const statusResults = new Map();
-const recentSession = { spaceId: "space1", updatedAt: new Date().toISOString() };
+const recentSession = { spaceId: "space1", lastMessageAt: new Date().toISOString() };
 const statusClient = { space: (spaceId) => ({ session: (sessionId) => ({ turns: { listPaginated: async (options) => {
   statusCalls.push({ spaceId, sessionId, options });
   return { turns: sessionId === "empty" ? [] : [runningTurn] };

@@ -21,6 +21,7 @@ import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog
 import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme } from "@/src/theme";
 import { useTranslation, type Translate } from "@/src/i18n";
 import { AppIcon, type IconName } from "@/src/ui";
+import { getUserBubbleLayout } from "@/src/ui/message-bubble-layout";
 import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
 function formatTokenCount(value: number) {
@@ -477,8 +478,9 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   // A one-line message keeps its clock inline. Longer text must not use the wrapping row: the
   // wrap lets the text claim the full width before the clock drops under it, leaving a
   // stretched single-line bubble with a stranded timestamp.
-  const fillUserWidth = isUser && Boolean(message.text?.includes("\n"));
-  const inlineUserMeta = isUser && !fillUserWidth && (message.text?.length ?? 0) <= 24;
+  const { fillUserWidth, inlineUserMeta } = isUser
+    ? getUserBubbleLayout(message)
+    : { fillUserWidth: false, inlineUserMeta: false };
   return <BubbleContext.Provider value={bubbleEnvironment}><View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
     <ChatBubbleFrame side={side} local={local} fillUserWidth={fillUserWidth}>
       {isUser ? inlineUserMeta ? <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "flex-end" }}>
