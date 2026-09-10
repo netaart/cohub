@@ -26,6 +26,10 @@ export function unwrap(result: Result) {
 - 只有正在增长的那一块应该重渲染
 
 下面开始修这两个类型错误。`;
+
+/** Larger corpus: same shapes repeated so high speeds still have parse work to do. */
+const LONG_BODY = Array.from({ length: 12 }, (_, index) => `### 第 ${index + 1} 节\n\n${BODY}`).join("\n\n");
+
 const TOOL_OUTPUT = [
   "> cohub-mobile@1.7.0 typecheck",
   "> tsc --noEmit --noUnusedLocals --noUnusedParameters",
@@ -36,6 +40,8 @@ const TOOL_OUTPUT = [
 ].join("\n");
 
 const NOW = new Date().toISOString();
+const SPEEDS = [1, 8, 64, 512, 4096, 32768] as const;
+const FRAME_MS = 16;
 
 function debugMessage(id: string, role: "user" | "assistant", text: string): MessageRecord {
   return {
@@ -74,9 +80,13 @@ export default function DebugStreamingScreen() {
   const [renders, setRenders] = useState(0);
   const [visible, setVisible] = useState(0);
   const [started, setStarted] = useState(true);
-  const [speed, setSpeed] = useState(2);
+  const [speedIndex, setSpeedIndex] = useState(1);
   const [tools, setTools] = useState(true);
-  const totalChars = INTRO.length + 2 + BODY.length;
+  const [loop, setLoop] = useState(true);
+  const [long, setLong] = useState(false);
+  const speed = SPEEDS[speedIndex]!;
+  const body = long ? LONG_BODY : BODY;
+  const totalChars = INTRO.length + 2 + body.length;
 
   const messages = useMemo(() => [
     debugMessage("debug-user", "user", "帮我把 typecheck 修一下。"),
@@ -84,12 +94,25 @@ export default function DebugStreamingScreen() {
   ], []);
 
   useEffect(() => {
-    if (!started) return;
-    const timer = setInterval(() => {
-      setVisible((current) => Math.min(totalChars, current + speed));
-    }, 32);
-    return () => clearInterval(timer);
-  }, [started, speed, totalChars]);
+    if (!started) return undefined;
+    let raf: number | null = null;
+    let lastTick = 0;
+    const tick = (now: number) => {
+      if (now - lastTick >= FRAME_MS) {
+        lastTick = now;
+        setVisible((current) => {
+          const next = current + speed;
+          if (next < totalChars) return next;
+          return loop ? next % totalChars : totalChars;
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf);
+    };
+  }, [loop, speed, started, totalChars]);
 
   useEffect(() => {
     const timer = setInterval(() => setRenders(renderCountRef.current), 250);
@@ -106,9 +129,9 @@ export default function DebugStreamingScreen() {
         blocks.push({ type: "tool_result", tool_use_id: "debug-tool", content: TOOL_OUTPUT, is_error: false });
       }
     }
-    if (bodyVisible > 0) blocks.push({ type: "text", text: BODY.slice(0, bodyVisible) });
+    if (bodyVisible > 0) blocks.push({ type: "text", text: body.slice(0, bodyVisible) });
     return blocks;
-  }, [tools, visible]);
+  }, [body, tools, visible]);
 
   const restart = useCallback(() => {
     renderCountRef.current = 0;
@@ -150,12 +173,16 @@ export default function DebugStreamingScreen() {
         ListHeaderComponent={<StreamCard content={content} status="streaming" />}
       />
       <View style={[styles.controls, { borderTopColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
-        <ControlChip icon="refresh" label="重新开始" onPress={restart} />
+        <ControlChip icon="refresh" label="重开" onPress={restart} />
         <ControlChip icon={started ? "stop" : "arrow-right"} label={started ? "暂停" : "继续"} onPress={() => setStarted((current) => !current)} />
-        <ControlChip label={`${speed}x`} onPress={() => setSpeed((current) => current >= 8 ? 1 : current * 2)} />
-        <ControlChip icon={tools ? "check" : "x"} label={tools ? "工具开" : "工具关"} onPress={() => setTools((current) => !current)} />
-        <Text style={[typography.micro, { color: theme.colors.textMuted, flex: 1, textAlign: "right" }]}>
-          重渲染 {renders}
+        <ControlChip icon="zap" label={`${speed}字/帧`} onPress={() => setSpeedIndex((current) => (current + 1) % SPEEDS.length)} />
+        <ControlChip icon={loop ? "sync" : "x"} label={loop ? "循环" : "单次"} onPress={() => setLoop((current) => !current)} />
+        <ControlChip icon="file-text" label={long ? "长文" : "短文"} onPress={() => setLong((current) => !current)} />
+        <ControlChip icon={tools ? "check" : "x"} label={tools ? "工具" : "无工具"} onPress={() => setTools((current) => !current)} />
+      </View>
+      <View style={[styles.metrics, { borderTopColor: theme.colors.border }]}>
+        <Text style={[typography.micro, { color: theme.colors.textMuted, flex: 1 }]}>
+          重渲染 {renders} · 已输出 {Math.min(visible, totalChars).toLocaleString()} / {totalChars.toLocaleString()} 字 · 约 {(speed * 1000 / FRAME_MS).toLocaleString()} 字/秒
         </Text>
       </View>
     </Screen>
@@ -165,13 +192,14 @@ export default function DebugStreamingScreen() {
 function ControlChip({ label, icon, onPress }: { label: string; icon?: IconName; onPress: () => void }) {
   const theme = useAppTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface, flexDirection: "row", alignItems: "center", gap: 5 })}>
-      {icon ? <AppIcon name={icon} size={13} color={theme.colors.textMuted} /> : null}
-      <Text style={[typography.caption, { color: theme.colors.textSecondary }]}>{label}</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={({ pressed }) => ({ minHeight: 32, paddingHorizontal: 9, borderRadius: 999, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface, flexDirection: "row", alignItems: "center", gap: 4 })}>
+      {icon ? <AppIcon name={icon} size={12} color={theme.colors.textMuted} /> : null}
+      <Text style={[typography.micro, { color: theme.colors.textSecondary }]}>{label}</Text>
     </Pressable>
   );
 }
 
 const styles = {
-  controls: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1 },
+  controls: { flexDirection: "row" as const, alignItems: "center" as const, flexWrap: "wrap" as const, gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 6, borderTopWidth: 1 },
+  metrics: { paddingHorizontal: 12, paddingBottom: 8, borderTopWidth: 1 },
 } satisfies Record<string, object>;

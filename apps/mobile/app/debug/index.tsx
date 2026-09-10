@@ -42,6 +42,10 @@ export default function DebugMenuScreen() {
         <DebugRow icon="download" title="更新与 OTA" detail="expo-updates 状态、GitHub APK 检查、冷启动" onPress={() => router.push("/debug/updates")} />
         <DebugRow icon="database" title="缓存检查器" detail="SQLite 行数、user_key、清空当前用户缓存" onPress={() => router.push("/debug/cache")} />
         <DebugRow icon="zap" title="输入框状态" detail="composer 全部组合 + 交互预览" onPress={() => router.push("/debug/composer")} />
+        <DebugRow icon="activity" title="连接与流" detail="连接状态机、活跃流、同步状态与时间线" onPress={() => router.push("/debug/connection")} />
+        <DebugRow icon="globe" title="深链测试" detail="解析并打开 cohub:// / web / 文件 / 外部链接" onPress={() => router.push("/debug/links")} />
+        <DebugRow icon="type" title="语言 / i18n" detail="当前语言、key 检索、中英文对照" onPress={() => router.push("/debug/i18n")} />
+        <DebugRow icon="fingerprint" title="身份与令牌" detail="claims、令牌存在性/过期（不显示明文）" onPress={() => router.push("/debug/identity")} />
       </View>
 
       <SectionHeader title="环境信息" />
