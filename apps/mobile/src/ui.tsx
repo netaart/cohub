@@ -102,7 +102,7 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   ) : (
     <View style={[{ flex: 1, backgroundColor: theme.colors.background }, contentStyle]}>{children}</View>
   );
-  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === "android" ? -insets.bottom : 0}>{body}</KeyboardAvoidingView> : body;
+  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>{body}</KeyboardAvoidingView> : body;
   return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
@@ -262,7 +262,7 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           }}
           blurOnSubmit={false}
         />
-        {expanded ? <View style={styles.composerToolbar} onTouchStart={() => { toolbarTouchRef.current = true; }} onTouchEnd={() => { setTimeout(() => { toolbarTouchRef.current = false; }, 0); }} onTouchCancel={() => { toolbarTouchRef.current = false; }}>
+        {expanded ? <View style={styles.composerToolbar} pointerEvents="box-none" onTouchStart={() => { toolbarTouchRef.current = true; }} onTouchEnd={() => { setTimeout(() => { toolbarTouchRef.current = false; }, 0); }} onTouchCancel={() => { toolbarTouchRef.current = false; }}>
           <IconButton name="plus" label={t("ui.composer.addAttachment")} size={34} onPress={onAttach} disabled={blocked} />
           <View style={styles.composerToolbarSpacer} />
           {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={t("ui.composer.chooseModel", { model: resolvedModelLabel, status: modelStatusLabel })} disabled={blocked} onPress={onModelPress} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{resolvedModelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
