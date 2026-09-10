@@ -6,8 +6,9 @@ import { useCurrentUser } from "@/src/auth/current-user";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useDebugUnlock } from "@/src/components/useDebugUnlock";
+import { CACHE_RETENTION_OPTIONS, setCacheRetention, useCacheRetention, type CacheRetention } from "@/src/data/cache-retention";
 import { useApp } from "@/src/data/context";
-import { useTranslation } from "@/src/i18n";
+import { useTranslation, type Translate } from "@/src/i18n";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useAppTheme, typography } from "@/src/theme";
 import {
@@ -19,7 +20,7 @@ import {
   SectionHeader,
 } from "@/src/ui";
 
-type ProfileSheet = "clear-cache" | "sign-out" | null;
+type ProfileSheet = "clear-cache" | "sign-out" | "cache-retention" | null;
 
 export default function ProfileScreen() {
   const theme = useAppTheme();
@@ -27,12 +28,13 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { signOut } = useProfileSession();
   const { name, email, avatar } = useCurrentUser();
-  const { state, connectionState, clearCache, refreshHome } = useApp();
+  const { state, connectionState, clearCache, applyCacheRetention, refreshHome } = useApp();
   const dataError = state.error ?? state.spacesError ?? state.sessionsError;
   const [sheet, setSheet] = useState<ProfileSheet>(null);
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const retention = useCacheRetention();
 
   const version = getInstalledAppVersion();
   const openDebug = useCallback(() => {
@@ -80,6 +82,17 @@ export default function ProfileScreen() {
       setSheetError(error instanceof Error ? error.message : t("profile.signOut.error"));
     } finally {
       setSigningOut(false);
+    }
+  };
+
+  const selectRetention = async (next: CacheRetention) => {
+    if (next === retention) return;
+    setSheetError(null);
+    try {
+      await setCacheRetention(next);
+      await applyCacheRetention();
+    } catch (error) {
+      setSheetError(error instanceof Error ? error.message : t("profile.cacheRetention.error"));
     }
   };
 
@@ -136,6 +149,13 @@ export default function ProfileScreen() {
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <SettingRow icon="database" title={t("profile.data.spaces")} detail={t("ui.available.offline", { count: state.spaces.length })} />
         <SettingRow icon="messages" title={t("profile.data.chats")} detail={t("ui.recent.threads", { count: state.sessions.length })} />
+        <SettingRow
+          icon="clock"
+          title={t("profile.data.retention")}
+          detail={retentionLabel(retention, t)}
+          onPress={() => openSheet("cache-retention")}
+          trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
+        />
         <SettingRow
           icon="trash"
           title={t("profile.data.clearCache")}
@@ -228,8 +248,45 @@ export default function ProfileScreen() {
         <Text style={[typography.body, { color: theme.colors.textSecondary }]}>{t("profile.signOut.body")}</Text>
         {sheetError ? <SheetError message={sheetError} /> : null}
       </AdaptiveSheet>
+
+      <AdaptiveSheet
+        visible={sheet === "cache-retention"}
+        title={t("profile.cacheRetention.title")}
+        subtitle={t("profile.cacheRetention.subtitle")}
+        onClose={closeSheet}
+        scrollable={false}
+        testID="cache-retention-sheet"
+      >
+        <Text style={[typography.body, { color: theme.colors.textSecondary }]}>{t("profile.cacheRetention.body")}</Text>
+        <View style={{ gap: 8, marginTop: 14 }}>
+          {CACHE_RETENTION_OPTIONS.map((option) => {
+            const selected = retention === option;
+            const label = retentionLabel(option, t);
+            return (
+              <Pressable
+                key={option}
+                accessibilityRole="radio"
+                accessibilityLabel={label}
+                accessibilityState={{ selected, checked: selected }}
+                onPress={() => void selectRetention(option)}
+                style={({ pressed }) => [styles.retentionOption, { borderColor: selected ? theme.colors.accentBorder : theme.colors.border, backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent" }]}
+              >
+                <Text style={[typography.bodyMedium, { color: selected ? theme.colors.accent : theme.colors.text, flex: 1 }]}>{label}</Text>
+                {selected ? <AppIcon name="check" size={17} color={theme.colors.accent} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        {sheetError ? <SheetError message={sheetError} /> : null}
+      </AdaptiveSheet>
     </Screen>
   );
+}
+
+function retentionLabel(option: CacheRetention, t: Translate) {
+  if (option === "1d") return t("profile.cacheRetention.option.oneDay");
+  if (option === "forever") return t("profile.cacheRetention.option.forever");
+  return t("profile.cacheRetention.option.days", { days: option === "7d" ? 7 : 30 });
 }
 
 function SheetFooter({ children }: { children: ReactNode }) {
@@ -319,5 +376,14 @@ const styles = {
     minHeight: 46,
     paddingHorizontal: 15,
     justifyContent: "center" as const,
+  },
+  retentionOption: {
+    minHeight: 52,
+    borderWidth: 1,
+    borderRadius: 11,
+    paddingHorizontal: 13,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 8,
   },
 } satisfies Record<string, object>;

@@ -15,15 +15,19 @@ import { AppState as NativeAppState } from "react-native";
 import { File as ExpoFile } from "expo-file-system";
 import { translate } from "@/src/i18n/core";
 import { createMobileClient } from "@/src/data/client";
+import { cacheRetentionCutoff, loadCacheRetention } from "@/src/data/cache-retention";
 import { createStreamBatch } from "@/src/data/chat-rendering";
 import {
   clearUserCache,
   hydrateHome,
   loadMessages,
   loadSessionReadSequence,
+  pruneUserCache,
   saveHome,
   saveMessages,
   saveSessionReadSequence,
+  saveSessions,
+  saveSpaces,
 } from "@/src/data/local-db";
 import type {
   ActivityItem,
@@ -645,6 +649,7 @@ export type AppContextValue = {
   renameSession: (sessionId: string, title: string) => Promise<void>;
   forkSession: (spaceId: string, sessionId: string, turn: Pick<SessionTurnRecord, "id" | "sourceTurnId">) => Promise<SessionRecord>;
   clearCache: () => Promise<void>;
+  applyCacheRetention: () => Promise<void>;
   loadSessionReadSequence: (sessionId: string) => Promise<number | null>;
   saveSessionReadSequence: (sessionId: string, sequence: number) => Promise<void>;
   activityItems: ActivityItem[];
@@ -906,8 +911,7 @@ export function AppProvider({
         const nextSessions = response.sessions ?? [];
         dispatch({ type: "sessions-more-success", sessions: nextSessions, hasMore: Boolean(response.pageInfo?.hasMore), cursor: response.pageInfo?.nextCursor ?? null });
         void refreshSessionStatuses(nextSessions);
-        const merged = [...stateRef.current.sessions, ...nextSessions.filter((item) => !stateRef.current.sessions.some((currentItem) => currentItem.id === item.id))];
-        void saveHome(userKey, { spaces: stateRef.current.spaces, sessions: merged }).catch(() => undefined);
+        void saveSessions(userKey, nextSessions).catch(() => undefined);
       } catch (error) {
         dispatch({ type: "sessions-more-error", message: errorMessage(error, translate("data.chatsLoadFailed")) });
       }
@@ -919,12 +923,22 @@ export function AppProvider({
     return task;
   }, [client, dispatch, refreshSessionStatuses, userKey]);
 
+  const applyCacheRetention = useCallback(async () => {
+    const cutoff = cacheRetentionCutoff(await loadCacheRetention(), Date.now());
+    if (cutoff !== null) await pruneUserCache(userKey, cutoff);
+  }, [userKey]);
+
   useEffect(() => {
     let active = true;
     const activeSubscriptions = subscriptions.current;
     const activeSessionSpaces = sessionSpaces.current;
     const activeResyncCoordinator = resyncCoordinatorRef.current;
     void (async () => {
+      try {
+        await applyCacheRetention();
+      } catch (error) {
+        console.warn("[mobile-cache] failed to prune expired cache", error);
+      }
       try {
         const cached = await hydrateHome(userKey);
         if (active && (cached.spaces.length > 0 || cached.sessions.length > 0)) {
@@ -954,7 +968,7 @@ export function AppProvider({
       activeSubscriptions.clear();
       activeSessionSpaces.clear();
     };
-  }, [dispatch, refreshHome, userKey]);
+  }, [applyCacheRetention, dispatch, refreshHome, userKey]);
 
   useEffect(() => {
     if (!client) return;
@@ -1241,8 +1255,7 @@ export function AppProvider({
           space: currentSummary?.space ?? null,
         };
         dispatch({ type: "session-upsert", session: nextSummary });
-        const nextSessions = stateRef.current.sessions.map((item) => item.id === sessionId ? nextSummary : item);
-        void saveHome(userKey, { spaces: stateRef.current.spaces, sessions: nextSessions }).catch(() => undefined);
+        void saveSessions(userKey, [nextSummary]).catch(() => undefined);
         const currentView = stateRef.current.sessionViews[sessionId];
         if (currentView) dispatch({ type: "session-meta", sessionId, session: updated, space: currentView.space });
       },
@@ -1491,11 +1504,7 @@ export function AppProvider({
           : null,
       };
       dispatch({ type: "session-upsert", session });
-      const home = stateRef.current;
-      void saveHome(userKey, {
-        spaces: home.spaces,
-        sessions: [session, ...home.sessions.filter((item) => item.id !== session.id)],
-      }).catch(() => undefined);
+      void saveSessions(userKey, [session]).catch(() => undefined);
       return result.session;
     },
     [client, dispatch, userKey],
@@ -1512,11 +1521,7 @@ export function AppProvider({
         source: "mobile",
       });
       dispatch({ type: "space-upsert", space: result.space });
-      const home = stateRef.current;
-      void saveHome(userKey, {
-        spaces: [result.space, ...home.spaces.filter((space) => space.id !== result.space.id)],
-        sessions: home.sessions,
-      }).catch(() => undefined);
+      void saveSpaces(userKey, [result.space]).catch(() => undefined);
       return result.space;
     },
     [client, dispatch, userKey],
@@ -1538,11 +1543,7 @@ export function AppProvider({
     if (current) {
       const next = { ...current, isPinned: pinned };
       dispatch({ type: "space-upsert", space: next });
-      const home = stateRef.current;
-      void saveHome(userKey, {
-        spaces: [next, ...home.spaces.filter((space) => space.id !== spaceId)],
-        sessions: home.sessions,
-      }).catch(() => undefined);
+      void saveSpaces(userKey, [next]).catch(() => undefined);
     }
     return pinned;
   }, [client, dispatch, userKey]);
@@ -1569,11 +1570,7 @@ export function AppProvider({
       if (latest) {
         const next = { ...latest, isPinned: pinned };
         dispatch({ type: "space-upsert", space: next });
-        const home = stateRef.current;
-        void saveHome(userKey, {
-          spaces: [next, ...home.spaces.filter((space) => space.id !== spaceId)],
-          sessions: home.sessions,
-        }).catch(() => undefined);
+        void saveSpaces(userKey, [next]).catch(() => undefined);
       }
       return pinned;
     } catch (error) {
@@ -1604,21 +1601,13 @@ export function AppProvider({
       const pinned = isResourcePinned(payload.assignments as { labelSystemKey?: string | null }[]);
       const next = { ...current, isPinned: pinned };
       dispatch({ type: "space-upsert", space: next });
-      const home = stateRef.current;
-      void saveHome(userKey, {
-        spaces: [next, ...home.spaces.filter((space) => space.id !== next.id)],
-        sessions: home.sessions,
-      }).catch(() => undefined);
+      void saveSpaces(userKey, [next]).catch(() => undefined);
     });
   }, [client, dispatch, userKey]);
 
   const upsertSpace = useCallback((space: SpaceRecord) => {
     dispatch({ type: "space-upsert", space });
-    const home = stateRef.current;
-    void saveHome(userKey, {
-      spaces: [space, ...home.spaces.filter((item) => item.id !== space.id)],
-      sessions: home.sessions,
-    }).catch(() => undefined);
+    void saveSpaces(userKey, [space]).catch(() => undefined);
   }, [dispatch, userKey]);
 
   const forkSession = useCallback(async (spaceId: string, sessionId: string, turn: Pick<SessionTurnRecord, "id" | "sourceTurnId">) => {
@@ -1627,8 +1616,7 @@ export function AppProvider({
     const parent = stateRef.current.sessions.find((item) => item.id === sessionId);
     const session = { ...result, space: parent?.space ?? null };
     dispatch({ type: "session-upsert", session });
-    const home = stateRef.current;
-    void saveHome(userKey, { spaces: home.spaces, sessions: [session, ...home.sessions.filter((item) => item.id !== session.id)] }).catch(() => undefined);
+    void saveSessions(userKey, [session]).catch(() => undefined);
     return result;
   }, [client, dispatch, userKey]);
 
@@ -1732,6 +1720,7 @@ export function AppProvider({
       renameSession,
       forkSession,
       clearCache,
+      applyCacheRetention,
       loadSessionReadSequence: loadSessionReadSequenceForUser,
       saveSessionReadSequence: saveSessionReadSequenceForUser,
       activityItems,
@@ -1739,6 +1728,7 @@ export function AppProvider({
     [
       activityItems,
       abortSession,
+      applyCacheRetention,
       clearCache,
       client,
       loadSessionReadSequenceForUser,

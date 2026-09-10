@@ -183,6 +183,7 @@ export const en = {
   "profile.section.data": "Data",
   "profile.data.spaces": "Cached Spaces",
   "profile.data.chats": "Cached Chats",
+  "profile.data.retention": "Cache retention",
   "profile.data.clearCache": "Clear local cache",
   "profile.data.clearCacheDetail": "Remove cached work from this device",
   "profile.signingOut": "Signing out…",
@@ -195,6 +196,14 @@ export const en = {
   "profile.clearCache.error": "Unable to clear local cache.",
   "profile.clearCache.partialError":
     "Local cache could not be cleared. Signing out anyway.",
+  "profile.cacheRetention.title": "Cache retention",
+  "profile.cacheRetention.subtitle": "Chats and messages kept on this device",
+  "profile.cacheRetention.body":
+    "Older Chats and messages are removed from this device automatically. Spaces and account data stay available.",
+  "profile.cacheRetention.option.oneDay": "1 day",
+  "profile.cacheRetention.option.days": "{days} days",
+  "profile.cacheRetention.option.forever": "Forever",
+  "profile.cacheRetention.error": "Unable to update cache retention.",
   "profile.signOut.title": "Sign out of Cohub?",
   "profile.signOut.subtitle": "Your cached work on this device will be cleared.",
   "profile.signOut.body":

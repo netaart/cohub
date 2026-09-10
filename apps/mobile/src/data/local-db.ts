@@ -82,29 +82,63 @@ export async function hydrateHome(userKey: string): Promise<CachedHome> {
   };
 }
 
+async function writeSpaces(db: SQLiteDatabase, userKey: string, spaces: readonly SpaceRecord[], now: number) {
+  for (const space of spaces) {
+    await db.runAsync(
+      `INSERT OR REPLACE INTO spaces (user_key, space_id, payload, updated_at) VALUES (?, ?, ?, ?)`,
+      userKey,
+      space.id,
+      JSON.stringify(space),
+      now,
+    );
+  }
+}
+
+async function writeSessions(db: SQLiteDatabase, userKey: string, sessions: readonly UserSessionListItem[], now: number) {
+  for (const session of sessions) {
+    await db.runAsync(
+      `INSERT OR REPLACE INTO sessions (user_key, session_id, space_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      userKey,
+      session.id,
+      session.spaceId,
+      JSON.stringify(session),
+      now,
+    );
+  }
+}
+
 export async function saveHome(userKey: string, home: CachedHome) {
   const db = await database();
   const now = Date.now();
   await db.withTransactionAsync(async () => {
-    for (const space of home.spaces) {
-      await db.runAsync(
-        `INSERT OR REPLACE INTO spaces (user_key, space_id, payload, updated_at) VALUES (?, ?, ?, ?)`,
-        userKey,
-        space.id,
-        JSON.stringify(space),
-        now,
-      );
-    }
-    for (const session of home.sessions) {
-      await db.runAsync(
-        `INSERT OR REPLACE INTO sessions (user_key, session_id, space_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)`,
-        userKey,
-        session.id,
-        session.spaceId,
-        JSON.stringify(session),
-        now,
-      );
-    }
+    await writeSpaces(db, userKey, home.spaces, now);
+    await writeSessions(db, userKey, home.sessions, now);
+  });
+}
+
+/** Persist individual Spaces without rewriting the rest of the home cache. */
+export async function saveSpaces(userKey: string, spaces: readonly SpaceRecord[]) {
+  if (spaces.length === 0) return;
+  const db = await database();
+  const now = Date.now();
+  await db.withTransactionAsync(() => writeSpaces(db, userKey, spaces, now));
+}
+
+/** Persist individual Chats without rewriting the rest of the home cache. */
+export async function saveSessions(userKey: string, sessions: readonly UserSessionListItem[]) {
+  if (sessions.length === 0) return;
+  const db = await database();
+  const now = Date.now();
+  await db.withTransactionAsync(() => writeSessions(db, userKey, sessions, now));
+}
+
+/** Drop cached chat rows last written before the cutoff (cache retention). */
+export async function pruneUserCache(userKey: string, cutoff: number) {
+  const db = await database();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM messages WHERE user_key = ? AND updated_at < ?", userKey, cutoff);
+    await db.runAsync("DELETE FROM sessions WHERE user_key = ? AND updated_at < ?", userKey, cutoff);
+    await db.runAsync("DELETE FROM session_read_state WHERE user_key = ? AND updated_at < ?", userKey, cutoff);
   });
 }
 
