@@ -5,6 +5,8 @@ import { MessageMeasurements, createStreamBatch } from "../src/data/chat-renderi
 import { invertedListDistances, nextChatTailFollowing, reverseListIndex } from "../src/data/chat-scroll.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
+import { getComposerLayout } from "../src/ui/composer-layout.ts";
+import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
 import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
@@ -654,6 +656,47 @@ assert.deepEqual(
   getComposerActionState({ text: "follow up", hasAttachment: false, disabled: false, sending: true, running: true, hasStopHandler: true }),
   { blocked: true, hasDraft: true, canSend: false, canStop: false },
 );
+const composerLayoutInput = { text: "hello", contentHeight: 30, lineHeight: 22, availableHeight: 800, expanded: false };
+assert.deepEqual(getComposerLayout({ ...composerLayoutInput, text: "" }), {
+  expanded: false, showExpandButton: false, height: 44, scrollEnabled: false,
+});
+assert.deepEqual(getComposerLayout(composerLayoutInput), {
+  expanded: false, showExpandButton: false, height: 44, scrollEnabled: false,
+});
+assert.equal(getComposerLayout({ ...composerLayoutInput, text: "hello\n" }).showExpandButton, true, "explicit newline is expandable before native measurement");
+assert.deepEqual(getComposerLayout({ ...composerLayoutInput, contentHeight: 52 }), {
+  expanded: false, showExpandButton: true, height: 52, scrollEnabled: false,
+}, "soft-wrapped text grows and exposes expansion");
+assert.deepEqual(getComposerLayout({ ...composerLayoutInput, contentHeight: 600 }), {
+  expanded: false, showExpandButton: true, height: 120, scrollEnabled: true,
+});
+assert.deepEqual(getComposerLayout({ ...composerLayoutInput, contentHeight: 600, expanded: true }), {
+  expanded: true, showExpandButton: true, height: 320, scrollEnabled: true,
+});
+assert.deepEqual(getComposerLayout({ ...composerLayoutInput, contentHeight: 52, expanded: true }), {
+  expanded: true, showExpandButton: true, height: 320, scrollEnabled: false,
+});
+assert.equal(getComposerLayout({ ...composerLayoutInput, expanded: true }).showExpandButton, true, "collapse remains available after deleting back to one line");
+assert.deepEqual(getComposerLayout({ ...composerLayoutInput, text: "", contentHeight: 600, expanded: true }), {
+  expanded: false, showExpandButton: false, height: 44, scrollEnabled: false,
+}, "clearing or sending resets the layout even before the native measurement catches up");
+assert.equal(getComposerLayout({ ...composerLayoutInput, availableHeight: 400, expanded: true }).height, 180, "expanded input leaves room above the keyboard");
+assert.equal(getComposerLayout({ ...composerLayoutInput, availableHeight: 180, contentHeight: 600 }).height, 81, "short viewports also constrain the default input");
+assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 52 }).showExpandButton, false, "a large-font single line is not mistaken for multiline");
+assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 96 }).showExpandButton, true);
+assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 52 }).height, 52);
+const composerMenuInput = { anchor: { x: 12, y: 680, width: 366, height: 114 }, windowWidth: 390, windowHeight: 844, topInset: 47, bottomInset: 34, keyboardTop: null, preferredWidth: 360 };
+assert.deepEqual(getComposerMenuLayout(composerMenuInput), { left: 12, bottom: 172, width: 360, maxHeight: 480 });
+assert.equal(getComposerMenuLayout({ ...composerMenuInput, preferredWidth: 240 }).width, 240, "attachments use a compact menu");
+assert.equal(getComposerMenuLayout({ ...composerMenuInput, windowWidth: 320 }).width, 296, "menu fits narrow screens");
+assert.equal(getComposerMenuLayout({ ...composerMenuInput, anchor: { ...composerMenuInput.anchor, x: 300 } }).left, 18, "menu stays inside the right edge");
+const iosKeyboardMenu = getComposerMenuLayout({ ...composerMenuInput, keyboardTop: 500, bottomInset: 0 });
+assert.deepEqual(iosKeyboardMenu, { left: 12, bottom: 352, width: 360, maxHeight: 433 }, "iOS menu clears the keyboard without resizing the modal window");
+const androidKeyboardMenu = getComposerMenuLayout({ ...composerMenuInput, windowHeight: 500, keyboardTop: 500, bottomInset: 0 });
+assert.deepEqual(androidKeyboardMenu, { left: 12, bottom: 12, width: 360, maxHeight: 429 }, "Android uses the resized modal height without double-subtracting the keyboard");
+const tallDraftMenu = getComposerMenuLayout({ ...composerMenuInput, anchor: { ...composerMenuInput.anchor, y: 280 }, windowHeight: 400, keyboardTop: 400, bottomInset: 0 });
+assert.equal(tallDraftMenu.maxHeight, 213, "a tall draft constrains the menu above it");
+assert.ok(400 - tallDraftMenu.bottom - tallDraftMenu.maxHeight >= composerMenuInput.topInset + 12);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom: 420, userInteracting: false, pendingTarget: false }), true);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom: 420, userInteracting: false, pendingTarget: false }), false);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom: 420, userInteracting: true, pendingTarget: false }), false);

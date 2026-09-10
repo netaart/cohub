@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -12,6 +12,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type ColorValue,
   type GestureResponderEvent,
@@ -19,10 +20,10 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Reanimated, { LinearTransition } from "react-native-reanimated";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { icons, type IconName } from "@/src/icons";
 import { getComposerActionState } from "@/src/data/composer-state";
+import { COMPOSER_TEXT_PADDING, getComposerLayout } from "@/src/ui/composer-layout";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem } from "@/src/data/types";
@@ -215,68 +216,82 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
   return <View style={{ paddingHorizontal: 16, gap: 4 }}>{Array.from({ length: count }).map((_, index) => <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}><View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ flex: 1, gap: 9 }}><View style={{ width: `${58 + (index % 3) * 10}%`, height: 12, borderRadius: 6, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ width: `${38 + (index % 2) * 15}%`, height: 10, borderRadius: 5, backgroundColor: theme.colors.surfaceRaised }} /></View></View>)}</View>;
 }
 
-export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel, modelStatus = "unknown", disabled = false, sending = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
+export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel, modelStatus = "unknown", disabled = false, sending = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder, anchorRef, attachmentMenuOpen = false, modelMenuOpen = false }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string; anchorRef?: React.RefObject<View | null>; attachmentMenuOpen?: boolean; modelMenuOpen?: boolean }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight, fontScale } = useWindowDimensions();
   const [focused, setFocused] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const toolbarTouchRef = useRef(false);
-  const [toolbarOpen, setToolbarOpen] = useState(false);
-  // Track keyboard visibility to zero out the bottom inset while the keyboard is up (Android
-  // does not update insets.bottom automatically, so we'd get a gap equal to insets.bottom
-  // between the composer and the keyboard if we left it in while KeyboardAvoidingView is active).
-  // Also use this to close the toolbar when the keyboard hides for real.
+  const [keyboardTop, setKeyboardTop] = useState<number | null>(() => Keyboard.metrics()?.screenY ?? null);
+  const [expanded, setExpanded] = useState(false);
+  const [contentHeight, setContentHeight] = useState(0);
+  const keyboardVisible = keyboardTop !== null;
+  // Android keeps its bottom safe-area inset while KeyboardAvoidingView is active.
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const show = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
-    const hide = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false);
-      if (!toolbarTouchRef.current) setToolbarOpen(false);
-    });
+    const show = Keyboard.addListener(showEvent, (event) => setKeyboardTop(event.endCoordinates.screenY));
+    const hide = Keyboard.addListener(hideEvent, () => setKeyboardTop(null));
     return () => { show.remove(); hide.remove(); };
   }, []);
+  if (!value && expanded) setExpanded(false);
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
-  const expanded = focused || toolbarOpen || hasAttachment || voiceActive;
+  const layout = getComposerLayout({
+    text: value,
+    contentHeight,
+    lineHeight: typography.body.lineHeight * fontScale,
+    availableHeight: Math.min(windowHeight, keyboardTop ?? windowHeight) - insets.top - (keyboardVisible ? 0 : insets.bottom),
+    expanded,
+  });
   const resolvedModelLabel = modelLabel ?? t("ui.composer.modelAutomatic");
   const modelStatusLabel = modelStatus === "available" ? t("ui.modelStatus.available") : modelStatus === "degraded" ? t("ui.modelStatus.degraded") : modelStatus === "outage" ? t("ui.modelStatus.outage") : t("ui.modelStatus.unknown");
   return (
     <View style={[styles.composerWrap, { paddingBottom: (Platform.OS === "android" && keyboardVisible ? 0 : insets.bottom) + 10 }]}>
-      <Reanimated.View layout={LinearTransition.duration(220)} style={[styles.composer, expanded ? styles.composerExpanded : styles.composerCompact, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
-        {!expanded ? <IconButton name="plus" label={t("ui.composer.addAttachment")} size={34} onPress={onAttach} disabled={blocked} /> : null}
-        <TextInput
-          value={value}
-          onChangeText={onChangeText}
-          editable={!blocked}
-          multiline
-          maxLength={12000}
-          placeholder={placeholder ?? t("ui.composer.placeholder")}
-          placeholderTextColor={theme.colors.textFaint}
-          style={[typography.body, styles.composerText, expanded ? styles.composerTextExpanded : styles.composerTextCompact, { color: theme.colors.text }]}
-          onFocus={() => { setFocused(true); setToolbarOpen(true); }}
-          onBlur={() => {
-            setFocused(false);
-            if (toolbarTouchRef.current) return;
-            setToolbarOpen(false);
-          }}
-          blurOnSubmit={false}
-        />
-        {expanded ? <View style={styles.composerToolbar} pointerEvents="box-none" onTouchStart={() => { toolbarTouchRef.current = true; }} onTouchEnd={() => { setTimeout(() => { toolbarTouchRef.current = false; }, 0); }} onTouchCancel={() => { toolbarTouchRef.current = false; }}>
-          <IconButton name="plus" label={t("ui.composer.addAttachment")} size={34} onPress={onAttach} disabled={blocked} />
+      <View ref={anchorRef} collapsable={false} testID="chat-composer" style={[styles.composer, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
+        <View style={styles.composerInputRow}>
+          <TextInput
+            testID="chat-composer-input"
+            accessibilityLabel={t("ui.composer.placeholder")}
+            value={value}
+            onChangeText={onChangeText}
+            onContentSizeChange={(event) => setContentHeight(event.nativeEvent.contentSize.height)}
+            editable={!blocked}
+            multiline
+            scrollEnabled={layout.scrollEnabled}
+            maxLength={12000}
+            placeholder={placeholder ?? t("ui.composer.placeholder")}
+            placeholderTextColor={theme.colors.textFaint}
+            style={[typography.body, styles.composerText, { color: theme.colors.text, height: layout.height }]}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            submitBehavior="newline"
+          />
+          <View style={styles.composerExpandSlot}>
+            {layout.showExpandButton ? <Pressable
+              testID="chat-composer-expand"
+              accessibilityRole="button"
+              accessibilityLabel={t(layout.expanded ? "ui.composer.collapse" : "ui.composer.expand")}
+              accessibilityState={{ expanded: layout.expanded }}
+              onPress={() => setExpanded(!layout.expanded)}
+              style={({ pressed }) => [styles.composerExpandButton, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}
+            ><AppIcon name={layout.expanded ? "minimize" : "maximize"} size={17} color={theme.colors.textMuted} /></Pressable> : null}
+          </View>
+        </View>
+        <View style={styles.composerToolbar}>
+          <Pressable testID="chat-composer-attach" accessibilityRole="button" accessibilityLabel={t("ui.composer.addAttachment")} accessibilityState={{ expanded: attachmentMenuOpen, disabled: blocked }} disabled={blocked} onPress={() => { Keyboard.dismiss(); onAttach(); }} style={({ pressed }) => [styles.composerCircleButton, { backgroundColor: pressed || attachmentMenuOpen ? theme.colors.surfacePressed : theme.colors.surfaceRaised, opacity: blocked ? 0.45 : 1 }]}><AppIcon name={attachmentMenuOpen ? "x" : "plus"} size={22} color={theme.colors.textSecondary} /></Pressable>
+          {onModelPress ? <Pressable testID="chat-composer-model" accessibilityRole="button" accessibilityLabel={t("ui.composer.chooseModel", { model: resolvedModelLabel, status: modelStatusLabel })} accessibilityState={{ expanded: modelMenuOpen, disabled: blocked }} disabled={blocked} onPress={() => { Keyboard.dismiss(); onModelPress(); }} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed || modelMenuOpen ? theme.colors.surfacePressed : theme.colors.surfaceRaised, opacity: blocked ? 0.5 : 1 }]}>
+            <AppIcon name="zap" size={18} color={theme.colors.textSecondary} />
+            <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flexShrink: 1 }]}>{resolvedModelLabel}</Text>
+            {modelStatus === "unknown" ? null : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : theme.colors.danger }} />}
+            <AppIcon name="chevron-down" size={14} color={theme.colors.textMuted} />
+          </Pressable> : null}
           <View style={styles.composerToolbarSpacer} />
-          {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={t("ui.composer.chooseModel", { model: resolvedModelLabel, status: modelStatusLabel })} disabled={blocked} onPress={onModelPress} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{resolvedModelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
-          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? t("ui.composer.voiceStop") : t("ui.composer.voiceStart")} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
+          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? t("ui.composer.voiceStop") : t("ui.composer.voiceStart")} accessibilityState={{ disabled: blocked || voiceStarting, selected: voiceActive }} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.composerCircleButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, opacity: blocked ? 0.45 : 1 }]}>{voiceStarting ? <ActivityIndicator size="small" color={theme.colors.textMuted} /> : <AppIcon name="mic" size={21} color={voiceActive ? theme.colors.accent : theme.colors.textSecondary} />}</Pressable> : null}
           <Pressable accessibilityRole="button" accessibilityLabel={canStop ? t("ui.composer.stop") : t("ui.composer.send")} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
-            <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} fill={canStop ? theme.colors.background : undefined} />
+            <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 17 : 22} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} fill={canStop ? theme.colors.background : undefined} />
           </Pressable>
-        </View> : <View style={styles.composerCompactActions}>
-          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? t("ui.composer.voiceStop") : t("ui.composer.voiceStart")} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? t("ui.composer.stop") : t("ui.composer.send")} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
-            <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} fill={canStop ? theme.colors.background : undefined} />
-          </Pressable>
-        </View>}
-      </Reanimated.View>
+        </View>
+      </View>
     </View>
   );
 }
@@ -326,17 +341,15 @@ const styles = StyleSheet.create({
   primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   searchField: { minHeight: 48, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 10 },
   composerWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10 },
-  composer: { paddingHorizontal: 8, gap: 2, overflow: "hidden" },
-  composerCompact: { minHeight: 56, borderRadius: 28, borderWidth: 1, flexDirection: "row", alignItems: "center", paddingVertical: 6 },
-  composerExpanded: { minHeight: 84, borderRadius: 18, borderWidth: 1, paddingTop: 6, paddingBottom: 6 },
-  composerText: { minHeight: 34, maxHeight: 120, paddingHorizontal: 5, paddingTop: 0, paddingBottom: 4, textAlignVertical: "top" },
-  composerTextCompact: { flex: 1, minWidth: 0, maxHeight: 42, paddingVertical: 3 },
-  composerTextExpanded: { width: "100%", minHeight: 34 },
-  composerToolbar: { height: 36, flexDirection: "row", alignItems: "center", gap: 3 },
-  composerCompactActions: { flexDirection: "row", alignItems: "center", gap: 3 },
+  composer: { paddingHorizontal: 8, paddingVertical: 8, gap: 8, borderRadius: 18, borderCurve: "continuous", borderWidth: 1, overflow: "hidden" },
+  composerInputRow: { flexDirection: "row", alignItems: "flex-start" },
+  composerText: { flex: 1, minWidth: 0, paddingHorizontal: 5, paddingVertical: COMPOSER_TEXT_PADDING / 2, textAlignVertical: "top", includeFontPadding: false },
+  composerExpandSlot: { width: 44, height: 44 },
+  composerExpandButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  composerToolbar: { height: 44, flexDirection: "row", alignItems: "center", gap: 6 },
   composerToolbarSpacer: { flex: 1, minWidth: 0 },
-  composerModel: { height: 30, maxWidth: "58%", paddingHorizontal: 5, borderRadius: 9, flexDirection: "row", alignItems: "center", gap: 5, overflow: "hidden" },
-  sendButton: { width: 36, height: 36, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  voiceButton: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center", marginBottom: 2 },
+  composerModel: { height: 44, maxWidth: "58%", flexShrink: 1, minWidth: 0, paddingHorizontal: 10, borderRadius: 22, flexDirection: "row", alignItems: "center", gap: 6, overflow: "hidden" },
+  composerCircleButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  sendButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   attachmentChip: { flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderRadius: 10, paddingHorizontal: 9, paddingVertical: 7, maxWidth: "100%" },
 });

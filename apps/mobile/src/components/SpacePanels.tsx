@@ -185,6 +185,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
       <Reanimated.ScrollView
         ref={pagerRef}
         horizontal
+        keyboardShouldPersistTaps="handled"
         style={styles.pager}
         showsHorizontalScrollIndicator={false}
         bounces={false}

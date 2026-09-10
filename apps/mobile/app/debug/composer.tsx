@@ -1,9 +1,14 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import {
   getComposerActionState,
   type ComposerActionStateInput,
 } from "@/src/data/composer-state";
+import { AttachmentMenu } from "@/src/components/AttachmentMenu";
+import { ModelSelectorMenu } from "@/src/components/ModelSelectorMenu";
+import { useApp } from "@/src/data/context";
+import type { ChatModelSelection } from "@/src/data/types";
+import { formatThinkingLevel, modelAvailabilityLevel } from "@/src/model-catalog";
 import { typography, useAppTheme } from "@/src/theme";
 import { ComposerInput, Screen, SectionHeader } from "@/src/ui";
 
@@ -28,13 +33,20 @@ function buildMatrix() {
 export default function DebugComposerScreen() {
   const theme = useAppTheme();
   const matrix = useMemo(() => buildMatrix(), []);
-
+  const { models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadModels, loadModelStatus } = useApp();
+  const composerRef = useRef<View>(null);
+  const [attachmentOpen, setAttachmentOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<ChatModelSelection | null>(null);
   const [text, setText] = useState("");
   const [attach, setAttach] = useState(false);
   const [disabled, setDisabled] = useState(false);
   const [sending, setSending] = useState(false);
   const [running, setRunning] = useState(false);
   const [hasStop, setHasStop] = useState(true);
+  const modelLabel = selectedModel?.name ?? selectedModel?.id;
+  const modelTriggerLabel = selectedModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(selectedModel.thinkingLevel)}` : modelLabel;
   const live = getComposerActionState({ text, hasAttachment: attach, disabled, sending, running, hasStopHandler: hasStop });
 
   return (
@@ -53,18 +65,12 @@ export default function DebugComposerScreen() {
             {`blocked=${live.blocked}  hasDraft=${live.hasDraft}  canSend=${live.canSend}  canStop=${live.canStop}`}
           </Text>
         </View>
-        <ComposerInput
-          value={text}
-          onChangeText={setText}
-          onSend={() => undefined}
-          onStop={hasStop ? () => undefined : undefined}
-          onAttach={() => setAttach((v) => !v)}
-          sending={sending}
-          running={running}
-          disabled={disabled}
-          hasAttachment={attach}
-        />
-
+        <View style={{ paddingHorizontal: 16, paddingBottom: 8, flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          <Toggle label="单行" on={text === "Hello"} onPress={() => setText("Hello")} />
+          <Toggle label="多行" on={text === "First line\nSecond line\nThird line"} onPress={() => setText("First line\nSecond line\nThird line")} />
+          <Toggle label="自动折行" on={text.startsWith("A long draft")} onPress={() => setText("A long draft that wraps across the input width. ".repeat(60))} />
+          <Toggle label="清空" on={!text} onPress={() => setText("")} />
+        </View>
         <SectionHeader title="状态矩阵（64 种组合）" />
         <Text style={[typography.caption, { color: theme.colors.textMuted, marginHorizontal: 16, marginBottom: 8 }]}>
           列：文本 / A 附件 / D disabled / S sending / R running / H onStop → 结果：B blocked / S canSend / T canStop
@@ -93,6 +99,27 @@ export default function DebugComposerScreen() {
           })}
         </View>
       </ScrollView>
+      <ComposerInput
+        anchorRef={composerRef}
+        attachmentMenuOpen={attachmentOpen}
+        modelMenuOpen={modelOpen}
+        value={text}
+        onChangeText={setText}
+        onSend={() => { setText(""); setAttach(false); }}
+        onStop={hasStop ? () => setRunning(false) : undefined}
+        onAttach={() => setAttachmentOpen(true)}
+        onVoice={() => setVoiceActive((value) => !value)}
+        voiceActive={voiceActive}
+        onModelPress={() => { setModelOpen(true); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); }}
+        modelLabel={modelTriggerLabel}
+        modelStatus={selectedModel ? modelAvailabilityLevel(modelStatus?.models[selectedModel.id]) : "unknown"}
+        sending={sending}
+        running={running}
+        disabled={disabled}
+        hasAttachment={attach}
+      />
+      {attachmentOpen ? <AttachmentMenu anchorRef={composerRef} onClose={() => setAttachmentOpen(false)} onCamera={() => { setAttach(true); setAttachmentOpen(false); }} onPhotos={() => { setAttach(true); setAttachmentOpen(false); }} onFile={() => { setAttach(true); setAttachmentOpen(false); }} /> : null}
+      {modelOpen ? <ModelSelectorMenu anchorRef={composerRef} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={selectedModel} onClose={() => setModelOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelOpen(false); }} /> : null}
     </Screen>
   );
 }
