@@ -1,3 +1,4 @@
+import { translate } from "@/src/i18n/core";
 import { fromUint8Array } from "js-base64";
 import { requestRecordingPermissionsAsync, useAudioStream } from "expo-audio";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -21,10 +22,10 @@ function asText(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
-function voiceErrorMessage(error: unknown, fallback = "Voice input failed") {
+function voiceErrorMessage(error: unknown, fallback = translate("voice.failed")) {
   const message = error instanceof Error ? error.message.trim() : "";
   if (/AudioStream|shared object|already released|cannot be cast/i.test(message)) {
-    return "Voice input became unavailable. Try again.";
+    return translate("voice.becameUnavailable");
   }
   return message || fallback;
 }
@@ -80,7 +81,7 @@ export function useNativeVoiceInput({ getAccessToken, onFinal }: VoiceCallbacks)
       try {
         stream.stop();
       } catch (caught) {
-        if (mountedRef.current) setError(voiceErrorMessage(caught, "Voice input stopped unexpectedly. Try again."));
+        if (mountedRef.current) setError(voiceErrorMessage(caught, translate("voice.stoppedUnexpectedly")));
       }
     },
     [stream],
@@ -111,10 +112,10 @@ export function useNativeVoiceInput({ getAccessToken, onFinal }: VoiceCallbacks)
 
     try {
       const permission = await requestRecordingPermissionsAsync();
-      if (!permission.granted) throw new Error("Microphone permission is required for voice input");
+      if (!permission.granted) throw new Error(translate("voice.micPermission"));
       const token = await getAccessToken();
       if (!isCurrent()) return;
-      if (!token) throw new Error("Sign in to use voice input");
+      if (!token) throw new Error(translate("voice.signIn"));
 
       const socket = new WebSocket(voiceUrl());
       socketRef.current = socket;
@@ -126,16 +127,16 @@ export function useNativeVoiceInput({ getAccessToken, onFinal }: VoiceCallbacks)
             resolve(message);
           } else if (message.type === "asr.error") {
             waitingRef.current = null;
-            reject(new Error(asText(message.payload?.message) || "Voice input failed"));
+            reject(new Error(asText(message.payload?.message) || translate("voice.failed")));
           }
         };
         socket.onerror = () => {
           waitingRef.current = null;
-          reject(new Error("Voice service unavailable"));
+          reject(new Error(translate("voice.serviceUnavailable")));
         };
         socket.onclose = () => {
           waitingRef.current = null;
-          reject(new Error("Voice connection closed"));
+          reject(new Error(translate("voice.connectionClosed")));
           if (isCurrent()) {
             stopStream();
             setIsRecording(false);
@@ -145,8 +146,8 @@ export function useNativeVoiceInput({ getAccessToken, onFinal }: VoiceCallbacks)
 
       await new Promise<void>((resolve, reject) => {
         socket.onopen = () => resolve();
-        socket.onerror = () => reject(new Error("Voice service unavailable"));
-        socket.onclose = () => reject(new Error("Voice connection closed"));
+        socket.onerror = () => reject(new Error(translate("voice.serviceUnavailable")));
+        socket.onclose = () => reject(new Error(translate("voice.connectionClosed")));
       });
       if (!isCurrent()) return;
 
@@ -156,7 +157,7 @@ export function useNativeVoiceInput({ getAccessToken, onFinal }: VoiceCallbacks)
         try {
           message = JSON.parse(String(event.data)) as VoiceMessage;
         } catch {
-          setError("Voice service returned invalid data");
+          setError(translate("voice.invalidData"));
           return;
         }
         if (waitingRef.current) {
@@ -176,7 +177,7 @@ export function useNativeVoiceInput({ getAccessToken, onFinal }: VoiceCallbacks)
           closeSocket();
         }
         if (message.type === "asr.error") {
-          setError(asText(message.payload?.message) || "Voice input failed");
+          setError(asText(message.payload?.message) || translate("voice.failed"));
           stopStream();
           setIsRecording(false);
           closeSocket();

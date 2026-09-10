@@ -1,3 +1,4 @@
+import { translate } from "@/src/i18n/core";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Application from "expo-application";
 import Constants from "expo-constants";
@@ -205,7 +206,7 @@ async function requestNativeRelease(): Promise<AppRelease | null> {
     });
     if (!response.ok) throw new Error(`Update check failed with HTTP ${response.status}`);
     const payload: unknown = await response.json();
-    if (!Array.isArray(payload)) throw new Error("Update response did not contain a release list");
+    if (!Array.isArray(payload)) throw new Error(translate("update.responseInvalid"));
     // Only a release with an APK for this device requires a new native build; JS-only releases ride OTA.
     let newest: AppRelease | null = null;
     for (const item of payload) {
@@ -280,9 +281,9 @@ export async function snoozeAppUpdate(version: string) {
 
 export async function openAndroidInstallPermissionSettings(): Promise<void> {
   if (Platform.OS !== "android" || Constants.executionEnvironment === "storeClient") {
-    throw new Error("Installation permission requires a standalone Android build.");
+    throw new Error(translate("update.permissionStandalone"));
   }
-  if (!Application.applicationId) throw new Error("The installed Android package identifier is unavailable.");
+  if (!Application.applicationId) throw new Error(translate("update.packageIdMissing"));
   const IntentLauncher = await import("expo-intent-launcher");
   await IntentLauncher.startActivityAsync("android.settings.MANAGE_UNKNOWN_APP_SOURCES", {
     data: `package:${Application.applicationId}`,
@@ -300,11 +301,11 @@ export async function downloadAndInstallAndroidUpdate(
   options: { signal: AbortSignal; onProgress: (progress: ApkUpdateProgress) => void },
 ): Promise<void> {
   if (Platform.OS !== "android" || Constants.executionEnvironment === "storeClient") {
-    throw new Error("APK installation requires a standalone Android build, not Expo Go.");
+    throw new Error(translate("update.installRequiresStandalone"));
   }
-  if (apkUpdateInProgress) throw new Error("An update is already in progress. Finish or cancel it first.");
+  if (apkUpdateInProgress) throw new Error(translate("update.inProgress"));
   if (!isNewerAppVersion(getInstalledAppVersion(), release.version)) {
-    throw new Error("This release is not newer than the installed app. Check for updates again.");
+    throw new Error(translate("update.notNewer"));
   }
   const asset = validateAndroidUpdateAsset(release);
   apkUpdateInProgress = true;
@@ -332,7 +333,7 @@ export async function downloadAndInstallAndroidUpdate(
       }
       if (options.signal.aborted) return;
       options.onProgress({ phase: "verifying" });
-      if (file.size !== asset.size) throw new Error("APK size verification failed. Retry the download.");
+      if (file.size !== asset.size) throw new Error(translate("update.sizeVerifyFailed"));
       // expo-crypto's Android binding only accepts a TypedArray; a bare ArrayBuffer fails to convert.
       const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, new Uint8Array(await file.arrayBuffer()));
       const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");

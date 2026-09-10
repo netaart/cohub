@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useApp } from "@/src/data/context";
+import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, DetailTopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
 import {
@@ -25,6 +26,7 @@ export default function FilesScreen() {
   const spaceId = firstParam(params.spaceId);
   const currentPath = normalizeSpacePath(firstParam(params.path));
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const { client, state } = useApp();
   const space = state.spaces.find((item) => item.id === spaceId);
   const [entries, setEntries] = useState<SpaceFsEntry[]>([]);
@@ -38,7 +40,7 @@ export default function FilesScreen() {
     if (!client || !spaceId) {
       setEntries([]);
       setLoading(false);
-      setError(spaceId ? "Connect to Cohub to browse Files." : "Space is unavailable.");
+      setError(spaceId ? t("files.connect") : t("files.spaceUnavailable"));
       return;
     }
 
@@ -48,11 +50,11 @@ export default function FilesScreen() {
       const result = await client.space(spaceId).files.list(currentPath || undefined);
       if (requestId === requestIdRef.current) setEntries(result.entries);
     } catch (caught) {
-      if (requestId === requestIdRef.current) setError(caught instanceof Error ? caught.message : "Unable to load Files");
+      if (requestId === requestIdRef.current) setError(caught instanceof Error ? caught.message : t("files.loadError"));
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [client, currentPath, spaceId]);
+  }, [client, currentPath, spaceId, t]);
 
   useEffect(() => {
     let active = true;
@@ -108,12 +110,12 @@ export default function FilesScreen() {
     dismissPath(parentSpacePath(currentPath));
   }, [currentPath, dismissPath]);
 
-  const title = currentPath ? spacePathName(currentPath) : "Files";
+  const title = currentPath ? spacePathName(currentPath) : t("files.title");
   const subtitle = space
     ? currentPath
       ? `${displaySpaceName(space)} / ${currentPath}`
       : displaySpaceName(space)
-    : "Space workspace";
+    : t("files.workspace");
 
   return (
     <Screen>
@@ -124,7 +126,7 @@ export default function FilesScreen() {
         actions={
           <IconButton
             name="refresh"
-            label="Refresh files"
+            label={t("files.refresh")}
             size={40}
             onPress={() => setRefreshToken((value) => value + 1)}
             disabled={loading}
@@ -157,16 +159,16 @@ export default function FilesScreen() {
             <View style={styles.emptyState}>
               <AppIcon name="folder-open" size={26} color={theme.colors.textMuted} />
               <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10 }]}>
-                {currentPath ? "This folder is empty." : "This workspace is empty."}
+                {currentPath ? t("files.emptyFolder") : t("files.emptyWorkspace")}
               </Text>
               {currentPath ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="Back to Files"
+                  accessibilityLabel={t("files.backToFiles")}
                   onPress={() => dismissPath("")}
                   style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, marginTop: 14 })}
                 >
-                  <Text style={[typography.bodyMedium, { color: theme.colors.accent }]}>Back to Files</Text>
+                  <Text style={[typography.bodyMedium, { color: theme.colors.accent }]}>{t("files.backToFiles")}</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -179,10 +181,11 @@ export default function FilesScreen() {
 
 function DirectoryParentBar({ parentPath, onPress }: { parentPath: string; onPress: () => void }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={parentPath ? `Back to ${parentPath}` : "Back to Files"}
+      accessibilityLabel={parentPath ? t("files.backTo", { name: parentPath }) : t("files.backToFiles")}
       onPress={onPress}
      
       style={({ pressed }) => [
@@ -192,7 +195,7 @@ function DirectoryParentBar({ parentPath, onPress }: { parentPath: string; onPre
     >
       <AppIcon name="arrow-left" size={16} color={theme.colors.textMuted} />
       <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textSecondary }]}>
-        {parentPath ? `Back to ${spacePathName(parentPath)}` : "Back to Files"}
+        {parentPath ? t("files.backTo", { name: spacePathName(parentPath) }) : t("files.backToFiles")}
       </Text>
     </Pressable>
   );
@@ -200,13 +203,14 @@ function DirectoryParentBar({ parentPath, onPress }: { parentPath: string; onPre
 
 function FilesError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   return (
     <View style={styles.errorState}>
       <AppIcon name="cloud-off" size={26} color={theme.colors.danger} />
       <Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 10 }]}>
         {message}
       </Text>
-      <PrimaryButton label="Retry" icon="refresh" onPress={onRetry} style={{ marginTop: 16 }} />
+      <PrimaryButton label={t("common.retry")} icon="refresh" onPress={onRetry} style={{ marginTop: 16 }} />
     </View>
   );
 }

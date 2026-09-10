@@ -21,6 +21,7 @@ import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
 import type { MessageRecord } from "@neta-art/cohub";
 import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage, withTurnSequences } from "@/src/data/session-history";
 import { useAppTheme, typography } from "@/src/theme";
+import { useTranslation } from "@/src/i18n";
 import { formatThinkingLevel, modelAvailabilityLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { useNativeVoiceInput } from "@/src/platform/native-voice-input";
 import { AppIcon, AttachmentChip, ComposerInput, ConnectionBanner, DetailTopBar, IconButton, PrimaryButton, Screen } from "@/src/ui";
@@ -55,6 +56,7 @@ export default function ChatScreen() {
 function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessionId: string; initialTurnSequence: number | null; initialTurnId: string | null }) {
   const router = useRouter();
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const { state, client, connectionState, refreshHome, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, forkSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadSessionReadSequence, saveSessionReadSequence } = useApp();
   const view = useSession(sessionId);
   const [input, setInput] = useState("");
@@ -167,7 +169,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
   const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
   const spaceId = view.space?.id ?? session?.spaceId ?? sessionSummary?.spaceId ?? "";
-  const spaceName = view.space ? displaySpaceName(view.space) : sessionSummary?.space?.name || "Space";
+  const spaceName = view.space ? displaySpaceName(view.space) : sessionSummary?.space?.name || t("space.fallbackName");
   const spaceSessions = useMemo(() => state.sessions.filter((item) => item.spaceId === spaceId), [spaceId, state.sessions]);
   const queuedFollowups = useMemo(() => queuedFollowupTurns(view.turns, view.stream?.turnId), [view.stream?.turnId, view.turns]);
   const queuedFollowupIds = useMemo(() => new Set(queuedFollowups.map((turn) => turn.id)), [queuedFollowups]);
@@ -233,7 +235,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   }
   const activeModel = modelOverride ? selectedModel : recordedModel;
   const activeStatus = activeModel ? modelAvailabilityLevel(modelStatus?.models[activeModel.id]) : "unknown";
-  const modelLabel = activeModel?.name || activeModel?.id || "Automatic";
+  const modelLabel = activeModel?.name || activeModel?.id || t("chat.model.automatic");
   const modelTriggerLabel = activeModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(activeModel.thinkingLevel)}` : modelLabel;
   const liveStream = shouldShowLiveStream(view.stream, messages);
   const threadPlaceholder = chatThreadPlaceholder({
@@ -326,7 +328,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       scrollToTurn(resolvedSequence);
       setTurnNavigatorOpen(false);
     } catch (error) {
-      setNotice({ title: "Turn unavailable", message: error instanceof Error ? error.message : "Unable to open this part of the Chat." });
+      setNotice({ title: t("chat.turnUnavailable.title"), message: error instanceof Error ? error.message : t("chat.turnUnavailable.body") });
     } finally {
       setLoadingSequence(null);
     }
@@ -370,10 +372,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         pendingScrollSequence.current = sequence;
         scrollToTurn(sequence);
       } catch (error) {
-        setNotice({ title: "Turn unavailable", message: error instanceof Error ? error.message : "Unable to open the requested part of the Chat." });
+        setNotice({ title: t("chat.turnUnavailable.title"), message: error instanceof Error ? error.message : t("chat.turnUnavailable.deepLinkBody") });
       }
     })();
-  }, [client, initialTurnId, initialTurnSequence, jumpToTurn, scrollToTurn, sessionId, spaceId, view.historyLoaded, view.turns]);
+  }, [client, initialTurnId, initialTurnSequence, jumpToTurn, scrollToTurn, sessionId, spaceId, t, view.historyLoaded, view.turns]);
 
   useEffect(() => {
     if (turnNavigatorOpen) void loadTurnIndex(sessionId, { force: true }).catch(() => undefined);
@@ -386,34 +388,34 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       const result = await DocumentPicker.getDocumentAsync({ type: "*/*", multiple: true, copyToCacheDirectory: true });
       if (result.canceled) return;
       appendAttachments(result.assets.map((asset) => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || "application/octet-stream", size: asset.size ?? 0 })));
-    } catch (error) { setNotice({ title: "Attachment unavailable", message: error instanceof Error ? error.message : "Unable to select a file." }); }
+    } catch (error) { setNotice({ title: t("chat.attachmentUnavailable.title"), message: error instanceof Error ? error.message : t("chat.attachmentUnavailable.body") }); }
   };
   const pickPhotos = async () => {
     setAttachmentMenuOpen(false);
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) { setNotice({ title: "Photo access is off", message: "Allow photo access in system settings to attach an image." }); return; }
+      if (!permission.granted) { setNotice({ title: t("chat.photoOff.title"), message: t("chat.photoOff.body") }); return; }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, quality: 0.88 });
       if (result.canceled) return;
       appendAttachments(result.assets.map((asset, index) => ({ uri: asset.uri, name: asset.fileName || `image-${index + 1}.jpg`, mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 })));
-    } catch (error) { setNotice({ title: "Photo picker unavailable", message: error instanceof Error ? error.message : "Unable to select a photo." }); }
+    } catch (error) { setNotice({ title: t("chat.photoPickerUnavailable.title"), message: error instanceof Error ? error.message : t("chat.photoPickerUnavailable.body") }); }
   };
   const takePhoto = async () => {
     setAttachmentMenuOpen(false);
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) { setNotice({ title: "Camera access is off", message: "Allow camera access in system settings to take a photo." }); return; }
+      if (!permission.granted) { setNotice({ title: t("chat.cameraOff.title"), message: t("chat.cameraOff.body") }); return; }
       const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.88 });
       if (result.canceled) return;
       const asset = result.assets[0];
       if (asset) appendAttachments([{ uri: asset.uri, name: asset.fileName || "camera-photo.jpg", mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }]);
-    } catch (error) { setNotice({ title: "Camera unavailable", message: error instanceof Error ? error.message : "Unable to take a photo." }); }
+    } catch (error) { setNotice({ title: t("chat.cameraUnavailable.title"), message: error instanceof Error ? error.message : t("chat.cameraUnavailable.body") }); }
   };
   const stopGeneration = async () => {
     if (stopping) return;
     setStopping(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try { await abortSession(sessionId); } catch (error) { setNotice({ title: "Unable to stop", message: error instanceof Error ? error.message : "The Agent could not be stopped." }); } finally { setStopping(false); }
+    try { await abortSession(sessionId); } catch (error) { setNotice({ title: t("chat.stopFailed.title"), message: error instanceof Error ? error.message : t("chat.stopFailed.body") }); } finally { setStopping(false); }
   };
   const runFollowupAction = async (turnId: string, action: "steer" | "cancel") => {
     if (!client || !spaceId || pendingFollowupAction !== null) return;
@@ -424,7 +426,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       else await cancelQueuedFollowup(client, spaceId, sessionId, turnId);
       await refreshSession(sessionId);
     } catch (error) {
-      setNotice({ title: action === "steer" ? "Unable to steer" : "Unable to cancel", message: error instanceof Error ? error.message : "Please try again." });
+      setNotice({ title: action === "steer" ? t("chat.steerFailed.title") : t("chat.cancelFailed.title"), message: error instanceof Error ? error.message : t("chat.followupFailed.body") });
       void refreshSession(sessionId).catch(() => undefined);
     } finally {
       setPendingFollowupAction(null);
@@ -432,9 +434,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   };
   const shareChat = async () => {
     setMoreOpen(false);
-    const title = session ? displaySessionTitle(session) : "Chat";
+    const title = session ? displaySessionTitle(session) : t("chat.title");
     if (!spaceId) {
-      setNotice({ title: "Unable to share Chat", message: "This Chat is not associated with a Space yet." });
+      setNotice({ title: t("chat.shareFailed.title"), message: t("chat.shareFailed.body") });
       return;
     }
     const url = `https://cohub.live/spaces/${encodeURIComponent(spaceId)}/sessions/${encodeURIComponent(sessionId)}`;
@@ -450,7 +452,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       .catch(() => setChatLabels([]));
   };
   const saveRename = async () => {
-    try { await renameSession(sessionId, renameValue); setRenameOpen(false); } catch (error) { setNotice({ title: "Rename failed", message: error instanceof Error ? error.message : "Unable to rename this Chat." }); }
+    try { await renameSession(sessionId, renameValue); setRenameOpen(false); } catch (error) { setNotice({ title: t("chat.renameFailed.title"), message: error instanceof Error ? error.message : t("chat.renameFailed.body") }); }
   };
   const handleScroll = useCallback((event: ChatScrollEvent) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
@@ -550,9 +552,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 
   const handleCopyMessage = useCallback((text: string) => {
     void copyMessageText(text).catch((error) => {
-      setNotice({ title: "Copy failed", message: error instanceof Error ? error.message : "Unable to copy this message." });
+      setNotice({ title: t("chat.copyFailed.title"), message: error instanceof Error ? error.message : t("chat.copyFailed.body") });
     });
-  }, []);
+  }, [t]);
 
   const forkMessage = useCallback(async (message: MessageRecord) => {
     const turnId = message.meta?.turnId;
@@ -560,16 +562,16 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     setForkingTurnId(turnId);
     try {
       const turn = view.turns.find((item) => item.id === turnId);
-      if (!turn) throw new Error("This turn is no longer available. Reload the Chat and try again.");
+      if (!turn) throw new Error(t("chat.forkUnavailable"));
       const response = await forkSession(spaceId, sessionId, turn);
       void refreshHome();
       router.push({ pathname: "/chat/[sessionId]", params: { sessionId: response.id } });
     } catch (error) {
-      setNotice({ title: "Fork failed", message: error instanceof Error ? error.message : "Unable to fork this Chat." });
+      setNotice({ title: t("chat.forkFailed.title"), message: error instanceof Error ? error.message : t("chat.forkFailed.body") });
     } finally {
       setForkingTurnId(null);
     }
-  }, [forkSession, forkingTurnId, refreshHome, router, sessionId, spaceId, view.turns]);
+  }, [forkSession, forkingTurnId, refreshHome, router, sessionId, spaceId, t, view.turns]);
 
   const submit = async () => {
     if ((!input.trim() && attachments.length === 0) || view.sending) return;
@@ -587,48 +589,48 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     } catch { setInput(text); setAttachments(files); }
   };
 
-  if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen><DetailTopBar title="Chat" onBack={() => router.back()} /><ChatThreadPlaceholder kind="opening" /></Screen>;
+  if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen><DetailTopBar title={t("chat.title")} onBack={() => router.back()} /><ChatThreadPlaceholder kind="opening" /></Screen>;
   return <Screen keyboard>
     <SpacePanels key={spaceId || sessionId} spaceId={spaceId} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => { if (spaceId) router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId } }); }} onOpenFile={(path) => { if (spaceId) router.push({ pathname: "/space/[spaceId]/file", params: { spaceId, path } }); }} onOpenFilesPage={() => { if (spaceId) router.push({ pathname: "/space/[spaceId]/files", params: { spaceId } }); }}>
-      <View style={{ flex: 1 }}>
-        <DetailTopBar title={session ? displaySessionTitle(session) : "Chat"} subtitle={spaceName} onBack={() => router.back()} actions={<><IconButton name="list-tree" label="Open conversation turns" size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><IconButton name="more" label="More actions" size={38} onPress={() => setMoreOpen(true)} /></>} />
+      <View style={{ flex: 1, minHeight: 0 }}>
+        <DetailTopBar title={session ? displaySessionTitle(session) : t("chat.title")} subtitle={spaceName} onBack={() => router.back()} actions={<><IconButton name="list-tree" label={t("chat.turns.open")} size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><IconButton name="more" label={t("chat.more")} size={38} onPress={() => setMoreOpen(true)} /></>} />
         <ConnectionBanner state={connectionState} />
-        {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>Retry</Text></Pressable> : null}
-        <View style={{ flex: 1 }}>
-        <FlatList ref={listRef} inverted initialNumToRender={16} maxToRenderPerBatch={8} updateCellsBatchingPeriod={32} windowSize={11} onLayout={(event) => setListWidth(event.nativeEvent.layout.width)} data={timeline} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const chronologicalIndex = reverseListIndex(index, messages.length); const sequence = turnSequenceForMessage(item); const older = timeline[index + 1]; const olderSequence = older ? turnSequenceForMessage(older) : null; const showTurnMarker = sequence !== null && sequence !== olderSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); const messageTurn = typeof item.meta?.turnId === "string" ? view.turns.find((entry) => entry.id === item.meta?.turnId) : null; return <View onLayout={(event) => { if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} />{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence).map((entry) => entry.id === view.stream?.turnId ? <StreamingTurnProcess key={entry.id} messages={view.stream.intermediateMessages} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: timeline.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel="Load newer turns" disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load newer turns</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>} ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel="Load earlier turns" disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>Load earlier turns</Text>}</Pressable> : null} />
+        {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>{t("common.retry")}</Text></Pressable> : null}
+        <View style={{ flex: 1, minHeight: 0 }}>
+        <FlatList ref={listRef} inverted initialNumToRender={16} maxToRenderPerBatch={8} updateCellsBatchingPeriod={32} windowSize={11} onLayout={(event) => setListWidth(event.nativeEvent.layout.width)} data={timeline} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const chronologicalIndex = reverseListIndex(index, messages.length); const sequence = turnSequenceForMessage(item); const older = timeline[index + 1]; const olderSequence = older ? turnSequenceForMessage(older) : null; const showTurnMarker = sequence !== null && sequence !== olderSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); const messageTurn = typeof item.meta?.turnId === "string" ? view.turns.find((entry) => entry.id === item.meta?.turnId) : null; return <View onLayout={(event) => { if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} />{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence).map((entry) => entry.id === view.stream?.turnId ? <StreamingTurnProcess key={entry.id} messages={view.stream.intermediateMessages} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: timeline.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>} ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null} />
         {threadPlaceholder ? <View pointerEvents="none" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}><ChatThreadPlaceholder kind={threadPlaceholder} /></View> : null}
-        {!followingTail ? <Pressable accessibilityRole="button" accessibilityLabel="Jump to latest" onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} style={({ pressed }) => ({ position: "absolute", right: 16, bottom: 12, zIndex: 4, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, borderWidth: 1, borderColor: theme.colors.border, shadowColor: theme.colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5, elevation: 4 })}><AppIcon name="arrow-down" size={18} color={theme.colors.accent} /></Pressable> : null}
+        {!followingTail ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.jumpLatest")} onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} style={({ pressed }) => ({ position: "absolute", right: 16, bottom: 12, zIndex: 4, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, borderWidth: 1, borderColor: theme.colors.border, shadowColor: theme.colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5, elevation: 4 })}><AppIcon name="arrow-down" size={18} color={theme.colors.accent} /></Pressable> : null}
         </View>
         {queuedFollowups.length > 0 ? <View style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, backgroundColor: theme.colors.background, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6, gap: 6 }}>
-          <Text style={[typography.micro, { color: theme.colors.textMuted }]}>Follow-ups · {queuedFollowups.length} queued</Text>
+          <Text style={[typography.micro, { color: theme.colors.textMuted }]}>{t("chat.followups", { count: queuedFollowups.length })}</Text>
           {queuedFollowups.map((turn) => {
             const pending = pendingFollowupAction === turn.id;
             const preview = followupPreviewText(turn);
             return <View key={turn.id} style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 10, paddingLeft: 10, paddingRight: 6, paddingVertical: 5, backgroundColor: theme.colors.surface }}>
               <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>{preview}</Text>
               {pending ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <>
-                <Pressable accessibilityRole="button" accessibilityLabel={`Steer now: ${preview}`} onPress={() => void runFollowupAction(turn.id, "steer")} hitSlop={6} style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.accentSoft })}><Text style={[typography.caption, { color: theme.colors.accent }]}>Steer now</Text></Pressable>
-                <Pressable accessibilityRole="button" accessibilityLabel={`Cancel follow-up: ${preview}`} onPress={() => void runFollowupAction(turn.id, "cancel")} hitSlop={6} style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}><Text style={[typography.caption, { color: theme.colors.textMuted }]}>Cancel</Text></Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel={t("chat.steerAccessibility", { preview })} onPress={() => void runFollowupAction(turn.id, "steer")} hitSlop={6} style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.accentSoft })}><Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.steerNow")}</Text></Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel={t("chat.cancelFollowup", { preview })} onPress={() => void runFollowupAction(turn.id, "cancel")} hitSlop={6} style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}><Text style={[typography.caption, { color: theme.colors.textMuted }]}>{t("common.cancel")}</Text></Pressable>
               </>}
             </View>;
           })}
         </View> : null}
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
-        {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
-        <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => setAttachmentMenuOpen(true)} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? "Agent is working…" : "Message the Agent"} />
-        <AdaptiveSheet visible={moreOpen} title="Chat actions" onClose={() => setMoreOpen(false)} scrollable={false} testID="chat-actions-sheet">
-          <SheetAction icon="share" title="Share" detail="Share a link to this Chat" onPress={() => void shareChat()} />
-          <SheetAction icon="messages" title="Open Chats" detail="Browse conversations in this Space" disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("chat"); }} />
-          <SheetAction icon="folder-open" title="Open Files" detail="Browse files in this Space" disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("files"); }} />
-          <SheetAction icon="tag" title="Manage labels" detail="Organize this Chat" disabled={!client || !spaceId} onPress={openLabelSheet} />
-          <SheetAction icon="square-pen" title="Rename Chat" detail="Change the Chat title" onPress={openRename} />
+        {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
+        <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => setAttachmentMenuOpen(true)} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? t("ui.composer.working") : t("ui.composer.placeholder")} />
+        <AdaptiveSheet visible={moreOpen} title={t("chat.actions.title")} onClose={() => setMoreOpen(false)} scrollable={false} testID="chat-actions-sheet">
+          <SheetAction icon="share" title={t("chat.actions.share")} detail={t("chat.actions.shareDetail")} onPress={() => void shareChat()} />
+          <SheetAction icon="messages" title={t("chat.actions.openChats")} detail={t("chat.actions.openChatsDetail")} disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("chat"); }} />
+          <SheetAction icon="folder-open" title={t("chat.actions.openFiles")} detail={t("chat.actions.openFilesDetail")} disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("files"); }} />
+          <SheetAction icon="tag" title={t("chat.actions.labels")} detail={t("chat.actions.labelsDetail")} disabled={!client || !spaceId} onPress={openLabelSheet} />
+          <SheetAction icon="square-pen" title={t("chat.actions.rename")} detail={t("chat.actions.renameDetail")} onPress={openRename} />
         </AdaptiveSheet>
         {labelSheetOpen && client && session && spaceId ? <SessionLabelSheet client={client} spaceId={spaceId} session={session} labels={chatLabels} labelsError={null} onLabelsReload={() => { if (client && spaceId) void fetchSessionLabels(client, spaceId).then((tree) => setChatLabels(toUserSessionLabels(tree))).catch(() => undefined); }} onClose={() => setLabelSheetOpen(false)} onChanged={() => undefined} /> : null}
-        <AdaptiveSheet visible={attachmentMenuOpen} title="Add to Chat" subtitle="Choose what to include with your next message." onClose={() => setAttachmentMenuOpen(false)} scrollable={false} testID="chat-attachment-sheet"><SheetAction icon="images" title="Photo library" detail="Choose one or more images" onPress={() => void pickPhotos()} /><SheetAction icon="camera" title="Take a photo" detail="Use the device camera" onPress={() => void takePhoto()} /><SheetAction icon="paperclip" title="Choose a file" detail="Attach a document or archive" onPress={() => void pickAttachments()} /></AdaptiveSheet>
+        <AdaptiveSheet visible={attachmentMenuOpen} title={t("chat.attachment.title")} subtitle={t("chat.attachment.subtitle")} onClose={() => setAttachmentMenuOpen(false)} scrollable={false} testID="chat-attachment-sheet"><SheetAction icon="images" title={t("chat.attachment.photos")} detail={t("chat.attachment.photosDetail")} onPress={() => void pickPhotos()} /><SheetAction icon="camera" title={t("chat.attachment.camera")} detail={t("chat.attachment.cameraDetail")} onPress={() => void takePhoto()} /><SheetAction icon="paperclip" title={t("chat.attachment.file")} detail={t("chat.attachment.fileDetail")} onPress={() => void pickAttachments()} /></AdaptiveSheet>
         <TurnNavigatorSheet visible={turnNavigatorOpen} turns={view.turnIndex} currentSequence={currentTurnSequence} loading={view.turnIndexLoading} loadingSequence={loadingSequence} onClose={() => setTurnNavigatorOpen(false)} onJump={(sequence) => handleTurnJump(sequence)} onRetry={() => void loadTurnIndex(sessionId, { force: true }).catch(() => undefined)} />
         <ModelSelectorSheet key={modelSelectorOpen ? "chat-model-open" : "chat-model-closed"} visible={modelSelectorOpen} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={modelOverride ? selectedModel : recordedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelOverride(true); setModelSelectorOpen(false); }} />
-        <AdaptiveSheet visible={notice !== null} title={notice?.title ?? "Notice"} onClose={() => setNotice(null)} scrollable={false} footer={<View style={{ alignItems: "flex-end" }}><PrimaryButton label="Done" onPress={() => setNotice(null)} style={{ minHeight: 44, paddingHorizontal: 18 }} /></View>} testID="chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
-        <Modal visible={renameOpen} transparent animationType="fade" onRequestClose={() => setRenameOpen(false)}><View style={{ flex: 1, justifyContent: "center", padding: 22, backgroundColor: "rgba(0,0,0,0.6)" }}><View style={{ borderRadius: 18, padding: 18, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}><Text style={[typography.heading, { color: theme.colors.text }]}>Rename Chat</Text><TextInput autoFocus value={renameValue} onChangeText={setRenameValue} maxLength={80} placeholder="Chat name" placeholderTextColor={theme.colors.textFaint} style={[typography.body, { color: theme.colors.text, minHeight: 48, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, paddingHorizontal: 12, marginTop: 14 }]} /><View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 16 }}><Pressable onPress={() => setRenameOpen(false)} style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: "center" }}><Text style={[typography.bodyMedium, { color: theme.colors.textMuted }]}>Cancel</Text></Pressable><PrimaryButton label="Save" onPress={() => void saveRename()} style={{ minHeight: 44, paddingHorizontal: 16 }} /></View></View></View></Modal>
+        <AdaptiveSheet visible={notice !== null} title={notice?.title ?? t("common.notice")} onClose={() => setNotice(null)} scrollable={false} footer={<View style={{ alignItems: "flex-end" }}><PrimaryButton label={t("common.done")} onPress={() => setNotice(null)} style={{ minHeight: 44, paddingHorizontal: 18 }} /></View>} testID="chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
+        <Modal visible={renameOpen} transparent animationType="fade" onRequestClose={() => setRenameOpen(false)}><View style={{ flex: 1, justifyContent: "center", padding: 22, backgroundColor: "rgba(0,0,0,0.6)" }}><View style={{ borderRadius: 18, padding: 18, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}><Text style={[typography.heading, { color: theme.colors.text }]}>{t("chat.rename.title")}</Text><TextInput autoFocus value={renameValue} onChangeText={setRenameValue} maxLength={80} placeholder={t("chat.rename.placeholder")} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { color: theme.colors.text, minHeight: 48, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, paddingHorizontal: 12, marginTop: 14 }]} /><View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 16 }}><Pressable onPress={() => setRenameOpen(false)} style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: "center" }}><Text style={[typography.bodyMedium, { color: theme.colors.textMuted }]}>{t("common.cancel")}</Text></Pressable><PrimaryButton label={t("common.save")} onPress={() => void saveRename()} style={{ minHeight: 44, paddingHorizontal: 16 }} /></View></View></View></Modal>
       </View>
     </SpacePanels>
   </Screen>;
@@ -636,11 +638,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 
 function ChatThreadPlaceholder({ kind }: { kind: "opening" | "empty" }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   if (kind === "opening") {
     return (
-      <View accessible accessibilityLabel="Opening Chat" style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 28 }}>
+      <View accessible accessibilityLabel={t("chat.opening")} style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 28 }}>
         <ActivityIndicator size="small" color={theme.colors.accent} />
-        <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 14 }]}>Opening Chat…</Text>
+        <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 14 }]}>{t("chat.placeholder.opening")}</Text>
       </View>
     );
   }
@@ -649,8 +652,8 @@ function ChatThreadPlaceholder({ kind }: { kind: "opening" | "empty" }) {
       <View style={{ width: 52, height: 52, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft }}>
         <AppIcon name="sparkles" size={23} color={theme.colors.accent} />
       </View>
-      <Text style={[typography.heading, { color: theme.colors.text, marginTop: 14, textAlign: "center" }]}>A fresh Space for thinking</Text>
-      <Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 6, maxWidth: 290 }]}>Send a prompt to start working with the Agent.</Text>
+      <Text style={[typography.heading, { color: theme.colors.text, marginTop: 14, textAlign: "center" }]}>{t("chat.placeholder.empty.title")}</Text>
+      <Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 6, maxWidth: 290 }]}>{t("chat.placeholder.empty.body")}</Text>
     </View>
   );
 }
@@ -664,6 +667,7 @@ function TurnMarker({ sequence, status }: { sequence: number; status?: string })
 function DraftChatContent({ spaceId }: { spaceId: string }) {
   const router = useRouter();
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const { state, client, connectionState, sendNewMessage, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError } = useApp();
   const space = state.spaces.find((item) => item.id === spaceId) ?? null;
   const [input, setInput] = useState("");
@@ -676,9 +680,9 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
   const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
   const appendAttachments = (next: AttachmentDraft[]) => setAttachments((current) => [...current, ...next].slice(0, 6));
-  const pickAttachments = async () => { setAttachmentMenuOpen(false); try { const result = await DocumentPicker.getDocumentAsync({ type: "*/*", multiple: true, copyToCacheDirectory: true }); if (result.canceled) return; appendAttachments(result.assets.map((asset) => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || "application/octet-stream", size: asset.size ?? 0 }))); } catch (error) { setNotice({ title: "Attachment unavailable", message: error instanceof Error ? error.message : "Unable to select a file." }); } };
-  const pickPhotos = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) { setNotice({ title: "Photo access is off", message: "Allow photo access in system settings to attach an image." }); return; } const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, quality: 0.88 }); if (result.canceled) return; appendAttachments(result.assets.map((asset, index) => ({ uri: asset.uri, name: asset.fileName || `image-${index + 1}.jpg`, mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }))); } catch (error) { setNotice({ title: "Photo picker unavailable", message: error instanceof Error ? error.message : "Unable to select a photo." }); } };
-  const takePhoto = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestCameraPermissionsAsync(); if (!permission.granted) { setNotice({ title: "Camera access is off", message: "Allow camera access in system settings to take a photo." }); return; } const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.88 }); if (result.canceled) return; const asset = result.assets[0]; if (asset) appendAttachments([{ uri: asset.uri, name: asset.fileName || "camera-photo.jpg", mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }]); } catch (error) { setNotice({ title: "Camera unavailable", message: error instanceof Error ? error.message : "Unable to take a photo." }); } };
+  const pickAttachments = async () => { setAttachmentMenuOpen(false); try { const result = await DocumentPicker.getDocumentAsync({ type: "*/*", multiple: true, copyToCacheDirectory: true }); if (result.canceled) return; appendAttachments(result.assets.map((asset) => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || "application/octet-stream", size: asset.size ?? 0 }))); } catch (error) { setNotice({ title: t("chat.attachmentUnavailable.title"), message: error instanceof Error ? error.message : t("chat.attachmentUnavailable.body") }); } };
+  const pickPhotos = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) { setNotice({ title: t("chat.photoOff.title"), message: t("chat.photoOff.body") }); return; } const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, quality: 0.88 }); if (result.canceled) return; appendAttachments(result.assets.map((asset, index) => ({ uri: asset.uri, name: asset.fileName || `image-${index + 1}.jpg`, mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }))); } catch (error) { setNotice({ title: t("chat.photoPickerUnavailable.title"), message: error instanceof Error ? error.message : t("chat.photoPickerUnavailable.body") }); } };
+  const takePhoto = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestCameraPermissionsAsync(); if (!permission.granted) { setNotice({ title: t("chat.cameraOff.title"), message: t("chat.cameraOff.body") }); return; } const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.88 }); if (result.canceled) return; const asset = result.assets[0]; if (asset) appendAttachments([{ uri: asset.uri, name: asset.fileName || "camera-photo.jpg", mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }]); } catch (error) { setNotice({ title: t("chat.cameraUnavailable.title"), message: error instanceof Error ? error.message : t("chat.cameraUnavailable.body") }); } };
   const submit = async () => {
     if (!space || sending || (!input.trim() && attachments.length === 0)) return;
     const text = input;
@@ -686,28 +690,28 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
     setInput("");
     setAttachments([]);
     setSending(true);
-    try { const session = await sendNewMessage(space.id, text, files, { model: selectedModel }); router.replace({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } }); } catch (error) { setInput(text); setAttachments(files); setNotice({ title: "Chat could not start", message: error instanceof Error ? error.message : "Unable to start this Chat." }); } finally { setSending(false); }
+    try { const session = await sendNewMessage(space.id, text, files, { model: selectedModel }); router.replace({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } }); } catch (error) { setInput(text); setAttachments(files); setNotice({ title: t("chat.startFailed.title"), message: error instanceof Error ? error.message : t("chat.startFailed.body") }); } finally { setSending(false); }
   };
-  if (!space) return <Screen><DetailTopBar title="Space unavailable" onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>This Space is no longer available.</Text></View></Screen>;
+  if (!space) return <Screen><DetailTopBar title={t("chat.spaceUnavailable")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("chat.spaceUnavailable.body")}</Text></View></Screen>;
   const spaceName = displaySpaceName(space);
   const spaceSessions = state.sessions.filter((item) => item.spaceId === space.id);
-  const modelLabel = selectedModel?.name || selectedModel?.id || "Automatic";
+  const modelLabel = selectedModel?.name || selectedModel?.id || t("chat.model.automatic");
   const modelTriggerLabel = selectedModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(selectedModel.thinkingLevel)}` : modelLabel;
   const selectedStatus = selectedModel ? modelAvailabilityLevel(modelStatus?.models[selectedModel.id]) : "unknown";
   return <Screen keyboard>
     <SpacePanels key={space.id} spaceId={space.id} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} onOpenFile={(path) => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: space.id, path } })} onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}>
-      <View style={{ flex: 1 }}>
-        <DetailTopBar title={spaceName} subtitle="Start a conversation" onBack={() => router.back()} actions={<><IconButton name="messages" label="Open Chats" size={38} onPress={() => setActivePanel("chat")} /><IconButton name="folder-open" label="Open Files" size={38} onPress={() => setActivePanel("files")} /></>} />
+      <View style={{ flex: 1, minHeight: 0 }}>
+        <DetailTopBar title={spaceName} subtitle={t("chat.draft.subtitle")} onBack={() => router.back()} actions={<><IconButton name="messages" label={t("chat.actions.openChats")} size={38} onPress={() => setActivePanel("chat")} /><IconButton name="folder-open" label={t("chat.actions.openFiles")} size={38} onPress={() => setActivePanel("files")} /></>} />
         <ConnectionBanner state={connectionState} />
-        <View style={{ flex: 1 }}>
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingBottom: 18 }}><View style={{ width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accentBorder }}><AppIcon name="sparkles" size={26} color={theme.colors.accent} /></View><Text style={[typography.title, { color: theme.colors.text, marginTop: 15, textAlign: "center" }]}>What are you working on?</Text><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 7, textAlign: "center", maxWidth: 320 }]}>Your first message will become the conversation title automatically.</Text></View>
+        <View style={{ flex: 1, minHeight: 0 }}>
+          <View style={{ flex: 1, minHeight: 0, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingBottom: 18 }}><View style={{ width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accentBorder }}><AppIcon name="sparkles" size={26} color={theme.colors.accent} /></View><Text style={[typography.title, { color: theme.colors.text, marginTop: 15, textAlign: "center" }]}>{t("chat.draft.title")}</Text><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 7, textAlign: "center", maxWidth: 320 }]}>{t("chat.draft.body")}</Text></View>
           {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
-          {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : `Listening · ${voice.partial}`}</Text></View> : null}
-          <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onAttach={() => setAttachmentMenuOpen(true)} sending={sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? "Starting Chat…" : "Message the Agent"} />
+          {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
+          <ComposerInput value={input} onChangeText={setInput} onSend={() => void submit()} onAttach={() => setAttachmentMenuOpen(true)} sending={sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? t("chat.draft.starting") : t("ui.composer.placeholder")} />
         </View>
         <ModelSelectorSheet key={modelSelectorOpen ? "draft-model-open" : "draft-model-closed"} visible={modelSelectorOpen} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={selectedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelSelectorOpen(false); }} />
-        <AdaptiveSheet visible={attachmentMenuOpen} title="Add to Chat" subtitle="Choose what to include with your first message." onClose={() => setAttachmentMenuOpen(false)} scrollable={false} testID="new-chat-attachment-sheet"><SheetAction icon="images" title="Photo library" detail="Choose one or more images" onPress={() => void pickPhotos()} /><SheetAction icon="camera" title="Take a photo" detail="Use the device camera" onPress={() => void takePhoto()} /><SheetAction icon="paperclip" title="Choose a file" detail="Attach a document or archive" onPress={() => void pickAttachments()} /></AdaptiveSheet>
-        <AdaptiveSheet visible={notice !== null} title={notice?.title ?? "Notice"} onClose={() => setNotice(null)} scrollable={false} footer={<View style={{ alignItems: "flex-end" }}><PrimaryButton label="Done" onPress={() => setNotice(null)} style={{ minHeight: 44, paddingHorizontal: 18 }} /></View>} testID="new-chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
+        <AdaptiveSheet visible={attachmentMenuOpen} title={t("chat.attachment.title")} subtitle={t("chat.attachment.firstSubtitle")} onClose={() => setAttachmentMenuOpen(false)} scrollable={false} testID="new-chat-attachment-sheet"><SheetAction icon="images" title={t("chat.attachment.photos")} detail={t("chat.attachment.photosDetail")} onPress={() => void pickPhotos()} /><SheetAction icon="camera" title={t("chat.attachment.camera")} detail={t("chat.attachment.cameraDetail")} onPress={() => void takePhoto()} /><SheetAction icon="paperclip" title={t("chat.attachment.file")} detail={t("chat.attachment.fileDetail")} onPress={() => void pickAttachments()} /></AdaptiveSheet>
+        <AdaptiveSheet visible={notice !== null} title={notice?.title ?? t("common.notice")} onClose={() => setNotice(null)} scrollable={false} footer={<View style={{ alignItems: "flex-end" }}><PrimaryButton label={t("common.done")} onPress={() => setNotice(null)} style={{ minHeight: 44, paddingHorizontal: 18 }} /></View>} testID="new-chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
       </View>
     </SpacePanels>
   </Screen>;
@@ -716,5 +720,6 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
 function MissingChat() {
   const router = useRouter();
   const theme = useAppTheme();
-  return <Screen><DetailTopBar title="Chat" onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={[typography.body, { color: theme.colors.textMuted }]}>This Chat could not be found.</Text></View></Screen>;
+  const { t } = useTranslation();
+  return <Screen><DetailTopBar title={t("chat.title")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={[typography.body, { color: theme.colors.textMuted }]}>{t("chat.missing")}</Text></View></Screen>;
 }

@@ -1,3 +1,4 @@
+import { translate } from "@/src/i18n/core";
 import { isRunningInExpoGo } from "expo";
 import * as Device from "expo-device";
 import { Platform } from "react-native";
@@ -106,12 +107,12 @@ async function readErrorMessage(response: Response) {
 }
 
 export async function registerForPushNotifications(options: PushRegistrationOptions): Promise<PushRegistrationResult> {
-  if (isRunningInExpoGo()) return unavailable("expo-go", "Expo Go cannot issue remote push tokens on Android. Install a formal Cohub build.");
-  if (!Device.isDevice) return unavailable("simulator", "Push notifications require a physical device.");
-  if (!options.installationId?.trim()) return unavailable("missing-installation", "The device installation identity is not ready. Restart Cohub and try again.");
+  if (isRunningInExpoGo()) return unavailable("expo-go", translate("notifications.expoGo"));
+  if (!Device.isDevice) return unavailable("simulator", translate("notifications.simulator"));
+  if (!options.installationId?.trim()) return unavailable("missing-installation", translate("notifications.missingInstallation"));
 
   const Notifications = await loadNotifications();
-  if (!Notifications) return unavailable("module-unavailable", "The native notification module is not available in this build.");
+  if (!Notifications) return unavailable("module-unavailable", translate("notifications.moduleUnavailable"));
 
   const current = await Notifications.getPermissionsAsync();
   let status = current.status;
@@ -119,7 +120,7 @@ export async function registerForPushNotifications(options: PushRegistrationOpti
     const requested = await Notifications.requestPermissionsAsync();
     status = requested.status;
   }
-  if (status !== "granted") return unavailable("permission-denied", "Notification permission is denied. Enable notifications for Cohub in system settings.");
+  if (status !== "granted") return unavailable("permission-denied", translate("notifications.permissionDenied"));
 
   let token: string;
   try {
@@ -130,20 +131,20 @@ export async function registerForPushNotifications(options: PushRegistrationOpti
     return unavailable(
       "native-token-unavailable",
       Platform.OS === "android"
-        ? "Android push needs Firebase configuration in the installed build (google-services.json). Rebuild Cohub after adding it."
-        : "APNs could not issue a device token for this build. Check the signing and notification entitlements.",
+        ? translate("notifications.androidFirebase")
+        : translate("notifications.apnsToken"),
     );
   }
-  if (!token) return unavailable("native-token-unavailable", "The operating system returned an empty push token.");
+  if (!token) return unavailable("native-token-unavailable", translate("notifications.emptyToken"));
 
   let accessToken: string | null;
   try {
     accessToken = await options.getAccessToken();
   } catch (error) {
     console.warn("[mobile-notifications] access token unavailable", error);
-    return unavailable("missing-auth", "Your Cohub sign-in token is unavailable. Sign in again and retry.");
+    return unavailable("missing-auth", translate("notifications.missingAuth"));
   }
-  if (!accessToken) return unavailable("missing-auth", "Your Cohub sign-in token is unavailable. Sign in again and retry.");
+  if (!accessToken) return unavailable("missing-auth", translate("notifications.missingAuth"));
 
   try {
     const response = await fetchWithTimeout(`${config.apiOrigin}/api/me/devices`, {
@@ -163,18 +164,18 @@ export async function registerForPushNotifications(options: PushRegistrationOpti
     });
     if (!response.ok) {
       const detail = await readErrorMessage(response);
-      if (response.status === 404) return unavailable("server-unavailable", "Cohub API does not have mobile device registration enabled yet.");
+      if (response.status === 404) return unavailable("server-unavailable", translate("notifications.serverUnavailable"));
       return unavailable("server-unavailable", detail ? `Cohub could not register this device (${response.status}): ${detail}` : `Cohub could not register this device (HTTP ${response.status}).`);
     }
   } catch (error) {
-    return unavailable("server-unavailable", error instanceof Error ? `Cohub device registration failed: ${error.message}` : "Cohub device registration failed.");
+    return unavailable("server-unavailable", error instanceof Error ? translate("notifications.registrationFailedDetail", { error: error.message }) : translate("notifications.registrationFailed"));
   }
 
   return {
     status: "enabled",
     token,
     platform: Platform.OS === "ios" ? "ios" : "android",
-    message: "This device is registered for Agent completion notifications.",
+    message: translate("notifications.registered"),
   };
 }
 

@@ -27,6 +27,7 @@ import {
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { useApp } from "@/src/data/context";
+import { useTranslation, type TranslationKey } from "@/src/i18n";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import {
 	registerForPushNotifications,
@@ -67,16 +68,16 @@ type SettingsScreenProps = {
 
 const sections: {
 	id: SettingsSection;
-	label: string;
+	labelKey: TranslationKey;
 	icon: React.ComponentProps<typeof AppIcon>["name"];
 }[] = [
-	{ id: "profile", label: "Profile", icon: "user" },
-	{ id: "activity", label: "Activity", icon: "activity" },
-	{ id: "notifications", label: "Notifications", icon: "bell" },
-	{ id: "rules", label: "Rules", icon: "file-text" },
-	{ id: "channels", label: "Channels", icon: "messages" },
-	{ id: "billing", label: "Billing", icon: "database" },
-	{ id: "referrals", label: "Referrals", icon: "share" },
+	{ id: "profile", labelKey: "settings.section.profile", icon: "user" },
+	{ id: "activity", labelKey: "settings.section.activity", icon: "activity" },
+	{ id: "notifications", labelKey: "settings.section.notifications", icon: "bell" },
+	{ id: "rules", labelKey: "settings.section.rules", icon: "file-text" },
+	{ id: "channels", labelKey: "settings.section.channels", icon: "messages" },
+	{ id: "billing", labelKey: "settings.section.billing", icon: "database" },
+	{ id: "referrals", labelKey: "settings.section.referrals", icon: "share" },
 ];
 
 export function SettingsScreen({
@@ -84,6 +85,7 @@ export function SettingsScreen({
 }: SettingsScreenProps) {
 	const router = useRouter();
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const { client, installationId, clearCache, getAccessToken } = useApp();
 	const [section, setSection] = useState<SettingsSection>(initialSection);
 	const [notice, setNotice] = useState<{
@@ -106,19 +108,19 @@ export function SettingsScreen({
 				await clearCache();
 			} catch (error) {
 				setNotice({
-					title: "Local cache cleanup incomplete",
+					title: t("settings.signOut.cacheIncomplete.title"),
 					message:
 						error instanceof Error
-							? `${error.message} Sign out will continue.`
-							: "Local cache could not be cleared. Sign out will continue.",
+							? t("settings.signOut.cacheIncomplete.body", { error: error.message })
+							: t("settings.signOut.cacheIncomplete.fallback"),
 				});
 			}
 			await signOut();
 			setSignOutOpen(false);
 		} catch (error) {
 			setNotice({
-				title: "Sign out failed",
-				message: error instanceof Error ? error.message : "Unable to sign out.",
+				title: t("settings.signOut.failed.title"),
+				message: error instanceof Error ? error.message : t("settings.signOut.failed.body"),
 			});
 		} finally {
 			setSigningOut(false);
@@ -127,11 +129,11 @@ export function SettingsScreen({
 
 	return (
 		<Screen>
-			<DetailTopBar
-				title="Settings"
-				subtitle="Account, app, and workspace preferences"
-				onBack={() => router.back()}
-			/>
+				<DetailTopBar
+					title={t("settings.title")}
+					subtitle={t("settings.subtitle")}
+					onBack={() => router.back()}
+				/>
 			<ScrollView
 				horizontal
 				showsHorizontalScrollIndicator={false}
@@ -149,12 +151,13 @@ export function SettingsScreen({
 			>
 				{sections.map((item) => {
 					const active = section === item.id;
+					const label = t(item.labelKey);
 					return (
 						<Pressable
 							key={item.id}
 							accessibilityRole="tab"
 							accessibilityState={{ selected: active }}
-							accessibilityLabel={item.label}
+							accessibilityLabel={label}
 							onPress={() => setSection(item.id)}
 							style={({ pressed }) => ({
 								minHeight: 36,
@@ -189,7 +192,7 @@ export function SettingsScreen({
 									},
 								]}
 							>
-								{item.label}
+								{label}
 							</Text>
 						</Pressable>
 					);
@@ -225,7 +228,7 @@ export function SettingsScreen({
 				<View style={{ paddingHorizontal: 16, paddingTop: 30 }}>
 					<Pressable
 						accessibilityRole="button"
-						accessibilityLabel="Sign out"
+						accessibilityLabel={t("settings.signOut.action")}
 						onPress={() => setSignOutOpen(true)}
 						style={({ pressed }) => ({
 							minHeight: 48,
@@ -242,7 +245,7 @@ export function SettingsScreen({
 						<Text
 							style={[typography.bodyMedium, { color: theme.colors.danger }]}
 						>
-							{signingOut ? "Signing out" : "Sign out"}
+							{signingOut ? t("settings.signOut.signingOut") : t("settings.signOut.action")}
 						</Text>
 					</Pressable>
 					<Text
@@ -261,13 +264,13 @@ export function SettingsScreen({
 			</ScrollView>
 			<AdaptiveSheet
 				visible={notice !== null}
-				title={notice?.title ?? "Notice"}
+				title={notice?.title ?? t("common.notice")}
 				onClose={() => setNotice(null)}
 				scrollable={false}
 				footer={
 					<View style={{ alignItems: "flex-end" }}>
 						<PrimaryButton
-							label="Done"
+							label={t("common.done")}
 							onPress={() => setNotice(null)}
 							style={{ minHeight: 44, paddingHorizontal: 18 }}
 						/>
@@ -281,8 +284,8 @@ export function SettingsScreen({
 			</AdaptiveSheet>
 			<AdaptiveSheet
 				visible={signOutOpen}
-				title="Sign out of Cohub?"
-				subtitle="Your cached work on this device will be cleared."
+				title={t("settings.signOut.title")}
+				subtitle={t("settings.signOut.subtitle")}
 				onClose={closeSignOut}
 				dismissible={!signingOut}
 				scrollable={false}
@@ -310,11 +313,11 @@ export function SettingsScreen({
 									{ color: theme.colors.textSecondary },
 								]}
 							>
-								Cancel
+								{t("common.cancel")}
 							</Text>
 						</Pressable>
 						<PrimaryButton
-							label="Sign out"
+							label={t("common.signOut")}
 							icon="arrow-right"
 							tone="danger"
 							loading={signingOut}
@@ -325,7 +328,7 @@ export function SettingsScreen({
 				}
 			>
 				<Text style={[typography.body, { color: theme.colors.textSecondary }]}>
-					Work stored in your Spaces will not be changed.
+					{t("settings.signOut.body")}
 				</Text>
 			</AdaptiveSheet>
 		</Screen>
@@ -475,6 +478,7 @@ function ProfileSection({
 	onNotice: (notice: { title: string; message: string }) => void;
 }) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const { getClaims } = useProfileSession();
 	const [data, setData] = useState<ProfileState>({
 		profile: null,
@@ -491,7 +495,7 @@ function ProfileSection({
 	const load = useCallback(async () => {
 		if (!client) {
 			setLoading(false);
-			setError("Connect to Cohub to load account settings.");
+			setError(t("settings.profile.connect"));
 			return;
 		}
 		setLoading(true);
@@ -512,12 +516,12 @@ function ProfileSection({
 			setUsername(profile.username ?? "");
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : "Unable to load profile",
+				caught instanceof Error ? caught.message : t("settings.profile.loadError"),
 			);
 		} finally {
 			setLoading(false);
 		}
-	}, [client, getClaims]);
+	}, [client, getClaims, t]);
 
 	useEffect(() => {
 		void Promise.resolve().then(() => load());
@@ -532,9 +536,8 @@ function ProfileSection({
 				await ImagePicker.requestMediaLibraryPermissionsAsync();
 			if (!permission.granted) {
 				onNotice({
-					title: "Photo access is off",
-					message:
-						"Allow photo access in system settings to change your avatar.",
+					title: t("settings.profile.photoOff.title"),
+					message: t("settings.profile.photoOff.body"),
 				});
 				return;
 			}
@@ -560,12 +563,12 @@ function ProfileSection({
 			});
 			setData((current) => ({ ...current, profile: updated.profile }));
 			onNotice({
-				title: "Avatar updated",
-				message: "Your new avatar is now visible across Cohub.",
+				title: t("settings.profile.avatarUpdated.title"),
+				message: t("settings.profile.avatarUpdated.body"),
 			});
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : "Unable to update avatar",
+				caught instanceof Error ? caught.message : t("settings.profile.avatarError"),
 			);
 		} finally {
 			setUploadingAvatar(false);
@@ -585,12 +588,12 @@ function ProfileSection({
 			setDisplayName(result.profile.displayName);
 			setUsername(result.profile.username ?? "");
 			onNotice({
-				title: "Profile updated",
-				message: "Your account profile has been saved.",
+				title: t("settings.profile.updated.title"),
+				message: t("settings.profile.updated.body"),
 			});
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : "Unable to save profile",
+				caught instanceof Error ? caught.message : t("settings.profile.saveError"),
 			);
 		} finally {
 			setSaving(false);
@@ -600,8 +603,8 @@ function ProfileSection({
 	return (
 		<View>
 			<SettingsIntro
-				title="Profile"
-				description="Manage the identity shown across your Cohub account."
+				title={t("settings.profile.intro.title")}
+				description={t("settings.profile.intro.body")}
 			/>
 			{loading ? (
 				<LoadingBlock />
@@ -614,7 +617,7 @@ function ProfileSection({
 					>
 						<Pressable
 							accessibilityRole="button"
-							accessibilityLabel="Change avatar"
+							accessibilityLabel={t("settings.profile.changeAvatar")}
 							onPress={() => void changeAvatar()}
 							disabled={uploadingAvatar}
 							style={({ pressed }) => ({
@@ -623,7 +626,7 @@ function ProfileSection({
 							})}
 						>
 							<Avatar
-								name={data.profile?.displayName || "Cohub user"}
+								name={data.profile?.displayName || t("settings.profile.fallbackName")}
 								uri={data.profile?.avatarUrl}
 								size={82}
 								online
@@ -645,7 +648,7 @@ function ProfileSection({
 										{ color: theme.colors.textMuted },
 									]}
 								>
-									Uploading avatar
+									{t("settings.profile.uploadingAvatar")}
 								</Text>
 							</View>
 						) : null}
@@ -658,7 +661,7 @@ function ProfileSection({
 								},
 							]}
 						>
-							{data.profile?.displayName || "Cohub user"}
+							{data.profile?.displayName || t("settings.profile.fallbackName")}
 						</Text>
 						{data.email ? (
 							<Text
@@ -676,7 +679,7 @@ function ProfileSection({
 								{ color: theme.colors.textFaint, marginTop: 6 },
 							]}
 						>
-							Tap the avatar to change it
+							{t("settings.profile.tapAvatar")}
 						</Text>
 					</View>
 					<SettingsGroup>
@@ -687,13 +690,13 @@ function ProfileSection({
 									{ color: theme.colors.textSecondary, marginBottom: 6 },
 								]}
 							>
-								Display name
+								{t("settings.profile.displayName")}
 							</Text>
 							<TextInput
 								value={displayName}
 								onChangeText={setDisplayName}
 								maxLength={120}
-								placeholder="Your name"
+								placeholder={t("settings.profile.displayNamePlaceholder")}
 								placeholderTextColor={theme.colors.textFaint}
 								style={[
 									styles.input,
@@ -715,14 +718,14 @@ function ProfileSection({
 									},
 								]}
 							>
-								Username
+								{t("settings.profile.username")}
 							</Text>
 							<TextInput
 								value={username}
 								onChangeText={setUsername}
 								maxLength={39}
 								autoCapitalize="none"
-								placeholder="your-handle"
+								placeholder={t("settings.profile.usernamePlaceholder")}
 								placeholderTextColor={theme.colors.textFaint}
 								style={[
 									styles.input,
@@ -735,7 +738,7 @@ function ProfileSection({
 								]}
 							/>
 							<PrimaryButton
-								label={saving ? "Saving" : "Save changes"}
+								label={saving ? t("settings.profile.saving") : t("settings.profile.save")}
 								icon="check"
 								loading={saving}
 								disabled={!displayName.trim()}
@@ -744,18 +747,18 @@ function ProfileSection({
 							/>
 						</View>
 					</SettingsGroup>
-					<SectionHeader title="Account identity" />
+					<SectionHeader title={t("settings.profile.section.identity")} />
 					<SettingsGroup>
 						<SettingsRow
 							icon="fingerprint"
-							title="User ID"
-							detail={data.uuid || "Unavailable"}
+							title={t("settings.profile.userId")}
+							detail={data.uuid || t("settings.profile.unavailable")}
 							trailing={null}
 						/>
 						<SettingsRow
 							icon="user"
-							title="Username"
-							detail={username ? `@${username}` : "Not set"}
+							title={t("settings.profile.username")}
+							detail={username ? `@${username}` : t("settings.profile.notSet")}
 							trailing={null}
 						/>
 					</SettingsGroup>
@@ -767,6 +770,7 @@ function ProfileSection({
 
 function ActivitySection({ client }: { client: CohubClient | null }) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const [days, setDays] = useState(30);
 	const [data, setData] = useState<UserActivityResponse | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -774,7 +778,7 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 	const load = useCallback(async () => {
 		if (!client) {
 			setLoading(false);
-			setError("Connect to Cohub to load activity.");
+			setError(t("settings.activity.connect"));
 			return;
 		}
 		setLoading(true);
@@ -783,12 +787,12 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 			setData(await client.user.getActivity({ days }));
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : "Unable to load activity",
+				caught instanceof Error ? caught.message : t("settings.activity.error"),
 			);
 		} finally {
 			setLoading(false);
 		}
-	}, [client, days]);
+	}, [client, days, t]);
 	useEffect(() => {
 		void Promise.resolve().then(() => load());
 	}, [load]);
@@ -796,8 +800,8 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 	return (
 		<View>
 			<SettingsIntro
-				title="Activity"
-				description="Review recent usage across your Chats, models, and Works."
+				title={t("settings.activity.intro.title")}
+				description={t("settings.activity.intro.body")}
 			/>
 			<View
 				style={{
@@ -842,7 +846,7 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 								},
 							]}
 						>
-							{value === 365 ? "1Y" : `${value}D`}
+							{value === 365 ? t("settings.activity.range.oneYear") : t("settings.activity.range.days", { days: value })}
 						</Text>
 					</Pressable>
 				))}
@@ -862,22 +866,22 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 						}}
 					>
 						<Metric
-							label="Tokens"
+							label={t("settings.activity.metric.tokens")}
 							value={formatNumber(summary?.totalTokens)}
 							icon="layers"
 						/>
 						<Metric
-							label="Requests"
+							label={t("settings.activity.metric.requests")}
 							value={formatNumber(summary?.requestCount)}
 							icon="zap"
 						/>
 						<Metric
-							label="Success"
+							label={t("settings.activity.metric.success")}
 							value={formatNumber(summary?.successCount)}
 							icon="check-circle"
 						/>
 					</View>
-					<SectionHeader title="Top models" />
+					<SectionHeader title={t("settings.activity.topModels")} />
 					<SettingsGroup>
 						{(data?.rankings.llmModels ?? []).slice(0, 8).map((item, index) => (
 							<View
@@ -937,7 +941,7 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 									{ color: theme.colors.textMuted, padding: 16 },
 								]}
 							>
-								No model usage in this period.
+								{t("settings.activity.noUsage")}
 							</Text>
 						) : null}
 					</SettingsGroup>
@@ -961,6 +965,7 @@ function NotificationsSection({
 	onNotice: (notice: { title: string; message: string }) => void;
 }) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const [result, setResult] = useState<PushRegistrationResult | null>(null);
 	const [loading, setLoading] = useState(false);
 	const enable = async () => {
@@ -974,19 +979,18 @@ function NotificationsSection({
 			setResult(next);
 			if (next.status === "enabled")
 				onNotice({
-					title: "Notifications enabled",
-					message:
-						"This device is registered to receive Agent completion notifications.",
+					title: t("settings.notifications.enabled.title"),
+					message: t("settings.notifications.enabled.body"),
 				});
 			else
-				onNotice({ title: "Notifications unavailable", message: next.message });
+				onNotice({ title: t("settings.notifications.unavailable.title"), message: next.message });
 		} catch (error) {
 			onNotice({
-				title: "Notifications unavailable",
+				title: t("settings.notifications.unavailable.title"),
 				message:
 					error instanceof Error
 						? error.message
-						: "Unable to configure notifications.",
+						: t("settings.notifications.unavailable.body"),
 			});
 		} finally {
 			setLoading(false);
@@ -994,23 +998,23 @@ function NotificationsSection({
 	};
 	const status =
 		result?.status === "enabled"
-			? "Enabled"
+			? t("settings.notifications.status.enabled")
 			: result?.status === "unavailable"
-				? "Needs setup"
-				: "Not configured";
+				? t("settings.notifications.status.needsSetup")
+				: t("settings.notifications.status.notConfigured");
 	return (
 		<View>
 			<SettingsIntro
-				title="Notifications"
-				description="Get a notification when Agent work finishes while Cohub is not in front."
+				title={t("settings.notifications.intro.title")}
+				description={t("settings.notifications.intro.body")}
 			/>
 			<SettingsGroup>
 				<SettingsRow
 					icon="bell"
-					title="Agent completion notifications"
+					title={t("settings.notifications.row.title")}
 					detail={
 						result?.message ??
-						"Permission, device registration, and server delivery are checked together."
+						t("settings.notifications.row.detail")
 					}
 					trailing={
 						<StatusPill
@@ -1027,7 +1031,7 @@ function NotificationsSection({
 				/>
 				<View style={{ padding: 14 }}>
 					<PrimaryButton
-						label={loading ? "Checking device" : "Enable notifications"}
+						label={loading ? t("settings.notifications.checking") : t("settings.notifications.enable")}
 						icon="bell"
 						loading={loading}
 						onPress={() => void enable()}
@@ -1037,7 +1041,7 @@ function NotificationsSection({
 					result.reason === "permission-denied" ? (
 						<Pressable
 							accessibilityRole="button"
-							accessibilityLabel="Open system notification settings"
+							accessibilityLabel={t("settings.notifications.openSystem")}
 							onPress={() => void Linking.openSettings()}
 							style={({ pressed }) => ({
 								marginTop: 11,
@@ -1047,7 +1051,7 @@ function NotificationsSection({
 							<Text
 								style={[typography.bodyMedium, { color: theme.colors.accent }]}
 							>
-								Open system settings
+								{t("settings.notifications.openSystem")}
 							</Text>
 						</Pressable>
 					) : null}
@@ -1057,27 +1061,26 @@ function NotificationsSection({
 							{ color: theme.colors.textMuted, marginTop: 10 },
 						]}
 					>
-						Android requires a formal development/release build with Firebase
-						configuration. Expo Go cannot provide remote push tokens.
+						{t("settings.notifications.androidNote")}
 					</Text>
 				</View>
 			</SettingsGroup>
-			<SectionHeader title="Device" />
+			<SectionHeader title={t("settings.notifications.section.device")} />
 			<SettingsGroup>
 				<SettingsRow
 					icon="fingerprint"
-					title="Installation"
+					title={t("settings.notifications.installation")}
 					detail={
 						installationId
 							? `${installationId.slice(0, 8)}…`
-							: "Preparing device identity"
+							: t("settings.notifications.preparingIdentity")
 					}
 				/>
 				<SettingsRow
 					icon="wifi"
-					title="Delivery"
+					title={t("settings.notifications.delivery")}
 					detail={
-						client ? "Connected to Cohub API" : "Waiting for account connection"
+						client ? t("settings.notifications.connected") : t("settings.notifications.waiting")
 					}
 				/>
 			</SettingsGroup>
@@ -1087,13 +1090,14 @@ function NotificationsSection({
 
 function RulesSection({ client }: { client: CohubClient | null }) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const [data, setData] = useState<UserRulesResponse | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const load = useCallback(async () => {
 		if (!client) {
 			setLoading(false);
-			setError("Connect to Cohub to load user rules.");
+			setError(t("settings.rules.connect"));
 			return;
 		}
 		setLoading(true);
@@ -1102,20 +1106,20 @@ function RulesSection({ client }: { client: CohubClient | null }) {
 			setData(await client.user.getRules());
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : "Unable to load rules",
+				caught instanceof Error ? caught.message : t("settings.rules.error"),
 			);
 		} finally {
 			setLoading(false);
 		}
-	}, [client]);
+	}, [client, t]);
 	useEffect(() => {
 		void Promise.resolve().then(() => load());
 	}, [load]);
 	return (
 		<View>
 			<SettingsIntro
-				title="User rules"
-				description="Read the AGENTS.md rules that shape your personal Cohub sessions."
+				title={t("settings.rules.intro.title")}
+				description={t("settings.rules.intro.body")}
 			/>
 			{loading ? (
 				<LoadingBlock />
@@ -1141,8 +1145,8 @@ function RulesSection({ client }: { client: CohubClient | null }) {
 							]}
 						>
 							{data?.updatedAt
-								? `Updated ${formatRelativeTime(data.updatedAt)}`
-								: "Not published yet"}
+								? t("settings.rules.updated", { time: formatRelativeTime(data.updatedAt) })
+								: t("settings.rules.notPublished")}
 						</Text>
 						<ScrollView
 							horizontal={false}
@@ -1158,7 +1162,7 @@ function RulesSection({ client }: { client: CohubClient | null }) {
 									},
 								]}
 							>
-								{data?.content?.trim() || "No published user rules."}
+								{data?.content?.trim() || t("settings.rules.none")}
 							</Text>
 						</ScrollView>
 					</View>
@@ -1176,6 +1180,7 @@ function ChannelsSection({
 	onNotice: (notice: { title: string; message: string }) => void;
 }) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const [channels, setChannels] = useState<Channel[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -1184,7 +1189,7 @@ function ChannelsSection({
 	const load = useCallback(async () => {
 		if (!client) {
 			setLoading(false);
-			setError("Connect to Cohub to load channels.");
+			setError(t("settings.channels.connect"));
 			return;
 		}
 		setLoading(true);
@@ -1193,12 +1198,12 @@ function ChannelsSection({
 			setChannels(await client.channels.list());
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : "Unable to load channels",
+				caught instanceof Error ? caught.message : t("settings.channels.error"),
 			);
 		} finally {
 			setLoading(false);
 		}
-	}, [client]);
+	}, [client, t]);
 	useEffect(() => {
 		void Promise.resolve().then(() => load());
 	}, [load]);
@@ -1214,11 +1219,11 @@ function ChannelsSection({
 			setRemoveCandidate(null);
 		} catch (caught) {
 			onNotice({
-				title: "Channel could not be removed",
+				title: t("settings.channels.removeError.title"),
 				message:
 					caught instanceof Error
 						? caught.message
-						: "Unable to remove channel.",
+						: t("settings.channels.removeError.body"),
 			});
 		} finally {
 			setRemoving(false);
@@ -1227,8 +1232,8 @@ function ChannelsSection({
 	return (
 		<View>
 			<SettingsIntro
-				title="Channels"
-				description="Review connected chat channels and their current binding state."
+				title={t("settings.channels.intro.title")}
+				description={t("settings.channels.intro.body")}
 			/>
 			{loading ? (
 				<LoadingBlock />
@@ -1237,8 +1242,8 @@ function ChannelsSection({
 			) : channels.length === 0 ? (
 				<EmptyState
 					icon="messages"
-					title="No channels"
-					description="Connected Discord, Feishu, WeChat, and other channels will appear here."
+					title={t("settings.channels.empty.title")}
+					description={t("settings.channels.empty.body")}
 				/>
 			) : (
 				<>
@@ -1297,27 +1302,27 @@ function ChannelsSection({
 									>
 										{channel.provider} ·{" "}
 										{channel.boundSpace
-											? `Bound to ${channel.boundSpace.title || channel.boundSpace.id.slice(0, 8)}`
-											: "Not bound"}
+											? t("settings.channels.boundTo", { name: channel.boundSpace.title || channel.boundSpace.id.slice(0, 8) })
+											: t("settings.channels.notBound")}
 									</Text>
 								</View>
 								{!channel.boundSpace ? (
 									<IconButton
 										name="trash"
-										label={`Remove ${channel.name}`}
+										label={t("settings.channels.remove", { name: channel.name })}
 										tone="danger"
 										size={38}
 										onPress={() => setRemoveCandidate(channel)}
 									/>
 								) : (
-									<StatusPill label="Bound" tone="success" />
+									<StatusPill label={t("settings.channels.bound")} tone="success" />
 								)}
 							</View>
 						))}
 					</SettingsGroup>
 					<AdaptiveSheet
 						visible={removeCandidate !== null}
-						title="Remove channel?"
+						title={t("settings.channels.removeSheet.title")}
 						subtitle={removeCandidate?.name}
 						onClose={() => {
 							if (!removing) setRemoveCandidate(null);
@@ -1348,11 +1353,11 @@ function ChannelsSection({
 											{ color: theme.colors.textSecondary },
 										]}
 									>
-										Cancel
+										{t("common.cancel")}
 									</Text>
 								</Pressable>
 								<PrimaryButton
-									label="Remove"
+									label={t("common.remove")}
 									icon="trash"
 									tone="danger"
 									loading={removing}
@@ -1365,8 +1370,7 @@ function ChannelsSection({
 						<Text
 							style={[typography.body, { color: theme.colors.textSecondary }]}
 						>
-							This only removes the channel connection. A bound channel must be
-							unbound from its Space first.
+							{t("settings.channels.removeSheet.body")}
 						</Text>
 					</AdaptiveSheet>
 				</>
@@ -1383,6 +1387,7 @@ function BillingSection({
 	onNotice: (notice: { title: string; message: string }) => void;
 }) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const [credits, setCredits] = useState<BillingCreditStatus | null>(null);
 	const [catalog, setCatalog] = useState<BillingCatalog | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -1391,7 +1396,7 @@ function BillingSection({
 	const load = useCallback(async () => {
 		if (!client) {
 			setLoading(false);
-			setError("Connect to Cohub to load billing.");
+			setError(t("settings.billing.connect"));
 			return;
 		}
 		setLoading(true);
@@ -1405,12 +1410,12 @@ function BillingSection({
 			setCatalog(catalogResult.catalog);
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : "Unable to load billing",
+				caught instanceof Error ? caught.message : t("settings.billing.error"),
 			);
 		} finally {
 			setLoading(false);
 		}
-	}, [client]);
+	}, [client, t]);
 	useEffect(() => {
 		void Promise.resolve().then(() => load());
 	}, [load]);
@@ -1427,19 +1432,19 @@ function BillingSection({
 			const checkout = result.checkout;
 			if (!checkout.checkoutUrl) {
 				onNotice({
-					title: "Checkout unavailable",
+					title: t("settings.billing.checkoutUnavailable.title"),
 					message:
 						checkout.message ||
-						"This billing provider is not ready for this account.",
+						t("settings.billing.checkoutUnavailable.body"),
 				});
 				return;
 			}
 			await WebBrowser.openBrowserAsync(checkout.checkoutUrl);
 		} catch (caught) {
 			onNotice({
-				title: "Checkout unavailable",
+				title: t("settings.billing.checkoutUnavailable.title"),
 				message:
-					caught instanceof Error ? caught.message : "Unable to open checkout.",
+					caught instanceof Error ? caught.message : t("settings.billing.checkoutError"),
 			});
 		} finally {
 			setPendingProductKey(null);
@@ -1448,8 +1453,8 @@ function BillingSection({
 	return (
 		<View>
 			<SettingsIntro
-				title="Billing"
-				description="View your Cohub balance and available plans."
+				title={t("settings.billing.intro.title")}
+				description={t("settings.billing.intro.body")}
 			/>
 			{loading ? (
 				<LoadingBlock />
@@ -1462,7 +1467,7 @@ function BillingSection({
 							<Text
 								style={[typography.caption, { color: theme.colors.textMuted }]}
 							>
-								Current balance
+								{t("settings.billing.balance")}
 							</Text>
 							<Text
 								style={[
@@ -1480,14 +1485,14 @@ function BillingSection({
 							</Text>
 						</View>
 					</SettingsGroup>
-					<SectionHeader title="Plans" />
+					<SectionHeader title={t("settings.billing.plans")} />
 					<SettingsGroup>
 						{(catalog?.plans ?? []).slice(0, 8).map((plan) => (
 							<SettingsRow
 								key={plan.key}
 								icon="zap"
 								title={plan.name}
-								detail={plan.description || "Cohub plan"}
+								detail={plan.description || t("settings.billing.planFallback")}
 								disabled={pendingProductKey !== null}
 								onPress={() => void openProduct(plan)}
 								trailing={
@@ -1509,20 +1514,20 @@ function BillingSection({
 									{ color: theme.colors.textMuted, padding: 16 },
 								]}
 							>
-								No plans are available.
+								{t("settings.billing.noPlans")}
 							</Text>
 						) : null}
 					</SettingsGroup>
 					{(catalog?.addons ?? []).length > 0 ? (
 						<>
-							<SectionHeader title="Credit packages" />
+							<SectionHeader title={t("settings.billing.creditPackages")} />
 							<SettingsGroup>
 								{(catalog?.addons ?? []).slice(0, 8).map((addon) => (
 									<SettingsRow
 										key={addon.key}
 										icon="zap"
 										title={addon.name}
-										detail={addon.description || "Additional Cohub credits"}
+										detail={addon.description || t("settings.billing.addonFallback")}
 										disabled={pendingProductKey !== null}
 										onPress={() => void openProduct(addon)}
 										trailing={
@@ -1554,13 +1559,14 @@ function ReferralsSection({
 	onNotice: (notice: { title: string; message: string }) => void;
 }) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const [data, setData] = useState<ReferralDashboard | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const load = useCallback(async () => {
 		if (!client) {
 			setLoading(false);
-			setError("Connect to Cohub to load referrals.");
+			setError(t("settings.referrals.connect"));
 			return;
 		}
 		setLoading(true);
@@ -1569,12 +1575,12 @@ function ReferralsSection({
 			setData(await client.referrals.getMine());
 		} catch (caught) {
 			setError(
-				caught instanceof Error ? caught.message : "Unable to load referrals",
+				caught instanceof Error ? caught.message : t("settings.referrals.error"),
 			);
 		} finally {
 			setLoading(false);
 		}
-	}, [client]);
+	}, [client, t]);
 	useEffect(() => {
 		void Promise.resolve().then(() => load());
 	}, [load]);
@@ -1582,25 +1588,25 @@ function ReferralsSection({
 		if (!data) return;
 		const url = `https://cohub.live/referrals/${data.code}`;
 		try {
-			await Share.share({ title: "Join Cohub", message: url });
+			await Share.share({ title: t("settings.referrals.shareTitle"), message: url });
 		} catch {
 			onNotice({
-				title: "Share unavailable",
-				message: "The referral link is ready to copy from the Cohub web app.",
+				title: t("settings.referrals.shareUnavailable.title"),
+				message: t("settings.referrals.shareUnavailable.body"),
 			});
 		}
 	};
 	return (
 		<View>
 			<SettingsIntro
-				title="Referrals"
-				description="Share Cohub with someone and track earned credits."
+				title={t("settings.referrals.intro.title")}
+				description={t("settings.referrals.intro.body")}
 			/>
 			{loading ? (
 				<LoadingBlock />
 			) : error || !data ? (
 				<InlineError
-					message={error || "Referral data is unavailable"}
+					message={error || t("settings.referrals.unavailable")}
 					onRetry={() => void load()}
 				/>
 			) : (
@@ -1610,7 +1616,7 @@ function ReferralsSection({
 							<Text
 								style={[typography.caption, { color: theme.colors.textMuted }]}
 							>
-								Your referral link
+								{t("settings.referrals.link")}
 							</Text>
 							<Text
 								selectable
@@ -1622,7 +1628,7 @@ function ReferralsSection({
 								https://cohub.live/referrals/{data.code}
 							</Text>
 							<PrimaryButton
-								label="Share link"
+								label={t("settings.referrals.share")}
 								icon="share"
 								onPress={() => void share()}
 								style={{ marginTop: 14 }}
@@ -1638,23 +1644,23 @@ function ReferralsSection({
 						}}
 					>
 						<Metric
-							label="Rewarded"
+							label={t("settings.referrals.rewarded")}
 							value={String(data.summary.rewarded)}
 							icon="check-circle"
 						/>
 						<Metric
-							label="Earned"
+							label={t("settings.referrals.earned")}
 							value={formatUsd(data.summary.earnedUsd)}
 							icon="gift"
 						/>
 					</View>
-					<SectionHeader title="Recent referrals" />
+					<SectionHeader title={t("settings.referrals.recent")} />
 					<SettingsGroup>
 						{data.items.slice(0, 12).map((item) => (
 							<SettingsRow
 								key={item.id}
 								icon="user"
-								title={item.profile?.displayName || "Cohub user"}
+								title={item.profile?.displayName || t("settings.profile.fallbackName")}
 								detail={formatRelativeTime(item.claimedAt)}
 								trailing={
 									<StatusPill
@@ -1671,7 +1677,7 @@ function ReferralsSection({
 									{ color: theme.colors.textMuted, padding: 16 },
 								]}
 							>
-								No referrals yet.
+								{t("settings.referrals.none")}
 							</Text>
 						) : null}
 					</SettingsGroup>
@@ -1724,6 +1730,7 @@ function Metric({
 
 function LoadingBlock() {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	return (
 		<View
 			style={{ minHeight: 190, alignItems: "center", justifyContent: "center" }}
@@ -1735,7 +1742,7 @@ function LoadingBlock() {
 					{ color: theme.colors.textMuted, marginTop: 10 },
 				]}
 			>
-				Loading settings
+				{t("settings.loading")}
 			</Text>
 		</View>
 	);
@@ -1749,6 +1756,7 @@ function InlineError({
 	onRetry: () => void;
 }) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	return (
 		<View
 			style={{
@@ -1769,7 +1777,7 @@ function InlineError({
 			</Text>
 			<Pressable
 				accessibilityRole="button"
-				accessibilityLabel="Retry"
+				accessibilityLabel={t("common.retry")}
 				onPress={onRetry}
 				style={({ pressed }) => ({
 					marginTop: 10,
@@ -1778,7 +1786,7 @@ function InlineError({
 				})}
 			>
 				<Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>
-					Retry
+					{t("common.retry")}
 				</Text>
 			</Pressable>
 		</View>

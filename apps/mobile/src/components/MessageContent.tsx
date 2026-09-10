@@ -17,6 +17,7 @@ import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
 import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme } from "@/src/theme";
+import { useTranslation, type Translate } from "@/src/i18n";
 import { AppIcon, type IconName } from "@/src/ui";
 import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
@@ -146,6 +147,7 @@ function imageUri(block: Extract<ContentBlock, { type: "image" }>) {
 
 function GalleryThumbnail({ uri, index, total, size, onOpen }: { uri: string; index: number; total: number; size: number; onOpen: () => void }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const [pressed, setPressed] = useState(false);
   // Link.Trigger slots its child, and slotting spreads the child's style prop: a function
   // style would be flattened to {}. Track pressed state and pass a plain object instead.
@@ -162,7 +164,7 @@ function GalleryThumbnail({ uri, index, total, size, onOpen }: { uri: string; in
       <Link.Trigger withAppleZoom>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Open image ${index + 1} of ${total}`}
+          accessibilityLabel={t("message.openImage", { index: index + 1, total })}
           onPressIn={() => setPressed(true)}
           onPressOut={() => setPressed(false)}
           style={style}
@@ -227,21 +229,24 @@ function toolIcon(name: string): IconName {
 const TOOL_DETAILS_MAX_HEIGHT = 420;
 
 function CappedCodeText({ value, color }: { value: string; color: string }) {
-  const text = value || "(empty output)";
+  const { t } = useTranslation();
+  const text = value || t("message.tool.emptyOutput");
   return <Text selectable style={[typography.code, { fontFamily: "SpaceMono", color }]}>{text}</Text>;
 }
 
 function ToolOutput({ block }: { block: Extract<ContentBlock, { type: "tool_result" }> }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   // Running tools keep appending to `content`; the body must be height-capped
   // (mirroring the web's tail view) or an expanded bubble grows forever.
-  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>OUT{block.is_error ? " · Error" : ""}</Text>{typeof block.content === "string" ? <CappedCodeText value={block.content} color={theme.colors.text} /> : <MessageContent content={block.content} />}</View>;
+  return <View style={{ gap: 6 }}><Text style={[typography.micro, { color: block.is_error ? theme.colors.danger : theme.colors.textMuted }]}>{block.is_error ? t("message.tool.outputError") : t("message.tool.output")}</Text>{typeof block.content === "string" ? <CappedCodeText value={block.content} color={theme.colors.text} /> : <MessageContent content={block.content} />}</View>;
 }
 
 function ToolCall({ block, result, active = false }: { block: Extract<ContentBlock, { type: "tool_use" }>; result?: Extract<ContentBlock, { type: "tool_result" }>; active?: boolean }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const status = result ? result.is_error ? "error" : "done" : active ? "running" : "no result";
+  const status = result ? result.is_error ? t("message.tool.status.error") : t("message.tool.status.done") : active ? t("message.tool.status.running") : t("message.tool.status.noResult");
   const iconColor = result?.is_error ? theme.colors.danger : active && !result ? theme.colors.accent : theme.colors.textMuted;
   const preview = toolCallPreview(block.name, block.input);
   const caption = formatToolCallCaption(block.name, block.input);
@@ -255,7 +260,7 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
       </Text>
     </Pressable>
     {expanded ? <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={{ maxHeight: TOOL_DETAILS_MAX_HEIGHT, marginTop: 4 }} contentContainerStyle={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, paddingRight: 8, gap: 8 }}>
-      <Text style={[typography.micro, { color: theme.colors.textMuted }]}>IN</Text>
+      <Text style={[typography.micro, { color: theme.colors.textMuted }]}>{t("message.tool.input")}</Text>
       <CappedCodeText value={JSON.stringify(block.input, null, 2)} color={theme.colors.text} />
       {edits.map((edit, index) => <View key={index}><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }]}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.success }]}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View>)}
       {result ? <ToolOutput block={result} /> : null}
@@ -339,13 +344,13 @@ function TypingIndicator() {
   </View>;
 }
 
-function BubbleMeta({ clock, local = false, side, live = false, inline = false }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean; inline?: boolean }) {
+function BubbleMeta({ clock, local = false, side, live = false, inline = false, t }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean; inline?: boolean; t: Translate }) {
   const theme = useAppTheme();
   const color = side === "user" ? theme.colors.userBubbleMeta : theme.colors.textFaint;
   if (!clock && !local && !live) return null;
   return <View style={inline ? { flexDirection: "row", alignItems: "center", gap: 3, marginLeft: 8, alignSelf: "flex-end", marginBottom: -4, transform: [{ translateY: 3 }] } : { position: "absolute", right: 12, bottom: 5, flexDirection: "row", alignItems: "center", gap: 3 }}>
     {live ? <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: theme.colors.accent, marginRight: 2 }} /> : null}
-    {local ? <Text style={[typography.micro, { color }]}>Sending</Text> : null}
+    {local ? <Text style={[typography.micro, { color }]}>{t("chat.sending")}</Text> : null}
     {clock ? <Text style={[typography.micro, { color, fontVariant: ["tabular-nums"] }]}>{clock}</Text> : null}
     {side === "user" && !local ? <AppIcon name="check-check" size={11} color={color} strokeWidth={2.4} /> : null}
   </View>;
@@ -353,6 +358,7 @@ function BubbleMeta({ clock, local = false, side, live = false, inline = false }
 
 export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const { width } = useWindowDimensions();
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -363,7 +369,7 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   if (!hasRenderableMessage(message)) return null;
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
-  if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || "System update"}</Text></View>;
+  if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || t("chat.systemUpdate")}</Text></View>;
   const thinkingLevel = requestedThinkingLevel(message.meta);
   const inputTokenValue = (message.usage?.input ?? 0) + (message.usage?.cacheRead ?? 0);
   const cachedInputTokens = typeof message.usage?.cacheRead === "number" && Number.isFinite(message.usage.cacheRead) && message.usage.cacheRead > 0 ? formatTokenCount(message.usage.cacheRead) : null;
@@ -382,23 +388,24 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
           {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
           {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.userBubbleText, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
         </View>
-        <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} inline />
+        <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} inline t={t} />
       </View> : <>
         {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
         {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
-        <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} />
+        <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} t={t} />
       </>}
     </ChatBubbleFrame>
-    {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}{inputTokens ? ` · ↑${inputTokens}${cachedInputTokens ? ` (${cachedInputTokens} cached)` : ""}` : ""}{outputTokens ? ` · ↓${outputTokens}` : ""}</Text> : null}
+    {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || t("chat.model.agent")}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}{inputTokens ? ` · ${t("message.tokens.input", { count: inputTokens })}${cachedInputTokens ? ` ${t("message.tokens.cached", { count: cachedInputTokens })}` : ""}` : ""}{outputTokens ? ` · ${t("message.tokens.output", { count: outputTokens })}` : ""}</Text> : null}
     {copyText && !isUser ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3, marginLeft: side === "assistant" ? 4 : 0, marginRight: side === "user" ? 4 : 0 }}>
-      {onCopy ? <Pressable accessibilityRole="button" accessibilityLabel={copied ? "Message copied" : "Copy message"} onPress={() => { onCopy(copyText); setCopied(true); }} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}><AppIcon name={copied ? "check" : "copy"} size={14} color={copied ? theme.colors.success : theme.colors.textFaint} /></Pressable> : null}
-      {!isUser && onFork && typeof message.meta?.turnId === "string" ? <Pressable accessibilityRole="button" accessibilityLabel="Fork conversation here" disabled={forkDisabled} onPress={() => onFork(message)} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: forkDisabled ? 0.45 : pressed ? 0.55 : 1 })}>{forking ? <ActivityIndicator size="small" color={theme.colors.textFaint} /> : <AppIcon name="git-fork" size={14} color={theme.colors.textFaint} />}</Pressable> : null}
+      {onCopy ? <Pressable accessibilityRole="button" accessibilityLabel={copied ? t("chat.copied") : t("chat.copy")} onPress={() => { onCopy(copyText); setCopied(true); }} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}><AppIcon name={copied ? "check" : "copy"} size={14} color={copied ? theme.colors.success : theme.colors.textFaint} /></Pressable> : null}
+      {!isUser && onFork && typeof message.meta?.turnId === "string" ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.fork")} disabled={forkDisabled} onPress={() => onFork(message)} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: forkDisabled ? 0.45 : pressed ? 0.55 : 1 })}>{forking ? <ActivityIndicator size="small" color={theme.colors.textFaint} /> : <AppIcon name="git-fork" size={14} color={theme.colors.textFaint} />}</Pressable> : null}
     </View> : null}
   </View>;
 });
 
 export function StreamCard({ content, status, runtimePhase = null, runtimeModel = null }: { content: ContentBlock[]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const liveContent = content;
   const hasLivePreview = liveContent.some((block) => (block.type === "text" && block.text.trim().length > 0) || (block.type === "thinking" && block.thinking.trim().length > 0) || block.type === "tool_use");
   // Mirrors the web turn footer: live content is the status itself; otherwise surface
@@ -406,14 +413,14 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
   const runtimeLabel = !hasLivePreview && (status === "pending" || status === "streaming")
     ? runtimePhase === "llm_call_started"
       ? runtimeModel?.trim()
-        ? `waiting ${runtimeModel.trim()}…`
-        : "waiting model…"
+        ? t("message.stream.waitingModel", { model: runtimeModel.trim() })
+        : t("message.stream.waitingGeneric")
       : status === "pending" && !hasRenderableContent(liveContent)
-        ? "starting agent…"
+        ? t("message.stream.starting")
         : null
     : null;
   const failed = status === "failed" || status === "interrupted";
-  const statusLabel = status === "failed" ? "Agent failed" : status === "interrupted" ? "Generation stopped" : null;
+  const statusLabel = status === "failed" ? t("message.stream.failed") : status === "interrupted" ? t("message.stream.stopped") : null;
   const live = status === "pending" || status === "streaming";
   return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
     <ChatBubbleFrame side="assistant" fitContent={!hasLivePreview && !hasRenderableContent(liveContent)}>
@@ -421,7 +428,7 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
       {statusLabel ? <Text style={[typography.caption, { color: theme.colors.danger, marginBottom: hasLivePreview || runtimeLabel ? 6 : 0 }]}>{statusLabel}</Text> : null}
       {runtimeLabel ? <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</Text> : null}
       {hasLivePreview || hasRenderableContent(liveContent) ? <MessageContent active={live} content={liveContent} /> : null}
-      <BubbleMeta clock={failed ? undefined : live ? formatMessageClock(new Date().toISOString()) : undefined} side="assistant" live={live && !failed} />
+      <BubbleMeta clock={failed ? undefined : live ? formatMessageClock(new Date().toISOString()) : undefined} side="assistant" live={live && !failed} t={t} />
     </ChatBubbleFrame>
   </View>;
 }

@@ -2,11 +2,13 @@ import { Link } from "expo-router";
 import { useState } from "react";
 import { Pressable } from "react-native";
 import { useCurrentUser } from "@/src/auth/current-user";
+import { useTranslation } from "@/src/i18n";
 import { Avatar } from "@/src/ui";
 
 /** Tapping the avatar pushes Profile; on iOS 18+ it zooms out of the avatar itself. */
 export function AccountAvatar({ size = 38, online = false }: { size?: number; online?: boolean }) {
   const { name, avatar } = useCurrentUser();
+  const { t } = useTranslation();
   const [pressed, setPressed] = useState(false);
   return (
     <Link href="/profile" asChild>
@@ -15,7 +17,7 @@ export function AccountAvatar({ size = 38, online = false }: { size?: number; on
             a function style would be flattened to {}. */}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Open profile"
+          accessibilityLabel={t("profile.open")}
           hitSlop={5}
           onPressIn={() => setPressed(true)}
           onPressOut={() => setPressed(false)}

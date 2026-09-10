@@ -7,6 +7,7 @@ import {
   type HighlightedCode,
 } from "@/src/data/code-highlight";
 import { codeLanguageLabel, resolveCodeLanguage } from "@/src/data/code-language";
+import { useTranslation } from "@/src/i18n";
 import { typography, useAppTheme } from "@/src/theme";
 import { AppIcon } from "@/src/ui";
 
@@ -60,6 +61,7 @@ export function CodeBlock({
   style?: StyleProp<ViewStyle>;
 }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const highlightTheme: CodeHighlightTheme = theme.mode === "dark" ? "github-dark" : "github-light";
   const languageId = resolveCodeLanguage(language);
   const cachedHighlight = useMemo(() => {
@@ -111,7 +113,7 @@ export function CodeBlock({
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 11, paddingTop: 8, paddingBottom: 2 }}>
           <AppIcon name="code" size={13} color={theme.colors.textFaint} />
           <Text style={[typography.micro, { color: theme.colors.textFaint }]}>
-            {label ?? "code"}{streaming ? " · streaming" : ""}
+            {label ?? t("code.fallback")}{streaming ? ` · ${t("code.streaming")}` : ""}
           </Text>
         </View>
       ) : null}

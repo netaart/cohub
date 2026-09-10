@@ -1,4 +1,5 @@
 import type { ModelCatalogEntry, ModelStatusEntry } from "@neta-art/cohub";
+import { translate } from "@/src/i18n/core";
 
 export type ModelThinkingLevel =
 	| "off"
@@ -116,30 +117,30 @@ export function clampThinkingLevel(
 export function formatThinkingLevel(level: ModelThinkingLevel) {
 	switch (level) {
 		case "off":
-			return "Off";
+			return translate("model.thinkingLevel.off");
 		case "minimal":
-			return "Minimal";
+			return translate("model.thinkingLevel.minimal");
 		case "low":
-			return "Low";
+			return translate("model.thinkingLevel.low");
 		case "medium":
-			return "Medium";
+			return translate("model.thinkingLevel.medium");
 		case "high":
-			return "High";
+			return translate("model.thinkingLevel.high");
 		case "xhigh":
-			return "Extra high";
+			return translate("model.thinkingLevel.xhigh");
 		case "max":
-			return "Max";
+			return translate("model.thinkingLevel.max");
 	}
 }
 
 export function formatThinkingLevelShort(level: ModelThinkingLevel) {
 	switch (level) {
 		case "minimal":
-			return "Min";
+			return translate("model.thinkingShort.minimal");
 		case "medium":
-			return "Med";
+			return translate("model.thinkingShort.medium");
 		case "xhigh":
-			return "xHigh";
+			return translate("model.thinkingShort.xhigh");
 		default:
 			return formatThinkingLevel(level);
 	}
@@ -168,12 +169,12 @@ export function modelAvailabilityLevel(
 export function modelAvailabilityLabel(level: ModelAvailabilityLevel) {
 	switch (level) {
 		case "available":
-			return "Operational";
+			return translate("model.availability.available");
 		case "degraded":
-			return "Degraded";
+			return translate("model.availability.degraded");
 		case "outage":
-			return "Outage";
+			return translate("model.availability.outage");
 		case "unknown":
-			return "No status";
+			return translate("model.availability.unknown");
 	}
 }

@@ -12,6 +12,7 @@ import { SessionRow } from "@/src/components/SessionRow";
 import { SessionLabelSheet } from "@/src/components/SessionLabelSheet";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useAppTheme, typography } from "@/src/theme";
+import { useTranslation } from "@/src/i18n";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { useApp } from "@/src/data/context";
 import {
@@ -59,9 +60,10 @@ const PANEL_CLOSE_SETTLE_MS = 380;
  */
 export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
+  const { width } = useWindowDimensions();
   const panelWidth = Math.min(MAX_PANEL_WIDTH, Math.max(280, width * PANEL_WIDTH_RATIO));
   const centerOffset = panelWidth;
   const filesOffset = panelWidth + width;
@@ -70,7 +72,6 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const scrollOffset = useSharedValue(centerOffset);
   const scrim = useSharedValue(activePanel ? 1 : 0);
   const shownPanel = useSharedValue<PanelName | 0>(activePanel ?? 0);
-  const [pageHeight, setPageHeight] = useState(height);
   const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const [visiblePanel, setVisiblePanel] = useState<PanelName | null>(activePanel);
   const [interactive, setInteractive] = useState(Boolean(activePanel));
@@ -173,7 +174,6 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     panel === "chat" ? styles.panelPageLeft : styles.panelPageRight,
     {
       width: panelWidth,
-      height: pageHeight,
       paddingBottom: insets.bottom,
       backgroundColor: theme.colors.background,
       borderColor: theme.colors.border,
@@ -200,7 +200,6 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         onScrollEndDrag={scheduleSettle}
         onMomentumScrollBegin={clearIdleTimer}
         onMomentumScrollEnd={settle}
-        onLayout={(event) => setPageHeight(event.nativeEvent.layout.height)}
         onContentSizeChange={() => {
           if (initialScrollDone.current) return;
           initialScrollDone.current = true;
@@ -208,7 +207,10 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
           pagerRef.current?.scrollTo({ x: centerOffset, animated: false });
         }}
       >
-        <View style={{ flexDirection: "row", height: pageHeight }}>
+        {/* Pages fill the pager's own height. Seeding it from the window height overshot by the
+            status bar, top inset, and Android navigation bar whenever the pager's onLayout did
+            not correct it, which pushed the composer below the visible area. */}
+        <View style={styles.pages}>
           <View
             style={pageStyle("chat")}
             accessibilityViewIsModal={interactive && visiblePanel === "chat"}
@@ -221,10 +223,10 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
                 : <PanelGesturePreview panel="chat" />
               : null}
           </View>
-          <View style={{ width, height: pageHeight }} accessibilityElementsHidden={visiblePanel !== null} importantForAccessibility={visiblePanel ? "no-hide-descendants" : "auto"}>
+          <View style={[styles.contentPage, { width }]} accessibilityElementsHidden={visiblePanel !== null} importantForAccessibility={visiblePanel ? "no-hide-descendants" : "auto"}>
             {children}
             <Reanimated.View style={[styles.backdrop, scrimStyle]} pointerEvents={interactive ? "auto" : "none"}>
-              <Pressable accessibilityRole="button" accessibilityLabel="Close panel" style={styles.fill} onPress={closePanel} />
+              <Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.close")} style={styles.fill} onPress={closePanel} />
             </Reanimated.View>
           </View>
           <View
@@ -247,11 +249,13 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
 
 function PanelGesturePreview({ panel }: { panel: SpacePanel }) {
   const theme = useAppTheme();
-  return <View style={styles.panelContent} accessibilityElementsHidden><View style={[styles.header, { borderBottomColor: theme.colors.border }]}><AppIcon name={panel === "chat" ? "messages" : "folder-open"} size={19} color={theme.colors.accent} /><Text style={[typography.heading, { color: theme.colors.text }]}>{panel === "chat" ? "Chats" : "Files"}</Text></View></View>;
+  const { t } = useTranslation();
+  return <View style={styles.panelContent} accessibilityElementsHidden><View style={[styles.header, { borderBottomColor: theme.colors.border }]}><AppIcon name={panel === "chat" ? "messages" : "folder-open"} size={19} color={theme.colors.accent} /><Text style={[typography.heading, { color: theme.colors.text }]}>{panel === "chat" ? t("space.panel.chats") : t("space.panel.files")}</Text></View></View>;
 }
 
 function PanelHeader({ title, subtitle, onClose, action, avatar }: { title: string; subtitle?: string; onClose: () => void; action?: ReactNode; avatar?: ReactNode }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   return (
     <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
       {avatar}
@@ -260,7 +264,7 @@ function PanelHeader({ title, subtitle, onClose, action, avatar }: { title: stri
         {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{subtitle}</Text> : null}
       </View>
       {action}
-      <IconButton name="x" label={`Close ${title}`} size={36} onPress={onClose} />
+      <IconButton name="x" label={t("ui.sheet.close", { title })} size={36} onPress={onClose} />
     </View>
   );
 }
@@ -306,6 +310,7 @@ type ChatListFilter =
 
 function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onChipsTouchChange: (touching: boolean) => void; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const { state, refreshSessionStatuses } = useApp();
   const [query, setQuery] = useState("");
   const [extraSessions, setExtraSessions] = useState<UserSessionListItem[]>([]);
@@ -343,12 +348,12 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
         setLabels(toUserSessionLabels(tree));
       })
       .catch((error) => {
-        if (active) setLabelsError(error instanceof Error ? error.message : "Unable to load labels");
+        if (active) setLabelsError(error instanceof Error ? error.message : t("labels.error"));
       });
     return () => {
       active = false;
     };
-  }, [client, spaceId, labelsReloadToken]);
+  }, [client, spaceId, labelsReloadToken, t]);
 
   useEffect(() => {
     if (!client || !spaceId || listFilter.kind !== "label") {
@@ -364,7 +369,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
         if (active) setLabelSessionIds(new Set(ids));
       })
       .catch((error) => {
-        if (active) setLabelSessionsError(error instanceof Error ? error.message : "Unable to load labeled Chats");
+        if (active) setLabelSessionsError(error instanceof Error ? error.message : t("labels.loadedLabeledChatsError"));
       })
       .finally(() => {
         if (active) setLabelSessionsLoading(false);
@@ -372,7 +377,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
     return () => {
       active = false;
     };
-  }, [client, listFilter, spaceId]);
+  }, [client, listFilter, spaceId, t]);
 
   const openLabelSheet = useCallback((session: UserSessionListItem) => {
     setLabelSheetSession(session);
@@ -420,7 +425,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
       setScopeHasMore(Boolean(response.pageInfo?.hasMore));
       setScopeInitialized(true);
     } catch (error) {
-      setLoadMoreError(error instanceof Error ? error.message : "Unable to load more Chats");
+      setLoadMoreError(error instanceof Error ? error.message : t("space.panel.loadMoreError"));
     } finally {
       setLoadingMore(false);
     }
@@ -428,16 +433,16 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
   const showLoadMore = Boolean(client && !trimmedQuery && (!scopeInitialized || scopeHasMore));
   const emptyLoading = (remoteQueryMatches && remoteSearch.loading) || labelSessionsLoading;
   const emptyLabel = listFilter.kind === "label"
-    ? `No Chats labeled “${listFilter.label.name}”`
+    ? t("space.panel.empty.labeled", { name: listFilter.label.name })
     : listFilter.kind === "source"
-      ? listFilter.source === "web" ? "No Web App Chats" : "No other Chats"
+      ? listFilter.source === "web" ? t("space.panel.empty.web") : t("space.panel.empty.other")
     : trimmedQuery
-      ? "No matching Chats"
-      : "No Chats in this Space yet.";
+      ? t("space.panel.empty.matching")
+      : t("space.panel.empty.none");
   const filterChips: { key: string; label: string; icon?: React.ComponentProps<typeof AppIcon>["name"]; filter: ChatListFilter }[] = [
-    { key: "all", label: "All", filter: { kind: "all" } },
-    { key: "web", label: "Web App", icon: "globe", filter: { kind: "source", source: "web" } },
-    { key: "other", label: "Other", icon: "globe", filter: { kind: "source", source: "other" } },
+    { key: "all", label: t("space.panel.filter.all"), filter: { kind: "all" } },
+    { key: "web", label: t("space.panel.filter.webApp"), icon: "globe", filter: { kind: "source", source: "web" } },
+    { key: "other", label: t("space.panel.filter.other"), icon: "globe", filter: { kind: "source", source: "other" } },
     ...labels.map((label) => ({ key: `label:${label.id}`, label: label.name, filter: { kind: "label" as const, label, ref: formatLabelRef(label) } })),
   ];
   const chipRow = <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
@@ -450,21 +455,21 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
         onPress={() => setListFilter(chip.filter)}
       />
     ))}
-    {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel="Retry loading labels" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.caption, { color: theme.colors.accent }]}>Retry labels</Text></Pressable> : null}
+    {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.retryLabelsA11y")} onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.caption, { color: theme.colors.accent }]}>{t("space.panel.retryLabels")}</Text></Pressable> : null}
   </ScrollView>;
   return (
     <View style={styles.panelContent}>
-      <PanelHeader title={spaceName} subtitle="Chats" onClose={onClose} avatar={<Avatar name={spaceName} uri={displaySessions.find((session) => session.space?.publicProfile?.avatarUrl)?.space?.publicProfile?.avatarUrl} size={38} />} />
+      <PanelHeader title={spaceName} subtitle={t("space.panel.chats")} onClose={onClose} avatar={<Avatar name={spaceName} uri={displaySessions.find((session) => session.space?.publicProfile?.avatarUrl)?.space?.publicProfile?.avatarUrl} size={38} />} />
       <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 9 }}>
-        <PrimaryButton label="New Chat" icon="plus" onPress={onNewChat} style={{ minHeight: 44 }} />
+        <PrimaryButton label={t("space.newChat")} icon="plus" onPress={onNewChat} style={{ minHeight: 44 }} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Search Chats" /></View>
+          <View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder={t("space.panel.searchChats")} /></View>
           {remoteQueryMatches && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
         </View>
         <View onTouchStart={() => onChipsTouchChange(true)} onTouchEnd={() => onChipsTouchChange(false)} onTouchCancel={() => onChipsTouchChange(false)}>{chipRow}</View>
-        {remoteQueryMatches && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
-        {state.sessionStatusError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{state.sessionStatusError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat statuses" onPress={() => void refreshSessionStatuses(displaySessions)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
-        {labelSessionsError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{labelSessionsError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry loading labeled Chats" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
+        {remoteQueryMatches && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("chats.search.retry")} onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}
+        {state.sessionStatusError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{state.sessionStatusError}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.retryStatuses")} onPress={() => void refreshSessionStatuses(displaySessions)}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}
+        {labelSessionsError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{labelSessionsError}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.retryLabeledChats")} onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}
       </View>
       <FlatList
         data={listItems}
@@ -474,7 +479,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
           : <SessionRow session={item.session} showSpace={false} onPress={() => onOpenSession(item.session.id)} onLongPress={client ? () => openLabelSheet(item.session) : undefined} />}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 24, flexGrow: listItems.length === 0 ? 1 : undefined }}
-        ListFooterComponent={showLoadMore ? <View>{loadMoreError ? <Text selectable style={[typography.micro, { color: theme.colors.danger, marginHorizontal: 14, marginTop: 8 }]}>{loadMoreError}</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel={loadMoreError ? "Retry loading Chats" : "Load more Chats"} disabled={loadingMore} onPress={() => void loadMore()} style={({ pressed }) => ({ minHeight: 40, marginHorizontal: 14, marginTop: 8, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{loadingMore ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{loadMoreError ? "Retry loading Chats" : "Load more Chats"}</Text>}</Pressable></View> : null}
+        ListFooterComponent={showLoadMore ? <View>{loadMoreError ? <Text selectable style={[typography.micro, { color: theme.colors.danger, marginHorizontal: 14, marginTop: 8 }]}>{loadMoreError}</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel={loadMoreError ? t("space.panel.retryLoadMore") : t("space.panel.loadMore")} disabled={loadingMore} onPress={() => void loadMore()} style={({ pressed }) => ({ minHeight: 40, marginHorizontal: 14, marginTop: 8, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{loadingMore ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{loadMoreError ? t("space.panel.retryLoadMore") : t("space.panel.loadMore")}</Text>}</Pressable></View> : null}
         ListEmptyComponent={<View style={styles.emptyPanel}>{emptyLoading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <AppIcon name={listFilter.kind === "label" ? "tag" : trimmedQuery ? "search" : "messages"} size={26} color={theme.colors.textMuted} />}<Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{emptyLabel}</Text></View>}
       />
       {labelSheetSession && client ? <SessionLabelSheet client={client} spaceId={spaceId} session={labelSheetSession} labels={labels} labelsError={labelsError} onLabelsReload={() => setLabelsReloadToken((value) => value + 1)} onClose={closeLabelSheet} onChanged={() => { setLabelSessionIds(new Set()); setLabelsReloadToken((value) => value + 1); }} /> : null}
@@ -489,6 +494,7 @@ function PanelFilterChip({ label, icon, selected, onPress }: { label: string; ic
 
 function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpenFile, onOpenFilesPage }: { enabled?: boolean; spaceId: string; spaceName: string; client: CohubClient | null; onClose: () => void; onOpenFile: (path: string) => void; onOpenFilesPage: () => void }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const [path, setPath] = useState("");
   const [entries, setEntries] = useState<SpaceFsEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -500,7 +506,7 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
     const currentRequest = ++requestIdRef.current;
     if (!client) {
       setEntries([]);
-      setError("Connect to Cohub to browse Files.");
+      setError(t("files.panelConnect"));
       setLoading(false);
       return;
     }
@@ -510,11 +516,11 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
       const result = await client.space(spaceId).files.list(path || undefined);
       if (currentRequest === requestIdRef.current) setEntries(result.entries);
     } catch (caught) {
-      if (currentRequest === requestIdRef.current) setError(caught instanceof Error ? caught.message : "Unable to load Files");
+      if (currentRequest === requestIdRef.current) setError(caught instanceof Error ? caught.message : t("files.loadError"));
     } finally {
       if (currentRequest === requestIdRef.current) setLoading(false);
     }
-  }, [client, enabled, path, spaceId]);
+  }, [client, enabled, path, spaceId, t]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -538,19 +544,19 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
 
   return (
     <View style={styles.panelContent}>
-      <PanelHeader title={path ? spacePathName(path) : "Files"} subtitle={path ? `${spaceName} / ${path}` : spaceName} onClose={onClose} action={<IconButton name="external-link" label="Open full Files" size={36} onPress={onOpenFilesPage} />} />
-      {path ? <Pressable accessibilityRole="button" accessibilityLabel="Back to parent folder" onPress={() => setPath(parentSpacePath(path))} style={({ pressed }) => [styles.parentBar, { borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}><AppIcon name="arrow-left" size={16} color={theme.colors.textMuted} /><Text style={[typography.caption, { color: theme.colors.textSecondary }]}>{parentSpacePath(path) ? `Back to ${spacePathName(parentSpacePath(path))}` : "Back to Files"}</Text></Pressable> : null}
+      <PanelHeader title={path ? spacePathName(path) : t("files.title")} subtitle={path ? `${spaceName} / ${path}` : spaceName} onClose={onClose} action={<IconButton name="external-link" label={t("space.panel.openFullFiles")} size={36} onPress={onOpenFilesPage} />} />
+      {path ? <Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.backToParent")} onPress={() => setPath(parentSpacePath(path))} style={({ pressed }) => [styles.parentBar, { borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}><AppIcon name="arrow-left" size={16} color={theme.colors.textMuted} /><Text style={[typography.caption, { color: theme.colors.textSecondary }]}>{parentSpacePath(path) ? t("files.backTo", { name: spacePathName(parentSpacePath(path)) }) : t("files.backToFiles")}</Text></Pressable> : null}
       {loading ? (
-        <View style={styles.emptyPanel}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>Loading Files…</Text></View>
+        <View style={styles.emptyPanel}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>{t("files.loading")}</Text></View>
       ) : error ? (
-        <View style={styles.emptyPanel}><AppIcon name="cloud-off" size={25} color={theme.colors.danger} /><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 10 }]}>{error}</Text><PrimaryButton label="Retry" icon="refresh" onPress={() => void load()} style={{ marginTop: 15, minHeight: 42 }} /></View>
+        <View style={styles.emptyPanel}><AppIcon name="cloud-off" size={25} color={theme.colors.danger} /><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 10 }]}>{error}</Text><PrimaryButton label={t("common.retry")} icon="refresh" onPress={() => void load()} style={{ marginTop: 15, minHeight: 42 }} /></View>
       ) : (
         <FlatList
           data={entries}
           keyExtractor={(item) => item.path}
           contentContainerStyle={{ paddingVertical: 8, paddingBottom: 24, flexGrow: entries.length === 0 ? 1 : undefined }}
           renderItem={({ item }) => <SpaceFileRow entry={item} compact onPress={() => openEntry(item)} />}
-          ListEmptyComponent={<View style={styles.emptyPanel}><AppIcon name="folder-open" size={26} color={theme.colors.textMuted} /><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{path ? "This folder is empty." : "This workspace is empty."}</Text></View>}
+          ListEmptyComponent={<View style={styles.emptyPanel}><AppIcon name="folder-open" size={26} color={theme.colors.textMuted} /><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 10, textAlign: "center" }]}>{path ? t("files.emptyFolder") : t("files.emptyWorkspace")}</Text></View>}
         />
       )}
     </View>
@@ -560,7 +566,9 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
 const styles = {
   nativeRoot: { flex: 1, minHeight: 0, overflow: "hidden" as const },
   pager: { flex: 1 },
-  panelPage: { borderLeftWidth: 1, borderRightWidth: 1, shadowColor: "#000000", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 18, elevation: 12 },
+  pages: { flexDirection: "row" as const, height: "100%" as const },
+  contentPage: { height: "100%" as const },
+  panelPage: { height: "100%" as const, borderLeftWidth: 1, borderRightWidth: 1, shadowColor: "#000000", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 18, elevation: 12 },
   panelPageLeft: { borderLeftWidth: 0 },
   panelPageRight: { borderRightWidth: 0 },
   fill: { flex: 1 } as const,

@@ -1,16 +1,17 @@
 import type { ContentBlock, MessageRecord, SessionRecord, SpaceRecord } from "@neta-art/cohub";
 import * as Crypto from "expo-crypto";
+import { translate, getActiveLocale } from "@/src/i18n/core";
 
 export function newId() {
   return Crypto.randomUUID();
 }
 
 export function displaySpaceName(space: Pick<SpaceRecord, "name" | "title"> | null | undefined) {
-  return space?.name?.trim() || space?.title?.trim() || "Space";
+  return space?.name?.trim() || space?.title?.trim() || translate("space.fallbackName");
 }
 
 export function displaySessionTitle(session: Pick<SessionRecord, "title" | "latestMessageText">) {
-  return session.title?.trim() || session.latestMessageText?.trim().split("\n")[0]?.slice(0, 64) || "Untitled conversation";
+  return session.title?.trim() || session.latestMessageText?.trim().split("\n")[0]?.slice(0, 64) || translate("session.untitled");
 }
 
 export function initials(value: string) {
@@ -29,12 +30,12 @@ export function formatRelativeTime(value: string | null | undefined) {
   if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m`;
   if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h`;
   if (delta < 7 * 86_400_000) return `${Math.floor(delta / 86_400_000)}d`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleDateString(getActiveLocale(), { month: "short", day: "numeric" });
 }
 
 export function formatNumber(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return "0";
-  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat(getActiveLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
 export function contentBlockText(block: ContentBlock | Record<string, unknown>) {
@@ -46,10 +47,10 @@ export function contentBlockText(block: ContentBlock | Record<string, unknown>) 
   }
   if (block.type === "tool_use") {
     const name = (block as { name?: unknown }).name;
-    return typeof name === "string" ? `Using ${name}` : "Using a tool";
+    return typeof name === "string" ? translate("message.tool.using", { name }) : translate("message.tool.usingGeneric");
   }
   if (block.type === "tool_result") {
-    return "Tool result";
+    return translate("message.tool.result");
   }
   return "";
 }
@@ -82,7 +83,7 @@ export function messageText(message: Pick<MessageRecord, "text" | "content">) {
 }
 
 export function shortPreview(value: string | null | undefined, limit = 110) {
-  const normalized = value?.replace(/\s+/g, " ").trim() || "No messages yet";
+  const normalized = value?.replace(/\s+/g, " ").trim() || translate("session.noMessages");
   return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
 }
 
@@ -110,7 +111,7 @@ export function parentSpacePath(value: string) {
   return separator < 0 ? "" : path.slice(0, separator);
 }
 
-export function spacePathName(value: string, fallback = "Files") {
+export function spacePathName(value: string, fallback = translate("files.title")) {
   const path = normalizeSpacePath(value);
   return path.split("/").pop() || fallback;
 }

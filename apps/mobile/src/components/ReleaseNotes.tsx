@@ -1,6 +1,7 @@
 import { Linking, Text, View, type ColorValue } from "react-native";
 import type { ReactNode } from "react";
 import { CodeBlock } from "@/src/components/CodeBlock";
+import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 
 type ReleaseNotesProps = {
@@ -18,9 +19,10 @@ type ReleaseBlock =
 
 export function ReleaseNotes({ content }: ReleaseNotesProps) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   if (!content?.trim()) {
     return (
-      <Text style={[typography.body, { color: theme.colors.textMuted }]}>No release notes were published.</Text>
+      <Text style={[typography.body, { color: theme.colors.textMuted }]}>{t("releaseNotes.empty")}</Text>
     );
   }
 

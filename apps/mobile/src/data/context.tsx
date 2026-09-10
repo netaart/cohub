@@ -13,6 +13,7 @@ import type {
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState as NativeAppState } from "react-native";
 import { File as ExpoFile } from "expo-file-system";
+import { translate } from "@/src/i18n/core";
 import { createMobileClient } from "@/src/data/client";
 import { createStreamBatch } from "@/src/data/chat-rendering";
 import {
@@ -57,7 +58,7 @@ const OUT_OF_SYNC_RESYNC_COOLDOWN_MS = 15_000;
 function withTimeout<T>(promise: Promise<T>, label: string) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after 15 seconds`)), HOME_REQUEST_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new Error(translate("data.timeout", { label, seconds: 15 }))), HOME_REQUEST_TIMEOUT_MS);
   });
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer);
@@ -67,8 +68,8 @@ function withTimeout<T>(promise: Promise<T>, label: string) {
 function errorMessage(error: unknown, fallback: string) {
   if (typeof error === "object" && error !== null && "status" in error) {
     const status = (error as { status?: unknown }).status;
-    if (status === 401) return "Your sign-in session was rejected. Please sign in again and retry.";
-    if (status === 403) return "Your account does not have access to this data.";
+    if (status === 401) return translate("data.signInRejected");
+    if (status === 403) return translate("data.noAccess");
   }
   return error instanceof Error && error.message.trim() ? error.message : fallback;
 }
@@ -739,7 +740,7 @@ export function AppProvider({
     if (models.length > 0 && !options.force) return models;
     if (modelsRequestRef.current && !options.force) return modelsRequestRef.current;
     const activeClient = clientRef.current;
-    if (!activeClient) throw new Error("Cohub is still connecting");
+    if (!activeClient) throw new Error(translate("data.stillConnecting"));
 
     setModelsLoading(true);
     setModelsError(null);
@@ -766,7 +767,7 @@ export function AppProvider({
     if (!options.force && modelStatus && Date.now() - modelStatusLoadedAtRef.current < 60_000) return modelStatus;
     if (modelStatusRequestRef.current && !options.force) return modelStatusRequestRef.current;
     const activeClient = clientRef.current;
-    if (!activeClient) throw new Error("Cohub is still connecting");
+    if (!activeClient) throw new Error(translate("data.stillConnecting"));
 
     setModelStatusLoading(true);
     setModelStatusError(null);
@@ -815,7 +816,7 @@ export function AppProvider({
       const activeClient = clientRef.current ?? createMobileClient(getAccessToken, resolvedInstallationId);
       clientRef.current = activeClient;
       const token = await withAccessTokenTimeout(getAccessToken());
-      if (!token) throw new Error("Your sign-in session is unavailable. Please sign in again.");
+      if (!token) throw new Error(translate("data.signInUnavailable"));
       const [spacesResult, sessionsResult] = await Promise.all([
         withTimeout(activeClient.spaces.list(), "Loading Spaces").then(
           (spaces) => ({ status: "fulfilled" as const, value: spaces }),
@@ -829,7 +830,7 @@ export function AppProvider({
       if (generation !== homeRefreshGenerationRef.current) return;
       const errors = [spacesResult, sessionsResult].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
       if (errors.length === 2) {
-        throw new Error(errors.map((error) => errorMessage(error, "Request failed")).join("\n"));
+        throw new Error(errors.map((error) => errorMessage(error, translate("data.requestFailed"))).join("\n"));
       }
       const existingSpaces = new Map(stateRef.current.spaces.map((space) => [space.id, space]));
       const remoteSpaces = spacesResult.status === "fulfilled" ? spacesResult.value ?? [] : null;
@@ -837,7 +838,7 @@ export function AppProvider({
         ? remoteSpaces.map((space) => preserveSpacePin(existingSpaces.get(space.id), space))
         : stateRef.current.spaces;
       const spacesError = spacesResult.status === "rejected"
-        ? `Spaces could not be refreshed: ${errorMessage(spacesResult.reason, "Request failed")}`
+        ? `Spaces could not be refreshed: ${errorMessage(spacesResult.reason, translate("data.requestFailed"))}`
         : undefined;
       const pinRequestVersions = new Map(spaces.map((space) => [space.id, spacePinMutationVersionsRef.current.get(space.id) ?? 0]));
       const spacesMissingPinState = remoteSpaces?.filter((space) => space.isPinned === undefined).map((space) => space.id) ?? [];
@@ -867,7 +868,7 @@ export function AppProvider({
       const sessionsHasMore = sessionsResult.status === "fulfilled" ? Boolean(sessionsResult.value.pageInfo?.hasMore) : stateRef.current.sessionsHasMore;
       const sessionsCursor = sessionsResult.status === "fulfilled" ? (sessionsResult.value.pageInfo?.nextCursor ?? null) : stateRef.current.sessionsCursor;
       const sessionsError = sessionsResult.status === "rejected"
-        ? `Chats could not be refreshed: ${errorMessage(sessionsResult.reason, "Request failed")}`
+        ? `Chats could not be refreshed: ${errorMessage(sessionsResult.reason, translate("data.requestFailed"))}`
         : undefined;
       dispatch({ type: "home-success", spaces, sessions, sessionsHasMore, sessionsCursor, spacesError, sessionsError });
       void refreshSessionStatuses(sessions);
@@ -880,11 +881,11 @@ export function AppProvider({
           if (generation === homeRefreshGenerationRef.current) dispatch({ type: "usage", usage: activity.summary });
         })
         .catch((error) => {
-          if (generation === homeRefreshGenerationRef.current) dispatch({ type: "usage-error", message: errorMessage(error, "Activity could not be refreshed") });
+          if (generation === homeRefreshGenerationRef.current) dispatch({ type: "usage-error", message: errorMessage(error, translate("data.activityRefreshFailed")) });
         });
     } catch (error) {
       if (generation === homeRefreshGenerationRef.current) {
-        dispatch({ type: "home-error", message: errorMessage(error, "Unable to load Cohub") });
+        dispatch({ type: "home-error", message: errorMessage(error, translate("data.loadCohubFailed")) });
       }
     }
   }, [dispatch, ensureInstallation, getAccessToken, refreshSessionStatuses, userKey]);
@@ -907,7 +908,7 @@ export function AppProvider({
         const merged = [...stateRef.current.sessions, ...nextSessions.filter((item) => !stateRef.current.sessions.some((currentItem) => currentItem.id === item.id))];
         void saveHome(userKey, { spaces: stateRef.current.spaces, sessions: merged }).catch(() => undefined);
       } catch (error) {
-        dispatch({ type: "sessions-more-error", message: errorMessage(error, "Chats could not be loaded") });
+        dispatch({ type: "sessions-more-error", message: errorMessage(error, translate("data.chatsLoadFailed")) });
       }
     })();
     sessionsMoreRequestRef.current = task;
@@ -938,7 +939,7 @@ export function AppProvider({
       if (active) {
         dispatch({
           type: "home-error",
-          message: errorMessage(error, "Unable to initialize Cohub"),
+          message: errorMessage(error, translate("data.initFailed")),
         });
       }
     });
@@ -1017,7 +1018,7 @@ export function AppProvider({
           type: "session-refresh-end",
           sessionId,
           ...(options.silent ? { silent: true } : {}),
-          error: error instanceof Error ? error.message : "Unable to refresh Chat",
+          error: error instanceof Error ? error.message : translate("data.refreshChatFailed"),
         });
       }
     },
@@ -1089,7 +1090,7 @@ export function AppProvider({
           dispatch({ type: "session-page-end", sessionId, direction: "older" });
           return;
         }
-        dispatch({ type: "session-page-error", sessionId, message: errorMessage(error, "Unable to load earlier turns") });
+        dispatch({ type: "session-page-error", sessionId, message: errorMessage(error, translate("data.loadOlderFailed")) });
       }
     })();
     paginationRequestsRef.current.set(key, task);
@@ -1126,7 +1127,7 @@ export function AppProvider({
           dispatch({ type: "session-page-end", sessionId, direction: "newer" });
           return;
         }
-        dispatch({ type: "session-page-error", sessionId, message: errorMessage(error, "Unable to load newer turns") });
+        dispatch({ type: "session-page-error", sessionId, message: errorMessage(error, translate("data.loadNewerFailed")) });
       }
     })();
     paginationRequestsRef.current.set(key, task);
@@ -1145,10 +1146,10 @@ export function AppProvider({
     const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
     const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
     const activeClient = clientRef.current;
-    if (!activeClient || !spaceId) throw new Error("Chat context is unavailable");
+    if (!activeClient || !spaceId) throw new Error(translate("data.chatContextUnavailable"));
     const response = await activeClient.space(spaceId).session(sessionId).turns.window({ ...(typeof target === "number" ? { sequence: target } : { turnId: target.turnId }), before: 10, after: 20 });
     const sequence = response.anchorSequence ?? response.turns.find((turn) => (typeof target === "number" && turn.sequence === target) || (typeof target !== "number" && (turn.id === target.turnId || turn.sourceTurnId === target.turnId)))?.sequence;
-    if (sequence == null) throw new Error("The requested conversation turn is unavailable");
+    if (sequence == null) throw new Error(translate("data.turnUnavailable"));
     dispatch({ type: "session-window-success", sessionId, session: response.session, turns: response.turns, hasMoreOlder: response.hasMoreOlder, hasMoreNewer: response.hasMoreNewer, oldestCursor: response.oldestCursor, newestCursor: response.newestCursor });
     void saveMessages(userKey, sessionId, messagesFromTurns(mergeTurns(view?.turns ?? [], response.turns))).catch(() => undefined);
     return sequence;
@@ -1331,7 +1332,7 @@ export function AppProvider({
         void saveMessages(userKey, sessionId, messages).catch(() => undefined);
       } catch (error) {
         if (openTokens.current.get(sessionId) !== token) return;
-        dispatch({ type: "session-error", sessionId, message: error instanceof Error ? error.message : "Unable to open Chat" });
+        dispatch({ type: "session-error", sessionId, message: error instanceof Error ? error.message : translate("data.openChatFailed") });
       }
     },
     [attachSessionRealtime, client, dispatch, loadTurnIndex, userKey],
@@ -1348,11 +1349,11 @@ export function AppProvider({
 
   const abortSession = useCallback(
     async (sessionId: string) => {
-      if (!client) throw new Error("Cohub is still connecting");
+      if (!client) throw new Error(translate("data.stillConnecting"));
       const view = stateRef.current.sessionViews[sessionId];
       const summary = stateRef.current.sessions.find((item) => item.id === sessionId);
       const spaceId = view?.session?.spaceId ?? summary?.spaceId;
-      if (!spaceId) throw new Error("Chat context is unavailable");
+      if (!spaceId) throw new Error(translate("data.chatContextUnavailable"));
       await client.space(spaceId).session(sessionId).abort({
         turnId: view?.stream?.turnId ?? null,
       });
@@ -1370,11 +1371,11 @@ export function AppProvider({
       attachments: AttachmentDraft[] = [],
       options: { model?: ChatModelSelection | null } = {},
     ) => {
-      if (!client) throw new Error("Cohub is still connecting");
+      if (!client) throw new Error(translate("data.stillConnecting"));
       const text = rawText.trim();
       const view = stateRef.current.sessionViews[sessionId];
       const session = view?.session ?? stateRef.current.sessions.find((item) => item.id === sessionId);
-      if (!session?.spaceId) throw new Error("Chat context is unavailable");
+      if (!session?.spaceId) throw new Error(translate("data.chatContextUnavailable"));
       if (!text && attachments.length === 0) return;
 
       const clientMessageId = newId();
@@ -1437,11 +1438,11 @@ export function AppProvider({
           schedule: { mode: "immediate" },
           ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
         });
-        if (response.mode !== "immediate") throw new Error("Message was not accepted immediately");
+        if (response.mode !== "immediate") throw new Error(translate("data.messageNotAccepted"));
         dispatch({ type: "turn-upsert", sessionId, session: response.session, turn: withFallbackUserContent(response.turn, content, text) });
         dispatch({ type: "send-end", sessionId });
       } catch (error) {
-        dispatch({ type: "send-failed", sessionId, clientMessageId, message: error instanceof Error ? error.message : "Message failed to send" });
+        dispatch({ type: "send-failed", sessionId, clientMessageId, message: error instanceof Error ? error.message : translate("data.messageSendFailed") });
         throw error;
       }
     },
@@ -1455,10 +1456,10 @@ export function AppProvider({
       attachments: AttachmentDraft[] = [],
       options: { model?: ChatModelSelection | null } = {},
     ) => {
-      if (!client) throw new Error("Cohub is still connecting");
+      if (!client) throw new Error(translate("data.stillConnecting"));
       const text = rawText.trim();
-      if (!spaceId) throw new Error("Space is required");
-      if (!text && attachments.length === 0) throw new Error("Message cannot be empty");
+      if (!spaceId) throw new Error(translate("data.spaceRequired"));
+      if (!text && attachments.length === 0) throw new Error(translate("data.messageEmpty"));
 
       const clientMessageId = newId();
       const content = await buildPromptContent(client, spaceId, undefined, text, attachments);
@@ -1473,7 +1474,7 @@ export function AppProvider({
         ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
       });
       if (result.mode !== "immediate" || !result.session) {
-        throw new Error("The new Chat was not created");
+        throw new Error(translate("data.newChatNotCreated"));
       }
 
       const space = stateRef.current.spaces.find((item) => item.id === spaceId) ?? null;
@@ -1501,9 +1502,9 @@ export function AppProvider({
 
   const createSpace = useCallback(
     async (name: string, description?: string) => {
-      if (!client) throw new Error("Cohub is still connecting");
+      if (!client) throw new Error(translate("data.stillConnecting"));
       const trimmedName = name.trim();
-      if (!trimmedName) throw new Error("Space name is required");
+      if (!trimmedName) throw new Error(translate("data.spaceNameRequired"));
       const result = await client.spaces.create({
         name: trimmedName,
         description: description?.trim() || null,
@@ -1521,7 +1522,7 @@ export function AppProvider({
   );
 
   const refreshSpacePin = useCallback(async (spaceId: string) => {
-    if (!client) throw new Error("Cohub is still connecting");
+    if (!client) throw new Error(translate("data.stillConnecting"));
     const currentBeforeRequest = stateRef.current.spaces.find((space) => space.id === spaceId);
     if (spacePinPendingMutationsRef.current.has(spaceId)) return currentBeforeRequest?.isPinned ?? false;
     const requestVersion = spacePinMutationVersionsRef.current.get(spaceId) ?? 0;
@@ -1546,7 +1547,7 @@ export function AppProvider({
   }, [client, dispatch, userKey]);
 
   const toggleSpacePin = useCallback(async (spaceId: string) => {
-    if (!client) throw new Error("Cohub is still connecting");
+    if (!client) throw new Error(translate("data.stillConnecting"));
     const mutationVersion = ++spacePinMutationSequenceRef.current;
     spacePinMutationVersionsRef.current.set(spaceId, mutationVersion);
     spacePinPendingMutationsRef.current.set(spaceId, mutationVersion);
@@ -1620,7 +1621,7 @@ export function AppProvider({
   }, [dispatch, userKey]);
 
   const forkSession = useCallback(async (spaceId: string, sessionId: string, turn: Pick<SessionTurnRecord, "id" | "sourceTurnId">) => {
-    if (!client) throw new Error("Cohub is still connecting");
+    if (!client) throw new Error(translate("data.stillConnecting"));
     const result = await forkSessionTurn(client, spaceId, sessionId, turn);
     const parent = stateRef.current.sessions.find((item) => item.id === sessionId);
     const session = { ...result, space: parent?.space ?? null };
@@ -1632,11 +1633,11 @@ export function AppProvider({
 
   const renameSession = useCallback(
     async (sessionId: string, title: string) => {
-      if (!client) throw new Error("Cohub is still connecting");
+      if (!client) throw new Error(translate("data.stillConnecting"));
       const view = stateRef.current.sessionViews[sessionId];
       const summary = stateRef.current.sessions.find((item) => item.id === sessionId);
       const spaceId = view?.session?.spaceId ?? summary?.spaceId;
-      if (!spaceId) throw new Error("Chat context is unavailable");
+      if (!spaceId) throw new Error(translate("data.chatContextUnavailable"));
       const result = await client.space(spaceId).session(sessionId).rename(title.trim() || null);
       dispatch({ type: "session-upsert", session: { ...result.session, space: summary?.space ?? null } });
       const currentView = stateRef.current.sessionViews[sessionId];
@@ -1778,7 +1779,7 @@ export function AppProvider({
 
 export function useApp() {
   const value = useContext(AppContext);
-  if (!value) throw new Error("useApp must be used inside AppProvider");
+  if (!value) throw new Error(translate("data.useAppProvider"));
   return value;
 }
 

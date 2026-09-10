@@ -1,3 +1,4 @@
+import { translate } from "@/src/i18n/core";
 import type { CohubClient, SessionTurnRecord } from "@neta-art/cohub";
 
 /** Server-side follow-ups waiting for the running turn to finish, excluding the turn currently streaming. */
@@ -10,7 +11,7 @@ export function queuedFollowupTurns(turns: readonly SessionTurnRecord[], activeT
 }
 
 export function followupPreviewText(turn: Pick<SessionTurnRecord, "userText">) {
-  return (turn.userText ?? "").replace(/\s+/g, " ").trim() || "Follow-up";
+  return (turn.userText ?? "").replace(/\s+/g, " ").trim() || translate("chat.followUpFallback");
 }
 
 /** Aborts the running turn and runs this queued follow-up next. */

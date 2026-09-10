@@ -22,6 +22,7 @@ import Reanimated, { LinearTransition } from "react-native-reanimated";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { icons, type IconName } from "@/src/icons";
 import { getComposerActionState } from "@/src/data/composer-state";
+import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem } from "@/src/data/types";
 import { initials } from "@/src/utils";
@@ -104,13 +105,14 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
-export function WorkspaceToolbar({ query, onQueryChange, queryRef, account, onCreate, onSettings, placeholder = "Search Chats and Spaces" }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; account: ReactNode; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
+export function WorkspaceToolbar({ query, onQueryChange, queryRef, account, onCreate, onSettings, placeholder }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; account: ReactNode; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   return <View style={[styles.workspaceToolbar, { borderBottomColor: theme.colors.border }]}>
     {account}
-    <View style={{ flex: 1, minWidth: 0 }}><SearchField inputRef={queryRef} value={query} onChangeText={onQueryChange} placeholder={placeholder} /></View>
-    <IconButton name="plus" label="Create new" size={42} tone="accent" onPress={onCreate} />
-    <IconButton name="settings" label="Open settings" size={42} onPress={onSettings} />
+    <View style={{ flex: 1, minWidth: 0 }}><SearchField inputRef={queryRef} value={query} onChangeText={onQueryChange} placeholder={placeholder ?? t("ui.search.chatsAndSpaces")} /></View>
+    <IconButton name="plus" label={t("ui.createNew")} size={42} tone="accent" onPress={onCreate} />
+    <IconButton name="settings" label={t("ui.openSettings")} size={42} onPress={onSettings} />
   </View>;
 }
 
@@ -128,11 +130,12 @@ export function TopBar({ title, subtitle, left, right }: { title: string; subtit
   );
 }
 
-export function DetailTopBar({ title, subtitle, onBack, backLabel = "Back", actions }: { title: string; subtitle?: string; onBack: () => void; backLabel?: string; actions?: ReactNode }) {
+export function DetailTopBar({ title, subtitle, onBack, backLabel, actions }: { title: string; subtitle?: string; onBack: () => void; backLabel?: string; actions?: ReactNode }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   return (
     <View testID="app-detail-top-bar" style={[styles.detailTopBar, { borderBottomColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
-      <IconButton name="arrow-left" label={backLabel} size={40} onPress={onBack} />
+      <IconButton name="arrow-left" label={backLabel ?? t("ui.detail.back")} size={40} onPress={onBack} />
       <View style={styles.detailTopBarTitle}>
         <Text accessibilityRole="header" numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
         {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textSecondary, marginTop: 1 }]}>{subtitle}</Text> : null}
@@ -194,13 +197,14 @@ export function PrimaryButton({ label, onPress, icon, loading = false, disabled 
   );
 }
 
-export function SearchField({ value, onChangeText, placeholder = "Search", inputRef }: Pick<TextInputProps, "value" | "onChangeText" | "placeholder"> & { inputRef?: React.RefObject<TextInput | null> }) {
+export function SearchField({ value, onChangeText, placeholder, inputRef }: Pick<TextInputProps, "value" | "onChangeText" | "placeholder"> & { inputRef?: React.RefObject<TextInput | null> }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   return (
     <View style={[styles.searchField, { backgroundColor: theme.colors.surfaceRaised }]}>
       <AppIcon name="search" size={18} color={theme.colors.textMuted} />
-      <TextInput ref={inputRef} value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { flex: 1, color: theme.colors.text, paddingVertical: 0 }]} returnKeyType="search" />
-      {value ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => onChangeText?.("")} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1 })}><AppIcon name="circle-x" size={17} color={theme.colors.textFaint} /></Pressable> : null}
+      <TextInput ref={inputRef} value={value} onChangeText={onChangeText} placeholder={placeholder ?? t("ui.search.placeholder")} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { flex: 1, color: theme.colors.text, paddingVertical: 0 }]} returnKeyType="search" />
+      {value ? <Pressable accessibilityRole="button" accessibilityLabel={t("ui.search.clear")} onPress={() => onChangeText?.("")} hitSlop={8} style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1 })}><AppIcon name="circle-x" size={17} color={theme.colors.textFaint} /></Pressable> : null}
     </View>
   );
 }
@@ -210,24 +214,26 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
   return <View style={{ paddingHorizontal: 16, gap: 4 }}>{Array.from({ length: count }).map((_, index) => <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}><View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ flex: 1, gap: 9 }}><View style={{ width: `${58 + (index % 3) * 10}%`, height: 12, borderRadius: 6, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ width: `${38 + (index % 2) * 15}%`, height: 10, borderRadius: 5, backgroundColor: theme.colors.surfaceRaised }} /></View></View>)}</View>;
 }
 
-export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel = "Automatic", modelStatus = "unknown", disabled = false, sending = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder = "Message the Agent" }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
+export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel, modelStatus = "unknown", disabled = false, sending = false, running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [focused, setFocused] = useState(false);
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
   const expanded = focused || hasAttachment || voiceActive;
-  const modelStatusLabel = modelStatus === "available" ? "operational" : modelStatus === "degraded" ? "degraded" : modelStatus === "outage" ? "outage" : "status unavailable";
+  const resolvedModelLabel = modelLabel ?? t("ui.composer.modelAutomatic");
+  const modelStatusLabel = modelStatus === "available" ? t("ui.modelStatus.available") : modelStatus === "degraded" ? t("ui.modelStatus.degraded") : modelStatus === "outage" ? t("ui.modelStatus.outage") : t("ui.modelStatus.unknown");
   return (
     <View style={[styles.composerWrap, { paddingBottom: insets.bottom + 10 }]}>
       <Reanimated.View layout={LinearTransition.duration(220)} style={[styles.composer, expanded ? styles.composerExpanded : styles.composerCompact, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
-        {!expanded ? <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} /> : null}
+        {!expanded ? <IconButton name="plus" label={t("ui.composer.addAttachment")} size={34} onPress={onAttach} disabled={blocked} /> : null}
         <TextInput
           value={value}
           onChangeText={onChangeText}
           editable={!blocked}
           multiline
           maxLength={12000}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t("ui.composer.placeholder")}
           placeholderTextColor={theme.colors.textFaint}
           style={[typography.body, styles.composerText, expanded ? styles.composerTextExpanded : styles.composerTextCompact, { color: theme.colors.text }]}
           onFocus={() => setFocused(true)}
@@ -235,16 +241,16 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           blurOnSubmit={false}
         />
         {expanded ? <View style={styles.composerToolbar}>
-          <IconButton name="plus" label="Add attachment" size={34} onPress={onAttach} disabled={blocked} />
+          <IconButton name="plus" label={t("ui.composer.addAttachment")} size={34} onPress={onAttach} disabled={blocked} />
           <View style={styles.composerToolbarSpacer} />
-          {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={`Choose model, ${modelLabel}, ${modelStatusLabel}`} disabled={blocked} onPress={onModelPress} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{modelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
-          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
+          {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={t("ui.composer.chooseModel", { model: resolvedModelLabel, status: modelStatusLabel })} disabled={blocked} onPress={onModelPress} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{resolvedModelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}
+          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? t("ui.composer.voiceStop") : t("ui.composer.voiceStart")} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? t("ui.composer.stop") : t("ui.composer.send")} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
             <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} fill={canStop ? theme.colors.background : undefined} />
           </Pressable>
         </View> : <View style={styles.composerCompactActions}>
-          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? "Stop voice input" : "Start voice input"} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
-          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? "Stop generation" : "Send message"} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
+          {onVoice ? <Pressable accessibilityRole="button" accessibilityLabel={voiceActive ? t("ui.composer.voiceStop") : t("ui.composer.voiceStart")} disabled={blocked || voiceStarting} onPress={onVoice} style={({ pressed }) => [styles.voiceButton, { backgroundColor: voiceActive ? (pressed ? theme.colors.accentBorder : theme.colors.accentSoft) : pressed ? theme.colors.surfacePressed : "transparent", borderColor: voiceActive ? theme.colors.accentBorder : "transparent" }]}><AppIcon name={voiceActive ? "mic" : voiceStarting ? "more" : "mic"} size={17} color={voiceActive ? theme.colors.accent : theme.colors.textMuted} /></Pressable> : null}
+          <Pressable accessibilityRole="button" accessibilityLabel={canStop ? t("ui.composer.stop") : t("ui.composer.send")} disabled={!canStop && !canSend} onPress={() => { if (canStop) onStop?.(); else onSend(); }} style={({ pressed }) => [styles.sendButton, { backgroundColor: canStop ? (pressed ? theme.colors.textSecondary : theme.colors.text) : canSend ? (pressed ? theme.colors.accentPressed : theme.colors.accent) : theme.colors.surfaceRaised }]}>
             <AppIcon name={canStop ? "stop" : "arrow-up"} size={canStop ? 15 : 18} color={canStop ? theme.colors.background : canSend ? theme.colors.accentText : theme.colors.textFaint} fill={canStop ? theme.colors.background : undefined} />
           </Pressable>
         </View>}
@@ -260,14 +266,16 @@ export function AttachmentChip({ name, onRemove }: { name: string; onRemove: () 
 
 export function ConnectionBanner({ state }: { state: string }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   if (state === "open" || state === "idle") return null;
   const reconnecting = state === "reconnecting" || state === "connecting";
-  return <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 8, backgroundColor: reconnecting ? theme.colors.warningSoft : theme.colors.dangerSoft }}><AppIcon name={reconnecting ? "sync" : "cloud-off"} size={14} color={reconnecting ? theme.colors.warning : theme.colors.danger} /><Text style={[typography.caption, { color: reconnecting ? theme.colors.warning : theme.colors.danger }]}>{reconnecting ? "Reconnecting to Cohub" : "Connection unavailable"}</Text></View>;
+  return <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 8, backgroundColor: reconnecting ? theme.colors.warningSoft : theme.colors.dangerSoft }}><AppIcon name={reconnecting ? "sync" : "cloud-off"} size={14} color={reconnecting ? theme.colors.warning : theme.colors.danger} /><Text style={[typography.caption, { color: reconnecting ? theme.colors.warning : theme.colors.danger }]}>{reconnecting ? t("ui.banner.reconnecting") : t("ui.banner.unavailable")}</Text></View>;
 }
 
 export function DataError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const theme = useAppTheme();
-  return <View style={[styles.dataError, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><View style={[styles.dataErrorIcon, { backgroundColor: theme.colors.background }]}><AppIcon name="cloud-off" size={17} color={theme.colors.danger} /></View><View style={{ flex: 1, minWidth: 0 }}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Could not load your data</Text><Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 3 }]}>{message}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Retry loading data" onPress={onRetry} hitSlop={8}><Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>Retry</Text></Pressable></View>;
+  const { t } = useTranslation();
+  return <View style={[styles.dataError, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><View style={[styles.dataErrorIcon, { backgroundColor: theme.colors.background }]}><AppIcon name="cloud-off" size={17} color={theme.colors.danger} /></View><View style={{ flex: 1, minWidth: 0 }}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("ui.dataError.title")}</Text><Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 3 }]}>{message}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={t("ui.dataError.retry")} onPress={onRetry} hitSlop={8}><Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>{t("common.retry")}</Text></Pressable></View>;
 }
 
 export function getStatusTone(status: ActivityItem["status"]): "success" | "warning" | "danger" | "neutral" {

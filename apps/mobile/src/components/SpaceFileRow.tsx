@@ -13,6 +13,7 @@ import { Text, View } from "react-native";
 import { AppIcon, type IconName } from "@/src/ui";
 import { PressableScale } from "@/src/ui/PressableScale";
 import { useAppTheme, typography } from "@/src/theme";
+import { useTranslation } from "@/src/i18n";
 import { formatRelativeTime } from "@/src/utils";
 
 type SpaceFileRowProps = {
@@ -46,21 +47,22 @@ export function formatSpaceFileBytes(value: number) {
 
 export function SpaceFileRow({ entry, onPress, compact = false }: SpaceFileRowProps) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const isDirectory = entry.type === "dir";
   const isSymlink = entry.type === "symlink";
   const icon: IconName = isDirectory ? "folder" : isSymlink ? "external-link" : "file-text";
   const fileType = isDirectory || isSymlink ? null : fileTypeIcon(entry.name);
   const iconColor = isDirectory ? theme.colors.accent : theme.colors.textMuted;
   const detail = isDirectory
-    ? "Folder"
+    ? t("space.file.folder")
     : isSymlink
-      ? "Symbolic link"
-      : `${entry.mimeType || "File"} · ${formatSpaceFileBytes(entry.size)}`;
+      ? t("space.file.symlink")
+      : t("space.file.type", { type: entry.mimeType || t("space.file.generic"), size: formatSpaceFileBytes(entry.size) });
 
   return (
     <PressableScale
       accessibilityRole="button"
-      accessibilityLabel={`${isDirectory ? "Open folder" : "Open file"} ${entry.name}`}
+      accessibilityLabel={isDirectory ? t("space.file.openFolder", { name: entry.name }) : t("space.file.openFile", { name: entry.name })}
       onPress={onPress}
       haptic
       style={{

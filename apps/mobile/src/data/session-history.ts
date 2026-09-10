@@ -1,3 +1,4 @@
+import { translate } from "@/src/i18n/core";
 import type {
 	ContentBlock,
 	MessageRecord,
@@ -226,7 +227,7 @@ export function messageIndexForTurn(messages: Pick<MessageRecord, "role" | "meta
 }
 
 export function turnIndexPreview(turn: SessionTurnIndexItem) {
-	const value = turn.userPreview || turn.assistantPreview || "Empty turn";
+	const value = turn.userPreview || turn.assistantPreview || translate("turn.empty");
 	return value.replace(/\s+/g, " ").trim();
 }
 

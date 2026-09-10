@@ -8,6 +8,7 @@ import { SessionRow } from "@/src/components/SessionRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type RemoteSpaceSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
+import { useTranslation } from "@/src/i18n";
 import { ConnectionBanner, DataError, EmptyState, ExpandableSearchBar, LoadingRows, Screen } from "@/src/ui";
 import { getSessionStatus } from "@/src/data/session-status";
 import { SpaceRow } from "@/src/components/SpaceRow";
@@ -23,6 +24,7 @@ const CHAT_SEARCH_TYPES = ["session", "turn", "space"] as const;
 export default function ChatsScreen() {
   const router = useRouter();
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const tabBarInset = useFloatingTabBarInset();
   const isFocused = useIsFocused();
   const { state, client, connectionState, refreshHome, refreshSessionStatuses, loadMoreSessions } = useApp();
@@ -75,8 +77,8 @@ export default function ChatsScreen() {
   };
 
   const searchEmpty = trimmedQuery.length >= 2 && remoteSearch.query === trimmedQuery && remoteSearch.loading && listItems.length === 0
-    ? <View style={{ flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>Searching Cohub</Text></View>
-    : <EmptyState icon={trimmedQuery || filter !== "all" ? "search" : "messages"} title={trimmedQuery || filter !== "all" ? "No matching Chats" : "No Chats yet"} description={trimmedQuery || filter !== "all" ? "Try another search or filter." : "Start a focused thread inside one of your Spaces."} action={trimmedQuery || filter !== "all" ? "Clear filters" : "New Chat"} onAction={() => { if (trimmedQuery || filter !== "all") { setQuery(""); setFilter("all"); } else router.push("/new-chat"); }} />;
+    ? <View style={{ flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>{t("chats.searching")}</Text></View>
+    : <EmptyState icon={trimmedQuery || filter !== "all" ? "search" : "messages"} title={trimmedQuery || filter !== "all" ? t("chats.empty.matching.title") : t("chats.empty.none.title")} description={trimmedQuery || filter !== "all" ? t("chats.empty.matching.body") : t("chats.empty.none.body")} action={trimmedQuery || filter !== "all" ? t("chats.action.clearFilters") : t("chats.action.newChat")} onAction={() => { if (trimmedQuery || filter !== "all") { setQuery(""); setFilter("all"); } else router.push("/new-chat"); }} />;
 
   return (
     <Screen>
@@ -105,9 +107,9 @@ export default function ChatsScreen() {
         onEndReached={() => { if (!trimmedQuery && filter === "all") void loadMoreSessions(); }}
         onEndReachedThreshold={0.7}
         contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
-        ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12 }}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}<View style={{ flexDirection: "row", gap: 8, paddingTop: 12, paddingBottom: 4 }}><FilterChip label="All" selected={filter === "all"} onPress={() => setFilter("all")} /><FilterChip label="Running" selected={filter === "running"} onPress={() => { setFilter("running"); void refreshSessionStatuses(state.sessions); }} /><FilterChip label="Completed" selected={filter === "completed"} onPress={() => setFilter("completed")} /></View></View>}
-        ListEmptyComponent={state.booting || (filter !== "all" && (statusesLoading || filteringPages)) ? <LoadingRows count={5} /> : dataError ? <EmptyState icon="cloud-off" title="Chats are unavailable" description="Retry above after checking your connection and sign-in session." /> : searchEmpty}
-        ListFooterComponent={state.sessionsLoadingMore || statusesLoading || filteringPages ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator accessibilityLabel="Loading Chat statuses" size="small" color={theme.colors.accent} /></View> : null}
+        ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12 }}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("chats.search.retry")} onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}<View style={{ flexDirection: "row", gap: 8, paddingTop: 12, paddingBottom: 4 }}><FilterChip label={t("chats.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} /><FilterChip label={t("chats.filter.running")} selected={filter === "running"} onPress={() => { setFilter("running"); void refreshSessionStatuses(state.sessions); }} /><FilterChip label={t("chats.filter.completed")} selected={filter === "completed"} onPress={() => setFilter("completed")} /></View></View>}
+        ListEmptyComponent={state.booting || (filter !== "all" && (statusesLoading || filteringPages)) ? <LoadingRows count={5} /> : dataError ? <EmptyState icon="cloud-off" title={t("chats.error.title")} description={t("chats.error.body")} /> : searchEmpty}
+        ListFooterComponent={state.sessionsLoadingMore || statusesLoading || filteringPages ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator accessibilityLabel={t("chats.loadingStatuses")} size="small" color={theme.colors.accent} /></View> : null}
       />
     </Screen>
   );

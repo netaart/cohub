@@ -1,3 +1,4 @@
+import { translate } from "@/src/i18n/core";
 import { LogtoProvider, useLogto } from "@logto/rn";
 import { useFonts } from "expo-font";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
@@ -11,6 +12,7 @@ import { AuthScreen } from "@/src/auth/AuthScreen";
 import { AppUpdateBanner } from "@/src/components/AppUpdateBanner";
 import { config } from "@/src/config";
 import { AppProvider } from "@/src/data/context";
+import { LocaleProvider, useTranslation } from "@/src/i18n";
 import { useAppTheme } from "@/src/theme";
 import { NativeInteractionBridge } from "@/src/platform/NavigationBridge";
 
@@ -44,7 +46,7 @@ export default function RootLayout() {
   // keep the splash up until the bundled font is registered.
   const [fontsLoaded, fontError] = useFonts({ SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf") });
   if (!fontsLoaded && !fontError) return null;
-  return <LogtoProvider config={logtoConfig}><NativeRoot /></LogtoProvider>;
+  return <LocaleProvider><LogtoProvider config={logtoConfig}><NativeRoot /></LogtoProvider></LocaleProvider>;
 }
 
 function NativeRoot() {
@@ -67,7 +69,7 @@ function NativeRoot() {
       const userUuid = typeof claims.talesofai_uuid === "string" && claims.talesofai_uuid.trim()
         ? claims.talesofai_uuid.trim()
         : null;
-      if (!userUuid) throw new Error("Your account identity is missing. Please sign in again.");
+      if (!userUuid) throw new Error(translate("data.identityMissing"));
       if (active) {
         setAuthError(null);
         setIdentity({ authenticated: true, uuid: userUuid });
@@ -115,6 +117,7 @@ function NativeRoot() {
 }
 
 function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
+  const { t } = useTranslation();
   return <ThemeProvider value={theme.mode === "dark" ? DarkTheme : DefaultTheme}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
@@ -131,16 +134,17 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
           <Stack.Screen name="space/[spaceId]/file" />
           <Stack.Screen name="work/[appId]" />
           <Stack.Screen name="image-viewer" options={{ contentStyle: { backgroundColor: "#000000" } }} />
-          <Stack.Screen name="new-chat" options={{ title: "New Chat", presentation: "modal", animation: "slide_from_bottom" }} />
-          <Stack.Screen name="profile" options={{ title: "Profile" }} />
-          <Stack.Screen name="settings" options={{ title: "Settings" }} />
-          <Stack.Screen name="appearance" options={{ title: "Appearance" }} />
-          <Stack.Screen name="about" options={{ title: "About" }} />
-          <Stack.Screen name="debug/index" options={{ title: "Debug" }} />
-          <Stack.Screen name="debug/streaming" options={{ title: "Streaming" }} />
-          <Stack.Screen name="debug/tools" options={{ title: "Tools" }} />
-          <Stack.Screen name="debug/markdown" options={{ title: "Markdown" }} />
-          <Stack.Screen name="debug/list" options={{ title: "Long List" }} />
+          <Stack.Screen name="new-chat" options={{ title: t("route.newChat"), presentation: "modal", animation: "slide_from_bottom" }} />
+          <Stack.Screen name="profile" options={{ title: t("route.profile") }} />
+          <Stack.Screen name="settings" options={{ title: t("route.settings") }} />
+          <Stack.Screen name="appearance" options={{ title: t("route.appearance") }} />
+          <Stack.Screen name="language" options={{ title: t("route.language") }} />
+          <Stack.Screen name="about" options={{ title: t("route.about") }} />
+          <Stack.Screen name="debug/index" options={{ title: t("route.debug") }} />
+          <Stack.Screen name="debug/streaming" options={{ title: t("route.streaming") }} />
+          <Stack.Screen name="debug/tools" options={{ title: t("route.tools") }} />
+          <Stack.Screen name="debug/markdown" options={{ title: t("route.markdown") }} />
+          <Stack.Screen name="debug/list" options={{ title: t("route.longList") }} />
         </Stack>
         <AppUpdateBanner />
       </View>

@@ -8,6 +8,7 @@ import {
   type HighlightedCode,
 } from "@/src/data/code-highlight";
 import type { CodeLanguageId } from "@/src/data/code-language";
+import { useTranslation } from "@/src/i18n";
 import { typography, useAppTheme } from "@/src/theme";
 
 const HIGHLIGHT_DEBOUNCE_MS = 160;
@@ -71,6 +72,7 @@ export function CodeEditor({
   highlightTheme: CodeHighlightTheme;
 }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const [charWidth, setCharWidth] = useState(0);
   const [availableWidth, setAvailableWidth] = useState(0);
   const [asyncHighlight, setAsyncHighlight] = useState<{ value: string; result: HighlightedCode } | null>(null);
@@ -161,7 +163,7 @@ export function CodeEditor({
               selectionColor={theme.colors.accent}
               cursorColor={theme.colors.accent}
               underlineColorAndroid="transparent"
-              accessibilityLabel="Code editor"
+              accessibilityLabel={t("code.editor")}
               style={[metrics, { width: "100%", height: editorHeight, paddingHorizontal: PADDING_HORIZONTAL, paddingVertical: PADDING_VERTICAL, color: "transparent" }]}
             />
           </View>

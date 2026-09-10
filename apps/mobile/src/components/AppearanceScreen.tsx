@@ -14,19 +14,20 @@ import {
   useThemePreference,
   typography,
 } from "@/src/theme";
+import { useTranslation, type TranslationKey } from "@/src/i18n";
 import { AppIcon, DetailTopBar, Screen, SectionHeader } from "@/src/ui";
 
-const THEME_OPTIONS: { value: ThemePreference; label: string; icon: "monitor" | "sun" | "moon" }[] = [
-  { value: "system", label: "System", icon: "monitor" },
-  { value: "light", label: "Light", icon: "sun" },
-  { value: "dark", label: "Dark", icon: "moon" },
+const THEME_OPTIONS: { value: ThemePreference; labelKey: TranslationKey; icon: "monitor" | "sun" | "moon" }[] = [
+  { value: "system", labelKey: "appearance.theme.system", icon: "monitor" },
+  { value: "light", labelKey: "appearance.theme.light", icon: "sun" },
+  { value: "dark", labelKey: "appearance.theme.dark", icon: "moon" },
 ];
 
-const TEXT_SIZE_OPTIONS: { value: FontScalePreference; label: string }[] = [
-  { value: "small", label: "Small" },
-  { value: "default", label: "Default" },
-  { value: "large", label: "Large" },
-  { value: "xlarge", label: "XL" },
+const TEXT_SIZE_OPTIONS: { value: FontScalePreference; labelKey: TranslationKey }[] = [
+  { value: "small", labelKey: "appearance.textSize.small" },
+  { value: "default", labelKey: "appearance.textSize.default" },
+  { value: "large", labelKey: "appearance.textSize.large" },
+  { value: "xlarge", labelKey: "appearance.textSize.xlarge" },
 ];
 
 type PreviewColors = Pick<AppTheme["colors"], "background" | "surface" | "surfaceRaised" | "border" | "accent" | "text" | "textMuted">;
@@ -34,9 +35,10 @@ type PreviewColors = Pick<AppTheme["colors"], "background" | "surface" | "surfac
 export function AppearanceScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   return (
     <Screen>
-      <DetailTopBar title="Appearance" subtitle="Theme and display" onBack={() => router.back()} />
+      <DetailTopBar title={t("appearance.title")} subtitle={t("appearance.subtitle")} onBack={() => router.back()} />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
@@ -51,6 +53,7 @@ export function AppearanceScreen() {
 
 export function AppearanceContent() {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const preference = useThemePreference();
   const pureBlack = usePureBlackPreference();
   const fontScalePreference = useFontScalePreference();
@@ -60,19 +63,20 @@ export function AppearanceContent() {
   return (
     <View testID="appearance-content">
       <View style={styles.intro}>
-        <Text style={[typography.title, { color: theme.colors.text }]}>Appearance</Text>
-        <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 6, maxWidth: 520 }]}>Choose how Cohub looks on this device.</Text>
+        <Text style={[typography.title, { color: theme.colors.text }]}>{t("appearance.intro.title")}</Text>
+        <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 6, maxWidth: 520 }]}>{t("appearance.intro.body")}</Text>
       </View>
 
-      <SectionHeader title="Theme" />
+      <SectionHeader title={t("appearance.section.theme")} />
       <View style={[styles.segmented, { marginHorizontal: 16, borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.background }]}>
         {THEME_OPTIONS.map((option, index) => {
           const selected = preference === option.value;
+          const label = t(option.labelKey);
           return (
             <Pressable
               key={option.value}
               accessibilityRole="radio"
-              accessibilityLabel={option.label}
+              accessibilityLabel={label}
               accessibilityState={{ selected, checked: selected }}
               aria-checked={selected}
               onPress={() => void setThemePreference(option.value)}
@@ -84,7 +88,7 @@ export function AppearanceContent() {
               ]}
             >
               <AppIcon name={option.icon} size={15} color={selected ? theme.colors.accent : theme.colors.textMuted} />
-              <Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textSecondary }]}>{option.label}</Text>
+              <Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textSecondary }]}>{label}</Text>
             </Pressable>
           );
         })}
@@ -101,7 +105,7 @@ export function AppearanceContent() {
           return (
             <ThemePreviewCard
               key={option.value}
-              label={option.label}
+              label={t(option.labelKey)}
               mode={previewMode}
               pureBlack={pureBlack && previewMode === "dark"}
               selected={selected}
@@ -118,11 +122,11 @@ export function AppearanceContent() {
             <AppIcon name="moon" size={17} color={theme.colors.textMuted} />
           </View>
           <View style={styles.settingText}>
-            <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Pure black dark mode</Text>
-            <Text numberOfLines={2} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>Use black surfaces when a dark theme is active.</Text>
+            <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("appearance.pureBlack.title")}</Text>
+            <Text numberOfLines={2} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{t("appearance.pureBlack.body")}</Text>
           </View>
           <Switch
-            accessibilityLabel="Pure black dark mode"
+            accessibilityLabel={t("appearance.pureBlack.title")}
             value={pureBlack}
             disabled={preference === "light"}
             onValueChange={(value) => void setPureBlackPreference(value)}
@@ -133,15 +137,16 @@ export function AppearanceContent() {
         </View>
       </View>
 
-      <SectionHeader title="Text size" />
+      <SectionHeader title={t("appearance.section.textSize")} />
       <View style={[styles.segmented, { marginHorizontal: 16, borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.background }]}>
         {TEXT_SIZE_OPTIONS.map((option, index) => {
           const selected = fontScalePreference === option.value;
+          const label = t(option.labelKey);
           return (
             <Pressable
               key={option.value}
               accessibilityRole="radio"
-              accessibilityLabel={`${option.label} text size`}
+              accessibilityLabel={label}
               accessibilityState={{ selected, checked: selected }}
               aria-checked={selected}
               onPress={() => void setFontScalePreference(option.value)}
@@ -151,7 +156,7 @@ export function AppearanceContent() {
                 { backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent" },
               ]}
             >
-              <Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textSecondary }]}>{option.label}</Text>
+              <Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textSecondary }]}>{label}</Text>
             </Pressable>
           );
         })}
@@ -162,31 +167,32 @@ export function AppearanceContent() {
             <AppIcon name="type" size={17} color={theme.colors.textMuted} />
           </View>
           <View style={styles.settingText}>
-            <Text style={[typography.chatBody, { color: theme.colors.text }]}>The Agent is working on your request…</Text>
-            <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>Applies to Chats, Spaces, and settings.</Text>
+            <Text style={[typography.chatBody, { color: theme.colors.text }]}>{t("appearance.textPreview.sample")}</Text>
+            <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{t("appearance.textPreview.body")}</Text>
           </View>
         </View>
       </View>
 
-      <SectionHeader title="Current palette" />
+      <SectionHeader title={t("appearance.section.palette")} />
       <View style={[styles.currentPalette, { marginHorizontal: 16, borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: theme.colors.accent }} />
-          <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{preferenceLabel(preference)} · {appliedModeLabel(theme.mode, pureBlack)}</Text>
+          <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{preferenceLabel(preference, t)} · {appliedModeLabel(theme.mode, pureBlack, t)}</Text>
         </View>
-        <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 5 }]}>Applied to navigation, Chat, Files, and settings.</Text>
+        <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 5 }]}>{t("appearance.palette.applied")}</Text>
       </View>
     </View>
   );
 }
 
-function preferenceLabel(preference: ThemePreference) {
-  return THEME_OPTIONS.find((option) => option.value === preference)?.label ?? "System";
+function preferenceLabel(preference: ThemePreference, t: (key: TranslationKey) => string) {
+  const option = THEME_OPTIONS.find((item) => item.value === preference);
+  return t(option?.labelKey ?? "appearance.theme.system");
 }
 
-function appliedModeLabel(mode: AppTheme["mode"], pureBlack: boolean) {
-  if (mode === "dark") return pureBlack ? "Pure black" : "Dark";
-  return "Light";
+function appliedModeLabel(mode: AppTheme["mode"], pureBlack: boolean, t: (key: TranslationKey) => string) {
+  if (mode === "dark") return pureBlack ? t("appearance.mode.pureBlack") : t("appearance.mode.dark");
+  return t("appearance.mode.light");
 }
 
 function ThemePreviewCard({ label, mode, pureBlack, selected, width, onPress }: { label: string; mode: "light" | "dark"; pureBlack: boolean; selected: boolean; width: number; onPress: () => void }) {
@@ -200,7 +206,7 @@ function ThemePreviewCard({ label, mode, pureBlack, selected, width, onPress }: 
     <View style={{ width }}>
       <Pressable
         accessibilityRole="radio"
-        accessibilityLabel={`${label} theme`}
+        accessibilityLabel={label}
         accessibilityState={{ selected, checked: selected }}
         aria-checked={selected}
         onPress={onPress}

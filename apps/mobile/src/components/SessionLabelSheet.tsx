@@ -13,6 +13,7 @@ import {
   type SessionLabel,
 } from "@/src/data/session-labels";
 import { useAppTheme, typography } from "@/src/theme";
+import { useTranslation } from "@/src/i18n";
 import { AppIcon } from "@/src/ui";
 
 type SessionLabelSheetProps = {
@@ -28,6 +29,7 @@ type SessionLabelSheetProps = {
 
 export function SessionLabelSheet({ client, spaceId, session, labels = [], labelsError = null, onLabelsReload, onClose, onChanged }: SessionLabelSheetProps) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const [fetchedCatalog, setFetchedCatalog] = useState<SessionLabel[]>([]);
   const [assignments, setAssignments] = useState<LabelAssignmentRecord[]>([]);
   const [loading, setLoading] = useState(labels.length === 0);
@@ -56,7 +58,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
         setAssignments(assigned);
       })
       .catch((caught) => {
-        if (active) setError(caught instanceof Error ? caught.message : "Unable to load labels");
+        if (active) setError(caught instanceof Error ? caught.message : t("labels.error"));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -64,7 +66,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
     return () => {
       active = false;
     };
-  }, [client, reloadToken, session.id, spaceId]);
+  }, [client, reloadToken, session.id, spaceId, t]);
 
   const assignedIds = useMemo(() => new Set(assignments.map((item) => item.labelId)), [assignments]);
   const selectable = useMemo(() => catalog.filter((label) => !label.system), [catalog]);
@@ -92,7 +94,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
       setAssignments((current) => wasAssigned
         ? [...current, { labelId: label.id, labelName: label.name, labelSystemKey: label.systemKey } as LabelAssignmentRecord]
         : current.filter((item) => item.labelId !== label.id));
-      setError(caught instanceof Error ? caught.message : "Unable to update labels");
+      setError(caught instanceof Error ? caught.message : t("labels.updateError"));
     } finally {
       setBusyLabelIds((current) => {
         const next = new Set(current);
@@ -100,7 +102,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
         return next;
       });
     }
-  }, [assignedIds, busyLabelIds, client, onChanged, session.id, spaceId]);
+  }, [assignedIds, busyLabelIds, client, onChanged, session.id, spaceId, t]);
 
   const create = useCallback(async () => {
     const name = newLabelName.trim();
@@ -117,44 +119,44 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
       const createdLabel = created ? nextCatalog.find((item) => item.id === created.id) ?? created : null;
       if (createdLabel) await toggle(createdLabel);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to create label");
+      setError(caught instanceof Error ? caught.message : t("labels.createError"));
     } finally {
       setCreating(false);
     }
-  }, [client, creating, newLabelName, onLabelsReload, spaceId, toggle]);
+  }, [client, creating, newLabelName, onLabelsReload, spaceId, t, toggle]);
 
   return (
     <AdaptiveSheet
       visible
-      title="Labels"
-      subtitle="Choose a label for this Chat, or create a new one."
+      title={t("labels.title")}
+      subtitle={t("labels.subtitle")}
       onClose={onClose}
       testID="session-label-sheet"
       footer={
         <View>
-          <Text style={[typography.caption, { color: theme.colors.textMuted, marginBottom: 8 }]}>Create label</Text>
+          <Text style={[typography.caption, { color: theme.colors.textMuted, marginBottom: 8 }]}>{t("labels.createSection")}</Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <View style={{ flex: 1 }}>
               <TextInput
                 value={newLabelName}
                 onChangeText={setNewLabelName}
-                placeholder="Label name"
+                placeholder={t("labels.namePlaceholder")}
                 placeholderTextColor={theme.colors.textFaint}
                 editable={!creating}
                 onSubmitEditing={() => void create()}
                 style={{ minHeight: 42, paddingHorizontal: 12, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.background, color: theme.colors.text, fontSize: typography.body.fontSize }}
               />
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="Create label" disabled={!newLabelName.trim() || creating} onPress={() => void create()} style={({ pressed }) => ({ minHeight: 42, paddingHorizontal: 14, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: !newLabelName.trim() || creating ? theme.colors.surfaceRaised : pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: !newLabelName.trim() || creating ? 0.6 : 1 })}>
-              {creating ? <ActivityIndicator size="small" color={theme.colors.accentText} /> : <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>Create</Text>}
+            <Pressable accessibilityRole="button" accessibilityLabel={t("labels.create")} disabled={!newLabelName.trim() || creating} onPress={() => void create()} style={({ pressed }) => ({ minHeight: 42, paddingHorizontal: 14, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: !newLabelName.trim() || creating ? theme.colors.surfaceRaised : pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: !newLabelName.trim() || creating ? 0.6 : 1 })}>
+              {creating ? <ActivityIndicator size="small" color={theme.colors.accentText} /> : <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>{t("common.create")}</Text>}
             </Pressable>
           </View>
         </View>
       }
     >
-      {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel="Retry loading labels" onPress={reload} style={{ paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.accent }]}>Labels failed to load — tap to retry</Text></Pressable> : null}
+      {labelsError ? <Pressable accessibilityRole="button" accessibilityLabel={t("labels.retry")} onPress={reload} style={{ paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.accent }]}>{t("labels.loadFailed")}</Text></Pressable> : null}
       {loading && selectable.length === 0 ? <View style={{ paddingVertical: 24, alignItems: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : selectable.length === 0 ? (
-        <Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 14 }]}>No labels in this Space yet. Create one below, then tap it to add this Chat.</Text>
+        <Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 14 }]}>{t("labels.none")}</Text>
       ) : selectable.map((item) => {
         const assigned = assignedIds.has(item.id);
         const busy = busyLabelIds.has(item.id);
@@ -162,7 +164,7 @@ export function SessionLabelSheet({ client, spaceId, session, labels = [], label
           <Pressable
             key={item.id}
             accessibilityRole="checkbox"
-            accessibilityLabel={`Add to ${item.name}`}
+            accessibilityLabel={t("labels.addTo", { name: item.name })}
             accessibilityState={{ checked: assigned }}
             onPress={() => void toggle(item)}
             disabled={busy}

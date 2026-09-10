@@ -18,6 +18,7 @@ import Reanimated, { cancelAnimation, ReduceMotion, useAnimatedStyle, useSharedV
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 import { useAppTheme, typography } from "@/src/theme";
+import { useTranslation } from "@/src/i18n";
 import { AppIcon, IconButton, type IconName } from "@/src/ui";
 
 const COMPACT_BREAKPOINT = 720;
@@ -51,6 +52,7 @@ export function AdaptiveSheet({
   testID,
 }: AdaptiveSheetProps) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const compact = Math.min(width, height) < COMPACT_BREAKPOINT;
@@ -207,7 +209,7 @@ export function AdaptiveSheet({
               </View>
               <IconButton
                 name="x"
-                label={`Close ${title}`}
+                label={t("ui.sheet.close", { title })}
                 size={36}
                 disabled={!dismissible}
                 onPress={requestClose}

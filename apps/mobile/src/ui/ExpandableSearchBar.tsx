@@ -8,6 +8,7 @@ import Reanimated, {
   interpolate,
 } from "react-native-reanimated"
 import { AppIcon } from "@/src/ui";
+import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 
 type ExpandableSearchBarProps = {
@@ -27,12 +28,13 @@ const GAP = 8;
 export function ExpandableSearchBar({
   query,
   onQueryChange,
-  placeholder = "Search",
+  placeholder,
   queryRef,
   account,
   onCreate,
 }: ExpandableSearchBarProps) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const inputRef = useRef<TextInput>(null);
   const expandedRef = useRef(false);
   const [expanded, setExpanded] = useState(false);
@@ -106,7 +108,7 @@ export function ExpandableSearchBar({
         >
           <Pressable
             accessibilityRole="button"
-         accessibilityLabel="Close search"
+         accessibilityLabel={t("ui.search.close")}
             hitSlop={8}
             onPress={collapse}
             style={({ pressed }) => ({
@@ -153,7 +155,7 @@ alignItems: "center",
  ref={inputRef}
      value={query}
           onChangeText={onQueryChange}
-      placeholder={placeholder}
+      placeholder={placeholder ?? t("ui.search.placeholder")}
     placeholderTextColor={theme.colors.textFaint}
  style={[typography.body, { flex: 1, minWidth: 0, height: 44, color: theme.colors.text, padding: 0 }]}
           returnKeyType="search"
@@ -164,7 +166,7 @@ onFocus={expand}
   {query.length > 0 ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Clear search"
+            accessibilityLabel={t("ui.search.clear")}
             hitSlop={8}
             onPress={() => onQueryChange("")}
         style={({ pressed }) => ({
@@ -188,7 +190,7 @@ onFocus={expand}
       >
         <Pressable
           accessibilityRole="button"
-       accessibilityLabel="Create new"
+       accessibilityLabel={t("ui.createNew")}
           hitSlop={8}
           onPress={onCreate}
           style={({ pressed }) => ({

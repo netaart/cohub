@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Linking, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useApp } from "@/src/data/context";
+import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import { DetailTopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
 
@@ -14,6 +15,7 @@ export default function WorkScreen() {
   const params = useLocalSearchParams<Params>();
   const appId = Array.isArray(params.appId) ? params.appId[0] : params.appId;
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const { client } = useApp();
   const [detail, setDetail] = useState<AppDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -29,15 +31,15 @@ export default function WorkScreen() {
     void client.apps.get(appId).then((result) => {
       if (active) setDetail(result);
     }).catch((caught) => {
-      if (active) setError(caught instanceof Error ? caught.message : "Unable to open Work");
+      if (active) setError(caught instanceof Error ? caught.message : t("work.error"));
     });
     return () => { active = false; };
-  }, [appId, client]);
+  }, [appId, client, t]);
 
-  const title = detail?.app.meta?.title || detail?.app.meta?.name || detail?.app.slug || "Work";
+  const title = detail?.app.meta?.title || detail?.app.meta?.name || detail?.app.slug || t("work.fallbackTitle");
   return <Screen>
-    <DetailTopBar title={title} subtitle={detail?.space.name || "Published Work"} onBack={() => router.back()} actions={contentUrl ? <IconButton name="external-link" label="Open externally" size={40} onPress={() => void Linking.openURL(contentUrl)} /> : undefined} />
-    {error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center" }]}>{error}</Text></View> : !detail ? <LoadingRows count={6} /> : !contentUrl ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>This Work has no published content yet.</Text></View> : <WebView
+    <DetailTopBar title={title} subtitle={detail?.space.name || t("work.published")} onBack={() => router.back()} actions={contentUrl ? <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void Linking.openURL(contentUrl)} /> : undefined} />
+    {error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center" }]}>{error}</Text></View> : !detail ? <LoadingRows count={6} /> : !contentUrl ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("work.noContent")}</Text></View> : <WebView
       source={{ uri: contentUrl }}
       style={{ flex: 1, backgroundColor: theme.colors.background }}
       originWhitelist={["https://*"]}

@@ -2,10 +2,12 @@ import { useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppIcon, BrandMark } from "@/src/ui";
+import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 
 export function AuthScreen({ onSignIn, loading, error }: { onSignIn: () => Promise<void>; loading: boolean; error: string | null }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [pressed, setPressed] = useState(false);
   return (
@@ -13,22 +15,22 @@ export function AuthScreen({ onSignIn, loading, error }: { onSignIn: () => Promi
       <View style={styles.header}>
         <BrandMark size={54} />
         <Text style={[typography.display, { color: theme.colors.text, marginTop: 20 }]}>Cohub</Text>
-        <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 9, textAlign: "center", maxWidth: 290 }]}>A living space where people and Agents build together.</Text>
+        <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 9, textAlign: "center", maxWidth: 290 }]}>{t("auth.tagline")}</Text>
       </View>
 
       <View style={styles.center}>
         <View style={[styles.signalRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
           <View style={[styles.signalIcon, { backgroundColor: theme.colors.accentSoft }]}><AppIcon name="sparkles" size={20} color={theme.colors.accent} /></View>
           <View style={{ flex: 1 }}>
-            <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Your work, in context</Text>
-            <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>Chats, files, previews, and Agent runs in one Space.</Text>
+            <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("auth.feature.context.title")}</Text>
+            <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>{t("auth.feature.context.body")}</Text>
           </View>
         </View>
         <View style={[styles.signalRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, marginTop: 10 }]}>
           <View style={[styles.signalIcon, { backgroundColor: theme.colors.infoSoft }]}><AppIcon name="sync" size={20} color={theme.colors.info} /></View>
           <View style={{ flex: 1 }}>
-            <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>Pick up anywhere</Text>
-            <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>Continue a run from your phone without losing the thread.</Text>
+            <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("auth.feature.sync.title")}</Text>
+            <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>{t("auth.feature.sync.body")}</Text>
           </View>
         </View>
       </View>
@@ -37,7 +39,7 @@ export function AuthScreen({ onSignIn, loading, error }: { onSignIn: () => Promi
         {error ? <View style={[styles.error, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{error}</Text></View> : null}
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Continue with Cohub"
+          accessibilityLabel={t("auth.continue")}
           disabled={loading}
           onPress={() => void onSignIn()}
           onPressIn={() => setPressed(true)}
@@ -45,9 +47,9 @@ export function AuthScreen({ onSignIn, loading, error }: { onSignIn: () => Promi
           style={[styles.signIn, { backgroundColor: pressed ? theme.colors.accentPressed : theme.colors.accent, opacity: loading ? 0.65 : 1 }]}
         >
           {loading ? <ActivityIndicator color={theme.colors.accentText} /> : <AppIcon name="arrow-right" size={19} color={theme.colors.accentText} />}
-          <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>{loading ? "Opening sign in…" : "Continue with Cohub"}</Text>
+          <Text style={[typography.bodyMedium, { color: theme.colors.accentText }]}>{loading ? t("auth.opening") : t("auth.continue")}</Text>
         </Pressable>
-        <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center", marginTop: 12 }]}>Secure sign in via Logto</Text>
+        <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center", marginTop: 12 }]}>{t("auth.secure")}</Text>
       </View>
     </View>
   );

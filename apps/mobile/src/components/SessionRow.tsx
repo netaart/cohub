@@ -4,8 +4,9 @@ import { Avatar, AppIcon, StatusPill } from "@/src/ui";
 import { PressableScale } from "@/src/ui/PressableScale";
 import { useAppTheme, typography } from "@/src/theme";
 import { displaySessionTitle, formatRelativeTime, shortPreview } from "@/src/utils";
-import { getSessionStatus, sessionStatusLabels } from "@/src/data/session-status";
+import { getSessionStatus } from "@/src/data/session-status";
 import { useApp } from "@/src/data/context";
+import { useTranslation } from "@/src/i18n";
 
 type SessionRowProps = {
   session: UserSessionListItem;
@@ -19,8 +20,9 @@ type SessionRowProps = {
 
 export function SessionRow({ session, onPress, onLongPress, labels = [], showSpace = true }: SessionRowProps) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const { state } = useApp();
-  const spaceName = session.space?.name?.trim() || "Space";
+  const spaceName = session.space?.name?.trim() || t("space.fallbackName");
   const sessionStatus = getSessionStatus(state.sessionLatestTurns[session.id]?.status);
   const running = sessionStatus === "running";
   const rowContent = <>
@@ -32,7 +34,7 @@ export function SessionRow({ session, onPress, onLongPress, labels = [], showSpa
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
         <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, flex: 1 }]}>{showSpace ? `${spaceName} · ` : ""}{shortPreview(session.latestMessageText, 84)}</Text>
-        {sessionStatus === "running" ? <StatusPill label={sessionStatusLabels.running} tone="warning" /> : sessionStatus === "failed" ? <StatusPill label={sessionStatusLabels.failed} tone="danger" /> : sessionStatus === "stopped" ? <StatusPill label={sessionStatusLabels.stopped} tone="neutral" /> : null}
+        {sessionStatus === "running" ? <StatusPill label={t("ui.status.running")} tone="warning" /> : sessionStatus === "failed" ? <StatusPill label={t("ui.status.failed")} tone="danger" /> : sessionStatus === "stopped" ? <StatusPill label={t("ui.status.stopped")} tone="neutral" /> : null}
       </View>
       {labels.length > 0 ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
         {labels.slice(0, 3).map((label) => <View key={label.id} style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: label.system ? theme.colors.infoSoft : theme.colors.accentSoft }}>
@@ -45,5 +47,5 @@ export function SessionRow({ session, onPress, onLongPress, labels = [], showSpa
   </>;
   const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: showSpace ? 76 : 68, paddingHorizontal: showSpace ? 18 : 16, paddingVertical: 10, backgroundColor: "transparent", borderBottomWidth: 1, borderBottomColor: theme.colors.border };
   const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
-  return <PressableScale accessibilityRole="button" accessibilityLabel={`Open ${displaySessionTitle(session)}`} onPress={onPress} onLongPress={onLongPress} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{rowContent}</PressableScale>;
+  return <PressableScale accessibilityRole="button" accessibilityLabel={t("ui.openNamed", { name: displaySessionTitle(session) })} onPress={onPress} onLongPress={onLongPress} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{rowContent}</PressableScale>;
 }

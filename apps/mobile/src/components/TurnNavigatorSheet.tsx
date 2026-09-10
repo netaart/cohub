@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { turnIndexPreview } from "@/src/data/session-history";
+import { useTranslation, type Translate } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, SearchField, StatusPill } from "@/src/ui";
 import { formatRelativeTime } from "@/src/utils";
@@ -38,12 +39,12 @@ function statusTone(
 	return "success";
 }
 
-function statusLabel(status: SessionTurnIndexItem["status"]) {
-	if (status === "completed") return "Done";
-	if (status === "failed") return "Failed";
-	if (status === "running") return "Running";
-	if (status === "queued") return "Queued";
-	if (status === "interrupted" || status === "cancelled") return "Stopped";
+function statusLabel(status: SessionTurnIndexItem["status"], t: Translate) {
+	if (status === "completed") return t("ui.status.done");
+	if (status === "failed") return t("ui.status.failed");
+	if (status === "running") return t("ui.status.running");
+	if (status === "queued") return t("ui.status.queued");
+	if (status === "interrupted" || status === "cancelled") return t("ui.status.stopped");
 	return status;
 }
 
@@ -58,6 +59,7 @@ export function TurnNavigatorSheet({
 	onRetry,
 }: TurnNavigatorSheetProps) {
 	const theme = useAppTheme();
+	const { t } = useTranslation();
 	const [query, setQuery] = useState("");
 	const filteredTurns = useMemo(() => {
 		const needle = query.trim().toLowerCase();
@@ -77,11 +79,11 @@ export function TurnNavigatorSheet({
 	return (
 		<AdaptiveSheet
 			visible={visible}
-			title="Conversation turns"
+			title={t("turn.navigator.title")}
 			subtitle={
 				turns.length > 0
-					? `${turns.length} turns · select a point in this Chat`
-					: "Jump to any point in this Chat"
+					? t("turn.navigator.subtitle", { count: turns.length })
+					: t("turn.navigator.subtitleEmpty")
 			}
 			onClose={onClose}
 			scrollable={false}
@@ -92,7 +94,7 @@ export function TurnNavigatorSheet({
 			<SearchField
 				value={query}
 				onChangeText={setQuery}
-				placeholder="Search turns"
+				placeholder={t("turn.navigator.search")}
 			/>
 			{loading && turns.length === 0 ? (
 				<View style={styles.state}>
@@ -103,7 +105,7 @@ export function TurnNavigatorSheet({
 							{ color: theme.colors.textMuted, marginTop: 10 },
 						]}
 					>
-						Loading conversation index
+						{t("turn.navigator.loading")}
 					</Text>
 				</View>
 			) : filteredTurns.length === 0 ? (
@@ -124,13 +126,13 @@ export function TurnNavigatorSheet({
 						]}
 					>
 						{query
-							? "No matching turns"
-							: "The conversation index is unavailable"}
+							? t("turn.navigator.noMatch")
+							: t("turn.navigator.unavailable")}
 					</Text>
 					{!query ? (
 						<Pressable
 							accessibilityRole="button"
-							accessibilityLabel="Retry loading conversation index"
+							accessibilityLabel={t("turn.navigator.retry")}
 							onPress={onRetry}
 							style={({ pressed }) => ({
 								marginTop: 12,
@@ -140,7 +142,7 @@ export function TurnNavigatorSheet({
 							<Text
 								style={[typography.bodyMedium, { color: theme.colors.accent }]}
 							>
-								Retry
+								{t("common.retry")}
 							</Text>
 						</Pressable>
 					) : null}
@@ -158,7 +160,7 @@ export function TurnNavigatorSheet({
 						return (
 							<Pressable
 								accessibilityRole="button"
-								accessibilityLabel={`Jump to turn ${turn.sequence}`}
+								accessibilityLabel={t("turn.navigator.jump", { sequence: turn.sequence })}
 								accessibilityState={{ selected }}
 								disabled={loadingSequence !== null}
 								onPress={() => void onJump(turn.sequence)}
@@ -216,7 +218,7 @@ export function TurnNavigatorSheet({
 											{turn.model ? ` · ${turn.model}` : ""}
 										</Text>
 										<StatusPill
-											label={statusLabel(turn.status)}
+											label={statusLabel(turn.status, t)}
 											tone={statusTone(turn.status)}
 										/>
 									</View>

@@ -7,6 +7,7 @@ import { useProfileSession } from "@/src/auth/profile-session";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useDebugUnlock } from "@/src/components/useDebugUnlock";
 import { useApp } from "@/src/data/context";
+import { useTranslation } from "@/src/i18n";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { useAppTheme, typography } from "@/src/theme";
 import {
@@ -22,6 +23,7 @@ type ProfileSheet = "clear-cache" | "sign-out" | null;
 
 export default function ProfileScreen() {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const { signOut } = useProfileSession();
   const { name, email, avatar } = useCurrentUser();
@@ -56,7 +58,7 @@ export default function ProfileScreen() {
       await clearCache();
       setSheet(null);
     } catch (error) {
-      setSheetError(error instanceof Error ? error.message : "Unable to clear local cache.");
+      setSheetError(error instanceof Error ? error.message : t("profile.clearCache.error"));
     } finally {
       setClearingCache(false);
     }
@@ -70,12 +72,12 @@ export default function ProfileScreen() {
       try {
         await clearCache();
       } catch {
-        setSheetError("Local cache could not be cleared. Signing out anyway.");
+        setSheetError(t("profile.clearCache.partialError"));
       }
       await signOut();
       setSheet(null);
     } catch (error) {
-      setSheetError(error instanceof Error ? error.message : "Unable to sign out.");
+      setSheetError(error instanceof Error ? error.message : t("profile.signOut.error"));
     } finally {
       setSigningOut(false);
     }
@@ -98,39 +100,46 @@ export default function ProfileScreen() {
       </View>
       {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
 
-      <SectionHeader title="App" />
+      <SectionHeader title={t("profile.section.app")} />
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <SettingRow
           icon="settings"
-          title="Settings"
-          detail="Account and notification preferences"
+          title={t("profile.settings.title")}
+          detail={t("profile.settings.detail")}
           onPress={() => router.push("/settings")}
           trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
         />
         <SettingRow
           icon="palette"
-          title="Appearance"
-          detail="Theme and display"
+          title={t("profile.appearance.title")}
+          detail={t("profile.appearance.detail")}
           onPress={() => router.push("/appearance")}
           trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
         />
         <SettingRow
+          icon="globe"
+          title={t("profile.language.title")}
+          detail={t("profile.language.detail")}
+          onPress={() => router.push("/language")}
+          trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
+        />
+        <SettingRow
           icon="info"
-          title="About"
-          detail={`Cohub Mobile · ${version}`}
+          title={t("profile.about.title")}
+          detail={t("profile.about.detail", { version })}
           onPress={() => router.push("/about")}
           trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
         />
       </View>
 
-      <SectionHeader title="Data" />
+      <SectionHeader title={t("profile.section.data")} />
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-        <SettingRow icon="database" title="Cached Spaces" detail={`${state.spaces.length} available offline`} />
-        <SettingRow icon="messages" title="Cached Chats" detail={`${state.sessions.length} recent threads`} />
+        <SettingRow icon="database" title={t("profile.data.spaces")} detail={t("ui.available.offline", { count: state.spaces.length })} />
+        <SettingRow icon="messages" title={t("profile.data.chats")} detail={t("ui.recent.threads", { count: state.sessions.length })} />
         <SettingRow
           icon="trash"
-          title="Clear local cache"
-          detail="Remove cached work from this device"
+          title={t("profile.data.clearCache")}
+          detail={t("profile.data.clearCacheDetail")}
           onPress={() => openSheet("clear-cache")}
           trailing={<AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />}
         />
@@ -138,7 +147,7 @@ export default function ProfileScreen() {
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Sign out"
+        accessibilityLabel={t("common.signOut")}
         disabled={signingOut}
         onPress={() => openSheet("sign-out")}
         style={({ pressed }) => ({
@@ -155,10 +164,10 @@ export default function ProfileScreen() {
         })}
       >
         <Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>
-          {signingOut ? "Signing out…" : "Sign out"}
+          {signingOut ? t("profile.signingOut") : t("common.signOut")}
         </Text>
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="App version" onPress={unlockDebug} hitSlop={10}>
+      <Pressable accessibilityRole="button" accessibilityLabel={t("profile.version")} onPress={unlockDebug} hitSlop={10}>
         <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center", marginTop: 22, marginBottom: 8 }]}>
           Cohub Mobile · {version}
         </Text>
@@ -166,8 +175,8 @@ export default function ProfileScreen() {
 
       <AdaptiveSheet
         visible={sheet === "clear-cache"}
-        title="Clear local cache?"
-        subtitle="This only removes local copies. Your Spaces remain on Cohub."
+        title={t("profile.clearCache.title")}
+        subtitle={t("profile.clearCache.subtitle")}
         onClose={closeSheet}
         dismissible={!clearingCache}
         scrollable={false}
@@ -175,10 +184,10 @@ export default function ProfileScreen() {
         footer={
           <SheetFooter>
             <Pressable disabled={clearingCache} onPress={closeSheet} style={styles.cancelButton}>
-              <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>Cancel</Text>
+              <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>{t("common.cancel")}</Text>
             </Pressable>
             <PrimaryButton
-              label="Clear cache"
+              label={t("profile.clearCache.action")}
               icon="trash"
               tone="danger"
               loading={clearingCache}
@@ -188,14 +197,14 @@ export default function ProfileScreen() {
           </SheetFooter>
         }
       >
-        <Text style={[typography.body, { color: theme.colors.textSecondary }]}>Cached Spaces and Chat messages will be removed from this device.</Text>
+        <Text style={[typography.body, { color: theme.colors.textSecondary }]}>{t("profile.clearCache.body")}</Text>
         {sheetError ? <SheetError message={sheetError} /> : null}
       </AdaptiveSheet>
 
       <AdaptiveSheet
         visible={sheet === "sign-out"}
-        title="Sign out of Cohub?"
-        subtitle="Your cached work on this device will be cleared."
+        title={t("profile.signOut.title")}
+        subtitle={t("profile.signOut.subtitle")}
         onClose={closeSheet}
         dismissible={!signingOut}
         scrollable={false}
@@ -203,10 +212,10 @@ export default function ProfileScreen() {
         footer={
           <SheetFooter>
             <Pressable disabled={signingOut} onPress={closeSheet} style={styles.cancelButton}>
-              <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>Cancel</Text>
+              <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>{t("common.cancel")}</Text>
             </Pressable>
             <PrimaryButton
-              label="Sign out"
+              label={t("common.signOut")}
               icon="arrow-right"
               tone="danger"
               loading={signingOut}
@@ -216,7 +225,7 @@ export default function ProfileScreen() {
           </SheetFooter>
         }
       >
-        <Text style={[typography.body, { color: theme.colors.textSecondary }]}>You can sign in again later. Work stored in your Spaces will not be changed.</Text>
+        <Text style={[typography.body, { color: theme.colors.textSecondary }]}>{t("profile.signOut.body")}</Text>
         {sheetError ? <SheetError message={sheetError} /> : null}
       </AdaptiveSheet>
     </Screen>

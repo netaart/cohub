@@ -8,6 +8,7 @@ import { CodeEditor } from "@/src/components/CodeEditor";
 import { detectCodeLanguage } from "@/src/data/code-language";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError, MAX_EDITABLE_CODE_BYTES } from "@/src/data/code-file";
 import { useApp } from "@/src/data/context";
+import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, DetailTopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
 
@@ -23,6 +24,7 @@ export default function FileScreen() {
   const spaceId = firstParam(params.spaceId);
   const path = Array.isArray(params.path) ? params.path.join("/") : params.path ?? "";
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const { client } = useApp();
   const [file, setFile] = useState<SpaceFsFileResponse | null>(null);
   const requestIdRef = useRef(0);
@@ -41,7 +43,7 @@ export default function FileScreen() {
       setFile(null);
       setUrl(null);
       setLoading(false);
-      setError(!spaceId ? "Space is unavailable." : !path ? "File path is missing." : "Connect to Cohub to open Files.");
+      setError(!spaceId ? t("file.spaceUnavailable") : !path ? t("file.pathMissing") : t("file.connect"));
       return;
     }
 
@@ -59,14 +61,14 @@ export default function FileScreen() {
         setFile(result);
         if (result.delivery === "url" && result.url) setUrl(result.url);
       } else {
-        setError("This file is still being prepared. Try again shortly.");
+        setError(t("file.preparing"));
       }
     } catch (caught) {
-      if (requestId === requestIdRef.current) setError(caught instanceof Error ? caught.message : "Unable to open File");
+      if (requestId === requestIdRef.current) setError(caught instanceof Error ? caught.message : t("file.openError"));
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [client, path, spaceId]);
+  }, [client, path, spaceId, t]);
 
   useEffect(() => {
     let active = true;
@@ -101,11 +103,11 @@ export default function FileScreen() {
       exitEditing();
       return;
     }
-    Alert.alert("Discard changes?", "Your edits to this file will be lost.", [
-      { text: "Keep editing", style: "cancel" },
-      { text: "Discard", style: "destructive", onPress: exitEditing },
+    Alert.alert(t("file.discard.title"), t("file.discard.body"), [
+      { text: t("file.discard.keep"), style: "cancel" },
+      { text: t("file.discard.confirm"), style: "destructive", onPress: exitEditing },
     ]);
-  }, [dirty, editing, exitEditing, router, saving]);
+  }, [dirty, editing, exitEditing, router, saving, t]);
 
   const save = useCallback(async (force = false) => {
     if (!client || !spaceId || !path || !file || draft === null) return;
@@ -133,22 +135,22 @@ export default function FileScreen() {
           saved = await write({ mtimeMs: fresh.mtimeMs, size: fresh.size });
         } else {
           setConflict(true);
-          setSaveError("This file changed on the server. Reload it or overwrite those changes.");
+          setSaveError(t("file.conflict"));
           return;
         }
       }
-      if (!saved) throw new Error("The save did not complete.");
+      if (!saved) throw new Error(t("file.saveIncomplete"));
       const { size, mtimeMs } = saved;
       setFile((current) => current ? { ...current, content, size, mtimeMs } : current);
       // Keep editing if the draft advanced while the write was in flight.
       setDraft((current) => current === content ? null : current);
       setConflict(false);
     } catch (caught) {
-      setSaveError(caught instanceof Error ? caught.message : "Unable to save this file.");
+      setSaveError(caught instanceof Error ? caught.message : t("file.saveError"));
     } finally {
       setSaving(false);
     }
-  }, [client, draft, file, path, spaceId]);
+  }, [client, draft, file, path, spaceId, t]);
 
   const reloadForConflict = useCallback(async () => {
     if (!client || !spaceId || !path) return;
@@ -156,19 +158,19 @@ export default function FileScreen() {
     setSaveError(null);
     try {
       const fresh = await client.space(spaceId).files.read(path);
-      if (!("content" in fresh)) throw new Error("This file is still being prepared. Try again shortly.");
+      if (!("content" in fresh)) throw new Error(t("file.preparing"));
       setFile(fresh);
       setDraft(fresh.kind === "text" && fresh.delivery !== "url" ? fresh.content : null);
       setConflict(false);
     } catch (caught) {
-      setSaveError(caught instanceof Error ? caught.message : "Unable to reload this file.");
+      setSaveError(caught instanceof Error ? caught.message : t("file.reloadError"));
     } finally {
       setSaving(false);
     }
-  }, [client, path, spaceId]);
+  }, [client, path, spaceId, t]);
 
-  const title = path.split("/").pop() || "File";
-  const subtitle = editing ? (dirty ? "Unsaved changes" : "Editing") : path || "Space workspace";
+  const title = path.split("/").pop() || t("file.title");
+  const subtitle = editing ? (dirty ? t("file.unsaved") : t("file.editing")) : path || t("files.workspace");
   const showWebView = Boolean(file && url && inlineContent === null);
 
   return (
@@ -180,19 +182,19 @@ export default function FileScreen() {
         actions={
           editing ? (
             <>
-              <IconButton name="x" label="Cancel editing" size={40} onPress={handleBack} disabled={saving} />
+              <IconButton name="x" label={t("file.cancelEditing")} size={40} onPress={handleBack} disabled={saving} />
               {saving ? (
                 <View style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
                   <ActivityIndicator size="small" color={theme.colors.accent} />
                 </View>
               ) : (
-                <IconButton name="check" label="Save file" size={40} tone="accent" onPress={() => void save()} disabled={!dirty} />
+                <IconButton name="check" label={t("file.save")} size={40} tone="accent" onPress={() => void save()} disabled={!dirty} />
               )}
             </>
           ) : editable ? (
-            <IconButton name="square-pen" label="Edit file" size={40} onPress={() => setDraft(file?.content ?? "")} />
+            <IconButton name="square-pen" label={t("file.edit")} size={40} onPress={() => setDraft(file?.content ?? "")} />
           ) : url ? (
-            <IconButton name="external-link" label="Open externally" size={40} onPress={() => void Linking.openURL(url)} />
+            <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void Linking.openURL(url)} />
           ) : undefined
         }
       />
@@ -239,7 +241,7 @@ export default function FileScreen() {
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
                 <AppIcon name="alert" size={14} color={theme.colors.textMuted} />
                 <Text style={[typography.caption, { color: theme.colors.textMuted, flex: 1 }]}>
-                  This file is too large to edit on mobile.
+                  {t("file.tooLarge")}
                 </Text>
               </View>
             ) : null}
@@ -265,6 +267,7 @@ function SaveBanner({
   onOverwrite: () => void;
 }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   return (
     <View style={{ backgroundColor: theme.colors.dangerSoft, borderBottomWidth: 1, borderBottomColor: theme.colors.border, paddingHorizontal: 14, paddingVertical: 10, gap: 8 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -273,9 +276,9 @@ function SaveBanner({
       </View>
       {conflict ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 23 }}>
-          <PrimaryButton label="Reload" icon="refresh" onPress={onReload} disabled={saving} style={{ minHeight: 36, paddingHorizontal: 12 }} />
-          <Pressable accessibilityRole="button" accessibilityLabel="Overwrite server changes" disabled={saving} onPress={onOverwrite} style={({ pressed }) => ({ opacity: pressed || saving ? 0.6 : 1 })}>
-            <Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>Overwrite</Text>
+          <PrimaryButton label={t("file.reload")} icon="refresh" onPress={onReload} disabled={saving} style={{ minHeight: 36, paddingHorizontal: 12 }} />
+          <Pressable accessibilityRole="button" accessibilityLabel={t("file.overwriteA11y")} disabled={saving} onPress={onOverwrite} style={({ pressed }) => ({ opacity: pressed || saving ? 0.6 : 1 })}>
+            <Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>{t("file.overwrite")}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -285,6 +288,7 @@ function SaveBanner({
 
 function FileError({ message, onRetry, onBack }: { message: string; onRetry: () => void; onBack: () => void }) {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const isDirectory = /not a file|directory|folder/i.test(message);
   return (
     <View style={styles.errorState}>
@@ -292,14 +296,14 @@ function FileError({ message, onRetry, onBack }: { message: string; onRetry: () 
         <AppIcon name={isDirectory ? "folder" : "cloud-off"} size={24} color={theme.colors.danger} />
       </View>
       <Text style={[typography.heading, { color: theme.colors.text, textAlign: "center", marginTop: 14 }]}>
-        {isDirectory ? "This is a folder" : "Unable to open this file"}
+        {isDirectory ? t("file.folder.title") : t("file.error.title")}
       </Text>
       <Text selectable style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 6, maxWidth: 320 }]}>
-        {isDirectory ? "Open folders from the Files list to browse their contents." : message}
+        {isDirectory ? t("file.folder.body") : message}
       </Text>
       <View style={styles.errorActions}>
-        <PrimaryButton label="Back to Files" icon="arrow-left" onPress={onBack} style={{ minHeight: 44, paddingHorizontal: 14 }} />
-        {!isDirectory ? <Pressable accessibilityRole="button" accessibilityLabel="Retry opening file" onPress={onRetry} style={({ pressed }) => ({ minHeight: 44, justifyContent: "center", paddingHorizontal: 12, opacity: pressed ? 0.6 : 1 })}><Text style={[typography.bodyMedium, { color: theme.colors.accent }]}>Retry</Text></Pressable> : null}
+        <PrimaryButton label={t("files.backToFiles")} icon="arrow-left" onPress={onBack} style={{ minHeight: 44, paddingHorizontal: 14 }} />
+        {!isDirectory ? <Pressable accessibilityRole="button" accessibilityLabel={t("common.retry")} onPress={onRetry} style={({ pressed }) => ({ minHeight: 44, justifyContent: "center", paddingHorizontal: 12, opacity: pressed ? 0.6 : 1 })}><Text style={[typography.bodyMedium, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable> : null}
       </View>
     </View>
   );

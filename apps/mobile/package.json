@@ -62,7 +62,7 @@
     "ios": "expo run:ios",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
-    "test:workflow": "node --no-warnings --experimental-strip-types scripts/check-chat-workflow.mjs && node --no-warnings --experimental-strip-types scripts/check-ota-publish.mjs",
+    "test:workflow": "node --no-warnings --experimental-strip-types --import ./scripts/register-node-alias.mjs scripts/check-chat-workflow.mjs && node --no-warnings --experimental-strip-types --import ./scripts/register-node-alias.mjs scripts/check-ota-publish.mjs",
     "doctor": "expo-doctor",
     "release:check": "node scripts/check-release.mjs",
     "check": "npm run lint && npm run typecheck && npm run test:workflow && node scripts/check-expo-go-notifications.mjs && npm run release:check && npm run doctor",

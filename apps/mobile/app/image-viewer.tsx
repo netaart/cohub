@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { FlatList, Image, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { clearImageViewerPayload, getImageViewerPayload } from "@/src/data/image-viewer";
+import { useTranslation } from "@/src/i18n";
 import { typography } from "@/src/theme";
 import { AppIcon } from "@/src/ui";
 
@@ -14,6 +15,7 @@ import { AppIcon } from "@/src/ui";
 export default function ImageViewerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const { width, height } = useWindowDimensions();
   const [payload] = useState(() => getImageViewerPayload());
   const [index, setIndex] = useState(() => payload?.index ?? 0);
@@ -46,7 +48,7 @@ export default function ImageViewerScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: "#000000" }}>
         <StatusBar style="light" />
-        <Pressable accessibilityRole="button" accessibilityLabel="Close image viewer" hitSlop={6} onPress={close} style={closeButtonStyle}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t("imageViewer.close")} hitSlop={6} onPress={close} style={closeButtonStyle}>
           <AppIcon name="x" size={22} color="#ffffff" />
         </Pressable>
       </View>
@@ -77,7 +79,7 @@ export default function ImageViewerScreen() {
           </View>
         )}
       />
-      <Pressable accessibilityRole="button" accessibilityLabel="Close image viewer" hitSlop={6} onPress={close} style={closeButtonStyle}>
+      <Pressable accessibilityRole="button" accessibilityLabel={t("imageViewer.close")} hitSlop={6} onPress={close} style={closeButtonStyle}>
         <AppIcon name="x" size={22} color="#ffffff" />
       </Pressable>
       <View pointerEvents="none" style={{ position: "absolute", zIndex: 2, top: insets.top + 19, left: 18 }}>
