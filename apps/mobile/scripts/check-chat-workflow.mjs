@@ -8,7 +8,8 @@ import { getComposerActionState } from "../src/data/composer-state.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
 import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
-import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, nextTurnSequence, withFallbackUserContent, withTurnSequences } from "../src/data/session-history.ts";
+import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, nextTurnSequence, withFallbackUserContent, withTurnSequences } from "../src/data/session-history.ts";
+import { compactionFromMessage, compactionStats } from "../src/data/compaction.ts";
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 import { filterSpaces } from "../src/data/space-filters.ts";
 import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch } from "../src/data/session-status.ts";
@@ -20,6 +21,8 @@ import { splitStreamingMarkdown } from "../src/data/stream-markdown.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
 import { panelForScrollOffset } from "../src/data/space-panel-pager.ts";
+import { getSpaceSessionCount, loadSpaceSessionCounts, publishSpaceSessionCount } from "../src/data/space-session-counts.ts";
+import { cacheRetentionCutoff, DEFAULT_CACHE_RETENTION } from "../src/data/cache-retention.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
 import { forkSessionTurn } from "../src/data/session-fork.ts";
 import { resolveMessageLink } from "../src/data/message-links.ts";
@@ -156,6 +159,42 @@ assert.equal(chatThreadPlaceholder({ messageCount: 0, historyLoaded: false }), "
 assert.equal(chatThreadPlaceholder({ messageCount: 0, historyLoaded: false, error: "Unable to open Chat" }), null);
 assert.equal(chatThreadPlaceholder({ messageCount: 0, historyLoaded: true }), "empty");
 assert.equal(chatThreadPlaceholder({ messageCount: 2, historyLoaded: false }), null);
+
+// Compaction ("context") turns project to a message whose text is the summary,
+// not an empty assistant reply; the notice reads its stats from the turn meta.
+const compactTurn = {
+  id: "compact-turn",
+  sessionId: "s1",
+  sequence: 3,
+  status: "completed",
+  intent: "compact",
+  userContent: [],
+  userText: null,
+  assistantContent: [{ type: "system_note", note_type: "compacted", text: "Earlier context summary" }],
+  assistantText: null,
+  provider: "deepseek",
+  model: "deepseek-flash",
+  stopReason: null,
+  errorMessage: null,
+  finalUsage: { input: 372_700, output: 1_200, cacheRead: 372_000 },
+  totalUsage: null,
+  meta: { compaction: { summarizedMessageCount: 12, tokensBefore: 372_700, estimatedTokensAfter: 44_000 } },
+  userUuid: null,
+  authorProfile: null,
+  startedAt: null,
+  completedAt: null,
+  durationMs: 8_200,
+  createdAt: "2026-09-10T09:12:00.000Z",
+};
+const compactMessages = messagesFromTurns([compactTurn]);
+assert.equal(compactMessages.length, 1, "Compaction turns must project to exactly one message");
+assert.equal(compactMessages[0]?.text, "Earlier context summary");
+const compactInfo = compactionFromMessage(compactMessages[0]);
+assert.equal(compactInfo?.summary, "Earlier context summary");
+assert.equal(compactInfo?.meta.summarizedMessageCount, 12);
+assert.deepEqual(compactionStats(compactInfo?.meta ?? {}), { summarizedMessageCount: 12, tokensBefore: 372_700, tokensAfter: 44_000 });
+assert.equal(compactionFromMessage({ content: [{ type: "text", text: "hello" }], meta: {} }), null, "Regular messages are not compaction");
+assert.equal(compactionFromMessage({ content: [], meta: { messageKind: "compacted" } })?.summary, "", "Compacted system messages still render a notice");
 assert.equal(chatThreadPlaceholder({ messageCount: 0, historyLoaded: false, hasLiveActivity: true }), null);
 assert.equal(liveStreamStatusFromPatch("idle"), null);
 assert.equal(liveStreamStatusFromPatch("completed"), null);
@@ -419,6 +458,71 @@ assert.equal(panelForScrollOffset(360, 360, 760), null);
 assert.equal(panelForScrollOffset(760, 360, 760), "files");
 assert.equal(panelForScrollOffset(150, 360, 760), "chat");
 assert.equal(panelForScrollOffset(620, 360, 760), "files");
+
+// Space Chat counts come from a cached probe of the Space's first page.
+const countListCalls = [];
+let countInFlight = 0;
+let countMaxInFlight = 0;
+const countClient = {
+  space: (spaceId) => ({
+    sessions: {
+      list: async ({ limit } = {}) => {
+        countListCalls.push({ spaceId, limit });
+        countInFlight += 1;
+        countMaxInFlight = Math.max(countMaxInFlight, countInFlight);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        countInFlight -= 1;
+        const total = spaceId === "small" ? 3 : 25;
+        const count = Math.min(total, limit ?? 20);
+        return {
+          sessions: Array.from({ length: count }, (_, index) => ({ id: `${spaceId}-${index}` })),
+          pageInfo: { hasMore: total > count, nextCursor: null },
+        };
+      },
+    },
+  }),
+};
+await loadSpaceSessionCounts(countClient, Array.from({ length: 9 }, (_, index) => `space-${index}`));
+assert.ok(countMaxInFlight <= 4, "Space count probes must stay within the concurrency cap");
+await loadSpaceSessionCounts(countClient, ["small", "big"]);
+assert.deepEqual(getSpaceSessionCount(countClient, "small"), { count: 3, hasMore: false });
+assert.deepEqual(getSpaceSessionCount(countClient, "big"), { count: 20, hasMore: true });
+const countCallsAfterProbe = countListCalls.length;
+await loadSpaceSessionCounts(countClient, ["small", "big"]);
+assert.equal(countListCalls.length, countCallsAfterProbe, "Fresh Space counts must be reused");
+await loadSpaceSessionCounts(countClient, ["small"], { force: true });
+assert.equal(countListCalls.length, countCallsAfterProbe + 1);
+publishSpaceSessionCount(countClient, "published", 7, false);
+assert.deepEqual(getSpaceSessionCount(countClient, "published"), { count: 7, hasMore: false });
+const failingCountClient = { space: () => ({ sessions: { list: async () => { throw new Error("offline"); } } }) };
+await loadSpaceSessionCounts(failingCountClient, ["broken"]);
+assert.equal(getSpaceSessionCount(failingCountClient, "broken"), null, "Failed probes must not be cached");
+const sharedProbes = [];
+const shareCountClient = {
+  space: (spaceId) => ({
+    sessions: {
+      list: async () => {
+        sharedProbes.push(spaceId);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return { sessions: [{ id: "shared-session" }], pageInfo: { hasMore: false, nextCursor: null } };
+      },
+    },
+  }),
+};
+await Promise.all([
+  loadSpaceSessionCounts(shareCountClient, ["shared"]),
+  loadSpaceSessionCounts(shareCountClient, ["shared"]),
+]);
+assert.equal(sharedProbes.length, 1, "Concurrent probes for the same Space must be shared");
+assert.deepEqual(getSpaceSessionCount(shareCountClient, "shared"), { count: 1, hasMore: false });
+
+// Cache retention prunes by cache write time; the default window is one week.
+assert.equal(DEFAULT_CACHE_RETENTION, "7d");
+const retentionNow = Date.UTC(2026, 0, 10);
+assert.equal(cacheRetentionCutoff("1d", retentionNow), retentionNow - 24 * 60 * 60 * 1000);
+assert.equal(cacheRetentionCutoff("7d", retentionNow), retentionNow - 7 * 24 * 60 * 60 * 1000);
+assert.equal(cacheRetentionCutoff("30d", retentionNow), retentionNow - 30 * 24 * 60 * 60 * 1000);
+assert.equal(cacheRetentionCutoff("forever", retentionNow), null);
 
 let fakePinned = false;
 const pinCalls = [];
