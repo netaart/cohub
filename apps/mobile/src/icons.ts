@@ -38,6 +38,8 @@ import Info from "lucide-react-native/icons/info";
 import Layers2 from "lucide-react-native/icons/layers-2";
 import ListTree from "lucide-react-native/icons/list-tree";
 import MessagesSquare from "lucide-react-native/icons/messages-square";
+import Maximize2 from "lucide-react-native/icons/maximize-2";
+import Minimize2 from "lucide-react-native/icons/minimize-2";
 import Monitor from "lucide-react-native/icons/monitor";
 import Mic from "lucide-react-native/icons/mic";
 import Paperclip from "lucide-react-native/icons/paperclip";
@@ -104,6 +106,8 @@ export const icons = {
   layers: Layers2,
   "list-tree": ListTree,
   messages: MessagesSquare,
+  maximize: Maximize2,
+  minimize: Minimize2,
   monitor: Monitor,
   mic: Mic,
   more: Ellipsis,
