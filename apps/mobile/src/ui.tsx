@@ -102,7 +102,8 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   ) : (
     <View style={[{ flex: 1, backgroundColor: theme.colors.background }, contentStyle]}>{children}</View>
   );
-  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>{body}</KeyboardAvoidingView> : body;  return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
+  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === "android" ? -insets.bottom : 0}>{body}</KeyboardAvoidingView> : body;
+  return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
 export function WorkspaceToolbar({ query, onQueryChange, queryRef, account, onCreate, onSettings, placeholder }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; account: ReactNode; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
