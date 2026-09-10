@@ -14,6 +14,7 @@ import type { MarkdownBlock, MarkdownInline, MarkdownTableAlignment } from "@/sr
 import { graphemeLength, splitGraphemes } from "@/src/data/stream-reveal";
 import { parseMarkdownEntries, StreamingMarkdownCache, type MarkdownBlockEntry } from "@/src/data/stream-markdown-cache";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
+import { compactionFromMessage, compactionStats, type CompactionInfo } from "@/src/data/compaction";
 import { resolveMessageLink } from "@/src/data/message-links";
 import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
@@ -254,7 +255,49 @@ function Block({ block, color, streaming = false }: { block: ContentBlock; color
   const accent = color ?? theme.colors.accent;
   if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} streaming={streaming} />;
   if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} streaming={streaming} />;
+  if (block.type === "system_note") return <SystemNoteRow block={block} />;
   return null;
+}
+
+function SystemNoteRow({ block }: { block: Extract<ContentBlock, { type: "system_note" }> }) {
+  const theme = useAppTheme();
+  const { t } = useTranslation();
+  const title = block.note_type === "compacted" ? t("message.compaction.title") : t("chat.systemUpdate");
+  const body = block.text?.trim();
+  return <View style={{ borderLeftWidth: 2, borderLeftColor: theme.colors.border, paddingLeft: 9, gap: 3 }}>
+    <Text style={[typography.caption, { color: theme.colors.textSecondary, fontWeight: "600" }]}>{title}</Text>
+    {body ? <Text selectable style={[typography.caption, { color: theme.colors.textMuted }]}>{body}</Text> : null}
+  </View>;
+}
+
+/**
+ * Compaction is runtime metadata, not a reply: it renders as a boundary card
+ * (mirroring the Web "Context compacted" notice) instead of an empty bubble.
+ */
+function CompactionNotice({ info }: { info: CompactionInfo }) {
+  const theme = useAppTheme();
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const stats = compactionStats(info.meta);
+  const details: string[] = [];
+  if (stats.summarizedMessageCount !== null) details.push(t("message.compaction.messages", { count: stats.summarizedMessageCount }));
+  if (stats.tokensBefore !== null && stats.tokensAfter !== null) details.push(t("message.compaction.context", { before: formatTokenCount(stats.tokensBefore), after: formatTokenCount(stats.tokensAfter) }));
+  const hasSummary = info.summary.length > 0;
+  return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5 }}>
+    <View style={{ borderWidth: 1, borderColor: theme.colors.border, borderRadius: theme.radius.lg, borderCurve: "continuous", backgroundColor: theme.colors.surface, overflow: "hidden" }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={hasSummary ? t(expanded ? "message.compaction.collapse" : "message.compaction.expand") : t("message.compaction.title")} accessibilityState={{ expanded }} disabled={!hasSummary} onPress={() => setExpanded((value) => !value)} style={({ pressed }) => ({ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: pressed && hasSummary ? theme.colors.surfacePressed : "transparent" })}>
+        <AppIcon name="archive" size={15} color={theme.colors.textMuted} />
+        <Text style={[typography.caption, { color: theme.colors.textSecondary, fontWeight: "600" }]}>{t("message.compaction.title")}</Text>
+        {details.length > 0 ? <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textMuted, flex: 1, textAlign: "right" }]}>{details.join(" · ")}</Text> : <View style={{ flex: 1 }} />}
+        {hasSummary ? <AppIcon name={expanded ? "chevron-down" : "chevron-right"} size={14} color={theme.colors.textFaint} /> : null}
+      </Pressable>
+      {expanded && hasSummary ? <View style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, maxHeight: 320 }}>
+        <ScrollView nestedScrollEnabled showsVerticalScrollIndicator contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 10 }}>
+          <MarkdownBody source={info.summary} accent={theme.colors.accent} textColor={theme.colors.textSecondary} />
+        </ScrollView>
+      </View> : null}
+    </View>
+  </View>;
 }
 
 function toolIcon(name: string): IconName {
@@ -416,6 +459,8 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   }, [copied]);
   const isUser = message.role === "user";
   const bubbleEnvironment = useMemo(() => ({ onUser: isUser, spaceId }), [isUser, spaceId]);
+  const compaction = compactionFromMessage(message);
+  if (compaction && (message.content ?? []).every((block) => block.type === "system_note")) return <CompactionNotice info={compaction} />;
   if (!hasRenderableMessage(message)) return null;
   const isSystem = message.role === "system";
   if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || t("chat.systemUpdate")}</Text></View>;

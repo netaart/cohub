@@ -15,6 +15,7 @@ function messageText(
 			.flatMap((block) => {
 				if (block.type === "text") return [block.text];
 				if (block.type === "thinking") return [block.thinking];
+				if (block.type === "system_note") return [block.text];
 				return [];
 			})
 			.join("\n\n")

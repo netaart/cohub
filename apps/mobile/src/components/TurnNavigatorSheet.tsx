@@ -48,6 +48,11 @@ function statusLabel(status: SessionTurnIndexItem["status"], t: Translate) {
 	return status;
 }
 
+function turnPreview(turn: SessionTurnIndexItem, t: Translate) {
+	if (turn.intent === "compact") return t("message.compaction.title");
+	return turnIndexPreview(turn);
+}
+
 export function TurnNavigatorSheet({
 	visible,
 	turns,
@@ -68,13 +73,13 @@ export function TurnNavigatorSheet({
 			return [
 				String(turn.sequence),
 				`#${turn.sequence}`,
-				turnIndexPreview(turn),
+				turnPreview(turn, t),
 				turn.provider ?? "",
 				turn.model ?? "",
 				turn.authorProfile?.displayName ?? "",
 			].some((value) => value.toLowerCase().includes(needle));
 		});
-	}, [query, turns]);
+	}, [query, t, turns]);
 
 	return (
 		<AdaptiveSheet
@@ -156,7 +161,7 @@ export function TurnNavigatorSheet({
 					keyboardShouldPersistTaps="handled"
 					renderItem={({ item: turn }) => {
 						const selected = turn.sequence === currentSequence;
-						const preview = turnIndexPreview(turn);
+						const preview = turnPreview(turn, t);
 						return (
 							<Pressable
 								accessibilityRole="button"

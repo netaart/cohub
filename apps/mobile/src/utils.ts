@@ -52,6 +52,9 @@ export function contentBlockText(block: ContentBlock | Record<string, unknown>) 
   if (block.type === "tool_result") {
     return translate("message.tool.result");
   }
+  if (block.type === "system_note" && typeof (block as { text?: unknown }).text === "string") {
+    return (block as { text: string }).text;
+  }
   return "";
 }
 
@@ -70,6 +73,7 @@ export function hasRenderableContent(content: ContentBlock[] | null | undefined)
     }
     if (block.type === "tool_use") return true;
     if (block.type === "tool_result") return true;
+    if (block.type === "system_note") return typeof block.text === "string" && block.text.trim().length > 0;
     return false;
   });
 }
