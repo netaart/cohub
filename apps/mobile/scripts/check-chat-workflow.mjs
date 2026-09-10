@@ -19,7 +19,7 @@ import { markdownBlockSignature, parseInlineMarkdown, parseMarkdown } from "../s
 import { splitStreamingMarkdown } from "../src/data/stream-markdown.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
-import { panelForOpeningDelta, shouldClosePanel, shouldOpenPanel } from "../src/data/space-panel-gesture.ts";
+import { panelForScrollOffset } from "../src/data/space-panel-pager.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
 import { forkSessionTurn } from "../src/data/session-fork.ts";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
@@ -413,13 +413,11 @@ assert.deepEqual(filterSpaces([
   { id: "old", updatedAt: "2026-01-01T00:00:00.000Z" },
   { id: "new", updatedAt: "2026-09-01T00:00:00.000Z" },
 ], "recent").map((space) => space.id), ["new", "old"]);
-assert.equal(panelForOpeningDelta(30), "chat");
-assert.equal(panelForOpeningDelta(-30), "files");
-assert.equal(panelForOpeningDelta(0), null);
-assert.equal(shouldOpenPanel(100, 360, 0), true);
-assert.equal(shouldOpenPanel(10, 360, 0.5), false);
-assert.equal(shouldOpenPanel(10, 360, 0.6), true);
-assert.equal(shouldClosePanel(180, 360, 0), true);
+assert.equal(panelForScrollOffset(0, 360, 760), "chat");
+assert.equal(panelForScrollOffset(360, 360, 760), null);
+assert.equal(panelForScrollOffset(760, 360, 760), "files");
+assert.equal(panelForScrollOffset(150, 360, 760), "chat");
+assert.equal(panelForScrollOffset(620, 360, 760), "files");
 
 let fakePinned = false;
 const pinCalls = [];

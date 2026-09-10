@@ -1,12 +1,11 @@
-/* eslint-disable react-hooks/refs -- gesture callbacks read panel refs that are written outside render. */
 /* eslint-disable react-hooks/immutability -- Reanimated shared values are intentionally mutated by gesture worklets. */
 /* eslint-disable react-hooks/set-state-in-effect -- controlled panel state synchronizes the native animation surface. */
 import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/cohub";
 import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, BackHandler, FlatList, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Reanimated, { cancelAnimation, Extrapolation, interpolate, runOnJS, useAnimatedStyle, useSharedValue, withSpring, type SharedValue } from "react-native-reanimated";
+import Reanimated, { Extrapolation, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionSearchRow } from "@/src/components/SearchResultRow";
 import { SessionRow } from "@/src/components/SessionRow";
@@ -24,7 +23,7 @@ import {
   type SessionLabel,
   type SessionSourceGroup,
 } from "@/src/data/session-labels";
-import { panelForOpeningDelta, panelForSide, shouldClosePanel, shouldOpenPanel, sideForPanel, type PanelName, type PanelSide } from "@/src/data/space-panel-gesture";
+import { panelForScrollOffset, type PanelName } from "@/src/data/space-panel-pager";
 import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField } from "@/src/ui";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
 
@@ -46,68 +45,48 @@ type SpacePanelsProps = {
 
 const PANEL_WIDTH_RATIO = 0.86;
 const MAX_PANEL_WIDTH = 360;
+/** Time without scroll events before the pager commits to its nearest page. */
+const PANEL_SCROLL_IDLE_MS = 140;
+/** A programmatic close has no drag-end event; give the native scroll animation time to land. */
+const PANEL_CLOSE_SETTLE_MS = 380;
 
-// One RNGH pan surface so the two panel directions cannot compete.
+/**
+ * Push-style pager. The Chats/Files gesture is a native horizontal scroll, which is also the
+ * only arbitration Android gives us: the ScrollView intercepts a horizontal drag and the text
+ * underneath receives ACTION_CANCEL (so a long press never turns into a selection mid-swipe),
+ * while a text selection keeps precedence because the native text view sets
+ * FLAG_DISALLOW_INTERCEPT, which disables that interception.
+ */
 export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
   const theme = useAppTheme();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const panelWidth = Math.min(MAX_PANEL_WIDTH, Math.max(280, width * PANEL_WIDTH_RATIO));
-  const progress = useSharedValue(activePanel ? 1 : 0);
-  const activeSide = useSharedValue<PanelSide | 0>(activePanel ? sideForPanel(activePanel) : 0);
-  const gestureSide = useSharedValue<PanelSide | 0>(0);
-  const gestureStartSide = useSharedValue<PanelSide | 0>(0);
-  const gestureStartProgress = useSharedValue(0);
-  const gestureActive = useSharedValue(false);
-  const animationId = useSharedValue(0);
-  const [visiblePanel, setVisiblePanel] = useState<SpacePanel | null>(activePanel);
+  const centerOffset = panelWidth;
+  const filesOffset = panelWidth + width;
+  const snapOffsets = useMemo(() => [0, centerOffset, filesOffset], [centerOffset, filesOffset]);
+  const pagerRef = useRef<ScrollView>(null);
+  const scrollOffset = useSharedValue(centerOffset);
+  const scrim = useSharedValue(activePanel ? 1 : 0);
+  const shownPanel = useSharedValue<PanelName | 0>(activePanel ?? 0);
+  const [pageHeight, setPageHeight] = useState(height);
+  const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
+  const [visiblePanel, setVisiblePanel] = useState<PanelName | null>(activePanel);
   const [interactive, setInteractive] = useState(Boolean(activePanel));
-  const visiblePanelRef = useRef<SpacePanel | null>(activePanel);
-  const activePanelRef = useRef<SpacePanel | null>(activePanel);
+  const visiblePanelRef = useRef<PanelName | null>(activePanel);
+  const activePanelRef = useRef<PanelName | null>(activePanel);
+  const initialScrollDone = useRef(false);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearClosedPanel = useCallback((panel: PanelName) => {
-    if (activePanelRef.current !== null || visiblePanelRef.current !== panel) return;
-    visiblePanelRef.current = null;
-    setVisiblePanel(null);
-    setInteractive(false);
-    activeSide.value = 0;
-    gestureSide.value = 0;
-  }, [activeSide, gestureSide]);
+  const clearIdleTimer = useCallback(() => {
+    if (idleTimer.current === null) return;
+    clearTimeout(idleTimer.current);
+    idleTimer.current = null;
+  }, []);
+  useEffect(() => clearIdleTimer, [clearIdleTimer]);
 
-  const finishClosedPanel = useCallback((panel: PanelName) => {
-    if (activePanelRef.current === panel) {
-      activePanelRef.current = null;
-      setInteractive(false);
-      onActivePanelChange(null);
-    }
-    clearClosedPanel(panel);
-  }, [clearClosedPanel, onActivePanelChange]);
-
-  const animateClosed = useCallback((panel: PanelName) => {
-    activeSide.value = sideForPanel(panel);
-    gestureSide.value = 0;
-    const currentAnimation = animationId.value + 1;
-    animationId.value = currentAnimation;
-    progress.value = withSpring(0, {
-      damping: 28,
-      stiffness: 420,
-      mass: 0.9,
-      overshootClamping: true,
-    }, (finished) => {
-      if (finished && animationId.value === currentAnimation) runOnJS(finishClosedPanel)(panel);
-    });
-  }, [activeSide, animationId, finishClosedPanel, gestureSide, progress]);
-
-  const closePanel = useCallback((panel: SpacePanel) => {
-    if (visiblePanelRef.current !== panel) return;
-    activePanelRef.current = null;
-    setInteractive(false);
-    onActivePanelChange(null);
-    animateClosed(panel);
-  }, [animateClosed, onActivePanelChange]);
-
-  const showGesturePanel = useCallback((panel: PanelName) => {
+  const showPanel = useCallback((panel: PanelName) => {
     if (visiblePanelRef.current === panel) return;
     visiblePanelRef.current = panel;
     setVisiblePanel(panel);
@@ -118,227 +97,152 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     visiblePanelRef.current = panel;
     setVisiblePanel(panel);
     setInteractive(true);
-    activeSide.value = sideForPanel(panel);
-    gestureSide.value = 0;
     onActivePanelChange(panel);
-  }, [activeSide, gestureSide, onActivePanelChange]);
+  }, [onActivePanelChange]);
 
-  const commitClose = useCallback((panel: PanelName) => {
-    if (activePanelRef.current !== panel) return;
+  const commitClosed = useCallback(() => {
     activePanelRef.current = null;
+    visiblePanelRef.current = null;
+    setVisiblePanel(null);
     setInteractive(false);
     onActivePanelChange(null);
   }, [onActivePanelChange]);
 
-  useEffect(() => {
-    if (activePanel === activePanelRef.current) return;
-    activePanelRef.current = activePanel;
-    if (activePanel) {
-      visiblePanelRef.current = activePanel;
-      setVisiblePanel(activePanel);
-      setInteractive(true);
-      activeSide.value = sideForPanel(activePanel);
-      gestureSide.value = 0;
-      animationId.value += 1;
-      progress.value = withSpring(1, {
-        damping: 28,
-        stiffness: 420,
-        mass: 0.9,
-        overshootClamping: true,
-      });
-      return;
-    }
-    const panel = visiblePanelRef.current;
-    if (panel) {
-      setInteractive(false);
-      animateClosed(panel);
-    }
-  }, [activePanel, activeSide, animateClosed, animationId, gestureSide, progress]);
+  const settle = useCallback(() => {
+    clearIdleTimer();
+    const panel = panelForScrollOffset(scrollOffset.get(), centerOffset, filesOffset);
+    if (panel) commitOpen(panel);
+    else commitClosed();
+  }, [centerOffset, clearIdleTimer, commitClosed, commitOpen, filesOffset, scrollOffset]);
+
+  const scheduleSettle = useCallback(() => {
+    clearIdleTimer();
+    idleTimer.current = setTimeout(settle, PANEL_SCROLL_IDLE_MS);
+  }, [clearIdleTimer, settle]);
+
+  const closePanel = useCallback(() => {
+    activePanelRef.current = null;
+    onActivePanelChange(null);
+    clearIdleTimer();
+    pagerRef.current?.scrollTo({ x: centerOffset, animated: true });
+    idleTimer.current = setTimeout(settle, PANEL_CLOSE_SETTLE_MS);
+  }, [centerOffset, clearIdleTimer, onActivePanelChange, settle]);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      const offset = event.contentOffset.x;
+      scrollOffset.value = offset;
+      const distance = Math.abs(offset - centerOffset);
+      scrim.value = interpolate(distance, [0, panelWidth], [0, 1], Extrapolation.CLAMP);
+      if (distance <= 8) return;
+      const panel: PanelName = offset < centerOffset ? "chat" : "files";
+      if (shownPanel.value === panel) return;
+      shownPanel.value = panel;
+      scheduleOnRN(showPanel, panel);
+    },
+  }, [centerOffset, panelWidth, scrim, scrollOffset, showPanel, shownPanel]);
 
   useEffect(() => {
     if (!isFocused) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      const panel = activePanelRef.current ?? visiblePanelRef.current;
-      if (!panel) return false;
-      closePanel(panel);
+      if (!activePanelRef.current && !visiblePanelRef.current) return false;
+      closePanel();
       return true;
     });
     return () => subscription.remove();
   }, [closePanel, isFocused]);
 
-  // The chip row is a native horizontal ScrollView. Touch-start inside it must scroll the row instead of swiping the panel.
-  const chipsRect = useSharedValue<ChipsRect>({ x: -1, y: -1, width: 0, height: 0 });
-  const panGesture = useMemo(() => Gesture.Pan()
-    .activeOffsetX([-4, 4])
-    .failOffsetY([-15, 15])
-    .onTouchesDown((event, manager) => {
-      "worklet";
-      const touch = event.allTouches[0];
-      if (!touch) return;
-      const rect = chipsRect.value;
-      if (rect.width > 0 && touch.absoluteX >= rect.x && touch.absoluteX <= rect.x + rect.width && touch.absoluteY >= rect.y && touch.absoluteY <= rect.y + rect.height) manager.fail();
-    })
-    .onStart(() => {
-      "worklet";
-      gestureActive.value = true;
-      gestureStartSide.value = activeSide.value;
-      gestureStartProgress.value = progress.value;
-      gestureSide.value = 0;
-      cancelAnimation(progress);
-    })
-    .onUpdate((event) => {
-      "worklet";
-      const startSide = gestureStartSide.value;
-      if (startSide === 0) {
-        let side = gestureSide.value;
-        if (side === 0 && Math.abs(event.translationX) >= 8) {
-          const panel = panelForOpeningDelta(event.translationX);
-          if (panel) {
-            side = sideForPanel(panel);
-            gestureSide.value = side;
-            runOnJS(showGesturePanel)(panel);
-          }
-        }
-        if (side === 0) return;
-        const distance = side === -1 ? Math.max(0, event.translationX) : Math.max(0, -event.translationX);
-        progress.value = Math.min(1, distance / panelWidth);
-        return;
-      }
-      const distance = startSide === -1 ? Math.max(0, -event.translationX) : Math.max(0, event.translationX);
-      progress.value = Math.max(0, gestureStartProgress.value - distance / panelWidth);
-    })
-    .onEnd((event, success) => {
-      "worklet";
-      if (!success) return;
-      gestureActive.value = false;
-      const startSide = gestureStartSide.value;
-      if (startSide === 0) {
-        const side = gestureSide.value;
-        if (side === 0) {
-          progress.value = 0;
-          return;
-        }
-        const panel = panelForSide(side);
-        const distance = progress.value * panelWidth;
-        // RNGH reports points/second; the shared helper uses PanResponder's points/millisecond.
-        const velocityTowardOpen = (side === -1 ? event.velocityX : -event.velocityX) / 1000;
-        if (shouldOpenPanel(distance, panelWidth, velocityTowardOpen)) {
-          activeSide.value = side;
-          gestureSide.value = 0;
-          const currentAnimation = animationId.value + 1;
-          animationId.value = currentAnimation;
-          progress.value = withSpring(1, {
-            damping: 28,
-            stiffness: 420,
-            mass: 0.9,
-            overshootClamping: true,
-          });
-          runOnJS(commitOpen)(panel);
-        } else {
-          const currentAnimation = animationId.value + 1;
-          animationId.value = currentAnimation;
-          progress.value = withSpring(0, {
-            damping: 28,
-            stiffness: 420,
-            mass: 0.9,
-            overshootClamping: true,
-          }, (finished) => {
-            if (finished && animationId.value === currentAnimation) runOnJS(clearClosedPanel)(panel);
-          });
-        }
-        return;
-      }
+  // Keep the settled page aligned when the panel or window width changes.
+  useEffect(() => {
+    const panel = activePanelRef.current ?? visiblePanelRef.current;
+    const x = panel === "chat" ? 0 : panel === "files" ? filesOffset : centerOffset;
+    scrollOffset.value = x;
+    pagerRef.current?.scrollTo({ x, animated: false });
+  }, [centerOffset, filesOffset, scrollOffset]);
 
-      const panel = panelForSide(startSide);
-      const distance = panel === "chat" ? Math.max(0, -event.translationX) : Math.max(0, event.translationX);
-      const velocityTowardClose = (panel === "chat" ? -event.velocityX : event.velocityX) / 1000;
-      if (shouldClosePanel(distance, panelWidth, velocityTowardClose)) {
-        const currentAnimation = animationId.value + 1;
-        animationId.value = currentAnimation;
-        progress.value = withSpring(0, {
-          damping: 28,
-          stiffness: 420,
-          mass: 0.9,
-          overshootClamping: true,
-        }, (finished) => {
-          if (finished && animationId.value === currentAnimation) runOnJS(finishClosedPanel)(panel);
-        });
-        runOnJS(commitClose)(panel);
-      } else {
-        const currentAnimation = animationId.value + 1;
-        animationId.value = currentAnimation;
-        progress.value = withSpring(1, {
-          damping: 28,
-          stiffness: 420,
-          mass: 0.9,
-          overshootClamping: true,
-        });
-      }
-    })
-    .onFinalize((_, success) => {
-      "worklet";
-      if (!gestureActive.value || success) return;
-      gestureActive.value = false;
-      const startSide = gestureStartSide.value;
-      const canceledSide = gestureSide.value;
-      if (canceledSide !== 0) activeSide.value = canceledSide;
-      gestureSide.value = 0;
-      const target = startSide === 0 ? 0 : 1;
-      const currentAnimation = animationId.value + 1;
-      animationId.value = currentAnimation;
-      progress.value = withSpring(target, {
-        damping: 28,
-        stiffness: 420,
-        mass: 0.9,
-        overshootClamping: true,
-      }, (finished) => {
-        if (finished && target === 0 && animationId.value === currentAnimation) {
-          if (canceledSide !== 0) runOnJS(clearClosedPanel)(panelForSide(canceledSide));
-        }
-      });
-    }), [activeSide, animationId, chipsRect, clearClosedPanel, commitClose, commitOpen, finishClosedPanel, gestureActive, gestureSide, gestureStartProgress, gestureStartSide, panelWidth, progress, showGesturePanel]);
+  const scrimStyle = useAnimatedStyle(() => ({ opacity: scrim.value * 0.52 }));
 
-  // Becoming the JS responder makes React Native intercept native touches for this view
-  // (JSResponderHandler), so a panel swipe cancels a native text long press / selection
-  // underneath instead of letting both run. Selection drags stay untouched: the native
-  // text view sets FLAG_DISALLOW_INTERCEPT, which disables that interception.
-  const capturePanelDrag = useCallback(() => gestureActive.get(), [gestureActive]);
+  const handleChipsTouchChange = useCallback((touching: boolean) => {
+    // The filter chips are a nested horizontal ScrollView; it only wins its drag while the
+    // pager is not scrolling, so touch-start there disables the pager for this gesture.
+    setPagerScrollEnabled(!touching);
+  }, []);
 
-  const panelStyle = useAnimatedStyle(() => {
-    const side = activeSide.value === 0 ? gestureSide.value : activeSide.value;
-    const closedOffset = side < 0 ? -panelWidth : panelWidth;
-    return {
-      transform: [{ translateX: interpolate(progress.value, [0, 1], [closedOffset, 0], Extrapolation.CLAMP) }],
-    };
-  }, [panelWidth]);
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value * 0.52 }));
+  const pageStyle = (panel: PanelName) => [
+    styles.panelPage,
+    panel === "chat" ? styles.panelPageLeft : styles.panelPageRight,
+    {
+      width: panelWidth,
+      height: pageHeight,
+      paddingBottom: insets.bottom,
+      backgroundColor: theme.colors.background,
+      borderColor: theme.colors.border,
+    },
+  ];
 
-  return <GestureDetector gesture={panGesture} userSelect="none" enableContextMenu={false} touchAction="pan-y">
-    <View collapsable={false} style={styles.nativeRoot} onMoveShouldSetResponderCapture={capturePanelDrag} onResponderTerminationRequest={() => false}>
-      {children}
-      {visiblePanel ? <Reanimated.View pointerEvents={interactive ? "box-none" : "none"} style={styles.nativeOverlay}>
-        <Reanimated.View pointerEvents={interactive ? "auto" : "none"} style={[styles.backdrop, backdropStyle]}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Close panel" style={styles.fill} onPress={() => closePanel(visiblePanel)} />
-        </Reanimated.View>
-        <Reanimated.View
-          collapsable={false}
-          testID={`space-panel-${visiblePanel}`}
-          pointerEvents={interactive ? "auto" : "none"}
-          accessibilityViewIsModal={interactive}
-          accessibilityElementsHidden={!interactive}
-          importantForAccessibility={interactive ? "yes" : "no-hide-descendants"}
-          role="dialog"
-          style={[styles.panel, panelStyle, { width: panelWidth, paddingBottom: insets.bottom, backgroundColor: theme.colors.background, borderColor: theme.colors.border, left: visiblePanel === "chat" ? 0 : undefined, right: visiblePanel === "files" ? 0 : undefined }]}
-        >
-          {interactive
-            ? visiblePanel === "chat"
-              ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} chipsRect={chipsRect} onClose={() => closePanel("chat")} onNewChat={() => { closePanel("chat"); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel("chat"); onOpenSession(sessionId, target); }} />
-              : <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} onClose={() => closePanel("files")} onOpenFile={(path) => { closePanel("files"); onOpenFile(path); }} onOpenFilesPage={() => { closePanel("files"); onOpenFilesPage(); }} />
-            : <PanelGesturePreview panel={visiblePanel} />}
-        </Reanimated.View>
-      </Reanimated.View> : null}
+  return (
+    <View style={styles.nativeRoot} collapsable={false}>
+      <Reanimated.ScrollView
+        ref={pagerRef}
+        horizontal
+        style={styles.pager}
+        showsHorizontalScrollIndicator={false}
+        bounces={false}
+        overScrollMode="never"
+        scrollEventThrottle={16}
+        scrollEnabled={pagerScrollEnabled}
+        snapToOffsets={snapOffsets}
+        decelerationRate="fast"
+        disableIntervalMomentum
+        contentOffset={{ x: centerOffset, y: 0 }}
+        onScroll={scrollHandler}
+        onScrollBeginDrag={clearIdleTimer}
+        onScrollEndDrag={scheduleSettle}
+        onMomentumScrollBegin={clearIdleTimer}
+        onMomentumScrollEnd={settle}
+        onLayout={(event) => setPageHeight(event.nativeEvent.layout.height)}
+        onContentSizeChange={() => {
+          if (initialScrollDone.current) return;
+          initialScrollDone.current = true;
+          scrollOffset.value = centerOffset;
+          pagerRef.current?.scrollTo({ x: centerOffset, animated: false });
+        }}
+      >
+        <View style={{ flexDirection: "row", height: pageHeight }}>
+          <View
+            style={pageStyle("chat")}
+            accessibilityViewIsModal={interactive && visiblePanel === "chat"}
+            accessibilityElementsHidden={!(interactive && visiblePanel === "chat")}
+            importantForAccessibility={interactive && visiblePanel === "chat" ? "yes" : "no-hide-descendants"}
+          >
+            {visiblePanel === "chat"
+              ? interactive
+                ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onChipsTouchChange={handleChipsTouchChange} onClose={closePanel} onNewChat={() => { closePanel(); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel(); onOpenSession(sessionId, target); }} />
+                : <PanelGesturePreview panel="chat" />
+              : null}
+          </View>
+          <View style={{ width, height: pageHeight }} accessibilityElementsHidden={visiblePanel !== null} importantForAccessibility={visiblePanel ? "no-hide-descendants" : "auto"}>
+            {children}
+            <Reanimated.View style={[styles.backdrop, scrimStyle]} pointerEvents={interactive ? "auto" : "none"}>
+              <Pressable accessibilityRole="button" accessibilityLabel="Close panel" style={styles.fill} onPress={closePanel} />
+            </Reanimated.View>
+          </View>
+          <View
+            style={pageStyle("files")}
+            accessibilityViewIsModal={interactive && visiblePanel === "files"}
+            accessibilityElementsHidden={!(interactive && visiblePanel === "files")}
+            importantForAccessibility={interactive && visiblePanel === "files" ? "yes" : "no-hide-descendants"}
+          >
+            {visiblePanel === "files"
+              ? interactive
+                ? <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} onClose={closePanel} onOpenFile={(path) => { closePanel(); onOpenFile(path); }} onOpenFilesPage={() => { closePanel(); onOpenFilesPage(); }} />
+                : <PanelGesturePreview panel="files" />
+              : null}
+          </View>
+        </View>
+      </Reanimated.ScrollView>
     </View>
-  </GestureDetector>;
+  );
 }
 
 function PanelGesturePreview({ panel }: { panel: SpacePanel }) {
@@ -400,9 +304,7 @@ type ChatListFilter =
   | { kind: "source"; source: SessionSourceGroup }
   | { kind: "label"; label: SessionLabel; ref: string };
 
-type ChipsRect = { x: number; y: number; width: number; height: number };
-
-function ChatPanel({ spaceId, spaceName, sessions, client, chipsRect, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; chipsRect?: SharedValue<ChipsRect>; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
+function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onChipsTouchChange: (touching: boolean) => void; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
   const { state, refreshSessionStatuses } = useApp();
   const [query, setQuery] = useState("");
@@ -538,18 +440,6 @@ function ChatPanel({ spaceId, spaceName, sessions, client, chipsRect, onClose, o
     { key: "other", label: "Other", icon: "globe", filter: { kind: "source", source: "other" } },
     ...labels.map((label) => ({ key: `label:${label.id}`, label: label.name, filter: { kind: "label" as const, label, ref: formatLabelRef(label) } })),
   ];
-  const chipsRowRef = useRef<View>(null);
-  const measureChipsRow = useCallback(() => {
-    if (!chipsRect) return;
-    chipsRowRef.current?.measureInWindow((x, y, width, height) => {
-      chipsRect.value = { x, y, width, height };
-    });
-  }, [chipsRect]);
-  // The panel slides in, so the first layout measurement is off-screen. Re-measure once it settles.
-  useEffect(() => {
-    const timeout = setTimeout(measureChipsRow, 450);
-    return () => clearTimeout(timeout);
-  }, [measureChipsRow]);
   const chipRow = <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
     {filterChips.map((chip) => (
       <PanelFilterChip
@@ -571,7 +461,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, chipsRect, onClose, o
           <View style={{ flex: 1 }}><SearchField value={query} onChangeText={setQuery} placeholder="Search Chats" /></View>
           {remoteQueryMatches && remoteSearch.loading ? <ActivityIndicator size="small" color={theme.colors.accent} /> : null}
         </View>
-        <View ref={chipsRowRef} collapsable={false} onLayout={measureChipsRow}>{chipRow}</View>
+        <View onTouchStart={() => onChipsTouchChange(true)} onTouchEnd={() => onChipsTouchChange(false)} onTouchCancel={() => onChipsTouchChange(false)}>{chipRow}</View>
         {remoteQueryMatches && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat search" onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
         {state.sessionStatusError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{state.sessionStatusError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry Chat statuses" onPress={() => void refreshSessionStatuses(displaySessions)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
         {labelSessionsError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{labelSessionsError}</Text><Pressable accessibilityRole="button" accessibilityLabel="Retry loading labeled Chats" onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.micro, { color: theme.colors.accent }]}>Retry</Text></Pressable></View> : null}
@@ -669,12 +559,12 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
 
 const styles = {
   nativeRoot: { flex: 1, minHeight: 0, overflow: "hidden" as const },
-  nativeOverlay: { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20 },
-  modalRoot: { flex: 1 } as const,
-  gesturePreviewRoot: { position: "absolute" as const, left: 0, right: 0, zIndex: 20, elevation: 20 },
+  pager: { flex: 1 },
+  panelPage: { borderLeftWidth: 1, borderRightWidth: 1, shadowColor: "#000000", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 18, elevation: 12 },
+  panelPageLeft: { borderLeftWidth: 0 },
+  panelPageRight: { borderRightWidth: 0 },
   fill: { flex: 1 } as const,
   backdrop: { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "#000000" },
-  panel: { position: "absolute" as const, top: 0, bottom: 0, borderLeftWidth: 1, borderRightWidth: 1, shadowColor: "#000000", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 18, elevation: 12 },
   panelContent: { flex: 1, minHeight: 0 },
   header: { minHeight: 62, paddingHorizontal: 10, paddingVertical: 7, flexDirection: "row" as const, alignItems: "center" as const, gap: 5, borderBottomWidth: 1 },
   headerText: { flex: 1, minWidth: 0, paddingHorizontal: 3 },
