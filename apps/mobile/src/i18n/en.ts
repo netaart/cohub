@@ -577,8 +577,6 @@ export const en = {
   "message.tool.status.noResult": "no result",
   "message.openImage": "Open image {index} of {total}",
   "message.tokens.cached": "{count} cached",
-  "message.tokens.input": "↑{count}",
-  "message.tokens.output": "↓{count}",
   "message.compaction.title": "Context compacted",
   "message.compaction.messages": "{count} msgs",
   "message.compaction.context": "{before} → ~{after}",

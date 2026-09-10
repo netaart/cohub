@@ -550,8 +550,6 @@ export const zh: Record<TranslationKey, string> = {
   "message.tool.status.noResult": "无结果",
   "message.openImage": "打开第 {index} 张图片，共 {total} 张",
   "message.tokens.cached": "已缓存 {count}",
-  "message.tokens.input": "↑{count}",
-  "message.tokens.output": "↓{count}",
   "message.compaction.title": "上下文已压缩",
   "message.compaction.messages": "{count} 条消息",
   "message.compaction.context": "{before} → ~{after}",
