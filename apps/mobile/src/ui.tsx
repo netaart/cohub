@@ -1,8 +1,9 @@
 import { useRouter } from "expo-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -101,7 +102,9 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   ) : (
     <View style={[{ flex: 1, backgroundColor: theme.colors.background }, contentStyle]}>{children}</View>
   );
-  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>{body}</KeyboardAvoidingView> : body;
+  // Android resizes the window itself (adjustResize is the manifest default), so wrapping it in
+  // KeyboardAvoidingView subtracts the keyboard twice and pushes the composer off-screen.
+  const wrapped = keyboard && Platform.OS === "ios" ? <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">{body}</KeyboardAvoidingView> : body;
   return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
@@ -219,8 +222,25 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [focused, setFocused] = useState(false);
+  // Tapping a toolbar control blurs the input before its onPress fires. If blur alone
+  // collapsed the toolbar, the control would unmount under the finger and never receive
+  // the tap. Toolbar touches are flagged so that blur is ignored; the toolbar stays open
+  // until the input is dismissed for real (tap outside, send, or keyboard hide).
+  const toolbarTouchRef = useRef(false);
+  const [toolbarOpen, setToolbarOpen] = useState(false);
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
-  const expanded = focused || hasAttachment || voiceActive;
+  const expanded = focused || toolbarOpen || hasAttachment || voiceActive;
+  // A toolbar tap keeps the input blurred but the keyboard may already be gone; the sheet
+  // it opened (model picker) covers the composer. When the keyboard hides for any other
+  // reason the toolbar closes with it.
+  useEffect(() => {
+    if (!toolbarOpen) return;
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => {
+      if (toolbarTouchRef.current) return;
+      setToolbarOpen(false);
+    });
+    return () => hide.remove();
+  }, [toolbarOpen]);
   const resolvedModelLabel = modelLabel ?? t("ui.composer.modelAutomatic");
   const modelStatusLabel = modelStatus === "available" ? t("ui.modelStatus.available") : modelStatus === "degraded" ? t("ui.modelStatus.degraded") : modelStatus === "outage" ? t("ui.modelStatus.outage") : t("ui.modelStatus.unknown");
   return (
@@ -236,11 +256,15 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
           placeholder={placeholder ?? t("ui.composer.placeholder")}
           placeholderTextColor={theme.colors.textFaint}
           style={[typography.body, styles.composerText, expanded ? styles.composerTextExpanded : styles.composerTextCompact, { color: theme.colors.text }]}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onFocus={() => { setFocused(true); setToolbarOpen(true); }}
+          onBlur={() => {
+            setFocused(false);
+            if (toolbarTouchRef.current) return;
+            setToolbarOpen(false);
+          }}
           blurOnSubmit={false}
         />
-        {expanded ? <View style={styles.composerToolbar}>
+        {expanded ? <View style={styles.composerToolbar} onTouchStart={() => { toolbarTouchRef.current = true; }} onTouchEnd={() => { setTimeout(() => { toolbarTouchRef.current = false; }, 0); }} onTouchCancel={() => { toolbarTouchRef.current = false; }}>
           <IconButton name="plus" label={t("ui.composer.addAttachment")} size={34} onPress={onAttach} disabled={blocked} />
           <View style={styles.composerToolbarSpacer} />
           {onModelPress ? <Pressable accessibilityRole="button" accessibilityLabel={t("ui.composer.chooseModel", { model: resolvedModelLabel, status: modelStatusLabel })} disabled={blocked} onPress={onModelPress} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: blocked ? 0.5 : 1 }]}><AppIcon name="zap" size={14} color={theme.colors.accent} /><View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: modelStatus === "available" ? theme.colors.success : modelStatus === "degraded" ? theme.colors.warning : modelStatus === "outage" ? theme.colors.danger : theme.colors.textFaint }} /><Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textSecondary, flexShrink: 1 }]}>{resolvedModelLabel}</Text><AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} /></Pressable> : null}

@@ -1,7 +1,7 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Clipboard from "expo-clipboard";
-import { Link } from "expo-router";
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useRouter } from "expo-router";
+import { createContext, memo, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { CodeBlock } from "@/src/components/CodeBlock";
@@ -14,6 +14,7 @@ import type { MarkdownBlock, MarkdownInline, MarkdownTableAlignment } from "@/sr
 import { graphemeLength, splitGraphemes } from "@/src/data/stream-reveal";
 import { parseMarkdownEntries, StreamingMarkdownCache, type MarkdownBlockEntry } from "@/src/data/stream-markdown-cache";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
+import { resolveMessageLink } from "@/src/data/message-links";
 import type { StreamView } from "@/src/data/types";
 import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme } from "@/src/theme";
@@ -36,8 +37,46 @@ function fadedValue(value: string, start: number, fadeFrom: number, style: Style
     : part);
 }
 
+/**
+ * Per-bubble rendering environment. Inline nodes several layers down need to know
+ * which bubble they sit on (for code tint) and which Space owns sandbox paths;
+ * threading both through every memoized markdown layer would defeat the memo.
+ */
+const BubbleContext = createContext<{ onUser: boolean; spaceId: string | null }>({ onUser: false, spaceId: null });
+
+/**
+ * Resolves a message URL into an in-app route or system browser. Sandbox file
+ * paths need the owning Space; when it is unknown the path falls through as text.
+ */
+function useOpenMessageLink(spaceId: string | null) {
+  const router = useRouter();
+  return (url: string) => {
+    const target = resolveMessageLink(url);
+    if (!target) return false;
+    if (target.kind === "external") {
+      void Linking.openURL(target.url).catch(() => undefined);
+      return true;
+    }
+    if (target.kind === "session") {
+      router.push({ pathname: "/chat/[sessionId]", params: { sessionId: target.sessionId } });
+      return true;
+    }
+    if (target.kind === "space") {
+      router.push({ pathname: "/space/[spaceId]", params: { spaceId: target.spaceId } });
+      return true;
+    }
+    if (!spaceId) return false;
+    router.push({ pathname: "/space/[spaceId]/file", params: { spaceId, path: target.path } });
+    return true;
+  };
+}
+
 function InlineNodes({ nodes, accent, color, fadeTail = 0 }: { nodes: MarkdownInline[]; accent: string; color: string; fadeTail?: number }) {
   const theme = useAppTheme();
+  const { onUser, spaceId } = useContext(BubbleContext);
+  const openLink = useOpenMessageLink(spaceId);
+  // Inline code sits on the bubble, so it needs a tint that reads on both bubble colors.
+  const codeBackground = onUser ? "rgba(255, 255, 255, 0.18)" : theme.colors.surfaceRaised;
   const lengths = fadeTail > 0 ? nodes.map((node) => graphemeLength(node.value)) : null;
   const starts = lengths?.map((_, index) => lengths.slice(0, index).reduce((sum, value) => sum + value, 0)) ?? null;
   const total = lengths?.reduce((sum, value) => sum + value, 0) ?? 0;
@@ -49,11 +88,20 @@ function InlineNodes({ nodes, accent, color, fadeTail = 0 }: { nodes: MarkdownIn
       return <Text key={`text-${index}`} style={{ color }}>{fadedValue(node.value, start, fadeFrom, { color }, `text-${index}`)}</Text>;
     }
     if (node.type === "code") {
-      return <Text key={`code-${index}`} style={{ fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color, backgroundColor: theme.colors.surfaceRaised, borderRadius: 4, paddingHorizontal: 4 }}>{node.value}</Text>;
+      return <Text key={`code-${index}`} style={{ fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color, backgroundColor: codeBackground, borderRadius: 4, paddingHorizontal: 4 }}>{node.value}</Text>;
+    }
+    if (node.type === "mention") {
+      // Mentions read as a chip: `@design-skill`, tinted like a link but without the underline.
+      return <Text key={`mention-${index}`} style={{ color: accent, fontWeight: "600" }} onPress={() => openLink(node.url)}>@{node.value}</Text>;
+    }
+    if (node.type === "image") {
+      // Inline images that point at sandbox paths cannot be fetched from the device; show them as an openable file link.
+      const style = { color: accent, textDecorationLine: "underline" as const };
+      return <Text key={`image-${index}`} style={style} onPress={() => openLink(node.url)}>{node.value || node.url}</Text>;
     }
     if (node.type === "link") {
       const style = { color: accent, textDecorationLine: "underline" as const };
-      return <Text key={`link-${index}`} style={style} onPress={() => void Linking.openURL(node.url).catch(() => undefined)}>{fadedValue(node.value, start, fadeFrom, style, `link-${index}`)}</Text>;
+      return <Text key={`link-${index}`} style={style} onPress={() => openLink(node.url)}>{fadedValue(node.value, start, fadeFrom, style, `link-${index}`)}</Text>;
     }
     const style = node.type === "strong" ? { fontWeight: "700" as const, color } : { fontStyle: "italic" as const, color };
     return <Text key={`${node.type}-${index}`} style={style}>{fadedValue(node.value, start, fadeFrom, style, `${node.type}-${index}`)}</Text>;
@@ -356,7 +404,7 @@ function BubbleMeta({ clock, local = false, side, live = false, inline = false, 
   </View>;
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean }) {
+export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
@@ -366,8 +414,9 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
     const timeout = setTimeout(() => setCopied(false), 1600);
     return () => clearTimeout(timeout);
   }, [copied]);
-  if (!hasRenderableMessage(message)) return null;
   const isUser = message.role === "user";
+  const bubbleEnvironment = useMemo(() => ({ onUser: isUser, spaceId }), [isUser, spaceId]);
+  if (!hasRenderableMessage(message)) return null;
   const isSystem = message.role === "system";
   if (isSystem) return <View style={{ alignItems: "center", paddingHorizontal: 24, paddingVertical: 8 }}><Text style={[typography.caption, { color: theme.colors.textFaint, textAlign: "center" }]}>{message.text || t("chat.systemUpdate")}</Text></View>;
   const thinkingLevel = requestedThinkingLevel(message.meta);
@@ -380,16 +429,24 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const accent = isUser ? theme.colors.userBubbleText : theme.colors.accent;
   const copyText = messageText(message);
   const maxWidth = Math.max(196, Math.round(width * (isUser ? 0.78 : 0.86)) - 24);
+  // A one-line message keeps its clock inline. Longer text must not use the wrapping row: the
+  // wrap lets the text claim the full width before the clock drops under it, leaving a
+  // stretched single-line bubble with a stranded timestamp.
   const fillUserWidth = isUser && Boolean(message.text?.includes("\n"));
-  return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
+  const inlineUserMeta = isUser && !fillUserWidth && (message.text?.length ?? 0) <= 24;
+  return <BubbleContext.Provider value={bubbleEnvironment}><View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
     <ChatBubbleFrame side={side} local={local} fillUserWidth={fillUserWidth}>
-      {isUser ? <View style={{ flexDirection: "row", alignItems: "flex-end", flexWrap: "wrap", justifyContent: "flex-end" }}>
+      {isUser ? inlineUserMeta ? <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "flex-end" }}>
         <View style={{ flexShrink: 1, minWidth: 0 }}>
           {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
           {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.userBubbleText, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
         </View>
         <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} inline t={t} />
       </View> : <>
+        {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
+        {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.userBubbleText, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
+        <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 2 }}><BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} inline t={t} /></View>
+      </> : <>
         {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
         {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
         <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} t={t} />
@@ -400,7 +457,7 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
       {onCopy ? <Pressable accessibilityRole="button" accessibilityLabel={copied ? t("chat.copied") : t("chat.copy")} onPress={() => { onCopy(copyText); setCopied(true); }} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}><AppIcon name={copied ? "check" : "copy"} size={14} color={copied ? theme.colors.success : theme.colors.textFaint} /></Pressable> : null}
       {!isUser && onFork && typeof message.meta?.turnId === "string" ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.fork")} disabled={forkDisabled} onPress={() => onFork(message)} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: forkDisabled ? 0.45 : pressed ? 0.55 : 1 })}>{forking ? <ActivityIndicator size="small" color={theme.colors.textFaint} /> : <AppIcon name="git-fork" size={14} color={theme.colors.textFaint} />}</Pressable> : null}
     </View> : null}
-  </View>;
+  </View></BubbleContext.Provider>;
 });
 
 export function StreamCard({ content, status, runtimePhase = null, runtimeModel = null }: { content: ContentBlock[]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null }) {
