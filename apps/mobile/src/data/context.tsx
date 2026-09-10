@@ -1234,13 +1234,13 @@ export function AppProvider({
         const payload = event.payload as { session?: Partial<SessionRecord> };
         if (!payload.session || payload.session.id !== sessionId) return;
         const updated = preferNewerSession(current, { ...current, ...payload.session });
-        dispatch({
-          type: "session-upsert",
-          session: {
-            ...updated,
-            space: currentSummary?.space ?? null,
-          },
-        });
+        const nextSummary = {
+          ...updated,
+          space: currentSummary?.space ?? null,
+        };
+        dispatch({ type: "session-upsert", session: nextSummary });
+        const nextSessions = stateRef.current.sessions.map((item) => item.id === sessionId ? nextSummary : item);
+        void saveHome(userKey, { spaces: stateRef.current.spaces, sessions: nextSessions }).catch(() => undefined);
         const currentView = stateRef.current.sessionViews[sessionId];
         if (currentView) dispatch({ type: "session-meta", sessionId, session: updated, space: currentView.space });
       },
@@ -1248,7 +1248,9 @@ export function AppProvider({
         if (event.type !== "session.message.persisted") return;
         const message = (event.payload as { message?: MessageRecord }).message;
         if (!message) return;
+        const currentMessages = stateRef.current.sessionViews[sessionId]?.messages ?? [];
         dispatch({ type: "message-add", sessionId, message });
+        void saveMessages(userKey, sessionId, mergeMessages(currentMessages, message)).catch(() => undefined);
       },
     });
     const stop = () => {
@@ -1257,7 +1259,7 @@ export function AppProvider({
       stopPersisted();
     };
     subscriptions.current.set(sessionId, stop);
-  }, [dispatch, refreshSession]);
+  }, [dispatch, refreshSession, userKey]);
 
   /**
    * Recover an open Chat after a transport/foreground gap: rebuild the generation
@@ -1415,11 +1417,14 @@ export function AppProvider({
         createdAt: new Date().toISOString(),
       };
       dispatch({ type: "message-optimistic", sessionId, message: optimistic });
+      void saveMessages(userKey, sessionId, [...(view?.messages ?? []), optimistic]).catch(() => undefined);
       dispatch({ type: "send-start", sessionId });
 
       try {
         const content = await buildPromptContent(client, session.spaceId, sessionId, text, attachments);
-        dispatch({ type: "message-optimistic", sessionId, message: { ...optimistic, content, text: text || optimistic.text } });
+        const optimisticWithContent = { ...optimistic, content, text: text || optimistic.text };
+        dispatch({ type: "message-optimistic", sessionId, message: optimisticWithContent });
+        void saveMessages(userKey, sessionId, [...(stateRef.current.sessionViews[sessionId]?.messages ?? []), optimisticWithContent]).catch(() => undefined);
         const response = await client.space(session.spaceId).prompt({
           mode: "agent",
           sessionId,
@@ -1440,7 +1445,7 @@ export function AppProvider({
         throw error;
       }
     },
-    [client, dispatch, userUuid],
+    [client, dispatch, userKey, userUuid],
   );
 
   const sendNewMessage = useCallback(
