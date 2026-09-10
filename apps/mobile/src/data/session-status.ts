@@ -1,5 +1,4 @@
 import type { CohubClient, SessionTurnRecord, UserSessionListItem } from "@neta-art/cohub";
-import { translate } from "@/src/i18n/core";
 
 const STATUS_REQUEST_TIMEOUT_MS = 15_000;
 const SESSION_STATUS_LOOKBACK_MS = 30 * 60 * 1000;
@@ -7,7 +6,7 @@ const SESSION_STATUS_LOOKBACK_MS = 30 * 60 * 1000;
 function withTimeout<T>(promise: Promise<T>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(translate("data.statusTimeout"))), STATUS_REQUEST_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new Error("Loading Chat status timed out after 15 seconds")), STATUS_REQUEST_TIMEOUT_MS);
   });
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer);
@@ -51,7 +50,7 @@ export async function loadSessionLatestTurns(
   const cutoff = Date.now() - SESSION_STATUS_LOOKBACK_MS;
   const recentSessions = sessions.filter((session) => {
     const updatedAt = Date.parse(session.updatedAt);
-    if (!Number.isFinite(updatedAt)) throw new Error(translate("data.invalidUpdatedAt", { id: session.id }));
+    if (!Number.isFinite(updatedAt)) throw new Error(`Invalid updatedAt for Chat ${session.id}. Refresh Chats and retry.`);
     return updatedAt >= cutoff;
   });
   let next = 0;
@@ -67,7 +66,7 @@ export async function loadSessionLatestTurns(
       }
     }
   }));
-  if (errors.length) throw new Error(translate("data.statusRefreshFailed", { count: errors.length }), { cause: errors[0] });
+  if (errors.length) throw new Error(`Could not refresh ${errors.length} Chat status request(s). Pull to refresh and retry.`, { cause: errors[0] });
 }
 
 export function getSessionStatus(value: string | null | undefined): SessionStatus {

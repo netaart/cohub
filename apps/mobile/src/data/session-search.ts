@@ -1,4 +1,3 @@
-import { translate } from "@/src/i18n/core";
 import type { CohubClient, GlobalSearchResult, GlobalSearchType } from "@neta-art/cohub";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -87,7 +86,7 @@ export function mapRemoteSearchResults(items: GlobalSearchResult[]) {
 
   for (const item of items) {
     if (item.type === "space") {
-      const title = text(item.title) ?? translate("space.untitled");
+      const title = text(item.title) ?? "Untitled Space";
       const current = spaces.get(item.spaceId);
       spaces.set(item.spaceId, current ? {
         ...current,
@@ -116,7 +115,7 @@ export function mapRemoteSearchResults(items: GlobalSearchResult[]) {
       sessions.set(sessionId, {
         sessionId,
         spaceId: item.spaceId,
-        title: itemTitle ?? translate("chat.untitled"),
+        title: itemTitle ?? "Untitled Chat",
         preview: itemPreview,
         spaceName: text(item.spaceName),
         spaceAvatarUrl: item.spaceProfile?.avatarUrl ?? null,
@@ -203,7 +202,7 @@ export function useRemoteSearch(
         setState({ ...mapped, query: normalizedQuery, loading: false, error: null, degraded: response.degraded === true });
       }).catch((caught) => {
         if (!active || requestId !== requestIdRef.current) return;
-        setState({ ...EMPTY_STATE, query: normalizedQuery, error: caught instanceof Error ? caught.message : translate("search.unavailable") });
+        setState({ ...EMPTY_STATE, query: normalizedQuery, error: caught instanceof Error ? caught.message : "Search is unavailable" });
       });
     }, SEARCH_DEBOUNCE_MS);
 
