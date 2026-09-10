@@ -555,7 +555,7 @@ function ProfileSection({
 			const uploaded = await client.publicAssets.upload({
 				purpose: "user_avatar",
 				file,
-				mimeType: asset.mimeType || "image/jpeg",
+				mimeType: file.type || asset.mimeType || "image/jpeg",
 				filename: asset.fileName || "avatar.jpg",
 			});
 			const updated = await client.user.updateProfile({

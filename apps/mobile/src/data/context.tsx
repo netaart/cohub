@@ -90,11 +90,15 @@ async function buildPromptContent(
   const imageBlocks: ContentBlock[] = [];
   for (const attachment of attachments) {
     const blob: Blob = new ExpoFile(attachment.uri);
+    // The presigned PUT signs Content-Type from the mime type we pass, while
+    // native Blob bodies send the file's own type; they must agree or R2
+    // rejects the signature.
+    const mimeType = blob.type || attachment.mimeType;
     const uploaded = await client.publicAssets.uploadChatAttachment({
       spaceId,
       sessionId,
       file: blob,
-      mimeType: attachment.mimeType,
+      mimeType,
       filename: attachment.name,
     });
     if (attachment.mimeType.startsWith("image/")) {
@@ -103,7 +107,7 @@ async function buildPromptContent(
         source: { type: "url", url: uploaded.publicUrl },
         _meta: {
           filename: attachment.name,
-          mediaType: attachment.mimeType,
+          mediaType: mimeType,
           size: attachment.size,
         },
       });
