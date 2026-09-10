@@ -102,9 +102,7 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   ) : (
     <View style={[{ flex: 1, backgroundColor: theme.colors.background }, contentStyle]}>{children}</View>
   );
-  // Android resizes the window itself (adjustResize is the manifest default), so wrapping it in
-  // KeyboardAvoidingView subtracts the keyboard twice and pushes the composer off-screen.
-  const wrapped = keyboard && Platform.OS === "ios" ? <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">{body}</KeyboardAvoidingView> : body;
+  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "padding"} keyboardVerticalOffset={Platform.OS === "android" ? insets.top : 0}>{body}</KeyboardAvoidingView> : body;
   return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
