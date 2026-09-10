@@ -31,9 +31,17 @@ export default function DebugMenuScreen() {
       <SectionHeader title="渲染验收" />
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <DebugRow icon="activity" title="流式渲染验收" detail="文本 + 工具调用实时流式，含重渲染计数" onPress={() => router.push("/debug/streaming")} />
+        <DebugRow icon="zap" title="快速气泡渲染" detail="高速追加 / 循环各种 Markdown 气泡，实时 FPS" onPress={() => router.push("/debug/bubbles")} />
         <DebugRow icon="terminal" title="工具展开验收" detail="长输出、报错、编辑 diff 的展开高度" onPress={() => router.push("/debug/tools")} />
         <DebugRow icon="code" title="Markdown 渲染验收" detail="标题、表格、代码块、列表、引用" onPress={() => router.push("/debug/markdown")} />
         <DebugRow icon="list-tree" title="长列表性能" detail="500 / 2000 / 10000 条消息" onPress={() => router.push("/debug/list")} />
+      </View>
+
+      <SectionHeader title="运行时 / 数据" />
+      <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+        <DebugRow icon="download" title="更新与 OTA" detail="expo-updates 状态、GitHub APK 检查、冷启动" onPress={() => router.push("/debug/updates")} />
+        <DebugRow icon="database" title="缓存检查器" detail="SQLite 行数、user_key、清空当前用户缓存" onPress={() => router.push("/debug/cache")} />
+        <DebugRow icon="zap" title="输入框状态" detail="composer 全部组合 + 交互预览" onPress={() => router.push("/debug/composer")} />
       </View>
 
       <SectionHeader title="环境信息" />

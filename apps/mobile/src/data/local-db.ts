@@ -172,3 +172,27 @@ export async function clearUserCache(userKey: string) {
     await db.runAsync("DELETE FROM session_read_state WHERE user_key = ?", userKey);
   });
 }
+
+export type CacheStats = {
+  spaces: number;
+  sessions: number;
+  messages: number;
+  readStates: number;
+};
+
+/** Row counts for the authenticated user's local cache, for the debug inspector. */
+export async function cacheStats(userKey: string): Promise<CacheStats> {
+  const db = await database();
+  const row = await db.getFirstAsync<CacheStats>(
+    `SELECT
+      (SELECT COUNT(*) FROM spaces WHERE user_key = ?) AS spaces,
+      (SELECT COUNT(*) FROM sessions WHERE user_key = ?) AS sessions,
+      (SELECT COUNT(*) FROM messages WHERE user_key = ?) AS messages,
+      (SELECT COUNT(*) FROM session_read_state WHERE user_key = ?) AS readStates`,
+    userKey,
+    userKey,
+    userKey,
+    userKey,
+  );
+  return row ?? { spaces: 0, sessions: 0, messages: 0, readStates: 0 };
+}

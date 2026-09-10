@@ -613,6 +613,7 @@ function reducer(state: AppState, action: Action): AppState {
 export type AppContextValue = {
   state: AppState;
   client: CohubClient | null;
+  userUuid: string;
   connectionState: ConnectionState;
   installationId: string | null;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
@@ -1699,6 +1700,7 @@ export function AppProvider({
     () => ({
       state,
       client,
+      userUuid,
       connectionState,
       installationId,
       getAccessToken,
@@ -1771,6 +1773,7 @@ export function AppProvider({
       sendNewMessage,
       state,
       upsertSpace,
+      userUuid,
     ],
   );
 
