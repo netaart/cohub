@@ -1,7 +1,8 @@
 import { Link, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useCallback, useState, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCurrentUser } from "@/src/auth/current-user";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
@@ -15,6 +16,7 @@ import {
   AppIcon,
   Avatar,
   DataError,
+  DetailTopBar,
   PrimaryButton,
   Screen,
   SectionHeader,
@@ -24,6 +26,7 @@ type ProfileSheet = "clear-cache" | "sign-out" | "cache-retention" | null;
 
 export default function ProfileScreen() {
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const router = useRouter();
   const { signOut } = useProfileSession();
@@ -97,7 +100,9 @@ export default function ProfileScreen() {
   };
 
   return (
-    <Screen scroll>
+    <Screen>
+      <DetailTopBar title={t("route.profile")} onBack={() => router.back()} />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 28 }} keyboardShouldPersistTaps="handled">
       <View style={styles.profileHeader}>
         <Link.AppleZoomTarget>
           <Avatar name={name} uri={avatar} size={76} online={connectionState === "open"} />
@@ -192,6 +197,7 @@ export default function ProfileScreen() {
           Cohub Mobile · {version}
         </Text>
       </Pressable>
+      </ScrollView>
 
       <AdaptiveSheet
         visible={sheet === "clear-cache"}
