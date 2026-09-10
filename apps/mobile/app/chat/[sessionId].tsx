@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
 import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
+import { useToast } from "@/src/components/Toast";
 import { copyMessageText, MessageBubble, StreamCard } from "@/src/components/MessageContent";
 import { StreamingTurnProcess, TurnProcess } from "@/src/components/TurnProcess";
 import { ModelSelectorSheet } from "@/src/components/ModelSelectorSheet";
@@ -57,6 +58,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const router = useRouter();
   const theme = useAppTheme();
   const { t } = useTranslation();
+  const showToast = useToast();
   const { state, client, connectionState, refreshHome, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, forkSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadSessionReadSequence, saveSessionReadSequence } = useApp();
   const view = useSession(sessionId);
   const [input, setInput] = useState("");
@@ -388,34 +390,34 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       const result = await DocumentPicker.getDocumentAsync({ type: "*/*", multiple: true, copyToCacheDirectory: true });
       if (result.canceled) return;
       appendAttachments(result.assets.map((asset) => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || "application/octet-stream", size: asset.size ?? 0 })));
-    } catch (error) { setNotice({ title: t("chat.attachmentUnavailable.title"), message: error instanceof Error ? error.message : t("chat.attachmentUnavailable.body") }); }
+    } catch (error) { showToast({ title: t("chat.attachmentUnavailable.title"), message: error instanceof Error ? error.message : t("chat.attachmentUnavailable.body"), tone: "danger" }); }
   };
   const pickPhotos = async () => {
     setAttachmentMenuOpen(false);
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) { setNotice({ title: t("chat.photoOff.title"), message: t("chat.photoOff.body") }); return; }
+      if (!permission.granted) { showToast({ title: t("chat.photoOff.title"), message: t("chat.photoOff.body"), tone: "danger" }); return; }
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, quality: 0.88 });
       if (result.canceled) return;
       appendAttachments(result.assets.map((asset, index) => ({ uri: asset.uri, name: asset.fileName || `image-${index + 1}.jpg`, mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 })));
-    } catch (error) { setNotice({ title: t("chat.photoPickerUnavailable.title"), message: error instanceof Error ? error.message : t("chat.photoPickerUnavailable.body") }); }
+    } catch (error) { showToast({ title: t("chat.photoPickerUnavailable.title"), message: error instanceof Error ? error.message : t("chat.photoPickerUnavailable.body"), tone: "danger" }); }
   };
   const takePhoto = async () => {
     setAttachmentMenuOpen(false);
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) { setNotice({ title: t("chat.cameraOff.title"), message: t("chat.cameraOff.body") }); return; }
+      if (!permission.granted) { showToast({ title: t("chat.cameraOff.title"), message: t("chat.cameraOff.body"), tone: "danger" }); return; }
       const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.88 });
       if (result.canceled) return;
       const asset = result.assets[0];
       if (asset) appendAttachments([{ uri: asset.uri, name: asset.fileName || "camera-photo.jpg", mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }]);
-    } catch (error) { setNotice({ title: t("chat.cameraUnavailable.title"), message: error instanceof Error ? error.message : t("chat.cameraUnavailable.body") }); }
+    } catch (error) { showToast({ title: t("chat.cameraUnavailable.title"), message: error instanceof Error ? error.message : t("chat.cameraUnavailable.body"), tone: "danger" }); }
   };
   const stopGeneration = async () => {
     if (stopping) return;
     setStopping(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try { await abortSession(sessionId); } catch (error) { setNotice({ title: t("chat.stopFailed.title"), message: error instanceof Error ? error.message : t("chat.stopFailed.body") }); } finally { setStopping(false); }
+    try { await abortSession(sessionId); } catch (error) { showToast({ title: t("chat.stopFailed.title"), message: error instanceof Error ? error.message : t("chat.stopFailed.body"), tone: "danger" }); } finally { setStopping(false); }
   };
   const runFollowupAction = async (turnId: string, action: "steer" | "cancel") => {
     if (!client || !spaceId || pendingFollowupAction !== null) return;
@@ -426,7 +428,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       else await cancelQueuedFollowup(client, spaceId, sessionId, turnId);
       await refreshSession(sessionId);
     } catch (error) {
-      setNotice({ title: action === "steer" ? t("chat.steerFailed.title") : t("chat.cancelFailed.title"), message: error instanceof Error ? error.message : t("chat.followupFailed.body") });
+      showToast({ title: action === "steer" ? t("chat.steerFailed.title") : t("chat.cancelFailed.title"), message: error instanceof Error ? error.message : t("chat.followupFailed.body"), tone: "danger" });
       void refreshSession(sessionId).catch(() => undefined);
     } finally {
       setPendingFollowupAction(null);
@@ -436,7 +438,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     setMoreOpen(false);
     const title = session ? displaySessionTitle(session) : t("chat.title");
     if (!spaceId) {
-      setNotice({ title: t("chat.shareFailed.title"), message: t("chat.shareFailed.body") });
+      showToast({ title: t("chat.shareFailed.title"), message: t("chat.shareFailed.body"), tone: "danger" });
       return;
     }
     const url = `https://cohub.live/spaces/${encodeURIComponent(spaceId)}/sessions/${encodeURIComponent(sessionId)}`;
@@ -452,7 +454,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       .catch(() => setChatLabels([]));
   };
   const saveRename = async () => {
-    try { await renameSession(sessionId, renameValue); setRenameOpen(false); } catch (error) { setNotice({ title: t("chat.renameFailed.title"), message: error instanceof Error ? error.message : t("chat.renameFailed.body") }); }
+    try { await renameSession(sessionId, renameValue); setRenameOpen(false); } catch (error) { showToast({ title: t("chat.renameFailed.title"), message: error instanceof Error ? error.message : t("chat.renameFailed.body"), tone: "danger" }); }
   };
   const handleScroll = useCallback((event: ChatScrollEvent) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
@@ -552,9 +554,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 
   const handleCopyMessage = useCallback((text: string) => {
     void copyMessageText(text).catch((error) => {
-      setNotice({ title: t("chat.copyFailed.title"), message: error instanceof Error ? error.message : t("chat.copyFailed.body") });
+      showToast({ title: t("chat.copyFailed.title"), message: error instanceof Error ? error.message : t("chat.copyFailed.body"), tone: "danger" });
     });
-  }, [t]);
+  }, [showToast, t]);
 
   const forkMessage = useCallback(async (message: MessageRecord) => {
     const turnId = message.meta?.turnId;
@@ -567,11 +569,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       void refreshHome();
       router.push({ pathname: "/chat/[sessionId]", params: { sessionId: response.id } });
     } catch (error) {
-      setNotice({ title: t("chat.forkFailed.title"), message: error instanceof Error ? error.message : t("chat.forkFailed.body") });
+      showToast({ title: t("chat.forkFailed.title"), message: error instanceof Error ? error.message : t("chat.forkFailed.body"), tone: "danger" });
     } finally {
       setForkingTurnId(null);
     }
-  }, [forkSession, forkingTurnId, refreshHome, router, sessionId, spaceId, t, view.turns]);
+  }, [forkSession, forkingTurnId, refreshHome, router, sessionId, showToast, spaceId, t, view.turns]);
 
   const submit = async () => {
     if ((!input.trim() && attachments.length === 0) || view.sending) return;
@@ -668,6 +670,7 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
   const router = useRouter();
   const theme = useAppTheme();
   const { t } = useTranslation();
+  const showToast = useToast();
   const { state, client, connectionState, sendNewMessage, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError } = useApp();
   const space = state.spaces.find((item) => item.id === spaceId) ?? null;
   const [input, setInput] = useState("");
@@ -680,9 +683,9 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
   const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
   const appendAttachments = (next: AttachmentDraft[]) => setAttachments((current) => [...current, ...next].slice(0, 6));
-  const pickAttachments = async () => { setAttachmentMenuOpen(false); try { const result = await DocumentPicker.getDocumentAsync({ type: "*/*", multiple: true, copyToCacheDirectory: true }); if (result.canceled) return; appendAttachments(result.assets.map((asset) => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || "application/octet-stream", size: asset.size ?? 0 }))); } catch (error) { setNotice({ title: t("chat.attachmentUnavailable.title"), message: error instanceof Error ? error.message : t("chat.attachmentUnavailable.body") }); } };
-  const pickPhotos = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) { setNotice({ title: t("chat.photoOff.title"), message: t("chat.photoOff.body") }); return; } const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, quality: 0.88 }); if (result.canceled) return; appendAttachments(result.assets.map((asset, index) => ({ uri: asset.uri, name: asset.fileName || `image-${index + 1}.jpg`, mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }))); } catch (error) { setNotice({ title: t("chat.photoPickerUnavailable.title"), message: error instanceof Error ? error.message : t("chat.photoPickerUnavailable.body") }); } };
-  const takePhoto = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestCameraPermissionsAsync(); if (!permission.granted) { setNotice({ title: t("chat.cameraOff.title"), message: t("chat.cameraOff.body") }); return; } const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.88 }); if (result.canceled) return; const asset = result.assets[0]; if (asset) appendAttachments([{ uri: asset.uri, name: asset.fileName || "camera-photo.jpg", mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }]); } catch (error) { setNotice({ title: t("chat.cameraUnavailable.title"), message: error instanceof Error ? error.message : t("chat.cameraUnavailable.body") }); } };
+  const pickAttachments = async () => { setAttachmentMenuOpen(false); try { const result = await DocumentPicker.getDocumentAsync({ type: "*/*", multiple: true, copyToCacheDirectory: true }); if (result.canceled) return; appendAttachments(result.assets.map((asset) => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || "application/octet-stream", size: asset.size ?? 0 }))); } catch (error) { showToast({ title: t("chat.attachmentUnavailable.title"), message: error instanceof Error ? error.message : t("chat.attachmentUnavailable.body"), tone: "danger" }); } };
+  const pickPhotos = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) { showToast({ title: t("chat.photoOff.title"), message: t("chat.photoOff.body"), tone: "danger" }); return; } const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, quality: 0.88 }); if (result.canceled) return; appendAttachments(result.assets.map((asset, index) => ({ uri: asset.uri, name: asset.fileName || `image-${index + 1}.jpg`, mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }))); } catch (error) { showToast({ title: t("chat.photoPickerUnavailable.title"), message: error instanceof Error ? error.message : t("chat.photoPickerUnavailable.body"), tone: "danger" }); } };
+  const takePhoto = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestCameraPermissionsAsync(); if (!permission.granted) { showToast({ title: t("chat.cameraOff.title"), message: t("chat.cameraOff.body"), tone: "danger" }); return; } const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.88 }); if (result.canceled) return; const asset = result.assets[0]; if (asset) appendAttachments([{ uri: asset.uri, name: asset.fileName || "camera-photo.jpg", mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }]); } catch (error) { showToast({ title: t("chat.cameraUnavailable.title"), message: error instanceof Error ? error.message : t("chat.cameraUnavailable.body"), tone: "danger" }); } };
   const submit = async () => {
     if (!space || sending || (!input.trim() && attachments.length === 0)) return;
     const text = input;
@@ -690,7 +693,7 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
     setInput("");
     setAttachments([]);
     setSending(true);
-    try { const session = await sendNewMessage(space.id, text, files, { model: selectedModel }); router.replace({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } }); } catch (error) { setInput(text); setAttachments(files); setNotice({ title: t("chat.startFailed.title"), message: error instanceof Error ? error.message : t("chat.startFailed.body") }); } finally { setSending(false); }
+    try { const session = await sendNewMessage(space.id, text, files, { model: selectedModel }); router.replace({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } }); } catch (error) { setInput(text); setAttachments(files); showToast({ title: t("chat.startFailed.title"), message: error instanceof Error ? error.message : t("chat.startFailed.body"), tone: "danger" }); } finally { setSending(false); }
   };
   if (!space) return <Screen><DetailTopBar title={t("chat.spaceUnavailable")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("chat.spaceUnavailable.body")}</Text></View></Screen>;
   const spaceName = displaySpaceName(space);

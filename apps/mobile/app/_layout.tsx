@@ -10,6 +10,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { AuthScreen } from "@/src/auth/AuthScreen";
 import { AppUpdateBanner } from "@/src/components/AppUpdateBanner";
+import { ToastProvider } from "@/src/components/Toast";
 import { config } from "@/src/config";
 import { AppProvider } from "@/src/data/context";
 import { LocaleProvider, useTranslation } from "@/src/i18n";
@@ -122,36 +123,42 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
       <NativeInteractionBridge />
-      <View style={{ flex: 1 }}>
-        {/* Deeper screens use the platform transition: the iOS push (with its interactive back
-            swipe) and Android's own forward animation. Overriding it replaces a platform behavior
-            with an imitation. */}
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="chat/[sessionId]" />
-          <Stack.Screen name="space/[spaceId]" />
-          <Stack.Screen name="space/[spaceId]/files" />
-          <Stack.Screen name="space/[spaceId]/file" />
-          <Stack.Screen name="work/[appId]" />
-          <Stack.Screen name="image-viewer" options={{ contentStyle: { backgroundColor: "#000000" } }} />
-          <Stack.Screen name="new-chat" options={{ title: t("route.newChat"), presentation: "modal", animation: "slide_from_bottom" }} />
-          <Stack.Screen name="profile" options={{ title: t("route.profile") }} />
-          <Stack.Screen name="settings" options={{ title: t("route.settings") }} />
-          <Stack.Screen name="appearance" options={{ title: t("route.appearance") }} />
-          <Stack.Screen name="language" options={{ title: t("route.language") }} />
-          <Stack.Screen name="about" options={{ title: t("route.about") }} />
-          <Stack.Screen name="debug/index" options={{ title: t("route.debug") }} />
-          <Stack.Screen name="debug/streaming" options={{ title: t("route.streaming") }} />
-          <Stack.Screen name="debug/bubbles" options={{ title: t("route.bubbles") }} />
-          <Stack.Screen name="debug/updates" options={{ title: t("route.updates") }} />
-          <Stack.Screen name="debug/cache" options={{ title: t("route.cache") }} />
-          <Stack.Screen name="debug/composer" options={{ title: t("route.composer") }} />
-          <Stack.Screen name="debug/tools" options={{ title: t("route.tools") }} />
-          <Stack.Screen name="debug/markdown" options={{ title: t("route.markdown") }} />
-          <Stack.Screen name="debug/list" options={{ title: t("route.longList") }} />
-        </Stack>
-        <AppUpdateBanner />
-      </View>
+      <ToastProvider>
+        <View style={{ flex: 1 }}>
+          {/* Deeper screens use the platform transition: the iOS push (with its interactive back
+              swipe) and Android's own forward animation. Overriding it replaces a platform behavior
+              with an imitation. */}
+          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="chat/[sessionId]" />
+            <Stack.Screen name="space/[spaceId]" />
+            <Stack.Screen name="space/[spaceId]/files" />
+            <Stack.Screen name="space/[spaceId]/file" />
+            <Stack.Screen name="work/[appId]" />
+            <Stack.Screen name="image-viewer" options={{ contentStyle: { backgroundColor: "#000000" } }} />
+            <Stack.Screen name="new-chat" options={{ title: t("route.newChat"), presentation: "modal", animation: "slide_from_bottom" }} />
+            <Stack.Screen name="profile" options={{ title: t("route.profile") }} />
+            <Stack.Screen name="settings" options={{ title: t("route.settings") }} />
+            <Stack.Screen name="appearance" options={{ title: t("route.appearance") }} />
+            <Stack.Screen name="language" options={{ title: t("route.language") }} />
+            <Stack.Screen name="about" options={{ title: t("route.about") }} />
+            <Stack.Screen name="debug/index" options={{ title: t("route.debug") }} />
+            <Stack.Screen name="debug/streaming" options={{ title: t("route.streaming") }} />
+            <Stack.Screen name="debug/bubbles" options={{ title: t("route.bubbles") }} />
+            <Stack.Screen name="debug/updates" options={{ title: t("route.updates") }} />
+            <Stack.Screen name="debug/cache" options={{ title: t("route.cache") }} />
+            <Stack.Screen name="debug/composer" options={{ title: t("route.composer") }} />
+          <Stack.Screen name="debug/connection" options={{ title: t("route.connection") }} />
+          <Stack.Screen name="debug/links" options={{ title: t("route.links") }} />
+          <Stack.Screen name="debug/i18n" options={{ title: t("route.i18n") }} />
+          <Stack.Screen name="debug/identity" options={{ title: t("route.identity") }} />
+            <Stack.Screen name="debug/tools" options={{ title: t("route.tools") }} />
+            <Stack.Screen name="debug/markdown" options={{ title: t("route.markdown") }} />
+            <Stack.Screen name="debug/list" options={{ title: t("route.longList") }} />
+          </Stack>
+          <AppUpdateBanner />
+        </View>
+      </ToastProvider>
     </GestureHandlerRootView>
   </ThemeProvider>;
 }
