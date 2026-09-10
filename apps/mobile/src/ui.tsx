@@ -102,8 +102,7 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   ) : (
     <View style={[{ flex: 1, backgroundColor: theme.colors.background }, contentStyle]}>{children}</View>
   );
-  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "padding"} keyboardVerticalOffset={Platform.OS === "android" ? insets.top : 0}>{body}</KeyboardAvoidingView> : body;
-  return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
+  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>{body}</KeyboardAvoidingView> : body;  return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
 export function WorkspaceToolbar({ query, onQueryChange, queryRef, account, onCreate, onSettings, placeholder }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; account: ReactNode; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
@@ -220,29 +219,29 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [focused, setFocused] = useState(false);
-  // Tapping a toolbar control blurs the input before its onPress fires. If blur alone
-  // collapsed the toolbar, the control would unmount under the finger and never receive
-  // the tap. Toolbar touches are flagged so that blur is ignored; the toolbar stays open
-  // until the input is dismissed for real (tap outside, send, or keyboard hide).
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const toolbarTouchRef = useRef(false);
   const [toolbarOpen, setToolbarOpen] = useState(false);
+  // Track keyboard visibility to zero out the bottom inset while the keyboard is up (Android
+  // does not update insets.bottom automatically, so we'd get a gap equal to insets.bottom
+  // between the composer and the keyboard if we left it in while KeyboardAvoidingView is active).
+  // Also use this to close the toolbar when the keyboard hides for real.
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const show = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hide = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
+      if (!toolbarTouchRef.current) setToolbarOpen(false);
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
   const expanded = focused || toolbarOpen || hasAttachment || voiceActive;
-  // A toolbar tap keeps the input blurred but the keyboard may already be gone; the sheet
-  // it opened (model picker) covers the composer. When the keyboard hides for any other
-  // reason the toolbar closes with it.
-  useEffect(() => {
-    if (!toolbarOpen) return;
-    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => {
-      if (toolbarTouchRef.current) return;
-      setToolbarOpen(false);
-    });
-    return () => hide.remove();
-  }, [toolbarOpen]);
   const resolvedModelLabel = modelLabel ?? t("ui.composer.modelAutomatic");
   const modelStatusLabel = modelStatus === "available" ? t("ui.modelStatus.available") : modelStatus === "degraded" ? t("ui.modelStatus.degraded") : modelStatus === "outage" ? t("ui.modelStatus.outage") : t("ui.modelStatus.unknown");
   return (
-    <View style={[styles.composerWrap, { paddingBottom: insets.bottom + 10 }]}>
+    <View style={[styles.composerWrap, { paddingBottom: (Platform.OS === "android" && keyboardVisible ? 0 : insets.bottom) + 10 }]}>
       <Reanimated.View layout={LinearTransition.duration(220)} style={[styles.composer, expanded ? styles.composerExpanded : styles.composerCompact, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
         {!expanded ? <IconButton name="plus" label={t("ui.composer.addAttachment")} size={34} onPress={onAttach} disabled={blocked} /> : null}
         <TextInput
