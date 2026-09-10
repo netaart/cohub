@@ -41,8 +41,6 @@ type SpacePanelsProps = {
   onNewChat: () => void;
   onOpenFile: (path: string) => void;
   onOpenFilesPage: () => void;
-  /** False while the timeline owns the gesture, e.g. selecting message text. */
-  swipeEnabled?: boolean;
   children: ReactNode;
 };
 
@@ -50,7 +48,7 @@ const PANEL_WIDTH_RATIO = 0.86;
 const MAX_PANEL_WIDTH = 360;
 
 // One RNGH pan surface so the two panel directions cannot compete.
-export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, swipeEnabled = true, children }: SpacePanelsProps) {
+export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
   const theme = useAppTheme();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
@@ -171,7 +169,6 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   // The chip row is a native horizontal ScrollView. Touch-start inside it must scroll the row instead of swiping the panel.
   const chipsRect = useSharedValue<ChipsRect>({ x: -1, y: -1, width: 0, height: 0 });
   const panGesture = useMemo(() => Gesture.Pan()
-    .enabled(swipeEnabled)
     .activeOffsetX([-4, 4])
     .failOffsetY([-15, 15])
     .onTouchesDown((event, manager) => {
@@ -299,7 +296,13 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
           if (canceledSide !== 0) runOnJS(clearClosedPanel)(panelForSide(canceledSide));
         }
       });
-    }), [activeSide, animationId, chipsRect, clearClosedPanel, commitClose, commitOpen, finishClosedPanel, gestureActive, gestureSide, gestureStartProgress, gestureStartSide, panelWidth, progress, showGesturePanel, swipeEnabled]);
+    }), [activeSide, animationId, chipsRect, clearClosedPanel, commitClose, commitOpen, finishClosedPanel, gestureActive, gestureSide, gestureStartProgress, gestureStartSide, panelWidth, progress, showGesturePanel]);
+
+  // Becoming the JS responder makes React Native intercept native touches for this view
+  // (JSResponderHandler), so a panel swipe cancels a native text long press / selection
+  // underneath instead of letting both run. Selection drags stay untouched: the native
+  // text view sets FLAG_DISALLOW_INTERCEPT, which disables that interception.
+  const capturePanelDrag = useCallback(() => gestureActive.get(), [gestureActive]);
 
   const panelStyle = useAnimatedStyle(() => {
     const side = activeSide.value === 0 ? gestureSide.value : activeSide.value;
@@ -311,7 +314,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value * 0.52 }));
 
   return <GestureDetector gesture={panGesture} userSelect="none" enableContextMenu={false} touchAction="pan-y">
-    <View collapsable={false} style={styles.nativeRoot}>
+    <View collapsable={false} style={styles.nativeRoot} onMoveShouldSetResponderCapture={capturePanelDrag} onResponderTerminationRequest={() => false}>
       {children}
       {visiblePanel ? <Reanimated.View pointerEvents={interactive ? "box-none" : "none"} style={styles.nativeOverlay}>
         <Reanimated.View pointerEvents={interactive ? "auto" : "none"} style={[styles.backdrop, backdropStyle]}>
