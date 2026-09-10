@@ -1,5 +1,60 @@
 # Changelog
 
+## [2.1.0](https://github.com/markbang/cohub-mobile/compare/v2.0.0...v2.1.0) (2026-09-10)
+
+
+### Features
+
+* **cache:** add a retention setting and narrow cache writes ([9e27d1e](https://github.com/markbang/cohub-mobile/commit/9e27d1e409961b60712e578e887b72aeb0a561c2))
+* **chat:** drive the Chats/Files panels with a native push pager ([64f13db](https://github.com/markbang/cohub-mobile/commit/64f13dbb9f728047e2c76b9296b38d42a43ac6f2))
+* **chat:** improve composer expansion and compact native menus ([55d7203](https://github.com/markbang/cohub-mobile/commit/55d720336663526f62293645bb197dc7c73abe36))
+* **chat:** render compacted context turns ([9faf376](https://github.com/markbang/cohub-mobile/commit/9faf37634807efd1f029c76e3adbb3b21a29ba7f))
+* **chat:** resolve Cohub mentions, files, and external links in messages ([6068fe7](https://github.com/markbang/cohub-mobile/commit/6068fe7fd59d9ba3cf81db91530f2de0ed4aef32))
+* **debug:** add a synthetic usage control and mark bubble areas ([c54ba1c](https://github.com/markbang/cohub-mobile/commit/c54ba1c7881c2f62cc83f5a197a19527d84e2b54))
+* **debug:** add bubble stress, OTA, cache, and composer inspectors ([7a9788d](https://github.com/markbang/cohub-mobile/commit/7a9788dd7c16f8a31041641335ae69fce6b49730))
+* **debug:** inspect chat message usage and bubble footers ([f42dc80](https://github.com/markbang/cohub-mobile/commit/f42dc80cb3d917d79a77e92706125e67eb377b69))
+* **debug:** show message shape and render guards in the usage inspector ([e6efd04](https://github.com/markbang/cohub-mobile/commit/e6efd04056db36caa2db9c2bb8d3fa0d5d4b8ed4))
+* **debug:** turbo-charge streaming stress and add runtime inspectors ([661b4ca](https://github.com/markbang/cohub-mobile/commit/661b4ca8bc68ab94e887086cf7858ebd19733786))
+* **i18n:** add Simplified Chinese support ([58b62f6](https://github.com/markbang/cohub-mobile/commit/58b62f63a1569fde5a1c827bab07aba53d4cce49))
+* **mobile:** improve native navigation and composer ([e8c8ee4](https://github.com/markbang/cohub-mobile/commit/e8c8ee42ab5524a8b13190e6ac2e4a1c6436fbef))
+* **space:** load Space Chats from the API and harden detail loading ([d6e85d2](https://github.com/markbang/cohub-mobile/commit/d6e85d2f4d06b24bb7d3c0b354b3c0cef87073cd))
+* **ui:** add clock and archive icons ([b00de37](https://github.com/markbang/cohub-mobile/commit/b00de37e218421f985ecd4caba58d46758dd1390))
+* **ui:** add expandable capsule search bar ([f1a46c7](https://github.com/markbang/cohub-mobile/commit/f1a46c777d1fcda12fe26fada0e3502a6bd7be19))
+* **ui:** add toast system and migrate chat error notices ([f5ce40e](https://github.com/markbang/cohub-mobile/commit/f5ce40e0021f643e87bdcc7ebd44817cd1a3ce9d))
+* **ui:** adopt platform-native motion and refine chat presentation ([241b2dd](https://github.com/markbang/cohub-mobile/commit/241b2ddfc8eccedb375fb6fbee9bec26644cab28))
+* **ui:** polish chat bubbles, follow-up queue, and settings ([7b80f74](https://github.com/markbang/cohub-mobile/commit/7b80f7444a522014b2c367cd0ca009adcc349c4f))
+
+
+### Fixes
+
+* **android:** allow touch events through toolbar container ([d7c1866](https://github.com/markbang/cohub-mobile/commit/d7c186614d6a4da65a03de1a40d6de40be5db454))
+* **android:** eliminate gap between composer and keyboard ([f85f341](https://github.com/markbang/cohub-mobile/commit/f85f3414f852bc19c58bb348debffbb6b0271ba4))
+* **android:** use padding behavior with offset for keyboard avoidance ([a03d23e](https://github.com/markbang/cohub-mobile/commit/a03d23e15912dcfe421a4a9ec287827442ab4d6d))
+* **cache:** persist realtime chat updates ([4427217](https://github.com/markbang/cohub-mobile/commit/44272178943fb56c33a83b952ebbc455ccbdfb62))
+* **chat:** arbitrate panel swipe and text selection with the JS responder ([c8bc2a3](https://github.com/markbang/cohub-mobile/commit/c8bc2a35450026a9881205b48ad07f4e5931858a))
+* **chat:** give the token footer a definite width and an explicit fallback ([134eedf](https://github.com/markbang/cohub-mobile/commit/134eedf7f3c51c543a555fc58d842cac00ac89c3))
+* **chat:** keep token footer arrows out of i18n ([3bea673](https://github.com/markbang/cohub-mobile/commit/3bea673cc62b87c2f7cbcfad51f3657ed99eef22))
+* **chat:** make text selection opt-in so the panel swipe keeps working ([8b6ba13](https://github.com/markbang/cohub-mobile/commit/8b6ba133629da44a66e4d3f405b4c77523bd5339))
+* **chat:** polish composer and message interactions ([b38c27b](https://github.com/markbang/cohub-mobile/commit/b38c27bcd39dae4cd2b29420f9a88e51f9cbc661))
+* **chat:** refine sharing and message presentation ([b9fec28](https://github.com/markbang/cohub-mobile/commit/b9fec2837ac318cd490f538182ebdb9bfdebbfd3))
+* **chat:** render the token footer as one text run ([03fa230](https://github.com/markbang/cohub-mobile/commit/03fa2309025f82c6783d25bd50bac2363c78f121))
+* **chat:** restore content-sized user message bubbles ([a76446b](https://github.com/markbang/cohub-mobile/commit/a76446b46640050509255dab19e2340b5d55041d))
+* **chat:** restore fork actions for completed turns ([370413c](https://github.com/markbang/cohub-mobile/commit/370413cde899ca45d8877df6f3ebae5ba4f12a89))
+* **mobile:** align attachment classification and model status feedback ([b9ccf0a](https://github.com/markbang/cohub-mobile/commit/b9ccf0ad587e305a54bc823dbad1a99335f11b95))
+* **navigation:** restore Android back handling and add Profile back button ([463e7ca](https://github.com/markbang/cohub-mobile/commit/463e7ca39befefb6b63ab9367e41cacb12c4f917))
+* **ota:** keep the runtime fingerprint stable for JS-only releases ([db7ee09](https://github.com/markbang/cohub-mobile/commit/db7ee0908e371f8df2765f525fc8bc0530f4b04a))
+* **release:** locate nested Android APKs in the release artifact ([a0791b0](https://github.com/markbang/cohub-mobile/commit/a0791b059ffdf75d1136587336f2f5519498c228))
+* **ui:** keep expanded search bar inside screen bounds ([95bb0d1](https://github.com/markbang/cohub-mobile/commit/95bb0d16e7fa49e71bbd82ce38153fccb36aefc1))
+* **ui:** keep gallery thumbnails and avatars visible inside links ([a86715a](https://github.com/markbang/cohub-mobile/commit/a86715a30847efba86d1d6a985e571d122b57c4c))
+* **ui:** keep short user bubble timestamps inline and fix Android keyboard inset ([08027ee](https://github.com/markbang/cohub-mobile/commit/08027eea9ef7cbea0d3a44161784df52f3f3479b))
+* **ui:** use padding keyboard avoidance with an Android top offset ([f241821](https://github.com/markbang/cohub-mobile/commit/f241821cd40bbb4b18acdcea5e3799fbda2598b9))
+* **uploads:** align signed content types with native file bodies ([19bebaa](https://github.com/markbang/cohub-mobile/commit/19bebaa4569d9f8a6ac4ec221a105cdd6b7e9450))
+
+
+### Performance
+
+* **ui:** optimize expandable search bar animations ([8230008](https://github.com/markbang/cohub-mobile/commit/82300083fa6b6c1d05b4e65fc30a8ab8627cf60a))
+
 ## [2.0.0](https://github.com/markbang/cohub-mobile/compare/v1.9.0...v2.0.0) (2026-09-09)
 
 
