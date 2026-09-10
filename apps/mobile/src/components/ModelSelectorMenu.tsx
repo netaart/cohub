@@ -44,11 +44,11 @@ function statusColor(level: ModelAvailabilityLevel, theme: ReturnType<typeof use
   }
 }
 
-function ModelStatusDot({ entry, status }: { entry: ModelCatalogEntry; status: ModelStatusEntry | null }) {
+function ModelStatusDot({ status }: { status: ModelStatusEntry | null }) {
   const theme = useAppTheme();
   const level = modelAvailabilityLevel(status);
   const color = statusColor(level, theme);
-  return <View accessibilityLabel={`${modelDisplayName(entry)} status: ${modelAvailabilityLabel(level)}`} style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />;
+  return <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />;
 }
 
 function modelIconModel(entry: ModelCatalogEntry) {
@@ -113,11 +113,11 @@ export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStat
     const summary = [entry.provider, context].filter(Boolean).join(" · ");
     return <View style={[styles.modelRow, { backgroundColor: selected ? theme.colors.surfaceRaised : "transparent" }]}>
       <View style={styles.modelMainRow}>
-        <Pressable testID={`model-option-${entry.provider}-${entry.id}`} accessibilityRole="radio" accessibilityLabel={t("model.use", { name: modelDisplayName(entry) })} accessibilityState={{ checked: selected }} onPress={() => selectEntry(entry, levels.length > 1 ? selectedLevel : undefined)} style={({ pressed }) => [styles.modelSelect, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}>
+        <Pressable testID={`model-option-${entry.provider}-${entry.id}`} accessibilityRole="radio" accessibilityLabel={`${t("model.use", { name: modelDisplayName(entry) })}, ${modelAvailabilityLabel(modelAvailabilityLevel(modelStatus?.[entry.id]))}`} accessibilityState={{ checked: selected }} onPress={() => selectEntry(entry, levels.length > 1 ? selectedLevel : undefined)} style={({ pressed }) => [styles.modelSelect, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}>
           <View style={styles.modelIcon}><ModelBrandMark entry={entry} /></View>
           <View style={styles.modelText}>
             <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text }]}>{modelDisplayName(entry)}</Text>
-            <View style={styles.modelSummary}><ModelStatusDot entry={entry} status={modelStatus?.[entry.id] ?? null} /><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, flex: 1 }]}>{summary}</Text></View>
+            <View style={styles.modelSummary}><ModelStatusDot status={modelStatus?.[entry.id] ?? null} /><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, flex: 1 }]}>{summary}</Text></View>
           </View>
           <View style={styles.selectionMark}>{selected ? <AppIcon name="check" size={18} color={theme.colors.text} /> : null}</View>
         </Pressable>

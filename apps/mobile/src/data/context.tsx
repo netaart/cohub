@@ -101,7 +101,7 @@ async function buildPromptContent(
       mimeType,
       filename: attachment.name,
     });
-    if (attachment.mimeType.startsWith("image/")) {
+    if (mimeType.startsWith("image/")) {
       imageBlocks.push({
         type: "image",
         source: { type: "url", url: uploaded.publicUrl },

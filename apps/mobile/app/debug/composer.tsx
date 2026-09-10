@@ -8,6 +8,7 @@ import { AttachmentMenu } from "@/src/components/AttachmentMenu";
 import { ModelSelectorMenu } from "@/src/components/ModelSelectorMenu";
 import { useApp } from "@/src/data/context";
 import type { ChatModelSelection } from "@/src/data/types";
+import { formatThinkingLevel, modelAvailabilityLevel } from "@/src/model-catalog";
 import { typography, useAppTheme } from "@/src/theme";
 import { ComposerInput, Screen, SectionHeader } from "@/src/ui";
 
@@ -44,6 +45,8 @@ export default function DebugComposerScreen() {
   const [sending, setSending] = useState(false);
   const [running, setRunning] = useState(false);
   const [hasStop, setHasStop] = useState(true);
+  const modelLabel = selectedModel?.name ?? selectedModel?.id;
+  const modelTriggerLabel = selectedModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(selectedModel.thinkingLevel)}` : modelLabel;
   const live = getComposerActionState({ text, hasAttachment: attach, disabled, sending, running, hasStopHandler: hasStop });
 
   return (
@@ -108,7 +111,8 @@ export default function DebugComposerScreen() {
         onVoice={() => setVoiceActive((value) => !value)}
         voiceActive={voiceActive}
         onModelPress={() => { setModelOpen(true); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); }}
-        modelLabel={selectedModel?.name ?? selectedModel?.id}
+        modelLabel={modelTriggerLabel}
+        modelStatus={selectedModel ? modelAvailabilityLevel(modelStatus?.models[selectedModel.id]) : "unknown"}
         sending={sending}
         running={running}
         disabled={disabled}
