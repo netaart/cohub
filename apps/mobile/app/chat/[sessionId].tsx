@@ -170,15 +170,16 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const spaceName = view.space ? displaySpaceName(view.space) : sessionSummary?.space?.name || "Space";
   const spaceSessions = useMemo(() => state.sessions.filter((item) => item.spaceId === spaceId), [spaceId, state.sessions]);
   const queuedFollowups = useMemo(() => queuedFollowupTurns(view.turns, view.stream?.turnId), [view.stream?.turnId, view.turns]);
+  const queuedFollowupIds = useMemo(() => new Set(queuedFollowups.map((turn) => turn.id)), [queuedFollowups]);
   const messages = useMemo(() => {
     const history = messagesFromTurns(view.turns);
     return withTurnSequences(
       mergeDisplayMessages(history.length > 0 ? history : view.messages, history.length > 0 ? view.messages : [])
-        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message))
+        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message) && !(typeof message.meta?.turnId === "string" && queuedFollowupIds.has(message.meta.turnId)))
         .sort((a, b) => a.sequence - b.sequence),
       view.turns,
     );
-  }, [view.messages, view.turns]);
+  }, [queuedFollowupIds, view.messages, view.turns]);
   const timeline = useMemo(() => messages.slice().reverse(), [messages]);
   const { fontScale } = useWindowDimensions();
   // App text size changes row heights, so it participates in the measurement cache key.

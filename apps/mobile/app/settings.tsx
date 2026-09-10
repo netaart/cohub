@@ -5,8 +5,6 @@ type Params = { section?: string | string[] };
 
 const sections = new Set([
 	"profile",
-	"appearance",
-	"about",
 	"activity",
 	"notifications",
 	"rules",

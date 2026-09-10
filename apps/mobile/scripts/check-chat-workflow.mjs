@@ -639,6 +639,15 @@ assert.deepEqual(
   ["a", "b"],
 );
 assert.deepEqual(queuedFollowupTurns([queuedFollowup("active", 7)], "active"), []);
+// A stale queued record after the previous turn completed is not a live queue: nothing is running to steer.
+assert.deepEqual(queuedFollowupTurns([
+  { id: "finished", sequence: 8, status: "completed", intent: "followup", userText: "done", createdAt: "2026-09-01T00:00:00.000Z" },
+  queuedFollowup("stale", 9),
+], null), []);
+assert.deepEqual(queuedFollowupTurns([
+  { id: "running", sequence: 10, status: "running", intent: "followup", userText: "now", createdAt: "2026-09-01T00:00:00.000Z" },
+  queuedFollowup("next", 11),
+], null).map((turn) => turn.id), ["next"]);
 assert.equal(followupPreviewText({ userText: "  hello\n\n world  " }), "hello world");
 assert.equal(followupPreviewText({ userText: "   " }), "Follow-up");
 assert.equal(followupPreviewText({ userText: null }), "Follow-up");

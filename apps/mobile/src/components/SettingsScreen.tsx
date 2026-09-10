@@ -24,9 +24,7 @@ import {
 	TextInput,
 	View,
 } from "react-native";
-import { AboutContent } from "@/src/components/AboutScreen";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
-import { AppearanceContent } from "@/src/components/AppearanceScreen";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { useApp } from "@/src/data/context";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
@@ -50,8 +48,6 @@ import { formatNumber, formatRelativeTime } from "@/src/utils";
 
 type SettingsSection =
 	| "profile"
-	| "appearance"
-	| "about"
 	| "activity"
 	| "notifications"
 	| "rules"
@@ -75,8 +71,6 @@ const sections: {
 	icon: React.ComponentProps<typeof AppIcon>["name"];
 }[] = [
 	{ id: "profile", label: "Profile", icon: "user" },
-	{ id: "appearance", label: "Appearance", icon: "palette" },
-	{ id: "about", label: "About", icon: "info" },
 	{ id: "activity", label: "Activity", icon: "activity" },
 	{ id: "notifications", label: "Notifications", icon: "bell" },
 	{ id: "rules", label: "Rules", icon: "file-text" },
@@ -209,8 +203,6 @@ export function SettingsScreen({
 				{section === "profile" ? (
 					<ProfileSection client={client} onNotice={setNotice} />
 				) : null}
-				{section === "appearance" ? <AppearanceSection /> : null}
-				{section === "about" ? <AboutSection onNotice={setNotice} /> : null}
 				{section === "activity" ? <ActivitySection client={client} /> : null}
 				{section === "notifications" ? (
 					<NotificationsSection
@@ -771,14 +763,6 @@ function ProfileSection({
 			)}
 		</View>
 	);
-}
-
-function AppearanceSection() {
-	return <AppearanceContent />;
-}
-
-function AboutSection({ onNotice }: { onNotice: (notice: { title: string; message: string }) => void }) {
-	return <AboutContent onNotice={onNotice} />;
 }
 
 function ActivitySection({ client }: { client: CohubClient | null }) {

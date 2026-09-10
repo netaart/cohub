@@ -294,7 +294,7 @@ function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = fa
     backgroundColor: side === "user" ? theme.colors.userBubble : theme.colors.assistantBubble,
     paddingHorizontal: 12,
     paddingTop: 8,
-    paddingBottom: 18,
+    paddingBottom: side === "user" ? 7 : 18,
     opacity: local ? 0.72 : 1,
   };
 }
@@ -339,11 +339,11 @@ function TypingIndicator() {
   </View>;
 }
 
-function BubbleMeta({ clock, local = false, side, live = false }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean }) {
+function BubbleMeta({ clock, local = false, side, live = false, inline = false }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean; inline?: boolean }) {
   const theme = useAppTheme();
   const color = side === "user" ? theme.colors.userBubbleMeta : theme.colors.textFaint;
   if (!clock && !local && !live) return null;
-  return <View style={{ position: "absolute", right: 12, bottom: 5, flexDirection: "row", alignItems: "center", gap: 3 }}>
+  return <View style={inline ? { flexDirection: "row", alignItems: "center", gap: 3, marginLeft: 8, alignSelf: "flex-end", marginBottom: -4, transform: [{ translateY: 3 }] } : { position: "absolute", right: 12, bottom: 5, flexDirection: "row", alignItems: "center", gap: 3 }}>
     {live ? <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: theme.colors.accent, marginRight: 2 }} /> : null}
     {local ? <Text style={[typography.micro, { color }]}>Sending</Text> : null}
     {clock ? <Text style={[typography.micro, { color, fontVariant: ["tabular-nums"] }]}>{clock}</Text> : null}
@@ -377,9 +377,17 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const fillUserWidth = isUser && Boolean(message.text?.includes("\n"));
   return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
     <ChatBubbleFrame side={side} local={local} fillUserWidth={fillUserWidth}>
-      {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
-      {message.errorMessage ? <Text selectable style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
-      <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} />
+      {isUser ? <View style={{ flexDirection: "row", alignItems: "flex-end", flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <View style={{ flexShrink: 1, minWidth: 0 }}>
+          {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
+          {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.userBubbleText, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
+        </View>
+        <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} inline />
+      </View> : <>
+        {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
+        {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
+        <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} />
+      </>}
     </ChatBubbleFrame>
     {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4 }]}>{message.model || "Agent"}{thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}{inputTokens ? ` · ↑${inputTokens}${cachedInputTokens ? ` (${cachedInputTokens} cached)` : ""}` : ""}{outputTokens ? ` · ↓${outputTokens}` : ""}</Text> : null}
     {copyText && !isUser ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3, marginLeft: side === "assistant" ? 4 : 0, marginRight: side === "user" ? 4 : 0 }}>
