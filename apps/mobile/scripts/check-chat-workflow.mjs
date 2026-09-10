@@ -22,6 +22,7 @@ import { connectionDisplayState, createSessionResyncCoordinator, isTransportReco
 import { panelForScrollOffset } from "../src/data/space-panel-pager.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
 import { forkSessionTurn } from "../src/data/session-fork.ts";
+import { resolveMessageLink } from "../src/data/message-links.ts";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
 
 const forkCalls = [];
@@ -676,6 +677,32 @@ assert.deepEqual(parseInlineMarkdown("a **b** _c_ `d` [e](https://f)"), [
   { type: "text", value: " " },
   { type: "link", url: "https://f", value: "e" },
 ]);
+// Message-specific link families: Space/Skill mentions, image syntax pointing at sandbox paths, cohub:// links.
+assert.deepEqual(parseInlineMarkdown("@[design-skill](cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23) help"), [
+  { type: "mention", url: "cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23", value: "design-skill" },
+  { type: "text", value: " help" },
+]);
+assert.deepEqual(parseInlineMarkdown("see ![Contact Sheet](/workspace/out/sheet.png) now"), [
+  { type: "text", value: "see " },
+  { type: "image", url: "/workspace/out/sheet.png", value: "Contact Sheet" },
+  { type: "text", value: " now" },
+]);
+assert.deepEqual(parseInlineMarkdown("[open](cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f)"), [
+  { type: "link", url: "cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f", value: "open" },
+]);
+// A bare `[x](y)` with an unsupported scheme stays text, and a later valid link on the same line is still found.
+assert.deepEqual(parseInlineMarkdown("[a](ftp://x) [b](https://y)"), [
+  { type: "text", value: "[a](ftp://x) " },
+  { type: "link", url: "https://y", value: "b" },
+]);
+
+assert.deepEqual(resolveMessageLink("cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23"), { kind: "space", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23" });
+assert.deepEqual(resolveMessageLink("cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f"), { kind: "session", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23", sessionId: "81816f3f-02fa-4b71-b775-ba64a5759c8f" });
+assert.deepEqual(resolveMessageLink("https://cohub.live/spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f?turn=3"), { kind: "session", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23", sessionId: "81816f3f-02fa-4b71-b775-ba64a5759c8f" });
+assert.deepEqual(resolveMessageLink("/workspace/avatars/out/contact-sheet.png"), { kind: "file", path: "/workspace/avatars/out/contact-sheet.png" });
+assert.deepEqual(resolveMessageLink("https://example.com/x"), { kind: "external", url: "https://example.com/x" });
+assert.equal(resolveMessageLink("javascript:alert(1)"), null);
+assert.equal(resolveMessageLink(""), null);
 
 const stableBlocks = parseMarkdown("one\n\ntwo");
 const grownBlocks = parseMarkdown("one\n\ntwo and more");

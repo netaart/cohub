@@ -3,7 +3,9 @@ export type MarkdownInline =
   | { type: "strong"; value: string }
   | { type: "emphasis"; value: string }
   | { type: "code"; value: string }
-  | { type: "link"; url: string; value: string };
+  | { type: "link"; url: string; value: string }
+  | { type: "image"; url: string; value: string }
+  | { type: "mention"; url: string; value: string };
 
 export type MarkdownTableAlignment = "left" | "center" | "right" | null;
 
@@ -19,7 +21,7 @@ type InlineSpan = {
   start: number;
   end: number;
   content: string;
-  kind: "strong" | "emphasis" | "link" | "code";
+  kind: "strong" | "emphasis" | "link" | "code" | "image" | "mention";
   url?: string;
 };
 
@@ -52,18 +54,30 @@ function findInlineCode(value: string, startAt: number): InlineSpan | null {
 }
 
 function findInlineLink(value: string, startAt: number): InlineSpan | null {
-  const start = value.indexOf("[", startAt);
-  if (start < 0 || value[start - 1] === "\\") return null;
-  const labelEnd = value.indexOf("](", start + 1);
-  if (labelEnd < 0) return null;
-  const urlStart = labelEnd + 2;
-  const urlEnd = value.indexOf(")", urlStart);
-  if (urlEnd < 0) return null;
-  const url = value.slice(urlStart, urlEnd).trim();
-  if (!/^(https?:\/\/|\/)/.test(url)) return null;
-  const content = value.slice(start + 1, labelEnd);
-  if (findInlineEmphasis(content, 0)) return null;
-  return { start, end: urlEnd + 1, content, kind: "link", url };
+  let start = value.indexOf("[", startAt);
+  while (start >= 0) {
+    if (value[start - 1] === "\\") {
+      start = value.indexOf("[", start + 1);
+      continue;
+    }
+    const labelEnd = value.indexOf("](", start + 1);
+    if (labelEnd < 0) return null;
+    const urlStart = labelEnd + 2;
+    const urlEnd = value.indexOf(")", urlStart);
+    if (urlEnd < 0) return null;
+    const url = value.slice(urlStart, urlEnd).trim();
+    const content = value.slice(start + 1, labelEnd);
+    // `@[label](cohub://…)` is a Space/Skill mention; `![alt](url)` is an image. Both share the link syntax.
+    const prefix = value[start - 1];
+    const isMention = prefix === "@" && url.startsWith("cohub://");
+    const isImage = prefix === "!" && /^(https?:\/\/|\/|data:image\/)/.test(url);
+    const isLink = /^(https?:\/\/|\/|cohub:\/\/)/.test(url) && !findInlineEmphasis(content, 0);
+    if (isMention) return { start: start - 1, end: urlEnd + 1, content, kind: "mention", url };
+    if (isImage) return { start: start - 1, end: urlEnd + 1, content, kind: "image", url };
+    if (isLink) return { start, end: urlEnd + 1, content, kind: "link", url };
+    start = value.indexOf("[", start + 1);
+  }
+  return null;
 }
 
 function findInlineEmphasis(value: string, startAt: number): InlineSpan | null {
@@ -130,7 +144,7 @@ export function parseInlineMarkdown(value: string): MarkdownInline[] {
     }
     if (next.start > cursor) text += value.slice(cursor, next.start);
     flushText();
-    if (next.kind === "link") nodes.push({ type: "link", url: next.url ?? "", value: next.content });
+    if (next.kind === "link" || next.kind === "image" || next.kind === "mention") nodes.push({ type: next.kind, url: next.url ?? "", value: next.content });
     else nodes.push({ type: next.kind, value: next.content });
     cursor = next.end;
   }
