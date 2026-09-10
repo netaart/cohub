@@ -5,6 +5,7 @@ import ArrowLeft from "lucide-react-native/icons/arrow-left";
 import ArrowRight from "lucide-react-native/icons/arrow-right";
 import ArrowDown from "lucide-react-native/icons/arrow-down";
 import ArrowUp from "lucide-react-native/icons/arrow-up";
+import Archive from "lucide-react-native/icons/archive";
 import Bell from "lucide-react-native/icons/bell";
 import BookOpen from "lucide-react-native/icons/book-open";
 import Brain from "lucide-react-native/icons/brain";
@@ -15,6 +16,7 @@ import CheckCheck from "lucide-react-native/icons/check-check";
 import Code from "lucide-react-native/icons/code";
 import CircleCheck from "lucide-react-native/icons/circle-check";
 import CircleX from "lucide-react-native/icons/circle-x";
+import Clock from "lucide-react-native/icons/clock";
 import ChevronDown from "lucide-react-native/icons/chevron-down";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
 import CloudOff from "lucide-react-native/icons/cloud-off";
@@ -66,6 +68,7 @@ import Zap from "lucide-react-native/icons/zap";
 export const icons = {
   activity: Activity,
   alert: CircleAlert,
+  archive: Archive,
   "arrow-left": ArrowLeft,
   "arrow-right": ArrowRight,
   "arrow-down": ArrowDown,
@@ -80,6 +83,7 @@ export const icons = {
   code: Code,
   "check-circle": CircleCheck,
   "circle-x": CircleX,
+  clock: Clock,
   "chevron-down": ChevronDown,
   "chevron-right": ChevronRight,
   "cloud-off": CloudOff,
