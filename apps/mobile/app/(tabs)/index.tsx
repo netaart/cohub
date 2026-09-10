@@ -6,6 +6,7 @@ import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { SessionSearchRow, SpaceSearchRow } from "@/src/components/SearchResultRow";
 import { SessionRow } from "@/src/components/SessionRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type RemoteSpaceSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
+import { useSpaceSessionCounts } from "@/src/data/space-session-counts";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
@@ -51,6 +52,9 @@ export default function ChatsScreen() {
     const needle = trimmedQuery.toLowerCase();
     return state.spaces.filter((space) => [space.name, space.title, space.description].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false));
   }, [filter, state.spaces, trimmedQuery]);
+  const countSpaceIds = useMemo(() => localSpaces.filter((space) => !space.description?.trim()).map((space) => space.id), [localSpaces]);
+  // Search results reuse already-probed counts; they do not fan out probes of their own.
+  const spaceSessionCounts = useSpaceSessionCounts(client, countSpaceIds, { probe: false });
   const listItems = useMemo<ChatListItem[]>(() => {
     if (!trimmedQuery || filter !== "all") return localSessions.map((session) => ({ kind: "local-session", session }));
     const remoteQueryMatches = remoteSearch.query === trimmedQuery;
@@ -99,7 +103,7 @@ export default function ChatsScreen() {
           if (item.kind === "remote-session") return <SessionSearchRow hit={item.hit} onPress={(target) => openSearchSession(item.hit.sessionId, target)} />;
           if (item.kind === "local-session") return <SessionRow session={item.session} onPress={() => openSearchSession(item.session.id)} />;
           if (item.kind === "remote-space") return <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} />;
-          return <SpaceRow space={item.space} chatCount={state.sessions.filter((session) => session.spaceId === item.space.id).length} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />;
+          return <SpaceRow space={item.space} sessionCount={spaceSessionCounts[item.space.id] ?? null} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />;
         }}
         keyboardShouldPersistTaps="handled"
         refreshing={state.refreshing}

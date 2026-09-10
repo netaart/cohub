@@ -1,12 +1,13 @@
 import { useRouter, useScrollToTop } from "expo-router";
-import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View, type ViewToken } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { SpaceSearchRow } from "@/src/components/SearchResultRow";
 import { SpaceRow } from "@/src/components/SpaceRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSpaceSearchHit } from "@/src/data/session-search";
+import { useSpaceSessionCounts } from "@/src/data/space-session-counts";
 import { filterSpaces, type SpaceFilter } from "@/src/data/space-filters";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
@@ -44,6 +45,19 @@ export default function SpacesScreen() {
     const candidates = filter === "recent" && trimmedQuery ? state.spaces : filterSpaces(state.spaces, filter);
     return candidates.filter((space) => !needle || [displaySpaceName(space), space.description].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false));
   }, [filter, state.spaces, trimmedQuery]);
+  const [visibleSpaceIds, setVisibleSpaceIds] = useState<string[]>([]);
+  const visibleSpaceKeyRef = useRef("");
+  const onViewableItemsChanged = useCallback((info: { viewableItems: ViewToken<SpaceListItem>[] }) => {
+    const ids = info.viewableItems.flatMap((token) => (token.item?.kind === "local" ? [token.item.space.id] : []));
+    const key = ids.join(",");
+    if (key === visibleSpaceKeyRef.current) return;
+    visibleSpaceKeyRef.current = key;
+    setVisibleSpaceIds(ids);
+  }, []);
+  const viewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 25 }), []);
+  const spaceById = useMemo(() => new Map(spaces.map((space) => [space.id, space])), [spaces]);
+  const countSpaceIds = useMemo(() => visibleSpaceIds.filter((id) => !spaceById.get(id)?.description?.trim()), [spaceById, visibleSpaceIds]);
+  const spaceSessionCounts = useSpaceSessionCounts(client, countSpaceIds);
   const listItems = useMemo<SpaceListItem[]>(() => {
     if (!trimmedQuery) return spaces.map((space) => ({ kind: "local", space }));
     const remoteQueryMatches = remoteSearch.query === trimmedQuery;
@@ -105,9 +119,11 @@ export default function SpacesScreen() {
       ref={listRef}
       data={listItems}
       keyExtractor={(item) => item.kind === "remote" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
-      renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} chatCount={state.sessions.filter((session) => session.spaceId === item.space.id).length} pinning={pinningSpaceId === item.space.id} onTogglePin={client ? () => void togglePin(item.space.id) : undefined} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}
+      renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} sessionCount={spaceSessionCounts[item.space.id] ?? null} pinning={pinningSpaceId === item.space.id} onTogglePin={client ? () => void togglePin(item.space.id) : undefined} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}
       refreshing={state.refreshing}
       onRefresh={() => void refreshHome()}
+      viewabilityConfig={viewabilityConfig}
+      onViewableItemsChanged={onViewableItemsChanged}
       keyboardShouldPersistTaps="handled"
 contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
       ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}<View style={{ flexDirection: "row", gap: 8, paddingTop: 4 }}><SpaceFilterChip label={t("spaces.filter.recent")} selected={filter === "recent"} onPress={() => setFilter("recent")} /><SpaceFilterChip label={t("spaces.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} /><SpaceFilterChip label={t("spaces.filter.pinned")} icon="pin" selected={filter === "pinned"} onPress={() => setFilter("pinned")} /></View>{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("spaces.search.retry")} onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}{pinError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{pinError}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("spaces.pin.dismiss")} onPress={() => setPinError(null)}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.dismiss")}</Text></Pressable></View> : null}<Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 12, textTransform: "uppercase" }]}>{t("spaces.section.yourWorkspaces")}</Text></View>}
