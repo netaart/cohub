@@ -1,4 +1,4 @@
-import type { ContentBlock } from "@neta-art/cohub";
+import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { MessageBubble } from "@/src/components/MessageContent";
@@ -31,6 +31,27 @@ function contentSummary(content: ContentBlock[] | null | undefined): string {
   if (content.length === 0) return "[]";
   return `[${content.map(blockSummary).join(", ")}]`;
 }
+
+const CONTROL_MESSAGE: MessageRecord = {
+  id: "debug-usage-control",
+  sessionId: "debug-usage",
+  role: "assistant" as const,
+  content: [{ type: "text" as const, text: "对照组：合成消息（usage.output = 1160，footer 应显示 ↓1.2K）。" }],
+  text: "对照组：合成消息（usage.output = 1160，footer 应显示 ↓1.2K）。",
+  sequence: -1,
+  provider: "cohub",
+  model: "deepseek-flash",
+  stopReason: "stop",
+  errorMessage: null,
+  usage: { input: 1000, output: 1160, cacheRead: 253184, cacheWrite: 0, totalTokens: 255344 },
+  meta: { messageKind: "assistant_final", turnId: "debug-control", requestedThinkingLevel: "xhigh" },
+  authorUuid: null,
+  authorProfile: null,
+  startedAt: null,
+  completedAt: null,
+  durationMs: 0,
+  createdAt: new Date().toISOString(),
+};
 
 /**
  * Renders the exact assistant messages the chat timeline would show, with the
@@ -90,6 +111,14 @@ export default function DebugMessagesScreen() {
             <Row label="stream" value={view.stream ? `${view.stream.status}${view.stream.turnId ? ` · ${view.stream.turnId.slice(0, 8)}` : ""}` : "—"} />
           </View>
 
+          <SectionHeader title="对照组（合成消息）" />
+          <Text selectable style={[typography.caption, { color: theme.colors.textMuted, marginHorizontal: 16, marginBottom: 4 }]}>
+            固定 usage.output=1160；气泡 footer 应显示 ↓1.2K。
+          </Text>
+          <View style={{ marginHorizontal: 16, borderWidth: 1, borderStyle: "dashed", borderColor: theme.colors.border }}>
+            <MessageBubble message={CONTROL_MESSAGE} />
+          </View>
+
           <SectionHeader title="最近的 assistant 消息（usage + 真实渲染）" />
           {assistantMessages.length === 0 ? (
             <Text style={[typography.caption, { color: theme.colors.textMuted, marginHorizontal: 16 }]}>没有 assistant 消息。</Text>
@@ -111,7 +140,10 @@ export default function DebugMessagesScreen() {
               <Text selectable style={[typography.caption, { color: output ? theme.colors.success : theme.colors.danger, marginHorizontal: 16, marginTop: 3 }]}>
                 {`tokens → input ${input ?? "—"} / cached ${cached ?? "—"} / output ${output ? `↓${output}` : "MISSING"}`}
               </Text>
-              <MessageBubble message={message} />
+              <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginHorizontal: 16, marginTop: 6 }]}>气泡 ↓（虚线框内）</Text>
+              <View style={{ marginHorizontal: 16, marginTop: 2, borderWidth: 1, borderStyle: "dashed", borderColor: theme.colors.border }}>
+                <MessageBubble message={message} />
+              </View>
             </View>;
           })}
         </> : null}
