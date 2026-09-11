@@ -23,7 +23,8 @@ import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog
 import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme } from "@/src/theme";
 import { useTranslation, type Translate } from "@/src/i18n";
 import { AppIcon, type IconName } from "@/src/ui";
-import { getUserBubbleLayout } from "@/src/ui/message-bubble-layout";
+import { BUBBLE_PADDING_X, getBubbleMaxWidth } from "@/src/ui/message-bubble-layout";
+import { BubbleContentWidth, BubbleText, BubbleTraceMessage } from "@/src/components/BubbleText";
 import { turnSequenceForMessage } from "@/src/data/session-history";
 import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
@@ -139,42 +140,46 @@ function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignm
   </View>;
 }
 
-function MarkdownBlockView({ block, accent, textColor, fadeTail = 0 }: { block: MarkdownBlock; accent: string; textColor: string; fadeTail?: number }) {
+function MarkdownBlockView({ block, accent, textColor, fadeTail = 0, footer }: { block: MarkdownBlock; accent: string; textColor: string; fadeTail?: number; footer?: ReactNode }) {
   const theme = useAppTheme();
-  if (block.type === "code") return <CodeBlock code={block.code} language={block.language} streaming={!block.closed} />;
-  if (block.type === "table") return <MarkdownTable alignments={block.alignments} header={block.header} rows={block.rows} accent={accent} textColor={textColor} />;
+  const contentWidth = useContext(BubbleContentWidth);
+  const measurementKey = JSON.stringify([block, typography.chatBody.fontSize]);
+  if (block.type === "code" || block.type === "table") return <View style={{ width: contentWidth, minWidth: 0 }}>
+    {block.type === "code" ? <CodeBlock code={block.code} language={block.language} streaming={!block.closed} /> : <MarkdownTable alignments={block.alignments} header={block.header} rows={block.rows} accent={accent} textColor={textColor} />}
+    {footer ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}
+  </View>;
   if (block.type === "heading") {
     const size = scaleFontSize(block.level <= 2 ? 19 : block.level <= 4 ? 17 : 15);
-    return <Text selectable style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700", marginTop: 3 }}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} fadeTail={fadeTail} /></Text>;
+    return <BubbleText selectable footer={footer} measurementKey={measurementKey} containerStyle={{ marginTop: 3 }} style={{ color: textColor, fontSize: size, lineHeight: size + 6, fontWeight: "700" }}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} fadeTail={fadeTail} /></BubbleText>;
   }
   if (block.type === "quote") {
-    return <View style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><Text selectable style={[typography.chatBody, { color: theme.colors.textMuted }]}><InlineNodes nodes={block.inlines} accent={accent} color={theme.colors.textMuted} fadeTail={fadeTail} /></Text></View>;
+    return <View style={{ width: contentWidth, borderLeftWidth: 3, borderLeftColor: theme.colors.accentBorder, paddingLeft: 10 }}><BubbleText selectable footer={footer} measurementKey={measurementKey} containerStyle={{ minWidth: 0 }} style={[typography.chatBody, { color: theme.colors.textMuted }]}><InlineNodes nodes={block.inlines} accent={accent} color={theme.colors.textMuted} fadeTail={fadeTail} /></BubbleText></View>;
   }
   if (block.type === "list") {
-    return <View style={{ gap: 6 }}>{block.items.map((item, index) => <View key={index} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.chatBody, { color: accent, minWidth: 18 }]}>{block.ordered ? `${block.start + index}.` : "•"}</Text><Text selectable style={[typography.chatBody, { color: textColor, flex: 1 }]}><InlineNodes nodes={item} accent={accent} color={textColor} fadeTail={index === block.items.length - 1 ? fadeTail : 0} /></Text></View>)}</View>;
+    return <View style={{ width: contentWidth, gap: 6 }}>{block.items.map((item, index) => <View key={index} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><Text style={[typography.chatBody, { color: accent, minWidth: 18 }]}>{block.ordered ? `${block.start + index}.` : "•"}</Text><BubbleText selectable footer={index === block.items.length - 1 ? footer : undefined} measurementKey={measurementKey} containerStyle={{ flex: 1, minWidth: 0 }} style={[typography.chatBody, { color: textColor }]}><InlineNodes nodes={item} accent={accent} color={textColor} fadeTail={index === block.items.length - 1 ? fadeTail : 0} /></BubbleText></View>)}</View>;
   }
-  return <Text selectable style={[typography.chatBody, { color: textColor }]}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} fadeTail={fadeTail} /></Text>;
+  return <BubbleText selectable footer={footer} measurementKey={measurementKey} style={[typography.chatBody, { color: textColor }]}><InlineNodes nodes={block.inlines} accent={accent} color={textColor} fadeTail={fadeTail} /></BubbleText>;
 }
 
 // Streaming re-parses only the tail, so completed blocks keep their identity and
 // memo skips them; the growing tail block carries the fade window.
 const MemoBlock = memo(
-  function MemoBlock(props: { block: MarkdownBlock; signature: string; accent: string; textColor: string; fadeTail: number }) {
-    return <MarkdownBlockView block={props.block} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} />;
+  function MemoBlock(props: { block: MarkdownBlock; signature: string; accent: string; textColor: string; fadeTail: number; footer?: ReactNode }) {
+    return <MarkdownBlockView block={props.block} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} footer={props.footer} />;
   },
-  (previous, next) => previous.signature === next.signature && previous.accent === next.accent && previous.textColor === next.textColor && previous.fadeTail === next.fadeTail,
+  (previous, next) => previous.signature === next.signature && previous.accent === next.accent && previous.textColor === next.textColor && previous.fadeTail === next.fadeTail && previous.footer === next.footer,
 );
 
-const MarkdownBlocks = memo(function MarkdownBlocks({ entries, accent, textColor, fadeTail = 0 }: { entries: MarkdownBlockEntry[]; accent: string; textColor: string; fadeTail?: number }) {
-  return <>{entries.map((entry, index) => <MemoBlock key={index} block={entry.block} signature={entry.signature} accent={accent} textColor={textColor} fadeTail={index === entries.length - 1 ? fadeTail : 0} />)}</>;
+const MarkdownBlocks = memo(function MarkdownBlocks({ entries, accent, textColor, fadeTail = 0, footer }: { entries: MarkdownBlockEntry[]; accent: string; textColor: string; fadeTail?: number; footer?: ReactNode }) {
+  return <>{entries.map((entry, index) => <MemoBlock key={index} block={entry.block} signature={entry.signature} accent={accent} textColor={textColor} fadeTail={index === entries.length - 1 ? fadeTail : 0} footer={index === entries.length - 1 ? footer : undefined} />)}{entries.length === 0 ? footer : null}</>;
 });
 
-const MarkdownBody = memo(function MarkdownBody({ source, accent, textColor }: { source: string; accent: string; textColor: string }) {
+const MarkdownBody = memo(function MarkdownBody({ source, accent, textColor, footer }: { source: string; accent: string; textColor: string; footer?: ReactNode }) {
   const entries = useMemo(() => parseMarkdownEntries(source), [source]);
-  return <MarkdownBlocks entries={entries} accent={accent} textColor={textColor} />;
+  return <MarkdownBlocks entries={entries} accent={accent} textColor={textColor} footer={footer} />;
 });
 
-function TextBlock({ value, muted = false, accent, color, streaming = false }: { value: string; muted?: boolean; accent: string; color?: string; streaming?: boolean }) {
+function TextBlock({ value, muted = false, accent, color, streaming = false, footer }: { value: string; muted?: boolean; accent: string; color?: string; streaming?: boolean; footer?: ReactNode }) {
   const theme = useAppTheme();
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
   const { text, fadeTail } = useRevealedStreamText(value, streaming);
@@ -187,11 +192,11 @@ function TextBlock({ value, muted = false, accent, color, streaming = false }: {
   );
   const tail = rendered?.tail ?? "";
   const tailEntries = useMemo(() => (tail ? parseMarkdownEntries(tail) : []), [tail]);
-  if (!rendered) return <View style={{ gap: 9, width: "100%", minWidth: 0 }}><MarkdownBody source={text} accent={accent} textColor={textColor} /></View>;
+  if (!rendered) return <View style={{ gap: 9, minWidth: 0 }}><MarkdownBody source={text} accent={accent} textColor={textColor} footer={footer} /></View>;
   // One list in document order: a block that crosses the stable boundary keeps
   // its key and signature, so memo skips it instead of remounting the block.
-  return <View style={{ gap: 9, width: "100%", minWidth: 0 }}>
-    <MarkdownBlocks entries={tailEntries.length > 0 ? [...rendered.entries, ...tailEntries] : rendered.entries} accent={accent} textColor={textColor} fadeTail={fadeTail} />
+  return <View style={{ gap: 9, minWidth: 0 }}>
+    <MarkdownBlocks entries={tailEntries.length > 0 ? [...rendered.entries, ...tailEntries] : rendered.entries} accent={accent} textColor={textColor} fadeTail={fadeTail} footer={footer} />
   </View>;
 }
 
@@ -257,11 +262,11 @@ function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number })
   );
 }
 
-function Block({ block, color, streaming = false }: { block: ContentBlock; color?: string; streaming?: boolean }) {
+function Block({ block, color, streaming = false, footer }: { block: ContentBlock; color?: string; streaming?: boolean; footer?: ReactNode }) {
   const theme = useAppTheme();
   const accent = color ?? theme.colors.accent;
-  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} streaming={streaming} />;
-  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} streaming={streaming} />;
+  if (block.type === "text") return <TextBlock value={block.text} accent={accent} color={color} streaming={streaming} footer={footer} />;
+  if (block.type === "thinking") return <TextBlock value={block.thinking} muted accent={accent} streaming={streaming} footer={footer} />;
   if (block.type === "system_note") return <SystemNoteRow block={block} />;
   return null;
 }
@@ -342,6 +347,7 @@ function ToolOutput({ block }: { block: Extract<ContentBlock, { type: "tool_resu
 
 function ToolCall({ block, result, active = false }: { block: Extract<ContentBlock, { type: "tool_use" }>; result?: Extract<ContentBlock, { type: "tool_result" }>; active?: boolean }) {
   const theme = useAppTheme();
+  const contentWidth = useContext(BubbleContentWidth);
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const status = result ? result.is_error ? t("message.tool.status.error") : t("message.tool.status.done") : active ? t("message.tool.status.running") : t("message.tool.status.noResult");
@@ -349,7 +355,7 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
   const preview = toolCallPreview(block.name, block.input);
   const caption = formatToolCallCaption(block.name, block.input);
   const edits = Array.isArray(block.input.edits) ? block.input.edits.filter((edit): edit is { oldText: string; newText: string } => typeof edit === "object" && edit !== null && typeof edit.oldText === "string" && typeof edit.newText === "string") : [];
-  return <View>
+  return <View style={{ width: contentWidth }}>
     <Pressable accessibilityRole="button" accessibilityLabel={`${caption}: ${status}`} accessibilityState={{ expanded }} hitSlop={8} onPress={() => setExpanded(!expanded)} style={{ minHeight: 22, flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2 }}>
       <AppIcon name={toolIcon(block.name)} size={14} color={iconColor} />
       <Text numberOfLines={1} style={{ flex: 1, fontSize: scaleFontSize(13), lineHeight: scaleLineHeight(18) }}>
@@ -358,46 +364,51 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
       </Text>
     </Pressable>
     {expanded ? <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={{ maxHeight: TOOL_DETAILS_MAX_HEIGHT, marginTop: 4 }} contentContainerStyle={{ borderLeftWidth: 1, borderLeftColor: theme.colors.border, paddingLeft: 12, paddingRight: 8, gap: 8 }}>
+      <BubbleContentWidth.Provider value={contentWidth === undefined ? undefined : Math.max(0, contentWidth - 21)}>
       <Text style={[typography.micro, { color: theme.colors.textMuted }]}>{t("message.tool.input")}</Text>
       <CappedCodeText value={JSON.stringify(block.input, null, 2)} color={theme.colors.text} />
       {edits.map((edit, index) => <View key={index}><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }]}>{edit.oldText.split("\n").map((line) => `- ${line}`).join("\n")}</Text><Text style={[typography.code, { fontFamily: "SpaceMono", color: theme.colors.success }]}>{edit.newText.split("\n").map((line) => `+ ${line}`).join("\n")}</Text></View>)}
       {result ? <ToolOutput block={result} /> : null}
+      </BubbleContentWidth.Provider>
     </ScrollView> : null}
   </View>;
 }
 
-export function MessageContent({ content, active = false, color, imageMaxWidth }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string; imageMaxWidth?: number }) {
+export function MessageContent({ content, active = false, color, imageMaxWidth, footer }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string; imageMaxWidth?: number; footer?: ReactNode }) {
   const blocks = content ?? [];
+  const contentWidth = useContext(BubbleContentWidth);
   const imageUris = blocks.flatMap((block) => block.type === "image" ? [imageUri(block)].filter((uri): uri is string => Boolean(uri)) : []);
   const firstImageIndex = blocks.findIndex((block) => block.type === "image" && imageUri(block) !== null);
-  return <View style={{ gap: 3, width: "100%", minWidth: 0 }}>{blocks.map((block, index) => {
+  const lastVisibleIndex = blocks.findLastIndex((block, index) => block.type === "text" ? Boolean(block.text.trim()) : block.type === "thinking" ? Boolean(block.thinking.trim()) : block.type === "tool_use" || block.type === "system_note" || (block.type === "image" && index === firstImageIndex));
+  const last = blocks[lastVisibleIndex];
+  const textFooter = last?.type === "text" || last?.type === "thinking";
+  return <View style={{ gap: 3, minWidth: 0 }}>{blocks.map((block, index) => {
     // Tool results never render standalone. A paired one is shown inside its
     // ToolCall; a streaming message boundary can leave a partial result whose
     // tool_use was committed with the previous message, and dumping that raw
     // output into the bubble grows its height for as long as the tool runs.
-    if (block.type === "tool_result") return null;
+    if (block.type === "tool_result" || (block.type === "text" && !block.text.trim()) || (block.type === "thinking" && !block.thinking.trim())) return null;
     if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={blocks.find((item): item is Extract<ContentBlock, { type: "tool_result" }> => item.type === "tool_result" && item.tool_use_id === block.id)} />;
     if (block.type === "image") {
       if (index !== firstImageIndex) return null;
-      return imageUris.length > 0 ? <ImageGallery key="image-gallery" uris={imageUris} maxWidth={imageMaxWidth} /> : null;
+      return imageUris.length > 0 ? <ImageGallery key="image-gallery" uris={imageUris} maxWidth={imageMaxWidth ?? contentWidth} /> : null;
     }
-    return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} />;
-  })}</View>;
+    return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} footer={index === lastVisibleIndex && textFooter ? footer : undefined} />;
+  })}{footer && !textFooter ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}</View>;
 }
 
-function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local = false, maxWidth: number, fitContent = false, fillUserWidth = false): ViewStyle {
+function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local: boolean, maxWidth: number): ViewStyle {
   return {
     maxWidth,
-    ...(side === "assistant" && !fitContent ? { width: maxWidth } : side === "user" && fillUserWidth ? { width: maxWidth } : null),
     minWidth: 0,
     position: "relative",
     alignSelf: side === "user" ? "flex-end" : "flex-start",
     borderRadius: theme.radius.lg,
     borderCurve: "continuous",
     backgroundColor: side === "user" ? theme.colors.userBubble : theme.colors.assistantBubble,
-    paddingHorizontal: 12,
+    paddingHorizontal: BUBBLE_PADDING_X,
     paddingTop: 8,
-    paddingBottom: side === "user" ? 7 : 18,
+    paddingBottom: 7,
     opacity: local ? 0.72 : 1,
   };
 }
@@ -406,21 +417,16 @@ function ChatBubbleFrame({
   side,
   local = false,
   children,
-  fitContent = false,
-  fillUserWidth = false,
+  maxWidth,
 }: {
   side: "user" | "assistant";
   local?: boolean;
   children: ReactNode;
-  fitContent?: boolean;
-  fillUserWidth?: boolean;
+  maxWidth: number;
 }) {
   const theme = useAppTheme();
-  const { width } = useWindowDimensions();
-  const maxWidth = Math.max(196, Math.round(width * (side === "user" ? 0.78 : 0.86)) - 24);
-  const style = chatBubbleStyle(theme, side, local, maxWidth, fitContent, fillUserWidth);
-  // Native text selection on the timeline captures the panel swipe; copy from the long-press menu instead.
-  return <View style={style}>{children}</View>;
+  const style = chatBubbleStyle(theme, side, local, maxWidth);
+  return <BubbleContentWidth.Provider value={Math.max(0, maxWidth - BUBBLE_PADDING_X * 2)}><View style={style}>{children}</View></BubbleContentWidth.Provider>;
 }
 
 function TypingDot({ progress, index, color }: { progress: SharedValue<number>; index: number; color: string }) {
@@ -442,11 +448,11 @@ function TypingIndicator() {
   </View>;
 }
 
-function BubbleMeta({ clock, local = false, side, live = false, inline = false, t }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean; inline?: boolean; t: Translate }) {
+function BubbleMeta({ clock, local = false, side, live = false, t }: { clock?: string; local?: boolean; side: "user" | "assistant"; live?: boolean; t: Translate }) {
   const theme = useAppTheme();
   const color = side === "user" ? theme.colors.userBubbleMeta : theme.colors.textFaint;
   if (!clock && !local && !live) return null;
-  return <View style={inline ? { flexDirection: "row", alignItems: "center", gap: 3, marginLeft: 8, alignSelf: "flex-end", marginBottom: -4, transform: [{ translateY: 3 }] } : { position: "absolute", right: 12, bottom: 5, flexDirection: "row", alignItems: "center", gap: 3 }}>
+  return <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: 3, maxWidth: "100%" }}>
     {live ? <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: theme.colors.accent, marginRight: 2 }} /> : null}
     {local ? <Text style={[typography.micro, { color }]}>{t("chat.sending")}</Text> : null}
     {clock ? <Text style={[typography.micro, { color, fontVariant: ["tabular-nums"] }]}>{clock}</Text> : null}
@@ -454,7 +460,7 @@ function BubbleMeta({ clock, local = false, side, live = false, inline = false, 
   </View>;
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null }) {
+export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null, availableWidth }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
@@ -492,31 +498,14 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const textColor = isUser ? theme.colors.userBubbleText : undefined;
   const accent = isUser ? theme.colors.userBubbleText : theme.colors.accent;
   const copyText = messageText(message);
-  const maxWidth = Math.max(196, Math.round(width * (isUser ? 0.78 : 0.86)) - 24);
-  // A one-line message keeps its clock inline. Longer text must not use the wrapping row: the
-  // wrap lets the text claim the full width before the clock drops under it, leaving a
-  // stretched single-line bubble with a stranded timestamp.
-  const { fillUserWidth, inlineUserMeta } = isUser
-    ? getUserBubbleLayout(message)
-    : { fillUserWidth: false, inlineUserMeta: false };
+  const maxWidth = getBubbleMaxWidth(availableWidth ?? width);
+  const clock = formatMessageClock(message.createdAt);
+  const footer = clock || local ? <BubbleMeta clock={clock} local={local} side={side} t={t} /> : undefined;
   return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
-    <ChatBubbleFrame side={side} local={local} fillUserWidth={fillUserWidth}>
-      {isUser ? inlineUserMeta ? <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "flex-end" }}>
-        <View style={{ flexShrink: 1, minWidth: 0 }}>
-          {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
-          {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.userBubbleText, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
-        </View>
-        <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} inline t={t} />
-      </View> : <>
-        {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
-        {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.userBubbleText, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
-        <View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: 2 }}><BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} inline t={t} /></View>
-      </> : <>
-        {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - 24} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} /> : null}
-        {message.errorMessage ? <Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 6 }]}>{message.errorMessage}</Text> : null}
-        <BubbleMeta clock={formatMessageClock(message.createdAt)} local={local} side={side} t={t} />
-      </>}
-    </ChatBubbleFrame>
+    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} local={local} maxWidth={maxWidth}>
+      {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - BUBBLE_PADDING_X * 2} footer={message.errorMessage ? undefined : footer} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} footer={message.errorMessage ? undefined : footer} /> : !message.errorMessage ? footer : null}
+      {message.errorMessage ? <BubbleText selectable footer={footer} measurementKey={`${message.errorMessage}:${typography.caption.fontSize}`} containerStyle={{ marginTop: 6 }} style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger }]}>{message.errorMessage}</BubbleText> : null}
+    </ChatBubbleFrame></BubbleTraceMessage.Provider>
     {/* One string child with a definite width: separate runs and shrink-wrapped layout have dropped the output segment on some Android devices. */}
     {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4, alignSelf: "stretch" }]}>{`${message.model || t("chat.model.agent")}${thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}${inputTokens ? ` · ↑${inputTokens}${cachedInputTokens ? ` ${t("message.tokens.cached", { count: cachedInputTokens })}` : ""}` : ""}${outputTokens ? ` · ↓${outputTokens}` : " · ↓MISSING"}`}</Text> : null}
     {copyText && !isUser ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3, marginLeft: side === "assistant" ? 4 : 0, marginRight: side === "user" ? 4 : 0 }}>
@@ -526,8 +515,10 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   </View></BubbleContext.Provider>;
 });
 
-export function StreamCard({ content, status, runtimePhase = null, runtimeModel = null }: { content: ContentBlock[]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null }) {
+export function StreamCard({ content, status, runtimePhase = null, runtimeModel = null, availableWidth }: { content: ContentBlock[]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null; availableWidth?: number }) {
   const theme = useAppTheme();
+  const { width } = useWindowDimensions();
+  const maxWidth = getBubbleMaxWidth(availableWidth ?? width);
   const { t } = useTranslation();
   const liveContent = content;
   const hasLivePreview = liveContent.some((block) => (block.type === "text" && block.text.trim().length > 0) || (block.type === "thinking" && block.thinking.trim().length > 0) || block.type === "tool_use");
@@ -545,13 +536,14 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
   const failed = status === "failed" || status === "interrupted";
   const statusLabel = status === "failed" ? t("message.stream.failed") : status === "interrupted" ? t("message.stream.stopped") : null;
   const live = status === "pending" || status === "streaming";
+  const hasContent = hasLivePreview || hasRenderableContent(liveContent);
+  const footer = live && !failed ? <BubbleMeta clock={formatMessageClock(new Date().toISOString())} side="assistant" live t={t} /> : undefined;
   return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
-    <ChatBubbleFrame side="assistant" fitContent={!hasLivePreview && !hasRenderableContent(liveContent)}>
-      {!statusLabel && !hasLivePreview && !hasRenderableContent(liveContent) ? <TypingIndicator /> : null}
+    <ChatBubbleFrame side="assistant" maxWidth={maxWidth}>
+      {!statusLabel && !hasContent && !runtimeLabel ? <View><TypingIndicator />{footer ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}</View> : null}
       {statusLabel ? <Text style={[typography.caption, { color: theme.colors.danger, marginBottom: hasLivePreview || runtimeLabel ? 6 : 0 }]}>{statusLabel}</Text> : null}
-      {runtimeLabel ? <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</Text> : null}
-      {hasLivePreview || hasRenderableContent(liveContent) ? <MessageContent active={live} content={liveContent} /> : null}
-      <BubbleMeta clock={failed ? undefined : live ? formatMessageClock(new Date().toISOString()) : undefined} side="assistant" live={live && !failed} t={t} />
+      {runtimeLabel ? <BubbleText footer={hasContent ? undefined : footer} measurementKey={`${runtimeLabel}:${typography.caption.fontSize}`} style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</BubbleText> : null}
+      {hasContent ? <MessageContent active={live} content={liveContent} footer={footer} /> : null}
     </ChatBubbleFrame>
   </View>;
 }

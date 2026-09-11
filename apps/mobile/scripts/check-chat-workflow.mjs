@@ -9,7 +9,7 @@ import { invertedListDistances, nextChatTailFollowing, reverseListIndex } from "
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { getComposerLayout } from "../src/ui/composer-layout.ts";
-import { getUserBubbleLayout } from "../src/ui/message-bubble-layout.ts";
+import { BUBBLE_META_GAP, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
@@ -73,18 +73,88 @@ scrollTrace.start({ platform: "ios" });
 assert.equal(scrollTrace.alias("session", "different-account"), "session-1");
 assert.equal(scrollTrace.snapshot().entries[0].sequence, 1);
 
-const bubbleText = "好的呀，等我做完别的优化，我们可以直接发一个新版 APK，没问题";
-for (const text of [bubbleText, "第一行\n第二行", "好的", "a".repeat(24), "a".repeat(25)]) {
-  const content = [{ type: "text", text }];
-  const expected = { fillUserWidth: text.includes("\n"), inlineUserMeta: !text.includes("\n") && text.length <= 24 };
-  for (const summary of [null, "", text]) {
-    assert.deepEqual(getUserBubbleLayout({ content, text: summary }), expected, "content-only and hydrated messages keep the same layout");
+const bubbleMeta = { width: 48, height: 16 };
+const shortBubble = { width: 40, height: 23, lines: [{ x: 0, y: 0, width: 30, height: 23 }] };
+assert.deepEqual(getBubbleMetaLayout(null, bubbleMeta, 280), { minWidth: 0, marginTop: 2, inline: false });
+assert.equal(getBubbleMetaLayout(shortBubble, null, 280).inline, false);
+const shortLayout = getBubbleMetaLayout(shortBubble, bubbleMeta, 280);
+assert.equal(shortLayout.minWidth, 86, "short text may grow to accommodate timestamp and status");
+assert.equal(shortLayout.inline, false, "wait for actual expanded width before overlapping the footer row");
+assert.deepEqual(getBubbleMetaLayout({ ...shortBubble, width: 86 }, bubbleMeta, 280), { minWidth: 86, marginTop: -14, inline: true });
+assert.equal(getBubbleMetaLayout({ ...shortBubble, width: 85.5 }, bubbleMeta, 280).inline, false, "fractional overlap must wrap");
+const multiBubble = { width: 260, height: 69, lines: [{ x: 0, y: 0, width: 258, height: 23 }, { x: 0, y: 23, width: 255, height: 23 }, { x: 0, y: 46, width: 60, height: 23 }] };
+assert.deepEqual(getBubbleMetaLayout(multiBubble, bubbleMeta, 280), { minWidth: 0, marginTop: -14, inline: true });
+assert.equal(getBubbleMetaLayout({ ...multiBubble, lines: [...multiBubble.lines.slice(0, 2), { x: 0, y: 46, width: 250, height: 23 }] }, bubbleMeta, 280).inline, false);
+assert.equal(getBubbleMetaLayout({ ...shortBubble, width: 280, lines: [{ x: 230, y: 0, width: 50, height: 23 }] }, bubbleMeta, 280).inline, false, "right-aligned/RTL text cannot be covered by right-aligned metadata");
+assert.equal(getBubbleMetaLayout(shortBubble, { width: 290, height: 48 }, 280).minWidth, 280);
+assert.equal(getBubbleMetaLayout(shortBubble, { width: 0, height: 0 }, 280).inline, false);
+assert.equal(getBubbleMetaLayout({ width: 200, height: 0, lines: [] }, bubbleMeta, 280).inline, false);
+for (const viewport of [240, 320, 360, 390, 768]) {
+  assert.ok(getBubbleMaxWidth(viewport) <= viewport - 24);
+  for (const scale of [1, 1.3, 2]) {
+    for (const lastWidth of [0, 30, 100, 180, 250]) {
+      const text = { width: getBubbleMaxWidth(viewport) - 24, height: 46 * scale, lines: [{ x: 0, y: 0, width: 100, height: 23 * scale }, { x: 0, y: 23 * scale, width: lastWidth, height: 23 * scale }] };
+      const meta = { width: 48 * scale, height: 16 * scale };
+      const result = getBubbleMetaLayout(text, meta, text.width);
+      assert.equal(result.minWidth, 0, "multi-line text never changes width for the timestamp");
+      if (result.inline) {
+        assert.ok(lastWidth + BUBBLE_META_GAP + meta.width <= text.width);
+        assert.ok(text.height + result.marginTop >= text.lines[1].y, "tall metadata cannot overlap previous lines");
+      } else assert.ok(result.marginTop >= 0);
+    }
   }
-  assert.deepEqual(getUserBubbleLayout({ content: [], text }), expected, "text-only messages retain their layout");
 }
-assert.equal(getUserBubbleLayout({ content: [{ type: "text", text: bubbleText }], text: "short summary" }).inlineUserMeta, false);
-assert.equal(getUserBubbleLayout({ content: [{ type: "text", text: "one" }, { type: "text", text: "two" }], text: null }).fillUserWidth, true);
-assert.equal(getUserBubbleLayout({ content: [{ type: "image", source: { type: "url", url: "https://example.com/image.png" } }], text: null }).inlineUserMeta, false);
+
+// Execute the real JSX composition to catch a dropped footer between memo/Markdown layers.
+const bubbleSource = ts.createSourceFile("MessageContent.tsx", readFileSync(new URL("../src/components/MessageContent.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const bubbleFunctionNames = new Set(["MarkdownBlockView", "TextBlock", "Block", "MessageContent"]);
+const bubbleVariableNames = new Set(["MemoBlock", "MarkdownBlocks", "MarkdownBody"]);
+const bubbleFunctions = bubbleSource.statements.filter((statement) =>
+  (ts.isFunctionDeclaration(statement) && bubbleFunctionNames.has(statement.name?.text)) ||
+  (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => bubbleVariableNames.has(declaration.name.getText(bubbleSource))))
+).map((statement) => statement.getText(bubbleSource).replace(/^export /, ""));
+assert.equal(bubbleFunctions.length, 7);
+const bubbleEntries = (text) => parseMarkdown(text).map((block) => ({ block, signature: markdownBlockSignature(block) }));
+const bubbleScope = {
+  React: { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), Fragment: "Fragment" },
+  memo: (component) => component,
+  useMemo: (factory) => factory(),
+  useState: (factory) => [factory()],
+  useContext: () => 240,
+  useAppTheme: () => ({ colors: { text: "text", textMuted: "muted", accentBorder: "border" } }),
+  useRevealedStreamText: (text) => ({ text, fadeTail: 0 }),
+  StreamingMarkdownCache: class { hasStreamed = false; update(text) { return { entries: bubbleEntries(text), tail: "" }; } },
+  parseMarkdownEntries: bubbleEntries,
+  typography: { chatBody: { fontSize: 15 } },
+  scaleFontSize: (size) => size,
+  BubbleContentWidth: null,
+  View: "View", Text: "Text", BubbleText: "BubbleText", CodeBlock: "CodeBlock", MarkdownTable: "MarkdownTable",
+  InlineNodes: "InlineNodes", ImageGallery: "ImageGallery", ToolCall: "ToolCall", SystemNoteRow: "SystemNoteRow",
+  imageUri: (block) => block.source?.type === "url" ? block.source.url : null,
+};
+const bubbleRender = new Function(...Object.keys(bubbleScope), ts.transpileModule(`${bubbleFunctions.join("\n")}\nreturn MessageContent;`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText)(...Object.values(bubbleScope));
+function footerPlacements(node, footer, found = []) {
+  if (Array.isArray(node)) { node.forEach((child) => footerPlacements(child, footer, found)); return found; }
+  if (!node || typeof node !== "object") return found;
+  if (typeof node.type === "function") return footerPlacements(node.type(node.props), footer, found);
+  if (node === footer || node.props?.footer === footer) found.push(node.type);
+  footerPlacements(node.props?.children, footer, found);
+  return found;
+}
+const footerMarker = { type: "timestamp", props: {} };
+for (const text of ["你好", "First paragraph.\n\nLast paragraph.", "## Heading", "> Quote", "- First\n- Last", "**Bold** and `code`."]) {
+  for (const active of [false, true]) {
+    assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], active, footer: footerMarker }), footerMarker), ["BubbleText"], `one timestamp reaches the last native text: ${text}`);
+  }
+}
+for (const text of ["```ts\nconst x = 1;\n```", "| A | B |\n| --- | --- |\n| 1 | 2 |"])
+  assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], footer: footerMarker }), footerMarker), ["timestamp"], "framed content has an external footer row");
+const bubbleImage = { type: "image", source: { type: "url", url: "fixture://image" } };
+assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage], footer: footerMarker }), footerMarker), ["timestamp"]);
+assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage, { type: "text", text: "Caption" }], footer: footerMarker }), footerMarker), ["BubbleText"]);
+assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "Text" }, { type: "text", text: "  " }], footer: footerMarker }), footerMarker), ["BubbleText"]);
+assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "tool_use", id: "tool", name: "read", input: {} }, { type: "tool_result", tool_use_id: "tool", content: "result" }], footer: footerMarker }), footerMarker), ["timestamp"]);
+assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "No footer" }] }), footerMarker), []);
 
 const forkCalls = [];
 const forkClient = {

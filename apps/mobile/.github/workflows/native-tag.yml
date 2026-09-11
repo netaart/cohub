@@ -1,0 +1,131 @@
+name: Native Tag Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-tag-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  EXPO_NO_TELEMETRY: "1"
+
+jobs:
+  prepare:
+    name: Validate tag and prepare release
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.target.outputs.tag }}
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Validate pushed tag
+        id: target
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Native releases require a stable vX.Y.Z tag, received: $RELEASE_TAG"
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          tag_sha=$(git rev-list -n 1 "$RELEASE_TAG^{commit}")
+          event_sha=$(git rev-list -n 1 "$GITHUB_SHA^{commit}")
+          test "$tag_sha" = "$event_sha" || { echo "Tag moved since this push; refusing to release a different commit."; exit 1; }
+          git merge-base --is-ancestor "$tag_sha" origin/main || { echo "Release tag must be reachable from origin/main."; exit 1; }
+          git checkout --detach "$tag_sha"
+          node scripts/check-release.mjs --require-native-tag
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure GitHub Release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          tags=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[].tag_name')
+          if ! grep -Fxq -- "$RELEASE_TAG" <<< "$tags"; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$RELEASE_TAG" --generate-notes
+          fi
+
+  android:
+    name: Android signed APKs
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/native-release.yml
+    with:
+      platform: android
+      profile: distribution
+      submit: false
+      release_tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+
+  ios:
+    name: iOS TestFlight
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/native-release.yml
+    with:
+      platform: ios
+      profile: production
+      submit: true
+      release_tag: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
+
+  publish-android:
+    name: Attach Android APKs and fingerprint
+    needs: [prepare, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download formal Android APKs
+        uses: actions/download-artifact@v8
+        with:
+          name: cohub-android-distribution-${{ github.run_id }}
+          path: build/release
+
+      - name: Upload formal APKs to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Artifact downloads preserve the original directory layout.
+          mapfile -t apks < <(find build/release -type f -name 'app-*-release.apk' | sort)
+          test "${#apks[@]}" -eq 4 || { echo "Expected four Android ABI APKs, found ${#apks[@]}"; exit 1; }
+          mapfile -t fingerprints < <(find build/release -type f -name 'cohub-android-native-fingerprint.txt')
+          test "${#fingerprints[@]}" -eq 1 || { echo "Expected one native fingerprint file, found ${#fingerprints[@]}"; exit 1; }
+          for apk in "${apks[@]}"; do
+            abi=$(basename "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
+            case "$abi" in
+              armeabi-v7a|arm64-v8a|x86|x86_64) ;;
+              *) echo "Unexpected Android APK name: $(basename "$apk")"; exit 1 ;;
+            esac
+            release_apk="cohub-${RELEASE_TAG}-android-${abi}.apk"
+            cp "$apk" "$release_apk"
+            gh release upload "$RELEASE_TAG" "$release_apk" --repo "$GITHUB_REPOSITORY" --clobber
+          done
+          gh release upload "$RELEASE_TAG" "${fingerprints[0]}" --repo "$GITHUB_REPOSITORY" --clobber

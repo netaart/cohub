@@ -7,9 +7,9 @@ The repository does not require Expo Application Services (EAS) for builds.
 1. `CI` validates every PR and push to `main`, then exports Android and iOS JavaScript bundles.
 2. `Native CI` runs for pull requests targeting `main` and manual dispatches. It compiles Android debug APKs and an iOS simulator app for internal validation, without repeating the builds on the subsequent `main` push.
 3. `Release Please` maintains a version/changelog PR from Conventional Commits.
-4. Merging the Release Please PR creates `vX.Y.Z` and a GitHub Release. It does not build APKs. Signed Android packages are produced by the manual Native Release workflow when SDK or native code changes. Set `NATIVE_RELEASE_ON_VERSION_TAG=true` only if a version tag must also attach APKs.
+4. Pushing a stable `vX.Y.Z` tag starts `Native Tag Release`: signed Android APKs are attached to the GitHub Release, and a signed iOS IPA is uploaded to TestFlight. Both platforms record their OTA fingerprints. Release Please creates the version tag when its release PR is merged; it does not start a separate native build.
 
-An ordinary `main` push runs quality checks, bundle exports, security checks, Release Please, and production Android and iOS OTA. It does not compile native packages. Native CI remains available through Actions > Native CI > Run workflow for pull requests and manual native validation.
+An ordinary `main` push runs quality checks, bundle exports, security checks, Release Please, and production Android and iOS OTA. It does not compile native packages unless it produces a release tag. Every stable release tag, including a PATCH tag, starts both native distributions. Keep JS-only work on `main` without creating a tag until a native release is intended. Native CI remains available for pull requests and manual validation.
 
 Expo is used as the open-source React Native toolchain and for native modules. `expo prebuild` generates standard Gradle and Xcode projects inside CI. No Expo subscription or EAS project is required.
 
@@ -50,15 +50,9 @@ gh secret set ANDROID_KEY_PASSWORD --repo markbang/cohub-mobile
 
 The two password commands read their values interactively. Do not commit `cohub-release.keystore` or put it in the repository. Losing this keystore means future APKs cannot update an installed version.
 
-Signing secrets are still required for the manual Native Release path. Version tags do not build APKs unless `NATIVE_RELEASE_ON_VERSION_TAG=true`.
+Signing secrets are required for tag-triggered and manual native builds. Missing signing inputs fail the affected platform with an actionable error; they do not silently disable it. `NATIVE_AUTO_RELEASE_ENABLED` and `NATIVE_RELEASE_ON_VERSION_TAG` no longer control release behavior and can be removed from repository variables.
 
-After the secrets are configured, enable automatic formal APK builds:
-
-```bash
-gh variable set NATIVE_AUTO_RELEASE_ENABLED --repo markbang/cohub-mobile --body true
-```
-
-On the next Release Please release, GitHub Actions builds four signed standalone Android release APKs on Ubuntu, one for each ABI, and attaches them to the GitHub Release. These packages include the JavaScript bundle and can start without a Metro development server:
+On a stable tag push, GitHub Actions builds four signed standalone Android release APKs on Ubuntu, one for each ABI, and attaches them to the GitHub Release. These packages include the JavaScript bundle and can start without a Metro development server:
 
 ```text
 cohub-vX.Y.Z-android-arm64-v8a.apk
@@ -67,7 +61,7 @@ cohub-vX.Y.Z-android-x86.apk
 cohub-vX.Y.Z-android-x86_64.apk
 ```
 
-Each APK contains only its own native libraries, so each download is much smaller than one universal APK. The files are named directly, so the downloaded filename includes the ABI. This is direct APK distribution, not a Google Play upload. The automatic path does not build iOS and does not use a Google Play service account.
+Each APK contains only its own native libraries, so each download is much smaller than one universal APK. The files are named directly, so the downloaded filename includes the ABI. This is direct APK distribution, not a Google Play upload. iOS builds in parallel and uploads to TestFlight; the automatic Android path does not use a Google Play service account.
 
 The first formally signed package must be produced by a new release created after this distribution workflow is merged. The existing `v1.1.0` APKs were produced before formal signing was enabled and use the old debug key; uninstall them before installing the first formally signed release. The manual run produces Actions artifacts and does not modify an existing GitHub Release.
 
@@ -136,15 +130,49 @@ The native workflow uses `apple-actions/import-codesign-certs`, `apple-actions/d
 
 Register `cohub://callback` in the Native Logto application. Logto credentials are runtime application configuration, not build-service credentials.
 
+## Version policy
+
+Automatic releases use `always-bump-patch`: ordinary features and fixes advance `2.2.0` to `2.2.1`, not `2.3.0`. Commit types still determine changelog sections. No automatic MAJOR bump is performed.
+
+For the rare breaking change, explicitly request the next MINOR in the commit body (or the squash commit body when merging the PR), alongside the breaking-change description and migration note:
+
+```text
+feat(chat)!: change the message format
+
+BREAKING CHANGE: Describe the incompatible behavior and the required migration.
+Release-As: 2.3.0
+```
+
+The version is an example; use the next minor after the latest release. `!` or `BREAKING CHANGE` alone does not override `always-bump-patch`. Release Please honors the explicit `Release-As` version before applying the automatic strategy. Verify the release PR's version before merging; do not request a MAJOR unless separately agreed.
+
+Version numbering does not determine native compatibility: native dependency/configuration changes still require a new APK even for a PATCH release.
+
+## Tag automation setup
+
+`Native Tag Release` is triggered only by tag pushes, not GitHub Release events or a second call from Release Please. It reuses `Native Release` with Android `distribution` / `submit=false` and iOS `production` / `submit=true`. Android attachment and iOS TestFlight publication finish independently; check both platform results before declaring a dual-platform release complete. TestFlight processing or review may delay tester availability after upload.
+
+Release Please requires the `RELEASE_PLEASE_TOKEN` secret with repository contents and pull-request/issue write access. Use a PAT or GitHub App installation token authorized to create tags and trigger Actions. GitHub suppresses downstream workflows for tags created with the default `GITHUB_TOKEN`, so the workflow fails clearly instead of using that token. Existing signing and App Store Connect credentials remain required. No manual native dispatch is needed for a normal release.
+
+Merge these workflow changes into `main` before tagging. A tag must point to a commit reachable from `origin/main`, must match `package.json` and `app.json`, and must be a stable `vX.Y.Z` without a prerelease suffix or leading zeros. A moved tag or version mismatch fails before signing. Do not retag a published version. The prepare job creates the GitHub Release if a manually pushed tag does not already have one.
+
+After committing and merging the matching release metadata, a manual tag push is sufficient:
+
+```bash
+git tag vX.Y.Z <release-commit>
+git push upstream vX.Y.Z
+```
+
+Replace the placeholders with the validated release version and commit. Merely creating a local tag does not trigger GitHub Actions. Prefer Release Please to update version/changelog files rather than manually editing release metadata.
+
 ## Normal release
 
-1. Merge feature PRs with Conventional Commit titles.
+1. Merge feature PRs with Conventional Commit titles. For breaking changes, include the explicit next-MINOR `Release-As` footer described above.
 2. Wait for Release Please to open or update the Release PR.
 3. Review the generated `CHANGELOG.md`, `package.json`, `package-lock.json`, and `app.json` version changes.
 4. Confirm the required CI, Security, and Native CI checks are green.
 5. Merge the Release Please PR.
-6. GitHub creates the `vX.Y.Z` tag and release.
-7. GitHub creates the `vX.Y.Z` tag and release without APKs. JS-only updates publish as production Android and iOS OTA on the `main` push. When SDK or native code changes, run Native Release to attach signed APKs to that tag and to ship a new iOS TestFlight build whose fingerprint is attached to the release.
+6. Release Please creates the `vX.Y.Z` tag and release using `RELEASE_PLEASE_TOKEN`.
+7. The tag push automatically starts `Native Tag Release` for both platforms. Wait for Android APK attachment and iOS TestFlight processing/fingerprint attachment. No manual build dispatch is required.
 
 The release workflow validates that the tag is exactly `v<package version>`, and that `package.json` and `app.json` have identical versions. Native build numbers are derived deterministically from the app version in `app.config.ts`.
 
@@ -157,7 +185,7 @@ Open Actions -> `Native Release` -> Run workflow. Choose:
 - `distribution` for signed standalone Android release APKs
 - `production` for signed store artifacts (AAB/IPA)
 - one platform or `all`
-- `submit=true` only when a production artifact should be sent to a store; the automatic Release Please path always uses `submit=false`
+- `submit=true` when a production artifact should be sent to a store; automatic tag builds use `true` for iOS TestFlight and `false` for Android APK distribution
 - `internal` or `production` for the Google Play track when manually submitting a `profile=production` Android build
 
 Equivalent local commands:
@@ -172,7 +200,7 @@ The iOS command requires macOS and Xcode. The Android command requires the Andro
 
 ## Recovery
 
-If a Native Release APK build fails, inspect the build error and rerun `Native Release` with `release_tag` set to the existing `vX.Y.Z` tag, `platform=android`, `profile=distribution`, and `submit=false`. The manual rerun produces downloadable Actions artifacts; it does not attach them to the GitHub Release. Keep the same release keystore and passwords for all future versions.
+If a tag-triggered native build fails, inspect the failed job and rerun failed jobs in `Native Tag Release` for that tag. Do not rerun an already successful TestFlight upload with the same build number. If only APK attachment failed, rerun that job without rebuilding. For manual recovery, `Native Release` still accepts the existing tag and platform/profile inputs; Android manual runs produce Actions artifacts that must be attached explicitly. Keep the same release keystore and passwords for all future versions.
 
 For a Google Play failure, configure the Android signing and Play service-account secrets first, then rerun `Native Release` with:
 

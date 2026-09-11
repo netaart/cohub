@@ -147,6 +147,7 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
             <Stack.Screen name="about" options={{ title: t("route.about") }} />
             <Stack.Screen name="debug/index" options={{ title: t("route.debug") }} />
             <Stack.Screen name="debug/chat-scroll" options={{ title: "Scroll Diagnostics" }} />
+            <Stack.Screen name="debug/bubble-layout" options={{ title: "Bubble Layout" }} />
             <Stack.Screen name="debug/streaming" options={{ title: t("route.streaming") }} />
             <Stack.Screen name="debug/bubbles" options={{ title: t("route.bubbles") }} />
             <Stack.Screen name="debug/updates" options={{ title: t("route.updates") }} />

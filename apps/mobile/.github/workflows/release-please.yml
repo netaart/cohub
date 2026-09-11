@@ -18,115 +18,17 @@ jobs:
   release:
     name: Prepare release
     runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      sha: ${{ steps.release.outputs.sha }}
     steps:
+      - name: Validate release automation token
+        env:
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          test -n "$RELEASE_PLEASE_TOKEN" || { echo "RELEASE_PLEASE_TOKEN is required: tags created with GITHUB_TOKEN do not trigger Native Tag Release."; exit 1; }
+
       - name: Run Release Please
         id: release
         uses: googleapis/release-please-action@v5
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-
-  native-release-gate:
-    name: Check Android distribution signing
-    needs: release
-    if: needs.release.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      enabled: ${{ steps.gate.outputs.enabled }}
-    steps:
-      - name: Evaluate automatic Android distribution gate
-        id: gate
-        env:
-          AUTO_RELEASE: ${{ vars.NATIVE_AUTO_RELEASE_ENABLED }}
-          RELEASE_ON_VERSION_TAG: ${{ vars.NATIVE_RELEASE_ON_VERSION_TAG }}
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [[ "$AUTO_RELEASE" != "true" || "$RELEASE_ON_VERSION_TAG" != "true" ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "Automatic Android distribution on version tags is disabled. Use Native Release when SDK or native code changes."
-          elif [[ -z "$KEYSTORE_BASE64" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Automatic Android distribution is enabled but signing secrets are incomplete; skipping the APK build."
-            echo "Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD to enable it."
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Android distribution signing inputs are configured."
-          fi
-
-  mobile-release:
-    name: Build Android distribution APKs
-    needs: [release, native-release-gate]
-    if: needs.release.outputs.release_created == 'true' && needs.native-release-gate.outputs.enabled == 'true'
-    uses: ./.github/workflows/native-release.yml
-    with:
-      platform: android
-      profile: distribution
-      submit: false
-      release_tag: ${{ needs.release.outputs.tag_name }}
-    secrets: inherit
-
-  publish-android:
-    name: Publish formal Android APKs to GitHub Release
-    needs: [release, native-release-gate, mobile-release]
-    if: needs.release.outputs.release_created == 'true' && needs.native-release-gate.outputs.enabled == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download formal Android APKs
-        uses: actions/download-artifact@v8
-        with:
-          name: cohub-android-distribution-${{ github.run_id }}
-          path: build/release
-
-      - name: Upload formal APKs to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          # actions/download-artifact preserves the uploaded directory layout, so the
-          # APKs arrive under android/app/build/outputs/apk/release/, not flat.
-          mapfile -t apks < <(find build/release -type f -name 'app-*-release.apk' | sort)
-          test "${#apks[@]}" -eq 4 || { echo "Expected four Android ABI APKs, found ${#apks[@]}"; exit 1; }
-          fingerprint=$(find build/release -type f -name 'cohub-android-native-fingerprint.txt')
-          test -n "$fingerprint" || { echo "Expected one native fingerprint file, found none"; exit 1; }
-          for apk in "${apks[@]}"; do
-            abi=$(basename "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
-            case "$abi" in
-              armeabi-v7a|arm64-v8a|x86|x86_64) ;;
-              *) echo "Unexpected Android APK name: $(basename "$apk")"; exit 1 ;;
-            esac
-            release_apk="cohub-${RELEASE_TAG}-android-${abi}.apk"
-            cp "$apk" "$release_apk"
-            gh release upload "$RELEASE_TAG" "$release_apk" \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
-          done
-          gh release upload "$RELEASE_TAG" "$fingerprint" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
-
-  native-release-not-configured:
-    name: Native release is not configured
-    needs: [release, native-release-gate]
-    if: needs.release.outputs.release_created == 'true' && needs.native-release-gate.outputs.enabled != 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Explain release gate
-        run: |
-          echo "::notice::GitHub Release created without Android distribution APKs."
-          echo "Version tags no longer build APKs. Run Native Release when SDK or native code changes, and set NATIVE_RELEASE_ON_VERSION_TAG=true only if a version tag must also attach APKs."

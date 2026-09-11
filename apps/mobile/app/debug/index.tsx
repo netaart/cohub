@@ -30,6 +30,7 @@ export default function DebugMenuScreen() {
 
       <SectionHeader title="渲染验收" />
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+        <DebugRow icon="messages" title="Bubble Layout" detail="Text / Rich / States / Boundary / Stream" onPress={() => router.push("/debug/bubble-layout")} />
         <DebugRow icon="activity" title="Scroll Diagnostics" detail="Android / Chat" onPress={() => router.push("/debug/chat-scroll")} />
         <DebugRow icon="activity" title="流式渲染验收" detail="文本 + 工具调用实时流式，含重渲染计数" onPress={() => router.push("/debug/streaming")} />
         <DebugRow icon="zap" title="快速气泡渲染" detail="高速追加 / 循环各种 Markdown 气泡，实时 FPS" onPress={() => router.push("/debug/bubbles")} />

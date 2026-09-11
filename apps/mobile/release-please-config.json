@@ -3,6 +3,7 @@
   "packages": {
     ".": {
       "release-type": "expo",
+      "versioning": "always-bump-patch",
       "package-name": "cohub-mobile",
       "include-component-in-tag": false,
       "include-v-in-tag": true,

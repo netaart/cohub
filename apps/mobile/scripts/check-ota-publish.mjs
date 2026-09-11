@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import {
   OTA_CLI_REPOSITORY,
@@ -102,10 +105,100 @@ assert.match(JSON.stringify(attachIosFingerprint.steps), /gh release upload/);
 assert.match(JSON.stringify(nativeRelease.jobs.android.steps), /native-fingerprint/);
 assert.match(nativeRelease.jobs.android.steps.find((step) => step.uses === "actions/upload-artifact@v7").with.path, /native-fingerprint/);
 
+const taggedRelease = parse(".github/workflows/native-tag.yml");
+assert.deepEqual(taggedRelease.on.push.tags, ["v*"]);
+assert.deepEqual(Object.keys(taggedRelease.on), ["push"], "Only a tag push starts automatic native release; release events must not duplicate it");
+assert.equal(taggedRelease.concurrency["cancel-in-progress"], false);
+assert.match(taggedRelease.concurrency.group, /github.ref/);
+assert.match(taggedRelease.jobs.prepare.if, /!github.event.deleted/);
+const prepareSteps = JSON.stringify(taggedRelease.jobs.prepare.steps);
+assert.match(prepareSteps, /--is-ancestor/);
+assert.match(prepareSteps, /--require-native-tag/);
+assert.match(prepareSteps, /--verify-tag/);
+assert.match(prepareSteps, /GITHUB_SHA/);
+assert.equal(taggedRelease.jobs.prepare.permissions.contents, "write");
+const validateTag = taggedRelease.jobs.prepare.steps.find((step) => step.id === "target");
+for (const job of Object.values(taggedRelease.jobs)) {
+  for (const step of job.steps ?? []) {
+    if (step.run) execFileSync("bash", ["-n"], { input: step.run });
+  }
+}
+// Execute the actual tag validation shell against a local Git remote, without signing or publishing.
+const tagFixture = mkdtempSync(join(tmpdir(), "cohub-native-tag-"));
+try {
+  const remote = join(tagFixture, "remote.git");
+  const checkout = join(tagFixture, "checkout");
+  const git = (...args) => execFileSync("git", args, { cwd: checkout, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+  execFileSync("git", ["clone", remote, checkout], { stdio: "ignore" });
+  git("config", "user.name", "Release Test");
+  git("config", "user.email", "release-test@example.invalid");
+  git("checkout", "-b", "main");
+  mkdirSync(join(checkout, "scripts"));
+  copyFileSync("scripts/check-release.mjs", join(checkout, "scripts/check-release.mjs"));
+  writeFileSync(join(checkout, "package.json"), JSON.stringify({ version: "1.2.3" }));
+  writeFileSync(join(checkout, "app.json"), JSON.stringify({ expo: { version: "1.2.3" } }));
+  git("add", ".");
+  git("commit", "-m", "test: release fixture");
+  const releaseSha = git("rev-parse", "HEAD");
+  git("tag", "-a", "v1.2.3", "-m", "test release");
+  git("tag", "v1.2.4");
+  git("push", "origin", "main", "--tags");
+  const runTag = (tag, sha = releaseSha) => spawnSync("bash", ["-e", "-c", validateTag.run], {
+    cwd: checkout, encoding: "utf8", env: { ...process.env, RELEASE_TAG: tag, GITHUB_SHA: sha, GITHUB_OUTPUT: join(tagFixture, "output") },
+  });
+  let result = runTag("v1.2.3");
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(readFileSync(join(tagFixture, "output"), "utf8"), /tag=v1.2.3/);
+  result = runTag("v1.2.3", git("rev-parse", "v1.2.3"));
+  assert.equal(result.status, 0, result.stderr);
+  for (const tag of ["v01.2.3", "v1.2.3-beta.1", "v1.2", "v1.2.3;echo unsafe"]) {
+    result = runTag(tag);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout, /stable vX.Y.Z/);
+  }
+  result = runTag("v1.2.4");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Tag mismatch/);
+  git("checkout", "main");
+  git("commit", "--allow-empty", "-m", "test: newer main");
+  const newerSha = git("rev-parse", "HEAD");
+  git("push", "origin", "main");
+  result = runTag("v1.2.3", newerSha);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /Tag moved/);
+  git("checkout", "-b", "unmerged");
+  git("commit", "--allow-empty", "-m", "test: unmerged release");
+  const unmergedSha = git("rev-parse", "HEAD");
+  git("tag", "v1.2.6");
+  git("push", "origin", "v1.2.6");
+  result = runTag("v1.2.6", unmergedSha);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /reachable from origin\/main/);
+} finally {
+  rmSync(tagFixture, { recursive: true, force: true });
+}
+for (const platform of ["android", "ios"]) {
+  const job = taggedRelease.jobs[platform];
+  assert.equal(job.needs, "prepare");
+  assert.equal(job.uses, "./.github/workflows/native-release.yml");
+  assert.equal(job.with.platform, platform);
+  assert.equal(job.with.release_tag, "${{ needs.prepare.outputs.tag }}");
+  assert.equal(job.secrets, "inherit");
+}
+assert.equal(taggedRelease.jobs.android.with.profile, "distribution");
+assert.equal(taggedRelease.jobs.android.with.submit, false);
+assert.equal(taggedRelease.jobs.ios.with.profile, "production");
+assert.equal(taggedRelease.jobs.ios.with.submit, true);
+assert.equal(taggedRelease.jobs.ios.permissions.contents, "write");
+assert.deepEqual(taggedRelease.jobs["publish-android"].needs, ["prepare", "android"]);
+assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /cohub-android-native-fingerprint.txt/);
 const releasePlease = parse(".github/workflows/release-please.yml");
-assert.match(JSON.stringify(releasePlease.jobs["publish-android"].steps), /cohub-android-native-fingerprint.txt/);
-assert.match(JSON.stringify(releasePlease.jobs["native-release-gate"].steps), /NATIVE_RELEASE_ON_VERSION_TAG/);
-const publishApkStep = releasePlease.jobs["publish-android"].steps.find((step) => step.name === "Upload formal APKs to GitHub Release");
+assert.deepEqual(Object.keys(releasePlease.jobs), ["release"], "Release Please owns metadata, not a second native build path");
+const releaseStep = releasePlease.jobs.release.steps.find((step) => step.id === "release");
+assert.equal(releaseStep.with.token, "${{ secrets.RELEASE_PLEASE_TOKEN }}", "GITHUB_TOKEN-created tags do not trigger downstream push workflows");
+assert.match(releasePlease.jobs.release.steps[0].run, /RELEASE_PLEASE_TOKEN is required/);
+const publishApkStep = taggedRelease.jobs["publish-android"].steps.find((step) => step.name === "Upload formal APKs to GitHub Release");
 assert.ok(publishApkStep, "The release workflow must attach formal Android APKs to the GitHub Release");
 assert.match(publishApkStep.run, /find build\/release/, "Artifact downloads keep their directory layout, so the publish step must locate APKs recursively");
 assert.equal(publishApkStep.run.includes("build/release/*.apk"), false, "A flat glob misses APKs nested under android/app/build/outputs");

@@ -65,7 +65,7 @@ npm run native:ios
 - `Publish OTA` runs on every `main` push and publishes production Android and iOS JS updates against the installed native runtimes. Manual dispatch can still target staging or a specific SHA.
 - `Security` runs dependency review and CodeQL.
 - Release Please maintains `CHANGELOG.md`, synchronizes the Expo and npm versions, and creates `vX.Y.Z` GitHub Releases.
-- Version tags create GitHub Releases without APKs. Signed Android APKs are built by the manual Native Release workflow when SDK or native code changes. JS-only updates publish as production Android and iOS OTA on `main`.
+- Pushing a stable `vX.Y.Z` tag automatically builds both native platforms: signed Android APKs attach to the GitHub Release, and iOS uploads to TestFlight. Release Please requires `RELEASE_PLEASE_TOKEN` so its tag pushes trigger this workflow. Ordinary `main` pushes remain OTA-only; manual Native Release is for recovery.
 - Dependabot updates npm and GitHub Actions dependencies weekly.
 
 See [docs/releasing.md](docs/releasing.md) for signing secrets, store credentials, native runner details, normal releases, manual builds, and recovery. Android updates download directly in the app; users still confirm installation in Android. OTA requires an Expo Updates protocol service configured through `EXPO_PUBLIC_UPDATES_URL` at build time and is disabled without one. A `main` push publishes both platforms automatically; manual dispatch can target staging or a specific SHA.
