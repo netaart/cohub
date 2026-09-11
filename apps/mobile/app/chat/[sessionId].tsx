@@ -181,8 +181,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const history = messagesFromTurns(view.turns);
     return withTurnSequences(
       mergeDisplayMessages(history.length > 0 ? history : view.messages, history.length > 0 ? view.messages : [])
-        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message) && !(typeof message.meta?.turnId === "string" && queuedFollowupIds.has(message.meta.turnId)))
-        .sort((a, b) => a.sequence - b.sequence),
+        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message) && !(typeof message.meta?.turnId === "string" && queuedFollowupIds.has(message.meta.turnId))),
       view.turns,
     );
   }, [queuedFollowupIds, view.messages, view.turns]);

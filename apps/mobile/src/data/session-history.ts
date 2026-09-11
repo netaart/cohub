@@ -208,16 +208,19 @@ export function turnSequenceForMessage(message: Pick<MessageRecord, "meta">) {
 	return null;
 }
 
+/** Render live records in the same turn/role order as projected history, never by the independent DB message counter. */
 export function withTurnSequences(messages: MessageRecord[], turns: SessionTurnRecord[]) {
 	const sequenceByTurnId = new Map(turns.map((turn) => [turn.id, turn.sequence]));
 	return messages.map((message) => {
-		if (turnSequenceForMessage(message) !== null) return message;
 		const turnId = message.meta?.turnId;
-		if (typeof turnId !== "string") return message;
-		const sequence = sequenceByTurnId.get(turnId);
-		if (sequence == null) return message;
-		return { ...message, meta: { ...(message.meta ?? {}), turnSequence: sequence } };
-	});
+		const turnSequence = (typeof turnId === "string" ? sequenceByTurnId.get(turnId) : undefined)
+			?? turnSequenceForMessage(message);
+		if (turnSequence == null) return message;
+		const sequence = message.role === "user" ? turnSequence * 2 - 1
+			: message.role === "assistant" ? turnSequence * 2 : message.sequence;
+		if (message.sequence === sequence && message.meta?.turnSequence === turnSequence) return message;
+		return { ...message, sequence, meta: { ...(message.meta ?? {}), turnSequence } };
+	}).sort((a, b) => a.sequence - b.sequence);
 }
 
 export function messageIndexForTurn(messages: Pick<MessageRecord, "role" | "meta">[], sequence: number) {

@@ -79,9 +79,12 @@ function InlineNodes({ nodes, accent, color, fadeTail = 0 }: { nodes: MarkdownIn
   const openLink = useOpenMessageLink(spaceId);
   // Inline code sits on the bubble, so it needs a tint that reads on both bubble colors.
   const codeBackground = onUser ? "rgba(255, 255, 255, 0.18)" : theme.colors.surfaceRaised;
-  const lengths = fadeTail > 0 ? nodes.map((node) => graphemeLength(node.value)) : null;
-  const starts = lengths?.map((_, index) => lengths.slice(0, index).reduce((sum, value) => sum + value, 0)) ?? null;
-  const total = lengths?.reduce((sum, value) => sum + value, 0) ?? 0;
+  let total = 0;
+  const starts = fadeTail > 0 ? nodes.map((node) => {
+    const start = total;
+    total += graphemeLength(node.value);
+    return start;
+  }) : null;
   const fadeFrom = total - Math.min(fadeTail, total);
   return <>{nodes.map((node, index) => {
     const start = starts?.[index] ?? 0;

@@ -8,9 +8,13 @@ export type CachedHome = {
 
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
-async function database() {
-  databasePromise ??= openDatabaseAsync("cohub-mobile.db");
-  const db = await databasePromise;
+function database(): Promise<SQLiteDatabase> {
+  databasePromise ??= initializeDatabase();
+  return databasePromise;
+}
+
+async function initializeDatabase(): Promise<SQLiteDatabase> {
+  const db = await openDatabaseAsync("cohub-mobile.db");
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS space_list_cache (
@@ -93,27 +97,30 @@ export async function hydrateHome(userKey: string): Promise<CachedHome> {
 }
 
 async function writeSpaces(db: SQLiteDatabase, userKey: string, spaces: readonly SpaceRecord[], now: number) {
-  for (const space of spaces) {
-    await db.runAsync(
-      `INSERT OR REPLACE INTO spaces (user_key, space_id, payload, updated_at) VALUES (?, ?, ?, ?)`,
-      userKey,
-      space.id,
-      JSON.stringify(space),
-      now,
-    );
+  if (spaces.length === 0) return;
+  const statement = await db.prepareAsync(
+    `INSERT OR REPLACE INTO spaces (user_key, space_id, payload, updated_at) VALUES (?, ?, ?, ?)`,
+  );
+  try {
+    for (const space of spaces) {
+      await statement.executeAsync(userKey, space.id, JSON.stringify(space), now);
+    }
+  } finally {
+    await statement.finalizeAsync();
   }
 }
 
 async function writeSessions(db: SQLiteDatabase, userKey: string, sessions: readonly UserSessionListItem[], now: number) {
-  for (const session of sessions) {
-    await db.runAsync(
-      `INSERT OR REPLACE INTO sessions (user_key, session_id, space_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)`,
-      userKey,
-      session.id,
-      session.spaceId,
-      JSON.stringify(session),
-      now,
-    );
+  if (sessions.length === 0) return;
+  const statement = await db.prepareAsync(
+    `INSERT OR REPLACE INTO sessions (user_key, session_id, space_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)`,
+  );
+  try {
+    for (const session of sessions) {
+      await statement.executeAsync(userKey, session.id, session.spaceId, JSON.stringify(session), now);
+    }
+  } finally {
+    await statement.finalizeAsync();
   }
 }
 
@@ -169,19 +176,19 @@ export async function saveMessages(userKey: string, sessionId: string, messages:
   const db = await database();
   const now = Date.now();
   await db.withTransactionAsync(async () => {
-    for (const message of messages) {
-      const meta = message.meta ? { ...message.meta } : null;
-      if (meta) delete meta._mobileLive;
-      const persistable = { ...message, meta };
-      await db.runAsync(
-        `INSERT OR REPLACE INTO messages (user_key, session_id, message_id, sequence, payload, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        userKey,
-        sessionId,
-        message.id,
-        message.sequence,
-        JSON.stringify(persistable),
-        now,
-      );
+    if (messages.length === 0) return;
+    const statement = await db.prepareAsync(
+      `INSERT OR REPLACE INTO messages (user_key, session_id, message_id, sequence, payload, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    try {
+      for (const message of messages) {
+        const meta = message.meta ? { ...message.meta } : null;
+        if (meta) delete meta._mobileLive;
+        const persistable = { ...message, meta };
+        await statement.executeAsync(userKey, sessionId, message.id, message.sequence, JSON.stringify(persistable), now);
+      }
+    } finally {
+      await statement.finalizeAsync();
     }
   });
 }

@@ -170,6 +170,22 @@ assert.equal(mergeDisplayMessages(
   [{ id: "t10:user", role: "user", sequence: 19, meta: { turnId: "t10", turnSequence: 10 }, text: "hi" }],
   [{ id: "live-user", role: "user", sequence: 19, meta: { turnId: "t10", clientMessageId: "c1" }, text: "hi" }],
 )[0]?.meta?.turnSequence, 10);
+// Persisted message sequences and turn-projected sequences are independent counters.
+const orderingTurn = { id: "ordering-turn", sessionId: "s1", sequence: 10, status: "running", userText: "Question", userContent: [], assistantContent: [] };
+for (const sequence of [2, 12, 80]) {
+  const persistedFinal = { id: "persisted-final", sessionId: "s1", role: "assistant", sequence, text: "Answer", content: [], meta: { turnId: orderingTurn.id, messageKind: "assistant_final" } };
+  for (const finalized of [false, true]) {
+    const turns = [{ ...orderingTurn, ...(finalized ? { status: "completed", assistantText: "Answer" } : {}) }];
+    for (const meta of [persistedFinal.meta, { ...persistedFinal.meta, turnSequence: 10 }]) {
+      const display = withTurnSequences(mergeDisplayMessages(messagesFromTurns(turns), [{ ...persistedFinal, meta }]), turns);
+      assert.deepEqual(display.map((message) => message.role), ["user", "assistant"], "a committed final reply stays after its question before and after turn finalization");
+      assert.deepEqual(display.map((message) => message.sequence), [19, 20]);
+      assert.equal(display.filter((message) => message.role === "assistant").length, 1);
+      assert.equal(shouldShowLiveStream({ status: "streaming", turnId: orderingTurn.id }, display), false);
+    }
+  }
+  assert.equal(persistedFinal.sequence, sequence, "display projection does not mutate the SDK record");
+}
 const turnWithoutImage = { id: "t1", sessionId: "s1", sequence: 1, userContent: [{ type: "text", text: "photo" }], userText: "photo" };
 const imageContent = [{ type: "image", source: { type: "url", url: "file://shot.jpg" } }];
 assert.equal(withFallbackUserContent(turnWithoutImage, imageContent, "photo").userContent, imageContent);
@@ -1134,5 +1150,68 @@ assert.equal(classifySaveConflict(null, "base", "draft"), "conflict");
 assert.equal(isFileConflictError({ status: 409 }), true);
 assert.equal(isFileConflictError({ code: "file_conflict" }), true);
 assert.equal(isFileConflictError(new Error("nope")), false);
+
+const localDbSource = ts.transpileModule(readFileSync(new URL("../src/data/local-db.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const cacheModule = {};
+let databaseOpens = 0;
+let schemaRuns = 0;
+let failCacheWrite = false;
+const preparedWrites = [];
+const cacheDatabase = {
+  execAsync: async () => { schemaRuns += 1; },
+  getFirstAsync: async () => ({ sequence: 4 }),
+  withTransactionAsync: async (task) => task(),
+  prepareAsync: async (sql) => {
+    const write = { sql, rows: [], finalized: false };
+    preparedWrites.push(write);
+    return {
+      executeAsync: async (...params) => {
+        if (failCacheWrite) throw new Error("Cache write failed");
+        write.rows.push(params);
+      },
+      finalizeAsync: async () => { write.finalized = true; },
+    };
+  },
+};
+new Function("require", "exports", localDbSource)((name) => {
+  assert.equal(name, "expo-sqlite");
+  return { openDatabaseAsync: async () => { databaseOpens += 1; return cacheDatabase; } };
+}, cacheModule);
+assert.deepEqual(await Promise.all([
+  cacheModule.loadSessionReadSequence("user-a", "chat"),
+  cacheModule.loadSessionReadSequence("user-b", "chat"),
+]), [4, 4]);
+assert.equal(databaseOpens, 1);
+assert.equal(schemaRuns, 1, "concurrent cache readers share completed schema initialization");
+await cacheModule.saveHome("user-a", {
+  spaces: [{ id: "space-a" }, { id: "space-b" }],
+  sessions: [{ id: "chat-a", spaceId: "space-a" }, { id: "chat-b", spaceId: "space-b" }],
+});
+const cacheMessages = [
+  { id: "message-a", sequence: 2, meta: { _mobileLive: true, turnId: "turn-a" }, text: "answer" },
+  { id: "message-b", sequence: 4, meta: null, text: "next answer" },
+];
+await cacheModule.saveMessages("user-a", "chat-a", cacheMessages);
+assert.equal(preparedWrites.length, 3, "prepare once per table batch, not once per record");
+assert.ok(preparedWrites.every((write) => write.rows.length === 2 && write.finalized));
+assert.deepEqual(preparedWrites[0].rows.map((row) => row.slice(0, 3)), [
+  ["user-a", "space-a", JSON.stringify({ id: "space-a" })],
+  ["user-a", "space-b", JSON.stringify({ id: "space-b" })],
+]);
+assert.deepEqual(preparedWrites[1].rows.map((row) => row.slice(0, 3)), [["user-a", "chat-a", "space-a"], ["user-a", "chat-b", "space-b"]]);
+assert.deepEqual(preparedWrites[2].rows.map((row) => row.slice(0, 4)), [["user-a", "chat-a", "message-a", 2], ["user-a", "chat-a", "message-b", 4]]);
+assert.deepEqual(JSON.parse(preparedWrites[2].rows[0][4]), { ...cacheMessages[0], meta: { turnId: "turn-a" } });
+assert.equal(cacheMessages[0].meta._mobileLive, true, "persistence must not mutate live records");
+assert.equal(preparedWrites[2].rows[0][5], preparedWrites[2].rows[1][5], "keep one retention timestamp per batch");
+for (const save of [
+  () => cacheModule.saveSpaces("user-a", [{ id: "space-a" }]),
+  () => cacheModule.saveSessions("user-a", [{ id: "chat-a", spaceId: "space-a" }]),
+  () => cacheModule.saveMessages("user-a", "chat-a", cacheMessages),
+]) {
+  failCacheWrite = true;
+  await assert.rejects(save(), /Cache write failed/);
+  assert.equal(preparedWrites.at(-1).finalized, true, "failed writes release their prepared statement");
+}
+assert.equal(schemaRuns, 1, "writes do not repeat schema setup");
 
 console.log("Chat workflow checks passed");

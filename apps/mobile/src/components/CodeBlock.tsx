@@ -86,7 +86,7 @@ export function CodeBlock({
     };
   }, [cachedHighlight, code, highlightTheme, languageId, streaming]);
 
-  const lines: CodeLine[] = highlighted?.lines ?? plainLines(code);
+  const lines: CodeLine[] = useMemo(() => highlighted?.lines ?? plainLines(code), [code, highlighted]);
   const fallbackColor = highlighted?.foreground ?? theme.colors.textSecondary;
   const label = codeLanguageLabel(languageId) ?? language;
   const gutter = showLineNumbers ? lines.map((_, index) => String(index + 1)).join("\n") : null;
