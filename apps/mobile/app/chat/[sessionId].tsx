@@ -16,6 +16,8 @@ import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
 import { CHAT_PAGE_THRESHOLD, invertedListDistances, nextChatTailFollowing, reverseListIndex } from "@/src/data/chat-scroll";
+import { chatScrollTrace, type TraceFields } from "@/src/data/chat-scroll-trace";
+import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
 import { cancelQueuedFollowup, followupPreviewText, queuedFollowupTurns, steerQueuedFollowup } from "@/src/data/followup-queue";
 import { isLiveStreamStatus, isTerminalTurnStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
 import { MessageMeasurements } from "@/src/data/chat-rendering";
@@ -99,12 +101,38 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const turnScrollTargetRef = useRef<number | null>(null);
   const turnScrollRetriesRef = useRef(new Map<number, number>());
   const turnScrollRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastScrollRef = useRef({ y: 0, height: 0, viewport: 0 });
+  const traceRequestId = useRef(0);
+  const traceCancelGeneration = useRef(0);
+  const traceState = useCallback((): TraceFields => ({
+    session: chatScrollTrace.alias("session", sessionId),
+    pendingSequence: pendingScrollSequence.current, targetSequence: turnScrollTargetRef.current,
+    retryTimerPending: turnScrollRetryTimerRef.current !== null,
+    retries: turnScrollTargetRef.current === null ? null : turnScrollRetriesRef.current.get(turnScrollTargetRef.current) ?? 0,
+    following: followingTailRef.current, dragging: userDraggingRef.current, momentum: momentumScrollingRef.current,
+    initialDone: initialScrollDone.current, followFramePending: followTailFrameRef.current !== null,
+    cancelGeneration: traceCancelGeneration.current,
+    ...lastScrollRef.current,
+  }), [sessionId]);
+  const { recording: tracing, log: trace } = useChatScrollTrace("chat", traceState);
+  const traceTouches = useTraceTouches("chat.list", traceState, tracing);
+  const traceOffset = useCallback((source: string, options: { offset: number; animated: boolean }) => {
+    trace("command.scrollToOffset", { source, ...options, hasList: Boolean(listRef.current) });
+    listRef.current?.scrollToOffset(options);
+  }, [trace]);
+  const traceIndex = useCallback((source: string, options: { index: number; animated: boolean; viewPosition: number; viewOffset: number }) => {
+    trace("command.scrollToIndex", { source, ...options, hasList: Boolean(listRef.current) });
+    listRef.current?.scrollToIndex(options);
+  }, [trace]);
   const setFollowingTail = useCallback((next: boolean) => {
     if (followingTailRef.current === next) return;
+    trace("tail.followingChanged", { next });
     followingTailRef.current = next;
     setFollowingTailState(next);
-  }, []);
+  }, [trace]);
   const cancelTurnScroll = useCallback(() => {
+    traceCancelGeneration.current += 1;
+    trace("turn.cancel");
     pendingScrollSequence.current = null;
     turnScrollTargetRef.current = null;
     turnScrollRetriesRef.current.clear();
@@ -112,21 +140,23 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       clearTimeout(turnScrollRetryTimerRef.current);
       turnScrollRetryTimerRef.current = null;
     }
-  }, []);
+  }, [trace]);
   const requestFollowTail = useCallback((animated = false) => {
+    trace("tail.request", { animated });
     if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current || pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null) return;
     if (followTailFrameRef.current !== null) cancelAnimationFrame(followTailFrameRef.current);
     followTailFrameRef.current = requestAnimationFrame(() => {
       followTailFrameRef.current = null;
       if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current || pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null) return;
-      listRef.current?.scrollToOffset({ offset: 0, animated });
+      traceOffset("tail.frame", { offset: 0, animated });
       requestAnimationFrame(() => {
         if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current) return;
-        listRef.current?.scrollToOffset({ offset: 0, animated: false });
+        traceOffset("tail.secondFrame", { offset: 0, animated: false });
       });
     });
-  }, []);
+  }, [trace, traceOffset]);
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    if (chatScrollTrace.isRecording()) trace("list.viewable", { items: viewableItems.map((item) => ({ index: item.index, visible: item.isViewable, message: chatScrollTrace.alias("message", (item.item as MessageRecord).id), turn: turnSequenceForMessage(item.item as MessageRecord) })) });
     const ordered = viewableItems
       .filter((item) => item.isViewable && item.item && typeof item.item === "object")
       .sort((left, right) => (left.index ?? Number.MAX_SAFE_INTEGER) - (right.index ?? Number.MAX_SAFE_INTEGER));
@@ -157,6 +187,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const target = turnScrollTargetRef.current;
     if (target !== null) {
       if (ordered.some((item) => turnSequenceForMessage((item.item as { meta: Record<string, unknown> | null })) === target)) {
+        trace("turn.targetVisible", { sequence: target });
         turnScrollTargetRef.current = null;
         turnScrollRetriesRef.current.delete(target);
         if (turnScrollRetryTimerRef.current !== null) {
@@ -169,7 +200,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     }
     const visualTop = ordered.at(-1);
     if (visualTop?.item) setCurrentTurnSequence(turnSequenceForMessage(visualTop.item as { meta: Record<string, unknown> | null }));
-  }, [saveSessionReadSequence, sessionId]);
+  }, [saveSessionReadSequence, sessionId, trace]);
   const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
   const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
   const spaceId = view.space?.id ?? session?.spaceId ?? sessionSummary?.spaceId ?? "";
@@ -186,6 +217,19 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     );
   }, [queuedFollowupIds, view.messages, view.turns]);
   const timeline = useMemo(() => messages.slice().reverse(), [messages]);
+  useEffect(() => {
+    if (!tracing) return;
+    trace("chat.state", {
+      messageCount: messages.length, turnCount: view.turns.length,
+      loading: view.loading, historyLoaded: view.historyLoaded, refreshing: view.refreshing,
+      loadingOlder: view.loadingOlder, loadingNewer: view.loadingNewer,
+      hasMoreOlder: view.hasMoreOlder, hasMoreNewer: view.hasMoreNewer,
+      streamStatus: view.stream?.status ?? null, sending: view.sending,
+      activePanel, currentTurnSequence, turnNavigatorOpen,
+      initialTurnSequence, hasInitialTurnId: initialTurnId !== null,
+      inverted: true, maintainVisibleContentPosition: !followingTail,
+    });
+  }, [activePanel, currentTurnSequence, followingTail, initialTurnId, initialTurnSequence, messages.length, trace, tracing, turnNavigatorOpen, view.hasMoreNewer, view.hasMoreOlder, view.historyLoaded, view.loading, view.loadingNewer, view.loadingOlder, view.refreshing, view.sending, view.stream?.status, view.turns.length]);
   const { fontScale } = useWindowDimensions();
   // App text size changes row heights, so it participates in the measurement cache key.
   const textSizeToken = typography.chatBody.fontSize;
@@ -283,12 +327,13 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const requestInitialScroll = useCallback(() => {
     if (!view.historyLoaded || initialScrollDone.current || messages.length === 0 || hasInitialTurnTarget) return;
     initialScrollDone.current = true;
-    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    traceOffset("initial.latest", { offset: 0, animated: false });
     setFollowingTail(true);
     setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
-  }, [hasInitialTurnTarget, messages.length, setFollowingTail, view.historyLoaded, view.turns]);
+  }, [hasInitialTurnTarget, messages.length, setFollowingTail, traceOffset, view.historyLoaded, view.turns]);
 
   const scheduleTurnScrollRetry = useCallback((sequence: number, retry: number) => {
+    trace("turn.retrySchedule", { sequence, retry, exhausted: retry >= 4 });
     if (retry >= 4) {
       if (turnScrollTargetRef.current === sequence) turnScrollTargetRef.current = null;
       turnScrollRetriesRef.current.delete(sequence);
@@ -297,15 +342,17 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     if (turnScrollRetryTimerRef.current !== null) clearTimeout(turnScrollRetryTimerRef.current);
     turnScrollRetryTimerRef.current = setTimeout(() => {
       turnScrollRetryTimerRef.current = null;
+      trace("turn.retryFire", { sequence, retry });
       if (turnScrollTargetRef.current !== sequence) return;
       const index = targetMessageIndex(sequence);
       if (index < 0 || !listRef.current) return;
       turnScrollRetriesRef.current.set(sequence, retry + 1);
-      listRef.current.scrollToIndex({ index: reverseListIndex(index, messages.length), animated: false, viewPosition: 0.15, viewOffset: 8 });
+      traceIndex("turn.retryTimer", { index: reverseListIndex(index, messages.length), animated: false, viewPosition: 0.15, viewOffset: 8 });
     }, retry === 0 ? 120 : 180);
-  }, [messages.length, targetMessageIndex]);
+  }, [messages.length, targetMessageIndex, trace, traceIndex]);
   const scrollToTurn = useCallback((sequence: number, retry = 0) => {
     const index = targetMessageIndex(sequence);
+    trace("turn.scrollRequest", { sequence, retry, index, messageCount: messages.length });
     turnScrollTargetRef.current = sequence;
     turnScrollRetriesRef.current.set(sequence, retry);
     setFollowingTail(false);
@@ -319,18 +366,23 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     }
     pendingScrollSequence.current = null;
     initialScrollDone.current = true;
-    listRef.current.scrollToIndex({ index: reverseListIndex(index, messages.length), animated: retry === 0, viewPosition: 0.15, viewOffset: 8 });
+    traceIndex("turn.scrollToTurn", { index: reverseListIndex(index, messages.length), animated: retry === 0, viewPosition: 0.15, viewOffset: 8 });
     scheduleTurnScrollRetry(sequence, retry);
     setCurrentTurnSequence(sequence);
-  }, [messages.length, scheduleTurnScrollRetry, setFollowingTail, targetMessageIndex]);
+  }, [messages.length, scheduleTurnScrollRetry, setFollowingTail, targetMessageIndex, trace, traceIndex]);
 
   const handleTurnJump = async (sequence: number) => {
+    const requestId = ++traceRequestId.current;
+    const cancelGeneration = traceCancelGeneration.current;
     setLoadingSequence(sequence);
     try {
+      trace("turn.jumpStart", { sequence, origin: "navigator", requestId });
       const resolvedSequence = await jumpToTurn(sessionId, sequence);
+      trace("turn.jumpResolved", { sequence, resolvedSequence, origin: "navigator", requestId, cancelledWhileWaiting: cancelGeneration !== traceCancelGeneration.current });
       scrollToTurn(resolvedSequence);
       setTurnNavigatorOpen(false);
     } catch (error) {
+      trace("turn.jumpFailed", { origin: "navigator", requestId });
       setNotice({ title: t("chat.turnUnavailable.title"), message: error instanceof Error ? error.message : t("chat.turnUnavailable.body") });
     } finally {
       setLoadingSequence(null);
@@ -369,16 +421,21 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     handledDeepLinkTarget.current = targetKey;
     const target = initialTurnId ? { turnId: initialTurnId } : initialTurnSequence;
     if (target === null) return;
+    const requestId = ++traceRequestId.current;
+    const cancelGeneration = traceCancelGeneration.current;
     void (async () => {
       try {
+        if (chatScrollTrace.isRecording()) trace("turn.jumpStart", { origin: "deepLink", requestId, target: typeof target === "number" ? target : chatScrollTrace.alias("turn", target.turnId) });
         const sequence = await jumpToTurn(sessionId, target);
+        trace("turn.jumpResolved", { origin: "deepLink", sequence, requestId, cancelledWhileWaiting: cancelGeneration !== traceCancelGeneration.current });
         pendingScrollSequence.current = sequence;
         scrollToTurn(sequence);
       } catch (error) {
+        trace("turn.jumpFailed", { origin: "deepLink", requestId });
         setNotice({ title: t("chat.turnUnavailable.title"), message: error instanceof Error ? error.message : t("chat.turnUnavailable.deepLinkBody") });
       }
     })();
-  }, [client, initialTurnId, initialTurnSequence, jumpToTurn, scrollToTurn, sessionId, spaceId, t, view.historyLoaded, view.turns]);
+  }, [client, initialTurnId, initialTurnSequence, jumpToTurn, scrollToTurn, sessionId, spaceId, t, trace, view.historyLoaded, view.turns]);
 
   useEffect(() => {
     if (turnNavigatorOpen) void loadTurnIndex(sessionId, { force: true }).catch(() => undefined);
@@ -459,6 +516,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   };
   const handleScroll = useCallback((event: ChatScrollEvent) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    trace("list.scroll", { previousY: lastScrollRef.current.y, deltaY: contentOffset.y - lastScrollRef.current.y, offsetY: contentOffset.y, contentHeight: contentSize.height, viewportHeight: layoutMeasurement.height });
+    lastScrollRef.current = { y: contentOffset.y, height: contentSize.height, viewport: layoutMeasurement.height };
     const { distanceToLatest, distanceToOldest } = invertedListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({
       currentlyFollowing: followingTailRef.current,
@@ -466,11 +525,18 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       userInteracting: userDraggingRef.current || momentumScrollingRef.current,
       pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()),
     }));
-    if (initialScrollDone.current && distanceToOldest < CHAT_PAGE_THRESHOLD && view.hasMoreOlder && !view.loadingOlder) void loadOlderTurns(sessionId);
-    if (distanceToLatest < CHAT_PAGE_THRESHOLD && view.hasMoreNewer && !view.loadingNewer) void loadNewerTurns(sessionId);
-  }, [loadNewerTurns, loadOlderTurns, sessionId, setFollowingTail, targetIsLatestMessage, view.hasMoreNewer, view.hasMoreOlder, view.loadingNewer, view.loadingOlder]);
+    if (initialScrollDone.current && distanceToOldest < CHAT_PAGE_THRESHOLD && view.hasMoreOlder && !view.loadingOlder) {
+      trace("pagination.request", { direction: "older", distanceToOldest });
+      void loadOlderTurns(sessionId);
+    }
+    if (distanceToLatest < CHAT_PAGE_THRESHOLD && view.hasMoreNewer && !view.loadingNewer) {
+      trace("pagination.request", { direction: "newer", distanceToLatest });
+      void loadNewerTurns(sessionId);
+    }
+  }, [loadNewerTurns, loadOlderTurns, sessionId, setFollowingTail, targetIsLatestMessage, trace, view.hasMoreNewer, view.hasMoreOlder, view.loadingNewer, view.loadingOlder]);
 
-  const handleContentSizeChange = useCallback(() => {
+  const handleContentSizeChange = useCallback((width: number, height: number) => {
+    trace("list.contentSize", { width, height });
     const pending = pendingScrollSequence.current;
     if (pending !== null) {
       scrollToTurn(pending);
@@ -480,9 +546,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     }
     requestInitialScroll();
     requestFollowTail();
-  }, [requestFollowTail, requestInitialScroll, scrollToTurn]);
+  }, [requestFollowTail, requestInitialScroll, scrollToTurn, trace]);
 
   const handleScrollToIndexFailed = useCallback(({ index, averageItemLength }: { index: number; averageItemLength: number }) => {
+    trace("turn.indexFailed", { index, averageItemLength });
     const initialUnreadIndex = initialUnreadIndexRef.current;
     if (initialUnreadIndex !== null) {
       const retries = initialUnreadRetriesRef.current;
@@ -491,9 +558,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         return;
       }
       initialUnreadRetriesRef.current = retries + 1;
-      listRef.current?.scrollToOffset({ offset: estimatedOffset(index, averageItemLength), animated: false });
+      traceOffset("unread.estimate", { offset: estimatedOffset(index, averageItemLength), animated: false });
       requestAnimationFrame(() => {
-        if (initialUnreadIndexRef.current === initialUnreadIndex) listRef.current?.scrollToIndex({ index: initialUnreadIndex, animated: false, viewPosition: 0.15, viewOffset: 8 });
+        if (initialUnreadIndexRef.current === initialUnreadIndex) traceIndex("unread.retryFrame", { index: initialUnreadIndex, animated: false, viewPosition: 0.15, viewOffset: 8 });
       });
       return;
     }
@@ -510,13 +577,14 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       return;
     }
     turnScrollRetriesRef.current.set(target, retries + 1);
-    listRef.current?.scrollToOffset({ offset: estimatedOffset(index, averageItemLength), animated: false });
+    traceOffset("turn.estimate", { offset: estimatedOffset(index, averageItemLength), animated: false });
     requestAnimationFrame(() => {
       if (turnScrollTargetRef.current === target) scrollToTurn(target, retries + 1);
     });
-  }, [estimatedOffset, scrollToTurn]);
+  }, [estimatedOffset, scrollToTurn, trace, traceIndex, traceOffset]);
 
   const handleScrollBeginDrag = useCallback(() => {
+    trace("list.dragBegin");
     userDraggingRef.current = true;
     momentumScrollingRef.current = false;
     if (followTailFrameRef.current !== null) {
@@ -524,9 +592,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       followTailFrameRef.current = null;
     }
     cancelTurnScroll();
-  }, [cancelTurnScroll]);
+  }, [cancelTurnScroll, trace]);
 
   const handleScrollEndDrag = useCallback((event: ChatScrollEvent) => {
+    trace("list.dragEnd", { velocityY: event.nativeEvent.velocity?.y, offsetY: event.nativeEvent.contentOffset.y });
     const velocityY = event.nativeEvent.velocity?.y ?? 0;
     if (Math.abs(velocityY) >= 0.05) {
       momentumScrollingRef.current = true;
@@ -537,13 +606,15 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const { distanceToLatest } = invertedListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({ currentlyFollowing: followingTailRef.current, distanceToBottom: distanceToLatest, userInteracting: false, pendingTarget: pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null }));
     requestFollowTail();
-  }, [requestFollowTail, setFollowingTail]);
+  }, [requestFollowTail, setFollowingTail, trace]);
 
   const handleMomentumScrollBegin = useCallback(() => {
+    trace("list.momentumBegin");
     if (userDraggingRef.current) momentumScrollingRef.current = true;
-  }, []);
+  }, [trace]);
 
   const handleMomentumScrollEnd = useCallback((event: ChatScrollEvent) => {
+    trace("list.momentumEnd", { offsetY: event.nativeEvent.contentOffset.y });
     userDraggingRef.current = false;
     momentumScrollingRef.current = false;
     if (pendingScrollSequence.current !== null) return;
@@ -551,7 +622,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const { distanceToLatest } = invertedListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({ currentlyFollowing: followingTailRef.current, distanceToBottom: distanceToLatest, userInteracting: false, pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()) }));
     requestFollowTail();
-  }, [requestFollowTail, setFollowingTail, targetIsLatestMessage]);
+  }, [requestFollowTail, setFollowingTail, targetIsLatestMessage, trace]);
 
   const handleCopyMessage = useCallback((text: string) => {
     void copyMessageText(text).catch((error) => {
@@ -600,7 +671,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         <ConnectionBanner state={connectionState} />
         {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>{t("common.retry")}</Text></Pressable> : null}
         <View style={{ flex: 1, minHeight: 0 }}>
-        <FlatList ref={listRef} inverted initialNumToRender={16} maxToRenderPerBatch={8} updateCellsBatchingPeriod={32} windowSize={11} onLayout={(event) => setListWidth(event.nativeEvent.layout.width)} data={timeline} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const chronologicalIndex = reverseListIndex(index, messages.length); const sequence = turnSequenceForMessage(item); const older = timeline[index + 1]; const olderSequence = older ? turnSequenceForMessage(older) : null; const showTurnMarker = sequence !== null && sequence !== olderSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); const messageTurn = typeof item.meta?.turnId === "string" ? view.turns.find((entry) => entry.id === item.meta?.turnId) : null; return <View onLayout={(event) => { if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence).map((entry) => entry.id === view.stream?.turnId ? <StreamingTurnProcess key={entry.id} messages={view.stream.intermediateMessages} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: timeline.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>} ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null} />
+        <FlatList {...traceTouches} ref={listRef} inverted initialNumToRender={16} maxToRenderPerBatch={8} updateCellsBatchingPeriod={32} windowSize={11} onLayout={(event) => { trace("list.layout", { ...event.nativeEvent.layout }); setListWidth(event.nativeEvent.layout.width); }} data={timeline} keyExtractor={(item) => item.id} renderItem={({ item, index }) => { const chronologicalIndex = reverseListIndex(index, messages.length); const sequence = turnSequenceForMessage(item); const older = timeline[index + 1]; const olderSequence = older ? turnSequenceForMessage(older) : null; const showTurnMarker = sequence !== null && sequence !== olderSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); const messageTurn = typeof item.meta?.turnId === "string" ? view.turns.find((entry) => entry.id === item.meta?.turnId) : null; return <View onLayout={(event) => { if (chatScrollTrace.isRecording()) trace("row.layout", { message: chatScrollTrace.alias("message", item.id), index, sequence, ...event.nativeEvent.layout }); if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence).map((entry) => entry.id === view.stream?.turnId ? <StreamingTurnProcess key={entry.id} messages={view.stream.intermediateMessages} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: timeline.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>} ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null} />
         {threadPlaceholder ? <View pointerEvents="none" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}><ChatThreadPlaceholder kind={threadPlaceholder} /></View> : null}
         {!followingTail ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.jumpLatest")} onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} style={({ pressed }) => ({ position: "absolute", right: 16, bottom: 12, zIndex: 4, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, borderWidth: 1, borderColor: theme.colors.border, shadowColor: theme.colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5, elevation: 4 })}><AppIcon name="arrow-down" size={18} color={theme.colors.accent} /></Pressable> : null}
         </View>
@@ -622,6 +693,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
         <ComposerInput anchorRef={composerRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? t("ui.composer.working") : t("ui.composer.placeholder")} />
         <AdaptiveSheet visible={moreOpen} title={t("chat.actions.title")} onClose={() => setMoreOpen(false)} scrollable={false} testID="chat-actions-sheet">
+          {tracing ? <SheetAction icon="activity" title="Scroll Diagnostics" onPress={() => { trace("experiment.mark", { origin: "chatMenu" }); setMoreOpen(false); router.push("/debug/chat-scroll"); }} /> : null}
           <SheetAction icon="share" title={t("chat.actions.share")} detail={t("chat.actions.shareDetail")} onPress={() => void shareChat()} />
           <SheetAction icon="messages" title={t("chat.actions.openChats")} detail={t("chat.actions.openChatsDetail")} disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("chat"); }} />
           <SheetAction icon="folder-open" title={t("chat.actions.openFiles")} detail={t("chat.actions.openFilesDetail")} disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("files"); }} />

@@ -16,6 +16,7 @@ import { AppProvider } from "@/src/data/context";
 import { LocaleProvider, useTranslation } from "@/src/i18n";
 import { useAppTheme } from "@/src/theme";
 import { NativeInteractionBridge } from "@/src/platform/NavigationBridge";
+import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
 
 export { ErrorBoundary } from "expo-router";
 
@@ -119,6 +120,8 @@ function NativeRoot() {
 
 function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
   const { t } = useTranslation();
+  // The authenticated navigation tree owns the lifetime of diagnostic recordings.
+  useEffect(() => () => chatScrollTrace.reset(), []);
   return <ThemeProvider value={theme.mode === "dark" ? DarkTheme : DefaultTheme}>
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
@@ -143,6 +146,7 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
             <Stack.Screen name="language" options={{ title: t("route.language") }} />
             <Stack.Screen name="about" options={{ title: t("route.about") }} />
             <Stack.Screen name="debug/index" options={{ title: t("route.debug") }} />
+            <Stack.Screen name="debug/chat-scroll" options={{ title: "Scroll Diagnostics" }} />
             <Stack.Screen name="debug/streaming" options={{ title: t("route.streaming") }} />
             <Stack.Screen name="debug/bubbles" options={{ title: t("route.bubbles") }} />
             <Stack.Screen name="debug/updates" options={{ title: t("route.updates") }} />

@@ -1,7 +1,9 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Clipboard from "expo-clipboard";
 import { Link, useRouter } from "expo-router";
-import { createContext, memo, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
+import { useTraceTouches } from "@/src/components/use-chat-scroll-trace";
 import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { CodeBlock } from "@/src/components/CodeBlock";
@@ -22,6 +24,7 @@ import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme 
 import { useTranslation, type Translate } from "@/src/i18n";
 import { AppIcon, type IconName } from "@/src/ui";
 import { getUserBubbleLayout } from "@/src/ui/message-bubble-layout";
+import { turnSequenceForMessage } from "@/src/data/session-history";
 import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
 function formatTokenCount(value: number) {
@@ -456,6 +459,18 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
   const [copied, setCopied] = useState(false);
+  const tracing = useSyncExternalStore(chatScrollTrace.subscribe, chatScrollTrace.isRecording, chatScrollTrace.isRecording);
+  const traceIdentity = () => ({
+    session: chatScrollTrace.alias("session", message.sessionId),
+    message: chatScrollTrace.alias("message", message.id),
+    role: message.role,
+    sequence: message.sequence,
+    turnSequence: turnSequenceForMessage(message),
+    textLength: message.text?.length ?? 0,
+    blocks: (message.content ?? []).map((block) => ({ type: block.type, length: block.type === "text" ? block.text.length : block.type === "thinking" ? block.thinking.length : null })),
+    theme: theme.mode, fontSize: typography.chatBody.fontSize,
+  });
+  const traceTouches = useTraceTouches("bubble", traceIdentity, tracing);
   useEffect(() => {
     if (!copied) return;
     const timeout = setTimeout(() => setCopied(false), 1600);
@@ -484,7 +499,7 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const { fillUserWidth, inlineUserMeta } = isUser
     ? getUserBubbleLayout(message)
     : { fillUserWidth: false, inlineUserMeta: false };
-  return <BubbleContext.Provider value={bubbleEnvironment}><View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
+  return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
     <ChatBubbleFrame side={side} local={local} fillUserWidth={fillUserWidth}>
       {isUser ? inlineUserMeta ? <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "flex-end" }}>
         <View style={{ flexShrink: 1, minWidth: 0 }}>
