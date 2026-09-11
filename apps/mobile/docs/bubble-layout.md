@@ -6,10 +6,11 @@ Open **Debug > Bubble Layout** (tap the Profile/About version five times to open
 
 - User and assistant bubbles share the maximum-width calculation, padding, and metadata placement. Role only changes alignment, colors, and the sent checkmark.
 - Ordinary short text is content-sized. Structured blocks (code, tables, lists, quotes, tools, galleries) have bounded widths so their nested rows remain usable.
-- The last visible text block measures native line rectangles and the timestamp/status area. Single-line text may expand within the bubble cap to fit metadata. Multi-line text is never narrowed to reserve a timestamp column.
+- For completed messages, the last visible text block measures native line rectangles and the timestamp/status area. Single-line text may expand within the bubble cap to fit metadata. Multi-line text is never narrowed to reserve a timestamp column.
 - Metadata shares the final line only when its measured right-hand space fits the whole metadata area plus an 8 pt gap. Its bottom sits 2 pt below the text line when height permits. Otherwise it occupies its own right-aligned row.
 - Code/table/image/tool endings get a separate metadata row outside the framed content. Empty trailing text and hidden tool results do not take ownership of the timestamp. Errors, content-only records, and text-only records use the same composition.
-- Measurements are asynchronous: the unmeasured state reserves a separate footer row, and native layout results determine the final placement. Verify settling and streaming on device; Node assertions cannot validate native frame timing.
+- During streaming, the timestamp stays in its own row outside the growing text's measurement cycle. Each append changes the text measurement key; previously that reset the footer to a new row and then pulled it inline again, even without a line break (a replay measured 48 -> 64 -> 48 pt). Completed messages retain the measured inline placement. Glyph reveal/fade timing is unchanged.
+- Measurements are asynchronous: the unmeasured completed-message state reserves a separate footer row, and native layout results determine the final placement. Verify settling and streaming on device; Node assertions cannot validate native frame timing.
 - Model/token labels and message actions remain outside the bubble. This change does not alter turn navigation, selection handlers, or scroll-to-turn behavior.
 
 ## Controls
@@ -35,4 +36,4 @@ For a failure, report case number/group, role, viewport mode, font size, theme, 
 
 ## Automated Coverage
 
-`npm run test:workflow` checks metadata geometry at multiple widths/scales and executes the real Markdown JSX composition with lightweight native leaf stubs to verify footer forwarding and uniqueness. These are not native screenshot tests. Use `npm run check`, `npm run export:android`, and `npm run export:ios` for code/bundle validation.
+`npm run test:workflow` checks metadata geometry at multiple widths/scales and executes the real Markdown JSX composition with lightweight native leaf stubs to verify footer forwarding, uniqueness, and a separate streaming footer across every prefix of a mixed Markdown reply. These are not native screenshot tests. Use `npm run check`, `npm run export:android`, and `npm run export:ios` for code/bundle validation.

@@ -381,7 +381,9 @@ export function MessageContent({ content, active = false, color, imageMaxWidth, 
   const firstImageIndex = blocks.findIndex((block) => block.type === "image" && imageUri(block) !== null);
   const lastVisibleIndex = blocks.findLastIndex((block, index) => block.type === "text" ? Boolean(block.text.trim()) : block.type === "thinking" ? Boolean(block.thinking.trim()) : block.type === "tool_use" || block.type === "system_note" || (block.type === "image" && index === firstImageIndex));
   const last = blocks[lastVisibleIndex];
-  const textFooter = last?.type === "text" || last?.type === "thinking";
+  // Appending text invalidates native line measurements. Keep the live clock out of that
+  // measurement cycle so each chunk cannot add and then remove a footer row.
+  const textFooter = !active && (last?.type === "text" || last?.type === "thinking");
   return <View style={{ gap: 3, minWidth: 0 }}>{blocks.map((block, index) => {
     // Tool results never render standalone. A paired one is shown inside its
     // ToolCall; a streaming message boundary can leave a partial result whose

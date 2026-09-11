@@ -144,8 +144,13 @@ function footerPlacements(node, footer, found = []) {
 const footerMarker = { type: "timestamp", props: {} };
 for (const text of ["你好", "First paragraph.\n\nLast paragraph.", "## Heading", "> Quote", "- First\n- Last", "**Bold** and `code`."]) {
   for (const active of [false, true]) {
-    assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], active, footer: footerMarker }), footerMarker), ["BubbleText"], `one timestamp reaches the last native text: ${text}`);
+    assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], active, footer: footerMarker }), footerMarker), active ? ["timestamp"] : ["BubbleText"], `streaming metadata stays outside per-text measurement; completed metadata is inline-capable: ${text}`);
   }
+}
+const streamedFooterSample = "你好，逐字增长。\n\n## Heading\n\n- First\n- Last\n\nDone.";
+for (let length = 1; length <= streamedFooterSample.length; length++) {
+  const content = [{ type: "thinking", thinking: "Earlier thought." }, { type: "text", text: streamedFooterSample.slice(0, length) }];
+  assert.deepEqual(footerPlacements(bubbleRender({ content, active: true, footer: footerMarker }), footerMarker), ["timestamp"], `append ${length} must not remeasure inline metadata`);
 }
 for (const text of ["```ts\nconst x = 1;\n```", "| A | B |\n| --- | --- |\n| 1 | 2 |"])
   assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], footer: footerMarker }), footerMarker), ["timestamp"], "framed content has an external footer row");
