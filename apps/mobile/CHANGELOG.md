@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.2.0](https://github.com/markbang/cohub-mobile/compare/v2.1.0...v2.2.0) (2026-09-11)
+
+
+### Features
+
+* **chat:** add configurable recent filters and fix loading and bubble layout ([761fb2b](https://github.com/markbang/cohub-mobile/commit/761fb2b9467a1ebc1365b94519e87ce6286ff5d7))
+* **debug:** add chat scroll diagnostics and turn tracing ([392a9ae](https://github.com/markbang/cohub-mobile/commit/392a9ae139c9662c55015141a67242e2f4d2d9a6))
+
+
+### Fixes
+
+* **chat:** preserve final reply ordering and reduce cache overhead ([c8b98b7](https://github.com/markbang/cohub-mobile/commit/c8b98b71a975bb17e4b0525655e98605b0435224))
+* **deps:** align Expo SDK 57 patch versions ([09f10f7](https://github.com/markbang/cohub-mobile/commit/09f10f790124917db6b4dccffc84fe58960d3778))
+* **deps:** consolidate stable SDK 57 updates for native release ([8b4763f](https://github.com/markbang/cohub-mobile/commit/8b4763ff6e7a4ec716208a8b4d243a2559794bec))
+* **mobile:** align space filters and session lifecycle ([c724ed2](https://github.com/markbang/cohub-mobile/commit/c724ed2162b39bfeb64a2398ea32a33eb9e95e0c))
+
 ## [2.1.0](https://github.com/markbang/cohub-mobile/compare/v2.0.0...v2.1.0) (2026-09-10)
 
 
