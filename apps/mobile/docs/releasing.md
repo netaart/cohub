@@ -13,6 +13,14 @@ An ordinary `main` push runs quality checks, bundle exports, security checks, Re
 
 Expo is used as the open-source React Native toolchain and for native modules. `expo prebuild` generates standard Gradle and Xcode projects inside CI. No Expo subscription or EAS project is required.
 
+## v2.2.0 native baseline
+
+This release consolidates the SDK 57 patch updates on Expo 57.0.22, Expo Router 57.0.21, and Logto RN 1.3.0. SDK 58 is still a preview and is not part of this release. React and the React Native libraries stay on Expo's supported SDK 57 versions.
+
+Migration: install the new same-key Android APK; do not bypass the OTA fingerprint check for older binaries. Validate sign-in, deep links, chat selection/scroll diagnostics, clipboard, files, and voice on device. iOS needs a separately built and validated native distribution before claiming the new baseline.
+
+Logto 1.3 supports SDK 57 peer dependencies, so `npm ci` no longer uses `legacy-peer-deps`. The `react-dom` override tracks `$react` because Expo Router's transitive web peers otherwise select React DOM 19.3 against SDK 57's React 19.2.3; this does not add a web target. Batch future native dependency updates into planned APK releases, leaving JS-only changes on the installed native baseline for OTA.
+
 ## One-time repository setup
 
 ### Android formal distribution
