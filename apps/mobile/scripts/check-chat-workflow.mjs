@@ -156,6 +156,45 @@ assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text:
 assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "tool_use", id: "tool", name: "read", input: {} }, { type: "tool_result", tool_use_id: "tool", content: "result" }], footer: footerMarker }), footerMarker), ["timestamp"]);
 assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "No footer" }] }), footerMarker), []);
 
+// Configuration guard, not a native gesture test: focus scrolling must stay off on the real timeline.
+const focusPolicySource = ts.createSourceFile("chat.tsx", readFileSync(new URL("../app/chat/[sessionId].tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let timelineElement;
+function findTimelineElement(node) {
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(focusPolicySource) === "FlatList" && node.attributes.properties.some((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === "data" && ts.isJsxExpression(prop.initializer) && prop.initializer.expression?.getText(focusPolicySource) === "timeline")) timelineElement = node;
+  ts.forEachChild(node, findTimelineElement);
+}
+findTimelineElement(focusPolicySource);
+assert.ok(timelineElement);
+const focusScrollProp = timelineElement.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === "scrollsChildToFocus");
+assert.ok(focusScrollProp && ts.isJsxExpression(focusScrollProp.initializer), "timeline must explicitly disable native focus scrolling");
+assert.equal(focusScrollProp.initializer.expression.kind, ts.SyntaxKind.FalseKeyword);
+
+const scrollDebugSource = ts.createSourceFile("chat-scroll.tsx", readFileSync(new URL("../app/debug/chat-scroll.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let scrollFixtureFunction;
+function findScrollFixture(node) {
+  if (ts.isFunctionExpression(node) && node.name?.text === "ScrollFixture") scrollFixtureFunction = node.getText(scrollDebugSource);
+  ts.forEachChild(node, findScrollFixture);
+}
+findScrollFixture(scrollDebugSource);
+assert.ok(scrollFixtureFunction);
+let fixtureState;
+const scrollFixtureScope = {
+  React: bubbleScope.React,
+  useRef: (current) => ({ current }),
+  useCallback: (callback) => callback,
+  useChatScrollTrace: (_source, getState) => { fixtureState = getState; return { recording: false, log: () => {} }; },
+  useTraceTouches: () => ({}),
+  FlatList: "FlatList", MessageBubble: "MessageBubble",
+};
+const renderScrollFixture = new Function(...Object.keys(scrollFixtureScope), ts.transpileModule(`return (${scrollFixtureFunction});`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText)(...Object.values(scrollFixtureScope));
+for (const enabled of [true, false]) {
+  const element = renderScrollFixture({ inverted: true, scrollsChildToFocus: enabled, message: { id: "fixture", sequence: 1 } });
+  assert.equal(element.props.scrollsChildToFocus, enabled, "focus toggle reaches the native list prop");
+  assert.equal(fixtureState().scrollsChildToFocus, enabled, "fixture trace snapshots record the native focus-scroll setting");
+  assert.equal(element.props.inverted, true);
+  assert.equal(element.props.scrollEventThrottle, 100);
+}
+
 const forkCalls = [];
 const forkClient = {
   space: (spaceId) => ({

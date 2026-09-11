@@ -34,6 +34,7 @@ export default function ChatScrollDebugScreen() {
   const focused = useIsFocused();
   const [tab, setTab] = useState<"Test" | "Chats" | "Logs">("Test");
   const [inverted, setInverted] = useState(true);
+  const [focusScroll, setFocusScroll] = useState(true);
   const [fixture, setFixture] = useState(0);
   const [snapshot, setSnapshot] = useState(() => chatScrollTrace.snapshot());
   const recording = useSyncExternalStore(chatScrollTrace.subscribe, chatScrollTrace.isRecording, chatScrollTrace.isRecording);
@@ -44,7 +45,7 @@ export default function ChatScrollDebugScreen() {
     return () => clearInterval(timer);
   }, [focused, refresh]);
   const start = () => {
-    chatScrollTrace.start({ platform: Platform.OS, osVersion: String(Platform.Version), model: Device.modelName, appVersion: Application.nativeApplicationVersion, build: Application.nativeBuildVersion, runtime: Updates.runtimeVersion, updateId: Updates.updateId, embedded: Updates.isEmbeddedLaunch, width: dimensions.width, height: dimensions.height, fontScale: dimensions.fontScale, pixelRatio: dimensions.scale, theme: theme.mode, chatFontSize: typography.chatBody.fontSize });
+    chatScrollTrace.start({ platform: Platform.OS, osVersion: String(Platform.Version), model: Device.modelName, appVersion: Application.nativeApplicationVersion, build: Application.nativeBuildVersion, runtime: Updates.runtimeVersion, updateId: Updates.updateId, embedded: Updates.isEmbeddedLaunch, width: dimensions.width, height: dimensions.height, fontScale: dimensions.fontScale, pixelRatio: dimensions.scale, theme: theme.mode, chatFontSize: typography.chatBody.fontSize, fixtureFocusScroll: focusScroll });
     refresh();
   };
   const exportLog = async (share: boolean) => {
@@ -69,7 +70,7 @@ export default function ChatScrollDebugScreen() {
         <Switch accessibilityLabel="Record scroll diagnostics" value={recording} onValueChange={(enabled) => { if (!enabled) chatScrollTrace.pause(); else if (snapshot.startedAt) chatScrollTrace.resume(); else start(); refresh(); }} />
         <IconButton name="refresh" label="Start new recording" onPress={start} />
         <IconButton name="trash" label="Clear log" onPress={() => { chatScrollTrace.reset(); refresh(); }} />
-        <IconButton name="bookmark" label="Mark experiment" disabled={!recording} onPress={() => { chatScrollTrace.record("experiment.mark", "debug", { tab, inverted, fixture }); refresh(); }} />
+        <IconButton name="bookmark" label="Mark experiment" disabled={!recording} onPress={() => { chatScrollTrace.record("experiment.mark", "debug", { tab, inverted, fixture, fixtureFocusScroll: focusScroll }); refresh(); }} />
       </View>
       <Text style={[typography.micro, { color: snapshot.dropped ? theme.colors.danger : theme.colors.textMuted }]}>{`${recording ? "Recording" : "Stopped"} | ${snapshot.entries.length}/4000 events | ${snapshot.dropped} overwritten`}</Text>
       <View style={{ flexDirection: "row" }}>{(["Test", "Chats", "Logs"] as const).map((value) => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => { chatScrollTrace.record("debug.tab", "debug", { tab: value }); setTab(value); refresh(); }} style={{ flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", borderBottomWidth: 2, borderBottomColor: tab === value ? theme.colors.accent : "transparent" }}><Text style={[typography.bodyMedium, { color: tab === value ? theme.colors.accent : theme.colors.textMuted }]}>{value}</Text></Pressable>)}</View>
@@ -80,7 +81,14 @@ export default function ChatScrollDebugScreen() {
         <Switch accessibilityLabel="Inverted test list" value={inverted} onValueChange={(value) => { chatScrollTrace.record("fixture.mode", "debug", { inverted: value, fixture }); setInverted(value); }} />
         {["Paragraph", "Markdown"].map((label, index) => <Pressable key={label} accessibilityRole="tab" accessibilityState={{ selected: fixture === index }} onPress={() => { chatScrollTrace.record("fixture.mode", "debug", { inverted, fixture: index }); setFixture(index); }} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 6 }}><Text style={[typography.caption, { color: fixture === index ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>)}
       </View>
-      <ScrollFixture key={`${inverted}:${fixture}`} inverted={inverted} message={messages[fixture]!} />
+      {Platform.OS === "android" ? <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, minHeight: 44, gap: 8 }}>
+        <Text style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>Focus scroll</Text>
+        <Switch accessibilityLabel="Focus scroll in test list" value={focusScroll} onValueChange={(value) => {
+          chatScrollTrace.record("fixture.focusScrollChange", "debug", { previous: focusScroll, scrollsChildToFocus: value, inverted, fixture, remount: true });
+          setFocusScroll(value);
+        }} />
+      </View> : null}
+      <ScrollFixture key={`${inverted}:${fixture}:${focusScroll}`} inverted={inverted} scrollsChildToFocus={focusScroll} message={messages[fixture]!} />
     </> : tab === "Chats" ? <FlatList data={state.sessions} keyExtractor={(item) => item.id} ListEmptyComponent={<Text style={[typography.body, { color: theme.colors.textMuted, padding: 16 }]}>No loaded chats</Text>} renderItem={({ item }) => <Pressable accessibilityRole="button" onPress={() => { chatScrollTrace.record("experiment.openChat", "debug", { session: chatScrollTrace.alias("session", item.id) }); router.push({ pathname: "/chat/[sessionId]", params: { sessionId: item.id } }); }} style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}><Text numberOfLines={2} style={[typography.body, { color: theme.colors.text }]}>{item.title || "Chat"}</Text></Pressable>} /> : <ScrollView contentContainerStyle={{ padding: 12, gap: 8 }}>
       {snapshot.entries.length === 0 ? <Text style={[typography.body, { color: theme.colors.textMuted }]}>No events</Text> : snapshot.entries.slice(-150).reverse().map((entry) => <View key={entry.sequence} style={{ borderBottomWidth: 1, borderBottomColor: theme.colors.border, paddingBottom: 8 }}>
         <Text selectable style={[typography.caption, { color: entry.event.startsWith("command.") ? theme.colors.accent : theme.colors.text }]}>{`#${entry.sequence} +${entry.elapsedMs}ms ${entry.source} ${entry.event}`}</Text>
@@ -90,12 +98,12 @@ export default function ChatScrollDebugScreen() {
   </Screen>;
 }
 
-const ScrollFixture = memo(function ScrollFixture({ inverted, message }: { inverted: boolean; message: MessageRecord }) {
+const ScrollFixture = memo(function ScrollFixture({ inverted, scrollsChildToFocus, message }: { inverted: boolean; scrollsChildToFocus: boolean; message: MessageRecord }) {
   const metrics = useRef({ y: 0, height: 0, viewport: 0 });
-  const getState = useCallback(() => ({ inverted, fixture: message.sequence, ...metrics.current }), [inverted, message.sequence]);
+  const getState = useCallback(() => ({ inverted, scrollsChildToFocus, fixture: message.sequence, ...metrics.current }), [inverted, scrollsChildToFocus, message.sequence]);
   const { recording, log } = useChatScrollTrace("fixture", getState);
   const touches = useTraceTouches("fixture.list", getState, recording);
-  return <FlatList {...touches} inverted={inverted} data={[message]} keyExtractor={(item) => item.id} renderItem={({ item }) => <MessageBubble message={item} />} keyboardShouldPersistTaps="handled" scrollEventThrottle={100} contentContainerStyle={{ paddingVertical: 12 }}
+  return <FlatList {...touches} inverted={inverted} scrollsChildToFocus={scrollsChildToFocus} data={[message]} keyExtractor={(item) => item.id} renderItem={({ item }) => <MessageBubble message={item} />} keyboardShouldPersistTaps="handled" scrollEventThrottle={100} contentContainerStyle={{ paddingVertical: 12 }}
     onLayout={(event) => log("list.layout", { ...event.nativeEvent.layout })}
     onContentSizeChange={(width, height) => log("list.contentSize", { width, height })}
     onScroll={(event) => {

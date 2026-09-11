@@ -1,6 +1,6 @@
 # Chat Scroll Diagnostics
 
-This is an opt-in Android investigation tool, not a fix for selection or turn positioning.
+This is an opt-in Android investigation tool. The real chat timeline now disables Android's `scrollsChildToFocus` behavior independently of recording; the Test screen can compare the native default against this setting.
 
 ## Open And Record
 
@@ -18,8 +18,10 @@ Keep the keyboard closed and wait for scrolling to stop before each tap. For eac
 
 - **Test / Paragraph / Inverted on**: one fixed message with 100 numbered lines in one Markdown paragraph. This uses the real MessageBubble, but no turn navigation, streaming, pagination, panel pager, or follow-tail logic.
 - **Test / Markdown / Inverted on**: 18 sections with headings, paragraphs, bold/inline-code text, and lists. This checks selection across separately rendered text blocks.
+- On Android, **Test > Focus scroll** controls the test list's native `scrollsChildToFocus` prop. It defaults to on (the existing native behavior). Compare on/off at the same text and viewport position, keeping Recording enabled. Each toggle remounts the test list to clear native text focus and selection, so scroll back to the target before repeating the tap/long press; do not count the reset as the bug. Check that selection still works and separately test dragging its handles to viewport edges. This switch affects only the synthetic Test list, not real chats opened through Chats or Bubble Layout.
+- `fixture.focusScrollChange` records the old/new value and remount; all fixture scroll/touch events include `scrollsChildToFocus`. `fixtureFocusScroll` in the export metadata and experiment marker refers only to the test fixture.
 - Repeat with **Inverted off**. Changing fixture or mode remounts the test list and emits `fixture.mode`; do not count the reset as the bug.
-- **Chats**: open an affected real chat without a turn deep link. Use a completed long message, manually scroll to it, wait, then repeat the taps.
+- **Chats**: open an affected real chat without a turn deep link. Use a completed long message, manually scroll to it, wait, then repeat the taps. Chat events must include `scrollsChildToFocus: false`. No diagnostic switch is needed to enable the real-chat fix. Confirm normal text selection/copy, dragging selection handles to viewport edges, keyboard show/hide, manual scrolling, turn jumps, and follow-tail while streaming. The prop also suppresses native child-rectangle visibility requests; handle-edge autoscrolling and hardware-keyboard focus navigation specifically need device verification.
 - In the real chat, explicitly navigate to a turn and repeat. Also try dragging away while the turn window is loading. This exercises the existing asynchronous positioning/cancellation path without changing it.
 
 Use separate recordings for each scenario. Accompany the exported log with the scenario, approximate tap location, whether it jumped, and a screen recording if available. Do not include private message content unnecessarily.
