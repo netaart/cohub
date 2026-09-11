@@ -1,4 +1,4 @@
-import type { SpaceRecord } from "@neta-art/cohub";
+import type { SpaceListSpace } from "@/src/data/space-list";
 import { Text, View } from "react-native";
 import { PinnedRow } from "@/src/components/PinnedRow";
 import { type SpaceSessionCount } from "@/src/data/space-session-counts";
@@ -9,7 +9,7 @@ import { displaySpaceName, formatRelativeTime } from "@/src/utils";
 import { useTranslation } from "@/src/i18n";
 
 type SpaceRowProps = {
-  space: SpaceRecord;
+  space: SpaceListSpace;
   sessionCount?: SpaceSessionCount | null;
   onPress: () => void;
   pinning?: boolean;

@@ -16,7 +16,8 @@ import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../
 import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, nextTurnSequence, withFallbackUserContent, withTurnSequences } from "../src/data/session-history.ts";
 import { compactionFromMessage, compactionStats } from "../src/data/compaction.ts";
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
-import { filterSpaces } from "../src/data/space-filters.ts";
+import { selectSpaceList, recentSpaceVisits, SPACE_VISIT_MAX_AGE_MS } from "../src/data/space-list.ts";
+import { createSessionLifecycle } from "../src/data/session-lifecycle.ts";
 import { DEFAULT_SESSION_FILTER_MINUTES, getSessionStatus, hasMoreRecentSessions, isSessionInFilterWindow, latestTurn, loadSessionLatestTurns, parseSessionFilterMinutes, reconcileLatestTurn, reconcileTurnStatusPatch, sessionFilterCutoff, sessionPageState } from "../src/data/session-status.ts";
 import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-queue.ts";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
@@ -332,7 +333,12 @@ const contextSource = ts.createSourceFile("context.tsx", readFileSync(new URL(".
 let paginationCallback;
 let stateSyncHook;
 let timeoutSource;
+const sessionCallbacks = {};
 function inspectPagination(node) {
+  if (ts.isVariableDeclaration(node) && ["openSession", "closeSession", "loadSession", "releaseSession"].includes(node.name.getText(contextSource))) {
+    const callback = node.initializer;
+    if (ts.isCallExpression(callback) && callback.expression.getText(contextSource) === "useCallback") sessionCallbacks[node.name.getText(contextSource)] = callback.arguments[0].getText(contextSource);
+  }
   if (ts.isVariableDeclaration(node) && node.name.getText(contextSource) === "loadMoreSessions") paginationCallback = node.initializer.arguments[0].getText(contextSource);
   if (ts.isCallExpression(node) && ["useEffect", "useLayoutEffect"].includes(node.expression.getText(contextSource)) && node.arguments[0]?.getText(contextSource).includes("stateRef.current = state;")) stateSyncHook = node.expression.getText(contextSource);
   if (ts.isFunctionDeclaration(node) && node.name?.text === "withTimeout") timeoutSource = node.getText(contextSource);
@@ -381,6 +387,37 @@ stalePage.generationRef.current += 1;
 resolveStalePage({ sessions: [oldBoundary], pageInfo: { hasMore: false, nextCursor: null } });
 await pendingStalePage;
 assert.deepEqual(stalePage.actions.map((action) => action.type), ["sessions-more-start"], "an old page cannot replace a newly refreshed list or cursor");
+
+// Reopening hydrated history must not read and replace it with the older disk cache.
+const reopenActions = [];
+let reopenCacheReads = 0;
+let reopenRefreshes = 0;
+let reopenAttachments = 0;
+const reopenView = { historyLoaded: true, messages: [{ id: "live" }], session: { id: "session", spaceId: "space" }, space: { id: "space" } };
+const reopenScope = {
+  client: { space: () => ({ session: () => ({ turns: { listPaginated: async () => ({ turns: [], hasMore: false }) } }) }) },
+  openTokens: { current: new Map() },
+  stateRef: { current: { sessions: [reopenView.session], spaces: [reopenView.space], sessionViews: { session: reopenView } } },
+  dispatch: (action) => reopenActions.push(action),
+  loadMessages: async () => { reopenCacheReads += 1; return []; },
+  userKey: "test-user",
+  recordSpaceVisit: () => {},
+  attachSessionRealtime: () => { reopenAttachments += 1; },
+  refreshSession: async (_id, options) => { assert.equal(options.silent, true); reopenRefreshes += 1; },
+  messagesFromTurns: () => [],
+  isLiveMessage: () => false,
+  mergeDisplayMessages: (messages) => messages,
+  loadTurnIndex: async () => {},
+  saveMessages: async () => {},
+  translate: (key) => key,
+};
+const reopenSource = sessionCallbacks.loadSession ?? sessionCallbacks.openSession;
+const reopen = new Function(...Object.keys(reopenScope), ts.transpileModule(`return (${reopenSource});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(reopenScope));
+await reopen("session");
+assert.equal(reopenCacheReads, 0, "warm opens must not rehydrate the entire SQLite history");
+assert.equal(reopenActions.some((action) => action.type === "session-start"), false, "warm opens keep historyLoaded and pagination available");
+assert.equal(reopenAttachments, 1, "after subscription release, warm opens still recover the authoritative stream");
+assert.equal(reopenRefreshes, 1, "memory reuse still reconciles the server tail");
 
 const preferenceSource = ts.transpileModule(readFileSync(new URL("../src/data/session-filter-preference.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
 function loadPreferenceModule(storage) {
@@ -601,16 +638,72 @@ assert.deepEqual(toUserSessionLabels([
 assert.equal(normalizeSearchQuery("  server   result  "), "server result");
 assert.equal(isResourcePinned([{ labelSystemKey: "user:pinned" }]), true);
 assert.equal(isResourcePinned([{ labelSystemKey: "other" }]), false);
-assert.deepEqual(filterSpaces([{ id: "a", isPinned: true }, { id: "b", isPinned: false }, { id: "c", isPinned: true }], "pinned").map((space) => space.id), ["a", "c"]);
-assert.deepEqual(filterSpaces([
-  { id: "old", updatedAt: "2026-01-01T00:00:00.000Z" },
-  { id: "new", updatedAt: "2026-09-01T00:00:00.000Z" },
-], "recent").map((space) => space.id), ["new", "old"]);
+const listNow = Date.parse("2026-09-11T12:00:00Z");
+const spaceListInput = {
+  spaces: [{ id: "old", updatedAt: "2026-01-01", isPinned: true }, { id: "new", updatedAt: "2026-09-11" }],
+  sessions: [{ spaceId: "old", lastMessageAt: "2026-09-11T11:00:00Z" }],
+  overview: { spaces: [{ id: "new", lastParticipatedAt: null }, { id: "old", lastParticipatedAt: "2026-09-10" }] },
+  visits: [], personalActivity: new Map(), now: listNow,
+};
+const spaceIds = (options) => selectSpaceList({ ...spaceListInput, ...options }).map((space) => space.id);
+assert.deepEqual(spaceIds({ filter: "recent" }), ["old", "new"], "Recent uses personal participation, not Space updatedAt");
+assert.deepEqual(spaceIds({ filter: "all" }), ["old", "new"], "All includes session activity");
+assert.deepEqual(spaceIds({ filter: "pinned" }), ["old"]);
+assert.deepEqual(spaceIds({ filter: "recent", visits: [{ spaceId: "new", timestamp: listNow }] }), ["new", "old"]);
+assert.deepEqual(spaceIds({ filter: "recent", personalActivity: new Map([["new", listNow]]) }), ["new", "old"]);
+assert.deepEqual(spaceIds({ filter: "recent", overview: null }), [], "No server or cached overview is not a fabricated recent list");
+assert.equal(recentSpaceVisits(Array.from({ length: 12 }, (_, i) => ({ spaceId: String(i), timestamp: listNow - i })), listNow).length, 10);
+assert.deepEqual(recentSpaceVisits([{ spaceId: "expired", timestamp: listNow - SPACE_VISIT_MAX_AGE_MS - 1 }], listNow), []);
+assert.throws(() => recentSpaceVisits([{ spaceId: "", timestamp: listNow }], listNow), /Invalid Space visit/);
+
+mock.timers.enable({ apis: ["setTimeout"] });
+try {
+  let loads = 0;
+  const releases = [];
+  const lifecycle = createSessionLifecycle({ load: async () => { loads += 1; }, release: (id) => releases.push(id), releaseDelayMs: 1000 });
+  await lifecycle.open("running");
+  for (let i = 0; i < 100; i += 1) {
+    lifecycle.close("running");
+    mock.timers.tick(100);
+    await lifecycle.open("running");
+  }
+  assert.equal(loads, 1, "Rapid navigation reuses one load and live subscription");
+  assert.deepEqual(releases, []);
+  await lifecycle.open("running");
+  lifecycle.close("running");
+  mock.timers.tick(1001);
+  assert.deepEqual(releases, [], "Another reader still owns the stream");
+  lifecycle.close("running");
+  mock.timers.tick(1000);
+  assert.deepEqual(releases, ["running"]);
+  await lifecycle.open("running");
+  assert.equal(loads, 2, "A released session reconciles when reopened");
+  lifecycle.close("running");
+  lifecycle.clear();
+  mock.timers.tick(1000);
+  assert.deepEqual(releases, ["running", "running"], "Account cleanup releases once and cancels timers");
+} finally {
+  mock.timers.reset();
+}
 assert.equal(panelForScrollOffset(0, 360, 760), "chat");
 assert.equal(panelForScrollOffset(360, 360, 760), null);
 assert.equal(panelForScrollOffset(760, 360, 760), "files");
 assert.equal(panelForScrollOffset(150, 360, 760), "chat");
 assert.equal(panelForScrollOffset(620, 360, 760), "files");
+
+// Filter touches re-render the pager to toggle scrollEnabled. Reapplying a closed-page
+// contentOffset can reset the native scroll position even though no close was requested.
+const panelsSource = ts.createSourceFile("SpacePanels.tsx", readFileSync(new URL("../src/components/SpacePanels.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let panelPager;
+function findPanelPager(node) {
+  if (ts.isJsxOpeningElement(node) && node.tagName.getText(panelsSource) === "Reanimated.ScrollView") panelPager = node;
+  ts.forEachChild(node, findPanelPager);
+}
+findPanelPager(panelsSource);
+assert.ok(panelPager, "Space panels retain their native scroll pager");
+const pagerAttributes = panelPager.attributes.properties.filter(ts.isJsxAttribute);
+assert.equal(pagerAttributes.some((attribute) => attribute.name.getText(panelsSource) === "contentOffset"), false, "Filter touch re-renders must not reapply the closed-page contentOffset");
+assert.ok(pagerAttributes.some((attribute) => attribute.name.getText(panelsSource) === "onContentSizeChange"), "The pager still initializes its position on first layout");
 
 // Space Chat counts come from a cached probe of the Space's first page.
 const countListCalls = [];
@@ -938,6 +1031,19 @@ assert.deepEqual(
   ["a", "b"],
 );
 assert.deepEqual(queuedFollowupTurns([queuedFollowup("active", 7)], "active"), []);
+for (const status of ["completed", "failed", "interrupted", "merged", "cancelled"]) {
+  const finished = queuedFollowup("finished", 8, { status });
+  assert.deepEqual(
+    queuedFollowupTurns([finished, queuedFollowup("new", 9)], "finished"),
+    [],
+    `${status} stream references must not put a new message in the follow-up queue`,
+  );
+  assert.deepEqual(
+    queuedFollowupTurns([finished, queuedFollowup("running", 9, { status: "running" }), queuedFollowup("next", 10)], "finished").map((turn) => turn.id),
+    ["next"],
+    "a stale stream reference must not hide the queue behind an actually running turn",
+  );
+}
 // A stale queued record after the previous turn completed is not a live queue: nothing is running to steer.
 assert.deepEqual(queuedFollowupTurns([
   { id: "finished", sequence: 8, status: "completed", intent: "followup", userText: "done", createdAt: "2026-09-01T00:00:00.000Z" },

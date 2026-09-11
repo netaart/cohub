@@ -6,7 +6,7 @@ export function newId() {
   return Crypto.randomUUID();
 }
 
-export function displaySpaceName(space: Pick<SpaceRecord, "name" | "title"> | null | undefined) {
+export function displaySpaceName(space: Partial<Pick<SpaceRecord, "name" | "title">> | null | undefined) {
   return space?.name?.trim() || space?.title?.trim() || translate("space.fallbackName");
 }
 

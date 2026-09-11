@@ -114,7 +114,7 @@ function NativeRoot() {
   if (!isInitialized) return <LoadingScreen />;
   if (!isAuthenticated || (authError && !identity.uuid)) return <AuthScreen onSignIn={handleSignIn} loading={authLoading} error={authError} />;
   if (identity.authenticated !== isAuthenticated || !identity.uuid) return <LoadingScreen />;
-  return <AppProvider userUuid={identity.uuid} getAccessToken={getAccessToken}><Navigation theme={theme} /></AppProvider>;
+  return <AppProvider key={identity.uuid} userUuid={identity.uuid} getAccessToken={getAccessToken}><Navigation theme={theme} /></AppProvider>;
 }
 
 function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {

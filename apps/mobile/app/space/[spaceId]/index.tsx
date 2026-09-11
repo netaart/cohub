@@ -34,7 +34,10 @@ export default function SpaceScreen() {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { state, client, refreshHome, refreshSessionStatuses, refreshSpacePin, toggleSpacePin, upsertSpace } = useApp();
+  const { state, client, refreshHome, refreshSessionStatuses, refreshSpacePin, toggleSpacePin, upsertSpace, spaceList: { recordVisit } } = useApp();
+  useFocusEffect(useCallback(() => {
+    if (spaceId) recordVisit(spaceId);
+  }, [recordVisit, spaceId]));
   const [loadedSpace, setLoadedSpace] = useState<SpaceRecord | null>(null);
   const [spaceLoading, setSpaceLoading] = useState(true);
   const [spaceError, setSpaceError] = useState<string | null>(null);

@@ -195,13 +195,13 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         snapToOffsets={snapOffsets}
         decelerationRate="fast"
         disableIntervalMomentum
-        contentOffset={{ x: centerOffset, y: 0 }}
         onScroll={scrollHandler}
         onScrollBeginDrag={clearIdleTimer}
         onScrollEndDrag={scheduleSettle}
         onMomentumScrollBegin={clearIdleTimer}
         onMomentumScrollEnd={settle}
         onContentSizeChange={() => {
+          // Initialize imperatively so filter-touch re-renders cannot reapply a closed-page offset.
           if (initialScrollDone.current) return;
           initialScrollDone.current = true;
           scrollOffset.value = centerOffset;

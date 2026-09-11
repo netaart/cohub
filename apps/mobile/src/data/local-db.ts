@@ -13,6 +13,16 @@ async function database() {
   const db = await databasePromise;
   await db.execAsync(`
     PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS space_list_cache (
+      user_key TEXT PRIMARY KEY NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS space_visits (
+      user_key TEXT NOT NULL,
+      space_id TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      PRIMARY KEY (user_key, space_id)
+    );
     CREATE TABLE IF NOT EXISTS spaces (
       user_key TEXT NOT NULL,
       space_id TEXT NOT NULL,
@@ -204,7 +214,31 @@ export async function clearUserCache(userKey: string) {
     await db.runAsync("DELETE FROM sessions WHERE user_key = ?", userKey);
     await db.runAsync("DELETE FROM spaces WHERE user_key = ?", userKey);
     await db.runAsync("DELETE FROM session_read_state WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM space_list_cache WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM space_visits WHERE user_key = ?", userKey);
   });
+}
+
+export async function loadSpaceListCache(userKey: string): Promise<import("@neta-art/cohub").PaletteOverviewResponse | null> {
+  const db = await database();
+  const row = await db.getFirstAsync<{ payload: string }>("SELECT payload FROM space_list_cache WHERE user_key = ?", userKey);
+  return row ? parse<import("@neta-art/cohub").PaletteOverviewResponse>(row.payload) : null;
+}
+
+export async function saveSpaceListCache(userKey: string, overview: import("@neta-art/cohub").PaletteOverviewResponse): Promise<void> {
+  const db = await database();
+  await db.runAsync("INSERT OR REPLACE INTO space_list_cache (user_key, payload) VALUES (?, ?)", userKey, JSON.stringify(overview));
+}
+
+export async function loadSpaceVisits(userKey: string): Promise<import("./space-list").SpaceVisit[]> {
+  const db = await database();
+  return db.getAllAsync("SELECT space_id AS spaceId, timestamp FROM space_visits WHERE user_key = ? ORDER BY timestamp DESC LIMIT 10", userKey);
+}
+
+export async function saveSpaceVisit(userKey: string, spaceId: string, timestamp: number): Promise<void> {
+  const db = await database();
+  await db.runAsync("INSERT OR REPLACE INTO space_visits (user_key, space_id, timestamp) VALUES (?, ?, ?)", userKey, spaceId, timestamp);
+  await db.runAsync("DELETE FROM space_visits WHERE user_key = ? AND space_id NOT IN (SELECT space_id FROM space_visits WHERE user_key = ? ORDER BY timestamp DESC LIMIT 10)", userKey, userKey);
 }
 
 export type CacheStats = {

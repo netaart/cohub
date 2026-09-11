@@ -2,7 +2,7 @@ import type { CohubClient, SessionTurnRecord } from "@neta-art/cohub";
 
 /** Server-side follow-ups waiting for the running turn to finish, excluding the turn currently streaming. */
 export function queuedFollowupTurns(turns: readonly SessionTurnRecord[], activeTurnId: string | null | undefined) {
-  const active = turns.find((turn) => turn.id === activeTurnId) ?? turns.find((turn) => turn.status === "running" || turn.status === "abort_requested");
+  const active = turns.find((turn) => turn.id === activeTurnId && (turn.status === "queued" || turn.status === "running" || turn.status === "abort_requested")) ?? turns.find((turn) => turn.status === "running" || turn.status === "abort_requested");
   if (!active) return [];
   return turns
     .filter((turn) => turn.status === "queued" && turn.intent === "followup" && turn.id !== active.id)

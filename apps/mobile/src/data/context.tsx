@@ -15,6 +15,7 @@ import { AppState as NativeAppState } from "react-native";
 import { File as ExpoFile } from "expo-file-system";
 import { translate } from "@/src/i18n/core";
 import { createMobileClient } from "@/src/data/client";
+import { useSpaceListData } from "@/src/data/use-space-list";
 import { cacheRetentionCutoff, loadCacheRetention } from "@/src/data/cache-retention";
 import { createStreamBatch } from "@/src/data/chat-rendering";
 import {
@@ -42,6 +43,7 @@ import type {
 import { hasFinalAssistantForTurn, isActiveTurnStatus, isTerminalTurnStatus, liveStreamStatusFromPatch, pendingStreamForTurn, streamRecoveryFromTail } from "@/src/data/chat-stream";
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, turnSequenceForMessage, withFallbackUserContent } from "@/src/data/session-history";
 import { forkSessionTurn } from "@/src/data/session-fork";
+import { createSessionLifecycle } from "@/src/data/session-lifecycle";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
 import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, sessionPageState, type LatestSessionTurn, type SessionPageBoundary } from "@/src/data/session-status";
@@ -625,6 +627,7 @@ export type AppContextValue = {
   state: AppState;
   client: CohubClient | null;
   userUuid: string;
+  spaceList: ReturnType<typeof useSpaceListData>;
   connectionState: ConnectionState;
   installationId: string | null;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
@@ -681,6 +684,13 @@ export function AppProvider({
   const subscriptions = useRef(new Map<string, () => void>());
   const sessionSpaces = useRef(new Map<string, string>());
   const openTokens = useRef(new Map<string, number>());
+  const sessionLoadRef = useRef<(sessionId: string) => Promise<void>>(async () => undefined);
+  const sessionReleaseRef = useRef<(sessionId: string) => void>(() => undefined);
+  const sessionLifecycleRef = useRef(createSessionLifecycle({
+    load: (sessionId) => sessionLoadRef.current(sessionId),
+    release: (sessionId) => sessionReleaseRef.current(sessionId),
+    releaseDelayMs: 1000,
+  }));
   const installationIdRef = useRef<string | null>(null);
   const installationRequestRef = useRef<Promise<string> | null>(null);
   const clientRef = useRef<CohubClient | null>(null);
@@ -745,6 +755,9 @@ export function AppProvider({
     () => installationId ? createMobileClient(getAccessToken, installationId) : null,
 [getAccessToken, installationId],
   );
+
+  const spaceList = useSpaceListData(client, userKey);
+  const { recordVisit: recordSpaceVisit, reset: resetSpaceList } = spaceList;
 
   useEffect(() => {
     clientRef.current = client;
@@ -945,6 +958,7 @@ export function AppProvider({
     const activeSubscriptions = subscriptions.current;
     const activeSessionSpaces = sessionSpaces.current;
     const activeResyncCoordinator = resyncCoordinatorRef.current;
+    const activeSessionLifecycle = sessionLifecycleRef.current;
     void (async () => {
       try {
         await applyCacheRetention();
@@ -975,6 +989,7 @@ export function AppProvider({
       homeRefreshGenerationRef.current += 1;
       statusGenerationRef.current += 1;
       dispatch({ type: "session-status-reset" });
+      activeSessionLifecycle.clear();
       for (const sessionId of activeSubscriptions.keys()) activeResyncCoordinator.cancel(sessionId);
       for (const stop of activeSubscriptions.values()) stop();
       activeSubscriptions.clear();
@@ -1019,10 +1034,13 @@ export function AppProvider({
       const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
       const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
       if (!spaceId) return;
+      const openToken = openTokens.current.get(sessionId);
+      const isCurrentRequest = () => openTokens.current.get(sessionId) === openToken;
       // Recovery resyncs must not flash the pull-to-refresh spinner.
       dispatch({ type: "session-refresh-start", sessionId, ...(options.silent ? { silent: true } : {}) });
       try {
         const response = await client.space(spaceId).session(sessionId).turns.listPaginated({ limit: 30 });
+        if (!isCurrentRequest()) return;
         const current = stateRef.current.sessionViews[sessionId];
         const turns = mergeTurns(current?.turns ?? [], response.turns);
         const messages = mergeDisplayMessages(messagesFromTurns(turns), current?.messages.filter(isLiveMessage) ?? []);
@@ -1041,6 +1059,7 @@ export function AppProvider({
         });
         void saveMessages(userKey, sessionId, messages).catch(() => undefined);
       } catch (error) {
+        if (!isCurrentRequest()) return;
         dispatch({
           type: "session-refresh-end",
           sessionId,
@@ -1305,29 +1324,41 @@ export function AppProvider({
     resyncRunRef.current = resyncSession;
   }, [resyncSession]);
 
-  const openSession = useCallback(
+  const loadSession = useCallback(
     async (sessionId: string) => {
       if (!client) return;
       const token = (openTokens.current.get(sessionId) ?? 0) + 1;
       openTokens.current.set(sessionId, token);
-      const summary = stateRef.current.sessions.find((item) => item.id === sessionId);
+      const view = stateRef.current.sessionViews[sessionId];
+      const summary = view?.session ?? stateRef.current.sessions.find((item) => item.id === sessionId);
+      if (view?.historyLoaded && view.session && view.space) {
+        recordSpaceVisit(view.space.id);
+        // Memory already owns the history window; disk hydration would replace newer live messages.
+        attachSessionRealtime(client, view.space.id, sessionId);
+        await refreshSession(sessionId, { silent: true });
+        return;
+      }
       dispatch({ type: "session-start", sessionId, session: summary ?? null });
 
-      try {
-        const cachedMessages = await loadMessages(userKey, sessionId);
-        if (openTokens.current.get(sessionId) === token && cachedMessages.length > 0) {
-          dispatch({ type: "session-cache", sessionId, messages: cachedMessages });
+      if (!view?.messages.length) {
+        try {
+          const cachedMessages = await loadMessages(userKey, sessionId);
+          if (openTokens.current.get(sessionId) === token && cachedMessages.length > 0) {
+            dispatch({ type: "session-cache", sessionId, messages: cachedMessages });
+          }
+        } catch (error) {
+          console.warn("[mobile-cache] failed to load Chat", error);
         }
-      } catch (error) {
-        console.warn("[mobile-cache] failed to load Chat", error);
       }
+      if (openTokens.current.get(sessionId) !== token) return;
 
       let spaceId = summary?.spaceId;
-      let space = stateRef.current.spaces.find((item) => item.id === spaceId) ?? null;
+      let space = view?.space ?? stateRef.current.spaces.find((item) => item.id === spaceId) ?? null;
       let session = summary as SessionRecord | undefined;
       try {
         if (!spaceId || !space || !session) {
           const detail = await client.user.getSession(sessionId);
+          if (openTokens.current.get(sessionId) !== token) return;
           spaceId = detail.space.id;
           space = detail.space;
           session = detail.session;
@@ -1345,9 +1376,10 @@ export function AppProvider({
           });
         }
         if (!spaceId || !space || !session || openTokens.current.get(sessionId) !== token) return;
+        recordSpaceVisit(spaceId);
         dispatch({ type: "session-start", sessionId, space, session });
         attachSessionRealtime(client, spaceId, sessionId);
-   const sessionClient = client.space(spaceId).session(sessionId);
+        const sessionClient = client.space(spaceId).session(sessionId);
         const response = await sessionClient.turns.listPaginated({ limit: 30 });
         if (openTokens.current.get(sessionId) !== token) return;
         const messages = messagesFromTurns(response.turns);
@@ -1361,16 +1393,30 @@ export function AppProvider({
         dispatch({ type: "session-error", sessionId, message: error instanceof Error ? error.message : translate("data.openChatFailed") });
       }
     },
-    [attachSessionRealtime, client, dispatch, loadTurnIndex, userKey],
+    [attachSessionRealtime, client, dispatch, loadTurnIndex, recordSpaceVisit, refreshSession, userKey],
   );
 
-  const closeSession = useCallback((sessionId: string) => {
+  const releaseSession = useCallback((sessionId: string) => {
     resyncCoordinatorRef.current.cancel(sessionId);
     subscriptions.current.get(sessionId)?.();
     subscriptions.current.delete(sessionId);
     sessionSpaces.current.delete(sessionId);
     openTokens.current.set(sessionId, (openTokens.current.get(sessionId) ?? 0) + 1);
     optimisticMessageSequenceRef.current.delete(sessionId);
+  }, []);
+
+  useLayoutEffect(() => {
+    sessionLoadRef.current = loadSession;
+    sessionReleaseRef.current = releaseSession;
+  }, [loadSession, releaseSession]);
+
+  const openSession = useCallback(async (sessionId: string) => {
+    if (!client) return;
+    await sessionLifecycleRef.current.open(sessionId);
+  }, [client]);
+
+  const closeSession = useCallback((sessionId: string) => {
+    sessionLifecycleRef.current.close(sessionId);
   }, []);
 
   const abortSession = useCallback(
@@ -1660,6 +1706,7 @@ export function AppProvider({
   const clearCache = useCallback(async () => {
     homeRefreshGenerationRef.current += 1;
     statusGenerationRef.current += 1;
+    resetSpaceList();
     await clearUserCache(userKey);
     setModels([]);
     setModelsError(null);
@@ -1670,7 +1717,7 @@ export function AppProvider({
     spacePinMutationVersionsRef.current.clear();
     spacePinPendingMutationsRef.current.clear();
     setState({ ...initialState, booting: false, refreshing: false });
-  }, [userKey]);
+  }, [resetSpaceList, userKey]);
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     return state.sessions.slice(0, 30).flatMap((session) => {
@@ -1701,6 +1748,7 @@ export function AppProvider({
       state,
       client,
       userUuid,
+      spaceList,
       connectionState,
       installationId,
       getAccessToken,
@@ -1739,6 +1787,7 @@ export function AppProvider({
     }),
     [
       activityItems,
+      spaceList,
       abortSession,
       applyCacheRetention,
       clearCache,

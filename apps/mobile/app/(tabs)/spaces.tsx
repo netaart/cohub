@@ -1,4 +1,4 @@
-import { useRouter, useScrollToTop } from "expo-router";
+import { useFocusEffect, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View, type ViewToken } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
@@ -8,7 +8,7 @@ import { SpaceSearchRow } from "@/src/components/SearchResultRow";
 import { SpaceRow } from "@/src/components/SpaceRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSpaceSearchHit } from "@/src/data/session-search";
 import { useSpaceSessionCounts } from "@/src/data/space-session-counts";
-import { filterSpaces, type SpaceFilter } from "@/src/data/space-filters";
+import { selectSpaceList, type SpaceListSpace, type SpaceFilter } from "@/src/data/space-list";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
@@ -16,7 +16,7 @@ import { AppIcon, DataError, EmptyState, ExpandableSearchBar, LoadingRows, Prima
 import { displaySpaceName } from "@/src/utils";
 
 type SpaceListItem =
-  | { kind: "local"; space: import("@neta-art/cohub").SpaceRecord }
+  | { kind: "local"; space: SpaceListSpace }
   | { kind: "remote"; hit: RemoteSpaceSearchHit };
 const SPACE_SEARCH_TYPES = ["space"] as const;
 
@@ -25,8 +25,11 @@ export default function SpacesScreen() {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const tabBarInset = useFloatingTabBarInset();
-  const { state, client, refreshHome, createSpace, toggleSpacePin } = useApp();
-  const dataError = state.error ?? state.spacesError;
+  const { state, client, refreshHome, createSpace, toggleSpacePin, spaceList, userUuid } = useApp();
+  const dataError = state.error ?? state.spacesError ?? spaceList.error;
+  const refreshSpaceList = spaceList.refresh;
+  const [now, setNow] = useState(Date.now);
+  useFocusEffect(useCallback(() => { setNow(Date.now()); void refreshSpaceList(); }, [refreshSpaceList]));
   const [query, setQuery] = useState("");
   const listRef = useRef<FlatList<SpaceListItem>>(null);
   useScrollToTop(listRef);
@@ -42,9 +45,17 @@ export default function SpacesScreen() {
   const trimmedQuery = normalizeSearchQuery(query);
   const spaces = useMemo(() => {
     const needle = trimmedQuery.toLowerCase();
-    const candidates = filter === "recent" && trimmedQuery ? state.spaces : filterSpaces(state.spaces, filter);
+    const personalActivity = new Map<string, number>();
+    for (const view of Object.values(state.sessionViews)) {
+      if (!view.session) continue;
+      for (const turn of view.turns) {
+        if (turn.userUuid !== userUuid) continue;
+        personalActivity.set(view.session.spaceId, Math.max(personalActivity.get(view.session.spaceId) ?? 0, Date.parse(turn.createdAt)));
+      }
+    }
+    const candidates = selectSpaceList({ spaces: state.spaces, sessions: state.sessions, overview: spaceList.overview, visits: spaceList.visits, personalActivity, filter: filter === "recent" && trimmedQuery ? "all" : filter, now });
     return candidates.filter((space) => !needle || [displaySpaceName(space), space.description].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false));
-  }, [filter, state.spaces, trimmedQuery]);
+  }, [filter, now, state.spaces, state.sessions, state.sessionViews, spaceList.overview, spaceList.visits, trimmedQuery, userUuid]);
   const [visibleSpaceIds, setVisibleSpaceIds] = useState<string[]>([]);
   const visibleSpaceKeyRef = useRef("");
   const onViewableItemsChanged = useCallback((info: { viewableItems: ViewToken<SpaceListItem>[] }) => {
@@ -114,20 +125,20 @@ export default function SpacesScreen() {
       account={<AccountAvatar />}
       onCreate={() => { setCreateError(null); setCreateOpen(true); }}
     />
-    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
+    {dataError ? <DataError message={dataError} onRetry={() => void Promise.all([refreshHome(), spaceList.refresh()])} /> : null}
     <FlatList
       ref={listRef}
       data={listItems}
       keyExtractor={(item) => item.kind === "remote" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
       renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} sessionCount={spaceSessionCounts[item.space.id] ?? null} pinning={pinningSpaceId === item.space.id} onTogglePin={client ? () => void togglePin(item.space.id) : undefined} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}
-      refreshing={state.refreshing}
-      onRefresh={() => void refreshHome()}
+      refreshing={state.refreshing || (filter === "recent" && spaceList.loading)}
+      onRefresh={() => void Promise.all([refreshHome(), spaceList.refresh()])}
       viewabilityConfig={viewabilityConfig}
       onViewableItemsChanged={onViewableItemsChanged}
       keyboardShouldPersistTaps="handled"
 contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
       ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}<View style={{ flexDirection: "row", gap: 8, paddingTop: 4 }}><SpaceFilterChip label={t("spaces.filter.recent")} selected={filter === "recent"} onPress={() => setFilter("recent")} /><SpaceFilterChip label={t("spaces.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} /><SpaceFilterChip label={t("spaces.filter.pinned")} icon="pin" selected={filter === "pinned"} onPress={() => setFilter("pinned")} /></View>{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("spaces.search.retry")} onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}{pinError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{pinError}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("spaces.pin.dismiss")} onPress={() => setPinError(null)}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.dismiss")}</Text></Pressable></View> : null}<Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 12, textTransform: "uppercase" }]}>{t("spaces.section.yourWorkspaces")}</Text></View>}
-      ListEmptyComponent={state.booting ? <LoadingRows count={4} /> : dataError ? <EmptyState icon="cloud-off" title={t("spaces.error.title")} description={t("spaces.error.body")} /> : searchEmpty}
+      ListEmptyComponent={state.booting || (filter === "recent" && spaceList.loading) ? <LoadingRows count={4} /> : dataError ? <EmptyState icon="cloud-off" title={t("spaces.error.title")} description={t("spaces.error.body")} /> : searchEmpty}
     />
     <AdaptiveSheet
       visible={createOpen}
