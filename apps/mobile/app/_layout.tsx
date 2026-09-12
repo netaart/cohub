@@ -122,8 +122,9 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
   const { t } = useTranslation();
   // The authenticated navigation tree owns the lifetime of diagnostic recordings.
   useEffect(() => () => chatScrollTrace.reset(), []);
-  return <ThemeProvider value={theme.mode === "dark" ? DarkTheme : DefaultTheme}>
-    <GestureHandlerRootView style={{ flex: 1 }}>
+  const navigationTheme = theme.mode === "dark" ? DarkTheme : DefaultTheme;
+  return <ThemeProvider value={{ ...navigationTheme, colors: { ...navigationTheme.colors, background: theme.colors.background, card: theme.colors.background, text: theme.colors.text, border: theme.colors.border, primary: theme.colors.accent } }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.colors.background }}>
       <StatusBar style={theme.mode === "dark" ? "light" : "dark"} />
       <NativeInteractionBridge />
       <ToastProvider>

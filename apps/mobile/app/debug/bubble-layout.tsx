@@ -8,7 +8,7 @@ import { useToast } from "@/src/components/Toast";
 import { bubbleFixtures, fixtureMessage } from "@/src/data/bubble-fixtures";
 import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
 import { setFontScalePreference, setThemePreference, typography, useAppTheme, useFontScalePreference, type FontScalePreference } from "@/src/theme";
-import { DetailTopBar, IconButton, Screen } from "@/src/ui";
+import { TopBar, IconButton, Screen } from "@/src/ui";
 
 const STREAM_TEXT = "你好。\n\nThis reply grows from a short sentence into a longer paragraph, then finishes with a short final line.\n\n- First item\n- Second item\n\nDone.";
 const GROUPS = ["Text", "Rich", "States", "Boundary", "Stream"] as const;
@@ -31,7 +31,7 @@ export default function BubbleLayoutDebugScreen() {
   const run = (action: Promise<unknown>) => void action.catch((error) => toast({ title: "Action failed", message: error instanceof Error ? error.message : "Unable to complete this action.", tone: "danger" }));
   const log = (event: string) => chatScrollTrace.record(event, "bubble.fixtures", { group, width: availableWidth, inverted, theme: theme.mode, textSize, fontScale });
   return <Screen contentStyle={{ paddingBottom: insets.bottom }}>
-    <DetailTopBar title="Bubble Layout" onBack={() => router.back()} actions={<>
+    <TopBar title="Bubble Layout" onBack={() => router.back()} actions={<>
       <IconButton name="bookmark" label="Mark layout experiment" disabled={!recording} onPress={() => log("experiment.mark")} />
       <IconButton name="copy" label="Copy layout log" onPress={() => { log("experiment.export"); chatScrollTrace.pause(); run(Clipboard.setStringAsync(chatScrollTrace.export()).then(() => toast({ title: "Layout log copied" }))); }} />
     </>} />

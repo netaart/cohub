@@ -1,6 +1,6 @@
 import { useFocusEffect, useIsFocused, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Text, TextInput, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { SessionSearchRow, SpaceSearchRow } from "@/src/components/SearchResultRow";
@@ -10,7 +10,8 @@ import { useSpaceSessionCounts } from "@/src/data/space-session-counts";
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
-import { ConnectionBanner, DataError, EmptyState, ExpandableSearchBar, LoadingRows, Screen } from "@/src/ui";
+import { ConnectionBanner, DataError, EmptyState, ExpandableSearchBar, IconButton, LoadingRows, Screen } from "@/src/ui";
+import { IconSegmentedControl } from "@/src/ui/IconSegmentedControl";
 import { getSessionStatus, hasMoreRecentSessions, isSessionInFilterWindow, sessionFilterCutoff } from "@/src/data/session-status";
 import { loadSessionFilterMinutes, useSessionFilterPreference } from "@/src/data/session-filter-preference";
 import { SpaceRow } from "@/src/components/SpaceRow";
@@ -95,12 +96,14 @@ export default function ChatsScreen() {
   };
 
   const searchEmpty = trimmedQuery.length >= 2 && remoteSearch.query === trimmedQuery && remoteSearch.loading && listItems.length === 0
-    ? <View style={{ flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>{t("chats.searching")}</Text></View>
-    : <EmptyState icon={trimmedQuery || filter !== "all" ? "search" : "messages"} title={trimmedQuery || filter !== "all" ? t("chats.empty.matching.title") : t("chats.empty.none.title")} description={trimmedQuery || filter !== "all" ? t("chats.empty.matching.body") : t("chats.empty.none.body")} action={trimmedQuery || filter !== "all" ? t("chats.action.clearFilters") : t("chats.action.newChat")} onAction={() => { if (trimmedQuery || filter !== "all") { setQuery(""); setFilter("all"); } else router.push("/new-chat"); }} />;
+    ? <View style={{ flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" }}><ActivityIndicator accessibilityLabel={t("chats.searching")} size="small" color={theme.colors.accent} /></View>
+    : <EmptyState icon={trimmedQuery || filter !== "all" ? "search" : "messages"} title={trimmedQuery || filter !== "all" ? t("chats.empty.matching.title") : t("chats.empty.none.title")} action={trimmedQuery || filter !== "all" ? { icon: "x", label: t("chats.action.clearFilters"), onPress: () => { setQuery(""); setFilter("all"); } } : undefined} />;
 
   return (
     <Screen>
       <ExpandableSearchBar
+        title={t("tabs.chats")}
+        createLabel={t("chats.action.newChat")}
         query={query}
         onQueryChange={setQuery}
         queryRef={searchRef}
@@ -125,15 +128,19 @@ export default function ChatsScreen() {
         onEndReached={() => { if (!trimmedQuery && filter === "all") void loadMoreSessions(); }}
         onEndReachedThreshold={0.7}
         contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
-        ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 12 }}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("chats.search.retry")} onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}<View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 12, paddingBottom: 4 }}><FilterChip label={t("chats.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} /><FilterChip label={t("chats.filter.running")} selected={filter === "running"} onPress={() => setFilter("running")} /><FilterChip label={t("chats.filter.completed")} selected={filter === "completed"} onPress={() => setFilter("completed")} /></View>{filter !== "all" ? <Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 6 }]}>{t("chats.filter.window", { minutes: filterPreference.minutes })}</Text> : null}</View>}
+        ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
+          <IconSegmentedControl<Filter> value={filter} onChange={setFilter} options={[
+            { value: "all", icon: "messages", label: t("chats.filter.all") },
+            { value: "running", icon: "activity", label: t("chats.filter.running") },
+            { value: "completed", icon: "check-circle", label: t("chats.filter.completed") },
+          ]} />
+          {filter !== "all" ? <Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 6 }]}>{t("chats.filter.window", { minutes: filterPreference.minutes })}</Text> : null}
+          {remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator accessibilityLabel={t("chats.searching")} size="small" color={theme.colors.accent} /></View> : null}
+          {remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><IconButton name="refresh" label={t("chats.search.retry")} onPress={remoteSearch.retry} tone="accent" /></View> : null}
+        </View>}
         ListEmptyComponent={dataError ? <EmptyState icon="cloud-off" title={t("chats.error.title")} description={t("chats.error.body")} /> : state.booting || (filter !== "all" && (state.refreshing || !filterPreference.loaded || statusesLoading || filteringPages)) ? <LoadingRows count={5} /> : searchEmpty}
         ListFooterComponent={!dataError && (state.sessionsLoadingMore || (filter !== "all" && (statusesLoading || filteringPages))) ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator accessibilityLabel={t("chats.loadingStatuses")} size="small" color={theme.colors.accent} /></View> : null}
       />
     </Screen>
   );
-}
-
-function FilterChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  const theme = useAppTheme();
-  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }

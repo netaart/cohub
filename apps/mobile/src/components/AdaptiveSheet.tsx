@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
-import { AppIcon, IconButton, type IconName } from "@/src/ui";
+import { IconButton } from "@/src/ui";
 
 const COMPACT_BREAKPOINT = 720;
 const OPEN_DURATION_MS = 220;
@@ -247,55 +247,6 @@ export function AdaptiveSheet({
   );
 }
 
-export function SheetAction({
-  icon,
-  title,
-  detail,
-  onPress,
-  disabled = false,
-  tone = "default",
-}: {
-  icon: IconName;
-  title: string;
-  detail?: string;
-  onPress: () => void;
-  disabled?: boolean;
-  tone?: "default" | "danger";
-}) {
-  const theme = useAppTheme();
-  const toneColor = tone === "danger" ? theme.colors.danger : theme.colors.accent;
-  const toneBackground = tone === "danger" ? theme.colors.dangerSoft : theme.colors.accentSoft;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={title}
-      disabled={disabled}
-      onPress={onPress}
-     
-      style={({ pressed }) => [
-        styles.action,
-        {
-          backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
-          opacity: disabled ? 0.45 : 1,
-        },
-      ]}
-    >
-      <View style={[styles.actionIcon, { backgroundColor: toneBackground }]}>
-        <AppIcon name={icon} size={18} color={toneColor} />
-      </View>
-      <View style={styles.actionText}>
-        <Text style={[typography.bodyMedium, { color: tone === "danger" ? toneColor : theme.colors.text }]}>{title}</Text>
-        {detail ? (
-          <Text style={[typography.caption, { color: theme.colors.textSecondary, marginTop: 2 }]}>
-            {detail}
-          </Text>
-        ) : null}
-      </View>
-      <AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -382,25 +333,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  action: {
-    minHeight: 62,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 11,
-    overflow: "hidden",
-  },
-  actionIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionText: {
-    flex: 1,
-    minWidth: 0,
   },
 });

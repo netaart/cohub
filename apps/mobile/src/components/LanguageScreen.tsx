@@ -8,7 +8,7 @@ import {
   type LocalePreference,
 } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, DetailTopBar, Screen, SectionHeader } from "@/src/ui";
+import { AppIcon, TopBar, Screen, SectionHeader } from "@/src/ui";
 
 type LocaleOption = {
   value: LocalePreference;
@@ -47,9 +47,8 @@ export function LanguageScreen() {
   const { t } = useTranslation();
   return (
     <Screen>
-      <DetailTopBar
+      <TopBar
         title={t("language.title")}
-        subtitle={t("language.subtitle")}
         onBack={() => router.back()}
       />
       <ScrollView

@@ -15,7 +15,7 @@ import {
   typography,
 } from "@/src/theme";
 import { useTranslation, type TranslationKey } from "@/src/i18n";
-import { AppIcon, DetailTopBar, Screen, SectionHeader } from "@/src/ui";
+import { AppIcon, TopBar, Screen, SectionHeader } from "@/src/ui";
 
 const THEME_OPTIONS: { value: ThemePreference; labelKey: TranslationKey; icon: "monitor" | "sun" | "moon" }[] = [
   { value: "system", labelKey: "appearance.theme.system", icon: "monitor" },
@@ -38,7 +38,7 @@ export function AppearanceScreen() {
   const { t } = useTranslation();
   return (
     <Screen>
-      <DetailTopBar title={t("appearance.title")} subtitle={t("appearance.subtitle")} onBack={() => router.back()} />
+      <TopBar title={t("appearance.title")} onBack={() => router.back()} />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}

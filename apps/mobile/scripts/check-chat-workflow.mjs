@@ -8,9 +8,10 @@ import { MessageMeasurements, createStreamBatch } from "../src/data/chat-renderi
 import { invertedListDistances, nextChatTailFollowing, reverseListIndex } from "../src/data/chat-scroll.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
-import { getComposerLayout } from "../src/ui/composer-layout.ts";
+import { COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
 import { BUBBLE_META_GAP, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
+import { getAnchoredMenuLayout } from "../src/ui/anchored-menu-layout.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
 import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
@@ -34,6 +35,220 @@ import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts
 import { forkSessionTurn } from "../src/data/session-fork.ts";
 import { resolveMessageLink } from "../src/data/message-links.ts";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
+
+// Exercise the shared chrome's real JSX and callbacks without pretending to test native layout.
+function loadChromeComponent(path, name, scope) {
+  const source = ts.createSourceFile(path, readFileSync(new URL(path, import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const statements = source.statements.filter((statement) =>
+    (ts.isFunctionDeclaration(statement) && statement.name?.text === name) ||
+    (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => declaration.name.getText(source) === "styles"))
+  ).map((statement) => statement.getText(source).replace(/^export /, ""));
+  const code = ts.transpileModule(`${statements.join("\n")}\nreturn ${name};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
+  return new Function(...Object.keys(scope), code)(...Object.values(scope));
+}
+function chromeNodes(node) {
+  if (Array.isArray(node)) return node.flatMap(chromeNodes);
+  if (!node || typeof node !== "object") return [];
+  return [node, ...chromeNodes(node.props?.children)];
+}
+const chromeScope = {
+  React: { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), Fragment: "Fragment" },
+  View: "View", Text: "Text", TextInput: "TextInput", Pressable: "Pressable", IconButton: "IconButton", AppIcon: "AppIcon", TopBar: "TopBar",
+  StyleSheet: { create: (styles) => styles },
+  COMPOSER_TEXT_PADDING,
+  useTranslation: () => ({ t: (key) => key }),
+  typography: { heading: { fontSize: 17 }, caption: { fontSize: 12 }, body: { fontSize: 15 } },
+  useAppTheme: () => ({ colors: { background: "background", text: "text", textMuted: "muted", textSecondary: "secondary", accent: "accent", accentSoft: "selected", surfacePressed: "pressed" } }),
+};
+for (const background of ["#f7f7f5", "#0f1114", "#000000"]) {
+  const renderTopBar = loadChromeComponent("../src/ui.tsx", "TopBar", { ...chromeScope, useAppTheme: () => ({ colors: { background } }) });
+  let backCount = 0;
+  const header = renderTopBar({ title: "A long inline title", subtitle: "Space / file.ts", onBack: () => backCount++, actions: { type: "actions" } });
+  const headerStyle = Object.assign({}, ...header.props.style);
+  assert.equal(headerStyle.backgroundColor, background);
+  assert.equal(headerStyle.minHeight, 56);
+  assert.equal(headerStyle.maxHeight, undefined, "large text must be able to increase header height");
+  assert.equal(headerStyle.borderBottomWidth, undefined);
+  const headerNodes = chromeNodes(header);
+  assert.equal(headerNodes.find((node) => node.props?.accessibilityRole === "header").props.numberOfLines, 1);
+  headerNodes.find((node) => node.type === "IconButton").props.onPress();
+  assert.equal(backCount, 1);
+  assert.ok(headerNodes.some((node) => node.type === "actions"));
+  const searchHeader = renderTopBar({ title: "Chats", children: { type: "search-input" } });
+  assert.ok(chromeNodes(searchHeader).some((node) => node.type === "search-input"));
+  assert.ok(!chromeNodes(searchHeader).some((node) => node.props?.accessibilityRole === "header"), "search replaces the title instead of crowding it");
+}
+const chatMenuInput = { anchor: { x: 338, y: 53, width: 44, height: 44 }, viewport: { x: 0, y: 47, width: 390, height: 763 }, bottomInset: 34 };
+const chatMenuLayout = getAnchoredMenuLayout(chatMenuInput);
+assert.deepEqual(chatMenuLayout, { left: 102, top: 54, width: 280, maxHeight: 667 });
+assert.equal(chatMenuLayout.left + chatMenuLayout.width, chatMenuInput.anchor.x + chatMenuInput.anchor.width, "menu aligns to the trigger's right edge");
+assert.equal(chatMenuLayout.top + chatMenuInput.viewport.y, chatMenuInput.anchor.y + chatMenuInput.anchor.height + 4, "menu opens below the trigger, not from the bottom");
+assert.deepEqual(getAnchoredMenuLayout({ ...chatMenuInput, anchor: { ...chatMenuInput.anchor, x: 358, y: 83 }, viewport: { ...chatMenuInput.viewport, x: 20, y: 77 } }), chatMenuLayout, "screen-local coordinates account for safe areas and window offsets");
+for (const width of [240, 320, 390, 844]) {
+  for (const height of [180, 260, 763]) {
+    const layout = getAnchoredMenuLayout({ anchor: { x: width - 52, y: 6, width: 44, height: 44 }, viewport: { x: 0, y: 0, width, height }, bottomInset: 0 });
+    assert.ok(layout.left >= 8);
+    assert.ok(layout.left + layout.width <= width - 8);
+    assert.ok(layout.top + layout.maxHeight <= height - 8);
+    assert.ok(layout.maxHeight > 0, "landscape/keyboard-constrained menus must retain scrollable space");
+  }
+}
+const chatMenuEvents = [];
+let menuBackHandler;
+let menuBackRemoved = false;
+let menuFocused = true;
+const menuCleanups = [];
+const renderChatMenu = loadChromeComponent("../src/components/AnchoredActionMenu.tsx", "AnchoredActionMenu", {
+  ...chromeScope,
+  ScrollView: "ScrollView",
+  useRef: () => ({ current: null }),
+  useState: () => [chatMenuLayout, () => undefined],
+  useCallback: (callback) => callback,
+  useLayoutEffect: () => undefined,
+  useEffect: (effect) => { menuCleanups.push(effect()); },
+  useSafeAreaInsets: () => ({ bottom: 34 }),
+  useWindowDimensions: () => ({ width: 390, height: 844 }),
+  useIsFocused: () => menuFocused,
+  BackHandler: { addEventListener: (name, callback) => { assert.equal(name, "hardwareBackPress"); menuBackHandler = callback; return { remove: () => { menuBackRemoved = true; } }; } },
+  getAnchoredMenuLayout,
+});
+const chatMenuProps = {
+  anchorRef: { current: null }, title: "Current chat", testID: "chat-actions-menu", onClose: () => chatMenuEvents.push("close"),
+  actions: [
+    { icon: "share", title: "Share", onPress: () => chatMenuEvents.push("share") },
+    { icon: "tag", title: "Labels", disabled: true, onPress: () => chatMenuEvents.push("labels") },
+  ],
+};
+const menuNodes = chromeNodes(renderChatMenu(chatMenuProps));
+const menuItems = menuNodes.filter((node) => node.props?.accessibilityRole === "menuitem");
+assert.equal(menuNodes.find((node) => node.props?.accessibilityRole === "menu").props.testID, "chat-actions-menu");
+assert.equal(menuItems.length, 2);
+assert.equal(menuItems[1].props.disabled, true);
+assert.equal(menuItems[1].props.accessibilityState.disabled, true);
+menuItems[0].props.onPress();
+assert.deepEqual(chatMenuEvents.splice(0), ["close", "share"], "close the menu before executing Share or opening another surface");
+menuNodes.find((node) => node.props?.accessibilityRole === "button").props.onPress();
+assert.deepEqual(chatMenuEvents.splice(0), ["close"]);
+menuNodes.find((node) => node.props?.accessibilityRole === "menu").props.onAccessibilityEscape();
+assert.deepEqual(chatMenuEvents.splice(0), ["close"]);
+assert.equal(menuBackHandler(), true);
+assert.deepEqual(chatMenuEvents.splice(0), ["close"], "Android back dismisses the menu without navigating away");
+assert.equal(menuNodes.find((node) => node.type === "ScrollView").props.keyboardShouldPersistTaps, "always");
+assert.ok(!menuNodes.some((node) => node.type === "Modal"), "opening a native share sheet must not compete with another Modal");
+menuCleanups[0]();
+assert.equal(menuBackRemoved, true);
+menuFocused = false;
+renderChatMenu(chatMenuProps);
+assert.deepEqual(chatMenuEvents.splice(0), ["close"], "leaving the chat must dismiss its menu");
+
+// Read the actual Space menu declaration so the migration cannot silently drop an operation.
+const spaceMenuSource = ts.createSourceFile("space.tsx", readFileSync(new URL("../app/space/[spaceId]/index.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let spaceMenuElement;
+function findSpaceMenu(node) {
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(spaceMenuSource) === "AnchoredActionMenu") spaceMenuElement = node;
+  ts.forEachChild(node, findSpaceMenu);
+}
+findSpaceMenu(spaceMenuSource);
+assert.ok(spaceMenuElement);
+const spaceMenuActions = spaceMenuElement.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(spaceMenuSource) === "actions").initializer.expression.getText(spaceMenuSource);
+const buildSpaceActions = new Function("space", "pinning", "t", "setActivePanel", "togglePin", "router", ts.transpileModule(`return (${spaceMenuActions});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText);
+for (const isPinned of [false, true]) {
+  for (const pinning of [false, true]) {
+    const events = [];
+    const actions = buildSpaceActions({ id: "space-123", isPinned }, pinning, (key) => key, (panel) => events.push(panel), () => events.push("togglePin"), { push: (route) => events.push(route) });
+    assert.deepEqual(actions.map((action) => action.icon), ["messages", isPinned ? "pin-off" : "pin", "folder-open"]);
+    assert.equal(actions[1].title, isPinned ? "space.unpin" : "space.pin");
+    assert.equal(actions[1].disabled, pinning);
+    menuFocused = true;
+    const spaceMenu = renderChatMenu({ anchorRef: { current: null }, title: "Space", testID: "space-actions-menu", onClose: () => events.push("close"), actions });
+    assert.equal(chromeNodes(spaceMenu).find((node) => node.props?.accessibilityRole === "menu").props.testID, "space-actions-menu");
+    const items = chromeNodes(spaceMenu).filter((node) => node.props?.accessibilityRole === "menuitem");
+    items[0].props.onPress();
+    assert.deepEqual(events.splice(0), ["close", "chat"]);
+    if (!pinning) {
+      items[1].props.onPress();
+      assert.deepEqual(events.splice(0), ["close", "togglePin"]);
+    } else assert.equal(items[1].props.disabled, true);
+    items[2].props.onPress();
+    assert.deepEqual(events.splice(0), ["close", { pathname: "/space/[spaceId]/files", params: { spaceId: "space-123" } }]);
+  }
+}
+
+let filterHint = null;
+let selectedFilter = "all";
+const filterOptions = [
+  { value: "all", icon: "messages", label: "All" },
+  { value: "running", icon: "activity", label: "Running" },
+  { value: "completed", icon: "check-circle", label: "Completed" },
+];
+const renderIconSegments = loadChromeComponent("../src/ui/IconSegmentedControl.tsx", "IconSegmentedControl", {
+  ...chromeScope, useState: () => [filterHint, (value) => { filterHint = value; }],
+});
+const segmentProps = () => ({ value: selectedFilter, options: filterOptions, onChange: (value) => { selectedFilter = value; } });
+for (const option of filterOptions) {
+  const segments = chromeNodes(renderIconSegments(segmentProps())).filter((node) => node.type === "Pressable");
+  const segment = segments.find((node) => node.props.accessibilityLabel === option.label);
+  assert.equal(segments.filter((node) => node.props.accessibilityState.selected).length, 1);
+  const style = Object.assign({}, ...segment.props.style({ pressed: false }));
+  assert.ok(style.width >= 44 && style.height >= 44);
+  assert.ok(!chromeNodes(segment).some((node) => node.type === "Text"), "segment labels stay out of the default chrome");
+  const previous = selectedFilter;
+  segment.props.onLongPress();
+  assert.equal(filterHint, option.label);
+  assert.equal(selectedFilter, previous, "showing a hint must not change the filter");
+  assert.ok(chromeNodes(renderIconSegments(segmentProps())).some((node) => node.type === "Text"));
+  segment.props.onPressOut();
+  assert.equal(filterHint, null);
+  segment.props.onHoverIn();
+  assert.equal(filterHint, option.label);
+  segment.props.onHoverOut();
+  assert.equal(filterHint, null);
+  segment.props.onPress();
+  assert.equal(selectedFilter, option.value);
+}
+let searchExpanded;
+let searchQuery = "";
+let createdChats = 0;
+let keyboardDismissals = 0;
+let searchFocuses = 0;
+const searchInputRef = { current: { focus: () => searchFocuses++ } };
+const exposedSearchRef = { current: null };
+const searchEffects = [];
+const renderSearchBar = loadChromeComponent("../src/ui/ExpandableSearchBar.tsx", "ExpandableSearchBar", {
+  ...chromeScope,
+  useState: (initial) => { searchExpanded ??= initial; return [searchExpanded, (value) => { searchExpanded = value; }]; },
+  useRef: () => searchInputRef,
+  useEffect: (effect) => { searchEffects.push(effect); },
+  Keyboard: { dismiss: () => keyboardDismissals++ },
+});
+const searchProps = () => ({ title: "Chats", query: searchQuery, onQueryChange: (query) => { searchQuery = query; }, queryRef: exposedSearchRef, onCreate: () => createdChats++, createLabel: "New chat" });
+const searchAction = (tree, name) => chromeNodes(tree.props.actions).find((node) => node.props?.name === name);
+let searchTree = renderSearchBar(searchProps());
+assert.equal(chromeNodes(searchTree).some((node) => node.type === "TextInput"), false);
+searchAction(searchTree, "plus").props.onPress();
+assert.equal(createdChats, 1);
+searchAction(searchTree, "search").props.onPress();
+searchTree = renderSearchBar(searchProps());
+const searchInput = chromeNodes(searchTree).find((node) => node.type === "TextInput");
+assert.equal(searchInput.props.autoFocus, true);
+assert.equal(searchTree.props.actions, undefined, "empty search has no redundant clear/create controls");
+const releaseSearchRef = searchEffects.at(-1)();
+assert.equal(exposedSearchRef.current, searchInputRef.current);
+searchInput.props.onChangeText("project");
+searchTree = renderSearchBar(searchProps());
+assert.equal(chromeNodes(searchTree).find((node) => node.type === "TextInput").props.value, "project");
+searchAction(searchTree, "x").props.onPress();
+assert.equal(searchQuery, "");
+assert.equal(searchFocuses, 1);
+assert.equal(searchExpanded, true, "clearing search retains the editing mode");
+searchInput.props.onChangeText("another query");
+searchTree.props.onBack();
+assert.equal(searchQuery, "");
+assert.equal(searchExpanded, false);
+assert.equal(keyboardDismissals, 1);
+releaseSearchRef();
+assert.equal(exposedSearchRef.current, null);
+assert.ok(searchAction(renderSearchBar(searchProps()), "plus"), "closing search restores creation");
 
 const scrollTrace = new ChatScrollTrace();
 scrollTrace.record("ignored", "test");

@@ -13,7 +13,7 @@ import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-s
 import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
 import { useApp } from "@/src/data/context";
 import { typography, useAppTheme } from "@/src/theme";
-import { DetailTopBar, IconButton, Screen } from "@/src/ui";
+import { TopBar, IconButton, Screen } from "@/src/ui";
 
 const PARAGRAPH = Array.from({ length: 100 }, (_, index) => `Line ${String(index + 1).padStart(3, "0")}: This section records a detailed review of a mobile conversation. Each numbered line belongs to the same continuous paragraph.`).join("\n");
 const MARKDOWN = Array.from({ length: 18 }, (_, index) => `### Section ${index + 1}\n\n${Array.from({ length: 6 }, () => "A separate paragraph with **bold words**, plain text, and inline `code`.").join(" ")}\n\n- First list item\n- Second list item`).join("\n\n");
@@ -60,7 +60,7 @@ export default function ChatScrollDebugScreen() {
     }
   };
   return <Screen contentStyle={{ paddingBottom: insets.bottom }}>
-    <DetailTopBar title="Scroll Diagnostics" onBack={() => router.back()} actions={<>
+    <TopBar title="Scroll Diagnostics" onBack={() => router.back()} actions={<>
       <IconButton name="copy" label="Copy complete log" onPress={() => void exportLog(false)} />
       <IconButton name="share" label="Share complete log" onPress={() => void exportLog(true)} />
     </>} />

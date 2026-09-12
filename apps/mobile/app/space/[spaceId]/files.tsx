@@ -6,7 +6,7 @@ import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useApp } from "@/src/data/context";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, DetailTopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
+import { AppIcon, TopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
 import {
   displaySpaceName,
   normalizeSpacePath,
@@ -119,7 +119,7 @@ export default function FilesScreen() {
 
   return (
     <Screen>
-      <DetailTopBar
+      <TopBar
         title={title}
         subtitle={subtitle}
         onBack={() => router.back()}
@@ -210,7 +210,7 @@ function FilesError({ message, onRetry }: { message: string; onRetry: () => void
       <Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 10 }]}>
         {message}
       </Text>
-      <PrimaryButton label={t("common.retry")} icon="refresh" onPress={onRetry} style={{ marginTop: 16 }} />
+      <View style={{ marginTop: 16 }}><IconButton name="refresh" label={t("common.retry")} onPress={onRetry} tone="accent" /></View>
     </View>
   );
 }

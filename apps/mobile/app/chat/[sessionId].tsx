@@ -4,7 +4,8 @@ import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
-import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
+import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
 import { useToast } from "@/src/components/Toast";
 import { copyMessageText, MessageBubble, StreamCard } from "@/src/components/MessageContent";
 import { StreamingTurnProcess, TurnProcess } from "@/src/components/TurnProcess";
@@ -28,7 +29,7 @@ import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { formatThinkingLevel, modelAvailabilityLevel, requestedThinkingLevel } from "@/src/model-catalog";
 import { useNativeVoiceInput } from "@/src/platform/native-voice-input";
-import { AppIcon, AttachmentChip, ComposerInput, ConnectionBanner, DetailTopBar, IconButton, PrimaryButton, Screen } from "@/src/ui";
+import { AppIcon, AttachmentChip, ComposerInput, ConnectionBanner, TopBar, IconButton, PrimaryButton, Screen } from "@/src/ui";
 import { displaySessionTitle, displaySpaceName, hasRenderableMessage, isAssistantIntermediate } from "@/src/utils";
 
 type RouteParams = { sessionId?: string | string[]; spaceId?: string | string[]; turn?: string | string[]; turnId?: string | string[] };
@@ -70,6 +71,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreButtonRef = useRef<View>(null);
+  const closeMore = useCallback(() => setMoreOpen(false), []);
   const [labelSheetOpen, setLabelSheetOpen] = useState(false);
   const [chatLabels, setChatLabels] = useState<SessionLabel[]>([]);
   const [renameValue, setRenameValue] = useState("");
@@ -494,7 +497,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     }
   };
   const shareChat = async () => {
-    setMoreOpen(false);
     const title = session ? displaySessionTitle(session) : t("chat.title");
     if (!spaceId) {
       showToast({ title: t("chat.shareFailed.title"), message: t("chat.shareFailed.body"), tone: "danger" });
@@ -503,9 +505,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const url = `https://cohub.live/spaces/${encodeURIComponent(spaceId)}/sessions/${encodeURIComponent(sessionId)}`;
     await Share.share({ message: `${title}\n${url}`, url, title });
   };
-  const openRename = () => { setMoreOpen(false); setRenameValue(session ? displaySessionTitle(session) : ""); setRenameOpen(true); };
+  const openRename = () => { setRenameValue(session ? displaySessionTitle(session) : ""); setRenameOpen(true); };
   const openLabelSheet = () => {
-    setMoreOpen(false);
     setLabelSheetOpen(true);
     if (!client || !spaceId) return;
     void fetchSessionLabels(client, spaceId)
@@ -664,11 +665,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     } catch { setInput(text); setAttachments(files); }
   };
 
-  if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen><DetailTopBar title={t("chat.title")} onBack={() => router.back()} /><ChatThreadPlaceholder kind="opening" /></Screen>;
+  if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen><TopBar title={t("chat.title")} onBack={() => router.back()} /><ChatThreadPlaceholder kind="opening" /></Screen>;
   return <Screen keyboard>
+    <View style={{ flex: 1 }} accessibilityElementsHidden={moreOpen} importantForAccessibility={moreOpen ? "no-hide-descendants" : "auto"}>
     <SpacePanels key={spaceId || sessionId} spaceId={spaceId} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => { if (spaceId) router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId } }); }} onOpenFile={(path) => { if (spaceId) router.push({ pathname: "/space/[spaceId]/file", params: { spaceId, path } }); }} onOpenFilesPage={() => { if (spaceId) router.push({ pathname: "/space/[spaceId]/files", params: { spaceId } }); }}>
       <View style={{ flex: 1, minHeight: 0 }}>
-        <DetailTopBar title={session ? displaySessionTitle(session) : t("chat.title")} subtitle={spaceName} onBack={() => router.back()} actions={<><IconButton name="list-tree" label={t("chat.turns.open")} size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><IconButton name="more" label={t("chat.more")} size={38} onPress={() => setMoreOpen(true)} /></>} />
+        <TopBar title={session ? displaySessionTitle(session) : t("chat.title")} subtitle={spaceName} onBack={() => router.back()} actions={<><IconButton name="list-tree" label={t("chat.turns.open")} size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><View ref={moreButtonRef} collapsable={false}><IconButton name="more" label={t("chat.more")} size={38} onPress={() => setMoreOpen(true)} /></View></>} />
         <ConnectionBanner state={connectionState} />
         {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>{t("common.retry")}</Text></Pressable> : null}
         <View style={{ flex: 1, minHeight: 0 }}>
@@ -694,22 +696,29 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
         <ComposerInput anchorRef={composerRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? t("ui.composer.working") : t("ui.composer.placeholder")} />
-        <AdaptiveSheet visible={moreOpen} title={t("chat.actions.title")} onClose={() => setMoreOpen(false)} scrollable={false} testID="chat-actions-sheet">
-          {tracing ? <SheetAction icon="activity" title="Scroll Diagnostics" onPress={() => { trace("experiment.mark", { origin: "chatMenu" }); setMoreOpen(false); router.push("/debug/chat-scroll"); }} /> : null}
-          <SheetAction icon="share" title={t("chat.actions.share")} detail={t("chat.actions.shareDetail")} onPress={() => void shareChat()} />
-          <SheetAction icon="messages" title={t("chat.actions.openChats")} detail={t("chat.actions.openChatsDetail")} disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("chat"); }} />
-          <SheetAction icon="folder-open" title={t("chat.actions.openFiles")} detail={t("chat.actions.openFilesDetail")} disabled={!spaceId} onPress={() => { setMoreOpen(false); setActivePanel("files"); }} />
-          <SheetAction icon="tag" title={t("chat.actions.labels")} detail={t("chat.actions.labelsDetail")} disabled={!client || !spaceId} onPress={openLabelSheet} />
-          <SheetAction icon="square-pen" title={t("chat.actions.rename")} detail={t("chat.actions.renameDetail")} onPress={openRename} />
-        </AdaptiveSheet>
         {labelSheetOpen && client && session && spaceId ? <SessionLabelSheet client={client} spaceId={spaceId} session={session} labels={chatLabels} labelsError={null} onLabelsReload={() => { if (client && spaceId) void fetchSessionLabels(client, spaceId).then((tree) => setChatLabels(toUserSessionLabels(tree))).catch(() => undefined); }} onClose={() => setLabelSheetOpen(false)} onChanged={() => undefined} /> : null}
         {attachmentMenuOpen ? <AttachmentMenu anchorRef={composerRef} onClose={() => setAttachmentMenuOpen(false)} onCamera={() => void takePhoto()} onPhotos={() => void pickPhotos()} onFile={() => void pickAttachments()} /> : null}
         <TurnNavigatorSheet visible={turnNavigatorOpen} turns={view.turnIndex} currentSequence={currentTurnSequence} loading={view.turnIndexLoading} loadingSequence={loadingSequence} onClose={() => setTurnNavigatorOpen(false)} onJump={(sequence) => handleTurnJump(sequence)} onRetry={() => void loadTurnIndex(sessionId, { force: true }).catch(() => undefined)} />
         {modelSelectorOpen ? <ModelSelectorMenu anchorRef={composerRef} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={modelOverride ? selectedModel : recordedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelOverride(true); setModelSelectorOpen(false); }} /> : null}
-        <AdaptiveSheet visible={notice !== null} title={notice?.title ?? t("common.notice")} onClose={() => setNotice(null)} scrollable={false} footer={<View style={{ alignItems: "flex-end" }}><PrimaryButton label={t("common.done")} onPress={() => setNotice(null)} style={{ minHeight: 44, paddingHorizontal: 18 }} /></View>} testID="chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
+        <AdaptiveSheet visible={notice !== null} title={notice?.title ?? t("common.notice")} onClose={() => setNotice(null)} scrollable={false} testID="chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
         <Modal visible={renameOpen} transparent animationType="fade" onRequestClose={() => setRenameOpen(false)}><View style={{ flex: 1, justifyContent: "center", padding: 22, backgroundColor: "rgba(0,0,0,0.6)" }}><View style={{ borderRadius: 18, padding: 18, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}><Text style={[typography.heading, { color: theme.colors.text }]}>{t("chat.rename.title")}</Text><TextInput autoFocus value={renameValue} onChangeText={setRenameValue} maxLength={80} placeholder={t("chat.rename.placeholder")} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { color: theme.colors.text, minHeight: 48, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, paddingHorizontal: 12, marginTop: 14 }]} /><View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 16 }}><Pressable onPress={() => setRenameOpen(false)} style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: "center" }}><Text style={[typography.bodyMedium, { color: theme.colors.textMuted }]}>{t("common.cancel")}</Text></Pressable><PrimaryButton label={t("common.save")} onPress={() => void saveRename()} style={{ minHeight: 44, paddingHorizontal: 16 }} /></View></View></View></Modal>
       </View>
     </SpacePanels>
+    </View>
+    {moreOpen ? <AnchoredActionMenu
+      anchorRef={moreButtonRef}
+      title={session ? displaySessionTitle(session) : t("chat.title")}
+      testID="chat-actions-menu"
+      onClose={closeMore}
+      actions={[
+        ...(tracing ? [{ icon: "activity" as const, title: "Scroll Diagnostics", onPress: () => { trace("experiment.mark", { origin: "chatMenu" }); router.push("/debug/chat-scroll"); } }] : []),
+        { icon: "share", title: t("chat.actions.share"), onPress: () => void shareChat() },
+        { icon: "messages", title: t("chat.actions.openChats"), disabled: !spaceId, onPress: () => setActivePanel("chat") },
+        { icon: "folder-open", title: t("chat.actions.openFiles"), disabled: !spaceId, onPress: () => setActivePanel("files") },
+        { icon: "tag", title: t("chat.actions.labels"), disabled: !client || !spaceId, onPress: openLabelSheet },
+        { icon: "square-pen", title: t("chat.actions.rename"), onPress: openRename },
+      ]}
+    /> : null}
   </Screen>;
 }
 
@@ -771,7 +780,7 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
     setSending(true);
     try { const session = await sendNewMessage(space.id, text, files, { model: selectedModel }); router.replace({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } }); } catch (error) { setInput(text); setAttachments(files); showToast({ title: t("chat.startFailed.title"), message: error instanceof Error ? error.message : t("chat.startFailed.body"), tone: "danger" }); } finally { setSending(false); }
   };
-  if (!space) return <Screen><DetailTopBar title={t("chat.spaceUnavailable")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("chat.spaceUnavailable.body")}</Text></View></Screen>;
+  if (!space) return <Screen><TopBar title={t("chat.spaceUnavailable")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("chat.spaceUnavailable.body")}</Text></View></Screen>;
   const spaceName = displaySpaceName(space);
   const spaceSessions = state.sessions.filter((item) => item.spaceId === space.id);
   const modelLabel = selectedModel?.name || selectedModel?.id || t("chat.model.automatic");
@@ -780,17 +789,17 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
   return <Screen keyboard>
     <SpacePanels key={space.id} spaceId={space.id} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} onOpenFile={(path) => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: space.id, path } })} onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}>
       <View style={{ flex: 1, minHeight: 0 }}>
-        <DetailTopBar title={spaceName} subtitle={t("chat.draft.subtitle")} onBack={() => router.back()} actions={<><IconButton name="messages" label={t("chat.actions.openChats")} size={38} onPress={() => setActivePanel("chat")} /><IconButton name="folder-open" label={t("chat.actions.openFiles")} size={38} onPress={() => setActivePanel("files")} /></>} />
+        <TopBar title={spaceName} onBack={() => router.back()} actions={<><IconButton name="messages" label={t("chat.actions.openChats")} size={38} onPress={() => setActivePanel("chat")} /><IconButton name="folder-open" label={t("chat.actions.openFiles")} size={38} onPress={() => setActivePanel("files")} /></>} />
         <ConnectionBanner state={connectionState} />
         <View style={{ flex: 1, minHeight: 0 }}>
-          <View style={{ flex: 1, minHeight: 0, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingBottom: 18 }}><View style={{ width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accentBorder }}><AppIcon name="sparkles" size={26} color={theme.colors.accent} /></View><Text style={[typography.title, { color: theme.colors.text, marginTop: 15, textAlign: "center" }]}>{t("chat.draft.title")}</Text><Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 7, textAlign: "center", maxWidth: 320 }]}>{t("chat.draft.body")}</Text></View>
+          <View style={{ flex: 1, minHeight: 0, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingBottom: 18 }}><AppIcon name="sparkles" size={28} color={theme.colors.textMuted} /><Text style={[typography.heading, { color: theme.colors.text, marginTop: 15, textAlign: "center" }]}>{t("chat.draft.title")}</Text></View>
           {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
           {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
           <ComposerInput anchorRef={composerRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} value={input} onChangeText={setInput} onSend={() => void submit()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? t("chat.draft.starting") : t("ui.composer.placeholder")} />
         </View>
         {modelSelectorOpen ? <ModelSelectorMenu anchorRef={composerRef} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={selectedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelSelectorOpen(false); }} /> : null}
         {attachmentMenuOpen ? <AttachmentMenu anchorRef={composerRef} onClose={() => setAttachmentMenuOpen(false)} onCamera={() => void takePhoto()} onPhotos={() => void pickPhotos()} onFile={() => void pickAttachments()} /> : null}
-        <AdaptiveSheet visible={notice !== null} title={notice?.title ?? t("common.notice")} onClose={() => setNotice(null)} scrollable={false} footer={<View style={{ alignItems: "flex-end" }}><PrimaryButton label={t("common.done")} onPress={() => setNotice(null)} style={{ minHeight: 44, paddingHorizontal: 18 }} /></View>} testID="new-chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
+        <AdaptiveSheet visible={notice !== null} title={notice?.title ?? t("common.notice")} onClose={() => setNotice(null)} scrollable={false} testID="new-chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
       </View>
     </SpacePanels>
   </Screen>;
@@ -800,5 +809,5 @@ function MissingChat() {
   const router = useRouter();
   const theme = useAppTheme();
   const { t } = useTranslation();
-  return <Screen><DetailTopBar title={t("chat.title")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={[typography.body, { color: theme.colors.textMuted }]}>{t("chat.missing")}</Text></View></Screen>;
+  return <Screen><TopBar title={t("chat.title")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={[typography.body, { color: theme.colors.textMuted }]}>{t("chat.missing")}</Text></View></Screen>;
 }

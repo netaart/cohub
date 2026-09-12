@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View, type ViewToken } from "react-native";
+import { ActivityIndicator, FlatList, Text, TextInput, View, type ViewToken } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
@@ -12,7 +12,8 @@ import { selectSpaceList, type SpaceListSpace, type SpaceFilter } from "@/src/da
 import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
-import { AppIcon, DataError, EmptyState, ExpandableSearchBar, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
+import { DataError, EmptyState, ExpandableSearchBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
+import { IconSegmentedControl } from "@/src/ui/IconSegmentedControl";
 import { displaySpaceName } from "@/src/utils";
 
 type SpaceListItem =
@@ -114,11 +115,13 @@ export default function SpacesScreen() {
   };
 
   const searchEmpty = remoteSearch.query === trimmedQuery && remoteSearch.loading && trimmedQuery.length >= 2 && listItems.length === 0
-    ? <View style={{ flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" }}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>{t("spaces.searching")}</Text></View>
-    : <EmptyState icon={filter === "pinned" ? "pin" : trimmedQuery ? "search" : "layers"} title={filter === "pinned" ? t("spaces.empty.pinned.title") : trimmedQuery ? t("spaces.empty.matching.title") : t("spaces.empty.none.title")} description={filter === "pinned" ? t("spaces.empty.pinned.body") : trimmedQuery ? t("spaces.empty.matching.body") : t("spaces.empty.none.body")} action={filter === "pinned" || trimmedQuery ? t("spaces.action.clearFilters") : t("spaces.action.create")} onAction={() => filter === "pinned" || trimmedQuery ? (setFilter("recent"), setQuery("")) : setCreateOpen(true)} />;
+    ? <View style={{ flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" }}><ActivityIndicator accessibilityLabel={t("spaces.searching")} size="small" color={theme.colors.accent} /></View>
+    : <EmptyState icon={filter === "pinned" ? "pin" : trimmedQuery ? "search" : "layers"} title={filter === "pinned" ? t("spaces.empty.pinned.title") : trimmedQuery ? t("spaces.empty.matching.title") : t("spaces.empty.none.title")} action={filter === "pinned" || trimmedQuery ? { icon: "x", label: t("spaces.action.clearFilters"), onPress: () => { setFilter("recent"); setQuery(""); } } : undefined} />;
 
   return <Screen>
     <ExpandableSearchBar
+      title={t("tabs.spaces")}
+      createLabel={t("spaces.action.create")}
       query={query}
       onQueryChange={setQuery}
       placeholder={t("spaces.search.placeholder")}
@@ -136,18 +139,26 @@ export default function SpacesScreen() {
       viewabilityConfig={viewabilityConfig}
       onViewableItemsChanged={onViewableItemsChanged}
       keyboardShouldPersistTaps="handled"
-contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
-      ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 }}>{remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator size="small" color={theme.colors.accent} /></View> : null}<View style={{ flexDirection: "row", gap: 8, paddingTop: 4 }}><SpaceFilterChip label={t("spaces.filter.recent")} selected={filter === "recent"} onPress={() => setFilter("recent")} /><SpaceFilterChip label={t("spaces.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} /><SpaceFilterChip label={t("spaces.filter.pinned")} icon="pin" selected={filter === "pinned"} onPress={() => setFilter("pinned")} /></View>{remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("spaces.search.retry")} onPress={remoteSearch.retry}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}{pinError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 7 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{pinError}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("spaces.pin.dismiss")} onPress={() => setPinError(null)}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.dismiss")}</Text></Pressable></View> : null}<Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 12, textTransform: "uppercase" }]}>{t("spaces.section.yourWorkspaces")}</Text></View>}
+      contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
+      ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
+        <IconSegmentedControl<SpaceFilter> value={filter} onChange={setFilter} options={[
+          { value: "recent", icon: "clock", label: t("spaces.filter.recent") },
+          { value: "all", icon: "layers", label: t("spaces.filter.all") },
+          { value: "pinned", icon: "pin", label: t("spaces.filter.pinned") },
+        ]} />
+        {remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator accessibilityLabel={t("spaces.searching")} size="small" color={theme.colors.accent} /></View> : null}
+        {remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><IconButton name="refresh" label={t("spaces.search.retry")} onPress={remoteSearch.retry} tone="accent" /></View> : null}
+        {pinError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{pinError}</Text><IconButton name="x" label={t("spaces.pin.dismiss")} onPress={() => setPinError(null)} /></View> : null}
+      </View>}
       ListEmptyComponent={state.booting || (filter === "recent" && spaceList.loading) ? <LoadingRows count={4} /> : dataError ? <EmptyState icon="cloud-off" title={t("spaces.error.title")} description={t("spaces.error.body")} /> : searchEmpty}
     />
     <AdaptiveSheet
       visible={createOpen}
       title={t("spaces.create.title")}
-      subtitle={t("spaces.create.subtitle")}
       onClose={closeCreate}
       dismissible={!creating}
       testID="create-space-sheet"
-      footer={<View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10 }}><Pressable disabled={creating} onPress={closeCreate} style={({ pressed }) => ({ minHeight: 46, paddingHorizontal: 15, justifyContent: "center", opacity: pressed ? 0.6 : 1 })}><Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>{t("common.cancel")}</Text></Pressable><PrimaryButton label={t("spaces.create.action")} icon="plus" loading={creating} disabled={!name.trim()} onPress={() => void submitCreate()} style={{ minHeight: 46, paddingHorizontal: 16 }} /></View>}
+      footer={<PrimaryButton label={t("spaces.create.action")} icon="plus" loading={creating} disabled={!name.trim()} onPress={() => void submitCreate()} />}
     >
       <Text style={[typography.caption, { color: theme.colors.textSecondary, marginBottom: 7 }]}>{t("spaces.create.name")}</Text>
       <TextInput autoFocus value={name} onChangeText={setName} maxLength={80} placeholder={t("spaces.create.namePlaceholder")} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { color: theme.colors.text, minHeight: 48, paddingHorizontal: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, backgroundColor: theme.colors.background }]} />
@@ -156,9 +167,4 @@ contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length 
       {createError ? <Text style={[typography.caption, { color: theme.colors.danger, marginTop: 10 }]}>{createError}</Text> : null}
     </AdaptiveSheet>
   </Screen>;
-}
-
-function SpaceFilterChip({ label, icon, selected, onPress }: { label: string; icon?: React.ComponentProps<typeof AppIcon>["name"]; selected: boolean; onPress: () => void }) {
-  const theme = useAppTheme();
-  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => ({ height: 34, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border, backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, flexDirection: "row", alignItems: "center", gap: 5 })}>{icon ? <AppIcon name={icon} size={13} color={selected ? theme.colors.accent : theme.colors.textMuted} /> : null}<Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }

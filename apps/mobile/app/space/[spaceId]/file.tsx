@@ -10,7 +10,7 @@ import { classifySaveConflict, isEditableTextFile, isFileConflictError, MAX_EDIT
 import { useApp } from "@/src/data/context";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, DetailTopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
+import { AppIcon, TopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
 
 type Params = { spaceId?: string | string[]; path?: string | string[] };
 
@@ -175,7 +175,7 @@ export default function FileScreen() {
 
   return (
     <Screen keyboard={editing}>
-      <DetailTopBar
+      <TopBar
         title={title}
         subtitle={subtitle}
         onBack={handleBack}

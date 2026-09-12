@@ -16,7 +16,7 @@ import {
   AppIcon,
   Avatar,
   DataError,
-  DetailTopBar,
+  TopBar,
   PrimaryButton,
   Screen,
   SectionHeader,
@@ -101,7 +101,7 @@ export default function ProfileScreen() {
 
   return (
     <Screen>
-      <DetailTopBar title={t("route.profile")} onBack={() => router.back()} />
+      <TopBar title={t("route.profile")} onBack={() => router.back()} />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: insets.bottom + 28 }} keyboardShouldPersistTaps="handled">
       <View style={styles.profileHeader}>
         <Link.AppleZoomTarget>
@@ -179,9 +179,6 @@ export default function ProfileScreen() {
           marginHorizontal: 16,
           marginTop: 26,
           minHeight: 48,
-          borderRadius: 13,
-          borderWidth: 1,
-          borderColor: theme.colors.danger,
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: pressed ? theme.colors.dangerSoft : "transparent",
@@ -209,9 +206,6 @@ export default function ProfileScreen() {
         testID="clear-cache-sheet"
         footer={
           <SheetFooter>
-            <Pressable disabled={clearingCache} onPress={closeSheet} style={styles.cancelButton}>
-              <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>{t("common.cancel")}</Text>
-            </Pressable>
             <PrimaryButton
               label={t("profile.clearCache.action")}
               icon="trash"
@@ -237,9 +231,6 @@ export default function ProfileScreen() {
         testID="sign-out-sheet"
         footer={
           <SheetFooter>
-            <Pressable disabled={signingOut} onPress={closeSheet} style={styles.cancelButton}>
-              <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>{t("common.cancel")}</Text>
-            </Pressable>
             <PrimaryButton
               label={t("common.signOut")}
               icon="arrow-right"
@@ -377,11 +368,6 @@ const styles = {
   settingText: {
     flex: 1,
     minWidth: 0,
-  },
-  cancelButton: {
-    minHeight: 46,
-    paddingHorizontal: 15,
-    justifyContent: "center" as const,
   },
   retentionOption: {
     minHeight: 52,

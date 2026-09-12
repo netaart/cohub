@@ -2,7 +2,7 @@ import type { AppRecord, CheckpointRecord, SpaceRecord, TaskRunRecord, UserSessi
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { AdaptiveSheet, SheetAction } from "@/src/components/AdaptiveSheet";
+import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionRow } from "@/src/components/SessionRow";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
@@ -10,7 +10,7 @@ import { useApp } from "@/src/data/context";
 import { publishSpaceSessionCount, SPACE_SESSION_COUNT_PAGE_SIZE } from "@/src/data/space-session-counts";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, Avatar, DetailTopBar, IconButton, PrimaryButton, Screen, SectionHeader, StatusPill } from "@/src/ui";
+import { AppIcon, Avatar, TopBar, IconButton, PrimaryButton, Screen, SectionHeader, StatusPill } from "@/src/ui";
 import { displaySpaceName, formatRelativeTime, sortByRecent } from "@/src/utils";
 
 type Params = { spaceId?: string | string[] };
@@ -50,6 +50,8 @@ export default function SpaceScreen() {
   const [sessionsFailed, setSessionsFailed] = useState(false);
   const [pageRefreshing, setPageRefreshing] = useState(false);
   const [spaceActionsOpen, setSpaceActionsOpen] = useState(false);
+  const spaceActionsRef = useRef<View>(null);
+  const closeSpaceActions = useCallback(() => setSpaceActionsOpen(false), []);
   const [pinning, setPinning] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<SpacePanel | null>(null);
@@ -186,7 +188,7 @@ export default function SpaceScreen() {
   if (!space) {
     const opening = Boolean(spaceId) && (state.booting || !client || spaceLoading);
     return <Screen>
-      <DetailTopBar title={t("space.title")} onBack={() => router.back()} />
+      <TopBar title={t("space.title")} onBack={() => router.back()} />
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
         {opening
           ? <Text style={[typography.body, { color: theme.colors.textMuted }]}>{t("space.opening")}</Text>
@@ -211,6 +213,7 @@ export default function SpaceScreen() {
   const activeTasks = resources.tasks.filter((task) => task.status === "pending" || task.status === "running").length;
   const detailsFailed = resourceFailures.checkpoints || resourceFailures.apps || resourceFailures.tasks || sessionsFailed;
   return <Screen>
+    <View style={{ flex: 1 }} accessibilityElementsHidden={spaceActionsOpen} importantForAccessibility={spaceActionsOpen ? "no-hide-descendants" : "auto"}>
     <SpacePanels
       key={space.id}
       spaceId={space.id}
@@ -225,11 +228,10 @@ export default function SpaceScreen() {
       onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}
     >
       <View style={{ flex: 1 }}>
-    <DetailTopBar
+    <TopBar
       title={name}
-      subtitle={t("space.subtitle")}
       onBack={() => router.back()}
-      actions={<><IconButton name="messages" label={t("chat.actions.openChats")} size={38} onPress={() => setActivePanel("chat")} /><IconButton name={space.isPinned ? "pin-off" : "pin"} label={space.isPinned ? t("space.unpin") : t("space.pin")} size={38} tone={space.isPinned ? "accent" : "default"} disabled={pinning} onPress={() => void togglePin()} /><IconButton name="more" label={t("space.actions")} size={38} onPress={() => setSpaceActionsOpen(true)} /></>}
+      actions={<><IconButton name="folder-open" label={t("space.openFilesPanel")} onPress={() => setActivePanel("files")} /><View ref={spaceActionsRef} collapsable={false}><IconButton name="more" label={t("space.actions")} onPress={() => setSpaceActionsOpen(true)} /></View></>}
     />
     {pinError ? <Pressable accessibilityRole="button" accessibilityLabel={t("space.pin.dismiss")} onPress={() => setPinError(null)} style={{ marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10, backgroundColor: theme.colors.dangerSoft }}><Text style={[typography.caption, { color: theme.colors.danger }]}>{pinError}</Text></Pressable> : null}
     <ScrollView
@@ -239,21 +241,16 @@ export default function SpaceScreen() {
     >
     <View style={{ alignItems: "center", paddingHorizontal: 20, paddingTop: 25, paddingBottom: 22 }}>
       <Avatar name={name} uri={space.publicProfile?.avatarUrl} size={70} online={space.status === "running"} />
-      <Text style={[typography.title, { color: theme.colors.text, marginTop: 12 }]}>{name}</Text>
-      <Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 5, maxWidth: 320 }]}>{space.description || t("space.descriptionFallback")}</Text>
+      {space.description ? <Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center", marginTop: 12, maxWidth: 320 }]}>{space.description}</Text> : null}
     </View>
     <View style={{ flexDirection: "row", paddingHorizontal: 16, gap: 10 }}>
       <SpaceMetric icon="messages" label={t("space.metric.chats")} value={`${sessions.length}${spaceSessionsHasMore ? "+" : ""}`} />
       <SpaceMetric icon="rocket" label={t("space.metric.works")} value={String(resources.apps.length)} />
       <SpaceMetric icon="activity" label={t("space.metric.running")} value={String(activeTasks)} />
     </View>
-    <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: 16, marginTop: 18 }}>
-      <PrimaryButton label={t("space.newChat")} icon="plus" onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} style={{ flex: 1 }} />
-      <Pressable accessibilityRole="button" accessibilityLabel={t("space.openFilesPanel")} onPress={() => setActivePanel("files")} style={({ pressed }) => ({ minHeight: 46, width: 52, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}><AppIcon name="folder-open" size={19} color={theme.colors.textSecondary} /></Pressable>
-    </View>
     {detailsFailed ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, marginTop: 12 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{t("space.resourcesFailed")}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("space.resourcesRetry")} disabled={loadingResources || sessionsLoading} onPress={() => void reloadDetails()} hitSlop={8} style={({ pressed }) => ({ opacity: loadingResources || sessionsLoading ? 0.5 : pressed ? 0.6 : 1 })}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}
 
-    <SectionHeader title={t("space.section.chats")} action={t("space.section.new")} onAction={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} />
+    <SectionHeader title={t("space.section.chats")} action={{ icon: "plus", label: t("space.newChat"), onPress: () => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } }) }} />
     <View>{sessions.length > 0 ? sessions.slice(0, 8).map((session) => <SessionRow key={session.id} session={{ ...session, space: session.space ?? { id: space.id, name, slug: space.slug, publicProfile: space.publicProfile ?? null } }} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } })} />) : <ResourceEmpty text={sessionsLoading ? t("space.empty.chatsLoading") : sessionsFailed ? t("space.empty.loadFailed") : t("space.empty.chats")} />}</View>
 
     <SectionHeader title={t("space.section.works")} />
@@ -265,54 +262,26 @@ export default function SpaceScreen() {
     <SectionHeader title={t("space.section.tasks")} />
     <View style={{ paddingBottom: 24 }}>{resources.tasks.length > 0 ? resources.tasks.map((task) => <ResourceRow key={task.id} icon={task.status === "running" ? "sync" : task.status === "failed" ? "alert" : "check-circle"} title={task.taskType.replaceAll("_", " ")} subtitle={task.errorMessage || t("space.taskAttempt", { time: formatRelativeTime(task.updatedAt), count: task.attemptCount })} trailing={<StatusPill label={task.status} tone={task.status === "failed" ? "danger" : task.status === "running" || task.status === "pending" ? "warning" : "success"} />} onPress={task.sessionId ? () => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: task.sessionId! } }) : undefined} />) : <ResourceEmpty text={loadingResources ? t("space.empty.tasksLoading") : resourceFailures.tasks ? t("space.empty.loadFailed") : t("space.empty.tasks")} />}</View>
     </ScrollView>
-    <AdaptiveSheet
-      visible={spaceActionsOpen}
-      title={name}
-      subtitle={t("space.actions")}
-      onClose={() => setSpaceActionsOpen(false)}
-      scrollable={false}
-      testID="space-actions-sheet"
-    >
-      <Text style={[typography.body, { color: theme.colors.textSecondary }]}>
-        {space.description || t("space.descriptionFallback")}
-      </Text>
-      <SheetAction
-        icon="messages"
-        title={t("space.newChat")}
-        detail={t("space.newChatDetail")}
-        onPress={() => {
-          setSpaceActionsOpen(false);
-          router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } });
-        }}
-      />
-      <SheetAction
-        icon={space.isPinned ? "pin-off" : "pin"}
-        title={space.isPinned ? t("space.unpin") : t("space.pin")}
-        detail={space.isPinned ? t("space.actions.unpinDetail") : t("space.actions.pinDetail")}
-        disabled={pinning}
-        onPress={() => {
-          void togglePin();
-          setSpaceActionsOpen(false);
-        }}
-      />
-      <SheetAction
-        icon="folder-open"
-        title={t("space.openFiles")}
-        detail={t("space.openFilesDetail")}
-        onPress={() => {
-          setSpaceActionsOpen(false);
-          router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } });
-        }}
-      />
-    </AdaptiveSheet>
       </View>
     </SpacePanels>
+    </View>
+    {spaceActionsOpen ? <AnchoredActionMenu
+      anchorRef={spaceActionsRef}
+      title={name}
+      testID="space-actions-menu"
+      onClose={closeSpaceActions}
+      actions={[
+        { icon: "messages", title: t("chat.actions.openChats"), onPress: () => setActivePanel("chat") },
+        { icon: space.isPinned ? "pin-off" : "pin", title: space.isPinned ? t("space.unpin") : t("space.pin"), disabled: pinning, onPress: () => void togglePin() },
+        { icon: "folder-open", title: t("space.openFiles"), onPress: () => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } }) },
+      ]}
+    /> : null}
   </Screen>;
 }
 
 function SpaceMetric({ icon, label, value }: { icon: React.ComponentProps<typeof AppIcon>["name"]; label: string; value: string }) {
   const theme = useAppTheme();
-  return <View style={{ flex: 1, minHeight: 75, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 13, backgroundColor: theme.colors.surface, padding: 10 }}><AppIcon name={icon} size={16} color={theme.colors.accent} /><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, marginTop: 8 }]}>{value}</Text><Text style={[typography.micro, { color: theme.colors.textMuted, marginTop: 2 }]}>{label}</Text></View>;
+  return <View style={{ flex: 1, minWidth: 0, minHeight: 75, padding: 8 }}><AppIcon name={icon} size={16} color={theme.colors.accent} /><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, marginTop: 8 }]}>{value}</Text><Text style={[typography.micro, { color: theme.colors.textMuted, marginTop: 2 }]}>{label}</Text></View>;
 }
 
 function ResourceRow({ icon, title, subtitle, trailing, onPress }: { icon: React.ComponentProps<typeof AppIcon>["name"]; title: string; subtitle: string; trailing?: React.ReactNode; onPress?: () => void }) {

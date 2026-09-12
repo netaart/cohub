@@ -25,7 +25,7 @@ import {
   type SessionSourceGroup,
 } from "@/src/data/session-labels";
 import { panelForScrollOffset, type PanelName } from "@/src/data/space-panel-pager";
-import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField } from "@/src/ui";
+import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField, TopBar } from "@/src/ui";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
 
 export type SpacePanel = "chat" | "files";
@@ -251,23 +251,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
 function PanelGesturePreview({ panel }: { panel: SpacePanel }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
-  return <View style={styles.panelContent} accessibilityElementsHidden><View style={[styles.header, { borderBottomColor: theme.colors.border }]}><AppIcon name={panel === "chat" ? "messages" : "folder-open"} size={19} color={theme.colors.accent} /><Text style={[typography.heading, { color: theme.colors.text }]}>{panel === "chat" ? t("space.panel.chats") : t("space.panel.files")}</Text></View></View>;
-}
-
-function PanelHeader({ title, subtitle, onClose, action, avatar }: { title: string; subtitle?: string; onClose: () => void; action?: ReactNode; avatar?: ReactNode }) {
-  const theme = useAppTheme();
-  const { t } = useTranslation();
-  return (
-    <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
-      {avatar}
-      <View style={styles.headerText}>
-        <Text numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
-        {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{subtitle}</Text> : null}
-      </View>
-      {action}
-      <IconButton name="x" label={t("ui.sheet.close", { title })} size={36} onPress={onClose} />
-    </View>
-  );
+  return <View style={styles.panelContent} accessibilityElementsHidden><TopBar title={panel === "chat" ? t("space.panel.chats") : t("space.panel.files")} leading={<AppIcon name={panel === "chat" ? "messages" : "folder-open"} size={19} color={theme.colors.accent} />} /></View>;
 }
 
 function mergePanelSessions(current: UserSessionListItem[], incoming: UserSessionListItem[], spaceId: string, spaceName: string) {
@@ -460,7 +444,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
   </ScrollView>;
   return (
     <View style={styles.panelContent}>
-      <PanelHeader title={spaceName} subtitle={t("space.panel.chats")} onClose={onClose} avatar={<Avatar name={spaceName} uri={displaySessions.find((session) => session.space?.publicProfile?.avatarUrl)?.space?.publicProfile?.avatarUrl} size={38} />} />
+      <TopBar title={spaceName} subtitle={t("space.panel.chats")} leading={<Avatar name={spaceName} uri={displaySessions.find((session) => session.space?.publicProfile?.avatarUrl)?.space?.publicProfile?.avatarUrl} size={38} />} actions={<IconButton name="x" label={t("ui.sheet.close", { title: t("space.panel.chats") })} onPress={onClose} />} />
       <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: 8, gap: 9 }}>
         <PrimaryButton label={t("space.newChat")} icon="plus" onPress={onNewChat} style={{ minHeight: 44 }} />
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -545,7 +529,7 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
 
   return (
     <View style={styles.panelContent}>
-      <PanelHeader title={path ? spacePathName(path) : t("files.title")} subtitle={path ? `${spaceName} / ${path}` : spaceName} onClose={onClose} action={<IconButton name="external-link" label={t("space.panel.openFullFiles")} size={36} onPress={onOpenFilesPage} />} />
+      <TopBar title={path ? spacePathName(path) : t("files.title")} subtitle={path ? `${spaceName} / ${path}` : spaceName} actions={<><IconButton name="external-link" label={t("space.panel.openFullFiles")} onPress={onOpenFilesPage} /><IconButton name="x" label={t("ui.sheet.close", { title: t("files.title") })} onPress={onClose} /></>} />
       {path ? <Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.backToParent")} onPress={() => setPath(parentSpacePath(path))} style={({ pressed }) => [styles.parentBar, { borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}><AppIcon name="arrow-left" size={16} color={theme.colors.textMuted} /><Text style={[typography.caption, { color: theme.colors.textSecondary }]}>{parentSpacePath(path) ? t("files.backTo", { name: spacePathName(parentSpacePath(path)) }) : t("files.backToFiles")}</Text></Pressable> : null}
       {loading ? (
         <View style={styles.emptyPanel}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>{t("files.loading")}</Text></View>
@@ -575,8 +559,6 @@ const styles = {
   fill: { flex: 1 } as const,
   backdrop: { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "#000000" },
   panelContent: { flex: 1, minHeight: 0 },
-  header: { minHeight: 62, paddingHorizontal: 10, paddingVertical: 7, flexDirection: "row" as const, alignItems: "center" as const, gap: 5, borderBottomWidth: 1 },
-  headerText: { flex: 1, minWidth: 0, paddingHorizontal: 3 },
   emptyPanel: { flex: 1, minHeight: 180, alignItems: "center" as const, justifyContent: "center" as const, padding: 24 },
   parentBar: { minHeight: 40, paddingHorizontal: 14, flexDirection: "row" as const, alignItems: "center" as const, gap: 8, borderBottomWidth: 1 },
 } satisfies Record<string, object>;

@@ -69,7 +69,7 @@ export function Avatar({ name, uri, size = 42, online = false }: { name: string;
   );
 }
 
-export function IconButton({ name, onPress, label, size = 42, tone = "default", disabled = false }: { name: IconName; onPress: (event: GestureResponderEvent) => void; label: string; size?: number; tone?: "default" | "accent" | "danger"; disabled?: boolean }) {
+export function IconButton({ name, onPress, label, size = 44, tone = "default", disabled = false }: { name: IconName; onPress: (event: GestureResponderEvent) => void; label: string; size?: number; tone?: "default" | "accent" | "danger"; disabled?: boolean }) {
   const theme = useAppTheme();
   const color = tone === "accent" ? theme.colors.accent : tone === "danger" ? theme.colors.danger : theme.colors.textSecondary;
   return (
@@ -80,7 +80,7 @@ export function IconButton({ name, onPress, label, size = 42, tone = "default", 
       disabled={disabled}
       onPress={onPress}
      
-      style={({ pressed }) => [styles.iconButton, { width: size, height: size, borderRadius: size / 2, backgroundColor: pressed ? (tone === "accent" ? theme.colors.accentSoft : theme.colors.surfacePressed) : "transparent", opacity: disabled ? 0.45 : 1 }]}
+      style={({ pressed }) => [styles.iconButton, { width: Math.max(44, size), height: Math.max(44, size), borderRadius: Math.max(44, size) / 2, backgroundColor: pressed ? (tone === "accent" ? theme.colors.accentSoft : theme.colors.surfacePressed) : "transparent", opacity: disabled ? 0.45 : 1 }]}
     >
       <AppIcon name={name} size={size * 0.48} color={color} />
     </Pressable>
@@ -107,52 +107,39 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
-export function WorkspaceToolbar({ query, onQueryChange, queryRef, account, onCreate, onSettings, placeholder }: { query: string; onQueryChange: (value: string) => void; queryRef?: React.RefObject<TextInput | null>; account: ReactNode; onCreate: () => void; onSettings: () => void; placeholder?: string }) {
+type TopBarProps = {
+  title: string;
+  subtitle?: string;
+  onBack?: () => void;
+  backLabel?: string;
+  leading?: ReactNode;
+  actions?: ReactNode;
+  children?: ReactNode;
+};
+
+export function TopBar({ title, subtitle, onBack, backLabel, leading, actions, children }: TopBarProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
-  return <View style={[styles.workspaceToolbar, { borderBottomColor: theme.colors.border }]}>
-    {account}
-    <View style={{ flex: 1, minWidth: 0 }}><SearchField inputRef={queryRef} value={query} onChangeText={onQueryChange} placeholder={placeholder ?? t("ui.search.chatsAndSpaces")} /></View>
-    <IconButton name="plus" label={t("ui.createNew")} size={42} tone="accent" onPress={onCreate} />
-    <IconButton name="settings" label={t("ui.openSettings")} size={42} onPress={onSettings} />
-  </View>;
-}
-
-export function TopBar({ title, subtitle, left, right }: { title: string; subtitle?: string; left?: ReactNode; right?: ReactNode }) {
-  const theme = useAppTheme();
   return (
-    <View testID="app-top-bar" style={[styles.topBar, { borderBottomColor: theme.colors.border }]}>
-      <View style={styles.topBarLeft}>{left}</View>
+    <View testID="app-top-bar" style={[styles.topBar, { backgroundColor: theme.colors.background }]}>
+      {onBack ? <IconButton name="arrow-left" label={backLabel ?? t("ui.detail.back")} onPress={onBack} /> : leading ? <View style={styles.topBarLeading}>{leading}</View> : null}
       <View style={styles.topBarTitle}>
-        <Text numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
-        {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 1 }]}>{subtitle}</Text> : null}
+        {children ?? <>
+          <Text accessibilityRole="header" numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
+          {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textSecondary, marginTop: 1 }]}>{subtitle}</Text> : null}
+        </>}
       </View>
-      <View style={styles.topBarRight}>{right}</View>
+      {actions ? <View style={styles.topBarActions}>{actions}</View> : null}
     </View>
   );
 }
 
-export function DetailTopBar({ title, subtitle, onBack, backLabel, actions }: { title: string; subtitle?: string; onBack: () => void; backLabel?: string; actions?: ReactNode }) {
-  const theme = useAppTheme();
-  const { t } = useTranslation();
-  return (
-    <View testID="app-detail-top-bar" style={[styles.detailTopBar, { borderBottomColor: theme.colors.border, backgroundColor: theme.colors.background }]}>
-      <IconButton name="arrow-left" label={backLabel ?? t("ui.detail.back")} size={40} onPress={onBack} />
-      <View style={styles.detailTopBarTitle}>
-        <Text accessibilityRole="header" numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
-        {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textSecondary, marginTop: 1 }]}>{subtitle}</Text> : null}
-      </View>
-      {actions ? <View style={styles.detailTopBarActions}>{actions}</View> : null}
-    </View>
-  );
-}
-
-export function SectionHeader({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
+export function SectionHeader({ title, action }: { title: string; action?: { icon: IconName; label: string; onPress: () => void } }) {
   const theme = useAppTheme();
   return (
     <View style={styles.sectionHeader}>
-      <Text style={[typography.eyebrow, { color: theme.colors.textMuted, textTransform: "uppercase" }]}>{title}</Text>
-      {action && onAction ? <Pressable onPress={onAction} hitSlop={8}><Text style={[typography.caption, { color: theme.colors.accent }]}>{action}</Text></Pressable> : null}
+      <Text accessibilityRole="header" style={[typography.eyebrow, { flex: 1, color: theme.colors.textMuted, letterSpacing: 0, textTransform: "uppercase" }]}>{title}</Text>
+      {action ? <IconButton name={action.icon} label={action.label} onPress={action.onPress} tone="accent" /> : null}
     </View>
   );
 }
@@ -174,14 +161,14 @@ export function StatusPill({ label, tone = "neutral", dot = true }: { label: str
   );
 }
 
-export function EmptyState({ icon, title, description, action, onAction }: { icon: IconName; title: string; description: string; action?: string; onAction?: () => void }) {
+export function EmptyState({ icon, title, description, action }: { icon: IconName; title: string; description?: string; action?: { icon: IconName; label: string; onPress: () => void } }) {
   const theme = useAppTheme();
   return (
     <View style={styles.emptyState}>
-      <View style={[styles.emptyIcon, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}><AppIcon name={icon} size={24} color={theme.colors.accent} /></View>
+      <AppIcon name={icon} size={28} color={theme.colors.textMuted} />
       <Text style={[typography.heading, { color: theme.colors.text, marginTop: 14, textAlign: "center" }]}>{title}</Text>
-      <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 6, textAlign: "center", maxWidth: 300 }]}>{description}</Text>
-      {action && onAction ? <PrimaryButton label={action} onPress={onAction} style={{ marginTop: 18 }} /> : null}
+      {description ? <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 6, textAlign: "center", maxWidth: 300 }]}>{description}</Text> : null}
+      {action ? <View style={{ marginTop: 12 }}><IconButton name={action.icon} label={action.label} onPress={action.onPress} tone="accent" /></View> : null}
     </View>
   );
 }
@@ -312,7 +299,7 @@ export function ConnectionBanner({ state }: { state: string }) {
 export function DataError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
-  return <View style={[styles.dataError, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><View style={[styles.dataErrorIcon, { backgroundColor: theme.colors.background }]}><AppIcon name="cloud-off" size={17} color={theme.colors.danger} /></View><View style={{ flex: 1, minWidth: 0 }}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("ui.dataError.title")}</Text><Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 3 }]}>{message}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={t("ui.dataError.retry")} onPress={onRetry} hitSlop={8}><Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>{t("common.retry")}</Text></Pressable></View>;
+  return <View style={[styles.dataError, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><View style={[styles.dataErrorIcon, { backgroundColor: theme.colors.background }]}><AppIcon name="cloud-off" size={17} color={theme.colors.danger} /></View><View style={{ flex: 1, minWidth: 0 }}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("ui.dataError.title")}</Text><Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 3 }]}>{message}</Text></View><IconButton name="refresh" label={t("ui.dataError.retry")} onPress={onRetry} tone="danger" /></View>;
 }
 
 export function getStatusTone(status: ActivityItem["status"]): "success" | "warning" | "danger" | "neutral" {
@@ -325,17 +312,12 @@ export function useBackButton() {
 
 const styles = StyleSheet.create({
   iconButton: { alignItems: "center", justifyContent: "center" },
-  workspaceToolbar: { height: 66, minHeight: 66, paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
-  topBar: { height: 66, minHeight: 66, maxHeight: 66, flexShrink: 0, paddingHorizontal: 16, paddingVertical: 7, flexDirection: "row", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
-  topBarLeft: { width: 44, height: 42, alignItems: "flex-start", justifyContent: "center" },
-  topBarTitle: { flex: 1, minWidth: 0, height: 42, justifyContent: "center", paddingVertical: 2 },
-  topBarRight: { width: 96, height: 42, alignItems: "flex-end", justifyContent: "center", flexDirection: "row", gap: 2 },
-  detailTopBar: { height: 66, minHeight: 66, maxHeight: 66, flexShrink: 0, paddingHorizontal: 8, paddingVertical: 5, flexDirection: "row", alignItems: "center", gap: 4, borderBottomWidth: StyleSheet.hairlineWidth },
-  detailTopBarTitle: { flex: 1, minWidth: 0, height: 42, justifyContent: "center", paddingHorizontal: 2 },
-  detailTopBarActions: { height: 42, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 0 },
+  topBar: { minHeight: 56, flexShrink: 0, paddingHorizontal: 8, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 },
+  topBarLeading: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  topBarTitle: { flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 4 },
+  topBarActions: { flexShrink: 0, flexDirection: "row", alignItems: "center" },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 22, paddingBottom: 10 },
   emptyState: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, minHeight: 260 },
-  emptyIcon: { width: 56, height: 56, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   dataError: { flexDirection: "row", alignItems: "center", gap: 10, marginHorizontal: 16, marginTop: 12, padding: 12, borderWidth: 1, borderRadius: 14 },
   dataErrorIcon: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
   primaryButton: { minHeight: 46, paddingHorizontal: 18, borderRadius: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },

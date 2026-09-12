@@ -38,7 +38,7 @@ import { useAppTheme, typography } from "@/src/theme";
 import {
 	AppIcon,
 	Avatar,
-	DetailTopBar,
+	TopBar,
 	EmptyState,
 	IconButton,
 	PrimaryButton,
@@ -132,9 +132,8 @@ export function SettingsScreen({
 
 	return (
 		<Screen keyboard={section === "chats"}>
-				<DetailTopBar
+				<TopBar
 					title={t("settings.title")}
-					subtitle={t("settings.subtitle")}
 					onBack={() => router.back()}
 				/>
 			<ScrollView
@@ -143,8 +142,6 @@ export function SettingsScreen({
 				style={{
 					height: 56,
 					flexGrow: 0,
-					borderBottomWidth: 1,
-					borderBottomColor: theme.colors.border,
 				}}
 				contentContainerStyle={{
 					paddingHorizontal: 12,
@@ -163,21 +160,17 @@ export function SettingsScreen({
 							accessibilityLabel={label}
 							onPress={() => setSection(item.id)}
 							style={({ pressed }) => ({
-								minHeight: 36,
+								minHeight: 44,
 								paddingHorizontal: 11,
 								borderRadius: 9,
 								flexDirection: "row",
 								alignItems: "center",
 								gap: 6,
-								borderWidth: 1,
-								borderColor: active
-									? theme.colors.accentBorder
-									: theme.colors.border,
 								backgroundColor: active
 									? theme.colors.accentSoft
 									: pressed
 										? theme.colors.surfacePressed
-										: theme.colors.surface,
+										: "transparent",
 							})}
 						>
 							<AppIcon

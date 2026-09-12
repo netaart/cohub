@@ -6,7 +6,7 @@ import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AppUpdateRow } from "@/src/components/AppUpdateBanner";
 import { useDebugUnlock } from "@/src/components/useDebugUnlock";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
-import { AppIcon, DetailTopBar, Screen, SectionHeader } from "@/src/ui";
+import { AppIcon, TopBar, Screen, SectionHeader } from "@/src/ui";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import type { IconName } from "@/src/icons";
@@ -22,7 +22,7 @@ export function AboutScreen() {
   const { t } = useTranslation();
   return (
     <Screen>
-      <DetailTopBar title={t("about.title")} subtitle={t("about.subtitle")} onBack={() => router.back()} />
+      <TopBar title={t("about.title")} onBack={() => router.back()} />
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}

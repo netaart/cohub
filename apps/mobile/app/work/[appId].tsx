@@ -6,7 +6,7 @@ import { WebView } from "react-native-webview";
 import { useApp } from "@/src/data/context";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
-import { DetailTopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
+import { TopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
 
 type Params = { appId?: string | string[] };
 
@@ -38,7 +38,7 @@ export default function WorkScreen() {
 
   const title = detail?.app.meta?.title || detail?.app.meta?.name || detail?.app.slug || t("work.fallbackTitle");
   return <Screen>
-    <DetailTopBar title={title} subtitle={detail?.space.name || t("work.published")} onBack={() => router.back()} actions={contentUrl ? <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void Linking.openURL(contentUrl)} /> : undefined} />
+    <TopBar title={title} subtitle={detail?.space.name || t("work.published")} onBack={() => router.back()} actions={contentUrl ? <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void Linking.openURL(contentUrl)} /> : undefined} />
     {error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center" }]}>{error}</Text></View> : !detail ? <LoadingRows count={6} /> : !contentUrl ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("work.noContent")}</Text></View> : <WebView
       source={{ uri: contentUrl }}
       style={{ flex: 1, backgroundColor: theme.colors.background }}
