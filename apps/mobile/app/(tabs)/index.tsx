@@ -1,6 +1,6 @@
 import { useFocusEffect, useIsFocused, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { SessionSearchRow, SpaceSearchRow } from "@/src/components/SearchResultRow";
@@ -11,7 +11,6 @@ import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { ConnectionBanner, DataError, EmptyState, ExpandableSearchBar, IconButton, LoadingRows, Screen } from "@/src/ui";
-import { IconSegmentedControl } from "@/src/ui/IconSegmentedControl";
 import { getSessionStatus, hasMoreRecentSessions, isSessionInFilterWindow, sessionFilterCutoff } from "@/src/data/session-status";
 import { loadSessionFilterMinutes, useSessionFilterPreference } from "@/src/data/session-filter-preference";
 import { SpaceRow } from "@/src/components/SpaceRow";
@@ -129,11 +128,11 @@ export default function ChatsScreen() {
         onEndReachedThreshold={0.7}
         contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
         ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
-          <IconSegmentedControl<Filter> value={filter} onChange={setFilter} options={[
-            { value: "all", icon: "messages", label: t("chats.filter.all") },
-            { value: "running", icon: "activity", label: t("chats.filter.running") },
-            { value: "completed", icon: "check-circle", label: t("chats.filter.completed") },
-          ]} />
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingVertical: 4 }}>
+            <FilterChip label={t("chats.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} />
+            <FilterChip label={t("chats.filter.running")} selected={filter === "running"} onPress={() => setFilter("running")} />
+            <FilterChip label={t("chats.filter.completed")} selected={filter === "completed"} onPress={() => setFilter("completed")} />
+          </View>
           {filter !== "all" ? <Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 6 }]}>{t("chats.filter.window", { minutes: filterPreference.minutes })}</Text> : null}
           {remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator accessibilityLabel={t("chats.searching")} size="small" color={theme.colors.accent} /></View> : null}
           {remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><IconButton name="refresh" label={t("chats.search.retry")} onPress={remoteSearch.retry} tone="accent" /></View> : null}
@@ -143,4 +142,9 @@ export default function ChatsScreen() {
       />
     </Screen>
   );
+}
+
+function FilterChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  const theme = useAppTheme();
+  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }

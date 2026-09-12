@@ -26,7 +26,7 @@ import { getComposerActionState } from "@/src/data/composer-state";
 import { COMPOSER_TEXT_PADDING, getComposerLayout } from "@/src/ui/composer-layout";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
-import type { ActivityItem } from "@/src/data/types";
+import type { ActivityItem, ConnectionState } from "@/src/data/types";
 import { initials } from "@/src/utils";
 
 export { ExpandableSearchBar } from "@/src/ui/ExpandableSearchBar";
@@ -288,12 +288,11 @@ export function AttachmentChip({ name, onRemove }: { name: string; onRemove: () 
   return <View style={[styles.attachmentChip, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}><AppIcon name="file-text" size={15} color={theme.colors.accent} /><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>{name}</Text><Pressable onPress={onRemove} hitSlop={8}><AppIcon name="x" size={15} color={theme.colors.textMuted} /></Pressable></View>;
 }
 
-export function ConnectionBanner({ state }: { state: string }) {
+export function ConnectionBanner({ state }: { state: ConnectionState }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
-  if (state === "open" || state === "idle") return null;
-  const reconnecting = state === "reconnecting" || state === "connecting";
-  return <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 8, backgroundColor: reconnecting ? theme.colors.warningSoft : theme.colors.dangerSoft }}><AppIcon name={reconnecting ? "sync" : "cloud-off"} size={14} color={reconnecting ? theme.colors.warning : theme.colors.danger} /><Text style={[typography.caption, { color: reconnecting ? theme.colors.warning : theme.colors.danger }]}>{reconnecting ? t("ui.banner.reconnecting") : t("ui.banner.unavailable")}</Text></View>;
+  if (state !== "closed" && state !== "error") return null;
+  return <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, paddingVertical: 8, backgroundColor: theme.colors.dangerSoft }}><AppIcon name="cloud-off" size={14} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger }]}>{t("ui.banner.unavailable")}</Text></View>;
 }
 
 export function DataError({ message, onRetry }: { message: string; onRetry: () => void }) {

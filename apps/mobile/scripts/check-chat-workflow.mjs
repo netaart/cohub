@@ -121,6 +121,8 @@ const chatMenuProps = {
 };
 const menuNodes = chromeNodes(renderChatMenu(chatMenuProps));
 const menuItems = menuNodes.filter((node) => node.props?.accessibilityRole === "menuitem");
+assert.deepEqual(menuNodes.filter((node) => node.type === "Text").flatMap((node) => node.props.children), ["Share", "Labels"], "action menus show only action names, not a duplicate chat or space title");
+assert.equal(menuNodes.find((node) => node.props?.accessibilityRole === "menu").props.accessibilityLabel, "Current chat", "the menu retains its screen-reader context");
 assert.equal(menuNodes.find((node) => node.props?.accessibilityRole === "menu").props.testID, "chat-actions-menu");
 assert.equal(menuItems.length, 2);
 assert.equal(menuItems[1].props.disabled, true);
@@ -174,37 +176,34 @@ for (const isPinned of [false, true]) {
   }
 }
 
-let filterHint = null;
-let selectedFilter = "all";
-const filterOptions = [
-  { value: "all", icon: "messages", label: "All" },
-  { value: "running", icon: "activity", label: "Running" },
-  { value: "completed", icon: "check-circle", label: "Completed" },
-];
-const renderIconSegments = loadChromeComponent("../src/ui/IconSegmentedControl.tsx", "IconSegmentedControl", {
-  ...chromeScope, useState: () => [filterHint, (value) => { filterHint = value; }],
-});
-const segmentProps = () => ({ value: selectedFilter, options: filterOptions, onChange: (value) => { selectedFilter = value; } });
-for (const option of filterOptions) {
-  const segments = chromeNodes(renderIconSegments(segmentProps())).filter((node) => node.type === "Pressable");
-  const segment = segments.find((node) => node.props.accessibilityLabel === option.label);
-  assert.equal(segments.filter((node) => node.props.accessibilityState.selected).length, 1);
-  const style = Object.assign({}, ...segment.props.style({ pressed: false }));
-  assert.ok(style.width >= 44 && style.height >= 44);
-  assert.ok(!chromeNodes(segment).some((node) => node.type === "Text"), "segment labels stay out of the default chrome");
-  const previous = selectedFilter;
-  segment.props.onLongPress();
-  assert.equal(filterHint, option.label);
-  assert.equal(selectedFilter, previous, "showing a hint must not change the filter");
-  assert.ok(chromeNodes(renderIconSegments(segmentProps())).some((node) => node.type === "Text"));
-  segment.props.onPressOut();
-  assert.equal(filterHint, null);
-  segment.props.onHoverIn();
-  assert.equal(filterHint, option.label);
-  segment.props.onHoverOut();
-  assert.equal(filterHint, null);
-  segment.props.onPress();
-  assert.equal(selectedFilter, option.value);
+for (const [path, component, labels] of [
+  ["../app/(tabs)/index.tsx", "FilterChip", ["All", "Running", "Completed"]],
+  ["../app/(tabs)/spaces.tsx", "SpaceFilterChip", ["Recent", "All", "Pinned"]],
+  ["../app/(tabs)/activity.tsx", "ActivityFilter", ["All", "Running", "Completed"]],
+]) {
+  const renderChip = loadChromeComponent(path, component, { ...chromeScope, PressableScale: "PressableScale" });
+  for (const label of labels) {
+    for (const selected of [false, true]) {
+      let pressed = false;
+      const chip = renderChip({ label, selected, icon: label === "Pinned" ? "pin" : undefined, onPress: () => { pressed = true; } });
+      assert.equal(chip.props.accessibilityRole, "tab");
+      assert.equal(chip.props.accessibilityState.selected, selected);
+      assert.equal(chip.props.accessibilityLabel, label);
+      assert.deepEqual(chromeNodes(chip).filter((node) => node.type === "Text").flatMap((node) => node.props.children), [label], "filter names must be visible without long-pressing");
+      if (label === "Pinned") assert.ok(chromeNodes(chip).some((node) => node.type === "AppIcon" && node.props.name === "pin"));
+      chip.props.onPress();
+      assert.equal(pressed, true);
+    }
+  }
+}
+const renderConnectionBanner = loadChromeComponent("../src/ui.tsx", "ConnectionBanner", chromeScope);
+for (const state of ["idle", "connecting", "reconnecting", "open"]) {
+  assert.equal(renderConnectionBanner({ state }), null, `routine ${state} state must not show a banner`);
+}
+for (const state of ["closed", "error"]) {
+  const nodes = chromeNodes(renderConnectionBanner({ state }));
+  assert.ok(nodes.some((node) => node.type === "AppIcon" && node.props.name === "cloud-off"));
+  assert.deepEqual(nodes.filter((node) => node.type === "Text").flatMap((node) => node.props.children), ["ui.banner.unavailable"], "actual connection failures remain visible");
 }
 let searchExpanded;
 let searchQuery = "";

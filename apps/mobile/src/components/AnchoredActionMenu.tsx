@@ -65,7 +65,6 @@ export function AnchoredActionMenu({ anchorRef, title, actions, onClose, testID 
       style={[styles.menu, layout, { backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }]}
     >
       <ScrollView style={{ flexGrow: 0 }} bounces={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.content}>
-        <Text numberOfLines={2} style={[typography.caption, styles.title, { color: theme.colors.textMuted }]}>{title}</Text>
         {actions.map((action) => <Pressable
           key={action.title}
           accessibilityRole="menuitem"
@@ -87,7 +86,6 @@ const styles = StyleSheet.create({
   overlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20 },
   menu: { position: "absolute", borderRadius: 14, borderCurve: "continuous", borderWidth: StyleSheet.hairlineWidth, overflow: "hidden", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8 },
   content: { paddingVertical: 6 },
-  title: { paddingHorizontal: 16, paddingVertical: 10 },
   action: { minHeight: 48, paddingHorizontal: 16, paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 14 },
   label: { flex: 1, minWidth: 0 },
 });

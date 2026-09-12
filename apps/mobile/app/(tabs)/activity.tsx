@@ -7,7 +7,6 @@ import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { AppIcon, ConnectionBanner, DataError, EmptyState, LoadingRows, Screen, SectionHeader, TopBar } from "@/src/ui";
-import { IconSegmentedControl } from "@/src/ui/IconSegmentedControl";
 import { formatNumber, formatRelativeTime } from "@/src/utils";
 import { PressableScale } from "@/src/ui/PressableScale";
 
@@ -33,12 +32,10 @@ export default function ActivityScreen() {
       <Metric label={t("activity.metric.tokens")} value={state.activityLoading ? "…" : formatNumber(state.usage?.totalTokens)} icon="layers" tone="info" />
     </View>
     <SectionHeader title={t("activity.section.recent")} />
-    <View style={{ paddingHorizontal: 16 }}>
-      <IconSegmentedControl<"all" | "running" | "complete"> value={filter} onChange={setFilter} options={[
-        { value: "all", icon: "layers", label: t("activity.filter.all") },
-        { value: "running", icon: "activity", label: t("activity.filter.running") },
-        { value: "complete", icon: "check-circle", label: t("activity.filter.completed") },
-      ]} />
+    <View style={{ paddingHorizontal: 16, flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+      <ActivityFilter label={t("activity.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} />
+      <ActivityFilter label={t("activity.filter.running")} selected={filter === "running"} onPress={() => setFilter("running")} />
+      <ActivityFilter label={t("activity.filter.completed")} selected={filter === "complete"} onPress={() => setFilter("complete")} />
     </View>
     <View style={{ marginTop: 10 }}>
       {dataError && items.length === 0 ? <EmptyState icon="cloud-off" title={t("activity.error.title")} description={t("activity.error.body")} /> : state.booting || (state.sessionStatusRequests > 0 && items.length === 0) ? <LoadingRows count={4} /> : items.length > 0 ? items.map((item) => <PressableScale key={item.id} accessibilityRole="button" onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: item.sessionId } })} haptic style={{ flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: theme.colors.border }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}>
@@ -54,4 +51,9 @@ function Metric({ label, value, icon, tone = "default" }: { label: string; value
   const theme = useAppTheme();
   const color = tone === "success" ? theme.colors.success : tone === "info" ? theme.colors.info : theme.colors.accent;
   return <View style={{ flex: 1, minWidth: 0, minHeight: 82, padding: 8 }}><AppIcon name={icon} size={16} color={color} /><Text style={[typography.heading, { color: theme.colors.text, marginTop: 8 }]}>{value}</Text><Text style={[typography.micro, { color: theme.colors.textMuted, marginTop: 2 }]}>{label}</Text></View>;
+}
+
+function ActivityFilter({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  const theme = useAppTheme();
+  return <PressableScale accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={{ paddingHorizontal: 12, minHeight: 32, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></PressableScale>;
 }
