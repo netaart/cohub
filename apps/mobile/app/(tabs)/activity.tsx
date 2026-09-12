@@ -1,13 +1,17 @@
 import { useRouter, useScrollToTop } from "expo-router";
-import { useMemo, useRef, useState } from "react";
-import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { useRef, useState } from "react";
+import { Image, RefreshControl, ScrollView, Text, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
+import { TokenHeatmap } from "@/src/components/TokenHeatmap";
+import { TaskResultSheet } from "@/src/components/TaskResultSheet";
 import { useApp } from "@/src/data/context";
+import { taskOutputs, taskTitle } from "@/src/data/activity";
+import { useActivity } from "@/src/data/use-activity";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
-import { AppIcon, ConnectionBanner, DataError, EmptyState, LoadingRows, Screen, SectionHeader, TopBar } from "@/src/ui";
-import { formatNumber, formatRelativeTime } from "@/src/utils";
+import { AppIcon, ConnectionBanner, DataError, EmptyState, LoadingRows, Screen, SectionHeader, StatusPill, TopBar } from "@/src/ui";
+import { formatRelativeTime } from "@/src/utils";
 import { PressableScale } from "@/src/ui/PressableScale";
 
 export default function ActivityScreen() {
@@ -15,45 +19,49 @@ export default function ActivityScreen() {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const tabBarInset = useFloatingTabBarInset();
-  const { state, activityItems, connectionState, refreshHome } = useApp();
-  const dataError = state.error ?? state.sessionsError ?? state.sessionStatusError ?? state.activityError;
-  const [filter, setFilter] = useState<"all" | "running" | "complete">("all");
+  const { connectionState, userUuid } = useApp();
+  const { credits, days, works, tasks, loading, refresh } = useActivity();
+  const [selection, setSelection] = useState<{ id: string; userUuid: string | null } | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTop(scrollRef);
-  const items = useMemo(() => filter === "all" ? activityItems : activityItems.filter((item) => item.status === filter), [activityItems, filter]);
+  const retry = () => void refresh();
   return <Screen>
     <TopBar title={t("activity.title")} leading={<AccountAvatar />} />
-    <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: tabBarInset }} refreshControl={<RefreshControl refreshing={state.refreshing} onRefresh={() => void refreshHome()} tintColor={theme.colors.accent} colors={[theme.colors.accent]} />}>
-    <ConnectionBanner state={connectionState} />
-    {dataError ? <DataError message={dataError} onRetry={() => void refreshHome()} /> : null}
-    <View style={{ flexDirection: "row", paddingHorizontal: 16, paddingTop: 14, gap: 10 }}>
-      <Metric label={t("activity.metric.requests")} value={state.activityLoading ? "…" : formatNumber(state.usage?.requestCount)} icon="zap" />
-      <Metric label={t("activity.metric.successful")} value={state.activityLoading ? "…" : formatNumber(state.usage?.successCount)} icon="check-circle" tone="success" />
-      <Metric label={t("activity.metric.tokens")} value={state.activityLoading ? "…" : formatNumber(state.usage?.totalTokens)} icon="layers" tone="info" />
-    </View>
-    <SectionHeader title={t("activity.section.recent")} />
-    <View style={{ paddingHorizontal: 16, flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-      <ActivityFilter label={t("activity.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} />
-      <ActivityFilter label={t("activity.filter.running")} selected={filter === "running"} onPress={() => setFilter("running")} />
-      <ActivityFilter label={t("activity.filter.completed")} selected={filter === "complete"} onPress={() => setFilter("complete")} />
-    </View>
-    <View style={{ marginTop: 10 }}>
-      {dataError && items.length === 0 ? <EmptyState icon="cloud-off" title={t("activity.error.title")} description={t("activity.error.body")} /> : state.booting || (state.sessionStatusRequests > 0 && items.length === 0) ? <LoadingRows count={4} /> : items.length > 0 ? items.map((item) => <PressableScale key={item.id} accessibilityRole="button" onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: item.sessionId } })} haptic style={{ flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: theme.colors.border }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}>
-        <View accessible accessibilityLabel={item.status === "running" ? t("ui.status.running") : item.status === "failed" ? t("ui.status.failed") : item.status === "stopped" ? t("ui.status.stopped") : t("ui.status.done")} style={{ width: 34, height: 34, alignItems: "center", justifyContent: "center" }}><AppIcon name={item.status === "running" ? "sync" : item.status === "failed" ? "alert" : item.status === "stopped" ? "stop" : "check"} size={17} color={item.status === "running" ? theme.colors.warning : item.status === "failed" ? theme.colors.danger : item.status === "stopped" ? theme.colors.textMuted : theme.colors.success} /></View>
-        <View style={{ flex: 1, minWidth: 0 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}><Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{item.title}</Text><Text style={[typography.micro, { color: theme.colors.textFaint }]}>{formatRelativeTime(item.updatedAt)}</Text></View><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>{item.spaceName} · {item.preview}</Text></View>
-      </PressableScale>) : <EmptyState icon="activity" title={t("activity.empty.title")} />}
-    </View>
+    <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: tabBarInset }} refreshControl={<RefreshControl refreshing={loading} onRefresh={retry} tintColor={theme.colors.accent} colors={[theme.colors.accent]} />}>
+      <ConnectionBanner state={connectionState} />
+      <PressableScale accessibilityRole="button" accessibilityLabel={t("settings.section.billing")} onPress={() => router.push("/settings/billing")} style={{ padding: theme.spacing.lg, gap: theme.spacing.sm }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}>
+          <AppIcon name="database" size={17} color={theme.colors.accent} />
+          <Text style={[typography.caption, { flex: 1, color: theme.colors.textMuted }]}>{t("settings.billing.balance")}</Text>
+          <AppIcon name="chevron-right" size={17} color={theme.colors.textMuted} />
+        </View>
+        <Text style={[typography.title, { color: credits.data && credits.data.netUsd < 0 ? theme.colors.danger : theme.colors.text }]}>{credits.data ? `$${credits.data.netUsd.toFixed(2)}` : "—"}</Text>
+      </PressableScale>
+      {credits.error ? <DataError message={credits.error} onRetry={retry} /> : null}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", paddingHorizontal: theme.spacing.lg, gap: theme.spacing.lg }}>
+        {(["activity", "referrals"] as const).map((section) => <PressableScale key={section} accessibilityRole="button" onPress={() => router.push(`/settings/${section}`)} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}><AppIcon name={section === "activity" ? "activity" : "gift"} size={16} color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.accent }]}>{t(section === "activity" ? "activity.usageDetails" : "settings.section.referrals")}</Text></PressableScale>)}
+      </View>
+      <SectionHeader title={t("activity.heatmap.title")} />
+      {days.error ? <DataError message={days.error} onRetry={retry} /> : null}
+      {days.data ? <TokenHeatmap days={days.data} /> : !days.error ? <LoadingRows count={2} /> : null}
+      <SectionHeader title={t("activity.works.title")} />
+      {works.error ? <DataError message={works.error} onRetry={retry} /> : null}
+      {works.data ? works.data.length ? works.data.map((work) => <PressableScale key={work.id} accessibilityRole="button" onPress={() => router.push({ pathname: "/work/[appId]", params: { appId: work.id } })} style={{ flexDirection: "row", alignItems: "center", gap: theme.spacing.md, padding: theme.spacing.lg, borderBottomWidth: 1, borderBottomColor: theme.colors.border }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}>
+        <AppIcon name="layers" size={22} color={theme.colors.info} />
+        <View style={{ flex: 1, minWidth: 0, gap: theme.spacing.xs }}><Text numberOfLines={2} style={[typography.bodyMedium, { color: theme.colors.text }]}>{work.meta?.title || work.meta?.name || work.slug}</Text><Text style={[typography.micro, { color: theme.colors.textMuted }]}>{work.createdAt ? formatRelativeTime(work.createdAt) : work.slug}</Text></View>
+        <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
+      </PressableScale>) : <EmptyState icon="layers" title={t("activity.works.empty")} /> : !works.error ? <LoadingRows count={2} /> : null}
+      <SectionHeader title={t("activity.tasks.title")} />
+      {tasks.error ? <DataError message={tasks.error} onRetry={retry} /> : null}
+      {tasks.data ? tasks.data.length ? tasks.data.map((task) => {
+        const image = taskOutputs(task).find((output) => output.type === "image");
+        return <PressableScale key={task.id} accessibilityRole="button" onPress={() => setSelection({ id: task.id, userUuid })} style={{ flexDirection: "row", alignItems: "center", gap: theme.spacing.md, padding: theme.spacing.lg, borderBottomWidth: 1, borderBottomColor: theme.colors.border }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}>
+          {image && image.type === "image" ? <Image source={{ uri: image.url }} style={{ width: 48, height: 48, borderRadius: theme.radius.sm }} /> : <View style={{ width: 48, height: 48, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.surfaceRaised, borderRadius: theme.radius.sm }}><AppIcon name="file-text" size={22} color={theme.colors.textMuted} /></View>}
+          <View style={{ flex: 1, minWidth: 0, gap: theme.spacing.xs }}><Text numberOfLines={2} style={[typography.bodyMedium, { color: theme.colors.text }]}>{taskTitle(task)}</Text><Text style={[typography.micro, { color: theme.colors.textMuted }]}>{formatRelativeTime(task.createdAt)}</Text><StatusPill label={t(task.status === "completed" ? "ui.status.done" : task.status === "failed" ? "ui.status.failed" : task.status === "running" ? "ui.status.running" : "activity.tasks.pending")} tone={task.status === "failed" ? "danger" : task.status === "completed" ? "success" : "warning"} /></View>
+          <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
+        </PressableScale>;
+      }) : <EmptyState icon="file-text" title={t("activity.tasks.empty")} /> : !tasks.error ? <LoadingRows count={2} /> : null}
     </ScrollView>
+    {selection && selection.userUuid === userUuid ? <TaskResultSheet key={selection.id} taskId={selection.id} onClose={() => setSelection(null)} /> : null}
   </Screen>;
-}
-
-function Metric({ label, value, icon, tone = "default" }: { label: string; value: string; icon: React.ComponentProps<typeof AppIcon>["name"]; tone?: "default" | "success" | "info" }) {
-  const theme = useAppTheme();
-  const color = tone === "success" ? theme.colors.success : tone === "info" ? theme.colors.info : theme.colors.accent;
-  return <View style={{ flex: 1, minWidth: 0, minHeight: 82, padding: 8 }}><AppIcon name={icon} size={16} color={color} /><Text style={[typography.heading, { color: theme.colors.text, marginTop: 8 }]}>{value}</Text><Text style={[typography.micro, { color: theme.colors.textMuted, marginTop: 2 }]}>{label}</Text></View>;
-}
-
-function ActivityFilter({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  const theme = useAppTheme();
-  return <PressableScale accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={{ paddingHorizontal: 12, minHeight: 32, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></PressableScale>;
 }
