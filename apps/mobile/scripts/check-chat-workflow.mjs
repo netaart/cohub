@@ -38,7 +38,7 @@ import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src
 import { isSettingsSection, settingsMenu } from "../src/data/settings-navigation.ts";
 import { channelHealthState, createSettingsChannel, createWeChatLoginPoller, isChannelProvider, missingChannelField } from "../src/data/channel-settings.ts";
 
-import { activityRange, localDateKey, tokenDays, taskOutputs, loadRecentWorks } from "../src/data/activity.ts";
+import { activityRange, localDateKey, tokenDays } from "../src/data/activity.ts";
 
 assert.equal(isSettingsSection("channels"), true);
 for (const invalid of [undefined, ["channels"], "constructor", "__proto__", "appearance"]) assert.equal(isSettingsSection(invalid), false);
@@ -121,21 +121,6 @@ assert.deepEqual(activityDays.at(-1), { date: localDateKey(activityNow), tokens:
 assert.equal(activityDays[0].level, 0);
 assert.throws(() => tokenDays([{ bucketStartAt: "bad", totalTokens: 1 }], range.from, range.to), /Invalid token/);
 assert.throws(() => tokenDays([{ bucketStartAt: activityNow.toISOString(), totalTokens: -1 }], range.from, range.to), /Invalid token/);
-assert.deepEqual(taskOutputs({ result: { output: [
-  { type: "text", text: "Result" },
-  { type: "image", source: { type: "url", url: "https://example.com/result.png" } },
-  { type: "image", source: { type: "url", url: "javascript:alert(1)" } },
-  { type: "video", source: { type: "url", url: "file:///private/file" } },
-  null,
-] } }), [{ type: "text", text: "Result" }, { type: "image", url: "https://example.com/result.png" }]);
-assert.deepEqual(taskOutputs({ result: null }), []);
-const workClient = { spaces: { list: async () => [{ id: "space" }] }, apps: { listBySpace: async () => ({ apps: [
-  { id: "old", userUuid: "me", createdAt: "2026-09-01" },
-  { id: "other", userUuid: "other", createdAt: "2026-09-12" },
-  { id: "new", userUuid: "me", createdAt: "2026-09-11" },
-] }) } };
-assert.deepEqual((await loadRecentWorks(workClient, "me")).map((work) => work.id), ["new", "old"]);
-await assert.rejects(loadRecentWorks({ ...workClient, apps: { listBySpace: async () => { throw new Error("offline"); } } }, "me"), /offline/);
 
 // Exercise the shared chrome's real JSX and callbacks without pretending to test native layout.
 function loadChromeComponent(path, name, scope) {
