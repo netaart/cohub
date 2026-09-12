@@ -24,7 +24,7 @@ import { DEFAULT_SESSION_FILTER_MINUTES, getSessionStatus, hasMoreRecentSessions
 import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-queue.ts";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
-import { markdownBlockSignature, parseInlineMarkdown, parseMarkdown } from "../src/data/markdown.ts";
+import { markdownBlockSignature, markdownInlineText, markdownMedia, parseInlineMarkdown, parseMarkdown } from "../src/data/markdown.ts";
 import { splitStreamingMarkdown } from "../src/data/stream-markdown.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
@@ -339,6 +339,8 @@ const bubbleScope = {
   useRevealedStreamText: (text) => ({ text, fadeTail: 0 }),
   StreamingMarkdownCache: class { hasStreamed = false; update(text) { return { entries: bubbleEntries(text), tail: "" }; } },
   parseMarkdownEntries: bubbleEntries,
+  markdownMedia,
+  MarkdownVideo: "MarkdownVideo",
   typography: { chatBody: { fontSize: 15 } },
   scaleFontSize: (size) => size,
   BubbleContentWidth: null,
@@ -366,7 +368,7 @@ for (let length = 1; length <= streamedFooterSample.length; length++) {
   const content = [{ type: "thinking", thinking: "Earlier thought." }, { type: "text", text: streamedFooterSample.slice(0, length) }];
   assert.deepEqual(footerPlacements(bubbleRender({ content, active: true, footer: footerMarker }), footerMarker), ["timestamp"], `append ${length} must not remeasure inline metadata`);
 }
-for (const text of ["```ts\nconst x = 1;\n```", "| A | B |\n| --- | --- |\n| 1 | 2 |"])
+for (const text of ["---", "https://example.com/a.mp4", "![image](https://example.com/image)", "```ts\nconst x = 1;\n```", "| A | B |\n| --- | --- |\n| 1 | 2 |"])
   assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], footer: footerMarker }), footerMarker), ["timestamp"], "framed content has an external footer row");
 const bubbleImage = { type: "image", source: { type: "url", url: "fixture://image" } };
 assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage], footer: footerMarker }), footerMarker), ["timestamp"]);
@@ -1456,13 +1458,21 @@ assert.deepEqual(unclosedCode[1], { type: "code", language: "ts", code: "const x
 assert.deepEqual(parseMarkdown("```ts\nconst x = 1\n```")[0], { type: "code", language: "ts", code: "const x = 1", closed: true });
 assert.deepEqual(parseInlineMarkdown("a **b** _c_ `d` [e](https://f)"), [
   { type: "text", value: "a " },
-  { type: "strong", value: "b" },
+  { type: "strong", value: "b", children: [{ type: "text", value: "b" }] },
   { type: "text", value: " " },
-  { type: "emphasis", value: "c" },
+  { type: "emphasis", value: "c", children: [{ type: "text", value: "c" }] },
   { type: "text", value: " " },
   { type: "code", value: "d" },
   { type: "text", value: " " },
-  { type: "link", url: "https://f", value: "e" },
+  { type: "link", url: "https://f", value: "e", children: [{ type: "text", value: "e" }] },
+]);
+assert.deepEqual(parseInlineMarkdown("**[open](https://example.com)**"), [
+  { type: "strong", value: "[open](https://example.com)", children: [{ type: "link", url: "https://example.com", value: "open", children: [{ type: "text", value: "open" }] }] },
+]);
+assert.deepEqual(parseMarkdown("before\n\n---\n\nafter").map((block) => block.type), ["paragraph", "rule", "paragraph"]);
+assert.deepEqual(parseInlineMarkdown("HTTPS://example.com/image.png?x=1."), [
+  { type: "link", url: "HTTPS://example.com/image.png?x=1", value: "HTTPS://example.com/image.png?x=1", children: [{ type: "text", value: "HTTPS://example.com/image.png?x=1" }] },
+  { type: "text", value: "." },
 ]);
 // Message-specific link families: Space/Skill mentions, image syntax pointing at sandbox paths, cohub:// links.
 assert.deepEqual(parseInlineMarkdown("@[design-skill](cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23) help"), [
@@ -1475,13 +1485,37 @@ assert.deepEqual(parseInlineMarkdown("see ![Contact Sheet](/workspace/out/sheet.
   { type: "text", value: " now" },
 ]);
 assert.deepEqual(parseInlineMarkdown("[open](cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f)"), [
-  { type: "link", url: "cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f", value: "open" },
+  { type: "link", url: "cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f", value: "open", children: [{ type: "text", value: "open" }] },
 ]);
 // A bare `[x](y)` with an unsupported scheme stays text, and a later valid link on the same line is still found.
 assert.deepEqual(parseInlineMarkdown("[a](ftp://x) [b](https://y)"), [
   { type: "text", value: "[a](ftp://x) " },
-  { type: "link", url: "https://y", value: "b" },
+  { type: "link", url: "https://y", value: "b", children: [{ type: "text", value: "b" }] },
 ]);
+
+for (const marker of ["---", "***", "___", "* * *", "- - -", "_ _ _"]) {
+  assert.deepEqual(parseMarkdown(marker), [{ type: "rule" }]);
+}
+assert.equal(parseMarkdown("```\n---\n```")[0].type, "code");
+assert.deepEqual(parseInlineMarkdown("`https://example.com`"), [{ type: "code", value: "https://example.com" }]);
+assert.equal(parseInlineMarkdown("<https://example.com>")[0].url, "https://example.com");
+assert.equal(parseInlineMarkdown("(https://example.com/a_(b)).")[1].url, "https://example.com/a_(b)");
+assert.equal(parseInlineMarkdown("https://example.com，next")[0].url, "https://example.com");
+assert.equal(markdownInlineText(parseInlineMarkdown("[**open**](https://example.com)")[0]), "open");
+assert.equal(markdownInlineText(parseInlineMarkdown("**[open](https://example.com)**")[0]), "open");
+const mediaSource = "**[image](https://example.com/a.PNG?token=x)** ![remote](https://example.com/image) https://example.com/a.mp4#t=1 https://example.com/a.PNG?token=x";
+assert.deepEqual(markdownMedia(parseMarkdown(mediaSource)[0]), [
+  { type: "image", url: "https://example.com/a.PNG?token=x" },
+  { type: "image", url: "https://example.com/image" },
+  { type: "video", url: "https://example.com/a.mp4#t=1" },
+]);
+assert.deepEqual(markdownMedia(parseMarkdown("`https://example.com/a.png` [file](/workspace/a.png) [page](https://example.com/page.html) ![unsafe](data:image/png;base64,abc)")[0]), []);
+const mediaStream = `${mediaSource}\n\n---\n\nhttps://example.com/b.webm`;
+for (let length = 1; length <= mediaStream.length; length += 1) {
+  const source = mediaStream.slice(0, length);
+  const split = splitStreamingMarkdown(source);
+  assert.deepEqual([...parseMarkdown(split.stable), ...parseMarkdown(split.tail)], parseMarkdown(source));
+}
 
 assert.deepEqual(resolveMessageLink("cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23"), { kind: "space", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23" });
 assert.deepEqual(resolveMessageLink("cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f"), { kind: "session", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23", sessionId: "81816f3f-02fa-4b71-b775-ba64a5759c8f" });

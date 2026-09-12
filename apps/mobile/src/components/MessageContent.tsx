@@ -12,7 +12,8 @@ import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
 import Reanimated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming, type SharedValue } from "react-native-reanimated";
 import { formatMessageClock } from "@/src/data/chat-format";
 import { setImageViewerPayload } from "@/src/data/image-viewer";
-import type { MarkdownBlock, MarkdownInline, MarkdownTableAlignment } from "@/src/data/markdown";
+import { markdownInlineText, markdownMedia, type MarkdownBlock, type MarkdownInline, type MarkdownTableAlignment } from "@/src/data/markdown";
+import { WebView } from "react-native-webview";
 import { graphemeLength, splitGraphemes } from "@/src/data/stream-reveal";
 import { parseMarkdownEntries, StreamingMarkdownCache, type MarkdownBlockEntry } from "@/src/data/stream-markdown-cache";
 import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
@@ -86,12 +87,14 @@ function InlineNodes({ nodes, accent, color, fadeTail = 0 }: { nodes: MarkdownIn
   let total = 0;
   const starts = fadeTail > 0 ? nodes.map((node) => {
     const start = total;
-    total += graphemeLength(node.value);
+    total += graphemeLength(markdownInlineText(node));
     return start;
   }) : null;
   const fadeFrom = total - Math.min(fadeTail, total);
   return <>{nodes.map((node, index) => {
     const start = starts?.[index] ?? 0;
+    const length = graphemeLength(markdownInlineText(node));
+    const childFade = fadeTail > 0 ? Math.min(length, Math.max(0, start + length - fadeFrom)) : 0;
     if (node.type === "text") {
       if (fadeTail === 0) return node.value;
       return <Text key={`text-${index}`} style={{ color }}>{fadedValue(node.value, start, fadeFrom, { color }, `text-${index}`)}</Text>;
@@ -110,11 +113,33 @@ function InlineNodes({ nodes, accent, color, fadeTail = 0 }: { nodes: MarkdownIn
     }
     if (node.type === "link") {
       const style = { color: accent, textDecorationLine: "underline" as const };
-      return <Text key={`link-${index}`} style={style} onPress={() => openLink(node.url)}>{fadedValue(node.value, start, fadeFrom, style, `link-${index}`)}</Text>;
+      return <Text key={`link-${index}`} style={style} onPress={() => openLink(node.url)}><InlineNodes nodes={node.children} accent={accent} color={accent} fadeTail={childFade} /></Text>;
     }
     const style = node.type === "strong" ? { fontWeight: "700" as const, color } : { fontStyle: "italic" as const, color };
-    return <Text key={`${node.type}-${index}`} style={style}>{fadedValue(node.value, start, fadeFrom, style, `${node.type}-${index}`)}</Text>;
+    return <Text key={`${node.type}-${index}`} style={style}><InlineNodes nodes={node.children} accent={accent} color={color} fadeTail={childFade} /></Text>;
   })}</>;
+}
+
+function MarkdownVideo({ url }: { url: string }) {
+  const theme = useAppTheme();
+  const width = useContext(BubbleContentWidth);
+  const src = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; media-src http: https:; style-src 'unsafe-inline'"><style>html,body{margin:0;height:100%;background:transparent}video{width:100%;height:100%;object-fit:contain}</style></head><body><video controls playsinline preload="metadata" src="${src}"></video></body></html>`;
+  return <View style={{ width, aspectRatio: 16 / 9, backgroundColor: theme.colors.surfaceRaised, borderRadius: 8, overflow: "hidden" }}>
+    <WebView
+      source={{ html }}
+      style={{ flex: 1, backgroundColor: "transparent" }}
+      originWhitelist={["about:blank"]}
+      onShouldStartLoadWithRequest={(request) => request.url === "about:blank"}
+      javaScriptEnabled={false}
+      domStorageEnabled={false}
+      allowFileAccess={false}
+      allowsInlineMediaPlayback
+      allowsFullscreenVideo
+      mediaPlaybackRequiresUserAction
+      scrollEnabled={false}
+    />
+  </View>;
 }
 
 function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignments: MarkdownTableAlignment[]; header: MarkdownInline[][]; rows: MarkdownInline[][][]; accent: string; textColor: string }) {
@@ -144,6 +169,10 @@ function MarkdownBlockView({ block, accent, textColor, fadeTail = 0, footer }: {
   const theme = useAppTheme();
   const contentWidth = useContext(BubbleContentWidth);
   const measurementKey = JSON.stringify([block, typography.chatBody.fontSize]);
+  if (block.type === "rule") return <View style={{ width: contentWidth, minWidth: 0, paddingVertical: 4 }}>
+    <View style={{ height: 1, backgroundColor: textColor, opacity: 0.3 }} />
+    {footer ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}
+  </View>;
   if (block.type === "code" || block.type === "table") return <View style={{ width: contentWidth, minWidth: 0 }}>
     {block.type === "code" ? <CodeBlock code={block.code} language={block.language} streaming={!block.closed} /> : <MarkdownTable alignments={block.alignments} header={block.header} rows={block.rows} accent={accent} textColor={textColor} />}
     {footer ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}
@@ -165,7 +194,16 @@ function MarkdownBlockView({ block, accent, textColor, fadeTail = 0, footer }: {
 // memo skips them; the growing tail block carries the fade window.
 const MemoBlock = memo(
   function MemoBlock(props: { block: MarkdownBlock; signature: string; accent: string; textColor: string; fadeTail: number; footer?: ReactNode }) {
-    return <MarkdownBlockView block={props.block} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} footer={props.footer} />;
+    const contentWidth = useContext(BubbleContentWidth);
+    const media = useMemo(() => markdownMedia(props.block), [props.block]);
+    if (media.length === 0) return <MarkdownBlockView block={props.block} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} footer={props.footer} />;
+    return <View style={{ gap: 9, minWidth: 0 }}>
+      <MarkdownBlockView block={props.block} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} />
+      {media.map((item) => item.type === "image"
+        ? <ImageGallery key={item.url} uris={[item.url]} maxWidth={contentWidth} />
+        : <MarkdownVideo key={item.url} url={item.url} />)}
+      {props.footer ? <View style={{ alignSelf: "flex-end" }}>{props.footer}</View> : null}
+    </View>;
   },
   (previous, next) => previous.signature === next.signature && previous.accent === next.accent && previous.textColor === next.textColor && previous.fadeTail === next.fadeTail && previous.footer === next.footer,
 );

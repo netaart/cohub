@@ -1,15 +1,16 @@
 export type MarkdownInline =
   | { type: "text"; value: string }
-  | { type: "strong"; value: string }
-  | { type: "emphasis"; value: string }
+  | { type: "strong"; value: string; children: MarkdownInline[] }
+  | { type: "emphasis"; value: string; children: MarkdownInline[] }
   | { type: "code"; value: string }
-  | { type: "link"; url: string; value: string }
+  | { type: "link"; url: string; value: string; children: MarkdownInline[] }
   | { type: "image"; url: string; value: string }
   | { type: "mention"; url: string; value: string };
 
 export type MarkdownTableAlignment = "left" | "center" | "right" | null;
 
 export type MarkdownBlock =
+  | { type: "rule" }
   | { type: "paragraph"; inlines: MarkdownInline[] }
   | { type: "heading"; level: number; inlines: MarkdownInline[] }
   | { type: "quote"; inlines: MarkdownInline[] }
@@ -63,15 +64,22 @@ function findInlineLink(value: string, startAt: number): InlineSpan | null {
     const labelEnd = value.indexOf("](", start + 1);
     if (labelEnd < 0) return null;
     const urlStart = labelEnd + 2;
-    const urlEnd = value.indexOf(")", urlStart);
-    if (urlEnd < 0) return null;
+    let urlEnd = urlStart;
+    let depth = 1;
+    for (; urlEnd < value.length; urlEnd += 1) {
+      if (value[urlEnd - 1] === "\\") continue;
+      if (value[urlEnd] === "(") depth += 1;
+      if (value[urlEnd] === ")") depth -= 1;
+      if (depth === 0) break;
+    }
+    if (depth !== 0) return null;
     const url = value.slice(urlStart, urlEnd).trim();
     const content = value.slice(start + 1, labelEnd);
     // `@[label](cohub://…)` is a Space/Skill mention; `![alt](url)` is an image. Both share the link syntax.
     const prefix = value[start - 1];
     const isMention = prefix === "@" && url.startsWith("cohub://");
     const isImage = prefix === "!" && /^(https?:\/\/|\/|data:image\/)/.test(url);
-    const isLink = /^(https?:\/\/|\/|cohub:\/\/)/.test(url) && !findInlineEmphasis(content, 0);
+    const isLink = /^(https?:\/\/|\/|cohub:\/\/)/.test(url);
     if (isMention) return { start: start - 1, end: urlEnd + 1, content, kind: "mention", url };
     if (isImage) return { start: start - 1, end: urlEnd + 1, content, kind: "image", url };
     if (isLink) return { start, end: urlEnd + 1, content, kind: "link", url };
@@ -115,6 +123,26 @@ function findInlineEmphasis(value: string, startAt: number): InlineSpan | null {
   return null;
 }
 
+function findAutoLink(value: string, startAt: number): InlineSpan | null {
+  const pattern = /https?:\/\/[^\s<>"`*\[\]，。！？；：、]+/gi;
+  pattern.lastIndex = startAt;
+  for (let match = pattern.exec(value); match; match = pattern.exec(value)) {
+    const start = match.index;
+    if (start > 0 && /[\w/@]/.test(value[start - 1]!)) continue;
+    let url = match[0].replace(/[.,!?;:]+$/, "");
+    while (url.endsWith(")") && url.split(")").length > url.split("(").length) url = url.slice(0, -1);
+    url = url.replace(/[.,!?;:]+$/, "");
+    try {
+      if (!new URL(url).hostname) continue;
+    } catch {
+      continue;
+    }
+    const bracketed = value[start - 1] === "<" && value[start + url.length] === ">";
+    return { start: bracketed ? start - 1 : start, end: start + url.length + (bracketed ? 1 : 0), content: url, kind: "link", url };
+  }
+  return null;
+}
+
 function earliestSpan(spans: (InlineSpan | null)[]) {
   let next: InlineSpan | null = null;
   for (const span of spans) {
@@ -124,7 +152,7 @@ function earliestSpan(spans: (InlineSpan | null)[]) {
   return next;
 }
 
-export function parseInlineMarkdown(value: string): MarkdownInline[] {
+export function parseInlineMarkdown(value: string, links = true): MarkdownInline[] {
   const nodes: MarkdownInline[] = [];
   let text = "";
   let cursor = 0;
@@ -137,14 +165,16 @@ export function parseInlineMarkdown(value: string): MarkdownInline[] {
 
   while (cursor < value.length) {
     // Code spans win ties against emphasis/link markers starting at the same offset.
-    const next = earliestSpan([findInlineCode(value, cursor), findInlineEmphasis(value, cursor), findInlineLink(value, cursor)]);
+    const next = earliestSpan([findInlineCode(value, cursor), findInlineEmphasis(value, cursor), links ? findInlineLink(value, cursor) : null, links ? findAutoLink(value, cursor) : null]);
     if (!next) {
       text += value.slice(cursor);
       break;
     }
     if (next.start > cursor) text += value.slice(cursor, next.start);
     flushText();
-    if (next.kind === "link" || next.kind === "image" || next.kind === "mention") nodes.push({ type: next.kind, url: next.url ?? "", value: next.content });
+    if (next.kind === "link") nodes.push({ type: "link", url: next.url!, value: next.content, children: next.content === next.url ? [{ type: "text", value: next.content }] : parseInlineMarkdown(next.content, false) });
+    else if (next.kind === "image" || next.kind === "mention") nodes.push({ type: next.kind, url: next.url!, value: next.content });
+    else if (next.kind === "strong" || next.kind === "emphasis") nodes.push({ type: next.kind, value: next.content, children: parseInlineMarkdown(next.content, links) });
     else nodes.push({ type: next.kind, value: next.content });
     cursor = next.end;
   }
@@ -228,6 +258,13 @@ export function parseMarkdown(value: string): MarkdownBlock[] {
       continue;
     }
 
+    if (/^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/.test(line)) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "rule" });
+      continue;
+    }
+
     const heading = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
       flushParagraph();
@@ -259,7 +296,7 @@ export function parseMarkdown(value: string): MarkdownBlock[] {
           rows.push(alignments.map((_, cellIndex) => parseInlineMarkdown(cells[cellIndex] ?? "")));
           cursor += 1;
         }
-        blocks.push({ type: "table", alignments, header: headerCells.map(parseInlineMarkdown), rows });
+        blocks.push({ type: "table", alignments, header: headerCells.map((cell) => parseInlineMarkdown(cell)), rows });
         index = cursor - 1;
         continue;
       }
@@ -291,11 +328,41 @@ export function parseMarkdown(value: string): MarkdownBlock[] {
   return blocks;
 }
 
-/**
- * Stable identity for a parsed block. Streaming re-parses the whole message on
- * every patch, so renderers memoize per block and only the growing tail block
- * sees a new signature.
- */
+export type MarkdownMedia = { type: "image" | "video"; url: string };
+
+export function markdownMedia(block: MarkdownBlock): MarkdownMedia[] {
+  const media = new Map<string, MarkdownMedia>();
+  const visit = (nodes: MarkdownInline[]) => {
+    for (const node of nodes) {
+      if (node.type === "strong" || node.type === "emphasis") {
+        visit(node.children);
+        continue;
+      }
+      if (node.type !== "link" && node.type !== "image") continue;
+      let url: URL;
+      try {
+        url = new URL(node.url);
+      } catch {
+        continue;
+      }
+      if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+      const extension = url.pathname.split(".").pop()?.toLowerCase();
+      const type = ["m4v", "mov", "mp4", "ogv", "webm"].includes(extension ?? "") ? "video"
+        : node.type === "image" || ["png", "jpg", "jpeg", "gif", "webp", "avif"].includes(extension ?? "") ? "image" : null;
+      if (type) media.set(node.url, { type, url: node.url });
+    }
+  };
+  if ("inlines" in block) visit(block.inlines);
+  else if (block.type === "list") block.items.forEach(visit);
+  else if (block.type === "table") [block.header, ...block.rows].forEach((row) => row.forEach(visit));
+  return [...media.values()];
+}
+
+export function markdownInlineText(node: MarkdownInline): string {
+  return "children" in node ? node.children.map(markdownInlineText).join("") : node.value;
+}
+
+/** Stable identity lets streaming renderers memoize completed blocks. */
 export function markdownBlockSignature(block: MarkdownBlock) {
   return JSON.stringify(block);
 }
