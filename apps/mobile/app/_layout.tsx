@@ -141,7 +141,6 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
             <Stack.Screen name="work/[appId]" />
             <Stack.Screen name="image-viewer" options={{ contentStyle: { backgroundColor: "#000000" } }} />
             <Stack.Screen name="new-chat" options={{ title: t("route.newChat"), presentation: "modal", animation: "slide_from_bottom" }} />
-            <Stack.Screen name="profile" options={{ title: t("route.profile") }} />
             <Stack.Screen name="settings" options={{ title: t("route.settings") }} />
             <Stack.Screen name="appearance" options={{ title: t("route.appearance") }} />
             <Stack.Screen name="language" options={{ title: t("route.language") }} />

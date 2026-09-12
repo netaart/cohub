@@ -1,16 +1,16 @@
 import * as ImagePicker from "expo-image-picker";
+import * as Clipboard from "expo-clipboard";
 import { File as ExpoFile } from "expo-file-system";
 import type {
 	BillingCatalog,
 	BillingCreditStatus,
 	Channel,
 	CohubClient,
-	ReferralDashboard,
 	UserActivityResponse,
 	UserProfile,
-	UserRulesResponse,
 } from "@neta-art/cohub";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
@@ -26,10 +26,14 @@ import {
 } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { ChatFilterSettings } from "@/src/components/ChatFilterSettings";
+import { ChannelBindingSheet } from "@/src/components/ChannelBindingSheet";
+import { channelHealthState } from "@/src/data/channel-settings";
+import { useUserRules } from "@/src/data/use-user-rules";
+import { useReferrals } from "@/src/data/use-referrals";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { useApp } from "@/src/data/context";
-import { useTranslation, type TranslationKey } from "@/src/i18n";
-import { getInstalledAppVersion } from "@/src/platform/app-updates";
+import { useTranslation } from "@/src/i18n";
+import { settingsSections, type SettingsSection } from "@/src/data/settings-navigation";
 import {
 	registerForPushNotifications,
 	type PushRegistrationResult,
@@ -48,155 +52,33 @@ import {
 } from "@/src/ui";
 import { formatNumber, formatRelativeTime } from "@/src/utils";
 
-type SettingsSection =
-	| "profile"
-	| "chats"
-	| "activity"
-	| "notifications"
-	| "rules"
-	| "channels"
-	| "billing"
-	| "referrals";
-
 type ProfileState = {
 	profile: UserProfile | null;
 	email: string | null;
 	uuid: string;
 };
 
-type SettingsScreenProps = {
-	initialSection?: SettingsSection;
-};
-
-const sections: {
-	id: SettingsSection;
-	labelKey: TranslationKey;
-	icon: React.ComponentProps<typeof AppIcon>["name"];
-}[] = [
-	{ id: "profile", labelKey: "settings.section.profile", icon: "user" },
-	{ id: "chats", labelKey: "settings.section.chats", icon: "messages" },
-	{ id: "activity", labelKey: "settings.section.activity", icon: "activity" },
-	{ id: "notifications", labelKey: "settings.section.notifications", icon: "bell" },
-	{ id: "rules", labelKey: "settings.section.rules", icon: "file-text" },
-	{ id: "channels", labelKey: "settings.section.channels", icon: "messages" },
-	{ id: "billing", labelKey: "settings.section.billing", icon: "database" },
-	{ id: "referrals", labelKey: "settings.section.referrals", icon: "share" },
-];
-
-export function SettingsScreen({
-	initialSection = "profile",
-}: SettingsScreenProps) {
+export function SettingsScreen({ section }: { section: SettingsSection }) {
 	const router = useRouter();
 	const theme = useAppTheme();
 	const { t } = useTranslation();
-	const { client, installationId, clearCache, getAccessToken } = useApp();
-	const [section, setSection] = useState<SettingsSection>(initialSection);
+	const insets = useSafeAreaInsets();
+	const { client, installationId, getAccessToken } = useApp();
 	const [notice, setNotice] = useState<{
 		title: string;
 		message: string;
 	} | null>(null);
-	const [signOutOpen, setSignOutOpen] = useState(false);
-	const [signingOut, setSigningOut] = useState(false);
-	const { signOut } = useProfileSession();
-
-	const closeSignOut = () => {
-		if (!signingOut) setSignOutOpen(false);
-	};
-
-	const confirmSignOut = async () => {
-		if (signingOut) return;
-		setSigningOut(true);
-		try {
-			try {
-				await clearCache();
-			} catch (error) {
-				setNotice({
-					title: t("settings.signOut.cacheIncomplete.title"),
-					message:
-						error instanceof Error
-							? t("settings.signOut.cacheIncomplete.body", { error: error.message })
-							: t("settings.signOut.cacheIncomplete.fallback"),
-				});
-			}
-			await signOut();
-			setSignOutOpen(false);
-		} catch (error) {
-			setNotice({
-				title: t("settings.signOut.failed.title"),
-				message: error instanceof Error ? error.message : t("settings.signOut.failed.body"),
-			});
-		} finally {
-			setSigningOut(false);
-		}
-	};
 
 	return (
-		<Screen keyboard={section === "chats"}>
-				<TopBar
-					title={t("settings.title")}
-					onBack={() => router.back()}
-				/>
-			<ScrollView
-				horizontal
-				showsHorizontalScrollIndicator={false}
-				style={{
-					height: 56,
-					flexGrow: 0,
-				}}
-				contentContainerStyle={{
-					paddingHorizontal: 12,
-					alignItems: "center",
-					gap: 7,
-				}}
-			>
-				{sections.map((item) => {
-					const active = section === item.id;
-					const label = t(item.labelKey);
-					return (
-						<Pressable
-							key={item.id}
-							accessibilityRole="tab"
-							accessibilityState={{ selected: active }}
-							accessibilityLabel={label}
-							onPress={() => setSection(item.id)}
-							style={({ pressed }) => ({
-								minHeight: 44,
-								paddingHorizontal: 11,
-								borderRadius: 9,
-								flexDirection: "row",
-								alignItems: "center",
-								gap: 6,
-								backgroundColor: active
-									? theme.colors.accentSoft
-									: pressed
-										? theme.colors.surfacePressed
-										: "transparent",
-							})}
-						>
-							<AppIcon
-								name={item.icon}
-								size={14}
-								color={active ? theme.colors.accent : theme.colors.textMuted}
-							/>
-							<Text
-								style={[
-									typography.caption,
-									{
-										color: active
-											? theme.colors.accent
-											: theme.colors.textMuted,
-									},
-								]}
-							>
-								{label}
-							</Text>
-						</Pressable>
-					);
-				})}
-			</ScrollView>
+		<Screen keyboard>
+			<TopBar
+				title={t(settingsSections[section].labelKey)}
+				onBack={() => router.back()}
+				actions={section === "channels" ? <IconButton name="plus" label={t("settings.channels.add")} onPress={() => router.push("/settings/new-channel")} /> : undefined}
+			/>
 			<ScrollView
 				style={{ flex: 1 }}
-				contentContainerStyle={{ paddingBottom: 34 }}
+				contentContainerStyle={{ paddingBottom: insets.bottom + theme.spacing.xl }}
 				keyboardShouldPersistTaps="handled"
 			>
 				{section === "profile" ? (
@@ -212,7 +94,7 @@ export function SettingsScreen({
 						onNotice={setNotice}
 					/>
 				) : null}
-				{section === "rules" ? <RulesSection client={client} /> : null}
+				{section === "rules" ? <RulesSection /> : null}
 				{section === "channels" ? (
 					<ChannelsSection client={client} onNotice={setNotice} />
 				) : null}
@@ -222,42 +104,6 @@ export function SettingsScreen({
 				{section === "referrals" ? (
 					<ReferralsSection client={client} onNotice={setNotice} />
 				) : null}
-				<View style={{ paddingHorizontal: 16, paddingTop: 30 }}>
-					<Pressable
-						accessibilityRole="button"
-						accessibilityLabel={t("settings.signOut.action")}
-						onPress={() => setSignOutOpen(true)}
-						style={({ pressed }) => ({
-							minHeight: 48,
-							borderWidth: 1,
-							borderColor: theme.colors.danger,
-							borderRadius: 12,
-							alignItems: "center",
-							justifyContent: "center",
-							backgroundColor: pressed
-								? theme.colors.dangerSoft
-								: "transparent",
-						})}
-					>
-						<Text
-							style={[typography.bodyMedium, { color: theme.colors.danger }]}
-						>
-							{signingOut ? t("settings.signOut.signingOut") : t("settings.signOut.action")}
-						</Text>
-					</Pressable>
-					<Text
-						style={[
-							typography.micro,
-							{
-								color: theme.colors.textFaint,
-								textAlign: "center",
-								marginTop: 18,
-							},
-						]}
-					>
-						Cohub Mobile · {getInstalledAppVersion()}
-					</Text>
-				</View>
 			</ScrollView>
 			<AdaptiveSheet
 				visible={notice !== null}
@@ -279,81 +125,7 @@ export function SettingsScreen({
 					{notice?.message ?? ""}
 				</Text>
 			</AdaptiveSheet>
-			<AdaptiveSheet
-				visible={signOutOpen}
-				title={t("settings.signOut.title")}
-				subtitle={t("settings.signOut.subtitle")}
-				onClose={closeSignOut}
-				dismissible={!signingOut}
-				scrollable={false}
-				testID="settings-sign-out-sheet"
-				footer={
-					<View
-						style={{
-							flexDirection: "row",
-							justifyContent: "flex-end",
-							gap: 10,
-						}}
-					>
-						<Pressable
-							disabled={signingOut}
-							onPress={closeSignOut}
-							style={{
-								minHeight: 46,
-								paddingHorizontal: 15,
-								justifyContent: "center",
-							}}
-						>
-							<Text
-								style={[
-									typography.bodyMedium,
-									{ color: theme.colors.textSecondary },
-								]}
-							>
-								{t("common.cancel")}
-							</Text>
-						</Pressable>
-						<PrimaryButton
-							label={t("common.signOut")}
-							icon="arrow-right"
-							tone="danger"
-							loading={signingOut}
-							onPress={() => void confirmSignOut()}
-							style={{ minHeight: 46, paddingHorizontal: 16 }}
-						/>
-					</View>
-				}
-			>
-				<Text style={[typography.body, { color: theme.colors.textSecondary }]}>
-					{t("settings.signOut.body")}
-				</Text>
-			</AdaptiveSheet>
 		</Screen>
-	);
-}
-
-function SettingsIntro({
-	title,
-	description,
-}: {
-	title: string;
-	description: string;
-}) {
-	const theme = useAppTheme();
-	return (
-		<View style={{ paddingHorizontal: 16, paddingTop: 22, paddingBottom: 8 }}>
-			<Text style={[typography.title, { color: theme.colors.text }]}>
-				{title}
-			</Text>
-			<Text
-				style={[
-					typography.body,
-					{ color: theme.colors.textMuted, marginTop: 6, maxWidth: 520 },
-				]}
-			>
-				{description}
-			</Text>
-		</View>
 	);
 }
 
@@ -362,13 +134,11 @@ function SettingsGroup({ children }: { children: ReactNode }) {
 	return (
 		<View
 			style={{
-				marginHorizontal: 16,
-				marginTop: 13,
-				borderWidth: 1,
+				marginTop: theme.spacing.md,
+				borderTopWidth: 1,
+				borderBottomWidth: 1,
 				borderColor: theme.colors.border,
-				borderRadius: 14,
 				backgroundColor: theme.colors.surface,
-				overflow: "hidden",
 			}}
 		>
 			{children}
@@ -599,10 +369,6 @@ function ProfileSection({
 
 	return (
 		<View>
-			<SettingsIntro
-				title={t("settings.profile.intro.title")}
-				description={t("settings.profile.intro.body")}
-			/>
 			{loading ? (
 				<LoadingBlock />
 			) : error ? (
@@ -796,10 +562,6 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 	const summary = data?.summary;
 	return (
 		<View>
-			<SettingsIntro
-				title={t("settings.activity.intro.title")}
-				description={t("settings.activity.intro.body")}
-			/>
 			<View
 				style={{
 					flexDirection: "row",
@@ -1001,10 +763,6 @@ function NotificationsSection({
 				: t("settings.notifications.status.notConfigured");
 	return (
 		<View>
-			<SettingsIntro
-				title={t("settings.notifications.intro.title")}
-				description={t("settings.notifications.intro.body")}
-			/>
 			<SettingsGroup>
 				<SettingsRow
 					icon="bell"
@@ -1085,39 +843,13 @@ function NotificationsSection({
 	);
 }
 
-function RulesSection({ client }: { client: CohubClient | null }) {
+function RulesSection() {
 	const theme = useAppTheme();
 	const { t } = useTranslation();
-	const [data, setData] = useState<UserRulesResponse | null>(null);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-	const load = useCallback(async () => {
-		if (!client) {
-			setLoading(false);
-			setError(t("settings.rules.connect"));
-			return;
-		}
-		setLoading(true);
-		setError(null);
-		try {
-			setData(await client.user.getRules());
-		} catch (caught) {
-			setError(
-				caught instanceof Error ? caught.message : t("settings.rules.error"),
-			);
-		} finally {
-			setLoading(false);
-		}
-	}, [client, t]);
-	useEffect(() => {
-		void Promise.resolve().then(() => load());
-	}, [load]);
+	const router = useRouter();
+	const { data, configSpace, loading, creating, error, load, openConfig } = useUserRules();
 	return (
 		<View>
-			<SettingsIntro
-				title={t("settings.rules.intro.title")}
-				description={t("settings.rules.intro.body")}
-			/>
 			{loading ? (
 				<LoadingBlock />
 			) : error ? (
@@ -1162,6 +894,7 @@ function RulesSection({ client }: { client: CohubClient | null }) {
 								{data?.content?.trim() || t("settings.rules.none")}
 							</Text>
 						</ScrollView>
+						<PrimaryButton label={t(configSpace ? "settings.rules.openConfig" : "settings.rules.createConfig")} icon={configSpace ? "arrow-right" : "plus"} loading={creating} style={{ marginTop: theme.spacing.lg }} onPress={() => void openConfig().then((space) => { if (space) router.push({ pathname: "/space/[spaceId]", params: { spaceId: space.id } }); })} />
 					</View>
 				</SettingsGroup>
 			)}
@@ -1178,6 +911,8 @@ function ChannelsSection({
 }) {
 	const theme = useAppTheme();
 	const { t } = useTranslation();
+	const router = useRouter();
+	const [bindingChannel, setBindingChannel] = useState<Channel | null>(null);
 	const [channels, setChannels] = useState<Channel[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -1201,9 +936,9 @@ function ChannelsSection({
 			setLoading(false);
 		}
 	}, [client, t]);
-	useEffect(() => {
-		void Promise.resolve().then(() => load());
-	}, [load]);
+	useFocusEffect(useCallback(() => {
+		void load();
+	}, [load]));
 	const confirmRemove = async () => {
 		if (!client || !removeCandidate || removeCandidate.boundSpace || removing)
 			return;
@@ -1228,10 +963,10 @@ function ChannelsSection({
 	};
 	return (
 		<View>
-			<SettingsIntro
-				title={t("settings.channels.intro.title")}
-				description={t("settings.channels.intro.body")}
-			/>
+			{bindingChannel ? <ChannelBindingSheet key={bindingChannel.id} channel={bindingChannel} onClose={() => setBindingChannel(null)} onChanged={() => { setBindingChannel(null); void load(); }} /> : null}
+			<View style={{ paddingHorizontal: theme.spacing.lg, alignItems: "flex-end" }}>
+				<IconButton name="refresh" label={t("common.refresh")} disabled={loading} onPress={() => void load()} />
+			</View>
 			{loading ? (
 				<LoadingBlock />
 			) : error ? (
@@ -1240,7 +975,7 @@ function ChannelsSection({
 				<EmptyState
 					icon="messages"
 					title={t("settings.channels.empty.title")}
-					description={t("settings.channels.empty.body")}
+					action={{ icon: "plus", label: t("settings.channels.add"), onPress: () => router.push("/settings/new-channel") }}
 				/>
 			) : (
 				<>
@@ -1275,7 +1010,7 @@ function ChannelsSection({
 											height: 8,
 											borderRadius: 4,
 											backgroundColor:
-												channel.status === "active"
+												channelHealthState(channel) === "ready"
 													? theme.colors.success
 													: theme.colors.warning,
 										}}
@@ -1297,12 +1032,14 @@ function ChannelsSection({
 											{ color: theme.colors.textMuted, marginTop: 2 },
 										]}
 									>
-										{channel.provider} ·{" "}
-										{channel.boundSpace
-											? t("settings.channels.boundTo", { name: channel.boundSpace.title || channel.boundSpace.id.slice(0, 8) })
-											: t("settings.channels.notBound")}
+										{channel.provider} · {t(`settings.channels.health.${channelHealthState(channel)}`)}
 									</Text>
+									{channel.boundSpace ? <Pressable accessibilityRole="button" onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: channel.boundSpace!.id } })} style={({ pressed }) => ({ minHeight: 44, justifyContent: "center", opacity: pressed ? 0.6 : 1 })}>
+										<Text style={[typography.caption, { color: theme.colors.accent }]}>{t("settings.channels.boundTo", { name: channel.boundSpace.title || channel.boundSpace.id.slice(0, 8) })}</Text>
+									</Pressable> : null}
+									{channel.health?.message || channel.health?.detail ? <Text selectable style={[typography.caption, { color: theme.colors.textMuted }]}>{channel.health.message || channel.health.detail}</Text> : null}
 								</View>
+								<IconButton name="settings" label={t(channel.boundSpace ? "settings.channels.unbind" : "settings.channels.bind")} onPress={() => setBindingChannel(channel)} />
 								{!channel.boundSpace ? (
 									<IconButton
 										name="trash"
@@ -1311,9 +1048,7 @@ function ChannelsSection({
 										size={38}
 										onPress={() => setRemoveCandidate(channel)}
 									/>
-								) : (
-									<StatusPill label={t("settings.channels.bound")} tone="success" />
-								)}
+								) : null}
 							</View>
 						))}
 					</SettingsGroup>
@@ -1449,10 +1184,6 @@ function BillingSection({
 	};
 	return (
 		<View>
-			<SettingsIntro
-				title={t("settings.billing.intro.title")}
-				description={t("settings.billing.intro.body")}
-			/>
 			{loading ? (
 				<LoadingBlock />
 			) : error ? (
@@ -1484,7 +1215,7 @@ function BillingSection({
 					</SettingsGroup>
 					<SectionHeader title={t("settings.billing.plans")} />
 					<SettingsGroup>
-						{(catalog?.plans ?? []).slice(0, 8).map((plan) => (
+						{(catalog?.plans ?? []).map((plan) => (
 							<SettingsRow
 								key={plan.key}
 								icon="zap"
@@ -1519,7 +1250,7 @@ function BillingSection({
 						<>
 							<SectionHeader title={t("settings.billing.creditPackages")} />
 							<SettingsGroup>
-								{(catalog?.addons ?? []).slice(0, 8).map((addon) => (
+								{(catalog?.addons ?? []).map((addon) => (
 									<SettingsRow
 										key={addon.key}
 										icon="zap"
@@ -1557,30 +1288,8 @@ function ReferralsSection({
 }) {
 	const theme = useAppTheme();
 	const { t } = useTranslation();
-	const [data, setData] = useState<ReferralDashboard | null>(null);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-	const load = useCallback(async () => {
-		if (!client) {
-			setLoading(false);
-			setError(t("settings.referrals.connect"));
-			return;
-		}
-		setLoading(true);
-		setError(null);
-		try {
-			setData(await client.referrals.getMine());
-		} catch (caught) {
-			setError(
-				caught instanceof Error ? caught.message : t("settings.referrals.error"),
-			);
-		} finally {
-			setLoading(false);
-		}
-	}, [client, t]);
-	useEffect(() => {
-		void Promise.resolve().then(() => load());
-	}, [load]);
+	const { data, loading, rotating, error, load, rotate } = useReferrals(client);
+	const [rotateOpen, setRotateOpen] = useState(false);
 	const share = async () => {
 		if (!data) return;
 		const url = `https://cohub.live/referrals/${data.code}`;
@@ -1595,13 +1304,9 @@ function ReferralsSection({
 	};
 	return (
 		<View>
-			<SettingsIntro
-				title={t("settings.referrals.intro.title")}
-				description={t("settings.referrals.intro.body")}
-			/>
 			{loading ? (
 				<LoadingBlock />
-			) : error || !data ? (
+			) : !data ? (
 				<InlineError
 					message={error || t("settings.referrals.unavailable")}
 					onRetry={() => void load()}
@@ -1624,12 +1329,16 @@ function ReferralsSection({
 							>
 								https://cohub.live/referrals/{data.code}
 							</Text>
-							<PrimaryButton
-								label={t("settings.referrals.share")}
-								icon="share"
-								onPress={() => void share()}
-								style={{ marginTop: 14 }}
-							/>
+							<View style={{ flexDirection: "row", justifyContent: "flex-end", marginTop: theme.spacing.md }}>
+								<IconButton name="copy" label={t("settings.referrals.copy")} disabled={rotating} onPress={() => void Clipboard.setStringAsync(`https://cohub.live/referrals/${data.code}`).then(() => onNotice({ title: t("settings.referrals.copy"), message: t("settings.referrals.copied") })).catch((caught: unknown) => onNotice({ title: t("settings.referrals.copy"), message: caught instanceof Error ? caught.message : t("settings.referrals.error") }))} />
+								<IconButton name="share" label={t("settings.referrals.share")} disabled={rotating} onPress={() => void share()} />
+								<IconButton name="refresh" label={t("settings.referrals.rotate")} disabled={rotating} onPress={() => setRotateOpen(true)} />
+							</View>
+							{error && !rotateOpen ? <Text accessibilityRole="alert" style={[typography.caption, { color: theme.colors.danger }]}>{error}</Text> : null}
+							<AdaptiveSheet visible={rotateOpen} title={t("settings.referrals.rotate")} onClose={() => { if (!rotating) setRotateOpen(false); }} dismissible={!rotating} scrollable={false} footer={<PrimaryButton label={t("settings.referrals.rotate")} icon="refresh" tone="danger" loading={rotating} onPress={() => void rotate().then((ok) => { if (ok) setRotateOpen(false); })} />}>
+								<Text style={[typography.body, { color: theme.colors.text }]}>{t("settings.referrals.rotateConfirm")}</Text>
+								{error ? <Text accessibilityRole="alert" style={[typography.caption, { color: theme.colors.danger, marginTop: theme.spacing.md }]}>{error}</Text> : null}
+							</AdaptiveSheet>
 						</View>
 					</SettingsGroup>
 					<View
@@ -1653,7 +1362,7 @@ function ReferralsSection({
 					</View>
 					<SectionHeader title={t("settings.referrals.recent")} />
 					<SettingsGroup>
-						{data.items.slice(0, 12).map((item) => (
+						{data.items.map((item) => (
 							<SettingsRow
 								key={item.id}
 								icon="user"

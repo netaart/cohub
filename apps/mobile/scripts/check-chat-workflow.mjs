@@ -35,6 +35,107 @@ import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts
 import { forkSessionTurn } from "../src/data/session-fork.ts";
 import { resolveMessageLink } from "../src/data/message-links.ts";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
+import { isSettingsSection, settingsMenu } from "../src/data/settings-navigation.ts";
+import { channelHealthState, createSettingsChannel, createWeChatLoginPoller, isChannelProvider, missingChannelField } from "../src/data/channel-settings.ts";
+
+import { activityRange, localDateKey, tokenDays, taskOutputs, loadRecentWorks } from "../src/data/activity.ts";
+
+assert.equal(isSettingsSection("channels"), true);
+for (const invalid of [undefined, ["channels"], "constructor", "__proto__", "appearance"]) assert.equal(isSettingsSection(invalid), false);
+assert.equal(new Set(settingsMenu.map((item) => item.href)).size, settingsMenu.length);
+assert.ok(settingsMenu.some((item) => item.href === "/settings/storage"));
+assert.ok(settingsMenu.some((item) => item.href === "/settings/channels"));
+assert.ok(!readFileSync(new URL("../src/components/SettingsScreen.tsx", import.meta.url), "utf8").includes('accessibilityRole="tab"'));
+assert.ok(readFileSync(new URL("../src/components/AccountAvatar.tsx", import.meta.url), "utf8").includes('href="/settings"'));
+assert.equal(isChannelProvider("wechat"), true);
+for (const invalid of ["web", "unknown", ["discord"], undefined]) assert.equal(isChannelProvider(invalid), false);
+const channelDraft = { name: " My bot ", token: " token ", appId: " app ", secret: " secret ", brand: "lark" };
+assert.equal(missingChannelField("discord", { ...channelDraft, name: " " }), "name");
+assert.equal(missingChannelField("discord", { ...channelDraft, token: " " }), "token");
+assert.equal(missingChannelField("qq", { ...channelDraft, appId: " " }), "appId");
+assert.equal(missingChannelField("feishu", { ...channelDraft, secret: " " }), "secret");
+assert.equal(missingChannelField("wechat", { ...channelDraft, token: "", appId: "", secret: "" }), null);
+const channelCreates = [];
+const channelClient = { channels: { create: async (input) => channelCreates.push(input) } };
+for (const provider of ["discord", "feishu", "qq"]) await createSettingsChannel(channelClient, provider, channelDraft);
+assert.deepEqual(channelCreates, [
+  { provider: "discord", name: "My bot", credentials: { token: "token" } },
+  { provider: "feishu", name: "My bot", credentials: { appId: "app", appSecret: "secret", brand: "lark" } },
+  { provider: "qq", name: "My bot", credentials: { appId: "app", clientSecret: "secret" } },
+]);
+await assert.rejects(createSettingsChannel(channelClient, "discord", { ...channelDraft, token: "" }), /token is required/);
+assert.equal(channelCreates.length, 3, "invalid channel credentials never reach the SDK");
+assert.equal(channelHealthState({ status: "active", boundSpace: null }), "unbound");
+assert.equal(channelHealthState({ status: "active", boundSpace: { id: "space" } }), "connecting");
+assert.equal(channelHealthState({ health: { state: "error" } }), "error");
+
+const loginEvents = [];
+const loginRequests = [];
+const loginPoller = createWeChatLoginPoller((input) => new Promise((resolve, reject) => loginRequests.push({ input, resolve, reject })));
+const reportLogin = (status) => loginEvents.push(status);
+const reportLoginError = (error) => loginEvents.push(error);
+const flushLogin = async () => { await Promise.resolve(); await Promise.resolve(); };
+mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
+loginPoller.start("old", 20000, reportLogin, reportLoginError);
+loginPoller.stop();
+loginRequests[0].resolve({ connected: true, message: "connected" });
+await flushLogin();
+assert.equal(loginEvents.length, 0, "leaving the screen suppresses a late success");
+loginPoller.start("new", 20000, reportLogin, reportLoginError);
+loginRequests[1].resolve({ connected: false, needVerifyCode: true, message: "code" });
+await flushLogin();
+mock.timers.tick(1200);
+assert.equal(loginRequests.length, 2, "verification pauses polling");
+loginPoller.start("new", 20000, reportLogin, reportLoginError, "123456");
+assert.deepEqual(loginRequests[2].input, { sessionKey: "new", verifyCode: "123456" });
+loginRequests[2].resolve({ connected: false, message: "confirming" });
+await flushLogin();
+mock.timers.tick(1200);
+assert.deepEqual(loginRequests[3].input, { sessionKey: "new", verifyCode: undefined }, "verification codes are sent once");
+loginRequests[3].resolve({ connected: true, message: "connected" });
+await flushLogin();
+mock.timers.tick(1200);
+assert.equal(loginRequests.length, 4, "successful login stops polling");
+loginPoller.start("expired", 1000, reportLogin, reportLoginError);
+assert.equal(loginEvents.at(-1).expired, true);
+assert.equal(loginRequests.length, 4, "expired logins make no network request");
+loginPoller.start("failed", 20000, reportLogin, reportLoginError);
+const loginError = new Error("Network unavailable");
+loginRequests[4].reject(loginError);
+await flushLogin();
+assert.equal(loginEvents.at(-1), loginError);
+loginPoller.stop();
+mock.timers.reset();
+
+const activityNow = new Date(2026, 8, 12, 12);
+const range = activityRange(activityNow);
+assert.equal(range.from.getDay(), 0);
+const activityDays = tokenDays([
+  { bucketStartAt: new Date(2026, 8, 11, 1).toISOString(), totalTokens: 10 },
+  { bucketStartAt: new Date(2026, 8, 11, 2).toISOString(), totalTokens: 30 },
+  { bucketStartAt: new Date(2026, 8, 12, 1).toISOString(), totalTokens: 10 },
+], range.from, range.to);
+assert.equal(activityDays.length, 91);
+assert.deepEqual(activityDays.at(-2), { date: "2026-09-11", tokens: 40, level: 4 });
+assert.deepEqual(activityDays.at(-1), { date: localDateKey(activityNow), tokens: 10, level: 1 });
+assert.equal(activityDays[0].level, 0);
+assert.throws(() => tokenDays([{ bucketStartAt: "bad", totalTokens: 1 }], range.from, range.to), /Invalid token/);
+assert.throws(() => tokenDays([{ bucketStartAt: activityNow.toISOString(), totalTokens: -1 }], range.from, range.to), /Invalid token/);
+assert.deepEqual(taskOutputs({ result: { output: [
+  { type: "text", text: "Result" },
+  { type: "image", source: { type: "url", url: "https://example.com/result.png" } },
+  { type: "image", source: { type: "url", url: "javascript:alert(1)" } },
+  { type: "video", source: { type: "url", url: "file:///private/file" } },
+  null,
+] } }), [{ type: "text", text: "Result" }, { type: "image", url: "https://example.com/result.png" }]);
+assert.deepEqual(taskOutputs({ result: null }), []);
+const workClient = { spaces: { list: async () => [{ id: "space" }] }, apps: { listBySpace: async () => ({ apps: [
+  { id: "old", userUuid: "me", createdAt: "2026-09-01" },
+  { id: "other", userUuid: "other", createdAt: "2026-09-12" },
+  { id: "new", userUuid: "me", createdAt: "2026-09-11" },
+] }) } };
+assert.deepEqual((await loadRecentWorks(workClient, "me")).map((work) => work.id), ["new", "old"]);
+await assert.rejects(loadRecentWorks({ ...workClient, apps: { listBySpace: async () => { throw new Error("offline"); } } }, "me"), /offline/);
 
 // Exercise the shared chrome's real JSX and callbacks without pretending to test native layout.
 function loadChromeComponent(path, name, scope) {
@@ -60,6 +161,22 @@ const chromeScope = {
   typography: { heading: { fontSize: 17 }, caption: { fontSize: 12 }, body: { fontSize: 15 } },
   useAppTheme: () => ({ colors: { background: "background", text: "text", textMuted: "muted", textSecondary: "secondary", accent: "accent", accentSoft: "selected", surfacePressed: "pressed" } }),
 };
+for (const success of ["#238552", "#62c994"]) {
+  let selected = null;
+  const renderHeatmap = loadChromeComponent("../src/components/TokenHeatmap.tsx", "TokenHeatmap", {
+    ...chromeScope,
+    useState: () => [selected, (value) => { selected = value; }],
+    useAppTheme: () => ({ colors: { success, text: "text", textMuted: "muted", surfaceRaised: "empty" }, spacing: { xs: 4, sm: 8, lg: 16 } }),
+  });
+  const grid = renderHeatmap({ days: activityDays.slice(0, -2) });
+  const cells = chromeNodes(grid).filter((node) => node.type === "Pressable");
+  assert.equal(cells.length, 91);
+  assert.equal(cells.filter((cell) => cell.props.disabled).length, 2, "future days are blank and disabled");
+  assert.equal(cells[0].props.style({ pressed: false }).aspectRatio, 1);
+  cells[0].props.onPress();
+  assert.equal(selected, activityDays[0].date);
+  assert.equal(chromeNodes(renderHeatmap({ days: activityDays })).find((node) => node.type === "Pressable").props.accessibilityState.selected, true);
+}
 for (const background of ["#f7f7f5", "#0f1114", "#000000"]) {
   const renderTopBar = loadChromeComponent("../src/ui.tsx", "TopBar", { ...chromeScope, useAppTheme: () => ({ colors: { background } }) });
   let backCount = 0;
@@ -179,7 +296,6 @@ for (const isPinned of [false, true]) {
 for (const [path, component, labels] of [
   ["../app/(tabs)/index.tsx", "FilterChip", ["All", "Running", "Completed"]],
   ["../app/(tabs)/spaces.tsx", "SpaceFilterChip", ["Recent", "All", "Pinned"]],
-  ["../app/(tabs)/activity.tsx", "ActivityFilter", ["All", "Running", "Completed"]],
 ]) {
   const renderChip = loadChromeComponent(path, component, { ...chromeScope, PressableScale: "PressableScale" });
   for (const label of labels) {
