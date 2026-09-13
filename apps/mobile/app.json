@@ -52,7 +52,6 @@
       ]
     },
     "plugins": [
-      "./plugins/with-predictive-back",
       "expo-router",
       "expo-secure-store",
       "expo-sqlite",
