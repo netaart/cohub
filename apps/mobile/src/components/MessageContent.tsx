@@ -438,7 +438,7 @@ export function MessageContent({ content, active = false, color, imageMaxWidth, 
   })}{footer && !textFooter ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}</View>;
 }
 
-function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local: boolean, maxWidth: number): ViewStyle {
+function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", maxWidth: number): ViewStyle {
   return {
     maxWidth,
     minWidth: 0,
@@ -450,13 +450,12 @@ function chatBubbleStyle(theme: AppTheme, side: "user" | "assistant", local: boo
     paddingHorizontal: BUBBLE_PADDING_X,
     paddingTop: 8,
     paddingBottom: 7,
-    opacity: local ? 0.72 : 1,
+    opacity: 1,
   };
 }
 
 function ChatBubbleFrame({
   side,
-  local = false,
   children,
   maxWidth,
   bubbleRef,
@@ -464,7 +463,6 @@ function ChatBubbleFrame({
   animatedStyle,
 }: {
   side: "user" | "assistant";
-  local?: boolean;
   children: ReactNode;
   maxWidth: number;
   bubbleRef?: RefObject<View | null>;
@@ -472,7 +470,7 @@ function ChatBubbleFrame({
   animatedStyle?: AnimatedStyle<ViewStyle>;
 }) {
   const theme = useAppTheme();
-  const style = chatBubbleStyle(theme, side, local, maxWidth);
+  const style = chatBubbleStyle(theme, side, maxWidth);
   return <BubbleContentWidth.Provider value={Math.max(0, maxWidth - BUBBLE_PADDING_X * 2)}><Reanimated.View ref={bubbleRef} onLayout={onBubbleLayout} style={[style, animatedStyle]}>{children}</Reanimated.View></BubbleContentWidth.Provider>;
 }
 
@@ -501,8 +499,8 @@ function BubbleMeta({ clock, local = false, side, live = false, t }: { clock?: s
   if (!clock && !local && !live) return null;
   return <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: 3, maxWidth: "100%" }}>
     {live ? <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: theme.colors.accent, marginRight: 2 }} /> : null}
-    {local ? <Text style={[typography.micro, { color }]}>{t("chat.sending")}</Text> : null}
     {clock ? <Text style={[typography.micro, { color, fontVariant: ["tabular-nums"] }]}>{clock}</Text> : null}
+    {side === "user" && local ? <View accessibilityLabel={t("chat.sending")} style={{ width: 11, height: 11, alignItems: "center", justifyContent: "center" }}><View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} /></View> : null}
     {side === "user" && !local ? <AppIcon name="check-check" size={11} color={color} strokeWidth={2.4} /> : null}
   </View>;
 }
@@ -549,7 +547,7 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const clock = formatMessageClock(message.createdAt);
   const footer = clock || local ? <BubbleMeta clock={clock} local={local} side={side} t={t} /> : undefined;
   return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: floating ? undefined : "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
-    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} local={local} maxWidth={maxWidth} bubbleRef={bubbleRef} onBubbleLayout={onBubbleLayout} animatedStyle={animatedStyle}>
+    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} maxWidth={maxWidth} bubbleRef={bubbleRef} onBubbleLayout={onBubbleLayout} animatedStyle={animatedStyle}>
       {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - BUBBLE_PADDING_X * 2} footer={message.errorMessage ? undefined : footer} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} footer={message.errorMessage ? undefined : footer} /> : !message.errorMessage ? footer : null}
       {message.errorMessage ? <BubbleText selectable footer={footer} measurementKey={`${message.errorMessage}:${typography.caption.fontSize}`} containerStyle={{ marginTop: 6 }} style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger }]}>{message.errorMessage}</BubbleText> : null}
     </ChatBubbleFrame></BubbleTraceMessage.Provider>
