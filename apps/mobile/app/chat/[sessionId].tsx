@@ -663,8 +663,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     requestFollowTail(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     composerRef.current?.measureInWindow((composerX, composerY, composerWidth, composerHeight) => {
-      const bubbleWidth = Math.min(Math.max(composerWidth - 32, 120), 260);
-      listContainerRef.current?.measureInWindow((listX, listY, listWidth, listHeight) => setSendTransition({ text, x: composerX - listX + 16, y: composerY - listY + Math.min(composerHeight, 58) / 2, width: bubbleWidth, targetX: listWidth - bubbleWidth - 16, targetY: Math.max(16, listHeight - 76) }));
+      const bubbleWidth = Math.min(Math.max(28 + text.length * 8.5, 64), Math.min(composerWidth - 32, 260));
+      listContainerRef.current?.measureInWindow((listX, listY, listWidth, listHeight) => setSendTransition({ text, x: composerX - listX + Math.max(16, composerWidth - bubbleWidth - 24), y: composerY - listY + Math.min(composerHeight, 58) / 2, width: bubbleWidth, targetX: listWidth - bubbleWidth - 16, targetY: Math.max(16, listHeight - 76) }));
     });
     setInput("");
     setAttachments([]);
@@ -753,15 +753,14 @@ function SendTransitionOverlay({ transition }: { transition: { text: string; x: 
   }, [pop, travel]);
   const style = useAnimatedStyle(() => ({
     opacity: interpolate(pop.value, [0, 0.35, 1], [0, 1, 1]),
-    width: interpolate(travel.value, [0, 1], [transition.width, Math.min(transition.width, 260)]),
-    borderRadius: interpolate(pop.value, [0, 0.55, 1], [22, 25, 18]),
+    borderRadius: interpolate(pop.value, [0, 0.55, 1], [16, 21, 18]),
     transform: [
       { translateX: (transition.targetX - transition.x) * travel.value },
       { translateY: (transition.targetY - transition.y) * travel.value },
       { scale: interpolate(pop.value, [0, 0.55, 1], [0.94, 1.045, 1]) },
     ],
   }));
-  return <Reanimated.View pointerEvents="none" style={[{ position: "absolute", left: transition.x, top: transition.y - 22, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: theme.colors.accent, zIndex: 20, elevation: 6 }, style]}><Text numberOfLines={3} style={[typography.body, { color: theme.colors.accentText }]}>{transition.text}</Text></Reanimated.View>;
+  return <Reanimated.View pointerEvents="none" style={[{ position: "absolute", left: transition.x, top: transition.y - 22, width: transition.width, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: theme.colors.accent, zIndex: 20, elevation: 6 }, style]}><Text numberOfLines={3} style={[typography.body, { color: theme.colors.accentText }]}>{transition.text}</Text></Reanimated.View>;
 }
 
 function ChatThreadPlaceholder({ kind }: { kind: "opening" | "empty" }) {
