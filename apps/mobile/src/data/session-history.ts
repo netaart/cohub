@@ -31,6 +31,8 @@ function baseMessage(
 	content: ContentBlock[] | null,
 	text: string | null,
 ): MessageRecord {
+	const turnMeta = { ...(turn.meta ?? {}) };
+	delete turnMeta.optimistic;
 	return {
 		id,
 		sessionId: turn.sessionId,
@@ -44,7 +46,7 @@ function baseMessage(
 		errorMessage: role === "assistant" ? turn.errorMessage : null,
 		usage: role === "assistant" ? turn.finalUsage : null,
 		meta: {
-			...(turn.meta ?? {}),
+			...turnMeta,
 			messageKind: role === "user" ? "turn_user" : "turn_assistant",
 			turnId: turn.id,
 			turnSequence: turn.sequence,

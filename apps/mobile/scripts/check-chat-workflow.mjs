@@ -646,7 +646,8 @@ assert.equal(mergeDisplayMessages(
   [{ id: "live-user", role: "user", sequence: 19, meta: { turnId: "t10", clientMessageId: "c1" }, text: "hi" }],
 )[0]?.meta?.turnSequence, 10);
 // Persisted message sequences and turn-projected sequences are independent counters.
-const orderingTurn = { id: "ordering-turn", sessionId: "s1", sequence: 10, status: "running", userText: "Question", userContent: [], assistantContent: [] };
+const orderingTurn = { id: "ordering-turn", sessionId: "s1", sequence: 10, status: "running", userText: "Question", userContent: [], assistantContent: [], meta: { optimistic: true } };
+assert.equal(messagesFromTurns([orderingTurn])[0]?.meta?.optimistic, undefined, "confirmed turn projection never keeps the sending state");
 for (const sequence of [2, 12, 80]) {
   const persistedFinal = { id: "persisted-final", sessionId: "s1", role: "assistant", sequence, text: "Answer", content: [], meta: { turnId: orderingTurn.id, messageKind: "assistant_final" } };
   for (const finalized of [false, true]) {

@@ -237,7 +237,13 @@ function mergeMessages(messages: MessageRecord[], incoming: MessageRecord) {
   const byId = new Map(messages.map((message) => [message.id, message]));
   if (optimisticId && optimisticId !== incoming.id) byId.delete(optimisticId);
   const previous = byId.get(incoming.id);
-  byId.set(incoming.id, previous ? { ...previous, ...incoming } : incoming);
+  if (!previous) {
+    byId.set(incoming.id, incoming);
+  } else {
+    const meta = incoming.meta ? { ...(previous.meta ?? {}), ...incoming.meta } : { ...(previous.meta ?? {}) };
+    if (incoming.meta?.optimistic !== true) delete meta.optimistic;
+    byId.set(incoming.id, { ...previous, ...incoming, meta });
+  }
   return [...byId.values()].sort((a, b) => a.sequence - b.sequence);
 }
 
@@ -572,13 +578,23 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "send-start":
       return updateView(state, action.sessionId, { sending: true, error: null });
-    case "send-end":
-      return updateView(state, action.sessionId, { sending: false });
+    case "send-end": {
+      const current = state.sessionViews[action.sessionId] ?? emptyView();
+      const messages = current.messages.map((message) => {
+        if (message.meta?.optimistic !== true) return message;
+        const meta = { ...(message.meta ?? {}) };
+        delete meta.optimistic;
+        return { ...message, meta };
+      });
+      return updateView(state, action.sessionId, { sending: false, messages });
+    }
     case "send-failed": {
       const view = state.sessionViews[action.sessionId] ?? emptyView();
       const messages = view.messages.map((message) => {
         if (message.meta?.clientMessageId !== action.clientMessageId) return message;
-        return { ...message, errorMessage: action.message };
+        const meta = { ...(message.meta ?? {}) };
+        delete meta.optimistic;
+        return { ...message, errorMessage: action.message, meta };
       });
       return updateView(state, action.sessionId, { sending: false, error: action.message, messages });
     }
