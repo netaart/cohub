@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.2.1](https://github.com/markbang/cohub-mobile/compare/v2.2.0...v2.2.1) (2026-09-13)
+
+
+### Features
+
+* **activity:** add token heatmap, task results, and recent work ([92baf5f](https://github.com/markbang/cohub-mobile/commit/92baf5fc8ad6ca305ce6c459496883df89ee4826))
+* **mobile:** unify bubble layout and update release automation ([79ac9d2](https://github.com/markbang/cohub-mobile/commit/79ac9d2d5d797867ff5b132ee25b63a2692e123a))
+* **native:** add platform navigation and browser preferences ([d7dc3f4](https://github.com/markbang/cohub-mobile/commit/d7dc3f412306cbf789162952bed216709d861af6))
+* **settings:** redesign settings navigation and channel management ([f402520](https://github.com/markbang/cohub-mobile/commit/f402520a9bbceac80d2b73916e5e3b22e3660dff))
+* **ui:** unify app navigation and anchored action menus ([15a00a6](https://github.com/markbang/cohub-mobile/commit/15a00a67ca610b6c0806e2df2cbe7fe2a76a046a))
+
+
+### Fixes
+
+* **chat:** keep streaming timestamps out of line measurement ([2b6438c](https://github.com/markbang/cohub-mobile/commit/2b6438cc2e61ec16561a579830dbbf7c428bf4f6))
+* **chat:** prevent Android text focus from jumping the timeline ([47d084d](https://github.com/markbang/cohub-mobile/commit/47d084d6d26a96cf84db1c2b392e7304289cdd71))
+* **chat:** render nested markdown links and media previews ([1d0615c](https://github.com/markbang/cohub-mobile/commit/1d0615c369af19f313652d57f9c3a99ef1c846d5))
+* **ui:** restore text filters and remove redundant status copy ([1daa6a9](https://github.com/markbang/cohub-mobile/commit/1daa6a940184baddc513c69b259b4eaa9d9ae396))
+
+
+### Refactoring
+
+* **activity:** remove recent works and generations sections ([ce28181](https://github.com/markbang/cohub-mobile/commit/ce28181730f08ea78bd49b0ede12b2b76d7cd73c))
+
 ## [2.2.0](https://github.com/markbang/cohub-mobile/compare/v2.1.0...v2.2.0) (2026-09-11)
 
 
