@@ -257,7 +257,7 @@ export default function SpaceScreen() {
     <TopBar
       title={name}
       onBack={() => router.back()}
-      actions={<><IconButton name="folder-open" label={t("space.openFilesPanel")} onPress={() => setActivePanel("files")} /><View ref={spaceActionsRef} collapsable={false}><IconButton name="more" label={t("space.actions")} onPress={() => setSpaceActionsOpen(true)} /></View></>}
+      actions={<><IconButton name="folder-open" label={t("space.openFilesPanel")} onPress={() => setActivePanel("files")} /><IconButton name="settings" label={t("space.settings")} onPress={() => router.push({ pathname: "/space/[spaceId]/settings", params: { spaceId: space.id } })} /><View ref={spaceActionsRef} collapsable={false}><IconButton name="more" label={t("space.actions")} onPress={() => setSpaceActionsOpen(true)} /></View></>}
     />
     {pinError ? <Pressable accessibilityRole="button" accessibilityLabel={t("space.pin.dismiss")} onPress={() => setPinError(null)} style={{ marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10, backgroundColor: theme.colors.dangerSoft }}><Text style={[typography.caption, { color: theme.colors.danger }]}>{pinError}</Text></Pressable> : null}
     <ScrollView
@@ -282,7 +282,7 @@ export default function SpaceScreen() {
     <SectionHeader title={t("space.section.works")} />
     <View>{resources.apps.length > 0 ? resources.apps.map((app) => <ResourceRow key={app.id} icon="rocket" title={app.meta?.title || app.meta?.name || app.slug} subtitle={t("space.workSubtitle", { target: app.targetType, version: app.latestVersion })} trailing={<StatusPill label={app.status === "published" ? t("space.published") : t("space.disabled")} tone={app.status === "published" ? "success" : "neutral"} />} onPress={() => router.push({ pathname: "/work/[appId]", params: { appId: app.id } })} />) : <ResourceEmpty text={loadingResources ? t("space.empty.worksLoading") : resourceFailures.apps ? t("space.empty.loadFailed") : t("space.empty.works")} />}</View>
 
-    <SectionHeader title={t("space.section.saves")} />
+    <SectionHeader title={t("space.section.saves")} action={{ icon: "bookmark", label: t("space.saveCheckpoint"), onPress: () => void createCheckpoint() }} />
     <View>{resources.checkpoints.length > 0 ? resources.checkpoints.map((checkpoint) => <ResourceRow key={checkpoint.id} icon="bookmark" title={checkpoint.description || t("space.save", { hash: checkpoint.commitHash.slice(0, 8) })} subtitle={`${formatRelativeTime(checkpoint.createdAt)} · ${checkpoint.commitHash.slice(0, 8)}`} />) : <ResourceEmpty text={loadingResources ? t("space.empty.savesLoading") : resourceFailures.checkpoints ? t("space.empty.loadFailed") : t("space.empty.saves")} />}</View>
 
     <SectionHeader title={t("space.section.tasks")} />
@@ -301,8 +301,6 @@ export default function SpaceScreen() {
         { icon: "messages", title: t("chat.actions.openChats"), onPress: () => setActivePanel("chat") },
         { icon: space.isPinned ? "pin-off" : "pin", title: space.isPinned ? t("space.unpin") : t("space.pin"), disabled: pinning, onPress: () => void togglePin() },
         { icon: "folder-open", title: t("space.openFiles"), onPress: () => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } }) },
-        { icon: "settings", title: t("space.settings"), onPress: () => router.push({ pathname: "/space/[spaceId]/settings", params: { spaceId: space.id } }) },
-        { icon: "bookmark", title: checkpointing ? t("space.saveCheckpointSaving") : t("space.saveCheckpoint"), disabled: checkpointing, onPress: () => void createCheckpoint() },
       ]}
     /> : null}
   </Screen>;
