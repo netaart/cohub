@@ -3,7 +3,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
+import { ActivityIndicator, FlatList, Keyboard, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
 import { Easing, interpolate, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from "react-native-reanimated";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
@@ -686,6 +686,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     composerRef.current?.measureInWindow((composerX, composerY, composerWidth, composerHeight) => {
       listContainerRef.current?.measureInWindow((listX, listY) => { recordDebugEvent("chat.send_transition.source_measured", { x: composerX - listX, y: composerY - listY, width: composerWidth, height: composerHeight }); setSendTransition({ text: transitionText, startedAt: transitionStartedAt, sourceX: composerX - listX + Math.max(16, composerWidth - 60), sourceY: composerY - listY + Math.min(composerHeight, 58) / 2 - 5, targetX: 0, targetY: 0, targetHeight: 0 }); });
     });
+    recordDebugEvent("chat.keyboard.dismiss_requested");
+    Keyboard.dismiss();
     setInput("");
     setAttachments([]);
     recordDebugEvent("chat.send.composer_cleared");
