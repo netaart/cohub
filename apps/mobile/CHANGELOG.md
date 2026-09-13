@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.2](https://github.com/markbang/cohub-mobile/compare/v2.2.1...v2.2.2) (2026-09-13)
+
+
+### Fixes
+
+* **chat:** remove message long press and image flash ([498867e](https://github.com/markbang/cohub-mobile/commit/498867e4036f624175d8bdc361011f23eb2ae0c8))
+* **chat:** settle optimistic message state ([2e5d6bf](https://github.com/markbang/cohub-mobile/commit/2e5d6bf8100557f46e3407b1a0a8b840f324fb7f))
+* **image-viewer:** restore stable Android rendering ([4af642f](https://github.com/markbang/cohub-mobile/commit/4af642f3879a81fc9b3823d32c6ddef286b19050))
+* **navigation:** disable crashing experimental stack ([6348cf1](https://github.com/markbang/cohub-mobile/commit/6348cf1214cd2970596cbbdb3b68240ac3cd0ea3))
+
 ## [2.2.1](https://github.com/markbang/cohub-mobile/compare/v2.2.0...v2.2.1) (2026-09-13)
 
 
