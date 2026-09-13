@@ -240,9 +240,9 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
             testID="chat-composer-input"
             accessibilityLabel={t("ui.composer.placeholder")}
             value={value}
-            onChangeText={onChangeText}
+            onChangeText={(next) => { if (!sending) onChangeText(next); }}
             onContentSizeChange={(event) => setContentHeight(event.nativeEvent.contentSize.height)}
-            editable={!blocked}
+            editable={!disabled}
             multiline
             scrollEnabled={layout.scrollEnabled}
             maxLength={12000}
