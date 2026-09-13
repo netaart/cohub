@@ -1,7 +1,7 @@
 import type { ContentBlock, MessageRecord } from "@neta-art/cohub";
 import * as Clipboard from "expo-clipboard";
 import { Link, useRouter } from "expo-router";
-import { createContext, memo, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
 import { useTraceTouches } from "@/src/components/use-chat-scroll-trace";
 import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
@@ -459,15 +459,17 @@ function ChatBubbleFrame({
   local = false,
   children,
   maxWidth,
+  bubbleRef,
 }: {
   side: "user" | "assistant";
   local?: boolean;
   children: ReactNode;
   maxWidth: number;
+  bubbleRef?: RefObject<View | null>;
 }) {
   const theme = useAppTheme();
   const style = chatBubbleStyle(theme, side, local, maxWidth);
-  return <BubbleContentWidth.Provider value={Math.max(0, maxWidth - BUBBLE_PADDING_X * 2)}><View style={style}>{children}</View></BubbleContentWidth.Provider>;
+  return <BubbleContentWidth.Provider value={Math.max(0, maxWidth - BUBBLE_PADDING_X * 2)}><View ref={bubbleRef} style={style}>{children}</View></BubbleContentWidth.Provider>;
 }
 
 function TypingDot({ progress, index, color }: { progress: SharedValue<number>; index: number; color: string }) {
@@ -501,7 +503,7 @@ function BubbleMeta({ clock, local = false, side, live = false, t }: { clock?: s
   </View>;
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null, availableWidth }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number }) {
+export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null, availableWidth, bubbleRef, floating = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number; bubbleRef?: RefObject<View | null>; floating?: boolean }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
@@ -542,8 +544,8 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const maxWidth = getBubbleMaxWidth(availableWidth ?? width);
   const clock = formatMessageClock(message.createdAt);
   const footer = clock || local ? <BubbleMeta clock={clock} local={local} side={side} t={t} /> : undefined;
-  return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
-    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} local={local} maxWidth={maxWidth}>
+  return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: floating ? undefined : "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
+    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} local={local} maxWidth={maxWidth} bubbleRef={bubbleRef}>
       {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - BUBBLE_PADDING_X * 2} footer={message.errorMessage ? undefined : footer} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} footer={message.errorMessage ? undefined : footer} /> : !message.errorMessage ? footer : null}
       {message.errorMessage ? <BubbleText selectable footer={footer} measurementKey={`${message.errorMessage}:${typography.caption.fontSize}`} containerStyle={{ marginTop: 6 }} style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger }]}>{message.errorMessage}</BubbleText> : null}
     </ChatBubbleFrame></BubbleTraceMessage.Provider>
