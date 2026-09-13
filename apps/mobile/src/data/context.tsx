@@ -15,6 +15,7 @@ import { AppState as NativeAppState } from "react-native";
 import { File as ExpoFile } from "expo-file-system";
 import { translate } from "@/src/i18n/core";
 import { createMobileClient } from "@/src/data/client";
+import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useSpaceListData } from "@/src/data/use-space-list";
 import { cacheRetentionCutoff, loadCacheRetention } from "@/src/data/cache-retention";
 import { createStreamBatch } from "@/src/data/chat-rendering";
@@ -507,6 +508,7 @@ function reducer(state: AppState, action: Action): AppState {
       });
     }
     case "turn-upsert": {
+      recordDebugEvent("chat.turn.upsert", { sequence: action.turn.sequence, status: action.turn.status, intent: action.turn.intent ?? null, clientMessageIdPresent: typeof turnClientMessageId(action.turn) === "string" });
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = mergeTurnRecords(current.turns, [action.turn]);
       const clientMessageId = turnClientMessageId(action.turn);
@@ -537,6 +539,7 @@ function reducer(state: AppState, action: Action): AppState {
       });
     }
     case "turn-patch": {
+      recordDebugEvent("chat.turn.patch", { status: action.turn.status ?? null, clientMessageIdPresent: typeof turnClientMessageId(action.turn) === "string" });
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = patchTurnRecords(current.turns, action.turn);
       const nextState = updateLatestTurn(state, action.sessionId, reconcileTurnStatusPatch(state.sessionLatestTurns[action.sessionId], action.turn));
@@ -558,6 +561,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "turn-index-end":
       return updateView(state, action.sessionId, { turnIndexLoading: false });
     case "message-add": {
+      recordDebugEvent("chat.message.added", { role: action.message.role, sequence: action.message.sequence, optimistic: action.message.meta?.optimistic === true, messageKind: action.message.meta?.messageKind ?? null });
       const view = state.sessionViews[action.sessionId] ?? emptyView();
       const incomingMeta = action.message.meta ?? {};
       const turnId = typeof incomingMeta.turnId === "string" ? incomingMeta.turnId : null;
@@ -571,14 +575,17 @@ function reducer(state: AppState, action: Action): AppState {
       });
     }
     case "message-optimistic": {
+      recordDebugEvent("chat.message.optimistic", { role: action.message.role, sequence: action.message.sequence, clientMessageIdPresent: typeof action.message.meta?.clientMessageId === "string" });
       const view = state.sessionViews[action.sessionId] ?? emptyView();
       return updateView(state, action.sessionId, {
         messages: mergeMessages(view.messages, action.message),
       });
     }
     case "send-start":
+      recordDebugEvent("chat.send.started");
       return updateView(state, action.sessionId, { sending: true, error: null });
     case "send-end": {
+      recordDebugEvent("chat.send.ended");
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const messages = current.messages.map((message) => {
         if (message.meta?.optimistic !== true) return message;
@@ -589,6 +596,7 @@ function reducer(state: AppState, action: Action): AppState {
       return updateView(state, action.sessionId, { sending: false, messages });
     }
     case "send-failed": {
+      recordDebugEvent("chat.send.failed");
       const view = state.sessionViews[action.sessionId] ?? emptyView();
       const messages = view.messages.map((message) => {
         if (message.meta?.clientMessageId !== action.clientMessageId) return message;
@@ -1505,6 +1513,7 @@ export function AppProvider({
         durationMs: null,
         createdAt: new Date().toISOString(),
       };
+      recordDebugEvent("chat.send.optimistic_created", { sequence: optimistic.sequence, attachmentCount: attachments.length, hasText: Boolean(text), clientMessageIdPresent: true });
       dispatch({ type: "message-optimistic", sessionId, message: optimistic });
       void saveMessages(userKey, sessionId, [...(view?.messages ?? []), optimistic]).catch(() => undefined);
       dispatch({ type: "send-start", sessionId });
@@ -1527,6 +1536,7 @@ export function AppProvider({
           ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
         });
         if (response.mode !== "immediate") throw new Error(translate("data.messageNotAccepted"));
+        recordDebugEvent("chat.send.server_accepted", { turnSequence: response.turn.sequence, status: response.turn.status });
         dispatch({ type: "turn-upsert", sessionId, session: response.session, turn: withFallbackUserContent(response.turn, content, text) });
         dispatch({ type: "send-end", sessionId });
       } catch (error) {

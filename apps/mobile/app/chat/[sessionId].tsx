@@ -677,15 +677,27 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     });
     setInput("");
     setAttachments([]);
+    recordDebugEvent("chat.send.composer_cleared");
     try {
       const requestModel = modelOverride ? selectedModel : recordedModel;
       await sendMessage(sessionId, text, files, requestModel ? { model: requestModel } : undefined);
       setSendFeedback("success");
       setTimeout(() => setSendFeedback("idle"), 700);
-    } catch { setInput(text); setAttachments(files); setTransitionMessage(null); setSendTransition(null); }
-    finally {
+    } catch {
+      recordDebugEvent("chat.send.transition_cancelled");
+      setInput(text);
+      setAttachments(files);
+      setTransitionMessage(null);
+      setSendTransition(null);
+    } finally {
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = setTimeout(() => { transitionTimerRef.current = null; setTransitionMessage(null); setSendTransition(null); }, 560);
+      recordDebugEvent("chat.send.transition_cleanup_scheduled", { delayMs: 560 });
+      transitionTimerRef.current = setTimeout(() => {
+        transitionTimerRef.current = null;
+        recordDebugEvent("chat.send.transition_cleanup");
+        setTransitionMessage(null);
+        setSendTransition(null);
+      }, 560);
     }
   };
 
@@ -753,10 +765,18 @@ function SendBubbleMotion({ transition, message, spaceId, onCopy, bubbleRef, onB
   const pop = useSharedValue(0);
   const travel = useSharedValue(0);
   useEffect(() => {
+    recordDebugEvent("chat.send_transition.mounted", { message: chatScrollTrace.alias("message", message.id) });
+    return () => recordDebugEvent("chat.send_transition.unmounted", { message: chatScrollTrace.alias("message", message.id) });
+  }, [message.id]);
+  useEffect(() => {
     if (transition.targetHeight <= 0) return;
+    recordDebugEvent("chat.send_transition.started", { message: chatScrollTrace.alias("message", message.id), sourceX: transition.sourceX, sourceY: transition.sourceY, targetX: transition.targetX, targetY: transition.targetY, targetHeight: transition.targetHeight });
     pop.value = withSequence(withTiming(0.55, { duration: 110, easing: Easing.out(Easing.cubic) }), withSpring(1, { duration: 260, dampingRatio: 0.72 }));
     travel.value = withDelay(70, withTiming(1, { duration: 390, easing: Easing.out(Easing.cubic) }));
-  }, [pop, travel, transition.targetHeight]);
+    const popTimer = setTimeout(() => recordDebugEvent("chat.send_transition.pop_peak", { message: chatScrollTrace.alias("message", message.id) }), 110);
+    const settleTimer = setTimeout(() => recordDebugEvent("chat.send_transition.settled", { message: chatScrollTrace.alias("message", message.id) }), 470);
+    return () => { clearTimeout(popTimer); clearTimeout(settleTimer); };
+  }, [message.id, pop, travel, transition.sourceX, transition.sourceY, transition.targetHeight, transition.targetX, transition.targetY]);
   const style = useAnimatedStyle(() => ({
     opacity: transition.targetHeight > 0 ? interpolate(pop.value, [0, 0.35, 1], [0, 1, 1]) : 0,
     transform: transition.targetHeight > 0 ? [
@@ -793,7 +813,7 @@ function ChatThreadPlaceholder({ kind }: { kind: "opening" | "empty" }) {
 function TurnMarker({ sequence, status }: { sequence: number; status?: string }) {
   const theme = useAppTheme();
   const color = status === "failed" ? theme.colors.danger : status === "running" || status === "queued" ? theme.colors.warning : theme.colors.textFaint;
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingTop: 13, paddingBottom: 2 }}><View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} /><Text style={[typography.micro, { color }]}>#{sequence}</Text><View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} /></View>;
+  return <View onLayout={(event) => recordDebugEvent("chat.turn_marker.layout", { sequence, status: status ?? null, ...event.nativeEvent.layout })} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingTop: 13, paddingBottom: 2 }}><View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} /><Text style={[typography.micro, { color }]}>#{sequence}</Text><View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} /></View>;
 }
 
 function DraftChatContent({ spaceId }: { spaceId: string }) {

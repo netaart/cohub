@@ -1,20 +1,23 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
+import * as Updates from "expo-updates";
 import { useEffect, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { config } from "@/src/config";
-import { clearDebugSession, loadDebugEvents, saveDebugEvent, upsertDebugSession, type DebugEventRow } from "@/src/data/local-db";
-import { setDebugTraceSink } from "@/src/data/chat-scroll-trace";
+import { clearDebugSession, saveDebugEvent, upsertDebugSession, type DebugEventRow } from "@/src/data/local-db";
+import { chatScrollTrace, setDebugTraceSink } from "@/src/data/chat-scroll-trace";
 
 const ENABLED_KEY = "cohub.debug.diagnostics.enabled";
+const EVENT_CAPACITY = 4000;
 
 type DebugFields = Record<string, unknown>;
+type ActiveSession = { id: string; startedAt: string; sequence: number; dropped: number; events: DebugEventRow[]; writes: Promise<void> };
 export type FeedbackInput = { description: string; includeSession: boolean; includeConversation: boolean };
 export type FeedbackReceipt = { id: string };
-export type DebugSnapshot = { sessionId: string; startedAt: string; events: DebugEventRow[] };
+export type DebugSnapshot = { sessionId: string; startedAt: string; dropped: number; events: DebugEventRow[] };
 
 let enabled = false;
-let activeSession: { id: string; startedAt: string; sequence: number } | null = null;
+let activeSession: ActiveSession | null = null;
 let loadPromise: Promise<boolean> | null = null;
 
 function newId(prefix: string) {
@@ -37,34 +40,67 @@ function sanitize(value: unknown, depth = 0): unknown {
   return String(value);
 }
 
+function updateMetadata() {
+  try {
+    return { runtimeVersion: Updates.runtimeVersion ?? null, updateId: Updates.updateId ?? null };
+  } catch {
+    return { runtimeVersion: null, updateId: null };
+  }
+}
+
+function startChatTrace() {
+  if (!chatScrollTrace.isRecording()) chatScrollTrace.start({ diagnostics: true, platform: Platform.OS });
+}
+
+function stopChatTrace() {
+  if (!chatScrollTrace.isRecording()) return;
+  chatScrollTrace.pause();
+  chatScrollTrace.reset();
+}
+
 async function ensureLoaded() {
   if (loadPromise) return loadPromise;
   loadPromise = AsyncStorage.getItem(ENABLED_KEY).then((value) => {
     enabled = value === "true";
     setDebugTraceSink(enabled ? (name, fields) => record(name, fields) : null);
+    if (enabled) void startSession();
     return enabled;
   }).finally(() => { loadPromise = null; });
   return loadPromise;
 }
 
 async function startSession() {
-  if (activeSession) return activeSession;
-  const session = { id: newId("debug"), startedAt: new Date().toISOString(), sequence: 0 };
+  if (activeSession) {
+    startChatTrace();
+    return activeSession;
+  }
+  const session: ActiveSession = { id: newId("debug"), startedAt: new Date().toISOString(), sequence: 0, dropped: 0, events: [], writes: Promise.resolve() };
   activeSession = session;
   await upsertDebugSession({ sessionId: session.id, startedAt: session.startedAt, updatedAt: Date.now(), closedAt: null, uploadedAt: null });
-  record("diagnostics.session.started", { platform: Platform.OS, appVersion: Constants.expoConfig?.version ?? null, updateId: Constants.expoConfig?.extra?.updateId ?? null });
+  record("diagnostics.session.started", { platform: Platform.OS, appVersion: Constants.expoConfig?.version ?? null, ...updateMetadata() });
+  startChatTrace();
   return session;
 }
 
 export async function setDebugDiagnosticsEnabled(value: boolean) {
-  enabled = value;
-  setDebugTraceSink(value ? (name, fields) => record(name, fields) : null);
-  await AsyncStorage.setItem(ENABLED_KEY, String(value));
-  if (value) await startSession();
-  else if (activeSession) {
-    await clearDebugSession(activeSession.id);
+  if (value) {
+    enabled = true;
+    setDebugTraceSink((name, fields) => record(name, fields));
+    await AsyncStorage.setItem(ENABLED_KEY, "true");
+    await startSession();
+    return;
+  }
+  if (activeSession) {
+    record("diagnostics.session.stopping");
+    stopChatTrace();
+    const session = activeSession;
+    await session.writes;
+    await clearDebugSession(session.id);
     activeSession = null;
   }
+  enabled = false;
+  setDebugTraceSink(null);
+  await AsyncStorage.setItem(ENABLED_KEY, "false");
 }
 
 export async function isDebugDiagnosticsEnabled() {
@@ -81,13 +117,20 @@ export function record(name: string, fields: DebugFields = {}) {
     name,
     payload: JSON.stringify(sanitize(fields)),
   };
-  void saveDebugEvent(event).catch(() => undefined);
+  if (session.events.length === EVENT_CAPACITY) {
+    session.events.shift();
+    session.dropped += 1;
+  }
+  session.events.push(event);
+  session.writes = session.writes.then(() => saveDebugEvent(event)).catch(() => undefined);
 }
 
 export async function snapshot(): Promise<DebugSnapshot | null> {
   await ensureLoaded();
   if (!activeSession) return null;
-  return { sessionId: activeSession.id, startedAt: activeSession.startedAt, events: await loadDebugEvents(activeSession.id) };
+  const session = activeSession;
+  await session.writes;
+  return { sessionId: session.id, startedAt: session.startedAt, dropped: session.dropped, events: [...session.events] };
 }
 
 export async function submitFeedback(input: FeedbackInput): Promise<FeedbackReceipt> {
@@ -103,8 +146,8 @@ export async function submitFeedback(input: FeedbackInput): Promise<FeedbackRece
       description: description.slice(0, 4000),
       includeSession: input.includeSession,
       includeConversation: false,
-      session: { id: current.sessionId, startedAt: current.startedAt, events: current.events },
-      app: { version: Constants.expoConfig?.version ?? null, platform: Platform.OS, osVersion: String(Platform.Version), updateId: Constants.expoConfig?.extra?.updateId ?? null },
+      session: { id: current.sessionId, startedAt: current.startedAt, dropped: current.dropped, events: current.events },
+      app: { version: Constants.expoConfig?.version ?? null, platform: Platform.OS, osVersion: String(Platform.Version), ...updateMetadata() },
     }),
   });
   if (!response.ok) throw new Error(`Feedback upload failed (${response.status}).`);
