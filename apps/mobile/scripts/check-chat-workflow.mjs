@@ -260,12 +260,12 @@ function findSpaceMenu(node) {
 findSpaceMenu(spaceMenuSource);
 assert.ok(spaceMenuElement);
 const spaceMenuActions = spaceMenuElement.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(spaceMenuSource) === "actions").initializer.expression.getText(spaceMenuSource);
-const buildSpaceActions = new Function("space", "pinning", "t", "setActivePanel", "togglePin", "router", ts.transpileModule(`return (${spaceMenuActions});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText);
+const buildSpaceActions = new Function("space", "pinning", "t", "setActivePanel", "togglePin", "router", "checkpointing", "createCheckpoint", ts.transpileModule(`return (${spaceMenuActions});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText);
 for (const isPinned of [false, true]) {
   for (const pinning of [false, true]) {
     const events = [];
-    const actions = buildSpaceActions({ id: "space-123", isPinned }, pinning, (key) => key, (panel) => events.push(panel), () => events.push("togglePin"), { push: (route) => events.push(route) });
-    assert.deepEqual(actions.map((action) => action.icon), ["messages", isPinned ? "pin-off" : "pin", "folder-open"]);
+    const actions = buildSpaceActions({ id: "space-123", isPinned }, pinning, (key) => key, (panel) => events.push(panel), () => events.push("togglePin"), { push: (route) => events.push(route) }, false, () => events.push("checkpoint"));
+    assert.deepEqual(actions.map((action) => action.icon), ["messages", isPinned ? "pin-off" : "pin", "folder-open", "bookmark"]);
     assert.equal(actions[1].title, isPinned ? "space.unpin" : "space.pin");
     assert.equal(actions[1].disabled, pinning);
     menuFocused = true;

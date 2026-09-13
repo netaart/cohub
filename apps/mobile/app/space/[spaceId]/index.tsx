@@ -282,12 +282,12 @@ export default function SpaceScreen() {
     <SectionHeader title={t("space.section.works")} />
     <View>{resources.apps.length > 0 ? resources.apps.map((app) => <ResourceRow key={app.id} icon="rocket" title={app.meta?.title || app.meta?.name || app.slug} subtitle={t("space.workSubtitle", { target: app.targetType, version: app.latestVersion })} trailing={<StatusPill label={app.status === "published" ? t("space.published") : t("space.disabled")} tone={app.status === "published" ? "success" : "neutral"} />} onPress={() => router.push({ pathname: "/work/[appId]", params: { appId: app.id } })} />) : <ResourceEmpty text={loadingResources ? t("space.empty.worksLoading") : resourceFailures.apps ? t("space.empty.loadFailed") : t("space.empty.works")} />}</View>
 
-    <SectionHeader title={t("space.section.saves")} action={{ icon: "bookmark", label: t("space.saveCheckpoint"), onPress: () => void createCheckpoint() }} />
+    <SectionHeader title={t("space.section.saves")} />
     <View>{resources.checkpoints.length > 0 ? resources.checkpoints.map((checkpoint) => <ResourceRow key={checkpoint.id} icon="bookmark" title={checkpoint.description || t("space.save", { hash: checkpoint.commitHash.slice(0, 8) })} subtitle={`${formatRelativeTime(checkpoint.createdAt)} · ${checkpoint.commitHash.slice(0, 8)}`} />) : <ResourceEmpty text={loadingResources ? t("space.empty.savesLoading") : resourceFailures.checkpoints ? t("space.empty.loadFailed") : t("space.empty.saves")} />}</View>
 
     <SectionHeader title={t("space.section.tasks")} />
     <View style={{ paddingBottom: 24 }}>{resources.tasks.length > 0 ? resources.tasks.map((task) => <ResourceRow key={task.id} icon={task.status === "running" ? "sync" : task.status === "failed" ? "alert" : "check-circle"} title={task.taskType.replaceAll("_", " ")} subtitle={task.errorMessage || t("space.taskAttempt", { time: formatRelativeTime(task.updatedAt), count: task.attemptCount })} trailing={<StatusPill label={task.status} tone={task.status === "failed" ? "danger" : task.status === "running" || task.status === "pending" ? "warning" : "success"} />} onPress={() => task.taskType.includes("generation") ? router.push({ pathname: "/task/[taskId]", params: { taskId: task.id } }) : task.sessionId ? router.push({ pathname: "/chat/[sessionId]", params: { sessionId: task.sessionId! } }) : undefined} />) : <ResourceEmpty text={loadingResources ? t("space.empty.tasksLoading") : resourceFailures.tasks ? t("space.empty.loadFailed") : t("space.empty.tasks")} />}</View>
-    {taskCursor ? <PrimaryButton label={t("space.tasks.loadMore")} icon="plus" loading={tasksLoadingMore} onPress={() => void loadMoreTasks()} style={{ marginHorizontal: 16, marginBottom: 20 }} /> : null}
+    {taskCursor ? <Pressable accessibilityRole="button" disabled={tasksLoadingMore} onPress={() => void loadMoreTasks()} style={({ pressed }) => ({ alignItems: "center", paddingVertical: 14, marginHorizontal: 16, marginBottom: 20, opacity: tasksLoadingMore ? 0.5 : pressed ? 0.6 : 1 })}><Text style={[typography.caption, { color: theme.colors.accent }]}>{tasksLoadingMore ? t("space.tasks.loadingMore") : t("space.tasks.loadMore")}</Text></Pressable> : null}
     </ScrollView>
       </View>
     </SpacePanels>
@@ -301,6 +301,7 @@ export default function SpaceScreen() {
         { icon: "messages", title: t("chat.actions.openChats"), onPress: () => setActivePanel("chat") },
         { icon: space.isPinned ? "pin-off" : "pin", title: space.isPinned ? t("space.unpin") : t("space.pin"), disabled: pinning, onPress: () => void togglePin() },
         { icon: "folder-open", title: t("space.openFiles"), onPress: () => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } }) },
+        { icon: "bookmark", title: checkpointing ? t("space.saveCheckpointSaving") : t("space.saveCheckpoint"), disabled: checkpointing, onPress: () => void createCheckpoint() },
       ]}
     /> : null}
   </Screen>;

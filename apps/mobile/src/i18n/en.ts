@@ -743,6 +743,7 @@ export const en = {
   "space.openFiles": "Open Files",
   "space.settings": "Space settings",
   "space.tasks.loadMore": "Load more tasks",
+  "space.tasks.loadingMore": "Loading more…",
   "task.title": "Generation task",
   "task.error": "Unable to open task",
   "task.noOutput": "This task has no previewable output yet.",

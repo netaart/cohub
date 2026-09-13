@@ -716,6 +716,7 @@ export const zh: Record<TranslationKey, string> = {
   "space.openFiles": "打开文件",
   "space.settings": "空间设置",
   "space.tasks.loadMore": "加载更多任务",
+  "space.tasks.loadingMore": "正在加载更多…",
   "task.title": "生成任务",
   "task.error": "无法打开任务",
   "task.noOutput": "此任务暂时没有可预览的产物。",
