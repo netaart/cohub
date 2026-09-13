@@ -26,6 +26,8 @@ import Database from "lucide-react-native/icons/database";
 import Download from "lucide-react-native/icons/download";
 import Ellipsis from "lucide-react-native/icons/ellipsis";
 import ExternalLink from "lucide-react-native/icons/external-link";
+import Eye from "lucide-react-native/icons/eye";
+import EyeOff from "lucide-react-native/icons/eye-off";
 import FileText from "lucide-react-native/icons/file-text";
 import FingerprintPattern from "lucide-react-native/icons/fingerprint-pattern";
 import Folder from "lucide-react-native/icons/folder";
@@ -94,6 +96,8 @@ export const icons = {
   database: Database,
   download: Download,
   "external-link": ExternalLink,
+  eye: Eye,
+  "eye-off": EyeOff,
   "file-text": FileText,
   fingerprint: FingerprintPattern,
   folder: Folder,
