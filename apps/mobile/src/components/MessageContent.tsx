@@ -589,9 +589,16 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
     <ChatBubbleFrame side="assistant" maxWidth={maxWidth}>
       {!statusLabel && !hasContent && !runtimeLabel ? <View><TypingIndicator />{footer ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}</View> : null}
       {statusLabel ? <Text style={[typography.caption, { color: theme.colors.danger, marginBottom: hasLivePreview || runtimeLabel ? 6 : 0 }]}>{statusLabel}</Text> : null}
-      {runtimeLabel ? <BubbleText footer={hasContent ? undefined : footer} measurementKey={`${runtimeLabel}:${typography.caption.fontSize}`} style={[typography.caption, { color: theme.colors.textMuted }]}>{runtimeLabel}</BubbleText> : null}
+      {runtimeLabel ? <RuntimeStatusLine label={runtimeLabel} footer={hasContent ? undefined : footer} color={theme.colors.textMuted} /> : null}
       {hasContent ? <MessageContent active={live} content={liveContent} footer={footer} /> : null}
     </ChatBubbleFrame>
+  </View>;
+}
+
+function RuntimeStatusLine({ label, footer, color }: { label: string; footer?: ReactNode; color: string }) {
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 10, maxWidth: "100%" }}>
+    <Text numberOfLines={1} ellipsizeMode="tail" style={[typography.caption, { color, flexShrink: 1 }]}>{label}</Text>
+    {footer ? <View style={{ flexShrink: 0 }}>{footer}</View> : null}
   </View>;
 }
 
