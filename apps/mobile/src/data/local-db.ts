@@ -60,6 +60,23 @@ async function initializeDatabase(): Promise<SQLiteDatabase> {
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (user_key, session_id)
     );
+    CREATE TABLE IF NOT EXISTS debug_sessions (
+      session_id TEXT PRIMARY KEY NOT NULL,
+      started_at TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      closed_at TEXT,
+      uploaded_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS debug_events (
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      timestamp TEXT NOT NULL,
+      name TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      PRIMARY KEY (session_id, sequence)
+    );
+    CREATE INDEX IF NOT EXISTS debug_events_session_time
+      ON debug_events (session_id, timestamp);
   `);
   return db;
 }
@@ -212,6 +229,33 @@ export async function saveSessionReadSequence(userKey: string, sessionId: string
     sequence,
     Date.now(),
   );
+}
+
+export type DebugSessionRow = { sessionId: string; startedAt: string; updatedAt: number; closedAt: string | null; uploadedAt: string | null };
+export type DebugEventRow = { sessionId: string; sequence: number; timestamp: string; name: string; payload: string };
+
+export async function upsertDebugSession(session: DebugSessionRow) {
+  const db = await database();
+  await db.runAsync("INSERT OR REPLACE INTO debug_sessions (session_id, started_at, updated_at, closed_at, uploaded_at) VALUES (?, ?, ?, ?, ?)", session.sessionId, session.startedAt, session.updatedAt, session.closedAt, session.uploadedAt);
+}
+
+export async function saveDebugEvent(event: DebugEventRow) {
+  const db = await database();
+  await db.runAsync("INSERT OR REPLACE INTO debug_events (session_id, sequence, timestamp, name, payload) VALUES (?, ?, ?, ?, ?)", event.sessionId, event.sequence, event.timestamp, event.name, event.payload);
+  await db.runAsync("DELETE FROM debug_events WHERE session_id = ? AND sequence <= (SELECT MAX(sequence) - 3999 FROM debug_events WHERE session_id = ?)", event.sessionId, event.sessionId);
+}
+
+export async function loadDebugEvents(sessionId: string): Promise<DebugEventRow[]> {
+  const db = await database();
+  return db.getAllAsync<DebugEventRow>("SELECT session_id AS sessionId, sequence, timestamp, name, payload FROM debug_events WHERE session_id = ? ORDER BY sequence ASC", sessionId);
+}
+
+export async function clearDebugSession(sessionId: string) {
+  const db = await database();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM debug_events WHERE session_id = ?", sessionId);
+    await db.runAsync("DELETE FROM debug_sessions WHERE session_id = ?", sessionId);
+  });
 }
 
 export async function clearUserCache(userKey: string) {

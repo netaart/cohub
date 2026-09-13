@@ -7,6 +7,7 @@ type ExpoExtra = {
   authEndpoint?: string;
   logtoAppId?: string;
   apiResource?: string;
+  diagnosticsOrigin?: string;
   environment?: "prod" | "dev";
 };
 
@@ -38,6 +39,7 @@ const defaults =
 export const config = {
   environment,
   releasesApiUrl: "https://api.github.com/repos/markbang/cohub-mobile/releases",
+  diagnosticsOrigin: readPublic(process.env.EXPO_PUBLIC_DIAGNOSTICS_ORIGIN, extra.diagnosticsOrigin ?? "https://s-c649d081-fa43-411e-b2d0-bf1d746f3ae6-3000.cohub.live"),
   apiOrigin: readPublic(process.env.EXPO_PUBLIC_API_ORIGIN, extra.apiOrigin ?? defaults.apiOrigin),
   gatewayOrigin: readPublic(
     process.env.EXPO_PUBLIC_GATEWAY_ORIGIN,

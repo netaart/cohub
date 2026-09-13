@@ -17,6 +17,7 @@ import { LocaleProvider, useTranslation } from "@/src/i18n";
 import { useAppTheme } from "@/src/theme";
 import { NativeInteractionBridge } from "@/src/platform/NavigationBridge";
 import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
+import { useDebugDiagnosticsLifecycle } from "@/src/data/debug-session";
 
 export { ErrorBoundary } from "expo-router";
 
@@ -52,6 +53,7 @@ export default function RootLayout() {
 }
 
 function NativeRoot() {
+  useDebugDiagnosticsLifecycle();
   const { client, isInitialized, isAuthenticated, signIn, signOut } = useLogto();
   const theme = useAppTheme();
   const [authLoading, setAuthLoading] = useState(false);

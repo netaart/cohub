@@ -1,3 +1,10 @@
+export type DebugTraceSink = (event: string, fields: TraceFields) => void;
+let debugTraceSink: DebugTraceSink | null = null;
+
+export function setDebugTraceSink(sink: DebugTraceSink | null) {
+  debugTraceSink = sink;
+}
+
 export type TraceValue = string | number | boolean | null | undefined | TraceValue[] | { [key: string]: TraceValue };
 export type TraceFields = { [key: string]: TraceValue };
 export type ScrollTraceEntry = { sequence: number; elapsedMs: number; event: string; source: string; fields: TraceFields };
@@ -71,6 +78,7 @@ export class ChatScrollTrace {
     if (this.entries.length < CAPACITY) this.entries.push(entry);
     else this.entries[this.next] = entry;
     this.next = (this.next + 1) % CAPACITY;
+    debugTraceSink?.(`chat.scroll.${event}`, { source, ...fields });
     // Readers poll; recording must not re-render the chat on every scroll event.
   }
   snapshot(): { startedAt: string | null; recording: boolean; dropped: number; entries: ScrollTraceEntry[] } {

@@ -1,13 +1,14 @@
 import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { Image, Pressable, ScrollView, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AppUpdateRow } from "@/src/components/AppUpdateBanner";
 import { useDebugUnlock } from "@/src/components/useDebugUnlock";
+import { useDebugDiagnostics } from "@/src/data/debug-session";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { openWebLink } from "@/src/platform/browser";
-import { AppIcon, TopBar, Screen, SectionHeader } from "@/src/ui";
+import { AppIcon, TopBar, Screen, SectionHeader, PrimaryButton } from "@/src/ui";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import type { IconName } from "@/src/icons";
@@ -40,6 +41,12 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
   const router = useRouter();
   const { t } = useTranslation();
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackId, setFeedbackId] = useState<string | null>(null);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const diagnostics = useDebugDiagnostics();
   const version = getInstalledAppVersion();
   const unlockDebug = useDebugUnlock(useCallback(() => router.push("/debug"), [router]));
 
@@ -73,6 +80,16 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
         <AppUpdateRow />
       </View>
 
+      <SectionHeader title={t("about.section.diagnostics")} />
+      <View style={[styles.group, { marginHorizontal: 16, borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+        <View style={styles.row}>
+          <View style={[styles.rowIcon, { backgroundColor: theme.colors.accentSoft }]}><AppIcon name="activity" size={17} color={theme.colors.accent} /></View>
+          <View style={styles.rowText}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("about.diagnostics.title")}</Text><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{t("about.diagnostics.detail")}</Text></View>
+          <Switch accessibilityLabel={t("about.diagnostics.title")} value={diagnostics.enabled} onValueChange={(value) => void diagnostics.setEnabled(value)} />
+        </View>
+        {diagnostics.enabled ? <><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="messages" title={t("about.feedback.title")} detail={t("about.feedback.detail")} onPress={() => { setFeedbackError(null); setFeedbackId(null); setFeedbackText(""); setFeedbackOpen(true); }} /></> : null}
+      </View>
+
       <SectionHeader title={t("about.section.links")} />
       <View style={[styles.group, { marginHorizontal: 16, borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <AboutRow icon="code" title={t("about.row.source")} detail={t("about.row.sourceDetail")} onPress={() => void openExternal(REPOSITORY_URL, t("about.row.source"))} />
@@ -100,6 +117,15 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
           <Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message}</Text>
         </AdaptiveSheet>
       ) : null}
+
+      <AdaptiveSheet visible={feedbackOpen} title={t("about.feedback.title")} onClose={() => { if (!feedbackSubmitting) setFeedbackOpen(false); }} scrollable={false}>
+        {feedbackId ? <Text style={[typography.body, { color: theme.colors.success }]}>{t("about.feedback.success", { id: feedbackId })}</Text> : <>
+          <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{t("about.feedback.description")}</Text>
+          <TextInput value={feedbackText} onChangeText={setFeedbackText} multiline maxLength={4000} placeholder={t("about.feedback.placeholder")} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { color: theme.colors.text, minHeight: 120, marginTop: 12, padding: 12, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, textAlignVertical: "top" }]} />
+          {feedbackError ? <Text style={[typography.caption, { color: theme.colors.danger, marginTop: 8 }]}>{feedbackError}</Text> : null}
+          <PrimaryButton label={feedbackSubmitting ? t("common.loading") : t("about.feedback.submit")} disabled={feedbackSubmitting || !feedbackText.trim()} onPress={() => { setFeedbackSubmitting(true); setFeedbackError(null); void diagnostics.submitFeedback({ description: feedbackText, includeSession: true, includeConversation: false }).then((receipt) => setFeedbackId(receipt.id)).catch((error) => setFeedbackError(error instanceof Error ? error.message : t("about.feedback.error"))).finally(() => setFeedbackSubmitting(false)); }} style={{ marginTop: 14 }} />
+        </>}
+      </AdaptiveSheet>
     </View>
   );
 }
