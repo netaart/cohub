@@ -42,6 +42,8 @@ function sendTransitionKey(message: Pick<MessageRecord, "id" | "meta">) {
   return typeof clientMessageId === "string" ? `client:${clientMessageId}` : `message:${message.id}`;
 }
 
+type SendTransition = { text: string; startedAt: string; sourceX: number; sourceY: number; targetX: number; targetY: number; targetHeight: number };
+
 type ChatScrollEvent = {
   nativeEvent: {
     contentOffset: { y: number };
@@ -73,7 +75,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const { state, client, connectionState, refreshHome, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, forkSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadSessionReadSequence, saveSessionReadSequence } = useApp();
   const view = useSession(sessionId);
   const composerRef = useRef<View>(null);
-  const [sendTransition, setSendTransition] = useState<{ text: string; startedAt: string; sourceX: number; sourceY: number; targetX: number; targetY: number; targetHeight: number } | null>(null);
+  const [sendTransition, setSendTransition] = useState<SendTransition | null>(null);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [input, setInput] = useState("");
   const [sendFeedback, setSendFeedback] = useState<"idle" | "success">("idle");
@@ -113,7 +115,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const [followingTail, setFollowingTailState] = useState(true);
   const userDraggingRef = useRef(false);
   const momentumScrollingRef = useRef(false);
-  const sendTransitionActiveRef = useRef(false);
   const followTailFrameRef = useRef<number | null>(null);
   const turnScrollTargetRef = useRef<number | null>(null);
   const turnScrollRetriesRef = useRef(new Map<number, number>());
@@ -133,10 +134,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     ...lastScrollRef.current,
   }), [sessionId]);
   const { recording: tracing, log: trace } = useChatScrollTrace("chat", traceState);
-  const handleSendTransitionActiveChange = useCallback((active: boolean) => {
-    sendTransitionActiveRef.current = active;
-    recordDebugEvent(active ? "chat.send_transition.follow_suppressed" : "chat.send_transition.follow_resumed");
-  }, []);
   const traceTouches = useTraceTouches("chat.list", traceState, tracing);
   const traceOffset = useCallback((source: string, options: { offset: number; animated: boolean }) => {
     trace("command.scrollToOffset", { source, ...options, hasList: Boolean(listRef.current) });
@@ -165,10 +162,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   }, [trace]);
   const requestFollowTail = useCallback((animated = false) => {
     trace("tail.request", { animated });
-    if (sendTransitionActiveRef.current) {
-      trace("tail.suppressed", { animated });
-      return;
-    }
     if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current || pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null) return;
     if (followTailFrameRef.current !== null) cancelAnimationFrame(followTailFrameRef.current);
     followTailFrameRef.current = requestAnimationFrame(() => {
@@ -244,7 +237,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     );
   }, [queuedFollowupIds, view.messages, view.turns]);
   const timeline = useMemo(() => messages.slice().reverse(), [messages]);
-  const transitionMessage = sendTransition ? timeline.find((item) => item.role === "user" && transitionMessageKey !== null && sendTransitionKey(item) === transitionMessageKey) ?? timeline.find((item) => item.role === "user" && sendTransition.text === messageText(item) && item.createdAt >= sendTransition.startedAt) ?? null : null;
+  const transitionMessage = transitionMessageKey !== null
+    ? timeline.find((item) => item.role === "user" && sendTransitionKey(item) === transitionMessageKey) ?? null
+    : sendTransition
+      ? timeline.find((item) => item.role === "user" && sendTransition.text === messageText(item) && item.createdAt >= sendTransition.startedAt) ?? null
+      : null;
 
   useEffect(() => {
     if (!tracing) return;
@@ -709,7 +706,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       transitionTimerRef.current = setTimeout(() => {
         transitionTimerRef.current = null;
         recordDebugEvent("chat.send.transition_cleanup");
-        setTransitionMessageKey(null);
         setSendTransition(null);
       }, 560);
     }
@@ -727,7 +723,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>{t("common.retry")}</Text></Pressable> : null}
         <View ref={listContainerRef} collapsable={false} style={{ flex: 1, minHeight: 0 }}>
         {/* Android selectable text must not reposition the timeline when it gains focus. Explicit turn/tail scrolling remains enabled. */}
-        <FlatList {...traceTouches} ref={listRef} inverted scrollsChildToFocus={false} initialNumToRender={16} maxToRenderPerBatch={8} updateCellsBatchingPeriod={32} windowSize={11} onLayout={(event) => { trace("list.layout", { ...event.nativeEvent.layout }); setListWidth(event.nativeEvent.layout.width); }} data={timeline} keyExtractor={(item) => `${turnSequenceForMessage(item) ?? item.id}:${item.role}`} renderItem={({ item, index }) => { const chronologicalIndex = reverseListIndex(index, messages.length); const isTransitionMessage = transitionMessage ? sendTransitionKey(item) === sendTransitionKey(transitionMessage) : item.role === "user" && item.meta?.optimistic === true && sendTransition?.text === messageText(item) && item.createdAt >= sendTransition.startedAt; const isSendingMessage = item.role === "user" && isTransitionMessage; const sequence = turnSequenceForMessage(item); const older = timeline[index + 1]; const olderSequence = older ? turnSequenceForMessage(older) : null; const showTurnMarker = sequence !== null && sequence !== olderSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); const messageTurn = typeof item.meta?.turnId === "string" ? view.turns.find((entry) => entry.id === item.meta?.turnId) : null; return <View onLayout={(event) => { if (chatScrollTrace.isRecording()) trace("row.layout", { message: chatScrollTrace.alias("message", item.id), index, sequence, ...event.nativeEvent.layout }); if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height);  }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}{isSendingMessage && sendTransition ? <SendBubbleMotion transition={sendTransition} transitionKey={sendTransitionKey(item)} message={item} spaceId={spaceId} onCopy={handleCopyMessage} bubbleRef={sendBubbleRef} onTransitionActiveChange={handleSendTransitionActiveChange} onBubbleLayout={sendTransition.targetHeight <= 0 ? () => { setTransitionMessageKey((current) => current ?? sendTransitionKey(item)); recordDebugEvent("chat.send.optimistic_bubble_layout", { message: chatScrollTrace.alias("message", item.id) }); sendBubbleRef.current?.measureInWindow((bubbleX, bubbleY, _bubbleWidth, bubbleHeight) => listContainerRef.current?.measureInWindow((listX, listY) => setSendTransition((current) => current && current.text === messageText(item) ? (recordDebugEvent("chat.send_transition.target_measured", { message: chatScrollTrace.alias("message", item.id), x: bubbleX - listX, y: bubbleY - listY, width: _bubbleWidth, height: bubbleHeight }), { ...current, targetX: bubbleX - listX - 12, targetY: bubbleY - listY - 5, targetHeight: bubbleHeight }) : current))); } : undefined} /> : <MessageBubble message={item} local={item.meta?.optimistic === true && !isSendingMessage} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />}{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence).map((entry) => entry.id === view.stream?.turnId ? <StreamingTurnProcess key={entry.id} messages={view.stream.intermediateMessages} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: timeline.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>} ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null} />
+        <FlatList {...traceTouches} ref={listRef} inverted scrollsChildToFocus={false} initialNumToRender={16} maxToRenderPerBatch={8} updateCellsBatchingPeriod={32} windowSize={11} onLayout={(event) => { trace("list.layout", { ...event.nativeEvent.layout }); setListWidth(event.nativeEvent.layout.width); }} data={timeline} keyExtractor={(item) => `${turnSequenceForMessage(item) ?? item.id}:${item.role}`} renderItem={({ item, index }) => { const chronologicalIndex = reverseListIndex(index, messages.length); const isTransitionMessage = transitionMessage ? sendTransitionKey(item) === sendTransitionKey(transitionMessage) : item.role === "user" && item.meta?.optimistic === true && sendTransition?.text === messageText(item) && item.createdAt >= sendTransition.startedAt; const sequence = turnSequenceForMessage(item); const older = timeline[index + 1]; const olderSequence = older ? turnSequenceForMessage(older) : null; const showTurnMarker = sequence !== null && sequence !== olderSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); const messageTurn = typeof item.meta?.turnId === "string" ? view.turns.find((entry) => entry.id === item.meta?.turnId) : null; return <View onLayout={(event) => { if (chatScrollTrace.isRecording()) trace("row.layout", { message: chatScrollTrace.alias("message", item.id), index, sequence, ...event.nativeEvent.layout }); if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height);  }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}{isTransitionMessage ? <SendBubbleMotion transition={sendTransition} transitionKey={sendTransitionKey(item)} message={item} local={item.meta?.optimistic === true} spaceId={spaceId} onCopy={handleCopyMessage} bubbleRef={sendBubbleRef} onBubbleLayout={() => { setTransitionMessageKey((current) => current ?? sendTransitionKey(item)); sendBubbleRef.current?.measureInWindow((bubbleX, bubbleY, _bubbleWidth, bubbleHeight) => listContainerRef.current?.measureInWindow((listX, listY) => setSendTransition((current) => { if (!current || current.text !== messageText(item)) return current; const next = { ...current, targetX: bubbleX - listX - 12, targetY: bubbleY - listY - 5, targetHeight: bubbleHeight }; if (Math.abs(current.targetX - next.targetX) < 1 && Math.abs(current.targetY - next.targetY) < 1 && Math.abs(current.targetHeight - next.targetHeight) < 1) return current; recordDebugEvent("chat.send_transition.target_measured", { message: chatScrollTrace.alias("message", item.id), x: bubbleX - listX, y: bubbleY - listY, width: _bubbleWidth, height: bubbleHeight }); return next; }))); }} /> : <MessageBubble message={item} local={item.meta?.optimistic === true && !isTransitionMessage} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />}{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence).map((entry) => entry.id === view.stream?.turnId ? <StreamingTurnProcess key={entry.id} messages={view.stream.intermediateMessages} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentContainerStyle={{ paddingTop: 12, paddingBottom: 12, flexGrow: timeline.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>} ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null} />
         {threadPlaceholder ? <View pointerEvents="none" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}><ChatThreadPlaceholder kind={threadPlaceholder} /></View> : null}
 
         {!followingTail ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.jumpLatest")} onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} style={({ pressed }) => ({ position: "absolute", right: 16, bottom: 12, zIndex: 4, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, borderWidth: 1, borderColor: theme.colors.border, shadowColor: theme.colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5, elevation: 4 })}><AppIcon name="arrow-down" size={18} color={theme.colors.accent} /></Pressable> : null}
@@ -775,34 +771,43 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   </Screen>;
 }
 
-function SendBubbleMotion({ transition, transitionKey, message, spaceId, onCopy, bubbleRef, onBubbleLayout, onTransitionActiveChange }: { transition: { sourceX: number; sourceY: number; targetX: number; targetY: number; targetHeight: number }; transitionKey: string; message: MessageRecord; spaceId?: string; onCopy?: (text: string) => void; bubbleRef: React.RefObject<View | null>; onBubbleLayout?: () => void; onTransitionActiveChange?: (active: boolean) => void }) {
+function SendBubbleMotion({ transition, transitionKey, message, local, spaceId, onCopy, bubbleRef, onBubbleLayout }: { transition: SendTransition | null; transitionKey: string; message: MessageRecord; local: boolean; spaceId?: string; onCopy?: (text: string) => void; bubbleRef: React.RefObject<View | null>; onBubbleLayout?: () => void }) {
   const pop = useSharedValue(0);
   const travel = useSharedValue(0);
   const animationStarted = useRef(false);
+  const animationTimers = useRef<{ pop: ReturnType<typeof setTimeout>; settle: ReturnType<typeof setTimeout> } | null>(null);
+  const transitionAlias = chatScrollTrace.alias("message", transitionKey);
   useEffect(() => {
-    recordDebugEvent("chat.send_transition.mounted", { transitionKey });
-    return () => { onTransitionActiveChange?.(false); recordDebugEvent("chat.send_transition.unmounted", { transitionKey }); };
-  }, [onTransitionActiveChange, transitionKey]);
+    recordDebugEvent("chat.send_transition.mounted", { message: transitionAlias });
+    return () => {
+      if (animationTimers.current) {
+        clearTimeout(animationTimers.current.pop);
+        clearTimeout(animationTimers.current.settle);
+      }
+      recordDebugEvent("chat.send_transition.unmounted", { message: transitionAlias });
+    };
+  }, [transitionAlias, transitionKey]);
+  const targetHeight = transition?.targetHeight ?? 0;
   useEffect(() => {
-    if (transition.targetHeight <= 0 || animationStarted.current) return;
+    if (!transition || targetHeight <= 0 || animationStarted.current) return;
     animationStarted.current = true;
-    onTransitionActiveChange?.(true);
-    recordDebugEvent("chat.send_transition.started", { transitionKey, sourceX: transition.sourceX, sourceY: transition.sourceY, targetX: transition.targetX, targetY: transition.targetY, targetHeight: transition.targetHeight });
+    recordDebugEvent("chat.send_transition.started", { message: transitionAlias, sourceX: transition.sourceX, sourceY: transition.sourceY, targetX: transition.targetX, targetY: transition.targetY, targetHeight });
     pop.value = withSequence(withTiming(0.55, { duration: 110, easing: Easing.out(Easing.cubic) }), withSpring(1, { duration: 260, dampingRatio: 0.72 }));
     travel.value = withDelay(70, withTiming(1, { duration: 390, easing: Easing.out(Easing.cubic) }));
-    const popTimer = setTimeout(() => recordDebugEvent("chat.send_transition.pop_peak", { transitionKey }), 110);
-    const settleTimer = setTimeout(() => recordDebugEvent("chat.send_transition.settled", { transitionKey }), 470);
-    return () => { clearTimeout(popTimer); clearTimeout(settleTimer); };
-  }, [onTransitionActiveChange, pop, travel, transition.sourceX, transition.sourceY, transition.targetHeight, transition.targetX, transition.targetY, transitionKey]);
+    animationTimers.current = {
+      pop: setTimeout(() => recordDebugEvent("chat.send_transition.pop_peak", { message: transitionAlias }), 110),
+      settle: setTimeout(() => recordDebugEvent("chat.send_transition.settled", { message: transitionAlias }), 470),
+    };
+  }, [pop, targetHeight, travel, transition, transitionAlias, transitionKey]);
   const style = useAnimatedStyle(() => ({
-    opacity: transition.targetHeight > 0 ? interpolate(pop.value, [0, 0.35, 1], [0, 1, 1]) : 0,
-    transform: transition.targetHeight > 0 ? [
+    opacity: transition && targetHeight > 0 ? interpolate(pop.value, [0, 0.35, 1], [0, 1, 1]) : 1,
+    transform: transition && targetHeight > 0 ? [
       { translateX: (transition.sourceX - transition.targetX) * (1 - travel.value) },
       { translateY: (transition.sourceY - transition.targetY) * (1 - travel.value) },
       { scale: interpolate(pop.value, [0, 0.55, 1], [0.94, 1.045, 1]) },
     ] : [],
   }));
-  return <MessageBubble message={message} local onCopy={onCopy} spaceId={spaceId} bubbleRef={bubbleRef} onBubbleLayout={onBubbleLayout} animatedStyle={style} />;
+  return <MessageBubble message={message} local={local} onCopy={onCopy} spaceId={spaceId} bubbleRef={bubbleRef} onBubbleLayout={onBubbleLayout} animatedStyle={transition ? style : undefined} />;
 }
 
 function ChatThreadPlaceholder({ kind }: { kind: "opening" | "empty" }) {
