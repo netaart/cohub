@@ -43,6 +43,8 @@ export default function SpaceScreen() {
   const [spaceError, setSpaceError] = useState<string | null>(null);
   const [resources, setResources] = useState<Resources>(emptyResources);
   const [loadingResources, setLoadingResources] = useState(true);
+  const [taskCursor, setTaskCursor] = useState<string | null>(null);
+  const [tasksLoadingMore, setTasksLoadingMore] = useState(false);
   const [resourceFailures, setResourceFailures] = useState<ResourceFailures>(noResourceFailures);
   const [spaceSessions, setSpaceSessions] = useState<UserSessionListItem[]>([]);
   const [spaceSessionsHasMore, setSpaceSessionsHasMore] = useState(false);
@@ -54,6 +56,7 @@ export default function SpaceScreen() {
   const closeSpaceActions = useCallback(() => setSpaceActionsOpen(false), []);
   const [pinning, setPinning] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
+  const [checkpointing, setCheckpointing] = useState(false);
   const [activePanel, setActivePanel] = useState<SpacePanel | null>(null);
   const spaceRefreshAtRef = useRef<{ spaceId: string; at: number } | null>(null);
   const spaceRefreshInFlightRef = useRef<{ spaceId: string; token: number } | null>(null);
@@ -133,8 +136,21 @@ export default function SpaceScreen() {
       apps: appResult.status === "rejected",
       tasks: taskResult.status === "rejected",
     });
+    if (taskResult.status === "fulfilled") setTaskCursor(taskResult.value.pageInfo?.hasMore ? taskResult.value.pageInfo.nextCursor : null);
     setLoadingResources(false);
   }, [client, spaceId]);
+
+  const loadMoreTasks = async () => {
+    if (!client || !spaceId || !taskCursor || tasksLoadingMore) return;
+    setTasksLoadingMore(true);
+    try {
+      const result = await client.tasks.list({ spaceId, limit: 8, cursor: taskCursor });
+      setResources((current) => ({ ...current, tasks: [...new Map([...current.tasks, ...result.runs].map((task) => [task.id, task])).values()] }));
+      setTaskCursor(result.pageInfo?.hasMore ? result.pageInfo.nextCursor : null);
+    } finally {
+      setTasksLoadingMore(false);
+    }
+  };
 
   const loadSessions = useCallback(async (options: { force?: boolean } = {}) => {
     if (!client || !spaceId) return;
@@ -211,6 +227,16 @@ export default function SpaceScreen() {
     }
   };
   const activeTasks = resources.tasks.filter((task) => task.status === "pending" || task.status === "running").length;
+  const createCheckpoint = async () => {
+    if (checkpointing || !client) return;
+    setCheckpointing(true);
+    try {
+      await client.space(space.id).checkpoints.create();
+      await loadResources({ force: true });
+    } finally {
+      setCheckpointing(false);
+    }
+  };
   const detailsFailed = resourceFailures.checkpoints || resourceFailures.apps || resourceFailures.tasks || sessionsFailed;
   return <Screen>
     <View style={{ flex: 1 }} accessibilityElementsHidden={spaceActionsOpen} importantForAccessibility={spaceActionsOpen ? "no-hide-descendants" : "auto"}>
@@ -251,16 +277,17 @@ export default function SpaceScreen() {
     {detailsFailed ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, marginTop: 12 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{t("space.resourcesFailed")}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("space.resourcesRetry")} disabled={loadingResources || sessionsLoading} onPress={() => void reloadDetails()} hitSlop={8} style={({ pressed }) => ({ opacity: loadingResources || sessionsLoading ? 0.5 : pressed ? 0.6 : 1 })}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}
 
     <SectionHeader title={t("space.section.chats")} action={{ icon: "plus", label: t("space.newChat"), onPress: () => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } }) }} />
-    <View>{sessions.length > 0 ? sessions.slice(0, 8).map((session) => <SessionRow key={session.id} session={{ ...session, space: session.space ?? { id: space.id, name, slug: space.slug, publicProfile: space.publicProfile ?? null } }} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } })} />) : <ResourceEmpty text={sessionsLoading ? t("space.empty.chatsLoading") : sessionsFailed ? t("space.empty.loadFailed") : t("space.empty.chats")} />}</View>
+    <View>{sessions.length > 0 ? sessions.map((session) => <SessionRow key={session.id} session={{ ...session, space: session.space ?? { id: space.id, name, slug: space.slug, publicProfile: space.publicProfile ?? null } }} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } })} />) : <ResourceEmpty text={sessionsLoading ? t("space.empty.chatsLoading") : sessionsFailed ? t("space.empty.loadFailed") : t("space.empty.chats")} />}</View>
 
     <SectionHeader title={t("space.section.works")} />
-    <View>{resources.apps.length > 0 ? resources.apps.slice(0, 6).map((app) => <ResourceRow key={app.id} icon="rocket" title={app.meta?.title || app.meta?.name || app.slug} subtitle={t("space.workSubtitle", { target: app.targetType, version: app.latestVersion })} trailing={<StatusPill label={app.status === "published" ? t("space.published") : t("space.disabled")} tone={app.status === "published" ? "success" : "neutral"} />} onPress={() => router.push({ pathname: "/work/[appId]", params: { appId: app.id } })} />) : <ResourceEmpty text={loadingResources ? t("space.empty.worksLoading") : resourceFailures.apps ? t("space.empty.loadFailed") : t("space.empty.works")} />}</View>
+    <View>{resources.apps.length > 0 ? resources.apps.map((app) => <ResourceRow key={app.id} icon="rocket" title={app.meta?.title || app.meta?.name || app.slug} subtitle={t("space.workSubtitle", { target: app.targetType, version: app.latestVersion })} trailing={<StatusPill label={app.status === "published" ? t("space.published") : t("space.disabled")} tone={app.status === "published" ? "success" : "neutral"} />} onPress={() => router.push({ pathname: "/work/[appId]", params: { appId: app.id } })} />) : <ResourceEmpty text={loadingResources ? t("space.empty.worksLoading") : resourceFailures.apps ? t("space.empty.loadFailed") : t("space.empty.works")} />}</View>
 
     <SectionHeader title={t("space.section.saves")} />
     <View>{resources.checkpoints.length > 0 ? resources.checkpoints.map((checkpoint) => <ResourceRow key={checkpoint.id} icon="bookmark" title={checkpoint.description || t("space.save", { hash: checkpoint.commitHash.slice(0, 8) })} subtitle={`${formatRelativeTime(checkpoint.createdAt)} · ${checkpoint.commitHash.slice(0, 8)}`} />) : <ResourceEmpty text={loadingResources ? t("space.empty.savesLoading") : resourceFailures.checkpoints ? t("space.empty.loadFailed") : t("space.empty.saves")} />}</View>
 
     <SectionHeader title={t("space.section.tasks")} />
-    <View style={{ paddingBottom: 24 }}>{resources.tasks.length > 0 ? resources.tasks.map((task) => <ResourceRow key={task.id} icon={task.status === "running" ? "sync" : task.status === "failed" ? "alert" : "check-circle"} title={task.taskType.replaceAll("_", " ")} subtitle={task.errorMessage || t("space.taskAttempt", { time: formatRelativeTime(task.updatedAt), count: task.attemptCount })} trailing={<StatusPill label={task.status} tone={task.status === "failed" ? "danger" : task.status === "running" || task.status === "pending" ? "warning" : "success"} />} onPress={task.sessionId ? () => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: task.sessionId! } }) : undefined} />) : <ResourceEmpty text={loadingResources ? t("space.empty.tasksLoading") : resourceFailures.tasks ? t("space.empty.loadFailed") : t("space.empty.tasks")} />}</View>
+    <View style={{ paddingBottom: 24 }}>{resources.tasks.length > 0 ? resources.tasks.map((task) => <ResourceRow key={task.id} icon={task.status === "running" ? "sync" : task.status === "failed" ? "alert" : "check-circle"} title={task.taskType.replaceAll("_", " ")} subtitle={task.errorMessage || t("space.taskAttempt", { time: formatRelativeTime(task.updatedAt), count: task.attemptCount })} trailing={<StatusPill label={task.status} tone={task.status === "failed" ? "danger" : task.status === "running" || task.status === "pending" ? "warning" : "success"} />} onPress={() => task.taskType.includes("generation") ? router.push({ pathname: "/task/[taskId]", params: { taskId: task.id } }) : task.sessionId ? router.push({ pathname: "/chat/[sessionId]", params: { sessionId: task.sessionId! } }) : undefined} />) : <ResourceEmpty text={loadingResources ? t("space.empty.tasksLoading") : resourceFailures.tasks ? t("space.empty.loadFailed") : t("space.empty.tasks")} />}</View>
+    {taskCursor ? <PrimaryButton label={t("space.tasks.loadMore")} icon="plus" loading={tasksLoadingMore} onPress={() => void loadMoreTasks()} style={{ marginHorizontal: 16, marginBottom: 20 }} /> : null}
     </ScrollView>
       </View>
     </SpacePanels>
@@ -274,6 +301,8 @@ export default function SpaceScreen() {
         { icon: "messages", title: t("chat.actions.openChats"), onPress: () => setActivePanel("chat") },
         { icon: space.isPinned ? "pin-off" : "pin", title: space.isPinned ? t("space.unpin") : t("space.pin"), disabled: pinning, onPress: () => void togglePin() },
         { icon: "folder-open", title: t("space.openFiles"), onPress: () => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } }) },
+        { icon: "settings", title: t("space.settings"), onPress: () => router.push({ pathname: "/space/[spaceId]/settings", params: { spaceId: space.id } }) },
+        { icon: "bookmark", title: checkpointing ? t("space.saveCheckpointSaving") : t("space.saveCheckpoint"), disabled: checkpointing, onPress: () => void createCheckpoint() },
       ]}
     /> : null}
   </Screen>;

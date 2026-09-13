@@ -1,4 +1,5 @@
 import { useRouter, useScrollToTop } from "expo-router";
+import type { BillingSubscriptionHistoryStatus } from "@neta-art/cohub";
 import { useRef } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
@@ -6,6 +7,7 @@ import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { TokenHeatmap } from "@/src/components/TokenHeatmap";
 import { useApp } from "@/src/data/context";
 import { useActivity } from "@/src/data/use-activity";
+import { useBillingHistory } from "@/src/data/use-billing-history";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { AppIcon, ConnectionBanner, DataError, LoadingRows, Screen, SectionHeader, TopBar } from "@/src/ui";
@@ -18,6 +20,9 @@ export default function ActivityScreen() {
   const tabBarInset = useFloatingTabBarInset();
   const { connectionState } = useApp();
   const { credits, days, loading, refresh } = useActivity();
+  const subscriptions = useBillingHistory("subscriptions");
+  const subscriptionItems = subscriptions.data?.kind === "subscriptions" ? subscriptions.data.list.items as BillingSubscriptionHistoryStatus[] : [];
+  const currentSubscription = subscriptionItems.find((item) => item.status === "active") ?? subscriptionItems[0] ?? null;
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTop(scrollRef);
   const retry = () => void refresh();
@@ -34,6 +39,11 @@ export default function ActivityScreen() {
         <Text style={[typography.title, { color: credits.data && credits.data.netUsd < 0 ? theme.colors.danger : theme.colors.text }]}>{credits.data ? `$${credits.data.netUsd.toFixed(2)}` : "—"}</Text>
       </PressableScale>
       {credits.error ? <DataError message={credits.error} onRetry={retry} /> : null}
+      <PressableScale accessibilityRole="button" accessibilityLabel={t("activity.subscription.title")} onPress={() => router.push("/settings/billing-history")} style={{ marginHorizontal: theme.spacing.lg, marginTop: theme.spacing.md, padding: theme.spacing.lg, borderRadius: 14, backgroundColor: theme.colors.surfaceRaised, gap: theme.spacing.sm }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}><AppIcon name="sparkles" size={17} color={theme.colors.accent} /><Text style={[typography.caption, { flex: 1, color: theme.colors.textMuted }]}>{t("activity.subscription.title")}</Text><AppIcon name="chevron-right" size={17} color={theme.colors.textMuted} /></View>
+        <Text style={[typography.title, { color: theme.colors.text }]}>{currentSubscription?.productName ?? t("activity.subscription.none")}</Text>
+        <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{currentSubscription ? currentSubscription.status : t("activity.subscription.choose")}</Text>
+      </PressableScale>
       <View style={{ flexDirection: "row", flexWrap: "wrap", paddingHorizontal: theme.spacing.lg, gap: theme.spacing.lg }}>
         {(["activity", "referrals"] as const).map((section) => <PressableScale key={section} accessibilityRole="button" onPress={() => router.push(`/settings/${section}`)} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}><AppIcon name={section === "activity" ? "activity" : "gift"} size={16} color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.accent }]}>{t(section === "activity" ? "activity.usageDetails" : "settings.section.referrals")}</Text></PressableScale>)}
       </View>
