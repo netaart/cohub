@@ -1,8 +1,9 @@
-import { Linking, Text, View, type ColorValue } from "react-native";
+import { Text, View, type ColorValue } from "react-native";
 import type { ReactNode } from "react";
 import { CodeBlock } from "@/src/components/CodeBlock";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
+import { openWebLink } from "@/src/platform/browser";
 
 type ReleaseNotesProps = {
   content: string | null;
@@ -163,7 +164,7 @@ function renderInline(value: string, linkColor: ColorValue): ReactNode[] {
           key={`link-${key}`}
           accessibilityRole="link"
           style={{ color: linkColor, textDecorationLine: "underline" }}
-          onPress={() => void Linking.openURL(url).catch(() => undefined)}
+          onPress={() => void openWebLink(url).catch(() => undefined)}
         >
           {match[2]}
         </Text>,

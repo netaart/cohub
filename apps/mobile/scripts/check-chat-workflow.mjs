@@ -36,6 +36,7 @@ import { forkSessionTurn } from "../src/data/session-fork.ts";
 import { resolveMessageLink } from "../src/data/message-links.ts";
 import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
 import { isSettingsSection, settingsMenu } from "../src/data/settings-navigation.ts";
+import { parseBrowserPreference } from "../src/data/browser-preference.ts";
 import { channelHealthState, createSettingsChannel, createWeChatLoginPoller, isChannelProvider, missingChannelField } from "../src/data/channel-settings.ts";
 
 import { activityRange, localDateKey, tokenDays } from "../src/data/activity.ts";
@@ -45,6 +46,10 @@ for (const invalid of [undefined, ["channels"], "constructor", "__proto__", "app
 assert.equal(new Set(settingsMenu.map((item) => item.href)).size, settingsMenu.length);
 assert.ok(settingsMenu.some((item) => item.href === "/settings/storage"));
 assert.ok(settingsMenu.some((item) => item.href === "/settings/channels"));
+assert.ok(settingsMenu.some((item) => item.href === "/settings/browser"));
+assert.equal(parseBrowserPreference(null), "system");
+assert.equal(parseBrowserPreference("in-app"), "in-app");
+assert.throws(() => parseBrowserPreference("embedded"), /Invalid browser preference/);
 assert.ok(!readFileSync(new URL("../src/components/SettingsScreen.tsx", import.meta.url), "utf8").includes('accessibilityRole="tab"'));
 assert.ok(readFileSync(new URL("../src/components/AccountAvatar.tsx", import.meta.url), "utf8").includes('href="/settings"'));
 assert.equal(isChannelProvider("wechat"), true);

@@ -1,11 +1,11 @@
 import { useRouter } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { SettingsRow } from "@/src/components/SettingsRow";
 import { subscriptionCheckoutUrl } from "@/src/data/billing-settings";
+import { openWebLink } from "@/src/platform/browser";
 import { useBillingHistory, type SubscriptionCancellation } from "@/src/data/use-billing-history";
 import { useTranslation } from "@/src/i18n";
 import { typography, useAppTheme } from "@/src/theme";
@@ -45,7 +45,7 @@ export function BillingHistoryScreen({ kind }: { kind: "history" | "subscription
               if (!url) { void load(); return; }
               setPaying(true);
               setPaymentError(null);
-              void WebBrowser.openBrowserAsync(url).then(() => load()).catch((caught: unknown) => setPaymentError(caught instanceof Error ? caught.message : t("settings.billing.checkoutError"))).finally(() => setPaying(false));
+              void openWebLink(url).then(() => load()).catch((caught: unknown) => setPaymentError(caught instanceof Error ? caught.message : t("settings.billing.checkoutError"))).finally(() => setPaying(false));
             }} /> : null}
             {item.actions.canCancelCheckout || item.actions.canCancelAutoRenew ? <PrimaryButton label={t(item.actions.canCancelCheckout ? "settings.billing.cancelCheckout" : "settings.billing.cancelRenewal")} icon="x" tone="danger" disabled={busy} onPress={() => setCandidate({ subscription: item, kind: item.actions.canCancelCheckout ? "checkout" : "renewal" })} /> : null}
           </View>

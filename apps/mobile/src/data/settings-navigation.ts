@@ -10,6 +10,7 @@ export const settingsSections = {
   activity: { labelKey: "settings.section.activity", icon: "activity" },
   billing: { labelKey: "settings.section.billing", icon: "database" },
   referrals: { labelKey: "settings.section.referrals", icon: "gift" },
+  browser: { labelKey: "settings.browser.title", icon: "external-link" },
 } as const satisfies Record<string, { labelKey: TranslationKey; icon: IconName }>;
 
 export type SettingsSection = keyof typeof settingsSections;
@@ -21,6 +22,7 @@ export function isSettingsSection(value: unknown): value is SettingsSection {
 export const settingsMenu = [
   { labelKey: "profile.appearance.title", icon: "palette", href: "/appearance" },
   { labelKey: "profile.language.title", icon: "globe", href: "/language" },
+  { labelKey: "settings.browser.title", icon: "external-link", href: "/settings/browser" },
   ...(["chats", "notifications", "channels", "rules"] as const).map((section) => ({
     ...settingsSections[section], href: `/settings/${section}` as const,
   })),

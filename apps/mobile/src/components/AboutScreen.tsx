@@ -1,11 +1,12 @@
 import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { Image, Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AppUpdateRow } from "@/src/components/AppUpdateBanner";
 import { useDebugUnlock } from "@/src/components/useDebugUnlock";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
+import { openWebLink } from "@/src/platform/browser";
 import { AppIcon, TopBar, Screen, SectionHeader } from "@/src/ui";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
@@ -44,7 +45,7 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
 
   const openExternal = async (url: string, title: string) => {
     try {
-      await Linking.openURL(url);
+      await openWebLink(url);
     } catch (error) {
       const message = error instanceof Error ? error.message : t("about.linkUnavailable.body", { title });
       if (onNotice) onNotice({ title: t("about.linkUnavailable.title", { title }), message });

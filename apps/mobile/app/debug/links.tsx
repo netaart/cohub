@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { buildSessionDeepLink, buildSpaceDeepLink } from "@/src/config";
 import { resolveMessageLink } from "@/src/data/message-links";
+import { isWebLink, openWebLink } from "@/src/platform/browser";
 import { getInitialNotificationUrl } from "@/src/platform/notifications";
 import { typography, useAppTheme } from "@/src/theme";
 import { AppIcon, PrimaryButton, Screen, SectionHeader } from "@/src/ui";
@@ -41,7 +42,7 @@ export default function DebugLinksScreen() {
       router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: spaceId.trim(), path: target.path } });
       return;
     }
-    void Linking.openURL(target.url).catch(() => undefined);
+    void (isWebLink(target.url) ? openWebLink(target.url) : Linking.openURL(target.url)).catch(() => undefined);
   }, [router, spaceId, url]);
 
   return (

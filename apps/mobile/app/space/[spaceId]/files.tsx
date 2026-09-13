@@ -1,7 +1,7 @@
 import type { SpaceFsEntry } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FlatList, Pressable, Text, View } from "react-native";
+import { Alert, FlatList, Pressable, Share, Text, View } from "react-native";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useApp } from "@/src/data/context";
 import { useTranslation } from "@/src/i18n";
@@ -106,6 +106,14 @@ export default function FilesScreen() {
     [openPath, router, spaceId],
   );
 
+  const showFileActions = useCallback((entry: SpaceFsEntry) => {
+    Alert.alert(entry.name, undefined, [
+      { text: t("file.openExternally"), onPress: () => openEntry(entry) },
+      { text: "Share", onPress: () => void Share.share({ message: entry.path }).catch(() => undefined) },
+      { text: t("common.cancel"), style: "cancel" },
+    ]);
+  }, [openEntry, t]);
+
   const goToParent = useCallback(() => {
     dismissPath(parentSpacePath(currentPath));
   }, [currentPath, dismissPath]);
@@ -153,7 +161,7 @@ export default function FilesScreen() {
             flexGrow: entries.length === 0 ? 1 : undefined,
           }}
           renderItem={({ item }) => (
-            <SpaceFileRow entry={item} onPress={() => openEntry(item)} />
+            <SpaceFileRow entry={item} onPress={() => openEntry(item)} onLongPress={() => showFileActions(item)} />
           )}
           ListEmptyComponent={
             <View style={styles.emptyState}>

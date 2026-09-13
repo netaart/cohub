@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCurrentUser } from "@/src/auth/current-user";
 import { useProfileSession } from "@/src/auth/profile-session";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { useBrowserPreference } from "@/src/data/browser-preference";
 import { SettingsRow } from "@/src/components/SettingsRow";
 import { useDebugUnlock } from "@/src/components/useDebugUnlock";
 import { useApp } from "@/src/data/context";
@@ -20,6 +21,7 @@ export function SettingsHomeScreen() {
   const insets = useSafeAreaInsets();
   const { t, preference: language } = useTranslation();
   const appearance = useThemePreference();
+  const browser = useBrowserPreference();
   const router = useRouter();
   const { signOut } = useProfileSession();
   const { name, email, avatar } = useCurrentUser();
@@ -74,7 +76,7 @@ export function SettingsHomeScreen() {
           key={item.href}
           icon={item.icon}
           title={t(item.labelKey)}
-          value={item.href === "/appearance" ? t(`appearance.theme.${appearance}`) : item.href === "/language" ? t(language === "system" ? "language.option.system" : language === "en" ? "language.device.english" : "language.device.chinese") : undefined}
+          value={item.href === "/appearance" ? t(`appearance.theme.${appearance}`) : item.href === "/language" ? t(language === "system" ? "language.option.system" : language === "en" ? "language.device.english" : "language.device.chinese") : item.href === "/settings/browser" ? t(browser.preference === "in-app" ? "settings.browser.inApp" : "settings.browser.system") : undefined}
           onPress={() => router.push(item.href)}
         />)}
       </View>

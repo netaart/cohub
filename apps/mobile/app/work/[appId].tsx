@@ -1,9 +1,10 @@
 import type { AppDetailResponse } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Linking, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useApp } from "@/src/data/context";
+import { openWebLink } from "@/src/platform/browser";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import { TopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
@@ -38,7 +39,7 @@ export default function WorkScreen() {
 
   const title = detail?.app.meta?.title || detail?.app.meta?.name || detail?.app.slug || t("work.fallbackTitle");
   return <Screen>
-    <TopBar title={title} subtitle={detail?.space.name || t("work.published")} onBack={() => router.back()} actions={contentUrl ? <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void Linking.openURL(contentUrl)} /> : undefined} />
+    <TopBar title={title} subtitle={detail?.space.name || t("work.published")} onBack={() => router.back()} actions={contentUrl ? <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void openWebLink(contentUrl).catch(() => undefined)} /> : undefined} />
     {error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center" }]}>{error}</Text></View> : !detail ? <LoadingRows count={6} /> : !contentUrl ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("work.noContent")}</Text></View> : <WebView
       source={{ uri: contentUrl }}
       style={{ flex: 1, backgroundColor: theme.colors.background }}
@@ -54,7 +55,7 @@ export default function WorkScreen() {
           const url = new URL(request.url);
           if (url.protocol !== "https:") return false;
           if (!initialOrigin || url.origin === initialOrigin) return true;
-          void Linking.openURL(request.url);
+          void openWebLink(request.url).catch(() => undefined);
           return false;
         } catch {
           return false;

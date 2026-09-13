@@ -19,6 +19,7 @@ import { formatRelativeTime } from "@/src/utils";
 type SpaceFileRowProps = {
   entry: SpaceFsEntry;
   onPress: () => void;
+  onLongPress?: () => void;
   compact?: boolean;
 };
 
@@ -45,7 +46,7 @@ export function formatSpaceFileBytes(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function SpaceFileRow({ entry, onPress, compact = false }: SpaceFileRowProps) {
+export function SpaceFileRow({ entry, onPress, onLongPress, compact = false }: SpaceFileRowProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const isDirectory = entry.type === "dir";
@@ -64,6 +65,7 @@ export function SpaceFileRow({ entry, onPress, compact = false }: SpaceFileRowPr
       accessibilityRole="button"
       accessibilityLabel={isDirectory ? t("space.file.openFolder", { name: entry.name }) : t("space.file.openFile", { name: entry.name })}
       onPress={onPress}
+      onLongPress={onLongPress}
       haptic
       style={{
         minHeight: compact ? 60 : 63,

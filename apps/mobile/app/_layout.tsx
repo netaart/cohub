@@ -1,7 +1,7 @@
 import { translate } from "@/src/i18n/core";
 import { LogtoProvider, useLogto } from "@logto/rn";
 import { useFonts } from "expo-font";
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
+import { DarkTheme, DefaultTheme, ExperimentalStack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
@@ -132,35 +132,35 @@ function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {
           {/* Deeper screens use the platform transition: the iOS push (with its interactive back
               swipe) and Android's own forward animation. Overriding it replaces a platform behavior
               with an imitation. */}
-          <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="chat/[sessionId]" />
-            <Stack.Screen name="space/[spaceId]" />
-            <Stack.Screen name="space/[spaceId]/files" />
-            <Stack.Screen name="space/[spaceId]/file" />
-            <Stack.Screen name="work/[appId]" />
-            <Stack.Screen name="image-viewer" options={{ contentStyle: { backgroundColor: "#000000" } }} />
-            <Stack.Screen name="new-chat" options={{ title: t("route.newChat"), presentation: "modal", animation: "slide_from_bottom" }} />
-            <Stack.Screen name="settings" options={{ title: t("route.settings") }} />
-            <Stack.Screen name="appearance" options={{ title: t("route.appearance") }} />
-            <Stack.Screen name="language" options={{ title: t("route.language") }} />
-            <Stack.Screen name="about" options={{ title: t("route.about") }} />
-            <Stack.Screen name="debug/index" options={{ title: t("route.debug") }} />
-            <Stack.Screen name="debug/chat-scroll" options={{ title: "Scroll Diagnostics" }} />
-            <Stack.Screen name="debug/bubble-layout" options={{ title: "Bubble Layout" }} />
-            <Stack.Screen name="debug/streaming" options={{ title: t("route.streaming") }} />
-            <Stack.Screen name="debug/bubbles" options={{ title: t("route.bubbles") }} />
-            <Stack.Screen name="debug/updates" options={{ title: t("route.updates") }} />
-            <Stack.Screen name="debug/cache" options={{ title: t("route.cache") }} />
-            <Stack.Screen name="debug/composer" options={{ title: t("route.composer") }} />
-          <Stack.Screen name="debug/connection" options={{ title: t("route.connection") }} />
-          <Stack.Screen name="debug/links" options={{ title: t("route.links") }} />
-          <Stack.Screen name="debug/i18n" options={{ title: t("route.i18n") }} />
-          <Stack.Screen name="debug/identity" options={{ title: t("route.identity") }} />
-            <Stack.Screen name="debug/tools" options={{ title: t("route.tools") }} />
-            <Stack.Screen name="debug/markdown" options={{ title: t("route.markdown") }} />
-            <Stack.Screen name="debug/list" options={{ title: t("route.longList") }} />
-          </Stack>
+          <ExperimentalStack screenOptions={{ headerShown: false }}>
+            <ExperimentalStack.Screen name="(tabs)" />
+            <ExperimentalStack.Screen name="chat/[sessionId]" />
+            <ExperimentalStack.Screen name="space/[spaceId]" />
+            <ExperimentalStack.Screen name="space/[spaceId]/files" />
+            <ExperimentalStack.Screen name="space/[spaceId]/file" />
+            <ExperimentalStack.Screen name="work/[appId]" />
+            <ExperimentalStack.Screen name="image-viewer" options={{ contentStyle: { backgroundColor: "#000000" } }} />
+            <ExperimentalStack.Screen name="new-chat" options={{ title: t("route.newChat"), presentation: "modal", animation: "slide_from_bottom" }} />
+            <ExperimentalStack.Screen name="settings" options={{ title: t("route.settings") }} />
+            <ExperimentalStack.Screen name="appearance" options={{ title: t("route.appearance") }} />
+            <ExperimentalStack.Screen name="language" options={{ title: t("route.language") }} />
+            <ExperimentalStack.Screen name="about" options={{ title: t("route.about") }} />
+            <ExperimentalStack.Screen name="debug/index" options={{ title: t("route.debug") }} />
+            <ExperimentalStack.Screen name="debug/chat-scroll" options={{ title: "Scroll Diagnostics" }} />
+            <ExperimentalStack.Screen name="debug/bubble-layout" options={{ title: "Bubble Layout" }} />
+            <ExperimentalStack.Screen name="debug/streaming" options={{ title: t("route.streaming") }} />
+            <ExperimentalStack.Screen name="debug/bubbles" options={{ title: t("route.bubbles") }} />
+            <ExperimentalStack.Screen name="debug/updates" options={{ title: t("route.updates") }} />
+            <ExperimentalStack.Screen name="debug/cache" options={{ title: t("route.cache") }} />
+            <ExperimentalStack.Screen name="debug/composer" options={{ title: t("route.composer") }} />
+          <ExperimentalStack.Screen name="debug/connection" options={{ title: t("route.connection") }} />
+          <ExperimentalStack.Screen name="debug/links" options={{ title: t("route.links") }} />
+          <ExperimentalStack.Screen name="debug/i18n" options={{ title: t("route.i18n") }} />
+          <ExperimentalStack.Screen name="debug/identity" options={{ title: t("route.identity") }} />
+            <ExperimentalStack.Screen name="debug/tools" options={{ title: t("route.tools") }} />
+            <ExperimentalStack.Screen name="debug/markdown" options={{ title: t("route.markdown") }} />
+            <ExperimentalStack.Screen name="debug/list" options={{ title: t("route.longList") }} />
+          </ExperimentalStack>
           <AppUpdateBanner />
         </View>
       </ToastProvider>

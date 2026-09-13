@@ -11,7 +11,6 @@ import type {
 } from "@neta-art/cohub";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as WebBrowser from "expo-web-browser";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
 	ActivityIndicator,
@@ -25,6 +24,7 @@ import {
 	View,
 } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { BrowserSettings } from "@/src/components/BrowserSettings";
 import { ChatFilterSettings } from "@/src/components/ChatFilterSettings";
 import { ChannelBindingSheet } from "@/src/components/ChannelBindingSheet";
 import { channelHealthState } from "@/src/data/channel-settings";
@@ -51,6 +51,7 @@ import {
 	StatusPill,
 } from "@/src/ui";
 import { formatNumber, formatRelativeTime } from "@/src/utils";
+import { openWebLink } from "@/src/platform/browser";
 
 type ProfileState = {
 	profile: UserProfile | null;
@@ -85,6 +86,7 @@ export function SettingsScreen({ section }: { section: SettingsSection }) {
 					<ProfileSection client={client} onNotice={setNotice} />
 				) : null}
 				{section === "chats" ? <ChatFilterSettings /> : null}
+				{section === "browser" ? <BrowserSettings /> : null}
 				{section === "activity" ? <ActivitySection client={client} /> : null}
 				{section === "notifications" ? (
 					<NotificationsSection
@@ -1171,7 +1173,7 @@ function BillingSection({
 				});
 				return;
 			}
-			await WebBrowser.openBrowserAsync(checkout.checkoutUrl);
+			await openWebLink(checkout.checkoutUrl);
 		} catch (caught) {
 			onNotice({
 				title: t("settings.billing.checkoutUnavailable.title"),

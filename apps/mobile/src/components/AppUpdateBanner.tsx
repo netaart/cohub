@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState as NativeAppState, Linking, Platform, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, AppState as NativeAppState, Platform, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { ReleaseNotes } from "@/src/components/ReleaseNotes";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, PrimaryButton } from "@/src/ui";
+import { openWebLink } from "@/src/platform/browser";
 import {
   checkForAppUpdate,
   downloadAndInstallAndroidUpdate,
@@ -192,7 +193,7 @@ export function AppUpdateDetailsSheet({
             icon={isAndroid ? "download" : "external-link"}
             loading={opening}
             disabled={isAndroid && !release.downloadUrl}
-            onPress={() => void (isAndroid ? installUpdate() : runOperation(() => Linking.openURL(release.url)))}
+            onPress={() => void (isAndroid ? installUpdate() : runOperation(() => openWebLink(release.url)))}
             style={{ flex: 1, minWidth: 0, minHeight: 46, paddingHorizontal: 14 }}
           />
         </View>
@@ -245,7 +246,7 @@ export function AppUpdateDetailsSheet({
       <Pressable
         accessibilityRole="link"
         accessibilityLabel={t("update.openOnGitHub")}
-        onPress={() => void runOperation(() => Linking.openURL(release.url))}
+        onPress={() => void runOperation(() => openWebLink(release.url))}
         disabled={opening}
         style={({ pressed }) => [styles.githubLink, { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: opening ? 0.55 : 1 }]}
       >

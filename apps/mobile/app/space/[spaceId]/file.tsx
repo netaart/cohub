@@ -1,7 +1,7 @@
 import type { SpaceFsFileResponse } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { CodeBlock } from "@/src/components/CodeBlock";
 import { CodeEditor } from "@/src/components/CodeEditor";
@@ -9,6 +9,7 @@ import { detectCodeLanguage } from "@/src/data/code-language";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError, MAX_EDITABLE_CODE_BYTES } from "@/src/data/code-file";
 import { useApp } from "@/src/data/context";
 import { useTranslation } from "@/src/i18n";
+import { openWebLink } from "@/src/platform/browser";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, TopBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
 
@@ -194,7 +195,7 @@ export default function FileScreen() {
           ) : editable ? (
             <IconButton name="square-pen" label={t("file.edit")} size={40} onPress={() => setDraft(file?.content ?? "")} />
           ) : url ? (
-            <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void Linking.openURL(url)} />
+            <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void openWebLink(url).catch(() => undefined)} />
           ) : undefined
         }
       />
