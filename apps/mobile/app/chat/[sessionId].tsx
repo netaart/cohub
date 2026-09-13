@@ -4,7 +4,7 @@ import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
-import Reanimated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Reanimated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from "react-native-reanimated";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
 import { useToast } from "@/src/components/Toast";
@@ -742,10 +742,26 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 
 function SendTransitionOverlay({ transition }: { transition: { text: string; x: number; y: number; width: number; targetX: number; targetY: number } }) {
   const theme = useAppTheme();
-  const progress = useSharedValue(0);
-  useEffect(() => { progress.value = withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) }); }, [progress]);
-  const style = useAnimatedStyle(() => ({ opacity: 1 - progress.value * 0.35, transform: [{ translateX: (transition.targetX - transition.x) * progress.value }, { translateY: (transition.targetY - transition.y) * progress.value }, { scale: 1 - progress.value * 0.04 }] }));
-  return <Reanimated.View pointerEvents="none" style={[{ position: "absolute", left: transition.x, top: transition.y - 22, maxWidth: transition.width, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18, backgroundColor: theme.colors.accent, zIndex: 20, elevation: 6 }, style]}><Text numberOfLines={3} style={[typography.body, { color: theme.colors.accentText }]}>{transition.text}</Text></Reanimated.View>;
+  const pop = useSharedValue(0);
+  const travel = useSharedValue(0);
+  useEffect(() => {
+    pop.value = withSequence(
+      withTiming(0.55, { duration: 110, easing: Easing.out(Easing.cubic) }),
+      withSpring(1, { duration: 260, dampingRatio: 0.72 }),
+    );
+    travel.value = withDelay(70, withTiming(1, { duration: 390, easing: Easing.out(Easing.cubic) }));
+  }, [pop, travel]);
+  const style = useAnimatedStyle(() => ({
+    opacity: interpolate(pop.value, [0, 0.35, 1], [0, 1, 1]),
+    width: interpolate(travel.value, [0, 1], [transition.width, Math.min(transition.width, 260)]),
+    borderRadius: interpolate(pop.value, [0, 0.55, 1], [22, 25, 18]),
+    transform: [
+      { translateX: (transition.targetX - transition.x) * travel.value },
+      { translateY: (transition.targetY - transition.y) * travel.value },
+      { scale: interpolate(pop.value, [0, 0.55, 1], [0.94, 1.045, 1]) },
+    ],
+  }));
+  return <Reanimated.View pointerEvents="none" style={[{ position: "absolute", left: transition.x, top: transition.y - 22, paddingHorizontal: 14, paddingVertical: 10, backgroundColor: theme.colors.accent, zIndex: 20, elevation: 6 }, style]}><Text numberOfLines={3} style={[typography.body, { color: theme.colors.accentText }]}>{transition.text}</Text></Reanimated.View>;
 }
 
 function ChatThreadPlaceholder({ kind }: { kind: "opening" | "empty" }) {
