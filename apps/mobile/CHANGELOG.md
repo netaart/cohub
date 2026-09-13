@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.2.3](https://github.com/markbang/cohub-mobile/compare/v2.2.2...v2.2.3) (2026-09-13)
+
+
+### Features
+
+* **chat:** animate sent messages from composer ([bdf66fe](https://github.com/markbang/cohub-mobile/commit/bdf66fe7edaa67fdc9e1d71e6fbc80b385cbd768))
+* **diagnostics:** add SQLite feedback collection ([0015fee](https://github.com/markbang/cohub-mobile/commit/0015fee5b194e34cdb251b34c0da0d7aff24a162))
+
+
+### Fixes
+
+* **chat:** animate the optimistic bubble in place ([4685b86](https://github.com/markbang/cohub-mobile/commit/4685b865d8c05393a99f94db55ae0399938bbc68))
+* **chat:** animate the rendered optimistic bubble ([fd6ad98](https://github.com/markbang/cohub-mobile/commit/fd6ad98aa8371835aeff104278db5fa4647f28aa))
+* **chat:** hand off send bubble to optimistic row ([85f421f](https://github.com/markbang/cohub-mobile/commit/85f421ffb6146248e7051ace1d8ec3fb7b8232d8))
+* **chat:** measure send transition after bubble layout ([d52b1f8](https://github.com/markbang/cohub-mobile/commit/d52b1f84eabf841d697f9e5176e84322aa8b4480))
+* **chat:** preserve send transition across reconciliation ([a8b497e](https://github.com/markbang/cohub-mobile/commit/a8b497e65f81db72d1b7502ac0609e553870092d))
+* **chat:** reshape sent bubble transition ([1f56948](https://github.com/markbang/cohub-mobile/commit/1f569489e40faa86dd46fc73efbec315a781bb80))
+* **chat:** size send bubble to message content ([3024990](https://github.com/markbang/cohub-mobile/commit/3024990ab359b1fbc817b94882e5b1addde38450))
+* **chat:** stabilize runtime status bubble layout ([8af1fbf](https://github.com/markbang/cohub-mobile/commit/8af1fbf7c2303ff5100fddae9399c41d5cc9b4bc))
+
 ## [2.2.2](https://github.com/markbang/cohub-mobile/compare/v2.2.1...v2.2.2) (2026-09-13)
 
 
