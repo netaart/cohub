@@ -501,7 +501,7 @@ function BubbleMeta({ clock, local = false, side, live = false, t }: { clock?: s
   </View>;
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, onLongPress, forkDisabled = false, forking = false, spaceId = null, availableWidth }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; onLongPress?: () => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number }) {
+export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null, availableWidth }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
@@ -542,7 +542,7 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const maxWidth = getBubbleMaxWidth(availableWidth ?? width);
   const clock = formatMessageClock(message.createdAt);
   const footer = clock || local ? <BubbleMeta clock={clock} local={local} side={side} t={t} /> : undefined;
-  return <BubbleContext.Provider value={bubbleEnvironment}><Pressable {...traceTouches} onLongPress={onLongPress} delayLongPress={420} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
+  return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
     <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} local={local} maxWidth={maxWidth}>
       {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - BUBBLE_PADDING_X * 2} footer={message.errorMessage ? undefined : footer} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} footer={message.errorMessage ? undefined : footer} /> : !message.errorMessage ? footer : null}
       {message.errorMessage ? <BubbleText selectable footer={footer} measurementKey={`${message.errorMessage}:${typography.caption.fontSize}`} containerStyle={{ marginTop: 6 }} style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger }]}>{message.errorMessage}</BubbleText> : null}
@@ -553,7 +553,7 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
       {onCopy ? <Pressable accessibilityRole="button" accessibilityLabel={copied ? t("chat.copied") : t("chat.copy")} onPress={() => { onCopy(copyText); setCopied(true); }} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}><AppIcon name={copied ? "check" : "copy"} size={14} color={copied ? theme.colors.success : theme.colors.textFaint} /></Pressable> : null}
       {!isUser && onFork && typeof message.meta?.turnId === "string" ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.fork")} disabled={forkDisabled} onPress={() => onFork(message)} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: forkDisabled ? 0.45 : pressed ? 0.55 : 1 })}>{forking ? <ActivityIndicator size="small" color={theme.colors.textFaint} /> : <AppIcon name="git-fork" size={14} color={theme.colors.textFaint} />}</Pressable> : null}
     </View> : null}
-  </Pressable></BubbleContext.Provider>;
+  </View></BubbleContext.Provider>;
 });
 
 export function StreamCard({ content, status, runtimePhase = null, runtimeModel = null, availableWidth }: { content: ContentBlock[]; status: string; runtimePhase?: StreamView["runtimePhase"]; runtimeModel?: string | null; availableWidth?: number }) {

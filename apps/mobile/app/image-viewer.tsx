@@ -57,7 +57,7 @@ export default function ImageViewerScreen() {
         closeProgress.set(withTiming(0, { duration: 180, reduceMotion: ReduceMotion.System }));
       }
     }), [close, closeProgress, dismissScale, dismissY]);
-  const viewerStyle = useAnimatedStyle(() => ({ transform: [{ translateY: dismissY.get() }, { scale: dismissScale.get() }] }));
+  const galleryStyle = useAnimatedStyle(() => ({ transform: [{ translateY: dismissY.get() }, { scale: dismissScale.get() }] }));
   const backdropStyle = useAnimatedStyle(() => ({ opacity: 1 - closeProgress.get() * 0.75 }));
   const closeButtonStyle = {
     position: "absolute" as const,
@@ -88,10 +88,11 @@ export default function ImageViewerScreen() {
   }
 
   return (
-    <Reanimated.View style={[{ flex: 1, backgroundColor: "#000000" }, viewerStyle]}>
+    <View style={{ flex: 1, backgroundColor: "#000000" }}>
       <Reanimated.View pointerEvents="none" style={[{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "#000000" }, backdropStyle]} />
       <StatusBar style="light" />
       <GestureDetector gesture={dismissGesture}>
+      <Reanimated.View style={[{ flex: 1 }, galleryStyle]}>
       <FlatList
         data={payload.uris}
         horizontal
@@ -113,6 +114,7 @@ export default function ImageViewerScreen() {
           </View>
         )}
       />
+      </Reanimated.View>
       </GestureDetector>
       <Pressable accessibilityRole="button" accessibilityLabel={t("imageViewer.close")} hitSlop={6} onPress={close} style={closeButtonStyle}>
         <AppIcon name="x" size={22} color="#ffffff" />
@@ -120,6 +122,6 @@ export default function ImageViewerScreen() {
       <View pointerEvents="none" style={{ position: "absolute", zIndex: 2, top: insets.top + 19, left: 18 }}>
         <Text style={[typography.caption, { color: "#ffffff" }]}>{index + 1} / {payload.uris.length}</Text>
       </View>
-    </Reanimated.View>
+    </View>
   );
 }
