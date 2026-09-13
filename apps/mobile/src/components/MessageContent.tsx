@@ -9,7 +9,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { CodeBlock } from "@/src/components/CodeBlock";
 import { StreamingGlyph } from "@/src/components/StreamingGlyph";
 import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
-import Reanimated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming, type SharedValue } from "react-native-reanimated";
+import Reanimated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming, type AnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { formatMessageClock } from "@/src/data/chat-format";
 import { setImageViewerPayload } from "@/src/data/image-viewer";
 import { markdownInlineText, markdownMedia, type MarkdownBlock, type MarkdownInline, type MarkdownTableAlignment } from "@/src/data/markdown";
@@ -461,6 +461,7 @@ function ChatBubbleFrame({
   maxWidth,
   bubbleRef,
   onBubbleLayout,
+  animatedStyle,
 }: {
   side: "user" | "assistant";
   local?: boolean;
@@ -468,10 +469,11 @@ function ChatBubbleFrame({
   maxWidth: number;
   bubbleRef?: RefObject<View | null>;
   onBubbleLayout?: () => void;
+  animatedStyle?: AnimatedStyle<ViewStyle>;
 }) {
   const theme = useAppTheme();
   const style = chatBubbleStyle(theme, side, local, maxWidth);
-  return <BubbleContentWidth.Provider value={Math.max(0, maxWidth - BUBBLE_PADDING_X * 2)}><View ref={bubbleRef} onLayout={onBubbleLayout} style={style}>{children}</View></BubbleContentWidth.Provider>;
+  return <BubbleContentWidth.Provider value={Math.max(0, maxWidth - BUBBLE_PADDING_X * 2)}><Reanimated.View ref={bubbleRef} onLayout={onBubbleLayout} style={[style, animatedStyle]}>{children}</Reanimated.View></BubbleContentWidth.Provider>;
 }
 
 function TypingDot({ progress, index, color }: { progress: SharedValue<number>; index: number; color: string }) {
@@ -505,7 +507,7 @@ function BubbleMeta({ clock, local = false, side, live = false, t }: { clock?: s
   </View>;
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null, availableWidth, bubbleRef, onBubbleLayout, floating = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number; bubbleRef?: RefObject<View | null>; onBubbleLayout?: () => void; floating?: boolean }) {
+export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null, availableWidth, bubbleRef, onBubbleLayout, animatedStyle, floating = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number; bubbleRef?: RefObject<View | null>; onBubbleLayout?: () => void; animatedStyle?: AnimatedStyle<ViewStyle>; floating?: boolean }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
@@ -547,7 +549,7 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const clock = formatMessageClock(message.createdAt);
   const footer = clock || local ? <BubbleMeta clock={clock} local={local} side={side} t={t} /> : undefined;
   return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: floating ? undefined : "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
-    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} local={local} maxWidth={maxWidth} bubbleRef={bubbleRef} onBubbleLayout={onBubbleLayout}>
+    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} local={local} maxWidth={maxWidth} bubbleRef={bubbleRef} onBubbleLayout={onBubbleLayout} animatedStyle={animatedStyle}>
       {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - BUBBLE_PADDING_X * 2} footer={message.errorMessage ? undefined : footer} /> : message.text?.trim() ? <TextBlock value={message.text} accent={accent} color={textColor} footer={message.errorMessage ? undefined : footer} /> : !message.errorMessage ? footer : null}
       {message.errorMessage ? <BubbleText selectable footer={footer} measurementKey={`${message.errorMessage}:${typography.caption.fontSize}`} containerStyle={{ marginTop: 6 }} style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger }]}>{message.errorMessage}</BubbleText> : null}
     </ChatBubbleFrame></BubbleTraceMessage.Provider>
