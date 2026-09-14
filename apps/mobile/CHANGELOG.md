@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.9](https://github.com/markbang/cohub-mobile/compare/v2.2.8...v2.2.9) (2026-09-14)
+
+
+### Fixes
+
+* **android:** disable predictive back gesture ([eb92b75](https://github.com/markbang/cohub-mobile/commit/eb92b75ead7592d110130e2fb18195239bfd0c69))
+
 ## [2.2.8](https://github.com/markbang/cohub-mobile/compare/v2.2.7...v2.2.8) (2026-09-14)
 
 
