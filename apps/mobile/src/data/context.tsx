@@ -95,18 +95,40 @@ async function buildPromptContent(
   const content: ContentBlock[] = [];
   const imageBlocks: ContentBlock[] = [];
   for (const attachment of attachments) {
-    const blob: Blob = new ExpoFile(attachment.uri);
-    // The presigned PUT signs Content-Type from the mime type we pass, while
-    // native Blob bodies send the file's own type; they must agree or R2
-    // rejects the signature.
-    const mimeType = blob.type || attachment.mimeType;
-    const uploaded = await client.publicAssets.uploadChatAttachment({
+    const file = new ExpoFile(attachment.uri);
+    const mimeType = file.type || attachment.mimeType;
+    
+    // Use expo-file-system's native upload to avoid React Native bridge recycling issues.
+    // SDK's fetch-based upload can fail with "dynamic value has been recycled" on Android.
+    const plan = await client.publicAssets.createUpload({
+      purpose: "chat_attachment",
+      uploadProtocol: "presigned_put_v1",
       spaceId,
       sessionId,
-      file: blob,
-      mimeType,
-      filename: attachment.name,
+      file: {
+        size: file.size,
+        mimeType,
+        filename: attachment.name,
+      },
     });
+    
+    const uploadHeaders: Record<string, string> = {};
+    if (plan.asset.uploadHeaders) {
+      for (const [key, value] of Object.entries(plan.asset.uploadHeaders)) {
+        if (value != null) uploadHeaders[key] = String(value);
+      }
+    }
+    
+    const uploadResult = await file.upload(plan.asset.uploadUrl, {
+      uploadType: 0,
+      headers: uploadHeaders,
+    });
+    
+    if (uploadResult.status < 200 || uploadResult.status >= 300) {
+      throw new Error(`File upload failed: HTTP ${uploadResult.status}`);
+    }
+    
+    const uploaded = plan.asset;
     if (mimeType.startsWith("image/")) {
       imageBlocks.push({
         type: "image",
