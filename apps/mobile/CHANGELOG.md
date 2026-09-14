@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.5](https://github.com/markbang/cohub-mobile/compare/v2.2.4...v2.2.5) (2026-09-14)
+
+
+### Fixes
+
+* **android:** use supported predictive back callback ([a94e471](https://github.com/markbang/cohub-mobile/commit/a94e471224552fc73b70808d745ec514d650433c))
+
 ## [2.2.4](https://github.com/markbang/cohub-mobile/compare/v2.2.3...v2.2.4) (2026-09-14)
 
 
