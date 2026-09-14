@@ -145,22 +145,35 @@ export function highlightCodeSync(code: string, language: CodeLanguageId, theme:
   }
 }
 
+// Tokenizing runs on the JS thread, and opening a Chat can mount many code blocks at once.
+// Serialize them and yield a frame between blocks so a cache-heavy Chat cannot burst every
+// tokenization (and the token tree render that follows) into one long JS block.
+let highlightChain: Promise<unknown> = Promise.resolve();
+const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
 export async function highlightCode(code: string, language: string | null, theme: CodeHighlightTheme): Promise<HighlightedCode | null> {
   const languageId = resolveCodeLanguage(language);
   if (!languageId || code.length > MAX_HIGHLIGHT_CHARS) return null;
   const key = cacheKey(code, languageId, theme);
   const cached = resultCache.get(key);
   if (cached) return cached.result;
-  const highlighter = await getHighlighter();
-  await ensureLanguage(highlighter, languageId);
-  try {
-    const result = tokenize(highlighter, code, languageId, theme);
-    cacheResult(key, code, result);
-    return result;
-  } catch {
-    // Unsupported grammar patterns fall back to plain text in the caller.
-    return null;
-  }
+  const run = highlightChain.then(async (): Promise<HighlightedCode | null> => {
+    const memoized = resultCache.get(key);
+    if (memoized) return memoized.result;
+    await yieldFrame();
+    const highlighter = await getHighlighter();
+    await ensureLanguage(highlighter, languageId);
+    try {
+      const result = tokenize(highlighter, code, languageId, theme);
+      cacheResult(key, code, result);
+      return result;
+    } catch {
+      // Unsupported grammar patterns fall back to plain text in the caller.
+      return null;
+    }
+  });
+  highlightChain = run.catch(() => undefined);
+  return run;
 }
 
 export function getCachedHighlightedCode(code: string, language: string | null, theme: CodeHighlightTheme): HighlightedCode | null {

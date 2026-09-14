@@ -176,13 +176,19 @@ export async function pruneUserCache(userKey: string, cutoff: number) {
   });
 }
 
+/** Cache-first paint only needs the recent window; older history arrives with the server window. */
+const MESSAGE_CACHE_LIMIT = 30;
+
 export async function loadMessages(userKey: string, sessionId: string) {
   const db = await database();
   const rows = await db.getAllAsync<{ payload: string }>(
-    "SELECT payload FROM messages WHERE user_key = ? AND session_id = ? ORDER BY sequence ASC",
+    "SELECT payload FROM messages WHERE user_key = ? AND session_id = ? ORDER BY sequence DESC LIMIT ?",
     userKey,
     sessionId,
+    MESSAGE_CACHE_LIMIT,
   );
+  // Query newest-first so the limit keeps the tail, then restore ascending order for rendering.
+  rows.reverse();
   return rows.flatMap((row) => {
     const value = parse<MessageRecord>(row.payload);
     return value ? [value] : [];
