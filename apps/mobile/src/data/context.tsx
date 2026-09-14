@@ -1459,14 +1459,15 @@ export function AppProvider({
         const cachedMessages = stateRef.current.sessionViews[sessionId]?.messages ?? [];
         const liveMessages = cachedMessages.filter(isLiveMessage);
         dispatch({ type: "session-success", sessionId, space, session: response.session ?? session, messages: mergeDisplayMessages(messages, liveMessages), turns: response.turns, hasMoreOlder: response.hasMore, hasMoreNewer: false, oldestCursor: response.turns[0]?.sequence ?? null, newestCursor: response.turns.at(-1)?.sequence ?? null });
-        void loadTurnIndex(sessionId).catch(() => undefined);
+        // The turn index only feeds the turn navigator and marker colors; loading it eagerly made
+        // every Chat open pay a second slow request plus a full re-render. It loads when opened.
         void saveMessages(userKey, sessionId, messages).catch(() => undefined);
       } catch (error) {
         if (openTokens.current.get(sessionId) !== token) return;
         dispatch({ type: "session-error", sessionId, message: error instanceof Error ? error.message : translate("data.openChatFailed") });
       }
     },
-    [attachSessionRealtime, client, dispatch, loadTurnIndex, recordSpaceVisit, refreshSession, userKey],
+    [attachSessionRealtime, client, dispatch, recordSpaceVisit, refreshSession, userKey],
   );
 
   const releaseSession = useCallback((sessionId: string) => {

@@ -840,7 +840,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           ref={listRef}
           inverted
           scrollsChildToFocus={false}
-          initialNumToRender={16}
+          initialNumToRender={8}
           maxToRenderPerBatch={8}
           updateCellsBatchingPeriod={32}
           windowSize={11}
