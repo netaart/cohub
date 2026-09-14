@@ -23,6 +23,22 @@ export type SessionListActivityRow = {
   lastMessageAt: Date | string | null;
 };
 
+/**
+ * `source` query for cross-space session lists. `web` keeps human web chats;
+ * legacy rows with a null source count as web, matching the client fallback.
+ */
+export type UserSessionSourceFilter = "web";
+
+/** Raw `space_sessions.source` values that `source=web` matches. */
+export const WEB_SESSION_SOURCES = ["web", "web_app"] as const;
+
+export const parseUserSessionSourceFilter = (
+  value: string | null | undefined,
+): UserSessionSourceFilter | null => {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "web" ? "web" : null;
+};
+
 export const encodeSessionListCursor = (
   session: Pick<SessionListActivityRow, "id" | "lastMessageAt"> | null | undefined,
 ) => {

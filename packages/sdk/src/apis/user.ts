@@ -1,5 +1,5 @@
 import { HttpError, type HttpTransport, type Fetch } from "../transport.js";
-import type { LabelAssignmentRecord, LabelResourceType, MeResponse, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse } from "../types.js";
+import type { LabelAssignmentRecord, LabelResourceType, MeResponse, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse, UserSessionSourceFilter } from "../types.js";
 
 const usageDate = (value: string | Date) => value instanceof Date ? value.toISOString() : value;
 
@@ -38,12 +38,13 @@ export class UserApi {
     });
   }
 
-  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null } | Fetch, customFetch?: Fetch) {
+  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: UserSessionSourceFilter | null } | Fetch, customFetch?: Fetch) {
     const options = typeof optionsOrFetch === "function" ? undefined : optionsOrFetch;
     const fetch = typeof optionsOrFetch === "function" ? optionsOrFetch : customFetch;
     const params = new URLSearchParams();
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     if (options?.cursor) params.set("cursor", options.cursor);
+    if (options?.source) params.set("source", options.source);
     const query = params.toString();
     return this.transport.request<UserSessionsResponse>(
       `/api/me/sessions${query ? `?${query}` : ""}`,

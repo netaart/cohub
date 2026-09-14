@@ -47,12 +47,16 @@ import {
   resolveSessionListLimit,
   paginateSessionRows,
   type SessionListCursor,
+  type UserSessionSourceFilter,
+  WEB_SESSION_SOURCES,
 } from "./session-list.js";
 
 export {
   encodeSessionListCursor,
   InvalidSessionListCursorError,
   mergeUserSessionListBranches,
+  parseUserSessionSourceFilter,
+  type UserSessionSourceFilter,
 } from "./session-list.js";
 
 
@@ -445,6 +449,14 @@ export const attachSessionSpaceSummaries = async <T extends { spaceId: string }>
   }));
 };
 
+const sessionListSourceCondition = (source: UserSessionSourceFilter | null) => {
+  if (!source) return undefined;
+  return or(
+    isNull(spaceSessions.source),
+    inArray(spaceSessions.source, [...WEB_SESSION_SOURCES]),
+  );
+};
+
 /**
  * List sessions created by or participated in by a user, across spaces.
  *
@@ -455,24 +467,22 @@ export const attachSessionSpaceSummaries = async <T extends { spaceId: string }>
  */
 export const listUserSessions = async (
   userUuid: string,
-  options?: { limit?: number; cursor?: string | null },
+  options?: { limit?: number; cursor?: string | null; source?: UserSessionSourceFilter | null },
 ) => {
   const limit = resolveSessionListLimit(options?.limit);
   const cursor = decodeSessionListCursor(options?.cursor);
   const activityCursor = sessionListActivityCursorCondition(cursor);
+  const sourceCondition = sessionListSourceCondition(options?.source ?? null);
   const branchLimit = limit + 1;
 
-  const creatorWhere = activityCursor
-    ? and(eq(spaceSessions.userUuid, userUuid), activityCursor)
-    : eq(spaceSessions.userUuid, userUuid);
+  const creatorWhere = and(eq(spaceSessions.userUuid, userUuid), activityCursor, sourceCondition);
 
-  const participantOnly = and(
+  const participantWhere = and(
     userSessionParticipantCondition(userUuid),
     sql`${spaceSessions.userUuid} is distinct from ${userUuid}`,
+    activityCursor,
+    sourceCondition,
   );
-  const participantWhere = activityCursor
-    ? and(participantOnly, activityCursor)
-    : participantOnly;
 
   const [creatorRows, participantRows] = await Promise.all([
     db.select().from(spaceSessions).where(creatorWhere).orderBy(...sessionListOrderBy).limit(branchLimit),

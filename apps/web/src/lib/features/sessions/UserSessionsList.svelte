@@ -1,5 +1,8 @@
 <script lang="ts">
-import type { UserSessionListItem } from "@neta-art/cohub";
+import type {
+	UserSessionListItem,
+	UserSessionSourceFilter,
+} from "@neta-art/cohub";
 import { Loader2, Search } from "lucide-svelte";
 import SessionSidebarRowContent from "$lib/components/SessionSidebarRowContent.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
@@ -12,7 +15,6 @@ import {
 	buildUserSessionRoute,
 } from "$lib/space-routes";
 import { uiState } from "$lib/stores/ui.svelte";
-import type { SessionsSourceFilter } from "$lib/stores/user-sessions-source-filter";
 
 function openCommandPalette() {
 	window.dispatchEvent(new CustomEvent("cohub:open-command-palette"));
@@ -20,7 +22,6 @@ function openCommandPalette() {
 
 const {
 	sessions,
-	totalCount,
 	activeSessionId = null,
 	loading = false,
 	loadingMore = false,
@@ -29,14 +30,13 @@ const {
 	hasMore = false,
 	isDesktop = true,
 	modelsCatalog = null,
-	sourceFilter = "web",
+	sourceFilter = null,
 	onSourceFilterChange,
 	onSelect,
 	onLoadMore,
 	onNewChat,
 }: {
 	sessions: UserSessionListItem[];
-	totalCount?: number;
 	activeSessionId?: string | null;
 	loading?: boolean;
 	loadingMore?: boolean;
@@ -45,8 +45,8 @@ const {
 	hasMore?: boolean;
 	isDesktop?: boolean;
 	modelsCatalog?: ModelCatalogItem[] | null;
-	sourceFilter?: SessionsSourceFilter;
-	onSourceFilterChange?: (filter: SessionsSourceFilter) => void;
+	sourceFilter?: UserSessionSourceFilter | null;
+	onSourceFilterChange?: (filter: UserSessionSourceFilter | null) => void;
 	onSelect: (session: UserSessionListItem) => void;
 	onLoadMore: () => void;
 	onNewChat: () => void;
@@ -66,74 +66,60 @@ function spaceName(session: UserSessionListItem) {
 </script>
 
 <section class="flex h-full min-h-0 flex-col bg-[var(--sidebar-bg)]">
-	<header class="shrink-0 border-b border-border-subtle">
-		<div class="flex h-11 items-center gap-2 px-3">
-			<div class="flex min-w-0 flex-1 items-center gap-2">
-				{#if !isDesktop}
-					<button
-						type="button"
-						class="group flex min-w-0 items-center gap-2"
-						onclick={() => {
-							uiState.mobileDrawerOpen = !uiState.mobileDrawerOpen;
-						}}
-						aria-label={m.sessions_open_nav({}, { locale })}
-					>
-						<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-brand text-[11px] font-bold text-brand-contrast-fg transition-colors group-hover:bg-brand-hover">
-							C
-						</span>
-						<span class="truncate text-[13px] font-semibold tracking-tight text-text-primary">Cohub</span>
-					</button>
-				{:else}
-					<h1 class="text-[13px] font-semibold tracking-tight text-text-primary">Chats</h1>
-				{/if}
-				{#if refreshing}
-					<Loader2 class="h-3 w-3 shrink-0 animate-spin text-text-placeholder" />
-				{/if}
-			</div>
-			<div class="flex shrink-0 items-center gap-1">
-				{#if !isDesktop}
-					<button
-						type="button"
-						class="group/search flex h-7 shrink-0 items-center justify-center rounded-[6px] bg-bg-surface px-2 text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
-						onclick={openCommandPalette}
-						title={m.sessions_search_everywhere({}, { locale })}
-						aria-label="Search everywhere"
-					>
-						<Search class="h-3.5 w-3.5 text-text-placeholder transition-colors group-hover/search:text-brand" />
-					</button>
-				{/if}
+	<header class="flex h-11 shrink-0 items-center gap-2 border-b border-border-subtle px-3">
+		<div class="flex min-w-0 flex-1 items-center gap-2">
+			{#if !isDesktop}
 				<button
 					type="button"
-					class="inline-flex h-7 items-center rounded-[6px] border border-[color:var(--sidebar-primary-action-border)] bg-[var(--sidebar-primary-action-bg)] px-2.5 text-[12px] font-medium text-[var(--sidebar-primary-action-fg)] transition-colors hover:bg-[var(--sidebar-primary-action-bg-hover)]"
-					onclick={onNewChat}
+					class="group flex min-w-0 items-center gap-2"
+					onclick={() => {
+						uiState.mobileDrawerOpen = !uiState.mobileDrawerOpen;
+					}}
+					aria-label={m.sessions_open_nav({}, { locale })}
 				>
-					New
+					<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-brand text-[11px] font-bold text-brand-contrast-fg transition-colors group-hover:bg-brand-hover">
+						C
+					</span>
+					<span class="truncate text-[13px] font-semibold tracking-tight text-text-primary">Cohub</span>
 				</button>
-			</div>
+			{:else}
+				<h1 class="text-[13px] font-semibold tracking-tight text-text-primary">Chats</h1>
+			{/if}
+			{#if refreshing}
+				<Loader2 class="h-3 w-3 shrink-0 animate-spin text-text-placeholder" />
+			{/if}
 		</div>
-		{#if onSourceFilterChange}
-			<div
-				class="flex items-center gap-1 px-3 pb-2"
-				role="tablist"
-				aria-label="Filter chats by source"
+		<div class="flex shrink-0 items-center gap-1">
+			{#if !isDesktop}
+				<button
+					type="button"
+					class="group/search flex h-7 shrink-0 items-center justify-center rounded-[6px] bg-bg-surface px-2 text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
+					onclick={openCommandPalette}
+					title={m.sessions_search_everywhere({}, { locale })}
+					aria-label="Search everywhere"
+				>
+					<Search class="h-3.5 w-3.5 text-text-placeholder transition-colors group-hover/search:text-brand" />
+				</button>
+			{/if}
+			{#if onSourceFilterChange}
+				<button
+					type="button"
+					class="inline-flex h-7 items-center rounded-[6px] px-2 text-[12px] transition-colors {sourceFilter === 'web' ? 'bg-[var(--sidebar-item-active-bg)] font-medium text-[var(--sidebar-item-active-fg)]' : 'text-text-tertiary hover:bg-[var(--sidebar-item-hover-bg)] hover:text-text-secondary'}"
+					aria-pressed={sourceFilter === "web"}
+					title={sourceFilter === "web" ? "Showing Web App chats only" : "Showing all chats"}
+					onclick={() => onSourceFilterChange(sourceFilter === "web" ? null : "web")}
+				>
+					{sourceFilter === "web" ? "Web App" : "All"}
+				</button>
+			{/if}
+			<button
+				type="button"
+				class="inline-flex h-7 items-center rounded-[6px] border border-[color:var(--sidebar-primary-action-border)] bg-[var(--sidebar-primary-action-bg)] px-2.5 text-[12px] font-medium text-[var(--sidebar-primary-action-fg)] transition-colors hover:bg-[var(--sidebar-primary-action-bg-hover)]"
+				onclick={onNewChat}
 			>
-				{#each [
-					{ value: "web", label: "Web App" },
-					{ value: "all", label: "All" },
-				] as const as option (option.value)}
-					{@const selected = sourceFilter === option.value}
-					<button
-						type="button"
-						role="tab"
-						aria-selected={selected}
-						class="inline-flex h-6 items-center rounded-[6px] px-2 text-[11px] font-medium transition-colors {selected ? 'bg-[var(--sidebar-item-active-bg)] text-[var(--sidebar-item-active-fg)]' : 'text-text-tertiary hover:bg-[var(--sidebar-item-hover-bg)] hover:text-text-secondary'}"
-						onclick={() => onSourceFilterChange(option.value)}
-					>
-						{option.label}
-					</button>
-				{/each}
-			</div>
-		{/if}
+				New
+			</button>
+		</div>
 	</header>
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-1.5 py-2">
@@ -144,33 +130,6 @@ function spaceName(session: UserSessionListItem) {
 			</div>
 		{:else if error && sessions.length === 0}
 			<div class="px-2 py-3 text-[12px] text-error-soft">{error}</div>
-		{:else if sessions.length === 0 && sourceFilter === "web" && (totalCount ?? 0) > 0}
-			<div class="px-2 py-8 text-center">
-				<p class="text-[13px] text-text-secondary">No web chats yet</p>
-				<p class="mt-1 text-[12px] text-text-placeholder">Loaded chats come from scheduled prompts or channels.</p>
-				<div class="mt-4 flex items-center justify-center gap-2">
-					{#if hasMore}
-						<button
-							type="button"
-							class="inline-flex items-center gap-2 rounded-[6px] bg-bg-hover px-3 py-1.5 text-[12px] text-text-secondary transition-colors hover:bg-bg-hover-strong hover:text-text-primary disabled:opacity-60"
-							disabled={loadingMore}
-							onclick={onLoadMore}
-						>
-							{#if loadingMore}
-								<Loader2 class="h-3 w-3 animate-spin" />
-							{/if}
-							Load more
-						</button>
-					{/if}
-					<button
-						type="button"
-						class="inline-flex items-center rounded-[6px] px-3 py-1.5 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary"
-						onclick={() => onSourceFilterChange?.("all")}
-					>
-						Show all
-					</button>
-				</div>
-			</div>
 		{:else if sessions.length === 0}
 			<div class="px-2 py-8 text-center">
 				<p class="text-[13px] text-text-secondary">{m.sessions_no_chats({}, { locale })}</p>

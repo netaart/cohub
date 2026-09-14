@@ -5,6 +5,7 @@ import {
   encodeSessionListCursor,
   InvalidSessionListCursorError,
   mergeUserSessionListBranches,
+  parseUserSessionSourceFilter,
   pickSessionsPreservingOrder,
 } from "./session-list.js";
 
@@ -153,5 +154,20 @@ describe("decodeSessionListCursor", () => {
         (error: unknown) => error instanceof InvalidSessionListCursorError,
       );
     }
+  });
+});
+
+describe("parseUserSessionSourceFilter", () => {
+  it("accepts web case-insensitively and trims", () => {
+    assert.equal(parseUserSessionSourceFilter("web"), "web");
+    assert.equal(parseUserSessionSourceFilter(" WEB "), "web");
+  });
+
+  it("returns null for missing or unknown values", () => {
+    assert.equal(parseUserSessionSourceFilter(null), null);
+    assert.equal(parseUserSessionSourceFilter(undefined), null);
+    assert.equal(parseUserSessionSourceFilter(""), null);
+    assert.equal(parseUserSessionSourceFilter("all"), null);
+    assert.equal(parseUserSessionSourceFilter("scheduled_task"), null);
   });
 });

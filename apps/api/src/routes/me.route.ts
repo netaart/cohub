@@ -20,6 +20,8 @@ import {
   hydrateSessionParticipantProfiles,
   InvalidSessionListCursorError,
   listUserSessions,
+  parseUserSessionSourceFilter,
+  type UserSessionSourceFilter,
 } from "../space-sessions.js";
 import {
   aggregateGenerationUsageRows,
@@ -194,7 +196,7 @@ router.get("/rules", async (c) => {
  */
 async function listVisibleUserSessions(
   user: { uuid: string },
-  options: { limit: number; cursor: string | null },
+  options: { limit: number; cursor: string | null; source: UserSessionSourceFilter | null },
 ) {
   const identity = asAccountIdentity(user);
   if (!identity) {
@@ -224,7 +226,7 @@ async function listVisibleUserSessions(
   while (visible.length < limit && hasMore && guard < 8) {
     guard += 1;
     const batchLimit = Math.min(100, Math.max(limit * 2, limit - visible.length + 4));
-    const batch = await listUserSessions(identity.uuid, { limit: batchLimit, cursor });
+    const batch = await listUserSessions(identity.uuid, { limit: batchLimit, cursor, source: options.source });
     hasMore = Boolean(batch.pageInfo.hasMore);
     cursor = batch.pageInfo.nextCursor;
 
@@ -285,8 +287,13 @@ router.get("/sessions", async (c) => {
   const limitParam = Number(c.req.query("limit") ?? 20);
   const limit = Number.isFinite(limitParam) ? limitParam : 20;
   const cursor = c.req.query("cursor") ?? null;
+  const sourceParam = c.req.query("source") ?? null;
+  const source = parseUserSessionSourceFilter(sourceParam);
+  if (sourceParam && !source) {
+    return c.json({ message: "invalid source filter" }, 400);
+  }
   try {
-    const { sessions, pageInfo } = await listVisibleUserSessions(user, { limit, cursor });
+    const { sessions, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source });
     const hydratedSessions = await hydrateSessionParticipantProfiles(sessions);
     const withSpaces = await attachSessionSpaceSummaries(hydratedSessions);
     return c.json({ sessions: withSpaces, pageInfo });

@@ -1193,6 +1193,9 @@ export type UserSessionListItem = SessionRecord & {
   space?: UserSessionSpaceSummary | null;
 };
 
+/** `source` query for `GET /api/me/sessions`; `web` keeps only human web chats. */
+export type UserSessionSourceFilter = "web";
+
 export type UserSessionsResponse = {
   sessions: UserSessionListItem[];
   pageInfo?: {
