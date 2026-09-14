@@ -133,6 +133,21 @@ export async function snapshot(): Promise<DebugSnapshot | null> {
   return { sessionId: session.id, startedAt: session.startedAt, dropped: session.dropped, events: [...session.events] };
 }
 
+/** JSON Lines so a long session can be inspected line by line or grepped for a phase. */
+export function formatDiagnostics(snapshot: DebugSnapshot): string {
+  return [
+    JSON.stringify({ format: "cohub-diagnostics-v1", sessionId: snapshot.sessionId, startedAt: snapshot.startedAt, dropped: snapshot.dropped, events: snapshot.events.length, privacy: "Diagnostic events only. Fields whose names look like message text, titles, tokens or bodies are stripped before they are stored." }),
+    ...snapshot.events.map((event) => JSON.stringify({ at: event.timestamp, seq: event.sequence, name: event.name, payload: event.payload })),
+  ].join("\n");
+}
+
+/** Local export for sharing or copying; no server round trip. */
+export async function exportDiagnostics(): Promise<string> {
+  const current = await snapshot();
+  if (!current) throw new Error("Enable debug diagnostics and reproduce the issue first.");
+  return formatDiagnostics(current);
+}
+
 export async function submitFeedback(input: FeedbackInput): Promise<FeedbackReceipt> {
   const description = input.description.trim();
   if (!description) throw new Error("Feedback description is required.");

@@ -1,11 +1,12 @@
 import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { Image, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, Share, Switch, Text, TextInput, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AppUpdateRow } from "@/src/components/AppUpdateBanner";
 import { useDebugUnlock } from "@/src/components/useDebugUnlock";
-import { useDebugDiagnostics } from "@/src/data/debug-session";
+import { exportDiagnostics, useDebugDiagnostics } from "@/src/data/debug-session";
 import { getInstalledAppVersion } from "@/src/platform/app-updates";
 import { openWebLink } from "@/src/platform/browser";
 import { AppIcon, TopBar, Screen, SectionHeader, PrimaryButton } from "@/src/ui";
@@ -46,9 +47,32 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const [feedbackId, setFeedbackId] = useState<string | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [exportingLog, setExportingLog] = useState(false);
   const diagnostics = useDebugDiagnostics();
   const version = getInstalledAppVersion();
   const unlockDebug = useDebugUnlock(useCallback(() => router.push("/debug"), [router]));
+
+  const shareDiagnosticLog = async () => {
+    if (exportingLog) return;
+    setExportingLog(true);
+    try {
+      // Local export: no server round trip, so a diagnostics outage cannot block capture.
+      await Share.share({ title: t("about.export.share.title"), message: await exportDiagnostics() });
+    } catch (error) {
+      setNotice({ title: t("about.export.failed"), message: error instanceof Error ? error.message : t("about.export.empty") });
+    } finally {
+      setExportingLog(false);
+    }
+  };
+
+  const copyDiagnosticLog = async () => {
+    try {
+      await Clipboard.setStringAsync(await exportDiagnostics());
+      setNotice({ title: t("about.export.copied.title"), message: t("about.export.copied.body") });
+    } catch (error) {
+      setNotice({ title: t("about.export.failed"), message: error instanceof Error ? error.message : t("about.export.empty") });
+    }
+  };
 
   const openExternal = async (url: string, title: string) => {
     try {
@@ -87,7 +111,7 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
           <View style={styles.rowText}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("about.diagnostics.title")}</Text><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{t("about.diagnostics.detail")}</Text></View>
           <Switch accessibilityLabel={t("about.diagnostics.title")} value={diagnostics.enabled} onValueChange={(value) => void diagnostics.setEnabled(value)} />
         </View>
-        {diagnostics.enabled ? <><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="messages" title={t("about.feedback.title")} detail={t("about.feedback.detail")} onPress={() => { setFeedbackError(null); setFeedbackId(null); setFeedbackText(""); setFeedbackOpen(true); }} /></> : null}
+        {diagnostics.enabled ? <><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="download" title={t("about.export.share.title")} detail={exportingLog ? t("common.loading") : t("about.export.share.detail")} onPress={() => void shareDiagnosticLog()} /><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="copy" title={t("about.export.copy.title")} detail={t("about.export.copy.detail")} onPress={() => void copyDiagnosticLog()} /><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="messages" title={t("about.feedback.title")} detail={t("about.feedback.detail")} onPress={() => { setFeedbackError(null); setFeedbackId(null); setFeedbackText(""); setFeedbackOpen(true); }} /></> : null}
       </View>
 
       <SectionHeader title={t("about.section.links")} />
