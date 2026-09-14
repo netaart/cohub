@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.6](https://github.com/markbang/cohub-mobile/compare/v2.2.5...v2.2.6) (2026-09-14)
+
+
+### Fixes
+
+* **android:** preserve previous screen during back gesture ([a56c452](https://github.com/markbang/cohub-mobile/commit/a56c452f119a01844e7456ef012238484c19d45c))
+
 ## [2.2.5](https://github.com/markbang/cohub-mobile/compare/v2.2.4...v2.2.5) (2026-09-14)
 
 
