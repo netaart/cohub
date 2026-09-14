@@ -256,6 +256,10 @@ cohub generate "keep the character identity from all reference images" \
   --image reference_image=https://example.com/reference-1.png \
   --image reference_image=https://example.com/reference-2.png
 
+cohub generate "follow the reference soundtrack" \
+  --model minimax-h3 \
+  --audio reference_audio=https://example.com/reference.mp3
+
 cohub generate "a calm lake" \
   --model <model> \
   --async
@@ -273,9 +277,10 @@ Supported inputs:
 --video <path-or-url>
 --video reference_video=<path-or-url>
 --audio <path-or-url>
+--audio reference_audio=<path-or-url>
 ```
 
-Role-qualified media values add `meta.role` to that content block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles in one request.
+Role-qualified media values add `meta.role` to that content block. Repeat reference inputs for multiple images, videos, or audio files. Role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles in one request.
 
 Pass generation parameters with `--param key=value` or `--parameters '<json>'`.
 
