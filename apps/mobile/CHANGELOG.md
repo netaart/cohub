@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.2.10](https://github.com/markbang/cohub-mobile/compare/v2.2.9...v2.2.10) (2026-09-14)
+
+
+### Features
+
+* **about:** export the diagnostic log locally ([8038431](https://github.com/markbang/cohub-mobile/commit/8038431a4fc57dfe25ee09db85587dd1f8c65075))
+* **about:** save the diagnostic log to a folder ([fdb1ac9](https://github.com/markbang/cohub-mobile/commit/fdb1ac918987bf113a30802dc0941753fa2fb752))
+* **chat:** incremental Shiki tokenizer for streaming code ([315e447](https://github.com/markbang/cohub-mobile/commit/315e447ac1c684989dca6c58f74b9943c9d38298))
+* **chat:** render completed message text with native Markdown ([1e37dd4](https://github.com/markbang/cohub-mobile/commit/1e37dd480313e6725ed63f8443543b7cb651c183))
+* sync foreground data automatically ([70a926b](https://github.com/markbang/cohub-mobile/commit/70a926b70e94fe17e9eab9619793779c979e29dc))
+* **ui:** add edge-to-edge gradient chrome ([b537084](https://github.com/markbang/cohub-mobile/commit/b5370845a1a386ea2fb2af97fef16d6f828dd174))
+
+
+### Fixes
+
+* **chat:** reveal streamed text in finer commits ([9d48676](https://github.com/markbang/cohub-mobile/commit/9d486767ae1f7cf1d0a65b2c7a151e97b1719428))
+* **tabs:** show refresh indicators only on pull ([39baa2b](https://github.com/markbang/cohub-mobile/commit/39baa2be6ab3d1b053527b1992e88b05e6e8fb74))
+
+
+### Performance
+
+* **chat:** bound chat-open code work ([309d7be](https://github.com/markbang/cohub-mobile/commit/309d7be42512b9491785c1ebe5a599e130ad7d2b))
+* **chat:** cut running-chat entry cost ([1fac4b5](https://github.com/markbang/cohub-mobile/commit/1fac4b59caf3e78a2bc33bffe91c8bb270632406))
+* **chat:** pace the streaming tail as plain text ([2d06998](https://github.com/markbang/cohub-mobile/commit/2d06998eb99b5f632490e69002a4b07d92d43cb2))
+* **chat:** stabilize message list renders ([c544ec8](https://github.com/markbang/cohub-mobile/commit/c544ec8da98879fb777f9da198569ff881d0cf1f))
+* **chat:** trim the chat-open critical path ([2784d5e](https://github.com/markbang/cohub-mobile/commit/2784d5ec656337b9a7b7207434a9f8112f812edc))
+* **tabs:** migrate Chats and Spaces lists to LegendList ([0bd4070](https://github.com/markbang/cohub-mobile/commit/0bd407038cd915ab4d8239a7bf6a54169c7cb741))
+
+
+### Documentation
+
+* **ota:** assess update experience and delivery capabilities ([e1bf841](https://github.com/markbang/cohub-mobile/commit/e1bf841edc625ad6bd1689e1181804a462412480))
+
 ## [2.2.9](https://github.com/markbang/cohub-mobile/compare/v2.2.8...v2.2.9) (2026-09-14)
 
 
