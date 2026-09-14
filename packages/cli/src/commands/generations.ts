@@ -18,12 +18,12 @@ type GenerationSource =
 type MediaInputType = "image" | "video" | "audio";
 
 const frameMediaRoles = new Set(["first_frame", "last_frame"]);
-const referenceMediaRoles = new Set(["reference_image", "reference_video"]);
+const referenceMediaRoles = new Set(["reference_image", "reference_video", "reference_audio"]);
 
 const rolesByMediaType: Record<MediaInputType, ReadonlySet<string>> = {
   image: new Set([...frameMediaRoles, "reference_image"]),
   video: new Set(["reference_video"]),
-  audio: new Set(),
+  audio: new Set(["reference_audio"]),
 };
 
 const mediaRoles = new Set([...frameMediaRoles, ...referenceMediaRoles]);
@@ -109,7 +109,7 @@ function validateMediaRoleModes(content: GenerationContentBlock[]): void {
   if (hasFrameRole && hasReferenceRole) {
     error(
       "Invalid media role mix",
-      "Use first_frame/last_frame or reference_image/reference_video, not both.",
+      "Use first_frame/last_frame or reference_image/reference_video/reference_audio, not both.",
     );
   }
 }
@@ -268,7 +268,12 @@ export function registerGenerations(program: Command): void {
       collect,
       [],
     )
-    .option("--audio <path-or-url>", "Audio input file path or URL; repeatable", collect, [])
+    .option(
+      "--audio <path-or-url>",
+      "Audio input file path or URL; prefix with reference_audio= when needed; repeatable",
+      collect,
+      [],
+    )
     .option("--param <key=value>", "Generation parameter; repeatable, values may be JSON/number/boolean", collect, [])
     .option("--parameters <json>", "Generation parameters as a JSON object")
     .option("--meta <json>", "Meta as a JSON object")
@@ -284,6 +289,7 @@ Examples:
   COHUB_SPACE_ID=<space-id> cohub generate "Restyle this image" -m <model> --image input.png
   cohub -s <space-id> generate "Smooth transition" -m seedance-2-0-fast --image first_frame=https://example.com/first.png --image last_frame=https://example.com/last.png
   cohub -s <space-id> generate "Use these references" -m seedance-2-0-fast --image reference_image=https://example.com/a.png --image reference_image=https://example.com/b.png
+  cohub -s <space-id> generate "Lip-sync to the reference take" -m seedance-2-0-fast --image reference_image=https://example.com/portrait.png --audio reference_audio=https://example.com/speech.mp3
   cohub -s <space-id> generate "A calm lake" -m <model> --async
 `)
     .action(async (prompt: string, opts: {

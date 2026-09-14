@@ -1,7 +1,8 @@
 schema: neta.generation.model.v1
 model: seedance-2-0-fast
 title: Seedance 2.0 Fast
-description: Fast Ark video generation model for drafts, rapid iteration, text-to-video, image-to-video, and reference-guided video generation.
+category: video
+description: Fast video generation model that accepts text, image, video, and audio inputs. Faster and less expensive than seedance-2-0, making it well suited to creative validation and draft iteration.
 adapter:
   type: ark.videoGenerations
 content:
@@ -17,8 +18,29 @@ content:
       max: 9
       sources:
         - url
-        - base64
-      description: Optional image input. Use meta.role as first_frame, last_frame, or reference_image.
+      roles:
+        - first_frame
+        - last_frame
+        - reference_image
+      description: Optional public URL image input. Use meta.role as first_frame, last_frame, or reference_image.
+    - type: video
+      required: false
+      max: 1
+      sources:
+        - url
+      roles:
+        - reference_video
+      roleRequired: true
+      description: Optional public URL reference video input. Use meta.role as reference_video.
+    - type: audio
+      required: false
+      max: 3
+      sources:
+        - url
+      roles:
+        - reference_audio
+      roleRequired: true
+      description: Optional public URL reference audio. Use meta.role reference_audio. Audio cannot be the only media input; include at least one image or video. Do not mix first_frame/last_frame with reference_audio.
 parameters:
   duration:
     type: integer
@@ -33,47 +55,25 @@ parameters:
     default: 720p
     enum: [480p, 720p]
     description: Output video resolution.
-  aspect_ratio:
+  ratio:
     type: string
     optional: true
     default: "16:9"
     enum: ["16:9", "9:16", "1:1", "4:3", "3:2", "2:3", "3:4", "21:9", adaptive]
     description: Output aspect ratio. Use adaptive to let the model choose.
-  fps:
-    type: integer
-    optional: true
-    default: 30
-    min: 1
-    max: 60
-    description: Frames per second.
   seed:
     type: integer
     optional: true
     description: Random seed for reproducibility.
-  generate_audio:
-    type: boolean
-    optional: true
-    default: true
-    description: Generate synchronized audio.
-  return_last_frame:
-    type: boolean
-    optional: true
-    default: true
-    description: Return the last frame as an image for chaining video segments.
   camera_fixed:
     type: boolean
     optional: true
     default: false
     description: Fix camera position when supported.
-  watermark:
-    type: boolean
-    optional: true
-    default: false
-    description: Add AI Generated watermark.
   poll_interval:
     type: integer
     optional: true
-    default: 2
+    default: 1
     min: 1
     max: 30
     description: Seconds between task status checks.
@@ -94,4 +94,26 @@ examples:
       parameters:
         duration: 5
         resolution: 720p
-        aspect_ratio: "16:9"
+        ratio: "16:9"
+  - title: Image and reference audio
+    request:
+      model: seedance-2-0-fast
+      content:
+        - type: text
+          text: Close-up of the same person speaking. Lip-sync mouth motion to the reference audio.
+        - type: image
+          source:
+            type: url
+            url: https://example.com/portrait.png
+          meta:
+            role: reference_image
+        - type: audio
+          source:
+            type: url
+            url: https://example.com/speech.mp3
+          meta:
+            role: reference_audio
+      parameters:
+        duration: 8
+        resolution: 720p
+        ratio: "9:16"
