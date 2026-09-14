@@ -45,6 +45,16 @@ function fadedValue(value: string, start: number, fadeFrom: number, style: Style
     : part);
 }
 
+function fadedTail(value: string, fadeTail: number, style: StyleProp<TextStyle>, keyPrefix: string) {
+  if (fadeTail <= 0) return value;
+  const parts = splitGraphemes(value);
+  const fadeFrom = Math.max(0, parts.length - Math.min(fadeTail, parts.length));
+  if (fadeFrom >= parts.length) return value;
+  return parts.map((part, index) => index >= fadeFrom
+    ? <StreamingGlyph key={`${keyPrefix}-${index}`} value={part} style={style} />
+    : part);
+}
+
 /**
  * Per-bubble rendering environment. Inline nodes several layers down need to know
  * which bubble they sit on (for code tint) and which Space owns sandbox paths;
@@ -166,10 +176,12 @@ function MarkdownTable({ alignments, header, rows, accent, textColor }: { alignm
   </View>;
 }
 
-function MarkdownBlockView({ block, accent, textColor, fadeTail = 0, footer }: { block: MarkdownBlock; accent: string; textColor: string; fadeTail?: number; footer?: ReactNode }) {
+function MarkdownBlockView({ block, signature, accent, textColor, fadeTail = 0, footer }: { block: MarkdownBlock; signature: string; accent: string; textColor: string; fadeTail?: number; footer?: ReactNode }) {
   const theme = useAppTheme();
   const contentWidth = useContext(BubbleContentWidth);
-  const measurementKey = JSON.stringify([block, typography.chatBody.fontSize]);
+  // The block already carries a stable signature from its parse; reusing it avoids a
+  // second full JSON.stringify of the block on every render.
+  const measurementKey = `${signature}:${typography.chatBody.fontSize}`;
   if (block.type === "rule") return <View style={{ width: contentWidth, minWidth: 0, paddingVertical: 4 }}>
     <View style={{ height: 1, backgroundColor: textColor, opacity: 0.3 }} />
     {footer ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}
@@ -197,9 +209,9 @@ const MemoBlock = memo(
   function MemoBlock(props: { block: MarkdownBlock; signature: string; accent: string; textColor: string; fadeTail: number; footer?: ReactNode }) {
     const contentWidth = useContext(BubbleContentWidth);
     const media = useMemo(() => markdownMedia(props.block), [props.block]);
-    if (media.length === 0) return <MarkdownBlockView block={props.block} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} footer={props.footer} />;
+    if (media.length === 0) return <MarkdownBlockView block={props.block} signature={props.signature} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} footer={props.footer} />;
     return <View style={{ gap: 9, minWidth: 0 }}>
-      <MarkdownBlockView block={props.block} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} />
+      <MarkdownBlockView block={props.block} signature={props.signature} accent={props.accent} textColor={props.textColor} fadeTail={props.fadeTail} />
       {media.map((item) => item.type === "image"
         ? <ImageGallery key={item.url} uris={[item.url]} maxWidth={contentWidth} />
         : <MarkdownVideo key={item.url} url={item.url} />)}
@@ -218,6 +230,12 @@ const MarkdownBody = memo(function MarkdownBody({ source, accent, textColor, foo
   return <MarkdownBlocks entries={entries} accent={accent} textColor={textColor} footer={footer} />;
 });
 
+function StreamingTailText({ value, color, fadeTail, footer }: { value: string; color: string; fadeTail: number; footer?: ReactNode }) {
+  return <BubbleText selectable footer={footer} measurementKey="streaming-tail" style={[typography.chatBody, { color }]}>
+    {fadeTail > 0 ? fadedTail(value, fadeTail, { color }, "tail") : value}
+  </BubbleText>;
+}
+
 function TextBlock({ value, muted = false, accent, color, streaming = false, footer }: { value: string; muted?: boolean; accent: string; color?: string; streaming?: boolean; footer?: ReactNode }) {
   const theme = useAppTheme();
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
@@ -230,12 +248,21 @@ function TextBlock({ value, muted = false, accent, color, streaming = false, foo
     [cache, streaming, text],
   );
   const tail = rendered?.tail ?? "";
-  const tailEntries = useMemo(() => (tail ? parseMarkdownEntries(tail) : []), [tail]);
+  // An in-progress block renders as paced plain text instead of Markdown: parsing and
+  // re-rendering the growing tail on every reveal commit was what forced commits apart.
+  // An open code fence keeps the block parse because raw backticks and unformatted source
+  // read as broken, and a fence is cheap to parse. Completed blocks below stay Markdown.
+  const codeTail = tail.includes("```");
+  const plainTail = streaming && tail.length > 0 && !codeTail;
+  const tailEntries = useMemo(() => (tail && !plainTail ? parseMarkdownEntries(tail) : []), [plainTail, tail]);
   if (!rendered) return <View style={{ gap: 9, minWidth: 0 }}><MarkdownBody source={text} accent={accent} textColor={textColor} footer={footer} /></View>;
+  const tailRendered = plainTail || tailEntries.length > 0;
   // One list in document order: a block that crosses the stable boundary keeps
   // its key and signature, so memo skips it instead of remounting the block.
   return <View style={{ gap: 9, minWidth: 0 }}>
-    <MarkdownBlocks entries={tailEntries.length > 0 ? [...rendered.entries, ...tailEntries] : rendered.entries} accent={accent} textColor={textColor} fadeTail={fadeTail} footer={footer} />
+    {rendered.entries.length > 0 ? <MarkdownBlocks entries={rendered.entries} accent={accent} textColor={textColor} footer={tailRendered ? undefined : footer} /> : null}
+    {plainTail ? <StreamingTailText value={tail} color={textColor} fadeTail={fadeTail} footer={footer} /> : null}
+    {tailEntries.length > 0 ? <MarkdownBlocks entries={tailEntries} accent={accent} textColor={textColor} fadeTail={fadeTail} footer={footer} /> : null}
   </View>;
 }
 
