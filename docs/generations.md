@@ -164,6 +164,7 @@ See the full examples:
 - [`docs/examples/generations/gemini-3.1-flash-image-preview.yaml`](./examples/generations/gemini-3.1-flash-image-preview.yaml)
 - [`docs/examples/generations/seedance-2-0-fast.yaml`](./examples/generations/seedance-2-0-fast.yaml)
 - [`docs/examples/generations/seedance-2-0.yaml`](./examples/generations/seedance-2-0.yaml)
+- [`docs/examples/generations/minimax-h3.yaml`](./examples/generations/minimax-h3.yaml)
 - [`docs/examples/generations/suno_music.yaml`](./examples/generations/suno_music.yaml)
 
 ## CLI
@@ -203,6 +204,8 @@ cohub generate "smoothly transition from the first frame to the last frame" \
   --image last_frame=https://example.com/last.png \
   --param duration=5
 
+cohub generate "create a smooth transition from the opening frame to the closing frame" --model MiniMax-H3 --image first_frame=https://example.com/start.png --image last_frame=https://example.com/end.png --param duration=8 --param resolution=2K
+
 cohub generate "keep the character identity from all reference images" \
   --model seedance-2-0-fast \
   --image reference_image=https://example.com/reference-1.png \
@@ -219,4 +222,4 @@ cohub generate "write a hopeful chorus about sunrise after a storm" \
   --param operation=lyrics
 ```
 
-Role-qualified media values add `meta.role` to that content block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles in one request.
+Role-qualified media values add `meta.role` to that content block. Repeat `--image reference_image=...` for multiple reference images, or use `--audio reference_audio=...` for MiniMax H3 reference audio. Seedance and MiniMax H3 role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles in one request.

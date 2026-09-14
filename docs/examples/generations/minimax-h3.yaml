@@ -1,0 +1,115 @@
+schema: neta.generation.model.v1
+model: MiniMax-H3
+title: MiniMax H3
+description: MiniMax H3 video generation with text, frame, and multimodal reference inputs.
+adapter:
+  type: minimax.h3VideoGenerations
+content:
+  input:
+    - type: text
+      required: true
+      min: 1
+      max: 16
+      merge: newline
+      description: Video prompt.
+    - type: image
+      required: false
+      max: 9
+      sources:
+        - url
+      roles:
+        - first_frame
+        - last_frame
+        - reference_image
+      roleRequired: true
+      description: Public URL image input. Use frame roles for transitions or reference_image for subject/style references.
+    - type: video
+      required: false
+      max: 3
+      sources:
+        - url
+      roles:
+        - reference_video
+      roleRequired: true
+      description: Public URL reference video.
+    - type: audio
+      required: false
+      max: 3
+      sources:
+        - url
+      roles:
+        - reference_audio
+      roleRequired: true
+      description: Public URL reference audio. Requires at least one reference image or video.
+parameters:
+  duration:
+    type: integer
+    optional: true
+    default: 5
+    min: 4
+    max: 15
+    description: Video duration in seconds.
+  resolution:
+    type: string
+    optional: true
+    default: 768P
+    enum: [768P, 2K]
+    description: Output resolution.
+  ratio:
+    type: string
+    optional: true
+    default: "16:9"
+    enum: [adaptive, "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+    description: Output aspect ratio. Frame and reference modes use adaptive automatically.
+  aigc_watermark:
+    type: boolean
+    optional: true
+    default: false
+    description: Add an AIGC watermark to the output.
+  poll_interval:
+    type: integer
+    optional: true
+    default: 2
+    min: 1
+    max: 30
+    description: Seconds between task status checks.
+  max_wait:
+    type: integer
+    optional: true
+    default: 600
+    min: 30
+    max: 1800
+    description: Maximum seconds to wait for task completion.
+examples:
+  - title: Text to video
+    request:
+      model: MiniMax-H3
+      content:
+        - type: text
+          text: a cinematic tracking shot through a rain-soaked neon market
+      parameters:
+        duration: 5
+        resolution: 768P
+        ratio: "16:9"
+  - title: First and last frame transition
+    request:
+      model: MiniMax-H3
+      content:
+        - type: text
+          text: create a smooth transition from the opening frame to the closing frame
+        - type: image
+          source:
+            type: url
+            url: https://example.com/start.png
+          meta:
+            role: first_frame
+        - type: image
+          source:
+            type: url
+            url: https://example.com/end.png
+          meta:
+            role: last_frame
+      parameters:
+        duration: 8
+        resolution: 2K
+        ratio: adaptive

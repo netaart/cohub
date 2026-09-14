@@ -70,7 +70,7 @@ cohub generate "keep these characters consistent" \
   --image reference_image=https://example.com/b.png
 ```
 
-Roles include `first_frame`, `last_frame`, `reference_image`, and `reference_video`. Check `models show` for what a model accepts.
+Roles include `first_frame`, `last_frame`, `reference_image`, `reference_video`, and `reference_audio`. Check `models show` for what a model accepts.
 
 Pass generation parameters with `--param key=value` (repeatable; JSON, number, or boolean values) or `--parameters '<json>'`:
 
@@ -128,4 +128,3 @@ cohub generate "<edit instruction>" \
 ```
 
 For less common options, use `cohub generate -h`.
-
