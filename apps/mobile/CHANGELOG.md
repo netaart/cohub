@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.2.8](https://github.com/markbang/cohub-mobile/compare/v2.2.7...v2.2.8) (2026-09-14)
+
+
+### Fixes
+
+* **android:** avoid fragment attach on cancelled back swipe ([b0165e0](https://github.com/markbang/cohub-mobile/commit/b0165e020c516858122d18bfcf2a34da2a9925ac))
+* **android:** guard predictive back during screen transitions ([ce3cfa1](https://github.com/markbang/cohub-mobile/commit/ce3cfa16fafd096b8fd89dab2d9928419bc38baf))
+* **space:** show collaborator names and prompt sandbox restart ([95195ef](https://github.com/markbang/cohub-mobile/commit/95195efe75f16abe1ca92f84d1d94633cc554e83))
+
 ## [2.2.7](https://github.com/markbang/cohub-mobile/compare/v2.2.6...v2.2.7) (2026-09-14)
 
 
