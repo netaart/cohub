@@ -1,5 +1,5 @@
 import type { CohubClient, ContentBlock, SessionTurnRecord } from "@neta-art/cohub";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { MessageContent } from "@/src/components/MessageContent";
 import type { StreamView } from "@/src/data/types";
@@ -57,9 +57,18 @@ export function StreamingTurnProcess({ messages }: { messages: StreamView["inter
   const theme = useAppTheme();
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  // Collapsed rows still run on every dispatch; derive once per snapshot instead.
+  const { content, toolCount } = useMemo(() => {
+    let tools = 0;
+    const blocks: ContentBlock[] = [];
+    for (const message of messages) {
+      for (const block of message.content) if (block.type === "tool_use") tools += 1;
+      if (message.content.length) blocks.push(...message.content);
+      else if (message.text) blocks.push({ type: "text", text: message.text });
+    }
+    return { content: blocks, toolCount: tools };
+  }, [messages]);
   if (messages.length === 0) return null;
-  const toolCount = messages.reduce((count, message) => count + message.content.filter((block) => block.type === "tool_use").length, 0);
-  const content = messages.flatMap((message) => message.content.length ? message.content : message.text ? [{ type: "text" as const, text: message.text }] : []);
   return <View style={{ marginHorizontal: 18, marginVertical: 6 }}>
     <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded(!expanded)} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8 }}>
       <AppIcon name={expanded ? "chevron-down" : "chevron-right"} size={16} />

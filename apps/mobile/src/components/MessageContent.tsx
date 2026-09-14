@@ -16,7 +16,7 @@ import { markdownInlineText, markdownMedia, type MarkdownBlock, type MarkdownInl
 import { WebView } from "react-native-webview";
 import { graphemeLength, splitGraphemes } from "@/src/data/stream-reveal";
 import { parseMarkdownEntries, StreamingMarkdownCache, type MarkdownBlockEntry } from "@/src/data/stream-markdown-cache";
-import { formatToolCallCaption, toolCallPreview } from "@/src/data/tool-call";
+import { toolCallPreview } from "@/src/data/tool-call";
 import { compactionFromMessage, compactionStats, type CompactionInfo } from "@/src/data/compaction";
 import { isWebLink, openWebLink } from "@/src/platform/browser";
 import { resolveMessageLink } from "@/src/data/message-links";
@@ -419,7 +419,7 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
   const status = result ? result.is_error ? t("message.tool.status.error") : t("message.tool.status.done") : active ? t("message.tool.status.running") : t("message.tool.status.noResult");
   const iconColor = result?.is_error ? theme.colors.danger : active && !result ? theme.colors.accent : theme.colors.textMuted;
   const preview = toolCallPreview(block.name, block.input);
-  const caption = formatToolCallCaption(block.name, block.input);
+  const caption = preview ? `${block.name}: "${preview}"` : block.name;
   const edits = Array.isArray(block.input.edits) ? block.input.edits.filter((edit): edit is { oldText: string; newText: string } => typeof edit === "object" && edit !== null && typeof edit.oldText === "string" && typeof edit.newText === "string") : [];
   return <View style={{ width: contentWidth }}>
     <Pressable accessibilityRole="button" accessibilityLabel={`${caption}: ${status}`} accessibilityState={{ expanded }} hitSlop={8} onPress={() => setExpanded(!expanded)} style={{ minHeight: 22, flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2 }}>
@@ -443,6 +443,15 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
 export function MessageContent({ content, active = false, color, imageMaxWidth, footer }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string; imageMaxWidth?: number; footer?: ReactNode }) {
   const blocks = content ?? [];
   const contentWidth = useContext(BubbleContentWidth);
+  // Pairing tool calls with their results by scanning the block list per tool_use was O(n^2);
+  // a long running turn can carry hundreds of tool blocks that re-render on every commit.
+  const toolResultsByUseId = useMemo(() => {
+    const map = new Map<string, Extract<ContentBlock, { type: "tool_result" }>>();
+    for (const block of content ?? []) {
+      if (block.type === "tool_result" && block.tool_use_id) map.set(block.tool_use_id, block);
+    }
+    return map;
+  }, [content]);
   const imageUris = blocks.flatMap((block) => block.type === "image" ? [imageUri(block)].filter((uri): uri is string => Boolean(uri)) : []);
   const firstImageIndex = blocks.findIndex((block) => block.type === "image" && imageUri(block) !== null);
   const lastVisibleIndex = blocks.findLastIndex((block, index) => block.type === "text" ? Boolean(block.text.trim()) : block.type === "thinking" ? Boolean(block.thinking.trim()) : block.type === "tool_use" || block.type === "system_note" || (block.type === "image" && index === firstImageIndex));
@@ -456,7 +465,7 @@ export function MessageContent({ content, active = false, color, imageMaxWidth, 
     // tool_use was committed with the previous message, and dumping that raw
     // output into the bubble grows its height for as long as the tool runs.
     if (block.type === "tool_result" || (block.type === "text" && !block.text.trim()) || (block.type === "thinking" && !block.thinking.trim())) return null;
-    if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={blocks.find((item): item is Extract<ContentBlock, { type: "tool_result" }> => item.type === "tool_result" && item.tool_use_id === block.id)} />;
+    if (block.type === "tool_use") return <ToolCall key={`tool-${block.id}`} block={block} active={active} result={toolResultsByUseId.get(block.id)} />;
     if (block.type === "image") {
       if (index !== firstImageIndex) return null;
       return imageUris.length > 0 ? <ImageGallery key="image-gallery" uris={imageUris} maxWidth={imageMaxWidth ?? contentWidth} /> : null;
@@ -594,6 +603,7 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
   const { t } = useTranslation();
   const liveContent = content;
   const hasLivePreview = liveContent.some((block) => (block.type === "text" && block.text.trim().length > 0) || (block.type === "thinking" && block.thinking.trim().length > 0) || block.type === "tool_use");
+  const hasRenderableLive = hasRenderableContent(liveContent);
   // Mirrors the web turn footer: live content is the status itself; otherwise surface
   // what the runtime is doing so quiet gaps (agent launch, model latency) don't look frozen.
   const runtimeLabel = !hasLivePreview && (status === "pending" || status === "streaming")
@@ -601,14 +611,14 @@ export function StreamCard({ content, status, runtimePhase = null, runtimeModel 
       ? runtimeModel?.trim()
         ? t("message.stream.waitingModel", { model: runtimeModel.trim() })
         : t("message.stream.waitingGeneric")
-      : status === "pending" && !hasRenderableContent(liveContent)
+      : status === "pending" && !hasRenderableLive
         ? t("message.stream.starting")
         : null
     : null;
   const failed = status === "failed" || status === "interrupted";
   const statusLabel = status === "failed" ? t("message.stream.failed") : status === "interrupted" ? t("message.stream.stopped") : null;
   const live = status === "pending" || status === "streaming";
-  const hasContent = hasLivePreview || hasRenderableContent(liveContent);
+  const hasContent = hasLivePreview || hasRenderableLive;
   const footer = live && !failed ? <BubbleMeta clock={formatMessageClock(new Date().toISOString())} side="assistant" live t={t} /> : undefined;
   return <View style={{ width: "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: "flex-start" }}>
     <ChatBubbleFrame side="assistant" maxWidth={maxWidth}>

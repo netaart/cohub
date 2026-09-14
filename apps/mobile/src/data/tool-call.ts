@@ -1,3 +1,6 @@
+/** One-line caption budget. Longer values are truncated before normalization. */
+const PREVIEW_LIMIT = 400;
+
 const PREFERRED_INPUT_KEYS = [
   "command",
   "skill",
@@ -15,7 +18,9 @@ const PREFERRED_INPUT_KEYS = [
 
 function asPreviewText(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const text = value.replace(/\s+/g, " ").trim();
+  // Cap before normalizing: a large tool input (file contents, search text) would otherwise
+  // pay a full whitespace pass per render, and the caption calls this twice.
+  const text = value.slice(0, PREVIEW_LIMIT).replace(/\s+/g, " ").trim();
   return text || null;
 }
 
@@ -47,7 +52,7 @@ export function toolCallPreview(name: string, input?: Record<string, unknown> | 
   if (strings.length === 1) return strings[0]!;
   try {
     const json = JSON.stringify(input);
-    return json === "{}" ? "" : json.replace(/\s+/g, " ");
+    return json === "{}" ? "" : json.slice(0, PREVIEW_LIMIT).replace(/\s+/g, " ");
   } catch {
     return "";
   }
