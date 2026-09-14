@@ -21,23 +21,30 @@ const predictiveBackCode = `
   private var predictiveBackTop: Screen? = null
   private var predictiveBackPreviousAttached = false
   private var predictiveBackActive = false
+  private var predictiveBackGeneration = 0
+  private val predictiveBackAttachProgress = 0.12f
 
   private fun findPredictiveBackStack(view: View): ScreenStack? {
-    if (view is ScreenStack) return view
+    var nested: ScreenStack? = null
+    if (view is ScreenStack && view.fragments.size >= 2 && view.topScreen != null) {
+      nested = view
+    }
     if (view is ViewGroup) {
       for (index in view.childCount - 1 downTo 0) {
         findPredictiveBackStack(view.getChildAt(index))?.let { return it }
       }
     }
-    return null
+    return nested
   }
 
   private fun resetPredictiveBackTransforms(stack: ScreenStack) {
     for (index in 0 until stack.childCount) {
       val child = stack.getChildAt(index)
+      child.animate().cancel()
       child.translationX = 0f
       child.scaleX = 1f
       child.scaleY = 1f
+      child.setLayerType(View.LAYER_TYPE_NONE, null)
     }
   }
 
@@ -46,51 +53,62 @@ const predictiveBackCode = `
     return target.takeIf { it.visibility == View.VISIBLE && it.width > 0 && it.height > 0 }
   }
 
+  private fun clearPredictiveBackPreview() {
+    val stack = predictiveBackStack
+    val attached = predictiveBackPreviousAttached
+    predictiveBackTarget?.animate()?.cancel()
+    predictiveBackTarget = null
+    predictiveBackStack = null
+    predictiveBackTop = null
+    predictiveBackPreviousAttached = false
+    predictiveBackActive = false
+    if (stack != null) {
+      resetPredictiveBackTransforms(stack)
+      if (attached && stack.fragments.size >= 2) {
+        stack.detachBelowTop()
+      }
+    }
+  }
+
   private fun registerPredictiveBack() {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
 
     predictiveBackCallback = object : OnBackAnimationCallback {
       override fun onBackStarted(backEvent: BackEvent) {
-        predictiveBackActive = false
+        predictiveBackGeneration += 1
+        clearPredictiveBackPreview()
         val stack = findPredictiveBackStack(window.decorView)
-        if (stack == null || stack.fragments.size < 2 || stack.topScreen == null) {
-          predictiveBackTarget = null
-          predictiveBackStack = null
-          predictiveBackTop = null
-          predictiveBackPreviousAttached = false
+        val target = stack?.let { findPredictiveBackTarget(it) }
+        if (stack == null || target == null || target.animation != null || !target.isLaidOut) {
           return
         }
 
-        resetPredictiveBackTransforms(stack)
-        val enteringTarget = findPredictiveBackTarget(stack)
-        if (enteringTarget == null || enteringTarget.animation != null || !enteringTarget.isLaidOut) {
-          predictiveBackTarget = null
-          predictiveBackStack = null
-          predictiveBackTop = null
-          predictiveBackPreviousAttached = false
-          return
-        }
-
-        val top = stack.topScreen
-        stack.attachBelowTop()
         predictiveBackStack = stack
-        predictiveBackTop = top
-        predictiveBackPreviousAttached = true
-        predictiveBackTarget = findPredictiveBackTarget(stack)
-        predictiveBackActive = predictiveBackTarget != null
+        predictiveBackTop = stack.topScreen
+        predictiveBackTarget = target
+        predictiveBackActive = true
         predictiveBackDirection = if (backEvent.swipeEdge == BackEvent.EDGE_RIGHT) -1f else 1f
-        predictiveBackTarget?.let { target ->
-          target.pivotX = if (predictiveBackDirection > 0f) 0f else target.width.toFloat()
-          target.pivotY = target.height / 2f
-          target.translationX = 0f
-          target.scaleX = 1f
-          target.scaleY = 1f
-        }
+        target.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        target.pivotX = if (predictiveBackDirection > 0f) 0f else target.width.toFloat()
+        target.pivotY = target.height / 2f
+        target.translationX = 0f
+        target.scaleX = 1f
+        target.scaleY = 1f
       }
 
       override fun onBackProgressed(backEvent: BackEvent) {
-        val target = predictiveBackTarget ?: return
+        val stack = predictiveBackStack ?: return
+        if (!predictiveBackActive) return
         val progress = backEvent.progress.coerceIn(0f, 1f)
+        if (!predictiveBackPreviousAttached && progress >= predictiveBackAttachProgress && stack.fragments.size >= 2) {
+          stack.attachBelowTop()
+          predictiveBackPreviousAttached = true
+          predictiveBackTarget = findPredictiveBackTarget(stack) ?: predictiveBackTarget
+          predictiveBackTarget?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        }
+        val target = predictiveBackTarget ?: return
+        target.pivotX = if (predictiveBackDirection > 0f) 0f else target.width.toFloat()
+        target.pivotY = target.height / 2f
         target.translationX = predictiveBackDirection * target.width * progress
         val scale = 1f - (0.05f * progress)
         target.scaleX = scale
@@ -100,61 +118,46 @@ const predictiveBackCode = `
       override fun onBackCancelled() {
         val target = predictiveBackTarget
         val stack = predictiveBackStack
-        val restorePreview = {
-          if (predictiveBackPreviousAttached) {
-            stack?.detachBelowTop()
-            predictiveBackPreviousAttached = false
-          }
-          predictiveBackTarget = null
-          predictiveBackStack = null
-          predictiveBackTop = null
-          predictiveBackActive = false
-        }
+        val attached = predictiveBackPreviousAttached
+        val generation = predictiveBackGeneration
         if (!predictiveBackActive || target == null) {
-          restorePreview()
+          clearPredictiveBackPreview()
           return
         }
+        target.animate().cancel()
         target.animate()
           .translationX(0f)
           .scaleX(1f)
           .scaleY(1f)
-          .setDuration(180L)
+          .setDuration(160L)
           .setInterpolator(DecelerateInterpolator())
-          .withEndAction { restorePreview() }
+          .withEndAction {
+            if (generation != predictiveBackGeneration) return@withEndAction
+            predictiveBackTarget = null
+            predictiveBackStack = null
+            predictiveBackTop = null
+            predictiveBackPreviousAttached = false
+            predictiveBackActive = false
+            resetPredictiveBackTransforms(stack ?: return@withEndAction)
+            if (attached && stack.fragments.size >= 2) {
+              stack.detachBelowTop()
+            }
+          }
           .start()
       }
 
       override fun onBackInvoked() {
-        val target = predictiveBackTarget
         val stack = predictiveBackStack
-        val top = predictiveBackTop
-        val active = predictiveBackActive
+        predictiveBackTarget?.animate()?.cancel()
+        if (stack != null) resetPredictiveBackTransforms(stack)
         predictiveBackTarget = null
+        predictiveBackStack = null
+        predictiveBackTop = null
+        predictiveBackPreviousAttached = false
         predictiveBackActive = false
-        if (!active) {
-          onBackPressedDispatcher.onBackPressed()
-          predictiveBackStack = null
-          predictiveBackTop = null
-          predictiveBackPreviousAttached = false
-          return
-        }
+        // A committed pop rebuilds the native stack. Detaching here races that update and
+        // can leave the revealed destination translated.
         onBackPressedDispatcher.onBackPressed()
-        target?.postDelayed({
-          if (stack != null && stack.topScreen === top) {
-            if (predictiveBackPreviousAttached) {
-              stack.detachBelowTop()
-              predictiveBackPreviousAttached = false
-            }
-            target.translationX = 0f
-            target.scaleX = 1f
-            target.scaleY = 1f
-          } else {
-            predictiveBackPreviousAttached = false
-          }
-          predictiveBackStack = null
-          predictiveBackTop = null
-          predictiveBackActive = false
-        }, 300L)
       }
     }
 
