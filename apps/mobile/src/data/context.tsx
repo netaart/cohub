@@ -16,6 +16,7 @@ import { File as ExpoFile } from "expo-file-system";
 import { translate } from "@/src/i18n/core";
 import { createMobileClient } from "@/src/data/client";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
+import { markChatEntry, startChatEntry } from "@/src/data/chat-entry-trace";
 import { useSpaceListData } from "@/src/data/use-space-list";
 import { cacheRetentionCutoff, loadCacheRetention } from "@/src/data/cache-retention";
 import { createStreamBatch } from "@/src/data/chat-rendering";
@@ -1091,6 +1092,7 @@ export function AppProvider({
       if (!spaceId) return;
       const openToken = openTokens.current.get(sessionId);
       const isCurrentRequest = () => openTokens.current.get(sessionId) === openToken;
+      markChatEntry("refresh.start", { silent: Boolean(options.silent) });
       // Recovery resyncs must not flash the pull-to-refresh spinner.
       dispatch({ type: "session-refresh-start", sessionId, ...(options.silent ? { silent: true } : {}) });
       try {
@@ -1113,6 +1115,7 @@ export function AppProvider({
           newestCursor: turns.at(-1)?.sequence ?? null,
         });
         void saveMessages(userKey, sessionId, messages).catch(() => undefined);
+        markChatEntry("refresh.end", { turns: turns.length });
       } catch (error) {
         if (!isCurrentRequest()) return;
         dispatch({
@@ -1133,6 +1136,7 @@ export function AppProvider({
     const spaceId = current?.session?.spaceId ?? sessionSummary?.spaceId;
     const activeClient = clientRef.current;
     if (!activeClient || !spaceId) return;
+    markChatEntry("turnIndex.start");
     const key = `${sessionId}:index`;
     const pending = paginationRequestsRef.current.get(key);
     if (pending && !options.force) return pending;
@@ -1151,6 +1155,7 @@ export function AppProvider({
         const bySequence = new Map<number, SessionTurnIndexItem>();
         for (const item of collected) bySequence.set(item.sequence, item);
         dispatch({ type: "turn-index", sessionId, turnIndex: [...bySequence.values()].sort((a, b) => a.sequence - b.sequence) });
+        markChatEntry("turnIndex.end", { count: collected.length });
       } catch (error) {
         console.warn("[mobile-session] failed to load turn index", error);
       } finally {
@@ -1264,11 +1269,17 @@ export function AppProvider({
   const attachSessionRealtime = useCallback((client: CohubClient, spaceId: string, sessionId: string) => {
     subscriptions.current.get(sessionId)?.();
     sessionSpaces.current.set(sessionId, spaceId);
+    markChatEntry("stream.subscribe");
     const sessionClient = client.space(spaceId).session(sessionId);
     const streamBatch = createStreamBatch<StreamView>((stream) => dispatch({ type: "stream-state", sessionId, stream }));
+    let seeded = false;
     const stopGeneration = sessionClient.subscribeGeneration(
       {
         state: (event) => {
+          if (!seeded) {
+            seeded = true;
+            markChatEntry("stream.seed", { blocks: event.state.contentBlocks?.length ?? 0, intermediate: event.intermediateMessages?.length ?? 0 });
+          }
           const status = liveStreamStatusFromPatch(event.state.status);
           if (!status) {
             streamBatch.cancel();
@@ -1386,6 +1397,7 @@ export function AppProvider({
       openTokens.current.set(sessionId, token);
       const view = stateRef.current.sessionViews[sessionId];
       const summary = view?.session ?? stateRef.current.sessions.find((item) => item.id === sessionId);
+      markChatEntry("load.start", { memory: Boolean(view?.historyLoaded && view.session && view.space), cachedMessages: view?.messages.length ?? 0 });
       if (view?.historyLoaded && view.session && view.space) {
         recordSpaceVisit(view.space.id);
         // Memory already owns the history window; disk hydration would replace newer live messages.
@@ -1397,7 +1409,9 @@ export function AppProvider({
 
       if (!view?.messages.length) {
         try {
+          markChatEntry("cache.start");
           const cachedMessages = await loadMessages(userKey, sessionId);
+          markChatEntry("cache.end", { count: cachedMessages.length });
           if (openTokens.current.get(sessionId) === token && cachedMessages.length > 0) {
             dispatch({ type: "session-cache", sessionId, messages: cachedMessages });
           }
@@ -1412,7 +1426,9 @@ export function AppProvider({
       let session = summary as SessionRecord | undefined;
       try {
         if (!spaceId || !space || !session) {
+          markChatEntry("session.start");
           const detail = await client.user.getSession(sessionId);
+          markChatEntry("session.end");
           if (openTokens.current.get(sessionId) !== token) return;
           spaceId = detail.space.id;
           space = detail.space;
@@ -1435,7 +1451,9 @@ export function AppProvider({
         dispatch({ type: "session-start", sessionId, space, session });
         attachSessionRealtime(client, spaceId, sessionId);
         const sessionClient = client.space(spaceId).session(sessionId);
+        markChatEntry("turns.start");
         const response = await sessionClient.turns.listPaginated({ limit: 30 });
+        markChatEntry("turns.end", { count: response.turns.length });
         if (openTokens.current.get(sessionId) !== token) return;
         const messages = messagesFromTurns(response.turns);
         const cachedMessages = stateRef.current.sessionViews[sessionId]?.messages ?? [];
@@ -1467,6 +1485,7 @@ export function AppProvider({
 
   const openSession = useCallback(async (sessionId: string) => {
     if (!client) return;
+    startChatEntry();
     await sessionLifecycleRef.current.open(sessionId);
   }, [client]);
 

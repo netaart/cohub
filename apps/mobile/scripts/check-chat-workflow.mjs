@@ -1048,6 +1048,8 @@ const reopenScope = {
   mergeDisplayMessages: (messages) => messages,
   loadTurnIndex: async () => {},
   saveMessages: async () => {},
+  markChatEntry: () => {},
+  startChatEntry: () => {},
   translate: (key) => key,
 };
 const reopenSource = sessionCallbacks.loadSession ?? sessionCallbacks.openSession;

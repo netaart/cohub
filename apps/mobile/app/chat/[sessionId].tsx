@@ -22,6 +22,7 @@ import { chatScrollTrace, type TraceFields } from "@/src/data/chat-scroll-trace"
 import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
 import { useChatVisibleRows } from "@/src/components/use-chat-visible-rows";
+import { markChatEntry } from "@/src/data/chat-entry-trace";
 import { cancelQueuedFollowup, followupPreviewText, queuedFollowupTurns, steerQueuedFollowup } from "@/src/data/followup-queue";
 import { isActiveTurnStatus, isLiveStreamStatus, isTerminalTurnStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
 import { MessageMeasurements } from "@/src/data/chat-rendering";
@@ -130,6 +131,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   // it. Mount the committed history first and attach the live card on the next task so a long
   // running turn cannot block the screen transition.
   const [liveStreamReady, setLiveStreamReady] = useState(false);
+  // Entry timeline for the opt-in diagnostics: markChatEntry is a no-op unless enabled.
+  const entryRendersRef = useRef(0);
+  const entryHistoryLoadedRef = useRef(false);
+  const entryStatsRef = useRef({ messages: 0, turns: 0, hasStream: false, historyLoaded: false });
   const [currentTurnSequence, setCurrentTurnSequence] = useState<number | null>(null);
   const pendingScrollSequence = useRef<number | null>(null);
   const handledDeepLinkTarget = useRef<string | null>(null);
@@ -370,6 +375,27 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const timer = setTimeout(() => setLiveStreamReady(true), 0);
     return () => clearTimeout(timer);
   }, [sessionId]);
+
+  useEffect(() => {
+    entryRendersRef.current += 1;
+    entryStatsRef.current = { messages: view.messages.length, turns: view.turns.length, hasStream: Boolean(view.stream), historyLoaded: view.historyLoaded };
+  });
+
+  useEffect(() => {
+    markChatEntry("screen.mount", entryStatsRef.current);
+    const timer = setTimeout(() => markChatEntry("settled", { ...entryStatsRef.current, renders: entryRendersRef.current }), 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (entryHistoryLoadedRef.current || !view.historyLoaded) return;
+    entryHistoryLoadedRef.current = true;
+    markChatEntry("history.loaded", { turns: view.turns.length, renders: entryRendersRef.current });
+  }, [view.historyLoaded, view.turns.length]);
+
+  useEffect(() => {
+    if (liveStreamReady) markChatEntry("live.attached", { renders: entryRendersRef.current });
+  }, [liveStreamReady]);
 
   useEffect(() => {
     let active = true;
