@@ -25,7 +25,7 @@ import { icons, type IconName } from "@/src/icons";
 import { getComposerActionState } from "@/src/data/composer-state";
 import { COMPOSER_TEXT_PADDING, getComposerLayout } from "@/src/ui/composer-layout";
 import { useTranslation } from "@/src/i18n";
-import { useAppTheme, typography } from "@/src/theme";
+import { edgeChrome, useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem, ConnectionState } from "@/src/data/types";
 import { initials } from "@/src/utils";
 
@@ -87,7 +87,7 @@ export function IconButton({ name, onPress, label, size = 44, tone = "default", 
   );
 }
 
-export function Screen({ children, scroll = false, refreshing = false, onRefresh, contentStyle, keyboard = false, scrollRef }: { children: ReactNode; scroll?: boolean; refreshing?: boolean; onRefresh?: () => void; contentStyle?: ViewStyle; keyboard?: boolean; scrollRef?: React.RefObject<ScrollView | null> }) {
+export function Screen({ children, scroll = false, refreshing = false, onRefresh, contentStyle, keyboard = false, scrollRef, edgeToEdge = false }: { children: ReactNode; scroll?: boolean; refreshing?: boolean; onRefresh?: () => void; contentStyle?: ViewStyle; keyboard?: boolean; scrollRef?: React.RefObject<ScrollView | null>; edgeToEdge?: boolean }) {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
   const body = scroll ? (
@@ -104,7 +104,7 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
     <View style={[{ flex: 1, backgroundColor: theme.colors.background }, contentStyle]}>{children}</View>
   );
   const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>{body}</KeyboardAvoidingView> : body;
-  return <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
+  return <View style={{ flex: 1, paddingTop: edgeToEdge ? 0 : insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 
 type TopBarProps = {
@@ -115,13 +115,14 @@ type TopBarProps = {
   leading?: ReactNode;
   actions?: ReactNode;
   children?: ReactNode;
+  transparent?: boolean;
 };
 
-export function TopBar({ title, subtitle, onBack, backLabel, leading, actions, children }: TopBarProps) {
+export function TopBar({ title, subtitle, onBack, backLabel, leading, actions, children, transparent = false }: TopBarProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   return (
-    <View testID="app-top-bar" style={[styles.topBar, { backgroundColor: theme.colors.background }]}>
+    <View testID="app-top-bar" style={[styles.topBar, { backgroundColor: transparent ? "transparent" : theme.colors.background }]}>
       {onBack ? <IconButton name="arrow-left" label={backLabel ?? t("ui.detail.back")} onPress={onBack} /> : leading ? <View style={styles.topBarLeading}>{leading}</View> : null}
       <View style={styles.topBarTitle}>
         {children ?? <>
@@ -311,7 +312,7 @@ export function useBackButton() {
 
 const styles = StyleSheet.create({
   iconButton: { alignItems: "center", justifyContent: "center" },
-  topBar: { minHeight: 56, flexShrink: 0, paddingHorizontal: 8, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 },
+  topBar: { minHeight: edgeChrome.headerMinHeight, flexShrink: 0, paddingHorizontal: 8, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 },
   topBarLeading: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   topBarTitle: { flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 4 },
   topBarActions: { flexShrink: 0, flexDirection: "row", alignItems: "center" },

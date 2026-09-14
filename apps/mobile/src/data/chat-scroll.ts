@@ -19,6 +19,16 @@ export function reverseListIndex(index: number, length: number) {
   return length - 1 - index;
 }
 
+export function isChatRowVisible(rowTop: number, rowHeight: number, viewportTop: number, viewportHeight: number): boolean {
+  if (rowHeight <= 0 || viewportHeight <= 0) return false;
+  const visibleHeight = Math.max(0, Math.min(rowTop + rowHeight, viewportTop + viewportHeight) - Math.max(rowTop, viewportTop));
+  return visibleHeight >= Math.min(rowHeight * 0.2, viewportHeight);
+}
+
+export function invertedListViewOffset(viewPosition: number, viewOffset: number, topInset: number, bottomInset: number): number {
+  return viewOffset + bottomInset - viewPosition * (topInset + bottomInset);
+}
+
 export function invertedListDistances(offsetY: number, contentHeight: number, layoutHeight: number) {
   return {
     distanceToLatest: Math.max(0, offsetY),

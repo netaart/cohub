@@ -13,9 +13,10 @@ type ExpandableSearchBarProps = {
   account: ReactNode;
   onCreate: () => void;
   createLabel: string;
+  transparent?: boolean;
 };
 
-export function ExpandableSearchBar({ title, query, onQueryChange, placeholder, queryRef, account, onCreate, createLabel }: ExpandableSearchBarProps) {
+export function ExpandableSearchBar({ title, query, onQueryChange, placeholder, queryRef, account, onCreate, createLabel, transparent = false }: ExpandableSearchBarProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const inputRef = useRef<TextInput>(null);
@@ -35,6 +36,7 @@ export function ExpandableSearchBar({ title, query, onQueryChange, placeholder, 
 
   return (
     <TopBar
+      transparent={transparent}
       title={title}
       leading={account}
       onBack={expanded ? closeSearch : undefined}

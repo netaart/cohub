@@ -5,7 +5,7 @@ import ts from "typescript";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { ChatScrollTrace, setDebugTraceSink } from "../src/data/chat-scroll-trace.ts";
 import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
-import { invertedListDistances, nextChatTailFollowing, reverseListIndex } from "../src/data/chat-scroll.ts";
+import { invertedListDistances, invertedListViewOffset, isChatRowVisible, nextChatTailFollowing, reverseListIndex } from "../src/data/chat-scroll.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
@@ -147,6 +147,7 @@ const chromeScope = {
   View: "View", Text: "Text", TextInput: "TextInput", Pressable: "Pressable", IconButton: "IconButton", AppIcon: "AppIcon", TopBar: "TopBar",
   StyleSheet: { create: (styles) => styles },
   COMPOSER_TEXT_PADDING,
+  edgeChrome: { headerMinHeight: 56, fade: 24 },
   useTranslation: () => ({ t: (key) => key }),
   typography: { heading: { fontSize: 17 }, caption: { fontSize: 12 }, body: { fontSize: 15 } },
   useAppTheme: () => ({ colors: { background: "background", text: "text", textMuted: "muted", textSecondary: "secondary", accent: "accent", accentSoft: "selected", surfacePressed: "pressed" } }),
@@ -179,6 +180,7 @@ for (const [tab, component, expectedRequests] of [
     },
     useCallback: (callback) => callback, useMemo: (factory) => factory(), useEffect: () => {}, useFocusEffect: () => {},
     useRouter: () => ({}), useIsFocused: () => true, useScrollToTop: () => {}, useFloatingTabBarInset: () => 80,
+    useEdgeChrome: () => ({ headerHeight: 103, onHeaderLayout: () => {} }), EdgeHeader: "EdgeHeader",
     useApp: () => ({ state, spaceList, userUuid: "user", client: {}, connectionState: "open", refreshHome: () => request("home") }),
     useActivity: () => activityData, useBillingHistory: () => ({ data: null }),
     useAppTheme: () => ({ colors: {}, spacing: {} }),
@@ -197,6 +199,11 @@ for (const [tab, component, expectedRequests] of [
     const nodes = render();
     return tab === "activity" ? nodes.find((node) => node.type === "ScrollView").props.refreshControl : nodes.find((node) => node.type === "FlatList");
   };
+  const scrollSurface = render().find((node) => node.type === "ScrollView" || node.type === "FlatList");
+  assert.equal(render().find((node) => node.type === "Screen").props.edgeToEdge, true);
+  assert.equal(scrollSurface.props.contentContainerStyle.paddingTop, 103, `${tab}: initial content clears the measured header`);
+  assert.equal(scrollSurface.props.contentContainerStyle.paddingBottom, 80, `${tab}: the last item clears the floating tabs`);
+  assert.equal(control().props.progressViewOffset, 103, `${tab}: refresh feedback clears the header`);
   assert.equal(control().props.refreshing, false, `${tab}: automatic loading must not show the pull-to-refresh spinner`);
   assert.equal(requests.length, 0, `${tab}: rendering the refresh control does not start a request`);
   for (const failed of [false, true]) {
@@ -246,6 +253,16 @@ for (const background of ["#f7f7f5", "#0f1114", "#000000"]) {
   const header = renderTopBar({ title: "A long inline title", subtitle: "Space / file.ts", onBack: () => backCount++, actions: { type: "actions" } });
   const headerStyle = Object.assign({}, ...header.props.style);
   assert.equal(headerStyle.backgroundColor, background);
+  const transparentHeader = renderTopBar({ title: "Chats", transparent: true });
+  assert.equal(Object.assign({}, ...transparentHeader.props.style).backgroundColor, "transparent");
+  const renderScrim = loadChromeComponent("../src/ui/EdgeChrome.tsx", "EdgeScrim", { ...chromeScope, LinearGradient: "LinearGradient", useAppTheme: () => ({ colors: { background } }) });
+  for (const edge of ["top", "bottom"]) {
+    const scrim = renderScrim({ edge });
+    assert.deepEqual(scrim.props.colors, [background, `${background}f5`, `${background}b8`, `${background}00`]);
+    assert.equal(scrim.props.pointerEvents, "none", "the fade never intercepts scrolling or button presses");
+    assert.equal(scrim.props.start.y, edge === "top" ? 0 : 1);
+    assert.equal(scrim.props.end.y, edge === "top" ? 1 : 0);
+  }
   assert.equal(headerStyle.minHeight, 56);
   assert.equal(headerStyle.maxHeight, undefined, "large text must be able to increase header height");
   assert.equal(headerStyle.borderBottomWidth, undefined);
@@ -258,6 +275,58 @@ for (const background of ["#f7f7f5", "#0f1114", "#000000"]) {
   assert.ok(chromeNodes(searchHeader).some((node) => node.type === "search-input"));
   assert.ok(!chromeNodes(searchHeader).some((node) => node.props?.accessibilityRole === "header"), "search replaces the title instead of crowding it");
 }
+for (const topInset of [24, 103, 160]) {
+  for (const bottomInset of [100, 180, 300]) {
+    const offset = invertedListViewOffset(0.15, 8, topInset, bottomInset);
+    assert.equal(offset, 8 + bottomInset - 0.15 * (topInset + bottomInset));
+    assert.equal(invertedListDistances(0, 1400 + topInset + bottomInset, 800).distanceToLatest, 0, "overlay padding preserves the inverted tail origin");
+  }
+}
+assert.equal(isChatRowVisible(0, 80, 103, 500), false, "a row behind the header is not read");
+assert.equal(isChatRowVisible(610, 80, 103, 500), false, "a row behind the composer is not read");
+assert.equal(isChatRowVisible(200, 80, 103, 500), true);
+assert.equal(isChatRowVisible(588, 80, 103, 500), false, "less than 20 percent visible is not read");
+assert.equal(isChatRowVisible(587, 80, 103, 500), true);
+assert.equal(isChatRowVisible(-500, 4000, 103, 500), true, "a long message filling the readable viewport is visible");
+assert.equal(isChatRowVisible(200, 0, 103, 500), false);
+assert.equal(isChatRowVisible(200, 80, 103, 0), false);
+
+const visibleRowEvents = [];
+let viewportHeight = 800;
+let rowTop = 680;
+const measureRequests = [];
+const visibilityCleanups = [];
+const renderVisibleRows = loadChromeComponent("../src/components/use-chat-visible-rows.ts", "useChatVisibleRows", {
+  useRef: (current) => ({ current }), useCallback: (callback) => callback,
+  useEffect: (effect) => { visibilityCleanups.push(effect()); }, isChatRowVisible,
+});
+const visibleRows = renderVisibleRows({
+  viewportRef: { current: { measureInWindow: (callback) => callback(0, 0, 390, viewportHeight) } },
+  topInset: 103, bottomInset: 150,
+  onVisible: ({ viewableItems }) => visibleRowEvents.push(viewableItems.map((item) => item.key)),
+});
+visibleRows.trackRow("row", { measureInWindow: (callback) => measureRequests.push(() => callback(0, rowTop, 390, 80)) });
+visibleRows.onViewableItemsChanged({ viewableItems: [{ key: "row", isViewable: true, index: 0 }] });
+measureRequests.shift()();
+assert.deepEqual(visibleRowEvents.at(-1), [], "native measurements exclude a row covered by the composer");
+rowTop = 540;
+visibleRows.measureVisibleRows();
+measureRequests.shift()();
+assert.deepEqual(visibleRowEvents.at(-1), ["row"], "scrolling into the readable region updates visibility without a new FlatList candidate event");
+viewportHeight = 600;
+visibleRows.measureVisibleRows();
+measureRequests.shift()();
+assert.deepEqual(visibleRowEvents.at(-1), [], "keyboard resize updates the readable viewport");
+const previousVisibilityEvents = visibleRowEvents.length;
+visibleRows.measureVisibleRows();
+visibleRows.onViewableItemsChanged({ viewableItems: [] });
+measureRequests.shift()();
+assert.equal(visibleRowEvents.length, previousVisibilityEvents + 1, "stale measurements cannot restore outdated read candidates");
+visibleRows.onViewableItemsChanged({ viewableItems: [{ key: "row", isViewable: true, index: 0 }] });
+visibilityCleanups.forEach((cleanup) => cleanup());
+measureRequests.shift()();
+assert.equal(visibleRowEvents.length, previousVisibilityEvents + 1, "unmount cancels pending visibility callbacks");
+
 const chatMenuInput = { anchor: { x: 338, y: 53, width: 44, height: 44 }, viewport: { x: 0, y: 47, width: 390, height: 763 }, bottomInset: 34 };
 const chatMenuLayout = getAnchoredMenuLayout(chatMenuInput);
 assert.deepEqual(chatMenuLayout, { left: 102, top: 54, width: 280, maxHeight: 667 });

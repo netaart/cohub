@@ -14,6 +14,7 @@ import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { AppIcon, DataError, EmptyState, ExpandableSearchBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
 import { displaySpaceName } from "@/src/utils";
+import { EdgeHeader, useEdgeChrome } from "@/src/ui/EdgeChrome";
 
 type SpaceListItem =
   | { kind: "local"; space: SpaceListSpace }
@@ -25,6 +26,7 @@ export default function SpacesScreen() {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const tabBarInset = useFloatingTabBarInset();
+  const { headerHeight, onHeaderLayout } = useEdgeChrome();
   const { state, client, refreshHome, createSpace, toggleSpacePin, spaceList, userUuid } = useApp();
   const dataError = state.error ?? state.spacesError ?? spaceList.error;
   const refreshSpaceList = spaceList.refresh;
@@ -153,8 +155,10 @@ export default function SpacesScreen() {
     ? <View style={{ flex: 1, minHeight: 180, alignItems: "center", justifyContent: "center" }}><ActivityIndicator accessibilityLabel={t("spaces.searching")} size="small" color={theme.colors.accent} /></View>
     : <EmptyState icon={filter === "pinned" ? "pin" : trimmedQuery ? "search" : "layers"} title={filter === "pinned" ? t("spaces.empty.pinned.title") : trimmedQuery ? t("spaces.empty.matching.title") : t("spaces.empty.none.title")} action={filter === "pinned" || trimmedQuery ? { icon: "x", label: t("spaces.action.clearFilters"), onPress: () => { setFilter("recent"); setQuery(""); } } : undefined} />;
 
-  return <Screen>
+  return <Screen edgeToEdge>
+    <EdgeHeader onLayout={onHeaderLayout}>
     <ExpandableSearchBar
+      transparent
       title={t("tabs.spaces")}
       createLabel={t("spaces.action.create")}
       query={query}
@@ -164,6 +168,7 @@ export default function SpacesScreen() {
       onCreate={() => { setCreateError(null); setCreateOpen(true); }}
     />
     {dataError ? <DataError message={dataError} onRetry={() => void refresh()} /> : null}
+    </EdgeHeader>
     <FlatList
       ref={listRef}
       data={listItems}
@@ -174,7 +179,10 @@ export default function SpacesScreen() {
       viewabilityConfig={viewabilityConfig}
       onViewableItemsChanged={onViewableItemsChanged}
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
+      contentInsetAdjustmentBehavior="never"
+      progressViewOffset={headerHeight}
+      scrollIndicatorInsets={{ top: headerHeight, bottom: tabBarInset }}
+      contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
       ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingVertical: 4 }}>
           <SpaceFilterChip label={t("spaces.filter.recent")} selected={filter === "recent"} onPress={() => setFilter("recent")} />

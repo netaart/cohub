@@ -14,6 +14,7 @@ import { ConnectionBanner, DataError, EmptyState, ExpandableSearchBar, IconButto
 import { getSessionStatus, hasMoreRecentSessions, isSessionInFilterWindow, sessionFilterCutoff } from "@/src/data/session-status";
 import { loadSessionFilterMinutes, useSessionFilterPreference } from "@/src/data/session-filter-preference";
 import { SpaceRow } from "@/src/components/SpaceRow";
+import { EdgeHeader, useEdgeChrome } from "@/src/ui/EdgeChrome";
 
 type Filter = "all" | "running" | "completed";
 type ChatListItem =
@@ -28,6 +29,7 @@ export default function ChatsScreen() {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const tabBarInset = useFloatingTabBarInset();
+  const { headerHeight, onHeaderLayout } = useEdgeChrome();
   const isFocused = useIsFocused();
   const { state, client, connectionState, refreshHome, refreshSessionStatuses, loadMoreSessions } = useApp();
   const filterPreference = useSessionFilterPreference();
@@ -108,8 +110,10 @@ export default function ChatsScreen() {
     : <EmptyState icon={trimmedQuery || filter !== "all" ? "search" : "messages"} title={trimmedQuery || filter !== "all" ? t("chats.empty.matching.title") : t("chats.empty.none.title")} action={trimmedQuery || filter !== "all" ? { icon: "x", label: t("chats.action.clearFilters"), onPress: () => { setQuery(""); setFilter("all"); } } : undefined} />;
 
   return (
-    <Screen>
+    <Screen edgeToEdge>
+      <EdgeHeader onLayout={onHeaderLayout}>
       <ExpandableSearchBar
+        transparent
         title={t("tabs.chats")}
         createLabel={t("chats.action.newChat")}
         query={query}
@@ -120,6 +124,7 @@ export default function ChatsScreen() {
       />
       <ConnectionBanner state={connectionState} />
       {dataError ? <DataError message={dataError} onRetry={refresh} /> : null}
+      </EdgeHeader>
       <FlatList
         ref={listRef}
         data={listItems}
@@ -135,7 +140,10 @@ export default function ChatsScreen() {
         onRefresh={refreshOnPull}
         onEndReached={() => { if (!trimmedQuery && filter === "all") void loadMoreSessions(); }}
         onEndReachedThreshold={0.7}
-        contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
+        contentInsetAdjustmentBehavior="never"
+        progressViewOffset={headerHeight}
+        scrollIndicatorInsets={{ top: headerHeight, bottom: tabBarInset }}
+        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
         ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingVertical: 4 }}>
             <FilterChip label={t("chats.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} />

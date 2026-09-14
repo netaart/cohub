@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { typography, useAppTheme } from "@/src/theme";
+import { edgeChrome, typography, useAppTheme } from "@/src/theme";
+import { EdgeScrim } from "@/src/ui/EdgeChrome";
 
 const BAR_HEIGHT = 60;
 const BAR_HORIZONTAL_MARGIN = 18;
@@ -68,22 +69,22 @@ export function FloatingTabBar({ state, descriptors, navigation, insets }: Botto
   }));
 
   return (
-    <View
-      pointerEvents="box-none"
-      style={{
+    <Animated.View
+      pointerEvents={keyboardVisible ? "none" : "box-none"}
+      style={[{
         position: "absolute",
         left: 0,
         right: 0,
         bottom: 0,
         paddingHorizontal: BAR_HORIZONTAL_MARGIN,
         paddingBottom: Math.max(insets.bottom, BAR_BOTTOM_MARGIN) + BAR_BOTTOM_MARGIN,
-      }}
+      }, barStyle]}
     >
-      <Animated.View
+      <EdgeScrim edge="bottom" style={{ top: -edgeChrome.fade }} />
+      <View
         style={[
           styles.bar,
           { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, shadowColor: theme.colors.shadow },
-          barStyle,
         ]}
       >
         <View style={styles.barInner} onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}>
@@ -118,8 +119,8 @@ export function FloatingTabBar({ state, descriptors, navigation, insets }: Botto
             );
           })}
         </View>
-      </Animated.View>
-    </View>
+      </View>
+    </Animated.View>
   );
 }
 

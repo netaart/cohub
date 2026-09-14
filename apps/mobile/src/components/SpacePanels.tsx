@@ -42,6 +42,7 @@ type SpacePanelsProps = {
   onOpenFile: (path: string) => void;
   onOpenFilesPage: () => void;
   children: ReactNode;
+  edgeToEdge?: boolean;
 };
 
 const PANEL_WIDTH_RATIO = 0.86;
@@ -58,7 +59,7 @@ const PANEL_CLOSE_SETTLE_MS = 380;
  * while a text selection keeps precedence because the native text view sets
  * FLAG_DISALLOW_INTERCEPT, which disables that interception.
  */
-export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children }: SpacePanelsProps) {
+export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children, edgeToEdge = false }: SpacePanelsProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const isFocused = useIsFocused();
@@ -174,6 +175,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     panel === "chat" ? styles.panelPageLeft : styles.panelPageRight,
     {
       width: panelWidth,
+      paddingTop: edgeToEdge ? insets.top : 0,
       paddingBottom: insets.bottom,
       backgroundColor: theme.colors.background,
       borderColor: theme.colors.border,

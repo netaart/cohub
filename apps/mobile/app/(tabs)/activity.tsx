@@ -12,12 +12,14 @@ import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { AppIcon, ConnectionBanner, DataError, LoadingRows, Screen, SectionHeader, TopBar } from "@/src/ui";
 import { PressableScale } from "@/src/ui/PressableScale";
+import { EdgeHeader, useEdgeChrome } from "@/src/ui/EdgeChrome";
 
 export default function ActivityScreen() {
   const router = useRouter();
   const theme = useAppTheme();
   const { t } = useTranslation();
   const tabBarInset = useFloatingTabBarInset();
+  const { headerHeight, onHeaderLayout } = useEdgeChrome();
   const { connectionState } = useApp();
   const { credits, days, refresh } = useActivity();
   const [pullRefreshing, setPullRefreshing] = useState(false);
@@ -35,9 +37,11 @@ export default function ActivityScreen() {
       setPullRefreshing(false);
     }
   };
-  return <Screen>
-    <TopBar title={t("activity.title")} leading={<AccountAvatar />} />
-    <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: tabBarInset }} refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={refreshOnPull} tintColor={theme.colors.accent} colors={[theme.colors.accent]} />}>
+  return <Screen edgeToEdge>
+    <EdgeHeader onLayout={onHeaderLayout}>
+      <TopBar transparent title={t("activity.title")} leading={<AccountAvatar />} />
+    </EdgeHeader>
+    <ScrollView ref={scrollRef} style={{ flex: 1 }} contentInsetAdjustmentBehavior="never" scrollIndicatorInsets={{ top: headerHeight, bottom: tabBarInset }} contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: tabBarInset }} refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={refreshOnPull} progressViewOffset={headerHeight} tintColor={theme.colors.accent} colors={[theme.colors.accent]} />}>
       <ConnectionBanner state={connectionState} />
       <PressableScale accessibilityRole="button" accessibilityLabel={t("settings.section.billing")} onPress={() => router.push("/settings/billing")} style={{ padding: theme.spacing.lg, gap: theme.spacing.sm }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}>

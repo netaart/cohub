@@ -2,6 +2,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useColorScheme } from "react-native";
 import { useEffect, useMemo, useState } from "react";
 
+export const edgeChrome = { headerMinHeight: 56, fade: 24 } as const;
+
 export type AppTheme = {
   mode: "light" | "dark";
   colors: {
