@@ -33,6 +33,7 @@ export const load: PageServerLoad = async ({
 			owner: result.detail.owner,
 			content: result.detail.content,
 			publicUrl: result.detail.publicUrl,
+			totalViews: result.detail.totalViews ?? null,
 			pathname: url.pathname,
 			origin: url.origin,
 		};

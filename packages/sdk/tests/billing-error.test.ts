@@ -28,14 +28,14 @@ test("extractBillingPayload reads standard blocked body", () => {
 		billing: {
 			status: "blocked",
 			netUsd: 0.5,
-			minimumBalanceUsd: 0.6,
+			minimumBalanceUsd: 1.01,
 			conversion: { ...conversion, reason: "minimum_balance_not_met" },
 		},
 	};
 	const payload = extractBillingPayload(body);
 	assert.ok(payload);
 	assert.equal(payload.status, "blocked");
-	assert.equal(payload.minimumBalanceUsd, 0.6);
+	assert.equal(payload.minimumBalanceUsd, 1.01);
 	assert.equal(payload.conversion.reason, "minimum_balance_not_met");
 	assert.equal(payload.conversion.title, "Add credits to continue");
 });

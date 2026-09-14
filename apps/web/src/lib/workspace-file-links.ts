@@ -139,3 +139,52 @@ export function normalizeWorkspaceFileLink(
 ) {
 	return normalizeWorkspaceFileLinkTarget(href, options)?.path ?? null;
 }
+
+const PUBLIC_FILE_HREF_PATTERN = /^\/p\/([^/?#]+)\/(.+)$/;
+
+/** Decode one path segment; reject separators and traversal after decoding. */
+function decodePublicPathSegment(segment: string): string | null {
+	let decoded: string;
+	try {
+		decoded = decodeURIComponent(segment);
+	} catch {
+		return null;
+	}
+	if (!decoded || decoded === "." || decoded === "..") return null;
+	if (
+		decoded.includes("/") ||
+		decoded.includes("\\") ||
+		hasControlCharacter(decoded)
+	) {
+		return null;
+	}
+	return decoded;
+}
+
+/**
+ * Root-relative `/p/{spaceId}/{path}` marks a Space public file. The origin is
+ * omitted because the path is authored inside Cohub; it is rewritten to the
+ * absolute CDN URL when the markdown HTML is prepared.
+ */
+export function parsePublicFileHref(
+	href: string,
+): { spaceId: string; path: string } | null {
+	const raw = href.trim();
+	if (!raw.startsWith("/p/")) return null;
+
+	const withoutQuery = stripQueryAndHash(raw).trim();
+	const match = withoutQuery.match(PUBLIC_FILE_HREF_PATTERN);
+	if (!match) return null;
+
+	const spaceId = decodePublicPathSegment(match[1]);
+	if (!spaceId) return null;
+
+	const path: string[] = [];
+	for (const segment of match[2].split("/")) {
+		const decoded = decodePublicPathSegment(segment);
+		if (!decoded) return null;
+		path.push(decoded);
+	}
+
+	return { spaceId, path: path.join("/") };
+}

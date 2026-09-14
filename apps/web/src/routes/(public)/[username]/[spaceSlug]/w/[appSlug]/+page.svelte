@@ -27,6 +27,7 @@ type ReadyData = {
 	owner: AppDetailResponse["owner"];
 	content: AppDetailResponse["content"];
 	publicUrl: AppDetailResponse["publicUrl"];
+	totalViews: number | null;
 	pathname: string;
 	origin: string;
 };
@@ -161,6 +162,7 @@ const ready = $derived(
 					owner: clientDetail.owner,
 					content: clientDetail.content,
 					publicUrl: clientDetail.publicUrl,
+					totalViews: clientDetail.totalViews ?? null,
 					pathname: props.data.pathname,
 					origin: props.data.origin,
 				}
@@ -254,6 +256,7 @@ $effect(() => {
 		space={ready.space}
 		owner={ready.owner}
 		content={ready.content}
+		totalViews={ready.totalViews}
 		{launchState}
 		{shell}
 		{invocation}

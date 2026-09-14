@@ -1,5 +1,6 @@
 import { and, asc, eq, gte, sql } from "drizzle-orm";
 import { appViewStatsHourly } from "@cohub/db";
+import { createLogger } from "@cohub/infra/logging";
 import {
   encodeAppViewStatsRedisField,
   APP_VIEW_STATS_ACTIVE_REDIS_KEY,
@@ -7,6 +8,12 @@ import {
 } from "@cohub/protocol";
 import type { RequestSource } from "@cohub/protocol/provenance";
 import { db } from "./db/index.js";
+
+const logger = createLogger({ serviceName: "cohub-api" });
+
+/** Throttle the best-effort total-query warning: this runs on hot detail paths. */
+let lastAppTotalViewsWarningAt = 0;
+const APP_TOTAL_VIEWS_WARNING_INTERVAL_MS = 60_000;
 
 export type AppViewSource = AppViewStatsSource;
 
@@ -62,6 +69,8 @@ export function resolveAppViewSource(source: RequestSource | null | undefined, f
 type AppViewStatsRedisClient = {
   readonly status: string;
   hincrby(key: string, field: string, increment: number): Promise<number>;
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string, exMode: "EX", ttlSeconds: number): Promise<unknown>;
 };
 
 let appViewStatsRedisPromise: Promise<AppViewStatsRedisClient> | null = null;
@@ -138,14 +147,76 @@ export function aggregateAppViewStats(input: {
   };
 }
 
+const selectAppTotalViews = (appId: string) =>
+  db
+    .select({ totalViews: sql<string>`coalesce(sum(${appViewStatsHourly.viewCount}), 0)` })
+    .from(appViewStatsHourly)
+    .where(eq(appViewStatsHourly.appId, appId));
+
+/**
+ * All-time views stay cheap without a derived column: the rollups already
+ * trail the live buffer by up to 30s, so caching the SUM briefly removes
+ * repeat aggregates (notably on the workspace app-open path) while keeping
+ * the count no staler than the data itself.
+ */
+const APP_TOTAL_VIEWS_CACHE_TTL_SECONDS = 60;
+const appTotalViewsCacheKey = (appId: string) => `api:app-view-total:${appId}`;
+
+/** Only a non-negative safe integer is a trustworthy cache entry. */
+export function parseCachedTotalViews(value: string | null): number | null {
+  if (value === null || !/^\d+$/.test(value)) return null;
+  const totalViews = Number(value);
+  return Number.isSafeInteger(totalViews) ? totalViews : null;
+}
+
+/**
+ * Best-effort by design: a view count is decoration, so a rollup query that
+ * times out must never fail an app detail response. Returns `null` when the
+ * total is unknown (as opposed to a determined `0`).
+ */
+export async function getAppTotalViews(
+  appId: string,
+  redis?: AppViewStatsRedisClient,
+): Promise<number | null> {
+  const client = redis ?? await resolveAppViewStatsRedis();
+  const cacheKey = appTotalViewsCacheKey(appId);
+  if (client.status === "ready") {
+    try {
+      const cachedTotal = parseCachedTotalViews(await client.get(cacheKey));
+      if (cachedTotal !== null) return cachedTotal;
+    } catch {
+      // A cache read must never fail the request.
+    }
+  }
+
+  let totalViews: number;
+  try {
+    const [row] = await selectAppTotalViews(appId);
+    totalViews = toCount(row?.totalViews);
+  } catch (error) {
+    const now = Date.now();
+    if (now - lastAppTotalViewsWarningAt >= APP_TOTAL_VIEWS_WARNING_INTERVAL_MS) {
+      lastAppTotalViewsWarningAt = now;
+      logger.warn("[AppViewStats] total view query failed", { appId, error });
+    }
+    return null;
+  }
+  if (client.status === "ready") {
+    try {
+      // Also repairs a corrupted entry reached above.
+      await client.set(cacheKey, String(totalViews), "EX", APP_TOTAL_VIEWS_CACHE_TTL_SECONDS);
+    } catch {
+      // Best-effort cache write.
+    }
+  }
+  return totalViews;
+}
+
 export async function getAppViewStats(appId: string): Promise<AppViewStatsResponse> {
   const now = new Date();
   const startDay = toUtcDayBucket(new Date(now.getTime() - (STATS_DAYS - 1) * DAY_MS));
-  const [totalRows, recentRows] = await Promise.all([
-    db
-      .select({ totalViews: sql<string>`coalesce(sum(${appViewStatsHourly.viewCount}), 0)` })
-      .from(appViewStatsHourly)
-      .where(eq(appViewStatsHourly.appId, appId)),
+  const [totalViews, recentRows] = await Promise.all([
+    getAppTotalViews(appId),
     db
       .select({
         bucketStartAt: appViewStatsHourly.bucketStartAt,
@@ -159,9 +230,8 @@ export async function getAppViewStats(appId: string): Promise<AppViewStatsRespon
       ))
       .orderBy(asc(appViewStatsHourly.bucketStartAt)),
   ]);
-  return aggregateAppViewStats({
-    totalViews: totalRows[0]?.totalViews ?? 0,
-    rows: recentRows,
-    now,
-  });
+  // The management stats view is strict: a partial total would render as a
+  // contradictory `totalViews: 0` alongside real recent views.
+  if (totalViews === null) throw new Error(`app view total unavailable for ${appId}`);
+  return aggregateAppViewStats({ totalViews, rows: recentRows, now });
 }

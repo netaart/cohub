@@ -2,7 +2,10 @@ import type {
 	SpaceFsFileResponse,
 	SpaceFsPreparingFile,
 } from "@neta-art/cohub";
-import { normalizeWorkspaceFileLink } from "$lib/workspace-file-links";
+import {
+	normalizeWorkspaceFileLink,
+	parsePublicFileHref,
+} from "$lib/workspace-file-links";
 
 export type WorkspaceAsset = {
 	src: string;
@@ -145,13 +148,48 @@ export function fileResponseAsset(file: SpaceFsFileResponse): WorkspaceAsset {
 	};
 }
 
-export function prepareWorkspaceAssetHtml(
+export function prepareMarkdownAssetHtml(
 	html: string,
-	basePath: string | null,
+	options: {
+		basePath?: string | null;
+		/** Only extract workspace assets when a resolver will load them. */
+		extractWorkspaceAssets?: boolean;
+		/** Builds an absolute URL for `/p/{spaceId}/{path}` public files. */
+		publicFileUrl?: (spaceId: string, path: string) => string | null;
+	} = {},
 ) {
 	if (typeof document === "undefined") return html;
+	const {
+		basePath = null,
+		extractWorkspaceAssets = false,
+		publicFileUrl,
+	} = options;
+	if (!extractWorkspaceAssets && !html.includes("/p/")) return html;
+
 	const template = document.createElement("template");
 	template.innerHTML = html;
+
+	// Explicit `/p/{spaceId}/{path}` references point straight at the public CDN;
+	// they are never read from the workspace and keep the referenced Space. This
+	// runs regardless of whether a workspace resolver is available.
+	if (publicFileUrl) {
+		for (const anchor of template.content.querySelectorAll<HTMLAnchorElement>(
+			"a[href]",
+		)) {
+			const reference = anchor.getAttribute("href")?.trim();
+			if (!reference) continue;
+			const publicFile = parsePublicFileHref(reference);
+			if (!publicFile) continue;
+			const url = publicFileUrl(publicFile.spaceId, publicFile.path);
+			if (!url) continue;
+			anchor.setAttribute("href", url);
+			if (!anchor.hasAttribute("target")) {
+				anchor.dataset.cohubAutoTarget = "blank";
+				anchor.setAttribute("target", "_blank");
+			}
+			anchor.setAttribute("rel", "noopener noreferrer");
+		}
+	}
 
 	for (const [selector, attribute] of WORKSPACE_ASSET_SELECTORS) {
 		for (const element of template.content.querySelectorAll<HTMLElement>(
@@ -159,6 +197,13 @@ export function prepareWorkspaceAssetHtml(
 		)) {
 			const reference = element.getAttribute(attribute)?.trim();
 			if (!reference) continue;
+			const publicFile = publicFileUrl ? parsePublicFileHref(reference) : null;
+			if (publicFile) {
+				const url = publicFileUrl?.(publicFile.spaceId, publicFile.path);
+				if (url) element.setAttribute(attribute, url);
+				continue;
+			}
+			if (!extractWorkspaceAssets) continue;
 			const path = resolveWorkspaceAssetPath(reference, basePath);
 			if (!path) continue;
 			if (attribute === "src") element.dataset.workspaceAssetSrc = path;

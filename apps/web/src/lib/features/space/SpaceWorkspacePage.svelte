@@ -347,6 +347,8 @@ const sessionChat = createSessionChatHost({
 	openPath: (target) => openLinkedInlineFile(target),
 	// Shared, non-member sessions can't read workspace files: short-circuit to a
 	// lightweight placeholder instead of issuing requests that always fail.
+	// Public `/p/{spaceId}/{path}` references are rewritten to CDN URLs before
+	// this resolver runs, so they still render for those viewers.
 	resolveWorkspaceAsset: (path, options) =>
 		spaceHasMinimalAccess
 			? denyWorkspaceAsset(path, options)

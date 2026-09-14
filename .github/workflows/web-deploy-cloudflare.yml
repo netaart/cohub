@@ -88,6 +88,7 @@ jobs:
             echo "PUBLIC_API_ORIGIN=https://api.cohub.live" >> .env
             echo "PUBLIC_GATEWAY_ORIGIN=https://gateway.cohub.live" >> .env
             echo "PUBLIC_PREVIEW_ORIGIN=https://preview.cohub.live" >> .env
+            echo "PUBLIC_FILES_ORIGIN=https://public.cohub.live" >> .env
             echo "PUBLIC_LOGTO_ENDPOINT=https://auth.neta.art/" >> .env
             echo "PUBLIC_LOGTO_APP_ID=16ai0wao2mud3xqkbzqo0" >> .env
             echo "PUBLIC_LOGTO_API_RESOURCE=https://api.talesofai" >> .env
@@ -96,6 +97,7 @@ jobs:
             echo "PUBLIC_API_ORIGIN=https://api-dev.cohub.live" >> .env
             echo "PUBLIC_GATEWAY_ORIGIN=https://gateway-dev.cohub.live" >> .env
             echo "PUBLIC_PREVIEW_ORIGIN=https://preview-dev.cohub.live" >> .env
+            echo "PUBLIC_FILES_ORIGIN=https://public.cohub.live" >> .env
             echo "PUBLIC_LOGTO_ENDPOINT=https://dev-auth.neta.art/" >> .env
             echo "PUBLIC_LOGTO_APP_ID=vpikk7sl9zwvefiptowtn" >> .env
             echo "PUBLIC_LOGTO_API_RESOURCE=https://api.talesofai" >> .env

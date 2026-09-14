@@ -57,7 +57,7 @@ type GenerationTaskResult = {
 
 Generation requests share the platform credit balance with LLM turns.
 
-1. **Preflight gate** — `POST /api/generations` and the worker re-check the caller's balance before enqueue/execute. Video generation requires at least `$0.60`; a lower balance returns the standard 402 `billing` conversion payload before the provider is called. Other paid generations require a positive balance. Video balance lookup failures fail closed with a temporary-unavailable error.
+1. **Preflight gate** — `POST /api/generations` and the worker re-check the caller's balance before enqueue/execute. Video generation requires at least `$1.01`; a lower balance returns the standard 402 `billing` conversion payload before the provider is called. Other paid generations require a positive balance. Video balance lookup failures fail closed with a temporary-unavailable error.
 2. **Post-success charge** — after a successful provider call, the worker applies the request-time model discount snapshot to the official provider `cost` (USD), then attempts to record the effective charge amount:
 
 ```ts

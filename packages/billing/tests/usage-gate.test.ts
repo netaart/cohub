@@ -34,17 +34,17 @@ test("disabled billing bypasses the balance gate", async () => {
   assert.equal(requested, false);
 });
 
-test("video generation requires at least $0.60", async () => {
-  const blocked = await gateWithBalance(0.59).evaluate(gateInput("generation.video"));
+test("video generation requires at least $1.01", async () => {
+  const blocked = await gateWithBalance(1).evaluate(gateInput("generation.video"));
   assert.equal(blocked.status, "blocked");
   if (blocked.status !== "blocked") return;
   assert.equal(blocked.balanceState, "positive");
-  assert.equal("minimumBalanceUsd" in blocked && blocked.minimumBalanceUsd, 0.6);
+  assert.equal("minimumBalanceUsd" in blocked && blocked.minimumBalanceUsd, 1.01);
   assert.equal(blocked.conversion.reason, "minimum_balance_not_met");
   assert.equal(blocked.conversion.title, "Insufficient balance");
-  assert.equal(blocked.conversion.message, "Video generation requires a balance of at least $0.60.");
+  assert.equal(blocked.conversion.message, "Video generation requires a balance of at least $1.01.");
 
-  const allowed = await gateWithBalance(0.6).evaluate(gateInput("generation.video"));
+  const allowed = await gateWithBalance(1.01).evaluate(gateInput("generation.video"));
   assert.equal(allowed.status, "allowed");
 });
 

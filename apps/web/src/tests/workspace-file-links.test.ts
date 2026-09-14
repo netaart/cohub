@@ -3,6 +3,7 @@ import test from "node:test";
 import {
 	normalizeWorkspaceFileLink,
 	normalizeWorkspaceFileLinkTarget,
+	parsePublicFileHref,
 } from "$lib/workspace-file-links";
 
 test("resolves workspace-prefixed paths", () => {
@@ -72,4 +73,39 @@ test("decodes encoded references and rejects unsafe input", () => {
 	assert.equal(normalizeWorkspaceFileLink("a\\b.md"), null);
 	assert.equal(normalizeWorkspaceFileLink(""), null);
 	assert.equal(normalizeWorkspaceFileLink("/workspace"), null);
+});
+
+test("parses root-relative public file references", () => {
+	assert.deepEqual(parsePublicFileHref("/p/space-1/mock.png"), {
+		spaceId: "space-1",
+		path: "mock.png",
+	});
+	assert.deepEqual(parsePublicFileHref("/p/space-1/a/b.png?raw#L1"), {
+		spaceId: "space-1",
+		path: "a/b.png",
+	});
+	assert.deepEqual(parsePublicFileHref("/p/space-1/a%20b.png"), {
+		spaceId: "space-1",
+		path: "a b.png",
+	});
+	// Reserved characters are decoded per segment so the CDN URL re-encodes once.
+	assert.deepEqual(parsePublicFileHref("/p/space-1/a%23b.png"), {
+		spaceId: "space-1",
+		path: "a#b.png",
+	});
+	assert.deepEqual(parsePublicFileHref("/p/space-1/a%3Fb.png"), {
+		spaceId: "space-1",
+		path: "a?b.png",
+	});
+	for (const href of [
+		"/p/space-1/a/../b.png",
+		"/p/space-1/a%2Fb.png",
+		"/p/space-1/%2E%2E/x.png",
+		"/p//x.png",
+		"/p/space-1",
+		"/other/x.png",
+		"https://public.cohub.run/p/space-1/x.png",
+	]) {
+		assert.equal(parsePublicFileHref(href), null, href);
+	}
 });

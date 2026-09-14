@@ -156,6 +156,8 @@ export type AppDetailResponse = {
   owner: AppPublicOwnerRecord;
   publicUrl: string | null;
   content: AppContent | null;
+  /** All-time view count; `null` when the rollup total is unavailable. */
+  totalViews?: number | null;
 };
 
 export type AppGetResponse = AppDetailResponse;

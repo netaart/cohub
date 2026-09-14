@@ -27,9 +27,10 @@ import { onDestroy, tick, untrack } from "svelte";
 import MarkdownFrontmatter from "$lib/components/MarkdownFrontmatter.svelte";
 import MarkdownSurface from "$lib/components/MarkdownSurface.svelte";
 import { parseMarkdownFrontmatter } from "$lib/markdown-frontmatter";
+import { buildPublicFileUrl } from "$lib/public-files-url";
 import { StreamingMarkdownController } from "$lib/streaming-markdown-controller";
 import {
-	prepareWorkspaceAssetHtml,
+	prepareMarkdownAssetHtml,
 	type ResolveWorkspaceAsset,
 } from "$lib/workspace-assets";
 import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
@@ -136,10 +137,11 @@ function renderFullMarkdown(
 		.then(({ renderMarkdown }) => renderMarkdown(markdownSource))
 		.then((html) => {
 			if (seq !== renderSeq) return;
-			stableHtml =
-				assetResolver
-					? prepareWorkspaceAssetHtml(html, assetBasePath)
-					: html;
+			stableHtml = prepareMarkdownAssetHtml(html, {
+				basePath: assetBasePath,
+				extractWorkspaceAssets: Boolean(assetResolver),
+				publicFileUrl: buildPublicFileUrl,
+			});
 			tailHtml = "";
 			void tick().then(() => {
 				if (seq === renderSeq) untrack(() => onRendered?.());

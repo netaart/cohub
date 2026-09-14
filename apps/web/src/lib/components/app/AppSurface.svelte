@@ -19,6 +19,7 @@ import type {
 	AppRuntimeInvocationContext,
 	AppRuntimeShellContext,
 } from "@neta-art/cohub";
+import { Eye } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import { page } from "$app/state";
 import { appDisplayTitle } from "$lib/app-page-meta";
@@ -34,7 +35,10 @@ import {
 	type AppSurfaceHost,
 	createAppSurfaceHost,
 } from "$lib/features/app/surface-host";
+import { formatCompactNumber, formatNumber } from "$lib/i18n/format";
+import { getLocale } from "$lib/i18n/locale.svelte";
 import { parseNewChatBackgroundAction } from "$lib/new-chat-background-bridge";
+import { m } from "$lib/paraglide/messages.js";
 import { emitSpaceConfigBackgroundAction } from "$lib/space-config";
 import { createSpaceWorkspaceAssetResolver } from "$lib/space-workspace-assets";
 import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
@@ -71,6 +75,8 @@ type Props = {
 	space?: AppSpace | null;
 	owner?: AppOwner;
 	content?: AppContent | null;
+	/** All-time view count shown in the public Cohub bar. */
+	totalViews?: number | null;
 	mode?: AppSurfaceMode;
 	launchState?: AppLaunchState | null;
 	invocation?: AppRuntimeInvocationContext;
@@ -103,6 +109,7 @@ const {
 	space = null,
 	owner = null,
 	content = null,
+	totalViews = null,
 	mode = "page",
 	launchState = null,
 	invocation = undefined,
@@ -135,6 +142,20 @@ const appTitle = $derived(appDisplayTitle(app?.meta, app?.slug ?? "App"));
 const publisherName = $derived(owner?.displayName ?? "Cohub");
 const publisherAvatarUrl = $derived(owner?.avatarUrl?.trim() || null);
 const hideCohubBar = $derived(app?.meta?.presentation?.hideCohubBar === true);
+const locale = $derived(getLocale());
+const totalViewsText = $derived(
+	typeof totalViews === "number" && totalViews > 0
+		? formatCompactNumber(totalViews, locale)
+		: null,
+);
+const totalViewsTitle = $derived(
+	totalViewsText
+		? m.app_stats_total_views_title(
+				{ count: formatNumber(totalViews ?? 0, locale) },
+				{ locale },
+			)
+		: "",
+);
 // Board and file Works render natively; only web and port Works are embedded.
 const boardContent = $derived(content?.kind === "board" ? content : null);
 const fileContent = $derived(content?.kind === "file" ? content : null);
@@ -427,6 +448,14 @@ onMount(() => {
 					</div>
 				</div>
 				<div class="flex min-w-0 shrink-0 items-center gap-2 overflow-hidden">
+					{#if totalViewsText}
+						<span class="flex shrink-0 items-center gap-1.5 text-text-tertiary" title={totalViewsTitle}>
+							<Eye class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+							<span class="font-mono leading-none tabular-nums">{totalViewsText}</span>
+							<span class="sr-only">{totalViewsTitle}</span>
+						</span>
+						<div class="hidden h-4 w-px shrink-0 bg-border-subtle sm:block"></div>
+					{/if}
 					<span class="hidden shrink-0 leading-none text-text-tertiary md:inline">Published by</span>
 					<UserIdentity
 						name={publisherName}

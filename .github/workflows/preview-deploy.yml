@@ -168,6 +168,7 @@ jobs:
           PUBLIC_API_ORIGIN=https://${{ env.API_HOSTNAME }}
           PUBLIC_GATEWAY_ORIGIN=https://${{ env.GATEWAY_HOSTNAME }}
           PUBLIC_PREVIEW_ORIGIN=https://preview-dev.cohub.live
+          PUBLIC_FILES_ORIGIN=https://public.cohub.live
           PUBLIC_LOGTO_ENDPOINT=https://dev-auth.neta.art/
           PUBLIC_LOGTO_APP_ID=vpikk7sl9zwvefiptowtn
           PUBLIC_LOGTO_API_RESOURCE=https://api.talesofai

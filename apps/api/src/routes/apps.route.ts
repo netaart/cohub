@@ -50,6 +50,7 @@ import { applyRequestSourceToMeta, getRequestSource } from "../lib/request-sourc
 import { dispatchAppVersionPublished } from "../app-events.js";
 import { ensureUserProfileByUuid } from "../user-profiles.js";
 import {
+  getAppTotalViews,
   getAppViewStats,
   recordAppViewStatsHourly,
   resolveAppViewSource,
@@ -508,7 +509,10 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
   if (requiresSpaceAppAccess(row.app) && !(await hasPermission(user, "space.view", { spaceId: row.space.id }))) return authzDenied(c);
 
   recordResolvedAppView(c, row.app, "web");
-  const content = await getPublishedAppContent(row.app);
+  const [content, totalViews] = await Promise.all([
+    getPublishedAppContent(row.app),
+    getAppTotalViews(row.app.id),
+  ]);
 
   // Public apps are anonymous-readable; space apps depend on the caller.
   c.header(
@@ -521,6 +525,7 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
     owner: { ...row.owner, username: row.owner.username },
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: row.app.slug, status: row.app.status }),
     content,
+    totalViews,
   });
 });
 
@@ -560,12 +565,16 @@ router.get("/:id/public", async (c) => {
   const space = { id: row.space.id, slug: row.space.slug, name: row.space.name, userUuid: row.space.userUuid, publicProfile: getSpacePublicProfile(row.space) };
   // Content matches what the by-slug page already serves for the same access
   // model, so an in-workspace preview can render a Work reached by public url.
-  const content = await getPublishedAppContent(app);
+  const [content, totalViews] = await Promise.all([
+    getPublishedAppContent(app),
+    getAppTotalViews(app.id),
+  ]);
   return c.json({
     ...wrapAppRecord(wire, serializeApp(app)),
     space,
     owner: { ...row.owner, username: row.owner.username },
     content,
+    totalViews,
   });
 });
 
@@ -603,13 +612,17 @@ router.get("/:id", async (c) => {
   const shouldRecordCliView = getRequestSource(c)?.via === "cli"
     && getExecutionPrincipal(c)?.source !== APP_ACTION_EXECUTION_SOURCE;
   if (shouldRecordCliView) recordResolvedAppView(c, app, "cli");
-  const content = await getPublishedAppContent(app);
+  const [content, totalViews] = await Promise.all([
+    getPublishedAppContent(app),
+    getAppTotalViews(app.id),
+  ]);
   return c.json({
     ...wrapAppRecord(wire, serializeApp(app)),
     space,
     owner: { ...row.owner, username: row.owner.username },
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: app.slug, status: app.status }),
     content,
+    totalViews,
   });
 });
 

@@ -36,6 +36,22 @@ function numberFormat(
 	return format;
 }
 
+/** Locale-aware integer formatting (`12,345`). */
+export function formatNumber(value: number, locale?: LocaleOrString): string {
+	return numberFormat(toIntlTag(locale), {}).format(value);
+}
+
+/** Locale-aware compact notation (`1.2K`, `3.4M`) for dense metric displays. */
+export function formatCompactNumber(
+	value: number,
+	locale?: LocaleOrString,
+): string {
+	return numberFormat(toIntlTag(locale), {
+		notation: "compact",
+		maximumFractionDigits: 1,
+	}).format(value);
+}
+
 function dateFormat(
 	tag: string,
 	options: Intl.DateTimeFormatOptions,
