@@ -82,7 +82,7 @@ const predictiveBackCode = `
       }
     }
 
-    onBackInvokedDispatcher.registerOnBackAnimationCallback(
+    onBackInvokedDispatcher.registerOnBackInvokedCallback(
       OnBackInvokedDispatcher.PRIORITY_OVERLAY,
       predictiveBackCallback!!
     )
