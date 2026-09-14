@@ -20,6 +20,7 @@ const predictiveBackCode = `
   private var predictiveBackStack: ScreenStack? = null
   private var predictiveBackTop: Screen? = null
   private var predictiveBackPreviousAttached = false
+  private var predictiveBackActive = false
 
   private fun findPredictiveBackStack(view: View): ScreenStack? {
     if (view is ScreenStack) return view
@@ -31,14 +32,18 @@ const predictiveBackCode = `
     return null
   }
 
-  private fun findPredictiveBackTarget(stack: ScreenStack): View? {
-    for (index in stack.childCount - 1 downTo 0) {
+  private fun resetPredictiveBackTransforms(stack: ScreenStack) {
+    for (index in 0 until stack.childCount) {
       val child = stack.getChildAt(index)
-      if (child.visibility == View.VISIBLE && child.width > 0 && child.height > 0) {
-        return child
-      }
+      child.translationX = 0f
+      child.scaleX = 1f
+      child.scaleY = 1f
     }
-    return null
+  }
+
+  private fun findPredictiveBackTarget(stack: ScreenStack): View? {
+    val target = stack.topScreen?.fragment?.view ?: return null
+    return target.takeIf { it.visibility == View.VISIBLE && it.width > 0 && it.height > 0 }
   }
 
   private fun registerPredictiveBack() {
@@ -46,6 +51,7 @@ const predictiveBackCode = `
 
     predictiveBackCallback = object : OnBackAnimationCallback {
       override fun onBackStarted(backEvent: BackEvent) {
+        predictiveBackActive = false
         val stack = findPredictiveBackStack(window.decorView)
         if (stack == null || stack.fragments.size < 2 || stack.topScreen == null) {
           predictiveBackTarget = null
@@ -55,11 +61,23 @@ const predictiveBackCode = `
           return
         }
 
+        resetPredictiveBackTransforms(stack)
+        val enteringTarget = findPredictiveBackTarget(stack)
+        if (enteringTarget == null || enteringTarget.animation != null || !enteringTarget.isLaidOut) {
+          predictiveBackTarget = null
+          predictiveBackStack = null
+          predictiveBackTop = null
+          predictiveBackPreviousAttached = false
+          return
+        }
+
+        val top = stack.topScreen
         stack.attachBelowTop()
         predictiveBackStack = stack
-        predictiveBackTop = stack.topScreen
+        predictiveBackTop = top
         predictiveBackPreviousAttached = true
         predictiveBackTarget = findPredictiveBackTarget(stack)
+        predictiveBackActive = predictiveBackTarget != null
         predictiveBackDirection = if (backEvent.swipeEdge == BackEvent.EDGE_RIGHT) -1f else 1f
         predictiveBackTarget?.let { target ->
           target.pivotX = if (predictiveBackDirection > 0f) 0f else target.width.toFloat()
@@ -90,8 +108,9 @@ const predictiveBackCode = `
           predictiveBackTarget = null
           predictiveBackStack = null
           predictiveBackTop = null
+          predictiveBackActive = false
         }
-        if (target == null) {
+        if (!predictiveBackActive || target == null) {
           restorePreview()
           return
         }
@@ -109,7 +128,16 @@ const predictiveBackCode = `
         val target = predictiveBackTarget
         val stack = predictiveBackStack
         val top = predictiveBackTop
+        val active = predictiveBackActive
         predictiveBackTarget = null
+        predictiveBackActive = false
+        if (!active) {
+          onBackPressedDispatcher.onBackPressed()
+          predictiveBackStack = null
+          predictiveBackTop = null
+          predictiveBackPreviousAttached = false
+          return
+        }
         onBackPressedDispatcher.onBackPressed()
         target?.postDelayed({
           if (stack != null && stack.topScreen === top) {
@@ -125,6 +153,7 @@ const predictiveBackCode = `
           }
           predictiveBackStack = null
           predictiveBackTop = null
+          predictiveBackActive = false
         }, 300L)
       }
     }
