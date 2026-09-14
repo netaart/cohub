@@ -112,7 +112,7 @@ const predictiveBackCode = `
         predictiveBackTarget = null
         onBackPressedDispatcher.onBackPressed()
         target?.postDelayed({
-          if (stack?.topScreen === top) {
+          if (stack != null && stack.topScreen === top) {
             if (predictiveBackPreviousAttached) {
               stack.detachBelowTop()
               predictiveBackPreviousAttached = false
