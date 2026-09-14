@@ -6,6 +6,7 @@ import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
 import { useTraceTouches } from "@/src/components/use-chat-scroll-trace";
 import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { EnrichedMarkdownText, type MarkdownStyle } from "react-native-enriched-markdown";
 import { CodeBlock } from "@/src/components/CodeBlock";
 import { StreamingGlyph } from "@/src/components/StreamingGlyph";
 import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
@@ -236,8 +237,33 @@ function StreamingTailText({ value, color, fadeTail, footer }: { value: string; 
   </BubbleText>;
 }
 
+/**
+ * Markdown styles for the native renderer, mapped from the app theme. Code text stays on the
+ * neutral text color because code surfaces are their own background regardless of the bubble.
+ */
+function enrichedMarkdownStyle(theme: AppTheme, color: string): MarkdownStyle {
+  const body = { fontSize: typography.chatBody.fontSize, lineHeight: typography.chatBody.lineHeight, color };
+  const heading = (size: number): MarkdownStyle["h1"] => ({ ...body, fontSize: scaleFontSize(size), fontWeight: "700", marginTop: 3 });
+  return {
+    paragraph: body,
+    h1: heading(19),
+    h2: heading(19),
+    h3: heading(17),
+    h4: heading(17),
+    h5: heading(15),
+    h6: heading(15),
+    blockquote: { ...body, color: theme.colors.textMuted },
+    list: { ...body },
+    link: { color: theme.colors.accent, underline: true },
+    codeBlock: { fontFamily: "SpaceMono", fontSize: typography.code.fontSize, lineHeight: typography.code.lineHeight, color: theme.colors.text, backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, borderRadius: 8 },
+    code: { fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color: theme.colors.text, backgroundColor: theme.colors.surfaceRaised },
+  };
+}
+
 function TextBlock({ value, muted = false, accent, color, streaming = false, footer }: { value: string; muted?: boolean; accent: string; color?: string; streaming?: boolean; footer?: ReactNode }) {
   const theme = useAppTheme();
+  const { spaceId } = useContext(BubbleContext);
+  const openLink = useOpenMessageLink(spaceId);
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
   const { text, fadeTail } = useRevealedStreamText(value, streaming);
   const [cache] = useState(() => new StreamingMarkdownCache());
@@ -247,6 +273,7 @@ function TextBlock({ value, muted = false, accent, color, streaming = false, foo
     () => (streaming || cache.hasStreamed ? cache.update(text) : null),
     [cache, streaming, text],
   );
+  const markdownStyle = useMemo(() => enrichedMarkdownStyle(theme, textColor), [theme, textColor]);
   const tail = rendered?.tail ?? "";
   // An in-progress block renders as paced plain text instead of Markdown: parsing and
   // re-rendering the growing tail on every reveal commit was what forced commits apart.
@@ -255,6 +282,22 @@ function TextBlock({ value, muted = false, accent, color, streaming = false, foo
   const codeTail = tail.includes("```");
   const plainTail = streaming && tail.length > 0 && !codeTail;
   const tailEntries = useMemo(() => (tail && !plainTail ? parseMarkdownEntries(tail) : []), [plainTail, tail]);
+  // Completed text renders through the native Markdown view: parsing and code highlighting happen
+  // on the platform, so a history message no longer mounts a JS node per Markdown token, which is
+  // what made opening a cache-heavy Chat freeze. The streaming path below stays on the paced
+  // renderer until the native streaming animation is validated.
+  if (!streaming) {
+    return <View style={{ minWidth: 0 }}>
+      <EnrichedMarkdownText
+        markdown={value}
+        markdownStyle={markdownStyle}
+        selectable
+        flavor="github"
+        onLinkPress={(event) => { openLink(event.url); }}
+      />
+      {footer ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}
+    </View>;
+  }
   if (!rendered) return <View style={{ gap: 9, minWidth: 0 }}><MarkdownBody source={text} accent={accent} textColor={textColor} footer={footer} /></View>;
   const tailRendered = plainTail || tailEntries.length > 0;
   // One list in document order: a block that crosses the stable boundary keeps

@@ -601,6 +601,10 @@ const bubbleScope = {
   View: "View", Text: "Text", BubbleText: "BubbleText", CodeBlock: "CodeBlock", MarkdownTable: "MarkdownTable",
   InlineNodes: "InlineNodes", ImageGallery: "ImageGallery", ToolCall: "ToolCall", SystemNoteRow: "SystemNoteRow",
   imageUri: (block) => block.source?.type === "url" ? block.source.url : null,
+  EnrichedMarkdownText: "EnrichedMarkdownText",
+  enrichedMarkdownStyle: () => ({}),
+  useOpenMessageLink: () => () => {},
+  BubbleContext: null,
 };
 const bubbleRender = new Function(...Object.keys(bubbleScope), ts.transpileModule(`${bubbleFunctions.join("\n")}\nreturn MessageContent;`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText)(...Object.values(bubbleScope));
 function footerPlacements(node, footer, found = []) {
@@ -614,7 +618,8 @@ function footerPlacements(node, footer, found = []) {
 const footerMarker = { type: "timestamp", props: {} };
 for (const text of ["你好", "First paragraph.\n\nLast paragraph.", "## Heading", "> Quote", "- First\n- Last", "**Bold** and `code`."]) {
   for (const active of [false, true]) {
-    assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], active, footer: footerMarker }), footerMarker), active ? ["timestamp"] : ["BubbleText"], `streaming metadata stays outside per-text measurement; completed metadata is inline-capable: ${text}`);
+    // Completed text renders natively, so its clock is a sibling row rather than inline-capable.
+    assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], active, footer: footerMarker }), footerMarker), ["timestamp"], `metadata must stay attached to the message: ${text}`);
   }
 }
 const streamedFooterSample = "你好，逐字增长。\n\n## Heading\n\n- First\n- Last\n\nDone.";
@@ -626,8 +631,8 @@ for (const text of ["---", "https://example.com/a.mp4", "![image](https://exampl
   assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], footer: footerMarker }), footerMarker), ["timestamp"], "framed content has an external footer row");
 const bubbleImage = { type: "image", source: { type: "url", url: "fixture://image" } };
 assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage], footer: footerMarker }), footerMarker), ["timestamp"]);
-assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage, { type: "text", text: "Caption" }], footer: footerMarker }), footerMarker), ["BubbleText"]);
-assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "Text" }, { type: "text", text: "  " }], footer: footerMarker }), footerMarker), ["BubbleText"]);
+assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage, { type: "text", text: "Caption" }], footer: footerMarker }), footerMarker), ["timestamp"]);
+assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "Text" }, { type: "text", text: "  " }], footer: footerMarker }), footerMarker), ["timestamp"]);
 assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "tool_use", id: "tool", name: "read", input: {} }, { type: "tool_result", tool_use_id: "tool", content: "result" }], footer: footerMarker }), footerMarker), ["timestamp"]);
 assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "No footer" }] }), footerMarker), []);
 
