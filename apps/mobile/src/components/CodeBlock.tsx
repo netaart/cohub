@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import {
+  createStreamingCodeTokenizer,
   getCachedHighlightedCode,
   highlightCode,
   type CodeHighlightTheme,
   type HighlightedCode,
 } from "@/src/data/code-highlight";
+import type { StreamingCodeTokenizer } from "@/src/data/code-highlight-stream";
 import { codeLanguageLabel, resolveCodeLanguage } from "@/src/data/code-language";
 import { useTranslation } from "@/src/i18n";
 import { typography, useAppTheme } from "@/src/theme";
@@ -47,6 +49,16 @@ function renderLines(lines: CodeLine[], fallbackColor: string): ReactNode[] {
   return nodes;
 }
 
+function toHighlighted(tokenizer: StreamingCodeTokenizer, theme: CodeHighlightTheme): HighlightedCode {
+  const { foreground, background } = tokenizer.colors();
+  return {
+    lines: tokenizer.lines(),
+    foreground: foreground ?? "#1f2328",
+    background: background ?? "transparent",
+    theme,
+  };
+}
+
 export function CodeBlock({
   code,
   language,
@@ -69,10 +81,58 @@ export function CodeBlock({
     return getCachedHighlightedCode(code, languageId, highlightTheme);
   }, [code, highlightTheme, languageId, streaming]);
   const [asyncHighlight, setAsyncHighlight] = useState<{ code: string; result: HighlightedCode } | null>(null);
-  const highlighted = cachedHighlight ?? (asyncHighlight?.code === code ? asyncHighlight.result : null);
+  // Streaming blocks tokenize incrementally: complete lines are highlighted once, and only the
+  // trailing line is re-tokenized as it grows, so a long reply never re-tokenizes per chunk.
+  const [streamHighlight, setStreamHighlight] = useState<{ code: string; result: HighlightedCode } | null>(null);
+  const streamRef = useRef<{ tokenizer: StreamingCodeTokenizer; lastCode: string } | null>(null);
+  const codeRef = useRef(code);
+  const highlighted = cachedHighlight
+    ?? (streamHighlight?.code === code ? streamHighlight.result : null)
+    ?? (asyncHighlight?.code === code ? asyncHighlight.result : null);
+
+  useEffect(() => {
+    codeRef.current = code;
+  }, [code]);
+
+  useEffect(() => {
+    if (!streaming || !languageId) return;
+    let active = true;
+    streamRef.current = null;
+    void createStreamingCodeTokenizer(languageId, highlightTheme).then((tokenizer) => {
+      if (!active || !tokenizer) return;
+      // The highlighter loads asynchronously, so the block may already have streamed further.
+      const current = codeRef.current;
+      tokenizer.enqueue(current);
+      streamRef.current = { tokenizer, lastCode: current };
+      setStreamHighlight({ code: current, result: toHighlighted(tokenizer, highlightTheme) });
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+      streamRef.current = null;
+    };
+  }, [highlightTheme, languageId, streaming]);
+
+  useEffect(() => {
+    if (!streaming) return;
+    const state = streamRef.current;
+    if (!state) return;
+    const delta = code.startsWith(state.lastCode) ? code.slice(state.lastCode.length) : null;
+    if (delta === null) {
+      state.tokenizer.clear();
+      state.tokenizer.enqueue(code);
+    } else if (delta.length === 0) {
+      return;
+    } else {
+      state.tokenizer.enqueue(delta);
+    }
+    state.lastCode = code;
+    setStreamHighlight({ code, result: toHighlighted(state.tokenizer, highlightTheme) });
+  }, [code, highlightTheme, streaming]);
 
   useEffect(() => {
     if (streaming || !languageId || cachedHighlight) return;
+    // A block that streamed already carries its tokens; re-tokenizing it would be wasted work.
+    if (streamHighlight?.code === code) return;
     let active = true;
     // Defer so a large block cannot block the initial paint of a message.
     const timer = setTimeout(() => {
@@ -84,7 +144,7 @@ export function CodeBlock({
       active = false;
       clearTimeout(timer);
     };
-  }, [cachedHighlight, code, highlightTheme, languageId, streaming]);
+  }, [cachedHighlight, code, highlightTheme, languageId, streamHighlight, streaming]);
 
   const lines: CodeLine[] = useMemo(() => highlighted?.lines ?? plainLines(code), [code, highlighted]);
   const fallbackColor = highlighted?.foreground ?? theme.colors.textSecondary;

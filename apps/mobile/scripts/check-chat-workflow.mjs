@@ -24,6 +24,7 @@ import { DEFAULT_SESSION_FILTER_MINUTES, getSessionStatus, hasMoreRecentSessions
 import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-queue.ts";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
+import { StreamingCodeTokenizer } from "../src/data/code-highlight-stream.ts";
 import { markdownBlockSignature, markdownInlineText, markdownMedia, parseInlineMarkdown, parseMarkdown } from "../src/data/markdown.ts";
 import { splitStreamingMarkdown } from "../src/data/stream-markdown.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
@@ -1793,6 +1794,27 @@ assert.equal(detectCodeLanguage("Makefile"), null);
 assert.equal(resolveCodeLanguage("ts"), "typescript");
 assert.equal(resolveCodeLanguage("C++"), "cpp");
 assert.equal(resolveCodeLanguage("unknown"), null);
+
+// Streaming code tokenizer: complete lines tokenize once with the carried grammar state, and an
+// append only re-tokenizes the trailing partial line.
+const streamCalls = [];
+const fakeHighlighter = {
+  codeToTokens(line, options) {
+    streamCalls.push({ line, state: options?.grammarState ?? null });
+    return { tokens: [[{ content: line, offset: 0 }]], fg: "#111", bg: "#222", grammarState: `g:${line}` };
+  },
+};
+const streamTokenizer = new StreamingCodeTokenizer(fakeHighlighter, "typescript", "github-dark");
+streamTokenizer.enqueue("const a");
+streamTokenizer.enqueue(" = 1;\nconst b");
+const callsAfterAppend = streamCalls.length;
+assert.equal(streamCalls[0].state, null, "the first line starts without grammar state");
+assert.equal(streamCalls[2].state, "g:const a = 1;", "complete lines carry the grammar state forward");
+streamTokenizer.enqueue(" = 2");
+assert.equal(streamCalls.length, callsAfterAppend + 1, "an append only re-tokenizes the trailing line");
+assert.deepEqual(streamTokenizer.lines().map((line) => line.map((token) => token.content)), [["const a = 1;"], ["const b = 2"]]);
+streamTokenizer.clear();
+assert.deepEqual(streamTokenizer.lines(), [], "clear drops buffered token lines");
 
 const textFile = { path: "a.ts", name: "a.ts", size: 10, mimeType: "text/plain", mtimeMs: 1, kind: "text", encoding: "utf-8", content: "const a" };
 assert.equal(isEditableTextFile(textFile), true);

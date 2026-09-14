@@ -1,6 +1,7 @@
 import { createHighlighterCore, type HighlighterCore, type LanguageRegistration, type ThemedToken } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { resolveCodeLanguage, type CodeLanguageId } from "@/src/data/code-language";
+import { StreamingCodeTokenizer } from "@/src/data/code-highlight-stream";
 
 export type CodeHighlightTheme = "github-light" | "github-dark";
 
@@ -180,4 +181,17 @@ export function getCachedHighlightedCode(code: string, language: string | null, 
   const languageId = resolveCodeLanguage(language);
   if (!languageId) return null;
   return resultCache.get(cacheKey(code, languageId, theme))?.result ?? null;
+}
+
+/**
+ * Incremental tokenizer for a code block that is still streaming. Returns `null` when the language
+ * is unknown or the highlighter/grammar cannot be loaded, in which case the caller stays on plain
+ * text.
+ */
+export async function createStreamingCodeTokenizer(language: string | null, theme: CodeHighlightTheme): Promise<StreamingCodeTokenizer | null> {
+  const languageId = resolveCodeLanguage(language);
+  if (!languageId) return null;
+  const highlighter = await getHighlighter();
+  await ensureLanguage(highlighter, languageId);
+  return new StreamingCodeTokenizer(highlighter, languageId, theme);
 }
