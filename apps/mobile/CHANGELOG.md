@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.7](https://github.com/markbang/cohub-mobile/compare/v2.2.6...v2.2.7) (2026-09-14)
+
+
+### Fixes
+
+* **android:** narrow predictive back stack state ([4893e82](https://github.com/markbang/cohub-mobile/commit/4893e82d2d88604eb0e6ffffee128f3aa2325164))
+
 ## [2.2.6](https://github.com/markbang/cohub-mobile/compare/v2.2.5...v2.2.6) (2026-09-14)
 
 
