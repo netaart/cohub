@@ -33,10 +33,16 @@ import {
 	setLastUserSessionId,
 } from "$lib/stores/last-user-session";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
+import { isWebSessionSource } from "$lib/stores/sidebar-source-labels";
 import {
 	fetchSpaceListWithCache,
 	getCachedSpaceList,
 } from "$lib/stores/space-list-cache";
+import {
+	getSessionsSourceFilter,
+	type SessionsSourceFilter,
+	setSessionsSourceFilter,
+} from "$lib/stores/user-sessions-source-filter";
 import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
 
 const {
@@ -154,6 +160,29 @@ const routeTurnSequence = $derived.by(() => {
 const activeSeed = $derived(
 	routeSessionId ? list.findById(routeSessionId) : null,
 );
+
+// Scheduled prompts and channel bots flood the cross-space inbox; default to
+// human web chats so the list surfaces real conversations first.
+let sourceFilter = $state<SessionsSourceFilter>("web");
+const visibleSessions = $derived(
+	sourceFilter === "web"
+		? list.sessions.filter((session) => isWebSessionSource(session))
+		: list.sessions,
+);
+
+function setSourceFilter(next: SessionsSourceFilter) {
+	sourceFilter = next;
+	const userUuid = authStore.userUuid;
+	if (userUuid) setSessionsSourceFilter(userUuid, next);
+}
+
+$effect(() => {
+	const userUuid = authStore.userUuid;
+	if (!userUuid) return;
+	untrack(() => {
+		sourceFilter = getSessionsSourceFilter(userUuid);
+	});
+});
 
 function updateViewport() {
 	isDesktop = window.innerWidth >= DESKTOP_SHELL_MIN_WIDTH_PX;
@@ -360,7 +389,7 @@ async function openRouteSession(sessionId: string | null) {
 		const userUuid = authStore.userUuid;
 		if (userUuid) clearLastUserSessionId(userUuid);
 		const fallback =
-			list.sessions.find(
+			visibleSessions.find(
 				(session) => session.id !== sessionId && !failedOpenIds.has(session.id),
 			) ?? null;
 		if (fallback) {
@@ -508,7 +537,7 @@ $effect(() => {
 	const rememberedOk =
 		remembered && !failedOpenIds.has(remembered) ? remembered : null;
 	const first =
-		list.sessions.find((session) => !failedOpenIds.has(session.id)) ?? null;
+		visibleSessions.find((session) => !failedOpenIds.has(session.id)) ?? null;
 	const targetId = rememberedOk ?? first?.id ?? null;
 	if (!targetId) return;
 	untrack(() => {
@@ -593,7 +622,10 @@ onDestroy(() => {
 			class:max-w-[360px]={isDesktop}
 		>
 			<UserSessionsList
-				sessions={list.sessions}
+				sessions={visibleSessions}
+				totalCount={list.sessions.length}
+				{sourceFilter}
+				onSourceFilterChange={setSourceFilter}
 				activeSessionId={isDesktop ? (routeIsNew ? null : routeSessionId) : null}
 				loading={list.loading}
 				loadingMore={list.loadingMore}
