@@ -1,12 +1,13 @@
 <script lang="ts">
 import type {
 	UserSessionListItem,
-	UserSessionSourceFilter,
+	UserSessionSourceKey,
 } from "@neta-art/cohub";
 import { Loader2, Search } from "lucide-svelte";
 import SessionSidebarRowContent from "$lib/components/SessionSidebarRowContent.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import { getSessionTitle } from "$lib/features/session-chat";
+import SessionsSourceFilter from "$lib/features/sessions/SessionsSourceFilter.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
@@ -30,7 +31,8 @@ const {
 	hasMore = false,
 	isDesktop = true,
 	modelsCatalog = null,
-	sourceFilter = null,
+	sourceFilter = [],
+	sourceCounts = [],
 	onSourceFilterChange,
 	onSelect,
 	onLoadMore,
@@ -45,8 +47,9 @@ const {
 	hasMore?: boolean;
 	isDesktop?: boolean;
 	modelsCatalog?: ModelCatalogItem[] | null;
-	sourceFilter?: UserSessionSourceFilter | null;
-	onSourceFilterChange?: (filter: UserSessionSourceFilter | null) => void;
+	sourceFilter?: readonly UserSessionSourceKey[];
+	sourceCounts?: Array<{ key: string; count: number }>;
+	onSourceFilterChange?: (filter: UserSessionSourceKey[]) => void;
 	onSelect: (session: UserSessionListItem) => void;
 	onLoadMore: () => void;
 	onNewChat: () => void;
@@ -102,15 +105,11 @@ function spaceName(session: UserSessionListItem) {
 				</button>
 			{/if}
 			{#if onSourceFilterChange}
-				<button
-					type="button"
-					class="inline-flex h-7 items-center rounded-[6px] px-2 text-[12px] transition-colors {sourceFilter === 'web' ? 'bg-[var(--sidebar-item-active-bg)] font-medium text-[var(--sidebar-item-active-fg)]' : 'text-text-tertiary hover:bg-[var(--sidebar-item-hover-bg)] hover:text-text-secondary'}"
-					aria-pressed={sourceFilter === "web"}
-					title={sourceFilter === "web" ? "Showing Web App chats only" : "Showing all chats"}
-					onclick={() => onSourceFilterChange(sourceFilter === "web" ? null : "web")}
-				>
-					{sourceFilter === "web" ? "Web App" : "All"}
-				</button>
+				<SessionsSourceFilter
+					selected={sourceFilter}
+					counts={sourceCounts}
+					onChange={onSourceFilterChange}
+				/>
 			{/if}
 			<button
 				type="button"
@@ -130,6 +129,27 @@ function spaceName(session: UserSessionListItem) {
 			</div>
 		{:else if error && sessions.length === 0}
 			<div class="px-2 py-3 text-[12px] text-error-soft">{error}</div>
+		{:else if sessions.length === 0 && sourceFilter.length > 0 && onSourceFilterChange}
+			<div class="px-2 py-8 text-center">
+				<p class="text-[13px] text-text-secondary">No chats from this origin</p>
+				<p class="mt-1 text-[12px] text-text-placeholder">The filter hides chats from other origins.</p>
+				<div class="mt-4 flex items-center justify-center gap-2">
+					<button
+						type="button"
+						class="sessions-empty-new-chat inline-flex items-center rounded-[6px] bg-bg-hover px-3 py-1.5 text-[12px] text-text-secondary transition-colors hover:bg-bg-hover-strong hover:text-text-primary"
+						onclick={onNewChat}
+					>
+						New chat
+					</button>
+					<button
+						type="button"
+						class="inline-flex items-center rounded-[6px] px-3 py-1.5 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary"
+						onclick={() => onSourceFilterChange([])}
+					>
+						Show any origin
+					</button>
+				</div>
+			</div>
 		{:else if sessions.length === 0}
 			<div class="px-2 py-8 text-center">
 				<p class="text-[13px] text-text-secondary">{m.sessions_no_chats({}, { locale })}</p>

@@ -2,4 +2,4 @@
 "@neta-art/cohub": minor
 ---
 
-`GET /api/me/sessions` accepts `source=web` to return only human web chats, so scheduled prompts and channel bots no longer bury real conversations. `user.listSessions({ source: "web" })` exposes it, and the web inbox defaults to this filter with a Web App / All toggle.
+`GET /api/me/sessions` filters by session source instead of only `web`: `?source=web,feishu` takes any of the `Source/*` label kinds, and each response carries `sourceCounts` so callers can build a picker from the kinds an account actually has. `user.listSessions({ source: ["web"] })`. The web inbox defaults to Web App and offers a source picker.

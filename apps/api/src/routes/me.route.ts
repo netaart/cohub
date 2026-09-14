@@ -19,9 +19,12 @@ import {
   encodeSessionListCursor,
   hydrateSessionParticipantProfiles,
   InvalidSessionListCursorError,
+  InvalidSessionSourceFilterError,
+  MAX_SESSION_LIST_LIMIT,
   listUserSessions,
-  parseUserSessionSourceFilter,
-  type UserSessionSourceFilter,
+  parseSessionSourceKeys,
+  sessionSourceKeyOf,
+  type SessionSourceFilter,
 } from "../space-sessions.js";
 import {
   aggregateGenerationUsageRows,
@@ -196,12 +199,20 @@ router.get("/rules", async (c) => {
  */
 async function listVisibleUserSessions(
   user: { uuid: string },
-  options: { limit: number; cursor: string | null; source: UserSessionSourceFilter | null },
+  options: { limit: number; cursor: string | null; source: SessionSourceFilter | null },
 ) {
   const identity = asAccountIdentity(user);
   if (!identity) {
-    return { sessions: [], pageInfo: { hasMore: false, nextCursor: null } };
+    return { sessions: [], pageInfo: { hasMore: false, nextCursor: null }, sourceCounts: [] };
   }
+
+  // Options for the source picker: counted unfiltered so they cover every kind,
+  // while the page itself stays filtered.
+  const sourceCounts = new Map<string, number>();
+  const countSource = (session: { source?: string | null }) => {
+    const key = sessionSourceKeyOf(session.source ?? null);
+    sourceCounts.set(key, (sourceCounts.get(key) ?? 0) + 1);
+  };
 
   const limit = options.limit;
   const visible: Awaited<ReturnType<typeof listUserSessions>>["sessions"] = [];
@@ -257,7 +268,24 @@ async function listVisibleUserSessions(
     }
     visible.push(...pickSessionsPreservingOrder(batch.sessions, visibleIds));
 
+    if (!options.source) {
+      for (const session of batch.sessions) countSource(session);
+    }
+
     if (!hasMore) break;
+  }
+
+  // One unfiltered pass so a filtered page still reports the other sources.
+  if (options.source) {
+    try {
+      const unfiltered = await listUserSessions(identity.uuid, {
+        limit: MAX_SESSION_LIST_LIMIT,
+        cursor: null,
+      });
+      for (const session of unfiltered.sessions) countSource(session);
+    } catch (error) {
+      logger.warn("[me/sessions] failed to count session sources", error);
+    }
   }
 
   const sessions = visible.slice(0, limit);
@@ -276,6 +304,7 @@ async function listVisibleUserSessions(
       hasMore: Boolean(nextCursor),
       nextCursor,
     },
+    sourceCounts: [...sourceCounts].map(([key, count]) => ({ key, count })),
   };
 }
 
@@ -287,16 +316,20 @@ router.get("/sessions", async (c) => {
   const limitParam = Number(c.req.query("limit") ?? 20);
   const limit = Number.isFinite(limitParam) ? limitParam : 20;
   const cursor = c.req.query("cursor") ?? null;
-  const sourceParam = c.req.query("source") ?? null;
-  const source = parseUserSessionSourceFilter(sourceParam);
-  if (sourceParam && !source) {
-    return c.json({ message: "invalid source filter" }, 400);
+  let source: SessionSourceFilter | null;
+  try {
+    source = parseSessionSourceKeys(c.req.query("source"));
+  } catch (error) {
+    if (error instanceof InvalidSessionSourceFilterError) {
+      return c.json({ message: error.message, unknownSources: error.unknownKeys }, 400);
+    }
+    throw error;
   }
   try {
-    const { sessions, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source });
+    const { sessions, pageInfo, sourceCounts } = await listVisibleUserSessions(user, { limit, cursor, source });
     const hydratedSessions = await hydrateSessionParticipantProfiles(sessions);
     const withSpaces = await attachSessionSpaceSummaries(hydratedSessions);
-    return c.json({ sessions: withSpaces, pageInfo });
+    return c.json({ sessions: withSpaces, pageInfo, sourceCounts });
   } catch (error) {
     if (error instanceof InvalidSessionListCursorError) {
       return c.json({ message: "invalid cursor" }, 400);

@@ -1,7 +1,7 @@
 import type {
 	ChannelEnvelope,
 	UserSessionListItem,
-	UserSessionSourceFilter,
+	UserSessionSourceKey,
 } from "@neta-art/cohub";
 import { getCacheUserKeyAsync } from "$lib/cache/keys";
 import { sdk } from "$lib/sdk";
@@ -37,9 +37,9 @@ function isTurnNotifyEvent(
 }
 
 export function createUserSessionListController(input?: {
-	source?: UserSessionSourceFilter | null;
+	source?: readonly UserSessionSourceKey[];
 }) {
-	let source = $state<UserSessionSourceFilter | null>(input?.source ?? null);
+	let source = $state<readonly UserSessionSourceKey[]>(input?.source ?? []);
 	let sessions = $state<UserSessionListItem[]>([]);
 	let pageInfo = $state(emptyUserSessionListPageInfo());
 	let loading = $state(false);
@@ -47,6 +47,7 @@ export function createUserSessionListController(input?: {
 	let refreshing = $state(false);
 	let error = $state<string | null>(null);
 	let hydrated = $state(false);
+	let sourceCounts = $state<Array<{ key: string; count: number }>>([]);
 	let refreshSeq = 0;
 	let loadMoreSeq = 0;
 	let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -97,6 +98,7 @@ export function createUserSessionListController(input?: {
 				source: requestSource,
 			});
 			if (seq !== refreshSeq) return;
+			sourceCounts = result.sourceCounts ?? sourceCounts;
 			const currentUserKey = await getCacheUserKeyAsync();
 			if (currentUserKey !== requestUserKey) return;
 
@@ -193,8 +195,12 @@ export function createUserSessionListController(input?: {
 	 * Switch the server-side filter. Drops the current page set and invalidates
 	 * in-flight requests; the next refresh walks matching rows only.
 	 */
-	async function setSource(next: UserSessionSourceFilter | null) {
-		if (next === source) return;
+	async function setSource(next: readonly UserSessionSourceKey[]) {
+		if (
+			next.length === source.length &&
+			next.every((key, index) => key === source[index])
+		)
+			return;
 		source = next;
 		refreshSeq += 1;
 		loadMoreSeq += 1;
@@ -289,6 +295,9 @@ export function createUserSessionListController(input?: {
 		},
 		get hydrated() {
 			return hydrated;
+		},
+		get sourceCounts() {
+			return sourceCounts;
 		},
 		hydrateFromCache,
 		refresh,

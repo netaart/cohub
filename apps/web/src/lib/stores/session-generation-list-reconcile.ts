@@ -1,6 +1,6 @@
 import type { SessionRecord } from "@neta-art/cohub";
-import { resetGeneration } from "$lib/stores/session-generation-controller";
 import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
+import { resetGeneration } from "$lib/stores/session-generation-controller";
 
 export function reconcileGenerationStateFromSessionList(
 	sessions: SessionRecord[],

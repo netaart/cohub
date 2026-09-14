@@ -42,7 +42,7 @@ const toneClass = $derived.by(() => {
 >
 	{#if normalized === "discord"}
 		<MessageSquare class={iconClass} />
-	{:else if normalized === "wechat" || normalized === "qq" || normalized === "telegram"}
+	{:else if normalized === "wechat" || normalized === "qq"}
 		<MessageCircle class={iconClass} />
 	{:else if normalized === "web"}
 		<MonitorPlay class={iconClass} />

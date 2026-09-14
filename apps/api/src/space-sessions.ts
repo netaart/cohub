@@ -1,5 +1,5 @@
 import { createLogger } from "@cohub/infra/logging";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import type { Usage } from "@cohub/protocol/core";
 import type { PersistMessageInput, RegisterSessionInput, SessionTurnRecord, UpdateSessionInfoInput } from "@cohub/protocol/model";
 import type { ModelThinkingLevel } from "@cohub/protocol";
@@ -9,6 +9,7 @@ import { SPACE_ENV_REDIS_KEY } from "@cohub/protocol/sandbox";
 import { isSandboxUsableStatus } from "@cohub/sandbox-controller";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
+import { SESSION_SOURCE_KEYS, sessionSourceRawValues } from "@cohub/core/labels/session-source";
 import {
   claimSessionFallbackTitle,
   deriveSessionFallbackTitle,
@@ -43,20 +44,24 @@ import { touchSpaceActivity } from "./space-activity.js";
 import { pickActiveTurns } from "./session-active-turns.js";
 import {
   decodeSessionListCursor,
+  isOtherSessionSource,
   mergeUserSessionListBranches,
   resolveSessionListLimit,
   paginateSessionRows,
   type SessionListCursor,
-  type UserSessionSourceFilter,
-  WEB_SESSION_SOURCES,
+  type SessionSourceFilter,
 } from "./session-list.js";
 
 export {
+  countUserSessionsBySource,
   encodeSessionListCursor,
   InvalidSessionListCursorError,
+  InvalidSessionSourceFilterError,
+  MAX_SESSION_LIST_LIMIT,
   mergeUserSessionListBranches,
-  parseUserSessionSourceFilter,
-  type UserSessionSourceFilter,
+  parseSessionSourceKeys,
+  sessionSourceKeyOf,
+  type SessionSourceFilter,
 } from "./session-list.js";
 
 
@@ -449,12 +454,32 @@ export const attachSessionSpaceSummaries = async <T extends { spaceId: string }>
   }));
 };
 
-const sessionListSourceCondition = (source: UserSessionSourceFilter | null) => {
-  if (!source) return undefined;
-  return or(
-    isNull(spaceSessions.source),
-    inArray(spaceSessions.source, [...WEB_SESSION_SOURCES]),
+const sessionSourceRawValuesFor = (key: string): string[] =>
+  key === "web" ? ["web", "web_app"] : [...sessionSourceRawValues(key)];
+
+/**
+ * SQL predicate for a source-kind filter. `web` also matches a null source,
+ * which is how legacy web rows were stored; `other` matches anything that does
+ * not resolve to a known kind, so the picker never hides rows.
+ */
+const sessionListSourceCondition = (source: SessionSourceFilter | null) => {
+  if (!source || source.keys.length === 0) return undefined;
+  const knownRawValues = SESSION_SOURCE_KEYS.flatMap((key) =>
+    key === "web" ? ["web", "web_app"] : sessionSourceRawValuesFor(key),
   );
+  const clauses = source.keys.map((key) => {
+    if (isOtherSessionSource(key)) {
+      return and(
+        isNotNull(spaceSessions.source),
+        notInArray(spaceSessions.source, knownRawValues),
+      );
+    }
+    const values = key === "web" ? ["web", "web_app"] : sessionSourceRawValuesFor(key);
+    return key === "web"
+      ? or(isNull(spaceSessions.source), inArray(spaceSessions.source, values))
+      : inArray(spaceSessions.source, values);
+  });
+  return clauses.length === 1 ? clauses[0] : or(...clauses);
 };
 
 /**
@@ -467,7 +492,7 @@ const sessionListSourceCondition = (source: UserSessionSourceFilter | null) => {
  */
 export const listUserSessions = async (
   userUuid: string,
-  options?: { limit?: number; cursor?: string | null; source?: UserSessionSourceFilter | null },
+  options?: { limit?: number; cursor?: string | null; source?: SessionSourceFilter | null },
 ) => {
   const limit = resolveSessionListLimit(options?.limit);
   const cursor = decodeSessionListCursor(options?.cursor);

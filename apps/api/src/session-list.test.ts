@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 import {
   decodeSessionListCursor,
   encodeSessionListCursor,
+  countUserSessionsBySource,
   InvalidSessionListCursorError,
+  InvalidSessionSourceFilterError,
   mergeUserSessionListBranches,
-  parseUserSessionSourceFilter,
+  parseSessionSourceKeys,
   pickSessionsPreservingOrder,
 } from "./session-list.js";
 
@@ -157,17 +159,49 @@ describe("decodeSessionListCursor", () => {
   });
 });
 
-describe("parseUserSessionSourceFilter", () => {
-  it("accepts web case-insensitively and trims", () => {
-    assert.equal(parseUserSessionSourceFilter("web"), "web");
-    assert.equal(parseUserSessionSourceFilter(" WEB "), "web");
+describe("parseSessionSourceKeys", () => {
+  it("returns null when the filter is absent", () => {
+    assert.equal(parseSessionSourceKeys(null), null);
+    assert.equal(parseSessionSourceKeys(undefined), null);
+    assert.equal(parseSessionSourceKeys(""), null);
+    assert.equal(parseSessionSourceKeys("   "), null);
   });
 
-  it("returns null for missing or unknown values", () => {
-    assert.equal(parseUserSessionSourceFilter(null), null);
-    assert.equal(parseUserSessionSourceFilter(undefined), null);
-    assert.equal(parseUserSessionSourceFilter(""), null);
-    assert.equal(parseUserSessionSourceFilter("all"), null);
-    assert.equal(parseUserSessionSourceFilter("scheduled_task"), null);
+  it("parses, trims and dedupes comma-separated kinds", () => {
+    assert.deepEqual(parseSessionSourceKeys("web"), { keys: ["web"] });
+    assert.deepEqual(parseSessionSourceKeys(" WEB , feishu "), {
+      keys: ["web", "feishu"],
+    });
+    assert.deepEqual(parseSessionSourceKeys("web,web"), { keys: ["web"] });
+  });
+
+  it("rejects unknown kinds instead of silently returning everything", () => {
+    assert.throws(
+      () => parseSessionSourceKeys("nope"),
+      (error: unknown) =>
+        error instanceof InvalidSessionSourceFilterError &&
+        error.unknownKeys[0] === "nope",
+    );
+  });
+});
+
+describe("countUserSessionsBySource", () => {
+  it("counts raw sources by kind, mapping null to web", () => {
+    assert.deepEqual(
+      countUserSessionsBySource([
+        { source: null },
+        { source: "web" },
+        { source: "web_app" },
+        { source: "scheduled_task" },
+        { source: "qq:c2c:1" },
+        { source: "mystery" },
+      ]),
+      [
+        { key: "scheduled_task", count: 1 },
+        { key: "web", count: 3 },
+        { key: "qq", count: 1 },
+        { key: "other", count: 1 },
+      ],
+    );
   });
 });

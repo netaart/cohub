@@ -1,6 +1,7 @@
+import { resolveSessionSourceKey, SESSION_SOURCE_KEYS } from "@cohub/core/labels/session-source";
+
 export const DEFAULT_SESSION_LIST_LIMIT = 20;
 export const MAX_SESSION_LIST_LIMIT = 100;
-
 /** Standard UUID (space_sessions.id is uuid). */
 const SESSION_LIST_CURSOR_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -24,19 +25,67 @@ export type SessionListActivityRow = {
 };
 
 /**
- * `source` query for cross-space session lists. `web` keeps human web chats;
- * legacy rows with a null source count as web, matching the client fallback.
+ * Source kinds a cross-space session list can be filtered by, comma-separated
+ * in `?source=`. Keys come from `SESSION_SOURCE_KEYS` so the vocabulary stays
+ * shared with the source labels in a space sidebar.
  */
-export type UserSessionSourceFilter = "web";
+export type SessionSourceFilter = {
+  keys: readonly string[];
+};
 
-/** Raw `space_sessions.source` values that `source=web` matches. */
-export const WEB_SESSION_SOURCES = ["web", "web_app"] as const;
+export type SessionSourceCount = {
+  key: string;
+  count: number;
+};
 
-export const parseUserSessionSourceFilter = (
+/**
+ * Parses `?source=web,feishu`. Returns null when the param is absent, and
+ * throws for unknown keys so a typo fails loudly instead of silently
+ * returning everything.
+ */
+export const parseSessionSourceKeys = (
   value: string | null | undefined,
-): UserSessionSourceFilter | null => {
-  const normalized = value?.trim().toLowerCase();
-  return normalized === "web" ? "web" : null;
+): SessionSourceFilter | null => {
+  const raw = value?.trim();
+  if (!raw) return null;
+  const keys = [...new Set(raw.split(",").map((key) => key.trim().toLowerCase()).filter(Boolean))];
+  if (keys.length === 0) return null;
+  const unknown = keys.filter((key) => !SESSION_SOURCE_KEYS.includes(key));
+  if (unknown.length > 0) {
+    throw new InvalidSessionSourceFilterError(unknown);
+  }
+  return { keys };
+};
+
+export class InvalidSessionSourceFilterError extends Error {
+  constructor(readonly unknownKeys: readonly string[]) {
+    super(`unknown session source keys: ${unknownKeys.join(", ")}`);
+    this.name = "InvalidSessionSourceFilterError";
+  }
+}
+
+/** Local resolution used for `other`, which has no raw source value of its own. */
+export const isOtherSessionSource = (key: string) => key === "other";
+
+/** Maps a raw source back to its kind; mirrors the label vocabulary. */
+export const sessionSourceKeyOf = (source: string | null | undefined) => resolveSessionSourceKey(source);
+
+/**
+ * Counts the user's sessions per source kind, for the list picker. Only kinds
+ * present in the given rows appear; order follows the vocabulary.
+ */
+export const countUserSessionsBySource = (
+  sessions: Array<{ source?: string | null }>,
+): SessionSourceCount[] => {
+  const counts = new Map<string, number>();
+  for (const session of sessions) {
+    const key = sessionSourceKeyOf(session.source ?? null);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return SESSION_SOURCE_KEYS.filter((key) => counts.has(key)).map((key) => ({
+    key,
+    count: counts.get(key) ?? 0,
+  }));
 };
 
 export const encodeSessionListCursor = (

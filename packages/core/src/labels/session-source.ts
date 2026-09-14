@@ -29,10 +29,8 @@ const SOURCE_LABELS: Record<string, string> = {
   cli: "Source/CLI",
   feishu: "Source/Feishu",
   wechat: "Source/WeChat",
-  slack: "Source/Slack",
   discord: "Source/Discord",
   qq: "Source/QQ",
-  telegram: "Source/Telegram",
 };
 
 const normalizeKey = (value: string | null | undefined) => value?.trim().toLowerCase().replace(/[\s-]+/g, "_") || null;
@@ -61,6 +59,36 @@ export function resolveKnownSessionSourceLabelSystemKey(labelRef: string) {
 export function resolveSessionSourceLabelSystemKey(labelRef: string) {
   return resolveKnownSessionSourceLabelSystemKey(labelRef) ?? getSessionSourceLabelSystemKey("other");
 }
+
+/**
+ * Stable key for a raw `space_sessions.source` value, used both by the source
+ * labels above and by cross-space session filtering. A null source means a
+ * legacy web chat, matching the historical client-side default. Aliases that
+ * share a label (`web` / `web_app`) collapse to the first key in the table.
+ */
+export function resolveSessionSourceKey(source: string | null | undefined): string {
+  const sourceKey = normalizeKey(source) ?? "web";
+  const direct = SOURCE_LABEL_REF_TO_KEY.get(SOURCE_LABELS[sourceKey] ?? "");
+  if (direct) return direct;
+  const channelPrefixMatch = sourceKey.match(/^channel[:_](.+)$/);
+  const channelKey = channelPrefixMatch?.[1] ?? (sourceKey.includes(":") ? sourceKey.split(":")[0] : null);
+  const channelRef = channelKey ? SOURCE_LABELS[channelKey] : undefined;
+  return (channelRef && SOURCE_LABEL_REF_TO_KEY.get(channelRef)) || "other";
+}
+
+/** Raw `space_sessions.source` values a kind matches, excluding the null case. */
+export function sessionSourceRawValues(sourceKey: string): string[] {
+  return Object.keys(SOURCE_LABELS).filter((key) => {
+    const ref = SOURCE_LABELS[key];
+    return ref !== undefined && (SOURCE_LABEL_REF_TO_KEY.get(ref) ?? "other") === sourceKey;
+  });
+}
+
+/** Selectable kinds, vocabulary order with `other` last. */
+export const SESSION_SOURCE_KEYS: readonly string[] = [
+  ...new Set(Object.keys(SOURCE_LABELS).map(resolveSessionSourceKey)),
+  "other",
+];
 
 export function resolveSessionSourceLabelRef(input: SessionSourceLabelInput): string {
   const providerKey = normalizeKey(input.provider);

@@ -156,7 +156,8 @@ export function createAppSurfaceRegistry() {
 	function clear() {
 		invokers.clear();
 		// Settle outstanding waiters as "gone" instead of leaving them to time out.
-		for (const pending of waiters.values()) for (const settle of pending) settle(null);
+		for (const pending of waiters.values())
+			for (const settle of pending) settle(null);
 		waiters.clear();
 	}
 
