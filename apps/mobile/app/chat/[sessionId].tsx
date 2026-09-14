@@ -3,7 +3,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Keyboard, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type ViewToken } from "react-native";
+import { ActivityIndicator, FlatList, Keyboard, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type LayoutChangeEvent, type ViewToken } from "react-native";
 import { Easing, interpolate, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from "react-native-reanimated";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
@@ -23,10 +23,10 @@ import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
 import { useChatVisibleRows } from "@/src/components/use-chat-visible-rows";
 import { cancelQueuedFollowup, followupPreviewText, queuedFollowupTurns, steerQueuedFollowup } from "@/src/data/followup-queue";
-import { isLiveStreamStatus, isTerminalTurnStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
+import { isActiveTurnStatus, isLiveStreamStatus, isTerminalTurnStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
 import { MessageMeasurements } from "@/src/data/chat-rendering";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
-import type { MessageRecord } from "@neta-art/cohub";
+import type { CohubClient, MessageRecord, SessionTurnRecord } from "@neta-art/cohub";
 import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage, withTurnSequences } from "@/src/data/session-history";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
@@ -45,6 +45,31 @@ function sendTransitionKey(message: Pick<MessageRecord, "id" | "meta">) {
 }
 
 type SendTransition = { text: string; startedAt: string; sourceX: number; sourceY: number; targetX: number; targetY: number; targetHeight: number };
+
+// Row height depends on rendered text/blocks, not on the metadata JSON stringify would also
+// walk. A transcript-wide JSON.stringify on every turn patch dominated list re-renders.
+function measurementRevision(message: MessageRecord, previousTurnSequence: number | null) {
+  let blockSignature = "";
+  for (const block of message.content ?? []) {
+    if (block.type === "text") blockSignature += `t${block.text.length};`;
+    else if (block.type === "thinking") blockSignature += `k${block.thinking.length};`;
+    else blockSignature += `${block.type};`;
+  }
+  const usage = message.usage;
+  return [
+    message.id,
+    turnSequenceForMessage(message) ?? -1,
+    previousTurnSequence ?? -1,
+    message.role,
+    message.text?.length ?? 0,
+    message.errorMessage?.length ?? 0,
+    blockSignature,
+    message.model ?? "",
+    usage?.input ?? 0,
+    usage?.cacheRead ?? 0,
+    usage?.output ?? 0,
+  ].join(":");
+}
 
 type ChatScrollEvent = {
   nativeEvent: {
@@ -242,6 +267,18 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     );
   }, [queuedFollowupIds, view.messages, view.turns]);
   const timeline = useMemo(() => messages.slice().reverse(), [messages]);
+  // renderItem previously ran linear `find`/`filter` over every turn for every rendered row.
+  const turnIndexBySequence = useMemo(() => new Map(view.turnIndex.map((entry) => [entry.sequence, entry])), [view.turnIndex]);
+  const turnsById = useMemo(() => new Map(view.turns.map((entry) => [entry.id, entry])), [view.turns]);
+  const turnsBySequence = useMemo(() => {
+    const map = new Map<number, SessionTurnRecord[]>();
+    for (const entry of view.turns) {
+      const list = map.get(entry.sequence);
+      if (list) list.push(entry);
+      else map.set(entry.sequence, [entry]);
+    }
+    return map;
+  }, [view.turns]);
   const transitionMessage = transitionMessageKey !== null
     ? timeline.find((item) => item.role === "user" && sendTransitionKey(item) === transitionMessageKey) ?? null
     : sendTransition
@@ -272,7 +309,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   }, [listWidth, fontScale, textSizeToken, theme.mode]);
   const measuredMessages = useMemo(() => messages.map((message, index) => ({
     id: message.id,
-    revision: JSON.stringify([message, index > 0 ? turnSequenceForMessage(messages[index - 1]!) : null]),
+    revision: measurementRevision(message, index > 0 ? turnSequenceForMessage(messages[index - 1]!) : null),
   })), [messages]);
   useEffect(() => {
     measurements.configure(`${listWidth}:${fontScale}:${theme.mode}:${textSizeToken}`, measuredMessages);
@@ -722,6 +759,35 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 
   useEffect(() => () => { if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current); }, []);
 
+  // FlatList and its cells are PureComponents: bailing out depends on every prop keeping its
+  // identity. These are stable across stream batches, so a live turn no longer re-renders every
+  // mounted row (the live step list subscribes on its own instead).
+  const streamTurnId = view.stream?.turnId ?? null;
+  const keyExtractor = useCallback((item: MessageRecord) => `${turnSequenceForMessage(item) ?? item.id}:${item.role}`, []);
+  const listContentStyle = useMemo(() => ({ paddingTop: footerHeight + 12, paddingBottom: headerHeight + 12, flexGrow: timeline.length === 0 ? 1 : undefined }), [footerHeight, headerHeight, timeline.length]);
+  const listIndicatorInsets = useMemo(() => ({ top: footerHeight, bottom: headerHeight }), [footerHeight, headerHeight]);
+  const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }), [followingTail]);
+  const handleListLayout = useCallback((event: LayoutChangeEvent) => {
+    trace("list.layout", { ...event.nativeEvent.layout });
+    setListWidth(event.nativeEvent.layout.width);
+    measureVisibleRows();
+  }, [measureVisibleRows, trace]);
+  const handleListRefresh = useCallback(() => { void refreshSession(sessionId); }, [refreshSession, sessionId]);
+  const renderMessage = useCallback(({ item, index }: { item: MessageRecord; index: number }) => {
+    const chronologicalIndex = reverseListIndex(index, messages.length);
+    const isTransitionMessage = transitionMessage
+      ? sendTransitionKey(item) === sendTransitionKey(transitionMessage)
+      : item.role === "user" && item.meta?.optimistic === true && sendTransition?.text === messageText(item) && item.createdAt >= sendTransition.startedAt;
+    const sequence = turnSequenceForMessage(item);
+    const older = timeline[index + 1];
+    const olderSequence = older ? turnSequenceForMessage(older) : null;
+    const showTurnMarker = sequence !== null && sequence !== olderSequence;
+    const turn = sequence === null ? null : turnIndexBySequence.get(sequence) ?? null;
+    const messageTurn = typeof item.meta?.turnId === "string" ? turnsById.get(item.meta.turnId) ?? null : null;
+    const sequenceTurns = item.role === "user" && sequence !== null ? turnsBySequence.get(sequence) : undefined;
+    return <View ref={(row) => trackRow(`${turnSequenceForMessage(item) ?? item.id}:${item.role}`, row)} collapsable={false} onLayout={(event) => { if (chatScrollTrace.isRecording()) trace("row.layout", { message: chatScrollTrace.alias("message", item.id), index, sequence, ...event.nativeEvent.layout }); if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}{isTransitionMessage ? <SendBubbleMotion transition={sendTransition} transitionKey={sendTransitionKey(item)} message={item} local={item.meta?.optimistic === true} spaceId={spaceId} onCopy={handleCopyMessage} bubbleRef={sendBubbleRef} onBubbleLayout={() => { setTransitionMessageKey((current) => current ?? sendTransitionKey(item)); sendBubbleRef.current?.measureInWindow((bubbleX, bubbleY, _bubbleWidth, bubbleHeight) => listContainerRef.current?.measureInWindow((listX, listY) => setSendTransition((current) => { if (!current || current.text !== messageText(item)) return current; const next = { ...current, targetX: bubbleX - listX - 12, targetY: bubbleY - listY - 5, targetHeight: bubbleHeight }; if (Math.abs(current.targetX - next.targetX) < 1 && Math.abs(current.targetY - next.targetY) < 1 && Math.abs(current.targetHeight - next.targetHeight) < 1) return current; recordDebugEvent("chat.send_transition.target_measured", { message: chatScrollTrace.alias("message", item.id), x: bubbleX - listX, y: bubbleY - listY, width: _bubbleWidth, height: bubbleHeight }); return next; }))); }} /> : <MessageBubble message={item} local={item.meta?.optimistic === true && !isTransitionMessage} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />}{sequenceTurns?.map((entry) => isActiveTurnStatus(entry.status) || entry.id === streamTurnId ? <LiveTurnProcess key={entry.id} sessionId={sessionId} turn={entry} client={client} spaceId={spaceId} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>;
+  }, [client, forkMessage, forkingTurnId, handleCopyMessage, measuredMessages, measurements, messages.length, sendTransition, sessionId, spaceId, streamTurnId, timeline, trace, transitionMessage, trackRow, turnIndexBySequence, turnsById, turnsBySequence]);
+
   if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen edgeToEdge><EdgeHeader onLayout={onHeaderLayout}><TopBar transparent title={t("chat.title")} onBack={() => router.back()} /></EdgeHeader><View style={{ flex: 1, paddingTop: headerHeight }}><ChatThreadPlaceholder kind="opening" /></View></Screen>;
   return <Screen keyboard edgeToEdge>
     <View style={{ flex: 1 }} accessibilityElementsHidden={moreOpen} importantForAccessibility={moreOpen ? "no-hide-descendants" : "auto"}>
@@ -734,7 +800,40 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         </EdgeHeader>
         <View ref={listContainerRef} collapsable={false} style={{ flex: 1, minHeight: 0 }}>
         {/* Android selectable text must not reposition the timeline when it gains focus. Explicit turn/tail scrolling remains enabled. */}
-        <FlatList {...traceTouches} ref={listRef} inverted scrollsChildToFocus={false} initialNumToRender={16} maxToRenderPerBatch={8} updateCellsBatchingPeriod={32} windowSize={11} onLayout={(event) => { trace("list.layout", { ...event.nativeEvent.layout }); setListWidth(event.nativeEvent.layout.width); measureVisibleRows(); }} data={timeline} keyExtractor={(item) => `${turnSequenceForMessage(item) ?? item.id}:${item.role}`} renderItem={({ item, index }) => { const chronologicalIndex = reverseListIndex(index, messages.length); const isTransitionMessage = transitionMessage ? sendTransitionKey(item) === sendTransitionKey(transitionMessage) : item.role === "user" && item.meta?.optimistic === true && sendTransition?.text === messageText(item) && item.createdAt >= sendTransition.startedAt; const sequence = turnSequenceForMessage(item); const older = timeline[index + 1]; const olderSequence = older ? turnSequenceForMessage(older) : null; const showTurnMarker = sequence !== null && sequence !== olderSequence; const turn = sequence === null ? null : view.turnIndex.find((entry) => entry.sequence === sequence); const messageTurn = typeof item.meta?.turnId === "string" ? view.turns.find((entry) => entry.id === item.meta?.turnId) : null; return <View ref={(row) => trackRow(`${turnSequenceForMessage(item) ?? item.id}:${item.role}`, row)} collapsable={false} onLayout={(event) => { if (chatScrollTrace.isRecording()) trace("row.layout", { message: chatScrollTrace.alias("message", item.id), index, sequence, ...event.nativeEvent.layout }); if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height);  }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}{isTransitionMessage ? <SendBubbleMotion transition={sendTransition} transitionKey={sendTransitionKey(item)} message={item} local={item.meta?.optimistic === true} spaceId={spaceId} onCopy={handleCopyMessage} bubbleRef={sendBubbleRef} onBubbleLayout={() => { setTransitionMessageKey((current) => current ?? sendTransitionKey(item)); sendBubbleRef.current?.measureInWindow((bubbleX, bubbleY, _bubbleWidth, bubbleHeight) => listContainerRef.current?.measureInWindow((listX, listY) => setSendTransition((current) => { if (!current || current.text !== messageText(item)) return current; const next = { ...current, targetX: bubbleX - listX - 12, targetY: bubbleY - listY - 5, targetHeight: bubbleHeight }; if (Math.abs(current.targetX - next.targetX) < 1 && Math.abs(current.targetY - next.targetY) < 1 && Math.abs(current.targetHeight - next.targetHeight) < 1) return current; recordDebugEvent("chat.send_transition.target_measured", { message: chatScrollTrace.alias("message", item.id), x: bubbleX - listX, y: bubbleY - listY, width: _bubbleWidth, height: bubbleHeight }); return next; }))); }} /> : <MessageBubble message={item} local={item.meta?.optimistic === true && !isTransitionMessage} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />}{item.role === "user" && view.turns.filter((entry) => entry.sequence === sequence).map((entry) => entry.id === view.stream?.turnId ? <StreamingTurnProcess key={entry.id} messages={view.stream.intermediateMessages} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>; }} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition={followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }} viewabilityConfig={messageViewabilityConfig} onViewableItemsChanged={onViewableItemsChanged} scrollEventThrottle={100} onScroll={handleScroll} onScrollBeginDrag={handleScrollBeginDrag} onScrollEndDrag={handleScrollEndDrag} onMomentumScrollBegin={handleMomentumScrollBegin} onMomentumScrollEnd={handleMomentumScrollEnd} contentInsetAdjustmentBehavior="never" progressViewOffset={footerHeight} scrollIndicatorInsets={{ top: footerHeight, bottom: headerHeight }} contentContainerStyle={{ paddingTop: footerHeight + 12, paddingBottom: headerHeight + 12, flexGrow: timeline.length === 0 ? 1 : undefined }} onContentSizeChange={handleContentSizeChange} onScrollToIndexFailed={handleScrollToIndexFailed} onRefresh={() => void refreshSession(sessionId)} refreshing={view.refreshing} ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>} ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null} />
+        <FlatList
+          {...traceTouches}
+          ref={listRef}
+          inverted
+          scrollsChildToFocus={false}
+          initialNumToRender={16}
+          maxToRenderPerBatch={8}
+          updateCellsBatchingPeriod={32}
+          windowSize={11}
+          onLayout={handleListLayout}
+          data={timeline}
+          keyExtractor={keyExtractor}
+          renderItem={renderMessage}
+          keyboardShouldPersistTaps="handled"
+          maintainVisibleContentPosition={maintainVisiblePosition}
+          viewabilityConfig={messageViewabilityConfig}
+          onViewableItemsChanged={onViewableItemsChanged}
+          scrollEventThrottle={100}
+          onScroll={handleScroll}
+          onScrollBeginDrag={handleScrollBeginDrag}
+          onScrollEndDrag={handleScrollEndDrag}
+          onMomentumScrollBegin={handleMomentumScrollBegin}
+          onMomentumScrollEnd={handleMomentumScrollEnd}
+          contentInsetAdjustmentBehavior="never"
+          progressViewOffset={footerHeight}
+          scrollIndicatorInsets={listIndicatorInsets}
+          contentContainerStyle={listContentStyle}
+          onContentSizeChange={handleContentSizeChange}
+          onScrollToIndexFailed={handleScrollToIndexFailed}
+          onRefresh={handleListRefresh}
+          refreshing={view.refreshing}
+          ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>}
+          ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null}
+        />
         {threadPlaceholder ? <View pointerEvents="none" style={{ position: "absolute", top: headerHeight, right: 0, bottom: footerHeight, left: 0 }}><ChatThreadPlaceholder kind={threadPlaceholder} /></View> : null}
 
         {!followingTail ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.jumpLatest")} onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} style={({ pressed }) => ({ position: "absolute", right: 16, bottom: footerHeight + 12, zIndex: 4, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, borderWidth: 1, borderColor: theme.colors.border, shadowColor: theme.colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5, elevation: 4 })}><AppIcon name="arrow-down" size={18} color={theme.colors.accent} /></Pressable> : null}
@@ -782,6 +881,18 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       ]}
     /> : null}
   </Screen>;
+}
+
+/**
+ * Live step list for an active turn. Subscribing to the stream here instead of inside
+ * `renderItem` keeps the row list's callback identity stable, so stream batches stop
+ * re-rendering every mounted cell. The fallback matches the persisted turn process.
+ */
+function LiveTurnProcess({ sessionId, turn, client, spaceId }: { sessionId: string; turn: SessionTurnRecord; client: CohubClient | null; spaceId: string }) {
+  const { state } = useApp();
+  const stream = state.sessionViews[sessionId]?.stream ?? null;
+  if (stream?.turnId === turn.id) return <StreamingTurnProcess messages={stream.intermediateMessages} />;
+  return <TurnProcess turn={turn} client={client} spaceId={spaceId} />;
 }
 
 function SendBubbleMotion({ transition, transitionKey, message, local, spaceId, onCopy, bubbleRef, onBubbleLayout }: { transition: SendTransition | null; transitionKey: string; message: MessageRecord; local: boolean; spaceId?: string; onCopy?: (text: string) => void; bubbleRef: React.RefObject<View | null>; onBubbleLayout?: () => void }) {
