@@ -189,7 +189,7 @@ for (const [tab, component, expectedRequests] of [
     useSessionFilterPreference: () => ({ loaded: true, minutes: 30 }), loadSessionFilterMinutes: async () => 30,
     sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [],
     CHAT_SEARCH_TYPES: ["session", "turn", "space"], SPACE_SEARCH_TYPES: ["space"],
-    Screen: "Screen", ScrollView: "ScrollView", FlatList: "FlatList", RefreshControl: "RefreshControl",
+    Screen: "Screen", ScrollView: "ScrollView", LegendList: "LegendList", RefreshControl: "RefreshControl",
     AccountAvatar: "AccountAvatar", TokenHeatmap: "TokenHeatmap", PressableScale: "PressableScale",
     ConnectionBanner: "ConnectionBanner", DataError: "DataError", LoadingRows: "LoadingRows", SectionHeader: "SectionHeader",
     EmptyState: "EmptyState", ExpandableSearchBar: "ExpandableSearchBar", ActivityIndicator: "ActivityIndicator",
@@ -198,9 +198,9 @@ for (const [tab, component, expectedRequests] of [
   const render = () => { cursor = 0; return chromeNodes(renderTab()); };
   const control = () => {
     const nodes = render();
-    return tab === "activity" ? nodes.find((node) => node.type === "ScrollView").props.refreshControl : nodes.find((node) => node.type === "FlatList");
+    return tab === "activity" ? nodes.find((node) => node.type === "ScrollView").props.refreshControl : nodes.find((node) => node.type === "LegendList");
   };
-  const scrollSurface = render().find((node) => node.type === "ScrollView" || node.type === "FlatList");
+  const scrollSurface = render().find((node) => node.type === "ScrollView" || node.type === "LegendList");
   assert.equal(render().find((node) => node.type === "Screen").props.edgeToEdge, true);
   assert.equal(scrollSurface.props.contentContainerStyle.paddingTop, 103, `${tab}: initial content clears the measured header`);
   assert.equal(scrollSurface.props.contentContainerStyle.paddingBottom, 80, `${tab}: the last item clears the floating tabs`);

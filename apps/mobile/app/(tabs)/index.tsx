@@ -1,6 +1,7 @@
 import { useFocusEffect, useIsFocused, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
+import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { SessionSearchRow, SpaceSearchRow } from "@/src/components/SearchResultRow";
@@ -36,7 +37,7 @@ export default function ChatsScreen() {
   const [cutoff, setCutoff] = useState(() => sessionFilterCutoff(filterPreference.minutes, Date.now()));
   const dataError = filterPreference.error ?? state.error ?? state.sessionsError ?? state.sessionStatusError;
   const searchRef = useRef<TextInput>(null);
-  const listRef = useRef<FlatList<ChatListItem>>(null);
+  const listRef = useRef<LegendListRef>(null);
   useScrollToTop(listRef);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -125,9 +126,10 @@ export default function ChatsScreen() {
       <ConnectionBanner state={connectionState} />
       {dataError ? <DataError message={dataError} onRetry={refresh} /> : null}
       </EdgeHeader>
-      <FlatList
+      <LegendList
         ref={listRef}
         data={listItems}
+        estimatedItemSize={76}
         keyExtractor={(item) => item.kind === "remote-session" ? `remote-session:${item.hit.sessionId}` : item.kind === "local-session" ? `session:${item.session.id}` : item.kind === "remote-space" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
         renderItem={({ item }) => {
           if (item.kind === "remote-session") return <SessionSearchRow hit={item.hit} onPress={(target) => openSearchSession(item.hit.sessionId, target)} />;

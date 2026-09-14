@@ -1,6 +1,7 @@
 import { useFocusEffect, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState as NativeAppState, FlatList, Pressable, Text, TextInput, View, type ViewToken } from "react-native";
+import { LegendList, type LegendListRef, type ViewToken } from "@legendapp/list/react-native";
+import { ActivityIndicator, AppState as NativeAppState, Pressable, Text, TextInput, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
@@ -69,7 +70,7 @@ export default function SpacesScreen() {
     };
   }, [refreshSpaceList]));
   const [query, setQuery] = useState("");
-  const listRef = useRef<FlatList<SpaceListItem>>(null);
+  const listRef = useRef<LegendListRef>(null);
   useScrollToTop(listRef);
   const [filter, setFilter] = useState<SpaceFilter>("recent");
   const [pinningSpaceId, setPinningSpaceId] = useState<string | null>(null);
@@ -169,9 +170,10 @@ export default function SpacesScreen() {
     />
     {dataError ? <DataError message={dataError} onRetry={() => void refresh()} /> : null}
     </EdgeHeader>
-    <FlatList
+    <LegendList
       ref={listRef}
       data={listItems}
+      estimatedItemSize={80}
       keyExtractor={(item) => item.kind === "remote" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
       renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} sessionCount={spaceSessionCounts[item.space.id] ?? null} pinning={pinningSpaceId === item.space.id} onTogglePin={client ? () => void togglePin(item.space.id) : undefined} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}
       refreshing={pullRefreshing}
