@@ -27,7 +27,7 @@
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false,
+      "predictiveBackGestureEnabled": true,
       "intentFilters": [
         {
           "action": "VIEW",
@@ -53,6 +53,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/with-predictive-back",
       "expo-secure-store",
       "expo-sqlite",
       [
