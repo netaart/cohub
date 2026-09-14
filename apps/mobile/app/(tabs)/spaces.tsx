@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View, type ViewToken } from "react-native";
+import { ActivityIndicator, AppState as NativeAppState, FlatList, Pressable, Text, TextInput, View, type ViewToken } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
@@ -29,7 +29,33 @@ export default function SpacesScreen() {
   const dataError = state.error ?? state.spacesError ?? spaceList.error;
   const refreshSpaceList = spaceList.refresh;
   const [now, setNow] = useState(Date.now);
-  useFocusEffect(useCallback(() => { setNow(Date.now()); void refreshSpaceList(); }, [refreshSpaceList]));
+  useFocusEffect(useCallback(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stopPolling = () => {
+      if (timer !== null) clearInterval(timer);
+      timer = null;
+    };
+    const startPolling = () => {
+      stopPolling();
+      timer = setInterval(() => void refreshSpaceList({ silent: true }), 60_000);
+    };
+    setNow(Date.now());
+    void refreshSpaceList();
+    startPolling();
+    const subscription = NativeAppState.addEventListener("change", (next) => {
+      if (next !== "active") {
+        stopPolling();
+        return;
+      }
+      setNow(Date.now());
+      void refreshSpaceList({ silent: true });
+      startPolling();
+    });
+    return () => {
+      stopPolling();
+      subscription.remove();
+    };
+  }, [refreshSpaceList]));
   const [query, setQuery] = useState("");
   const listRef = useRef<FlatList<SpaceListItem>>(null);
   useScrollToTop(listRef);

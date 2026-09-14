@@ -11,6 +11,7 @@ export function useSpaceListData(client: CohubClient | null, userKey: string) {
   const generation = useRef(0);
   const visitsRef = useRef<SpaceVisit[]>([]);
   const hydration = useRef<Promise<void>>(Promise.resolve());
+  const refreshRequest = useRef<Promise<void> | null>(null);
 
   useLayoutEffect(() => {
     const token = ++generation.current;
@@ -26,24 +27,33 @@ export function useSpaceListData(client: CohubClient | null, userKey: string) {
     return () => { generation.current += 1; };
   }, [userKey]);
 
-  const refresh = useCallback(async (): Promise<void> => {
-    if (!client) return;
-    const beforeHydration = generation.current;
-    await hydration.current;
-    if (generation.current !== beforeHydration) return;
-    const token = ++generation.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await client.search.overview({ spaceLimit: 50, recentSpaceIds: recentSpaceVisits(visitsRef.current, Date.now()).map((visit) => visit.spaceId) });
-      if (generation.current !== token) return;
-      setOverview(data);
-      await saveSpaceListCache(userKey, data);
-    } catch {
-      if (generation.current === token) setError("Could not refresh recent Spaces. Check your connection and retry.");
-    } finally {
-      if (generation.current === token) setLoading(false);
-    }
+  const refresh = useCallback((options: { silent?: boolean } = {}): Promise<void> => {
+    if (refreshRequest.current) return refreshRequest.current;
+    const request = (async () => {
+      if (!client) return;
+      const beforeHydration = generation.current;
+      await hydration.current;
+      if (generation.current !== beforeHydration) return;
+      const token = ++generation.current;
+      if (!options.silent) setLoading(true);
+      if (!options.silent) setError(null);
+      try {
+        const data = await client.search.overview({ spaceLimit: 50, recentSpaceIds: recentSpaceVisits(visitsRef.current, Date.now()).map((visit) => visit.spaceId) });
+        if (generation.current !== token) return;
+        setOverview(data);
+        setError(null);
+        await saveSpaceListCache(userKey, data);
+      } catch {
+        if (generation.current === token && !options.silent) setError("Could not refresh recent Spaces. Check your connection and retry.");
+      } finally {
+        if (generation.current === token) setLoading(false);
+      }
+    })();
+    refreshRequest.current = request;
+    void request.finally(() => {
+      if (refreshRequest.current === request) refreshRequest.current = null;
+    }).catch(() => undefined);
+    return request;
   }, [client, userKey]);
 
   const recordVisit = useCallback((spaceId: string): void => {
