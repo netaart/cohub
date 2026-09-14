@@ -1,7 +1,7 @@
 import { useRouter } from "expo-router";
+import { Directory } from "expo-file-system";
 import { useCallback, useState } from "react";
-import { Image, Pressable, ScrollView, Share, Switch, Text, TextInput, View } from "react-native";
-import * as Clipboard from "expo-clipboard";
+import { Image, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AppUpdateRow } from "@/src/components/AppUpdateBanner";
@@ -52,25 +52,26 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
   const version = getInstalledAppVersion();
   const unlockDebug = useDebugUnlock(useCallback(() => router.push("/debug"), [router]));
 
-  const shareDiagnosticLog = async () => {
+  const saveDiagnosticLog = async () => {
     if (exportingLog) return;
     setExportingLog(true);
     try {
-      // Local export: no server round trip, so a diagnostics outage cannot block capture.
-      await Share.share({ title: t("about.export.share.title"), message: await exportDiagnostics() });
+      // Local export: write the log into a folder the user picks, then they can attach the file
+      // directly. No server round trip, so a diagnostics outage cannot block capture.
+      const text = await exportDiagnostics();
+      const directory = await Directory.pickDirectoryAsync();
+      const name = `cohub-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`;
+      const file = directory.createFile(name, "application/jsonl");
+      if (!file.exists) file.create();
+      file.write(text);
+      setNotice({ title: t("about.export.saved.title"), message: t("about.export.saved.body", { name }) });
     } catch (error) {
-      setNotice({ title: t("about.export.failed"), message: error instanceof Error ? error.message : t("about.export.empty") });
+      const message = error instanceof Error ? error.message : String(error);
+      // Dismissing the folder picker is not a failure.
+      if (/cancel/i.test(message)) return;
+      setNotice({ title: t("about.export.failed"), message });
     } finally {
       setExportingLog(false);
-    }
-  };
-
-  const copyDiagnosticLog = async () => {
-    try {
-      await Clipboard.setStringAsync(await exportDiagnostics());
-      setNotice({ title: t("about.export.copied.title"), message: t("about.export.copied.body") });
-    } catch (error) {
-      setNotice({ title: t("about.export.failed"), message: error instanceof Error ? error.message : t("about.export.empty") });
     }
   };
 
@@ -111,7 +112,7 @@ export function AboutContent({ onNotice }: { onNotice?: (notice: { title: string
           <View style={styles.rowText}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("about.diagnostics.title")}</Text><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{t("about.diagnostics.detail")}</Text></View>
           <Switch accessibilityLabel={t("about.diagnostics.title")} value={diagnostics.enabled} onValueChange={(value) => void diagnostics.setEnabled(value)} />
         </View>
-        {diagnostics.enabled ? <><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="download" title={t("about.export.share.title")} detail={exportingLog ? t("common.loading") : t("about.export.share.detail")} onPress={() => void shareDiagnosticLog()} /><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="copy" title={t("about.export.copy.title")} detail={t("about.export.copy.detail")} onPress={() => void copyDiagnosticLog()} /><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="messages" title={t("about.feedback.title")} detail={t("about.feedback.detail")} onPress={() => { setFeedbackError(null); setFeedbackId(null); setFeedbackText(""); setFeedbackOpen(true); }} /></> : null}
+        {diagnostics.enabled ? <><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="download" title={t("about.export.save.title")} detail={exportingLog ? t("common.loading") : t("about.export.save.detail")} onPress={() => void saveDiagnosticLog()} /><View style={[styles.separator, { backgroundColor: theme.colors.border }]} /><AboutRow icon="messages" title={t("about.feedback.title")} detail={t("about.feedback.detail")} onPress={() => { setFeedbackError(null); setFeedbackId(null); setFeedbackText(""); setFeedbackOpen(true); }} /></> : null}
       </View>
 
       <SectionHeader title={t("about.section.links")} />
