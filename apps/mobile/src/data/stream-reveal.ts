@@ -1,7 +1,11 @@
 import { graphemeSegments } from "unicode-segmenter/grapheme";
 
-const COMMIT_MIN_MS = 48;
-const COMMIT_MAX_MS = 96;
+// Every commit re-parses the trailing Markdown block, so commits are throttled below the
+// display refresh rate. The interval still widens with the active block, but keeping the cap
+// tight bounds the visible leap: with the previous 48-96ms window a fast stream showed a whole
+// paragraph per commit, which read as text appearing in one lump instead of paced.
+const COMMIT_MIN_MS = 32;
+const COMMIT_MAX_MS = 48;
 const TAIL_SCALE_UNITS = 1024;
 const ACTIVE_INPUT_WINDOW_MS = 220;
 const DRAIN_AFTER_IDLE_MS = 600;
