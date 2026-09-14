@@ -1,5 +1,12 @@
 # @neta-art/cohub
 
+## 8.15.0
+
+### Minor Changes
+
+- eff8a32: Public app detail responses (`AppDetailResponse`) now expose `totalViews`, the app's all-time view count. `by-slug`, `:id/public` and `:id` all return it, so hosts can surface a view count without a separate stats request. It is `null` when the rollup total is temporarily unavailable — a view count never fails a detail response.
+- a5ffd93: `GET /api/me/sessions` accepts `source=web` to return only human web chats, so scheduled prompts and channel bots no longer bury real conversations. `user.listSessions({ source: "web" })` exposes it, and the web inbox defaults to this filter with a Web App / All toggle.
+
 ## 8.14.0
 
 ### Minor Changes
