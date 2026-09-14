@@ -29,6 +29,16 @@ export default function SpacesScreen() {
   const dataError = state.error ?? state.spacesError ?? spaceList.error;
   const refreshSpaceList = spaceList.refresh;
   const [now, setNow] = useState(Date.now);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const refresh = () => Promise.all([refreshHome(), spaceList.refresh()]);
+  const refreshOnPull = async () => {
+    setPullRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setPullRefreshing(false);
+    }
+  };
   useFocusEffect(useCallback(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     const stopPolling = () => {
@@ -153,14 +163,14 @@ export default function SpacesScreen() {
       account={<AccountAvatar />}
       onCreate={() => { setCreateError(null); setCreateOpen(true); }}
     />
-    {dataError ? <DataError message={dataError} onRetry={() => void Promise.all([refreshHome(), spaceList.refresh()])} /> : null}
+    {dataError ? <DataError message={dataError} onRetry={() => void refresh()} /> : null}
     <FlatList
       ref={listRef}
       data={listItems}
       keyExtractor={(item) => item.kind === "remote" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
       renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} sessionCount={spaceSessionCounts[item.space.id] ?? null} pinning={pinningSpaceId === item.space.id} onTogglePin={client ? () => void togglePin(item.space.id) : undefined} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}
-      refreshing={state.refreshing || (filter === "recent" && spaceList.loading)}
-      onRefresh={() => void Promise.all([refreshHome(), spaceList.refresh()])}
+      refreshing={pullRefreshing}
+      onRefresh={refreshOnPull}
       viewabilityConfig={viewabilityConfig}
       onViewableItemsChanged={onViewableItemsChanged}
       keyboardShouldPersistTaps="handled"
@@ -175,7 +185,7 @@ export default function SpacesScreen() {
         {remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><IconButton name="refresh" label={t("spaces.search.retry")} onPress={remoteSearch.retry} tone="accent" /></View> : null}
         {pinError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{pinError}</Text><IconButton name="x" label={t("spaces.pin.dismiss")} onPress={() => setPinError(null)} /></View> : null}
       </View>}
-      ListEmptyComponent={state.booting || (filter === "recent" && spaceList.loading) ? <LoadingRows count={4} /> : dataError ? <EmptyState icon="cloud-off" title={t("spaces.error.title")} description={t("spaces.error.body")} /> : searchEmpty}
+      ListEmptyComponent={state.booting || (filter === "recent" && spaceList.loading && spaceList.overview === null) ? <LoadingRows count={4} /> : dataError ? <EmptyState icon="cloud-off" title={t("spaces.error.title")} description={t("spaces.error.body")} /> : searchEmpty}
     />
     <AdaptiveSheet
       visible={createOpen}

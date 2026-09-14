@@ -1,6 +1,6 @@
 import { useRouter, useScrollToTop } from "expo-router";
 import type { BillingSubscriptionHistoryStatus } from "@neta-art/cohub";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
@@ -19,16 +19,25 @@ export default function ActivityScreen() {
   const { t } = useTranslation();
   const tabBarInset = useFloatingTabBarInset();
   const { connectionState } = useApp();
-  const { credits, days, loading, refresh } = useActivity();
+  const { credits, days, refresh } = useActivity();
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const subscriptions = useBillingHistory("subscriptions");
   const subscriptionItems = subscriptions.data?.kind === "subscriptions" ? subscriptions.data.list.items as BillingSubscriptionHistoryStatus[] : [];
   const currentSubscription = subscriptionItems.find((item) => item.status === "active") ?? subscriptionItems[0] ?? null;
   const scrollRef = useRef<ScrollView>(null);
   useScrollToTop(scrollRef);
   const retry = () => void refresh();
+  const refreshOnPull = async () => {
+    setPullRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setPullRefreshing(false);
+    }
+  };
   return <Screen>
     <TopBar title={t("activity.title")} leading={<AccountAvatar />} />
-    <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: tabBarInset }} refreshControl={<RefreshControl refreshing={loading} onRefresh={retry} tintColor={theme.colors.accent} colors={[theme.colors.accent]} />}>
+    <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: tabBarInset }} refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={refreshOnPull} tintColor={theme.colors.accent} colors={[theme.colors.accent]} />}>
       <ConnectionBanner state={connectionState} />
       <PressableScale accessibilityRole="button" accessibilityLabel={t("settings.section.billing")} onPress={() => router.push("/settings/billing")} style={{ padding: theme.spacing.lg, gap: theme.spacing.sm }} pressedStyle={{ backgroundColor: theme.colors.surfacePressed }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}>

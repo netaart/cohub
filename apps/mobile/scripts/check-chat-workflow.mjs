@@ -133,7 +133,7 @@ function loadChromeComponent(path, name, scope) {
   const statements = source.statements.filter((statement) =>
     (ts.isFunctionDeclaration(statement) && statement.name?.text === name) ||
     (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => declaration.name.getText(source) === "styles"))
-  ).map((statement) => statement.getText(source).replace(/^export /, ""));
+  ).map((statement) => statement.getText(source).replace(/^export (?:default )?/, ""));
   const code = ts.transpileModule(`${statements.join("\n")}\nreturn ${name};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
   return new Function(...Object.keys(scope), code)(...Object.values(scope));
 }
@@ -151,6 +151,79 @@ const chromeScope = {
   typography: { heading: { fontSize: 17 }, caption: { fontSize: 12 }, body: { fontSize: 15 } },
   useAppTheme: () => ({ colors: { background: "background", text: "text", textMuted: "muted", textSecondary: "secondary", accent: "accent", accentSoft: "selected", surfacePressed: "pressed" } }),
 };
+// Data requests triggered by tab focus must not activate the pull-to-refresh control.
+for (const [tab, component, expectedRequests] of [
+  ["activity", "ActivityScreen", ["activity"]],
+  ["spaces", "SpacesScreen", ["home", "spaces"]],
+  ["index", "ChatsScreen", ["home"]],
+]) {
+  let cursor = 0;
+  const slots = [];
+  const requests = [];
+  let pending = Promise.withResolvers();
+  const request = (resource) => { requests.push(resource); return pending.promise; };
+  const state = { booting: false, refreshing: true, spaces: [], sessions: [], sessionViews: {}, sessionLatestTurns: {}, sessionStatusRequests: 0 };
+  const spaceList = { loading: true, overview: {}, visits: [], refresh: () => request("spaces") };
+  const activityData = { loading: true, credits: { data: { netUsd: 1 }, error: null }, days: { data: [], error: null }, refresh: () => request("activity") };
+  const renderTab = loadChromeComponent(`../app/(tabs)/${tab}.tsx`, component, {
+    ...chromeScope,
+    useState: (initial) => {
+      const index = cursor++;
+      if (!(index in slots)) slots[index] = typeof initial === "function" ? initial() : initial;
+      return [slots[index], (value) => { slots[index] = typeof value === "function" ? value(slots[index]) : value; }];
+    },
+    useRef: (initial) => {
+      const index = cursor++;
+      if (!(index in slots)) slots[index] = { current: initial };
+      return slots[index];
+    },
+    useCallback: (callback) => callback, useMemo: (factory) => factory(), useEffect: () => {}, useFocusEffect: () => {},
+    useRouter: () => ({}), useIsFocused: () => true, useScrollToTop: () => {}, useFloatingTabBarInset: () => 80,
+    useApp: () => ({ state, spaceList, userUuid: "user", client: {}, connectionState: "open", refreshHome: () => request("home") }),
+    useActivity: () => activityData, useBillingHistory: () => ({ data: null }),
+    useAppTheme: () => ({ colors: {}, spacing: {} }),
+    useRemoteSearch: () => ({ query: "", sessions: [], spaces: [] }), useSpaceSessionCounts: () => ({}),
+    useSessionFilterPreference: () => ({ loaded: true, minutes: 30 }), loadSessionFilterMinutes: async () => 30,
+    sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [],
+    CHAT_SEARCH_TYPES: ["session", "turn", "space"], SPACE_SEARCH_TYPES: ["space"],
+    Screen: "Screen", ScrollView: "ScrollView", FlatList: "FlatList", RefreshControl: "RefreshControl",
+    AccountAvatar: "AccountAvatar", TokenHeatmap: "TokenHeatmap", PressableScale: "PressableScale",
+    ConnectionBanner: "ConnectionBanner", DataError: "DataError", LoadingRows: "LoadingRows", SectionHeader: "SectionHeader",
+    EmptyState: "EmptyState", ExpandableSearchBar: "ExpandableSearchBar", ActivityIndicator: "ActivityIndicator",
+    AdaptiveSheet: "AdaptiveSheet", PrimaryButton: "PrimaryButton", SpaceFilterChip: "SpaceFilterChip", FilterChip: "FilterChip",
+  });
+  const render = () => { cursor = 0; return chromeNodes(renderTab()); };
+  const control = () => {
+    const nodes = render();
+    return tab === "activity" ? nodes.find((node) => node.type === "ScrollView").props.refreshControl : nodes.find((node) => node.type === "FlatList");
+  };
+  assert.equal(control().props.refreshing, false, `${tab}: automatic loading must not show the pull-to-refresh spinner`);
+  assert.equal(requests.length, 0, `${tab}: rendering the refresh control does not start a request`);
+  for (const failed of [false, true]) {
+    pending = Promise.withResolvers();
+    const task = control().props.onRefresh();
+    assert.equal(control().props.refreshing, true, `${tab}: the pull gesture immediately shows feedback, even during automatic loading`);
+    for (let tick = 0; tick < 5; tick++) await Promise.resolve();
+    assert.deepEqual(requests.splice(0), expectedRequests);
+    if (failed) {
+      state.error = "Unable to refresh";
+      activityData.credits.error = state.error;
+    }
+    pending.resolve(); // Data hooks report failures in their resource state.
+    await task;
+    assert.equal(control().props.refreshing, false, `${tab}: completion stops the spinner on success and failure`);
+    if (failed) assert.ok(render().some((node) => node.type === "DataError"), `${tab}: refresh errors remain actionable`);
+  }
+  state.error = null;
+  if (tab === "spaces") {
+    const list = control();
+    assert.notEqual(list.props.ListEmptyComponent.type, "LoadingRows", "returning to a loaded empty Spaces list must not flash skeletons");
+    spaceList.overview = null;
+    assert.equal(control().props.ListEmptyComponent.type, "LoadingRows", "the first Spaces load still has a placeholder");
+    assert.equal(control().props.refreshing, false, "the first Spaces load is not a pull gesture");
+  }
+}
+
 for (const success of ["#238552", "#62c994"]) {
   let selected = null;
   const renderHeatmap = loadChromeComponent("../src/components/TokenHeatmap.tsx", "TokenHeatmap", {

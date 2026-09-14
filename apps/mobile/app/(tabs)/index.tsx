@@ -38,6 +38,7 @@ export default function ChatsScreen() {
   useScrollToTop(listRef);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const remoteSearch = useRemoteSearch(client, query, { enabled: filter === "all", types: CHAT_SEARCH_TYPES });
   const trimmedQuery = normalizeSearchQuery(query);
   const sessionsRef = useRef(state.sessions);
@@ -88,7 +89,15 @@ export default function ChatsScreen() {
   useEffect(() => {
     if (filteringPages && !state.refreshing && !state.sessionsLoadingMore && !statusesLoading) void loadMoreSessions();
   }, [filteringPages, loadMoreSessions, state.refreshing, state.sessionsCursor, state.sessionsLoadingMore, statusesLoading]);
-  const refresh = () => { setCutoff(sessionFilterCutoff(filterPreference.minutes, Date.now())); void loadSessionFilterMinutes().then(() => refreshHome()).catch(() => undefined); };
+  const refresh = () => { setCutoff(sessionFilterCutoff(filterPreference.minutes, Date.now())); return loadSessionFilterMinutes().then(() => refreshHome()).catch(() => undefined); };
+  const refreshOnPull = async () => {
+    setPullRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setPullRefreshing(false);
+    }
+  };
 
   const openSearchSession = (sessionId: string, target?: SessionNavigationTarget) => {
     router.push({ pathname: "/chat/[sessionId]", params: { sessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } });
@@ -122,8 +131,8 @@ export default function ChatsScreen() {
           return <SpaceRow space={item.space} sessionCount={spaceSessionCounts[item.space.id] ?? null} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />;
         }}
         keyboardShouldPersistTaps="handled"
-        refreshing={state.refreshing}
-        onRefresh={refresh}
+        refreshing={pullRefreshing}
+        onRefresh={refreshOnPull}
         onEndReached={() => { if (!trimmedQuery && filter === "all") void loadMoreSessions(); }}
         onEndReachedThreshold={0.7}
         contentContainerStyle={{ paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
