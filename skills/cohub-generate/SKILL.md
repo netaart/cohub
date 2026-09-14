@@ -68,9 +68,14 @@ cohub generate "keep these characters consistent" \
   --model <model> \
   --image reference_image=https://example.com/a.png \
   --image reference_image=https://example.com/b.png
+
+cohub generate "lip-sync to this spoken take" \
+  --model <model> \
+  --image reference_image=https://example.com/portrait.png \
+  --audio reference_audio=https://example.com/speech.mp3
 ```
 
-Roles include `first_frame`, `last_frame`, `reference_image`, and `reference_video`. Check `models show` for what a model accepts.
+Roles include `first_frame`, `last_frame`, `reference_image`, `reference_video`, and `reference_audio`. Check `models show` for what a model accepts. Do not mix first/last frame roles with reference roles. Seedance 2 reference audio needs an image or video in the same request.
 
 Pass generation parameters with `--param key=value` (repeatable; JSON, number, or boolean values) or `--parameters '<json>'`:
 
@@ -79,7 +84,7 @@ cohub generate "cinematic drone shot over misty mountains" \
   --model <model> \
   --param duration=5 \
   --param resolution=720p \
-  --param aspect_ratio=16:9
+  --param ratio=16:9
 ```
 
 Other useful flags:

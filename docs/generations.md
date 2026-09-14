@@ -209,6 +209,13 @@ cohub generate "keep the character identity from all reference images" \
   --image reference_image=https://example.com/reference-2.png \
   --param duration=5
 
+cohub generate "Lip-sync to this spoken take" \
+  --model seedance-2-0-fast \
+  --image reference_image=https://example.com/portrait.png \
+  --audio reference_audio=https://example.com/speech.mp3 \
+  --param duration=8 \
+  --param ratio=9:16
+
 cohub generate "uplifting cinematic pop with warm piano and clear chorus" \
   --model suno_music \
   --param operation=music \
@@ -219,4 +226,6 @@ cohub generate "write a hopeful chorus about sunrise after a storm" \
   --param operation=lyrics
 ```
 
-Role-qualified media values add `meta.role` to that content block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles in one request.
+Role-qualified media values add `meta.role` to that content block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request. Seedance 2 reference audio is additive to image or video; audio-only is rejected.
+
+Platform `.cohub/generations` YAML is what the API/worker validate against (`includeBuiltinModels: false`). Copy the Seedance examples above onto the live PVC if you want reference audio accepted in production.
