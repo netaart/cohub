@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.2.4](https://github.com/markbang/cohub-mobile/compare/v2.2.3...v2.2.4) (2026-09-14)
+
+
+### Features
+
+* add space collaborators and invitations ([2fefc7d](https://github.com/markbang/cohub-mobile/commit/2fefc7de1ca8e563860c2b927676c30559e81adf))
+* align mobile space and billing workflows ([9020889](https://github.com/markbang/cohub-mobile/commit/90208897d287e08c40c6bb858b94a4124c022971))
+* **android:** add predictive back animation ([2c63044](https://github.com/markbang/cohub-mobile/commit/2c630444dc26507375d6acc3cbc7a59fdac2185e))
+* polish space controls and task pagination ([3fd8a0b](https://github.com/markbang/cohub-mobile/commit/3fd8a0bdc6a7d41814b5569d6dcb302d6fa6a58b))
+
+
+### Fixes
+
+* **chat:** avoid replaying send transition on reconcile ([c33fa80](https://github.com/markbang/cohub-mobile/commit/c33fa8053f63db34816a90cbb9682f724334e0bf))
+* **chat:** coordinate keyboard dismissal with send ([f929d6c](https://github.com/markbang/cohub-mobile/commit/f929d6c5ed0a28c006180a352cfe524cf64416ea))
+* **chat:** keep keyboard focused while sending ([042097f](https://github.com/markbang/cohub-mobile/commit/042097f6e4886fd1fca2805fb3b8cbe8953cf0e4))
+* **chat:** keep send bubble footer geometry stable ([34d2cd5](https://github.com/markbang/cohub-mobile/commit/34d2cd51ad2c237655a643835dbdf4cce8e2b6ee))
+* **chat:** keep send transition geometry live ([539666e](https://github.com/markbang/cohub-mobile/commit/539666e3df56c8a655eb26c2ae2a9ab19ecf8c7d))
+* **chat:** pause tail scrolling during send transition ([a38f3ac](https://github.com/markbang/cohub-mobile/commit/a38f3ac8a09547ef4f8d0b768e17551990482c9e))
+* **diagnostics:** capture complete chat send timeline ([7d3c8a7](https://github.com/markbang/cohub-mobile/commit/7d3c8a78400d4172203e61bceb178530c599e6a8))
+* keep space workflow checks compatible ([d67738f](https://github.com/markbang/cohub-mobile/commit/d67738f7b7622a5579132ffbb42717a59d059194))
+
 ## [2.2.3](https://github.com/markbang/cohub-mobile/compare/v2.2.2...v2.2.3) (2026-09-13)
 
 
