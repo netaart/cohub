@@ -90,7 +90,7 @@ function spaceActivityAt(space: SpaceRecord) {
 	return space.lastActivityAt ?? space.updatedAt ?? space.createdAt ?? null;
 }
 
-export function spaceToItem(
+function spaceToItem(
 	space: SpaceRecord,
 	query: string,
 	viewerUserUuid?: string | null,

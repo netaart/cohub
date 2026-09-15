@@ -2,12 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { textMatchScore } from "$lib/command-palette/score";
 import type { SpaceMentionSuggestion } from "$lib/mentions/space";
-import {
-	mergeSpaceMentionSuggestions,
-	selectSpaceMentionSuggestions,
-} from "$lib/mentions/space-mention-select";
-
-const VIEWER = "viewer";
+import { mergeSpaceMentionSuggestions } from "$lib/mentions/space-mention-select";
 
 function suggestion(
 	id: string,
@@ -34,77 +29,30 @@ function suggestion(
 	};
 }
 
-function installRecentSpaces(entries: Array<{ spaceId: string; at: number }>) {
-	const store: Record<string, string> = {
-		[`cohub:recent-spaces:${VIEWER}:v1`]: JSON.stringify(
-			entries.map((entry) => ({
-				spaceId: entry.spaceId,
-				sessionId: null,
-				timestamp: entry.at,
-			})),
-		),
-	};
-	globalThis.window = {} as Window & typeof globalThis;
-	globalThis.localStorage = {
-		getItem: (key: string) => store[key] ?? null,
-		setItem: (key: string, value: string) => {
-			store[key] = value;
-		},
-		removeItem: (key: string) => {
-			delete store[key];
-		},
-	} as Storage;
-}
-
-const now = Date.now();
-const spaces = [
-	suggestion("current", "Current"),
-	suggestion("alpha", "Alpha Studio"),
-	suggestion("beta", "Beta Lab"),
-	suggestion("gamma", "Gamma"),
-	suggestion("delta", "Delta Notes"),
-];
-
-test("empty @ query keeps recently visited spaces and drops the current one", () => {
-	installRecentSpaces([
-		{ spaceId: "current", at: now },
-		{ spaceId: "gamma", at: now - 1 },
-		{ spaceId: "alpha", at: now - 2 },
-	]);
+test("empty @ query keeps Recent default order and drops the current space", () => {
 	assert.deepEqual(
-		selectSpaceMentionSuggestions(spaces, {
+		mergeSpaceMentionSuggestions({
+			local: [
+				suggestion("current", "Current"),
+				suggestion("gamma", "Gamma"),
+				suggestion("alpha", "Alpha Studio"),
+			],
+			remote: [],
 			query: "",
 			currentSpaceId: "current",
-			viewerUserUuid: VIEWER,
 		}).map((item) => item.spaceId),
 		["gamma", "alpha"],
 	);
 });
 
-test("empty @ query with no recents falls back to all other spaces by name", () => {
-	installRecentSpaces([]);
-	assert.deepEqual(
-		selectSpaceMentionSuggestions(spaces, {
-			query: "",
-			currentSpaceId: "current",
-			viewerUserUuid: VIEWER,
-		}).map((item) => item.spaceId),
-		["alpha", "beta", "delta", "gamma"],
-	);
-});
-
-test("tt matches test as a subsequence, like command-palette space search", () => {
+test("tt matches test as a subsequence, like Recent space search", () => {
 	assert.ok(textMatchScore("test", "tt") > 0);
 	assert.ok(textMatchScore("test-feishu", "tt") > 0);
 	assert.ok(textMatchScore("sandbox test", "tt") > 0);
-	assert.equal(
-		textMatchScore("world_01KSFNYTZ9H8BFPJVRM7HSETTG", "tt") > 0,
-		true,
-	);
+	assert.ok(textMatchScore("world_01KSFNYTZ9H8BFPJVRM7HSETTG", "tt") > 0);
 });
 
 test("typed @ query ranks owned spaces above public substring hits", () => {
-	installRecentSpaces([]);
 	assert.deepEqual(
 		mergeSpaceMentionSuggestions({
 			local: [
@@ -128,21 +76,18 @@ test("typed @ query ranks owned spaces above public substring hits", () => {
 			],
 			query: "tt",
 			currentSpaceId: "current",
-			viewerUserUuid: VIEWER,
 		}).map((item) => item.spaceId),
 		["mine", "public"],
 	);
 });
 
 test("typed @ query keeps subsequence matches instead of requiring a substring", () => {
-	installRecentSpaces([]);
 	assert.deepEqual(
 		mergeSpaceMentionSuggestions({
 			local: [suggestion("mine", "test", { textScore: 0.5, score: 0.55 })],
 			remote: [],
 			query: "tt",
 			currentSpaceId: "current",
-			viewerUserUuid: VIEWER,
 		}).map((item) => item.spaceId),
 		["mine"],
 	);

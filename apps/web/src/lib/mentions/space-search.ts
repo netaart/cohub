@@ -1,64 +1,37 @@
-import type { GlobalSearchResult, SpaceRecord } from "@neta-art/cohub";
-import { idbGetAllByIndex, type SpaceRecordCacheRecord } from "$lib/cache/db";
-import { getCacheUserKey } from "$lib/cache/keys";
+import type { GlobalSearchResult } from "@neta-art/cohub";
 import {
-	searchLocalCommandItems,
-	spaceToItem,
-} from "$lib/command-palette/local-search";
+	getCommandPaletteDefaultItems,
+	getLocalPaletteOverview,
+} from "$lib/command-palette/default-items";
+import { searchLocalCommandItems } from "$lib/command-palette/local-search";
+import { getPaletteOverviewSnapshot } from "$lib/command-palette/palette-overview";
+import { mergeLocalOverviewIntoSnapshot } from "$lib/command-palette/palette-overview-local";
 import { searchRemoteCommandItems } from "$lib/command-palette/remote-search";
-import { sortCommandItems } from "$lib/command-palette/score";
+import type { CommandPaletteItem } from "$lib/command-palette/types";
 import { sdk } from "$lib/sdk";
-import { getSpacePublicProfile } from "$lib/space-profile";
-import { getCachedSpaceList } from "$lib/stores/space-list-cache";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
-import {
-	buildSpaceMentionHref,
-	buildSpaceMentionUri,
-	type SpaceMentionSuggestion,
-} from "./space";
-import {
-	commandSpaceToMentionSuggestion,
-	selectSpaceMentionSuggestions,
-} from "./space-mention-select";
+import type { SpaceMentionSuggestion } from "./space";
+import { commandSpaceToMentionSuggestion } from "./space-mention-select";
 
 export { mergeSpaceMentionSuggestions } from "./space-mention-select";
 
 const SPACE_LINK_RESOLVE_LIMIT = 20;
-
-const LOCAL_LIMIT = 24;
 const REMOTE_LIMIT = 30;
 
-function compactText(value: string | null | undefined, limit: number) {
-	const text = (value ?? "").replace(/\s+/g, " ").trim();
-	if (!text) return null;
-	return text.length > limit
-		? `${text.slice(0, Math.max(0, limit - 1))}…`
-		: text;
+function isMentionSuggestion(
+	item: SpaceMentionSuggestion | null,
+): item is SpaceMentionSuggestion {
+	return item !== null;
 }
 
-function spaceName(space: Pick<SpaceRecord, "name" | "title" | "id">) {
-	return space.name ?? space.title ?? `space:${space.id.slice(0, 8)}`;
-}
-
-function localSpaceToSuggestion(space: SpaceRecord): SpaceMentionSuggestion {
-	return {
-		type: "space",
-		id: space.id,
-		spaceId: space.id,
-		name: spaceName(space),
-		description: compactText(space.description, 180),
-		ownerProfile: space.ownerProfile ?? null,
-		spaceProfile: getSpacePublicProfile(space),
-		href: buildSpaceMentionHref(space.id),
-		uri: buildSpaceMentionUri(space.id),
-		activityAt:
-			space.lastActivityAt ?? space.updatedAt ?? space.createdAt ?? null,
-		source: "local",
-		score: 0,
-		textScore: 0,
-		recencyScore: 0,
-		typePriorityScore: 0,
-	};
+function toMentionSuggestions(
+	items: CommandPaletteItem[],
+	currentSpaceId?: string | null,
+) {
+	return items
+		.map(commandSpaceToMentionSuggestion)
+		.filter(isMentionSuggestion)
+		.filter((item) => item.spaceId !== currentSpaceId);
 }
 
 function remoteSearchToSuggestion(
@@ -76,49 +49,31 @@ function remoteSearchToSuggestion(
 	});
 }
 
-function shouldAbort(signal?: AbortSignal) {
-	if (signal?.aborted) throw new DOMException("Search aborted", "AbortError");
-}
-
-function isMentionSuggestion(
-	item: SpaceMentionSuggestion | null,
-): item is SpaceMentionSuggestion {
-	return item !== null;
-}
-
-function excludeCurrentSpace(
-	item: SpaceMentionSuggestion,
-	currentSpaceId?: string | null,
-) {
-	return item.spaceId !== currentSpaceId;
-}
-
-async function loadLocalSpaces(
-	userKey: string,
-	options?: { signal?: AbortSignal; currentSpaceId?: string | null },
-) {
-	const spaces: SpaceRecord[] = [];
-	const seen = new Set<string>();
-	const add = (space: SpaceRecord) => {
-		if (space.id === options?.currentSpaceId || seen.has(space.id)) return;
-		seen.add(space.id);
-		spaces.push(space);
-	};
-
-	for (const space of getCachedSpaceList() ?? []) add(space);
-	shouldAbort(options?.signal);
-
-	const records = await idbGetAllByIndex<SpaceRecordCacheRecord>(
-		"space_records",
-		"by_updated_at",
-		IDBKeyRange.lowerBound(0),
+async function searchRecentSpaceDefaults(options?: {
+	signal?: AbortSignal;
+	currentSpaceId?: string | null;
+	viewerUserUuid?: string | null;
+}) {
+	const localOverview = await getLocalPaletteOverview({
+		signal: options?.signal,
+		viewerUserUuid: options?.viewerUserUuid,
+	});
+	const snapshot = getPaletteOverviewSnapshot().data;
+	const hasSnapshotItems = Boolean(
+		snapshot?.spaces.length || snapshot?.recentSessions.length,
 	);
-	shouldAbort(options?.signal);
-	for (const record of records) {
-		if (record.userKey !== userKey) continue;
-		add(record.space);
-	}
-	return spaces;
+	const overview =
+		snapshot && hasSnapshotItems
+			? mergeLocalOverviewIntoSnapshot(snapshot, localOverview)
+			: localOverview;
+	return getCommandPaletteDefaultItems({
+		query: "",
+		resourceTypes: ["space"],
+		currentSpaceId: options?.currentSpaceId,
+		signal: options?.signal,
+		viewerUserUuid: options?.viewerUserUuid,
+		paletteOverview: overview,
+	});
 }
 
 export async function searchLocalSpaceMentions(
@@ -127,45 +82,18 @@ export async function searchLocalSpaceMentions(
 		signal?: AbortSignal;
 		currentSpaceId?: string | null;
 		viewerUserUuid?: string | null;
-		limit?: number;
 	},
 ): Promise<SpaceMentionSuggestion[]> {
 	const normalized = query.trim();
-	const userKey = getCacheUserKey();
-	const viewerUserUuid = options?.viewerUserUuid ?? userKey;
-	const limit = options?.limit ?? LOCAL_LIMIT;
-
-	if (normalized.length >= 2) {
-		const items = await searchLocalCommandItems(normalized, {
-			signal: options?.signal,
-			resourceTypes: ["space"],
-			viewerUserUuid,
-		});
-		return items
-			.map(commandSpaceToMentionSuggestion)
-			.filter(isMentionSuggestion)
-			.filter((item) => excludeCurrentSpace(item, options?.currentSpaceId))
-			.slice(0, limit);
-	}
-
-	const spaces = await loadLocalSpaces(userKey, options);
-	if (!normalized) {
-		return selectSpaceMentionSuggestions(spaces.map(localSpaceToSuggestion), {
-			query: "",
-			currentSpaceId: options?.currentSpaceId,
-			viewerUserUuid,
-			limit,
-		});
-	}
-
-	return sortCommandItems(
-		spaces
-			.map((space) => spaceToItem(space, normalized, viewerUserUuid))
-			.filter((item): item is NonNullable<typeof item> => Boolean(item)),
-	)
-		.map(commandSpaceToMentionSuggestion)
-		.filter((item): item is SpaceMentionSuggestion => Boolean(item))
-		.slice(0, limit);
+	const items =
+		normalized.length < 2
+			? await searchRecentSpaceDefaults(options)
+			: await searchLocalCommandItems(normalized, {
+					signal: options?.signal,
+					resourceTypes: ["space"],
+					viewerUserUuid: options?.viewerUserUuid,
+				});
+	return toMentionSuggestions(items, options?.currentSpaceId);
 }
 
 export async function resolveSpaceMentionLabels(
@@ -216,5 +144,5 @@ export async function searchRemoteSpaceMentions(
 	return result
 		.map(remoteSearchToSuggestion)
 		.filter(isMentionSuggestion)
-		.filter((item) => excludeCurrentSpace(item, options?.currentSpaceId));
+		.filter((item) => item.spaceId !== options?.currentSpaceId);
 }

@@ -349,8 +349,7 @@ const spaceMentionItems = $derived(
 		remote: remoteSpaceMentionItems,
 		query: spaceMentionTrigger?.query ?? "",
 		currentSpaceId,
-		viewerUserUuid: authStore.userUuid,
-		limit: 30,
+		limit: 50,
 	}),
 );
 const spaceMentionLoading = $derived(
