@@ -278,7 +278,7 @@ export function registerGenerations(program: Command): void {
     .option("--param <key=value>", "Generation parameter; repeatable, values may be JSON/number/boolean", collect, [])
     .option("--parameters <json>", "Generation parameters as a JSON object")
     .option("--meta <json>", "Meta as a JSON object")
-    .option("--mode <mode>", "Suno songwriting mode: simple or custom")
+    .option("--lyrics <text>", "Explicit Suno lyrics; otherwise the prompt is a song description")
     .option("--lyrics-file <path>", "Read custom Suno lyrics from a file")
     .option("--style <style>", "Custom Suno style tags")
     .option("--title <title>", "Custom Suno title")
@@ -306,7 +306,7 @@ Examples:
       param: string[];
       parameters?: string;
       meta?: string;
-      mode?: string; lyricsFile?: string; style?: string; title?: string; instrumental?: boolean;
+      lyrics?: string; lyricsFile?: string; style?: string; title?: string; instrumental?: boolean;
       output?: string;
       async?: boolean;
       timeoutMs?: string;
@@ -314,7 +314,7 @@ Examples:
     }) => {
       try {
         const spaceId = await resolveSpace(program);
-        const suno = await resolveSunoInput({ model: opts.model, mode: opts.mode, prompt, lyricsFile: opts.lyricsFile, style: opts.style, title: opts.title, instrumental: opts.instrumental, meta: opts.meta, hasMedia: opts.image.length + opts.video.length + opts.audio.length > 0 });
+        const suno = await resolveSunoInput({ model: opts.model, prompt, lyrics: opts.lyrics, lyricsFile: opts.lyricsFile, style: opts.style, title: opts.title, instrumental: opts.instrumental, meta: opts.meta, hasMedia: opts.image.length + opts.video.length + opts.audio.length > 0 });
         const content: GenerationContentBlock[] = [...suno.content];
         content.push(...await Promise.all(opts.image.map((value) => contentFromPathOrUrl("image", value))));
         content.push(...await Promise.all(opts.video.map((value) => contentFromPathOrUrl("video", value))));
