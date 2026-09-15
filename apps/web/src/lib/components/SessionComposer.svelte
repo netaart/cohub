@@ -15,7 +15,6 @@ import {
 	X,
 } from "lucide-svelte";
 import { onMount } from "svelte";
-import { getCacheUserKey } from "$lib/cache/keys";
 import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
 import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
 import ComposerSurface from "$lib/components/composer/ComposerSurface.svelte";
@@ -70,6 +69,7 @@ import {
 } from "$lib/mentions/space-trigger";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { authStore } from "$lib/stores/auth.svelte";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 import { entriesFromFiles, type LocalUploadEntry } from "$lib/upload-entries";
 
@@ -349,7 +349,7 @@ const spaceMentionItems = $derived(
 		remote: remoteSpaceMentionItems,
 		query: spaceMentionTrigger?.query ?? "",
 		currentSpaceId,
-		viewerUserUuid: getCacheUserKey(),
+		viewerUserUuid: authStore.userUuid,
 		limit: 30,
 	}),
 );
@@ -851,6 +851,7 @@ function scheduleSpaceMentionSearch(
 	void searchLocalSpaceMentions(q, {
 		signal: spaceMentionLocalController.signal,
 		currentSpaceId,
+		viewerUserUuid: authStore.userUuid,
 	})
 		.then((items) => {
 			if (token !== spaceMentionSearchToken) return;
@@ -870,6 +871,7 @@ function scheduleSpaceMentionSearch(
 				const items = await searchLocalSpaceMentions(q, {
 					signal,
 					currentSpaceId,
+					viewerUserUuid: authStore.userUuid,
 				});
 				if (token !== spaceMentionSearchToken) return;
 				localSpaceMentionItems = items;

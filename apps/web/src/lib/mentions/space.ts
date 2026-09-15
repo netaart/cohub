@@ -1,4 +1,8 @@
-import type { SpacePublicProfile, UserProfile } from "@neta-art/cohub";
+import type {
+	GlobalSearchViewerRelation,
+	SpacePublicProfile,
+	UserProfile,
+} from "@neta-art/cohub";
 import { COHUB_WEB_ORIGIN_SOURCE } from "./platform-origin";
 
 export type SpaceMention = {
@@ -25,6 +29,12 @@ export type SpaceMentionSuggestion = {
 	uri: string;
 	activityAt: string | null;
 	source: "local" | "remote" | "local+remote";
+	score: number;
+	textScore: number;
+	recencyScore: number;
+	typePriorityScore: number;
+	viewerRelation?: GlobalSearchViewerRelation | "unknown" | null;
+	viewerTier?: number;
 };
 
 export type SpaceMentionTextToken =
