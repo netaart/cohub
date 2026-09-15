@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@neta-art/cohub": "workspace:*",
-    "@neta-art/generation": "^0.1.29",
+    "@neta-art/generation": "^0.1.30",
     "commander": "^15.0.0",
     "pixi.js": "^8.20.1",
     "sharp": "^0.35.4"

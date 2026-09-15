@@ -28,7 +28,7 @@
     "@cohub/sandbox-controller": "workspace:*",
     "@earendil-works/pi-ai": "0.81.1",
     "@kubernetes/client-node": "^2.0.0",
-    "@neta-art/generation": "^0.1.29",
+    "@neta-art/generation": "^0.1.30",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.222.0",
     "@opentelemetry/instrumentation": "^0.222.0",
