@@ -9,7 +9,7 @@ import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, chatListDistances, chatListViewOff
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
-import { COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
+import { collapsedComposerHeight, COMPOSER_CHROME_HEIGHT, COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
 import { BUBBLE_META_GAP, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getAnchoredMenuLayout } from "../src/ui/anchored-menu-layout.ts";
@@ -632,6 +632,8 @@ function findTimelineElement(node) {
 findTimelineElement(focusPolicySource);
 assert.ok(timelineElement, "the chat timeline renders messages chronologically through LegendList");
 const timelineProp = (name) => timelineElement.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === name);
+assert.ok(focusPolicySource.text.includes("timelineReady"), "the timeline waits for a tail before mounting so initialScrollAtEnd still applies");
+assert.ok(focusPolicySource.text.includes("reserveComposer: true"), "the first paint reserves composer height so the tail does not jump");
 assert.ok(timelineProp("alignItemsAtEnd"), "short timelines stick to the bottom");
 assert.equal(timelineProp("inverted"), undefined, "the timeline must not be inverted");
 assert.equal(timelineProp("experimental_hideItemsUntilMeasured"), undefined, "hiding rows until measured makes the timeline jitter on open");
@@ -1316,6 +1318,23 @@ try {
   lifecycle.clear();
   mock.timers.tick(1000);
   assert.deepEqual(releases, ["running", "running"], "Account cleanup releases once and cancels timers");
+
+  let primedLoads = 0;
+  const primedReleases = [];
+  const primed = createSessionLifecycle({ load: async () => { primedLoads += 1; }, release: (id) => primedReleases.push(id), releaseDelayMs: 1000 });
+  primed.prime("warm");
+  primed.prime("warm");
+  assert.equal(primedLoads, 1, "press-in prefetch shares one load");
+  await primed.open("warm");
+  assert.equal(primedLoads, 1, "opening a primed Chat reuses the in-flight load");
+  mock.timers.tick(1000);
+  assert.deepEqual(primedReleases, [], "an owned Chat does not release on the prefetch timer");
+  primed.close("warm");
+  mock.timers.tick(1000);
+  assert.deepEqual(primedReleases, ["warm"]);
+  primed.prime("cancel");
+  mock.timers.tick(1000);
+  assert.deepEqual(primedReleases, ["warm", "cancel"], "a cancelled press-in still releases");
 } finally {
   mock.timers.reset();
 }
@@ -1337,6 +1356,8 @@ findPanelPager(panelsSource);
 assert.ok(panelPager, "Space panels retain their native scroll pager");
 const pagerAttributes = panelPager.attributes.properties.filter(ts.isJsxAttribute);
 assert.equal(pagerAttributes.some((attribute) => attribute.name.getText(panelsSource) === "contentOffset"), false, "Filter touch re-renders must not reapply the closed-page contentOffset");
+const pagerSpreads = panelPager.attributes.properties.filter(ts.isJsxSpreadAttribute);
+assert.ok(pagerSpreads.some((spread) => spread.getText(panelsSource).includes("contentOffset") && spread.getText(panelsSource).includes("seedPagerOffset")), "The pager seeds the closed page for the first paint, then drops contentOffset");
 assert.ok(pagerAttributes.some((attribute) => attribute.name.getText(panelsSource) === "onContentSizeChange"), "The pager still initializes its position on first layout");
 assert.equal(panelsSource.text.includes("usePanelGestureBlocker"), false, "The pager must not be disabled for every message that happens to contain a fence");
 const markdownPatch = readFileSync(new URL("../scripts/patch-enriched-markdown.mjs", import.meta.url), "utf8");
@@ -1346,6 +1367,9 @@ assert.equal(markdownPatch.includes("setOnTouchListener {"), false, "OnTouchList
 const messageContent = readFileSync(new URL("../src/components/MessageContent.tsx", import.meta.url), "utf8");
 assert.equal(messageContent.includes("usePanelGestureBlocker"), false, "Message markdown must not blanket-block the panel swipe");
 assert.equal(messageContent.includes("holdsPanelGesture"), false, "Message markdown must not blanket-block the panel swipe");
+assert.ok(panelsSource.text.includes("prefetchSession"), "opening a Chat from the space panel starts the load on press-in");
+assert.ok(readFileSync(new URL("../app/(tabs)/index.tsx", import.meta.url), "utf8").includes("prefetchSession"), "opening a Chat from Chats starts the load on press-in");
+assert.match(readFileSync(new URL("../src/data/context.tsx", import.meta.url), "utf8"), /useLayoutEffect\(\(\) => \{\s*void openSession\(sessionId\);/, "Chat open must attach before paint so a prefetch can win the first frame");
 
 // Space Chat counts come from a cached probe of the Space's first page.
 const countListCalls = [];
@@ -1571,6 +1595,10 @@ assert.equal(getComposerLayout({ ...composerLayoutInput, availableHeight: 180, c
 assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 52 }).showExpandButton, false, "a large-font single line is not mistaken for multiline");
 assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 96 }).showExpandButton, true);
 assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 52 }).height, 52);
+assert.equal(COMPOSER_CHROME_HEIGHT, 132);
+assert.equal(collapsedComposerHeight(34), 166);
+assert.equal(collapsedComposerHeight(0), 132);
+assert.equal(collapsedComposerHeight(-1), 132);
 const composerMenuInput = { anchor: { x: 12, y: 680, width: 366, height: 114 }, windowWidth: 390, windowHeight: 844, topInset: 47, bottomInset: 34, keyboardTop: null, preferredWidth: 360 };
 assert.deepEqual(getComposerMenuLayout(composerMenuInput), { left: 12, bottom: 172, width: 360, maxHeight: 480 });
 assert.equal(getComposerMenuLayout({ ...composerMenuInput, preferredWidth: 240 }).width, 240, "attachments use a compact menu");

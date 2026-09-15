@@ -11,6 +11,7 @@ import { useTranslation } from "@/src/i18n";
 type SessionRowProps = {
   session: UserSessionListItem;
   onPress: () => void;
+  onPressIn?: () => void;
   /** Long-press opens label management (only when connected). */
   onLongPress?: () => void;
   /** Labels shown as small chips under the preview line. */
@@ -18,7 +19,7 @@ type SessionRowProps = {
   showSpace?: boolean;
 };
 
-export function SessionRow({ session, onPress, onLongPress, labels = [], showSpace = true }: SessionRowProps) {
+export function SessionRow({ session, onPress, onPressIn, onLongPress, labels = [], showSpace = true }: SessionRowProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const { state } = useApp();
@@ -47,5 +48,5 @@ export function SessionRow({ session, onPress, onLongPress, labels = [], showSpa
   </>;
   const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: showSpace ? 76 : 68, paddingHorizontal: showSpace ? 18 : 16, paddingVertical: 10, backgroundColor: "transparent", borderBottomWidth: 1, borderBottomColor: theme.colors.border };
   const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
-  return <PressableScale accessibilityRole="button" accessibilityLabel={t("ui.openNamed", { name: displaySessionTitle(session) })} onPress={onPress} onLongPress={onLongPress} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{rowContent}</PressableScale>;
+  return <PressableScale accessibilityRole="button" accessibilityLabel={t("ui.openNamed", { name: displaySessionTitle(session) })} onPress={onPress} onPressIn={onPressIn} onLongPress={onLongPress} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{rowContent}</PressableScale>;
 }

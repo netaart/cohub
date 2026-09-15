@@ -103,7 +103,7 @@ export function Screen({ children, scroll = false, refreshing = false, onRefresh
   ) : (
     <View style={[{ flex: 1, backgroundColor: theme.colors.background }, contentStyle]}>{children}</View>
   );
-  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>{body}</KeyboardAvoidingView> : body;
+  const wrapped = keyboard ? <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.colors.background }} behavior={Platform.OS === "ios" ? "padding" : "height"}>{body}</KeyboardAvoidingView> : body;
   return <View style={{ flex: 1, paddingTop: edgeToEdge ? 0 : insets.top, backgroundColor: theme.colors.background }}>{wrapped}</View>;
 }
 

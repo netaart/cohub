@@ -6,6 +6,7 @@ import { motion, press } from "@/src/motion";
 type PressableScaleProps = {
   children: ReactNode;
   onPress?: () => void;
+  onPressIn?: () => void;
   onLongPress?: () => void;
   disabled?: boolean;
   accessibilityLabel?: string;
@@ -30,6 +31,7 @@ type PressableScaleProps = {
 export function PressableScale({
   children,
   onPress,
+  onPressIn,
   onLongPress,
   disabled = false,
   accessibilityLabel,
@@ -73,6 +75,7 @@ export function PressableScale({
         android_ripple={androidRipple}
         style={fill ?? undefined}
         onPressIn={() => {
+          onPressIn?.();
           if (scale) settle(press.scale);
           if (haptic) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
         }}

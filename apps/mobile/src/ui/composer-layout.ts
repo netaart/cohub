@@ -1,4 +1,10 @@
 export const COMPOSER_TEXT_PADDING = 8;
+/** Empty collapsed composer chrome in `src/ui.tsx` (`composerWrap` + `composer` + input + toolbar), excluding the home-indicator inset. */
+export const COMPOSER_CHROME_HEIGHT = 132;
+
+export function collapsedComposerHeight(bottomInset: number) {
+  return COMPOSER_CHROME_HEIGHT + Math.max(0, bottomInset);
+}
 
 export type ComposerLayoutInput = {
   text: string;

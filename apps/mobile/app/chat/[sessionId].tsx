@@ -105,7 +105,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const showToast = useToast();
   const { state, client, connectionState, refreshHome, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, forkSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadSessionReadSequence, saveSessionReadSequence } = useApp();
   const view = useSession(sessionId);
-  const { headerHeight, footerHeight, onHeaderLayout, onFooterLayout } = useEdgeChrome();
+  const { headerHeight, footerHeight, onHeaderLayout, onFooterLayout } = useEdgeChrome({ reserveComposer: true });
   const composerRef = useRef<View>(null);
   const [sendTransition, setSendTransition] = useState<SendTransition | null>(null);
   const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -369,6 +369,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const modelLabel = activeModel?.name || activeModel?.id || t("chat.model.automatic");
   const modelTriggerLabel = activeModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(activeModel.thinkingLevel)}` : modelLabel;
   const liveStream = shouldShowLiveStream(view.stream, messages);
+  // Mounting LegendList empty then filling it drops `initialScrollAtEnd`, so the first paint
+  // would show the oldest rows and jump. Wait until there is a tail to pin to.
+  const timelineReady = messages.length > 0 || view.historyLoaded || Boolean(liveStream) || view.sending;
   const threadPlaceholder = chatThreadPlaceholder({
     messageCount: timeline.length,
     historyLoaded: view.historyLoaded,
@@ -844,9 +847,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         <ConnectionBanner state={connectionState} />
         {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>{t("common.retry")}</Text></Pressable> : null}
         </EdgeHeader>
-        <View ref={listContainerRef} collapsable={false} style={{ flex: 1, minHeight: 0 }}>
+        <View ref={listContainerRef} collapsable={false} style={{ flex: 1, minHeight: 0, backgroundColor: theme.colors.background }}>
         {/* Android selectable text must not reposition the timeline when it gains focus. Explicit turn/tail scrolling remains enabled. */}
-        <LegendList
+        {timelineReady ? <LegendList
           {...traceTouches}
           ref={listRef}
           data={messages}
@@ -884,7 +887,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           refreshing={view.refreshing}
           ListHeaderComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null}
           ListFooterComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStreamReady && liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>}
-        />
+        /> : null}
         {threadPlaceholder ? <View pointerEvents="none" style={{ position: "absolute", top: headerHeight, right: 0, bottom: footerHeight, left: 0 }}><ChatThreadPlaceholder kind={threadPlaceholder} /></View> : null}
 
         {!followingTail ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.jumpLatest")} onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} style={({ pressed }) => ({ position: "absolute", right: 16, bottom: footerHeight + 12, zIndex: 4, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, borderWidth: 1, borderColor: theme.colors.border, shadowColor: theme.colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5, elevation: 4 })}><AppIcon name="arrow-down" size={18} color={theme.colors.accent} /></Pressable> : null}
