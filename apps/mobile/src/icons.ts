@@ -38,6 +38,7 @@ import Globe from "lucide-react-native/icons/globe";
 import Images from "lucide-react-native/icons/images";
 import Info from "lucide-react-native/icons/info";
 import Layers2 from "lucide-react-native/icons/layers-2";
+import ListFilter from "lucide-react-native/icons/list-filter";
 import ListTree from "lucide-react-native/icons/list-tree";
 import MessagesSquare from "lucide-react-native/icons/messages-square";
 import Maximize2 from "lucide-react-native/icons/maximize-2";
@@ -99,6 +100,7 @@ export const icons = {
   eye: Eye,
   "eye-off": EyeOff,
   "file-text": FileText,
+  filter: ListFilter,
   fingerprint: FingerprintPattern,
   folder: Folder,
   "folder-open": FolderOpen,

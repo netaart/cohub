@@ -16,6 +16,7 @@ import { getAnchoredMenuLayout } from "../src/ui/anchored-menu-layout.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
 import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
+import { sessionSourceFilterKeys } from "../src/data/session-source.ts";
 import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, nextTurnSequence, withFallbackUserContent, withTurnSequences } from "../src/data/session-history.ts";
 import { compactionFromMessage, compactionStats } from "../src/data/compaction.ts";
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
@@ -184,7 +185,10 @@ for (const [tab, component, expectedRequests] of [
     useActivity: () => activityData, useBillingHistory: () => ({ data: null }),
     useAppTheme: () => ({ colors: {}, spacing: {} }),
     useRemoteSearch: () => ({ query: "", sessions: [], spaces: [] }), useSpaceSessionCounts: () => ({}),
+    useSourceSessions: () => ({ sessions: [], loading: false, loadingMore: false, error: null, hasMore: false, initialized: true, loadMore: () => {}, reload: () => {} }),
     useSessionFilterPreference: () => ({ loaded: true, minutes: 30 }), loadSessionFilterMinutes: async () => 30,
+    useSessionSourcePreference: () => ({ filter: "all", loaded: true, error: null }), saveSessionSourcePreference: async () => {}, loadSessionSourcePreference: async () => "all",
+    useToast: () => () => {},
     sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [],
     CHAT_SEARCH_TYPES: ["session", "turn", "space"], SPACE_SEARCH_TYPES: ["space"],
     Screen: "Screen", ScrollView: "ScrollView", LegendList: "LegendList", RefreshControl: "RefreshControl",
@@ -192,6 +196,7 @@ for (const [tab, component, expectedRequests] of [
     ConnectionBanner: "ConnectionBanner", DataError: "DataError", LoadingRows: "LoadingRows", SectionHeader: "SectionHeader",
     EmptyState: "EmptyState", ExpandableSearchBar: "ExpandableSearchBar", ActivityIndicator: "ActivityIndicator",
     AdaptiveSheet: "AdaptiveSheet", PrimaryButton: "PrimaryButton", SpaceFilterChip: "SpaceFilterChip", FilterChip: "FilterChip",
+    AnchoredActionMenu: "AnchoredActionMenu",
   });
   const render = () => { cursor = 0; return chromeNodes(renderTab()); };
   const control = () => {
@@ -1094,6 +1099,23 @@ assert.equal(await pendingPreferenceRead, 90, "a late stored snapshot cannot ove
 const invalidPreference = loadPreferenceModule({ ...filterStorage, getItem: async () => "30minutes" });
 await assert.rejects(invalidPreference.loadSessionFilterMinutes(), /whole number/);
 
+let storedSource = null;
+const sourceStorage = { getItem: async () => storedSource, setItem: async (_key, value) => { storedSource = value; } };
+const sourcePreference = loadPreferenceModule(sourceStorage);
+assert.equal(await sourcePreference.loadSessionSourcePreference(), "all", "missing source preference defaults to all");
+assert.equal(sourcePreference.parseSessionSourceFilter("web"), "web");
+assert.equal(sourcePreference.parseSessionSourceFilter("nonsense"), "all");
+await sourcePreference.saveSessionSourcePreference("other");
+assert.equal(storedSource, "other");
+assert.equal(await sourcePreference.loadSessionSourcePreference(), "other");
+assert.equal(await loadPreferenceModule(sourceStorage).loadSessionSourcePreference(), "other", "a new module instance restores the saved source");
+let finishSourceRead;
+const concurrentSource = loadPreferenceModule({ ...sourceStorage, getItem: () => new Promise((resolve) => { finishSourceRead = resolve; }), setItem: async () => {} });
+const pendingSourceRead = concurrentSource.loadSessionSourcePreference();
+await concurrentSource.saveSessionSourcePreference("web");
+finishSourceRead("other");
+assert.equal(await pendingSourceRead, "web", "a late stored snapshot cannot overwrite a user source save");
+
 const statusCalls = [];
 const statusResults = new Map();
 const recentSession = { spaceId: "space1", lastMessageAt: new Date().toISOString() };
@@ -1267,6 +1289,10 @@ assert.equal(isWebSessionSource({ source: null }), true);
 assert.equal(isWebSessionSource({ source: "mobile" }), true);
 assert.equal(sessionSourceGroup({ source: "mobile" }), "web");
 assert.equal(sessionSourceGroup({ source: "Web App" }), "web");
+assert.equal(sessionSourceFilterKeys("all"), null);
+assert.deepEqual(sessionSourceFilterKeys("web"), ["web"]);
+assert.ok(sessionSourceFilterKeys("other")?.includes("other"));
+assert.ok(!sessionSourceFilterKeys("other")?.includes("web"));
 assert.deepEqual(toUserSessionLabels([
   { id: "src", name: "Source", source: "system", systemKey: null, children: [{ id: "web", name: "Web App", source: "system", systemKey: "session-source:web", children: [] }] },
   { id: "work", name: "Work", source: "user", systemKey: null, children: [{ id: "urgent", name: "Urgent", source: "user", systemKey: null, children: [] }] },
