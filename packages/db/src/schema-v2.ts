@@ -1297,6 +1297,12 @@ export const labelAssignments = v2.table(
       table.resourceRef,
       table.labelId,
     ),
+    // Speeds up source-label counts for cross-space lists: join by session id
+    // among system-assigned session labels only (one row per session).
+    systemSessionLabelIdx: index("v2_idx_label_assignments_system_session_resource").on(
+      table.resourceRef,
+      table.labelId,
+    ).where(sql`${table.resourceType} = 'session' and ${table.source} = 'system'`),
     resourceRefSearchIdx: index("v2_idx_label_assignments_resource_ref_trgm").using("gin", table.resourceRef.op("gin_trgm_ops")),
   }),
 );
