@@ -108,6 +108,9 @@ assert.match(JSON.stringify(nativeRelease.jobs.android.steps), /native-fingerpri
 assert.match(nativeRelease.jobs.android.steps.find((step) => step.uses === "actions/upload-artifact@v7").with.path, /native-fingerprint/);
 
 const taggedRelease = parse(".github/workflows/native-tag.yml");
+assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /gh release upload/, "GitHub Release must still attach APKs");
+assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /publish-yaota-apks/, "Native Tag Release must publish the same APKs to Yaota");
+assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /OTA_SERVER/);
 assert.deepEqual(taggedRelease.on.push.tags, ["v*"]);
 assert.deepEqual(Object.keys(taggedRelease.on), ["push"], "Only a tag push starts automatic native release; release events must not duplicate it");
 assert.equal(taggedRelease.concurrency["cancel-in-progress"], false);
