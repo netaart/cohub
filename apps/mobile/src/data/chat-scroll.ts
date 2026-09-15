@@ -1,5 +1,11 @@
 export const CHAT_TAIL_THRESHOLD = 60;
 export const CHAT_PAGE_THRESHOLD = 180;
+/**
+ * Legend only keeps pinning while the viewport is within this many screen-heights of the
+ * tail (its default is 0.1). Following is our decision; once it is on, a streamed burst
+ * that outruns the animated pin must not drop it.
+ */
+export const CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD = 8;
 
 type ChatTailStateInput = {
   currentlyFollowing: boolean;
@@ -43,4 +49,9 @@ export function chatListDistances(offsetY: number, contentHeight: number, layout
     distanceToLatest: Math.max(0, contentHeight - layoutHeight - offsetY),
     distanceToOldest: Math.max(0, offsetY),
   };
+}
+
+/** Animated pinning is held off while the send fly-in measures a still target. */
+export function chatMaintainScrollAtEnd(followingTail: boolean, sendTransitionActive: boolean) {
+  return followingTail && !sendTransitionActive ? { animated: true } as const : false;
 }

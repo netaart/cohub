@@ -18,7 +18,7 @@ import { fetchSessionLabels, toUserSessionLabels, type SessionLabel } from "@/sr
 import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
-import { CHAT_PAGE_THRESHOLD, chatListDistances, chatListViewOffset, chatTailScrolledAway, nextChatTailFollowing } from "@/src/data/chat-scroll";
+import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, CHAT_PAGE_THRESHOLD, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, nextChatTailFollowing } from "@/src/data/chat-scroll";
 import { chatScrollTrace, type TraceFields } from "@/src/data/chat-scroll-trace";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
@@ -130,9 +130,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const [forkingTurnId, setForkingTurnId] = useState<string | null>(null);
   const [turnNavigatorOpen, setTurnNavigatorOpen] = useState(false);
   const [loadingSequence, setLoadingSequence] = useState<number | null>(null);
-  // A running Chat carries its live turn snapshot in memory, so its first paint has to render
-  // it. Mount the committed history first and attach the live card on the next task so a long
-  // running turn cannot block the screen transition.
+  // A running Chat carries its live turn snapshot in memory. Mount the committed history first
+  // and attach the live card after Legend has measured those rows (onLoad), so a tall streaming
+  // footer cannot land on estimated positions and overlap the last user bubble.
   const [liveStreamReady, setLiveStreamReady] = useState(false);
   // Entry timeline for the opt-in diagnostics: markChatEntry is a no-op unless enabled.
   const entryRendersRef = useRef(0);
@@ -378,10 +378,15 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const running = state.sessionLatestTurns[sessionId]?.status === "running" || view.sending || (liveStream && isLiveStreamStatus(view.stream?.status ?? ""));
   const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
 
+  const handleListLoad = useCallback(() => {
+    setLiveStreamReady(true);
+  }, []);
   useEffect(() => {
+    // A running Chat with no committed rows never gets onLoad (no containers to measure).
+    if (messages.length > 0) return undefined;
     const timer = setTimeout(() => setLiveStreamReady(true), 0);
     return () => clearTimeout(timer);
-  }, [sessionId]);
+  }, [messages.length, sessionId]);
 
   useEffect(() => {
     entryRendersRef.current += 1;
@@ -756,6 +761,16 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     setInput("");
     setAttachments([]);
     recordDebugEvent("chat.send.composer_cleared");
+    // Hold the animated pin only for the fly-in, not for the network round-trip: a slow send
+    // used to leave the live card growing while pinning was off, then fail the 10% threshold.
+    if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    recordDebugEvent("chat.send.transition_cleanup_scheduled", { delayMs: 560 });
+    transitionTimerRef.current = setTimeout(() => {
+      transitionTimerRef.current = null;
+      recordDebugEvent("chat.send.transition_cleanup");
+      setSendTransition(null);
+      requestFollowTail();
+    }, 560);
     try {
       const requestModel = modelOverride ? selectedModel : recordedModel;
       await sendMessage(sessionId, text, files, requestModel ? { model: requestModel } : undefined);
@@ -767,16 +782,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       setAttachments(files);
       setTransitionMessageKey(null);
       setSendTransition(null);
-    } finally {
-      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
-      recordDebugEvent("chat.send.transition_cleanup_scheduled", { delayMs: 560 });
-      transitionTimerRef.current = setTimeout(() => {
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
         transitionTimerRef.current = null;
-        recordDebugEvent("chat.send.transition_cleanup");
-        setSendTransition(null);
-        // The animated pin was held off during the transition; land on the tail once it settles.
-        requestFollowTail();
-      }, 560);
+      }
     }
   };
 
@@ -793,6 +802,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     [forkingTurnId, sendTransition, transitionMessageKey, streamTurnId, t, theme],
   );
   const keyExtractor = useCallback((item: MessageRecord) => `${turnSequenceForMessage(item) ?? item.id}:${item.role}`, []);
+  // Assistant Markdown rows are much taller than user bubbles; separate averages so the
+  // first measured assistant does not poison the estimate used for the next user row.
+  const getMessageItemType = useCallback((item: MessageRecord) => item.role, []);
   const listContentStyle = useMemo(() => ({ paddingTop: headerHeight + 12, paddingBottom: footerHeight + 12, flexGrow: messages.length === 0 ? 1 : undefined }), [footerHeight, headerHeight, messages.length]);
   const listIndicatorInsets = useMemo(() => ({ top: headerHeight, bottom: footerHeight }), [footerHeight, headerHeight]);
   // Chronological list: anchoring on data changes keeps the reading position when older turns are
@@ -800,7 +812,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { data: true }), [followingTail]);
   // Growth (our streaming card lives in the list footer) is absorbed by Legend's animated
   // end-pinning instead of a hard rAF jump, so the timeline slides while a bubble grows.
-  const maintainScrollAtEnd = useMemo(() => (followingTail && sendTransition === null ? { animated: true } : false), [followingTail, sendTransition]);
+  const maintainScrollAtEnd = useMemo(() => chatMaintainScrollAtEnd(followingTail, sendTransition !== null), [followingTail, sendTransition]);
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     trace("list.layout", { ...event.nativeEvent.layout });
     setListWidth(event.nativeEvent.layout.width);
@@ -841,11 +853,19 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           extraData={rowExtraData}
           alignItemsAtEnd
           maintainScrollAtEnd={maintainScrollAtEnd}
+          maintainScrollAtEndThreshold={CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD}
           estimatedItemSize={FALLBACK_ROW_HEIGHT}
+          getItemType={getMessageItemType}
+          // Native Markdown is far taller than FALLBACK_ROW_HEIGHT, so painting at the estimate
+          // stacks the last user bubble on the live card for ~1s when opening a running Chat.
+          experimental_hideItemsUntilMeasured
+          // Deep links still own the first scroll; otherwise open on the tail instead of the oldest row.
+          initialScrollAtEnd={!hasInitialTurnTarget}
           // Android scrolls a focused selectable text into view; selecting a message must not
           // move the timeline. Explicit turn/tail scrolling stays enabled.
           scrollsChildToFocus={false}
           onLayout={handleListLayout}
+          onLoad={handleListLoad}
           keyExtractor={keyExtractor}
           renderItem={renderMessage}
           keyboardShouldPersistTaps="handled"

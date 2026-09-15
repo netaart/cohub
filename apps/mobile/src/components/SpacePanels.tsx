@@ -59,6 +59,11 @@ const PANEL_CLOSE_SETTLE_MS = 380;
  * underneath receives ACTION_CANCEL (so a long press never turns into a selection mid-swipe),
  * while a text selection keeps precedence because the native text view sets
  * FLAG_DISALLOW_INTERCEPT, which disables that interception.
+ *
+ * Markdown code blocks (and tables) are a nested HorizontalScrollView. RN's pager only yields
+ * to another ReactHorizontalScrollView, so those blocks claim or release the drag themselves
+ * (see scripts/patch-enriched-markdown.mjs). Do not disable the pager for a whole message just
+ * because the markdown contains a fence — that blocks the panel swipe on almost every reply.
  */
 export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel, onActivePanelChange, onOpenSession, onNewChat, onOpenFile, onOpenFilesPage, children, edgeToEdge = false }: SpacePanelsProps) {
   const theme = useAppTheme();
