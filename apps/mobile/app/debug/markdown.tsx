@@ -1,6 +1,6 @@
 import type { MessageRecord } from "@neta-art/cohub";
 import { EnrichedMarkdownText } from "react-native-enriched-markdown";
-import { ScrollView, Text, View } from "react-native";
+import { FlatList, ScrollView, Text, View } from "react-native";
 import { MessageBubble } from "@/src/components/MessageContent";
 import { typography, useAppTheme } from "@/src/theme";
 import { Screen } from "@/src/ui";
@@ -82,6 +82,20 @@ export default function DebugMarkdownScreen() {
         </View>
         <View style={{ paddingHorizontal: 16, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
           <EnrichedMarkdownText markdown={RAW_MARKDOWN} selectable flavor="github" />
+        </View>
+        <View style={{ paddingHorizontal: 16, paddingTop: 14 }}>
+          <Text style={[typography.caption, { color: theme.colors.textMuted }]}>
+            下面这个高度固定的反转列表复刻了 chat 的容器结构（inverted FlatList），用来区分「列表」和「翻页器」谁是罪魁。
+          </Text>
+        </View>
+        <View style={{ height: 240, marginTop: 8 }}>
+          <FlatList
+            inverted
+            data={[MESSAGE]}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => <MessageBubble message={item} />}
+            contentContainerStyle={{ paddingVertical: 8 }}
+          />
         </View>
         <MessageBubble message={MESSAGE} />
       </ScrollView>
