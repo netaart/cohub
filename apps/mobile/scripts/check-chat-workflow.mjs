@@ -25,9 +25,6 @@ import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-q
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
 import { StreamingCodeTokenizer } from "../src/data/code-highlight-stream.ts";
-import { markdownBlockSignature, markdownInlineText, markdownMedia, parseInlineMarkdown, parseMarkdown } from "../src/data/markdown.ts";
-import { splitStreamingMarkdown } from "../src/data/stream-markdown.ts";
-import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
 import { panelForScrollOffset } from "../src/data/space-panel-pager.ts";
 import { getSpaceSessionCount, loadSpaceSessionCounts, publishSpaceSessionCount } from "../src/data/space-session-counts.ts";
@@ -572,39 +569,30 @@ for (const viewport of [240, 320, 360, 390, 768]) {
   }
 }
 
-// Execute the real JSX composition to catch a dropped footer between memo/Markdown layers.
+// Execute the real JSX composition to catch a dropped footer between the bubble layers.
 const bubbleSource = ts.createSourceFile("MessageContent.tsx", readFileSync(new URL("../src/components/MessageContent.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const bubbleFunctionNames = new Set(["MarkdownBlockView", "TextBlock", "Block", "MessageContent"]);
-const bubbleVariableNames = new Set(["MemoBlock", "MarkdownBlocks", "MarkdownBody"]);
+const bubbleFunctionNames = new Set(["enrichedMarkdownStyle", "TextBlock", "Block", "MessageContent"]);
 const bubbleFunctions = bubbleSource.statements.filter((statement) =>
-  (ts.isFunctionDeclaration(statement) && bubbleFunctionNames.has(statement.name?.text)) ||
-  (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => bubbleVariableNames.has(declaration.name.getText(bubbleSource))))
+  ts.isFunctionDeclaration(statement) && bubbleFunctionNames.has(statement.name?.text)
 ).map((statement) => statement.getText(bubbleSource).replace(/^export /, ""));
-assert.equal(bubbleFunctions.length, 7);
-const bubbleEntries = (text) => parseMarkdown(text).map((block) => ({ block, signature: markdownBlockSignature(block) }));
+assert.equal(bubbleFunctions.length, 4);
 const bubbleScope = {
   React: { createElement: (type, props, ...children) => ({ type, props: { ...props, children } }), Fragment: "Fragment" },
   memo: (component) => component,
   useMemo: (factory) => factory(),
   useState: (factory) => [factory()],
   useContext: () => 240,
-  useAppTheme: () => ({ colors: { text: "text", textMuted: "muted", accentBorder: "border" } }),
-  useRevealedStreamText: (text) => ({ text, fadeTail: 0 }),
-  StreamingMarkdownCache: class { hasStreamed = false; update(text) { return { entries: bubbleEntries(text), tail: "" }; } },
-  parseMarkdownEntries: bubbleEntries,
-  markdownMedia,
-  MarkdownVideo: "MarkdownVideo",
-  typography: { chatBody: { fontSize: 15 } },
+  useAppTheme: () => ({ colors: { text: "text", textMuted: "muted", accentBorder: "border", accent: "accent", border: "border", surfaceRaised: "raised" } }),
+  typography: { chatBody: { fontSize: 15, lineHeight: 23 }, caption: { fontSize: 12, lineHeight: 17 }, code: { fontSize: 12, lineHeight: 19 } },
   scaleFontSize: (size) => size,
-  BubbleContentWidth: null,
-  View: "View", Text: "Text", BubbleText: "BubbleText", CodeBlock: "CodeBlock", MarkdownTable: "MarkdownTable",
-  InlineNodes: "InlineNodes", ImageGallery: "ImageGallery", ToolCall: "ToolCall", SystemNoteRow: "SystemNoteRow",
-  imageUri: (block) => block.source?.type === "url" ? block.source.url : null,
   EnrichedMarkdownText: "EnrichedMarkdownText",
-  enrichedMarkdownStyle: () => ({}),
   useOpenMessageLink: () => () => {},
   usePanelGestureBlocker: () => null,
   BubbleContext: null,
+  BubbleContentWidth: null,
+  View: "View", Text: "Text", BubbleText: "BubbleText",
+  ImageGallery: "ImageGallery", ToolCall: "ToolCall", SystemNoteRow: "SystemNoteRow",
+  imageUri: (block) => block.source?.type === "url" ? block.source.url : null,
 };
 const bubbleRender = new Function(...Object.keys(bubbleScope), ts.transpileModule(`${bubbleFunctions.join("\n")}\nreturn MessageContent;`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText)(...Object.values(bubbleScope));
 function footerPlacements(node, footer, found = []) {
@@ -730,63 +718,6 @@ try {
 } finally {
   mock.timers.reset();
 }
-
-mock.timers.enable({ apis: ["setTimeout", "Date"] });
-const revealed = new StreamRevealController();
-const revealedValues = [];
-revealed.subscribe(() => revealedValues.push(revealed.getDisplayed()));
-try {
-  // First content is authoritative and shows whole instead of animating from empty.
-  revealed.setTarget("你好");
-  assert.deepEqual(revealedValues, ["你好"]);
-  assert.ok(revealed.getFadeTailCount() > 0, "first content fades in");
-  mock.timers.tick(200);
-  assert.equal(revealed.getFadeTailCount(), 0, "fade window closes");
-  // A ZWJ emoji arrives as one grapheme; a multi-grapheme append paces in commits.
-  revealed.setTarget("你好👩🏽‍💻");
-  mock.timers.tick(50);
-  assert.equal(revealed.getDisplayed(), "你好👩🏽‍💻");
-  revealed.setTarget("你好👩🏽‍💻abcdefghij");
-  const beforePacing = revealedValues.length;
-  mock.timers.tick(50);
-  assert.ok(revealedValues.length > beforePacing, "appends commit over multiple frames");
-  assert.ok(revealed.getFadeTailCount() > 0, "revealed graphemes are inside the fade window");
-  mock.timers.tick(50);
-  assert.ok(revealedValues.length > beforePacing + 1, "a long append takes more than one commit");
-  for (const value of revealedValues) assert.ok(revealed.getDisplayed().startsWith(value), `revealed value is a prefix: ${value}`);
-  mock.timers.tick(600);
-  assert.equal(revealed.getDisplayed(), "你好👩🏽‍💻abcdefghij");
-  // Never split the emoji across commits.
-  for (const value of revealedValues) assert.ok(!value.endsWith("\u200d") && !/[\u{1F3FB}-\u{1F3FF}]$/u.test(value), `commit splits a grapheme: ${value}`);
-  // An append that extends the trailing grapheme completes that unit first.
-  revealed.setTarget("a");
-  revealed.setTarget("a\u{1F3FD}");
-  mock.timers.tick(600);
-  assert.equal(revealed.getDisplayed(), "a\u{1F3FD}");
-  // A correction is authoritative; it must not replay the obsolete suffix.
-  revealed.setTarget("corrected");
-  assert.equal(revealed.getDisplayed(), "corrected");
-  // Completion drains immediately.
-  revealed.setTarget("corrected answer");
-  revealed.flush();
-  assert.equal(revealed.getDisplayed(), "corrected answer");
-  mock.timers.tick(500);
-  assert.equal(revealedValues.at(-1), "corrected answer");
-} finally {
-  revealed.stop();
-  mock.timers.reset();
-}
-
-// Streaming markdown: only the tail re-parses, so the split must stay stable
-// across appends and must never cut a fence or a loose list in half.
-assert.deepEqual(splitStreamingMarkdown("one"), { stable: "", tail: "one" });
-assert.deepEqual(splitStreamingMarkdown("a\n\nb"), { stable: "a\n\n", tail: "b" });
-assert.deepEqual(splitStreamingMarkdown("a\n\nb\n\nc"), { stable: "a\n\nb\n\n", tail: "c" });
-assert.deepEqual(splitStreamingMarkdown("```\ncode\n\nmore\n```\n\nafter"), { stable: "```\ncode\n\nmore\n```\n\n", tail: "after" });
-assert.deepEqual(splitStreamingMarkdown("- a\n\n- b\n\nc"), { stable: "- a\n\n- b\n\n", tail: "c" });
-const firstSplit = splitStreamingMarkdown("a\n\nb");
-assert.deepEqual(splitStreamingMarkdown("a\n\nb\n\nc", firstSplit), { stable: "a\n\nb\n\n", tail: "c" });
-assert.deepEqual(splitStreamingMarkdown("a\n\nbc", firstSplit), { stable: "a\n\n", tail: "bc" });
 
 const finalReply = { id: "final", role: "assistant", sequence: 2, meta: { turnId: "turn-1" }, text: "Final reply" };
 const intermediateReply = { id: "step", role: "assistant", sequence: 1, meta: { turnId: "turn-1", messageKind: "assistant_intermediate" }, text: "Working" };
@@ -1704,81 +1635,6 @@ assert.equal(followupPreviewText({ userText: "  hello\n\n world  " }), "hello wo
 assert.equal(followupPreviewText({ userText: "   " }), "Follow-up");
 assert.equal(followupPreviewText({ userText: null }), "Follow-up");
 
-const tableBlocks = parseMarkdown("| Name | Value |\n| :--- | ---: |\n| a | `1` |\n| b | 2 |\n\ntail");
-assert.deepEqual(tableBlocks[0], {
-  type: "table",
-  alignments: ["left", "right"],
-  header: [[{ type: "text", value: "Name" }], [{ type: "text", value: "Value" }]],
-  rows: [
-    [[{ type: "text", value: "a" }], [{ type: "code", value: "1" }]],
-    [[{ type: "text", value: "b" }], [{ type: "text", value: "2" }]],
-  ],
-});
-assert.deepEqual(tableBlocks[1], { type: "paragraph", inlines: [{ type: "text", value: "tail" }] });
-const unclosedCode = parseMarkdown("before\n```ts\nconst x = 1");
-assert.deepEqual(unclosedCode[1], { type: "code", language: "ts", code: "const x = 1", closed: false });
-assert.deepEqual(parseMarkdown("```ts\nconst x = 1\n```")[0], { type: "code", language: "ts", code: "const x = 1", closed: true });
-assert.deepEqual(parseInlineMarkdown("a **b** _c_ `d` [e](https://f)"), [
-  { type: "text", value: "a " },
-  { type: "strong", value: "b", children: [{ type: "text", value: "b" }] },
-  { type: "text", value: " " },
-  { type: "emphasis", value: "c", children: [{ type: "text", value: "c" }] },
-  { type: "text", value: " " },
-  { type: "code", value: "d" },
-  { type: "text", value: " " },
-  { type: "link", url: "https://f", value: "e", children: [{ type: "text", value: "e" }] },
-]);
-assert.deepEqual(parseInlineMarkdown("**[open](https://example.com)**"), [
-  { type: "strong", value: "[open](https://example.com)", children: [{ type: "link", url: "https://example.com", value: "open", children: [{ type: "text", value: "open" }] }] },
-]);
-assert.deepEqual(parseMarkdown("before\n\n---\n\nafter").map((block) => block.type), ["paragraph", "rule", "paragraph"]);
-assert.deepEqual(parseInlineMarkdown("HTTPS://example.com/image.png?x=1."), [
-  { type: "link", url: "HTTPS://example.com/image.png?x=1", value: "HTTPS://example.com/image.png?x=1", children: [{ type: "text", value: "HTTPS://example.com/image.png?x=1" }] },
-  { type: "text", value: "." },
-]);
-// Message-specific link families: Space/Skill mentions, image syntax pointing at sandbox paths, cohub:// links.
-assert.deepEqual(parseInlineMarkdown("@[design-skill](cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23) help"), [
-  { type: "mention", url: "cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23", value: "design-skill" },
-  { type: "text", value: " help" },
-]);
-assert.deepEqual(parseInlineMarkdown("see ![Contact Sheet](/workspace/out/sheet.png) now"), [
-  { type: "text", value: "see " },
-  { type: "image", url: "/workspace/out/sheet.png", value: "Contact Sheet" },
-  { type: "text", value: " now" },
-]);
-assert.deepEqual(parseInlineMarkdown("[open](cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f)"), [
-  { type: "link", url: "cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f", value: "open", children: [{ type: "text", value: "open" }] },
-]);
-// A bare `[x](y)` with an unsupported scheme stays text, and a later valid link on the same line is still found.
-assert.deepEqual(parseInlineMarkdown("[a](ftp://x) [b](https://y)"), [
-  { type: "text", value: "[a](ftp://x) " },
-  { type: "link", url: "https://y", value: "b", children: [{ type: "text", value: "b" }] },
-]);
-
-for (const marker of ["---", "***", "___", "* * *", "- - -", "_ _ _"]) {
-  assert.deepEqual(parseMarkdown(marker), [{ type: "rule" }]);
-}
-assert.equal(parseMarkdown("```\n---\n```")[0].type, "code");
-assert.deepEqual(parseInlineMarkdown("`https://example.com`"), [{ type: "code", value: "https://example.com" }]);
-assert.equal(parseInlineMarkdown("<https://example.com>")[0].url, "https://example.com");
-assert.equal(parseInlineMarkdown("(https://example.com/a_(b)).")[1].url, "https://example.com/a_(b)");
-assert.equal(parseInlineMarkdown("https://example.com，next")[0].url, "https://example.com");
-assert.equal(markdownInlineText(parseInlineMarkdown("[**open**](https://example.com)")[0]), "open");
-assert.equal(markdownInlineText(parseInlineMarkdown("**[open](https://example.com)**")[0]), "open");
-const mediaSource = "**[image](https://example.com/a.PNG?token=x)** ![remote](https://example.com/image) https://example.com/a.mp4#t=1 https://example.com/a.PNG?token=x";
-assert.deepEqual(markdownMedia(parseMarkdown(mediaSource)[0]), [
-  { type: "image", url: "https://example.com/a.PNG?token=x" },
-  { type: "image", url: "https://example.com/image" },
-  { type: "video", url: "https://example.com/a.mp4#t=1" },
-]);
-assert.deepEqual(markdownMedia(parseMarkdown("`https://example.com/a.png` [file](/workspace/a.png) [page](https://example.com/page.html) ![unsafe](data:image/png;base64,abc)")[0]), []);
-const mediaStream = `${mediaSource}\n\n---\n\nhttps://example.com/b.webm`;
-for (let length = 1; length <= mediaStream.length; length += 1) {
-  const source = mediaStream.slice(0, length);
-  const split = splitStreamingMarkdown(source);
-  assert.deepEqual([...parseMarkdown(split.stable), ...parseMarkdown(split.tail)], parseMarkdown(source));
-}
-
 assert.deepEqual(resolveMessageLink("cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23"), { kind: "space", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23" });
 assert.deepEqual(resolveMessageLink("cohub://spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f"), { kind: "session", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23", sessionId: "81816f3f-02fa-4b71-b775-ba64a5759c8f" });
 assert.deepEqual(resolveMessageLink("https://cohub.live/spaces/241ec263-bd4f-47d6-b459-35b4219e0c23/sessions/81816f3f-02fa-4b71-b775-ba64a5759c8f?turn=3"), { kind: "session", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23", sessionId: "81816f3f-02fa-4b71-b775-ba64a5759c8f" });
@@ -1786,11 +1642,6 @@ assert.deepEqual(resolveMessageLink("/workspace/avatars/out/contact-sheet.png"),
 assert.deepEqual(resolveMessageLink("https://example.com/x"), { kind: "external", url: "https://example.com/x" });
 assert.equal(resolveMessageLink("javascript:alert(1)"), null);
 assert.equal(resolveMessageLink(""), null);
-
-const stableBlocks = parseMarkdown("one\n\ntwo");
-const grownBlocks = parseMarkdown("one\n\ntwo and more");
-assert.equal(markdownBlockSignature(stableBlocks[0]), markdownBlockSignature(grownBlocks[0]));
-assert.notEqual(markdownBlockSignature(stableBlocks[1]), markdownBlockSignature(grownBlocks[1]));
 
 assert.equal(detectCodeLanguage("src/components/App.tsx"), "tsx");
 assert.equal(detectCodeLanguage("docs/readme.md"), "markdown");
