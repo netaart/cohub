@@ -4,7 +4,7 @@
 
 The repository does not require Expo Application Services (EAS) for builds.
 
-1. `CI` validates every PR and push to `main`, then exports Android and iOS JavaScript bundles.
+1. `CI` validates every PR and push to `main`, and exports Android and iOS JavaScript bundles in parallel with the quality checks.
 2. `Native CI` is a manual dispatch that compiles Android debug APKs and an iOS simulator app for internal validation. It does not run on pull requests or `main` pushes.
 3. `Release Please` maintains a version/changelog PR from Conventional Commits.
 4. Pushing a stable `vX.Y.Z` tag starts `Native Tag Release`: signed Android APKs are attached to the GitHub Release, and a signed iOS IPA is uploaded to TestFlight. Both platforms record their OTA fingerprints. Release Please creates the version tag when its release PR is merged; it does not start a separate native build.
