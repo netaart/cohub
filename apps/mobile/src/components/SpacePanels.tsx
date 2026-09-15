@@ -471,6 +471,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
       </View>
       <LegendList
         estimatedItemSize={68}
+        scrollsChildToFocus={false}
         data={listItems}
         keyExtractor={(item) => item.kind === "remote" ? `remote:${item.hit.sessionId}` : `local:${item.session.id}`}
         renderItem={({ item }) => item.kind === "remote"
@@ -552,6 +553,7 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
       ) : (
         <LegendList
           estimatedItemSize={68}
+          scrollsChildToFocus={false}
           data={entries}
           keyExtractor={(item) => item.path}
           contentContainerStyle={{ paddingVertical: 8, paddingBottom: 24, flexGrow: entries.length === 0 ? 1 : undefined }}

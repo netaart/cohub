@@ -648,6 +648,9 @@ assert.ok(timelineElement, "the chat timeline renders messages chronologically t
 const timelineProp = (name) => timelineElement.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === name);
 assert.ok(timelineProp("alignItemsAtEnd"), "short timelines stick to the bottom");
 assert.equal(timelineProp("inverted"), undefined, "the timeline must not be inverted");
+const focusScrollProp = timelineProp("scrollsChildToFocus");
+assert.ok(focusScrollProp && ts.isJsxExpression(focusScrollProp.initializer), "timeline must explicitly disable native focus scrolling");
+assert.equal(focusScrollProp.initializer.expression.kind, ts.SyntaxKind.FalseKeyword);
 
 const scrollDebugSource = ts.createSourceFile("chat-scroll.tsx", readFileSync(new URL("../app/debug/chat-scroll.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let scrollFixtureFunction;

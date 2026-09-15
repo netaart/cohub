@@ -824,6 +824,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           data={messages}
           alignItemsAtEnd
           estimatedItemSize={FALLBACK_ROW_HEIGHT}
+          // Android scrolls a focused selectable text into view; selecting a message must not
+          // move the timeline. Explicit turn/tail scrolling stays enabled.
+          scrollsChildToFocus={false}
           onLayout={handleListLayout}
           keyExtractor={keyExtractor}
           renderItem={renderMessage}
