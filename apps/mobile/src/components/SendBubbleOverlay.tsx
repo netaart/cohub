@@ -4,6 +4,9 @@ import { StyleSheet, Text, View } from "react-native";
 import Animated, { cancelAnimation, Extrapolation, interpolate, interpolateColor, measure, ReduceMotion, useAnimatedRef, useAnimatedStyle, useFrameCallback, useSharedValue, withSpring, type AnimatedRef } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { MessageBubble } from "@/src/components/MessageContent";
+import { QueuedFollowupRow } from "@/src/components/QueuedFollowupRow";
+import type { FollowupQueueItem } from "@/src/data/followup-queue";
+import { AttachmentChip } from "@/src/ui";
 import { motion } from "@/src/motion";
 import { typography, useAppTheme } from "@/src/theme";
 import { COMPOSER_TEXT_PADDING } from "@/src/ui/composer-layout";
@@ -14,9 +17,10 @@ import { interpolateSendBubbleRect, type SendBubbleRect, type SendBubbleTransiti
 // times out an animation that has started or waits for the network response.
 const TARGET_WAIT_MS = 1200;
 
-export function SendBubbleOverlay({ transition, message, rootRef, targetRef, availableWidth, spaceId, onComplete }: {
+export function SendBubbleOverlay({ transition, message, queueItem, rootRef, targetRef, availableWidth, spaceId, onComplete }: {
   transition: SendBubbleTransition;
   message: MessageRecord;
+  queueItem: FollowupQueueItem | null;
   rootRef: AnimatedRef<View>;
   targetRef: AnimatedRef<View>;
   availableWidth: number;
@@ -33,6 +37,10 @@ export function SendBubbleOverlay({ transition, message, rootRef, targetRef, ava
   const target = useSharedValue<SendBubbleRect>(transition.source);
   const id = transition.message.id;
   const source = transition.source;
+  const queued = queueItem !== null;
+  const hasAttachments = transition.attachments.length > 0;
+  const destinationColor = queued ? theme.colors.surface : theme.colors.userBubble;
+  const destinationRadius = queued ? 10 : theme.radius.lg;
 
   useEffect(() => () => cancelAnimation(progress), [progress]);
 
@@ -72,8 +80,8 @@ export function SendBubbleOverlay({ transition, message, rootRef, targetRef, ava
     const rect = interpolateSendBubbleRect(source, target.get(), p);
     return {
       left: rect.x, top: rect.y, width: rect.width, height: rect.height,
-      borderRadius: interpolate(p, [0, 1], [8, theme.radius.lg]),
-      backgroundColor: interpolateColor(p, [0, 1], [theme.colors.surface, theme.colors.userBubble]),
+      borderRadius: interpolate(p, [0, 1], [8, destinationRadius]),
+      backgroundColor: interpolateColor(p, [0, 1], [theme.colors.surface, destinationColor]),
     };
   });
   const sourceStyle = useAnimatedStyle(() => {
@@ -97,12 +105,14 @@ export function SendBubbleOverlay({ transition, message, rootRef, targetRef, ava
   return <View testID="chat-send-overlay" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.overlay}>
     <Animated.View style={[styles.surface, surfaceStyle]} />
     <Animated.View style={[styles.source, { width: source.width, height: source.height }, sourceStyle]}>
-      <Text style={[typography.body, styles.sourceText, { color: theme.colors.text, transform: [{ translateY: -source.scrollY }] }]}>{transition.text}</Text>
+      {hasAttachments ? <View style={{ gap: 7, transform: [{ translateY: -source.scrollY }] }}>{transition.attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} uri={attachment.uri} mimeType={attachment.mimeType} />)}</View> : <Text style={[typography.body, styles.sourceText, { color: theme.colors.text, transform: [{ translateY: -source.scrollY }] }]}>{transition.text}</Text>}
     </Animated.View>
     <Animated.View style={[styles.copy, copyStyle]}>
-      <View style={{ width: getBubbleMaxWidth(availableWidth) + 24, marginLeft: -12, marginTop: -5, alignItems: "flex-start" }}>
+      {queueItem ? <View style={{ width: Math.max(0, availableWidth - 24) }}>
+        <QueuedFollowupRow rowRef={copyRef} preview={queueItem.preview} pending={queueItem.turn === null} surfaceHidden />
+      </View> : <View style={{ width: getBubbleMaxWidth(availableWidth) + 24, marginLeft: -12, marginTop: -5, alignItems: "flex-start" }}>
         <MessageBubble message={message} local={message.meta?.optimistic === true} floating surfaceHidden availableWidth={availableWidth} spaceId={spaceId} bubbleRef={copyRef} />
-      </View>
+      </View>}
     </Animated.View>
   </View>;
 }

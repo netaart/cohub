@@ -3,7 +3,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Dimensions, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type LayoutChangeEvent, type ViewToken } from "react-native";
+import { ActivityIndicator, Dimensions, Modal, Pressable, ScrollView, Share, Text, TextInput, View, useWindowDimensions, type LayoutChangeEvent, type ViewToken } from "react-native";
 import Animated, { useAnimatedRef, useReducedMotion } from "react-native-reanimated";
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
@@ -11,6 +11,7 @@ import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
 import { useToast } from "@/src/components/Toast";
 import { copyMessageText, MessageBubble, StreamCard } from "@/src/components/MessageContent";
 import { SendBubbleOverlay } from "@/src/components/SendBubbleOverlay";
+import { QueuedFollowupRow } from "@/src/components/QueuedFollowupRow";
 import { isSendBubbleMessage, measureSendBubbleSource, type SendBubbleTransition } from "@/src/ui/send-bubble-motion";
 import { StreamingTurnProcess, TurnProcess } from "@/src/components/TurnProcess";
 import { ModelSelectorMenu } from "@/src/components/ModelSelectorMenu";
@@ -26,9 +27,9 @@ import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
 import { useChatVisibleRows } from "@/src/components/use-chat-visible-rows";
 import { markChatEntry } from "@/src/data/chat-entry-trace";
-import { cancelQueuedFollowup, followupPreviewText, queuedFollowupTurns, steerQueuedFollowup } from "@/src/data/followup-queue";
+import { cancelQueuedFollowup, followupQueueItems, isOptimisticFollowup, isSendQueueItem, queuedFollowupTurns, steerQueuedFollowup } from "@/src/data/followup-queue";
 import { isActiveTurnStatus, isLiveStreamStatus, isTerminalTurnStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
-import { MessageMeasurements } from "@/src/data/chat-rendering";
+import { liveReplyAnchor, MessageMeasurements } from "@/src/data/chat-rendering";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
 import type { CohubClient, MessageRecord, SessionTurnRecord } from "@neta-art/cohub";
 import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage, withTurnSequences } from "@/src/data/session-history";
@@ -106,6 +107,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const composerMeasurementRef = useRef<ComposerInputMeasurement>({ input: null, scrollY: 0 });
   const sendRootRef = useAnimatedRef<View>();
   const sendBubbleRef = useAnimatedRef<View>();
+  const sendQueueRef = useAnimatedRef<View>();
+  const attachmentSourceRef = useRef<View>(null);
+  const attachmentScrollYRef = useRef(0);
+  const queueScrollRef = useRef<ScrollView>(null);
   const submitLockRef = useRef(false);
   const sendGenerationRef = useRef(0);
   const reducedMotion = useReducedMotion();
@@ -127,6 +132,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const [input, setInput] = useState("");
   const [sendFeedback, setSendFeedback] = useState<"idle" | "success">("idle");
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
+  useEffect(() => { if (attachments.length === 0) attachmentScrollYRef.current = 0; }, [attachments.length]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -145,10 +151,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const [forkingTurnId, setForkingTurnId] = useState<string | null>(null);
   const [turnNavigatorOpen, setTurnNavigatorOpen] = useState(false);
   const [loadingSequence, setLoadingSequence] = useState<number | null>(null);
-  // A running Chat carries its live turn snapshot in memory. Mount the committed history first
-  // and attach the live card after Legend has measured those rows (onLoad), so a tall streaming
-  // footer cannot land on estimated positions and overlap the last user bubble.
-  const [liveStreamReady, setLiveStreamReady] = useState(false);
+  // Initial layout stays nonanimated; live replies are measured with their owning row.
+  const [listLoaded, setListLoaded] = useState(false);
   // Entry timeline for the opt-in diagnostics: markChatEntry is a no-op unless enabled.
   const entryRendersRef = useRef(0);
   const entryHistoryLoadedRef = useRef(false);
@@ -289,12 +293,20 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const spaceSessions = useMemo(() => state.sessions.filter((item) => item.spaceId === spaceId), [spaceId, state.sessions]);
   const queuedFollowups = useMemo(() => queuedFollowupTurns(view.turns, view.stream?.turnId), [view.stream?.turnId, view.turns]);
   const queuedFollowupIds = useMemo(() => new Set(queuedFollowups.map((turn) => turn.id)), [queuedFollowups]);
+  const queueItems = useMemo(() => followupQueueItems(view.turns, view.stream?.turnId, view.messages), [view.turns, view.stream?.turnId, view.messages]);
+  const transitionQueueItem = sendTransition ? queueItems.find((item) => isSendQueueItem(item, sendTransition.message)) ?? null : null;
+  const queueTransitionActive = sendTransition !== null && transitionQueueItem !== null;
+  useEffect(() => {
+    if (!sendTransition || sendTransition.destination !== "queue" || transitionQueueItem) return;
+    const frame = requestAnimationFrame(() => completeSendTransition(sendTransition.message.id));
+    return () => cancelAnimationFrame(frame);
+  }, [completeSendTransition, sendTransition, transitionQueueItem]);
   useEffect(() => { recordDebugEvent("chat.queue.state", { count: queuedFollowups.length, ids: queuedFollowups.map((turn) => chatScrollTrace.alias("turn", turn.id)) }); }, [queuedFollowups]);
   const messages = useMemo(() => {
     const history = messagesFromTurns(view.turns);
     return withTurnSequences(
       mergeDisplayMessages(history.length > 0 ? history : view.messages, history.length > 0 ? view.messages : [])
-        .filter((message) => !isAssistantIntermediate(message) && hasRenderableMessage(message) && !(typeof message.meta?.turnId === "string" && queuedFollowupIds.has(message.meta.turnId))),
+        .filter((message) => !isOptimisticFollowup(message) && !isAssistantIntermediate(message) && hasRenderableMessage(message) && !(typeof message.meta?.turnId === "string" && queuedFollowupIds.has(message.meta.turnId))),
       view.turns,
     );
   }, [queuedFollowupIds, view.messages, view.turns]);
@@ -393,14 +405,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
 
   const handleListLoad = useCallback(() => {
-    setLiveStreamReady(true);
+    setListLoaded(true);
   }, []);
-  useEffect(() => {
-    // A running Chat with no committed rows never gets onLoad (no containers to measure).
-    if (messages.length > 0) return undefined;
-    const timer = setTimeout(() => setLiveStreamReady(true), 0);
-    return () => clearTimeout(timer);
-  }, [messages.length, sessionId]);
 
   useEffect(() => {
     entryRendersRef.current += 1;
@@ -420,8 +426,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   }, [view.historyLoaded, view.turns.length]);
 
   useEffect(() => {
-    if (liveStreamReady) markChatEntry("live.attached", { renders: entryRendersRef.current });
-  }, [liveStreamReady]);
+    if (listLoaded) markChatEntry("list.loaded", { renders: entryRendersRef.current });
+  }, [listLoaded]);
 
   useEffect(() => {
     let active = true;
@@ -454,12 +460,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     return target !== null && lastMessage !== undefined && turnSequenceForMessage(lastMessage) === target;
   }, [messages]);
   const requestInitialScroll = useCallback(() => {
-    if (!view.historyLoaded || initialScrollDone.current || messages.length === 0 || hasInitialTurnTarget) return;
+    if (!listLoaded || !view.historyLoaded || initialScrollDone.current || messages.length === 0 || hasInitialTurnTarget) return;
     initialScrollDone.current = true;
-    traceEnd("initial.latest", false);
     setFollowingTail(true);
     setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
-  }, [hasInitialTurnTarget, messages.length, setFollowingTail, traceEnd, view.historyLoaded, view.turns]);
+  }, [hasInitialTurnTarget, listLoaded, messages.length, setFollowingTail, view.historyLoaded, view.turns]);
 
   // Legend resolves `scrollToIndex` for unrendered rows from its own estimates; when it rejects the
   // row is too far away, so park at an estimated offset and let the retry timer re-target it.
@@ -763,10 +768,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     recordDebugEvent("chat.send.pressed", { hasText: Boolean(text.trim()), attachmentCount: files.length, keyboardExpected: true });
     try {
       const { input: field, scrollY } = composerMeasurementRef.current;
-      const source = reducedMotion ? null : await measureSendBubbleSource(field, sendRootRef.current, scrollY);
+      const source = reducedMotion ? null : await measureSendBubbleSource(files.length > 0 ? attachmentSourceRef.current : field, sendRootRef.current, files.length > 0 ? attachmentScrollYRef.current : scrollY);
       if (generation !== sendGenerationRef.current) return;
-      cancelTurnScroll();
-      setFollowingTail(true);
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setSendTransition(null);
       setInput("");
@@ -778,9 +781,13 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         onOptimistic: (message) => {
           if (source) {
             recordDebugEvent("chat.send_transition.source_measured", { ...source });
-            setSendTransition({ message, text, source });
+            setSendTransition({ message, text, source, attachments: files, destination: isOptimisticFollowup(message) ? "queue" : "bubble" });
           }
-          requestFollowTail(!reducedMotion);
+          if (!isOptimisticFollowup(message)) {
+            cancelTurnScroll();
+            setFollowingTail(true);
+            requestFollowTail(!reducedMotion);
+          }
         },
       });
       setSendFeedback("success");
@@ -800,11 +807,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   // identity. These are stable across stream batches, so a live turn no longer re-renders every
   // mounted row (the live step list subscribes on its own instead).
   const streamTurnId = view.stream?.turnId ?? null;
+  const replyAnchor = liveStream || (view.sending && !view.messages.some(isOptimisticFollowup)) ? liveReplyAnchor(messages, liveStream ? streamTurnId : null) : null;
   // LegendList memoizes each row on [item, extraData]; fork/send-transition state renders
   // inside a row but never changes `messages`, so it must flow through extraData to reach it.
   const rowExtraData = useMemo(
-    () => ({ forkingTurnId, sendTransition, streamTurnId, t, theme }),
-    [forkingTurnId, sendTransition, streamTurnId, t, theme],
+    () => ({ forkingTurnId, sendTransition, queueTransitionActive, streamTurnId, replyAnchor, liveStream, t, theme }),
+    [forkingTurnId, sendTransition, queueTransitionActive, streamTurnId, replyAnchor, liveStream, t, theme],
   );
   const keyExtractor = useCallback((item: MessageRecord) => `${turnSequenceForMessage(item) ?? item.id}:${item.role}`, []);
   // Assistant Markdown rows are much taller than user bubbles; separate averages so the
@@ -815,9 +823,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   // Chronological list: anchoring on data changes keeps the reading position when older turns are
   // prepended. `undefined` keeps Legend's default size stabilization.
   const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { data: true }), [followingTail]);
-  // Growth (our streaming card lives in the list footer) is absorbed by Legend's animated
-  // end-pinning instead of a hard rAF jump, so the timeline slides while a bubble grows.
-  const maintainScrollAtEnd = useMemo(() => chatMaintainScrollAtEnd(followingTail, liveStreamReady && !reducedMotion), [followingTail, liveStreamReady, reducedMotion]);
+  // Row growth uses the list's animated pin, including tool expansion and streaming.
+  const maintainScrollAtEnd = useMemo(() => chatMaintainScrollAtEnd(followingTail, listLoaded && !reducedMotion), [followingTail, listLoaded, reducedMotion]);
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     trace("list.layout", { ...event.nativeEvent.layout });
     setListWidth(event.nativeEvent.layout.width);
@@ -826,7 +833,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const handleListRefresh = useCallback(() => { void refreshSession(sessionId); }, [refreshSession, sessionId]);
   const renderMessage = useCallback(({ item, index }: { item: MessageRecord; index: number }) => {
     const chronologicalIndex = index;
-    const isTransitionMessage = sendTransition !== null && isSendBubbleMessage(item, sendTransition.message);
+    const isTransitionMessage = sendTransition?.destination === "bubble" && !queueTransitionActive && isSendBubbleMessage(item, sendTransition.message);
     const sequence = turnSequenceForMessage(item);
     const older = messages[index - 1];
     const olderSequence = older ? turnSequenceForMessage(older) : null;
@@ -834,8 +841,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const turn = sequence === null ? null : turnIndexBySequence.get(sequence) ?? null;
     const messageTurn = typeof item.meta?.turnId === "string" ? turnsById.get(item.meta.turnId) ?? null : null;
     const sequenceTurns = item.role === "user" && sequence !== null ? turnsBySequence.get(sequence) : undefined;
-    return <View ref={(row) => trackRow(`${turnSequenceForMessage(item) ?? item.id}:${item.role}`, row)} collapsable={false} onLayout={(event) => { if (chatScrollTrace.isRecording()) trace("row.layout", { message: chatScrollTrace.alias("message", item.id), index, sequence, ...event.nativeEvent.layout }); if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} hidden={isTransitionMessage} bubbleRef={isTransitionMessage ? sendBubbleRef : undefined} availableWidth={listWidth || windowWidth} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />{sequenceTurns?.map((entry) => isActiveTurnStatus(entry.status) || entry.id === streamTurnId ? <LiveTurnProcess key={entry.id} sessionId={sessionId} turn={entry} client={client} spaceId={spaceId} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>;
-  }, [client, forkMessage, forkingTurnId, handleCopyMessage, listWidth, measuredMessages, measurements, messages, sendBubbleRef, sendTransition, sessionId, spaceId, streamTurnId, trace, trackRow, turnIndexBySequence, turnsById, turnsBySequence, windowWidth]);
+    return <View ref={(row) => trackRow(`${turnSequenceForMessage(item) ?? item.id}:${item.role}`, row)} collapsable={false} onLayout={(event) => { if (chatScrollTrace.isRecording()) trace("row.layout", { message: chatScrollTrace.alias("message", item.id), index, sequence, ...event.nativeEvent.layout }); if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}<MessageBubble message={item} local={item.meta?.optimistic === true} hidden={isTransitionMessage} bubbleRef={isTransitionMessage ? sendBubbleRef : undefined} availableWidth={listWidth || windowWidth} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />{sequenceTurns?.map((entry) => isActiveTurnStatus(entry.status) || entry.id === streamTurnId ? <LiveTurnProcess key={entry.id} sessionId={sessionId} turn={entry} client={client} spaceId={spaceId} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}{item.id === replyAnchor ? <LiveReply sessionId={sessionId} showStream={liveStream} processInRow={Boolean(sequenceTurns?.some((entry) => entry.id === streamTurnId))} availableWidth={listWidth || windowWidth} /> : null}</View>;
+  }, [client, forkMessage, forkingTurnId, handleCopyMessage, listWidth, measuredMessages, measurements, messages, liveStream, replyAnchor, queueTransitionActive, sendBubbleRef, sendTransition, sessionId, spaceId, streamTurnId, trace, trackRow, turnIndexBySequence, turnsById, turnsBySequence, windowWidth]);
 
   if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen edgeToEdge><EdgeHeader onLayout={onHeaderLayout}><TopBar transparent title={t("chat.title")} onBack={() => router.back()} /></EdgeHeader><View style={{ flex: 1, paddingTop: headerHeight }}><ChatThreadPlaceholder kind="opening" /></View></Screen>;
   return <Screen keyboard edgeToEdge>
@@ -886,32 +893,28 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           onRefresh={handleListRefresh}
           refreshing={view.refreshing}
           ListHeaderComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null}
-          ListFooterComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStreamReady && liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>}
+          ListFooterComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{messages.length === 0 ? <LiveReply sessionId={sessionId} showStream={liveStream} processInRow={false} availableWidth={listWidth || windowWidth} /> : null}</View>}
         /> : null}
         {threadPlaceholder ? <View pointerEvents="none" style={{ position: "absolute", top: headerHeight, right: 0, bottom: footerHeight, left: 0 }}><ChatThreadPlaceholder kind={threadPlaceholder} /></View> : null}
 
         {!followingTail ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.jumpLatest")} onPress={() => { cancelTurnScroll(); setFollowingTail(true); requestFollowTail(true); }} style={({ pressed }) => ({ position: "absolute", right: 16, bottom: footerHeight + 12, zIndex: 4, width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, borderWidth: 1, borderColor: theme.colors.border, shadowColor: theme.colors.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 5, elevation: 4 })}><AppIcon name="arrow-down" size={18} color={theme.colors.accent} /></Pressable> : null}
         </View>
         <EdgeFooter onLayout={onFooterLayout}>
-        {queuedFollowups.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6, gap: 6 }}>
-          <Text style={[typography.micro, { color: theme.colors.textMuted }]}>{t("chat.followups", { count: queuedFollowups.length })}</Text>
-          {queuedFollowups.map((turn) => {
-            const pending = pendingFollowupAction === turn.id;
-            const preview = followupPreviewText(turn);
-            return <View key={turn.id} style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 10, paddingLeft: 10, paddingRight: 6, paddingVertical: 5, backgroundColor: theme.colors.surface }}>
-              <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>{preview}</Text>
-              {pending ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <>
-                <Pressable accessibilityRole="button" accessibilityLabel={t("chat.steerAccessibility", { preview })} onPress={() => void runFollowupAction(turn.id, "steer")} hitSlop={6} style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.accentSoft })}><Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.steerNow")}</Text></Pressable>
-                <Pressable accessibilityRole="button" accessibilityLabel={t("chat.cancelFollowup", { preview })} onPress={() => void runFollowupAction(turn.id, "cancel")} hitSlop={6} style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}><Text style={[typography.caption, { color: theme.colors.textMuted }]}>{t("common.cancel")}</Text></Pressable>
-              </>}
-            </View>;
-          })}
+        {queueItems.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 6, gap: 6 }}>
+          <Text style={[typography.micro, { color: theme.colors.textMuted }]}>{t("chat.followups", { count: queueItems.length })}</Text>
+          <ScrollView ref={queueScrollRef} style={{ maxHeight: 180, flexGrow: 0 }} contentContainerStyle={{ gap: 6 }} keyboardShouldPersistTaps="handled" onContentSizeChange={() => { if (queueTransitionActive || queueItems.some((item) => item.turn === null)) queueScrollRef.current?.scrollToEnd({ animated: false }); }}>
+            {queueItems.map((item) => {
+              const turn = item.turn;
+              const inFlight = transitionQueueItem?.key === item.key;
+              return <QueuedFollowupRow key={item.key} preview={item.preview} pending={!turn || pendingFollowupAction === turn.id} hidden={inFlight} rowRef={inFlight ? sendQueueRef : undefined} onSteer={turn ? () => void runFollowupAction(turn.id, "steer") : undefined} onCancel={turn ? () => void runFollowupAction(turn.id, "cancel") : undefined} />;
+            })}
+          </ScrollView>
         </View> : null}
-        {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
+        {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, backgroundColor: theme.colors.background }}><View ref={attachmentSourceRef} collapsable={false} style={{ maxHeight: 136 }}><ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 7 }} keyboardShouldPersistTaps="handled" onScroll={(event) => { attachmentScrollYRef.current = event.nativeEvent.contentOffset.y; }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} uri={attachment.uri} mimeType={attachment.mimeType} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</ScrollView></View></View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
         <ComposerInput anchorRef={composerRef} measurementRef={composerMeasurementRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} sendFeedback={sendFeedback} value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? t("ui.composer.working") : t("ui.composer.placeholder")} />
         </EdgeFooter>
-        {sendTransition && transitionMessage ? <SendBubbleOverlay key={sendTransition.message.id} transition={sendTransition} message={transitionMessage} rootRef={sendRootRef} targetRef={sendBubbleRef} availableWidth={listWidth || windowWidth} spaceId={spaceId || null} onComplete={completeSendTransition} /> : null}
+        {sendTransition && transitionMessage && (sendTransition.destination === "bubble" || transitionQueueItem) ? <SendBubbleOverlay key={sendTransition.message.id} transition={sendTransition} message={transitionMessage} queueItem={transitionQueueItem} rootRef={sendRootRef} targetRef={queueTransitionActive ? sendQueueRef : sendBubbleRef} availableWidth={listWidth || windowWidth} spaceId={spaceId || null} onComplete={completeSendTransition} /> : null}
         {labelSheetOpen && client && session && spaceId ? <SessionLabelSheet client={client} spaceId={spaceId} session={session} labels={chatLabels} labelsError={null} onLabelsReload={() => { if (client && spaceId) void fetchSessionLabels(client, spaceId).then((tree) => setChatLabels(toUserSessionLabels(tree))).catch(() => undefined); }} onClose={() => setLabelSheetOpen(false)} onChanged={() => undefined} /> : null}
         {attachmentMenuOpen ? <AttachmentMenu anchorRef={composerRef} onClose={() => setAttachmentMenuOpen(false)} onCamera={() => void takePhoto()} onPhotos={() => void pickPhotos()} onFile={() => void pickAttachments()} /> : null}
         <TurnNavigatorSheet visible={turnNavigatorOpen} turns={view.turnIndex} currentSequence={currentTurnSequence} loading={view.turnIndexLoading} loadingSequence={loadingSequence} onClose={() => setTurnNavigatorOpen(false)} onJump={(sequence) => handleTurnJump(sequence)} onRetry={() => void loadTurnIndex(sessionId, { force: true }).catch(() => undefined)} />
@@ -946,8 +949,19 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
 function LiveTurnProcess({ sessionId, turn, client, spaceId }: { sessionId: string; turn: SessionTurnRecord; client: CohubClient | null; spaceId: string }) {
   const { state } = useApp();
   const stream = state.sessionViews[sessionId]?.stream ?? null;
-  if (stream?.turnId === turn.id) return <StreamingTurnProcess messages={stream.intermediateMessages} />;
+  if (stream?.turnId === turn.id && stream.intermediateMessages.length > 0) return <StreamingTurnProcess messages={stream.intermediateMessages} />;
   return <TurnProcess turn={turn} client={client} spaceId={spaceId} />;
+}
+
+function LiveReply({ sessionId, showStream, processInRow, availableWidth }: { sessionId: string; showStream: boolean; processInRow: boolean; availableWidth: number }) {
+  const { state } = useApp();
+  const view = state.sessionViews[sessionId];
+  const stream = view?.stream;
+  if (showStream && stream) return <View testID="chat-live-reply">
+    {!processInRow ? <StreamingTurnProcess messages={stream.intermediateMessages} /> : null}
+    <StreamCard content={stream.contentBlocks} status={stream.status} runtimePhase={stream.runtimePhase} runtimeModel={stream.runtimeModel} availableWidth={availableWidth} />
+  </View>;
+  return view?.sending && !view.messages.some(isOptimisticFollowup) ? <StreamCard content={[]} status="pending" availableWidth={availableWidth} /> : null;
 }
 
 function ChatThreadPlaceholder({ kind }: { kind: "opening" | "empty" }) {

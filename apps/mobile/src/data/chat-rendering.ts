@@ -1,4 +1,15 @@
+import type { MessageRecord } from "@neta-art/cohub";
+
 export type MeasuredMessage = { id: string; revision: string };
+
+/** Keep a growing reply in its user's normal-flow row, not a separately positioned footer.
+ * Before that turn's history arrives, the live reply remains after the loaded tail. */
+export function liveReplyAnchor(messages: readonly MessageRecord[], turnId: string | null): string | null {
+  const owner = turnId === null
+    ? messages.findLast((message) => message.role === "user" && message.meta?.optimistic === true)
+    : messages.find((message) => message.role === "user" && message.meta?.turnId === turnId);
+  return (owner ?? messages.at(-1))?.id ?? null;
+}
 
 // Estimates are only for scroll recovery, never FlatList's exact getItemLayout contract.
 export class MessageMeasurements {

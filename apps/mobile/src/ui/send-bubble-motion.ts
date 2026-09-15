@@ -1,8 +1,9 @@
 import type { MessageRecord } from "@neta-art/cohub";
+import type { AttachmentDraft } from "@/src/data/types";
 
 export type SendBubbleRect = { x: number; y: number; width: number; height: number };
 export type SendBubbleSource = SendBubbleRect & { scrollY: number };
-export type SendBubbleTransition = { message: MessageRecord; text: string; source: SendBubbleSource };
+export type SendBubbleTransition = { message: MessageRecord; text: string; attachments: AttachmentDraft[]; source: SendBubbleSource; destination: "bubble" | "queue" };
 
 type Measurable = {
   measureInWindow: (callback: (x: number, y: number, width: number, height: number) => void) => void;

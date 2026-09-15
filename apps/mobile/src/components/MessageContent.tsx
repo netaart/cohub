@@ -162,9 +162,11 @@ function GalleryThumbnail({ uri, index, total, size, onOpen }: { uri: string; in
 function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number }) {
   const { width } = useWindowDimensions();
   const galleryWidth = maxWidth ?? width;
-  const thumbnailWidth = Math.min(164, Math.max(124, Math.min(width * 0.42, galleryWidth)));
+  const thumbnailWidth = Math.max(0, Math.min(164, width * 0.42, galleryWidth));
 
   const galleryGesture = useMemo(() => Gesture.Native().disallowInterruption(true), []);
+
+  if (uris.length === 1) return <GalleryThumbnail uri={uris[0]!} index={0} total={1} size={thumbnailWidth} onOpen={() => setImageViewerPayload({ uris, index: 0 })} />;
 
   return (
     <GestureDetector gesture={galleryGesture}>

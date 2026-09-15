@@ -4,7 +4,7 @@ import { mock } from "node:test";
 import ts from "typescript";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { ChatScrollTrace, setDebugTraceSink } from "../src/data/chat-scroll-trace.ts";
-import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
+import { MessageMeasurements, createStreamBatch, liveReplyAnchor } from "../src/data/chat-rendering.ts";
 import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, isChatRowVisible, nextChatTailFollowing } from "../src/data/chat-scroll.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
@@ -25,7 +25,7 @@ import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/sessio
 import { selectSpaceList, recentSpaceVisits, SPACE_VISIT_MAX_AGE_MS } from "../src/data/space-list.ts";
 import { createSessionLifecycle } from "../src/data/session-lifecycle.ts";
 import { DEFAULT_SESSION_FILTER_MINUTES, getSessionStatus, hasMoreRecentSessions, isSessionInFilterWindow, latestTurn, loadSessionLatestTurns, parseSessionFilterMinutes, reconcileLatestTurn, reconcileTurnStatusPatch, sessionFilterCutoff, sessionPageState } from "../src/data/session-status.ts";
-import { followupPreviewText, queuedFollowupTurns } from "../src/data/followup-queue.ts";
+import { followupPreviewText, queuedFollowupTurns, followupQueueItems, isOptimisticFollowup, isSendQueueItem, shouldQueueFollowup } from "../src/data/followup-queue.ts";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
 import { StreamingCodeTokenizer } from "../src/data/code-highlight-stream.ts";
@@ -980,7 +980,7 @@ let stateSyncHook;
 let timeoutSource;
 const sessionCallbacks = {};
 function inspectPagination(node) {
-  if (ts.isVariableDeclaration(node) && ["openSession", "closeSession", "loadSession", "releaseSession"].includes(node.name.getText(contextSource))) {
+  if (ts.isVariableDeclaration(node) && ["openSession", "closeSession", "loadSession", "releaseSession", "sendMessage"].includes(node.name.getText(contextSource))) {
     const callback = node.initializer;
     if (ts.isCallExpression(callback) && callback.expression.getText(contextSource) === "useCallback") sessionCallbacks[node.name.getText(contextSource)] = callback.arguments[0].getText(contextSource);
   }
@@ -1665,8 +1665,79 @@ assert.deepEqual(await measureSendBubbleSource({ measureInWindow: (callback) => 
 const sentMessage = { id: "local", sessionId: "session", role: "user", meta: { clientMessageId: "same" } };
 assert.equal(isSendBubbleMessage({ ...sentMessage, id: "server", meta: { clientMessageId: "same" } }, sentMessage), true);
 assert.ok(motion.sendBubble.duration < 500, "send bubble handoff stays within a short interaction window");
+const renderSendOverlay = loadChromeComponent("../src/components/SendBubbleOverlay.tsx", "SendBubbleOverlay", {
+  ...chromeScope,
+  useAppTheme: () => ({ radius: { lg: 18 }, colors: {} }),
+  Animated: { View: "AnimatedView" }, MessageBubble: "MessageBubble", QueuedFollowupRow: "QueuedFollowupRow", AttachmentChip: "AttachmentChip",
+  useAnimatedRef: () => ({ current: null }), useSharedValue: (value) => ({ get: () => value }),
+  useEffect: () => {}, useFrameCallback: () => {}, useAnimatedStyle: (callback) => callback(),
+  interpolateSendBubbleRect, getBubbleMaxWidth, interpolate: () => 0, interpolateColor: () => "color", Extrapolation: { CLAMP: "clamp" },
+});
+for (const destination of ["bubble", "queue"]) {
+  for (const attachments of [[], [{ uri: "file:///photo.png", name: "photo.png", mimeType: "image/png", size: 20 }], [{ uri: "file:///file.pdf", name: "file.pdf", mimeType: "application/pdf", size: 30 }]]) {
+    const overlay = renderSendOverlay({
+      transition: { message: sentMessage, text: attachments.length ? "" : "Hello", attachments, source: { ...sendRect, scrollY: 0 }, destination },
+      message: sentMessage, queueItem: destination === "queue" ? { preview: "Queued", turn: null } : null,
+      rootRef: {}, targetRef: {}, availableWidth: 390, spaceId: "space", onComplete: () => {},
+    });
+    const nodes = chromeNodes(overlay);
+    assert.equal(nodes.filter((node) => node.type === "MessageBubble").length, destination === "bubble" ? 1 : 0, "queue animations must never render a bubble copy");
+    assert.equal(nodes.filter((node) => node.type === "QueuedFollowupRow").length, destination === "queue" ? 1 : 0);
+    assert.equal(nodes.filter((node) => node.type === "AttachmentChip").length, attachments.length, "attachment sources keep their visible file/image previews");
+  }
+}
 assert.ok(CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD >= 1, "a streamed card can grow more than 10% of the screen in one layout");
 const chatSource = readFileSync(new URL("../app/chat/[sessionId].tsx", import.meta.url), "utf8");
+const runningRowMessages = [
+  { id: "user-a", role: "user", meta: { turnId: "turn-a", turnSequence: 1 } },
+  { id: "queued-b", role: "user", meta: { optimistic: true, turnSequence: 2 } },
+];
+assert.equal(liveReplyAnchor(runningRowMessages, "turn-a"), "user-a", "a queued send must not take ownership of the running turn's reply");
+assert.equal(liveReplyAnchor(runningRowMessages, null), "queued-b", "a send without a turn id follows its optimistic user row");
+assert.equal(liveReplyAnchor([], "turn-a"), null);
+assert.equal(liveReplyAnchor(runningRowMessages, "not-yet-loaded"), "queued-b", "unloaded history retains the live reply at the loaded tail");
+
+// Execute the production renderItem: the reply must be a normal-flow sibling of
+// the user bubble inside the SAME measured row, including after tool expansion.
+const chatAst = ts.createSourceFile("chat.tsx", chatSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let renderMessageSource;
+function findChatRender(node) {
+  if (ts.isVariableDeclaration(node) && node.name.getText(chatAst) === "renderMessage") renderMessageSource = node.initializer.arguments[0].getText(chatAst);
+  ts.forEachChild(node, findChatRender);
+}
+findChatRender(chatAst);
+const liveRowScope = {
+  ...chromeScope, messages: runningRowMessages, sendTransition: null, replyAnchor: "user-a", liveStream: true,
+  turnSequenceForMessage: (message) => message.meta?.turnSequence ?? null,
+  turnIndexBySequence: new Map(), turnsById: new Map(), turnsBySequence: new Map(),
+  chatScrollTrace: { isRecording: () => false }, trackRow: () => {},
+  MessageBubble: "MessageBubble", TurnMarker: "TurnMarker", LiveReply: "LiveReply",
+  listWidth: 390, windowWidth: 390, sessionId: "fixture", spaceId: "space", streamTurnId: "turn-a",
+  handleCopyMessage: () => {}, forkMessage: () => {}, forkingTurnId: null,
+};
+const renderLiveRow = new Function(...Object.keys(liveRowScope), ts.transpileModule(`return (${renderMessageSource});`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText)(...Object.values(liveRowScope));
+const ownerRow = renderLiveRow({ item: runningRowMessages[0], index: 0 });
+assert.equal(ownerRow.type, "View");
+assert.equal(typeof ownerRow.props.onLayout, "function");
+assert.deepEqual(ownerRow.props.children.filter((child) => child?.type === "MessageBubble" || child?.type === "LiveReply").map((child) => child.type), ["MessageBubble", "LiveReply"]);
+assert.equal(chromeNodes(renderLiveRow({ item: runningRowMessages[1], index: 1 })).filter((node) => node.type === "LiveReply").length, 0);
+const liveView = { stream: { turnId: "turn", intermediateMessages: [] }, sending: false, messages: [] };
+const renderLiveReply = loadChromeComponent("../app/chat/[sessionId].tsx", "LiveReply", {
+  ...chromeScope, useApp: () => ({ state: { sessionViews: { fixture: liveView } } }),
+  StreamingTurnProcess: "StreamingTurnProcess", StreamCard: "StreamCard", isOptimisticFollowup,
+});
+assert.equal(chromeNodes(renderLiveReply({ sessionId: "fixture", showStream: true, processInRow: true, availableWidth: 390 })).filter((node) => node.type === "StreamCard").length, 1);
+assert.equal(renderLiveReply({ sessionId: "fixture", showStream: false, processInRow: true, availableWidth: 390 }), null, "completed replies leave no stale live duplicate");
+liveView.sending = true;
+assert.equal(renderLiveReply({ sessionId: "fixture", showStream: false, processInRow: false, availableWidth: 390 }).props.status, "pending");
+const renderLiveProcess = loadChromeComponent("../app/chat/[sessionId].tsx", "LiveTurnProcess", {
+  ...chromeScope,
+  useApp: () => ({ state: { sessionViews: { fixture: { stream: { turnId: "turn", intermediateMessages: [] } } } } }),
+  StreamingTurnProcess: "StreamingTurnProcess", TurnProcess: "TurnProcess",
+});
+const pendingProcess = renderLiveProcess({ sessionId: "fixture", turn: { id: "turn", intermediateSummary: { messageCount: 4, toolCallCount: 4 } }, client: null, spaceId: "space" });
+assert.equal(pendingProcess.type, "TurnProcess", "reconnecting with an empty stream must not remove the cached execution summary and collapse its row");
+assert.ok(!chatSource.includes('traceEnd("initial.latest"'), "Legend initialScrollAtEnd owns initial placement, without a competing app scroll");
 assert.ok(!chatSource.includes("transition_cleanup_scheduled"), "animation completion, not a click-time timer, owns handoff");
 assert.ok(!chatSource.includes("Keyboard.dismiss()"), "sending keeps the keyboard open");
 assert.ok(chatSource.includes("hidden={isTransitionMessage}"), "the list reserves geometry without displaying a duplicate bubble");
@@ -1748,6 +1819,67 @@ assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 124, sha256: 
 assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sha256: "b".repeat(64) }), /verification/);
 
 const queuedFollowup = (id, sequence, overrides = {}) => ({ id, sequence, status: "queued", intent: "followup", userText: `Follow-up ${id}`, createdAt: "2026-09-01T00:00:00.000Z", ...overrides });
+const activeQueueTurn = queuedFollowup("active", 1, { status: "running" });
+assert.equal(shouldQueueFollowup([activeQueueTurn], null), true);
+assert.equal(shouldQueueFollowup([], { status: "streaming" }), true);
+assert.equal(shouldQueueFollowup([], { status: "pending" }), true);
+assert.equal(shouldQueueFollowup([queuedFollowup("finished", 1, { status: "completed" })], { status: "completed" }), false);
+const photoDraft = { uri: "file:///photo.png", name: "photo.png", mimeType: "image/png", size: 20 };
+const fileDraft = { uri: "file:///report.pdf", name: "report.pdf", mimeType: "application/pdf", size: 30 };
+for (const busy of [false, true]) {
+  for (const [text, attachments] of [["Hello", []], ["", [photoDraft]], ["", [fileDraft]], ["Review these", [photoDraft, fileDraft]]]) {
+    const actions = [];
+    const uploads = Promise.withResolvers();
+    let optimistic;
+    const turns = busy ? [activeQueueTurn] : [];
+    const sendScope = {
+      stateRef: { current: { sessionViews: { fixture: { session: { spaceId: "space" }, turns, messages: [], stream: null } } } },
+      client: { space: () => ({ prompt: async () => ({ mode: "immediate", turn: queuedFollowup("accepted", busy ? 2 : 1, { status: busy ? "queued" : "running", meta: { clientMessageId: "client" } }) }) }) },
+      translate: (key) => key, newId: () => "client", nextTurnSequence,
+      optimisticMessageSequenceRef: { current: new Map() }, userUuid: "user", userKey: "user",
+      shouldQueueFollowup, recordDebugEvent: () => {}, dispatch: (action) => actions.push(action), saveMessages: async () => {},
+      buildPromptContent: () => uploads.promise, withFallbackUserContent: (turn) => turn,
+    };
+    const send = new Function(...Object.keys(sendScope), ts.transpileModule(`return (${sessionCallbacks.sendMessage});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(sendScope));
+    const request = send("fixture", text, attachments, { onOptimistic: (message) => { optimistic = message; } });
+    assert.ok(optimistic, "the animation destination exists before uploads complete");
+    assert.equal(isOptimisticFollowup(optimistic), busy);
+    assert.equal(optimistic.content.filter((block) => block.type === "image").length, attachments.filter((file) => file.mimeType.startsWith("image/")).length);
+    if (attachments.includes(fileDraft)) assert.ok(optimistic.content.some((block) => block.type === "text" && block.text.includes("report.pdf")), "files stay visible even with a text caption");
+    const localQueue = followupQueueItems(turns, busy ? "active" : null, [optimistic]);
+    assert.equal(localQueue.length, busy ? 1 : 0, "queued uploads render as queue items; idle uploads render as messages");
+    if (busy) {
+      assert.equal(isSendQueueItem(localQueue[0], optimistic), true);
+      assert.equal(isSendQueueItem({ ...localQueue[0], clientMessageId: "other" }, optimistic), false);
+      assert.equal(localQueue[0].turn, null);
+    }
+    uploads.resolve(optimistic.content);
+    await request;
+    const accepted = actions.find((action) => action.type === "turn-upsert").turn;
+    const acceptedQueue = followupQueueItems([...turns, accepted], busy ? "active" : accepted.id, [optimistic]);
+    assert.equal(acceptedQueue.length, busy ? 1 : 0, "acceptance replaces the optimistic queue item, never duplicates it");
+    if (busy) {
+      assert.equal(isSendQueueItem(acceptedQueue[0], optimistic), true);
+      assert.equal(followupQueueItems([{ ...activeQueueTurn, status: "completed" }, { ...accepted, status: "running" }], accepted.id, [optimistic]).length, 0, "a started turn leaves the queue even if an optimistic snapshot is still present");
+    }
+  }
+}
+const reducerFunction = contextSource.statements.find((statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === "reducer");
+const reduceQueueFailure = new Function("isOptimisticFollowup", "recordDebugEvent", "updateView", ts.transpileModule(`${reducerFunction.getText(contextSource)}; return reducer;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(isOptimisticFollowup, () => {}, (state, id, patch) => ({ ...state, sessionViews: { ...state.sessionViews, [id]: { ...state.sessionViews[id], ...patch } } }));
+const failedQueuedMessage = { id: "upload", role: "user", meta: { optimistic: true, queuedFollowup: true, clientMessageId: "failed" } };
+const queueFailure = reduceQueueFailure({ sessionViews: { fixture: { messages: [failedQueuedMessage] } } }, { type: "send-failed", sessionId: "fixture", clientMessageId: "failed", message: "Upload failed" });
+assert.deepEqual(queueFailure.sessionViews.fixture.messages, [], "failed queued uploads return to the composer, not a failed message bubble");
+const cachedSends = [];
+const saveQueueMessages = loadChromeComponent("../src/data/local-db.ts", "saveMessages", {
+  isOptimisticFollowup,
+  database: async () => ({
+    withTransactionAsync: async (action) => action(),
+    prepareAsync: async () => ({ executeAsync: async (...args) => cachedSends.push(args), finalizeAsync: async () => {} }),
+  }),
+});
+await saveQueueMessages("user", "fixture", [failedQueuedMessage, { id: "accepted", role: "user", meta: { clientMessageId: "accepted" } }]);
+assert.deepEqual(cachedSends.map((args) => args[2]), ["accepted"], "unaccepted queue placeholders must not survive a restart as cached messages");
+assert.equal(followupPreviewText({ userText: null, userContent: [{ type: "image", _meta: { filename: "photo.png" } }] }), "photo.png");
 assert.deepEqual(
   queuedFollowupTurns([
     { id: "running", sequence: 2, status: "running", intent: "followup", userText: "now", createdAt: "2026-09-01T00:00:00.000Z" },
@@ -1859,6 +1991,7 @@ const cacheDatabase = {
   },
 };
 new Function("require", "exports", localDbSource)((name) => {
+  if (name === "./followup-queue") return { isOptimisticFollowup };
   assert.equal(name, "expo-sqlite");
   return { openDatabaseAsync: async () => { databaseOpens += 1; return cacheDatabase; } };
 }, cacheModule);

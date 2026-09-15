@@ -1,5 +1,6 @@
 import { openDatabaseAsync, type SQLiteDatabase } from "expo-sqlite";
 import type { MessageRecord, SpaceRecord, UserSessionListItem } from "@neta-art/cohub";
+import { isOptimisticFollowup } from "./followup-queue";
 
 export type CachedHome = {
   spaces: SpaceRecord[];
@@ -205,6 +206,8 @@ export async function saveMessages(userKey: string, sessionId: string, messages:
     );
     try {
       for (const message of messages) {
+        // An unaccepted upload is a transient queue placeholder, not resumable server work.
+        if (isOptimisticFollowup(message)) continue;
         const meta = message.meta ? { ...message.meta } : null;
         if (meta) delete meta._mobileLive;
         const persistable = { ...message, meta };

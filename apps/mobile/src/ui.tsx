@@ -288,9 +288,14 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
   );
 }
 
-export function AttachmentChip({ name, onRemove }: { name: string; onRemove: () => void }) {
+export function AttachmentChip({ name, uri, mimeType, onRemove }: { name: string; uri?: string; mimeType?: string; onRemove?: () => void }) {
   const theme = useAppTheme();
-  return <View style={[styles.attachmentChip, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}><AppIcon name="file-text" size={15} color={theme.colors.accent} /><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>{name}</Text><Pressable onPress={onRemove} hitSlop={8}><AppIcon name="x" size={15} color={theme.colors.textMuted} /></Pressable></View>;
+  const { t } = useTranslation();
+  return <View style={[styles.attachmentChip, { minHeight: 44, backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}>
+    {uri && mimeType?.startsWith("image/") ? <Image source={{ uri }} resizeMode="cover" style={{ width: 30, height: 30, borderRadius: 5 }} /> : <AppIcon name="file-text" size={20} color={theme.colors.accent} />}
+    <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flex: 1, minWidth: 0 }]}>{name}</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={`${t("common.remove")}: ${name}`} disabled={!onRemove} onPress={onRemove} hitSlop={8}><AppIcon name="x" size={15} color={theme.colors.textMuted} /></Pressable>
+  </View>;
 }
 
 export function ConnectionBanner({ state }: { state: ConnectionState }) {

@@ -45,6 +45,7 @@ import type {
 import { hasFinalAssistantForTurn, isActiveTurnStatus, isTerminalTurnStatus, liveStreamStatusFromPatch, pendingStreamForTurn, streamRecoveryFromTail } from "@/src/data/chat-stream";
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, turnSequenceForMessage, withFallbackUserContent } from "@/src/data/session-history";
 import { forkSessionTurn } from "@/src/data/session-fork";
+import { isOptimisticFollowup, shouldQueueFollowup } from "@/src/data/followup-queue";
 import { createSessionLifecycle } from "@/src/data/session-lifecycle";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
@@ -625,7 +626,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "send-failed": {
       recordDebugEvent("chat.send.failed");
       const view = state.sessionViews[action.sessionId] ?? emptyView();
-      const messages = view.messages.map((message) => {
+      const messages = view.messages.filter((message) => !(isOptimisticFollowup(message) && message.meta?.clientMessageId === action.clientMessageId)).map((message) => {
         if (message.meta?.clientMessageId !== action.clientMessageId) return message;
         const meta = { ...(message.meta ?? {}) };
         delete meta.optimistic;
@@ -1578,7 +1579,7 @@ export function AppProvider({
             source: { type: "url" as const, url: item.uri },
             _meta: { filename: item.name, mediaType: item.mimeType, size: item.size },
           })),
-          ...(!text && attachments.some((item) => !item.mimeType.startsWith("image/")) ? [{ type: "text" as const, text: optimisticText }] : []),
+          ...attachments.filter((item) => !item.mimeType.startsWith("image/")).map((item) => ({ type: "text" as const, text: `Attached file: ${item.name}` })),
         ],
         text: optimisticText,
         sequence: turnSequence * 2 - 1,
@@ -1587,7 +1588,7 @@ export function AppProvider({
         stopReason: null,
         errorMessage: null,
         usage: null,
-        meta: { optimistic: true, clientMessageId, turnSequence, ...(options.model?.thinkingLevel ? { requestedThinkingLevel: options.model.thinkingLevel } : {}) },
+        meta: { optimistic: true, queuedFollowup: shouldQueueFollowup(view?.turns ?? [], view?.stream), clientMessageId, turnSequence, ...(options.model?.thinkingLevel ? { requestedThinkingLevel: options.model.thinkingLevel } : {}) },
         authorUuid: userUuid,
         authorProfile: null,
         startedAt: null,
