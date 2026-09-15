@@ -2,4 +2,4 @@
 "@neta-art/cohub": patch
 ---
 
-`GET /api/me/sessions?source=…` now matches channel sources the way the label normalizer attributes them. Channel sessions are stored as `feishu:oc_…`, `qq:c2c:…` or `channel:feishu`, but the filter compared the raw column against the bare kind, so every Feishu/WeChat/Discord/QQ chat was missing from its own filter and leaked into `other` instead.
+`GET /api/me/sessions?source=…` now filters by each session's source **system label** instead of the raw `space_sessions.source` string. Channel sessions are stored as `feishu:dm:…` or `channel:feishu`, so matching the raw column dropped every Feishu/WeChat/Discord/QQ chat from its own filter and leaked it into `other`; labels carry the attribution the normalizer already made at creation, so this fixes every provider at once and matches what a space sidebar shows.

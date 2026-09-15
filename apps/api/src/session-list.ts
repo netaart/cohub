@@ -1,4 +1,4 @@
-import { resolveSessionSourceKey, SESSION_SOURCE_KEYS } from "@cohub/core/labels/session-source";
+import { SESSION_SOURCE_KEYS } from "@cohub/core/labels/session-source";
 
 export const DEFAULT_SESSION_LIST_LIMIT = 20;
 export const MAX_SESSION_LIST_LIMIT = 100;
@@ -61,9 +61,6 @@ export class InvalidSessionSourceFilterError extends Error {
 
 /** Local resolution used for `other`, which has no raw source value of its own. */
 export const isOtherSessionSource = (key: string) => key === "other";
-
-/** Maps a raw source back to its kind; mirrors the label vocabulary. */
-export const sessionSourceKeyOf = (source: string | null | undefined) => resolveSessionSourceKey(source);
 
 
 export const encodeSessionListCursor = (

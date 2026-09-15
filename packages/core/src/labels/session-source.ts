@@ -76,64 +76,6 @@ export function resolveSessionSourceKey(source: string | null | undefined): stri
   return (channelRef && SOURCE_LABEL_REF_TO_KEY.get(channelRef)) || "other";
 }
 
-/** Raw `space_sessions.source` values a kind matches, excluding the null case. */
-export function sessionSourceRawValues(sourceKey: string): string[] {
-  return Object.keys(SOURCE_LABELS).filter((key) => {
-    const ref = SOURCE_LABELS[key];
-    return ref !== undefined && (SOURCE_LABEL_REF_TO_KEY.get(ref) ?? "other") === sourceKey;
-  });
-}
-
-/**
- * The spellings a source kind is written as in `space_sessions.source`.
- * Callers that filter in SQL mirror `sessionSourceMatchesKey` with these, so
- * stored values like `feishu:oc_…` are matched the same way the label
- * normalizer attributes them.
- */
-export type SessionSourceMatchSpec = {
-  /** Full spellings: `web`, `web_app`, `feishu`, `scheduled_task`. */
-  exact: readonly string[];
-  /** Channel-command spellings: `channel:feishu`, `channel_feishu`. */
-  channel: readonly string[];
-  /** Whether a null source belongs here (legacy web rows). */
-  nullSource: boolean;
-};
-
-export function sessionSourceMatchSpec(sourceKey: string): SessionSourceMatchSpec {
-  const exact = sessionSourceRawValues(sourceKey);
-  return {
-    exact,
-    channel: exact.flatMap((value) => [`channel:${value}`, `channel_${value}`]),
-    nullSource: sourceKey === "web",
-  };
-}
-
-/**
- * In-memory counterpart of the SQL source predicate, so a test can pin the two
- * together and they cannot drift. Values are compared as stored (trimmed,
- * lowercased); `resolveSessionSourceKey` additionally folds spaces and hyphens
- * to underscores, which only matters for hand-written non-canonical values.
- */
-export function sessionSourceMatchesKey(
-  source: string | null | undefined,
-  sourceKey: string,
-): boolean {
-  if (sourceKey === "other") {
-    const value = source == null ? "" : source.trim().toLowerCase();
-    if (!value) return false;
-    return !SESSION_SOURCE_KEYS.some(
-      (key) => key !== "other" && sessionSourceMatchesKey(source, key),
-    );
-  }
-  const spec = sessionSourceMatchSpec(sourceKey);
-  if (source == null) return spec.nullSource;
-  const value = source.trim().toLowerCase();
-  if (!value) return spec.nullSource;
-  if (spec.exact.includes(value) || spec.channel.includes(value)) return true;
-  const head = value.split(":")[0] ?? "";
-  return spec.exact.includes(head);
-}
-
 /** Selectable kinds, vocabulary order with `other` last. */
 export const SESSION_SOURCE_KEYS: readonly string[] = [
   ...new Set(Object.keys(SOURCE_LABELS).map(resolveSessionSourceKey)),

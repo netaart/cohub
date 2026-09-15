@@ -1,54 +1,41 @@
-import {
-  sessionSourceMatchSpec,
-  SESSION_SOURCE_KEYS,
-} from "@cohub/core/labels/session-source";
-import { spaceSessions } from "@cohub/db";
-import { and, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm";
-import type { AnyColumn, SQL } from "drizzle-orm";
+import { getSessionSourceLabelSystemKey } from "@cohub/core/labels/session-source";
+import { labelAssignments, labels, spaceSessions } from "@cohub/db";
+import { or, sql, type SQL } from "drizzle-orm";
 import type { SessionSourceFilter } from "./session-list.js";
 
-function lowerIn(column: SQL | AnyColumn, values: readonly string[]) {
-  if (values.length === 0) return undefined;
-  return inArray(sql`lower(${column})`, [...values]);
+/**
+ * Sessions are filtered by their source **system label**, not by the raw
+ * `space_sessions.source` string.
+ *
+ * Labels are the attribution that is actually correct: they are assigned
+ * provider-aware at creation (`assignSessionSourceSystemLabel`), they are what
+ * the space sidebar shows, and they survive the `source` column being retired.
+ * Matching the raw string meant re-deriving that attribution in SQL — channel
+ * sessions are stored as `feishu:dm:…` / `channel:feishu`, so an exact match on
+ * the kind dropped them, and `other` claimed them in the same breath.
+ *
+ * Probes `(scope, resourceType, resourceRef)` on label_assignments, which
+ * `v2_idx_label_assignments_scope_resource` covers, then the label by primary
+ * key. Sessions with no source label match no kind and only appear under "All".
+ */
+export function sessionSourceKindCondition(key: string): SQL {
+  const systemKey = getSessionSourceLabelSystemKey(key);
+  return sql`exists (
+    select 1 from ${labelAssignments}
+    inner join ${labels} on ${labels.id} = ${labelAssignments.labelId}
+    where ${labelAssignments.scopeType} = 'space'
+      and ${labelAssignments.scopeId} = ${spaceSessions.spaceId}::text
+      and ${labelAssignments.resourceType} = 'session'
+      and ${labelAssignments.resourceRef} = ${spaceSessions.id}::text
+      and ${labels.systemKey} = ${systemKey}
+  )`;
 }
 
-/**
- * SQL predicate for one source kind. Must stay aligned with
- * `sessionSourceMatchesKey`, which a test pins it against. A stored source is
- * attributed the same way the label normalizer does it:
- *   - full spellings: `web`, `web_app`, `feishu`
- *   - channel command spellings: `channel:feishu`, `channel_feishu`
- *   - `<kind>:<payload>`: `feishu:oc_…`, `qq:c2c:…` (head segment)
- * A null source is a legacy web row.
- */
-export function sessionSourceKindCondition(key: string): SQL | undefined {
-  const spec = sessionSourceMatchSpec(key);
-  return or(
-    lowerIn(spaceSessions.source, [...spec.exact, ...spec.channel]),
-    lowerIn(sql`split_part(${spaceSessions.source}, ':', 1)`, spec.exact),
-    spec.nullSource ? isNull(spaceSessions.source) : undefined,
-  );
-}
-
-const knownSourceCondition = () =>
-  or(
-    ...SESSION_SOURCE_KEYS.filter((key) => key !== "other").map((key) =>
-      sessionSourceKindCondition(key),
-    ),
-  ) as SQL;
-
-/**
- * SQL predicate for `?source=`. Unknown kinds cannot reach here: the route
- * validates keys against `SESSION_SOURCE_KEYS` first.
- */
+/** SQL predicate for `?source=`. Unknown kinds are rejected by the route first. */
 export function sessionListSourceCondition(
   source: SessionSourceFilter | null,
 ): SQL | undefined {
   if (!source || source.keys.length === 0) return undefined;
-  const clauses = source.keys.map((key) =>
-    key === "other"
-      ? and(isNotNull(spaceSessions.source), not(knownSourceCondition()))
-      : sessionSourceKindCondition(key),
-  );
+  const clauses = source.keys.map((key) => sessionSourceKindCondition(key));
   return clauses.length === 1 ? clauses[0] : or(...clauses);
 }

@@ -6,42 +6,7 @@ import {
   resolveSessionSourceKey,
   resolveSessionSourceLabelRef,
   SESSION_SOURCE_KEYS,
-  sessionSourceMatchSpec,
-  sessionSourceMatchesKey,
-  sessionSourceRawValues,
 } from "./session-source.js";
-
-/**
- * Values as the writers in apps/api and apps/gateway store them, plus the
- * hand-written odds. Channel entries mirror each provider's sourceChannel
- * builder (dm / group / guild variants).
- */
-const SOURCE_CORPUS: Array<string | null> = [
-  null,
-  "web",
-  "web_app",
-  "WEB",
-  "feishu",
-  "feishu:oc_abc123",
-  "feishu:dm:alice",
-  "feishu:group:eng",
-  "channel:feishu",
-  "channel_feishu",
-  "qq:dm:openid",
-  "qq:group:gid",
-  "qq:guild:chan",
-  "qq:c2c:12345",
-  "wechat:dm:user-1",
-  "discord:dm:bob",
-  "discord:Acme:#general",
-  "scheduled_task",
-  "space_hook",
-  "cli",
-  "public_api",
-  "websocket",
-  "mystery",
-  "channel:feishu:oc_abc",
-];
 
 test("resolveSessionSourceLabelRef maps known channel providers", () => {
   assert.equal(resolveSessionSourceLabelRef({ provider: "qq" }), "Source/QQ");
@@ -88,11 +53,6 @@ test("resolveSessionSourceKey collapses label aliases and defaults null to web",
   assert.equal(resolveSessionSourceKey("mystery"), "other");
 });
 
-test("sessionSourceRawValues returns every raw alias of a kind", () => {
-  assert.deepEqual(new Set(sessionSourceRawValues("web")), new Set(["web", "web_app"]));
-  assert.deepEqual(sessionSourceRawValues("qq"), ["qq"]);
-  assert.deepEqual(sessionSourceRawValues("other"), []);
-});
 
 test("SESSION_SOURCE_KEYS lists each kind once, other last", () => {
   assert.equal(SESSION_SOURCE_KEYS.at(-1), "other");
@@ -123,37 +83,3 @@ test("SESSION_SOURCE_KEYS covers the non-channel kinds and the real providers", 
   assert.equal(SESSION_SOURCE_KEYS.length, 7 + chatProviders.length);
 });
 
-// The SQL predicate in apps/api is generated from sessionSourceMatchSpec and is
-// pinned to this matcher. If they ever disagree with resolveSessionSourceKey, the
-// inbox filter silently drops chats the sidebar still shows.
-test("sessionSourceMatchesKey agrees with resolveSessionSourceKey", () => {
-  for (const raw of SOURCE_CORPUS) {
-    const expected = resolveSessionSourceKey(raw);
-    const matched = SESSION_SOURCE_KEYS.filter((key) =>
-      sessionSourceMatchesKey(raw, key),
-    );
-    assert.deepEqual(
-      matched,
-      [expected],
-      `source ${JSON.stringify(raw)} should match only ${expected}`,
-    );
-  }
-});
-
-test("sessionSourceMatchSpec lists every spelling of a kind", () => {
-  assert.deepEqual(sessionSourceMatchSpec("feishu"), {
-    exact: ["feishu"],
-    channel: ["channel:feishu", "channel_feishu"],
-    nullSource: false,
-  });
-  assert.deepEqual(sessionSourceMatchSpec("web"), {
-    exact: ["web", "web_app"],
-    channel: ["channel:web", "channel_web", "channel:web_app", "channel_web_app"],
-    nullSource: true,
-  });
-  assert.deepEqual(sessionSourceMatchSpec("other"), {
-    exact: [],
-    channel: [],
-    nullSource: false,
-  });
-});

@@ -58,7 +58,6 @@ export {
   MAX_SESSION_LIST_LIMIT,
   mergeUserSessionListBranches,
   parseSessionSourceKeys,
-  sessionSourceKeyOf,
   type SessionSourceFilter,
 } from "./session-list.js";
 

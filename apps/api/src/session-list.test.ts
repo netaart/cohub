@@ -8,7 +8,6 @@ import {
   mergeUserSessionListBranches,
   parseSessionSourceKeys,
   pickSessionsPreservingOrder,
-  sessionSourceKeyOf,
 } from "./session-list.js";
 
 const session = (id: string, lastMessageAt: string | null) => ({
@@ -185,13 +184,3 @@ describe("parseSessionSourceKeys", () => {
   });
 });
 
-describe("sessionSourceKeyOf", () => {
-  it("maps raw sources by kind, mapping null to web", () => {
-    assert.strictEqual(sessionSourceKeyOf(null), "web");
-    assert.strictEqual(sessionSourceKeyOf("web"), "web");
-    assert.strictEqual(sessionSourceKeyOf("web_app"), "web");
-    assert.strictEqual(sessionSourceKeyOf("scheduled_task"), "scheduled_task");
-    assert.strictEqual(sessionSourceKeyOf("qq:c2c:1"), "qq");
-    assert.strictEqual(sessionSourceKeyOf("mystery"), "other");
-  });
-});
