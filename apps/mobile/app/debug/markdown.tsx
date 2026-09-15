@@ -1,4 +1,5 @@
 import type { MessageRecord } from "@neta-art/cohub";
+import { EnrichedMarkdownText } from "react-native-enriched-markdown";
 import { ScrollView, Text, View } from "react-native";
 import { MessageBubble } from "@/src/components/MessageContent";
 import { typography, useAppTheme } from "@/src/theme";
@@ -43,6 +44,10 @@ def greet(name: str) -> str:
 
 结束段落。`;
 
+const RAW_MARKDOWN = `裸组件对照：长按这段应当能选中文字（原生选择句柄 + 系统菜单）。
+
+普通段落，包含 **加粗** 和 \`行内代码\`。`;
+
 const MESSAGE = {
   id: "debug-markdown",
   sessionId: "debug-markdown",
@@ -71,6 +76,12 @@ export default function DebugMarkdownScreen() {
           <Text style={[typography.caption, { color: theme.colors.textMuted }]}>
             检查表格对齐、代码高亮、长单词换行和列表缩进。
           </Text>
+          <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 6 }]}>
+            长按选择排查：第一段是裸的原生 Markdown 组件，下面才是消息气泡。
+          </Text>
+        </View>
+        <View style={{ paddingHorizontal: 16, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+          <EnrichedMarkdownText markdown={RAW_MARKDOWN} selectable flavor="github" />
         </View>
         <MessageBubble message={MESSAGE} />
       </ScrollView>
