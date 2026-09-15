@@ -1,5 +1,24 @@
 # @neta-art/cohub
 
+## 8.17.0
+
+### Minor Changes
+
+- 50d6f00: **App version history and provenance.** Published apps now expose their immutable version history, and every version carries the session it was published from.
+  
+  - Public app pages gain a Cohub bar version switcher: `?cohub_v=<n>` selects a version, `getBySlug(…, { version })` fetches that version's content, and `listPublicVersions()` returns the history. SSR resolves the requested version; switching is a client-side fetch that keeps the URL shareable.
+  - `AppVersionRecord.source` and `AppVersionSource` describe provenance (`sessionId`, `turnId`, `turnSequence`, `via`). The raw `meta.source` stamped at publish time is no longer exposed, provenance is validated against the app's own space, and session identity/title is included only when the caller holds `session.view` for the source session — so a private session never leaks through a published app, and viewer-scoped responses are never shared-cached.
+  - `cohub apps versions` prints a Source column: the source session title when visible, otherwise the publishing channel.
+  - The public page docks the Cohub bar above the App instead of floating over it, keeps the Cohub wordmark in that bar, and opens a version's source session in a new tab. Version history loads off the public page's critical path, so the first render never waits for it.
+- c89672c: `GET /api/me/sessions` no longer returns `sourceCounts`. The per-origin totals required a full aggregate over the account's sessions on every page fetch, which does not scale with large scheduled-task volumes. The source picker in the web inbox now lists every origin statically without counts.
+
+### Patch Changes
+
+- 4071454: `GET /api/me/sessions?source=…` now filters by each session's source **system label** instead of the raw `space_sessions.source` string. Channel sessions are stored as `feishu:dm:…` or `channel:feishu`, so matching the raw column dropped every Feishu/WeChat/Discord/QQ chat from its own filter and leaked it into `other`; labels carry the attribution the normalizer already made at creation, so this fixes every provider at once and matches what a space sidebar shows.
+- f33c6ca: Queued follow-up turns no longer render (or resume) as running generation. A session's newest unfinished turn can be a queued follow-up waiting behind a running one, so live generation is now resumed only from `running` / `abort_requested` turns: a queued turn stays in the follow-up queue instead of being cloned as the streaming turn, and an empty pending snapshot is never persisted or restored.
+- f33c6ca: The web model picker shows availability dots for generation models too, not just LLMs — the same status feed now marks unavailable or degraded image/video/audio models in the picker, in both the collapsed row and the expanded model list.
+- f33c6ca: Space `@` mentions in the composer now share the command palette's space search instead of maintaining a second scorer. An empty query lists recently visited Spaces in the palette's Recent order, and a typed query goes through the same merge (fuzzy text match weighted against viewer tier and recency), so a mention and the palette can no longer disagree about which Space ranks first — and the removed duplicate logic drops the per-keystroke scan over cached session lists.
+
 ## 8.16.0
 
 ### Minor Changes
