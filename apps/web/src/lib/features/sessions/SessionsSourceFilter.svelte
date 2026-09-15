@@ -3,9 +3,8 @@
  * Source filter for the cross-space chats inbox.
  *
  * This filters `session.source` (where a chat came from), not the labels a user
- * assigns in a space. Options come from the server: `sourceCounts` reports which
- * kinds the account actually has, so the list never offers a kind with nothing
- * behind it.
+ * assigns in a space. The list is the full source vocabulary — every origin is
+ * always selectable, regardless of whether it has rows yet.
  */
 import type { UserSessionSourceKey } from "@neta-art/cohub";
 import { Check, ChevronDown } from "lucide-svelte";
@@ -14,27 +13,25 @@ import { floatNear } from "$lib/actions/portal";
 
 const {
 	selected,
-	counts,
 	onChange,
 }: {
 	selected: readonly UserSessionSourceKey[];
-	counts: Array<{ key: string; count: number }>;
 	onChange: (next: UserSessionSourceKey[]) => void;
 } = $props();
 
-const SOURCE_LABELS: Record<string, string> = {
-	web: "Web App",
-	public_api: "Public API",
-	scheduled_task: "Scheduled Task",
-	space_hook: "Hook",
-	websocket: "Websocket",
-	cli: "CLI",
-	feishu: "Feishu",
-	wechat: "WeChat",
-	discord: "Discord",
-	qq: "QQ",
-	other: "Other",
-};
+const SOURCES: Array<{ key: UserSessionSourceKey; label: string }> = [
+	{ key: "web", label: "Web App" },
+	{ key: "public_api", label: "Public API" },
+	{ key: "scheduled_task", label: "Scheduled Task" },
+	{ key: "space_hook", label: "Hook" },
+	{ key: "websocket", label: "Websocket" },
+	{ key: "cli", label: "CLI" },
+	{ key: "feishu", label: "Feishu" },
+	{ key: "wechat", label: "WeChat" },
+	{ key: "discord", label: "Discord" },
+	{ key: "qq", label: "QQ" },
+	{ key: "other", label: "Other" },
+];
 
 let open = $state(false);
 let rootEl = $state<HTMLDivElement | null>(null);
@@ -48,7 +45,7 @@ const selectionLabel = $derived.by(() => {
 });
 
 function sourceLabel(key: string) {
-	return SOURCE_LABELS[key] ?? key;
+	return SOURCES.find((source) => source.key === key)?.label ?? key;
 }
 
 function toggle(key: UserSessionSourceKey) {
@@ -124,18 +121,17 @@ onMount(() => {
 			All origins
 		</button>
 		<div class="my-1 h-px bg-border-subtle"></div>
-		{#each counts as item (item.key)}
-			{@const active = selected.includes(item.key as UserSessionSourceKey)}
+		{#each SOURCES as source (source.key)}
+			{@const active = selected.includes(source.key)}
 			<button
 				type="button"
 				class="flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-bg-hover {active ? 'text-text-primary' : 'text-text-secondary'}"
 				role="menuitemcheckbox"
 				aria-checked={active}
-				onclick={() => toggle(item.key as UserSessionSourceKey)}
+				onclick={() => toggle(source.key)}
 			>
 				<Check class="h-3 w-3 shrink-0 {active ? 'opacity-100' : 'opacity-0'}" />
-				<span class="min-w-0 flex-1 truncate">{sourceLabel(item.key)}</span>
-				<span class="shrink-0 text-[11px] text-text-placeholder">{item.count}</span>
+				<span class="min-w-0 flex-1 truncate">{source.label}</span>
 			</button>
 		{/each}
 	</div>

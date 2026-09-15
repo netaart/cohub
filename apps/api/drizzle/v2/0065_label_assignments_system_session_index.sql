@@ -1,1 +1,0 @@
-CREATE INDEX "v2_idx_label_assignments_system_session_resource" ON "v2"."label_assignments" USING btree ("resource_ref","label_id") WHERE "v2"."label_assignments"."resource_type" = 'session' and "v2"."label_assignments"."source" = 'system';

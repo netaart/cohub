@@ -33,11 +33,6 @@ export type SessionSourceFilter = {
   keys: readonly string[];
 };
 
-export type SessionSourceCount = {
-  key: string;
-  count: number;
-};
-
 /**
  * Parses `?source=web,feishu`. Returns null when the param is absent, and
  * throws for unknown keys so a typo fails loudly instead of silently
@@ -70,15 +65,6 @@ export const isOtherSessionSource = (key: string) => key === "other";
 /** Maps a raw source back to its kind; mirrors the label vocabulary. */
 export const sessionSourceKeyOf = (source: string | null | undefined) => resolveSessionSourceKey(source);
 
-/**
- * Order a per-kind count map into the picker's shape. Only kinds with rows
- * appear; order follows the vocabulary.
- */
-export const orderSessionSourceCounts = (counts: ReadonlyMap<string, number>): SessionSourceCount[] =>
-  SESSION_SOURCE_KEYS.filter((key) => counts.has(key)).map((key) => ({
-    key,
-    count: counts.get(key) ?? 0,
-  }));
 
 export const encodeSessionListCursor = (
   session: Pick<SessionListActivityRow, "id" | "lastMessageAt"> | null | undefined,

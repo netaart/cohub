@@ -16,7 +16,6 @@ import {
 import { pickSessionsPreservingOrder } from "../session-list.js";
 import {
   attachSessionSpaceSummaries,
-  countUserSessionSources,
   encodeSessionListCursor,
   hydrateSessionParticipantProfiles,
   InvalidSessionListCursorError,
@@ -202,7 +201,7 @@ async function listVisibleUserSessions(
 ) {
   const identity = asAccountIdentity(user);
   if (!identity) {
-    return { sessions: [], pageInfo: { hasMore: false, nextCursor: null }, sourceCounts: [] };
+    return { sessions: [], pageInfo: { hasMore: false, nextCursor: null } };
   }
 
   const limit = options.limit;
@@ -210,13 +209,6 @@ async function listVisibleUserSessions(
   let cursor = options.cursor;
   let hasMore = true;
   let guard = 0;
-
-  // Picker totals run alongside the page: one GROUP BY over the user's source
-  // labels, independent of the active filter and of how far the list has paged.
-  const sourceCountsPromise = countUserSessionSources(identity.uuid).catch((error) => {
-    logger.warn("[me/sessions] failed to count session sources", error);
-    return [];
-  });
 
   // Cache space membership + space-level view for this request.
   const memberViewBySpace = new Map<string, boolean>();
@@ -285,7 +277,6 @@ async function listVisibleUserSessions(
       hasMore: Boolean(nextCursor),
       nextCursor,
     },
-    sourceCounts: await sourceCountsPromise,
   };
 }
 
@@ -307,10 +298,10 @@ router.get("/sessions", async (c) => {
     throw error;
   }
   try {
-    const { sessions, pageInfo, sourceCounts } = await listVisibleUserSessions(user, { limit, cursor, source });
+    const { sessions, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source });
     const hydratedSessions = await hydrateSessionParticipantProfiles(sessions);
     const withSpaces = await attachSessionSpaceSummaries(hydratedSessions);
-    return c.json({ sessions: withSpaces, pageInfo, sourceCounts });
+    return c.json({ sessions: withSpaces, pageInfo });
   } catch (error) {
     if (error instanceof InvalidSessionListCursorError) {
       return c.json({ message: "invalid cursor" }, 400);

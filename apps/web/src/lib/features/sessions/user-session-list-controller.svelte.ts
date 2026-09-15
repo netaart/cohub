@@ -47,7 +47,6 @@ export function createUserSessionListController(input?: {
 	let refreshing = $state(false);
 	let error = $state<string | null>(null);
 	let hydrated = $state(false);
-	let sourceCounts = $state<Array<{ key: string; count: number }>>([]);
 	let refreshSeq = 0;
 	let loadMoreSeq = 0;
 	let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -98,7 +97,6 @@ export function createUserSessionListController(input?: {
 				source: requestSource,
 			});
 			if (seq !== refreshSeq) return;
-			sourceCounts = result.sourceCounts ?? sourceCounts;
 			const currentUserKey = await getCacheUserKeyAsync();
 			if (currentUserKey !== requestUserKey) return;
 
@@ -295,9 +293,6 @@ export function createUserSessionListController(input?: {
 		},
 		get hydrated() {
 			return hydrated;
-		},
-		get sourceCounts() {
-			return sourceCounts;
 		},
 		hydrateFromCache,
 		refresh,

@@ -629,7 +629,6 @@ onDestroy(() => {
 		>
 			<UserSessionsList
 				sessions={list.sessions}
-				sourceCounts={list.sourceCounts}
 				{sourceFilter}
 				onSourceFilterChange={setSourceFilter}
 				activeSessionId={isDesktop ? (routeIsNew ? null : routeSessionId) : null}

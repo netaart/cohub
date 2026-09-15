@@ -1211,19 +1211,12 @@ export type UserSessionSourceKey =
   | "qq"
   | "other";
 
-export type UserSessionSourceCount = {
-  key: string;
-  count: number;
-};
-
 export type UserSessionsResponse = {
   sessions: UserSessionListItem[];
   pageInfo?: {
     hasMore: boolean;
     nextCursor: string | null;
   };
-  /** Kinds seen while filling this page, for the source picker. Subset. */
-  sourceCounts?: UserSessionSourceCount[];
 };
 
 export type PromptAccessMode = "read_only" | "full_access";

@@ -32,7 +32,6 @@ const {
 	isDesktop = true,
 	modelsCatalog = null,
 	sourceFilter = [],
-	sourceCounts = [],
 	onSourceFilterChange,
 	onSelect,
 	onLoadMore,
@@ -48,7 +47,6 @@ const {
 	isDesktop?: boolean;
 	modelsCatalog?: ModelCatalogItem[] | null;
 	sourceFilter?: readonly UserSessionSourceKey[];
-	sourceCounts?: Array<{ key: string; count: number }>;
 	onSourceFilterChange?: (filter: UserSessionSourceKey[]) => void;
 	onSelect: (session: UserSessionListItem) => void;
 	onLoadMore: () => void;
@@ -107,7 +105,6 @@ function spaceName(session: UserSessionListItem) {
 			{#if onSourceFilterChange}
 				<SessionsSourceFilter
 					selected={sourceFilter}
-					counts={sourceCounts}
 					onChange={onSourceFilterChange}
 				/>
 			{/if}
