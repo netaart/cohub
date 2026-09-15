@@ -101,6 +101,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout publish script
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
       - name: Download formal Android APKs
         uses: actions/download-artifact@v8
         with:
@@ -129,3 +139,17 @@ jobs:
             gh release upload "$RELEASE_TAG" "$release_apk" --repo "$GITHUB_REPOSITORY" --clobber
           done
           gh release upload "$RELEASE_TAG" "${fingerprints[0]}" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Upload APKs to Yaota
+        env:
+          OTA_SERVER: ${{ vars.OTA_SERVER }}
+          OTA_API_KEY: ${{ secrets.OTA_API_KEY }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test -n "$OTA_SERVER" || { echo "OTA_SERVER is required to distribute APKs from Yaota."; exit 1; }
+          test -n "$OTA_API_KEY" || { echo "OTA_API_KEY is required to publish APKs to Yaota."; exit 1; }
+          shopt -s nullglob
+          files=(cohub-"$RELEASE_TAG"-android-*.apk)
+          test "${#files[@]}" -eq 4 || { echo "Expected four renamed APKs before Yaota upload, found ${#files[@]}"; exit 1; }
+          node --experimental-strip-types scripts/publish-yaota-apks.mjs "${files[@]}"
