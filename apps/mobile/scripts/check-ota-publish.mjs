@@ -238,4 +238,40 @@ assert.equal(publishApkStep.run.includes("build/release/*.apk"), false, "A flat 
 
 assert.equal(OTA_CLI_REVISION.length, 40);
 
+// Run the actual Doctor wrapper with local CLI fixtures, without contacting Expo.
+const doctorFixture = mkdtempSync(join(tmpdir(), "cohub-doctor-"));
+try {
+  mkdirSync(join(doctorFixture, "scripts"));
+  mkdirSync(join(doctorFixture, "node_modules/expo/bin"), { recursive: true });
+  mkdirSync(join(doctorFixture, "node_modules/expo-doctor/build"), { recursive: true });
+  copyFileSync("scripts/check-expo-baseline.mjs", join(doctorFixture, "scripts/check-expo-baseline.mjs"));
+  writeFileSync(join(doctorFixture, "node_modules/expo/bin/cli.js"), `
+    const assert = require('node:assert/strict');
+    assert.deepEqual(process.argv.slice(2), ['install', '--check']);
+    assert.equal(process.env.EXPO_OFFLINE, '1');
+    assert.equal(process.env.CI, '1');
+    console.log('baseline checked');
+    process.exit(Number(process.env.BASELINE_EXIT || 0));
+  `);
+  writeFileSync(join(doctorFixture, "node_modules/expo-doctor/build/index.js"), `
+    const assert = require('node:assert/strict');
+    assert.equal(process.env.EXPO_OFFLINE, undefined);
+    assert.equal(process.env.EXPO_DOCTOR_SKIP_DEPENDENCY_VERSION_CHECK, '1');
+    console.log('remaining doctor checks');
+    process.exit(Number(process.env.DOCTOR_EXIT || 0));
+  `);
+  for (const [baselineExit, doctorExit, expected] of [[0, 0, 0], [7, 0, 7], [0, 9, 9]]) {
+    const env = { ...process.env, BASELINE_EXIT: String(baselineExit), DOCTOR_EXIT: String(doctorExit) };
+    delete env.EXPO_OFFLINE;
+    const result = spawnSync(process.execPath, [join(doctorFixture, "scripts/check-expo-baseline.mjs")], { env, encoding: "utf8" });
+    assert.equal(result.status, expected, result.stderr);
+    assert.equal(result.stdout.includes('remaining doctor checks'), baselineExit === 0);
+  }
+} finally {
+  rmSync(doctorFixture, { recursive: true, force: true });
+}
+const appPackage = JSON.parse(readFileSync("package.json", "utf8"));
+assert.equal(appPackage.scripts.doctor, "node scripts/check-expo-baseline.mjs");
+assert.equal(appPackage.scripts["doctor:upstream"], "expo-doctor");
+
 console.log("OTA publish workflow checks passed.");
