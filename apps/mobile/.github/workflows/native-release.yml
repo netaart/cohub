@@ -227,7 +227,20 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
+
+      # setup-java hashes the prebuild-generated android/*.gradle files into its cache key
+      # and never falls back to an older entry, so every release version bump starts cold
+      # (~4 minutes of re-downloaded dependencies and artifact transforms). The Gradle
+      # caches only depend on the committed dependency set, which changes far less often.
+      - name: Restore Gradle caches
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
       - name: Validate Android signing inputs
         if: inputs.profile == 'distribution' || inputs.profile == 'production'

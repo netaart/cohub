@@ -11,6 +11,8 @@ await run("xcodebuild", [
   "-sdk", "iphonesimulator",
   "-derivedDataPath", join(root, "build", "ios"),
   "CODE_SIGNING_ALLOWED=NO",
+  // Index data only feeds an IDE and this derived data directory is discarded after the run.
+  "COMPILER_INDEX_STORE_ENABLE=NO",
   "build",
 ]);
 const app = await findBuiltIosApp(root, scheme);

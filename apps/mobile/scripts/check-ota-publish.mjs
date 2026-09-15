@@ -97,6 +97,26 @@ assert.ok(Object.hasOwn(nativeCi.on, "workflow_dispatch"), "Native CI remains av
 
 const nativeRelease = parse(".github/workflows/native-release.yml");
 assert.ok(nativeRelease.on.workflow_dispatch.inputs.platform.options.includes("ios"), "Native Release must allow iOS-only TestFlight builds");
+
+// Gradle caches must key on the committed dependency set. setup-java hashes the
+// prebuild-generated android/*.gradle files and offers no older-entry fallback, so its
+// cache goes cold on every app version or config bump (~4 minutes of re-downloads).
+for (const [file, workflow] of [["native-ci.yml", nativeCi], ["native-release.yml", nativeRelease]]) {
+  const javaStep = workflow.jobs.android.steps.find((step) => step.uses === "actions/setup-java@v6");
+  assert.ok(javaStep, `${file} must set up Java for the Android build`);
+  assert.equal(javaStep.with.cache, undefined, `${file} must cache Gradle explicitly instead of through setup-java`);
+  const gradleCache = workflow.jobs.android.steps.find((step) => String(step.uses).startsWith("actions/cache@"));
+  assert.ok(gradleCache, `${file} must restore the Gradle caches`);
+  assert.match(gradleCache.with.path, /~\/\.gradle\/caches/, `${file} must cache the Gradle dependency caches`);
+  assert.match(gradleCache.with.path, /~\/\.gradle\/wrapper/, `${file} must cache the Gradle wrapper distributions`);
+  assert.match(gradleCache.with.key, /hashFiles\('package-lock\.json'\)/, `${file} must key the Gradle cache on the committed dependency set`);
+  assert.match(gradleCache.with["restore-keys"], /gradle-\$\{\{ runner\.os \}\}-/, `${file} must fall back to the previous Gradle cache so dependency updates stay warm`);
+}
+
+const ci = parse(".github/workflows/ci.yml");
+assert.deepEqual(ci.jobs.bundle.strategy.matrix.platform, ["android", "ios"], "CI must still export both platform bundles");
+assert.equal(Object.hasOwn(ci.jobs.bundle, "needs"), false, "CI exports must not serialize behind Quality: they are independent and serializing them doubled every run's wall clock");
+
 const testFlightUpload = nativeRelease.jobs.ios.steps.find((step) => step.name === "Submit iOS to TestFlight");
 assert.equal(testFlightUpload.with["wait-for-processing"], "true", "TestFlight uploads must confirm Apple processed the build");
 assert.equal(Object.hasOwn(testFlightUpload.with, "uses-non-exempt-encryption"), false, "TestFlight uploads must not patch build metadata with a limited API key");

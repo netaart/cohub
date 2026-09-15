@@ -48,9 +48,10 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
+  # Runs alongside Quality: the export does not read lint/typecheck results, and
+  # serializing the two added ~70s to every pull request and main push.
   bundle:
     name: Bundle (${{ matrix.platform }})
-    needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
