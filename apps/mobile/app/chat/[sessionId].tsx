@@ -634,13 +634,17 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const handleScroll = useCallback((event: ChatScrollEvent) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     trace("list.scroll", { previousY: lastScrollRef.current.y, deltaY: contentOffset.y - lastScrollRef.current.y, offsetY: contentOffset.y, contentHeight: contentSize.height, viewportHeight: layoutMeasurement.height });
+    // Growth adds distance from the tail without the user going anywhere. Legend's own animated
+    // tail pin also reports momentum while it catches up, so a burst of tokens could otherwise be
+    // mistaken for a scroll-away and drop following for good.
+    const grew = contentSize.height > lastScrollRef.current.height;
     lastScrollRef.current = { y: contentOffset.y, height: contentSize.height, viewport: layoutMeasurement.height };
     measureVisibleRows();
     const { distanceToLatest, distanceToOldest } = chatListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({
       currentlyFollowing: followingTailRef.current,
       distanceToBottom: distanceToLatest,
-      userInteracting: userDraggingRef.current || momentumScrollingRef.current,
+      userInteracting: (userDraggingRef.current || momentumScrollingRef.current) && !grew,
       pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()),
     }));
     if (initialScrollDone.current && distanceToOldest < CHAT_PAGE_THRESHOLD && view.hasMoreOlder && !view.loadingOlder) {
@@ -740,7 +744,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     setTransitionMessageKey(null);
     cancelTurnScroll();
     setFollowingTail(true);
-    requestFollowTail(true);
+    // Instant: the fly-in measures the bubble's window position, and an animated tail move would
+    // leave that measurement stale by the time the bubble lands.
+    requestFollowTail(false);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     composerRef.current?.measureInWindow((composerX, composerY, composerWidth, composerHeight) => {
       listContainerRef.current?.measureInWindow((listX, listY) => { recordDebugEvent("chat.send_transition.source_measured", { x: composerX - listX, y: composerY - listY, width: composerWidth, height: composerHeight }); setSendTransition({ text: transitionText, startedAt: transitionStartedAt, sourceX: composerX - listX + Math.max(16, composerWidth - 60), sourceY: composerY - listY + Math.min(composerHeight, 58) / 2 - 5, targetX: 0, targetY: 0, targetHeight: 0 }); });
@@ -792,7 +798,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { data: true }), [followingTail]);
   // Growth (our streaming card lives in the list footer) is absorbed by Legend's animated
   // end-pinning instead of a hard rAF jump, so the timeline slides while a bubble grows.
-  const maintainScrollAtEnd = useMemo(() => (followingTail ? { animated: true } : false), [followingTail]);
+  const maintainScrollAtEnd = useMemo(() => (followingTail && sendTransition === null ? { animated: true } : false), [followingTail, sendTransition]);
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     trace("list.layout", { ...event.nativeEvent.layout });
     setListWidth(event.nativeEvent.layout.width);
