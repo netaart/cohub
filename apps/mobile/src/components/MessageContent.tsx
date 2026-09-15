@@ -22,6 +22,7 @@ import { AppIcon, type IconName } from "@/src/ui";
 import { BUBBLE_PADDING_X, getBubbleMaxWidth } from "@/src/ui/message-bubble-layout";
 import { BubbleContentWidth, BubbleText, BubbleTraceMessage } from "@/src/components/BubbleText";
 import { usePanelGestureBlocker } from "@/src/components/SpacePanels";
+import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
 import { turnSequenceForMessage } from "@/src/data/session-history";
 import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
@@ -105,6 +106,8 @@ function TextBlock({ value, muted = false, color, streaming = false, footer }: {
   const blockPanelGesture = usePanelGestureBlocker();
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
   const markdownStyle = useMemo(() => enrichedMarkdownStyle(theme, textColor), [theme, textColor]);
+  // Paced prefix: the renderer is native, so this only decides how much Markdown it has been given.
+  const paced = useRevealedStreamText(value, streaming);
   // A code block is a native horizontal scroller; while the touch is inside a message that has
   // one, the SpacePanels pager must not claim the drag. Messages without code keep the pager so
   // the chat/files swipe still works from them.
@@ -116,7 +119,7 @@ function TextBlock({ value, muted = false, color, streaming = false, footer }: {
     onTouchCancel={holdsPanelGesture ? () => blockPanelGesture(false) : undefined}
   >
     <EnrichedMarkdownText
-      markdown={value}
+      markdown={paced}
       markdownStyle={markdownStyle}
       selectable
       flavor="github"

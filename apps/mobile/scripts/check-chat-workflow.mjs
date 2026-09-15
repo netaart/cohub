@@ -6,6 +6,7 @@ import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { ChatScrollTrace, setDebugTraceSink } from "../src/data/chat-scroll-trace.ts";
 import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
 import { chatListDistances, chatListViewOffset, isChatRowVisible, nextChatTailFollowing } from "../src/data/chat-scroll.ts";
+import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
@@ -588,6 +589,7 @@ const bubbleScope = {
   EnrichedMarkdownText: "EnrichedMarkdownText",
   useOpenMessageLink: () => () => {},
   usePanelGestureBlocker: () => null,
+  useRevealedStreamText: (text) => text,
   BubbleContext: null,
   BubbleContentWidth: null,
   View: "View", Text: "Text", BubbleText: "BubbleText",
@@ -716,6 +718,48 @@ try {
   mock.timers.tick(100);
   assert.deepEqual(published, ["latest", "before lifecycle"]);
 } finally {
+  mock.timers.reset();
+}
+
+mock.timers.enable({ apis: ["setTimeout", "Date"] });
+const revealed = new StreamRevealController();
+const revealedValues = [];
+revealed.subscribe(() => revealedValues.push(revealed.getDisplayed()));
+try {
+  // First content is authoritative and shows whole instead of animating from empty.
+  revealed.setTarget("你好");
+  assert.deepEqual(revealedValues, ["你好"]);
+  // A ZWJ emoji arrives as one grapheme; a multi-grapheme append paces in commits.
+  revealed.setTarget("你好👩🏽‍💻");
+  mock.timers.tick(50);
+  assert.equal(revealed.getDisplayed(), "你好👩🏽‍💻");
+  revealed.setTarget("你好👩🏽‍💻abcdefghij");
+  const beforePacing = revealedValues.length;
+  mock.timers.tick(50);
+  assert.ok(revealedValues.length > beforePacing, "appends commit over multiple frames");
+  mock.timers.tick(50);
+  assert.ok(revealedValues.length > beforePacing + 1, "a long append takes more than one commit");
+  for (const value of revealedValues) assert.ok(revealed.getDisplayed().startsWith(value), `revealed value is a prefix: ${value}`);
+  mock.timers.tick(600);
+  assert.equal(revealed.getDisplayed(), "你好👩🏽‍💻abcdefghij");
+  // Never split a grapheme across commits.
+  for (const value of revealedValues) assert.ok(!value.endsWith("\u200d") && !/[\u{1F3FB}-\u{1F3FF}]$/u.test(value), `commit splits a grapheme: ${value}`);
+  // An append that extends the trailing grapheme completes that unit first.
+  revealed.setTarget("a");
+  revealed.setTarget("a\u{1F3FD}");
+  mock.timers.tick(600);
+  assert.equal(revealed.getDisplayed(), "a\u{1F3FD}");
+  // A correction is authoritative; it must not replay the obsolete suffix.
+  revealed.setTarget("corrected");
+  assert.equal(revealed.getDisplayed(), "corrected");
+  // Completion drains immediately.
+  revealed.setTarget("corrected answer");
+  revealed.flush();
+  assert.equal(revealed.getDisplayed(), "corrected answer");
+  mock.timers.tick(500);
+  assert.equal(revealedValues.at(-1), "corrected answer");
+} finally {
+  revealed.stop();
   mock.timers.reset();
 }
 
