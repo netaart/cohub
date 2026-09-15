@@ -15,6 +15,7 @@ import {
 	X,
 } from "lucide-svelte";
 import { onMount } from "svelte";
+import { getCacheUserKey } from "$lib/cache/keys";
 import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
 import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
 import ComposerSurface from "$lib/components/composer/ComposerSurface.svelte";
@@ -346,7 +347,9 @@ const spaceMentionItems = $derived(
 	mergeSpaceMentionSuggestions({
 		local: localSpaceMentionItems,
 		remote: remoteSpaceMentionItems,
+		query: spaceMentionTrigger?.query ?? "",
 		currentSpaceId,
+		viewerUserUuid: getCacheUserKey(),
 		limit: 30,
 	}),
 );

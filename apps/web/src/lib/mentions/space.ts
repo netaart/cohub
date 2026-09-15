@@ -25,9 +25,6 @@ export type SpaceMentionSuggestion = {
 	uri: string;
 	activityAt: string | null;
 	source: "local" | "remote" | "local+remote";
-	score: number;
-	textScore: number;
-	recencyScore: number;
 };
 
 export type SpaceMentionTextToken =
