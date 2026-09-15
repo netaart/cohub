@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
-export const OTA_CLI_REPOSITORY = "https://github.com/markbang/cloudflare-expo-ota-updates.git";
-export const OTA_CLI_REVISION = "fab754606dfe747abee8faef24d84981789f8064";
+export const OTA_CLI_REPOSITORY = "https://github.com/markbang/yaota.git";
+export const OTA_CLI_REVISION = "62e237e864b291c6ee266a6af820569817ab984c";
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 const FINGERPRINT_HASH = /^[a-f0-9]{40,64}$/;
 const CHANNELS = new Set(["staging", "production"]);
