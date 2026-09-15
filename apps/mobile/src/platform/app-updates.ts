@@ -6,6 +6,7 @@ import * as Device from "expo-device";
 import { Platform } from "react-native";
 import { config } from "@/src/config";
 import {
+  applyYaotaReleaseNote,
   githubReleaseUrl,
   isAllowedAndroidUpdateUrl,
   selectYaotaAndroidUpdate,
@@ -150,13 +151,15 @@ async function requestNativeRelease(): Promise<AppRelease | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${config.apkOrigin.replace(/\/+$/, "")}/api/apks`, {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Update check failed with HTTP ${response.status}`);
-    const payload: unknown = await response.json();
-    return selectYaotaAndroidUpdate(payload, config.apkOrigin, abi);
+    const origin = config.apkOrigin.replace(/\/+$/, "");
+    const [apkResponse, releaseResponse] = await Promise.all([
+      fetch(`${origin}/api/apks`, { headers: { Accept: "application/json" }, signal: controller.signal }),
+      fetch(`${origin}/api/apk-releases`, { headers: { Accept: "application/json" }, signal: controller.signal }),
+    ]);
+    if (!apkResponse.ok || !releaseResponse.ok) throw new Error(`Update check failed with HTTP ${!apkResponse.ok ? apkResponse.status : releaseResponse.status}`);
+    const apkPayload: unknown = await apkResponse.json();
+    const releasePayload: unknown = await releaseResponse.json();
+    return applyYaotaReleaseNote(selectYaotaAndroidUpdate(apkPayload, config.apkOrigin, abi), releasePayload);
   } finally {
     clearTimeout(timeout);
   }

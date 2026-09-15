@@ -31,6 +31,9 @@ function originFromEnv() {
 
 const apiKey = process.env.OTA_API_KEY?.trim();
 if (!apiKey) fail("OTA_API_KEY is required to publish APKs");
+const releaseTitle = process.env.RELEASE_TITLE?.trim() || null;
+const releaseNotes = process.env.RELEASE_NOTES ?? null;
+const releaseUrl = process.env.RELEASE_URL?.trim() || null;
 const origin = originFromEnv();
 const files = process.argv.slice(2);
 if (files.length === 0) fail("Pass one or more cohub-vX.Y.Z-android-<abi>.apk paths");
@@ -50,7 +53,7 @@ for (const file of files) {
   const presign = await fetch(`${origin}/api/apks/presign`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-ota-api-key": apiKey },
-    body: JSON.stringify({ version, arch, size, sha256 }),
+    body: JSON.stringify({ version, arch, size, sha256, title: releaseTitle, notes: releaseNotes, releaseUrl }),
   });
   if (!presign.ok) fail(`presign failed for ${name}: HTTP ${presign.status} ${await presign.text()}`);
   const payload = await presign.json();

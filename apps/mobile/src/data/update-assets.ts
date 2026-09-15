@@ -153,6 +153,13 @@ function apkFromYaotaRecord(value: unknown, origin: string, abi: AndroidUpdateAb
   };
 }
 
+export function applyYaotaReleaseNote(release: YaotaAndroidRelease | null, payload: unknown): YaotaAndroidRelease | null {
+  if (!release || !isRecord(payload) || !Array.isArray(payload.releases)) return release;
+  const metadata = payload.releases.find((item) => isRecord(item) && item.version === release.version);
+  if (!isRecord(metadata)) return release;
+  return { ...release, title: typeof metadata.title === "string" ? metadata.title.trim() || null : null, notes: typeof metadata.notes === "string" ? metadata.notes : null, url: typeof metadata.releaseUrl === "string" && metadata.releaseUrl.trim() ? metadata.releaseUrl.trim() : release.url, publishedAt: typeof metadata.publishedAt === "string" ? metadata.publishedAt : release.publishedAt };
+}
+
 export function selectYaotaAndroidUpdate(payload: unknown, origin: string, abi: AndroidUpdateAbi): YaotaAndroidRelease | null {
   androidUpdateOrigin(origin);
   if (!isRecord(payload) || !Array.isArray(payload.apks)) throw new Error("The update catalog is invalid.");

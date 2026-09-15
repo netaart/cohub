@@ -145,10 +145,15 @@ jobs:
           OTA_SERVER: ${{ vars.OTA_SERVER }}
           OTA_API_KEY: ${{ secrets.OTA_API_KEY }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test -n "$OTA_SERVER" || { echo "OTA_SERVER is required to distribute APKs from Yaota."; exit 1; }
           test -n "$OTA_API_KEY" || { echo "OTA_API_KEY is required to publish APKs to Yaota."; exit 1; }
+          release_json=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json name,body,url)
+          export RELEASE_TITLE=$(RELEASE_JSON="$release_json" node -e 'process.stdout.write(JSON.parse(process.env.RELEASE_JSON).name || "")')
+          export RELEASE_NOTES=$(RELEASE_JSON="$release_json" node -e 'process.stdout.write(JSON.parse(process.env.RELEASE_JSON).body || "")')
+          export RELEASE_URL=$(RELEASE_JSON="$release_json" node -e 'process.stdout.write(JSON.parse(process.env.RELEASE_JSON).url || "")')
           shopt -s nullglob
           files=(cohub-"$RELEASE_TAG"-android-*.apk)
           test "${#files[@]}" -eq 4 || { echo "Expected four renamed APKs before Yaota upload, found ${#files[@]}"; exit 1; }
