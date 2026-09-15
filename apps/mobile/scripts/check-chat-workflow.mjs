@@ -5,7 +5,7 @@ import ts from "typescript";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { ChatScrollTrace, setDebugTraceSink } from "../src/data/chat-scroll-trace.ts";
 import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
-import { invertedListDistances, invertedListViewOffset, isChatRowVisible, nextChatTailFollowing, reverseListIndex } from "../src/data/chat-scroll.ts";
+import { chatListDistances, chatListViewOffset, isChatRowVisible, nextChatTailFollowing } from "../src/data/chat-scroll.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
@@ -277,11 +277,10 @@ for (const background of ["#f7f7f5", "#0f1114", "#000000"]) {
   assert.ok(!chromeNodes(searchHeader).some((node) => node.props?.accessibilityRole === "header"), "search replaces the title instead of crowding it");
 }
 for (const topInset of [24, 103, 160]) {
-  for (const bottomInset of [100, 180, 300]) {
-    const offset = invertedListViewOffset(0.15, 8, topInset, bottomInset);
-    assert.equal(offset, 8 + bottomInset - 0.15 * (topInset + bottomInset));
-    assert.equal(invertedListDistances(0, 1400 + topInset + bottomInset, 800).distanceToLatest, 0, "overlay padding preserves the inverted tail origin");
-  }
+  const offset = chatListViewOffset(0.15, 8, topInset);
+  assert.equal(offset, 8 + Math.max(0, Math.round(topInset * 0.85)), "a jumped-to turn lands below the overlaid chrome");
+  assert.equal(chatListDistances(0, 1400 + topInset, 800).distanceToOldest, 0, "the oldest edge is the top of a chronological list");
+  assert.equal(chatListDistances(1400 + topInset - 800, 1400 + topInset, 800).distanceToLatest, 0, "the newest edge is the bottom of a chronological list");
 }
 assert.equal(isChatRowVisible(0, 80, 103, 500), false, "a row behind the header is not read");
 assert.equal(isChatRowVisible(610, 80, 103, 500), false, "a row behind the composer is not read");
@@ -637,18 +636,18 @@ assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text:
 assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "tool_use", id: "tool", name: "read", input: {} }, { type: "tool_result", tool_use_id: "tool", content: "result" }], footer: footerMarker }), footerMarker), ["timestamp"]);
 assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "No footer" }] }), footerMarker), []);
 
-// Configuration guard, not a native gesture test: focus scrolling must stay off on the real timeline.
+// Configuration guard, not a native gesture test: the timeline is chronological (no inversion).
 const focusPolicySource = ts.createSourceFile("chat.tsx", readFileSync(new URL("../app/chat/[sessionId].tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let timelineElement;
 function findTimelineElement(node) {
-  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(focusPolicySource) === "FlatList" && node.attributes.properties.some((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === "data" && ts.isJsxExpression(prop.initializer) && prop.initializer.expression?.getText(focusPolicySource) === "timeline")) timelineElement = node;
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(focusPolicySource) === "LegendList" && node.attributes.properties.some((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === "data" && ts.isJsxExpression(prop.initializer) && prop.initializer.expression?.getText(focusPolicySource) === "messages")) timelineElement = node;
   ts.forEachChild(node, findTimelineElement);
 }
 findTimelineElement(focusPolicySource);
-assert.ok(timelineElement);
-const focusScrollProp = timelineElement.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === "scrollsChildToFocus");
-assert.ok(focusScrollProp && ts.isJsxExpression(focusScrollProp.initializer), "timeline must explicitly disable native focus scrolling");
-assert.equal(focusScrollProp.initializer.expression.kind, ts.SyntaxKind.FalseKeyword);
+assert.ok(timelineElement, "the chat timeline renders messages chronologically through LegendList");
+const timelineProp = (name) => timelineElement.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === name);
+assert.ok(timelineProp("alignItemsAtEnd"), "short timelines stick to the bottom");
+assert.equal(timelineProp("inverted"), undefined, "the timeline must not be inverted");
 
 const scrollDebugSource = ts.createSourceFile("chat-scroll.tsx", readFileSync(new URL("../app/debug/chat-scroll.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let scrollFixtureFunction;
@@ -1595,11 +1594,8 @@ assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom:
 assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom: 20, userInteracting: true, pendingTarget: false }), true);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom: 20, userInteracting: false, pendingTarget: true }), false);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom: 20, userInteracting: false, pendingTarget: true }), false);
-assert.equal(reverseListIndex(0, 10), 9);
-assert.equal(reverseListIndex(9, 10), 0);
-assert.equal(reverseListIndex(-1, 10), -1);
-assert.deepEqual(invertedListDistances(0, 4000, 700), { distanceToLatest: 0, distanceToOldest: 3300 });
-assert.deepEqual(invertedListDistances(3280, 4000, 700), { distanceToLatest: 3280, distanceToOldest: 20 });
+assert.deepEqual(chatListDistances(0, 4000, 700), { distanceToLatest: 3300, distanceToOldest: 0 });
+assert.deepEqual(chatListDistances(3280, 4000, 700), { distanceToLatest: 20, distanceToOldest: 3280 });
 
 const messages = [
   { role: "assistant", meta: { turnSequence: 6 } },

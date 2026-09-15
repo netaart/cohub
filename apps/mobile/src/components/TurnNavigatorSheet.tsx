@@ -1,8 +1,8 @@
 import type { SessionTurnIndexItem } from "@neta-art/cohub";
+import { LegendList } from "@legendapp/list/react-native";
 import { useMemo, useState } from "react";
 import {
 	ActivityIndicator,
-	FlatList,
 	Pressable,
 	Text,
 	View,
@@ -153,7 +153,8 @@ export function TurnNavigatorSheet({
 					) : null}
 				</View>
 			) : (
-				<FlatList
+				<LegendList
+					estimatedItemSize={64}
 					data={filteredTurns}
 					keyExtractor={(turn) => `${turn.sequence}:${turn.id}`}
 					style={{ flex: 1, minHeight: 0, marginTop: 10 }}

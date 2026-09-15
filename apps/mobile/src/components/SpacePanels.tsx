@@ -3,7 +3,8 @@
 import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/cohub";
 import { useIsFocused } from "expo-router";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, BackHandler, FlatList, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { LegendList } from "@legendapp/list/react-native";
+import { ActivityIndicator, BackHandler, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import Reanimated, { Extrapolation, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -468,7 +469,8 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
         {state.sessionStatusError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{state.sessionStatusError}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.retryStatuses")} onPress={() => void refreshSessionStatuses(displaySessions)}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}
         {labelSessionsError ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{labelSessionsError}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.retryLabeledChats")} onPress={() => setLabelsReloadToken((value) => value + 1)}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}
       </View>
-      <FlatList
+      <LegendList
+        estimatedItemSize={68}
         data={listItems}
         keyExtractor={(item) => item.kind === "remote" ? `remote:${item.hit.sessionId}` : `local:${item.session.id}`}
         renderItem={({ item }) => item.kind === "remote"
@@ -548,7 +550,8 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
       ) : error ? (
         <View style={styles.emptyPanel}><AppIcon name="cloud-off" size={25} color={theme.colors.danger} /><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 10 }]}>{error}</Text><PrimaryButton label={t("common.retry")} icon="refresh" onPress={() => void load()} style={{ marginTop: 15, minHeight: 42 }} /></View>
       ) : (
-        <FlatList
+        <LegendList
+          estimatedItemSize={68}
           data={entries}
           keyExtractor={(item) => item.path}
           contentContainerStyle={{ paddingVertical: 8, paddingBottom: 24, flexGrow: entries.length === 0 ? 1 : undefined }}

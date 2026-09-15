@@ -3,8 +3,9 @@ import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Keyboard, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type LayoutChangeEvent, type ViewToken } from "react-native";
+import { ActivityIndicator, Keyboard, Modal, Pressable, Share, Text, TextInput, View, useWindowDimensions, type LayoutChangeEvent, type ViewToken } from "react-native";
 import { Easing, interpolate, useAnimatedStyle, useSharedValue, withDelay, withSequence, withSpring, withTiming } from "react-native-reanimated";
+import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
 import { useToast } from "@/src/components/Toast";
@@ -17,7 +18,7 @@ import { fetchSessionLabels, toUserSessionLabels, type SessionLabel } from "@/sr
 import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
-import { CHAT_PAGE_THRESHOLD, invertedListDistances, invertedListViewOffset, nextChatTailFollowing, reverseListIndex } from "@/src/data/chat-scroll";
+import { CHAT_PAGE_THRESHOLD, chatListDistances, chatListViewOffset, nextChatTailFollowing } from "@/src/data/chat-scroll";
 import { chatScrollTrace, type TraceFields } from "@/src/data/chat-scroll-trace";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
@@ -39,6 +40,8 @@ import { EdgeFooter, EdgeHeader, useEdgeChrome } from "@/src/ui/EdgeChrome";
 
 type RouteParams = { sessionId?: string | string[]; spaceId?: string | string[]; turn?: string | string[]; turnId?: string | string[] };
 const messageViewabilityConfig = { itemVisiblePercentThreshold: 20 };
+/** Only used to estimate the destination of a jump the list cannot resolve on its own. */
+const FALLBACK_ROW_HEIGHT = 140;
 
 function sendTransitionKey(message: Pick<MessageRecord, "id" | "meta">) {
   const clientMessageId = message.meta?.clientMessageId;
@@ -138,7 +141,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const [currentTurnSequence, setCurrentTurnSequence] = useState<number | null>(null);
   const pendingScrollSequence = useRef<number | null>(null);
   const handledDeepLinkTarget = useRef<string | null>(null);
-  const listRef = useRef<FlatList>(null);
+  const listRef = useRef<LegendListRef>(null);
   const listContainerRef = useRef<View>(null);
   const sendBubbleRef = useRef<View>(null);
   const [transitionMessageKey, setTransitionMessageKey] = useState<string | null>(null);
@@ -167,7 +170,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     following: followingTailRef.current, dragging: userDraggingRef.current, momentum: momentumScrollingRef.current,
     initialDone: initialScrollDone.current, followFramePending: followTailFrameRef.current !== null,
     cancelGeneration: traceCancelGeneration.current,
-    scrollsChildToFocus: false,
+    inverted: false,
     ...lastScrollRef.current,
   }), [sessionId]);
   const { recording: tracing, log: trace } = useChatScrollTrace("chat", traceState);
@@ -176,11 +179,16 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     trace("command.scrollToOffset", { source, ...options, hasList: Boolean(listRef.current) });
     listRef.current?.scrollToOffset(options);
   }, [trace]);
+  const traceEnd = useCallback((source: string, animated: boolean) => {
+    trace("command.scrollToEnd", { source, animated, hasList: Boolean(listRef.current) });
+    listRef.current?.scrollToEnd({ animated });
+  }, [trace]);
   const traceIndex = useCallback((source: string, options: { index: number; animated: boolean; viewPosition: number; viewOffset: number }) => {
     trace("command.scrollToIndex", { source, ...options, hasList: Boolean(listRef.current) });
-    // Inverted lists position from the bottom; target the unobscured viewport.
-    listRef.current?.scrollToIndex({ ...options, viewOffset: invertedListViewOffset(options.viewPosition, options.viewOffset, headerHeight, footerHeight) });
-  }, [footerHeight, headerHeight, trace]);
+    // Chronological list: only the overlaid top bar has to be compensated.
+    const viewOffset = chatListViewOffset(options.viewPosition, options.viewOffset, headerHeight);
+    return listRef.current?.scrollToIndex({ ...options, viewOffset }) ?? Promise.resolve();
+  }, [headerHeight, trace]);
   const setFollowingTail = useCallback((next: boolean) => {
     if (followingTailRef.current === next) return;
     trace("tail.followingChanged", { next });
@@ -205,13 +213,13 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     followTailFrameRef.current = requestAnimationFrame(() => {
       followTailFrameRef.current = null;
       if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current || pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null) return;
-      traceOffset("tail.frame", { offset: 0, animated });
+      traceEnd("tail.frame", animated);
       requestAnimationFrame(() => {
         if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current) return;
-        traceOffset("tail.secondFrame", { offset: 0, animated: false });
+        traceEnd("tail.secondFrame", false);
       });
     });
-  }, [trace, traceOffset]);
+  }, [trace, traceEnd]);
   const onVisibleRows = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (chatScrollTrace.isRecording()) trace("list.viewable", { items: viewableItems.map((item) => ({ index: item.index, visible: item.isViewable, message: chatScrollTrace.alias("message", (item.item as MessageRecord).id), turn: turnSequenceForMessage(item.item as MessageRecord) })) });
     const ordered = viewableItems
@@ -255,7 +263,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       }
       return;
     }
-    const visualTop = ordered.at(-1);
+    // Chronological list: the first viewable row is the one at the top of the viewport.
+    const visualTop = ordered[0];
     if (visualTop?.item) setCurrentTurnSequence(turnSequenceForMessage(visualTop.item as { meta: Record<string, unknown> | null }));
   }, [saveSessionReadSequence, sessionId, trace]);
   const { onViewableItemsChanged, measureVisibleRows, trackRow } = useChatVisibleRows({ viewportRef: listContainerRef, topInset: headerHeight, bottomInset: footerHeight, onVisible: onVisibleRows });
@@ -304,7 +313,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       streamStatus: view.stream?.status ?? null, sending: view.sending,
       activePanel, currentTurnSequence, turnNavigatorOpen,
       initialTurnSequence, hasInitialTurnId: initialTurnId !== null,
-      inverted: true, maintainVisibleContentPosition: !followingTail,
+      inverted: false, maintainVisibleContentPosition: !followingTail,
     });
   }, [activePanel, currentTurnSequence, followingTail, initialTurnId, initialTurnSequence, messages.length, trace, tracing, turnNavigatorOpen, view.hasMoreNewer, view.hasMoreOlder, view.historyLoaded, view.loading, view.loadingNewer, view.loadingOlder, view.refreshing, view.sending, view.stream?.status, view.turns.length]);
   const { fontScale } = useWindowDimensions();
@@ -323,12 +332,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   useEffect(() => {
     measurements.configure(`${listWidth}:${fontScale}:${theme.mode}:${textSizeToken}`, measuredMessages);
   }, [measurements, measuredMessages, listWidth, fontScale, textSizeToken, theme.mode]);
-  const estimatedOffset = useCallback((timelineIndex: number, averageHeight: number) => {
-    const chronologicalIndex = reverseListIndex(timelineIndex, measuredMessages.length);
-    const fromOldest = chronologicalIndex < 0 ? 0 : measurements.estimateOffset(measuredMessages, chronologicalIndex, averageHeight);
-    const total = measurements.estimateOffset(measuredMessages, measuredMessages.length, averageHeight);
-    return footerHeight + 12 + (view.hasMoreNewer ? 50 : 0) + Math.max(0, total - fromOldest);
-  }, [footerHeight, measurements, measuredMessages, view.hasMoreNewer]);
+  const estimatedOffset = useCallback((index: number, averageHeight: number) => {
+    const fromOldest = index < 0 ? 0 : measurements.estimateOffset(measuredMessages, index, averageHeight);
+    return headerHeight + 12 + (view.hasMoreOlder ? 50 : 0) + fromOldest;
+  }, [headerHeight, measurements, measuredMessages, view.hasMoreOlder]);
   let recordedModel: ChatModelSelection | null = null;
   let hasRelevantTurn = false;
   for (const turn of [...view.turns].reverse()) {
@@ -430,10 +437,19 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const requestInitialScroll = useCallback(() => {
     if (!view.historyLoaded || initialScrollDone.current || messages.length === 0 || hasInitialTurnTarget) return;
     initialScrollDone.current = true;
-    traceOffset("initial.latest", { offset: 0, animated: false });
+    traceEnd("initial.latest", false);
     setFollowingTail(true);
     setCurrentTurnSequence(view.turns.at(-1)?.sequence ?? null);
-  }, [hasInitialTurnTarget, messages.length, setFollowingTail, traceOffset, view.historyLoaded, view.turns]);
+  }, [hasInitialTurnTarget, messages.length, setFollowingTail, traceEnd, view.historyLoaded, view.turns]);
+
+  // Legend resolves `scrollToIndex` for unrendered rows from its own estimates; when it rejects the
+  // row is too far away, so park at an estimated offset and let the retry timer re-target it.
+  const scrollToMessageIndex = useCallback((source: string, index: number, animated: boolean) => {
+    void traceIndex(source, { index, animated, viewPosition: 0.15, viewOffset: 8 }).catch(() => {
+      trace("command.scrollToIndexEstimate", { source, index });
+      traceOffset(`${source}.estimate`, { offset: estimatedOffset(index, FALLBACK_ROW_HEIGHT), animated: false });
+    });
+  }, [estimatedOffset, trace, traceIndex, traceOffset]);
 
   const scheduleTurnScrollRetry = useCallback((sequence: number, retry: number) => {
     trace("turn.retrySchedule", { sequence, retry, exhausted: retry >= 4 });
@@ -450,9 +466,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       const index = targetMessageIndex(sequence);
       if (index < 0 || !listRef.current) return;
       turnScrollRetriesRef.current.set(sequence, retry + 1);
-      traceIndex("turn.retryTimer", { index: reverseListIndex(index, messages.length), animated: false, viewPosition: 0.15, viewOffset: 8 });
+      scrollToMessageIndex("turn.retryTimer", index, false);
     }, retry === 0 ? 120 : 180);
-  }, [messages.length, targetMessageIndex, trace, traceIndex]);
+  }, [scrollToMessageIndex, targetMessageIndex, trace]);
   const scrollToTurn = useCallback((sequence: number, retry = 0) => {
     const index = targetMessageIndex(sequence);
     trace("turn.scrollRequest", { sequence, retry, index, messageCount: messages.length });
@@ -469,10 +485,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     }
     pendingScrollSequence.current = null;
     initialScrollDone.current = true;
-    traceIndex("turn.scrollToTurn", { index: reverseListIndex(index, messages.length), animated: retry === 0, viewPosition: 0.15, viewOffset: 8 });
+    scrollToMessageIndex("turn.scrollToTurn", index, retry === 0);
     scheduleTurnScrollRetry(sequence, retry);
     setCurrentTurnSequence(sequence);
-  }, [messages.length, scheduleTurnScrollRetry, setFollowingTail, targetMessageIndex, trace, traceIndex]);
+  }, [messages.length, scheduleTurnScrollRetry, scrollToMessageIndex, setFollowingTail, targetMessageIndex, trace]);
 
   const handleTurnJump = async (sequence: number) => {
     const requestId = ++traceRequestId.current;
@@ -620,7 +636,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     trace("list.scroll", { previousY: lastScrollRef.current.y, deltaY: contentOffset.y - lastScrollRef.current.y, offsetY: contentOffset.y, contentHeight: contentSize.height, viewportHeight: layoutMeasurement.height });
     lastScrollRef.current = { y: contentOffset.y, height: contentSize.height, viewport: layoutMeasurement.height };
     measureVisibleRows();
-    const { distanceToLatest, distanceToOldest } = invertedListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
+    const { distanceToLatest, distanceToOldest } = chatListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({
       currentlyFollowing: followingTailRef.current,
       distanceToBottom: distanceToLatest,
@@ -651,41 +667,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     requestFollowTail();
   }, [measureVisibleRows, requestFollowTail, requestInitialScroll, scrollToTurn, trace]);
 
-  const handleScrollToIndexFailed = useCallback(({ index, averageItemLength }: { index: number; averageItemLength: number }) => {
-    trace("turn.indexFailed", { index, averageItemLength });
-    const initialUnreadIndex = initialUnreadIndexRef.current;
-    if (initialUnreadIndex !== null) {
-      const retries = initialUnreadRetriesRef.current;
-      if (retries >= 4) {
-        initialUnreadIndexRef.current = null;
-        return;
-      }
-      initialUnreadRetriesRef.current = retries + 1;
-      traceOffset("unread.estimate", { offset: estimatedOffset(index, averageItemLength), animated: false });
-      requestAnimationFrame(() => {
-        if (initialUnreadIndexRef.current === initialUnreadIndex) traceIndex("unread.retryFrame", { index: initialUnreadIndex, animated: false, viewPosition: 0.15, viewOffset: 8 });
-      });
-      return;
-    }
-    const target = turnScrollTargetRef.current ?? pendingScrollSequence.current;
-    if (target === null) return;
-    const retries = turnScrollRetriesRef.current.get(target) ?? 0;
-    if (retries >= 4) {
-      turnScrollRetriesRef.current.delete(target);
-      turnScrollTargetRef.current = null;
-      if (turnScrollRetryTimerRef.current !== null) {
-        clearTimeout(turnScrollRetryTimerRef.current);
-        turnScrollRetryTimerRef.current = null;
-      }
-      return;
-    }
-    turnScrollRetriesRef.current.set(target, retries + 1);
-    traceOffset("turn.estimate", { offset: estimatedOffset(index, averageItemLength), animated: false });
-    requestAnimationFrame(() => {
-      if (turnScrollTargetRef.current === target) scrollToTurn(target, retries + 1);
-    });
-  }, [estimatedOffset, scrollToTurn, trace, traceIndex, traceOffset]);
-
   const handleScrollBeginDrag = useCallback(() => {
     trace("list.dragBegin");
     userDraggingRef.current = true;
@@ -706,7 +687,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     }
     userDraggingRef.current = false;
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const { distanceToLatest } = invertedListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
+    const { distanceToLatest } = chatListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({ currentlyFollowing: followingTailRef.current, distanceToBottom: distanceToLatest, userInteracting: false, pendingTarget: pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null }));
     requestFollowTail();
   }, [requestFollowTail, setFollowingTail, trace]);
@@ -722,7 +703,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     momentumScrollingRef.current = false;
     if (pendingScrollSequence.current !== null) return;
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const { distanceToLatest } = invertedListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
+    const { distanceToLatest } = chatListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({ currentlyFollowing: followingTailRef.current, distanceToBottom: distanceToLatest, userInteracting: false, pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()) }));
     requestFollowTail();
   }, [requestFollowTail, setFollowingTail, targetIsLatestMessage, trace]);
@@ -799,9 +780,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   // mounted row (the live step list subscribes on its own instead).
   const streamTurnId = view.stream?.turnId ?? null;
   const keyExtractor = useCallback((item: MessageRecord) => `${turnSequenceForMessage(item) ?? item.id}:${item.role}`, []);
-  const listContentStyle = useMemo(() => ({ paddingTop: footerHeight + 12, paddingBottom: headerHeight + 12, flexGrow: timeline.length === 0 ? 1 : undefined }), [footerHeight, headerHeight, timeline.length]);
-  const listIndicatorInsets = useMemo(() => ({ top: footerHeight, bottom: headerHeight }), [footerHeight, headerHeight]);
-  const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { minIndexForVisible: 0, autoscrollToTopThreshold: 80 }), [followingTail]);
+  const listContentStyle = useMemo(() => ({ paddingTop: headerHeight + 12, paddingBottom: footerHeight + 12, flexGrow: messages.length === 0 ? 1 : undefined }), [footerHeight, headerHeight, messages.length]);
+  const listIndicatorInsets = useMemo(() => ({ top: headerHeight, bottom: footerHeight }), [footerHeight, headerHeight]);
+  // Chronological list: anchoring on data changes keeps the reading position when older turns are
+  // prepended. `undefined` keeps Legend's default size stabilization.
+  const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { data: true }), [followingTail]);
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     trace("list.layout", { ...event.nativeEvent.layout });
     setListWidth(event.nativeEvent.layout.width);
@@ -809,19 +792,19 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   }, [measureVisibleRows, trace]);
   const handleListRefresh = useCallback(() => { void refreshSession(sessionId); }, [refreshSession, sessionId]);
   const renderMessage = useCallback(({ item, index }: { item: MessageRecord; index: number }) => {
-    const chronologicalIndex = reverseListIndex(index, messages.length);
+    const chronologicalIndex = index;
     const isTransitionMessage = transitionMessage
       ? sendTransitionKey(item) === sendTransitionKey(transitionMessage)
       : item.role === "user" && item.meta?.optimistic === true && sendTransition?.text === messageText(item) && item.createdAt >= sendTransition.startedAt;
     const sequence = turnSequenceForMessage(item);
-    const older = timeline[index + 1];
+    const older = messages[index - 1];
     const olderSequence = older ? turnSequenceForMessage(older) : null;
     const showTurnMarker = sequence !== null && sequence !== olderSequence;
     const turn = sequence === null ? null : turnIndexBySequence.get(sequence) ?? null;
     const messageTurn = typeof item.meta?.turnId === "string" ? turnsById.get(item.meta.turnId) ?? null : null;
     const sequenceTurns = item.role === "user" && sequence !== null ? turnsBySequence.get(sequence) : undefined;
     return <View ref={(row) => trackRow(`${turnSequenceForMessage(item) ?? item.id}:${item.role}`, row)} collapsable={false} onLayout={(event) => { if (chatScrollTrace.isRecording()) trace("row.layout", { message: chatScrollTrace.alias("message", item.id), index, sequence, ...event.nativeEvent.layout }); if (chronologicalIndex >= 0) measurements.measure(measuredMessages[chronologicalIndex]!, event.nativeEvent.layout.height); }}>{showTurnMarker ? <TurnMarker sequence={sequence} status={turn?.status} /> : null}{isTransitionMessage ? <SendBubbleMotion transition={sendTransition} transitionKey={sendTransitionKey(item)} message={item} local={item.meta?.optimistic === true} spaceId={spaceId} onCopy={handleCopyMessage} bubbleRef={sendBubbleRef} onBubbleLayout={() => { setTransitionMessageKey((current) => current ?? sendTransitionKey(item)); sendBubbleRef.current?.measureInWindow((bubbleX, bubbleY, _bubbleWidth, bubbleHeight) => listContainerRef.current?.measureInWindow((listX, listY) => setSendTransition((current) => { if (!current || current.text !== messageText(item)) return current; const next = { ...current, targetX: bubbleX - listX - 12, targetY: bubbleY - listY - 5, targetHeight: bubbleHeight }; if (Math.abs(current.targetX - next.targetX) < 1 && Math.abs(current.targetY - next.targetY) < 1 && Math.abs(current.targetHeight - next.targetHeight) < 1) return current; recordDebugEvent("chat.send_transition.target_measured", { message: chatScrollTrace.alias("message", item.id), x: bubbleX - listX, y: bubbleY - listY, width: _bubbleWidth, height: bubbleHeight }); return next; }))); }} /> : <MessageBubble message={item} local={item.meta?.optimistic === true && !isTransitionMessage} onCopy={handleCopyMessage} onFork={messageTurn && isTerminalTurnStatus(messageTurn.status) ? forkMessage : undefined} forkDisabled={forkingTurnId !== null} forking={forkingTurnId === turn?.id} spaceId={spaceId || null} />}{sequenceTurns?.map((entry) => isActiveTurnStatus(entry.status) || entry.id === streamTurnId ? <LiveTurnProcess key={entry.id} sessionId={sessionId} turn={entry} client={client} spaceId={spaceId} /> : <TurnProcess key={entry.id} turn={entry} client={client} spaceId={spaceId} />)}</View>;
-  }, [client, forkMessage, forkingTurnId, handleCopyMessage, measuredMessages, measurements, messages.length, sendTransition, sessionId, spaceId, streamTurnId, timeline, trace, transitionMessage, trackRow, turnIndexBySequence, turnsById, turnsBySequence]);
+  }, [client, forkMessage, forkingTurnId, handleCopyMessage, measuredMessages, measurements, messages, sendTransition, sessionId, spaceId, streamTurnId, trace, transitionMessage, trackRow, turnIndexBySequence, turnsById, turnsBySequence]);
 
   if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen edgeToEdge><EdgeHeader onLayout={onHeaderLayout}><TopBar transparent title={t("chat.title")} onBack={() => router.back()} /></EdgeHeader><View style={{ flex: 1, paddingTop: headerHeight }}><ChatThreadPlaceholder kind="opening" /></View></Screen>;
   return <Screen keyboard edgeToEdge>
@@ -835,17 +818,13 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         </EdgeHeader>
         <View ref={listContainerRef} collapsable={false} style={{ flex: 1, minHeight: 0 }}>
         {/* Android selectable text must not reposition the timeline when it gains focus. Explicit turn/tail scrolling remains enabled. */}
-        <FlatList
+        <LegendList
           {...traceTouches}
           ref={listRef}
-          inverted
-          scrollsChildToFocus={false}
-          initialNumToRender={16}
-          maxToRenderPerBatch={8}
-          updateCellsBatchingPeriod={32}
-          windowSize={11}
+          data={messages}
+          alignItemsAtEnd
+          estimatedItemSize={FALLBACK_ROW_HEIGHT}
           onLayout={handleListLayout}
-          data={timeline}
           keyExtractor={keyExtractor}
           renderItem={renderMessage}
           keyboardShouldPersistTaps="handled"
@@ -859,15 +838,14 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           onMomentumScrollBegin={handleMomentumScrollBegin}
           onMomentumScrollEnd={handleMomentumScrollEnd}
           contentInsetAdjustmentBehavior="never"
-          progressViewOffset={footerHeight}
+          progressViewOffset={headerHeight}
           scrollIndicatorInsets={listIndicatorInsets}
           contentContainerStyle={listContentStyle}
           onContentSizeChange={handleContentSizeChange}
-          onScrollToIndexFailed={handleScrollToIndexFailed}
           onRefresh={handleListRefresh}
           refreshing={view.refreshing}
-          ListHeaderComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStreamReady && liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>}
-          ListFooterComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null}
+          ListHeaderComponent={view.hasMoreOlder ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadOlder")} disabled={view.loadingOlder} onPress={() => void loadOlderTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginTop: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingOlder ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadOlder")}</Text>}</Pressable> : null}
+          ListFooterComponent={<View>{view.hasMoreNewer ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.loadNewer")} disabled={view.loadingNewer} onPress={() => void loadNewerTurns(sessionId)} style={({ pressed }) => ({ minHeight: 42, marginHorizontal: 16, marginBottom: 8, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface })}>{view.loadingNewer ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{t("chat.loadNewer")}</Text>}</Pressable> : null}{liveStreamReady && liveStream && view.stream ? <><StreamingTurnProcess messages={view.turns.some((turn) => turn.id === view.stream?.turnId) ? [] : view.stream.intermediateMessages} /><StreamCard content={view.stream.contentBlocks} status={view.stream.status} runtimePhase={view.stream.runtimePhase} runtimeModel={view.stream.runtimeModel} /></> : view.sending && !liveStream ? <StreamCard content={[]} status="pending" /> : null}</View>}
         />
         {threadPlaceholder ? <View pointerEvents="none" style={{ position: "absolute", top: headerHeight, right: 0, bottom: footerHeight, left: 0 }}><ChatThreadPlaceholder kind={threadPlaceholder} /></View> : null}
 

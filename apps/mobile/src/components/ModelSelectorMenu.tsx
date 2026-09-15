@@ -1,7 +1,8 @@
 import { ModelIcon, modelMappings } from "@lobehub/icons-rn";
 import type { ModelCatalogEntry, ModelStatusEntry } from "@neta-art/cohub";
 import { useMemo, useState, type RefObject } from "react";
-import { ActivityIndicator, FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { LegendList } from "@legendapp/list/react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { ComposerMenu } from "@/src/components/ComposerMenu";
 import type { ChatModelSelection } from "@/src/data/types";
 import {
@@ -145,7 +146,8 @@ export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStat
       {loading || modelStatusLoading ? <ActivityIndicator size="small" color={theme.colors.textMuted} /> : null}
       {query ? <IconButton name="circle-x" label={t("ui.search.clear")} size={36} onPress={() => setQuery("")} /> : <IconButton name="x" label={t("ui.sheet.close", { title: t("model.title") })} size={36} onPress={onClose} />}
     </View>
-    <FlatList
+    <LegendList
+      estimatedItemSize={56}
       data={visibleModels}
       keyExtractor={(entry) => `${entry.provider}/${entry.id}`}
       renderItem={renderModel}
@@ -153,8 +155,7 @@ export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStat
       contentContainerStyle={{ padding: 6 }}
       nestedScrollEnabled
       keyboardShouldPersistTaps="always"
-      removeClippedSubviews={false}
-      ListHeaderComponent={<>
+            ListHeaderComponent={<>
         <Pressable testID="model-option-automatic" accessibilityRole="radio" accessibilityLabel={t("model.automaticA11y")} accessibilityState={{ checked: currentModel === null }} onPress={() => { onSelect(null); setOptionsOpenFor(null); }} style={({ pressed }) => [styles.automaticRow, { backgroundColor: pressed ? theme.colors.surfacePressed : currentModel === null ? theme.colors.surfaceRaised : "transparent" }]}>
           <View style={styles.modelIcon}><AppIcon name="sparkles" size={22} color={theme.colors.textSecondary} /></View>
           <View style={styles.modelText}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("model.automatic")}</Text><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted }]}>{t("model.automaticDetail")}</Text></View>

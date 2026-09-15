@@ -14,24 +14,24 @@ export function nextChatTailFollowing(input: ChatTailStateInput) {
   return input.currentlyFollowing || input.distanceToBottom <= CHAT_TAIL_THRESHOLD;
 }
 
-export function reverseListIndex(index: number, length: number) {
-  if (!Number.isInteger(index) || !Number.isInteger(length) || index < 0 || length <= 0 || index >= length) return -1;
-  return length - 1 - index;
-}
-
 export function isChatRowVisible(rowTop: number, rowHeight: number, viewportTop: number, viewportHeight: number): boolean {
   if (rowHeight <= 0 || viewportHeight <= 0) return false;
   const visibleHeight = Math.max(0, Math.min(rowTop + rowHeight, viewportTop + viewportHeight) - Math.max(rowTop, viewportTop));
   return visibleHeight >= Math.min(rowHeight * 0.2, viewportHeight);
 }
 
-export function invertedListViewOffset(viewPosition: number, viewOffset: number, topInset: number, bottomInset: number): number {
-  return viewOffset + bottomInset - viewPosition * (topInset + bottomInset);
+/**
+ * The timeline is chronological with the newest message at the end, so `viewPosition` already
+ * measures from the top and only the overlaid top bar has to be compensated: RN/Legend subtract
+ * `viewOffset` from the target scroll offset, which pushes the jumped-to turn below the chrome.
+ */
+export function chatListViewOffset(viewPosition: number, viewOffset: number, topInset: number): number {
+  return viewOffset + Math.max(0, Math.round(topInset * (1 - viewPosition)));
 }
 
-export function invertedListDistances(offsetY: number, contentHeight: number, layoutHeight: number) {
+export function chatListDistances(offsetY: number, contentHeight: number, layoutHeight: number) {
   return {
-    distanceToLatest: Math.max(0, offsetY),
-    distanceToOldest: Math.max(0, contentHeight - layoutHeight - offsetY),
+    distanceToLatest: Math.max(0, contentHeight - layoutHeight - offsetY),
+    distanceToOldest: Math.max(0, offsetY),
   };
 }

@@ -1,7 +1,8 @@
 import type { SpaceFsEntry } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, FlatList, Pressable, Share, Text, View } from "react-native";
+import { LegendList } from "@legendapp/list/react-native";
+import { Alert, Pressable, Share, Text, View } from "react-native";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useApp } from "@/src/data/context";
 import { useTranslation } from "@/src/i18n";
@@ -152,7 +153,8 @@ export default function FilesScreen() {
       ) : error ? (
         <FilesError message={error} onRetry={() => setRefreshToken((value) => value + 1)} />
       ) : (
-        <FlatList
+        <LegendList
+          estimatedItemSize={56}
           data={entries}
           keyExtractor={(item) => item.path}
           contentContainerStyle={{
