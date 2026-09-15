@@ -28,6 +28,7 @@ export function AnchoredActionMenu({ anchorRef, title, actions, onClose, testID 
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const focused = useIsFocused();
+  const contentWidth = Math.max(...actions.map((action) => Array.from(action.title).length * 9 + 16 * 2 + 21 + 14), 0);
   const overlayRef = useRef<View>(null);
   const [layout, setLayout] = useState<ReturnType<typeof getAnchoredMenuLayout> | null>(null);
   const measure = useCallback(() => {
@@ -37,10 +38,11 @@ export function AnchoredActionMenu({ anchorRef, title, actions, onClose, testID 
           anchor: { x: anchorX, y: anchorY, width: anchorWidth, height: anchorHeight },
           viewport: { x, y, width: viewportWidth, height: viewportHeight },
           bottomInset: insets.bottom,
+          contentWidth,
         }));
       });
     });
-  }, [anchorRef, insets.bottom]);
+  }, [anchorRef, contentWidth, insets.bottom]);
 
   useLayoutEffect(() => {
     const frame = requestAnimationFrame(measure);

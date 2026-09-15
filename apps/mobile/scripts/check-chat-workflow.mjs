@@ -332,7 +332,11 @@ assert.equal(visibleRowEvents.length, previousVisibilityEvents + 1, "unmount can
 
 const chatMenuInput = { anchor: { x: 338, y: 53, width: 44, height: 44 }, viewport: { x: 0, y: 47, width: 390, height: 763 }, bottomInset: 34 };
 const chatMenuLayout = getAnchoredMenuLayout(chatMenuInput);
-assert.deepEqual(chatMenuLayout, { left: 102, top: 54, width: 280, maxHeight: 667 });
+assert.deepEqual(chatMenuLayout, { left: 202, top: 54, width: 180, maxHeight: 667 });
+assert.equal(getAnchoredMenuLayout({ ...chatMenuInput, contentWidth: 140 }).width, 180, "short menus retain the minimum width");
+assert.equal(getAnchoredMenuLayout({ ...chatMenuInput, contentWidth: 230 }).width, 230, "menus expand to their content width");
+assert.equal(getAnchoredMenuLayout({ ...chatMenuInput, contentWidth: 400 }).width, 280, "long menus respect the maximum width");
+assert.equal(getAnchoredMenuLayout({ ...chatMenuInput, contentWidth: 230, viewport: { ...chatMenuInput.viewport, width: 160 } }).width, 144, "narrow screens take precedence over the minimum width");
 assert.equal(chatMenuLayout.left + chatMenuLayout.width, chatMenuInput.anchor.x + chatMenuInput.anchor.width, "menu aligns to the trigger's right edge");
 assert.equal(chatMenuLayout.top + chatMenuInput.viewport.y, chatMenuInput.anchor.y + chatMenuInput.anchor.height + 4, "menu opens below the trigger, not from the bottom");
 assert.deepEqual(getAnchoredMenuLayout({ ...chatMenuInput, anchor: { ...chatMenuInput.anchor, x: 358, y: 83 }, viewport: { ...chatMenuInput.viewport, x: 20, y: 77 } }), chatMenuLayout, "screen-local coordinates account for safe areas and window offsets");

@@ -3,7 +3,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, type IconName } from "@/src/ui";
 
-const MENU_WIDTH = 220;
+const MIN_MENU_WIDTH = 180;
+const MAX_MENU_WIDTH = 280;
 const ROW_HEIGHT = 48;
 
 export type ContextMenuAction = {
@@ -31,7 +32,9 @@ export function ContextMenu({
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const menuHeight = actions.length * ROW_HEIGHT + 8;
-  const left = Math.min(Math.max(12, x - MENU_WIDTH / 2), Math.max(12, width - MENU_WIDTH - 12));
+  const contentWidth = Math.max(...actions.map((action) => Array.from(action.title).length * 9 + 14 * 2 + 18 + 10), 0);
+  const menuWidth = Math.min(width - 24, Math.max(MIN_MENU_WIDTH, Math.min(MAX_MENU_WIDTH, contentWidth)));
+  const left = Math.min(Math.max(12, x - menuWidth / 2), Math.max(12, width - menuWidth - 12));
   const top = Math.min(
     Math.max(insets.top + 8, y - menuHeight - 16),
     Math.max(insets.top + 8, height - insets.bottom - menuHeight - 12),
@@ -40,7 +43,7 @@ export function ContextMenu({
   return <Modal visible={visible} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
     <View style={styles.overlay} testID={testID}>
       <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={onClose} />
-      <View accessibilityRole="menu" style={[styles.menu, { top, left, width: MENU_WIDTH, backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }]}>
+      <View accessibilityRole="menu" style={[styles.menu, { top, left, width: menuWidth, backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }]}>
         {actions.map((action) => (
           <Pressable
             key={action.title}
