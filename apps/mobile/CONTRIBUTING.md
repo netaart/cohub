@@ -23,7 +23,7 @@ ci: tighten release validation
 
 ## Pull requests
 
-Keep changes focused. CI must pass Quality, all three Bundle jobs, and Native CI on the pull request. Native CI does not rerun on the subsequent `main` push. Do not commit `.env`, native signing files, generated `ios/` or `android/` directories, or Expo credentials.
+Keep changes focused. CI must pass Quality and the bundle jobs on the pull request. Native debug builds are a manual `Native CI` workflow, not a PR check. Do not commit `.env`, native signing files, generated `ios/` or `android/` directories, or Expo credentials.
 
 ## Releases
 

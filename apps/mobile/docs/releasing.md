@@ -5,11 +5,11 @@
 The repository does not require Expo Application Services (EAS) for builds.
 
 1. `CI` validates every PR and push to `main`, then exports Android and iOS JavaScript bundles.
-2. `Native CI` runs for pull requests targeting `main` and manual dispatches. It compiles Android debug APKs and an iOS simulator app for internal validation, without repeating the builds on the subsequent `main` push.
+2. `Native CI` is a manual dispatch that compiles Android debug APKs and an iOS simulator app for internal validation. It does not run on pull requests or `main` pushes.
 3. `Release Please` maintains a version/changelog PR from Conventional Commits.
 4. Pushing a stable `vX.Y.Z` tag starts `Native Tag Release`: signed Android APKs are attached to the GitHub Release, and a signed iOS IPA is uploaded to TestFlight. Both platforms record their OTA fingerprints. Release Please creates the version tag when its release PR is merged; it does not start a separate native build.
 
-An ordinary `main` push runs quality checks, bundle exports, security checks, Release Please, and production Android and iOS OTA. It does not compile native packages unless it produces a release tag. Every stable release tag, including a PATCH tag, starts both native distributions. Keep JS-only work on `main` without creating a tag until a native release is intended. Native CI remains available for pull requests and manual validation.
+An ordinary `main` push runs quality checks, bundle exports, security checks, Release Please, and production Android and iOS OTA. It does not compile native packages unless it produces a release tag. Every stable release tag, including a PATCH tag, starts both native distributions. Keep JS-only work on `main` without creating a tag until a native release is intended. Native CI remains available as a manual validation run.
 
 Expo is used as the open-source React Native toolchain and for native modules. `expo prebuild` generates standard Gradle and Xcode projects inside CI. No Expo subscription or EAS project is required.
 
@@ -169,7 +169,7 @@ Replace the placeholders with the validated release version and commit. Merely c
 1. Merge feature PRs with Conventional Commit titles. For breaking changes, include the explicit next-MINOR `Release-As` footer described above.
 2. Wait for Release Please to open or update the Release PR.
 3. Review the generated `CHANGELOG.md`, `package.json`, `package-lock.json`, and `app.json` version changes.
-4. Confirm the required CI, Security, and Native CI checks are green.
+4. Confirm the required CI and Security checks are green.
 5. Merge the Release Please PR.
 6. Release Please creates the `vX.Y.Z` tag and release using `RELEASE_PLEASE_TOKEN`.
 7. The tag push automatically starts `Native Tag Release` for both platforms. Wait for Android APK attachment and iOS TestFlight processing/fingerprint attachment. No manual build dispatch is required.

@@ -84,6 +84,8 @@ assert.match(JSON.stringify(ota.jobs.ios.steps), /cohub-ota-ios-/);
 
 const nativeCi = parse(".github/workflows/native-ci.yml");
 assert.equal(Object.hasOwn(nativeCi.on, "push"), false);
+assert.equal(Object.hasOwn(nativeCi.on, "pull_request"), false, "PR workflow must not compile native debug builds");
+assert.ok(Object.hasOwn(nativeCi.on, "workflow_dispatch"), "Native CI remains available as a manual run");
 
 const nativeRelease = parse(".github/workflows/native-release.yml");
 assert.ok(nativeRelease.on.workflow_dispatch.inputs.platform.options.includes("ios"), "Native Release must allow iOS-only TestFlight builds");
