@@ -71,22 +71,14 @@ export const isOtherSessionSource = (key: string) => key === "other";
 export const sessionSourceKeyOf = (source: string | null | undefined) => resolveSessionSourceKey(source);
 
 /**
- * Counts the user's sessions per source kind, for the list picker. Only kinds
- * present in the given rows appear; order follows the vocabulary.
+ * Order a per-kind count map into the picker's shape. Only kinds with rows
+ * appear; order follows the vocabulary.
  */
-export const countUserSessionsBySource = (
-  sessions: Array<{ source?: string | null }>,
-): SessionSourceCount[] => {
-  const counts = new Map<string, number>();
-  for (const session of sessions) {
-    const key = sessionSourceKeyOf(session.source ?? null);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  return SESSION_SOURCE_KEYS.filter((key) => counts.has(key)).map((key) => ({
+export const orderSessionSourceCounts = (counts: ReadonlyMap<string, number>): SessionSourceCount[] =>
+  SESSION_SOURCE_KEYS.filter((key) => counts.has(key)).map((key) => ({
     key,
     count: counts.get(key) ?? 0,
   }));
-};
 
 export const encodeSessionListCursor = (
   session: Pick<SessionListActivityRow, "id" | "lastMessageAt"> | null | undefined,

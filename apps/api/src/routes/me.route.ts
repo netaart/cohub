@@ -16,14 +16,13 @@ import {
 import { pickSessionsPreservingOrder } from "../session-list.js";
 import {
   attachSessionSpaceSummaries,
+  countUserSessionSources,
   encodeSessionListCursor,
   hydrateSessionParticipantProfiles,
   InvalidSessionListCursorError,
   InvalidSessionSourceFilterError,
-  MAX_SESSION_LIST_LIMIT,
   listUserSessions,
   parseSessionSourceKeys,
-  sessionSourceKeyOf,
   type SessionSourceFilter,
 } from "../space-sessions.js";
 import {
@@ -206,19 +205,18 @@ async function listVisibleUserSessions(
     return { sessions: [], pageInfo: { hasMore: false, nextCursor: null }, sourceCounts: [] };
   }
 
-  // Options for the source picker: counted unfiltered so they cover every kind,
-  // while the page itself stays filtered.
-  const sourceCounts = new Map<string, number>();
-  const countSource = (session: { source?: string | null }) => {
-    const key = sessionSourceKeyOf(session.source ?? null);
-    sourceCounts.set(key, (sourceCounts.get(key) ?? 0) + 1);
-  };
-
   const limit = options.limit;
   const visible: Awaited<ReturnType<typeof listUserSessions>>["sessions"] = [];
   let cursor = options.cursor;
   let hasMore = true;
   let guard = 0;
+
+  // Picker totals run alongside the page: one GROUP BY over the user's source
+  // labels, independent of the active filter and of how far the list has paged.
+  const sourceCountsPromise = countUserSessionSources(identity.uuid).catch((error) => {
+    logger.warn("[me/sessions] failed to count session sources", error);
+    return [];
+  });
 
   // Cache space membership + space-level view for this request.
   const memberViewBySpace = new Map<string, boolean>();
@@ -268,24 +266,7 @@ async function listVisibleUserSessions(
     }
     visible.push(...pickSessionsPreservingOrder(batch.sessions, visibleIds));
 
-    if (!options.source) {
-      for (const session of batch.sessions) countSource(session);
-    }
-
     if (!hasMore) break;
-  }
-
-  // One unfiltered pass so a filtered page still reports the other sources.
-  if (options.source) {
-    try {
-      const unfiltered = await listUserSessions(identity.uuid, {
-        limit: MAX_SESSION_LIST_LIMIT,
-        cursor: null,
-      });
-      for (const session of unfiltered.sessions) countSource(session);
-    } catch (error) {
-      logger.warn("[me/sessions] failed to count session sources", error);
-    }
   }
 
   const sessions = visible.slice(0, limit);
@@ -304,7 +285,7 @@ async function listVisibleUserSessions(
       hasMore: Boolean(nextCursor),
       nextCursor,
     },
-    sourceCounts: [...sourceCounts].map(([key, count]) => ({ key, count })),
+    sourceCounts: await sourceCountsPromise,
   };
 }
 

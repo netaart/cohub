@@ -9,7 +9,7 @@ import { SPACE_ENV_REDIS_KEY } from "@cohub/protocol/sandbox";
 import { isSandboxUsableStatus } from "@cohub/sandbox-controller";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
-import { SESSION_SOURCE_KEYS, sessionSourceRawValues } from "@cohub/core/labels/session-source";
+import { SESSION_SOURCE_KEYS, SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX, SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY, sessionSourceRawValues } from "@cohub/core/labels/session-source";
 import {
   claimSessionFallbackTitle,
   deriveSessionFallbackTitle,
@@ -23,6 +23,8 @@ import {
 } from "@cohub/core/sessions";
 import { db } from "./db/index.js";
 import {
+  labelAssignments,
+  labels,
   sessionMessages,
   sessionTurnSegments,
   sessionTurns,
@@ -46,14 +48,15 @@ import {
   decodeSessionListCursor,
   isOtherSessionSource,
   mergeUserSessionListBranches,
+  orderSessionSourceCounts,
   resolveSessionListLimit,
   paginateSessionRows,
   type SessionListCursor,
+  type SessionSourceCount,
   type SessionSourceFilter,
 } from "./session-list.js";
 
 export {
-  countUserSessionsBySource,
   encodeSessionListCursor,
   InvalidSessionListCursorError,
   InvalidSessionSourceFilterError,
@@ -519,6 +522,52 @@ export const listUserSessions = async (
     ...page,
     sessions: await attachActiveTurns(page.sessions),
   };
+};
+
+/**
+ * Per-source totals for every session the user created or participates in,
+ * read from the `Source/*` system labels rather than `space_sessions.source`.
+ * Labels are what the space sidebar shows, and `source` is on its way out.
+ *
+ * Runs one GROUP BY on the label system key. Sessions without a source label
+ * (a creation path that skipped it, or a label write that failed) are not
+ * counted; they still list, they just have no kind.
+ */
+export const countUserSessionSources = async (userUuid: string): Promise<SessionSourceCount[]> => {
+  const prefix = SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX;
+  const memberOf = or(
+    eq(spaceSessions.userUuid, userUuid),
+    and(
+      userSessionParticipantCondition(userUuid),
+      sql`${spaceSessions.userUuid} is distinct from ${userUuid}`,
+    ),
+  );
+  const rows = await db
+    .select({
+      systemKey: labels.systemKey,
+      count: sql<number>`count(*)::int`,
+    })
+    .from(spaceSessions)
+    .innerJoin(labelAssignments, and(
+      eq(labelAssignments.resourceType, "session"),
+      sql`${labelAssignments.resourceRef} = ${spaceSessions.id}::text`,
+      eq(labelAssignments.source, "system"),
+    ))
+    .innerJoin(labels, and(
+      eq(labels.id, labelAssignments.labelId),
+      sql`${labels.systemKey} like ${`${prefix}%`}`,
+      sql`${labels.systemKey} <> ${SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY}`,
+    ))
+    .where(memberOf)
+    .groupBy(labels.systemKey);
+
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = row.systemKey?.slice(prefix.length);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + row.count);
+  }
+  return orderSessionSourceCounts(counts);
 };
 
 const getNextSessionSequence = async (sessionId: string) => {

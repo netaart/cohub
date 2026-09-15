@@ -11,6 +11,7 @@ import {
 import { createGenerationClient, GenerationValidationError } from "@neta-art/generation";
 import { buildGenerationRequestMessage, buildGenerationResultMessage } from "@cohub/protocol/generation";
 import { createInitialSpaceSession, getSpaceSessionById, persistMessageNode } from "./space-sessions.js";
+import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
 import { db } from "./db/index.js";
 import { sessionMessages, sessionTurns, spaceSessions, taskRuns } from "@cohub/db";
 import { and, eq, sql } from "drizzle-orm";
@@ -108,6 +109,9 @@ export async function createGenerationSessionExecution(input: {
       if (!session) {
         const created = await createInitialSpaceSession({ spaceId: input.spaceId, sessionId, userUuid: input.userId, title: null, source: input.source ?? "web", externalSessionId: null, meta: { createdBy: "direct_generation" } });
         sessionId = created.id;
+        await assignSessionSourceSystemLabel({ db, spaceId: input.spaceId, sessionId, source: input.source ?? "web", provider: null }).catch((error) => {
+          console.warn("[GenerationSession] failed to assign source label", { sessionId, error });
+        });
       } else if (session.spaceId !== input.spaceId) {
         throw new GenerationSessionExecutionError(404, "generation_session_not_found", "Generation session not found in this space.");
       }
@@ -116,6 +120,9 @@ export async function createGenerationSessionExecution(input: {
     if (!sessionId) {
       const session = await createInitialSpaceSession({ spaceId: input.spaceId, sessionId: crypto.randomUUID(), userUuid: input.userId, title: null, source: input.source ?? "web", externalSessionId: null, meta: { createdBy: "direct_generation" } });
       sessionId = session.id;
+      await assignSessionSourceSystemLabel({ db, spaceId: input.spaceId, sessionId, source: input.source ?? "web", provider: null }).catch((error) => {
+        console.warn("[GenerationSession] failed to assign source label", { sessionId, error });
+      });
     }
     const request = buildGenerationRequestMessage({ taskId: taskRunId, model: input.model, provider: declaration.adapter?.type ?? null, parameters, content: input.content });
     let turn: Awaited<ReturnType<typeof createSessionTurn>>;
