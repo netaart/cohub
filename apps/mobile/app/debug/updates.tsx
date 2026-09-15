@@ -190,7 +190,7 @@ export default function DebugUpdatesScreen() {
           </View>
         </View>
 
-        <SectionHeader title="GitHub 原生发布 (APK)" />
+        <SectionHeader title="Yaota 原生发布 (APK)" />
         <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
           {busy === "release" && !releaseChecked ? (
             <View style={{ padding: 20, alignItems: "center" }}>
@@ -211,7 +211,7 @@ export default function DebugUpdatesScreen() {
           {releaseError ? <Row icon="alert" label="错误" value={releaseError} tone="danger" /> : null}
           <View style={{ padding: 14 }}>
             <PrimaryButton
-              label="重新检查 GitHub 发布"
+              label="重新检查 Yaota APK"
               icon="refresh"
               loading={busy === "release"}
               disabled={busy !== null}

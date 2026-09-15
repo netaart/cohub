@@ -33,7 +33,7 @@ import { cacheRetentionCutoff, DEFAULT_CACHE_RETENTION } from "../src/data/cache
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
 import { forkSessionTurn } from "../src/data/session-fork.ts";
 import { resolveMessageLink } from "../src/data/message-links.ts";
-import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
+import { androidUpdateApkUrl, selectYaotaAndroidUpdate, validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
 import { isSettingsSection, settingsMenu } from "../src/data/settings-navigation.ts";
 import { parseBrowserPreference } from "../src/data/browser-preference.ts";
 import { channelHealthState, createSettingsChannel, createWeChatLoginPoller, isChannelProvider, missingChannelField } from "../src/data/channel-settings.ts";
@@ -1654,23 +1654,24 @@ assert.equal(formatToolCallCaption("terminal", {}), "terminal");
 assert.equal(formatMessageClock(new Date(2026, 0, 1, 19, 3).toISOString()), "19:03");
 assert.equal(formatMessageClock("not-a-date"), "");
 
+const apkOrigin = "https://mobile.talesofai.com";
 const apkRelease = {
   version: "1.6.1",
-  downloadUrl: "https://github.com/markbang/cohub-mobile/releases/download/v1.6.1/cohub-v1.6.1-android-arm64-v8a.apk",
+  downloadUrl: androidUpdateApkUrl(apkOrigin, "1.6.1", "arm64-v8a"),
   downloadName: "cohub-v1.6.1-android-arm64-v8a.apk",
   downloadSize: 123,
   downloadSha256: "A".repeat(64),
 };
 for (const abi of ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]) {
   const name = `cohub-v1.6.1-android-${abi}.apk`;
-  const url = `https://github.com/markbang/cohub-mobile/releases/download/v1.6.1/${name}`;
-  assert.deepEqual(validateAndroidUpdateAsset({ ...apkRelease, downloadName: name, downloadUrl: url }), {
+  const url = androidUpdateApkUrl(apkOrigin, "1.6.1", abi);
+  assert.deepEqual(validateAndroidUpdateAsset({ ...apkRelease, downloadName: name, downloadUrl: url }, apkOrigin), {
     name, url, size: 123, sha256: "a".repeat(64),
   });
 }
 for (const invalid of [
   { version: "1.6.1-beta" },
-  { downloadUrl: "https://github.com/other/repo/releases/download/v1.6.1/update.apk" },
+  { downloadUrl: "https://github.com/markbang/cohub-mobile/releases/download/v1.6.1/cohub-v1.6.1-android-arm64-v8a.apk" },
   { downloadUrl: apkRelease.downloadUrl.replace("https:", "http:") },
   { downloadUrl: `${apkRelease.downloadUrl}?redirect=elsewhere` },
   { downloadName: "../update.apk" },
@@ -1680,8 +1681,15 @@ for (const invalid of [
   { downloadSize: 1.5 },
   { downloadSha256: null },
   { downloadSha256: "invalid" },
-]) assert.throws(() => validateAndroidUpdateAsset({ ...apkRelease, ...invalid }));
-const apkAsset = validateAndroidUpdateAsset(apkRelease);
+]) assert.throws(() => validateAndroidUpdateAsset({ ...apkRelease, ...invalid }, apkOrigin));
+assert.equal(selectYaotaAndroidUpdate({
+  apks: [
+    { version: "1.6.0", arch: "arm64-v8a", size: 100, sha256: "b".repeat(64), url: androidUpdateApkUrl(apkOrigin, "1.6.0", "arm64-v8a"), status: "Available", createdAt: "2026-01-01T00:00:00.000Z" },
+    { version: "1.6.1", arch: "arm64-v8a", size: 123, sha256: "a".repeat(64), url: androidUpdateApkUrl(apkOrigin, "1.6.1", "arm64-v8a"), status: "Available", createdAt: "2026-01-02T00:00:00.000Z" },
+    { version: "1.7.0", arch: "x86_64", size: 123, sha256: "c".repeat(64), url: androidUpdateApkUrl(apkOrigin, "1.7.0", "x86_64"), status: "Available", createdAt: "2026-01-03T00:00:00.000Z" },
+  ],
+}, apkOrigin, "arm64-v8a")?.version, "1.6.1");
+const apkAsset = validateAndroidUpdateAsset(apkRelease, apkOrigin);
 assert.doesNotThrow(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sha256: "a".repeat(64) }));
 assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 124, sha256: apkAsset.sha256 }), /verification/);
 assert.throws(() => verifyAndroidUpdateIntegrity(apkAsset, { size: 123, sha256: "b".repeat(64) }), /verification/);

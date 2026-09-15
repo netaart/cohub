@@ -5,15 +5,20 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { Platform } from "react-native";
 import { config } from "@/src/config";
-import { validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "@/src/data/update-assets";
+import {
+  githubReleaseUrl,
+  isAllowedAndroidUpdateUrl,
+  selectYaotaAndroidUpdate,
+  validateAndroidUpdateAsset,
+  verifyAndroidUpdateIntegrity,
+  type AndroidUpdateAbi,
+} from "@/src/data/update-assets";
 
-const CACHE_KEY = "cohub:mobile-update-check:v3";
+const CACHE_KEY = "cohub:mobile-update-check:v4";
 const SNOOZE_KEY = "cohub:mobile-update-snooze:v1";
 const CHECK_TTL_MS = 6 * 60 * 60 * 1000;
 const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 8_000;
-// Enough releases to find the newest native build behind any number of JS-only releases.
-const NATIVE_RELEASE_SCAN_LIMIT = 20;
 
 export type AppRelease = {
   version: string;
@@ -51,16 +56,13 @@ function parseVersion(value: string) {
   return [Number(match[1]), Number(match[2]), Number(match[3])] as const;
 }
 
-function isAllowedReleaseUrl(value: string) {
-  try {
-    const url = new URL(value);
-    const path = url.pathname.replace(/\/+$/, "");
-    return url.protocol === "https:" &&
-      (url.hostname === "github.com" || url.hostname === "www.github.com") &&
-      (path === "/markbang/cohub-mobile/releases" || path.startsWith("/markbang/cohub-mobile/releases/"));
-  } catch {
-    return false;
-  }
+function deviceAbi(): AndroidUpdateAbi | null {
+  const architectures = (Device.supportedCpuArchitectures ?? []).map((value) => value.toLowerCase());
+  if (architectures.some((value) => value.includes("arm64") || value.includes("aarch64"))) return "arm64-v8a";
+  if (architectures.some((value) => value.includes("armeabi-v7a") || value.includes("armv7"))) return "armeabi-v7a";
+  if (architectures.some((value) => value.includes("x86_64") || value.includes("x86-64") || value.includes("amd64"))) return "x86_64";
+  if (architectures.some((value) => value.includes("x86"))) return "x86";
+  return null;
 }
 
 export function isNewerAppVersion(current: string, latest: string) {
@@ -77,61 +79,6 @@ export function isNewerAppVersion(current: string, latest: string) {
 
 export function getInstalledAppVersion() {
   return Application.nativeApplicationVersion?.trim() || Constants.expoConfig?.version?.trim() || "0.0.0";
-}
-
-function resolveDownloadAsset(payload: Record<string, unknown>) {
-  if (Platform.OS !== "android") return null;
-  const architectures = (Device.supportedCpuArchitectures ?? []).map((value) => value.toLowerCase());
-  const abi = architectures.some((value) => value.includes("arm64") || value.includes("aarch64"))
-    ? "arm64-v8a"
-    : architectures.some((value) => value.includes("armeabi-v7a") || value.includes("armv7"))
-      ? "armeabi-v7a"
-      : architectures.some((value) => value.includes("x86_64") || value.includes("x86-64") || value.includes("amd64"))
-        ? "x86_64"
-        : architectures.some((value) => value.includes("x86"))
-          ? "x86"
-          : null;
-  if (!abi || !Array.isArray(payload.assets)) return null;
-  const asset = payload.assets.find((item) => {
-    if (!isRecord(item)) return false;
-    const name = typeof item.name === "string" ? item.name : "";
-    const url = typeof item.browser_download_url === "string" ? item.browser_download_url.trim() : "";
-    return name.endsWith(`android-${abi}.apk`) && isAllowedReleaseUrl(url);
-  });
-  if (!isRecord(asset) || typeof asset.browser_download_url !== "string") return null;
-  const url = asset.browser_download_url.trim();
-  if (!url) return null;
-  const name = typeof asset.name === "string" ? asset.name.trim() || null : null;
-  const size = typeof asset.size === "number" && Number.isFinite(asset.size) && asset.size >= 0 ? asset.size : null;
-  const sha256 = typeof asset.digest === "string"
-    ? /^sha256:([a-f0-9]{64})$/i.exec(asset.digest)?.[1].toLowerCase() ?? null
-    : null;
-  return { url, name, size, sha256 };
-}
-
-function releaseFromPayload(payload: unknown): AppRelease | null {
-  if (!isRecord(payload)) return null;
-  const tag = typeof payload.tag_name === "string" ? payload.tag_name.trim() : "";
-  const url = typeof payload.html_url === "string" ? payload.html_url.trim() : "";
-  const draft = payload.draft === true;
-  const prerelease = payload.prerelease === true;
-  if (!tag || !url || !isAllowedReleaseUrl(url) || draft || prerelease || !parseVersion(tag)) return null;
-  const download = resolveDownloadAsset(payload);
-  const publishedAt = typeof payload.published_at === "string" && !Number.isNaN(Date.parse(payload.published_at))
-    ? payload.published_at
-    : null;
-
-  return {
-    version: tag.replace(/^v/, ""),
-    title: typeof payload.name === "string" && payload.name.trim() ? payload.name.trim() : null,
-    publishedAt,
-    url,
-    notes: typeof payload.body === "string" && payload.body.trim() ? payload.body.trim() : null,
-    downloadUrl: download?.url ?? null,
-    downloadName: download?.name ?? null,
-    downloadSize: download?.size ?? null,
-    downloadSha256: download?.sha256 ?? null,
-  };
 }
 
 function parseCachedCheck(value: unknown): CachedCheck | null {
@@ -158,8 +105,8 @@ function parseCachedCheck(value: unknown): CachedCheck | null {
   const downloadSha256 = typeof rawRelease.downloadSha256 === "string" && /^[a-f0-9]{64}$/i.test(rawRelease.downloadSha256)
     ? rawRelease.downloadSha256.toLowerCase()
     : null;
-  if (!version || !parseVersion(version) || !isAllowedReleaseUrl(url)) return null;
-  if (downloadUrl && !isAllowedReleaseUrl(downloadUrl)) return null;
+  if (!version || !parseVersion(version) || url !== githubReleaseUrl(version)) return null;
+  if (downloadUrl && !isAllowedAndroidUpdateUrl(config.apkOrigin, downloadUrl)) return null;
   return {
     checkedAt: value.checkedAt,
     release: { version, title, publishedAt, url, notes, downloadUrl, downloadName, downloadSize, downloadSha256 },
@@ -197,24 +144,19 @@ function persistCheck(value: CachedCheck) {
 }
 
 async function requestNativeRelease(): Promise<AppRelease | null> {
+  if (Platform.OS !== "android") return null;
+  const abi = deviceAbi();
+  if (!abi) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${config.releasesApiUrl}?per_page=${NATIVE_RELEASE_SCAN_LIMIT}`, {
-      headers: { Accept: "application/vnd.github+json" },
+    const response = await fetch(`${config.apkOrigin.replace(/\/+$/, "")}/api/apks`, {
+      headers: { Accept: "application/json" },
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Update check failed with HTTP ${response.status}`);
     const payload: unknown = await response.json();
-    if (!Array.isArray(payload)) throw new Error(translate("update.responseInvalid"));
-    // Only a release with an APK for this device requires a new native build; JS-only releases ride OTA.
-    let newest: AppRelease | null = null;
-    for (const item of payload) {
-      const release = releaseFromPayload(item);
-      if (!release?.downloadUrl) continue;
-      if (!newest || isNewerAppVersion(newest.version, release.version)) newest = release;
-    }
-    return newest;
+    return selectYaotaAndroidUpdate(payload, config.apkOrigin, abi);
   } finally {
     clearTimeout(timeout);
   }
@@ -307,7 +249,7 @@ export async function downloadAndInstallAndroidUpdate(
   if (!isNewerAppVersion(getInstalledAppVersion(), release.version)) {
     throw new Error(translate("update.notNewer"));
   }
-  const asset = validateAndroidUpdateAsset(release);
+  const asset = validateAndroidUpdateAsset(release, config.apkOrigin);
   apkUpdateInProgress = true;
   try {
     const { Directory, File, Paths } = await import("expo-file-system");
