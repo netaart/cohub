@@ -97,6 +97,19 @@ export default function DebugMarkdownScreen() {
             contentContainerStyle={{ paddingVertical: 8 }}
           />
         </View>
+        <View style={{ paddingHorizontal: 16, paddingTop: 14 }}>
+          <Text style={[typography.caption, { color: theme.colors.textMuted }]}>
+            非反转列表（同高度同内容）：这个能选、上面反转列表不能选，就说明是 inverted 的 scaleY(-1) 变换导致的。
+          </Text>
+        </View>
+        <View style={{ height: 240, marginTop: 8 }}>
+          <FlatList
+            data={[MESSAGE]}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => <MessageBubble message={item} />}
+            contentContainerStyle={{ paddingVertical: 8 }}
+          />
+        </View>
         <MessageBubble message={MESSAGE} />
       </ScrollView>
     </Screen>
