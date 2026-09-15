@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.2.11](https://github.com/markbang/cohub-mobile/compare/v2.2.10...v2.2.11) (2026-09-15)
+
+
+### Fixes
+
+* **chat:** keep focus scrolling off the LegendList timeline ([1f64d7f](https://github.com/markbang/cohub-mobile/commit/1f64d7f36ba52ae8ab666e8cb1d641c9c711d17e))
+* **chat:** keep the tail through bursts and settle the send fly-in ([2e9af1d](https://github.com/markbang/cohub-mobile/commit/2e9af1db5e5809e78b12ae74481738c73c202eb3))
+* **chat:** let a code block keep the drag it starts ([e55191c](https://github.com/markbang/cohub-mobile/commit/e55191c2ad9017c1976537f09935c66968fe5249))
+* **chat:** let LegendList slide the tail while a bubble grows ([cfa755c](https://github.com/markbang/cohub-mobile/commit/cfa755c5c8054d3dee6a1fc12197c0694446d401))
+* **chat:** pace the native streaming text ([7434f2b](https://github.com/markbang/cohub-mobile/commit/7434f2bb73897afdf962c29fa11b74d7f853d33d))
+* **chat:** repair attachment upload and native markdown theming ([b62322b](https://github.com/markbang/cohub-mobile/commit/b62322b4a7f02178c27012fe7331d8184a941e01))
+* **chat:** stop blocking the panel swipe over messages ([73a5c1b](https://github.com/markbang/cohub-mobile/commit/73a5c1bd02bbe0549d24ce45288899fd10d311da))
+* **mobile:** forward external row state to LegendList via extraData ([d5565b7](https://github.com/markbang/cohub-mobile/commit/d5565b7230947aa20077eff91f544d5cb464deaa))
+
+
+### Performance
+
+* **chat:** de-invert the timeline onto LegendList ([db85278](https://github.com/markbang/cohub-mobile/commit/db852780b62971ff6dc4aa70174ac5c96092dc74))
+* **chat:** stream message text through the native Markdown renderer ([4bf01d3](https://github.com/markbang/cohub-mobile/commit/4bf01d370f58e17f81fb37bbe412158d84ecac1b))
+
 ## [2.2.10](https://github.com/markbang/cohub-mobile/compare/v2.2.9...v2.2.10) (2026-09-14)
 
 
