@@ -28,6 +28,7 @@ import { useTranslation, type Translate } from "@/src/i18n";
 import { AppIcon, type IconName } from "@/src/ui";
 import { BUBBLE_PADDING_X, getBubbleMaxWidth } from "@/src/ui/message-bubble-layout";
 import { BubbleContentWidth, BubbleText, BubbleTraceMessage } from "@/src/components/BubbleText";
+import { usePanelGestureBlocker } from "@/src/components/SpacePanels";
 import { turnSequenceForMessage } from "@/src/data/session-history";
 import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
 
@@ -252,11 +253,30 @@ function enrichedMarkdownStyle(theme: AppTheme, color: string): MarkdownStyle {
     h4: heading(17),
     h5: heading(15),
     h6: heading(15),
-    blockquote: { ...body, color: theme.colors.textMuted },
-    list: { ...body },
+    blockquote: { ...body, color: theme.colors.textMuted, borderColor: theme.colors.accentBorder, backgroundColor: "transparent" },
+    list: { ...body, bulletColor: theme.colors.textMuted, markerColor: theme.colors.textMuted },
     link: { color: theme.colors.accent, underline: true },
-    codeBlock: { fontFamily: "SpaceMono", fontSize: typography.code.fontSize, lineHeight: typography.code.lineHeight, color: theme.colors.text, backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, borderRadius: 8 },
-    code: { fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color: theme.colors.text, backgroundColor: theme.colors.surfaceRaised },
+    thematicBreak: { color: theme.colors.border },
+    // The library ships light defaults; without an override a table renders as a white block in
+    // dark mode and inline code keeps its pink chip with a visible border.
+    table: {
+      ...body,
+      fontSize: typography.caption.fontSize,
+      lineHeight: typography.caption.lineHeight,
+      borderColor: theme.colors.border,
+      borderWidth: 1,
+      borderRadius: 10,
+      headerBackgroundColor: theme.colors.surfaceRaised,
+      headerTextColor: theme.colors.text,
+      rowEvenBackgroundColor: "transparent",
+      rowOddBackgroundColor: "transparent",
+      cellPaddingHorizontal: 10,
+      cellPaddingVertical: 6,
+    },
+    codeBlock: { fontFamily: "SpaceMono", fontSize: typography.code.fontSize, lineHeight: typography.code.lineHeight, color: theme.colors.text, backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, borderWidth: 1, borderRadius: 10, padding: 12 },
+    code: { fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color: theme.colors.text, backgroundColor: theme.colors.surfaceRaised, borderColor: "transparent" },
+    math: { color: theme.colors.text, backgroundColor: "transparent" },
+    inlineMath: { color: theme.colors.text },
   };
 }
 
@@ -264,6 +284,11 @@ function TextBlock({ value, muted = false, accent, color, streaming = false, foo
   const theme = useAppTheme();
   const { spaceId } = useContext(BubbleContext);
   const openLink = useOpenMessageLink(spaceId);
+  const blockPanelGesture = usePanelGestureBlocker();
+  // A code block is a native horizontal scroller; while the touch is inside a message that has
+  // one, the SpacePanels pager must not claim the drag. Messages without code keep the pager so
+  // the chat/files swipe still works from them.
+  const holdsPanelGesture = blockPanelGesture !== null && value.includes("```");
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
   const { text, fadeTail } = useRevealedStreamText(value, streaming);
   const [cache] = useState(() => new StreamingMarkdownCache());
@@ -287,7 +312,12 @@ function TextBlock({ value, muted = false, accent, color, streaming = false, foo
   // what made opening a cache-heavy Chat freeze. The streaming path below stays on the paced
   // renderer until the native streaming animation is validated.
   if (!streaming) {
-    return <View style={{ minWidth: 0 }}>
+    return <View
+      style={{ minWidth: 0 }}
+      onTouchStart={holdsPanelGesture ? () => blockPanelGesture(true) : undefined}
+      onTouchEnd={holdsPanelGesture ? () => blockPanelGesture(false) : undefined}
+      onTouchCancel={holdsPanelGesture ? () => blockPanelGesture(false) : undefined}
+    >
       <EnrichedMarkdownText
         markdown={value}
         markdownStyle={markdownStyle}

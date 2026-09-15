@@ -12,7 +12,7 @@ import type {
 } from "@neta-art/cohub";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState as NativeAppState } from "react-native";
-import { File as ExpoFile } from "expo-file-system";
+import { File as ExpoFile, UploadType } from "expo-file-system";
 import { translate } from "@/src/i18n/core";
 import { createMobileClient } from "@/src/data/client";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
@@ -119,8 +119,11 @@ async function buildPromptContent(
       }
     }
     
+    // `File.upload` defaults to POST; the presigned URL is signed for the method the plan
+    // reports (PUT), and a mismatched method makes R2 reject the signature with 403.
     const uploadResult = await file.upload(plan.asset.uploadUrl, {
-      uploadType: 0,
+      httpMethod: plan.asset.uploadMethod,
+      uploadType: UploadType.BINARY_CONTENT,
       headers: uploadHeaders,
     });
     

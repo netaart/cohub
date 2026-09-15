@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- controlled panel state synchronizes the native animation surface. */
 import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/cohub";
 import { useIsFocused } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, BackHandler, FlatList, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import Reanimated, { Extrapolation, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
@@ -29,6 +29,16 @@ import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField, TopBar } from 
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
 
 export type SpacePanel = "chat" | "files";
+
+/**
+ * Lets nested horizontal scrollers (code blocks, filter chips) hold the pager for one gesture.
+ * Without it the pager intercepts a horizontal drag before the nested scroller sees it.
+ */
+const PanelGestureContext = createContext<((touching: boolean) => void) | null>(null);
+
+export function usePanelGestureBlocker() {
+  return useContext(PanelGestureContext);
+}
 
 type SpacePanelsProps = {
   spaceId: string;
@@ -227,7 +237,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
               : null}
           </View>
           <View style={[styles.contentPage, { width }]} accessibilityElementsHidden={visiblePanel !== null} importantForAccessibility={visiblePanel ? "no-hide-descendants" : "auto"}>
-            {children}
+            <PanelGestureContext.Provider value={handleChipsTouchChange}>{children}</PanelGestureContext.Provider>
             <Reanimated.View style={[styles.backdrop, scrimStyle]} pointerEvents={interactive ? "auto" : "none"}>
               <Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.close")} style={styles.fill} onPress={closePanel} />
             </Reanimated.View>

@@ -604,6 +604,7 @@ const bubbleScope = {
   EnrichedMarkdownText: "EnrichedMarkdownText",
   enrichedMarkdownStyle: () => ({}),
   useOpenMessageLink: () => () => {},
+  usePanelGestureBlocker: () => null,
   BubbleContext: null,
 };
 const bubbleRender = new Function(...Object.keys(bubbleScope), ts.transpileModule(`${bubbleFunctions.join("\n")}\nreturn MessageContent;`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText)(...Object.values(bubbleScope));
