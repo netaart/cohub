@@ -10,6 +10,7 @@ import {
 import { createClient } from "../client.js";
 import { resolveSpace } from "../space.js";
 import { json as outJson, jsonRequested, ok, error, handleHttp, spinner } from "../output.js";
+import { resolveSunoInput } from "../suno-input.js";
 
 type GenerationSource =
   | { type: "url"; url: string }
@@ -254,7 +255,7 @@ export function registerGenerations(program: Command): void {
   program
     .command("generate")
     .description("Generate multimodal outputs")
-    .argument("<prompt>", "Prompt text")
+    .argument("[prompt]", "Prompt text or custom lyrics")
     .requiredOption("-m, --model <model>", "Multimodal model ID from `cohub models ls --model-type multimodal`")
     .option(
       "--image <path-or-url>",
@@ -277,6 +278,11 @@ export function registerGenerations(program: Command): void {
     .option("--param <key=value>", "Generation parameter; repeatable, values may be JSON/number/boolean", collect, [])
     .option("--parameters <json>", "Generation parameters as a JSON object")
     .option("--meta <json>", "Meta as a JSON object")
+    .option("--mode <mode>", "Suno songwriting mode: simple or custom")
+    .option("--lyrics-file <path>", "Read custom Suno lyrics from a file")
+    .option("--style <style>", "Custom Suno style tags")
+    .option("--title <title>", "Custom Suno title")
+    .option("--instrumental", "Generate instrumental music in Suno simple mode")
     .option("-o, --output <path>", "Save generated output to a file or directory")
     .option("--async", "Queue the generation task and return immediately")
     .option("--timeout-ms <ms>", "Maximum time to wait in synchronous mode")
@@ -292,7 +298,7 @@ Examples:
   cohub -s <space-id> generate "Lip-sync to the reference take" -m seedance-2-0-fast --image reference_image=https://example.com/portrait.png --audio reference_audio=https://example.com/speech.mp3
   cohub -s <space-id> generate "A calm lake" -m <model> --async
 `)
-    .action(async (prompt: string, opts: {
+    .action(async (prompt: string | undefined, opts: {
       model: string;
       image: string[];
       video: string[];
@@ -300,6 +306,7 @@ Examples:
       param: string[];
       parameters?: string;
       meta?: string;
+      mode?: string; lyricsFile?: string; style?: string; title?: string; instrumental?: boolean;
       output?: string;
       async?: boolean;
       timeoutMs?: string;
@@ -307,7 +314,8 @@ Examples:
     }) => {
       try {
         const spaceId = await resolveSpace(program);
-        const content: GenerationContentBlock[] = [{ type: "text", text: prompt }];
+        const suno = await resolveSunoInput({ model: opts.model, mode: opts.mode, prompt, lyricsFile: opts.lyricsFile, style: opts.style, title: opts.title, instrumental: opts.instrumental, meta: opts.meta, hasMedia: opts.image.length + opts.video.length + opts.audio.length > 0 });
+        const content: GenerationContentBlock[] = [...suno.content];
         content.push(...await Promise.all(opts.image.map((value) => contentFromPathOrUrl("image", value))));
         content.push(...await Promise.all(opts.video.map((value) => contentFromPathOrUrl("video", value))));
         content.push(...await Promise.all(opts.audio.map((value) => contentFromPathOrUrl("audio", value))));
@@ -325,7 +333,7 @@ Examples:
           throw policyError;
         }
 
-        const meta = parseMeta(opts.meta);
+        const meta = suno.meta ?? parseMeta(opts.meta);
         const client = createClient();
         const created = await client.generations.create({
           spaceId,
