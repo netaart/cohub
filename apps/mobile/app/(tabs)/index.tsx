@@ -32,7 +32,7 @@ export default function ChatsScreen() {
   const tabBarInset = useFloatingTabBarInset();
   const { headerHeight, onHeaderLayout } = useEdgeChrome();
   const isFocused = useIsFocused();
-  const { state, client, connectionState, refreshHome, refreshSessionStatuses, loadMoreSessions } = useApp();
+  const { state, client, connectionState, refreshHome, refreshSessionStatuses, loadMoreSessions, prefetchSession } = useApp();
   const filterPreference = useSessionFilterPreference();
   const [cutoff, setCutoff] = useState(() => sessionFilterCutoff(filterPreference.minutes, Date.now()));
   const dataError = filterPreference.error ?? state.error ?? state.sessionsError ?? state.sessionStatusError;
@@ -90,8 +90,8 @@ export default function ChatsScreen() {
   // LegendList memoizes each row on [item, extraData]; cached space counts load after the
   // first render but never change `listItems`, so they must flow through extraData.
   const rowExtraData = useMemo(
-    () => ({ spaceSessionCounts, t, theme }),
-    [spaceSessionCounts, t, theme],
+    () => ({ spaceSessionCounts, t, theme, prefetchSession }),
+    [spaceSessionCounts, t, theme, prefetchSession],
   );
 
   const filteringPages = isFocused && client !== null && filter !== "all" && filterPreference.loaded && !state.refreshing && !dataError && hasMoreRecentSessions({ hasMore: state.sessionsHasMore, cursor: state.sessionsCursor, boundary: state.sessionsPageBoundary, cutoff });
@@ -140,8 +140,8 @@ export default function ChatsScreen() {
         estimatedItemSize={76}
         keyExtractor={(item) => item.kind === "remote-session" ? `remote-session:${item.hit.sessionId}` : item.kind === "local-session" ? `session:${item.session.id}` : item.kind === "remote-space" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
         renderItem={({ item }) => {
-          if (item.kind === "remote-session") return <SessionSearchRow hit={item.hit} onPress={(target) => openSearchSession(item.hit.sessionId, target)} />;
-          if (item.kind === "local-session") return <SessionRow session={item.session} onPress={() => openSearchSession(item.session.id)} />;
+          if (item.kind === "remote-session") return <SessionSearchRow hit={item.hit} onPress={(target) => openSearchSession(item.hit.sessionId, target)} onPressIn={() => prefetchSession(item.hit.sessionId)} />;
+          if (item.kind === "local-session") return <SessionRow session={item.session} onPress={() => openSearchSession(item.session.id)} onPressIn={() => prefetchSession(item.session.id)} />;
           if (item.kind === "remote-space") return <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} />;
           return <SpaceRow space={item.space} sessionCount={spaceSessionCounts[item.space.id] ?? null} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />;
         }}

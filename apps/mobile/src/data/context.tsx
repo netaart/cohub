@@ -686,6 +686,7 @@ export type AppContextValue = {
   refreshSessionStatuses: (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "lastMessageAt">[], options?: { silent?: boolean }) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   openSession: (sessionId: string) => Promise<void>;
+  prefetchSession: (sessionId: string) => void;
   closeSession: (sessionId: string) => void;
   refreshSession: (sessionId: string) => Promise<void>;
   loadOlderTurns: (sessionId: string) => Promise<void>;
@@ -1515,6 +1516,11 @@ export function AppProvider({
     await sessionLifecycleRef.current.open(sessionId);
   }, [client]);
 
+  const prefetchSession = useCallback((sessionId: string) => {
+    if (!client || !sessionId || sessionId === "new") return;
+    sessionLifecycleRef.current.prime(sessionId);
+  }, [client]);
+
   const closeSession = useCallback((sessionId: string) => {
     sessionLifecycleRef.current.close(sessionId);
   }, []);
@@ -1858,6 +1864,7 @@ export function AppProvider({
       refreshSessionStatuses,
       loadMoreSessions,
       openSession,
+      prefetchSession,
       closeSession,
       refreshSession,
       loadOlderTurns,
@@ -1917,6 +1924,7 @@ export function AppProvider({
       modelStatusError,
       modelStatusLoading,
       openSession,
+      prefetchSession,
       refreshHome,
       refreshSessionStatuses,
       refreshSession,
@@ -1941,7 +1949,8 @@ export function useApp() {
 
 export function useSession(sessionId: string) {
   const { state, openSession, closeSession } = useApp();
-  useEffect(() => {
+  // Layout so a press-in prefetch can land in sessionViews before the first paint.
+  useLayoutEffect(() => {
     void openSession(sessionId);
     return () => closeSession(sessionId);
   }, [closeSession, openSession, sessionId]);

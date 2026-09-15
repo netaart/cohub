@@ -82,10 +82,13 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const [visiblePanel, setVisiblePanel] = useState<PanelName | null>(activePanel);
   const [interactive, setInteractive] = useState(Boolean(activePanel));
+  const [seedPagerOffset, setSeedPagerOffset] = useState(true);
   const visiblePanelRef = useRef<PanelName | null>(activePanel);
   const activePanelRef = useRef<PanelName | null>(activePanel);
   const initialScrollDone = useRef(false);
+  const seedPagerOffsetRef = useRef(true);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialPagerOffset = useMemo(() => ({ x: centerOffset, y: 0 }), [centerOffset]);
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimer.current === null) return;
@@ -189,12 +192,12 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   ];
 
   return (
-    <View style={styles.nativeRoot} collapsable={false}>
+    <View style={[styles.nativeRoot, { backgroundColor: theme.colors.background }]} collapsable={false}>
       <Reanimated.ScrollView
         ref={pagerRef}
         horizontal
         keyboardShouldPersistTaps="handled"
-        style={styles.pager}
+        style={[styles.pager, { backgroundColor: theme.colors.background }]}
         showsHorizontalScrollIndicator={false}
         bounces={false}
         overScrollMode="never"
@@ -203,17 +206,24 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         snapToOffsets={snapOffsets}
         decelerationRate="fast"
         disableIntervalMomentum
+        {...(seedPagerOffset ? { contentOffset: initialPagerOffset } : null)}
         onScroll={scrollHandler}
         onScrollBeginDrag={clearIdleTimer}
         onScrollEndDrag={scheduleSettle}
         onMomentumScrollBegin={clearIdleTimer}
         onMomentumScrollEnd={settle}
         onContentSizeChange={() => {
-          // Initialize imperatively so filter-touch re-renders cannot reapply a closed-page offset.
-          if (initialScrollDone.current) return;
-          initialScrollDone.current = true;
-          scrollOffset.value = centerOffset;
-          pagerRef.current?.scrollTo({ x: centerOffset, animated: false });
+          // Seed the closed page for the first paint, then drop `contentOffset` so filter-touch
+          // re-renders cannot reset the native scroll position.
+          if (!initialScrollDone.current) {
+            initialScrollDone.current = true;
+            scrollOffset.value = centerOffset;
+            pagerRef.current?.scrollTo({ x: centerOffset, animated: false });
+          }
+          if (seedPagerOffsetRef.current) {
+            seedPagerOffsetRef.current = false;
+            setSeedPagerOffset(false);
+          }
         }}
       >
         {/* Pages fill the pager's own height. Seeding it from the window height overshot by the
@@ -232,7 +242,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
                 : <PanelGesturePreview panel="chat" />
               : null}
           </View>
-          <View style={[styles.contentPage, { width }]} accessibilityElementsHidden={visiblePanel !== null} importantForAccessibility={visiblePanel ? "no-hide-descendants" : "auto"}>
+          <View style={[styles.contentPage, { width, backgroundColor: theme.colors.background }]} accessibilityElementsHidden={visiblePanel !== null} importantForAccessibility={visiblePanel ? "no-hide-descendants" : "auto"}>
             {children}
             <Reanimated.View style={[styles.backdrop, scrimStyle]} pointerEvents={interactive ? "auto" : "none"}>
               <Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.close")} style={styles.fill} onPress={closePanel} />
@@ -304,7 +314,7 @@ type ChatListFilter =
 function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onChipsTouchChange: (touching: boolean) => void; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
-  const { state, refreshSessionStatuses } = useApp();
+  const { state, prefetchSession, refreshSessionStatuses } = useApp();
   const [query, setQuery] = useState("");
   const [extraSessions, setExtraSessions] = useState<UserSessionListItem[]>([]);
   const [scopeCursor, setScopeCursor] = useState<string | null>(null);
@@ -407,7 +417,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
   }, [filteredSessions, labelSessionIds, listFilter, remoteQueryMatches, remoteSearch.sessions, sessionsById, trimmedQuery]);
   // LegendList memoizes each row on [item, extraData]; the row reads client/theme/locale,
   // which never change `listItems`, so they must flow through extraData.
-  const rowExtraData = useMemo(() => ({ client, t, theme }), [client, t, theme]);
+  const rowExtraData = useMemo(() => ({ client, t, theme, prefetchSession }), [client, t, theme, prefetchSession]);
   const loadMore = async () => {
     if (!client || loadingMore || (scopeInitialized && !scopeHasMore)) return;
     setLoadingMore(true);
@@ -474,8 +484,8 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
         extraData={rowExtraData}
         keyExtractor={(item) => item.kind === "remote" ? `remote:${item.hit.sessionId}` : `local:${item.session.id}`}
         renderItem={({ item }) => item.kind === "remote"
-          ? <SessionSearchRow hit={item.hit} showSpace={false} onPress={(target) => onOpenSession(item.hit.sessionId, target)} />
-          : <SessionRow session={item.session} showSpace={false} onPress={() => onOpenSession(item.session.id)} onLongPress={client ? () => openLabelSheet(item.session) : undefined} />}
+          ? <SessionSearchRow hit={item.hit} showSpace={false} onPress={(target) => onOpenSession(item.hit.sessionId, target)} onPressIn={() => prefetchSession(item.hit.sessionId)} />
+          : <SessionRow session={item.session} showSpace={false} onPress={() => onOpenSession(item.session.id)} onPressIn={() => prefetchSession(item.session.id)} onLongPress={client ? () => openLabelSheet(item.session) : undefined} />}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 24, flexGrow: listItems.length === 0 ? 1 : undefined }}
         ListFooterComponent={showLoadMore ? <View>{loadMoreError ? <Text selectable style={[typography.micro, { color: theme.colors.danger, marginHorizontal: 14, marginTop: 8 }]}>{loadMoreError}</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel={loadMoreError ? t("space.panel.retryLoadMore") : t("space.panel.loadMore")} disabled={loadingMore} onPress={() => void loadMore()} style={({ pressed }) => ({ minHeight: 40, marginHorizontal: 14, marginTop: 8, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}>{loadingMore ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <Text style={[typography.caption, { color: theme.colors.accent }]}>{loadMoreError ? t("space.panel.retryLoadMore") : t("space.panel.loadMore")}</Text>}</Pressable></View> : null}

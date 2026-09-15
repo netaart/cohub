@@ -2,12 +2,13 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useState, type ReactNode } from "react";
 import { StyleSheet, View, type LayoutChangeEvent, type StyleProp, type ViewStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { collapsedComposerHeight } from "@/src/ui/composer-layout";
 import { edgeChrome, useAppTheme } from "@/src/theme";
 
-export function useEdgeChrome() {
+export function useEdgeChrome(options?: { reserveComposer?: boolean }) {
   const insets = useSafeAreaInsets();
   const [headerHeight, setHeaderHeight] = useState(insets.top + edgeChrome.headerMinHeight);
-  const [footerHeight, setFooterHeight] = useState(0);
+  const [footerHeight, setFooterHeight] = useState(() => options?.reserveComposer ? collapsedComposerHeight(insets.bottom) : 0);
   return {
     headerHeight,
     footerHeight,

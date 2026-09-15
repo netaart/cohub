@@ -9,10 +9,11 @@ import { formatRelativeTime, shortPreview } from "@/src/utils";
 type SessionSearchRowProps = {
   hit: RemoteSessionSearchHit;
   onPress: (target?: SessionNavigationTarget) => void;
+  onPressIn?: () => void;
   showSpace?: boolean;
 };
 
-export function SessionSearchRow({ hit, onPress, showSpace = true }: SessionSearchRowProps) {
+export function SessionSearchRow({ hit, onPress, onPressIn, showSpace = true }: SessionSearchRowProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const spaceName = hit.spaceName?.trim() || t("space.fallbackName");
@@ -32,7 +33,7 @@ export function SessionSearchRow({ hit, onPress, showSpace = true }: SessionSear
   </>;
   const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, backgroundColor: "transparent" };
   const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
-  return <PressableScale accessibilityRole="button" accessibilityLabel={t("ui.openNamed", { name: hit.title })} onPress={() => onPress(target)} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
+  return <PressableScale accessibilityRole="button" accessibilityLabel={t("ui.openNamed", { name: hit.title })} onPress={() => onPress(target)} onPressIn={onPressIn} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
 }
 
 export function SpaceSearchRow({ hit, onPress }: { hit: RemoteSpaceSearchHit; onPress: () => void }) {
