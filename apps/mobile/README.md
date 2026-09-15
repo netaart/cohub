@@ -61,7 +61,7 @@ npm run native:ios
 ## CI and releases
 
 - `CI` runs lint, strict TypeScript, release metadata validation, Expo Doctor, dependency audit, and three-platform JavaScript exports.
-- `Native CI` compiles Android and iOS debug artifacts for pull requests and manual runs; it does not run on every `main` push.
+- `Native CI` compiles Android and iOS debug artifacts on manual dispatch only; it does not run on pull requests or `main` pushes.
 - `Publish OTA` runs on every `main` push and publishes production Android and iOS JS updates against the installed native runtimes. Manual dispatch can still target staging or a specific SHA.
 - `Security` runs dependency review and CodeQL.
 - Release Please maintains `CHANGELOG.md`, synchronizes the Expo and npm versions, and creates `vX.Y.Z` GitHub Releases.
