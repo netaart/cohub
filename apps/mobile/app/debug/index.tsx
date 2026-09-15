@@ -41,7 +41,7 @@ export default function DebugMenuScreen() {
 
       <SectionHeader title="运行时 / 数据" />
       <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-        <DebugRow icon="download" title="更新与 OTA" detail="expo-updates 状态、GitHub APK 检查、冷启动" onPress={() => router.push("/debug/updates")} />
+        <DebugRow icon="download" title="更新与 OTA" detail="expo-updates 状态、Yaota APK 检查、冷启动" onPress={() => router.push("/debug/updates")} />
         <DebugRow icon="messages" title="消息与 usage" detail="最近 assistant 消息的 usage 原始数据 + 真实气泡 footer" onPress={() => router.push("/debug/messages")} />
         <DebugRow icon="database" title="缓存检查器" detail="SQLite 行数、user_key、清空当前用户缓存" onPress={() => router.push("/debug/cache")} />
         <DebugRow icon="zap" title="输入框状态" detail="composer 全部组合 + 交互预览" onPress={() => router.push("/debug/composer")} />
