@@ -937,6 +937,19 @@ const hoverCardPos = $derived.by(() => {
 });
 </script>
 
+{#snippet availabilityDot(modelId: string)}
+	{#if modelStatus}
+		<span
+			class="avail-dot-target"
+			onmouseenter={(e) => onDotMouseEnter(modelId, e)}
+			onmouseleave={onDotMouseLeave}
+			role="presentation"
+		>
+			<span class={`avail-dot avail-dot--${getAvailabilityLevel(modelId)}`}></span>
+		</span>
+	{/if}
+{/snippet}
+
 <Dialog {open} {onClose} title={m.model_selector_title({}, { locale })} maxWidth="540px">
 	<div class="border-b border-border-subtle/70 px-3 py-2">
 		<div class="inline-flex rounded-md bg-bg-subtle/70 p-0.5 text-[12px]">
@@ -1021,15 +1034,8 @@ const hoverCardPos = $derived.by(() => {
 									{#if hasVision(item)}
 										<Image class="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
 									{/if}
-									{#if modelStatus && item.provider === STATUS_PROVIDER}
-										<span
-											class="avail-dot-target"
-											onmouseenter={(e) => onDotMouseEnter(item.id, e)}
-											onmouseleave={onDotMouseLeave}
-											role="presentation"
-										>
-											<span class={`avail-dot avail-dot--${getAvailabilityLevel(item.id)}`}></span>
-										</span>
+									{#if item.provider === STATUS_PROVIDER}
+										{@render availabilityDot(item.id)}
 									{/if}
 								</div>
 								{#if costText}
@@ -1184,6 +1190,7 @@ const hoverCardPos = $derived.by(() => {
 												<ChevronDown class={`h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationModelExpanded(model.model) ? "rotate-0" : "-rotate-90"}`} />
 												<span class="truncate text-[13px] font-medium text-text-primary">{getGenerationModelTitle(model)}</span>
 												<span class="text-[10px] text-text-tertiary/80">{getGenerationKind(model)}</span>
+												{@render availabilityDot(model.model)}
 											</div>
 											<div class="mt-0.5 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-text-tertiary">
 												<span class="truncate">{model.model}</span>
