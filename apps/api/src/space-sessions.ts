@@ -529,20 +529,17 @@ export const listUserSessions = async (
  * read from the `Source/*` system labels rather than `space_sessions.source`.
  * Labels are what the space sidebar shows, and `source` is on its way out.
  *
- * Runs one GROUP BY on the label system key. Sessions without a source label
- * (a creation path that skipped it, or a label write that failed) are not
- * counted; they still list, they just have no kind.
+ * Runs two GROUP BY queries (creator, participant) to avoid OR-condition
+ * index-selection issues, then merges the results.
+ *
+ * Sessions without a source label (a creation path that skipped it, or a
+ * label write that failed) are not counted; they still list, they just have
+ * no kind.
  */
 export const countUserSessionSources = async (userUuid: string): Promise<SessionSourceCount[]> => {
   const prefix = SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX;
-  const memberOf = or(
-    eq(spaceSessions.userUuid, userUuid),
-    and(
-      userSessionParticipantCondition(userUuid),
-      sql`${spaceSessions.userUuid} is distinct from ${userUuid}`,
-    ),
-  );
-  const rows = await db
+
+  const baseSelect = () => db
     .select({
       systemKey: labels.systemKey,
       count: sql<number>`count(*)::int`,
@@ -558,11 +555,18 @@ export const countUserSessionSources = async (userUuid: string): Promise<Session
       sql`${labels.systemKey} like ${`${prefix}%`}`,
       sql`${labels.systemKey} <> ${SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY}`,
     ))
-    .where(memberOf)
     .groupBy(labels.systemKey);
 
+  const [creatorRows, participantRows] = await Promise.all([
+    baseSelect().where(eq(spaceSessions.userUuid, userUuid)),
+    baseSelect().where(and(
+      userSessionParticipantCondition(userUuid),
+      sql`${spaceSessions.userUuid} is distinct from ${userUuid}`,
+    )),
+  ]);
+
   const counts = new Map<string, number>();
-  for (const row of rows) {
+  for (const row of [...creatorRows, ...participantRows]) {
     const key = row.systemKey?.slice(prefix.length);
     if (!key) continue;
     counts.set(key, (counts.get(key) ?? 0) + row.count);
