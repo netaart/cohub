@@ -1,5 +1,44 @@
 # Changelog
 
+## [2.2.12](https://github.com/markbang/cohub-mobile/compare/v2.2.11...v2.2.12) (2026-09-15)
+
+
+### Features
+
+* **android:** download in-app APKs from Yaota ([f19f2dc](https://github.com/markbang/cohub-mobile/commit/f19f2dc1ce9899b026d69b66954570093f303993))
+* **android:** download in-app APKs from Yaota ([#83](https://github.com/markbang/cohub-mobile/issues/83)) ([7d7b70c](https://github.com/markbang/cohub-mobile/commit/7d7b70c911ce24437203e17d6a30e5b6f0f47ae5))
+* **chat:** filter global Chats by source ([2c7bc57](https://github.com/markbang/cohub-mobile/commit/2c7bc57ef943357d37b84f2d7f807f53fbb055b0))
+* **chat:** polish message bubble sending flow ([2f13159](https://github.com/markbang/cohub-mobile/commit/2f1315952a518c78bd45419de3d9abee6b1e6f7b))
+* **ota:** publish verified binary deltas through Yaota ([e7b2e07](https://github.com/markbang/cohub-mobile/commit/e7b2e07607c2b952d714e1b200b14554ea1314d4))
+
+
+### Fixes
+
+* **chat:** keep overflowing code-block swipes off the panel ([4187a80](https://github.com/markbang/cohub-mobile/commit/4187a803d7e8271fe73bd48be2efdbdaedf93fb9))
+* **chat:** keep overflowing code-block swipes off the panel ([#85](https://github.com/markbang/cohub-mobile/issues/85)) ([a4bd04e](https://github.com/markbang/cohub-mobile/commit/a4bd04e281a090e44bc379a88ebba6f1fb511627))
+* **chat:** paint the destination chat on the first open frame ([1482df8](https://github.com/markbang/cohub-mobile/commit/1482df82d19386e227f79b9ca7d66b3ecafb2191))
+* **chat:** paint the destination chat on the first open frame ([#92](https://github.com/markbang/cohub-mobile/issues/92)) ([98b3e0f](https://github.com/markbang/cohub-mobile/commit/98b3e0f3c50a42ccc9fef5817e478d07a26d09fe))
+* **chat:** stop opening onto the space Chats panel ([bc17649](https://github.com/markbang/cohub-mobile/commit/bc17649e3fe339a44a52e8d1b3d8a605ec678895))
+* **chat:** stop opening onto the space Chats panel ([#94](https://github.com/markbang/cohub-mobile/issues/94)) ([b3077c4](https://github.com/markbang/cohub-mobile/commit/b3077c409f773bc209c6300df353583e8e1b6efd))
+* **chat:** stop the timeline jittering after opening a Chat ([1126996](https://github.com/markbang/cohub-mobile/commit/1126996b563f6bd40552db6d3c74847ee177fd2a))
+* **chat:** stop the timeline jittering after opening a Chat ([#86](https://github.com/markbang/cohub-mobile/issues/86)) ([f0b0bb8](https://github.com/markbang/cohub-mobile/commit/f0b0bb847acd0876acdb9b2976177991a68b44d3))
+* **ci:** validate the locked Expo baseline and update SDK 57 patches ([4f62907](https://github.com/markbang/cohub-mobile/commit/4f62907a7c2f717e3246ba264b589b1fa7a82e07))
+* **ui:** size action menus to their content ([3a582ed](https://github.com/markbang/cohub-mobile/commit/3a582eddfe78fced6de741478f2b559292e80f8c))
+
+
+### CI
+
+* copy GitHub Release APKs onto Yaota ([7886d7b](https://github.com/markbang/cohub-mobile/commit/7886d7b30c4991dba55cac06dea4df3a6d89cc78))
+* copy GitHub Release APKs onto Yaota ([#89](https://github.com/markbang/cohub-mobile/issues/89)) ([74f2ea3](https://github.com/markbang/cohub-mobile/commit/74f2ea3946c67ceb62f524bf7b286d2c8dad4051))
+* drop the Yaota APK GitHub Action ([ab11e33](https://github.com/markbang/cohub-mobile/commit/ab11e33150f250bfc80601699d213d5408087f39))
+* drop the Yaota APK GitHub Action ([#90](https://github.com/markbang/cohub-mobile/issues/90)) ([cf6d982](https://github.com/markbang/cohub-mobile/commit/cf6d9825675df10281ae556ab5d03d833a021936))
+* parallelize bundles and keep the Gradle caches warm ([#93](https://github.com/markbang/cohub-mobile/issues/93)) ([6d5532e](https://github.com/markbang/cohub-mobile/commit/6d5532e52ada8096430802969fa6c9c3e10ecaac))
+* parallelize bundles and key Gradle caches on the lockfile ([cd2ee1a](https://github.com/markbang/cohub-mobile/commit/cd2ee1abb11897c6952ab61ebc630aa7b6ae432d))
+* publish tagged Android APKs to Yaota ([4932ce7](https://github.com/markbang/cohub-mobile/commit/4932ce7f50232b69d4f7cbeec50c10b0d51f6600))
+* publish tagged Android APKs to Yaota ([#91](https://github.com/markbang/cohub-mobile/issues/91)) ([819be80](https://github.com/markbang/cohub-mobile/commit/819be801c90dc4d72a035960f0b0987509dc903a))
+* stop compiling native debug builds on pull requests ([958dfed](https://github.com/markbang/cohub-mobile/commit/958dfed94af4db0bc75d887f9e99f01e8c2030b1))
+* stop compiling native debug builds on pull requests ([#88](https://github.com/markbang/cohub-mobile/issues/88)) ([c3e9148](https://github.com/markbang/cohub-mobile/commit/c3e9148cbc820705af1bfdb6ae46925f4d514ed4))
+
 ## [2.2.11](https://github.com/markbang/cohub-mobile/compare/v2.2.10...v2.2.11) (2026-09-15)
 
 
