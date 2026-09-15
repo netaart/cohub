@@ -5,7 +5,7 @@ import ts from "typescript";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { ChatScrollTrace, setDebugTraceSink } from "../src/data/chat-scroll-trace.ts";
 import { MessageMeasurements, createStreamBatch } from "../src/data/chat-rendering.ts";
-import { chatListDistances, chatListViewOffset, isChatRowVisible, nextChatTailFollowing } from "../src/data/chat-scroll.ts";
+import { chatListDistances, chatListViewOffset, chatTailScrolledAway, isChatRowVisible, nextChatTailFollowing } from "../src/data/chat-scroll.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
@@ -1571,6 +1571,12 @@ assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom:
 assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom: 20, userInteracting: true, pendingTarget: false }), true);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom: 20, userInteracting: false, pendingTarget: true }), false);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom: 20, userInteracting: false, pendingTarget: true }), false);
+// Growth (or an animated programmatic pin) must not read as the user scrolling away.
+assert.equal(chatTailScrolledAway({ dragging: false, momentum: false, contentGrew: false }), false);
+assert.equal(chatTailScrolledAway({ dragging: true, momentum: false, contentGrew: false }), true);
+assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: false }), true);
+assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: true }), false, "a streamed burst keeps the tail");
+assert.equal(chatTailScrolledAway({ dragging: true, momentum: true, contentGrew: true }), false, "growth under the finger still keeps the tail");
 assert.deepEqual(chatListDistances(0, 4000, 700), { distanceToLatest: 3300, distanceToOldest: 0 });
 assert.deepEqual(chatListDistances(3280, 4000, 700), { distanceToLatest: 20, distanceToOldest: 3280 });
 

@@ -18,7 +18,7 @@ import { fetchSessionLabels, toUserSessionLabels, type SessionLabel } from "@/sr
 import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
-import { CHAT_PAGE_THRESHOLD, chatListDistances, chatListViewOffset, nextChatTailFollowing } from "@/src/data/chat-scroll";
+import { CHAT_PAGE_THRESHOLD, chatListDistances, chatListViewOffset, chatTailScrolledAway, nextChatTailFollowing } from "@/src/data/chat-scroll";
 import { chatScrollTrace, type TraceFields } from "@/src/data/chat-scroll-trace";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
@@ -644,7 +644,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     setFollowingTail(nextChatTailFollowing({
       currentlyFollowing: followingTailRef.current,
       distanceToBottom: distanceToLatest,
-      userInteracting: (userDraggingRef.current || momentumScrollingRef.current) && !grew,
+      userInteracting: chatTailScrolledAway({ dragging: userDraggingRef.current, momentum: momentumScrollingRef.current, contentGrew: grew }),
       pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()),
     }));
     if (initialScrollDone.current && distanceToOldest < CHAT_PAGE_THRESHOLD && view.hasMoreOlder && !view.loadingOlder) {
@@ -774,6 +774,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         transitionTimerRef.current = null;
         recordDebugEvent("chat.send.transition_cleanup");
         setSendTransition(null);
+        // The animated pin was held off during the transition; land on the tail once it settles.
+        requestFollowTail();
       }, 560);
     }
   };

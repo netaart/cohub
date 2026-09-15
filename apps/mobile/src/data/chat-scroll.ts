@@ -8,6 +8,15 @@ type ChatTailStateInput = {
   pendingTarget: boolean;
 };
 
+/**
+ * Whether a scroll event counts as the user leaving the tail. Growth adds distance to the tail
+ * without the user going anywhere, and an animated programmatic pin reports momentum while it
+ * catches up, so neither may drop following.
+ */
+export function chatTailScrolledAway(input: { dragging: boolean; momentum: boolean; contentGrew: boolean }) {
+  return (input.dragging || input.momentum) && !input.contentGrew;
+}
+
 export function nextChatTailFollowing(input: ChatTailStateInput) {
   if (input.pendingTarget) return false;
   if (input.userInteracting) return input.distanceToBottom <= CHAT_TAIL_THRESHOLD;
