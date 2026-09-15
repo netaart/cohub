@@ -812,7 +812,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { data: true }), [followingTail]);
   // Growth (our streaming card lives in the list footer) is absorbed by Legend's animated
   // end-pinning instead of a hard rAF jump, so the timeline slides while a bubble grows.
-  const maintainScrollAtEnd = useMemo(() => chatMaintainScrollAtEnd(followingTail, sendTransition !== null), [followingTail, sendTransition]);
+  const maintainScrollAtEnd = useMemo(() => chatMaintainScrollAtEnd(followingTail, sendTransition !== null, liveStreamReady), [followingTail, liveStreamReady, sendTransition]);
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     trace("list.layout", { ...event.nativeEvent.layout });
     setListWidth(event.nativeEvent.layout.width);
@@ -856,9 +856,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           maintainScrollAtEndThreshold={CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD}
           estimatedItemSize={FALLBACK_ROW_HEIGHT}
           getItemType={getMessageItemType}
-          // Native Markdown is far taller than FALLBACK_ROW_HEIGHT, so painting at the estimate
-          // stacks the last user bubble on the live card for ~1s when opening a running Chat.
-          experimental_hideItemsUntilMeasured
           // Deep links still own the first scroll; otherwise open on the tail instead of the oldest row.
           initialScrollAtEnd={!hasInitialTurnTarget}
           // Android scrolls a focused selectable text into view; selecting a message must not

@@ -10,7 +10,7 @@ import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
-import { BUBBLE_META_GAP, canInlineBubbleMeta, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
+import { BUBBLE_META_GAP, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getAnchoredMenuLayout } from "../src/ui/anchored-menu-layout.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
@@ -554,19 +554,6 @@ assert.equal(getBubbleMetaLayout({ ...shortBubble, width: 280, lines: [{ x: 230,
 assert.equal(getBubbleMetaLayout(shortBubble, { width: 290, height: 48 }, 280).minWidth, 280);
 assert.equal(getBubbleMetaLayout(shortBubble, { width: 0, height: 0 }, 280).inline, false);
 assert.equal(getBubbleMetaLayout({ width: 200, height: 0, lines: [] }, bubbleMeta, 280).inline, false);
-assert.equal(canInlineBubbleMeta("你好"), true);
-assert.equal(canInlineBubbleMeta("First paragraph.\n\nLast paragraph."), true);
-assert.equal(canInlineBubbleMeta("## Heading"), true);
-assert.equal(canInlineBubbleMeta("> Quote"), true);
-assert.equal(canInlineBubbleMeta("- First\n- Last"), true);
-assert.equal(canInlineBubbleMeta("**Bold** and `code`."), true);
-assert.equal(canInlineBubbleMeta("https://example.com/a.mp4"), true);
-assert.equal(canInlineBubbleMeta("---"), false);
-assert.equal(canInlineBubbleMeta("```ts\nconst x = 1;\n```"), false);
-assert.equal(canInlineBubbleMeta("| A | B |\n| --- | --- |\n| 1 | 2 |"), false);
-assert.equal(canInlineBubbleMeta("![image](https://example.com/image)"), false);
-assert.equal(canInlineBubbleMeta(""), false);
-assert.equal(canInlineBubbleMeta("   \n\n  "), false);
 for (const viewport of [240, 320, 360, 390, 768]) {
   assert.ok(getBubbleMaxWidth(viewport) <= viewport - 24);
   for (const scale of [1, 1.3, 2]) {
@@ -604,8 +591,7 @@ const bubbleScope = {
   useRevealedStreamText: (text) => text,
   BubbleContext: null,
   BubbleContentWidth: null,
-  View: "View", Text: "Text", BubbleText: "BubbleText", BubbleMarkdown: "BubbleMarkdown",
-  canInlineBubbleMeta,
+  View: "View", Text: "Text", BubbleText: "BubbleText",
   ImageGallery: "ImageGallery", ToolCall: "ToolCall", SystemNoteRow: "SystemNoteRow",
   imageUri: (block) => block.source?.type === "url" ? block.source.url : null,
 };
@@ -619,22 +605,20 @@ function footerPlacements(node, footer, found = []) {
   return found;
 }
 const footerMarker = { type: "timestamp", props: {} };
-for (const text of ["你好", "First paragraph.\n\nLast paragraph.", "## Heading", "> Quote", "- First\n- Last", "**Bold** and `code`."]) {
-  assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], active: false, footer: footerMarker }), footerMarker), ["BubbleMarkdown"], `completed clock tucks into the last line: ${text}`);
-  assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], active: true, footer: footerMarker }), footerMarker), ["timestamp"], `live clock stays a sibling row: ${text}`);
+for (const text of ["你好", "First paragraph.\n\nLast paragraph.", "## Heading", "> Quote", "- First\n- Last", "**Bold** and `code`.", "---", "https://example.com/a.mp4", "![image](https://example.com/image)", "```ts\nconst x = 1;\n```", "| A | B |\n| --- | --- |\n| 1 | 2 |"]) {
+  for (const active of [false, true]) {
+    assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], active, footer: footerMarker }), footerMarker), ["timestamp"], `native markdown keeps the clock on a sibling row: ${text}`);
+  }
 }
 const streamedFooterSample = "你好，逐字增长。\n\n## Heading\n\n- First\n- Last\n\nDone.";
 for (let length = 1; length <= streamedFooterSample.length; length++) {
   const content = [{ type: "thinking", thinking: "Earlier thought." }, { type: "text", text: streamedFooterSample.slice(0, length) }];
   assert.deepEqual(footerPlacements(bubbleRender({ content, active: true, footer: footerMarker }), footerMarker), ["timestamp"], `append ${length} must not remeasure inline metadata`);
 }
-for (const text of ["---", "![image](https://example.com/image)", "```ts\nconst x = 1;\n```", "| A | B |\n| --- | --- |\n| 1 | 2 |"])
-  assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text }], footer: footerMarker }), footerMarker), ["timestamp"], "framed content has an external footer row");
-assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "https://example.com/a.mp4" }], footer: footerMarker }), footerMarker), ["BubbleMarkdown"], "a plain link is still a text last line");
 const bubbleImage = { type: "image", source: { type: "url", url: "fixture://image" } };
 assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage], footer: footerMarker }), footerMarker), ["timestamp"]);
-assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage, { type: "text", text: "Caption" }], footer: footerMarker }), footerMarker), ["BubbleMarkdown"]);
-assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "Text" }, { type: "text", text: "  " }], footer: footerMarker }), footerMarker), ["BubbleMarkdown"]);
+assert.deepEqual(footerPlacements(bubbleRender({ content: [bubbleImage, { type: "text", text: "Caption" }], footer: footerMarker }), footerMarker), ["timestamp"]);
+assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "Text" }, { type: "text", text: "  " }], footer: footerMarker }), footerMarker), ["timestamp"]);
 assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "tool_use", id: "tool", name: "read", input: {} }, { type: "tool_result", tool_use_id: "tool", content: "result" }], footer: footerMarker }), footerMarker), ["timestamp"]);
 assert.deepEqual(footerPlacements(bubbleRender({ content: [{ type: "text", text: "No footer" }] }), footerMarker), []);
 
@@ -650,7 +634,7 @@ assert.ok(timelineElement, "the chat timeline renders messages chronologically t
 const timelineProp = (name) => timelineElement.attributes.properties.find((prop) => ts.isJsxAttribute(prop) && prop.name.getText(focusPolicySource) === name);
 assert.ok(timelineProp("alignItemsAtEnd"), "short timelines stick to the bottom");
 assert.equal(timelineProp("inverted"), undefined, "the timeline must not be inverted");
-assert.ok(timelineProp("experimental_hideItemsUntilMeasured"), "estimated rows must not paint over their neighbors");
+assert.equal(timelineProp("experimental_hideItemsUntilMeasured"), undefined, "hiding rows until measured makes the timeline jitter on open");
 const initialScrollAtEndProp = timelineProp("initialScrollAtEnd");
 assert.ok(initialScrollAtEndProp && ts.isJsxExpression(initialScrollAtEndProp.initializer), "the timeline must start at the tail");
 assert.equal(initialScrollAtEndProp.initializer.expression?.getText(focusPolicySource), "!hasInitialTurnTarget");
@@ -1612,6 +1596,7 @@ assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew
 assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: true }), false, "a streamed burst keeps the tail");
 assert.equal(chatTailScrolledAway({ dragging: true, momentum: true, contentGrew: true }), false, "growth under the finger still keeps the tail");
 assert.deepEqual(chatMaintainScrollAtEnd(true, false), { animated: true });
+assert.deepEqual(chatMaintainScrollAtEnd(true, false, false), { animated: false }, "first-row measurement must not animate the pin");
 assert.equal(chatMaintainScrollAtEnd(true, true), false, "the send fly-in needs a still target");
 assert.equal(chatMaintainScrollAtEnd(false, false), false);
 assert.ok(CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD >= 1, "a streamed card can grow more than 10% of the screen in one layout");
