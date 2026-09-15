@@ -13,6 +13,8 @@ import { collapsedComposerHeight, COMPOSER_CHROME_HEIGHT, COMPOSER_TEXT_PADDING,
 import { BUBBLE_META_GAP, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getAnchoredMenuLayout } from "../src/ui/anchored-menu-layout.ts";
+import { interpolateSendBubbleRect, isSendBubbleMessage, measureSendBubbleSource } from "../src/ui/send-bubble-motion.ts";
+import { motion } from "../src/motion.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
 import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
@@ -1654,13 +1656,20 @@ assert.equal(chatTailScrolledAway({ dragging: true, momentum: false, contentGrew
 assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: false }), true);
 assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: true }), false, "a streamed burst keeps the tail");
 assert.equal(chatTailScrolledAway({ dragging: true, momentum: true, contentGrew: true }), false, "growth under the finger still keeps the tail");
-assert.deepEqual(chatMaintainScrollAtEnd(true, false), { animated: true });
-assert.deepEqual(chatMaintainScrollAtEnd(true, false, false), { animated: false }, "first-row measurement must not animate the pin");
-assert.equal(chatMaintainScrollAtEnd(true, true), false, "the send fly-in needs a still target");
-assert.equal(chatMaintainScrollAtEnd(false, false), false);
+assert.deepEqual(chatMaintainScrollAtEnd(true), { animated: true }, "sending must not disable the moving tail");
+assert.deepEqual(chatMaintainScrollAtEnd(true, false), { animated: false }, "first-row measurement and reduced motion must not animate the pin");
+assert.equal(chatMaintainScrollAtEnd(false), false);
+const sendRect = { x: 10, y: 20, width: 100, height: 40 };
+assert.deepEqual(interpolateSendBubbleRect(sendRect, { x: 110, y: 220, width: 180, height: 60 }, 0.5), { x: 60, y: 120, width: 140, height: 50 });
+assert.deepEqual(await measureSendBubbleSource({ measureInWindow: (callback) => callback(20, 30, 100, 40) }, { measureInWindow: (callback) => callback(5, 10, 300, 500) }, 6), { x: 15, y: 20, width: 100, height: 40, scrollY: 6 });
+const sentMessage = { id: "local", sessionId: "session", role: "user", meta: { clientMessageId: "same" } };
+assert.equal(isSendBubbleMessage({ ...sentMessage, id: "server", meta: { clientMessageId: "same" } }, sentMessage), true);
+assert.ok(motion.sendBubble.duration < 500, "send bubble handoff stays within a short interaction window");
 assert.ok(CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD >= 1, "a streamed card can grow more than 10% of the screen in one layout");
 const chatSource = readFileSync(new URL("../app/chat/[sessionId].tsx", import.meta.url), "utf8");
-assert.ok(chatSource.indexOf("transition_cleanup_scheduled") < chatSource.indexOf("await sendMessage"), "the send fly-in must not hold the tail pin until the request finishes");
+assert.ok(!chatSource.includes("transition_cleanup_scheduled"), "animation completion, not a click-time timer, owns handoff");
+assert.ok(!chatSource.includes("Keyboard.dismiss()"), "sending keeps the keyboard open");
+assert.ok(chatSource.includes("hidden={isTransitionMessage}"), "the list reserves geometry without displaying a duplicate bubble");
 assert.deepEqual(chatListDistances(0, 4000, 700), { distanceToLatest: 3300, distanceToOldest: 0 });
 assert.deepEqual(chatListDistances(3280, 4000, 700), { distanceToLatest: 20, distanceToOldest: 3280 });
 

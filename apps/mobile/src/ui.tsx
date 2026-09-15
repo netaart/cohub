@@ -204,7 +204,9 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
   return <View style={{ paddingHorizontal: 16, gap: 4 }}>{Array.from({ length: count }).map((_, index) => <View key={index} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}><View style={{ width: 48, height: 48, borderRadius: 16, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ flex: 1, gap: 9 }}><View style={{ width: `${58 + (index % 3) * 10}%`, height: 12, borderRadius: 6, backgroundColor: theme.colors.surfaceRaised }} /><View style={{ width: `${38 + (index % 2) * 15}%`, height: 10, borderRadius: 5, backgroundColor: theme.colors.surfaceRaised }} /></View></View>)}</View>;
 }
 
-export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel, modelStatus = "unknown", disabled = false, sending = false, sendFeedback = "idle", running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder, anchorRef, attachmentMenuOpen = false, modelMenuOpen = false }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; sendFeedback?: "idle" | "success"; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string; anchorRef?: React.RefObject<View | null>; attachmentMenuOpen?: boolean; modelMenuOpen?: boolean }) {
+export type ComposerInputMeasurement = { input: TextInput | null; scrollY: number };
+
+export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel, modelStatus = "unknown", disabled = false, sending = false, sendFeedback = "idle", running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder, anchorRef, measurementRef, attachmentMenuOpen = false, modelMenuOpen = false }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; sendFeedback?: "idle" | "success"; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string; anchorRef?: React.RefObject<View | null>; measurementRef?: React.RefObject<ComposerInputMeasurement>; attachmentMenuOpen?: boolean; modelMenuOpen?: boolean }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -238,10 +240,12 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
       <View ref={anchorRef} collapsable={false} testID="chat-composer" style={[styles.composer, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
         <View style={styles.composerInputRow}>
           <TextInput
+            ref={(input) => { if (measurementRef) measurementRef.current.input = input; }}
             testID="chat-composer-input"
             accessibilityLabel={t("ui.composer.placeholder")}
             value={value}
-            onChangeText={(next) => { if (!sending) onChangeText(next); }}
+            onChangeText={onChangeText}
+            onScroll={(event) => { if (measurementRef) measurementRef.current.scrollY = event.nativeEvent.contentOffset.y; }}
             onContentSizeChange={(event) => setContentHeight(event.nativeEvent.contentSize.height)}
             editable={!disabled}
             multiline

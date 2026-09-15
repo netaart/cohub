@@ -693,7 +693,7 @@ export type AppContextValue = {
   loadNewerTurns: (sessionId: string) => Promise<void>;
   loadTurnIndex: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
   jumpToTurn: (sessionId: string, target: number | { turnId: string }) => Promise<number>;
-  sendMessage: (sessionId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<void>;
+  sendMessage: (sessionId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null; onOptimistic?: (message: MessageRecord) => void }) => Promise<void>;
   sendNewMessage: (spaceId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<SessionRecord>;
   abortSession: (sessionId: string) => Promise<void>;
   models: ChatModelCatalogItem[];
@@ -1547,7 +1547,7 @@ export function AppProvider({
       sessionId: string,
       rawText: string,
       attachments: AttachmentDraft[] = [],
-      options: { model?: ChatModelSelection | null } = {},
+      options: { model?: ChatModelSelection | null; onOptimistic?: (message: MessageRecord) => void } = {},
     ) => {
       if (!client) throw new Error(translate("data.stillConnecting"));
       const text = rawText.trim();
@@ -1597,6 +1597,7 @@ export function AppProvider({
       };
       recordDebugEvent("chat.send.optimistic_created", { sequence: optimistic.sequence, attachmentCount: attachments.length, hasText: Boolean(text), clientMessageIdPresent: true });
       dispatch({ type: "message-optimistic", sessionId, message: optimistic });
+      options.onOptimistic?.(optimistic);
       void saveMessages(userKey, sessionId, [...(view?.messages ?? []), optimistic]).catch(() => undefined);
       dispatch({ type: "send-start", sessionId });
 

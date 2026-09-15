@@ -7,7 +7,7 @@ import { useTraceTouches } from "@/src/components/use-chat-scroll-trace";
 import { ActivityIndicator, FlatList, Image, Linking, Pressable, ScrollView, Share, Text, View, useWindowDimensions, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { EnrichedMarkdownText, type MarkdownStyle } from "react-native-enriched-markdown";
-import Reanimated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming, type AnimatedStyle, type SharedValue } from "react-native-reanimated";
+import Reanimated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming, type SharedValue } from "react-native-reanimated";
 import { formatMessageClock } from "@/src/data/chat-format";
 import { setImageViewerPayload } from "@/src/data/image-viewer";
 import { toolCallPreview } from "@/src/data/tool-call";
@@ -60,7 +60,7 @@ function useOpenMessageLink(spaceId: string | null) {
   };
 }
 
-function enrichedMarkdownStyle(theme: AppTheme, color: string): MarkdownStyle {
+function enrichedMarkdownStyle(theme: AppTheme, color: string, linkColor = theme.colors.accent): MarkdownStyle {
   const body = { fontSize: typography.chatBody.fontSize, lineHeight: typography.chatBody.lineHeight, color };
   const heading = (size: number): MarkdownStyle["h1"] => ({ ...body, fontSize: scaleFontSize(size), fontWeight: "700", marginTop: 3 });
   return {
@@ -73,7 +73,7 @@ function enrichedMarkdownStyle(theme: AppTheme, color: string): MarkdownStyle {
     h6: heading(15),
     blockquote: { ...body, color: theme.colors.textMuted, borderColor: theme.colors.accentBorder, backgroundColor: "transparent" },
     list: { ...body, bulletColor: theme.colors.textMuted, markerColor: theme.colors.textMuted },
-    link: { color: theme.colors.accent, underline: true },
+    link: { color: linkColor, underline: true },
     thematicBreak: { color: theme.colors.border },
     // The library ships light defaults; without an override a table renders as a white block in
     // dark mode and inline code keeps its pink chip with a visible border.
@@ -98,12 +98,12 @@ function enrichedMarkdownStyle(theme: AppTheme, color: string): MarkdownStyle {
   };
 }
 
-function TextBlock({ value, muted = false, color, streaming = false, footer }: { value: string; muted?: boolean; color?: string; streaming?: boolean; footer?: ReactNode }) {
+function TextBlock({ value, muted = false, color, linkColor, streaming = false, footer }: { value: string; muted?: boolean; color?: string; linkColor?: string; streaming?: boolean; footer?: ReactNode }) {
   const theme = useAppTheme();
   const { spaceId } = useContext(BubbleContext);
   const openLink = useOpenMessageLink(spaceId);
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
-  const markdownStyle = useMemo(() => enrichedMarkdownStyle(theme, textColor), [theme, textColor]);
+  const markdownStyle = useMemo(() => enrichedMarkdownStyle(theme, textColor, linkColor), [linkColor, theme, textColor]);
   // Paced prefix: the renderer is native, so this only decides how much Markdown it has been given.
   const paced = useRevealedStreamText(value, streaming);
   // Native Markdown has no onTextLayout. A hidden Text measuring the source wraps differently
@@ -184,8 +184,8 @@ function ImageGallery({ uris, maxWidth }: { uris: string[]; maxWidth?: number })
   );
 }
 
-function Block({ block, color, streaming = false, footer }: { block: ContentBlock; color?: string; streaming?: boolean; footer?: ReactNode }) {
-  if (block.type === "text") return <TextBlock value={block.text} color={color} streaming={streaming} footer={footer} />;
+function Block({ block, color, linkColor, streaming = false, footer }: { block: ContentBlock; color?: string; linkColor?: string; streaming?: boolean; footer?: ReactNode }) {
+  if (block.type === "text") return <TextBlock value={block.text} color={color} linkColor={linkColor} streaming={streaming} footer={footer} />;
   if (block.type === "thinking") return <TextBlock value={block.thinking} muted streaming={streaming} footer={footer} />;
   if (block.type === "system_note") return <SystemNoteRow block={block} />;
   return null;
@@ -294,7 +294,7 @@ function ToolCall({ block, result, active = false }: { block: Extract<ContentBlo
   </View>;
 }
 
-export function MessageContent({ content, active = false, color, imageMaxWidth, footer }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string; imageMaxWidth?: number; footer?: ReactNode }) {
+export function MessageContent({ content, active = false, color, linkColor, imageMaxWidth, footer }: { content: ContentBlock[] | null | undefined; active?: boolean; color?: string; linkColor?: string; imageMaxWidth?: number; footer?: ReactNode }) {
   const blocks = content ?? [];
   const contentWidth = useContext(BubbleContentWidth);
   // Pairing tool calls with their results by scanning the block list per tool_use was O(n^2);
@@ -324,7 +324,7 @@ export function MessageContent({ content, active = false, color, imageMaxWidth, 
       if (index !== firstImageIndex) return null;
       return imageUris.length > 0 ? <ImageGallery key="image-gallery" uris={imageUris} maxWidth={imageMaxWidth ?? contentWidth} /> : null;
     }
-    return <Block key={`${block.type}-${index}`} block={block} color={color} streaming={active} footer={index === lastVisibleIndex && textFooter ? footer : undefined} />;
+    return <Block key={`${block.type}-${index}`} block={block} color={color} linkColor={linkColor} streaming={active} footer={index === lastVisibleIndex && textFooter ? footer : undefined} />;
   })}{footer && !textFooter ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}</View>;
 }
 
@@ -350,18 +350,18 @@ function ChatBubbleFrame({
   maxWidth,
   bubbleRef,
   onBubbleLayout,
-  animatedStyle,
+  surfaceHidden = false,
 }: {
   side: "user" | "assistant";
   children: ReactNode;
   maxWidth: number;
   bubbleRef?: RefObject<View | null>;
   onBubbleLayout?: () => void;
-  animatedStyle?: AnimatedStyle<ViewStyle>;
+  surfaceHidden?: boolean;
 }) {
   const theme = useAppTheme();
   const style = chatBubbleStyle(theme, side, maxWidth);
-  return <BubbleContentWidth.Provider value={Math.max(0, maxWidth - BUBBLE_PADDING_X * 2)}><Reanimated.View ref={bubbleRef} onLayout={onBubbleLayout} style={[style, animatedStyle]}>{children}</Reanimated.View></BubbleContentWidth.Provider>;
+  return <BubbleContentWidth.Provider value={Math.max(0, maxWidth - BUBBLE_PADDING_X * 2)}><Reanimated.View ref={bubbleRef} collapsable={false} onLayout={onBubbleLayout} style={[style, surfaceHidden ? { backgroundColor: "transparent" } : null]}>{children}</Reanimated.View></BubbleContentWidth.Provider>;
 }
 
 function TypingDot({ progress, index, color }: { progress: SharedValue<number>; index: number; color: string }) {
@@ -395,7 +395,7 @@ function BubbleMeta({ clock, local = false, side, live = false, t }: { clock?: s
   </View>;
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null, availableWidth, bubbleRef, onBubbleLayout, animatedStyle, floating = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number; bubbleRef?: RefObject<View | null>; onBubbleLayout?: () => void; animatedStyle?: AnimatedStyle<ViewStyle>; floating?: boolean }) {
+export const MessageBubble = memo(function MessageBubble({ message, local = false, onCopy, onFork, forkDisabled = false, forking = false, spaceId = null, availableWidth, bubbleRef, onBubbleLayout, hidden = false, surfaceHidden = false, floating = false }: { message: MessageRecord; local?: boolean; onCopy?: (text: string) => void; onFork?: (message: MessageRecord) => void; forkDisabled?: boolean; forking?: boolean; spaceId?: string | null; availableWidth?: number; bubbleRef?: RefObject<View | null>; onBubbleLayout?: () => void; hidden?: boolean; surfaceHidden?: boolean; floating?: boolean }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
@@ -435,13 +435,13 @@ export const MessageBubble = memo(function MessageBubble({ message, local = fals
   const maxWidth = getBubbleMaxWidth(availableWidth ?? width);
   const clock = formatMessageClock(message.createdAt);
   const footer = clock || local ? <BubbleMeta clock={clock} local={local} side={side} t={t} /> : undefined;
-  return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: floating ? undefined : "100%", paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
-    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} maxWidth={maxWidth} bubbleRef={bubbleRef} onBubbleLayout={onBubbleLayout} animatedStyle={animatedStyle}>
-      {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} imageMaxWidth={maxWidth - BUBBLE_PADDING_X * 2} footer={message.errorMessage ? undefined : footer} /> : message.text?.trim() ? <TextBlock value={message.text} color={textColor} footer={message.errorMessage ? undefined : footer} /> : !message.errorMessage ? footer : null}
+  return <BubbleContext.Provider value={bubbleEnvironment}><View {...traceTouches} pointerEvents={hidden ? "none" : "auto"} accessibilityElementsHidden={hidden} importantForAccessibility={hidden ? "no-hide-descendants" : "auto"} onLayout={tracing ? (event) => chatScrollTrace.record("bubble.layout", "bubble", { ...traceIdentity(), ...event.nativeEvent.layout }) : undefined} style={{ width: floating ? undefined : "100%", opacity: hidden ? 0 : 1, paddingHorizontal: 12, paddingVertical: 5, alignItems: isUser ? "flex-end" : "flex-start" }}>
+    <BubbleTraceMessage.Provider value={message}><ChatBubbleFrame side={side} maxWidth={maxWidth} bubbleRef={bubbleRef} onBubbleLayout={onBubbleLayout} surfaceHidden={surfaceHidden}>
+      {hasRenderableContent(message.content) ? <MessageContent content={message.content} color={textColor} linkColor={isUser ? theme.colors.userBubbleLink : undefined} imageMaxWidth={maxWidth - BUBBLE_PADDING_X * 2} footer={message.errorMessage ? undefined : footer} /> : message.text?.trim() ? <TextBlock value={message.text} color={textColor} linkColor={isUser ? theme.colors.userBubbleLink : undefined} footer={message.errorMessage ? undefined : footer} /> : !message.errorMessage ? footer : null}
       {message.errorMessage ? <BubbleText selectable footer={footer} measurementKey={`${message.errorMessage}:${typography.caption.fontSize}`} containerStyle={{ marginTop: 6 }} style={[typography.caption, { color: isUser ? theme.colors.userBubbleText : theme.colors.danger }]}>{message.errorMessage}</BubbleText> : null}
     </ChatBubbleFrame></BubbleTraceMessage.Provider>
     {/* One string child with a definite width: separate runs and shrink-wrapped layout have dropped the output segment on some Android devices. */}
-    {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4, alignSelf: "stretch" }]}>{`${message.model || t("chat.model.agent")}${thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}${inputTokens ? ` · ↑${inputTokens}${cachedInputTokens ? ` ${t("message.tokens.cached", { count: cachedInputTokens })}` : ""}` : ""}${outputTokens ? ` · ↓${outputTokens}` : " · ↓MISSING"}`}</Text> : null}
+    {!isUser && (message.model || thinkingLevel || inputTokens || outputTokens) ? <Text selectable style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4, marginLeft: 4, alignSelf: "stretch" }]}>{`${message.model || t("chat.model.agent")}${thinkingLevel ? ` · ${formatThinkingLevel(thinkingLevel)}` : ""}${inputTokens ? ` · ↑${inputTokens}${cachedInputTokens ? ` ${t("message.tokens.cached", { count: cachedInputTokens })}` : ""}` : ""}${outputTokens ? ` · ↓${outputTokens}` : ""}`}</Text> : null}
     {copyText && !isUser ? <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3, marginLeft: side === "assistant" ? 4 : 0, marginRight: side === "user" ? 4 : 0 }}>
       {onCopy ? <Pressable accessibilityRole="button" accessibilityLabel={copied ? t("chat.copied") : t("chat.copy")} onPress={() => { onCopy(copyText); setCopied(true); }} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.55 : 1 })}><AppIcon name={copied ? "check" : "copy"} size={14} color={copied ? theme.colors.success : theme.colors.textFaint} /></Pressable> : null}
       {!isUser && onFork && typeof message.meta?.turnId === "string" ? <Pressable accessibilityRole="button" accessibilityLabel={t("chat.fork")} disabled={forkDisabled} onPress={() => onFork(message)} hitSlop={6} style={({ pressed }) => ({ width: 36, height: 36, alignItems: "center", justifyContent: "center", opacity: forkDisabled ? 0.45 : pressed ? 0.55 : 1 })}>{forking ? <ActivityIndicator size="small" color={theme.colors.textFaint} /> : <AppIcon name="git-fork" size={14} color={theme.colors.textFaint} />}</Pressable> : null}

@@ -25,6 +25,7 @@ export type AppTheme = {
     accentText: string;
     userBubble: string;
     userBubbleText: string;
+    userBubbleLink: string;
     userBubbleMeta: string;
     assistantBubble: string;
     success: string;
@@ -75,6 +76,7 @@ const darkTheme: AppTheme = {
     accentText: "#2a150c",
     userBubble: "#c45d32",
     userBubbleText: "#fff6f0",
+    userBubbleLink: "#ffd2b8",
     userBubbleMeta: "rgba(255, 246, 240, 0.64)",
     assistantBubble: "#22262e",
     success: "#62c994",
@@ -127,6 +129,7 @@ const lightTheme: AppTheme = {
     accentText: "#ffffff",
     userBubble: "#b85427",
     userBubbleText: "#ffffff",
+    userBubbleLink: "#ffe0cf",
     userBubbleMeta: "rgba(255, 255, 255, 0.72)",
     assistantBubble: "#eceee9",
     success: "#238552",

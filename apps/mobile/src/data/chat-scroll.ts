@@ -51,8 +51,8 @@ export function chatListDistances(offsetY: number, contentHeight: number, layout
   };
 }
 
-/** Animated pinning is held off while the send fly-in measures a still target, and while the
- *  list is still measuring its first rows — animating those jumps looks like the chat is jittering. */
-export function chatMaintainScrollAtEnd(followingTail: boolean, sendTransitionActive: boolean, animate = true) {
-  return followingTail && !sendTransitionActive ? { animated: animate } as const : false;
+/** Sending keeps the animated pin: its overlay tracks the moving destination on the UI thread.
+ *  Initial row measurements still use an immediate pin. */
+export function chatMaintainScrollAtEnd(followingTail: boolean, animate = true) {
+  return followingTail ? { animated: animate } as const : false;
 }
