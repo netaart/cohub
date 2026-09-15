@@ -82,13 +82,15 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const [visiblePanel, setVisiblePanel] = useState<PanelName | null>(activePanel);
   const [interactive, setInteractive] = useState(Boolean(activePanel));
-  const [seedPagerOffset, setSeedPagerOffset] = useState(true);
   const visiblePanelRef = useRef<PanelName | null>(activePanel);
   const activePanelRef = useRef<PanelName | null>(activePanel);
   const initialScrollDone = useRef(false);
-  const seedPagerOffsetRef = useRef(true);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const initialPagerOffset = useMemo(() => ({ x: centerOffset, y: 0 }), [centerOffset]);
+  // Native scroll starts at 0 (the Chats page). Compensate until it reaches the closed page so
+  // opening a Chat does not land on the side panel. Never pass `contentOffset` — dropping that
+  // prop resets the native offset to 0 and gets stuck there.
+  const pagerSeed = useSharedValue(1);
+  const pagerNativeX = useSharedValue(0);
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimer.current === null) return;
@@ -142,7 +144,12 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
       const offset = event.contentOffset.x;
+      pagerNativeX.value = offset;
       scrollOffset.value = offset;
+      if (pagerSeed.value !== 0) {
+        if (Math.abs(offset - centerOffset) <= 8) pagerSeed.value = 0;
+        else return;
+      }
       const distance = Math.abs(offset - centerOffset);
       scrim.value = interpolate(distance, [0, panelWidth], [0, 1], Extrapolation.CLAMP);
       if (distance <= 8) return;
@@ -151,7 +158,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
       shownPanel.value = panel;
       scheduleOnRN(showPanel, panel);
     },
-  }, [centerOffset, panelWidth, scrim, scrollOffset, showPanel, shownPanel]);
+  }, [centerOffset, pagerNativeX, pagerSeed, panelWidth, scrim, scrollOffset, showPanel, shownPanel]);
 
   useEffect(() => {
     if (!isFocused) return;
@@ -164,14 +171,24 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   }, [closePanel, isFocused]);
 
   // Keep the settled page aligned when the panel or window width changes.
+  // Follow the committed panel only: a pre-seed scroll event can set visiblePanel to "chat"
+  // while the Chat is still closed, and using that here would pin the pager on the side page.
   useEffect(() => {
-    const panel = activePanelRef.current ?? visiblePanelRef.current;
+    const panel = activePanelRef.current;
     const x = panel === "chat" ? 0 : panel === "files" ? filesOffset : centerOffset;
     scrollOffset.value = x;
     pagerRef.current?.scrollTo({ x, animated: false });
   }, [centerOffset, filesOffset, scrollOffset]);
 
   const scrimStyle = useAnimatedStyle(() => ({ opacity: scrim.value * 0.52 }));
+  const pagerPaintStyle = useAnimatedStyle(() => {
+    if (pagerSeed.value === 0) return { transform: [{ translateX: 0 }] };
+    return { transform: [{ translateX: pagerNativeX.value - centerOffset }] };
+  }, [centerOffset]);
+  const handleScrollBeginDrag = useCallback(() => {
+    pagerSeed.set(0);
+    clearIdleTimer();
+  }, [clearIdleTimer, pagerSeed]);
 
   const handleChipsTouchChange = useCallback((touching: boolean) => {
     // The filter chips are a nested horizontal ScrollView; it only wins its drag while the
@@ -197,7 +214,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         ref={pagerRef}
         horizontal
         keyboardShouldPersistTaps="handled"
-        style={[styles.pager, { backgroundColor: theme.colors.background }]}
+        style={[styles.pager, { backgroundColor: theme.colors.background }, pagerPaintStyle]}
         showsHorizontalScrollIndicator={false}
         bounces={false}
         overScrollMode="never"
@@ -206,24 +223,17 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         snapToOffsets={snapOffsets}
         decelerationRate="fast"
         disableIntervalMomentum
-        {...(seedPagerOffset ? { contentOffset: initialPagerOffset } : null)}
         onScroll={scrollHandler}
-        onScrollBeginDrag={clearIdleTimer}
+        onScrollBeginDrag={handleScrollBeginDrag}
         onScrollEndDrag={scheduleSettle}
         onMomentumScrollBegin={clearIdleTimer}
         onMomentumScrollEnd={settle}
         onContentSizeChange={() => {
-          // Seed the closed page for the first paint, then drop `contentOffset` so filter-touch
-          // re-renders cannot reset the native scroll position.
-          if (!initialScrollDone.current) {
-            initialScrollDone.current = true;
-            scrollOffset.value = centerOffset;
-            pagerRef.current?.scrollTo({ x: centerOffset, animated: false });
-          }
-          if (seedPagerOffsetRef.current) {
-            seedPagerOffsetRef.current = false;
-            setSeedPagerOffset(false);
-          }
+          // Initialize imperatively so filter-touch re-renders cannot reapply a closed-page offset.
+          if (initialScrollDone.current) return;
+          initialScrollDone.current = true;
+          scrollOffset.value = centerOffset;
+          pagerRef.current?.scrollTo({ x: centerOffset, animated: false });
         }}
       >
         {/* Pages fill the pager's own height. Seeding it from the window height overshot by the
