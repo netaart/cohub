@@ -20,14 +20,3 @@ export function getBubbleMetaLayout(text: BubbleTextMetrics | null, meta: { widt
   const top = Math.max(last.y, last.y + last.height - meta.height + BUBBLE_META_DROP);
   return { minWidth, marginTop: top - text.height, inline: true };
 }
-
-/**
- * Native Markdown has no line metrics. Code, tables, rules, and images have no last text
- * line to tuck a clock into, so those keep an external footer row.
- */
-export function canInlineBubbleMeta(markdown: string): boolean {
-  const last = markdown.trimEnd().split(/\n{2,}/).at(-1)?.trim() ?? "";
-  if (!last) return false;
-  if (/^\s*```/.test(last) || /^\s*\|/.test(last) || /^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(last) || /^\s*!\[/.test(last)) return false;
-  return true;
-}

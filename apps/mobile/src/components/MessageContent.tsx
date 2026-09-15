@@ -19,8 +19,8 @@ import { formatThinkingLevel, requestedThinkingLevel } from "@/src/model-catalog
 import { scaleFontSize, scaleLineHeight, useAppTheme, typography, type AppTheme } from "@/src/theme";
 import { useTranslation, type Translate } from "@/src/i18n";
 import { AppIcon, type IconName } from "@/src/ui";
-import { BUBBLE_PADDING_X, canInlineBubbleMeta, getBubbleMaxWidth } from "@/src/ui/message-bubble-layout";
-import { BubbleContentWidth, BubbleMarkdown, BubbleText, BubbleTraceMessage } from "@/src/components/BubbleText";
+import { BUBBLE_PADDING_X, getBubbleMaxWidth } from "@/src/ui/message-bubble-layout";
+import { BubbleContentWidth, BubbleText, BubbleTraceMessage } from "@/src/components/BubbleText";
 import { useRevealedStreamText } from "@/src/components/useRevealedStreamText";
 import { turnSequenceForMessage } from "@/src/data/session-history";
 import { hasRenderableContent, hasRenderableMessage, messageText } from "@/src/utils";
@@ -106,20 +106,18 @@ function TextBlock({ value, muted = false, color, streaming = false, footer }: {
   const markdownStyle = useMemo(() => enrichedMarkdownStyle(theme, textColor), [theme, textColor]);
   // Paced prefix: the renderer is native, so this only decides how much Markdown it has been given.
   const paced = useRevealedStreamText(value, streaming);
-  const markdown = <EnrichedMarkdownText
-    markdown={paced}
-    markdownStyle={markdownStyle}
-    selectable
-    flavor="github"
-    streamingAnimation={streaming}
-    onLinkPress={(event) => { openLink(event.url); }}
-  />;
-  // Live appends invalidate line metrics; keep that clock on a sibling row until the text settles.
-  if (footer && !streaming && canInlineBubbleMeta(value)) {
-    return <BubbleMarkdown footer={footer} measurementKey={`${value}:${typography.chatBody.fontSize}`} measureText={value} measureStyle={typography.chatBody}>{markdown}</BubbleMarkdown>;
-  }
+  // Native Markdown has no onTextLayout. A hidden Text measuring the source wraps differently
+  // than the native view, so tucking the clock from those metrics made minWidth/marginTop
+  // oscillate and the bubble jitter after opening a Chat.
   return <View style={{ minWidth: 0 }}>
-    {markdown}
+    <EnrichedMarkdownText
+      markdown={paced}
+      markdownStyle={markdownStyle}
+      selectable
+      flavor="github"
+      streamingAnimation={streaming}
+      onLinkPress={(event) => { openLink(event.url); }}
+    />
     {footer ? <View style={{ alignSelf: "flex-end", marginTop: 2 }}>{footer}</View> : null}
   </View>;
 }
