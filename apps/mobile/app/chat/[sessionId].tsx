@@ -664,8 +664,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       return;
     }
     requestInitialScroll();
-    requestFollowTail();
-  }, [measureVisibleRows, requestFollowTail, requestInitialScroll, scrollToTurn, trace]);
+  }, [measureVisibleRows, requestInitialScroll, scrollToTurn, trace]);
 
   const handleScrollBeginDrag = useCallback(() => {
     trace("list.dragBegin");
@@ -791,6 +790,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   // Chronological list: anchoring on data changes keeps the reading position when older turns are
   // prepended. `undefined` keeps Legend's default size stabilization.
   const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { data: true }), [followingTail]);
+  // Growth (our streaming card lives in the list footer) is absorbed by Legend's animated
+  // end-pinning instead of a hard rAF jump, so the timeline slides while a bubble grows.
+  const maintainScrollAtEnd = useMemo(() => (followingTail ? { animated: true } : false), [followingTail]);
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     trace("list.layout", { ...event.nativeEvent.layout });
     setListWidth(event.nativeEvent.layout.width);
@@ -830,6 +832,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           data={messages}
           extraData={rowExtraData}
           alignItemsAtEnd
+          maintainScrollAtEnd={maintainScrollAtEnd}
           estimatedItemSize={FALLBACK_ROW_HEIGHT}
           // Android scrolls a focused selectable text into view; selecting a message must not
           // move the timeline. Explicit turn/tail scrolling stays enabled.
