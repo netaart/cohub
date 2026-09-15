@@ -588,7 +588,6 @@ const bubbleScope = {
   scaleFontSize: (size) => size,
   EnrichedMarkdownText: "EnrichedMarkdownText",
   useOpenMessageLink: () => () => {},
-  usePanelGestureBlocker: () => null,
   useRevealedStreamText: (text) => text,
   BubbleContext: null,
   BubbleContentWidth: null,
