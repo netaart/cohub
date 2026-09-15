@@ -779,6 +779,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   // identity. These are stable across stream batches, so a live turn no longer re-renders every
   // mounted row (the live step list subscribes on its own instead).
   const streamTurnId = view.stream?.turnId ?? null;
+  // LegendList memoizes each row on [item, extraData]; fork/send-transition state renders
+  // inside a row but never changes `messages`, so it must flow through extraData to reach it.
+  const rowExtraData = useMemo(
+    () => ({ forkingTurnId, sendTransition, transitionMessageKey, streamTurnId, t, theme }),
+    [forkingTurnId, sendTransition, transitionMessageKey, streamTurnId, t, theme],
+  );
   const keyExtractor = useCallback((item: MessageRecord) => `${turnSequenceForMessage(item) ?? item.id}:${item.role}`, []);
   const listContentStyle = useMemo(() => ({ paddingTop: headerHeight + 12, paddingBottom: footerHeight + 12, flexGrow: messages.length === 0 ? 1 : undefined }), [footerHeight, headerHeight, messages.length]);
   const listIndicatorInsets = useMemo(() => ({ top: headerHeight, bottom: footerHeight }), [footerHeight, headerHeight]);
@@ -822,6 +828,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
           {...traceTouches}
           ref={listRef}
           data={messages}
+          extraData={rowExtraData}
           alignItemsAtEnd
           estimatedItemSize={FALLBACK_ROW_HEIGHT}
           // Android scrolls a focused selectable text into view; selecting a message must not

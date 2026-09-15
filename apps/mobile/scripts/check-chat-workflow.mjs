@@ -1793,4 +1793,21 @@ for (const save of [
 }
 assert.equal(schemaRuns, 1, "writes do not repeat schema setup");
 
+// LegendList memoizes each row on [item, extraData], unlike FlatList cells that re-rendered
+// with renderItem identity. Rows that read state outside `data` must forward it through
+// extraData, or in-place updates (thinking options, async counts, turn selection, fork/send
+// feedback) never reach mounted rows.
+for (const path of [
+  "../src/components/ModelSelectorMenu.tsx",
+  "../src/components/TurnNavigatorSheet.tsx",
+  "../src/components/SpacePanels.tsx",
+  "../app/(tabs)/index.tsx",
+  "../app/(tabs)/spaces.tsx",
+  "../app/chat/[sessionId].tsx",
+  "../app/space/[spaceId]/files.tsx",
+]) {
+  const source = readFileSync(new URL(path, import.meta.url), "utf8");
+  assert.ok(/<LegendList[\s\S]*?extraData=/.test(source), `${path} must pass extraData so LegendList rows re-render on external state`);
+}
+
 console.log("Chat workflow checks passed");

@@ -81,6 +81,13 @@ export function TurnNavigatorSheet({
 		});
 	}, [query, t, turns]);
 
+	// LegendList memoizes each row on [item, extraData]; selection and jump feedback
+	// live outside `data`, so they must flow through extraData to reach the rows.
+	const rowExtraData = useMemo(
+		() => ({ currentSequence, loadingSequence, t, theme }),
+		[currentSequence, loadingSequence, t, theme],
+	);
+
 	return (
 		<AdaptiveSheet
 			visible={visible}
@@ -155,6 +162,7 @@ export function TurnNavigatorSheet({
 			) : (
 				<LegendList
 					estimatedItemSize={64}
+					extraData={rowExtraData}
 					data={filteredTurns}
 					keyExtractor={(turn) => `${turn.sequence}:${turn.id}`}
 					style={{ flex: 1, minHeight: 0, marginTop: 10 }}

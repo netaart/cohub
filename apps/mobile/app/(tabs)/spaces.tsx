@@ -119,6 +119,13 @@ export default function SpacesScreen() {
     ];
   }, [remoteSearch.query, remoteSearch.spaces, spaces, trimmedQuery]);
 
+  // LegendList memoizes each row on [item, extraData]; async counts and pin state are
+  // read by renderItem but never change `listItems`, so they must flow through extraData.
+  const rowExtraData = useMemo(
+    () => ({ client, pinningSpaceId, spaceSessionCounts, t, theme }),
+    [client, pinningSpaceId, spaceSessionCounts, t, theme],
+  );
+
   const togglePin = async (spaceId: string) => {
     if (pinningSpaceId) return;
     setPinningSpaceId(spaceId);
@@ -173,6 +180,7 @@ export default function SpacesScreen() {
     <LegendList
       ref={listRef}
       data={listItems}
+      extraData={rowExtraData}
       estimatedItemSize={80}
       keyExtractor={(item) => item.kind === "remote" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
       renderItem={({ item }) => item.kind === "remote" ? <SpaceSearchRow hit={item.hit} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.hit.spaceId } })} /> : <SpaceRow space={item.space} sessionCount={spaceSessionCounts[item.space.id] ?? null} pinning={pinningSpaceId === item.space.id} onTogglePin={client ? () => void togglePin(item.space.id) : undefined} onPress={() => router.push({ pathname: "/space/[spaceId]", params: { spaceId: item.space.id } })} />}

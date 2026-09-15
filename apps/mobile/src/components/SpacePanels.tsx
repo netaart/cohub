@@ -410,6 +410,9 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
       ...filteredSessions.filter((session) => !remoteIds.has(session.id)).map((session) => ({ kind: "local" as const, session })),
     ];
   }, [filteredSessions, labelSessionIds, listFilter, remoteQueryMatches, remoteSearch.sessions, sessionsById, trimmedQuery]);
+  // LegendList memoizes each row on [item, extraData]; the row reads client/theme/locale,
+  // which never change `listItems`, so they must flow through extraData.
+  const rowExtraData = useMemo(() => ({ client, t, theme }), [client, t, theme]);
   const loadMore = async () => {
     if (!client || loadingMore || (scopeInitialized && !scopeHasMore)) return;
     setLoadingMore(true);
@@ -473,6 +476,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
         estimatedItemSize={68}
         scrollsChildToFocus={false}
         data={listItems}
+        extraData={rowExtraData}
         keyExtractor={(item) => item.kind === "remote" ? `remote:${item.hit.sessionId}` : `local:${item.session.id}`}
         renderItem={({ item }) => item.kind === "remote"
           ? <SessionSearchRow hit={item.hit} showSpace={false} onPress={(target) => onOpenSession(item.hit.sessionId, target)} />
@@ -542,6 +546,10 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
     onOpenFile(entry.path);
   };
 
+  // LegendList memoizes each row on [item, extraData]; the row's child reads theme/locale,
+  // which never change `entries`, so they must flow through extraData.
+  const rowExtraData = useMemo(() => ({ t, theme }), [t, theme]);
+
   return (
     <View style={styles.panelContent}>
       <TopBar title={path ? spacePathName(path) : t("files.title")} subtitle={path ? `${spaceName} / ${path}` : spaceName} actions={<><IconButton name="external-link" label={t("space.panel.openFullFiles")} onPress={onOpenFilesPage} /><IconButton name="x" label={t("ui.sheet.close", { title: t("files.title") })} onPress={onClose} /></>} />
@@ -555,6 +563,7 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
           estimatedItemSize={68}
           scrollsChildToFocus={false}
           data={entries}
+          extraData={rowExtraData}
           keyExtractor={(item) => item.path}
           contentContainerStyle={{ paddingVertical: 8, paddingBottom: 24, flexGrow: entries.length === 0 ? 1 : undefined }}
           renderItem={({ item }) => <SpaceFileRow entry={item} compact onPress={() => openEntry(item)} />}

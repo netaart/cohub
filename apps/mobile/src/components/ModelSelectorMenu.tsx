@@ -97,6 +97,13 @@ export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStat
     return filtered;
   }, [currentModel, models, query]);
 
+  // LegendList memoizes each row on [item, extraData], so state read by renderModel
+  // outside `data` must flow through extraData or the expanded settings panel never renders.
+  const rowExtraData = useMemo(
+    () => ({ currentModel, modelStatus, optionsOpenFor, t, theme }),
+    [currentModel, modelStatus, optionsOpenFor, t, theme],
+  );
+
   const isCurrent = (entry: ModelCatalogEntry) => currentModel?.provider === entry.provider && currentModel.id === entry.id;
   const selectEntry = (entry: ModelCatalogEntry, level?: ChatModelSelection["thinkingLevel"]) => {
     onSelect(makeSelection(entry, level));
@@ -148,6 +155,7 @@ export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStat
     </View>
     <LegendList
       estimatedItemSize={56}
+      extraData={rowExtraData}
       data={visibleModels}
       keyExtractor={(entry) => `${entry.provider}/${entry.id}`}
       renderItem={renderModel}

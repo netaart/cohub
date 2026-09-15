@@ -1,6 +1,6 @@
 import type { SpaceFsEntry } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LegendList } from "@legendapp/list/react-native";
 import { Alert, Pressable, Share, Text, View } from "react-native";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
@@ -126,6 +126,10 @@ export default function FilesScreen() {
       : displaySpaceName(space)
     : t("files.workspace");
 
+  // LegendList memoizes each row on [item, extraData]; the row's child reads theme/locale,
+  // which never change `entries`, so they must flow through extraData.
+  const rowExtraData = useMemo(() => ({ t, theme }), [t, theme]);
+
   return (
     <Screen>
       <TopBar
@@ -156,6 +160,7 @@ export default function FilesScreen() {
         <LegendList
           estimatedItemSize={56}
           data={entries}
+          extraData={rowExtraData}
           keyExtractor={(item) => item.path}
           contentContainerStyle={{
             paddingVertical: 10,

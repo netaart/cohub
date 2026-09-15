@@ -87,6 +87,13 @@ export default function ChatsScreen() {
     ];
   }, [filter, localSessions, localSpaces, remoteSearch.query, remoteSearch.sessions, remoteSearch.spaces, trimmedQuery]);
 
+  // LegendList memoizes each row on [item, extraData]; cached space counts load after the
+  // first render but never change `listItems`, so they must flow through extraData.
+  const rowExtraData = useMemo(
+    () => ({ spaceSessionCounts, t, theme }),
+    [spaceSessionCounts, t, theme],
+  );
+
   const filteringPages = isFocused && client !== null && filter !== "all" && filterPreference.loaded && !state.refreshing && !dataError && hasMoreRecentSessions({ hasMore: state.sessionsHasMore, cursor: state.sessionsCursor, boundary: state.sessionsPageBoundary, cutoff });
   const statusesLoading = state.sessionStatusRequests > 0;
   useEffect(() => {
@@ -129,6 +136,7 @@ export default function ChatsScreen() {
       <LegendList
         ref={listRef}
         data={listItems}
+        extraData={rowExtraData}
         estimatedItemSize={76}
         keyExtractor={(item) => item.kind === "remote-session" ? `remote-session:${item.hit.sessionId}` : item.kind === "local-session" ? `session:${item.session.id}` : item.kind === "remote-space" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
         renderItem={({ item }) => {
