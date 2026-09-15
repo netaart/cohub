@@ -1,12 +1,12 @@
 schema: neta.generation.model.v1
-model: seedance-2-0
-title: Seedance 2.0
+model: seedance-2-5
+title: Seedance 2.5
 category: video
-description: High-quality video generation model that accepts text, image, video, and audio inputs. Supports resolutions from 480p to 2K and is well suited to final deliverables.
+description: Seedance 2.5 video generation with text, image, video, and audio inputs. Supports 480p to 1080p. Priced above Seedance 2.0 on BytePlus list USD; 4K is not offered.
 pricing:
   unit: 1m_tokens
-  min: 2.4
-  max: 7.7
+  min: 6.4
+  max: 11.7
   note: BytePlus list USD; varies by resolution and video input
 adapter:
   type: ark.videoGenerations
@@ -58,7 +58,7 @@ parameters:
     type: string
     optional: true
     default: 1080p
-    enum: [480p, 720p, 1080p, 2K]
+    enum: [480p, 720p, 1080p]
     description: Output video resolution.
   ratio:
     type: string
@@ -92,7 +92,7 @@ parameters:
 examples:
   - title: Text to video
     request:
-      model: seedance-2-0
+      model: seedance-2-5
       content:
         - type: text
           text: a cat playing piano in a cozy jazz club, cinematic lighting, smooth camera movement
@@ -102,7 +102,7 @@ examples:
         ratio: "16:9"
   - title: Image and reference audio
     request:
-      model: seedance-2-0
+      model: seedance-2-5
       content:
         - type: text
           text: Close-up of the same person speaking. Lip-sync mouth motion to the reference audio.

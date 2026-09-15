@@ -164,6 +164,7 @@ See the full examples:
 - [`docs/examples/generations/gemini-3.1-flash-image-preview.yaml`](./examples/generations/gemini-3.1-flash-image-preview.yaml)
 - [`docs/examples/generations/seedance-2-0-fast.yaml`](./examples/generations/seedance-2-0-fast.yaml)
 - [`docs/examples/generations/seedance-2-0.yaml`](./examples/generations/seedance-2-0.yaml)
+- [`docs/examples/generations/seedance-2-5.yaml`](./examples/generations/seedance-2-5.yaml)
 - [`docs/examples/generations/suno_music.yaml`](./examples/generations/suno_music.yaml)
 
 ## CLI

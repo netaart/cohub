@@ -3,6 +3,11 @@ model: seedance-2-0-fast
 title: Seedance 2.0 Fast
 category: video
 description: Fast video generation model that accepts text, image, video, and audio inputs. Faster and less expensive than seedance-2-0, making it well suited to creative validation and draft iteration.
+pricing:
+  unit: 1m_tokens
+  min: 3.3
+  max: 5.6
+  note: BytePlus list USD; varies by resolution and video input
 adapter:
   type: ark.videoGenerations
 content:
