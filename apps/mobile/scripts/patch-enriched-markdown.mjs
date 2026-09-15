@@ -7,10 +7,10 @@
  * `HorizontalScrollView` never wins. An OnTouchListener also cannot claim the drag: the child
  * TextView consumes ACTION_DOWN, the listener never runs, and MOVE is intercepted by the pager.
  *
- * Claim in `dispatchTouchEvent` (it sees every event that hits the scroller) and only keep the
- * drag while this view can actually scroll that way. A vertical drag, or a horizontal drag at the
- * edge / on a block that does not overflow, is handed back so the timeline and pager still work.
- * Touches that do not start on a nested scroller are untouched.
+ * Claim in `dispatchTouchEvent` (it sees every event that hits the scroller). Once a touch starts
+ * on an overflowing block, every horizontal drag stays there — handing back at the scroll edge
+ * just reopened the pager, which is the original bug. A vertical drag is still released so the
+ * timeline can move. Touches that do not start on a nested scroller are untouched.
  *
  * Applied on install because the patch has to land inside the dependency's native sources. The
  * proper fix belongs upstream; this only holds the line until it ships.
@@ -43,10 +43,10 @@ import kotlin.math.abs
  * opens instead of scrolling the code.
  *
  * Claim in dispatchTouchEvent (OnTouchListener never sees ACTION_DOWN: the
- * child TextView consumes it). Keep the drag only while this view can actually
- * scroll that way; a vertical drag, or a horizontal drag at the edge, is
- * handed back so the timeline and pager still work. Nested scrolling is off
- * so leftover motion cannot also drag the pager.
+ * child TextView consumes it). An overflowing block keeps every horizontal
+ * drag, even at the edge — otherwise a right-swipe at offset 0 still opens
+ * Chats. Vertical drags are released so the timeline can move. Nested
+ * scrolling is off so leftover motion cannot also drag the pager.
  */
 internal class NestedHorizontalScrollView(context: Context) : HorizontalScrollView(context) {
   private var downX = 0f
@@ -69,13 +69,8 @@ internal class NestedHorizontalScrollView(context: Context) : HorizontalScrollVi
       MotionEvent.ACTION_MOVE -> {
         val dx = event.rawX - downX
         val dy = event.rawY - downY
-        if (abs(dx) > touchSlop || abs(dy) > touchSlop) {
-          if (abs(dy) > abs(dx)) {
-            parent?.requestDisallowInterceptTouchEvent(false)
-          } else {
-            val canScroll = if (dx > 0) canScrollHorizontally(-1) else canScrollHorizontally(1)
-            parent?.requestDisallowInterceptTouchEvent(canScroll)
-          }
+        if (abs(dy) > abs(dx) && (abs(dx) > touchSlop || abs(dy) > touchSlop)) {
+          parent?.requestDisallowInterceptTouchEvent(false)
         }
       }
       MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -108,14 +103,7 @@ ${MARKER}
   if (fabs(translation.y) > fabs(translation.x)) {
     return NO;
   }
-  CGFloat dx = translation.x;
-  if (dx == 0) {
-    dx = [pan velocityInView:self].x;
-  }
-  if (dx > 0) {
-    return self.contentOffset.x > 0.5;
-  }
-  return (self.contentOffset.x + CGRectGetWidth(self.bounds)) < (self.contentSize.width - 0.5);
+  return self.contentSize.width > CGRectGetWidth(self.bounds) + 0.5;
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer
@@ -190,8 +178,35 @@ function applyNestedAndroidScrollView(source, label) {
   return next;
 }
 
+function upgradeIosNestedScrollView(source) {
+  const keepOverflow = `  return self.contentSize.width > CGRectGetWidth(self.bounds) + 0.5;
+`;
+  const leftoverDx = `  CGFloat dx = translation.x;
+  if (dx == 0) {
+    dx = [pan velocityInView:self].x;
+  }
+  return self.contentSize.width > CGRectGetWidth(self.bounds) + 0.5;
+`;
+  if (source.includes(leftoverDx)) {
+    return replaceOnce(source, leftoverDx, keepOverflow, "iOS drop unused edge dx");
+  }
+  const oldEdgeHandoff = `  CGFloat dx = translation.x;
+  if (dx == 0) {
+    dx = [pan velocityInView:self].x;
+  }
+  if (dx > 0) {
+    return self.contentOffset.x > 0.5;
+  }
+  return (self.contentOffset.x + CGRectGetWidth(self.bounds)) < (self.contentSize.width - 0.5);
+`;
+  if (source.includes(oldEdgeHandoff)) {
+    return replaceOnce(source, oldEdgeHandoff, keepOverflow, "iOS keep overflowing horizontal drags");
+  }
+  return source;
+}
+
 function patchIosCodeBlock(source) {
-  if (source.includes("ENRMNestedHorizontalScrollView")) return source;
+  if (source.includes("ENRMNestedHorizontalScrollView")) return upgradeIosNestedScrollView(source);
   const insertAnchor = `#if !TARGET_OS_OSX
 @interface ENRMCodeBlockContainerView () <UIContextMenuInteractionDelegate>
 @end
@@ -258,3 +273,7 @@ assertPatched(HELPER_RELATIVE, "override fun dispatchTouchEvent");
 assertPatched(CODE_BLOCK_RELATIVE, "NestedHorizontalScrollView(context)");
 assertPatched(TABLE_RELATIVE, "NestedHorizontalScrollView(context)");
 assertPatched(IOS_CODE_BLOCK_RELATIVE, "ENRMNestedHorizontalScrollView");
+const helper = readRequired(HELPER_RELATIVE).source;
+if (helper.includes("canScrollHorizontally(-1) else canScrollHorizontally(1)")) {
+  fail("an overflowing code block must keep horizontal drags; handing them back at the edge reopens the pager");
+}
