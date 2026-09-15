@@ -11,7 +11,11 @@ import {
   sessionSourceRawValues,
 } from "./session-source.js";
 
-/** Values as the writers in apps/api store them, plus the hand-written odds. */
+/**
+ * Values as the writers in apps/api and apps/gateway store them, plus the
+ * hand-written odds. Channel entries mirror each provider's sourceChannel
+ * builder (dm / group / guild variants).
+ */
 const SOURCE_CORPUS: Array<string | null> = [
   null,
   "web",
@@ -19,11 +23,17 @@ const SOURCE_CORPUS: Array<string | null> = [
   "WEB",
   "feishu",
   "feishu:oc_abc123",
+  "feishu:dm:alice",
+  "feishu:group:eng",
   "channel:feishu",
   "channel_feishu",
+  "qq:dm:openid",
+  "qq:group:gid",
+  "qq:guild:chan",
   "qq:c2c:12345",
-  "wechat:user-1",
-  "discord:guild:chan-1",
+  "wechat:dm:user-1",
+  "discord:dm:bob",
+  "discord:Acme:#general",
   "scheduled_task",
   "space_hook",
   "cli",
