@@ -10,6 +10,7 @@ module.exports = defineConfig([
     "ios/**",
     "reference/**",
     "coverage/**",
+    "landing/vendor/**",
   ]),
   {
     rules: {
