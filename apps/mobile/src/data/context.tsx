@@ -14,6 +14,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { AppState as NativeAppState } from "react-native";
 import { File as ExpoFile, UploadType } from "expo-file-system";
 import { translate } from "@/src/i18n/core";
+import { config } from "@/src/config";
 import { createMobileClient } from "@/src/data/client";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { markChatEntry, startChatEntry } from "@/src/data/chat-entry-trace";
@@ -859,7 +860,9 @@ export function AppProvider({
   const spacePinMutationVersionsRef = useRef(new Map<string, number>());
   const spacePinPendingMutationsRef = useRef(new Map<string, number>());
   const spacePinMutationSequenceRef = useRef(0);
-  const userKey = userUuid;
+  // Prod keeps the historical scope; other environments are namespaced so a separate
+  // deployment never reuses another environment's cached Spaces, Chats, or read state.
+  const userKey = config.environment === "prod" ? userUuid : `${config.environment}:${userUuid}`;
 
   // Child pagination effects must see this commit, not the previous page's loading flag.
   useLayoutEffect(() => {

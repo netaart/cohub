@@ -127,6 +127,9 @@ export const en = {
   "auth.continue": "Continue with Cohub",
   "auth.opening": "Opening sign in…",
   "auth.secure": "Secure sign in via Logto",
+  "auth.environment": "Environment",
+  "auth.environment.prod": "Production",
+  "auth.environment.dev": "Development",
 
   // Chats tab
   "chats.filter.all": "All",

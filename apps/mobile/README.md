@@ -19,7 +19,7 @@ A native iOS and Android client for Cohub, built with React Native and Expo.
 | Platform | Link |
 |----------|------|
 | **Android** | [Download APK](https://cohub.live/bangwu/cohub-mobile/w/download) · [all builds](https://github.com/markbang/cohub-mobile/releases) |
-| **iOS** | TestFlight link coming soon |
+| **iOS** | [Join the TestFlight beta](https://testflight.apple.com/join/KWhztpkP) |
 
 Android builds are published per ABI to the Yaota distribution origin, which is what the in-app updater reads. The [download page](https://cohub.live/bangwu/cohub-mobile/w/download) resolves the newest `arm64-v8a` build, and falls back to GitHub Releases if the catalog is unreachable.
 
@@ -98,6 +98,8 @@ cohub://callback
 ```
 
 The production defaults mirror the Cohub web client. The hosted Logto application must explicitly allow `cohub://callback`; otherwise create a Native Logto application and set its public app ID in `.env`. Override the other endpoints when using a self-hosted or development deployment. Do not place client secrets in the app.
+
+Sign in against the dev deployment from the login screen: development and non-production builds show an environment picker, and the choice is remembered on the device. Set `EXPO_PUBLIC_COHUB_ENV=dev` to make dev the build-time default instead. The picker is hidden in production builds and whenever the build pins endpoints through `EXPO_PUBLIC_*` overrides, because those take precedence.
 
 ## Push setup
 

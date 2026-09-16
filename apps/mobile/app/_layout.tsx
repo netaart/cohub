@@ -4,15 +4,16 @@ import { useFonts } from "expo-font";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 import { AuthScreen } from "@/src/auth/AuthScreen";
 import { AppUpdateBanner } from "@/src/components/AppUpdateBanner";
 import { ToastProvider } from "@/src/components/Toast";
-import { config } from "@/src/config";
+import { config, defaultEnvironment, environmentSelectionEnabled, resolveConfig, setActiveEnvironment, type CohubEnvironment } from "@/src/config";
 import { AppProvider } from "@/src/data/context";
+import { loadEnvironmentPreference, saveEnvironmentPreference } from "@/src/data/environment-preference";
 import { LocaleProvider, useTranslation } from "@/src/i18n";
 import { useAppTheme } from "@/src/theme";
 import { NativeInteractionBridge } from "@/src/platform/NavigationBridge";
@@ -27,11 +28,14 @@ export const unstable_settings = {
 
 SplashScreen.preventAutoHideAsync();
 
-const logtoConfig = {
-  endpoint: config.authEndpoint,
-  appId: config.logtoAppId,
-  scopes: ["openid", "offline_access", "profile", "email"],
-  resources: [config.apiResource],
+const logtoConfig = (environment: CohubEnvironment) => {
+  const resolved = resolveConfig(environment);
+  return {
+    endpoint: resolved.authEndpoint,
+    appId: resolved.logtoAppId,
+    scopes: ["openid", "offline_access", "profile", "email"],
+    resources: [resolved.apiResource],
+  };
 };
 
 function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 10_000) {
@@ -49,10 +53,50 @@ export default function RootLayout() {
   // keep the splash up until the bundled font is registered.
   const [fontsLoaded, fontError] = useFonts({ SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf") });
   if (!fontsLoaded && !fontError) return null;
-  return <LocaleProvider><LogtoProvider config={logtoConfig}><NativeRoot /></LogtoProvider></LocaleProvider>;
+  return <LocaleProvider><AuthEnvironmentRoot /></LocaleProvider>;
 }
 
-function NativeRoot() {
+/** Resolves the sign-in environment before any request runs, then owns the Logto client for it. */
+function AuthEnvironmentRoot() {
+  const [environment, setEnvironment] = useState<CohubEnvironment | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    // A store build must not inherit a dev selection left by another build on this device.
+    const stored = environmentSelectionEnabled ? loadEnvironmentPreference() : Promise.resolve(null);
+    void stored
+      .catch(() => null)
+      .then((preference) => {
+        if (!active) return;
+        const selected = preference ?? defaultEnvironment;
+        setActiveEnvironment(selected);
+        setEnvironment(selected);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectEnvironment = useCallback((next: CohubEnvironment) => {
+    setActiveEnvironment(next);
+    setEnvironment(next);
+    void saveEnvironmentPreference(next).catch(() => undefined);
+  }, []);
+
+  const clientConfig = useMemo(() => environment ? logtoConfig(environment) : null, [environment]);
+  if (!environment || !clientConfig) return <LoadingScreen />;
+
+  return (
+    <LogtoProvider key={environment} config={clientConfig}>
+      <NativeRoot
+        environment={environment}
+        onSelectEnvironment={environmentSelectionEnabled ? selectEnvironment : undefined}
+      />
+    </LogtoProvider>
+  );
+}
+
+function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEnvironment; onSelectEnvironment?: (environment: CohubEnvironment) => void }) {
   useDebugDiagnosticsLifecycle();
   const { client, isInitialized, isAuthenticated, signIn, signOut } = useLogto();
   const theme = useAppTheme();
@@ -115,7 +159,7 @@ function NativeRoot() {
   }, [isInitialized]);
 
   if (!isInitialized) return <LoadingScreen />;
-  if (!isAuthenticated || (authError && !identity.uuid)) return <AuthScreen onSignIn={handleSignIn} loading={authLoading} error={authError} />;
+  if (!isAuthenticated || (authError && !identity.uuid)) return <AuthScreen environment={environment} onSelectEnvironment={onSelectEnvironment} onSignIn={handleSignIn} loading={authLoading} error={authError} />;
   if (identity.authenticated !== isAuthenticated || !identity.uuid) return <LoadingScreen />;
   return <AppProvider key={identity.uuid} userUuid={identity.uuid} getAccessToken={getAccessToken}><Navigation theme={theme} /></AppProvider>;
 }

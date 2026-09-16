@@ -123,6 +123,9 @@ export const zh: Record<TranslationKey, string> = {
   "auth.feature.sync.body": "在手机上接着运行，思路不中断。",
   "auth.continue": "使用 Cohub 继续",
   "auth.opening": "正在打开登录…",
+  "auth.environment": "环境",
+  "auth.environment.prod": "生产",
+  "auth.environment.dev": "开发",
   "auth.secure": "通过 Logto 安全登录",
 
   // Chats tab
