@@ -9,10 +9,20 @@ export type RunningSessionsSnapshot = {
 
 export const emptyRunningSessions: RunningSessionsSnapshot = { sessions: [], loading: false, loaded: false, error: null };
 
+/** Known list rows remain usable while account-wide discovery fills the older pages. */
+export function runningSessionCandidates(discovered: UserSessionListItem[], known: UserSessionListItem[]): UserSessionListItem[] {
+  const sessions = new Map(discovered.map((session) => [session.id, session]));
+  for (const session of known) {
+    const previous = sessions.get(session.id);
+    if (!previous || Date.parse(session.updatedAt) > Date.parse(previous.updatedAt)) sessions.set(session.id, session);
+  }
+  return [...sessions.values()];
+}
+
 /** The SDK has no active-session filter; scan the authoritative user list without a recency cutoff. */
 export async function loadRunningSessions(
   client: CohubClient,
-  options: { source?: readonly UserSessionSourceKey[]; signal: AbortSignal },
+  options: { source?: readonly UserSessionSourceKey[]; signal: AbortSignal; onPage?: (sessions: UserSessionListItem[]) => void },
 ): Promise<UserSessionListItem[]> {
   const sessions = new Map<string, UserSessionListItem>();
   const cursors = new Set<string>();
@@ -42,9 +52,10 @@ export async function loadRunningSessions(
       if (!response.pageInfo || typeof response.pageInfo.hasMore !== "boolean") {
         throw new Error("The server did not return Chat pagination information. Account-wide Running discovery cannot finish.");
       }
-      if (!response.pageInfo.hasMore) break;
-      const next = response.pageInfo.nextCursor;
-      if (!next || cursors.has(next)) throw new Error("Running Chat discovery pagination did not advance. Refresh Chats and retry.");
+      const next = response.pageInfo.hasMore ? response.pageInfo.nextCursor : null;
+      if (response.pageInfo.hasMore && (!next || cursors.has(next))) throw new Error("Running Chat discovery pagination did not advance. Refresh Chats and retry.");
+      options.onPage?.(response.sessions);
+      if (!next) break;
       cursors.add(next);
       cursor = next;
     } finally {

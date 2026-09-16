@@ -20,7 +20,7 @@ import type { SessionSourceFilter } from "@/src/data/session-source";
 import { useSourceSessions } from "@/src/data/use-source-sessions";
 import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useSpaceRealtime } from "@/src/data/use-space-realtime";
-import { emptyRunningSessions } from "@/src/data/running-sessions";
+import { emptyRunningSessions, runningSessionCandidates } from "@/src/data/running-sessions";
 import { SpaceRow } from "@/src/components/SpaceRow";
 import { EdgeHeader, useEdgeChrome } from "@/src/ui/EdgeChrome";
 
@@ -62,7 +62,8 @@ export default function ChatsScreen() {
   const sourceLoadMore = sourceSessions.loadMore;
   const sourceLoadingMore = sourceSessions.loadingMore;
   const runningQuery = state.runningSessions[sourceFilter] ?? emptyRunningSessions;
-  const baseSessions = filter === "running" ? runningQuery.sessions : sourceFilter === "all" ? state.sessions : sourceSessionList;
+  const knownSessions = sourceFilter === "all" ? state.sessions : sourceSessionList;
+  const baseSessions = useMemo(() => filter === "running" ? runningSessionCandidates(runningQuery.sessions, knownSessions) : knownSessions, [filter, knownSessions, runningQuery.sessions]);
   useSyncScope(`running:${sourceFilter}`, () => discoverRunningSessions(sourceFilter), 30_000, filter === "running" && !state.booting, 30_000);
   const [visibleSpaceIds, setVisibleSpaceIds] = useState<string[]>([]);
   useSpaceRealtime(visibleSpaceIds);
@@ -70,8 +71,7 @@ export default function ChatsScreen() {
     const ids = [...new Set(viewableItems.filter((token) => token.isViewable).map(({ item }) => item.kind === "local-session" ? item.session.spaceId : item.kind === "local-space" ? item.space.id : item.hit.spaceId))].slice(0, 10);
     setVisibleSpaceIds((previous) => previous.join(",") === ids.join(",") ? previous : ids);
   }, []);
-  const activeChats = baseSessions.some((session) => sessionListStatus(session, state.sessionLatestTurns[session.id], state.sessionTurnStatuses) === "running");
-  useSyncScope("chats", refreshChats, activeChats ? 15_000 : 30_000, sourceFilter === "all" && filter !== "running" && !state.booting);
+  useSyncScope("chats", refreshChats, 15_000, sourceFilter === "all" && !state.booting);
   const dataError = (filter === "running" ? runningQuery.error : filterPreference.error ?? state.sessionsError ?? sourceSessions.error) ?? sourcePreference.error ?? state.error ?? state.realtimeError ?? state.sessionStatusError;
   const remoteSearch = useRemoteSearch(client, query, { enabled: filter === "all" && sourceFilter === "all", types: CHAT_SEARCH_TYPES });
   const trimmedQuery = normalizeSearchQuery(query);
@@ -219,7 +219,7 @@ export default function ChatsScreen() {
           {remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><IconButton name="refresh" label={t("chats.search.retry")} onPress={remoteSearch.retry} tone="accent" /></View> : null}
         </View>}
         ListEmptyComponent={dataError ? <EmptyState icon="cloud-off" title={t("chats.error.title")} description={t("chats.error.body")} /> : state.booting || (filter === "running" ? !runningQuery.loaded : (filter === "completed" && (state.refreshing || !filterPreference.loaded || statusesLoading || filteringPages)) || (sourceFilter !== "all" && (sourceSessions.loading || !sourceSessions.initialized))) ? <LoadingRows count={5} /> : searchEmpty}
-        ListFooterComponent={!dataError && filter !== "running" && (state.sessionsLoadingMore || (filter !== "all" && (statusesLoading || filteringPages)) || (sourceFilter !== "all" && (sourceLoadingMore || (filter !== "all" && (statusesLoading || sourceFilteringPages))))) ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator accessibilityLabel={t("chats.loadingStatuses")} size="small" color={theme.colors.accent} /></View> : null}
+        ListFooterComponent={!dataError && (filter === "running" ? runningQuery.loading : (state.sessionsLoadingMore || (filter !== "all" && (statusesLoading || filteringPages)) || (sourceFilter !== "all" && (sourceLoadingMore || (filter !== "all" && (statusesLoading || sourceFilteringPages)))))) ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator accessibilityLabel={t("chats.loadingStatuses")} size="small" color={theme.colors.accent} /></View> : null}
       />
       {sourceMenuOpen ? <AnchoredActionMenu
         anchorRef={sourceButtonRef}

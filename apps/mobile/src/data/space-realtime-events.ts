@@ -60,8 +60,8 @@ export function spaceRealtimeChange(event: SpaceRealtimeEvent): SpaceChange {
       break;
     }
     case "label.assignments.updated":
-      change.prefixes.push("chats", "running:");
-      change.exact.push(`space:${spaceId}:chat-panel`);
+      change.prefixes.push("chats", "running:", `space:${spaceId}:label-members:`);
+      change.exact.push(`space:${spaceId}:chat-panel`, `space:${spaceId}:labels`);
       break;
   }
   return change;

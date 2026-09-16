@@ -17,7 +17,7 @@ import { interpolateSendBubbleRect, isSendBubbleMessage, measureSendBubbleSource
 import { motion } from "../src/motion.ts";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, toggleResourcePin } from "../src/data/resource-pins.ts";
 import { hasFinalAssistantForTurn, liveStreamStatusFromPatch, shouldShowLiveStream, streamRecoveryFromTail } from "../src/data/chat-stream.ts";
-import { isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
+import { fetchSessionLabels, fetchLabelSessionIds, formatLabelRef, isWebSessionSource, sessionSourceGroup, toUserSessionLabels } from "../src/data/session-labels.ts";
 import { sessionSourceFilterKeys } from "../src/data/session-source.ts";
 import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, nextTurnSequence, withFallbackUserContent, withTurnSequences } from "../src/data/session-history.ts";
 import { compactionFromMessage, compactionStats } from "../src/data/compaction.ts";
@@ -27,7 +27,7 @@ import { createSessionLifecycle } from "../src/data/session-lifecycle.ts";
 import { createSyncScheduler } from "../src/data/sync-scheduler.ts";
 import { reconcileSessionHead } from "../src/data/session-list-sync.ts";
 import { mergeTaskRuns, refreshTaskRuns } from "../src/data/task-sync.ts";
-import { emptyRunningSessions, loadRunningSessions } from "../src/data/running-sessions.ts";
+import { emptyRunningSessions, loadRunningSessions, runningSessionCandidates } from "../src/data/running-sessions.ts";
 import { createSpaceRealtime } from "../src/data/space-realtime.ts";
 import { spaceRealtimeChange } from "../src/data/space-realtime-events.ts";
 import { DEFAULT_SESSION_FILTER_MINUTES, getSessionStatus, sessionListStatus, hasMoreRecentSessions, isSessionInFilterWindow, latestTurn, loadSessionLatestTurns, parseSessionFilterMinutes, reconcileLatestTurn, reconcileTurnStatusPatch, sessionFilterCutoff, sessionPageState } from "../src/data/session-status.ts";
@@ -148,6 +148,17 @@ try {
 } finally { mock.timers.reset(); }
 
 const runningFixture = { id: "ancient", spaceId: "space", title: "Old running Chat", lastMessageAt: "2020-01-01T00:00:00Z", updatedAt: "2020-01-01T00:00:00Z", activeTurn: { id: "active", status: "running" } };
+const slowRunningTail = Promise.withResolvers();
+const runningProgress = [];
+const progressiveRunning = loadRunningSessions({ user: { listSessions: async (options) => options.cursor ? slowRunningTail.promise : { sessions: [runningFixture], pageInfo: { hasMore: true, nextCursor: "slow-tail" } } } }, {
+  signal: new AbortController().signal,
+  onPage: (page) => runningProgress.push(page),
+});
+await flushSync();
+assert.equal(runningProgress.length, 1, "the first Running page publishes without waiting for historical pages");
+assert.deepEqual(runningProgress[0], [runningFixture]);
+slowRunningTail.resolve({ sessions: [], pageInfo: { hasMore: false, nextCursor: null } });
+assert.deepEqual(await progressiveRunning, [runningFixture]);
 const discoveryPages = [];
 const accountRunning = await loadRunningSessions({ user: { listSessions: async (options) => {
   discoveryPages.push(options);
@@ -392,7 +403,7 @@ for (const [tab, component, expectedRequests] of [
     useSessionFilterPreference: () => ({ loaded: true, minutes: 30 }), loadSessionFilterMinutes: async () => 30,
     useSessionSourcePreference: () => ({ filter: "all", loaded: true, error: null }), saveSessionSourcePreference: async () => {}, loadSessionSourcePreference: async () => "all",
     useToast: () => () => {},
-    sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [], emptyRunningSessions,
+    sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [], emptyRunningSessions, runningSessionCandidates, sessionListStatus,
     CHAT_SEARCH_TYPES: ["session", "turn", "space"], SPACE_SEARCH_TYPES: ["space"],
     Screen: "Screen", ScrollView: "ScrollView", LegendList: "LegendList", RefreshControl: "RefreshControl",
     AccountAvatar: "AccountAvatar", TokenHeatmap: "TokenHeatmap", PressableScale: "PressableScale",
@@ -429,6 +440,18 @@ for (const [tab, component, expectedRequests] of [
     if (failed) assert.ok(render().some((node) => node.type === "DataError"), `${tab}: refresh errors remain actionable`);
   }
   state.error = null;
+  if (tab === "index") {
+    state.sessions = [runningFixture];
+    state.runningSessions.all = { ...emptyRunningSessions, loading: true };
+    chromeNodes(control().props.ListHeaderComponent).find((node) => node.props?.label === "chats.filter.running").props.onPress();
+    assert.deepEqual(control().props.data.map((row) => row.session.id), [runningFixture.id], "Running immediately uses known active rows, even years outside the time window");
+    assert.ok(control().props.ListFooterComponent, "a partial Running result still indicates an unfinished account scan");
+    const laterPage = { ...runningFixture, id: "older-page-running", activeTurn: { id: "older-turn", status: "running" } };
+    state.runningSessions.all = { ...emptyRunningSessions, loading: true, sessions: [laterPage] };
+    assert.deepEqual(new Set(control().props.data.map((row) => row.session.id)), new Set([runningFixture.id, laterPage.id]), "later discovery pages append without hiding known rows");
+    state.sessionTurnStatuses.active = { id: "active", sequence: 1, status: "completed", updatedAt: "2026-09-16T01:00:00Z" };
+    assert.deepEqual(control().props.data.map((row) => row.session.id), [laterPage.id], "a known terminal turn is not resurrected by the immediate candidate list");
+  }
   if (tab === "spaces") {
     const list = control();
     assert.notEqual(list.props.ListEmptyComponent.type, "LoadingRows", "returning to a loaded empty Spaces list must not flash skeletons");
@@ -436,6 +459,63 @@ for (const [tab, component, expectedRequests] of [
     assert.equal(control().props.ListEmptyComponent.type, "LoadingRows", "the first Spaces load still has a placeholder");
     assert.equal(control().props.refreshing, false, "the first Spaces load is not a pull gesture");
   }
+}
+
+// Real ChatPanel refresh callbacks: server-created label filters and memberships update while open.
+{
+  let cursor = 0;
+  const slots = [];
+  const effects = [];
+  const jobs = new Map();
+  let remoteLabels = [];
+  let remoteMembers = [];
+  let labelsFetches = 0;
+  const client = { space: () => ({ labels: {
+    list: async () => { labelsFetches++; return { labels: remoteLabels }; },
+    listItems: async () => ({ items: remoteMembers.map((resourceRef) => ({ resourceRef })) }),
+  } }) };
+  const renderPanel = loadChromeComponent("../src/components/SpacePanels.tsx", "ChatPanel", {
+    ...chromeScope,
+    useState: (initial) => { const index = cursor++; if (!(index in slots)) slots[index] = typeof initial === "function" ? initial() : initial; return [slots[index], (value) => { slots[index] = typeof value === "function" ? value(slots[index]) : value; }]; },
+    useRef: (current) => { const index = cursor++; if (!(index in slots)) slots[index] = { current }; return slots[index]; },
+    useCallback: (callback) => callback, useMemo: (factory) => factory(),
+    useEffect: (callback, deps) => {
+      const index = cursor++;
+      const previous = slots[index];
+      if (!previous || deps.some((value, index) => value !== previous.deps[index])) {
+        effects.push(() => { previous?.cleanup?.(); slots[index] = { deps, cleanup: callback() }; });
+      }
+    },
+    useSyncScope: (key, run, interval, enabled = true) => { if (enabled) jobs.set(key, { run, interval }); },
+    useApp: () => ({ state: {}, sync: { invalidate() {}, invalidatePrefix() {} }, prefetchSession() {}, refreshSessionStatuses: async () => {} }),
+    useRemoteSearch: () => ({ query: "", sessions: [], loading: false }),
+    fetchSessionLabels, fetchLabelSessionIds, formatLabelRef, toUserSessionLabels, sessionSourceGroup, normalizeSearchQuery,
+    mergePanelSessions: (current, incoming) => [...current, ...incoming],
+    Avatar: "Avatar", PrimaryButton: "PrimaryButton", SearchField: "SearchField", PanelFilterChip: "PanelFilterChip", ScrollView: "ScrollView", LegendList: "LegendList", SessionLabelSheet: "SessionLabelSheet", ActivityIndicator: "ActivityIndicator",
+  });
+  const props = { spaceId: "space", spaceName: "Space", sessions: [runningFixture], client, onChipsTouchChange() {}, onClose() {}, onNewChat() {}, onOpenSession() {} };
+  const render = () => { cursor = 0; const nodes = chromeNodes(renderPanel(props)); while (effects.length) effects.shift()(); return nodes; };
+  render();
+  const labelsJob = jobs.get("space:space:labels");
+  assert.equal(labelsJob.interval, 15000, "label definitions participate in foreground polling");
+  await labelsJob.run();
+  remoteLabels = [{ id: "web-label", name: "Created on web", source: "user", systemKey: null }];
+  render();
+  await jobs.get("space:space:labels").run();
+  const chip = render().find((node) => node.type === "PanelFilterChip" && node.props.label === "Created on web");
+  assert.ok(chip, "new remote filters appear without closing the panel or pulling to refresh");
+  assert.equal(labelsFetches, 2);
+  chip.props.onPress();
+  render();
+  assert.equal(jobs.get("space:space:label-members:Created on web").interval, 15000);
+  await jobs.get("space:space:label-members:Created on web").run();
+  assert.equal(render().find((node) => node.type === "LegendList").props.data.length, 0);
+  remoteMembers = [runningFixture.id];
+  await jobs.get("space:space:label-members:Created on web").run();
+  assert.equal(render().find((node) => node.type === "LegendList").props.data[0].session.id, runningFixture.id, "label assignments made on the web update the current filtered list");
+  const change = spaceRealtimeChange({ type: "label.assignments.updated", spaceId: "space", payload: {} });
+  assert.ok(change.exact.includes("space:space:labels"));
+  assert.ok(change.prefixes.includes("space:space:label-members:"));
 }
 
 for (const success of ["#238552", "#62c994"]) {
@@ -1182,6 +1262,7 @@ assert.deepEqual(sessionPageState({ sessions: [], pageInfo: { hasMore: false, ne
 // Exercise the provider's real pagination callback with React's child-before-parent passive effect order.
 const contextSource = ts.createSourceFile("context.tsx", readFileSync(new URL("../src/data/context.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let paginationCallback;
+let refreshChatsCallback;
 let stateSyncHook;
 let timeoutSource;
 const sessionCallbacks = {};
@@ -1191,6 +1272,7 @@ function inspectPagination(node) {
     if (ts.isCallExpression(callback) && callback.expression.getText(contextSource) === "useCallback") sessionCallbacks[node.name.getText(contextSource)] = callback.arguments[0].getText(contextSource);
   }
   if (ts.isVariableDeclaration(node) && node.name.getText(contextSource) === "loadMoreSessions") paginationCallback = node.initializer.arguments[0].getText(contextSource);
+  if (ts.isVariableDeclaration(node) && node.name.getText(contextSource) === "refreshChats") refreshChatsCallback = node.initializer.arguments[0].getText(contextSource);
   if (ts.isCallExpression(node) && ["useEffect", "useLayoutEffect"].includes(node.expression.getText(contextSource)) && node.arguments[0]?.getText(contextSource).includes("stateRef.current = state;")) stateSyncHook = node.expression.getText(contextSource);
   if (ts.isFunctionDeclaration(node) && node.name?.text === "withTimeout") timeoutSource = node.getText(contextSource);
   ts.forEachChild(node, inspectPagination);
@@ -1221,6 +1303,18 @@ const newerOutcome = reduceListSync(listSyncState, { type: "session-latest-turn"
 const olderOutcome = reduceListSync(newerOutcome, { type: "session-latest-turn", sessionId: "chat", turn: { ...completedTurn, id: "older", sequence: 9 } });
 assert.equal(olderOutcome.sessionLatestTurns.chat.sequence, 10);
 assert.equal(olderOutcome.sessionTurnStatuses.older.status, "completed", "older active-turn reconciliation records its terminal state without replacing the latest outcome");
+const partialRunningState = reduceListSync(listSyncState, { type: "running-success", source: "all", sessions: [runningFixture], changedSessionIds: [], complete: false });
+assert.equal(partialRunningState.runningSessions.all.loading, true);
+assert.equal(partialRunningState.runningSessions.all.loaded, false, "a first page must not claim account-wide coverage");
+assert.deepEqual(partialRunningState.runningSessions.all.sessions, [runningFixture]);
+const cancelledPartial = reduceListSync(partialRunningState, { type: "running-end", source: "all" });
+assert.deepEqual(cancelledPartial.runningSessions.all.sessions, [runningFixture]);
+assert.equal(cancelledPartial.runningSessions.all.loading, false);
+const idleRunningPage = reduceListSync(partialRunningState, { type: "running-success", source: "all", sessions: [{ ...runningFixture, activeTurn: null }], changedSessionIds: [], complete: false });
+assert.equal(idleRunningPage.runningSessions.all.sessions.length, 0, "a scanned idle row removes only that row from a partial snapshot");
+const partialError = reduceListSync(partialRunningState, { type: "running-end", source: "all", error: "older page failed" });
+assert.equal(partialError.runningSessions.all.loaded, false);
+assert.equal(partialError.runningSessions.all.sessions.length, 1, "a failed historical page retains already discovered running rows");
 const discoveredState = reduceListSync(listSyncState, { type: "running-success", source: "all", sessions: [runningFixture], changedSessionIds: [] });
 assert.equal(discoveredState.sessions, listSyncState.sessions, "discovery must not contaminate the ordinary paginated list");
 assert.equal(discoveredState.sessionsCursor, "tail-cursor");
@@ -1243,6 +1337,88 @@ function paginationHarness(listSessions) {
   const load = new Function("stateRef", "client", "sessionsMoreRequestRef", "homeRefreshGenerationRef", "dispatch", "withTimeout", "sessionPageState", "refreshSessionStatuses", "saveSessions", "userKey", "errorMessage", "translate", `return ${paginationCallback}`)(stateRef, client, requestRef, generationRef, (action) => actions.push(action), pageTimeout, sessionPageState, () => {}, async () => {}, "test-user", (error) => error.message, (key) => key);
   return { load, calls, actions, requestRef, generationRef, stateRef };
 }
+// Provider effects can be cleaned up and restarted without recreating useState controllers.
+const syncEffects = [];
+let spaceRealtimeEffect;
+function inspectSyncEffects(node) {
+  if (ts.isCallExpression(node) && node.expression.getText(contextSource) === "useEffect" && node.arguments[1]?.getText(contextSource) === "[sync]") syncEffects.push(node.arguments[0].getText(contextSource));
+  if (ts.isCallExpression(node) && node.expression.getText(contextSource) === "useEffect" && node.arguments[1]?.getText(contextSource) === "[spaceRealtime]") spaceRealtimeEffect = node.arguments[0].getText(contextSource);
+  ts.forEachChild(node, inspectSyncEffects);
+}
+inspectSyncEffects(contextSource);
+mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
+try {
+  const sync = createSyncScheduler({ active: true, random: () => 0.5 });
+  const scope = {
+    sync, NativeAppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) },
+    runningDiscoveryControllers: { current: new Set() }, subscriptions: { current: new Map() }, resyncCoordinatorRef: { current: { request: () => {} } },
+  };
+  const effects = syncEffects.map((effect) => new Function(...Object.keys(scope), `return (${effect});`)(...Object.values(scope)));
+  for (const cleanup of effects.map((effect) => effect())) cleanup?.();
+  const cleanups = effects.map((effect) => effect());
+  let reads = 0;
+  const stop = sync.watch("chats", { intervalMs: () => 15000, run: async () => { reads++; } });
+  mock.timers.tick(250);
+  await flushSync();
+  mock.timers.tick(15000);
+  await flushSync();
+  assert.equal(reads, 2, "effect cleanup/restart must not permanently disable the account scheduler");
+  stop();
+  for (const cleanup of cleanups) cleanup?.();
+  sync.dispose();
+
+  let events = 0;
+  let listener;
+  let subscribed = 0;
+  const spaceRealtime = createSpaceRealtime({
+    subscribe: (_id, callback) => { listener = callback; subscribed++; return () => { subscribed--; }; },
+    event: () => { events++; }, error: () => {},
+  });
+  const restartEffect = new Function("spaceRealtime", "NativeAppState", `return (${spaceRealtimeEffect});`)(spaceRealtime, scope.NativeAppState);
+  restartEffect()();
+  const stopEffect = restartEffect();
+  const stopRoom = spaceRealtime.watch(["visible-space"]);
+  assert.equal(subscribed, 1, "restarting provider effects must restore Space subscriptions");
+  listener({ type: "session.created", spaceId: "visible-space" });
+  assert.equal(events, 1);
+  stopRoom();
+  stopEffect();
+  assert.equal(subscribed, 0, "unmount releases native room listeners");
+} finally { mock.timers.reset(); }
+
+// Exercise the actual provider callback through its scheduler, not just isolated timers.
+mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
+try {
+  for (const statusFailure of ["forbidden", "slow"]) {
+    let reads = 0;
+    const actions = [];
+    const slowStatus = Promise.withResolvers();
+    const scope = {
+      homeRefreshRequestRef: { current: null }, chatsRefreshRequestRef: { current: null }, homeRefreshGenerationRef: { current: 0 },
+      client: { user: { listSessions: async () => ({ sessions: [{ ...syncRows[0], id: `web-created-${++reads}` }], pageInfo: { hasMore: false, nextCursor: null } }) } },
+      withTimeout: pageTimeout, sessionPageState, dispatch: (action) => actions.push(action), saveSessions: async () => {}, userKey: "test",
+      errorMessage: (error) => error.message, translate: (key) => key,
+      refreshSessionStatuses: async (_sessions, options) => {
+        if (statusFailure === "slow") return slowStatus.promise;
+        if (options.throwOnError) throw new Error("one Chat status is forbidden", { cause: { status: 403 } });
+      },
+    };
+    const refresh = new Function(...Object.keys(scope), ts.transpileModule(`return (${refreshChatsCallback});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(scope));
+    const scheduler = createSyncScheduler({ active: true, random: () => 0.5 });
+    scheduler.watch("chats", { run: refresh, intervalMs: () => 15000 });
+    mock.timers.tick(250);
+    await flushSync();
+    mock.timers.tick(15000);
+    await flushSync();
+    assert.equal(reads, 2, `${statusFailure}: status enrichment must not stop discovery of new web Chats`);
+    assert.equal(actions.filter((action) => action.type === "sessions-head-success").at(-1).sessions[0].id, "web-created-2");
+    assert.ok(!actions.some((action) => action.type === "sessions-head-error"), "status errors do not become list errors");
+    scheduler.dispose();
+    slowStatus.resolve();
+    await flushSync();
+  }
+} finally { mock.timers.reset(); }
+
 const handoff = paginationHarness(async () => ({ sessions: [], pageInfo: { hasMore: false, nextCursor: null } }));
 const nextPageState = { ...handoff.stateRef.current, sessionsLoadingMore: false, sessionsCursor: "next-page" };
 if (stateSyncHook === "useLayoutEffect") handoff.stateRef.current = nextPageState;
@@ -1687,6 +1863,166 @@ assert.ok(panelPager, "Space panels retain their native scroll pager");
 const pagerAttributes = panelPager.attributes.properties.filter(ts.isJsxAttribute);
 assert.equal(pagerAttributes.some((attribute) => attribute.name.getText(panelsSource) === "contentOffset"), false, "Filter touch re-renders must not reapply the closed-page contentOffset");
 assert.equal(panelPager.attributes.properties.filter(ts.isJsxSpreadAttribute).some((spread) => spread.getText(panelsSource).includes("contentOffset")), false, "Spreading contentOffset and then dropping it resets the pager onto the Chats page");
+// Render the real pager with native commands delayed until both layouts are ready.
+// This checks geometry and callback ordering, not Android rendering or Reanimated scheduling.
+function panelPagerHarness(initialPanel = null) {
+  const slots = [];
+  let cursor = 0;
+  const effects = [];
+  let viewportWidth = 400;
+  const commits = [];
+  let props = { spaceId: "space", spaceName: "Space", sessions: [], client: null, activePanel: initialPanel, onActivePanelChange: (panel) => { commits.push(panel); props = { ...props, activePanel: panel }; }, children: { type: "ChatContent" } };
+  let measuredViewport = false;
+  let measuredContent = false;
+  let nativeX = 0;
+  const commands = [];
+  const slot = (create) => { const index = cursor++; if (!(index in slots)) slots[index] = create(); return [index, slots[index]]; };
+  const effect = (callback, deps) => {
+    const [index, previous] = slot(() => null);
+    if (!previous || deps.some((value, index) => value !== previous[index])) { effects.push(callback); slots[index] = deps; }
+  };
+  const renderPanels = loadChromeComponent("../src/components/SpacePanels.tsx", "SpacePanels", {
+    ...chromeScope,
+    useState: (initial) => { const [index, value] = slot(() => typeof initial === "function" ? initial() : initial); return [value, (next) => { slots[index] = typeof next === "function" ? next(slots[index]) : next; }]; },
+    useRef: (initial) => slot(() => ({ current: initial }))[1],
+    useSharedValue: (initial) => slot(() => ({ value: initial, get() { return this.value; }, set(value) { this.value = value; } }))[1],
+    useEffect: effect, useLayoutEffect: effect,
+    useCallback: (callback, deps) => {
+      const [index, previous] = slot(() => null);
+      if (!previous || deps.some((value, index) => value !== previous.deps[index])) slots[index] = { callback, deps };
+      return slots[index].callback;
+    },
+    useMemo: (factory, deps) => {
+      const [index, previous] = slot(() => null);
+      if (!previous || deps.some((value, index) => value !== previous.deps[index])) slots[index] = { value: factory(), deps };
+      return slots[index].value;
+    },
+    useWindowDimensions: () => ({ width: viewportWidth }), useSafeAreaInsets: () => ({ top: 0, bottom: 0 }), useIsFocused: () => true,
+    useAnimatedScrollHandler: (handler) => handler, useAnimatedStyle: (style) => ({ animated: style }),
+    scheduleOnRN: (callback, ...args) => callback(...args),
+    interpolate: (value, input, output) => Math.min(output[1], Math.max(output[0], value / input[1])), Extrapolation: { CLAMP: "clamp" },
+    Reanimated: { ScrollView: "Pager", View: "AnimatedView" }, BackHandler: { addEventListener: () => ({ remove() {} }) },
+    PANEL_WIDTH_RATIO: 0.86, MAX_PANEL_WIDTH: 360, PANEL_SCROLL_IDLE_MS: 140, PANEL_CLOSE_SETTLE_MS: 380,
+    panelForScrollOffset, chatScrollTrace: { record() {} }, ChatPanel: "ChatPanel", FilesPanel: "FilesPanel", PanelGesturePreview: "PanelGesturePreview",
+  });
+  let tree;
+  const render = () => {
+    cursor = 0;
+    tree = renderPanels(props);
+    const pager = chromeNodes(tree).find((node) => node.type === "Pager");
+    pager.props.ref.current = { scrollTo: (command) => { commands.push(command); if (measuredContent && measuredViewport) nativeX = Math.max(0, Math.min(command.x, 2 * Math.min(360, Math.max(280, viewportWidth * 0.86)))); } };
+    while (effects.length) effects.shift()();
+    return pager;
+  };
+  let pager = render();
+  const content = (contentWidth = 2 * Math.min(360, Math.max(280, viewportWidth * 0.86)) + viewportWidth) => { measuredContent = true; pager.props.onContentSizeChange(contentWidth, 800); };
+  const layout = (height = 800) => { measuredViewport = height > 0; pager.props.onLayout?.({ nativeEvent: { layout: { width: viewportWidth, height } } }); };
+  const style = (node) => Object.assign({}, ...[node.props.style].flat(Infinity).filter(Boolean).map((value) => value.animated ? value.animated() : value));
+  return {
+    commands, commits, content, layout,
+    resize: (width) => { viewportWidth = width; measuredContent = measuredViewport = false; pager = render(); },
+    nodes: () => chromeNodes(tree),
+    render: () => (pager = render()),
+    nativeX: () => nativeX,
+    pager: () => pager,
+    paintCoverage: () => {
+      const shift = style(pager).transform?.[0]?.translateX ?? 0;
+      return Math.max(0, Math.min(viewportWidth, shift + viewportWidth) - Math.max(0, shift));
+    },
+    contentShift: () => style(pager.props.children[0]).transform?.[0]?.translateX ?? 0,
+    scroll: (x) => { nativeX = x; pager.props.onScroll.onScroll({ contentOffset: { x } }); },
+    setPanel: (panel) => { props = { ...props, activePanel: panel }; return (pager = render()); },
+  };
+}
+const clippedPager = panelPagerHarness();
+assert.equal(clippedPager.paintCoverage(), 400, "initial seeding must not translate/clip the viewport down to the 14% Chat strip seen in the report");
+for (const order of ["content-first", "viewport-first"]) {
+  const harness = panelPagerHarness();
+  if (order === "content-first") { harness.content(); harness.layout(); }
+  else { harness.layout(); harness.content(); }
+  assert.equal(harness.nativeX(), 344, `${order}: seed only after both viewport and content can accept scrollTo`);
+  harness.scroll(344);
+  harness.render();
+  assert.equal(harness.paintCoverage(), 400);
+  assert.equal(harness.contentShift(), 0, "native acknowledgement removes content-only compensation");
+}
+const delayedPager = panelPagerHarness();
+assert.equal(delayedPager.pager().props.scrollEnabled, false, "unseeded native pages cannot be dragged into view");
+assert.equal(delayedPager.contentShift(), -344, "only the page strip compensates for native offset zero");
+delayedPager.scroll(0);
+delayedPager.pager().props.onMomentumScrollEnd();
+assert.deepEqual(delayedPager.commits, [], "pre-layout scroll/end events cannot commit a phantom open panel");
+delayedPager.content();
+delayedPager.layout(0);
+assert.equal(delayedPager.commands.length, 0, "zero-height route-transition layouts cannot complete seeding");
+delayedPager.layout();
+delayedPager.render();
+assert.equal(delayedPager.pager().props.scrollEnabled, false, "sending scrollTo is not acknowledgement");
+delayedPager.pager().props.onScrollBeginDrag();
+assert.equal(delayedPager.contentShift(), -344, "an early drag callback cannot drop the seed compensation");
+delayedPager.scroll(344);
+delayedPager.render();
+assert.equal(delayedPager.pager().props.scrollEnabled, true);
+const commandsAfterSeed = delayedPager.commands.length;
+delayedPager.content();
+delayedPager.layout();
+delayedPager.render();
+assert.equal(delayedPager.commands.length, commandsAfterSeed, "stream/list re-layouts never reposition a ready pager");
+for (let cycle = 0; cycle < 2; cycle++) {
+  delayedPager.pager().props.onScrollBeginDrag();
+  delayedPager.scroll(688);
+  delayedPager.pager().props.onMomentumScrollEnd();
+  delayedPager.render();
+  assert.ok(delayedPager.nodes().some((node) => node.type === "FilesPanel"), "every repeated swipe mounts an interactive Files panel");
+  delayedPager.scroll(344);
+  delayedPager.pager().props.onMomentumScrollEnd();
+  delayedPager.render();
+  assert.ok(!delayedPager.nodes().some((node) => node.type === "FilesPanel"));
+}
+delayedPager.setPanel("chat");
+assert.deepEqual(delayedPager.commands.at(-1), { x: 0, animated: true }, "external menu commands still open the requested panel");
+delayedPager.scroll(0);
+delayedPager.pager().props.onMomentumScrollEnd();
+delayedPager.render();
+assert.ok(delayedPager.nodes().some((node) => node.type === "ChatPanel"));
+delayedPager.setPanel(null);
+delayedPager.scroll(344);
+delayedPager.pager().props.onMomentumScrollEnd();
+delayedPager.render();
+delayedPager.resize(800);
+delayedPager.content();
+delayedPager.layout();
+assert.equal(delayedPager.nativeX(), 360, "resize uses current native layout dimensions");
+delayedPager.scroll(360);
+delayedPager.render();
+delayedPager.resize(900);
+delayedPager.layout();
+delayedPager.content();
+delayedPager.render();
+assert.equal(delayedPager.pager().props.scrollEnabled, true, "a capped-width panel can retain its confirmed offset across resize without a new scroll event");
+assert.equal(delayedPager.paintCoverage(), 900);
+for (const [initialPanel, offset] of [["chat", 0], ["files", 688]]) {
+  const harness = panelPagerHarness(initialPanel);
+  harness.scroll(0);
+  harness.content();
+  harness.layout();
+  assert.equal(harness.nativeX(), offset, "mounting with a panel open seeds that panel, not the center");
+  assert.equal(harness.commands.at(-1).x, offset, "right-panel targets must be reachable without native scroll clamping");
+  harness.scroll(offset);
+  harness.render();
+  assert.equal(harness.pager().props.scrollEnabled, true);
+}
+const closingSeed = panelPagerHarness("files");
+closingSeed.content();
+closingSeed.layout();
+const seedFilesPanel = closingSeed.nodes().find((node) => node.type === "FilesPanel");
+seedFilesPanel.props.onClose();
+closingSeed.render();
+assert.equal(closingSeed.nativeX(), 344);
+assert.ok(!closingSeed.nodes().some((node) => node.type === "FilesPanel"), "closing before seed acknowledgement must clear the panel and its touch-blocking scrim");
+closingSeed.scroll(344);
+closingSeed.render();
+assert.equal(closingSeed.pager().props.scrollEnabled, true);
 assert.ok(panelsSource.text.includes("pagerSeed"), "The first paint must compensate until native scroll reaches the closed page");
 assert.equal(panelsSource.text.includes("activePanelRef.current ?? visiblePanelRef.current"), false, "width realignment must not follow a pre-seed visiblePanel onto the Chats page");
 assert.ok(pagerAttributes.some((attribute) => attribute.name.getText(panelsSource) === "onContentSizeChange"), "The pager still initializes its position on first layout");

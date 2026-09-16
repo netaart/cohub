@@ -228,7 +228,7 @@ type Action =
   | { type: "sessions-head-success"; sessions: UserSessionListItem[]; hasMore: boolean; cursor: string | null; boundary: SessionPageBoundary | null; requestStartedAt: number }
   | { type: "sessions-head-error"; message: string }
   | { type: "running-start"; source: SessionSourceFilter }
-  | { type: "running-success"; source: SessionSourceFilter; sessions: UserSessionListItem[]; changedSessionIds: string[] }
+  | { type: "running-success"; source: SessionSourceFilter; sessions: UserSessionListItem[]; changedSessionIds: string[]; complete?: boolean }
   | { type: "running-end"; source: SessionSourceFilter; error?: string }
   | { type: "realtime-error"; message: string | null }
   | { type: "session-realtime-turn"; sessionId: string; turn: Partial<LatestSessionTurn> }
@@ -420,8 +420,12 @@ function reducer(state: AppState, action: Action): AppState {
       const changed = new Set(action.changedSessionIds);
       const previousById = new Map(previous.sessions.map((session) => [session.id, session]));
       const incomingIds = new Set(action.sessions.map((session) => session.id));
-      const sessions = [...action.sessions.map((session) => changed.has(session.id) ? previousById.get(session.id) ?? session : session), ...previous.sessions.filter((session) => changed.has(session.id) && !incomingIds.has(session.id))];
-      return { ...state, runningSessions: { ...state.runningSessions, [action.source]: { sessions: sortByRecent(sessions), loading: false, loaded: true, error: null } } };
+      const complete = action.complete !== false;
+      const sessions = [
+        ...action.sessions.map((session) => changed.has(session.id) ? previousById.get(session.id) ?? session : session).filter((session) => session.activeTurn !== null),
+        ...previous.sessions.filter((session) => !incomingIds.has(session.id) && (!complete || changed.has(session.id))),
+      ];
+      return { ...state, runningSessions: { ...state.runningSessions, [action.source]: { sessions: sortByRecent(sessions), loading: !complete, loaded: complete || previous.loaded, error: null } } };
     }
     case "running-end": {
       const current = state.runningSessions[action.source] ?? emptyRunningSessions;
@@ -1108,7 +1112,8 @@ export function AppProvider({
         const page = sessionPageState(response);
         dispatch({ type: "sessions-head-success", sessions: response.sessions, ...page, requestStartedAt });
         void saveSessions(userKey, response.sessions).catch(() => undefined);
-        await refreshSessionStatuses(response.sessions, { silent: true, throwOnError: true });
+        // Status enrichment cannot hold or disable the independent list-discovery timer.
+        void refreshSessionStatuses(response.sessions, { silent: true });
       } catch (error) {
         if (generation === homeRefreshGenerationRef.current) dispatch({ type: "sessions-head-error", message: errorMessage(error, translate("data.chatsLoadFailed")) });
         throw error;
@@ -1132,14 +1137,24 @@ export function AppProvider({
     dispatch({ type: "running-start", source });
     const request = (async () => {
       try {
-        const sessions = await loadRunningSessions(client, { source: sessionSourceFilterKeys(source) ?? undefined, signal: controller.signal });
+        const sessions = await loadRunningSessions(client, {
+          source: sessionSourceFilterKeys(source) ?? undefined,
+          signal: controller.signal,
+          onPage: (page) => {
+            if (generation !== statusGenerationRef.current || controller.signal.aborted) return;
+            const changedSessionIds = [...sessionEventRevisions.current].filter(([, eventRevision]) => eventRevision > revision).map(([id]) => id);
+            const changed = new Set(changedSessionIds);
+            for (const session of page) if (!changed.has(session.id)) statusSessionsRef.current.set(session.id, session);
+            dispatch({ type: "running-success", source, sessions: page, changedSessionIds, complete: false });
+          },
+        });
         if (generation !== statusGenerationRef.current || controller.signal.aborted) return;
         const changedSessionIds = [...sessionEventRevisions.current].filter(([, eventRevision]) => eventRevision > revision).map(([id]) => id);
         const changed = new Set(changedSessionIds);
         const unchanged = sessions.filter((session) => !changed.has(session.id));
         for (const session of unchanged) statusSessionsRef.current.set(session.id, session);
         dispatch({ type: "running-success", source, sessions, changedSessionIds });
-        await refreshSessionStatuses(unchanged, { silent: true, throwOnError: true, activeOnly: true });
+        void refreshSessionStatuses(unchanged, { silent: true, activeOnly: true });
       } catch (error) {
         if (generation === statusGenerationRef.current && !controller.signal.aborted) {
           dispatch({ type: "running-end", source, error: errorMessage(error, "Unable to discover running Chats. Check your connection and retry.") });
@@ -1255,6 +1270,7 @@ export function AppProvider({
   }, [client, sync]);
 
   useEffect(() => {
+    sync.setActive(NativeAppState.currentState === "active");
     const subscription = NativeAppState.addEventListener("change", (next) => {
       sync.setActive(next === "active");
       if (next !== "active") {
@@ -1264,7 +1280,8 @@ export function AppProvider({
       // A suspended native socket can still report open after foregrounding.
       for (const sessionId of subscriptions.current.keys()) resyncCoordinatorRef.current.request(sessionId, "foreground");
     });
-    return () => subscription.remove();
+    // Effects may restart with the same state-owned scheduler (e.g. Fast Refresh).
+    return () => { subscription.remove(); sync.setActive(false); };
   }, [sync]);
 
   useEffect(() => {
@@ -1282,7 +1299,7 @@ export function AppProvider({
           const turn = stateRef.current.sessionLatestTurns[session.id];
           return sessionListStatus(session, turn, stateRef.current.sessionTurnStatuses) === "running";
         });
-        await refreshSessionStatuses(active, { silent: true, throwOnError: true, activeOnly: true });
+        await refreshSessionStatuses(active, { silent: true, activeOnly: true });
       },
     });
     const stopRunningDiscovery = sync.watch("running:all", {
@@ -1306,8 +1323,6 @@ export function AppProvider({
     });
     return () => { stopChats(); stopStatuses(); stopRunningDiscovery(); stopSpaces(); };
   }, [client, dispatch, discoverRunningSessions, refreshChats, refreshSessionStatuses, state.booting, sync]);
-
-  useEffect(() => () => sync.dispose(), [sync]);
 
   const handleSpaceEvent = useCallback((event: SpaceRealtimeEvent) => {
     try {
@@ -1334,7 +1349,7 @@ export function AppProvider({
     if (!spaceRealtime) return;
     spaceRealtime.setActive(NativeAppState.currentState === "active");
     const subscription = NativeAppState.addEventListener("change", (next) => spaceRealtime.setActive(next === "active"));
-    return () => { subscription.remove(); spaceRealtime.dispose(); };
+    return () => { subscription.remove(); spaceRealtime.setActive(false); };
   }, [spaceRealtime]);
 
   useEffect(() => {

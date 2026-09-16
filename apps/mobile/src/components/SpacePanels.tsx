@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- controlled panel state synchronizes the native animation surface. */
 import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/cohub";
 import { useIsFocused } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LegendList } from "@legendapp/list/react-native";
 import { ActivityIndicator, BackHandler, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import Reanimated, { Extrapolation, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
@@ -28,6 +28,7 @@ import {
   type SessionSourceGroup,
 } from "@/src/data/session-labels";
 import { panelForScrollOffset, type PanelName } from "@/src/data/space-panel-pager";
+import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
 import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField, TopBar } from "@/src/ui";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
 
@@ -75,7 +76,8 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const { width } = useWindowDimensions();
   const panelWidth = Math.min(MAX_PANEL_WIDTH, Math.max(280, width * PANEL_WIDTH_RATIO));
   const centerOffset = panelWidth;
-  const filesOffset = panelWidth + width;
+  // The right panel aligns to the viewport's right edge, not its left edge.
+  const filesOffset = 2 * panelWidth;
   const snapOffsets = useMemo(() => [0, centerOffset, filesOffset], [centerOffset, filesOffset]);
   const pagerRef = useRef<ScrollView>(null);
   const scrollOffset = useSharedValue(centerOffset);
@@ -86,13 +88,41 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const [interactive, setInteractive] = useState(Boolean(activePanel));
   const visiblePanelRef = useRef<PanelName | null>(activePanel);
   const activePanelRef = useRef<PanelName | null>(activePanel);
-  const initialScrollDone = useRef(false);
+  const layoutRef = useRef({ width: 0, height: 0, contentWidth: 0 });
+  const [pagerReady, setPagerReady] = useState(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Native scroll starts at 0 (the Chats page). Compensate until it reaches the closed page so
-  // opening a Chat does not land on the side panel. Never pass `contentOffset` — dropping that
-  // prop resets the native offset to 0 and gets stuck there.
+  // Compensate inside the viewport until native layout acknowledges the target offset.
+  // Translating the ScrollView itself clips away an entire panel-width of the Chat.
   const pagerSeed = useSharedValue(1);
+  const pagerLayoutReady = useSharedValue(0);
+  const pagerTarget = useSharedValue(activePanel === "chat" ? 0 : activePanel === "files" ? filesOffset : centerOffset);
   const pagerNativeX = useSharedValue(0);
+  const pagerObserved = useSharedValue(false);
+
+  const seedPager = useCallback(() => {
+    if (pagerSeed.get() === 0) return;
+    const layout = layoutRef.current;
+    const ready = layout.height > 0 && Math.abs(layout.width - width) <= 1 && Math.abs(layout.contentWidth - (2 * panelWidth + width)) <= 1;
+    pagerLayoutReady.set(ready ? 1 : 0);
+    if (!ready) return;
+    const panel = activePanelRef.current;
+    const target = panel === "chat" ? 0 : panel === "files" ? filesOffset : centerOffset;
+    pagerTarget.set(target);
+    chatScrollTrace.record("pager.seed.request", "space-panel", { target, viewportWidth: layout.width, contentWidth: layout.contentWidth });
+    pagerRef.current?.scrollTo({ x: target, animated: false });
+    // A resize can keep the same offset; native scrollTo then emits no new event.
+    if (pagerObserved.get() && Math.abs(pagerNativeX.get() - target) <= 1) {
+      pagerSeed.set(0);
+      setPagerReady(true);
+      chatScrollTrace.record("pager.seed.retained", "space-panel", { offset: target });
+    }
+  }, [centerOffset, filesOffset, pagerLayoutReady, pagerNativeX, pagerObserved, pagerSeed, pagerTarget, panelWidth, width]);
+
+  const acknowledgeSeed = useCallback((offset: number) => {
+    if (pagerSeed.get() !== 0 || Math.abs(pagerTarget.get() - offset) > 1) return;
+    setPagerReady(true);
+    chatScrollTrace.record("pager.seed.ready", "space-panel", { offset });
+  }, [pagerSeed, pagerTarget]);
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimer.current === null) return;
@@ -120,15 +150,17 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     visiblePanelRef.current = null;
     setVisiblePanel(null);
     setInteractive(false);
+    shownPanel.set(0);
     onActivePanelChange(null);
-  }, [onActivePanelChange]);
+  }, [onActivePanelChange, shownPanel]);
 
   const settle = useCallback(() => {
     clearIdleTimer();
+    if (pagerSeed.get() !== 0) return;
     const panel = panelForScrollOffset(scrollOffset.get(), centerOffset, filesOffset);
     if (panel) commitOpen(panel);
     else commitClosed();
-  }, [centerOffset, clearIdleTimer, commitClosed, commitOpen, filesOffset, scrollOffset]);
+  }, [centerOffset, clearIdleTimer, commitClosed, commitOpen, filesOffset, pagerSeed, scrollOffset]);
 
   const scheduleSettle = useCallback(() => {
     clearIdleTimer();
@@ -136,21 +168,30 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   }, [clearIdleTimer, settle]);
 
   const closePanel = useCallback(() => {
-    activePanelRef.current = null;
-    onActivePanelChange(null);
     clearIdleTimer();
-    pagerRef.current?.scrollTo({ x: centerOffset, animated: true });
-    idleTimer.current = setTimeout(settle, PANEL_CLOSE_SETTLE_MS);
-  }, [centerOffset, clearIdleTimer, onActivePanelChange, settle]);
+    pagerTarget.set(centerOffset);
+    if (pagerSeed.get() !== 0) {
+      commitClosed();
+      scrim.set(0);
+      seedPager();
+    } else {
+      activePanelRef.current = null;
+      onActivePanelChange(null);
+      pagerRef.current?.scrollTo({ x: centerOffset, animated: true });
+      idleTimer.current = setTimeout(settle, PANEL_CLOSE_SETTLE_MS);
+    }
+  }, [centerOffset, clearIdleTimer, commitClosed, onActivePanelChange, pagerSeed, pagerTarget, scrim, seedPager, settle]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
       const offset = event.contentOffset.x;
       pagerNativeX.value = offset;
+      pagerObserved.value = true;
       scrollOffset.value = offset;
       if (pagerSeed.value !== 0) {
-        if (Math.abs(offset - centerOffset) <= 8) pagerSeed.value = 0;
-        else return;
+        if (pagerLayoutReady.value === 0 || Math.abs(offset - pagerTarget.value) > 1) return;
+        pagerSeed.value = 0;
+        scheduleOnRN(acknowledgeSeed, offset);
       }
       const distance = Math.abs(offset - centerOffset);
       scrim.value = interpolate(distance, [0, panelWidth], [0, 1], Extrapolation.CLAMP);
@@ -160,7 +201,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
       shownPanel.value = panel;
       scheduleOnRN(showPanel, panel);
     },
-  }, [centerOffset, pagerNativeX, pagerSeed, panelWidth, scrim, scrollOffset, showPanel, shownPanel]);
+  }, [acknowledgeSeed, centerOffset, pagerLayoutReady, pagerNativeX, pagerObserved, pagerSeed, pagerTarget, panelWidth, scrim, scrollOffset, showPanel, shownPanel]);
 
   useEffect(() => {
     if (!isFocused) return;
@@ -172,25 +213,38 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     return () => subscription.remove();
   }, [closePanel, isFocused]);
 
-  // Keep the settled page aligned when the panel or window width changes.
-  // Follow the committed panel only: a pre-seed scroll event can set visiblePanel to "chat"
-  // while the Chat is still closed, and using that here would pin the pager on the side page.
-  useEffect(() => {
+  useLayoutEffect(() => {
+    clearIdleTimer();
+    pagerSeed.set(1);
+    pagerLayoutReady.set(0);
+    setPagerReady(false);
     const panel = activePanelRef.current;
-    const x = panel === "chat" ? 0 : panel === "files" ? filesOffset : centerOffset;
-    scrollOffset.value = x;
-    pagerRef.current?.scrollTo({ x, animated: false });
-  }, [centerOffset, filesOffset, scrollOffset]);
+    pagerTarget.set(panel === "chat" ? 0 : panel === "files" ? filesOffset : centerOffset);
+    seedPager();
+  }, [centerOffset, clearIdleTimer, filesOffset, pagerLayoutReady, pagerSeed, pagerTarget, seedPager]);
+
+  useEffect(() => {
+    if (activePanelRef.current === activePanel) return;
+    activePanelRef.current = activePanel;
+    visiblePanelRef.current = activePanel;
+    setVisiblePanel(activePanel);
+    setInteractive(Boolean(activePanel));
+    shownPanel.set(activePanel ?? 0);
+    clearIdleTimer();
+    const target = activePanel === "chat" ? 0 : activePanel === "files" ? filesOffset : centerOffset;
+    pagerTarget.set(target);
+    if (pagerSeed.get() !== 0) seedPager();
+    else pagerRef.current?.scrollTo({ x: target, animated: true });
+  }, [activePanel, centerOffset, clearIdleTimer, filesOffset, pagerSeed, pagerTarget, seedPager, shownPanel]);
 
   const scrimStyle = useAnimatedStyle(() => ({ opacity: scrim.value * 0.52 }));
   const pagerPaintStyle = useAnimatedStyle(() => {
     if (pagerSeed.value === 0) return { transform: [{ translateX: 0 }] };
-    return { transform: [{ translateX: pagerNativeX.value - centerOffset }] };
-  }, [centerOffset]);
+    return { transform: [{ translateX: pagerNativeX.value - pagerTarget.value }] };
+  });
   const handleScrollBeginDrag = useCallback(() => {
-    pagerSeed.set(0);
     clearIdleTimer();
-  }, [clearIdleTimer, pagerSeed]);
+  }, [clearIdleTimer]);
 
   const handleChipsTouchChange = useCallback((touching: boolean) => {
     // The filter chips are a nested horizontal ScrollView; it only wins its drag while the
@@ -216,12 +270,12 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         ref={pagerRef}
         horizontal
         keyboardShouldPersistTaps="handled"
-        style={[styles.pager, { backgroundColor: theme.colors.background }, pagerPaintStyle]}
+        style={[styles.pager, { backgroundColor: theme.colors.background }]}
         showsHorizontalScrollIndicator={false}
         bounces={false}
         overScrollMode="never"
         scrollEventThrottle={16}
-        scrollEnabled={pagerScrollEnabled}
+        scrollEnabled={pagerReady && pagerScrollEnabled}
         snapToOffsets={snapOffsets}
         decelerationRate="fast"
         disableIntervalMomentum
@@ -230,18 +284,20 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         onScrollEndDrag={scheduleSettle}
         onMomentumScrollBegin={clearIdleTimer}
         onMomentumScrollEnd={settle}
-        onContentSizeChange={() => {
-          // Initialize imperatively so filter-touch re-renders cannot reapply a closed-page offset.
-          if (initialScrollDone.current) return;
-          initialScrollDone.current = true;
-          scrollOffset.value = centerOffset;
-          pagerRef.current?.scrollTo({ x: centerOffset, animated: false });
+        onLayout={({ nativeEvent: { layout } }) => {
+          layoutRef.current.width = layout.width;
+          layoutRef.current.height = layout.height;
+          seedPager();
+        }}
+        onContentSizeChange={(contentWidth) => {
+          layoutRef.current.contentWidth = contentWidth;
+          seedPager();
         }}
       >
         {/* Pages fill the pager's own height. Seeding it from the window height overshot by the
             status bar, top inset, and Android navigation bar whenever the pager's onLayout did
             not correct it, which pushed the composer below the visible area. */}
-        <View style={styles.pages}>
+        <Reanimated.View style={[styles.pages, { width: 2 * panelWidth + width }, pagerPaintStyle]}>
           <View
             style={pageStyle("chat")}
             accessibilityViewIsModal={interactive && visiblePanel === "chat"}
@@ -272,7 +328,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
                 : <PanelGesturePreview panel="files" />
               : null}
           </View>
-        </View>
+        </Reanimated.View>
       </Reanimated.ScrollView>
     </View>
   );
@@ -327,7 +383,7 @@ type ChatListFilter =
 function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, onClose, onNewChat, onOpenSession }: { spaceId: string; spaceName: string; sessions: UserSessionListItem[]; client: CohubClient | null; onChipsTouchChange: (touching: boolean) => void; onClose: () => void; onNewChat: () => void; onOpenSession: (sessionId: string, target?: SessionNavigationTarget) => void }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
-  const { state, prefetchSession, refreshSessionStatuses } = useApp();
+  const { state, sync, prefetchSession, refreshSessionStatuses } = useApp();
   const [query, setQuery] = useState("");
   const [extraSessions, setExtraSessions] = useState<UserSessionListItem[]>([]);
   const [scopeCursor, setScopeCursor] = useState<string | null>(null);
@@ -345,6 +401,10 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
   const [labelSessionIds, setLabelSessionIds] = useState<Set<string>>(new Set());
   const [labelSessionsLoading, setLabelSessionsLoading] = useState(false);
   const [labelSessionsError, setLabelSessionsError] = useState<string | null>(null);
+  const labelsRequestRef = useRef<Promise<void> | null>(null);
+  const labelMembersRequestRef = useRef<Promise<void> | null>(null);
+  const labelMembersGeneration = useRef(0);
+  const selectedLabelRef = listFilter.kind === "label" ? listFilter.ref : null;
   const [labelSheetSession, setLabelSheetSession] = useState<UserSessionListItem | null>(null);
   const remoteSearch = useRemoteSearch(client, query, { enabled: Boolean(spaceId), spaceId, types: ["session", "turn"] });
   const displaySessions = useMemo(() => mergePanelSessions(extraSessions, sessions, spaceId, spaceName), [extraSessions, sessions, spaceId, spaceName]);
@@ -357,46 +417,57 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
     setLabelSheetSession(null);
   }, [client, spaceId]);
 
-  useEffect(() => {
-    if (!client || !spaceId) return;
-    let active = true;
-    setLabelsError(null);
-    void fetchSessionLabels(client, spaceId)
-      .then((tree) => {
-        if (!active) return;
-        setLabels(toUserSessionLabels(tree));
-      })
-      .catch((error) => {
-        if (active) setLabelsError(error instanceof Error ? error.message : t("labels.error"));
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, spaceId, labelsReloadToken, t]);
+  const refreshLabels = useCallback((): Promise<void> => {
+    if (!client || !spaceId) return Promise.resolve();
+    if (labelsRequestRef.current) return labelsRequestRef.current;
+    const generation = scopeGenerationRef.current;
+    const request = fetchSessionLabels(client, spaceId).then((tree) => {
+      if (generation !== scopeGenerationRef.current) return;
+      setLabels(toUserSessionLabels(tree));
+      setLabelsError(null);
+    }).catch((error: unknown) => {
+      if (generation === scopeGenerationRef.current) setLabelsError(error instanceof Error ? error.message : t("labels.error"));
+      throw error;
+    });
+    labelsRequestRef.current = request;
+    void request.finally(() => { if (labelsRequestRef.current === request) labelsRequestRef.current = null; }).catch(() => undefined);
+    return request;
+  }, [client, spaceId, t]);
+  useSyncScope(`space:${spaceId}:labels`, refreshLabels, 15_000);
 
   useEffect(() => {
-    if (!client || !spaceId || listFilter.kind !== "label") {
-      setLabelSessionIds(new Set());
-      setLabelSessionsError(null);
-      return;
-    }
-    let active = true;
-    setLabelSessionsLoading(true);
+    labelMembersGeneration.current += 1;
+    labelMembersRequestRef.current = null;
+    setLabelSessionIds(new Set());
     setLabelSessionsError(null);
-    void fetchLabelSessionIds(client, spaceId, listFilter.ref)
-      .then((ids) => {
-        if (active) setLabelSessionIds(new Set(ids));
-      })
-      .catch((error) => {
-        if (active) setLabelSessionsError(error instanceof Error ? error.message : t("labels.loadedLabeledChatsError"));
-      })
-      .finally(() => {
-        if (active) setLabelSessionsLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [client, listFilter, spaceId, t]);
+    setLabelSessionsLoading(selectedLabelRef !== null);
+    return () => { labelMembersGeneration.current += 1; };
+  }, [client, selectedLabelRef, spaceId]);
+
+  const refreshLabelMembers = useCallback((): Promise<void> => {
+    if (!client || selectedLabelRef === null) return Promise.resolve();
+    if (labelMembersRequestRef.current) return labelMembersRequestRef.current;
+    const generation = labelMembersGeneration.current;
+    const request = fetchLabelSessionIds(client, spaceId, selectedLabelRef).then((ids) => {
+      if (generation !== labelMembersGeneration.current) return;
+      setLabelSessionIds(new Set(ids));
+      setLabelSessionsError(null);
+    }).catch((error: unknown) => {
+      if (generation === labelMembersGeneration.current) setLabelSessionsError(error instanceof Error ? error.message : t("labels.loadedLabeledChatsError"));
+      throw error;
+    }).finally(() => {
+      if (generation === labelMembersGeneration.current) setLabelSessionsLoading(false);
+    });
+    labelMembersRequestRef.current = request;
+    void request.finally(() => { if (labelMembersRequestRef.current === request) labelMembersRequestRef.current = null; }).catch(() => undefined);
+    return request;
+  }, [client, selectedLabelRef, spaceId, t]);
+  useSyncScope(`space:${spaceId}:label-members:${selectedLabelRef}`, refreshLabelMembers, 15_000, selectedLabelRef !== null);
+
+  useEffect(() => {
+    sync.invalidate(`space:${spaceId}:labels`);
+    sync.invalidatePrefix(`space:${spaceId}:label-members:`);
+  }, [labelsReloadToken, spaceId, sync]);
 
   const openLabelSheet = useCallback((session: UserSessionListItem) => {
     setLabelSheetSession(session);
@@ -473,7 +544,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
         setScopeInitialized(true);
       }
       setLoadMoreError(null);
-      await refreshSessionStatuses(response.sessions, { silent: true, throwOnError: true });
+      void refreshSessionStatuses(response.sessions, { silent: true });
     } catch (error) {
       if (generation === scopeGenerationRef.current) setLoadMoreError(error instanceof Error ? error.message : t("space.panel.loadMoreError"));
       throw error;

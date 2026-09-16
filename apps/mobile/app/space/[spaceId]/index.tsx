@@ -182,7 +182,7 @@ export default function SpaceScreen() {
       setSessionsFailed(false);
       publishSpaceSessionCount(client, spaceId, response.sessions.length, hasMore);
       setSessionsLoading(false);
-      await refreshSessionStatuses(response.sessions, { silent: options.silent, throwOnError: options.silent });
+      void refreshSessionStatuses(response.sessions, { silent: options.silent });
     } catch (error) {
       if (sessionsRequestRef.current !== requestToken) return;
       setSessionsFailed(true);
