@@ -14,7 +14,9 @@ export async function openWebLink(value: string) {
   if (!isWebLink(url)) throw new Error("Only absolute HTTP(S) URLs can be opened as web links.");
   const browserPreference = await loadBrowserPreference();
   if (browserPreference === "in-app") {
-    await WebBrowser.openBrowserAsync(url);
+    // Custom Tab rides in the app's own task. The default separate-task proxy adds a
+    // second black "Cohub" card to Recents that lingers after the page is closed.
+    await WebBrowser.openBrowserAsync(url, { createTask: false });
     return;
   }
   await Linking.openURL(url);
