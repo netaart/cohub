@@ -11,7 +11,7 @@ import "react-native-reanimated";
 import { AuthScreen } from "@/src/auth/AuthScreen";
 import { AppUpdateBanner } from "@/src/components/AppUpdateBanner";
 import { ToastProvider } from "@/src/components/Toast";
-import { config, defaultEnvironment, environmentSelectionEnabled, resolveConfig, setActiveEnvironment, type CohubEnvironment } from "@/src/config";
+import { config, defaultEnvironment, resolveConfig, setActiveEnvironment, type CohubEnvironment } from "@/src/config";
 import { AppProvider } from "@/src/data/context";
 import { loadEnvironmentPreference, saveEnvironmentPreference } from "@/src/data/environment-preference";
 import { LocaleProvider, useTranslation } from "@/src/i18n";
@@ -62,9 +62,7 @@ function AuthEnvironmentRoot() {
 
   useEffect(() => {
     let active = true;
-    // A store build must not inherit a dev selection left by another build on this device.
-    const stored = environmentSelectionEnabled ? loadEnvironmentPreference() : Promise.resolve(null);
-    void stored
+    void loadEnvironmentPreference()
       .catch(() => null)
       .then((preference) => {
         if (!active) return;
@@ -88,15 +86,12 @@ function AuthEnvironmentRoot() {
 
   return (
     <LogtoProvider key={environment} config={clientConfig}>
-      <NativeRoot
-        environment={environment}
-        onSelectEnvironment={environmentSelectionEnabled ? selectEnvironment : undefined}
-      />
+      <NativeRoot environment={environment} onSelectEnvironment={selectEnvironment} />
     </LogtoProvider>
   );
 }
 
-function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEnvironment; onSelectEnvironment?: (environment: CohubEnvironment) => void }) {
+function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEnvironment; onSelectEnvironment: (environment: CohubEnvironment) => void }) {
   useDebugDiagnosticsLifecycle();
   const { client, isInitialized, isAuthenticated, signIn, signOut } = useLogto();
   const theme = useAppTheme();

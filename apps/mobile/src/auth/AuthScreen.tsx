@@ -16,8 +16,7 @@ export function AuthScreen({ onSignIn, loading, error, environment, onSelectEnvi
   loading: boolean;
   error: string | null;
   environment: CohubEnvironment;
-  /** Absent when the build pins its deployment endpoints; see `environmentSelectionEnabled`. */
-  onSelectEnvironment?: (environment: CohubEnvironment) => void;
+  onSelectEnvironment: (environment: CohubEnvironment) => void;
 }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
@@ -49,35 +48,33 @@ export function AuthScreen({ onSignIn, loading, error, environment, onSelectEnvi
       </View>
 
       <View style={styles.footer}>
-        {onSelectEnvironment ? (
-          <View style={styles.environment}>
-            <Text style={[typography.micro, { color: theme.colors.textFaint, marginBottom: 7 }]}>{t("auth.environment")}</Text>
-            <View style={[styles.segmented, { borderColor: theme.colors.borderStrong }]}>
-              {ENVIRONMENT_OPTIONS.map((option, index) => {
-                const selected = environment === option.value;
-                const label = t(option.labelKey);
-                return (
-                  <Pressable
-                    key={option.value}
-                    accessibilityRole="radio"
-                    accessibilityLabel={label}
-                    accessibilityState={{ selected, checked: selected, disabled: loading }}
-                    aria-checked={selected}
-                    disabled={loading}
-                    onPress={() => onSelectEnvironment(option.value)}
-                    style={({ pressed }) => [
-                      styles.segment,
-                      index > 0 ? { borderLeftWidth: 1, borderLeftColor: theme.colors.borderStrong } : null,
-                      { backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent" },
-                    ]}
-                  >
-                    <Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textSecondary }]}>{label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+        <View style={styles.environment}>
+          <Text style={[typography.micro, { color: theme.colors.textFaint, marginBottom: 7 }]}>{t("auth.environment")}</Text>
+          <View style={[styles.segmented, { borderColor: theme.colors.borderStrong }]}>
+            {ENVIRONMENT_OPTIONS.map((option, index) => {
+              const selected = environment === option.value;
+              const label = t(option.labelKey);
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityLabel={label}
+                  accessibilityState={{ selected, checked: selected, disabled: loading }}
+                  aria-checked={selected}
+                  disabled={loading}
+                  onPress={() => onSelectEnvironment(option.value)}
+                  style={({ pressed }) => [
+                    styles.segment,
+                    index > 0 ? { borderLeftWidth: 1, borderLeftColor: theme.colors.borderStrong } : null,
+                    { backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : "transparent" },
+                  ]}
+                >
+                  <Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textSecondary }]}>{label}</Text>
+                </Pressable>
+              );
+            })}
           </View>
-        ) : null}
+        </View>
         {error ? <View style={[styles.error, { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger }]}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{error}</Text></View> : null}
         <Pressable
           accessibilityRole="button"

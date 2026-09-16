@@ -31,20 +31,8 @@ const buildEnvironment = readEnvironment(
   "prod",
 );
 
-/** Environment resolved at build time; an in-app selection can override it before sign-in. */
+/** Environment resolved at build time; the sign-in screen can override it and remembers the choice. */
 export const defaultEnvironment = buildEnvironment;
-
-// Environment switching only helps when the deployment endpoints are not pinned to a
-// self-hosted override, and it stays out of production builds shipped to stores.
-const hasEndpointOverride = Boolean(
-  process.env.EXPO_PUBLIC_API_ORIGIN?.trim() ||
-    process.env.EXPO_PUBLIC_GATEWAY_ORIGIN?.trim() ||
-    process.env.EXPO_PUBLIC_AUTH_ENDPOINT?.trim() ||
-    process.env.EXPO_PUBLIC_LOGTO_APP_ID?.trim(),
-);
-
-export const environmentSelectionEnabled =
-  !hasEndpointOverride && (process.env.NODE_ENV !== "production" || buildEnvironment !== "prod");
 
 const environmentDefaults: Record<
   CohubEnvironment,
