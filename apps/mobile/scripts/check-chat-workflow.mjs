@@ -4,7 +4,7 @@ import { mock } from "node:test";
 import ts from "typescript";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { ChatScrollTrace, setDebugTraceSink } from "../src/data/chat-scroll-trace.ts";
-import { MessageMeasurements, createStreamBatch, liveReplyAnchor } from "../src/data/chat-rendering.ts";
+import { MessageMeasurements, createStreamBatch, liveReplyAnchor, rowHeightMeasurement } from "../src/data/chat-rendering.ts";
 import { CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD, CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, CHAT_TAIL_THRESHOLD, chatFollowPinAnimated, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, isChatRowVisible, nextChatTailFollowing } from "../src/data/chat-scroll.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
@@ -1002,6 +1002,14 @@ measurements.measure(measuredRows[0], 200);
 measurements.configure("720:1:light", []);
 assert.equal(measurements.estimateOffset(measuredRows, 1, 80), 80);
 assert.throws(() => measurements.measure(measuredRows[0], NaN), /positive and finite/);
+// A stale row closure must not reach measure(): an uncaught throw inside a native event
+// handler is fatal on the new architecture and freezes the screen until restart.
+assert.equal(rowHeightMeasurement(measuredRows, 5, measuredRows[0].id, 200), null, "an out-of-range closure index is skipped, not thrown");
+assert.equal(rowHeightMeasurement(measuredRows, 0, "recycled", 200), null, "a recycled row whose id no longer matches the entry is skipped");
+assert.equal(rowHeightMeasurement(measuredRows, 0, measuredRows[0].id, 0), null, "recycled zero-height layouts are skipped");
+assert.equal(rowHeightMeasurement(measuredRows, 0, measuredRows[0].id, Number.NaN), null, "unsized NaN layouts are skipped");
+assert.equal(rowHeightMeasurement(measuredRows, -1, measuredRows[0].id, 200), null);
+assert.deepEqual(rowHeightMeasurement(measuredRows, 1, measuredRows[1].id, 120), { message: measuredRows[1], height: 120 }, "valid measurements still record");
 
 mock.timers.enable({ apis: ["setTimeout"] });
 try {
@@ -1449,6 +1457,58 @@ stalePage.generationRef.current += 1;
 resolveStalePage({ sessions: [oldBoundary], pageInfo: { hasMore: false, nextCursor: null } });
 await pendingStalePage;
 assert.deepEqual(stalePage.actions.map((action) => action.type), ["sessions-more-start"], "an old page cannot replace a newly refreshed list or cursor");
+
+// Space first paint must not wait for optional pin metadata or the slowest resource endpoint.
+const spaceScreenSource = ts.createSourceFile("space.tsx", readFileSync(new URL("../app/space/[spaceId]/index.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const spaceCallbacks = {};
+function inspectSpaceCallbacks(node) {
+  if (ts.isVariableDeclaration(node) && ["loadSpace", "loadResources"].includes(node.name.getText(spaceScreenSource))) {
+    spaceCallbacks[node.name.getText(spaceScreenSource)] = node.initializer.arguments[0].getText(spaceScreenSource);
+  }
+  ts.forEachChild(node, inspectSpaceCallbacks);
+}
+inspectSpaceCallbacks(spaceScreenSource);
+const compileSpaceCallback = (name, scope) => new Function(...Object.keys(scope), ts.transpileModule(`return (${spaceCallbacks[name]});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(scope));
+const slowPin = Promise.withResolvers();
+const paintedSpaces = [];
+const loadSpaceImmediately = compileSpaceCallback("loadSpace", {
+  client: { spaces: { get: async () => ({ id: "space", name: "Fast Space" }) } }, spaceId: "space",
+  spaceRefreshInFlightRef: { current: null }, spaceRefreshAtRef: { current: null }, cachedSpaceRef: { current: null }, SPACE_REFRESH_INTERVAL_MS: 60_000,
+  spaceRefreshTokenRef: { current: 0 }, setSpaceLoading() {}, setSpaceError() {}, refreshSpacePin: () => slowPin.promise,
+  setLoadedSpace: (space) => paintedSpaces.push(space), upsertSpace() {}, t: (key) => key, console,
+});
+const pendingSpacePaint = loadSpaceImmediately();
+await flushSync();
+assert.equal(paintedSpaces.length, 1, "Space shell paints when its detail request resolves, without waiting for pin metadata");
+let cachedSpaceGets = 0;
+const loadCachedSpace = compileSpaceCallback("loadSpace", {
+  client: { spaces: { get: async () => { cachedSpaceGets++; return { id: "space" }; } } }, spaceId: "space",
+  spaceRefreshInFlightRef: { current: null }, spaceRefreshAtRef: { current: null }, cachedSpaceRef: { current: { id: "space", name: "Cached", isPinned: true } }, SPACE_REFRESH_INTERVAL_MS: 60_000,
+  spaceRefreshTokenRef: { current: 0 }, setSpaceLoading() {}, setSpaceError() {}, refreshSpacePin: async () => false,
+  setLoadedSpace() {}, upsertSpace() {}, t: (key) => key, console,
+});
+await loadCachedSpace();
+assert.equal(cachedSpaceGets, 0, "a cached Space does not block its first render on a duplicate metadata request");
+slowPin.resolve(false);
+await pendingSpacePaint;
+const slowApps = Promise.withResolvers();
+const resourcePaints = [];
+const loadResourcesProgressively = compileSpaceCallback("loadResources", {
+  client: {
+    space: () => ({ checkpoints: { list: async () => ({ checkpoints: [{ id: "save" }] }) } }),
+    apps: { listBySpace: () => slowApps.promise }, tasks: { list: async () => ({ runs: [{ id: "task" }] }) },
+  },
+  spaceId: "space", resourcesInFlightRef: { current: false }, resourcesRefreshAtRef: { current: 0 }, SPACE_REFRESH_INTERVAL_MS: 60_000,
+  resourcesRequestRef: { current: 0 }, tasksRequestRef: { current: 0 }, allResourcesLoading: { checkpoints: true, apps: true, tasks: true },
+  setResourceLoading() {}, setResources: (update) => resourcePaints.push(update({ checkpoints: [], apps: [], tasks: [] })), setResourceFailures() {}, setTaskCursor() {},
+  mergeTaskRuns: (current, incoming) => [...current, ...incoming],
+});
+const pendingResourcePaint = loadResourcesProgressively();
+await flushSync();
+assert.ok(resourcePaints.some((resource) => resource.checkpoints.length === 1), "Saves render before a slower Works request settles");
+assert.ok(resourcePaints.some((resource) => resource.tasks.length === 1), "Tasks render before a slower Works request settles");
+slowApps.resolve({ apps: [] });
+await pendingResourcePaint;
 
 // Reopening hydrated history must not read and replace it with the older disk cache.
 const reopenActions = [];

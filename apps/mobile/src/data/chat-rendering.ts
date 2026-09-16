@@ -11,6 +11,20 @@ export function liveReplyAnchor(messages: readonly MessageRecord[], turnId: stri
   return (owner ?? messages.at(-1))?.id ?? null;
 }
 
+/**
+ * Rows keep their renderItem closure across prepends and window jumps (messages is
+ * deliberately outside extraData), so onLayout can arrive after the array changed.
+ * The native event dispatch must never see a throw — an uncaught error in a native
+ * event handler is fatal on the new architecture and freezes the screen — so stale
+ * indexes, recycled rows, and unsized layouts are skipped instead of asserted.
+ */
+export function rowHeightMeasurement(entries: readonly MeasuredMessage[], index: number, id: string, height: number): { message: MeasuredMessage; height: number } | null {
+  const entry = Number.isInteger(index) && index >= 0 ? entries[index] : undefined;
+  if (!entry || entry.id !== id) return null;
+  if (!Number.isFinite(height) || height <= 0) return null;
+  return { message: entry, height };
+}
+
 // Estimates are only for scroll recovery, never FlatList's exact getItemLayout contract.
 export class MessageMeasurements {
   private entries = new Map<string, { revision: string; height: number }>();
