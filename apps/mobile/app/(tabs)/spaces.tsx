@@ -1,7 +1,7 @@
 import { useFocusEffect, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { LegendList, type LegendListRef, type ViewToken } from "@legendapp/list/react-native";
-import { ActivityIndicator, AppState as NativeAppState, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
@@ -11,6 +11,7 @@ import { normalizeSearchQuery, useRemoteSearch, type RemoteSpaceSearchHit } from
 import { useSpaceSessionCounts } from "@/src/data/space-session-counts";
 import { selectSpaceList, type SpaceListSpace, type SpaceFilter } from "@/src/data/space-list";
 import { useApp } from "@/src/data/context";
+import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { AppIcon, DataError, EmptyState, ExpandableSearchBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
@@ -43,32 +44,13 @@ export default function SpacesScreen() {
     }
   };
   useFocusEffect(useCallback(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const stopPolling = () => {
-      if (timer !== null) clearInterval(timer);
-      timer = null;
-    };
-    const startPolling = () => {
-      stopPolling();
-      timer = setInterval(() => void refreshSpaceList({ silent: true }), 60_000);
-    };
     setNow(Date.now());
     void refreshSpaceList();
-    startPolling();
-    const subscription = NativeAppState.addEventListener("change", (next) => {
-      if (next !== "active") {
-        stopPolling();
-        return;
-      }
-      setNow(Date.now());
-      void refreshSpaceList({ silent: true });
-      startPolling();
-    });
-    return () => {
-      stopPolling();
-      subscription.remove();
-    };
   }, [refreshSpaceList]));
+  useSyncScope("spaces-overview", async () => {
+    setNow(Date.now());
+    await refreshSpaceList({ silent: true });
+  }, 60_000);
   const [query, setQuery] = useState("");
   const listRef = useRef<LegendListRef>(null);
   useScrollToTop(listRef);

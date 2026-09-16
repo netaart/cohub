@@ -18,6 +18,12 @@ import { createMobileClient } from "@/src/data/client";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { markChatEntry, startChatEntry } from "@/src/data/chat-entry-trace";
 import { useSpaceListData } from "@/src/data/use-space-list";
+import { createSyncScheduler, type SyncScheduler } from "@/src/data/sync-scheduler";
+import { reconcileSessionHead } from "@/src/data/session-list-sync";
+import { emptyRunningSessions, loadRunningSessions } from "@/src/data/running-sessions";
+import { createSpaceRealtime, type SpaceRealtime } from "@/src/data/space-realtime";
+import { spaceRealtimeChange, type SpaceRealtimeEvent } from "@/src/data/space-realtime-events";
+import { sessionSourceFilterKeys, type SessionSourceFilter } from "@/src/data/session-source";
 import { cacheRetentionCutoff, loadCacheRetention } from "@/src/data/cache-retention";
 import { createStreamBatch } from "@/src/data/chat-rendering";
 import {
@@ -49,7 +55,7 @@ import { isOptimisticFollowup, shouldQueueFollowup } from "@/src/data/followup-q
 import { createSessionLifecycle } from "@/src/data/session-lifecycle";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
 import { getInstallationId } from "@/src/platform/installation";
-import { getSessionStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, sessionPageState, type LatestSessionTurn, type SessionPageBoundary } from "@/src/data/session-status";
+import { sessionListStatus, latestTurn, loadSessionLatestTurns, reconcileLatestTurn, reconcileTurnStatusPatch, sessionPageState, type LatestSessionTurn, type SessionPageBoundary, type StatusSession } from "@/src/data/session-status";
 import { loadSessionFilterMinutes } from "@/src/data/session-filter-preference";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery, type SessionResyncReason } from "@/src/data/session-reconnect";
 import {
@@ -60,7 +66,6 @@ import {
 } from "@/src/utils";
 
 const HOME_REQUEST_TIMEOUT_MS = 15_000;
-const HOME_POLL_INTERVAL_MS = 60_000;
 // Reconnect `open` and AppState `active` usually fire together; collapse them into one resync.
 const SESSION_RESYNC_DEBOUNCE_MS = 250;
 // Mirrors the web client: never re-seed the same session's stream more than once per window.
@@ -203,18 +208,31 @@ const initialState: AppState = {
   sessionsHasMore: false,
   sessionsCursor: null,
   sessionsPageBoundary: null,
+  sessionsPagesLoaded: 0,
   sessionsLoadingMore: false,
   sessionLatestTurns: {},
+  sessionTurnStatuses: {},
   sessionStatusRequests: 0,
   sessionStatusError: null,
   sessionViews: {},
+  runningSessions: {},
+  realtimeError: null,
   usage: null,
 };
 
 type Action =
   | { type: "hydrate"; spaces: SpaceRecord[]; sessions: UserSessionListItem[] }
   | { type: "home-start"; silent?: boolean }
-  | { type: "home-success"; spaces: SpaceRecord[]; sessions: UserSessionListItem[]; sessionsHasMore?: boolean; sessionsCursor?: string | null; sessionsPageBoundary: SessionPageBoundary | null; spacesError?: string; sessionsError?: string; silent?: boolean }
+  | { type: "home-success"; spaces: SpaceRecord[]; sessions: UserSessionListItem[]; sessionsHasMore?: boolean; sessionsCursor?: string | null; sessionsPageBoundary: SessionPageBoundary | null; spacesError?: string; sessionsError?: string; silent?: boolean; requestStartedAt: number }
+  | { type: "sessions-head-success"; sessions: UserSessionListItem[]; hasMore: boolean; cursor: string | null; boundary: SessionPageBoundary | null; requestStartedAt: number }
+  | { type: "sessions-head-error"; message: string }
+  | { type: "running-start"; source: SessionSourceFilter }
+  | { type: "running-success"; source: SessionSourceFilter; sessions: UserSessionListItem[]; changedSessionIds: string[] }
+  | { type: "running-end"; source: SessionSourceFilter; error?: string }
+  | { type: "realtime-error"; message: string | null }
+  | { type: "session-realtime-turn"; sessionId: string; turn: Partial<LatestSessionTurn> }
+  | { type: "session-realtime-meta"; sessionId: string; session: Partial<SessionRecord> }
+  | { type: "spaces-sync"; spaces?: SpaceRecord[]; error?: string }
   | { type: "sessions-more-start" }
   | { type: "sessions-more-success"; sessions: UserSessionListItem[]; hasMore: boolean; cursor: string | null; boundary: SessionPageBoundary | null }
   | { type: "sessions-more-error"; message: string }
@@ -307,6 +325,7 @@ function updateLatestTurn(state: AppState, sessionId: string, turn: LatestSessio
   return {
     ...state,
     sessionLatestTurns: { ...state.sessionLatestTurns, [sessionId]: reconcileLatestTurn(state.sessionLatestTurns[sessionId], turn) },
+    sessionTurnStatuses: turn ? { ...state.sessionTurnStatuses, [turn.id]: reconcileLatestTurn(state.sessionTurnStatuses[turn.id], turn) } : state.sessionTurnStatuses,
   };
 }
 
@@ -365,20 +384,76 @@ function reducer(state: AppState, action: Action): AppState {
         booting: false,
         refreshing: false,
         error: null,
-        spacesError: action.silent ? null : action.spacesError ?? null,
-        sessionsError: action.silent ? null : action.sessionsError ?? null,
+        spacesError: action.spacesError ?? null,
+        sessionsError: action.sessionsError ?? null,
         lastSyncedAt: new Date().toISOString(),
         spaces: sortByRecent(refreshedSpaces),
-        sessions: sortByRecent(refreshedSessions),
-        sessionsHasMore: action.sessionsHasMore ?? false,
-        sessionsCursor: action.sessionsCursor ?? null,
-        sessionsPageBoundary: action.sessionsPageBoundary,
+        sessions: sortByRecent(action.silent ? reconcileSessionHead(state.sessions, refreshedSessions, action.sessionsHasMore === true, action.requestStartedAt) : refreshedSessions),
+        sessionsHasMore: action.silent && state.sessionsPagesLoaded > 1 && action.sessionsHasMore ? state.sessionsHasMore : action.sessionsHasMore ?? false,
+        sessionsCursor: action.silent && state.sessionsPagesLoaded > 1 && action.sessionsHasMore ? state.sessionsCursor : action.sessionsCursor ?? null,
+        sessionsPageBoundary: action.silent && state.sessionsPagesLoaded > 1 && action.sessionsHasMore ? state.sessionsPageBoundary : action.sessionsPageBoundary,
+        sessionsPagesLoaded: action.silent && action.sessionsHasMore ? Math.max(1, state.sessionsPagesLoaded) : 1,
         sessionsLoadingMore: false,
       };
     }
+    case "sessions-head-success": {
+      const keepTail = state.sessionsPagesLoaded > 1 && action.hasMore;
+      return {
+        ...state,
+        sessions: sortByRecent(reconcileSessionHead(state.sessions, action.sessions, action.hasMore, action.requestStartedAt)),
+        sessionsHasMore: keepTail ? state.sessionsHasMore : action.hasMore,
+        sessionsCursor: keepTail ? state.sessionsCursor : action.cursor,
+        sessionsPageBoundary: keepTail ? state.sessionsPageBoundary : action.boundary,
+        sessionsPagesLoaded: keepTail ? state.sessionsPagesLoaded : 1,
+        sessionsError: null,
+        error: null,
+        lastSyncedAt: new Date().toISOString(),
+      };
+    }
+    case "running-start": {
+      const current = state.runningSessions[action.source] ?? emptyRunningSessions;
+      return { ...state, runningSessions: { ...state.runningSessions, [action.source]: { ...current, loading: true } } };
+    }
+    case "running-success": {
+      const previous = state.runningSessions[action.source] ?? emptyRunningSessions;
+      const changed = new Set(action.changedSessionIds);
+      const previousById = new Map(previous.sessions.map((session) => [session.id, session]));
+      const incomingIds = new Set(action.sessions.map((session) => session.id));
+      const sessions = [...action.sessions.map((session) => changed.has(session.id) ? previousById.get(session.id) ?? session : session), ...previous.sessions.filter((session) => changed.has(session.id) && !incomingIds.has(session.id))];
+      return { ...state, runningSessions: { ...state.runningSessions, [action.source]: { sessions: sortByRecent(sessions), loading: false, loaded: true, error: null } } };
+    }
+    case "running-end": {
+      const current = state.runningSessions[action.source] ?? emptyRunningSessions;
+      return { ...state, runningSessions: { ...state.runningSessions, [action.source]: { ...current, loading: false, error: action.error ?? current.error } } };
+    }
+    case "realtime-error":
+      return { ...state, realtimeError: action.message };
+    case "session-realtime-turn": {
+      const known = action.turn.id ? state.sessionTurnStatuses[action.turn.id] : null;
+      const turn = reconcileTurnStatusPatch(known ?? state.sessionLatestTurns[action.sessionId], action.turn);
+      const next = updateLatestTurn(state, action.sessionId, turn);
+      const session = state.sessions.find((item) => item.id === action.sessionId);
+      const running = state.runningSessions.all ?? emptyRunningSessions;
+      if (!session || !turn || !isActiveTurnStatus(turn.status) || running.sessions.some((item) => item.id === session.id)) return next;
+      return { ...next, runningSessions: { ...next.runningSessions, all: { ...running, sessions: sortByRecent([...running.sessions, session]) } } };
+    }
+    case "session-realtime-meta": {
+      const patch = (session: UserSessionListItem) => session.id === action.sessionId ? { ...session, ...preferNewerSession(session, { ...session, ...action.session }) } : session;
+      const runningSessions = { ...state.runningSessions };
+      for (const source of ["all", "web", "other"] as const) {
+        const current = runningSessions[source];
+        if (current) runningSessions[source] = { ...current, sessions: sortByRecent(current.sessions.map(patch)) };
+      }
+      return { ...state, sessions: sortByRecent(state.sessions.map(patch)), runningSessions };
+    }
+    case "sessions-head-error":
+      return { ...state, sessionsError: action.message };
+    case "spaces-sync":
+      return { ...state, spacesError: action.error ?? null, spaces: action.spaces ? sortByRecent(action.spaces.map((space) => preserveSpacePin(state.spaces.find((current) => current.id === space.id), space))) : state.spaces };
     case "sessions-more-start":
       return { ...state, sessionsLoadingMore: true, sessionsError: null };
     case "sessions-more-success": {
+      if (state.sessionsPagesLoaded === 1 && !state.sessionsHasMore) return { ...state, sessionsLoadingMore: false };
       const incomingById = new Map(action.sessions.map((session) => [session.id, session]));
       const existingIds = new Set(state.sessions.map((session) => session.id));
       const merged = [
@@ -388,16 +463,16 @@ function reducer(state: AppState, action: Action): AppState {
         }),
         ...action.sessions.filter((session) => !existingIds.has(session.id)),
       ];
-      return { ...state, sessionsLoadingMore: false, sessions: sortByRecent(merged), sessionsHasMore: action.hasMore, sessionsCursor: action.cursor, sessionsPageBoundary: action.boundary };
+      return { ...state, sessionsLoadingMore: false, sessions: sortByRecent(merged), sessionsHasMore: action.hasMore, sessionsCursor: action.cursor, sessionsPageBoundary: action.boundary, sessionsPagesLoaded: state.sessionsPagesLoaded + 1 };
     }
     case "sessions-more-error":
       return { ...state, sessionsLoadingMore: false, sessionsError: action.message };
     case "session-status-start":
-      return { ...state, sessionStatusRequests: state.sessionStatusRequests + 1, sessionStatusError: action.silent ? state.sessionStatusError : state.sessionStatusRequests === 0 ? null : state.sessionStatusError };
+      return { ...state, sessionStatusRequests: state.sessionStatusRequests + (action.silent ? 0 : 1), sessionStatusError: action.silent ? state.sessionStatusError : state.sessionStatusRequests === 0 ? null : state.sessionStatusError };
     case "session-status-reset":
-      return { ...state, sessionLatestTurns: {}, sessionStatusRequests: 0, sessionStatusError: null };
+      return { ...state, sessionLatestTurns: {}, sessionTurnStatuses: {}, sessionStatusRequests: 0, sessionStatusError: null };
     case "session-status-end":
-      return { ...state, sessionStatusRequests: state.sessionStatusRequests - 1, sessionStatusError: action.silent && action.error ? state.sessionStatusError : action.error ?? null };
+      return { ...state, sessionStatusRequests: state.sessionStatusRequests - (action.silent ? 0 : 1), sessionStatusError: action.error ?? null };
     case "session-latest-turn":
       return updateLatestTurn(state, action.sessionId, action.turn);
     case "home-error":
@@ -555,7 +630,7 @@ function reducer(state: AppState, action: Action): AppState {
       const sessions = action.session
         ? state.sessions.map((item) => item.id === action.session?.id ? mergeSessionItem(item, { ...action.session, space: item.space }) : item)
         : state.sessions;
-      return updateView(updateLatestTurn({ ...state, sessions: sortByRecent(sessions) }, action.sessionId, latestTurn(turns)), action.sessionId, {
+      return updateView(updateLatestTurn(updateLatestTurn({ ...state, sessions: sortByRecent(sessions) }, action.sessionId, action.turn), action.sessionId, latestTurn(turns)), action.sessionId, {
         ...(session ? { session } : {}),
         turns,
         historyLoaded: true,
@@ -570,7 +645,8 @@ function reducer(state: AppState, action: Action): AppState {
       recordDebugEvent("chat.turn.patch", { status: action.turn.status ?? null, clientMessageIdPresent: typeof turnClientMessageId(action.turn) === "string" });
       const current = state.sessionViews[action.sessionId] ?? emptyView();
       const turns = patchTurnRecords(current.turns, action.turn);
-      const nextState = updateLatestTurn(state, action.sessionId, reconcileTurnStatusPatch(state.sessionLatestTurns[action.sessionId], action.turn));
+      const knownTurn = action.turn.id ? state.sessionTurnStatuses[action.turn.id] : null;
+      const nextState = updateLatestTurn(state, action.sessionId, reconcileTurnStatusPatch(knownTurn ?? state.sessionLatestTurns[action.sessionId], action.turn));
       if (turns === current.turns) return nextState;
       const patched = turns.find((turn) => turn.id === action.turn.id || turn.id === current.stream?.turnId);
       return updateView(nextState, action.sessionId, {
@@ -680,16 +756,20 @@ export type AppContextValue = {
   client: CohubClient | null;
   userUuid: string;
   spaceList: ReturnType<typeof useSpaceListData>;
+  sync: SyncScheduler;
+  spaceRealtime: SpaceRealtime | null;
+  refreshChats: () => Promise<void>;
+  discoverRunningSessions: (source?: SessionSourceFilter) => Promise<void>;
   connectionState: ConnectionState;
   installationId: string | null;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
   refreshHome: (options?: { silent?: boolean }) => Promise<void>;
-  refreshSessionStatuses: (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "lastMessageAt">[], options?: { silent?: boolean }) => Promise<void>;
+  refreshSessionStatuses: (sessions: StatusSession[], options?: { silent?: boolean; throwOnError?: boolean; activeOnly?: boolean }) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   openSession: (sessionId: string) => Promise<void>;
   prefetchSession: (sessionId: string) => void;
   closeSession: (sessionId: string) => void;
-  refreshSession: (sessionId: string) => Promise<void>;
+  refreshSession: (sessionId: string, options?: { silent?: boolean; throwOnError?: boolean }) => Promise<void>;
   loadOlderTurns: (sessionId: string) => Promise<void>;
   loadNewerTurns: (sessionId: string) => Promise<void>;
   loadTurnIndex: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
@@ -731,6 +811,7 @@ export function AppProvider({
 }) {
   const [installationId, setInstallationId] = useState<string | null>(null);
   const [state, setState] = useState<AppState>(initialState);
+  const [sync] = useState(() => createSyncScheduler({ active: NativeAppState.currentState === "active" }));
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const connectionStateRef = useRef<ConnectionState>("idle");
   const stateRef = useRef(state);
@@ -750,6 +831,12 @@ export function AppProvider({
   const homeRefreshGenerationRef = useRef(0);
   const statusGenerationRef = useRef(0);
   const homeRefreshRequestRef = useRef<Promise<void> | null>(null);
+  const chatsRefreshRequestRef = useRef<Promise<void> | null>(null);
+  const runningDiscoveryRequests = useRef(new Map<SessionSourceFilter, Promise<void>>());
+  const runningDiscoveryControllers = useRef(new Set<AbortController>());
+  const sessionEventRevisions = useRef(new Map<string, number>());
+  const sessionEventRevision = useRef(0);
+  const statusSessionsRef = useRef(new Map<string, StatusSession>());
   const resyncRunRef = useRef<(sessionId: string, reason: SessionResyncReason) => Promise<void>>(async () => undefined);
   // A ref keeps one coordinator instance for the provider without participating in hook dependencies.
   const resyncCoordinatorRef = useRef(createSessionResyncCoordinator({
@@ -780,6 +867,10 @@ export function AppProvider({
   }, [state]);
 
   const dispatch = useCallback((action: Action) => {
+    if (action.type === "turn-upsert" || action.type === "turn-patch" || action.type === "session-upsert") {
+      const id = action.type === "session-upsert" ? action.session.id : action.sessionId;
+      sessionEventRevisions.current.set(id, ++sessionEventRevision.current);
+    }
     setState((current) => reducer(current, action));
   }, []);
 
@@ -871,19 +962,33 @@ export function AppProvider({
     return request;
   }, [modelStatus]);
 
-  const refreshSessionStatuses = useCallback(async (sessions: Pick<UserSessionListItem, "id" | "spaceId" | "lastMessageAt">[], options: { silent?: boolean } = {}) => {
+  const refreshSessionStatuses = useCallback(async (sessions: StatusSession[], options: { silent?: boolean; throwOnError?: boolean; activeOnly?: boolean } = {}) => {
     const activeClient = clientRef.current;
     if (!activeClient || sessions.length === 0) return;
     const generation = statusGenerationRef.current;
+    for (const session of sessions) statusSessionsRef.current.set(session.id, session);
     dispatch({ type: "session-status-start", silent: options.silent });
     let statusError: string | undefined;
     try {
       const minutes = await loadSessionFilterMinutes();
       await loadSessionLatestTurns(activeClient, sessions, (sessionId, turn) => {
-        if (generation === statusGenerationRef.current) dispatch({ type: "session-latest-turn", sessionId, turn });
-      }, minutes);
+        if (generation !== statusGenerationRef.current) return;
+        dispatch({ type: "session-latest-turn", sessionId, turn });
+        const stream = stateRef.current.sessionViews[sessionId]?.stream;
+        if (turn && subscriptions.current.has(sessionId) && (
+          (isTerminalTurnStatus(turn.status) && stream?.turnId === turn.id) ||
+          (isActiveTurnStatus(turn.status) && !stream)
+        )) resyncCoordinatorRef.current.request(sessionId, "out-of-sync");
+      }, minutes, {
+        knownTurns: stateRef.current.sessionLatestTurns,
+        turnStatuses: stateRef.current.sessionTurnStatuses,
+        cached: options.silent,
+        activeOnly: options.activeOnly,
+        shouldContinue: () => generation === statusGenerationRef.current && (!options.silent || NativeAppState.currentState === "active"),
+      });
     } catch (error) {
-      statusError = errorMessage(error, "Unable to refresh Chat statuses. Pull to refresh and retry.");
+      statusError = errorMessage(error, "Unable to refresh Chat statuses. Check your connection and retry.");
+      if (options.throwOnError) throw error;
     } finally {
       if (generation === statusGenerationRef.current) dispatch({ type: "session-status-end", error: statusError, silent: options.silent });
     }
@@ -891,6 +996,7 @@ export function AppProvider({
 
   const refreshHome = useCallback((options: { silent?: boolean } = {}) => {
     if (homeRefreshRequestRef.current) return homeRefreshRequestRef.current;
+    const requestStartedAt = Date.now();
     const request = (async () => {
       const generation = homeRefreshGenerationRef.current + 1;
       homeRefreshGenerationRef.current = generation;
@@ -958,7 +1064,7 @@ export function AppProvider({
       const sessionsError = sessionsResult.status === "rejected"
         ? `Chats could not be refreshed: ${errorMessage(sessionsResult.reason, translate("data.requestFailed"))}`
         : undefined;
-      dispatch({ type: "home-success", spaces, sessions, sessionsHasMore, sessionsCursor, sessionsPageBoundary, spacesError, sessionsError, silent: options.silent });
+      dispatch({ type: "home-success", spaces, sessions, sessionsHasMore, sessionsCursor, sessionsPageBoundary, spacesError, sessionsError, silent: options.silent, requestStartedAt });
       void refreshSessionStatuses(sessions, options);
       if (!options.silent) dispatch({ type: "usage-start" });
       void saveHome(userKey, { spaces, sessions }).catch((error) => {
@@ -985,6 +1091,68 @@ export function AppProvider({
     }).catch(() => undefined);
     return request;
   }, [dispatch, ensureInstallation, getAccessToken, refreshSessionStatuses, userKey]);
+
+  const refreshChats = useCallback((): Promise<void> => {
+    if (homeRefreshRequestRef.current) return homeRefreshRequestRef.current;
+    if (chatsRefreshRequestRef.current) return chatsRefreshRequestRef.current;
+    if (!client) return Promise.resolve();
+    const generation = homeRefreshGenerationRef.current;
+    const requestStartedAt = Date.now();
+    const request = (async () => {
+      try {
+        const response = await withTimeout(client.user.listSessions({ limit: 60 }), "Loading Chats");
+        if (generation !== homeRefreshGenerationRef.current) return;
+        const page = sessionPageState(response);
+        dispatch({ type: "sessions-head-success", sessions: response.sessions, ...page, requestStartedAt });
+        void saveSessions(userKey, response.sessions).catch(() => undefined);
+        await refreshSessionStatuses(response.sessions, { silent: true, throwOnError: true });
+      } catch (error) {
+        if (generation === homeRefreshGenerationRef.current) dispatch({ type: "sessions-head-error", message: errorMessage(error, translate("data.chatsLoadFailed")) });
+        throw error;
+      }
+    })();
+    chatsRefreshRequestRef.current = request;
+    void request.finally(() => {
+      if (chatsRefreshRequestRef.current === request) chatsRefreshRequestRef.current = null;
+    }).catch(() => undefined);
+    return request;
+  }, [client, dispatch, refreshSessionStatuses, userKey]);
+
+  const discoverRunningSessions = useCallback((source: SessionSourceFilter = "all"): Promise<void> => {
+    const pending = runningDiscoveryRequests.current.get(source);
+    if (pending) return pending;
+    if (!client || NativeAppState.currentState !== "active") return Promise.resolve();
+    const generation = statusGenerationRef.current;
+    const revision = sessionEventRevision.current;
+    const controller = new AbortController();
+    runningDiscoveryControllers.current.add(controller);
+    dispatch({ type: "running-start", source });
+    const request = (async () => {
+      try {
+        const sessions = await loadRunningSessions(client, { source: sessionSourceFilterKeys(source) ?? undefined, signal: controller.signal });
+        if (generation !== statusGenerationRef.current || controller.signal.aborted) return;
+        const changedSessionIds = [...sessionEventRevisions.current].filter(([, eventRevision]) => eventRevision > revision).map(([id]) => id);
+        const changed = new Set(changedSessionIds);
+        const unchanged = sessions.filter((session) => !changed.has(session.id));
+        for (const session of unchanged) statusSessionsRef.current.set(session.id, session);
+        dispatch({ type: "running-success", source, sessions, changedSessionIds });
+        await refreshSessionStatuses(unchanged, { silent: true, throwOnError: true, activeOnly: true });
+      } catch (error) {
+        if (generation === statusGenerationRef.current && !controller.signal.aborted) {
+          dispatch({ type: "running-end", source, error: errorMessage(error, "Unable to discover running Chats. Check your connection and retry.") });
+          throw error;
+        }
+      } finally {
+        runningDiscoveryControllers.current.delete(controller);
+        if (generation === statusGenerationRef.current && controller.signal.aborted) dispatch({ type: "running-end", source });
+      }
+    })();
+    runningDiscoveryRequests.current.set(source, request);
+    void request.finally(() => {
+      if (runningDiscoveryRequests.current.get(source) === request) runningDiscoveryRequests.current.delete(source);
+    }).catch(() => undefined);
+    return request;
+  }, [client, dispatch, refreshSessionStatuses]);
 
   const loadMoreSessions = useCallback(async () => {
     if (sessionsMoreRequestRef.current) return sessionsMoreRequestRef.current;
@@ -1021,6 +1189,10 @@ export function AppProvider({
     let active = true;
     const activeSubscriptions = subscriptions.current;
     const activeSessionSpaces = sessionSpaces.current;
+    const statusSessions = statusSessionsRef.current;
+    const discoveryControllers = runningDiscoveryControllers.current;
+    const discoveryRequests = runningDiscoveryRequests.current;
+    const eventRevisions = sessionEventRevisions.current;
     const activeResyncCoordinator = resyncCoordinatorRef.current;
     const activeSessionLifecycle = sessionLifecycleRef.current;
     void (async () => {
@@ -1058,6 +1230,11 @@ export function AppProvider({
       for (const stop of activeSubscriptions.values()) stop();
       activeSubscriptions.clear();
       activeSessionSpaces.clear();
+      statusSessions.clear();
+      for (const controller of discoveryControllers) controller.abort();
+      discoveryControllers.clear();
+      discoveryRequests.clear();
+      eventRevisions.clear();
     };
   }, [applyCacheRetention, dispatch, refreshHome, userKey]);
 
@@ -1070,40 +1247,92 @@ export function AppProvider({
       if (displayState) setConnectionState(displayState);
       if (!isTransportRecovery(previous, snapshot.state)) return;
       for (const sessionId of subscriptions.current.keys()) resyncCoordinatorRef.current.request(sessionId, "transport-open");
-      // Running badges on the list are derived from turn status; refresh them for recent Chats.
-      void refreshSessionStatuses(stateRef.current.sessions, { silent: true });
+      sync.invalidate();
     });
-  }, [client, refreshSessionStatuses]);
+  }, [client, sync]);
 
   useEffect(() => {
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    const stopPolling = () => {
-      if (pollTimer !== null) clearInterval(pollTimer);
-      pollTimer = null;
-    };
-    const startPolling = () => {
-      stopPolling();
-      pollTimer = setInterval(() => {
-        void refreshHome({ silent: true });
-      }, HOME_POLL_INTERVAL_MS);
-    };
     const subscription = NativeAppState.addEventListener("change", (next) => {
+      sync.setActive(next === "active");
       if (next !== "active") {
-        stopPolling();
+        for (const controller of runningDiscoveryControllers.current) controller.abort();
         return;
       }
-      void refreshHome({ silent: true });
-      startPolling();
-      // iOS suspends the socket in the background without a close event; the
-      // stream reducer is stale even when the transport still reports `open`.
+      // A suspended native socket can still report open after foregrounding.
       for (const sessionId of subscriptions.current.keys()) resyncCoordinatorRef.current.request(sessionId, "foreground");
     });
-    if (NativeAppState.currentState === "active") startPolling();
-    return () => {
-      stopPolling();
-      subscription.remove();
-    };
-  }, [refreshHome]);
+    return () => subscription.remove();
+  }, [sync]);
+
+  useEffect(() => {
+    if (!client || state.booting) return;
+    const stopChats = sync.watch("chats", { run: refreshChats, intervalMs: () => 60_000, minRefreshMs: 2_000 });
+    const stopStatuses = sync.watch("chat-statuses", {
+      intervalMs: () => 5_000,
+      minRefreshMs: 5_000,
+      run: async () => {
+        const sessions = new Map(statusSessionsRef.current);
+        for (const session of stateRef.current.sessions) if (!sessions.has(session.id)) sessions.set(session.id, session);
+        for (const query of Object.values(stateRef.current.runningSessions)) for (const session of query.sessions) sessions.set(session.id, session);
+        for (const view of Object.values(stateRef.current.sessionViews)) if (view.session && !sessions.has(view.session.id)) sessions.set(view.session.id, view.session);
+        const active = [...sessions.values()].filter((session) => {
+          const turn = stateRef.current.sessionLatestTurns[session.id];
+          return sessionListStatus(session, turn, stateRef.current.sessionTurnStatuses) === "running";
+        });
+        await refreshSessionStatuses(active, { silent: true, throwOnError: true, activeOnly: true });
+      },
+    });
+    const stopRunningDiscovery = sync.watch("running:all", {
+      intervalMs: () => 120_000,
+      minRefreshMs: 30_000,
+      run: discoverRunningSessions,
+    });
+    const stopSpaces = sync.watch("spaces", {
+      intervalMs: () => 120_000,
+      run: async () => {
+        const generation = homeRefreshGenerationRef.current;
+        try {
+          const spaces = await withTimeout(client.spaces.list(), "Loading Spaces");
+          if (generation !== homeRefreshGenerationRef.current) return;
+          dispatch({ type: "spaces-sync", spaces });
+        } catch (error) {
+          if (generation === homeRefreshGenerationRef.current) dispatch({ type: "spaces-sync", error: errorMessage(error, "Unable to refresh Spaces") });
+          throw error;
+        }
+      },
+    });
+    return () => { stopChats(); stopStatuses(); stopRunningDiscovery(); stopSpaces(); };
+  }, [client, dispatch, discoverRunningSessions, refreshChats, refreshSessionStatuses, state.booting, sync]);
+
+  useEffect(() => () => sync.dispose(), [sync]);
+
+  const handleSpaceEvent = useCallback((event: SpaceRealtimeEvent) => {
+    try {
+      const change = spaceRealtimeChange(event);
+      if (change.sessionId) {
+        sessionEventRevisions.current.set(change.sessionId, ++sessionEventRevision.current);
+        if (change.session) dispatch({ type: "session-realtime-meta", sessionId: change.sessionId, session: change.session });
+        if (change.turn) dispatch({ type: "session-realtime-turn", sessionId: change.sessionId, turn: change.turn });
+      }
+      for (const key of change.exact) sync.invalidate(key);
+      for (const prefix of change.prefixes) sync.invalidatePrefix(prefix);
+    } catch (error) {
+      dispatch({ type: "realtime-error", message: errorMessage(error, "Unable to synchronize Space events") });
+    }
+  }, [dispatch, sync]);
+
+  const spaceRealtime = useMemo(() => client ? createSpaceRealtime({
+    subscribe: (spaceId, listener) => client.space(spaceId).subscribe(listener),
+    event: handleSpaceEvent,
+    error: (message) => dispatch({ type: "realtime-error", message }),
+  }) : null, [client, dispatch, handleSpaceEvent]);
+
+  useEffect(() => {
+    if (!spaceRealtime) return;
+    spaceRealtime.setActive(NativeAppState.currentState === "active");
+    const subscription = NativeAppState.addEventListener("change", (next) => spaceRealtime.setActive(next === "active"));
+    return () => { subscription.remove(); spaceRealtime.dispose(); };
+  }, [spaceRealtime]);
 
   useEffect(() => {
     const coordinator = resyncCoordinatorRef.current;
@@ -1111,7 +1340,7 @@ export function AppProvider({
   }, []);
 
   const refreshSession = useCallback(
-    async (sessionId: string, options: { silent?: boolean } = {}) => {
+    async (sessionId: string, options: { silent?: boolean; throwOnError?: boolean } = {}) => {
       if (!client) return;
       const view = stateRef.current.sessionViews[sessionId];
       const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
@@ -1119,11 +1348,15 @@ export function AppProvider({
       if (!spaceId) return;
       const openToken = openTokens.current.get(sessionId);
       const isCurrentRequest = () => openTokens.current.get(sessionId) === openToken;
+      const key = `refresh:${sessionId}:${openToken}`;
+      const pending = paginationRequestsRef.current.get(key);
+      if (pending) return pending;
+      const request = (async () => {
       markChatEntry("refresh.start", { silent: Boolean(options.silent) });
       // Recovery resyncs must not flash the pull-to-refresh spinner.
       dispatch({ type: "session-refresh-start", sessionId, ...(options.silent ? { silent: true } : {}) });
       try {
-        const response = await client.space(spaceId).session(sessionId).turns.listPaginated({ limit: 30 });
+        const response = await withTimeout(client.space(spaceId).session(sessionId).turns.listPaginated({ limit: 30 }), "Loading Chat");
         if (!isCurrentRequest()) return;
         const current = stateRef.current.sessionViews[sessionId];
         const turns = mergeTurns(current?.turns ?? [], response.turns);
@@ -1151,7 +1384,12 @@ export function AppProvider({
           ...(options.silent ? { silent: true } : {}),
           error: error instanceof Error ? error.message : translate("data.refreshChatFailed"),
         });
+        if (options.throwOnError) throw error;
       }
+      })();
+      paginationRequestsRef.current.set(key, request);
+      try { await request; }
+      finally { if (paginationRequestsRef.current.get(key) === request) paginationRequestsRef.current.delete(key); }
     },
     [client, dispatch, userKey],
   );
@@ -1539,8 +1777,9 @@ export function AppProvider({
       dispatch({ type: "stream-clear", sessionId });
       dispatch({ type: "send-end", sessionId });
       await refreshSession(sessionId);
+      sync.invalidate();
     },
-    [client, dispatch, refreshSession],
+    [client, dispatch, refreshSession, sync],
   );
 
   const sendMessage = useCallback(
@@ -1623,12 +1862,13 @@ export function AppProvider({
         recordDebugEvent("chat.send.server_accepted", { turnSequence: response.turn.sequence, status: response.turn.status });
         dispatch({ type: "turn-upsert", sessionId, session: response.session, turn: withFallbackUserContent(response.turn, content, text) });
         dispatch({ type: "send-end", sessionId });
+        sync.invalidate();
       } catch (error) {
         dispatch({ type: "send-failed", sessionId, clientMessageId, message: error instanceof Error ? error.message : translate("data.messageSendFailed") });
         throw error;
       }
     },
-    [client, dispatch, userKey, userUuid],
+    [client, dispatch, sync, userKey, userUuid],
   );
 
   const sendNewMessage = useCallback(
@@ -1673,9 +1913,10 @@ export function AppProvider({
       };
       dispatch({ type: "session-upsert", session });
       void saveSessions(userKey, [session]).catch(() => undefined);
+      sync.invalidate();
       return result.session;
     },
-    [client, dispatch, userKey],
+    [client, dispatch, sync, userKey],
   );
 
   const createSpace = useCallback(
@@ -1785,8 +2026,9 @@ export function AppProvider({
     const session = { ...result, space: parent?.space ?? null };
     dispatch({ type: "session-upsert", session });
     void saveSessions(userKey, [session]).catch(() => undefined);
+    sync.invalidate();
     return result;
-  }, [client, dispatch, userKey]);
+  }, [client, dispatch, sync, userKey]);
 
   const renameSession = useCallback(
     async (sessionId: string, title: string) => {
@@ -1799,8 +2041,9 @@ export function AppProvider({
       dispatch({ type: "session-upsert", session: { ...result.session, space: summary?.space ?? null } });
       const currentView = stateRef.current.sessionViews[sessionId];
       if (currentView) dispatch({ type: "session-meta", sessionId, session: result.session, space: currentView.space });
+      sync.invalidate();
     },
-    [client, dispatch],
+    [client, dispatch, sync],
   );
 
   const loadSessionReadSequenceForUser = useCallback(
@@ -1816,6 +2059,8 @@ export function AppProvider({
   const clearCache = useCallback(async () => {
     homeRefreshGenerationRef.current += 1;
     statusGenerationRef.current += 1;
+    for (const controller of runningDiscoveryControllers.current) controller.abort();
+    statusSessionsRef.current.clear();
     resetSpaceList();
     await clearUserCache(userKey);
     setModels([]);
@@ -1831,7 +2076,7 @@ export function AppProvider({
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     return state.sessions.slice(0, 30).flatMap((session) => {
-      const normalizedStatus = getSessionStatus(state.sessionLatestTurns[session.id]?.status);
+      const normalizedStatus = sessionListStatus(session, state.sessionLatestTurns[session.id], state.sessionTurnStatuses);
       if (normalizedStatus === "idle") return [];
       const status = normalizedStatus === "running"
         ? "running"
@@ -1851,7 +2096,7 @@ export function AppProvider({
         updatedAt: session.lastMessageAt ?? session.updatedAt,
       };
     });
-  }, [state.sessionLatestTurns, state.sessions]);
+  }, [state.sessionLatestTurns, state.sessionTurnStatuses, state.sessions]);
 
   const value = useMemo<AppContextValue>(
     () => ({
@@ -1859,6 +2104,10 @@ export function AppProvider({
       client,
       userUuid,
       spaceList,
+      sync,
+      spaceRealtime,
+      refreshChats,
+      discoverRunningSessions,
       connectionState,
       installationId,
       getAccessToken,
@@ -1899,6 +2148,10 @@ export function AppProvider({
     [
       activityItems,
       spaceList,
+      sync,
+      spaceRealtime,
+      refreshChats,
+      discoverRunningSessions,
       abortSession,
       applyCacheRetention,
       clearCache,

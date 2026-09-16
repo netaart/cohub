@@ -1,6 +1,6 @@
 import type { BillingCreditStatus } from "@neta-art/cohub";
-import { useCallback, useRef, useState } from "react";
-import { AppState as NativeAppState } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSyncScope } from "./use-sync-scope";
 import { useFocusEffect } from "expo-router";
 import { useApp } from "./context";
 import { activityRange, tokenDays, type TokenDay } from "./activity";
@@ -16,7 +16,7 @@ const empty: ActivityData = {
 };
 
 export function useActivity() {
-  const { client, userUuid, connectionState } = useApp();
+  const { client, userUuid } = useApp();
   const [snapshot, setSnapshot] = useState({ client, userUuid, data: empty });
   const [loading, setLoading] = useState(false);
   const generation = useRef(0);
@@ -28,12 +28,14 @@ export function useActivity() {
       const requestGeneration = ++generation.current;
       if (!options.silent) setLoading(true);
       const range = activityRange(new Date());
+      const errors: unknown[] = [];
       async function load<K extends keyof ActivityData>(key: K, operation: () => Promise<NonNullable<ActivityData[K]["data"]>>) {
         try {
           const data = await operation();
           if (requestGeneration === generation.current) setSnapshot((current) => ({ client, userUuid, data: { ...(current.client === client && current.userUuid === userUuid ? current.data : empty), [key]: { data, error: null } } }));
         } catch (error) {
-          if (requestGeneration === generation.current && !options.silent) setSnapshot((current) => {
+          errors.push(error);
+          if (requestGeneration === generation.current) setSnapshot((current) => {
             const data = current.client === client && current.userUuid === userUuid ? current.data : empty;
             return { client, userUuid, data: { ...data, [key]: { ...data[key], error: error instanceof Error ? error.message : "Unable to load activity. Please retry." } } };
           });
@@ -44,6 +46,7 @@ export function useActivity() {
         load("days", async () => tokenDays((await client.user.getActivity(range)).hourly, range.from, range.to)),
       ]);
       if (requestGeneration === generation.current && !options.silent) setLoading(false);
+      if (options.silent && errors.length) throw errors[0];
     })();
     refreshRequest.current = request;
     void request.finally(() => {
@@ -51,32 +54,8 @@ export function useActivity() {
     }).catch(() => undefined);
     return request;
   }, [client, userUuid]);
-  useFocusEffect(useCallback(() => {
-    if (connectionState === "reconnecting") return;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const stopPolling = () => {
-      if (timer !== null) clearInterval(timer);
-      timer = null;
-    };
-    const startPolling = () => {
-      stopPolling();
-      timer = setInterval(() => void refresh({ silent: true }), ACTIVITY_POLL_INTERVAL_MS);
-    };
-    void refresh();
-    startPolling();
-    const subscription = NativeAppState.addEventListener("change", (next) => {
-      if (next !== "active") {
-        stopPolling();
-        return;
-      }
-      void refresh({ silent: true });
-      startPolling();
-    });
-    return () => {
-      stopPolling();
-      subscription.remove();
-      generation.current++;
-    };
-  }, [refresh, connectionState]));
+  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+  useEffect(() => () => { generation.current += 1; refreshRequest.current = null; }, [client, userUuid]);
+  useSyncScope("activity", () => refresh({ silent: true }), ACTIVITY_POLL_INTERVAL_MS);
   return { ...(snapshot.client === client && snapshot.userUuid === userUuid ? snapshot.data : empty), loading, refresh };
 }

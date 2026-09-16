@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cohub — native Cohub client for iOS and Android</title>
+    <meta
+      name="description"
+      content="Cohub Mobile is a native iOS and Android client for Cohub: Chats, Spaces, live agent sessions, voice input, and push notifications."
+    />
+    <meta name="theme-color" content="#0f1114" />
+    <meta property="og:title" content="Cohub — native Cohub client for iOS and Android" />
+    <meta
+      property="og:description"
+      content="Chats, Spaces, live agent sessions, voice input, and push notifications, in a native app."
+    />
+    <meta property="og:type" content="website" />
+    <style>
+      /* Tokens mirror the app dark theme in src/theme.ts */
+      :root {
+        --background: #0f1114;
+        --surface: #171a1f;
+        --surface-raised: #22262e;
+        --border: #2b3039;
+        --text: #f7f8fa;
+        --text-secondary: #d0d5dd;
+        --text-muted: #a2aab6;
+        --text-faint: #747e8c;
+        --accent: #f08349;
+        --accent-pressed: #d96835;
+        --accent-soft: #36251e;
+        --accent-border: #865038;
+        --accent-text: #2a150c;
+        --radius: 14px;
+        --radius-lg: 22px;
+        --max-width: 1080px;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+      }
+
+      body {
+        margin: 0;
+        background: var(--background);
+        color: var(--text);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      .skip-link {
+        position: absolute;
+        left: -9999px;
+        top: 0;
+        background: var(--accent);
+        color: var(--accent-text);
+        padding: 12px 18px;
+        border-radius: 0 0 var(--radius) 0;
+        font-weight: 600;
+        z-index: 10;
+      }
+
+      .skip-link:focus {
+        left: 0;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+      }
+
+      .wrap {
+        width: 100%;
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      header.site {
+        border-bottom: 1px solid var(--border);
+        background: rgba(15, 17, 20, 0.9);
+        backdrop-filter: blur(12px);
+        position: sticky;
+        top: 0;
+        z-index: 5;
+      }
+
+      .site-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 64px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--text);
+        text-decoration: none;
+      }
+
+      .brand-mark {
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        background: var(--surface-raised);
+        border: 1px solid var(--border);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        place-content: center;
+        padding: 7px;
+      }
+
+      .brand-mark span {
+        display: block;
+        width: 6px;
+        height: 9px;
+        border-radius: 3px;
+        background: var(--text);
+      }
+
+      nav.site a {
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 0.95rem;
+        margin-left: 20px;
+      }
+
+      nav.site a:hover {
+        color: var(--text);
+      }
+
+      @media (max-width: 620px) {
+        nav.site a:not(.nav-primary) {
+          display: none;
+        }
+        nav.site a {
+          margin-left: 0;
+        }
+      }
+
+      section {
+        padding: 88px 0;
+        /* Keep anchor jumps clear of the sticky header */
+        scroll-margin-top: 80px;
+      }
+
+      section + section {
+        border-top: 1px solid var(--border);
+      }
+
+      h1 {
+        font-size: clamp(2.2rem, 6vw, 3.5rem);
+        line-height: 1.1;
+        letter-spacing: -0.03em;
+        margin: 0 0 20px;
+      }
+
+      h2 {
+        font-size: clamp(1.5rem, 3.4vw, 2.1rem);
+        letter-spacing: -0.02em;
+        margin: 0 0 14px;
+      }
+
+      h3 {
+        font-size: 1.05rem;
+        margin: 0 0 8px;
+      }
+
+      p.lead {
+        font-size: clamp(1.05rem, 2.2vw, 1.25rem);
+        color: var(--text-secondary);
+        max-width: 62ch;
+        margin: 0 0 32px;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        font-size: 0.8rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        background: var(--accent-soft);
+        border: 1px solid var(--accent-border);
+        border-radius: 999px;
+        padding: 6px 14px;
+        margin-bottom: 24px;
+      }
+
+      /* Download buttons */
+      .dl-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+      }
+
+      .dl-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 60px;
+        padding: 12px 24px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        background: var(--surface-raised);
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 650;
+        will-change: transform;
+      }
+
+      .dl-btn:hover {
+        border-color: var(--accent-border);
+      }
+
+      .dl-btn svg {
+        width: 26px;
+        height: 26px;
+        flex: none;
+        fill: currentColor;
+      }
+
+      .dl-btn .dl-label {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.25;
+        text-align: left;
+      }
+
+      .dl-btn .dl-label small {
+        font-weight: 500;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+      }
+
+      .dl-btn--primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-text);
+      }
+
+      .dl-btn--primary:hover {
+        background: var(--accent-pressed);
+        border-color: var(--accent-pressed);
+      }
+
+      .dl-btn--primary .dl-label small {
+        color: rgba(42, 21, 12, 0.72);
+      }
+
+      .dl-btn[aria-disabled="true"] {
+        background: var(--surface);
+        color: var(--text-faint);
+        border-color: var(--border);
+        cursor: not-allowed;
+      }
+
+      .dl-btn[aria-disabled="true"] .dl-label small {
+        color: var(--text-faint);
+      }
+
+      .note {
+        color: var(--text-faint);
+        font-size: 0.9rem;
+        margin: 20px 0 0;
+      }
+
+      .shots {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 24px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      @media (max-width: 800px) {
+        .shots {
+          grid-template-columns: 1fr;
+          max-width: 380px;
+          margin: 0 auto;
+        }
+      }
+
+      .shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+      }
+
+      .shot figcaption {
+        margin-top: 14px;
+      }
+
+      .shot figcaption strong {
+        display: block;
+        font-size: 1rem;
+      }
+
+      .shot figcaption span {
+        color: var(--text-muted);
+        font-size: 0.92rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 22px;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 0.95rem;
+      }
+
+      footer.site {
+        border-top: 1px solid var(--border);
+        padding: 40px 0 56px;
+        color: var(--text-faint);
+        font-size: 0.9rem;
+      }
+
+      footer.site nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        margin-bottom: 14px;
+      }
+
+      footer.site a {
+        color: var(--text-secondary);
+        text-decoration: none;
+      }
+
+      footer.site a:hover {
+        color: var(--text);
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site">
+      <div class="wrap site-inner">
+        <a class="brand" href="#main">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
+          Cohub
+        </a>
+        <nav class="site" aria-label="Primary">
+          <a href="#screens">Screens</a>
+          <a href="#features">Features</a>
+          <a href="https://github.com/markbang/cohub-mobile">GitHub</a>
+          <a class="nav-primary" href="#download">Download</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section id="hero">
+        <div class="wrap">
+          <span class="eyebrow" data-hero="eyebrow">iOS &amp; Android</span>
+          <h1 data-hero="title">Your Cohub agents, native on your phone.</h1>
+          <p class="lead" data-hero="lead">
+            Chats, Spaces, and live agent sessions in a real native client. Cache-first startup,
+            streaming turns, voice input, and push notifications that open straight to the right
+            conversation.
+          </p>
+
+          <div class="dl-row" data-hero="cta">
+            <!-- Original href is the GitHub fallback; data-dl-android rewrites it from Yaota. -->
+            <a
+              class="dl-btn dl-btn--primary"
+              data-press
+              data-dl-android
+              href="https://github.com/markbang/cohub-mobile/releases/latest"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5743-6.1185-9.4396"
+                />
+              </svg>
+              <span class="dl-label">
+                Android
+                <small data-dl-android-note>APK</small>
+              </span>
+            </a>
+
+            <!-- TODO: point iOS at the TestFlight invite URL and drop aria-disabled -->
+            <a class="dl-btn" data-press href="#download" aria-disabled="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
+                />
+              </svg>
+              <span class="dl-label">
+                iOS
+                <small>TestFlight</small>
+              </span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section id="screens">
+        <div class="wrap">
+          <h2 data-reveal>Screens</h2>
+          <ul class="shots">
+            <li data-shot>
+              <figure class="shot">
+                <img
+                  src="screenshots/chats.png"
+                  width="1307"
+                  height="2732"
+                  alt="Cohub Chats inbox showing All, Running, and Completed filters with a running chat session"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <figcaption>
+                  <strong>Chats</strong>
+                  <span>Cross-Space inbox with running and attention filters.</span>
+                </figcaption>
+              </figure>
+            </li>
+            <li data-shot>
+              <figure class="shot">
+                <img
+                  src="screenshots/spaces.png"
+                  width="1307"
+                  height="2732"
+                  alt="Cohub Spaces list with recent Spaces, chat counts, activity times, and pin controls"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <figcaption>
+                  <strong>Spaces</strong>
+                  <span>Recent, all, and pinned Spaces with live activity.</span>
+                </figcaption>
+              </figure>
+            </li>
+            <li data-shot>
+              <figure class="shot">
+                <img
+                  src="screenshots/settings.png"
+                  width="1307"
+                  height="2732"
+                  alt="Cohub Settings screen with profile, appearance, language, notifications, rules, and storage sections"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <figcaption>
+                  <strong>Settings</strong>
+                  <span>Appearance, language, notifications, rules, and cache.</span>
+                </figcaption>
+              </figure>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="features">
+        <div class="wrap">
+          <h2 data-reveal>What is inside</h2>
+          <div class="grid">
+            <article class="card" data-card>
+              <h3>Live agent sessions</h3>
+              <p>
+                Streaming turn patches, optimistic sends, stop, rename, and stable scroll position
+                across pagination.
+              </p>
+            </article>
+            <article class="card" data-card>
+              <h3>Spaces and Works</h3>
+              <p>
+                Chats, Files, Saves, Works, and Task Runs per Space, with a native file viewer and
+                origin-constrained previews for published Works.
+              </p>
+            </article>
+            <article class="card" data-card>
+              <h3>Model picker</h3>
+              <p>
+                Availability lights, provider and context metadata, and per-model thinking levels
+                before you send.
+              </p>
+            </article>
+            <article class="card" data-card>
+              <h3>Voice input</h3>
+              <p>Native PCM capture wired into Cohub ASR, for when typing is not practical.</p>
+            </article>
+            <article class="card" data-card>
+              <h3>Push that lands correctly</h3>
+              <p>
+                APNs and FCM notifications route into the target chat and refetch authoritative state
+                instead of trusting the payload.
+              </p>
+            </article>
+            <article class="card" data-card>
+              <h3>Offline-aware startup</h3>
+              <p>
+                User-scoped SQLite cache hydrates instantly, then reconciles against the server on
+                reconnect.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="download">
+        <div class="wrap">
+          <h2 data-reveal>Download</h2>
+          <div class="dl-row" data-reveal>
+            <a
+              class="dl-btn dl-btn--primary"
+              data-press
+              data-dl-android
+              href="https://github.com/markbang/cohub-mobile/releases/latest"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5743-6.1185-9.4396"
+                />
+              </svg>
+              <span class="dl-label">
+                Android
+                <small data-dl-android-note>APK</small>
+              </span>
+            </a>
+
+            <!-- TODO: point iOS at the TestFlight invite URL and drop aria-disabled -->
+            <a class="dl-btn" data-press href="#download" aria-disabled="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
+                />
+              </svg>
+              <span class="dl-label">
+                iOS
+                <small>TestFlight</small>
+              </span>
+            </a>
+          </div>
+          <p class="note" data-reveal>
+            iOS is in TestFlight beta —
+            <a href="https://github.com/markbang/cohub-mobile/releases">all builds</a>.
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site">
+      <div class="wrap">
+        <nav aria-label="Footer">
+          <a href="https://github.com/markbang/cohub-mobile">Source</a>
+          <a href="https://github.com/markbang/cohub-mobile/releases">Releases</a>
+          <a href="https://github.com/markbang/cohub-mobile/blob/main/CHANGELOG.md">Changelog</a>
+          <a href="https://github.com/markbang/cohub-mobile/issues">Issues</a>
+        </nav>
+        <p>Cohub Mobile is open source under the terms in the repository LICENSE.</p>
+      </div>
+    </footer>
+
+    <script>
+      // Resolve the Android APK the same way the app does (src/data/update-assets.ts):
+      // newest Available arm64-v8a record from the Yaota catalog, where the record's
+      // url must match the canonical /apk/cohub-v<version>-android-<abi>.apk path.
+      // On any failure the anchors keep their GitHub Releases fallback href.
+      (() => {
+        const ORIGIN = "https://mobile.talesofai.com";
+        const ABI = "arm64-v8a";
+        const VERSION = /^\d+\.\d+\.\d+$/;
+        const SHA256 = /^[a-f0-9]{64}$/;
+
+        const parseVersion = (value) => value.split(".").map(Number);
+        const isNewer = (candidate, current) => {
+          const a = parseVersion(candidate);
+          const b = parseVersion(current);
+          for (let i = 0; i < a.length; i += 1) {
+            if (a[i] !== b[i]) return a[i] > b[i];
+          }
+          return false;
+        };
+
+        const apkUrl = (version) => `${ORIGIN}/apk/cohub-v${version}-android-${ABI}.apk`;
+
+        const pickNewest = (payload) => {
+          if (!payload || !Array.isArray(payload.apks)) return null;
+          let newest = null;
+          for (const item of payload.apks) {
+            if (!item || typeof item !== "object") continue;
+            const version = typeof item.version === "string" ? item.version.trim() : "";
+            const arch = typeof item.arch === "string" ? item.arch.trim() : "";
+            const status = typeof item.status === "string" ? item.status.trim() : "Available";
+            const size = Number(item.size);
+            const sha256 = typeof item.sha256 === "string" ? item.sha256.trim().toLowerCase() : "";
+            if (!VERSION.test(version) || arch !== ABI || status !== "Available") continue;
+            if (!Number.isSafeInteger(size) || size <= 0 || !SHA256.test(sha256)) continue;
+            if (typeof item.url === "string" && item.url.trim() !== apkUrl(version)) continue;
+            if (typeof item.url !== "string") continue;
+            if (!newest || isNewer(version, newest.version)) newest = { version, size };
+          }
+          return newest;
+        };
+
+        const formatSize = (bytes) => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
+
+        const apply = (release) => {
+          document.querySelectorAll("[data-dl-android]").forEach((el) => {
+            el.href = apkUrl(release.version);
+          });
+          document.querySelectorAll("[data-dl-android-note]").forEach((el) => {
+            el.textContent = `v${release.version} · ${formatSize(release.size)}`;
+          });
+        };
+
+        fetch(`${ORIGIN}/api/apks`, { headers: { Accept: "application/json" } })
+          .then((response) => (response.ok ? response.json() : null))
+          .then((payload) => {
+            const release = pickNewest(payload);
+            if (release) apply(release);
+          })
+          .catch(() => {
+            // Keep the GitHub Releases fallback already in the markup.
+          });
+      })();
+    </script>
+
+    <script src="vendor/gsap.min.js"></script>
+    <script src="vendor/ScrollTrigger.min.js"></script>
+    <script>
+      (() => {
+        // Without both scripts the page stays fully visible; motion is additive.
+        if (!window.gsap || !window.ScrollTrigger) return;
+        gsap.registerPlugin(ScrollTrigger);
+
+        // Durations follow src/motion.ts (fade 150ms → sendBubble 360ms) rather than
+        // library defaults, so the page settles at the same speed as the app.
+        const mm = gsap.matchMedia();
+
+        mm.add(
+          {
+            reduce: "(prefers-reduced-motion: reduce)",
+            motionOk: "(prefers-reduced-motion: no-preference)",
+          },
+          (context) => {
+            if (context.conditions.reduce) return;
+
+            const hero = gsap.timeline({ defaults: { ease: "power2.out", duration: 0.42 } });
+            hero
+              .from("[data-hero='eyebrow']", { y: 10, autoAlpha: 0 }, 0)
+              .from("[data-hero='title']", { y: 16, autoAlpha: 0 }, 0.06)
+              .from("[data-hero='lead']", { y: 16, autoAlpha: 0 }, 0.12)
+              .from("[data-hero='cta'] > *", { y: 14, autoAlpha: 0, stagger: 0.08 }, 0.18);
+
+            ScrollTrigger.batch("[data-reveal]", {
+              start: "top 85%",
+              once: true,
+              onEnter: (elements) =>
+                gsap.from(elements, {
+                  y: 14,
+                  autoAlpha: 0,
+                  duration: 0.36,
+                  ease: "power2.out",
+                  stagger: 0.08,
+                  overwrite: true,
+                }),
+            });
+
+            ScrollTrigger.batch("[data-shot]", {
+              start: "top 82%",
+              once: true,
+              onEnter: (elements) =>
+                gsap.from(elements, {
+                  y: 22,
+                  autoAlpha: 0,
+                  duration: 0.5,
+                  ease: "power2.out",
+                  stagger: 0.1,
+                  overwrite: true,
+                }),
+            });
+
+            ScrollTrigger.batch("[data-card]", {
+              start: "top 88%",
+              once: true,
+              onEnter: (elements) =>
+                gsap.from(elements, {
+                  y: 14,
+                  autoAlpha: 0,
+                  duration: 0.36,
+                  ease: "power2.out",
+                  stagger: 0.06,
+                  overwrite: true,
+                }),
+            });
+
+            // Press feedback mirrors the app's pressIn (90ms) and press.scale.
+            const pressTweens = [];
+            document.querySelectorAll("[data-press]").forEach((el) => {
+              if (el.getAttribute("aria-disabled") === "true") return;
+              const scaleTo = gsap.quickTo(el, "scale", { duration: 0.09, ease: "power2.out" });
+              const down = () => scaleTo(0.975);
+              const up = () => scaleTo(1);
+              el.addEventListener("pointerdown", down);
+              el.addEventListener("pointerup", up);
+              el.addEventListener("pointerleave", up);
+              pressTweens.push({ el, down, up });
+            });
+            context.add(() => {
+              pressTweens.forEach(({ el, down, up }) => {
+                el.removeEventListener("pointerdown", down);
+                el.removeEventListener("pointerup", up);
+                el.removeEventListener("pointerleave", up);
+              });
+            });
+          },
+        );
+      })();
+    </script>
+  </body>
+</html>

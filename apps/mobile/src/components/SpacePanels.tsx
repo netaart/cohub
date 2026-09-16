@@ -16,6 +16,8 @@ import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { useApp } from "@/src/data/context";
+import { useSyncScope } from "@/src/data/use-sync-scope";
+import { reconcileSessionHead } from "@/src/data/session-list-sync";
 import {
   fetchLabelSessionIds,
   fetchSessionLabels,
@@ -287,6 +289,7 @@ function mergePanelSessions(current: UserSessionListItem[], incoming: UserSessio
   const byId = new Map(current.map((session) => [session.id, session]));
   for (const session of incoming) {
     const previous = byId.get(session.id);
+    if (previous && Date.parse(previous.updatedAt) > Date.parse(session.updatedAt)) continue;
     byId.set(session.id, { ...previous, ...session, space: session.space ?? previous?.space ?? knownSpace });
   }
   return sortByRecent([...byId.values()]);
@@ -330,6 +333,9 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
   const [scopeCursor, setScopeCursor] = useState<string | null>(null);
   const [scopeHasMore, setScopeHasMore] = useState(false);
   const [scopeInitialized, setScopeInitialized] = useState(false);
+  const tailLoadedRef = useRef(false);
+  const scopeGenerationRef = useRef(0);
+  useEffect(() => () => { scopeGenerationRef.current += 1; }, [client, spaceId]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [listFilter, setListFilter] = useState<ChatListFilter>({ kind: "all" });
@@ -429,12 +435,19 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
   // which never change `listItems`, so they must flow through extraData.
   const rowExtraData = useMemo(() => ({ client, t, theme, prefetchSession }), [client, t, theme, prefetchSession]);
   const loadMore = async () => {
-    if (!client || loadingMore || (scopeInitialized && !scopeHasMore)) return;
+    if (!client || loadingMore) return;
+    if (scopeInitialized && !scopeHasMore) {
+      if (loadMoreError) await refreshPanel().catch(() => undefined);
+      return;
+    }
     setLoadingMore(true);
     setLoadMoreError(null);
+    const generation = scopeGenerationRef.current;
     try {
       const cursor = scopeCursor ?? cursorAfterOldestSession(sessions);
       const response = await client.space(spaceId).sessions.list({ limit: 60, ...(cursor ? { cursor } : {}) });
+      if (generation !== scopeGenerationRef.current) return;
+      tailLoadedRef.current = true;
       setExtraSessions((current) => mergePanelSessions(current, response.sessions, spaceId, spaceName));
       void refreshSessionStatuses(response.sessions);
       setScopeCursor(response.pageInfo?.nextCursor ?? null);
@@ -446,7 +459,28 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
       setLoadingMore(false);
     }
   };
-  const showLoadMore = Boolean(client && !trimmedQuery && (!scopeInitialized || scopeHasMore));
+  const refreshPanel = async () => {
+    if (!client) return;
+    const generation = scopeGenerationRef.current;
+    const requestStartedAt = Date.now();
+    try {
+      const response = await client.space(spaceId).sessions.list({ limit: 60 });
+      if (generation !== scopeGenerationRef.current) return;
+      setExtraSessions((current) => reconcileSessionHead(current, response.sessions, response.pageInfo?.hasMore === true, requestStartedAt));
+      if (!tailLoadedRef.current) {
+        setScopeCursor(response.pageInfo?.nextCursor ?? null);
+        setScopeHasMore(response.pageInfo?.hasMore === true);
+        setScopeInitialized(true);
+      }
+      setLoadMoreError(null);
+      await refreshSessionStatuses(response.sessions, { silent: true, throwOnError: true });
+    } catch (error) {
+      if (generation === scopeGenerationRef.current) setLoadMoreError(error instanceof Error ? error.message : t("space.panel.loadMoreError"));
+      throw error;
+    }
+  };
+  useSyncScope(`space:${spaceId}:chat-panel`, refreshPanel, 15_000);
+  const showLoadMore = Boolean(client && !trimmedQuery && (!scopeInitialized || scopeHasMore || loadMoreError));
   const emptyLoading = (remoteQueryMatches && remoteSearch.loading) || labelSessionsLoading;
   const emptyLabel = listFilter.kind === "label"
     ? t("space.panel.empty.labeled", { name: listFilter.label.name })
@@ -489,6 +523,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
       </View>
       <LegendList
         estimatedItemSize={68}
+        maintainVisibleContentPosition
         scrollsChildToFocus={false}
         data={listItems}
         extraData={rowExtraData}
@@ -519,9 +554,10 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const inFlightRef = useRef(false);
 
-  const load = useCallback(async () => {
-    if (!enabled) return;
+  const load = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (!enabled || inFlightRef.current) return;
     const currentRequest = ++requestIdRef.current;
     if (!client) {
       setEntries([]);
@@ -529,15 +565,16 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
       setLoading(false);
       return;
     }
-    setLoading(true);
-    setError(null);
+    inFlightRef.current = true;
+    if (!options.silent) { setLoading(true); setError(null); setEntries([]); }
     try {
       const result = await client.space(spaceId).files.list(path || undefined);
-      if (currentRequest === requestIdRef.current) setEntries(result.entries);
+      if (currentRequest === requestIdRef.current) { setEntries(result.entries); setError(null); }
     } catch (caught) {
       if (currentRequest === requestIdRef.current) setError(caught instanceof Error ? caught.message : t("files.loadError"));
+      if (options.silent) throw caught;
     } finally {
-      if (currentRequest === requestIdRef.current) setLoading(false);
+      if (currentRequest === requestIdRef.current) { inFlightRef.current = false; setLoading(false); }
     }
   }, [client, enabled, path, spaceId, t]);
 
@@ -550,8 +587,10 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
     return () => {
       active = false;
       requestIdRef.current += 1;
+      inFlightRef.current = false;
     };
   }, [enabled, load]);
+  useSyncScope(`space:${spaceId}:files-panel:${path}`, () => load({ silent: true }), 30_000, enabled);
 
   const openEntry = (entry: SpaceFsEntry) => {
     if (entry.type === "dir") {
@@ -569,9 +608,10 @@ function FilesPanel({ enabled = true, spaceId, spaceName, client, onClose, onOpe
     <View style={styles.panelContent}>
       <TopBar title={path ? spacePathName(path) : t("files.title")} subtitle={path ? `${spaceName} / ${path}` : spaceName} actions={<><IconButton name="external-link" label={t("space.panel.openFullFiles")} onPress={onOpenFilesPage} /><IconButton name="x" label={t("ui.sheet.close", { title: t("files.title") })} onPress={onClose} /></>} />
       {path ? <Pressable accessibilityRole="button" accessibilityLabel={t("space.panel.backToParent")} onPress={() => setPath(parentSpacePath(path))} style={({ pressed }) => [styles.parentBar, { borderBottomColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}><AppIcon name="arrow-left" size={16} color={theme.colors.textMuted} /><Text style={[typography.caption, { color: theme.colors.textSecondary }]}>{parentSpacePath(path) ? t("files.backTo", { name: spacePathName(parentSpacePath(path)) }) : t("files.backToFiles")}</Text></Pressable> : null}
+      {error && entries.length > 0 ? <Text selectable style={[typography.caption, { color: theme.colors.danger, padding: 16 }]}>{error}</Text> : null}
       {loading ? (
         <View style={styles.emptyPanel}><ActivityIndicator size="small" color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>{t("files.loading")}</Text></View>
-      ) : error ? (
+      ) : error && entries.length === 0 ? (
         <View style={styles.emptyPanel}><AppIcon name="cloud-off" size={25} color={theme.colors.danger} /><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center", marginTop: 10 }]}>{error}</Text><PrimaryButton label={t("common.retry")} icon="refresh" onPress={() => void load()} style={{ marginTop: 15, minHeight: 42 }} /></View>
       ) : (
         <LegendList

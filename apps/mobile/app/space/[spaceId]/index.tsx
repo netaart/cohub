@@ -7,6 +7,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionRow } from "@/src/components/SessionRow";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp } from "@/src/data/context";
+import { useSyncScope } from "@/src/data/use-sync-scope";
+import { useSpaceRealtime } from "@/src/data/use-space-realtime";
+import { mergeTaskRuns, refreshTaskRuns } from "@/src/data/task-sync";
 import { publishSpaceSessionCount, SPACE_SESSION_COUNT_PAGE_SIZE } from "@/src/data/space-session-counts";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
@@ -31,6 +34,7 @@ export default function SpaceScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<Params>();
   const spaceId = Array.isArray(params.spaceId) ? params.spaceId[0] : params.spaceId;
+  useSpaceRealtime(spaceId ? [spaceId] : []);
   const theme = useAppTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -65,6 +69,10 @@ export default function SpaceScreen() {
   const resourcesRequestRef = useRef(0);
   const sessionsRefreshAtRef = useRef(0);
   const sessionsRequestRef = useRef(0);
+  const resourcesInFlightRef = useRef(false);
+  const sessionsInFlightRef = useRef(false);
+  const tasksInFlightRef = useRef(false);
+  const tasksRequestRef = useRef(0);
   const cachedSpace = state.spaces.find((item) => item.id === spaceId) ?? null;
   const cachedSpaceRef = useRef<SpaceRecord | null>(cachedSpace);
   useEffect(() => {
@@ -113,31 +121,37 @@ export default function SpaceScreen() {
     upsertSpace(resolved);
   }, [client, refreshSpacePin, spaceId, t, upsertSpace]);
 
-  const loadResources = useCallback(async (options: { force?: boolean } = {}) => {
-    if (!client || !spaceId) return;
+  const loadResources = useCallback(async (options: { force?: boolean; silent?: boolean } = {}) => {
+    if (!client || !spaceId || resourcesInFlightRef.current) return;
     if (!options.force && Date.now() - resourcesRefreshAtRef.current < SPACE_REFRESH_INTERVAL_MS) return;
     const requestToken = ++resourcesRequestRef.current;
-    setLoadingResources(true);
+    resourcesInFlightRef.current = true;
+    const taskToken = ++tasksRequestRef.current;
+    if (!options.silent) setLoadingResources(true);
     const [checkpointResult, appResult, taskResult] = await Promise.allSettled([
       client.space(spaceId).checkpoints.list({ limit: 5 }),
       client.apps.listBySpace(spaceId),
       client.tasks.list({ spaceId, limit: 8 }),
     ]);
+    resourcesInFlightRef.current = false;
     if (resourcesRequestRef.current !== requestToken) return;
-    resourcesRefreshAtRef.current = Date.now();
+    const tasksCurrent = taskToken === tasksRequestRef.current;
+    if ([checkpointResult, appResult, taskResult].every((result) => result.status === "fulfilled")) resourcesRefreshAtRef.current = Date.now();
     // Settled sections replace their data; failed ones keep what is already on screen.
     setResources((current) => ({
       checkpoints: checkpointResult.status === "fulfilled" ? checkpointResult.value.checkpoints : current.checkpoints,
       apps: appResult.status === "fulfilled" ? appResult.value.apps : current.apps,
-      tasks: taskResult.status === "fulfilled" ? taskResult.value.runs : current.tasks,
+      tasks: tasksCurrent && taskResult.status === "fulfilled" ? options.silent ? mergeTaskRuns(current.tasks, taskResult.value.runs) : taskResult.value.runs : current.tasks,
     }));
     setResourceFailures({
       checkpoints: checkpointResult.status === "rejected",
       apps: appResult.status === "rejected",
       tasks: taskResult.status === "rejected",
     });
-    if (taskResult.status === "fulfilled") setTaskCursor(taskResult.value.pageInfo?.hasMore ? taskResult.value.pageInfo.nextCursor : null);
+    if (tasksCurrent && taskResult.status === "fulfilled" && !options.silent) setTaskCursor(taskResult.value.pageInfo?.hasMore ? taskResult.value.pageInfo.nextCursor : null);
     setLoadingResources(false);
+    const failed = [checkpointResult, appResult, taskResult].find((result) => result.status === "rejected");
+    if (options.silent && failed?.status === "rejected") throw failed.reason;
   }, [client, spaceId]);
 
   const loadMoreTasks = async () => {
@@ -145,18 +159,19 @@ export default function SpaceScreen() {
     setTasksLoadingMore(true);
     try {
       const result = await client.tasks.list({ spaceId, limit: 8, cursor: taskCursor });
-      setResources((current) => ({ ...current, tasks: [...new Map([...current.tasks, ...result.runs].map((task) => [task.id, task])).values()] }));
+      setResources((current) => ({ ...current, tasks: mergeTaskRuns(current.tasks, result.runs) }));
       setTaskCursor(result.pageInfo?.hasMore ? result.pageInfo.nextCursor : null);
     } finally {
       setTasksLoadingMore(false);
     }
   };
 
-  const loadSessions = useCallback(async (options: { force?: boolean } = {}) => {
-    if (!client || !spaceId) return;
+  const loadSessions = useCallback(async (options: { force?: boolean; silent?: boolean } = {}) => {
+    if (!client || !spaceId || sessionsInFlightRef.current) return;
     if (!options.force && Date.now() - sessionsRefreshAtRef.current < SPACE_REFRESH_INTERVAL_MS) return;
     const requestToken = ++sessionsRequestRef.current;
-    setSessionsLoading(true);
+    sessionsInFlightRef.current = true;
+    if (!options.silent) setSessionsLoading(true);
     try {
       const response = await client.space(spaceId).sessions.list({ limit: SPACE_SESSION_COUNT_PAGE_SIZE });
       if (sessionsRequestRef.current !== requestToken) return;
@@ -166,12 +181,14 @@ export default function SpaceScreen() {
       setSpaceSessionsHasMore(hasMore);
       setSessionsFailed(false);
       publishSpaceSessionCount(client, spaceId, response.sessions.length, hasMore);
-      void refreshSessionStatuses(response.sessions);
-    } catch {
+      setSessionsLoading(false);
+      await refreshSessionStatuses(response.sessions, { silent: options.silent, throwOnError: options.silent });
+    } catch (error) {
       if (sessionsRequestRef.current !== requestToken) return;
-      sessionsRefreshAtRef.current = Date.now();
       setSessionsFailed(true);
+      if (options.silent) throw error;
     } finally {
+      sessionsInFlightRef.current = false;
       if (sessionsRequestRef.current === requestToken) setSessionsLoading(false);
     }
   }, [client, refreshSessionStatuses, spaceId]);
@@ -194,12 +211,33 @@ export default function SpaceScreen() {
     void loadSpace();
     void loadResources();
     void loadSessions();
-    return () => {
-      // A response that outlives this focus must not write over fresher state.
-      resourcesRequestRef.current += 1;
-      sessionsRequestRef.current += 1;
-    };
   }, [loadResources, loadSessions, loadSpace]));
+
+  useEffect(() => () => {
+    resourcesRequestRef.current += 1;
+    sessionsRequestRef.current += 1;
+    tasksRequestRef.current += 1;
+  }, [client, spaceId]);
+
+  const refreshTasks = useCallback(async () => {
+    if (!client || !spaceId || resourcesInFlightRef.current || tasksInFlightRef.current) return;
+    const token = ++tasksRequestRef.current;
+    tasksInFlightRef.current = true;
+    try {
+      const runs = await refreshTaskRuns(client, spaceId, resources.tasks);
+      if (token !== tasksRequestRef.current) return;
+      setResources((current) => ({ ...current, tasks: mergeTaskRuns(current.tasks, runs) }));
+      setResourceFailures((current) => ({ ...current, tasks: false }));
+    } catch (error) {
+      if (token === tasksRequestRef.current) setResourceFailures((current) => ({ ...current, tasks: true }));
+      throw error;
+    } finally {
+      tasksInFlightRef.current = false;
+    }
+  }, [client, resources.tasks, spaceId]);
+  useSyncScope(`space:${spaceId}:chats`, () => loadSessions({ force: true, silent: true }), 15_000, Boolean(spaceId));
+  useSyncScope(`space:${spaceId}:resources`, () => loadResources({ force: true, silent: true }), 60_000, Boolean(spaceId));
+  useSyncScope(`space:${spaceId}:tasks`, refreshTasks, resources.tasks.some((task) => task.status === "running" || task.status === "pending") ? 10_000 : 60_000, Boolean(spaceId));
 
   if (!space) {
     const opening = Boolean(spaceId) && (state.booting || !client || spaceLoading);
@@ -259,6 +297,7 @@ export default function SpaceScreen() {
       onBack={() => router.back()}
       actions={<><IconButton name="folder-open" label={t("space.openFilesPanel")} onPress={() => setActivePanel("files")} /><IconButton name="settings" label={t("space.settings")} onPress={() => router.push({ pathname: "/space/[spaceId]/settings", params: { spaceId: space.id } })} /><View ref={spaceActionsRef} collapsable={false}><IconButton name="more" label={t("space.actions")} onPress={() => setSpaceActionsOpen(true)} /></View></>}
     />
+    {state.realtimeError ? <Text selectable style={[typography.caption, { color: theme.colors.danger, marginHorizontal: 16, marginTop: 10 }]}>{state.realtimeError}</Text> : null}
     {pinError ? <Pressable accessibilityRole="button" accessibilityLabel={t("space.pin.dismiss")} onPress={() => setPinError(null)} style={{ marginHorizontal: 16, marginTop: 10, padding: 10, borderRadius: 10, backgroundColor: theme.colors.dangerSoft }}><Text style={[typography.caption, { color: theme.colors.danger }]}>{pinError}</Text></Pressable> : null}
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.background }}

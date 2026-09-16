@@ -43,8 +43,9 @@ export function useSpaceListData(client: CohubClient | null, userKey: string) {
         setOverview(data);
         setError(null);
         await saveSpaceListCache(userKey, data);
-      } catch {
-        if (generation.current === token && !options.silent) setError("Could not refresh recent Spaces. Check your connection and retry.");
+      } catch (error) {
+        if (generation.current === token) setError("Could not refresh recent Spaces. Check your connection and retry.");
+        if (options.silent) throw error;
       } finally {
         if (generation.current === token) setLoading(false);
       }

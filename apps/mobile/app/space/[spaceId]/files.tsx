@@ -5,6 +5,8 @@ import { LegendList } from "@legendapp/list/react-native";
 import { Alert, Pressable, Share, Text, View } from "react-native";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
 import { useApp } from "@/src/data/context";
+import { useSyncScope } from "@/src/data/use-sync-scope";
+import { useSpaceRealtime } from "@/src/data/use-space-realtime";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, TopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
@@ -25,6 +27,7 @@ export default function FilesScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<Params>();
   const spaceId = firstParam(params.spaceId);
+  useSpaceRealtime(spaceId ? [spaceId] : []);
   const currentPath = normalizeSpacePath(firstParam(params.path));
   const theme = useAppTheme();
   const { t } = useTranslation();
@@ -35,8 +38,10 @@ export default function FilesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshToken, setRefreshToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const inFlightRef = useRef(false);
 
-  const loadEntries = useCallback(async () => {
+  const loadEntries = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (inFlightRef.current) return;
     const requestId = ++requestIdRef.current;
     if (!client || !spaceId) {
       setEntries([]);
@@ -45,15 +50,16 @@ export default function FilesScreen() {
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    inFlightRef.current = true;
+    if (!options.silent) { setLoading(true); setError(null); setEntries([]); }
     try {
       const result = await client.space(spaceId).files.list(currentPath || undefined);
-      if (requestId === requestIdRef.current) setEntries(result.entries);
+      if (requestId === requestIdRef.current) { setEntries(result.entries); setError(null); }
     } catch (caught) {
       if (requestId === requestIdRef.current) setError(caught instanceof Error ? caught.message : t("files.loadError"));
+      if (options.silent) throw caught;
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
+      if (requestId === requestIdRef.current) { inFlightRef.current = false; setLoading(false); }
     }
   }, [client, currentPath, spaceId, t]);
 
@@ -65,8 +71,10 @@ export default function FilesScreen() {
     return () => {
       active = false;
       requestIdRef.current += 1;
+      inFlightRef.current = false;
     };
   }, [loadEntries, refreshToken]);
+  useSyncScope(`space:${spaceId}:files:${currentPath}`, () => loadEntries({ silent: true }), 30_000, Boolean(spaceId));
 
   const openPath = useCallback(
     (path: string) => {
@@ -152,9 +160,10 @@ export default function FilesScreen() {
           onPress={goToParent}
         />
       ) : null}
+      {error && entries.length > 0 ? <Text selectable style={[typography.caption, { color: theme.colors.danger, padding: 16 }]}>{error}</Text> : null}
       {loading ? (
         <LoadingRows count={6} />
-      ) : error ? (
+      ) : error && entries.length === 0 ? (
         <FilesError message={error} onRetry={() => setRefreshToken((value) => value + 1)} />
       ) : (
         <LegendList

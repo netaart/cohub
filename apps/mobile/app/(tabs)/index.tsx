@@ -1,6 +1,6 @@
 import { useFocusEffect, useIsFocused, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
+import { LegendList, type LegendListRef, type ViewToken } from "@legendapp/list/react-native";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
@@ -14,10 +14,13 @@ import { useApp } from "@/src/data/context";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { AppIcon, ConnectionBanner, DataError, EmptyState, ExpandableSearchBar, IconButton, LoadingRows, Screen } from "@/src/ui";
-import { getSessionStatus, hasMoreRecentSessions, isSessionInFilterWindow, sessionFilterCutoff } from "@/src/data/session-status";
+import { sessionListStatus, hasMoreRecentSessions, isSessionInFilterWindow, sessionFilterCutoff } from "@/src/data/session-status";
 import { loadSessionFilterMinutes, loadSessionSourcePreference, saveSessionSourcePreference, useSessionFilterPreference, useSessionSourcePreference } from "@/src/data/session-filter-preference";
 import type { SessionSourceFilter } from "@/src/data/session-source";
 import { useSourceSessions } from "@/src/data/use-source-sessions";
+import { useSyncScope } from "@/src/data/use-sync-scope";
+import { useSpaceRealtime } from "@/src/data/use-space-realtime";
+import { emptyRunningSessions } from "@/src/data/running-sessions";
 import { SpaceRow } from "@/src/components/SpaceRow";
 import { EdgeHeader, useEdgeChrome } from "@/src/ui/EdgeChrome";
 
@@ -36,7 +39,7 @@ export default function ChatsScreen() {
   const tabBarInset = useFloatingTabBarInset();
   const { headerHeight, onHeaderLayout } = useEdgeChrome();
   const isFocused = useIsFocused();
-  const { state, client, connectionState, refreshHome, refreshSessionStatuses, loadMoreSessions, prefetchSession } = useApp();
+  const { state, client, connectionState, refreshHome, refreshChats, discoverRunningSessions, refreshSessionStatuses, loadMoreSessions, prefetchSession } = useApp();
   const filterPreference = useSessionFilterPreference();
   const [cutoff, setCutoff] = useState(() => sessionFilterCutoff(filterPreference.minutes, Date.now()));
   const searchRef = useRef<TextInput>(null);
@@ -58,18 +61,28 @@ export default function ChatsScreen() {
   const sourceSessionList = sourceSessions.sessions;
   const sourceLoadMore = sourceSessions.loadMore;
   const sourceLoadingMore = sourceSessions.loadingMore;
-  const baseSessions = sourceFilter === "all" ? state.sessions : sourceSessionList;
-  const dataError = filterPreference.error ?? sourcePreference.error ?? state.error ?? state.sessionsError ?? state.sessionStatusError ?? sourceSessions.error;
+  const runningQuery = state.runningSessions[sourceFilter] ?? emptyRunningSessions;
+  const baseSessions = filter === "running" ? runningQuery.sessions : sourceFilter === "all" ? state.sessions : sourceSessionList;
+  useSyncScope(`running:${sourceFilter}`, () => discoverRunningSessions(sourceFilter), 30_000, filter === "running" && !state.booting, 30_000);
+  const [visibleSpaceIds, setVisibleSpaceIds] = useState<string[]>([]);
+  useSpaceRealtime(visibleSpaceIds);
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<ChatListItem>[] }) => {
+    const ids = [...new Set(viewableItems.filter((token) => token.isViewable).map(({ item }) => item.kind === "local-session" ? item.session.spaceId : item.kind === "local-space" ? item.space.id : item.hit.spaceId))].slice(0, 10);
+    setVisibleSpaceIds((previous) => previous.join(",") === ids.join(",") ? previous : ids);
+  }, []);
+  const activeChats = baseSessions.some((session) => sessionListStatus(session, state.sessionLatestTurns[session.id], state.sessionTurnStatuses) === "running");
+  useSyncScope("chats", refreshChats, activeChats ? 15_000 : 30_000, sourceFilter === "all" && filter !== "running" && !state.booting);
+  const dataError = (filter === "running" ? runningQuery.error : filterPreference.error ?? state.sessionsError ?? sourceSessions.error) ?? sourcePreference.error ?? state.error ?? state.realtimeError ?? state.sessionStatusError;
   const remoteSearch = useRemoteSearch(client, query, { enabled: filter === "all" && sourceFilter === "all", types: CHAT_SEARCH_TYPES });
   const trimmedQuery = normalizeSearchQuery(query);
   const sessionsRef = useRef(baseSessions);
   useEffect(() => { sessionsRef.current = baseSessions; }, [baseSessions]);
   useEffect(() => {
     if (sourceFilter === "all" || sourceSessionList.length === 0) return;
-    void refreshSessionStatuses(sourceSessionList);
+    void refreshSessionStatuses(sourceSessionList, { silent: true });
   }, [refreshSessionStatuses, sourceFilter, sourceSessionList]);
   useFocusEffect(useCallback(() => {
-    if (filter === "all" || !filterPreference.loaded) return;
+    if (filter !== "completed" || !filterPreference.loaded) return;
     const updateCutoff = () => setCutoff(sessionFilterCutoff(filterPreference.minutes, Date.now()));
     updateCutoff();
     void refreshSessionStatuses(sessionsRef.current);
@@ -80,12 +93,12 @@ export default function ChatsScreen() {
   const localSessions = useMemo(() => {
     const needle = trimmedQuery.toLowerCase();
     return baseSessions.filter((session) => {
-      const matchesFilter = filter === "all" || (isSessionInFilterWindow(session, cutoff) && getSessionStatus(state.sessionLatestTurns[session.id]?.status) === filter);
+      const matchesFilter = filter === "all" || ((filter === "running" || isSessionInFilterWindow(session, cutoff)) && sessionListStatus(session, state.sessionLatestTurns[session.id], state.sessionTurnStatuses) === filter);
       if (!matchesFilter) return false;
       if (!needle) return true;
       return [session.title, session.latestMessageText, session.space?.name].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false);
     });
-  }, [baseSessions, cutoff, filter, state.sessionLatestTurns, trimmedQuery]);
+  }, [baseSessions, cutoff, filter, state.sessionLatestTurns, state.sessionTurnStatuses, trimmedQuery]);
   const localSpaces = useMemo(() => {
     if (filter !== "all" || sourceFilter !== "all" || !trimmedQuery) return [];
     const needle = trimmedQuery.toLowerCase();
@@ -116,9 +129,9 @@ export default function ChatsScreen() {
     [spaceSessionCounts, t, theme, prefetchSession],
   );
 
-  const filteringPages = isFocused && client !== null && sourceFilter === "all" && filter !== "all" && filterPreference.loaded && !state.refreshing && !dataError && hasMoreRecentSessions({ hasMore: state.sessionsHasMore, cursor: state.sessionsCursor, boundary: state.sessionsPageBoundary, cutoff });
+  const filteringPages = isFocused && client !== null && sourceFilter === "all" && filter === "completed" && filterPreference.loaded && !state.refreshing && !dataError && hasMoreRecentSessions({ hasMore: state.sessionsHasMore, cursor: state.sessionsCursor, boundary: state.sessionsPageBoundary, cutoff });
   const sourceBoundary = sourceSessionList.at(-1) ?? null;
-  const sourceFilteringPages = isFocused && client !== null && sourceFilter !== "all" && filter !== "all" && filterPreference.loaded && !dataError && hasMoreRecentSessions({ hasMore: sourceSessions.hasMore, cursor: sourceSessions.hasMore ? "more" : null, boundary: sourceBoundary ? { lastMessageAt: sourceBoundary.lastMessageAt } : null, cutoff });
+  const sourceFilteringPages = isFocused && client !== null && sourceFilter !== "all" && filter === "completed" && filterPreference.loaded && !dataError && hasMoreRecentSessions({ hasMore: sourceSessions.hasMore, cursor: sourceSessions.hasMore ? "more" : null, boundary: sourceBoundary ? { lastMessageAt: sourceBoundary.lastMessageAt } : null, cutoff });
   const statusesLoading = state.sessionStatusRequests > 0;
   useEffect(() => {
     if (filteringPages && !state.refreshing && !state.sessionsLoadingMore && !statusesLoading) void loadMoreSessions();
@@ -126,7 +139,7 @@ export default function ChatsScreen() {
   useEffect(() => {
     if (sourceFilteringPages && !sourceLoadingMore && !statusesLoading) sourceLoadMore();
   }, [sourceFilteringPages, sourceLoadMore, sourceLoadingMore, statusesLoading]);
-  const refresh = () => { setCutoff(sessionFilterCutoff(filterPreference.minutes, Date.now())); if (sourceFilter !== "all") sourceSessions.reload(); void loadSessionSourcePreference().catch(() => undefined); return loadSessionFilterMinutes().then(() => refreshHome()).catch(() => undefined); };
+  const refresh = () => { if (filter === "running") return discoverRunningSessions(sourceFilter).catch(() => undefined); setCutoff(sessionFilterCutoff(filterPreference.minutes, Date.now())); if (sourceFilter !== "all") sourceSessions.reload(); void loadSessionSourcePreference().catch(() => undefined); return loadSessionFilterMinutes().then(() => refreshHome()).catch(() => undefined); };
   const refreshOnPull = async () => {
     setPullRefreshing(true);
     try {
@@ -166,6 +179,8 @@ export default function ChatsScreen() {
         data={listItems}
         extraData={rowExtraData}
         estimatedItemSize={76}
+        maintainVisibleContentPosition
+        onViewableItemsChanged={onViewableItemsChanged}
         keyExtractor={(item) => item.kind === "remote-session" ? `remote-session:${item.hit.sessionId}` : item.kind === "local-session" ? `session:${item.session.id}` : item.kind === "remote-space" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
         renderItem={({ item }) => {
           if (item.kind === "remote-session") return <SessionSearchRow hit={item.hit} onPress={(target) => openSearchSession(item.hit.sessionId, target)} onPressIn={() => prefetchSession(item.hit.sessionId)} />;
@@ -176,7 +191,7 @@ export default function ChatsScreen() {
         keyboardShouldPersistTaps="handled"
         refreshing={pullRefreshing}
         onRefresh={refreshOnPull}
-        onEndReached={() => { if (trimmedQuery) return; if (sourceFilter !== "all") { sourceLoadMore(); return; } if (filter === "all") void loadMoreSessions(); }}
+        onEndReached={() => { if (trimmedQuery || filter === "running") return; if (sourceFilter !== "all") { sourceLoadMore(); return; } if (filter === "all") void loadMoreSessions(); }}
         onEndReachedThreshold={0.7}
         contentInsetAdjustmentBehavior="never"
         progressViewOffset={headerHeight}
@@ -199,12 +214,12 @@ export default function ChatsScreen() {
               </Pressable>
             </View>
           </View>
-          {filter !== "all" ? <Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 6 }]}>{t("chats.filter.window", { minutes: filterPreference.minutes })}</Text> : null}
+          {filter === "completed" ? <Text style={[typography.caption, { color: theme.colors.textMuted, paddingVertical: 6 }]}>{t("chats.filter.window", { minutes: filterPreference.minutes })}</Text> : null}
           {remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator accessibilityLabel={t("chats.searching")} size="small" color={theme.colors.accent} /></View> : null}
           {remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><IconButton name="refresh" label={t("chats.search.retry")} onPress={remoteSearch.retry} tone="accent" /></View> : null}
         </View>}
-        ListEmptyComponent={dataError ? <EmptyState icon="cloud-off" title={t("chats.error.title")} description={t("chats.error.body")} /> : state.booting || (filter !== "all" && (state.refreshing || !filterPreference.loaded || statusesLoading || filteringPages)) || (sourceFilter !== "all" && (sourceSessions.loading || !sourceSessions.initialized)) ? <LoadingRows count={5} /> : searchEmpty}
-        ListFooterComponent={!dataError && (state.sessionsLoadingMore || (filter !== "all" && (statusesLoading || filteringPages)) || (sourceFilter !== "all" && (sourceLoadingMore || (filter !== "all" && (statusesLoading || sourceFilteringPages))))) ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator accessibilityLabel={t("chats.loadingStatuses")} size="small" color={theme.colors.accent} /></View> : null}
+        ListEmptyComponent={dataError ? <EmptyState icon="cloud-off" title={t("chats.error.title")} description={t("chats.error.body")} /> : state.booting || (filter === "running" ? !runningQuery.loaded : (filter === "completed" && (state.refreshing || !filterPreference.loaded || statusesLoading || filteringPages)) || (sourceFilter !== "all" && (sourceSessions.loading || !sourceSessions.initialized))) ? <LoadingRows count={5} /> : searchEmpty}
+        ListFooterComponent={!dataError && filter !== "running" && (state.sessionsLoadingMore || (filter !== "all" && (statusesLoading || filteringPages)) || (sourceFilter !== "all" && (sourceLoadingMore || (filter !== "all" && (statusesLoading || sourceFilteringPages))))) ? <View style={{ paddingVertical: 18, alignItems: "center" }}><ActivityIndicator accessibilityLabel={t("chats.loadingStatuses")} size="small" color={theme.colors.accent} /></View> : null}
       />
       {sourceMenuOpen ? <AnchoredActionMenu
         anchorRef={sourceButtonRef}

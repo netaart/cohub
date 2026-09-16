@@ -24,7 +24,13 @@ import { compactionFromMessage, compactionStats } from "../src/data/compaction.t
 import { mapRemoteSearchResults, normalizeSearchQuery } from "../src/data/session-search.ts";
 import { selectSpaceList, recentSpaceVisits, SPACE_VISIT_MAX_AGE_MS } from "../src/data/space-list.ts";
 import { createSessionLifecycle } from "../src/data/session-lifecycle.ts";
-import { DEFAULT_SESSION_FILTER_MINUTES, getSessionStatus, hasMoreRecentSessions, isSessionInFilterWindow, latestTurn, loadSessionLatestTurns, parseSessionFilterMinutes, reconcileLatestTurn, reconcileTurnStatusPatch, sessionFilterCutoff, sessionPageState } from "../src/data/session-status.ts";
+import { createSyncScheduler } from "../src/data/sync-scheduler.ts";
+import { reconcileSessionHead } from "../src/data/session-list-sync.ts";
+import { mergeTaskRuns, refreshTaskRuns } from "../src/data/task-sync.ts";
+import { emptyRunningSessions, loadRunningSessions } from "../src/data/running-sessions.ts";
+import { createSpaceRealtime } from "../src/data/space-realtime.ts";
+import { spaceRealtimeChange } from "../src/data/space-realtime-events.ts";
+import { DEFAULT_SESSION_FILTER_MINUTES, getSessionStatus, sessionListStatus, hasMoreRecentSessions, isSessionInFilterWindow, latestTurn, loadSessionLatestTurns, parseSessionFilterMinutes, reconcileLatestTurn, reconcileTurnStatusPatch, sessionFilterCutoff, sessionPageState } from "../src/data/session-status.ts";
 import { followupPreviewText, queuedFollowupTurns, followupQueueItems, isOptimisticFollowup, isSendQueueItem, shouldQueueFollowup } from "../src/data/followup-queue.ts";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError } from "../src/data/code-file.ts";
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
@@ -42,6 +48,201 @@ import { parseBrowserPreference } from "../src/data/browser-preference.ts";
 import { channelHealthState, createSettingsChannel, createWeChatLoginPoller, isChannelProvider, missingChannelField } from "../src/data/channel-settings.ts";
 
 import { activityRange, localDateKey, tokenDays } from "../src/data/activity.ts";
+
+const flushSync = async () => { for (let tick = 0; tick < 20; tick++) await Promise.resolve(); };
+mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
+try {
+  const requests = [];
+  const scheduler = createSyncScheduler({ random: () => 0.5 });
+  const task = { intervalMs: () => 1000, run: () => { const request = Promise.withResolvers(); requests.push(request); return request.promise; } };
+  const stop = scheduler.watch("chats", task);
+  const stopSecondReader = scheduler.watch("chats", task);
+  mock.timers.tick(5000);
+  await flushSync();
+  assert.equal(requests.length, 0, "background scopes do not start polling");
+  scheduler.setActive(true);
+  scheduler.invalidate();
+  scheduler.invalidate("chats");
+  mock.timers.tick(250);
+  await flushSync();
+  assert.equal(requests.length, 1, "focus/foreground/reconnect and multiple readers share one request");
+  scheduler.invalidate("chats");
+  scheduler.invalidate("chats");
+  requests[0].resolve();
+  await flushSync();
+  mock.timers.tick(250);
+  await flushSync();
+  assert.equal(requests.length, 2, "invalidation during a read queues exactly one follow-up");
+  scheduler.setActive(false);
+  requests[1].resolve();
+  await flushSync();
+  mock.timers.tick(10000);
+  await flushSync();
+  assert.equal(requests.length, 2, "finishing in the background does not restart a timer");
+  scheduler.setActive(true);
+  mock.timers.tick(250);
+  await flushSync();
+  assert.equal(requests.length, 3);
+  stop();
+  stopSecondReader();
+  scheduler.dispose();
+  requests[2].resolve();
+  await flushSync();
+  mock.timers.tick(10000);
+  await flushSync();
+  assert.equal(requests.length, 3, "late old-account completions cannot revive disposed work");
+
+  let attempts = 0;
+  const retrying = createSyncScheduler({ active: true, random: () => 0.5 });
+  retrying.watch("failed", { intervalMs: () => 1000, run: async () => { attempts++; throw new Error("offline"); } });
+  mock.timers.tick(250);
+  await flushSync();
+  mock.timers.tick(1999);
+  await flushSync();
+  assert.equal(attempts, 1);
+  mock.timers.tick(1);
+  await flushSync();
+  assert.equal(attempts, 2, "first failure doubles the request interval");
+  mock.timers.tick(3999);
+  await flushSync();
+  assert.equal(attempts, 2);
+  retrying.dispose();
+
+  const admitted = [];
+  const limited = createSyncScheduler({ active: true, random: () => 0.5 });
+  for (let id = 0; id < 6; id++) limited.watch(String(id), { intervalMs: () => 1000, run: () => {
+    const request = Promise.withResolvers(); admitted.push(request); return request.promise;
+  } });
+  mock.timers.tick(250);
+  await flushSync();
+  assert.equal(admitted.length, 4, "at most four automatic resource operations are admitted");
+  admitted[0].resolve();
+  await flushSync();
+  assert.equal(admitted.length, 5, "queued resources are not starved");
+  limited.dispose();
+  for (const request of admitted) request.resolve();
+  await flushSync();
+
+  let deniedReads = 0;
+  const denied = createSyncScheduler({ active: true, random: () => 0.5 });
+  denied.watch("denied", { intervalMs: () => 1000, run: async () => { deniedReads++; throw new Error("status batch failed", { cause: { status: 403 } }); } });
+  mock.timers.tick(250);
+  await flushSync();
+  mock.timers.tick(120000);
+  await flushSync();
+  assert.equal(deniedReads, 1, "permission failures do not retry indefinitely");
+  denied.invalidate();
+  mock.timers.tick(250);
+  await flushSync();
+  assert.equal(deniedReads, 2, "explicit invalidation can retry after access changes");
+  denied.dispose();
+
+  let suspendedReads = 0;
+  const suspended = createSyncScheduler({ active: true });
+  suspended.watch("suspended", { intervalMs: () => 1000, run: async () => { suspendedReads++; } });
+  mock.timers.tick(250);
+  suspended.setActive(false);
+  await flushSync();
+  assert.equal(suspendedReads, 0, "backgrounding between timer admission and execution suppresses the read");
+  suspended.dispose();
+} finally { mock.timers.reset(); }
+
+const runningFixture = { id: "ancient", spaceId: "space", title: "Old running Chat", lastMessageAt: "2020-01-01T00:00:00Z", updatedAt: "2020-01-01T00:00:00Z", activeTurn: { id: "active", status: "running" } };
+const discoveryPages = [];
+const accountRunning = await loadRunningSessions({ user: { listSessions: async (options) => {
+  discoveryPages.push(options);
+  if (!options.cursor) return { sessions: Array.from({ length: 60 }, (_, index) => ({ ...runningFixture, id: String(index), activeTurn: null })), pageInfo: { hasMore: true, nextCursor: "older" } };
+  if (options.cursor === "older") return { sessions: [], pageInfo: { hasMore: true, nextCursor: "oldest" } };
+  return { sessions: [runningFixture], pageInfo: { hasMore: false, nextCursor: null } };
+} } }, { source: ["web"], signal: new AbortController().signal });
+assert.deepEqual(accountRunning, [runningFixture], "Running discovery reaches older pages and never stops at a time window");
+assert.equal(discoveryPages.length, 3);
+assert.ok(discoveryPages.every((page) => page.source[0] === "web"), "source membership is filtered by the server on every page");
+for (const malformed of [
+  { sessions: [{ ...runningFixture, activeTurn: undefined }], pageInfo: { hasMore: false } },
+  { sessions: [runningFixture] },
+  { sessions: [], pageInfo: { hasMore: true, nextCursor: null } },
+]) await assert.rejects(loadRunningSessions({ user: { listSessions: async () => malformed } }, { signal: new AbortController().signal }), /server|pagination/);
+await assert.rejects(loadRunningSessions({ user: { listSessions: async () => ({ sessions: [], pageInfo: { hasMore: true, nextCursor: "same" } }) } }, { signal: new AbortController().signal }), /did not advance/);
+const discoveryAbort = new AbortController();
+let discoveryReads = 0;
+await assert.rejects(loadRunningSessions({ user: { listSessions: async () => {
+  discoveryReads++;
+  discoveryAbort.abort();
+  return { sessions: [runningFixture], pageInfo: { hasMore: true, nextCursor: "next" } };
+} } }, { signal: discoveryAbort.signal }), /cancelled/);
+assert.equal(discoveryReads, 1, "background/account cancellation stops after the in-flight page without publishing partial results");
+
+const roomListeners = new Map();
+const roomJoins = [];
+const roomLeaves = [];
+const roomEvents = [];
+const roomErrors = [];
+const realtime = createSpaceRealtime({
+  subscribe: (id, listener) => { roomJoins.push(id); roomListeners.set(id, listener); return () => roomLeaves.push(id); },
+  event: (event) => roomEvents.push(event), error: (error) => roomErrors.push(error),
+});
+const closeRoomA = realtime.watch(["space", "space"]);
+const closeRoomB = realtime.watch(["space"]);
+assert.equal(roomJoins.length, 0, "inactive apps do not join Space rooms");
+realtime.setActive(true);
+assert.deepEqual(roomJoins, ["space"], "multiple focused readers share one SDK subscription");
+const removedRoomListener = roomListeners.get("space");
+closeRoomA();
+assert.equal(roomLeaves.length, 0);
+realtime.setActive(false);
+removedRoomListener({ type: "space.fs.changed", spaceId: "space", payload: {} });
+assert.equal(roomEvents.length, 0, "released/background callbacks cannot update state");
+realtime.setActive(true);
+assert.equal(roomJoins.length, 2);
+roomListeners.get("space")({ type: "system.subscribe.error", payload: { rejected: [{ room: "space:space" }] } });
+assert.match(roomErrors.at(-1), /access was rejected/);
+const releaseMany = realtime.watch(Array.from({ length: 12 }, (_, id) => `room-${id}`));
+assert.equal(roomJoins.length - roomLeaves.length, 10, "room budget counts distinct Space IDs");
+closeRoomB();
+assert.equal(roomJoins.length - roomLeaves.length, 10, "freeing one room admits the next interested Space");
+releaseMany();
+realtime.dispose();
+assert.equal(roomJoins.length, roomLeaves.length);
+assert.deepEqual(spaceRealtimeChange({ type: "session.turn.patch", spaceId: "space", sessionId: "chat", payload: {} }), { exact: [], prefixes: [] }, "token patches never trigger HTTP invalidations");
+const fileChange = spaceRealtimeChange({ type: "space.fs.changed", spaceId: "space", payload: {} });
+assert.deepEqual(fileChange.prefixes, ["space:space:files:", "space:space:files-panel:"]);
+assert.equal(fileChange.exact.length, 0, "file changes do not refetch unrelated task/resource sections");
+const finishedTask = spaceRealtimeChange({ type: "task.updated", spaceId: "space", payload: { task: { id: "task", status: "completed" } } });
+assert.ok(finishedTask.exact.includes("task:task") && finishedTask.exact.includes("space:space:resources"));
+const statusChange = spaceRealtimeChange({ type: "session.turn.updated", spaceId: "space", sessionId: "chat", payload: { turn: { id: "turn", sequence: 2, status: "running", updatedAt: "2026-09-16T00:00:00Z" } } });
+assert.equal(statusChange.turn.status, "running");
+assert.ok(statusChange.prefixes.includes("running:") && statusChange.prefixes.includes("chats"));
+assert.throws(() => spaceRealtimeChange({ type: "session.updated", spaceId: "space", sessionId: "chat", payload: { session: { id: "other", spaceId: "space" } } }), /Invalid realtime/);
+assert.throws(() => spaceRealtimeChange({ type: "session.turn.updated", spaceId: "space", sessionId: "chat", payload: { turn: { id: "turn", status: "bogus" } } }), /Invalid realtime/);
+
+mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
+try {
+  let scans = 0;
+  const boundedSync = createSyncScheduler({ active: true, random: () => 0.5 });
+  boundedSync.watch("running:all", { intervalMs: () => 120000, minRefreshMs: 30000, run: async () => { scans++; } });
+  mock.timers.tick(250);
+  await flushSync();
+  for (let index = 0; index < 29; index++) { boundedSync.invalidatePrefix("running:"); mock.timers.tick(1000); await flushSync(); }
+  assert.equal(scans, 1, "event bursts never cause repeated full-account scans within the cooldown");
+  mock.timers.tick(1000);
+  await flushSync();
+  assert.equal(scans, 2, "continuous invalidations do not postpone the pending scan indefinitely");
+  boundedSync.dispose();
+} finally { mock.timers.reset(); }
+
+const syncRows = Array.from({ length: 120 }, (_, index) => ({ id: String(1000 - index), spaceId: "space", lastMessageAt: new Date(200000 - index * 1000).toISOString(), updatedAt: new Date(200000 - index * 1000).toISOString() }));
+const newHeadRow = { ...syncRows[0], id: "new", lastMessageAt: new Date(201000).toISOString(), updatedAt: new Date(201000).toISOString() };
+const mergedHead = reconcileSessionHead(syncRows, [newHeadRow, ...syncRows.slice(0, 59)], true, 300000);
+assert.equal(mergedHead.length, 121, "refreshing the first page retains loaded older pages");
+assert.ok(mergedHead.some((row) => row.id === syncRows.at(-1).id));
+const removedHead = reconcileSessionHead(syncRows, syncRows.slice(1, 61), true, 300000);
+assert.ok(!removedHead.some((row) => row.id === syncRows[0].id), "missing rows within the authoritative head boundary are removed");
+const eventRow = { ...syncRows[0], updatedAt: new Date(400000).toISOString(), title: "newer event" };
+assert.equal(reconcileSessionHead([eventRow], [syncRows[0]], false, 300000)[0].title, "newer event");
+assert.equal(reconcileSessionHead([eventRow], [], false, 300000).length, 1, "an event received after the read started survives an empty snapshot");
+assert.equal(reconcileSessionHead(syncRows, [], false, 300000).length, 0);
+assert.equal(reconcileSessionHead(syncRows, [], true, 300000), syncRows, "an empty nonterminal page cannot prove that cached rows were deleted");
 
 assert.equal(isSettingsSection("channels"), true);
 for (const invalid of [undefined, ["channels"], "constructor", "__proto__", "appearance"]) assert.equal(isSettingsSection(invalid), false);
@@ -165,7 +366,7 @@ for (const [tab, component, expectedRequests] of [
   const requests = [];
   let pending = Promise.withResolvers();
   const request = (resource) => { requests.push(resource); return pending.promise; };
-  const state = { booting: false, refreshing: true, spaces: [], sessions: [], sessionViews: {}, sessionLatestTurns: {}, sessionStatusRequests: 0 };
+  const state = { booting: false, refreshing: true, spaces: [], sessions: [], sessionViews: {}, sessionLatestTurns: {}, sessionTurnStatuses: {}, runningSessions: {}, sessionStatusRequests: 0 };
   const spaceList = { loading: true, overview: {}, visits: [], refresh: () => request("spaces") };
   const activityData = { loading: true, credits: { data: { netUsd: 1 }, error: null }, days: { data: [], error: null }, refresh: () => request("activity") };
   const renderTab = loadChromeComponent(`../app/(tabs)/${tab}.tsx`, component, {
@@ -180,7 +381,7 @@ for (const [tab, component, expectedRequests] of [
       if (!(index in slots)) slots[index] = { current: initial };
       return slots[index];
     },
-    useCallback: (callback) => callback, useMemo: (factory) => factory(), useEffect: () => {}, useFocusEffect: () => {},
+    useCallback: (callback) => callback, useMemo: (factory) => factory(), useEffect: () => {}, useFocusEffect: () => {}, useSyncScope: () => {}, useSpaceRealtime: () => {},
     useRouter: () => ({}), useIsFocused: () => true, useScrollToTop: () => {}, useFloatingTabBarInset: () => 80,
     useEdgeChrome: () => ({ headerHeight: 103, onHeaderLayout: () => {} }), EdgeHeader: "EdgeHeader",
     useApp: () => ({ state, spaceList, userUuid: "user", client: {}, connectionState: "open", refreshHome: () => request("home") }),
@@ -191,7 +392,7 @@ for (const [tab, component, expectedRequests] of [
     useSessionFilterPreference: () => ({ loaded: true, minutes: 30 }), loadSessionFilterMinutes: async () => 30,
     useSessionSourcePreference: () => ({ filter: "all", loaded: true, error: null }), saveSessionSourcePreference: async () => {}, loadSessionSourcePreference: async () => "all",
     useToast: () => () => {},
-    sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [],
+    sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [], emptyRunningSessions,
     CHAT_SEARCH_TYPES: ["session", "turn", "space"], SPACE_SEARCH_TYPES: ["space"],
     Screen: "Screen", ScrollView: "ScrollView", LegendList: "LegendList", RefreshControl: "RefreshControl",
     AccountAvatar: "AccountAvatar", TokenHeatmap: "TokenHeatmap", PressableScale: "PressableScale",
@@ -891,7 +1092,12 @@ assert.equal(latestTurn([{ sequence: 3, status: "completed" }, runningTurn, { se
 assert.equal(latestTurn([runningTurn, { ...completedTurn, sequence: 10 }])?.status, "completed");
 assert.equal(latestTurn([]), null);
 assert.equal(getSessionStatus(runningTurn.status), "running");
-for (const status of ["in_progress", "pending", "queued", "abort_requested", "needs_input", "waiting", "completed", "failed", "interrupted", "merged", "cancelled", null, undefined]) {
+assert.equal(getSessionStatus("queued"), "running");
+assert.equal(getSessionStatus("abort_requested"), "running");
+assert.equal(sessionListStatus({ activeTurn: { id: "older-active" } }, completedTurn, {}), "running", "an older active execution can outlive the latest completed turn");
+assert.equal(sessionListStatus({ activeTurn: { id: "older-active" } }, completedTurn, { "older-active": { ...completedTurn, id: "older-active" } }), "completed", "a stale activeTurn snapshot cannot resurrect a known terminal turn");
+assert.equal(sessionListStatus({ activeTurn: null }, undefined, {}), "idle", "no active turn does not imply completion");
+for (const status of ["in_progress", "pending", "needs_input", "waiting", "completed", "failed", "interrupted", "merged", "cancelled", null, undefined]) {
   assert.notEqual(getSessionStatus(status), "running");
 }
 assert.equal(reconcileLatestTurn(completedTurn, runningTurn), completedTurn);
@@ -991,6 +1197,41 @@ function inspectPagination(node) {
 }
 inspectPagination(contextSource);
 assert.ok(paginationCallback && stateSyncHook && timeoutSource);
+const listReducerSource = contextSource.statements.find((statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === "reducer");
+const latestStatusSource = contextSource.statements.find((statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === "updateLatestTurn");
+const reduceListSync = new Function("sortByRecent", "reconcileSessionHead", "reconcileLatestTurn", "reconcileTurnStatusPatch", "emptyRunningSessions", "isActiveTurnStatus", ts.transpileModule(`${latestStatusSource.getText(contextSource)}\n${listReducerSource.getText(contextSource)}\nreturn reducer;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(
+  (rows) => [...rows].sort((left, right) => Date.parse(right.lastMessageAt) - Date.parse(left.lastMessageAt)), reconcileSessionHead, reconcileLatestTurn, reconcileTurnStatusPatch, emptyRunningSessions, (status) => ["queued", "running", "abort_requested"].includes(status),
+);
+const listSyncState = {
+  sessions: syncRows, sessionsPagesLoaded: 2, sessionsHasMore: true, sessionsCursor: "tail-cursor", sessionsPageBoundary: { lastMessageAt: syncRows.at(-1).lastMessageAt },
+  sessionsLoadingMore: false, sessionViews: { chat: { messages: ["optimistic"], oldestCursor: 20, newestCursor: 50 } }, sessionLatestTurns: {}, sessionTurnStatuses: {}, runningSessions: {}, realtimeError: null, sessionStatusRequests: 0,
+};
+const refreshedList = reduceListSync(listSyncState, { type: "sessions-head-success", sessions: [newHeadRow, ...syncRows.slice(0, 59)], hasMore: true, cursor: "new-head-cursor", boundary: { lastMessageAt: syncRows[58].lastMessageAt }, requestStartedAt: 300000 });
+assert.equal(refreshedList.sessionsCursor, "tail-cursor");
+assert.equal(refreshedList.sessionsPageBoundary, listSyncState.sessionsPageBoundary);
+assert.equal(refreshedList.sessions.length, 121);
+assert.equal(refreshedList.sessionViews, listSyncState.sessionViews, "list polling never replaces an open Chat history window or optimistic messages");
+const completeHead = reduceListSync(listSyncState, { type: "sessions-head-success", sessions: syncRows.slice(0, 5), hasMore: false, cursor: null, boundary: { lastMessageAt: syncRows[4].lastMessageAt }, requestStartedAt: 300000 });
+const lateTail = reduceListSync(completeHead, { type: "sessions-more-success", sessions: syncRows.slice(60), hasMore: false, cursor: null, boundary: listSyncState.sessionsPageBoundary });
+assert.equal(lateTail.sessions, completeHead.sessions, "an old in-flight tail cannot restore rows removed by a complete head snapshot");
+const backgroundStatusStart = reduceListSync(listSyncState, { type: "session-status-start", silent: true });
+assert.equal(backgroundStatusStart.sessionStatusRequests, 0, "automatic status probes do not flash empty-list skeletons");
+assert.equal(reduceListSync(backgroundStatusStart, { type: "session-status-end", silent: true }).sessionStatusRequests, 0);
+const newerOutcome = reduceListSync(listSyncState, { type: "session-latest-turn", sessionId: "chat", turn: { ...completedTurn, sequence: 10 } });
+const olderOutcome = reduceListSync(newerOutcome, { type: "session-latest-turn", sessionId: "chat", turn: { ...completedTurn, id: "older", sequence: 9 } });
+assert.equal(olderOutcome.sessionLatestTurns.chat.sequence, 10);
+assert.equal(olderOutcome.sessionTurnStatuses.older.status, "completed", "older active-turn reconciliation records its terminal state without replacing the latest outcome");
+const discoveredState = reduceListSync(listSyncState, { type: "running-success", source: "all", sessions: [runningFixture], changedSessionIds: [] });
+assert.equal(discoveredState.sessions, listSyncState.sessions, "discovery must not contaminate the ordinary paginated list");
+assert.equal(discoveredState.sessionsCursor, "tail-cursor");
+const finalEventState = reduceListSync(discoveredState, { type: "session-realtime-turn", sessionId: runningFixture.id, turn: { ...completedTurn, id: "active" } });
+const lateScanState = reduceListSync(finalEventState, { type: "running-success", source: "all", sessions: [runningFixture], changedSessionIds: [runningFixture.id] });
+assert.equal(sessionListStatus(lateScanState.runningSessions.all.sessions[0], lateScanState.sessionLatestTurns[runningFixture.id], lateScanState.sessionTurnStatuses), "completed", "an old scan cannot resurrect a turn finalized by realtime");
+const failedScanState = reduceListSync(discoveredState, { type: "running-end", source: "all", error: "discovery failed" });
+assert.equal(failedScanState.runningSessions.all.sessions, discoveredState.runningSessions.all.sessions);
+assert.equal(failedScanState.runningSessions.all.error, "discovery failed");
+const unrelatedEvent = reduceListSync(discoveredState, { type: "session-realtime-turn", sessionId: "other-user-chat", turn: runningTurn });
+assert.deepEqual(unrelatedEvent.runningSessions.all.sessions, discoveredState.runningSessions.all.sessions, "Space room membership alone does not admit a Chat into the user inbox");
 const pageTimeout = new Function("HOME_REQUEST_TIMEOUT_MS", "translate", `${ts.transpileModule(timeoutSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}; return withTimeout;`)(15000, (_key, values) => `Timed out: ${values.label}`);
 function paginationHarness(listSessions) {
   const stateRef = { current: { sessionsLoadingMore: true, sessionsHasMore: true, sessionsCursor: "old-page", refreshing: false, sessionsPageBoundary: recentBoundary } };
@@ -1144,8 +1385,65 @@ await loadSessionLatestTurns({ space: () => ({ session: () => ({ turns: { listPa
   inFlightStatuses -= 1;
   return { turns: [runningTurn] };
 } } }) }) }, Array.from({ length: 15 }, (_, id) => ({ ...recentSession, id: String(id) })), () => { completedStatuses += 1; });
-assert.equal(maxInFlightStatuses, 6);
+assert.equal(maxInFlightStatuses, 2);
 assert.equal(completedStatuses, 15);
+
+let sharedRequests = 0;
+let sharedRunning = 0;
+let sharedPeak = 0;
+const sharedStatusClient = { space: () => ({ session: () => ({ turns: { listPaginated: async () => {
+  sharedRequests++;
+  sharedRunning++;
+  sharedPeak = Math.max(sharedPeak, sharedRunning);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  sharedRunning--;
+  return { turns: [runningTurn] };
+} } }) }) };
+const sharedSessions = Array.from({ length: 4 }, (_, id) => ({ ...recentSession, id: `shared-${id}` }));
+await Promise.all([
+  loadSessionLatestTurns(sharedStatusClient, sharedSessions, () => {}),
+  loadSessionLatestTurns(sharedStatusClient, sharedSessions.slice(0, 2), () => {}),
+]);
+assert.equal(sharedRequests, 4, "overlapping screen/status refreshes share per-session requests");
+assert.equal(sharedPeak, 2, "the status concurrency limit is shared across batches");
+await loadSessionLatestTurns(sharedStatusClient, sharedSessions, () => {}, 30, { cached: true });
+assert.equal(sharedRequests, 4, "unchanged outcomes are reused during automatic list polling");
+await loadSessionLatestTurns(sharedStatusClient, sharedSessions, () => {}, 30, { shouldContinue: () => false });
+assert.equal(sharedRequests, 4, "account disposal/background stops the remaining status batch");
+for (let round = 0; round < 3; round++) {
+  await Promise.all([
+    loadSessionLatestTurns(sharedStatusClient, sharedSessions, () => {}),
+    loadSessionLatestTurns(sharedStatusClient, sharedSessions.slice(2), () => {}),
+  ]);
+}
+assert.equal(sharedPeak, 2, "repeated waiter handoffs retain the shared concurrency limit");
+
+const oldActiveReads = [];
+const oldActiveSession = { id: "old-chat", spaceId: "space", lastMessageAt: "2020-01-01T00:00:00Z", activeTurn: { id: "old-turn" } };
+const oldActiveClient = { space: () => ({ session: () => ({ turns: {
+  get: async (id) => { oldActiveReads.push(id); return { turn: { ...completedTurn, id } }; },
+  listPaginated: () => assert.fail("An old known execution must be checked by turn ID"),
+} }) }) };
+await loadSessionLatestTurns(oldActiveClient, [oldActiveSession], () => {}, 30, { activeOnly: true });
+assert.deepEqual(oldActiveReads, ["old-turn"], "active executions outside the recency window remain tracked");
+await loadSessionLatestTurns(oldActiveClient, [oldActiveSession], () => {}, 30, {
+  activeOnly: true,
+  knownTurns: { "old-chat": { ...runningTurn, id: "new-turn" } },
+  turnStatuses: { "old-turn": { ...completedTurn, id: "old-turn" } },
+});
+assert.deepEqual(oldActiveReads, ["old-turn", "new-turn"], "a stale active snapshot must not prevent checking the newer running turn");
+
+const activeTasks = Array.from({ length: 105 }, (_, id) => ({ id: `task-${id}`, status: "running", createdAt: new Date(id * 1000).toISOString(), updatedAt: new Date(id * 1000).toISOString() }));
+const taskBatches = [];
+const nextTasks = await refreshTaskRuns({ tasks: {
+  list: async () => ({ runs: [{ ...activeTasks[0], status: "completed", updatedAt: new Date(200000).toISOString() }] }),
+  getMany: async (ids) => { taskBatches.push(ids); return { runs: ids.map((id) => ({ ...activeTasks.find((task) => task.id === id), status: "completed", updatedAt: new Date(200000).toISOString() })) }; },
+} }, "space", activeTasks);
+assert.deepEqual(taskBatches.map((batch) => batch.length), [100, 4]);
+assert.equal(new Set(nextTasks.map((task) => task.id)).size, 105, "known active tasks outside the first page are not dropped");
+const mergedTasks = mergeTaskRuns(activeTasks, nextTasks);
+assert.ok(mergedTasks.every((task) => task.status === "completed"));
+assert.equal(mergeTaskRuns(mergedTasks, activeTasks)[0].status, "completed", "late task pages cannot undo a newer status");
 const failedStatusResults = [];
 await assert.rejects(loadSessionLatestTurns({ space: () => ({ session: (id) => ({ turns: { listPaginated: async () => {
   if (id === "failed") throw new Error("Network unavailable");
@@ -1838,7 +2136,7 @@ for (const busy of [false, true]) {
       translate: (key) => key, newId: () => "client", nextTurnSequence,
       optimisticMessageSequenceRef: { current: new Map() }, userUuid: "user", userKey: "user",
       shouldQueueFollowup, recordDebugEvent: () => {}, dispatch: (action) => actions.push(action), saveMessages: async () => {},
-      buildPromptContent: () => uploads.promise, withFallbackUserContent: (turn) => turn,
+      buildPromptContent: () => uploads.promise, withFallbackUserContent: (turn) => turn, sync: { invalidate: () => {} },
     };
     const send = new Function(...Object.keys(sendScope), ts.transpileModule(`return (${sessionCallbacks.sendMessage});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(sendScope));
     const request = send("fixture", text, attachments, { onOptimistic: (message) => { optimistic = message; } });

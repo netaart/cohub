@@ -4,7 +4,7 @@ import { Avatar, AppIcon, StatusPill } from "@/src/ui";
 import { PressableScale } from "@/src/ui/PressableScale";
 import { useAppTheme, typography } from "@/src/theme";
 import { displaySessionTitle, formatRelativeTime, shortPreview } from "@/src/utils";
-import { getSessionStatus } from "@/src/data/session-status";
+import { sessionListStatus } from "@/src/data/session-status";
 import { useApp } from "@/src/data/context";
 import { useTranslation } from "@/src/i18n";
 
@@ -24,7 +24,7 @@ export function SessionRow({ session, onPress, onPressIn, onLongPress, labels = 
   const { t } = useTranslation();
   const { state } = useApp();
   const spaceName = session.space?.name?.trim() || t("space.fallbackName");
-  const sessionStatus = getSessionStatus(state.sessionLatestTurns[session.id]?.status);
+  const sessionStatus = sessionListStatus(session, state.sessionLatestTurns[session.id], state.sessionTurnStatuses);
   const running = sessionStatus === "running";
   const rowContent = <>
     {showSpace ? <Avatar name={spaceName} uri={session.space?.publicProfile?.avatarUrl} size={48} online={running} /> : null}

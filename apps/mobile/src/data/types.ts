@@ -12,6 +12,8 @@ import type {
 } from "@neta-art/cohub";
 
 import type { LatestSessionTurn, SessionPageBoundary } from "./session-status";
+import type { RunningSessionsSnapshot } from "./running-sessions";
+import type { SessionSourceFilter } from "./session-source";
 
 export type ConnectionState = "idle" | "connecting" | "reconnecting" | "open" | "closed" | "error";
 
@@ -90,11 +92,15 @@ export type AppState = {
   sessionsHasMore: boolean;
   sessionsCursor: string | null;
   sessionsPageBoundary: SessionPageBoundary | null;
+  sessionsPagesLoaded: number;
   sessionsLoadingMore: boolean;
   sessionLatestTurns: Record<string, LatestSessionTurn | null>;
+  sessionTurnStatuses: Record<string, LatestSessionTurn | null>;
   sessionStatusRequests: number;
   sessionStatusError: string | null;
   sessionViews: Record<string, SessionView>;
+  runningSessions: Partial<Record<SessionSourceFilter, RunningSessionsSnapshot>>;
+  realtimeError: string | null;
   usage: UsageSummary;
 };
 

@@ -21,6 +21,8 @@ import { fetchSessionLabels, toUserSessionLabels, type SessionLabel } from "@/sr
 import { TurnNavigatorSheet } from "@/src/components/TurnNavigatorSheet";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
+import { useSyncScope } from "@/src/data/use-sync-scope";
+import { useSpaceRealtime } from "@/src/data/use-space-realtime";
 import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, CHAT_PAGE_THRESHOLD, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, nextChatTailFollowing } from "@/src/data/chat-scroll";
 import { chatScrollTrace, type TraceFields } from "@/src/data/chat-scroll-trace";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
@@ -101,6 +103,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const showToast = useToast();
   const { state, client, connectionState, refreshHome, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, forkSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadSessionReadSequence, saveSessionReadSequence } = useApp();
   const view = useSession(sessionId);
+  useSyncScope(`chat:${sessionId}:tail`, () => refreshSession(sessionId, { silent: true, throwOnError: true }), 60_000, view.historyLoaded && !view.hasMoreNewer && !view.stream);
   const { headerHeight, footerHeight, onHeaderLayout, onFooterLayout } = useEdgeChrome({ reserveComposer: true });
   const composerRef = useRef<View>(null);
   const [sendTransition, setSendTransition] = useState<SendBubbleTransition | null>(null);
@@ -289,6 +292,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
   const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
   const spaceId = view.space?.id ?? session?.spaceId ?? sessionSummary?.spaceId ?? "";
+  useSpaceRealtime(spaceId ? [spaceId] : []);
   const spaceName = view.space ? displaySpaceName(view.space) : sessionSummary?.space?.name || t("space.fallbackName");
   const spaceSessions = useMemo(() => state.sessions.filter((item) => item.spaceId === spaceId), [spaceId, state.sessions]);
   const queuedFollowups = useMemo(() => queuedFollowupTurns(view.turns, view.stream?.turnId), [view.stream?.turnId, view.turns]);
@@ -993,6 +997,7 @@ function TurnMarker({ sequence, status }: { sequence: number; status?: string })
 }
 
 function DraftChatContent({ spaceId }: { spaceId: string }) {
+  useSpaceRealtime([spaceId]);
   const router = useRouter();
   const theme = useAppTheme();
   const { t } = useTranslation();

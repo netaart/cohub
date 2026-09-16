@@ -6,9 +6,28 @@
 
 A native iOS and Android client for Cohub, built with React Native and Expo.
 
-The app uses native screens for Chats, Spaces, Activity, Profile, session timelines, files, and settings. Published HTML/Work previews are opened in a constrained WebView because their content is inherently web-based.
+<p align="center">
+  <img src="landing/screenshots/chats.png" width="28%" alt="Chats inbox" />
+  &nbsp;&nbsp;
+  <img src="landing/screenshots/spaces.png" width="28%" alt="Spaces list" />
+  &nbsp;&nbsp;
+  <img src="landing/screenshots/settings.png" width="28%" alt="Settings" />
+</p>
+
+## Download
+
+| Platform | Link |
+|----------|------|
+| **Android** | [Download APK](https://cohub.live/bangwu/cohub-mobile/w/download) · [all builds](https://github.com/markbang/cohub-mobile/releases) |
+| **iOS** | TestFlight link coming soon |
+
+Android builds are published per ABI to the Yaota distribution origin, which is what the in-app updater reads. The [download page](https://cohub.live/bangwu/cohub-mobile/w/download) resolves the newest `arm64-v8a` build, and falls back to GitHub Releases if the catalog is unreachable.
+
+iOS ships through TestFlight while the app is in beta. Install the Apple TestFlight app first, then open the invite link above.
 
 ## Included
+
+The app uses native screens for Chats, Spaces, Activity, Profile, session timelines, files, and settings. Published HTML/Work previews are opened in a constrained WebView because their content is inherently web-based.
 
 - Native Chats inbox with paginated cross-Space selection, search, running/attention filters, optimistic sends, stop, rename, attachments, camera, photo library, and live Cohub stream patches
 - Turn-based Chat history with older/newer pagination, searchable turn navigation, direct window jumps, and stable scroll position

@@ -90,25 +90,86 @@ export function reconcileTurnStatusPatch(current: LatestSessionTurn | null | und
   return reconcileLatestTurn(current, { id: turn.id, sequence: turn.sequence, status: turn.status, updatedAt: turn.updatedAt });
 }
 
+export type StatusSession = Pick<UserSessionListItem, "id" | "spaceId" | "lastMessageAt" | "activeTurn">;
+
+type StatusRead = { turn: LatestSessionTurn | null; at: number; activity: string | null };
+type StatusReads = {
+  requests: Map<string, Promise<LatestSessionTurn | null>>;
+  cached: Map<string, StatusRead>;
+  running: number;
+  waiting: (() => void)[];
+};
+const statusClients = new WeakMap<CohubClient, StatusReads>();
+
+async function readStatus(reads: StatusReads, run: () => Promise<LatestSessionTurn | null>): Promise<LatestSessionTurn | null> {
+  if (reads.running >= 2) {
+    await new Promise<void>((resolve) => reads.waiting.push(() => {
+      // Reserve the slot before waking the waiter so a new caller cannot take it.
+      reads.running += 1;
+      resolve();
+    }));
+  } else reads.running += 1;
+  try {
+    return await run();
+  } finally {
+    reads.running -= 1;
+    reads.waiting.shift()?.();
+  }
+}
+
 export async function loadSessionLatestTurns(
   client: CohubClient,
-  sessions: Pick<UserSessionListItem, "id" | "spaceId" | "lastMessageAt">[],
+  sessions: StatusSession[],
   onTurn: (sessionId: string, turn: LatestSessionTurn | null) => void,
   lookbackMinutes = DEFAULT_SESSION_FILTER_MINUTES,
+  options: { knownTurns?: Record<string, LatestSessionTurn | null>; turnStatuses?: Record<string, LatestSessionTurn | null>; cached?: boolean; activeOnly?: boolean; shouldContinue?: () => boolean } = {},
 ): Promise<void> {
   const cutoff = sessionFilterCutoff(lookbackMinutes, Date.now());
   const recentSessions = sessions.filter((session) => {
     if (session.lastMessageAt !== null && !Number.isFinite(Date.parse(session.lastMessageAt))) throw new Error(`Invalid lastMessageAt for Chat ${session.id}. Refresh Chats and retry.`);
-    return isSessionInFilterWindow(session, cutoff);
+    return isSessionInFilterWindow(session, cutoff) || Boolean(session.activeTurn) || getSessionStatus(options.knownTurns?.[session.id]?.status) === "running";
   });
+  const reads = statusClients.get(client) ?? { requests: new Map<string, Promise<LatestSessionTurn | null>>(), cached: new Map<string, StatusRead>(), running: 0, waiting: [] };
+  statusClients.set(client, reads);
   let next = 0;
   const errors: unknown[] = [];
-  await Promise.all(Array.from({ length: Math.min(6, recentSessions.length) }, async () => {
-    while (next < recentSessions.length) {
+  await Promise.all(Array.from({ length: Math.min(2, recentSessions.length) }, async () => {
+    while (next < recentSessions.length && (options.shouldContinue?.() ?? true)) {
       const session = recentSessions[next++]!;
+      const known = options.knownTurns?.[session.id];
+      const activeRecord = session.activeTurn ? options.turnStatuses?.[session.activeTurn.id] : null;
+      const activeTurnId = session.activeTurn && (!activeRecord || getSessionStatus(activeRecord.status) === "running") ? session.activeTurn.id : undefined;
+      const active = activeTurnId !== undefined || getSessionStatus(known?.status) === "running";
+      const turnId = options.activeOnly || !isSessionInFilterWindow(session, cutoff) ? activeTurnId ?? (active ? known?.id : undefined) : undefined;
+      const key = `${session.id}:${turnId ?? "latest"}`;
+      const previous = reads.cached.get(key);
+      if (options.cached && previous && previous.activity === session.lastMessageAt && Date.now() - previous.at < (active ? 4_000 : 60_000)) {
+        onTurn(session.id, previous.turn);
+        continue;
+      }
+      let request = reads.requests.get(key);
+      if (!request) {
+        const turns = client.space(session.spaceId).session(session.id).turns;
+        request = readStatus(reads, async () => {
+          if (!(options.shouldContinue?.() ?? true)) return null;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), STATUS_REQUEST_TIMEOUT_MS);
+          const requestFetch: typeof fetch = (input, init) => fetch(input, { ...init, signal: controller.signal });
+          try {
+            const turn = await (turnId ? turns.get(turnId, requestFetch).then((response) => response.turn) : turns.listPaginated({ limit: 1, direction: "older" }, requestFetch).then((response) => latestTurn(response.turns)));
+            reads.cached.set(key, { turn, at: Date.now(), activity: session.lastMessageAt });
+            return turn;
+          } finally {
+            clearTimeout(timer);
+          }
+        });
+        reads.requests.set(key, request);
+        const current = request;
+        void request.finally(() => { if (reads.requests.get(key) === current) reads.requests.delete(key); }).catch(() => undefined);
+      }
       try {
-        const response = await withTimeout(client.space(session.spaceId).session(session.id).turns.listPaginated({ limit: 1, direction: "older" }));
-        onTurn(session.id, latestTurn(response.turns));
+        const turn = await withTimeout(request);
+        if (options.shouldContinue?.() ?? true) onTurn(session.id, turn);
       } catch (error) {
         errors.push(error);
       }
@@ -117,8 +178,18 @@ export async function loadSessionLatestTurns(
   if (errors.length) throw new Error(`Could not refresh ${errors.length} Chat status request(s). Pull to refresh and retry.`, { cause: errors[0] });
 }
 
+export function sessionListStatus(session: Pick<UserSessionListItem, "activeTurn">, turn: LatestSessionTurn | null | undefined, known: Record<string, LatestSessionTurn | null>): SessionStatus {
+  if (session.activeTurn) {
+    const active = known[session.activeTurn.id];
+    if (!active || getSessionStatus(active.status) === "running") return "running";
+  }
+  return getSessionStatus(turn?.status);
+}
+
 export function getSessionStatus(value: string | null | undefined): SessionStatus {
   switch (value) {
+    case "queued":
+    case "abort_requested":
     case "running":
       return "running";
     case "completed":
