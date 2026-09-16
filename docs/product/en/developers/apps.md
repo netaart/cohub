@@ -32,6 +32,12 @@ if (!ctx?.app?.id) throw new Error("Not inside a published app");
 `env` matters in the browser: an app served from a dev host must pass
 `env: "dev"`, or it will silently call production.
 
+## Authorization
+
+New Apps use `client.auth.authorize({ target, scopes })` with an account, explicit Space, or Space-picker target. Success includes the actual target, resolution and authoritative grant. Use the returned Space ID for subsequent operations. Unavailable Spaces may fall back to a viewer-controlled Space; `fallback: "none"` disables this.
+
+Logged-out viewers sign in before consent. Reinitialize context after a full-page redirect. Existing `auth.request()`, `requestSpace()` and `requestCreateSpace()` remain compatible. See the [authorization contract](https://github.com/talesofai/cohub/blob/main/docs/app-authorization.md).
+
 ## Context
 
 ```ts

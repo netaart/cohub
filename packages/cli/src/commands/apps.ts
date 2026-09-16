@@ -530,7 +530,7 @@ export function registerApps(program: Command): void {
     .option("--app-scope <scope>", "Scope granted directly to the app runtime (space.view, session.view, file.view, file.edit, taskrun.view, session.prompt.readonly, session.prompt.fullaccess, command.execute)", collectOption, [])
     .option("--viewer-scope <scope>", "Deprecated: viewer grants are no longer gated by the app configuration", collectOption, [])
     .option("--clear-app-scopes", "Clear app runtime scopes")
-    .option("--clear-viewer-scopes", "Clear viewer-requestable scopes")
+    .option("--clear-viewer-scopes", "Deprecated: clear legacy scope metadata / 已废弃：清除旧权限元数据")
     .option("--meta <json>", "App metadata as a JSON object")
     .option("--hide-cohub-bar", "Hide the Cohub footer bar on the public app page")
     .option("--show-cohub-bar", "Show the Cohub footer bar on the public app page")
@@ -753,14 +753,16 @@ export function registerApps(program: Command): void {
     .description("Grant an app scopes as the current user")
     .requiredOption("--scope <scope>", "Scope to grant (repeatable)", collectOption, [])
     .option("--space <spaceId>", "Target space; defaults to the app's own space")
+    .option("--extend", "Add scopes without replacing active grants / 增加权限，保留有效授权")
     .option("--json", "Output as JSON")
-    .action(async (appRef: string, opts: { scope: string[]; space?: string; json?: boolean }) => {
+    .action(async (appRef: string, opts: { scope: string[]; space?: string; extend?: boolean; json?: boolean }) => {
       const client = createClient();
       try {
         const detail = await getAppByRef(client, appRef);
         const result = await client.apps.authorize(detail.app.id, {
           scopes: opts.scope as Permission[],
           ...(opts.space ? { spaceId: opts.space } : {}),
+          ...(opts.extend ? { scopeMode: "extend" as const } : {}),
         });
         if (jsonRequested(opts)) return outJson(result);
         ok(`Granted ${result.grant.scopes.join(", ")} on space ${result.grant.spaceId}`);

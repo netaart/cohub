@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { spaces, apps, appPromotions, appPromotionStatsHourly, appVersions, appViewerGrants, appViewStatsHourly, userProfiles } from "@cohub/db";
 import { createAppAssetPublicUrl, deleteAppAssetsByObjectKey, isConfiguredAppAssetPublicUrl } from "../app-asset-storage.js";
 import { publishAppAssetInWorker, type AppPublishAssetJobResult } from "../app-publish-asset-queue.js";
+import { resolveAppGrantScopes } from "../app-grant-scopes.js";
 import { ALL_PERMISSIONS, APP_PUBLISHER_SCOPES, isUserLevelPermission, normalizePermissionScopes, scopeListHasPermission, type Permission } from "@cohub/core/permissions";
 import {
   APP_ACTION_INPUT_MAX_BYTES,
@@ -271,6 +272,7 @@ async function upsertViewerGrant(input: {
   viewerUserUuid: string;
   scopes: Permission[];
   expiresAt: Date;
+  scopeMode?: "extend";
 }): Promise<typeof appViewerGrants.$inferSelect | null | "migration_pending"> {
   return db.transaction(async (tx) => {
     const key = and(
@@ -278,16 +280,16 @@ async function upsertViewerGrant(input: {
       eq(appViewerGrants.viewerUserUuid, input.viewerUserUuid),
       eq(appViewerGrants.spaceId, input.spaceId),
     );
-    const write = (id: string) =>
+    const write = (existing: typeof appViewerGrants.$inferSelect) =>
       tx.update(appViewerGrants).set({
-        scopes: input.scopes,
+        scopes: resolveAppGrantScopes({ requested: input.scopes, mode: input.scopeMode, existing }),
         expiresAt: input.expiresAt,
         revokedAt: null,
         updatedAt: new Date(),
-      }).where(eq(appViewerGrants.id, id)).returning();
+      }).where(eq(appViewerGrants.id, existing.id)).returning();
 
     const [existing] = await tx.select().from(appViewerGrants).where(key).limit(1).for("update");
-    if (existing) return (await write(existing.id))[0] ?? null;
+    if (existing) return (await write(existing))[0] ?? null;
 
     const inserted = await tx.insert(appViewerGrants).values({
       appId: input.appId,
@@ -302,7 +304,7 @@ async function upsertViewerGrant(input: {
     // still in place. Distinguish by re-reading the three-column key.
     const [raced] = await tx.select().from(appViewerGrants).where(key).limit(1).for("update");
     if (!raced) return "migration_pending";
-    return (await write(raced.id))[0] ?? null;
+    return (await write(raced))[0] ?? null;
   });
 }
 
@@ -1236,7 +1238,9 @@ router.post("/:id/authorize", async (c) => {
   if (requiresSpaceAppAccess(app) && !(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) {
     return c.json({ message: "app is not accessible in this space", code: "app_not_accessible" }, 403);
   }
-  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown } | null;
+  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown } | null;
+  if (body?.scopeMode !== undefined && body.scopeMode !== "extend") return c.json({ code: "invalid_request", message: "invalid scope mode" }, 400);
+  if (body?.scopeMode === "extend" && (!Array.isArray(body.scopes) || body.scopes.some((scope) => typeof scope !== "string" || !ALLOWED_VIEWER_SCOPES.has(scope as Permission)))) return c.json({ code: "invalid_scope", message: "unknown permission scope" }, 400);
   const requested = normalizeScopes(body?.scopes, ALLOWED_VIEWER_SCOPES);
   if (requested.length === 0) return c.json({ message: "no valid scopes requested" }, 400);
   const targetSpaceId = typeof body?.spaceId === "string" && body.spaceId.trim() ? body.spaceId.trim() : app.spaceId;
@@ -1307,6 +1311,7 @@ router.post("/:id/authorize", async (c) => {
     viewerUserUuid: user.uuid,
     scopes: requested,
     expiresAt,
+    ...(body?.scopeMode === "extend" ? { scopeMode: "extend" as const } : {}),
   });
   if (grant === "migration_pending") {
     return c.json({ message: "space-scoped grants are not enabled yet; run the pending database migration", code: "migration_pending" }, 409);
@@ -1318,12 +1323,12 @@ router.post("/:id/authorize", async (c) => {
     appId: app.id,
     spaceId: app.spaceId,
     appScopes: app.appScopes as Permission[],
-    viewerScopes: requested,
+    viewerScopes: normalizePermissionScopes(grant.scopes),
   });
   return c.json({
     token,
     expiresIn: APP_SESSION_TTL_SECONDS,
-    grant: { id: grant.id, spaceId: targetSpaceId, scopes: requested, expiresAt: expiresAt.toISOString() },
+    grant: { id: grant.id, spaceId: targetSpaceId, scopes: normalizePermissionScopes(grant.scopes), expiresAt: expiresAt.toISOString() },
   });
 });
 

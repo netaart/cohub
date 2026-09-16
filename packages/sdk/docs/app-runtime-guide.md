@@ -1,8 +1,9 @@
 # Cohub App Runtime Guide
 
-This guide explains how to use the Cohub SDK **inside a published App** — the
-only environment where runtime APIs (`context()`, `auth.request`,
-`app.commerce.*`, `app.realtime.*`) function. Read this before building any
+This guide explains the Cohub SDK in a published App iframe or an explicitly
+configured standalone broker. New Apps should use `auth.authorize()`; see the
+[authorization contract](../../../docs/app-authorization.md). Legacy APIs below
+retain their original return types. Read this before building any
 App that calls Cohub capabilities from browser-side JavaScript.
 
 It is written to be self-contained: an agent or developer who reads only this
@@ -72,10 +73,9 @@ These runtime-only APIs form the foundation; everything else is standard SDK:
 | `client.context().permissions.viewerGrants` | Render the viewer's current per-space grants | `{ spaceId, scopes }[]` |
 | `client.app.commerce.*` / `client.app.realtime.*` | Commerce and realtime, bound to the app's runtime identity | (see below) |
 
-> **Runtime-only constraint.** These APIs only work inside a **published**
-> App. Outside that context (a static asset URL, a local `file://` preview,
-> a plain Node script) `context()` returns `null` and the other runtime APIs
-> fail. Always develop against a published App.
+> **Runtime requirement.** Use a published App iframe or explicitly configure
+> a broker. A standalone page without broker configuration has no runtime.
+> Initialize `context()` before using APIs to discover Host capabilities.
 
 `client.app.onContextChanged(listener)` pushes a fresh context whenever the
 host's state changes (sign-in, invocation, grants), so an App can render its
@@ -134,14 +134,14 @@ a direct static-asset URL not wrapped in the Cohub iframe. The SDK opens a
 
 ```js
 const ctx = await client.context();
-const isBroker = !ctx?.space?.id; // bridge has a real id; broker is ""
+const isBroker = ctx?.mode === "broker";
 ```
 
 In broker mode you cannot get a spaceId from `context()`. Resolve it via the
 public by-slug App API (anonymous, no token needed):
 
 ```js
-const isBroker = !ctx?.space?.id;
+const isBroker = ctx?.mode === "broker";
 let spaceId;
 if (isBroker) {
   const detail = await client.apps.getBySlug(ownerUsername, spaceSlug, appSlug);

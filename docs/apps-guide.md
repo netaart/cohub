@@ -6,7 +6,9 @@ Use Apps when a Space produces something people should open directly: a static H
 
 ## Runtime requirements
 
-`cohub.context()`, `cohub.auth.*`, and `cohub.app.commerce.*` only function inside a **published** App — the Cohub-hosted iframe where `window.parent` is the Cohub shell. They do not work from a static asset URL or a local preview. In those environments `context()` is `null` and commerce calls fail. Always develop against a published App.
+Runtime APIs need a Cohub Host: either a published App's iframe or an explicitly configured popup broker (`app: { brokerOrigin, appId }`). A standalone page or local preview without broker configuration has no runtime. Initialize `context()` before using runtime APIs.
+
+For new Apps, use structured `client.auth.authorize()`. See [App authorization](./app-authorization.md) for the target, login, fallback and compatibility contract. Legacy authorization examples below remain supported.
 
 ## What an App Contains
 

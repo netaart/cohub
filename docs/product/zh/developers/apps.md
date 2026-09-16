@@ -31,6 +31,12 @@ if (!ctx?.app?.id) throw new Error("Not inside a published app");
 浏览器中 `env` 很重要：dev 域名上的 App 必须显式传 `env: "dev"`，否则会静默
 调用生产环境。
 
+## 授权
+
+新 App 使用 `client.auth.authorize({ target, scopes })`：`target` 可为账户、指定 Space 或选取 Space。成功结果包含实际目标、回退方式及服务端 grant；后续操作使用返回的 Space ID。默认保留不可访问 Space 的友好回退，`fallback: "none"` 可禁止回退。
+
+未登录时先进入登录流程，再展示授权；整页跳转后需重新初始化 context。旧 `auth.request()`、`requestSpace()` 和 `requestCreateSpace()` 继续兼容。完整约定见 [授权规范](https://github.com/talesofai/cohub/blob/main/docs/app-authorization.md)。
+
 ## Context
 
 ```ts

@@ -14,6 +14,16 @@ const stats: AppViewStatsResponse = {
   ],
 };
 
+test("incremental authorization is opt-in", () => {
+  const program = new Command("cohub");
+  registerApps(program);
+  const authorize = program.commands.find((command) => command.name() === "apps")?.commands.find((command) => command.name() === "authorize");
+  assert.ok(authorize);
+  assert.equal(authorize.opts().extend, undefined);
+  authorize.parseOptions(["--scope", "file.view", "--extend"]);
+  assert.equal(authorize.opts().extend, true);
+});
+
 test("apps command registers stats", () => {
   const program = new Command("cohub");
   registerApps(program);

@@ -24,6 +24,58 @@ afterEach(() => {
 	globalThis.localStorage = originalLocalStorage;
 });
 
+test("broker reuses fresh tokens in memory without restoring or persisting another account", async () => {
+	const store: Record<string, string> = { "cohub:app-token:app-1": "previous-account" };
+	globalThis.localStorage = {
+		getItem: (key: string) => store[key] ?? null,
+		setItem: (key: string, value: string) => { store[key] = value; },
+		removeItem: (key: string) => { delete store[key]; },
+	} as Storage;
+	let handler: ((event: MessageEvent) => void) | null = null;
+	let opens = 0;
+	globalThis.window = {
+		location: { origin: "https://app.example" },
+		open: () => {
+			opens++;
+			const popup = {
+				closed: false,
+				close() { this.closed = true; },
+				postMessage(message: Record<string, unknown>) {
+					queueMicrotask(() => handler?.({ source: popup, origin: "https://cohub.live", data: {
+						type: "cohub.app.authorize.result", requestId: message.requestId, token: `fresh-${opens}`,
+						result: { status: "granted", requestedTarget: { kind: "account" }, target: { kind: "account" }, resolution: "requested",
+							grant: { id: "grant", spaceId: "home", scopes: ["user.space.list"], expiresAt: null } },
+					} } as MessageEvent));
+				},
+			};
+			queueMicrotask(() => handler?.({ source: popup, origin: "https://cohub.live", data: { type: "cohub.app.broker.ready", authorizationVersion: 2 } } as MessageEvent));
+			return popup;
+		},
+		addEventListener: (_type: string, callback: (event: MessageEvent) => void) => { handler = callback; },
+		removeEventListener: () => { handler = null; },
+	} as unknown as Window & typeof globalThis;
+	const transport = () => new PopupBrokerTransport({ brokerOrigin: "https://cohub.live", appId: "app-1" });
+	const runtime = createAppRuntime(transport(), "app-1");
+	assert.equal(store["cohub:app-token:app-1"], undefined);
+	store["cohub:app-token:app-1"] = "legacy-writer";
+	await runtime.authorize({ target: { kind: "account" }, scopes: ["user.space.list"] });
+	assert.deepEqual(await Promise.all([runtime.getAccessToken(), runtime.getAccessToken()]), ["fresh-1", "fresh-1"]);
+	assert.equal(opens, 1);
+	assert.equal(store["cohub:app-token:app-1"], undefined);
+	assert.equal(await runtime.getAccessToken({ forceRefresh: true }), "fresh-2");
+	assert.equal(await runtime.getAccessToken(), "fresh-2");
+	assert.equal(opens, 2);
+	assert.equal(store["cohub:app-token:app-1"], undefined);
+	store["cohub:app-token:app-1"] = "previous-account";
+	const reloaded = createAppRuntime(transport(), undefined, async () => "app-1");
+	assert.equal(await reloaded.getAccessToken(), "fresh-3");
+	assert.equal(await reloaded.getAccessToken(), "fresh-3");
+	assert.equal(opens, 3);
+	assert.equal(store["cohub:app-token:app-1"], undefined);
+	runtime.dispose();
+	reloaded.dispose();
+});
+
 test("work runtime ignores non-string ancestor origins", async () => {
 	let messageHandler: ((event: MessageEvent) => void) | null = null;
 	let targetOrigin: string | undefined;
@@ -1164,7 +1216,7 @@ test("createSlugAppIdResolver resolves appId from getBySlug and caches it", asyn
 			);
 			return {
 				ok: true,
-				json: async () => ({ work: { id: "resolved-work-id" } }),
+				json: async () => ({ app: { id: "resolved-work-id" } }),
 			} as Response;
 		}) as typeof globalThis.fetch,
 	});

@@ -39,6 +39,7 @@ import {
   type AppIdResolver,
   type AppContextChangedListener,
   type AppRuntimeApi,
+  type AppAuthorizationRequest,
   type AppRuntimeConfigureRequest,
 } from "./app-runtime.js";
 import type { CreateSpaceInput, Permission } from "./types.js";
@@ -184,14 +185,16 @@ export class CohubClient {
   }
 
   readonly auth = {
+    authorize: (input: AppAuthorizationRequest) => this.appRuntime.authorize(input),
     /**
+     * @deprecated Use authorize() for the actual target and structured result.
      * Ensure the app holds these scopes. Without an accessible `spaceId` the
      * host targets a viewer-controlled Space (never the app author's home
      * Space) — use `requestSpace` when the app needs to know which Space.
      * Silent when a grant already covers them; `alwaysAsk` forces the dialog.
      */
     request: (input: { scopes: Permission[]; reason?: string; spaceId?: string; alwaysAsk?: boolean }) => this.appRuntime.requestAuthorization(input),
-    /** One consent: the viewer picks a Space and grants the scopes on it. `alwaysAsk` re-opens the picker. */
+    /** @deprecated Use authorize({ target: { kind: "pick-space" }, scopes }). */
     requestSpace: (input: { scopes: Permission[]; reason?: string; alwaysAsk?: boolean }) => this.appRuntime.requestSpaceAuthorization(input),
     /** One consent: create a viewer-owned Space and grant the scopes on it. `space` is `CreateSpaceInput`. */
     requestCreateSpace: (input: { scopes: Permission[]; space: CreateSpaceInput; reason?: string }) => this.appRuntime.requestCreateSpaceAuthorization(input),

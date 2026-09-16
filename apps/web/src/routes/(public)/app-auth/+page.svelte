@@ -58,38 +58,48 @@ async function loadAppDetail(token: string): Promise<AppDetail | null> {
 
 async function init() {
 	if (!appId) {
-		fail("Missing app id.");
+		fail(m.app_auth_invalid_entry({}, { locale }));
 		return;
 	}
 	if (typeof window === "undefined" || !window.opener) {
-		fail(
-			"This page cannot be opened directly. Please access it through a Cohub app.",
-		);
+		fail(m.app_auth_invalid_entry({}, { locale }));
 		return;
 	}
 
-	// 1. Check auth — broker is an OAuth page.
+	// Validate the destination before starting login or posting any progress.
+	if (!openerOrigin || !isAllowedAppOrigin(openerOrigin)) {
+		fail(m.app_auth_origin_denied({}, { locale }));
+		return;
+	}
 	const token = await getAuthToken();
 	if (!token) {
 		phase = "need-login";
+		window.opener.postMessage(
+			{ type: "cohub.app.broker.progress", phase: "login" },
+			openerOrigin,
+		);
+		// Only one automatic redirect per attempt; keep the sign-in action
+		// available when an OAuth callback cannot establish a session.
+		try {
+			const key = `cohub:broker-login:${appId}`;
+			const previous = Number(sessionStorage.getItem(key) ?? 0);
+			if (Date.now() - previous > 600_000) {
+				sessionStorage.setItem(key, String(Date.now()));
+				await handleLogin();
+			}
+		} catch {
+			/* The explicit sign-in action remains available. */
+		}
 		return;
 	}
 
 	// 2. Load work metadata.
 	const detail = await loadAppDetail(token);
 	if (!detail) {
-		fail("App not found or no longer available.");
+		fail(m.app_auth_unavailable({}, { locale }));
 		return;
 	}
 	appDetail = detail;
-
-	// 3. Validate opener origin against the allowlist (§8.1 — the real boundary).
-	if (!openerOrigin || !isAllowedAppOrigin(openerOrigin)) {
-		fail(
-			`This site (${openerOrigin || "unknown"}) is not allowed to request Cohub authorization.`,
-		);
-		return;
-	}
 
 	// 4. Set up the bridge host with a reply that posts back to the opener.
 	validatedOpenerOrigin = openerOrigin;
@@ -123,7 +133,7 @@ async function init() {
 
 	// 5. Ready handshake: tell the opener we're ready to receive the request.
 	window.opener.postMessage(
-		{ type: "cohub.app.broker.ready" },
+		{ type: "cohub.app.broker.ready", authorizationVersion: 2 },
 		validatedOpenerOrigin ?? openerOrigin,
 	);
 	// Older published Work SDKs wait for the pre-rename handshake name.
@@ -150,7 +160,13 @@ async function handleLogin() {
 }
 
 onMount(() => {
-	void init();
+	void init().catch((error) => {
+		fail(
+			error instanceof Error
+				? error.message
+				: m.app_auth_unavailable({}, { locale }),
+		);
+	});
 	window.addEventListener("message", onMessage);
 });
 
@@ -173,7 +189,7 @@ onDestroy(() => window.removeEventListener("message", onMessage));
 			<p class="broker-login-title">{m.app_auth_sign_in({}, { locale })}</p>
 			<p class="broker-login-copy">{m.app_auth_continue({}, { locale })}</p>
 			<button type="button" class="broker-login-btn" onclick={handleLogin}>
-				Sign in with Cohub
+				{m.app_auth_sign_in({}, { locale })}
 			</button>
 		</div>
 	{:else if phase === "error"}

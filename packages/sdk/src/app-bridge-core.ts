@@ -1,3 +1,4 @@
+import { appAuthorizationRequestSchema, appAuthorizationGrantSchema, type AppAuthorizationRequest, type AppAuthorizationGrant, type AppAuthorizationResult } from "@cohub/protocol";
 import { PERMISSIONS, isUserLevelPermission, type CreateSpaceInput, type Permission, type SpaceBootstrapSource } from "./types.js";
 import type { AppRecord } from "./apis/apps.js";
 import type {
@@ -213,6 +214,8 @@ export type AppBridgeCore = {
 	cancelAuth: () => void;
 };
 
+class AppLoginRedirect extends Error {}
+
 function readTokenResponse(value: unknown) {
 	if (!value || typeof value !== "object") return null;
 	const token = (value as Record<string, unknown>).token;
@@ -422,11 +425,78 @@ export function createAppBridgeCore(
 	const onStateChange = config.onStateChange;
 
 	let appToken: string | null = null;
+	let tokenViewer: string | null | undefined;
+	function synchronizeViewer(viewer: string | null) {
+		if (tokenViewer !== undefined && tokenViewer !== viewer) {
+			appToken = null;
+			sessionViewerGrants.clear();
+			authoritativeGrants.clear();
+		}
+		tokenViewer = viewer;
+	}
 	/** Consents made through this host, keyed by target space. */
 	const sessionViewerGrants = new Map<string, { spaceId: string; scopes: Permission[] }>();
 	let activeInvocation: AppRuntimeInvocationContext | undefined;
 	let contextChangeVersion = 0;
 	const legacyRequestIds = new Set<string>();
+	const authorizationRequests = new Map<string, AppAuthorizationRequest>();
+	const authoritativeGrants = new Map<string, AppAuthorizationGrant>();
+	function canJoin(pending: AppAuthorizeRequest, next: Parameters<typeof isSameConsent>[1], requestId: string) {
+		const previous = authorizationRequests.get(pending.requestId);
+		const current = authorizationRequests.get(requestId);
+		return Boolean(previous) === Boolean(current)
+			&& previous?.fallback === current?.fallback
+			&& isSameConsent(pending, next);
+	}
+	let signInFlight: Promise<void> | null = null;
+	const pendingLoginKey = `cohub:app-login:${app.id}`;
+
+	function rememberAuthorization(data: Record<string, unknown>) {
+		// Never persist bootstrap credentials or any token. Creating a Space
+		// requires a fresh user action after a full-page login.
+		if (data.createSpace) return;
+		try {
+			const structured = typeof data.requestId === "string" ? authorizationRequests.get(data.requestId) : undefined;
+			sessionStorage.setItem(pendingLoginKey, JSON.stringify({ at: Date.now(), data: {
+				...(structured ? { ...structured, type: "cohub.app.authorize.v2" } : { type: data.type }), requestId: data.requestId, scopes: data.scopes,
+				reason: sanitizeReason(data.reason), spaceId: data.spaceId,
+				selectSpace: data.selectSpace, alwaysAsk: data.alwaysAsk,
+			} }));
+		} catch { /* Storage can be unavailable in private browsing. */ }
+	}
+
+	function clearAuthorizationIntent(requestId: string) {
+		try {
+			const raw = sessionStorage.getItem(pendingLoginKey);
+			if (!raw) return;
+			const saved = JSON.parse(raw);
+			if (isRecord(saved) && isRecord(saved.data) && saved.data.requestId === requestId) {
+				sessionStorage.removeItem(pendingLoginKey);
+			}
+		} catch { /* Storage failure must not change an authorization outcome. */ }
+	}
+
+	async function resumeAuthorization() {
+		if (state.pendingAuth || !(await getViewerUuid())) return;
+		try {
+			const raw = sessionStorage.getItem(pendingLoginKey);
+			if (!raw) return;
+			const saved = JSON.parse(raw);
+			if (!isRecord(saved) || typeof saved.at !== "number" || Date.now() - saved.at > 600_000 || !isRecord(saved.data)) {
+				sessionStorage.removeItem(pendingLoginKey);
+				return;
+			}
+			await handleMessage({ data: saved.data } as MessageEvent);
+		} catch { /* An invalid saved intent must not block context loading. */ }
+	}
+
+	async function startSignIn() {
+		if (state.pendingAuth) rememberAuthorization({ ...state.pendingAuth, type: "cohub.app.authorize" });
+		signInFlight ??= config.requestSignIn(
+			typeof location !== "undefined" ? location.pathname + location.search + location.hash : "/",
+		).catch((error) => { signInFlight = null; throw error; });
+		await signInFlight;
+	}
 
 	async function getContext(): Promise<AppRuntimeContext> {
 		const invocation =
@@ -436,6 +506,7 @@ export function createAppBridgeCore(
 		const shell = config.getShell?.() ?? config.shell;
 		const appScopes = clonePermissionScopes(app.appScopes);
 		const viewerUuid = await getViewerUuid();
+		synchronizeViewer(viewerUuid);
 		// Viewer grants as far as the host can tell: previously consented
 		// (localStorage cache) overlaid by this session's fresh consents. The
 		// server remains the source of truth; this is display-only.
@@ -444,6 +515,8 @@ export function createAppBridgeCore(
 			Array.from(sessionViewerGrants.values()),
 		);
 		return {
+			capabilities: { authorization: 2, serverGrants: true },
+			mode: authorizationContext.surface === "broker" ? "broker" : "bridge",
 			app: {
 				id: app.id,
 				slug: app.slug,
@@ -498,6 +571,30 @@ export function createAppBridgeCore(
 		payload: Record<string, unknown>,
 		complete = false,
 	) {
+		const request = authorizationRequests.get(requestId);
+		if (request && payload.type === "cohub.app.error" && ["space_inaccessible", "scope_not_held", "app_not_accessible", "consent_required"].includes(String(payload.code))) {
+			payload = { ...payload, type: "cohub.app.authorize.result", token: null, result: { status: "denied", code: payload.code } };
+		}
+		if (request && payload.type === "cohub.app.authorize.result" && !payload.result) {
+			const space = payload.space as { id: string; name: string | null } | undefined;
+			const grant = space ? authoritativeGrants.get(space.id) : undefined;
+			let result: AppAuthorizationResult = { status: "cancelled" };
+			if (payload.token && space && grant) {
+				result = {
+					status: "granted", requestedTarget: request.target,
+					target: request.target.kind === "account" ? { kind: "account" } : { kind: "space", spaceId: space.id, name: space.name },
+					resolution: request.target.kind === "pick-space" ? "selected" : request.target.kind === "space" && request.target.spaceId !== space.id ? "fallback" : "requested",
+					grant,
+				};
+			} else if (payload.token) {
+				payload = { type: "cohub.app.error", code: "invalid_response", message: "Missing authoritative grant." };
+			}
+			if (payload.type !== "cohub.app.error") payload = { ...payload, result };
+		}
+		if (complete && (payload.type === "cohub.app.authorize.result" ||
+			(payload.type === "cohub.app.error" && ["invalid_request", "space_inaccessible", "scope_not_held", "app_not_accessible", "consent_required"].includes(String(payload.code))))) {
+			clearAuthorizationIntent(requestId);
+		}
 		const namespace = legacyRequestIds.has(requestId) ? "work" : "app";
 		const type = payload.type;
 		reply(requestId, {
@@ -506,7 +603,10 @@ export function createAppBridgeCore(
 				? { type: type.replace("cohub.app.", `cohub.${namespace}.`) }
 				: {}),
 		});
-		if (complete) legacyRequestIds.delete(requestId);
+		if (complete) {
+			legacyRequestIds.delete(requestId);
+			authorizationRequests.delete(requestId);
+		}
 	}
 
 	function toLegacyWorkContext(context: AppRuntimeContext) {
@@ -623,12 +723,11 @@ export function createAppBridgeCore(
 	}
 
 	async function ensureBaseToken(forceRefresh = false) {
+		const viewer = await getViewerUuid();
+		synchronizeViewer(viewer);
 		if (appToken && !forceRefresh) return appToken;
 		const userToken = await getAccessToken({ forceRefresh });
 		if (!userToken) {
-			await config.requestSignIn(
-				typeof location !== "undefined" ? location.pathname : "/",
-			);
 			return null;
 		}
 		const response = await fetch(
@@ -641,6 +740,7 @@ export function createAppBridgeCore(
 		if (!response.ok) throw new Error("Failed to create app session.");
 		const token = readTokenResponse(await response.json());
 		if (!token) throw new Error("Invalid app session response.");
+		if (viewer !== await getViewerUuid()) return null;
 		appToken = token;
 		return appToken;
 	}
@@ -656,15 +756,16 @@ export function createAppBridgeCore(
 		spaceId?: string,
 		options?: { silent?: boolean; forceRefreshToken?: boolean },
 	) {
+		const incremental = Boolean(state.pendingAuth && authorizationRequests.has(state.pendingAuth.requestId));
 		const userToken = await getAccessToken(
 			options?.forceRefreshToken ? { forceRefresh: true } : undefined,
 		);
 		if (!userToken) {
-			await config.requestSignIn(
-				typeof location !== "undefined" ? location.pathname : "/",
-			);
-			throw new Error("Sign in is required to authorize this app.");
+			if (mintedSpace) throw new AppAuthorizationError("Sign in to finish authorization.", 401, "login_required");
+			await startSignIn();
+			throw new AppLoginRedirect();
 		}
+		const authorizingViewer = await getViewerUuid();
 		const response = await fetch(
 			`${apiOrigin}/api/apps/${app.id}/authorize`,
 			{
@@ -678,12 +779,13 @@ export function createAppBridgeCore(
 					scopes,
 					...(spaceId ? { spaceId } : {}),
 					...(options?.silent ? { silent: true } : {}),
+					...(incremental ? { scopeMode: "extend" } : {}),
 				}),
 			},
 		);
 		const payload = await response.json().catch(() => null) as {
 			token?: unknown;
-			grant?: { spaceId?: unknown; scopes?: unknown } | null;
+			grant?: { id?: unknown; spaceId?: unknown; scopes?: unknown; expiresAt?: unknown } | null;
 			message?: unknown;
 			code?: unknown;
 		} | null;
@@ -694,8 +796,12 @@ export function createAppBridgeCore(
 				typeof payload?.code === "string" ? payload.code : undefined,
 			);
 		}
+		if (authorizingViewer !== await getViewerUuid()) throw new AppAuthorizationError("The signed-in account changed. Please try again.", 409, "session_changed");
+		synchronizeViewer(authorizingViewer);
 		const token = readTokenResponse(payload);
 		if (!token) throw new Error("Invalid app authorization response.");
+		const parsedGrant = appAuthorizationGrantSchema.safeParse(payload?.grant);
+		if (parsedGrant.success) authoritativeGrants.set(parsedGrant.data.spaceId, parsedGrant.data);
 		const canonicalSpaceId =
 			typeof payload?.grant?.spaceId === "string" && payload.grant.spaceId
 				? payload.grant.spaceId
@@ -790,7 +896,10 @@ export function createAppBridgeCore(
 	async function listViewerSpaces(): Promise<AppAuthorizeSpaceOption[] | null> {
 		const request = async (forceRefresh = false) => {
 			const userToken = await getAccessToken({ forceRefresh });
-			if (!userToken) return null;
+			if (!userToken) {
+				await startSignIn();
+				throw new AppLoginRedirect();
+			}
 			return fetch(`${apiOrigin}/api/spaces`, {
 				headers: { Authorization: `Bearer ${userToken}` },
 				signal: spaceListSignal(),
@@ -810,7 +919,8 @@ export function createAppBridgeCore(
 				const option = toSpaceOption(space);
 				return option ? [option] : [];
 			});
-		} catch {
+		} catch (error) {
+			if (error instanceof AppLoginRedirect) throw error;
 			return null;
 		}
 	}
@@ -1035,7 +1145,7 @@ export function createAppBridgeCore(
 	}
 
 	async function handleMessage(event: MessageEvent) {
-		const data = event.data as {
+		let data = event.data as {
 			type?: string;
 			requestId?: string;
 			scopes?: Permission[];
@@ -1049,6 +1159,21 @@ export function createAppBridgeCore(
 			purchaseAttemptId?: string;
 		};
 		if (!data?.requestId) return;
+		if (data.type === "cohub.app.authorize.v2") {
+			const parsed = appAuthorizationRequestSchema.safeParse(event.data);
+			if (!parsed.success || parsed.data.scopes.some((scope) => !PERMISSIONS.includes(scope as Permission))) {
+				replyForRequest(data.requestId, { type: "cohub.app.error", code: "invalid_request", message: "Invalid authorization request." }, true);
+				return;
+			}
+			const input = parsed.data;
+			if (input.target.kind === "account" && input.scopes.some((scope) => !isUserLevelPermission(scope as Permission))) {
+				replyForRequest(data.requestId, { type: "cohub.app.error", code: "invalid_request", message: "Space permissions require a Space target." }, true);
+				return;
+			}
+			authorizationRequests.set(data.requestId, input);
+			data = { requestId: data.requestId, ...input, type: "cohub.app.authorize", scopes: input.scopes as Permission[], spaceId: input.target.kind === "space" ? input.target.spaceId : undefined, selectSpace: input.target.kind === "pick-space" };
+		}
+		if (!data.requestId) return;
 		const isLegacyWork = data.type?.startsWith("cohub.work.") === true;
 		if (isLegacyWork) legacyRequestIds.add(data.requestId);
 		// The dialog reservation this message created, when it got that far. Lets
@@ -1061,6 +1186,7 @@ export function createAppBridgeCore(
 					type: "cohub.app.context.result",
 					context: isLegacyWork ? toLegacyWorkContext(context) : context,
 				}, true);
+				await resumeAuthorization();
 			}
 			if (data.type === "cohub.app.token" || data.type === "cohub.work.token") {
 				const token = await ensureBaseToken(Boolean(data.forceRefresh));
@@ -1183,7 +1309,7 @@ export function createAppBridgeCore(
 					return;
 				}
 				if (state.pendingAuth) {
-					if (isSameConsent(state.pendingAuth, { scopes, spaceId, selectSpace, createSpace })) {
+					if (canJoin(state.pendingAuth, { scopes, spaceId, selectSpace, createSpace }, data.requestId)) {
 						state.pendingAuth.joinedRequestIds = [
 							...(state.pendingAuth.joinedRequestIds ?? []),
 							data.requestId,
@@ -1195,6 +1321,10 @@ export function createAppBridgeCore(
 				// Creating a Space is a side effect: always a consent dialog, never
 				// silent reuse or publisher auto-authorization.
 				if (createSpace) {
+					if (!(await getViewerUuid())) {
+						await startSignIn();
+						return;
+					}
 					mintedSpace = null;
 					const pendingCreate: AppAuthorizeRequest = {
 						requestId: data.requestId,
@@ -1220,6 +1350,7 @@ export function createAppBridgeCore(
 				// dialog like any other viewer.
 				if (
 					!selectSpace &&
+					!authorizationRequests.has(data.requestId) &&
 					!alwaysAsk &&
 					allowsOwnerAutoAuthorization() &&
 					(await isCurrentViewerAppOwner())
@@ -1251,7 +1382,7 @@ export function createAppBridgeCore(
 				// a concurrent request joins or replaces it instead of both proceeding
 				// and overwriting each other.
 				if (state.pendingAuth) {
-					if (isSameConsent(state.pendingAuth, { scopes, spaceId, selectSpace, createSpace })) {
+					if (canJoin(state.pendingAuth, { scopes, spaceId, selectSpace, createSpace }, data.requestId)) {
 						state.pendingAuth.joinedRequestIds = [
 							...(state.pendingAuth.joinedRequestIds ?? []),
 							data.requestId,
@@ -1284,6 +1415,11 @@ export function createAppBridgeCore(
 				// client-side cache checks before we decide whether to load Spaces.
 				const viewerUuid = await getViewerUuid();
 				if (state.pendingAuth !== reserved) return;
+				if (!viewerUuid) {
+					rememberAuthorization(data as Record<string, unknown>);
+					await startSignIn();
+					return;
+				}
 
 				// Resolve the target before any silent reuse, so a legacy home-space
 				// cache entry cannot silently re-authorize the app author's Space.
@@ -1327,12 +1463,29 @@ export function createAppBridgeCore(
 					if (fallback) spaces = [fallback];
 				}
 				const candidates = spaces ?? null;
+				// A failed Space lookup is different from an empty accessible list.
+				// Keep the dialog visible for retry, but never authorize an unresolved target.
+				if (spaceLevel && spaces === null) {
+					reserved.spaces = null;
+					state.authError = "Couldn't load your Spaces. Please try again.";
+					state.authOpen = true;
+					state.canChangeSpace = false;
+					notify();
+					return;
+				}
 				// An explicit target is honoured only when the viewer can use it. A list
 				// that failed to load stays unresolved for every Space-bound request, so
 				// confirmation is blocked rather than trusting an unverified target.
 				const explicitAccessible =
 					Boolean(spaceId) &&
 					candidates?.some((space) => space.id === spaceId) === true;
+				const structuredRequest = authorizationRequests.get(data.requestId);
+				if (spaceId && candidates && !explicitAccessible && structuredRequest?.fallback === "none") {
+					replyPendingAuth(reserved, { type: "cohub.app.error", code: "space_inaccessible", message: "The requested Space is unavailable." });
+					resetDialogState();
+					safeNotify();
+					return;
+				}
 				const defaultSpaceId = explicitAccessible
 					? spaceId
 					: resolveDefaultSpaceId(candidates);
@@ -1399,14 +1552,21 @@ export function createAppBridgeCore(
 				notify();
 			}
 		} catch (error) {
+			if (error instanceof AppLoginRedirect) {
+				rememberAuthorization(data as Record<string, unknown>);
+				resetDialogState();
+				safeNotify();
+				return;
+			}
 			const message =
 				error instanceof Error ? error.message : "Request failed.";
+			const code = error instanceof AppAuthorizationError ? error.code : "request_failed";
 			// An error after the reservation (e.g. `onStateChange` threw) must answer
 			// every joined request and release the dialog, or they would wait for the
 			// SDK timeout and leave invisible stale state. Identity — not the
 			// app-supplied request id — decides what is still the current reservation.
 			if (reservedAuth && state.pendingAuth === reservedAuth) {
-				replyPendingAuth(reservedAuth, { type: "cohub.app.error", message });
+				replyPendingAuth(reservedAuth, { type: "cohub.app.error", message, code });
 				resetDialogState();
 				safeNotify();
 				return;
@@ -1414,6 +1574,7 @@ export function createAppBridgeCore(
 			replyForRequest(data.requestId, {
 				type: "cohub.app.error",
 				message,
+				code,
 			}, true);
 		}
 	}
@@ -1439,6 +1600,7 @@ export function createAppBridgeCore(
 		replyPendingAuth(state.pendingAuth, {
 			type: "cohub.app.authorize.result",
 			token: null,
+			...(mintedSpace ? { space: { id: mintedSpace.id, name: mintedSpace.name }, stage: mintedSpace.provisioned ? "authorization" : "bootstrap" } : {}),
 		});
 		resetDialogState();
 		mintedSpace = null;
@@ -1525,6 +1687,11 @@ export function createAppBridgeCore(
 		// the caller only receives a boolean and acts on the Space it named.
 		const picked = state.canChangeSpace ? pickedSpaceId : undefined;
 		let requestedSpaceId = picked ?? state.selectedSpaceId ?? undefined;
+		if (pending.spaces === null) {
+			state.authError = "Couldn't load your Spaces. Please try again.";
+			notify();
+			return;
+		}
 		if (pending.spaces !== undefined) {
 			const candidates = pending.spaces;
 			const resolved =
@@ -1592,6 +1759,13 @@ export function createAppBridgeCore(
 			resetDialogState();
 			mintedSpace = null;
 		} catch (error) {
+			if (error instanceof AppLoginRedirect) return;
+			if (mintedSpace && error instanceof AppAuthorizationError && error.code === "login_required") {
+				replyPendingAuth(pending, authorizeResult(null, mintedSpace.id, mintedSpace.name));
+				resetDialogState();
+				mintedSpace = null;
+				return;
+			}
 			// Grant failures whose cause is the app's own configuration are never
 			// surfaced to the viewer; they go to the app author as diagnostics. Other
 			// failures keep their message because the viewer can act on them (e.g. a

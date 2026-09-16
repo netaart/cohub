@@ -2370,7 +2370,7 @@ test("checkout-state message reflects current checkout state", async () => {
 	assert.equal(config.replies[0].payload.orderId, "order_abc");
 });
 
-test("missing user token triggers requestSignIn and replies null token", async () => {
+test("passive token requests without a login do not redirect", async () => {
 	let signInCalled = false;
 	const config = makeConfig({
 		tokens: [null], // getAccessToken returns null
@@ -2384,7 +2384,7 @@ test("missing user token triggers requestSignIn and replies null token", async (
 		messageEvent({ type: "cohub.app.token", requestId: "r1" }),
 	);
 
-	assert.equal(signInCalled, true);
+	assert.equal(signInCalled, false);
 	assert.equal(config.replies.length, 1);
 	assert.equal(config.replies[0].payload.token, null);
 });

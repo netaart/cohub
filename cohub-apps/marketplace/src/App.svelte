@@ -83,17 +83,18 @@ async function load() {
 async function chooseSpace() {
   authorizing = true; error = ""; errorKind = null;
   try {
-    const result = await client.auth.requestSpace({
+    const result = await client.auth.authorize({
+      target: { kind: "pick-space" },
       scopes: ["file.view"],
       reason: "Choose a Space to browse Apps.",
       alwaysAsk: true,
     });
-    if (!result.granted || !result.space) {
+    if (result.status !== "granted" || result.target.kind !== "space") {
       errorKind = "space";
       error = "No Space was selected.";
       return;
     }
-    space = result.space;
+    space = { id: result.target.spaceId, name: result.target.name };
     await load();
   } catch (cause) {
     errorKind = "space";
@@ -103,13 +104,16 @@ async function chooseSpace() {
 async function authorize() {
   authorizing = true; error = ""; errorKind = null;
   try {
-    const granted = await client.auth.request({
+    const result = await client.auth.authorize({
       scopes: requiredScopes,
-      spaceId: space?.id,
+      target: space ? { kind: "space", spaceId: space.id } : { kind: "pick-space" },
       reason: requiredScopes.includes("file.edit") ? "Install Apps in this Space." : "Browse Apps in this Space.",
       alwaysAsk: true,
     });
-    if (granted) await load();
+    if (result.status === "granted" && result.target.kind === "space") {
+      space = { id: result.target.spaceId, name: result.target.name };
+      await load();
+    }
     else { errorKind = "auth"; error = "Access was not granted."; }
   } catch (cause) {
     errorKind = "auth";
@@ -120,14 +124,15 @@ async function install(app: MarketplaceEntry) {
   if (!space || installed.some((item) => item.id === app.id) || savingId) return;
   savingId = app.id; error = ""; requiredScopes = ["file.view", "file.edit"];
   try {
-    const granted = await client.auth.request({ scopes: ["file.view", "file.edit"], spaceId: space.id, reason: `Install ${app.name} in this Space.` });
-    if (!granted) { errorKind = "auth"; error = "Access was not granted."; return; }
+    const result = await client.auth.authorize({ scopes: ["file.view", "file.edit"], target: { kind: "space", spaceId: space.id }, reason: `Install ${app.name} in this Space.` });
+    if (result.status !== "granted" || result.target.kind !== "space") { errorKind = "auth"; error = "Access was not granted."; return; }
+    space = { id: result.target.spaceId, name: result.target.name };
     const current = await readInstalled();
     if (current.document.apps.some((item) => item.id === app.id)) { installed = current.document.apps; return; }
     const next = { ...current.document, apps: [...current.document.apps, toInstalledApp(app)] };
-    const result = await client.space(space.id).files.write({ path: APPS_PATH, content: `${JSON.stringify(next, null, 2)}\n`, encoding: "utf-8", ...(current.revision ? { expected: current.revision } : {}), mutationId: crypto.randomUUID() });
+    const writeResult = await client.space(space.id).files.write({ path: APPS_PATH, content: `${JSON.stringify(next, null, 2)}\n`, encoding: "utf-8", ...(current.revision ? { expected: current.revision } : {}), mutationId: crypto.randomUUID() });
     installed = next.apps;
-    void result;
+    void writeResult;
   } catch (cause) {
     if (isPermissionError(cause)) {
       requiredScopes = ["file.view", "file.edit"];

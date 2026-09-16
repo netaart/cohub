@@ -61,6 +61,7 @@ export type AppRecord = {
   latestVersion: number;
   publishedAt: string | null;
   appScopes: Permission[];
+  /** @deprecated Viewer grants are not restricted by publisher configuration. */
   allowedViewerScopes: Permission[];
   meta: AppMeta | null;
   createdAt: string | null;
@@ -76,6 +77,7 @@ export type AppCreateInput = {
   targetRef: string;
   assetKey?: string | null;
   appScopes?: Permission[];
+  /** @deprecated Viewer grants are not restricted by publisher configuration. */
   allowedViewerScopes?: Permission[];
   meta?: AppMeta | null;
 };
@@ -87,6 +89,7 @@ export type AppUpdateInput = Partial<{
   targetType: AppTargetType;
   targetRef: string;
   appScopes: Permission[];
+  /** @deprecated Viewer grants are not restricted by publisher configuration. */
   allowedViewerScopes: Permission[];
   meta: AppMeta | null;
 }>;
@@ -448,7 +451,7 @@ export class AppsApi {
    * existing live grant — the server rejects it instead of creating or
    * reviving one, so revoked grants stay revoked.
    */
-  authorize(appId: string, input: { scopes: Permission[]; spaceId?: string; reason?: string; silent?: boolean }) {
+  authorize(appId: string, input: { scopes: Permission[]; spaceId?: string; reason?: string; silent?: boolean; scopeMode?: "extend" }) {
     return this.transport.request<AppAuthorizeResponse>(`/api/apps/${appId}/authorize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
