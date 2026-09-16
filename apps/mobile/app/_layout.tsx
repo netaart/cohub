@@ -84,8 +84,10 @@ function AuthEnvironmentRoot() {
   const clientConfig = useMemo(() => environment ? logtoConfig(environment) : null, [environment]);
   if (!environment || !clientConfig) return <LoadingScreen />;
 
+  // The provider swaps its Logto client when the config identity changes; remounting it
+  // here would rebuild the login screen and flash a loading state on every switch.
   return (
-    <LogtoProvider key={environment} config={clientConfig}>
+    <LogtoProvider config={clientConfig}>
       <NativeRoot environment={environment} onSelectEnvironment={selectEnvironment} />
     </LogtoProvider>
   );
@@ -96,9 +98,11 @@ function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEn
   const { client, isInitialized, isAuthenticated, signIn, signOut } = useLogto();
   const theme = useAppTheme();
   const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [authFailure, setAuthFailure] = useState<{ environment: CohubEnvironment; message: string } | null>(null);
   const [identity, setIdentity] = useState<{ authenticated: boolean; uuid: string | null }>(() => ({ authenticated: isAuthenticated, uuid: null }));
   const [identityAttempt, setIdentityAttempt] = useState(0);
+  // A failure belongs to the environment it happened in, so switching drops it without an effect.
+  const authError = authFailure?.environment === environment ? authFailure.message : null;
 
   useEffect(() => {
     let active = true;
@@ -114,17 +118,17 @@ function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEn
         : null;
       if (!userUuid) throw new Error(translate("data.identityMissing"));
       if (active) {
-        setAuthError(null);
+        setAuthFailure(null);
         setIdentity({ authenticated: true, uuid: userUuid });
       }
     }).catch((error) => {
       if (active) {
-        setAuthError(error instanceof Error ? error.message : "Unable to read your account");
+        setAuthFailure({ environment, message: error instanceof Error ? error.message : "Unable to read your account" });
         setIdentity({ authenticated: true, uuid: null });
       }
     });
     return () => { active = false; };
-  }, [client, identityAttempt, isAuthenticated]);
+  }, [client, environment, identityAttempt, isAuthenticated]);
 
   const getAccessToken = useCallback(async (options?: { forceRefresh?: boolean }) => {
     try {
@@ -137,17 +141,17 @@ function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEn
 
   const handleSignIn = useCallback(async () => {
     setAuthLoading(true);
-    setAuthError(null);
+    setAuthFailure(null);
     try {
       if (isAuthenticated) await signOut();
       await signIn(config.redirectUri);
       setIdentityAttempt((attempt) => attempt + 1);
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Sign in was not completed");
+      setAuthFailure({ environment, message: error instanceof Error ? error.message : "Sign in was not completed" });
     } finally {
       setAuthLoading(false);
     }
-  }, [isAuthenticated, signIn, signOut]);
+  }, [environment, isAuthenticated, signIn, signOut]);
 
   useEffect(() => {
     if (isInitialized) void SplashScreen.hideAsync();
