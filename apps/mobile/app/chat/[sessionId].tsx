@@ -23,7 +23,7 @@ import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
 import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useSpaceRealtime } from "@/src/data/use-space-realtime";
-import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, CHAT_PAGE_THRESHOLD, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, nextChatTailFollowing } from "@/src/data/chat-scroll";
+import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, CHAT_PAGE_THRESHOLD, chatFollowPinAnimated, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, nextChatTailFollowing } from "@/src/data/chat-scroll";
 import { chatScrollTrace, type TraceFields } from "@/src/data/chat-scroll-trace";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
@@ -173,6 +173,8 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const savedReadSequenceRef = useRef<number | null>(null);
   const followingTailRef = useRef(true);
   const [followingTail, setFollowingTailState] = useState(true);
+  const followPinAnimatedRef = useRef(true);
+  const [followPinAnimated, setFollowPinAnimatedState] = useState(true);
   const userDraggingRef = useRef(false);
   const momentumScrollingRef = useRef(false);
   const followTailFrameRef = useRef<number | null>(null);
@@ -215,6 +217,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     followingTailRef.current = next;
     setFollowingTailState(next);
   }, [trace]);
+  const setFollowPinAnimated = useCallback((next: boolean) => {
+    if (followPinAnimatedRef.current === next) return;
+    followPinAnimatedRef.current = next;
+    setFollowPinAnimatedState(next);
+  }, []);
   const cancelTurnScroll = useCallback(() => {
     traceCancelGeneration.current += 1;
     trace("turn.cancel");
@@ -663,8 +670,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     trace("list.scroll", { previousY: lastScrollRef.current.y, deltaY: contentOffset.y - lastScrollRef.current.y, offsetY: contentOffset.y, contentHeight: contentSize.height, viewportHeight: layoutMeasurement.height });
     // Growth adds distance from the tail without the user going anywhere. Legend's own animated
-    // tail pin also reports momentum while it catches up, so a burst of tokens could otherwise be
-    // mistaken for a scroll-away and drop following for good.
+    // tail pin also reports momentum while it catches up toward newer messages, so a burst of
+    // tokens must not look like a scroll-away. Only a move toward older messages may drop following.
+    const offsetDelta = contentOffset.y - lastScrollRef.current.y;
     const grew = contentSize.height > lastScrollRef.current.height;
     lastScrollRef.current = { y: contentOffset.y, height: contentSize.height, viewport: layoutMeasurement.height };
     measureVisibleRows();
@@ -672,9 +680,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     setFollowingTail(nextChatTailFollowing({
       currentlyFollowing: followingTailRef.current,
       distanceToBottom: distanceToLatest,
-      userInteracting: chatTailScrolledAway({ dragging: userDraggingRef.current, momentum: momentumScrollingRef.current, contentGrew: grew }),
+      userInteracting: chatTailScrolledAway({ dragging: userDraggingRef.current, momentum: momentumScrollingRef.current, contentGrew: grew, offsetDelta }),
       pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()),
     }));
+    // Native animated scrollTo cannot retarget; snap once a burst opens a gap the pin would chase.
+    setFollowPinAnimated(chatFollowPinAnimated(distanceToLatest, followPinAnimatedRef.current));
     if (initialScrollDone.current && distanceToOldest < CHAT_PAGE_THRESHOLD && view.hasMoreOlder && !view.loadingOlder) {
       trace("pagination.request", { direction: "older", distanceToOldest });
       void loadOlderTurns(sessionId);
@@ -683,7 +693,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       trace("pagination.request", { direction: "newer", distanceToLatest });
       void loadNewerTurns(sessionId);
     }
-  }, [loadNewerTurns, loadOlderTurns, measureVisibleRows, sessionId, setFollowingTail, targetIsLatestMessage, trace, view.hasMoreNewer, view.hasMoreOlder, view.loadingNewer, view.loadingOlder]);
+  }, [loadNewerTurns, loadOlderTurns, measureVisibleRows, sessionId, setFollowPinAnimated, setFollowingTail, targetIsLatestMessage, trace, view.hasMoreNewer, view.hasMoreOlder, view.loadingNewer, view.loadingOlder]);
 
   const handleContentSizeChange = useCallback((width: number, height: number) => {
     trace("list.contentSize", { width, height });
@@ -721,8 +731,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const { distanceToLatest } = chatListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({ currentlyFollowing: followingTailRef.current, distanceToBottom: distanceToLatest, userInteracting: false, pendingTarget: pendingScrollSequence.current !== null || turnScrollTargetRef.current !== null }));
+    setFollowPinAnimated(chatFollowPinAnimated(distanceToLatest, followPinAnimatedRef.current));
     requestFollowTail();
-  }, [requestFollowTail, setFollowingTail, trace]);
+  }, [requestFollowTail, setFollowPinAnimated, setFollowingTail, trace]);
 
   const handleMomentumScrollBegin = useCallback(() => {
     trace("list.momentumBegin");
@@ -737,8 +748,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const { distanceToLatest } = chatListDistances(contentOffset.y, contentSize.height, layoutMeasurement.height);
     setFollowingTail(nextChatTailFollowing({ currentlyFollowing: followingTailRef.current, distanceToBottom: distanceToLatest, userInteracting: false, pendingTarget: pendingScrollSequence.current !== null || (turnScrollTargetRef.current !== null && !targetIsLatestMessage()) }));
+    setFollowPinAnimated(chatFollowPinAnimated(distanceToLatest, followPinAnimatedRef.current));
     requestFollowTail();
-  }, [requestFollowTail, setFollowingTail, targetIsLatestMessage, trace]);
+  }, [requestFollowTail, setFollowPinAnimated, setFollowingTail, targetIsLatestMessage, trace]);
 
   const handleCopyMessage = useCallback((text: string) => {
     void copyMessageText(text).catch((error) => {
@@ -827,8 +839,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   // Chronological list: anchoring on data changes keeps the reading position when older turns are
   // prepended. `undefined` keeps Legend's default size stabilization.
   const maintainVisiblePosition = useMemo(() => (followingTail ? undefined : { data: true }), [followingTail]);
-  // Row growth uses the list's animated pin, including tool expansion and streaming.
-  const maintainScrollAtEnd = useMemo(() => chatMaintainScrollAtEnd(followingTail, listLoaded && !reducedMotion), [followingTail, listLoaded, reducedMotion]);
+  // Row growth uses the list's pin, including tool expansion and streaming. Small growth animates;
+  // a burst that outruns the pin snaps so the tail cannot run away.
+  const maintainScrollAtEnd = useMemo(() => chatMaintainScrollAtEnd(followingTail, listLoaded && !reducedMotion && followPinAnimated), [followPinAnimated, followingTail, listLoaded, reducedMotion]);
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     trace("list.layout", { ...event.nativeEvent.layout });
     setListWidth(event.nativeEvent.layout.width);

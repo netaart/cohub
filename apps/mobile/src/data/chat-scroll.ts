@@ -6,6 +6,9 @@ export const CHAT_PAGE_THRESHOLD = 180;
  * that outruns the animated pin must not drop it.
  */
 export const CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD = 8;
+/** Native animated scrollTo cannot retarget. Growth within this many pixels still uses the
+ *  smooth pin; a burst that opens a larger gap snaps so the tail cannot run away. */
+export const CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD = 80;
 
 type ChatTailStateInput = {
   currentlyFollowing: boolean;
@@ -17,10 +20,17 @@ type ChatTailStateInput = {
 /**
  * Whether a scroll event counts as the user leaving the tail. Growth adds distance to the tail
  * without the user going anywhere, and an animated programmatic pin reports momentum while it
- * catches up, so neither may drop following.
+ * catches up toward newer messages (positive offset delta). Only a move toward older messages
+ * may drop following — `contentGrew` is true for a single event, but the pin keeps scrolling
+ * after that, and those frames must not look like a scroll-away.
  */
-export function chatTailScrolledAway(input: { dragging: boolean; momentum: boolean; contentGrew: boolean }) {
-  return (input.dragging || input.momentum) && !input.contentGrew;
+export function chatTailScrolledAway(input: { dragging: boolean; momentum: boolean; contentGrew: boolean; offsetDelta: number }) {
+  return (input.dragging || input.momentum) && !input.contentGrew && input.offsetDelta < 0;
+}
+
+export function chatFollowPinAnimated(distanceToBottom: number, currentlyAnimated = true) {
+  if (currentlyAnimated) return distanceToBottom <= CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD;
+  return distanceToBottom <= CHAT_TAIL_THRESHOLD;
 }
 
 export function nextChatTailFollowing(input: ChatTailStateInput) {

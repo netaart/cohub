@@ -5,7 +5,7 @@ import ts from "typescript";
 import { latestUnreadAssistantIndex } from "../src/data/chat-read-state.ts";
 import { ChatScrollTrace, setDebugTraceSink } from "../src/data/chat-scroll-trace.ts";
 import { MessageMeasurements, createStreamBatch, liveReplyAnchor } from "../src/data/chat-rendering.ts";
-import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, isChatRowVisible, nextChatTailFollowing } from "../src/data/chat-scroll.ts";
+import { CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD, CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, CHAT_TAIL_THRESHOLD, chatFollowPinAnimated, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, isChatRowVisible, nextChatTailFollowing } from "../src/data/chat-scroll.ts";
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
@@ -1949,11 +1949,20 @@ assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom
 assert.equal(nextChatTailFollowing({ currentlyFollowing: true, distanceToBottom: 20, userInteracting: false, pendingTarget: true }), false);
 assert.equal(nextChatTailFollowing({ currentlyFollowing: false, distanceToBottom: 20, userInteracting: false, pendingTarget: true }), false);
 // Growth (or an animated programmatic pin) must not read as the user scrolling away.
-assert.equal(chatTailScrolledAway({ dragging: false, momentum: false, contentGrew: false }), false);
-assert.equal(chatTailScrolledAway({ dragging: true, momentum: false, contentGrew: false }), true);
-assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: false }), true);
-assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: true }), false, "a streamed burst keeps the tail");
-assert.equal(chatTailScrolledAway({ dragging: true, momentum: true, contentGrew: true }), false, "growth under the finger still keeps the tail");
+assert.equal(chatTailScrolledAway({ dragging: false, momentum: false, contentGrew: false, offsetDelta: 0 }), false);
+assert.equal(chatTailScrolledAway({ dragging: true, momentum: false, contentGrew: false, offsetDelta: -40 }), true);
+assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: false, offsetDelta: -40 }), true);
+assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: true, offsetDelta: -40 }), false, "a streamed burst keeps the tail");
+assert.equal(chatTailScrolledAway({ dragging: true, momentum: true, contentGrew: true, offsetDelta: -40 }), false, "growth under the finger still keeps the tail");
+assert.equal(chatTailScrolledAway({ dragging: false, momentum: true, contentGrew: false, offsetDelta: 80 }), false, "the animated pin catching up is not a scroll-away");
+assert.equal(chatTailScrolledAway({ dragging: true, momentum: true, contentGrew: false, offsetDelta: 80 }), false, "a programmatic pin must not look like a drag-away");
+assert.equal(chatTailScrolledAway({ dragging: true, momentum: false, contentGrew: false, offsetDelta: 0 }), false, "holding still at the tail is not leaving");
+assert.equal(chatFollowPinAnimated(0), true);
+assert.equal(chatFollowPinAnimated(CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD), true);
+assert.equal(chatFollowPinAnimated(CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD + 1), false, "a burst larger than the pin window snaps instead of chasing");
+assert.equal(chatFollowPinAnimated(CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD, false), false, "stay snapped until back on the tail");
+assert.equal(chatFollowPinAnimated(CHAT_TAIL_THRESHOLD, false), true);
+assert.equal(chatFollowPinAnimated(CHAT_TAIL_THRESHOLD + 1, false), false);
 assert.deepEqual(chatMaintainScrollAtEnd(true), { animated: true }, "sending must not disable the moving tail");
 assert.deepEqual(chatMaintainScrollAtEnd(true, false), { animated: false }, "first-row measurement and reduced motion must not animate the pin");
 assert.equal(chatMaintainScrollAtEnd(false), false);
@@ -1985,7 +1994,10 @@ for (const destination of ["bubble", "queue"]) {
   }
 }
 assert.ok(CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD >= 1, "a streamed card can grow more than 10% of the screen in one layout");
+assert.ok(CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD > CHAT_TAIL_THRESHOLD, "the smooth pin has room to catch a few lines before snapping");
 const chatSource = readFileSync(new URL("../app/chat/[sessionId].tsx", import.meta.url), "utf8");
+assert.ok(chatSource.includes("offsetDelta"), "the pin catching up is distinguished from scrolling toward older messages");
+assert.ok(chatSource.includes("chatFollowPinAnimated"), "a burst larger than the pin window must snap");
 const runningRowMessages = [
   { id: "user-a", role: "user", meta: { turnId: "turn-a", turnSequence: 1 } },
   { id: "queued-b", role: "user", meta: { optimistic: true, turnSequence: 2 } },
