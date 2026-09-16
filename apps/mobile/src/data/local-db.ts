@@ -254,6 +254,11 @@ export async function saveDebugEvent(event: DebugEventRow) {
   await db.runAsync("DELETE FROM debug_events WHERE session_id = ? AND sequence <= (SELECT MAX(sequence) - 3999 FROM debug_events WHERE session_id = ?)", event.sessionId, event.sessionId);
 }
 
+export async function loadDebugSessions(): Promise<DebugSessionRow[]> {
+  const db = await database();
+  return db.getAllAsync<DebugSessionRow>("SELECT session_id AS sessionId, started_at AS startedAt, updated_at AS updatedAt, closed_at AS closedAt, uploaded_at AS uploadedAt FROM debug_sessions ORDER BY updated_at DESC LIMIT 10");
+}
+
 export async function loadDebugEvents(sessionId: string): Promise<DebugEventRow[]> {
   const db = await database();
   return db.getAllAsync<DebugEventRow>("SELECT session_id AS sessionId, sequence, timestamp, name, payload FROM debug_events WHERE session_id = ? ORDER BY sequence ASC", sessionId);

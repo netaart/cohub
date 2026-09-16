@@ -4,7 +4,7 @@ import * as Updates from "expo-updates";
 import { useEffect, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { config } from "@/src/config";
-import { clearDebugSession, saveDebugEvent, upsertDebugSession, type DebugEventRow } from "@/src/data/local-db";
+import { clearDebugSession, loadDebugEvents, loadDebugSessions, saveDebugEvent, upsertDebugSession, type DebugEventRow } from "@/src/data/local-db";
 import { chatScrollTrace, setDebugTraceSink } from "@/src/data/chat-scroll-trace";
 
 const ENABLED_KEY = "cohub.debug.diagnostics.enabled";
@@ -127,10 +127,22 @@ export function record(name: string, fields: DebugFields = {}) {
 
 export async function snapshot(): Promise<DebugSnapshot | null> {
   await ensureLoaded();
-  if (!activeSession) return null;
-  const session = activeSession;
-  await session.writes;
-  return { sessionId: session.id, startedAt: session.startedAt, dropped: session.dropped, events: [...session.events] };
+  // A frozen screen kills the JS thread before anything can run, so the crashed
+  // session stays open in SQLite. Prefer the most recent session that actually
+  // has events: usually the crash itself, since the restarted app opens a new one.
+  if (activeSession && activeSession.events.length > 0) {
+    await activeSession.writes;
+    return { sessionId: activeSession.id, startedAt: activeSession.startedAt, dropped: activeSession.dropped, events: [...activeSession.events] };
+  }
+  const sessions = await loadDebugSessions();
+  for (const session of sessions) {
+    if (activeSession?.id === session.sessionId) continue;
+    const events = await loadDebugEvents(session.sessionId);
+    if (events.length === 0) continue;
+    if (session.closedAt === null) await upsertDebugSession({ ...session, closedAt: new Date().toISOString() });
+    return { sessionId: session.sessionId, startedAt: session.startedAt, dropped: Math.max(0, events.at(-1)!.sequence - events.length), events };
+  }
+  return null;
 }
 
 /** JSON Lines so a long session can be inspected line by line or grepped for a phase. */
