@@ -24,10 +24,13 @@ type Resources = {
   tasks: TaskRunRecord[];
 };
 
-type ResourceFailures = Record<"checkpoints" | "apps" | "tasks", boolean>;
+type ResourceKey = keyof Resources;
+type ResourceFailures = Record<ResourceKey, boolean>;
+type ResourceLoading = Record<ResourceKey, boolean>;
 
 const emptyResources: Resources = { checkpoints: [], apps: [], tasks: [] };
 const noResourceFailures: ResourceFailures = { checkpoints: false, apps: false, tasks: false };
+const allResourcesLoading: ResourceLoading = { checkpoints: true, apps: true, tasks: true };
 const SPACE_REFRESH_INTERVAL_MS = 60_000;
 
 export default function SpaceScreen() {
@@ -46,7 +49,8 @@ export default function SpaceScreen() {
   const [spaceLoading, setSpaceLoading] = useState(true);
   const [spaceError, setSpaceError] = useState<string | null>(null);
   const [resources, setResources] = useState<Resources>(emptyResources);
-  const [loadingResources, setLoadingResources] = useState(true);
+  const [resourceLoading, setResourceLoading] = useState<ResourceLoading>(allResourcesLoading);
+  const loadingResources = resourceLoading.checkpoints || resourceLoading.apps || resourceLoading.tasks;
   const [taskCursor, setTaskCursor] = useState<string | null>(null);
   const [tasksLoadingMore, setTasksLoadingMore] = useState(false);
   const [resourceFailures, setResourceFailures] = useState<ResourceFailures>(noResourceFailures);
@@ -96,29 +100,45 @@ export default function SpaceScreen() {
     if (!client || !spaceId) return;
     if (spaceRefreshInFlightRef.current?.spaceId === spaceId) return;
     const lastRefresh = spaceRefreshAtRef.current;
-    if (!options.force && cachedSpaceRef.current && lastRefresh?.spaceId === spaceId && Date.now() - lastRefresh.at < SPACE_REFRESH_INTERVAL_MS) return;
+    const cached = cachedSpaceRef.current;
+    if (!options.force && cached?.id === spaceId && (!lastRefresh || (lastRefresh.spaceId === spaceId && Date.now() - lastRefresh.at < SPACE_REFRESH_INTERVAL_MS))) {
+      // Home/cache data is enough for first paint; global Space reconciliation keeps it fresh.
+      spaceRefreshAtRef.current ??= { spaceId, at: Date.now() };
+      setSpaceLoading(false);
+      setSpaceError(null);
+      if (cached.isPinned === undefined) void refreshSpacePin(spaceId).catch((error: unknown) => console.warn("[mobile-space] failed to refresh pin state", error));
+      return;
+    }
     const requestToken = spaceRefreshTokenRef.current + 1;
     spaceRefreshTokenRef.current = requestToken;
     spaceRefreshInFlightRef.current = { spaceId, token: requestToken };
     setSpaceLoading(true);
     setSpaceError(null);
-    // Pin state comes from a private label endpoint; without it the Space remains usable.
-    const [spaceResult, pinResult] = await Promise.allSettled([
-      client.spaces.get(spaceId),
-      refreshSpacePin(spaceId),
-    ]);
-    if (spaceRefreshInFlightRef.current?.token !== requestToken) return;
-    spaceRefreshInFlightRef.current = null;
-    setSpaceLoading(false);
-    if (spaceResult.status === "rejected") {
-      setSpaceError(spaceResult.reason instanceof Error && spaceResult.reason.message.trim() ? spaceResult.reason.message : t("space.unavailable"));
-      return;
+    // Pin state is private metadata, not a prerequisite for rendering the Space shell.
+    const pinRequest = refreshSpacePin(spaceId).catch((error: unknown) => {
+      console.warn("[mobile-space] failed to refresh pin state", error);
+      return null;
+    });
+    try {
+      const remoteSpace = await client.spaces.get(spaceId);
+      if (spaceRefreshInFlightRef.current?.token !== requestToken) return;
+      spaceRefreshAtRef.current = { spaceId, at: Date.now() };
+      setLoadedSpace(remoteSpace);
+      upsertSpace(remoteSpace);
+      setSpaceLoading(false);
+      void pinRequest.then((pinned) => {
+        if (pinned === null || spaceRefreshTokenRef.current !== requestToken) return;
+        const resolved = { ...remoteSpace, isPinned: pinned };
+        setLoadedSpace(resolved);
+        upsertSpace(resolved);
+      });
+    } catch (error) {
+      if (spaceRefreshInFlightRef.current?.token !== requestToken) return;
+      setSpaceLoading(false);
+      setSpaceError(error instanceof Error && error.message.trim() ? error.message : t("space.unavailable"));
+    } finally {
+      if (spaceRefreshInFlightRef.current?.token === requestToken) spaceRefreshInFlightRef.current = null;
     }
-    spaceRefreshAtRef.current = { spaceId, at: Date.now() };
-    const pinned = pinResult.status === "fulfilled" ? pinResult.value : null;
-    const resolved = pinned === null ? spaceResult.value : { ...spaceResult.value, isPinned: pinned };
-    setLoadedSpace(resolved);
-    upsertSpace(resolved);
   }, [client, refreshSpacePin, spaceId, t, upsertSpace]);
 
   const loadResources = useCallback(async (options: { force?: boolean; silent?: boolean } = {}) => {
@@ -127,30 +147,35 @@ export default function SpaceScreen() {
     const requestToken = ++resourcesRequestRef.current;
     resourcesInFlightRef.current = true;
     const taskToken = ++tasksRequestRef.current;
-    if (!options.silent) setLoadingResources(true);
-    const [checkpointResult, appResult, taskResult] = await Promise.allSettled([
-      client.space(spaceId).checkpoints.list({ limit: 5 }),
-      client.apps.listBySpace(spaceId),
-      client.tasks.list({ spaceId, limit: 8 }),
-    ]);
+    if (!options.silent) setResourceLoading(allResourcesLoading);
+    const settle = (key: ResourceKey, failed: boolean) => {
+      if (resourcesRequestRef.current !== requestToken) return;
+      setResourceFailures((current) => ({ ...current, [key]: failed }));
+      setResourceLoading((current) => ({ ...current, [key]: false }));
+    };
+    const checkpointRequest = client.space(spaceId).checkpoints.list({ limit: 5 }).then((result) => {
+      if (resourcesRequestRef.current === requestToken) setResources((current) => ({ ...current, checkpoints: result.checkpoints }));
+      settle("checkpoints", false);
+      return result;
+    }).catch((error: unknown) => { settle("checkpoints", true); throw error; });
+    const appRequest = client.apps.listBySpace(spaceId).then((result) => {
+      if (resourcesRequestRef.current === requestToken) setResources((current) => ({ ...current, apps: result.apps }));
+      settle("apps", false);
+      return result;
+    }).catch((error: unknown) => { settle("apps", true); throw error; });
+    const taskRequest = client.tasks.list({ spaceId, limit: 8 }).then((result) => {
+      if (resourcesRequestRef.current === requestToken && taskToken === tasksRequestRef.current) {
+        setResources((current) => ({ ...current, tasks: options.silent ? mergeTaskRuns(current.tasks, result.runs) : result.runs }));
+        if (!options.silent) setTaskCursor(result.pageInfo?.hasMore ? result.pageInfo.nextCursor : null);
+      }
+      settle("tasks", false);
+      return result;
+    }).catch((error: unknown) => { settle("tasks", true); throw error; });
+    const results = await Promise.allSettled([checkpointRequest, appRequest, taskRequest]);
     resourcesInFlightRef.current = false;
     if (resourcesRequestRef.current !== requestToken) return;
-    const tasksCurrent = taskToken === tasksRequestRef.current;
-    if ([checkpointResult, appResult, taskResult].every((result) => result.status === "fulfilled")) resourcesRefreshAtRef.current = Date.now();
-    // Settled sections replace their data; failed ones keep what is already on screen.
-    setResources((current) => ({
-      checkpoints: checkpointResult.status === "fulfilled" ? checkpointResult.value.checkpoints : current.checkpoints,
-      apps: appResult.status === "fulfilled" ? appResult.value.apps : current.apps,
-      tasks: tasksCurrent && taskResult.status === "fulfilled" ? options.silent ? mergeTaskRuns(current.tasks, taskResult.value.runs) : taskResult.value.runs : current.tasks,
-    }));
-    setResourceFailures({
-      checkpoints: checkpointResult.status === "rejected",
-      apps: appResult.status === "rejected",
-      tasks: taskResult.status === "rejected",
-    });
-    if (tasksCurrent && taskResult.status === "fulfilled" && !options.silent) setTaskCursor(taskResult.value.pageInfo?.hasMore ? taskResult.value.pageInfo.nextCursor : null);
-    setLoadingResources(false);
-    const failed = [checkpointResult, appResult, taskResult].find((result) => result.status === "rejected");
+    if (results.every((result) => result.status === "fulfilled")) resourcesRefreshAtRef.current = Date.now();
+    const failed = results.find((result) => result.status === "rejected");
     if (options.silent && failed?.status === "rejected") throw failed.reason;
   }, [client, spaceId]);
 
@@ -214,9 +239,14 @@ export default function SpaceScreen() {
   }, [loadResources, loadSessions, loadSpace]));
 
   useEffect(() => () => {
+    spaceRefreshTokenRef.current += 1;
+    spaceRefreshInFlightRef.current = null;
     resourcesRequestRef.current += 1;
     sessionsRequestRef.current += 1;
     tasksRequestRef.current += 1;
+    resourcesInFlightRef.current = false;
+    sessionsInFlightRef.current = false;
+    tasksInFlightRef.current = false;
   }, [client, spaceId]);
 
   const refreshTasks = useCallback(async () => {
@@ -319,13 +349,13 @@ export default function SpaceScreen() {
     <View>{sessions.length > 0 ? sessions.map((session) => <SessionRow key={session.id} session={{ ...session, space: session.space ?? { id: space.id, name, slug: space.slug, publicProfile: space.publicProfile ?? null } }} onPress={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } })} onPressIn={() => prefetchSession(session.id)} />) : <ResourceEmpty text={sessionsLoading ? t("space.empty.chatsLoading") : sessionsFailed ? t("space.empty.loadFailed") : t("space.empty.chats")} />}</View>
 
     <SectionHeader title={t("space.section.works")} />
-    <View>{resources.apps.length > 0 ? resources.apps.map((app) => <ResourceRow key={app.id} icon="rocket" title={app.meta?.title || app.meta?.name || app.slug} subtitle={t("space.workSubtitle", { target: app.targetType, version: app.latestVersion })} trailing={<StatusPill label={app.status === "published" ? t("space.published") : t("space.disabled")} tone={app.status === "published" ? "success" : "neutral"} />} onPress={() => router.push({ pathname: "/work/[appId]", params: { appId: app.id } })} />) : <ResourceEmpty text={loadingResources ? t("space.empty.worksLoading") : resourceFailures.apps ? t("space.empty.loadFailed") : t("space.empty.works")} />}</View>
+    <View>{resources.apps.length > 0 ? resources.apps.map((app) => <ResourceRow key={app.id} icon="rocket" title={app.meta?.title || app.meta?.name || app.slug} subtitle={t("space.workSubtitle", { target: app.targetType, version: app.latestVersion })} trailing={<StatusPill label={app.status === "published" ? t("space.published") : t("space.disabled")} tone={app.status === "published" ? "success" : "neutral"} />} onPress={() => router.push({ pathname: "/work/[appId]", params: { appId: app.id } })} />) : <ResourceEmpty text={resourceLoading.apps ? t("space.empty.worksLoading") : resourceFailures.apps ? t("space.empty.loadFailed") : t("space.empty.works")} />}</View>
 
     <SectionHeader title={t("space.section.saves")} />
-    <View>{resources.checkpoints.length > 0 ? resources.checkpoints.map((checkpoint) => <ResourceRow key={checkpoint.id} icon="bookmark" title={checkpoint.description || t("space.save", { hash: checkpoint.commitHash.slice(0, 8) })} subtitle={`${formatRelativeTime(checkpoint.createdAt)} · ${checkpoint.commitHash.slice(0, 8)}`} />) : <ResourceEmpty text={loadingResources ? t("space.empty.savesLoading") : resourceFailures.checkpoints ? t("space.empty.loadFailed") : t("space.empty.saves")} />}</View>
+    <View>{resources.checkpoints.length > 0 ? resources.checkpoints.map((checkpoint) => <ResourceRow key={checkpoint.id} icon="bookmark" title={checkpoint.description || t("space.save", { hash: checkpoint.commitHash.slice(0, 8) })} subtitle={`${formatRelativeTime(checkpoint.createdAt)} · ${checkpoint.commitHash.slice(0, 8)}`} />) : <ResourceEmpty text={resourceLoading.checkpoints ? t("space.empty.savesLoading") : resourceFailures.checkpoints ? t("space.empty.loadFailed") : t("space.empty.saves")} />}</View>
 
     <SectionHeader title={t("space.section.tasks")} />
-    <View style={{ paddingBottom: 24 }}>{resources.tasks.length > 0 ? resources.tasks.map((task) => <ResourceRow key={task.id} icon={task.status === "running" ? "sync" : task.status === "failed" ? "alert" : "check-circle"} title={task.taskType.replaceAll("_", " ")} subtitle={task.errorMessage || t("space.taskAttempt", { time: formatRelativeTime(task.updatedAt), count: task.attemptCount })} trailing={<StatusPill label={task.status} tone={task.status === "failed" ? "danger" : task.status === "running" || task.status === "pending" ? "warning" : "success"} />} onPress={() => task.taskType.includes("generation") ? router.push({ pathname: "/task/[taskId]", params: { taskId: task.id } }) : task.sessionId ? router.push({ pathname: "/chat/[sessionId]", params: { sessionId: task.sessionId! } }) : undefined} />) : <ResourceEmpty text={loadingResources ? t("space.empty.tasksLoading") : resourceFailures.tasks ? t("space.empty.loadFailed") : t("space.empty.tasks")} />}</View>
+    <View style={{ paddingBottom: 24 }}>{resources.tasks.length > 0 ? resources.tasks.map((task) => <ResourceRow key={task.id} icon={task.status === "running" ? "sync" : task.status === "failed" ? "alert" : "check-circle"} title={task.taskType.replaceAll("_", " ")} subtitle={task.errorMessage || t("space.taskAttempt", { time: formatRelativeTime(task.updatedAt), count: task.attemptCount })} trailing={<StatusPill label={task.status} tone={task.status === "failed" ? "danger" : task.status === "running" || task.status === "pending" ? "warning" : "success"} />} onPress={() => task.taskType.includes("generation") ? router.push({ pathname: "/task/[taskId]", params: { taskId: task.id } }) : task.sessionId ? router.push({ pathname: "/chat/[sessionId]", params: { sessionId: task.sessionId! } }) : undefined} />) : <ResourceEmpty text={resourceLoading.tasks ? t("space.empty.tasksLoading") : resourceFailures.tasks ? t("space.empty.loadFailed") : t("space.empty.tasks")} />}</View>
     {taskCursor ? <Pressable accessibilityRole="button" disabled={tasksLoadingMore} onPress={() => void loadMoreTasks()} style={({ pressed }) => ({ alignItems: "center", paddingVertical: 14, marginHorizontal: 16, marginBottom: 20, opacity: tasksLoadingMore ? 0.5 : pressed ? 0.6 : 1 })}><Text style={[typography.caption, { color: theme.colors.accent }]}>{tasksLoadingMore ? t("space.tasks.loadingMore") : t("space.tasks.loadMore")}</Text></Pressable> : null}
     </ScrollView>
       </View>
