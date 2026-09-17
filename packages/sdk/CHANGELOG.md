@@ -1,5 +1,35 @@
 # @neta-art/cohub
 
+## 8.19.0
+
+### Minor Changes
+
+- c19a941: **App management for builders.** Apps are governed by a single `app.manage` permission — create, publish versions, change config/status, read stats, delete your own — granted to `host` and `builder` instead of leaning on `space.edit`, so Space builders can run Apps without gaining host-only Space settings. There is no separate `app.publish` atom.
+  
+  - `app_source` uploads (used by the local CLI / local agent publish path) now require `app.manage`; `space_avatar` stays on `space.edit`.
+  - App deletion: hosts may delete any App, builders only the Apps they published themselves.
+  - App detail responses now report the actual `publisher` (App creator); the public Cohub bar credits that identity instead of always showing the Space owner, and the App authorize dialog names that author.
+  - The App management page shows Edit / Disable / stats / Update version for `app.manage` holders, and Delete only for hosts or the App's publisher.
+  - The `Permission` union gains `"app.manage"`.
+
+### Patch Changes
+
+- 65499d6: **Event-driven local Runtime recovery.** Recovery is Session-scoped and triggered by real
+  events: the local Runtime reports pending executions in bounded batches after connecting,
+  Gateway peer disconnects and transport uncertainty enqueue reconciliation for that Session,
+  and only the affected Chat exposes stop confirmation. Realtime and channel notifications are
+  best effort; committed messages and terminal turns stay authoritative. `runtime.hello` drops
+  `pendingExecutions`, `RuntimeStatus` drops the Space-wide `recovery` / `canManage` fields, and
+  `confirmRuntimeStopped(sessionId, …)` requests `expectedTurnId`. The local Runtime was never
+  live, so these type changes ship as a patch.
+  
+  **事件驱动的本地 Runtime 恢复。** 恢复改为 Session 粒度并由真实事件触发：本地 Runtime 连接后
+  分批上报待恢复执行，Gateway peer 断开与传输结果不确定都会为该 Session 入队协调，仅受影响的
+  Chat 暴露停止确认。实时与渠道通知降级为 best effort，已提交的消息与终态 turn 仍是权威数据。
+  `runtime.hello` 移除 `pendingExecutions`，`RuntimeStatus` 移除 Space 级 `recovery` / `canManage`，
+  `confirmRuntimeStopped(sessionId, …)` 需要 `expectedTurnId`。本地 Runtime 从未上线，因此这些类型
+  变更为 patch。
+
 ## 8.18.0
 
 ### Minor Changes
