@@ -735,7 +735,7 @@ router.post("/", async (c) => {
   const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
   const spaceId = typeof body?.spaceId === "string" ? body.spaceId : "";
   if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  if (!(await hasPermission(user, "space.edit", { spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(user, "app.publish", { spaceId }))) return authzDenied(c);
 
   const slug = typeof body?.slug === "string" ? body.slug.trim().toLowerCase() : "";
   if (!SLUG_RE.test(slug)) return c.json({ message: "slug must use lowercase letters, numbers, hyphens, or underscores" }, 400);
@@ -1027,7 +1027,7 @@ router.patch("/:id", async (c) => {
   if (!requireValidId(id)) return c.json({ message: "app not found" }, 404);
   const current = await getAppById(id);
   if (!current) return c.json({ message: "app not found" }, 404);
-  if (!(await hasPermission(user, "space.edit", { spaceId: current.spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(user, "app.publish", { spaceId: current.spaceId }))) return authzDenied(c);
 
   const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
   return updateApp(c, current, body, user);
@@ -1053,7 +1053,7 @@ router.post("/:id/versions", async (c) => {
   if (!requireValidId(id)) return c.json({ message: "app not found" }, 404);
   const app = await getAppById(id);
   if (!app) return c.json({ message: "app not found" }, 404);
-  if (!(await hasPermission(user, "space.edit", { spaceId: app.spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(user, "app.publish", { spaceId: app.spaceId }))) return authzDenied(c);
   const meta = applyRequestSourceToMeta(c, null);
   return publishAppVersion(c, app, { actor: user, meta });
 });
