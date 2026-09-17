@@ -23,7 +23,7 @@ import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp, useSession } from "@/src/data/context";
 import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useSpaceRealtime } from "@/src/data/use-space-realtime";
-import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, CHAT_PAGE_THRESHOLD, chatFollowPinAnimated, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, nextChatTailFollowing } from "@/src/data/chat-scroll";
+import { CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD, CHAT_PAGE_THRESHOLD, chatFollowPinAnimated, chatListDistances, chatListViewOffset, chatMaintainScrollAtEnd, chatTailScrolledAway, chatTailStalled, nextChatTailFollowing } from "@/src/data/chat-scroll";
 import { chatScrollTrace, type TraceFields } from "@/src/data/chat-scroll-trace";
 import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { useChatScrollTrace, useTraceTouches } from "@/src/components/use-chat-scroll-trace";
@@ -705,8 +705,25 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       initialScrollDone.current = true;
       return;
     }
+    // Legend's animated pin can lose its opening race on a chat that is already streaming when
+    // opened: its maintain request stays pending while the tail keeps growing out of view, and
+    // only a user drag recovers it. Re-check one frame later; a healthy pin is producing scroll
+    // events while it catches up, so an unchanged offset next to an oversized gap is a real stall.
+    if (initialScrollDone.current && followingTailRef.current && !userDraggingRef.current && !momentumScrollingRef.current && turnScrollTargetRef.current === null) {
+      if (followTailFrameRef.current !== null) cancelAnimationFrame(followTailFrameRef.current);
+      const yAtSchedule = lastScrollRef.current.y;
+      followTailFrameRef.current = requestAnimationFrame(() => {
+        followTailFrameRef.current = null;
+        if (!followingTailRef.current || userDraggingRef.current || momentumScrollingRef.current) return;
+        const { distanceToLatest } = chatListDistances(lastScrollRef.current.y, height, lastScrollRef.current.viewport);
+        if (!chatTailStalled(distanceToLatest, lastScrollRef.current.y === yAtSchedule)) return;
+        trace("tail.stalled", { distanceToLatest });
+        setFollowPinAnimated(chatFollowPinAnimated(distanceToLatest, followPinAnimatedRef.current));
+        requestFollowTail(false);
+      });
+    }
     requestInitialScroll();
-  }, [measureVisibleRows, requestInitialScroll, scrollToTurn, trace]);
+  }, [measureVisibleRows, requestFollowTail, requestInitialScroll, scrollToTurn, setFollowPinAnimated, trace]);
 
   const handleScrollBeginDrag = useCallback(() => {
     setSendTransition(null);
@@ -845,6 +862,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
   const handleListLayout = useCallback((event: LayoutChangeEvent) => {
     trace("list.layout", { ...event.nativeEvent.layout });
     setListWidth(event.nativeEvent.layout.width);
+    // The stall fallback measures distance before any scroll event may have fired, so the
+    // viewport has to come from layout, not only from onScroll.
+    lastScrollRef.current = { ...lastScrollRef.current, viewport: event.nativeEvent.layout.height };
     measureVisibleRows();
   }, [measureVisibleRows, trace]);
   const handleListRefresh = useCallback(() => { void refreshSession(sessionId); }, [refreshSession, sessionId]);

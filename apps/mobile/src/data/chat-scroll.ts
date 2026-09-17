@@ -66,3 +66,13 @@ export function chatListDistances(offsetY: number, contentHeight: number, layout
 export function chatMaintainScrollAtEnd(followingTail: boolean, animate = true) {
   return followingTail ? { animated: animate } as const : false;
 }
+
+/**
+ * Whether one content-growth frame needs the app-level stall fallback. A healthy animated pin
+ * emits scroll events while it catches up, so an unchanged offset beside a gap larger than the
+ * pin's animation window means the pin lost its race (e.g. a chat opened mid-stream) and only an
+ * explicit scroll can recover it.
+ */
+export function chatTailStalled(distanceToLatest: number, offsetUnchanged: boolean) {
+  return offsetUnchanged && distanceToLatest > CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD;
+}
