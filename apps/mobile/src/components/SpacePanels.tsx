@@ -300,15 +300,12 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         <Reanimated.View style={[styles.pages, { width: 2 * panelWidth + width }, pagerPaintStyle]}>
           <View
             style={pageStyle("chat")}
+            pointerEvents={interactive && visiblePanel === "chat" ? "auto" : "none"}
             accessibilityViewIsModal={interactive && visiblePanel === "chat"}
             accessibilityElementsHidden={!(interactive && visiblePanel === "chat")}
             importantForAccessibility={interactive && visiblePanel === "chat" ? "yes" : "no-hide-descendants"}
           >
-            {visiblePanel === "chat"
-              ? interactive
-                ? <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onChipsTouchChange={handleChipsTouchChange} onClose={closePanel} onNewChat={() => { closePanel(); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel(); onOpenSession(sessionId, target); }} />
-                : <PanelGesturePreview panel="chat" />
-              : null}
+            <ChatPanel spaceId={spaceId} spaceName={spaceName} sessions={sessions} client={client} onChipsTouchChange={handleChipsTouchChange} onClose={closePanel} onNewChat={() => { closePanel(); onNewChat(); }} onOpenSession={(sessionId, target) => { closePanel(); onOpenSession(sessionId, target); }} />
           </View>
           <View style={[styles.contentPage, { width, backgroundColor: theme.colors.background }]} accessibilityElementsHidden={visiblePanel !== null} importantForAccessibility={visiblePanel ? "no-hide-descendants" : "auto"}>
             {children}
@@ -318,26 +315,17 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
           </View>
           <View
             style={pageStyle("files")}
+            pointerEvents={interactive && visiblePanel === "files" ? "auto" : "none"}
             accessibilityViewIsModal={interactive && visiblePanel === "files"}
             accessibilityElementsHidden={!(interactive && visiblePanel === "files")}
             importantForAccessibility={interactive && visiblePanel === "files" ? "yes" : "no-hide-descendants"}
           >
-            {visiblePanel === "files"
-              ? interactive
-                ? <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} onClose={closePanel} onOpenFile={(path) => { closePanel(); onOpenFile(path); }} onOpenFilesPage={() => { closePanel(); onOpenFilesPage(); }} />
-                : <PanelGesturePreview panel="files" />
-              : null}
+            <FilesPanel enabled spaceId={spaceId} spaceName={spaceName} client={client} onClose={closePanel} onOpenFile={(path) => { closePanel(); onOpenFile(path); }} onOpenFilesPage={() => { closePanel(); onOpenFilesPage(); }} />
           </View>
         </Reanimated.View>
       </Reanimated.ScrollView>
     </View>
   );
-}
-
-function PanelGesturePreview({ panel }: { panel: SpacePanel }) {
-  const theme = useAppTheme();
-  const { t } = useTranslation();
-  return <View style={styles.panelContent} accessibilityElementsHidden><TopBar title={panel === "chat" ? t("space.panel.chats") : t("space.panel.files")} leading={<AppIcon name={panel === "chat" ? "messages" : "folder-open"} size={19} color={theme.colors.accent} />} /></View>;
 }
 
 function mergePanelSessions(current: UserSessionListItem[], incoming: UserSessionListItem[], spaceId: string, spaceName: string) {
