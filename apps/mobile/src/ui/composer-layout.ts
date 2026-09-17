@@ -21,6 +21,21 @@ export type ComposerLayout = {
   scrollEnabled: boolean;
 };
 
+export function shouldAutoExpandComposer(input: {
+  value: string;
+  expanded: boolean;
+  scrollEnabled: boolean;
+  lastUserText: string;
+  autoExpandedFor: string | null;
+}): boolean {
+  if (!input.value || input.expanded || !input.scrollEnabled) return false;
+  // Voice finals update `value` from JS without an onChangeText, and the overflowing final
+  // regularly lands after the mic stopped, so the append itself (not active recording)
+  // identifies dictation text.
+  if (input.value === input.lastUserText) return false;
+  return input.autoExpandedFor !== input.value;
+}
+
 export function getComposerLayout(input: ComposerLayoutInput): ComposerLayout {
   const hasText = input.text.length > 0;
   const expanded = hasText && input.expanded;

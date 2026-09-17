@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { icons, type IconName } from "@/src/icons";
 import { getComposerActionState } from "@/src/data/composer-state";
-import { COMPOSER_TEXT_PADDING, getComposerLayout } from "@/src/ui/composer-layout";
+import { COMPOSER_TEXT_PADDING, getComposerLayout, shouldAutoExpandComposer } from "@/src/ui/composer-layout";
 import { useTranslation } from "@/src/i18n";
 import { edgeChrome, useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem, ConnectionState } from "@/src/data/types";
@@ -215,10 +215,13 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
   const [keyboardTop, setKeyboardTop] = useState<number | null>(() => Keyboard.metrics()?.screenY ?? null);
   const [expanded, setExpanded] = useState(false);
   const [contentHeight, setContentHeight] = useState(0);
-  const inputRef = useRef<TextInput | null>(null);
   // User edits always round-trip through onChangeText; voice finals update `value`
-  // from JS and never produce one, so this marks the last user-driven text.
-  const lastUserTextRef = useRef(value);
+  // from JS and never produce one, so this marks the last user-driven text. Kept in
+  // state because the render-phase expansion check needs the committed value; identical
+  // updates bail out, so typing never pays an extra render.
+  const [lastUserText, setLastUserText] = useState(value);
+  const [autoExpandedFor, setAutoExpandedFor] = useState<string | null>(null);
+  const inputRef = useRef<TextInput | null>(null);
   const keyboardVisible = keyboardTop !== null;
   // Android keeps its bottom safe-area inset while KeyboardAvoidingView is active.
   useEffect(() => {
@@ -228,7 +231,10 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
     const hide = Keyboard.addListener(hideEvent, () => setKeyboardTop(null));
     return () => { show.remove(); hide.remove(); };
   }, []);
-  if (!value && expanded) setExpanded(false);
+  if (!value) {
+    if (autoExpandedFor !== null) setAutoExpandedFor(null);
+    if (expanded) setExpanded(false);
+  }
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
   const layout = getComposerLayout({
     text: value,
@@ -237,10 +243,14 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
     availableHeight: Math.min(windowHeight, keyboardTop ?? windowHeight) - insets.top - (keyboardVisible ? 0 : insets.bottom),
     expanded,
   });
-  // Dictation appends a whole transcript at once; once it outgrows the collapsed box, open the
-  // expanded editor so it stays readable instead of forcing a tap on the expand button. The
-  // state sticks after dictation stops, so the transcript can be reviewed before sending.
-  if (!expanded && voiceActive && layout.scrollEnabled) setExpanded(true);
+  // Dictation appends a whole transcript at once, and the overflowing final can land after
+  // the mic already stopped, so auto-expand keys off the missing onChangeText round-trip
+  // instead of active recording. It fires once per append so a manual collapse sticks while
+  // the transcript is reviewed before sending; the next append re-arms it.
+  if (shouldAutoExpandComposer({ value, expanded, scrollEnabled: layout.scrollEnabled, lastUserText, autoExpandedFor })) {
+    setAutoExpandedFor(value);
+    setExpanded(true);
+  }
   const resolvedModelLabel = modelLabel ?? t("ui.composer.modelAutomatic");
   const modelStatusLabel = modelStatus === "available" ? t("ui.modelStatus.available") : modelStatus === "degraded" ? t("ui.modelStatus.degraded") : modelStatus === "outage" ? t("ui.modelStatus.outage") : t("ui.modelStatus.unknown");
   return (
@@ -252,14 +262,26 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
             testID="chat-composer-input"
             accessibilityLabel={t("ui.composer.placeholder")}
             value={value}
-            onChangeText={(next) => { lastUserTextRef.current = next; onChangeText(next); }}
-            onScroll={(event) => { if (measurementRef) measurementRef.current.scrollY = event.nativeEvent.contentOffset.y; }}
+            onChangeText={(next) => { setLastUserText(next); onChangeText(next); }}
+            onScroll={(event) => {
+              if (measurementRef) measurementRef.current.scrollY = event.nativeEvent.contentOffset.y;
+              // A JS-driven append scrolls the caret natively without an onChangeText, and iOS
+              // only emits onContentSizeChange once the height prop itself has changed, which
+              // starves the growth logic. The scroll event still carries a fresh content size;
+              // only raising the measurement keeps Android's coarser scroll payload from
+              // shrinking the box. iOS includes it but the RN types omit it (Android leaves
+              // it unset), so it is read as an optional extra.
+              const appendedSize = (event.nativeEvent as { contentSize?: { height: number } }).contentSize;
+              if (value !== lastUserText && typeof appendedSize?.height === "number" && Number.isFinite(appendedSize.height)) {
+                setContentHeight((current) => Math.max(current, appendedSize.height));
+              }
+            }}
             onContentSizeChange={(event) => {
               setContentHeight(event.nativeEvent.contentSize.height);
               // Native inputs keep their scroll position on JS-driven text updates, so
               // a voice-appended tail lands below the fold. This event only fires after
               // the native layout reflects the new text, which is when the scroll lands.
-              if (value !== lastUserTextRef.current) inputRef.current?.setSelection(value.length, value.length);
+              if (value !== lastUserText) inputRef.current?.setSelection(value.length, value.length);
             }}
             editable={!disabled}
             multiline

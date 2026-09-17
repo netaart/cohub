@@ -10,7 +10,7 @@ import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { imageViewerPageIndex } from "../src/data/image-viewer.ts";
-import { collapsedComposerHeight, COMPOSER_CHROME_HEIGHT, COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
+import { collapsedComposerHeight, COMPOSER_CHROME_HEIGHT, COMPOSER_TEXT_PADDING, getComposerLayout, shouldAutoExpandComposer } from "../src/ui/composer-layout.ts";
 import { BUBBLE_META_GAP, bubbleTextLines, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getAnchoredMenuLayout } from "../src/ui/anchored-menu-layout.ts";
@@ -2410,6 +2410,15 @@ assert.equal(getComposerLayout({ ...composerLayoutInput, availableHeight: 180, c
 assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 52 }).showExpandButton, false, "a large-font single line is not mistaken for multiline");
 assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 96 }).showExpandButton, true);
 assert.equal(getComposerLayout({ ...composerLayoutInput, lineHeight: 44, contentHeight: 52 }).height, 52);
+// A dictation final can land after the mic already stopped, so auto-expansion keys off the
+// JS-driven append (no onChangeText round-trip), not off active recording.
+const autoExpandInput = { value: "hello", expanded: false, scrollEnabled: true, lastUserText: "hello", autoExpandedFor: null };
+assert.equal(shouldAutoExpandComposer(autoExpandInput), false, "user-typed text never auto-expands");
+assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "a very long dictation transcript" }), true, "a JS-appended overflowing transcript expands even after the mic stopped");
+assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "a very long dictation transcript", scrollEnabled: false }), false, "a short append that fits the collapsed box stays collapsed");
+assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "a very long dictation transcript", autoExpandedFor: "a very long dictation transcript" }), false, "the append expands once so a manual collapse sticks while the transcript is reviewed");
+assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "first sentence. a longer final sentence.", lastUserText: "first sentence.", autoExpandedFor: "first sentence." }), true, "the next dictation final re-arms the expansion");
+assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "a very long dictation transcript", expanded: true }), false, "an already-expanded editor needs no expansion");
 assert.equal(COMPOSER_CHROME_HEIGHT, 132);
 assert.equal(collapsedComposerHeight(34), 166);
 assert.equal(collapsedComposerHeight(0), 132);
