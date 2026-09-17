@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -215,6 +215,10 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
   const [keyboardTop, setKeyboardTop] = useState<number | null>(() => Keyboard.metrics()?.screenY ?? null);
   const [expanded, setExpanded] = useState(false);
   const [contentHeight, setContentHeight] = useState(0);
+  const inputRef = useRef<TextInput | null>(null);
+  // User edits always round-trip through onChangeText; voice finals update `value`
+  // from JS and never produce one, so this marks the last user-driven text.
+  const lastUserTextRef = useRef(value);
   const keyboardVisible = keyboardTop !== null;
   // Android keeps its bottom safe-area inset while KeyboardAvoidingView is active.
   useEffect(() => {
@@ -240,13 +244,19 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
       <View ref={anchorRef} collapsable={false} testID="chat-composer" style={[styles.composer, { backgroundColor: theme.colors.surface, borderColor: focused ? theme.colors.borderStrong : theme.colors.border }]}>
         <View style={styles.composerInputRow}>
           <TextInput
-            ref={(input) => { if (measurementRef) measurementRef.current.input = input; }}
+            ref={(input) => { inputRef.current = input; if (measurementRef) measurementRef.current.input = input; }}
             testID="chat-composer-input"
             accessibilityLabel={t("ui.composer.placeholder")}
             value={value}
-            onChangeText={onChangeText}
+            onChangeText={(next) => { lastUserTextRef.current = next; onChangeText(next); }}
             onScroll={(event) => { if (measurementRef) measurementRef.current.scrollY = event.nativeEvent.contentOffset.y; }}
-            onContentSizeChange={(event) => setContentHeight(event.nativeEvent.contentSize.height)}
+            onContentSizeChange={(event) => {
+              setContentHeight(event.nativeEvent.contentSize.height);
+              // Native inputs keep their scroll position on JS-driven text updates, so
+              // a voice-appended tail lands below the fold. This event only fires after
+              // the native layout reflects the new text, which is when the scroll lands.
+              if (value !== lastUserTextRef.current) inputRef.current?.setSelection(value.length, value.length);
+            }}
             editable={!disabled}
             multiline
             scrollEnabled={layout.scrollEnabled}
