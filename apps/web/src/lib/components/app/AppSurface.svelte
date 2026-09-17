@@ -134,6 +134,8 @@ function reportReady() {
 
 const isBackground = $derived(mode === "background");
 const appTitle = $derived(appDisplayTitle(app?.meta, app?.slug ?? "App"));
+// Who the viewer sees as the App's author: the publisher, or the Space owner when unknown.
+const publisherIdentity = $derived(publisher ?? owner);
 const hideCohubBar = $derived(app?.meta?.presentation?.hideCohubBar === true);
 // Board and file Apps render natively; only web and port Apps are embedded.
 const boardContent = $derived(content?.kind === "board" ? content : null);
@@ -373,7 +375,7 @@ onMount(() => {
 
 <div class="app-surface {mode}">
 	{#if mode === "page" && !hideCohubBar}
-		<CohubBar {app} {space} {owner} {publisher} {totalViews} actions={barActions} />
+		<CohubBar {app} {space} publisher={publisherIdentity} {totalViews} actions={barActions} />
 	{/if}
 
 	{#if boardContent}
@@ -426,7 +428,7 @@ onMount(() => {
 	error={host.authError}
 	saving={host.authSaving}
 	appName={appTitle}
-	authorName={owner?.displayName}
+	authorName={publisherIdentity?.displayName}
 	selectedSpaceId={host.selectedSpaceId}
 	canChangeSpace={host.canChangeSpace}
 	onSelectSpace={host.setSelectedSpace}

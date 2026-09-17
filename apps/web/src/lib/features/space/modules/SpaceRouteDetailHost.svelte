@@ -42,6 +42,7 @@ type Props = {
 	spaceHasMinimalAccess: boolean;
 	canEditSpace: boolean;
 	canPublishApp: boolean;
+	canManageApp: boolean;
 	taskRealtimeEvent: TaskRealtimeEvent | null;
 	ownerUsername: string | null;
 	spaceSlug: string | null;
@@ -58,6 +59,7 @@ let {
 	spaceHasMinimalAccess,
 	canEditSpace,
 	canPublishApp,
+	canManageApp,
 	taskRealtimeEvent,
 	ownerUsername,
 	spaceSlug,
@@ -129,6 +131,7 @@ function handleTaskLoaded(run: TaskRunRecord | null) {
 		{spaceSlug}
 		{canEditSpace}
 		{canPublishApp}
+		{canManageApp}
 		onDetailLoaded={handleAppLoaded}
 		{onPreviewApp}
 	/>

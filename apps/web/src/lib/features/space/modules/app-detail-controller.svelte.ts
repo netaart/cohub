@@ -58,7 +58,7 @@ export function createAppDetailController(options: {
 	getRouteAppId: () => string | null;
 	getOwnerUsername: () => string | null;
 	getSpaceSlug: () => string | null;
-	/** Stats require space.edit; skip the request for read-only viewers. */
+	/** Stats require app.manage; skip the request for viewers who cannot manage the App. */
 	getCanViewStats: () => boolean;
 	onDetailLoaded?: (app: AppRecord | null) => void;
 }) {

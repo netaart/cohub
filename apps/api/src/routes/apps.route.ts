@@ -705,7 +705,7 @@ router.get("/:id/stats", async (c) => {
   if (!requireValidId(id)) return c.json({ message: "app not found" }, 404);
   const app = await getAppById(id);
   if (!app) return c.json({ message: "app not found" }, 404);
-  if (!(await hasPermission(user, "space.edit", { spaceId: app.spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(user, "app.manage", { spaceId: app.spaceId }))) return authzDenied(c);
   return c.json(await getAppViewStats(app.id));
 });
 
@@ -1045,7 +1045,7 @@ router.patch("/:id", async (c) => {
   if (!requireValidId(id)) return c.json({ message: "app not found" }, 404);
   const current = await getAppById(id);
   if (!current) return c.json({ message: "app not found" }, 404);
-  if (!(await hasPermission(user, "app.publish", { spaceId: current.spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(user, "app.manage", { spaceId: current.spaceId }))) return authzDenied(c);
 
   const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
   return updateApp(c, current, body, user);
@@ -1085,7 +1085,7 @@ router.delete("/:id", async (c) => {
   if (!app) return c.json({ message: "app not found" }, 404);
   // Hosts delete any App; builders only the Apps they published themselves.
   const canDelete = (await hasPermission(user, "space.edit", { spaceId: app.spaceId }))
-    || (app.userUuid === user.uuid && (await hasPermission(user, "app.publish", { spaceId: app.spaceId })));
+    || (app.userUuid === user.uuid && (await hasPermission(user, "app.manage", { spaceId: app.spaceId })));
   if (!canDelete) return authzDenied(c);
   await db.transaction(async (tx) => {
     const promotions = await tx

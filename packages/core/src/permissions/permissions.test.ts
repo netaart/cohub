@@ -9,12 +9,14 @@ it("space.create is account-level, never a role permission", () => {
   }
 });
 
-// Publishing an App is a builder capability: hosts and builders may publish,
-// while guests may not.
-it("app publishing is a host and builder capability", () => {
-  assert.ok(ROLE_PERMISSIONS.host.has("app.publish"));
-  assert.ok(ROLE_PERMISSIONS.builder.has("app.publish"));
-  assert.ok(!ROLE_PERMISSIONS.guest.has("app.publish"));
+// Publishing an App is a builder capability: hosts and builders may publish
+// and manage Apps, while guests may not.
+it("app publishing and management are host and builder capabilities", () => {
+  for (const permission of ["app.publish", "app.manage"] as const) {
+    assert.ok(ROLE_PERMISSIONS.host.has(permission));
+    assert.ok(ROLE_PERMISSIONS.builder.has(permission));
+    assert.ok(!ROLE_PERMISSIONS.guest.has(permission));
+  }
 });
 
 // Session sharing is gated on the dedicated `session.access.manage` permission:

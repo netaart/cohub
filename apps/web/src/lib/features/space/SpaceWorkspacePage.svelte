@@ -307,6 +307,7 @@ const canEditFiles = $derived(hasAccessPermission("file.edit"));
 const canEditSpace = $derived(hasAccessPermission("space.edit"));
 // Publishing an App is a builder capability; deleting someone else's App stays a host one.
 const canPublishApp = $derived(hasAccessPermission("app.publish"));
+const canManageApp = $derived(hasAccessPermission("app.manage"));
 const spaceOwnerUsername = $derived(
 	space?.ownerProfile?.username ??
 		(space?.userUuid === authStore.userUuid
@@ -3153,6 +3154,7 @@ const headerActions = {
         {spaceHasMinimalAccess}
         {canEditSpace}
         {canPublishApp}
+        {canManageApp}
         {taskRealtimeEvent}
         ownerUsername={spaceOwnerUsername}
         {spaceSlug}

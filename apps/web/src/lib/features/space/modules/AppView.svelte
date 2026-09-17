@@ -41,8 +41,10 @@ type Props = {
 	ownerUsername: string | null;
 	spaceSlug: string | null;
 	canEditSpace: boolean;
-	/** Whether the viewer may publish/update/disable Apps (builder capability). */
+	/** Whether the viewer may create Apps and publish new versions (builder capability). */
 	canPublishApp: boolean;
+	/** Whether the viewer may change an App's configuration, status, and stats (builder capability). */
+	canManageApp: boolean;
 	onDetailLoaded?: (app: AppRecord | null) => void;
 	/** Show this app in the workspace window pane, beside the detail page. */
 	onPreviewApp?: (app: AppRecord) => void;
@@ -55,6 +57,7 @@ let {
 	spaceSlug,
 	canEditSpace,
 	canPublishApp,
+	canManageApp,
 	onDetailLoaded,
 	onPreviewApp,
 }: Props = $props();
@@ -66,14 +69,14 @@ const appDetailController = createAppDetailController({
 	getRouteAppId: () => routeAppId,
 	getOwnerUsername: () => ownerUsername,
 	getSpaceSlug: () => spaceSlug,
-	getCanViewStats: () => canEditSpace,
+	getCanViewStats: () => canManageApp,
 	onDetailLoaded: (app) => onDetailLoaded?.(app),
 });
 
 const appDetail = $derived(appDetailController.detail);
 // Hosts delete any App; builders only the Apps they published themselves.
 const canDeleteApp = $derived(
-	canEditSpace || (canPublishApp && appDetail?.userUuid === authStore.userUuid),
+	canEditSpace || (canManageApp && appDetail?.userUuid === authStore.userUuid),
 );
 const appDetailLoading = $derived(appDetailController.loading);
 const appDetailError = $derived(appDetailController.error);
@@ -190,7 +193,7 @@ onDestroy(() => {
               <span>{m.app_view_new_tab({}, { locale })}</span>
             </a>
           {/if}
-          {#if canPublishApp}
+          {#if canManageApp}
           <button type="button" class="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-[5px] bg-bg-elevated px-3 py-2 text-[12px] font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary sm:w-auto" onclick={() => { appDetailController.syncFormFromDetail(); appDetailController.editMode = !appDetailController.editMode; }}>
             <Pencil class="h-3.5 w-3.5" />
             <span>{appDetailController.editMode ? m.close_edit({}, { locale }) : m.common_edit({}, { locale })}</span>
@@ -209,14 +212,16 @@ onDestroy(() => {
         </div>
       </header>
 
-      {#if canEditSpace && !appDetailController.editMode}
-        <AppViewStats
-          stats={workStats}
-          loading={workStatsLoading}
-          error={workStatsError}
-          onRetry={() => void appDetailController.loadStats(appDetail.id)}
-        />
-        {#if publicRoute && appDetail.status === 'published'}
+      {#if !appDetailController.editMode}
+        {#if canManageApp}
+          <AppViewStats
+            stats={workStats}
+            loading={workStatsLoading}
+            error={workStatsError}
+            onRetry={() => void appDetailController.loadStats(appDetail.id)}
+          />
+        {/if}
+        {#if canEditSpace && publicRoute && appDetail.status === 'published'}
           <AppPromotions appId={appDetail.id} publicRoute={publicRoute} />
         {/if}
       {/if}

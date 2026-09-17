@@ -37,6 +37,7 @@ export const ALL_PERMISSIONS = [
   "mod.manage",
   "space.commerce.view",
   "space.commerce.manage",
+  "app.manage",
   "app.publish",
   "user.space.list",
   "user.session.list",
@@ -143,6 +144,7 @@ export const ROLE_PERMISSIONS: Record<SpaceRole, ReadonlySet<Permission>> = {
     "mod.manage",
     "space.commerce.view",
     "space.commerce.manage",
+    "app.manage",
     "app.publish",
   ]),
   builder: new Set([
@@ -168,6 +170,7 @@ export const ROLE_PERMISSIONS: Record<SpaceRole, ReadonlySet<Permission>> = {
     "command.execute",
     "sandbox.view",
     "mod.view",
+    "app.manage",
     "app.publish",
   ]),
   guest: new Set([
