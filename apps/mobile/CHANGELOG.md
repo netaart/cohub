@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.2.13](https://github.com/markbang/cohub-mobile/compare/v2.2.12...v2.2.13) (2026-09-17)
+
+
+### Features
+
+* **android:** add version-level APK release notes ([c4a4320](https://github.com/markbang/cohub-mobile/commit/c4a43207156acebdf52ffc0eebe949a85e37bbde))
+* **auth:** select the sign-in environment on the login screen ([1059ea3](https://github.com/markbang/cohub-mobile/commit/1059ea3b454df54ccbb3bc4d6b630c9c8210a97c))
+* **chat:** animate attachments and queued followups ([5b6ac2e](https://github.com/markbang/cohub-mobile/commit/5b6ac2ead0ed74b130fceaac445a637fc24f74ba))
+* **space:** load resources and pin state progressively ([7bcddbf](https://github.com/markbang/cohub-mobile/commit/7bcddbf468f0726db7d383c399029ae1799de47b))
+* **sync:** add realtime Space and running discovery ([6786839](https://github.com/markbang/cohub-mobile/commit/67868393e23aab115625c23726ef2d7ba22ea991))
+
+
+### Fixes
+
+* **app:** stabilize live lists and space panels ([cdde929](https://github.com/markbang/cohub-mobile/commit/cdde929fcff2fa28e068a65a7aab3c0209717663))
+* **auth:** avoid a loading flash when switching sign-in environment ([16b6630](https://github.com/markbang/cohub-mobile/commit/16b66303aa82295b5037795340b68a9c9a8e05ab))
+* **auth:** ignore the Logto redirect URL after sign-in ([57e4bc9](https://github.com/markbang/cohub-mobile/commit/57e4bc9aef5e3dba8e11df5e5b71a351237b673b))
+* **auth:** show the sign-in environment picker in every build ([0d29018](https://github.com/markbang/cohub-mobile/commit/0d2901859b55f863cba44375ef7ccb8d177efe2c))
+* **auth:** sign in again when the session is rejected ([9fdb92f](https://github.com/markbang/cohub-mobile/commit/9fdb92f86fdd6834eb848cee41569d634f42d73f))
+* **browser:** open in-app Custom Tabs in the app task ([08af0c9](https://github.com/markbang/cohub-mobile/commit/08af0c9e5f0615537dc61888fd46430b5b88d14c))
+* **chat:** keep the streaming tail through fast token bursts ([#97](https://github.com/markbang/cohub-mobile/issues/97)) ([17b2ce7](https://github.com/markbang/cohub-mobile/commit/17b2ce711900c19a4649dad6eb10fc0e00edfc9f))
+* **chat:** recover the streaming tail when opening a chat mid-stream ([0abca71](https://github.com/markbang/cohub-mobile/commit/0abca71f1e0020392621166156dc8993ea5523c8))
+* **chat:** stop send-time gray screen from stale row layouts ([c107cbd](https://github.com/markbang/cohub-mobile/commit/c107cbdfe5261143fafafd9301281385c4e89671))
+* **ci:** ignore vendored landing scripts ([c57417f](https://github.com/markbang/cohub-mobile/commit/c57417fe898bf0f1c7f7fb55f5ed6eee2ec5a83a))
+* **diagnostics:** export the crashed session after a freeze ([8efc4cb](https://github.com/markbang/cohub-mobile/commit/8efc4cb38133f49f464fe2565a2e11ea71a2f7e6))
+
 ## [2.2.12](https://github.com/markbang/cohub-mobile/compare/v2.2.11...v2.2.12) (2026-09-15)
 
 
