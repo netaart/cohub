@@ -238,6 +238,13 @@ function getMimeType(path: string) {
   return mimeByExt[extname(lower)] ?? (lower.startsWith(".") ? "text/plain" : null);
 }
 
+function getWorkAssetCacheControl(contentType: string) {
+  // HTML may be stored, but must be revalidated before reuse.
+  return contentType.split(";", 1)[0]?.trim().toLowerCase() === "text/html"
+    ? "public, no-cache"
+    : IMMUTABLE_PUBLIC_CACHE_CONTROL;
+}
+
 function assertSafeRelativePath(input: string, options?: { allowEmpty?: boolean; rejectDotSegments?: boolean }) {
   const value = String(input ?? "").replace(/\\/g, "/").trim();
   if (!value) {
@@ -480,7 +487,7 @@ async function putWorkAssetObject(input: { objectKey: string; body: Buffer | str
     Key: input.objectKey,
     Body: input.body,
     ContentType: input.contentType,
-    CacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
+    CacheControl: getWorkAssetCacheControl(input.contentType),
     Metadata: { sha256: input.sha256 },
   }));
 }
@@ -603,7 +610,7 @@ async function putWorkFileObject(input: {
         Body: body,
         ContentLength: prepared.snapshot.size,
         ContentType: input.contentType,
-        CacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
+        CacheControl: getWorkAssetCacheControl(input.contentType),
         Metadata: { sha256: prepared.sha256 },
       },
       queueSize: 2,
