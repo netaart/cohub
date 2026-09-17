@@ -237,6 +237,10 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
     availableHeight: Math.min(windowHeight, keyboardTop ?? windowHeight) - insets.top - (keyboardVisible ? 0 : insets.bottom),
     expanded,
   });
+  // Dictation appends a whole transcript at once; once it outgrows the collapsed box, open the
+  // expanded editor so it stays readable instead of forcing a tap on the expand button. The
+  // state sticks after dictation stops, so the transcript can be reviewed before sending.
+  if (!expanded && voiceActive && layout.scrollEnabled) setExpanded(true);
   const resolvedModelLabel = modelLabel ?? t("ui.composer.modelAutomatic");
   const modelStatusLabel = modelStatus === "available" ? t("ui.modelStatus.available") : modelStatus === "degraded" ? t("ui.modelStatus.degraded") : modelStatus === "outage" ? t("ui.modelStatus.outage") : t("ui.modelStatus.unknown");
   return (
