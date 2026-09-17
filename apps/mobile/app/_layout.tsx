@@ -1,10 +1,11 @@
 import { translate } from "@/src/i18n/core";
 import { LogtoProvider, useLogto } from "@logto/rn";
+import type { UnauthorizedContext } from "@neta-art/cohub";
 import { useFonts } from "expo-font";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
@@ -38,10 +39,13 @@ const logtoConfig = (environment: CohubEnvironment) => {
   };
 };
 
-function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 10_000) {
+function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = 10_000, onTimeout?: () => void) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs / 1000} seconds`)), timeoutMs);
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`${label} timed out after ${timeoutMs / 1000} seconds`));
+    }, timeoutMs);
   });
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer);
@@ -101,8 +105,41 @@ function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEn
   const [authFailure, setAuthFailure] = useState<{ environment: CohubEnvironment; message: string } | null>(null);
   const [identity, setIdentity] = useState<{ authenticated: boolean; uuid: string | null }>(() => ({ authenticated: isAuthenticated, uuid: null }));
   const [identityAttempt, setIdentityAttempt] = useState(0);
+  const authSessionVersionRef = useRef(0);
+  const sessionRejectionHandledRef = useRef(false);
+  const signOutRef = useRef(signOut);
+  const environmentRef = useRef(environment);
   // A failure belongs to the environment it happened in, so switching drops it without an effect.
   const authError = authFailure?.environment === environment ? authFailure.message : null;
+
+  useEffect(() => {
+    signOutRef.current = signOut;
+    environmentRef.current = environment;
+  }, [environment, signOut]);
+
+  // A new auth session invalidates 401s raised against the previous one. Clear the one-shot
+  // guard only on a fresh sign-in, so signing out does not re-trigger behind the login screen.
+  useEffect(() => {
+    authSessionVersionRef.current += 1;
+    if (isAuthenticated) sessionRejectionHandledRef.current = false;
+  }, [environment, identity.uuid, isAuthenticated]);
+
+  const rejectSession = useCallback((message: string) => {
+    if (sessionRejectionHandledRef.current) return;
+    sessionRejectionHandledRef.current = true;
+    setAuthFailure({ environment: environmentRef.current, message });
+    void Promise.resolve().then(() => signOutRef.current()).catch((error) => {
+      console.warn("[mobile-auth] sign out after a rejected session failed", error);
+    });
+  }, []);
+
+  const getAuthSessionVersion = useCallback(() => authSessionVersionRef.current, []);
+
+  const onUnauthorized = useCallback((context: UnauthorizedContext) => {
+    // A 401 from an auth session the app already replaced must not sign out the new one.
+    if (context.authSessionVersion !== undefined && context.authSessionVersion !== authSessionVersionRef.current) return;
+    rejectSession(translate("data.signInRejected"));
+  }, [rejectSession]);
 
   useEffect(() => {
     let active = true;
@@ -131,13 +168,24 @@ function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEn
   }, [client, environment, identityAttempt, isAuthenticated]);
 
   const getAccessToken = useCallback(async (options?: { forceRefresh?: boolean }) => {
+    if (options?.forceRefresh) {
+      try {
+        await client.clearAccessToken();
+      } catch (error) {
+        console.warn("[mobile-auth] failed to clear the cached access token", error);
+      }
+    }
+    let timedOut = false;
     try {
-      if (options?.forceRefresh) await client.clearAccessToken();
-      return await withTimeout(client.getAccessToken(config.apiResource), "Loading sign-in token").catch(() => null);
-    } catch {
+      return await withTimeout(client.getAccessToken(config.apiResource), "Loading sign-in token", 10_000, () => { timedOut = true; });
+    } catch (error) {
+      // Never report a dead refresh token as a generic request timeout. A slow auth endpoint
+      // may recover on its own, but a rejected token needs the user to sign in again.
+      console.warn("[mobile-auth] could not read an access token", error);
+      if (!timedOut) rejectSession(translate("data.signInUnavailable"));
       return null;
     }
-  }, [client]);
+  }, [client, rejectSession]);
 
   const handleSignIn = useCallback(async () => {
     setAuthLoading(true);
@@ -160,7 +208,7 @@ function NativeRoot({ environment, onSelectEnvironment }: { environment: CohubEn
   if (!isInitialized) return <LoadingScreen />;
   if (!isAuthenticated || (authError && !identity.uuid)) return <AuthScreen environment={environment} onSelectEnvironment={onSelectEnvironment} onSignIn={handleSignIn} loading={authLoading} error={authError} />;
   if (identity.authenticated !== isAuthenticated || !identity.uuid) return <LoadingScreen />;
-  return <AppProvider key={identity.uuid} userUuid={identity.uuid} getAccessToken={getAccessToken}><Navigation theme={theme} /></AppProvider>;
+  return <AppProvider key={identity.uuid} userUuid={identity.uuid} getAccessToken={getAccessToken} getAuthSessionVersion={getAuthSessionVersion} onUnauthorized={onUnauthorized}><Navigation theme={theme} /></AppProvider>;
 }
 
 function Navigation({ theme }: { theme: ReturnType<typeof useAppTheme> }) {

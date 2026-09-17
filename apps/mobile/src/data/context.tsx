@@ -8,6 +8,7 @@ import type {
   SessionTurnRecord,
   SpaceRecord,
   SpaceUsageSummary,
+  UnauthorizedContext,
   UserSessionListItem,
 } from "@neta-art/cohub";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -808,10 +809,14 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({
   userUuid,
   getAccessToken,
+  getAuthSessionVersion,
+  onUnauthorized,
   children,
 }: {
   userUuid: string;
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string | null>;
+  getAuthSessionVersion: () => string | number | null;
+  onUnauthorized: (context: UnauthorizedContext) => Promise<void> | void;
   children: ReactNode;
 }) {
   const [installationId, setInstallationId] = useState<string | null>(null);
@@ -903,9 +908,14 @@ export function AppProvider({
     installationIdRef.current = installationId;
   }, [installationId]);
 
+  const createClient = useCallback(
+    (resolvedInstallationId: string) => createMobileClient(getAccessToken, resolvedInstallationId, { getAuthSessionVersion, onUnauthorized }),
+    [getAccessToken, getAuthSessionVersion, onUnauthorized],
+  );
+
   const client = useMemo(
-    () => installationId ? createMobileClient(getAccessToken, installationId) : null,
-[getAccessToken, installationId],
+    () => installationId ? createClient(installationId) : null,
+    [createClient, installationId],
   );
 
   const spaceList = useSpaceListData(client, userKey);
@@ -1011,7 +1021,7 @@ export function AppProvider({
       dispatch({ type: "home-start", silent: options.silent });
       try {
       const resolvedInstallationId = await ensureInstallation();
-      const activeClient = clientRef.current ?? createMobileClient(getAccessToken, resolvedInstallationId);
+      const activeClient = clientRef.current ?? createClient(resolvedInstallationId);
       clientRef.current = activeClient;
       const token = await withAccessTokenTimeout(getAccessToken());
       if (!token) throw new Error(translate("data.signInUnavailable"));
@@ -1097,7 +1107,7 @@ export function AppProvider({
       if (homeRefreshRequestRef.current === request) homeRefreshRequestRef.current = null;
     }).catch(() => undefined);
     return request;
-  }, [dispatch, ensureInstallation, getAccessToken, refreshSessionStatuses, userKey]);
+  }, [createClient, dispatch, ensureInstallation, getAccessToken, refreshSessionStatuses, userKey]);
 
   const refreshChats = useCallback((): Promise<void> => {
     if (homeRefreshRequestRef.current) return homeRefreshRequestRef.current;
@@ -1735,7 +1745,7 @@ export function AppProvider({
         attachSessionRealtime(client, spaceId, sessionId);
         const sessionClient = client.space(spaceId).session(sessionId);
         markChatEntry("turns.start");
-        const response = await sessionClient.turns.listPaginated({ limit: 30 });
+        const response = await withTimeout(sessionClient.turns.listPaginated({ limit: 30 }), "Loading Chat");
         markChatEntry("turns.end", { count: response.turns.length });
         if (openTokens.current.get(sessionId) !== token) return;
         const messages = messagesFromTurns(response.turns);

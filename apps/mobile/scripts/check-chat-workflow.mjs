@@ -1534,6 +1534,7 @@ const reopenScope = {
   markChatEntry: () => {},
   startChatEntry: () => {},
   translate: (key) => key,
+  withTimeout: pageTimeout,
 };
 const reopenSource = sessionCallbacks.loadSession ?? sessionCallbacks.openSession;
 const reopen = new Function(...Object.keys(reopenScope), ts.transpileModule(`return (${reopenSource});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(reopenScope));
@@ -1542,6 +1543,42 @@ assert.equal(reopenCacheReads, 0, "warm opens must not rehydrate the entire SQLi
 assert.equal(reopenActions.some((action) => action.type === "session-start"), false, "warm opens keep historyLoaded and pagination available");
 assert.equal(reopenAttachments, 1, "after subscription release, warm opens still recover the authoritative stream");
 assert.equal(reopenRefreshes, 1, "memory reuse still reconciles the server tail");
+
+// A cold open must fail visibly instead of waiting forever on a stalled history request.
+mock.timers.enable({ apis: ["setTimeout"] });
+try {
+  const coldActions = [];
+  const coldScope = {
+    client: { space: () => ({ session: () => ({ turns: { listPaginated: () => new Promise(() => {}) } }) }) },
+    openTokens: { current: new Map() },
+    stateRef: { current: { sessions: [{ id: "session", spaceId: "space" }], spaces: [{ id: "space" }], sessionViews: { session: { messages: [], session: { id: "session", spaceId: "space" }, space: { id: "space" } } } } },
+    dispatch: (action) => coldActions.push(action),
+    loadMessages: async () => [],
+    userKey: "test-user",
+    recordSpaceVisit: () => {},
+    attachSessionRealtime: () => {},
+    refreshSession: async () => {},
+    messagesFromTurns: () => [],
+    isLiveMessage: () => false,
+    mergeDisplayMessages: (messages) => messages,
+    loadTurnIndex: async () => {},
+    saveMessages: async () => {},
+    markChatEntry: () => {},
+    startChatEntry: () => {},
+    translate: (key) => key,
+    withTimeout: pageTimeout,
+    displaySpaceName: (space) => space.name,
+  };
+  const cold = new Function(...Object.keys(coldScope), ts.transpileModule(`return (${reopenSource});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(coldScope));
+  const pendingCold = cold("session");
+  await flushSync();
+  mock.timers.tick(15000);
+  await pendingCold;
+  assert.equal(coldActions.at(-1).type, "session-error", "a stalled cold history request must fail instead of hanging the Chat");
+  assert.match(coldActions.at(-1).message, /Timed out/);
+} finally {
+  mock.timers.reset();
+}
 
 const preferenceSource = ts.transpileModule(readFileSync(new URL("../src/data/session-filter-preference.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
 function loadPreferenceModule(storage) {
