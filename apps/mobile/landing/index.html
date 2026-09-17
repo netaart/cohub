@@ -52,6 +52,22 @@
         }
       }
 
+      /* Reveal targets are hidden from the first paint until GSAP animates them in,
+         otherwise each scroll-triggered tween snaps an already visible element back
+         to opacity 0 and it flashes. The class is added only when motion is allowed
+         and is removed if the motion scripts do not run, so no-JS and reduced-motion
+         visitors keep seeing a fully visible page. Targets mirror the tween selectors
+         below; do not hide [data-hero='cta'] itself, only the animated children. */
+      html.motion-pending [data-hero="eyebrow"],
+      html.motion-pending [data-hero="title"],
+      html.motion-pending [data-hero="lead"],
+      html.motion-pending [data-hero="cta"] > *,
+      html.motion-pending [data-reveal],
+      html.motion-pending [data-shot],
+      html.motion-pending [data-card] {
+        visibility: hidden;
+      }
+
       body {
         margin: 0;
         background: var(--background);
@@ -353,6 +369,12 @@
         color: var(--text);
       }
     </style>
+    <script>
+      // Hide reveal targets before the first paint so their tweens never flash.
+      if (window.matchMedia("(prefers-reduced-motion: no-preference)").matches) {
+        document.documentElement.classList.add("motion-pending");
+      }
+    </script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -639,7 +661,10 @@
     <script>
       (() => {
         // Without both scripts the page stays fully visible; motion is additive.
-        if (!window.gsap || !window.ScrollTrigger) return;
+        if (!window.gsap || !window.ScrollTrigger) {
+          document.documentElement.classList.remove("motion-pending");
+          return;
+        }
         gsap.registerPlugin(ScrollTrigger);
 
         // Durations follow src/motion.ts (fade 150ms → sendBubble 360ms) rather than
@@ -652,55 +677,77 @@
             motionOk: "(prefers-reduced-motion: no-preference)",
           },
           (context) => {
-            if (context.conditions.reduce) return;
+            if (context.conditions.reduce) {
+              document.documentElement.classList.remove("motion-pending");
+              return;
+            }
 
+            // fromTo, not from: the pre-paint CSS above is the start state, and a
+            // from tween would read that hidden state as its end value.
             const hero = gsap.timeline({ defaults: { ease: "power2.out", duration: 0.42 } });
             hero
-              .from("[data-hero='eyebrow']", { y: 10, autoAlpha: 0 }, 0)
-              .from("[data-hero='title']", { y: 16, autoAlpha: 0 }, 0.06)
-              .from("[data-hero='lead']", { y: 16, autoAlpha: 0 }, 0.12)
-              .from("[data-hero='cta'] > *", { y: 14, autoAlpha: 0, stagger: 0.08 }, 0.18);
+              .fromTo("[data-hero='eyebrow']", { y: 10, autoAlpha: 0 }, { y: 0, autoAlpha: 1 }, 0)
+              .fromTo("[data-hero='title']", { y: 16, autoAlpha: 0 }, { y: 0, autoAlpha: 1 }, 0.06)
+              .fromTo("[data-hero='lead']", { y: 16, autoAlpha: 0 }, { y: 0, autoAlpha: 1 }, 0.12)
+              .fromTo(
+                "[data-hero='cta'] > *",
+                { y: 14, autoAlpha: 0 },
+                { y: 0, autoAlpha: 1, stagger: 0.08 },
+                0.18,
+              );
 
             ScrollTrigger.batch("[data-reveal]", {
               start: "top 85%",
               once: true,
               onEnter: (elements) =>
-                gsap.from(elements, {
-                  y: 14,
-                  autoAlpha: 0,
-                  duration: 0.36,
-                  ease: "power2.out",
-                  stagger: 0.08,
-                  overwrite: true,
-                }),
+                gsap.fromTo(
+                  elements,
+                  { y: 14, autoAlpha: 0 },
+                  {
+                    y: 0,
+                    autoAlpha: 1,
+                    duration: 0.36,
+                    ease: "power2.out",
+                    stagger: 0.08,
+                    overwrite: true,
+                  },
+                ),
             });
 
             ScrollTrigger.batch("[data-shot]", {
               start: "top 82%",
               once: true,
               onEnter: (elements) =>
-                gsap.from(elements, {
-                  y: 22,
-                  autoAlpha: 0,
-                  duration: 0.5,
-                  ease: "power2.out",
-                  stagger: 0.1,
-                  overwrite: true,
-                }),
+                gsap.fromTo(
+                  elements,
+                  { y: 22, autoAlpha: 0 },
+                  {
+                    y: 0,
+                    autoAlpha: 1,
+                    duration: 0.5,
+                    ease: "power2.out",
+                    stagger: 0.1,
+                    overwrite: true,
+                  },
+                ),
             });
 
             ScrollTrigger.batch("[data-card]", {
               start: "top 88%",
               once: true,
               onEnter: (elements) =>
-                gsap.from(elements, {
-                  y: 14,
-                  autoAlpha: 0,
-                  duration: 0.36,
-                  ease: "power2.out",
-                  stagger: 0.06,
-                  overwrite: true,
-                }),
+                gsap.fromTo(
+                  elements,
+                  { y: 14, autoAlpha: 0 },
+                  {
+                    y: 0,
+                    autoAlpha: 1,
+                    duration: 0.36,
+                    ease: "power2.out",
+                    stagger: 0.06,
+                    overwrite: true,
+                  },
+                ),
             });
 
             // Press feedback mirrors the app's pressIn (90ms) and press.scale.
