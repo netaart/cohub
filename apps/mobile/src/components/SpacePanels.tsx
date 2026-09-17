@@ -55,6 +55,9 @@ const MAX_PANEL_WIDTH = 360;
 const PANEL_SCROLL_IDLE_MS = 140;
 /** A programmatic close has no drag-end event; give the native scroll animation time to land. */
 const PANEL_CLOSE_SETTLE_MS = 380;
+/** The seed needs one native scroll event; re-issue the scroll, then force-complete the seed. */
+const PANEL_SEED_RETRY_MS = 240;
+const PANEL_SEED_FORCE_MS = 480;
 
 /**
  * Push-style pager. The Chats/Files gesture is a native horizontal scroll, which is also the
@@ -98,6 +101,41 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const pagerTarget = useSharedValue(activePanel === "chat" ? 0 : activePanel === "files" ? filesOffset : centerOffset);
   const pagerNativeX = useSharedValue(0);
   const pagerObserved = useSharedValue(false);
+  const seedFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearSeedFallback = useCallback(() => {
+    if (seedFallbackRef.current === null) return;
+    clearTimeout(seedFallbackRef.current);
+    seedFallbackRef.current = null;
+  }, []);
+
+  // The seed handshake depends on a single native scroll event. When the first chat frame
+  // saturates the UI thread, that event can be swallowed (a disabled ScrollView never emits
+  // one later), which used to leave the panel swipe dead for the screen's lifetime.
+  const armSeedFallback = useCallback((target: number) => {
+    clearSeedFallback();
+    const tick = (attempt: number) => {
+      seedFallbackRef.current = setTimeout(() => {
+        seedFallbackRef.current = null;
+        // A completed handshake, a newer seed, or an external panel command owns the pager now.
+        if (pagerSeed.get() === 0 || pagerTarget.get() !== target) return;
+        if (attempt === 0) {
+          chatScrollTrace.record("pager.seed.retry", "space-panel", { target });
+          pagerRef.current?.scrollTo({ x: target, animated: false });
+          tick(1);
+          return;
+        }
+        // Re-issued with no acknowledgement: the scroll commands have landed, so native sits on
+        // the target. Stop compensating and enable the gesture instead of waiting forever.
+        chatScrollTrace.record("pager.seed.timeout", "space-panel", { target });
+        pagerRef.current?.scrollTo({ x: target, animated: false });
+        pagerSeed.set(0);
+        setPagerReady(true);
+      }, attempt === 0 ? PANEL_SEED_RETRY_MS : PANEL_SEED_FORCE_MS);
+    };
+    tick(0);
+    // State setters are stable identities and stay out of the dependency list.
+  }, [clearSeedFallback, pagerSeed, pagerTarget]);
 
   const seedPager = useCallback(() => {
     if (pagerSeed.get() === 0) return;
@@ -115,14 +153,17 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
       pagerSeed.set(0);
       setPagerReady(true);
       chatScrollTrace.record("pager.seed.retained", "space-panel", { offset: target });
+      return;
     }
-  }, [centerOffset, filesOffset, pagerLayoutReady, pagerNativeX, pagerObserved, pagerSeed, pagerTarget, panelWidth, width]);
+    armSeedFallback(target);
+  }, [armSeedFallback, centerOffset, filesOffset, pagerLayoutReady, pagerNativeX, pagerObserved, pagerSeed, pagerTarget, panelWidth, width]);
 
   const acknowledgeSeed = useCallback((offset: number) => {
     if (pagerSeed.get() !== 0 || Math.abs(pagerTarget.get() - offset) > 1) return;
+    clearSeedFallback();
     setPagerReady(true);
     chatScrollTrace.record("pager.seed.ready", "space-panel", { offset });
-  }, [pagerSeed, pagerTarget]);
+  }, [clearSeedFallback, pagerSeed, pagerTarget]);
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimer.current === null) return;
@@ -130,6 +171,7 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     idleTimer.current = null;
   }, []);
   useEffect(() => clearIdleTimer, [clearIdleTimer]);
+  useEffect(() => clearSeedFallback, [clearSeedFallback]);
 
   const showPanel = useCallback((panel: PanelName) => {
     if (visiblePanelRef.current === panel) return;

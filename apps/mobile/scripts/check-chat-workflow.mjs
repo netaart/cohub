@@ -2008,6 +2008,7 @@ function panelPagerHarness(initialPanel = null) {
     interpolate: (value, input, output) => Math.min(output[1], Math.max(output[0], value / input[1])), Extrapolation: { CLAMP: "clamp" },
     Reanimated: { ScrollView: "Pager", View: "AnimatedView" }, BackHandler: { addEventListener: () => ({ remove() {} }) },
     PANEL_WIDTH_RATIO: 0.86, MAX_PANEL_WIDTH: 360, PANEL_SCROLL_IDLE_MS: 140, PANEL_CLOSE_SETTLE_MS: 380,
+    PANEL_SEED_RETRY_MS: 240, PANEL_SEED_FORCE_MS: 480,
     panelForScrollOffset, chatScrollTrace: { record() {} }, ChatPanel: "ChatPanel", FilesPanel: "FilesPanel",
   });
   let tree;
@@ -2118,6 +2119,31 @@ for (const [initialPanel, offset] of [["chat", 0], ["files", 688]]) {
   harness.scroll(offset);
   harness.render();
   assert.equal(harness.pager().props.scrollEnabled, true);
+}
+// The seed depends on one native scroll event; when the first chat frame swallows it, the
+// fallback must re-send and then force-complete, or the panel swipe stays dead for the screen.
+{
+  const timer = mock.timers;
+  // Arm inside the mocked clock: timers registered before enable() are not intercepted.
+  timer.enable({ apis: ["setTimeout"], now: 50_000 });
+  try {
+    const swallowedSeed = panelPagerHarness();
+    swallowedSeed.content();
+    swallowedSeed.layout();
+    assert.equal(swallowedSeed.pager().props.scrollEnabled, false, "the seed still waits for acknowledgement before enabling the gesture");
+    const commandsBeforeRetry = swallowedSeed.commands.length;
+    timer.tick(240);
+    swallowedSeed.render();
+    assert.ok(swallowedSeed.commands.length > commandsBeforeRetry, "a swallowed seed acknowledgement is re-issued once");
+    assert.equal(swallowedSeed.pager().props.scrollEnabled, false, "the retry alone cannot mark the pager ready");
+    timer.tick(480);
+    swallowedSeed.render();
+    assert.equal(swallowedSeed.pager().props.scrollEnabled, true, "a second unacknowledged seed force-completes instead of deadlocking the gesture");
+    assert.equal(swallowedSeed.contentShift(), 0, "forcing the seed drops the stale page-strip compensation");
+    swallowedSeed.scroll(344);
+    swallowedSeed.render();
+    assert.equal(swallowedSeed.pager().props.scrollEnabled, true, "the pager stays usable after a forced seed");
+  } finally { timer.reset(); }
 }
 const closingSeed = panelPagerHarness("files");
 closingSeed.content();
