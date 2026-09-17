@@ -3,7 +3,7 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
 import { FlatList, Image, Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { clearImageViewerPayload, getImageViewerPayload } from "@/src/data/image-viewer";
+import { clearImageViewerPayload, getImageViewerPayload, imageViewerPageIndex } from "@/src/data/image-viewer";
 import { useTranslation } from "@/src/i18n";
 import { typography } from "@/src/theme";
 import { AppIcon } from "@/src/ui";
@@ -64,7 +64,10 @@ export default function ImageViewerScreen() {
         pagingEnabled
         initialScrollIndex={payload.index}
         getItemLayout={(_, itemIndex) => ({ length: width, offset: width * itemIndex, index: itemIndex })}
-        onMomentumScrollEnd={(event) => setIndex(Math.round(event.nativeEvent.contentOffset.x / width))}
+        onMomentumScrollEnd={(event) => {
+          const next = imageViewerPageIndex(event.nativeEvent.contentOffset.x, width, payload.uris.length);
+          if (next !== null) setIndex(next);
+        }}
         keyExtractor={(uri, itemIndex) => `${uri}-${itemIndex}`}
         showsHorizontalScrollIndicator={false}
         renderItem={({ item: uri, index: itemIndex }) => (

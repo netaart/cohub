@@ -1,6 +1,16 @@
 export type BubbleTextLine = { x: number; y: number; width: number; height: number };
 export type BubbleTextMetrics = { width: number; height: number; lines: BubbleTextLine[] };
 
+/**
+ * Native `onTextLayout` can fire without a lines payload (a recycled or unmounted Text).
+ * Mapping it blindly throws inside a native event handler, which is fatal on the new
+ * architecture, so a missing payload measures as no lines instead.
+ */
+export function bubbleTextLines(lines: readonly BubbleTextLine[] | null | undefined): BubbleTextLine[] {
+  if (!Array.isArray(lines)) return [];
+  return lines.map(({ x, y, width, height }) => ({ x, y, width, height }));
+}
+
 export const BUBBLE_PADDING_X = 12;
 export const BUBBLE_META_GAP = 8;
 export const BUBBLE_META_DROP = 2;

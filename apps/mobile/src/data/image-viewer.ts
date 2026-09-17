@@ -20,3 +20,13 @@ export function getImageViewerPayload() {
 export function clearImageViewerPayload() {
   payload = null;
 }
+
+/**
+ * Nearest page for a paginated gallery. A native scroll handler must not turn an absent
+ * page width into a NaN index, and a rubber-band offset must not point past the loaded
+ * pages; an unusable offset leaves the current page alone.
+ */
+export function imageViewerPageIndex(offsetX: number, pageWidth: number, pageCount: number): number | null {
+  if (!Number.isFinite(offsetX) || !Number.isFinite(pageWidth) || pageWidth <= 0 || pageCount <= 0) return null;
+  return Math.min(Math.max(Math.round(offsetX / pageWidth), 0), pageCount - 1);
+}

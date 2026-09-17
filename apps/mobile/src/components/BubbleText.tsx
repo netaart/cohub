@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Text, View, useWindowDimensions, type LayoutChangeEvent, type TextProps, type ViewStyle } from "react-native";
 import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
-import { getBubbleMetaLayout, type BubbleTextLine } from "@/src/ui/message-bubble-layout";
+import { bubbleTextLines, getBubbleMetaLayout, type BubbleTextLine } from "@/src/ui/message-bubble-layout";
 
 export const BubbleContentWidth = createContext<number | undefined>(undefined);
 export const BubbleTraceMessage = createContext<{ id: string; sessionId: string } | null>(null);
@@ -51,7 +51,7 @@ export function BubbleText({ footer, measurementKey, containerStyle, ...textProp
     <Text {...textProps}
       onLayout={onBodyLayout}
       onTextLayout={captureLines ? (event) => {
-        captureLines(event.nativeEvent.lines.map(({ x, y, width, height }) => ({ x, y, width, height })));
+        captureLines(bubbleTextLines(event.nativeEvent.lines));
       } : undefined}
     />
     {footer ? <View onLayout={onMetaLayout} style={{ alignSelf: "flex-end", maxWidth: "100%", marginTop }}>{footer}</View> : null}

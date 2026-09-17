@@ -9,8 +9,9 @@ import { CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD, CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD
 import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
+import { imageViewerPageIndex } from "../src/data/image-viewer.ts";
 import { collapsedComposerHeight, COMPOSER_CHROME_HEIGHT, COMPOSER_TEXT_PADDING, getComposerLayout } from "../src/ui/composer-layout.ts";
-import { BUBBLE_META_GAP, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
+import { BUBBLE_META_GAP, bubbleTextLines, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getAnchoredMenuLayout } from "../src/ui/anchored-menu-layout.ts";
 import { interpolateSendBubbleRect, isSendBubbleMessage, measureSendBubbleSource } from "../src/ui/send-bubble-motion.ts";
@@ -846,6 +847,20 @@ assert.equal(getBubbleMetaLayout({ ...shortBubble, width: 280, lines: [{ x: 230,
 assert.equal(getBubbleMetaLayout(shortBubble, { width: 290, height: 48 }, 280).minWidth, 280);
 assert.equal(getBubbleMetaLayout(shortBubble, { width: 0, height: 0 }, 280).inline, false);
 assert.equal(getBubbleMetaLayout({ width: 200, height: 0, lines: [] }, bubbleMeta, 280).inline, false);
+// A native text-layout callback must not throw on a missing payload: an uncaught throw there
+// is fatal on the new architecture, and an empty measurement keeps the footer in its own row.
+assert.deepEqual(bubbleTextLines(undefined), [], "a Text without a lines payload measures as no lines");
+assert.deepEqual(bubbleTextLines(null), []);
+assert.deepEqual(bubbleTextLines([{ x: 1, y: 2, width: 3, height: 4, ascender: 9 }]), [{ x: 1, y: 2, width: 3, height: 4 }], "only the geometry is kept");
+assert.equal(getBubbleMetaLayout({ width: 200, height: 0, lines: bubbleTextLines(null) }, bubbleMeta, 280).inline, false);
+// A paginated gallery cannot derive a NaN page from a missing width, and a rubber-band
+// offset cannot point past the loaded pages.
+assert.equal(imageViewerPageIndex(0, 402, 3), 0);
+assert.equal(imageViewerPageIndex(805, 402, 3), 2, "the last page keeps its own offset");
+assert.equal(imageViewerPageIndex(5000, 402, 3), 2, "a rubber-band offset stays on the last page");
+assert.equal(imageViewerPageIndex(NaN, 402, 3), null, "a missing offset leaves the page alone");
+assert.equal(imageViewerPageIndex(402, 0, 3), null, "a page width is required before deriving the page");
+assert.equal(imageViewerPageIndex(402, 402, 0), null);
 for (const viewport of [240, 320, 360, 390, 768]) {
   assert.ok(getBubbleMaxWidth(viewport) <= viewport - 24);
   for (const scale of [1, 1.3, 2]) {
@@ -2466,6 +2481,17 @@ for (const destination of ["bubble", "queue"]) {
     assert.equal(nodes.filter((node) => node.type === "AttachmentChip").length, attachments.length, "attachment sources keep their visible file/image previews");
   }
 }
+// An unmounted destination row makes Reanimated's measure throw. Worklets does not catch an
+// exception raised inside a UI-thread frame callback, so a throw here would abort the process
+// (the 2.2.12 send-bubble crash): an unmeasurable view must read as not ready instead.
+const measureView = loadChromeComponent("../src/components/SendBubbleOverlay.tsx", "measureView", {
+  ...chromeScope,
+  measure: () => { throw new Error("Value is null, expected an Object"); },
+});
+assert.equal(measureView({}), null, "an unattached destination ref is not ready, not fatal");
+const measuredRect = { x: 1, y: 2, width: 3, height: 4, pageX: 5, pageY: 6 };
+const measureMountedView = loadChromeComponent("../src/components/SendBubbleOverlay.tsx", "measureView", { ...chromeScope, measure: () => measuredRect });
+assert.deepEqual(measureMountedView({}), measuredRect, "a mounted view still reports its measurement");
 assert.ok(CHAT_FOLLOW_TAIL_MAINTAIN_THRESHOLD >= 1, "a streamed card can grow more than 10% of the screen in one layout");
 assert.ok(CHAT_FOLLOW_TAIL_ANIMATE_THRESHOLD > CHAT_TAIL_THRESHOLD, "the smooth pin has room to catch a few lines before snapping");
 const chatSource = readFileSync(new URL("../app/chat/[sessionId].tsx", import.meta.url), "utf8");

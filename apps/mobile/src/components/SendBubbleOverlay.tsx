@@ -1,7 +1,7 @@
 import type { MessageRecord } from "@neta-art/cohub";
 import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import Animated, { cancelAnimation, Extrapolation, interpolate, interpolateColor, measure, ReduceMotion, useAnimatedRef, useAnimatedStyle, useFrameCallback, useSharedValue, withSpring, type AnimatedRef } from "react-native-reanimated";
+import Animated, { cancelAnimation, Extrapolation, interpolate, interpolateColor, measure, ReduceMotion, useAnimatedRef, useAnimatedStyle, useFrameCallback, useSharedValue, withSpring, type AnimatedRef, type MeasuredDimensions } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { MessageBubble } from "@/src/components/MessageContent";
 import { QueuedFollowupRow } from "@/src/components/QueuedFollowupRow";
@@ -16,6 +16,19 @@ import { interpolateSendBubbleRect, type SendBubbleRect, type SendBubbleTransiti
 // A virtualized/queued row may never mount. This only cancels preparation; it never
 // times out an animation that has started or waits for the network response.
 const TARGET_WAIT_MS = 1200;
+
+// `measure` throws when the referenced view has no attached node yet (an unmounted or
+// not-yet-rendered destination row). That throw escapes the frame worklet, and worklets
+// does not catch exceptions raised inside a UI-thread frame callback, so an unmeasurable
+// view has to read as "not ready" instead of aborting the app.
+function measureView(ref: AnimatedRef<View>): MeasuredDimensions | null {
+  "worklet";
+  try {
+    return measure(ref);
+  } catch {
+    return null;
+  }
+}
 
 export function SendBubbleOverlay({ transition, message, queueItem, rootRef, targetRef, availableWidth, spaceId, onComplete }: {
   transition: SendBubbleTransition;
@@ -46,9 +59,9 @@ export function SendBubbleOverlay({ transition, message, queueItem, rootRef, tar
 
   useFrameCallback((frame) => {
     if (cancelled.get()) return;
-    const root = measure(rootRef);
-    const destination = measure(targetRef);
-    const copy = measure(copyRef);
+    const root = measureView(rootRef);
+    const destination = measureView(targetRef);
+    const copy = measureView(copyRef);
     if (root && destination && copy && destination.width > 0 && destination.height > 0 && copy.width > 0 && copy.height > 0) {
       // Track scrolling and native Markdown measurements on the UI thread. At p=1
       // the floating copy stays exactly on the real bubble until React hands it over.
