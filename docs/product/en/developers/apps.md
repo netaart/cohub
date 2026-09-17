@@ -36,7 +36,7 @@ if (!ctx?.app?.id) throw new Error("Not inside a published app");
 
 New Apps use `client.auth.authorize({ target, scopes })` with an account, explicit Space, or Space-picker target. Success includes the actual target, resolution and authoritative grant. Use the returned Space ID for subsequent operations. Unavailable Spaces may fall back to a viewer-controlled Space; `fallback: "none"` disables this.
 
-Logged-out viewers sign in before consent. Reinitialize context after a full-page redirect. Existing `auth.request()`, `requestSpace()` and `requestCreateSpace()` remain compatible. See the [authorization contract](https://github.com/talesofai/cohub/blob/main/docs/app-authorization.md).
+Logged-out viewers sign in before consent. Reinitialize context after a full-page redirect. Legacy `auth.request()` / `requestSpace()` keep working but cannot report the actual target; `requestCreateSpace()` remains the create-Space entry. See the [authorization contract](https://github.com/talesofai/cohub/blob/main/docs/app-authorization.md).
 
 ## Context
 
@@ -74,7 +74,7 @@ Every scenario below assumes `client` is initialized and `spaceId` is known
 (`ctx.shell.space.id`, `ctx.app.homeSpace.id`, or `ctx.invocation.spaceId`).
 Scope lines show the
 minimum authorization; app scopes cover only the App's own Space, and viewer
-grants via `client.auth.request()` are needed elsewhere.
+grants via `client.auth.authorize()` are needed elsewhere.
 
 ### Prompt an Agent
 
@@ -142,7 +142,8 @@ Key points:
   a user gesture:
 
   ```ts
-  await client.auth.request({
+  await client.auth.authorize({
+    target: { kind: "space", spaceId },
     scopes: ["generation.create"],
     reason: "Generate images in this app",
   });
@@ -292,19 +293,106 @@ const models = await client.models.list();
 const multimodal = await client.models.listMultimodal();
 ```
 
+### Run App Actions
+
+Directory Apps can expose server-side entrypoints under `.cohub/actions/`. The
+frontend invokes one by file stem; the host downloads the immutable App version
+and runs it in the App home Space Sandbox with the existing execution token, so
+the App owner is the platform cost owner while the signed-in viewer's
+entitlements apply.
+
+```ts
+const task = await cohub.app.actions.run({
+  action: "summarize",
+  input: { text: "Long document..." },
+});
+const result = await cohub.tasks.get(task.taskRunId);
+```
+
+- `.ts` / `.js` entrypoints use the Sandbox Node.js runtime with native type
+  stripping (no enums, namespaces, or parameter properties). Other files run
+  through their executable bit, shebang, or binary format.
+- Input arrives as JSON on stdin. It is stored with the Task Run and is visible
+  to the App owner and Space members who can inspect the Task — never treat it
+  as a secret channel.
+- Action keys are `[a-z0-9-_]+`, exactly one matching entrypoint may exist, and
+  Actions cannot invoke `cohub.app.actions.run()` recursively.
+
+### Overlay surface
+
+Besides a preview tab, an App can open as an **overlay**: a transparent,
+chrome-free layer above the workspace that always stays below Cohub's own UI.
+Declare it at publish time, or request it per open:
+
+```html
+<meta name="cohub:surface" content="overlay" />
+```
+
+```bash
+cohub desktop open <app> --as overlay
+cohub desktop open <app> --as window   # one-off override
+```
+
+An overlay starts fully click-through. The App claims the interactive parts and
+optionally its own geometry:
+
+```ts
+cohub.app.requestConfigure({
+  inputRegion: [{ x: rect.left, y: rect.top, width: rect.width, height: rect.height }],
+});
+```
+
+`inputRegion` is `"none"` (default), `"all"`, or a list of rects; it only routes
+pointer events and never clips what is painted. `geometry` (`anchor`, `x`, `y`,
+`width`, `height`) shrinks the overlay and is clamped on-screen; an omitted axis
+fills the window, and an invalid axis ignores the whole shape. Paint your own
+transparency (`html, body { background: transparent }`) and set
+`<meta name="color-scheme" content="light dark">` so Chromium does not paint an
+opaque backdrop. The App closes itself with `cohub.app.requestClose()`; the
+viewer can always press `Escape`.
+
+### Embed other Apps
+
+A published App can host other Apps in iframes. The public page keeps owning the
+embedded runtime — its bridge, consent dialogs, commerce, and Cohub bar behave
+exactly as standalone, and the embedder never sees its tokens.
+
+```html
+<iframe src="https://cohub.live/alice/studio/w/notes"
+  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
+  allow="clipboard-read; clipboard-write; fullscreen; web-share"></iframe>
+```
+
+```ts
+const embed = cohub.app.embed.attach(frame, {
+  appId: context.app.id,
+  shell: context.shell ?? null,
+  onCloseRequest: () => frame.remove(),
+});
+cohub.app.onContextChanged((next) => embed.setShell(next.shell ?? null));
+embed.dispose();
+```
+
+The embedded App sees the forwarded location as `context.shell` with
+`surface: "embed"` and learns its host from `context.invocation.embedder`. Those
+ids are navigation hints, never authorization inputs — reading anything still
+requires the embedded App's own grants.
+
 ### Account-level data
 
 Beyond the App's own Space, viewer grants unlock the viewer's account data.
 
 ```ts
 // user.space.list
-await client.auth.request({ scopes: ["user.space.list"], reason: "Show your spaces" });
+await client.auth.authorize({ target: { kind: "account" }, scopes: ["user.space.list"], reason: "Show your spaces" });
 const { spaces } = await client.spaces.list();
 
 // user.session.list
+await client.auth.authorize({ target: { kind: "account" }, scopes: ["user.session.list"], reason: "List your sessions" });
 const { sessions } = await client.user.listSessions({ limit: 20 });
 
 // user.usage.read
+await client.auth.authorize({ target: { kind: "account" }, scopes: ["user.usage.read"], reason: "Show your activity" });
 const activity = await client.user.getActivity({ days: 30 });
 ```
 
@@ -328,6 +416,9 @@ const { granted, space } = await client.auth.requestCreateSpace({
 if (granted && space) {
   const created = client.space(space.id);
 }
+// `granted: false` with a `space` means the Space exists but bootstrap or
+// authorization did not finish. Keep the id and resume; never create a second
+// Space or delete the first one automatically.
 ```
 
 Checkpoint access still uses `checkpoint.view` on the source Space. A public
@@ -350,8 +441,9 @@ Actions, other Spaces, generation, account data → viewer grants
 ```
 
 Request viewer grants from a user gesture (button click), state a clear
-reason, and let silent reuse cover return visits — `auth.request` only opens
-a dialog when something new is needed.
+reason, and let silent reuse cover return visits — `auth.authorize()` only
+opens a dialog when something new is needed. Always act on the returned
+`target`, which may resolve to a different Space than you asked for.
 
 ## Publishing and verifying
 
@@ -359,7 +451,7 @@ Publish targets, versions, and management details live in
 [Apps](/docs/create/apps).
 
 The one rule that matters during development: runtime APIs (`context()`,
-`auth.request`, realtime, commerce) only work inside a **published** App.
+`auth.authorize`, realtime, commerce) only work inside a **published** App.
 Local `file://` pages and bare static URLs cannot exercise them — publish and
 test against the real runtime, and publish a new version (`cohub apps
 publish-version`) after changes.
@@ -367,7 +459,7 @@ publish-version`) after changes.
 ## Best practices
 
 - Least privilege: request the smallest scope set that works
-- Call `auth.request` from user gestures with a clear reason
+- Call `auth.authorize` from user gestures with a clear reason
 - Treat invocation context as routing info, not authorization
 - Keep server data authoritative; realtime is a transport, resync after reconnect
 - Make Surface handlers and credit consumption idempotent

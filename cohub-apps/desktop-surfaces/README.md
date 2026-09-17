@@ -13,7 +13,7 @@ The Milk Frog keeps both capabilities and adds a personality: it wanders, turns
 to gaze at you, and occasionally muses about what is happening in the current
 chat.
 
-![Milk Frog](https://public.cohub.live/p/cf327f11-5065-4f3a-bfe5-cdb0a70f3377/docs/examples/desktop-surfaces/milk-frog/milk-frog.webp)
+![Milk Frog](https://public.cohub.live/p/cf327f11-5065-4f3a-bfe5-cdb0a70f3377/cohub-apps/desktop-surfaces/milk-frog/milk-frog.webp)
 
 ## What it does
 
@@ -111,7 +111,7 @@ the SDK is loaded from an ESM CDN.
 
 The sheets were generated with Cohub Models, cut out with `birefnet-general`,
 then sliced and baseline-aligned locally. Every public URL is under
-`https://public.cohub.live/p/cf327f11-5065-4f3a-bfe5-cdb0a70f3377/docs/examples/desktop-surfaces/milk-frog/`.
+`https://public.cohub.live/p/cf327f11-5065-4f3a-bfe5-cdb0a70f3377/cohub-apps/desktop-surfaces/milk-frog/`.
 
 | Sheet | Frames | Animation |
 |---|---|---|

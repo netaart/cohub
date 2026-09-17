@@ -42,7 +42,7 @@ async function loadCohub() {
 // Sheets are served from the CDN (see "Asset provenance" in the README), so the
 // repository ships no image binaries.
 const ASSET_BASE =
-  "https://public.cohub.live/p/cf327f11-5065-4f3a-bfe5-cdb0a70f3377/docs/examples/desktop-surfaces/milk-frog";
+  "https://public.cohub.live/p/cf327f11-5065-4f3a-bfe5-cdb0a70f3377/cohub-apps/desktop-surfaces/milk-frog";
 const SPRITES = {
   idle: { src: `${ASSET_BASE}/pet-idle.webp`, frames: 6 },
   walk: { src: `${ASSET_BASE}/pet-walk.webp`, frames: 6 },
@@ -547,21 +547,21 @@ function onStreamError() {
 
 // ── Follow the current chat ─────────────────────────────────────────────────
 const FOLLOW_SCOPES = ["space.view", "session.view"];
-// Every explicit consent *replaces* the viewer's grant for this App + Space
-// (the server upserts `scopes`, it does not merge), and the issued token's
-// viewer scopes are exactly the requested set. So a later, narrower request
-// would silently drop the earlier one — always ask for the union.
+// New consent is incremental: the server keeps scopes from a still-valid grant
+// and adds the request on top, so the narrower prompt request never drops the
+// follow scopes. Revoked or expired scopes still require a fresh dialog.
 const PROMPT_SCOPES = [...FOLLOW_SCOPES, "session.prompt.readonly"];
 
 function ensureFollowAccess(spaceId) {
   let pending = followAccess.get(spaceId);
   if (!pending) {
     pending = cohub.auth
-      .request({
+      .authorize({
+        target: { kind: "space", spaceId },
         scopes: FOLLOW_SCOPES,
-        spaceId,
         reason: "Follow the current chat so the frog can react to agent activity.",
       })
+      .then((result) => result.status === "granted")
       .catch(() => false);
     followAccess.set(spaceId, pending);
   }
@@ -693,14 +693,15 @@ function ensurePromptScope(spaceId) {
   let pending = promptScopePending.get(spaceId);
   if (!pending) {
     pending = cohub.auth
-      .request({
+      .authorize({
+        target: { kind: "space", spaceId },
         scopes: PROMPT_SCOPES,
-        spaceId,
         reason: "Follow this chat and let the frog read it so it can murmur something relevant.",
       })
-      .then((ok) => {
+      .then((result) => {
+        const ok = result.status === "granted";
         promptScopeState.set(spaceId, ok ? "granted" : "denied");
-        return Boolean(ok);
+        return ok;
       })
       .catch(() => false);
     promptScopePending.set(spaceId, pending);

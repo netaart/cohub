@@ -29,9 +29,9 @@ Public URL shape:
 
 | Target | Best for | Notes |
 | --- | --- | --- |
-| File | Single HTML document | Path should end in `.html` / `.htm` |
-| Directory | Static site | Usually needs `index.html` and relative assets |
-| Port | Live app in Sandbox | Process must be listening on a supported public port |
+| File | Single HTML document | Path should end in `.html` / `.htm`; 1 byte – 1 GiB |
+| Directory | Static site | Must contain `index.html`, 1–1000 files, up to 1 GiB total |
+| Port | Live app in Sandbox | Process must listen on a supported public port |
 
 Pick the simplest target that matches the output.
 
@@ -56,6 +56,16 @@ From the App management page you can:
 - Publish a new version from the current target
 - Disable or delete the App
 - Copy the App id for CLI/SDK use
+
+The preview tab is keyed by App id, deep-linkable as `?window=app:<appId>`, and
+shares the workspace tab budget with file, Board, and port previews. An Agent in
+the Space can open the same preview from the chat tab and call methods the App
+exposes:
+
+```bash
+cohub desktop open <app> --call selection.get
+cohub desktop open <app> --call board.focus --data '{"nodeId":"n1"}'
+```
 
 Important behavior:
 
@@ -118,6 +128,35 @@ cohub apps publish-version <appId>
 ```
 
 `apps download` restores newly published file and directory artifacts directly from the CDN and verifies their checksums. HTML files with companion assets are restored as directory bundles. Board and port apps are not downloadable.
+
+## Promote an App
+
+Promotion links give each campaign an immutable URL and per-link statistics:
+
+```bash
+cohub apps promotions create <app> --name "Launch video A" --provider meta \
+  --utm-source instagram --utm-medium paid_social --utm-campaign launch_2026
+cohub apps promotions list <app>
+cohub apps promotions stats <app> <promotion-id>
+```
+
+`generic` (default) records local landing and readiness analytics without loading
+third-party code. `meta` additionally sends App ready, first registration,
+purchase-confirmation, and checkout-start events to the deployment-configured
+Meta Pixel and Conversions API provider. Attribution is kept App-scoped in local
+storage for 30 days so sign-in and checkout redirects preserve it. Cohub never
+retains visitor-level promotion records.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Public link cannot be formed | The owner has a username and the Space has a slug |
+| File App fails to publish | Target is 1 byte – 1 GiB; a Board file is valid and references ≤1000 assets ≤1 GiB |
+| Directory App fails to publish | Contains `index.html`, 1–1000 files, ≤1 GiB total |
+| App opens but Cohub APIs fail | It runs inside a published App runtime; check `appScopes` and `context().permissions` |
+| Authorization is refused | The viewer must already hold every requested permission on the target Space |
+| Account data returns 403 | That `user.*` scope was granted separately |
 
 ## Practical tips
 

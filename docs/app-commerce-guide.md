@@ -209,4 +209,4 @@ Keep the App responsible for displaying products and balances, initiating purcha
 
 See:
 
-- `docs/examples/app-capability-lab/commerce-demo.md`
+- `cohub-apps/app-capability-lab/commerce-demo.md`

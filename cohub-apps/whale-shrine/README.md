@@ -28,7 +28,7 @@ Viewer clicks "Burn $5 to Summon"
   ├─ getEntitlements()          check credit balance
   ├─ purchase()                 $5 credit pack if balance is 0 → checkout redirect
   ├─ consumeCredits(1)          burn 1 credit (idempotent via shout id)
-  ├─ auth.request(fullaccess)   viewer consents to shell execution
+  ├─ auth.authorize(fullaccess) viewer consents to shell execution (incremental grant)
   ├─ space.prompt("!node …")    direct shell command — no LLM, deterministic
   │     └─ post-shout.mjs       validates + appends to shouts.jsonl (idempotent)
   ├─ poll files.read()          wait until the new echo appears
@@ -44,7 +44,7 @@ without decoding the session token manually.
 ## File structure
 
 ```
-docs/examples/app-capability-lab/whale-shrine/
+cohub-apps/whale-shrine/
 ├─ index.html              App entry point (no-build)
 ├─ styles.css              Shrine gacha theme
 ├─ app.js                  Commerce + prompt + polling + animations
@@ -58,7 +58,7 @@ docs/examples/app-capability-lab/whale-shrine/
 ## Local preview
 
 ```bash
-cd docs/examples/app-capability-lab/whale-shrine
+cd cohub-apps/whale-shrine
 python3 -m http.server 8080
 # open http://localhost:8080
 ```
@@ -71,14 +71,15 @@ calls only function inside a published Cohub App iframe.
 
 1. Upload these files to your Space (root or a subdirectory).
 2. If using a subdirectory, update `CONFIG.DATA_PATH` and `CONFIG.SCRIPT_PATH`
-   in `app.js` to match (e.g. `docs/examples/app-capability-lab/whale-shrine/data/shouts.jsonl`).
-3. Open the directory preview and click **Publish**. (Or publish from the CLI: `cohub -s <space-id> apps publish whale-shrine --dir docs/examples/app-capability-lab/whale-shrine --app-scope file.view` — `--dir` takes the path inside the Space workspace, so upload the folder first with `cohub -s <space-id> spaces files upload <dir>`.)
+   in `app.js` to match (e.g. `cohub-apps/whale-shrine/data/shouts.jsonl`).
+3. Open the directory preview and click **Publish**. (Or publish from the CLI: `cohub -s <space-id> apps publish whale-shrine --dir cohub-apps/whale-shrine --app-scope file.view` — `--dir` takes the path inside the Space workspace, so upload the folder first with `cohub -s <space-id> spaces files upload <dir>`.)
 4. Under **App can**, select `file.view` — the direct read access the app needs for its own Space.
 5. Run the commerce setup (below) to create the $5 credit product.
 
 Prompt access (`session.prompt.fullaccess`) is not configured at publish time: the
 viewer grants it per Space through the consent dialog the first time they summon
-(`auth.request()` inside `app.js`). Grants last 14 days and can be revoked any time:
+(`auth.authorize()` inside `app.js`, targeting the Space the App runs in). Grants
+last 14 days and can be revoked any time:
 
 ```bash
 cohub -s <space-id> apps grants whale-shrine

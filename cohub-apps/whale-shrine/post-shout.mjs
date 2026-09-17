@@ -3,7 +3,7 @@
  * post-shout.mjs — Append one shout to data/shouts.jsonl
  *
  * Called via Cohub prompt as a direct shell command:
- *   !node docs/examples/app-capability-lab/whale-shrine/post-shout.mjs <base64-json>
+ *   !node cohub-apps/whale-shrine/post-shout.mjs <base64-json>
  *
  * The `!` prefix makes Cohub run this as a deterministic shell command
  * (no LLM involved), so the write is stable and repeatable.

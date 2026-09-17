@@ -50,7 +50,7 @@ Product docs: [cohub.live/docs](https://cohub.live/docs) · [中文](https://coh
 
 Source of truth: `docs/product/en/` · `docs/product/zh/`
 
-Engineering notes: [self-hosting](docs/self-hosting.md) · [agent-sandbox-runtime](docs/agent-sandbox-runtime.md) · [apps-guide](docs/apps-guide.md) · [generations](docs/generations.md) · [space-hooks](docs/space-hooks.md)
+Engineering notes: [self-hosting](docs/self-hosting.md) · [agent-sandbox-runtime](docs/agent-sandbox-runtime.md) · [app-authorization](docs/app-authorization.md) · [app-commerce](docs/app-commerce-guide.md) · [generations](docs/generations.md) · [space-hooks](docs/space-hooks.md)
 
 Changelog: [CHANGELOG.md](CHANGELOG.md)
 

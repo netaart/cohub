@@ -269,10 +269,9 @@ async function createClient() {
     if (!state.module) await importSdk();
     const baseUrl = $("apiBase").value.trim().replace(/\/+$/, "");
     // Do NOT override getAccessToken. The SDK's default appRuntime
-    // getAccessToken() re-authorizes viewer-granted scopes (e.g.
-    // session.prompt.readonly) after auth.request, so prompt calls carry a
-    // token with the granted viewerScopes. Replacing it with a raw
-    // cohub.app.token mint produces an appScopes-only token -> 403 on prompt.
+    // getAccessToken() resolves Host capabilities from context: modern hosts
+    // keep viewer grants server-side and refresh tokens silently, while older
+    // hosts retain the legacy renewal path.
     const options = {};
     if (baseUrl) options.baseUrl = baseUrl;
     state.client = state.module.createCohubClient(options);
@@ -282,7 +281,7 @@ async function createClient() {
     }
     const methods = [
       typeof state.client.context === "function" ? "context" : "no context",
-      state.client.auth?.request ? "auth.request" : "no auth.request",
+      state.client.auth?.authorize ? "auth.authorize" : "no auth.authorize",
       state.client.space ? "space" : "no space",
     ].join(" / ");
     $("clientState").textContent = baseUrl ? `ready (${baseUrl})` : `ready (${methods})`;
@@ -377,47 +376,54 @@ async function sessionsList() {
 
 const DEFAULT_AUTH_REASON = "App SDK Lab wants to verify viewer-granted prompts and account access through the Cohub SDK.";
 
+const ACCOUNT_SCOPES = new Set(["user.space.list", "user.session.list", "user.taskrun.list", "user.usage.read", "space.create"]);
+
+// Space-bound consent needs an explicit target. Prefer where the App is
+// actually running, and never silently fall back to the App's own Space;
+// ask the viewer to pick when nothing is known.
+function resolveSpaceTarget() {
+  const spaceId = state.context?.shell?.space?.id || state.context?.invocation?.spaceId;
+  return spaceId ? { kind: "space", spaceId } : { kind: "pick-space" };
+}
+
+function authorizationSummary(result) {
+  if (result.target.kind !== "space") return result.resolution;
+  return `${result.resolution} → ${result.target.name || result.target.spaceId}`;
+}
+
+async function authorizeScopes(scopes, reason, options = {}) {
+  const client = await ensureClient();
+  if (typeof client.auth?.authorize !== "function") throw new Error("This SDK build does not expose auth.authorize().");
+  const { target: requestedTarget, ...rest } = options;
+  const target = requestedTarget
+    ?? (scopes.every((scope) => ACCOUNT_SCOPES.has(scope)) ? { kind: "account" } : resolveSpaceTarget());
+  const result = await client.auth.authorize({ target, scopes, reason, ...rest });
+  if (result.status === "denied") log("warn", `auth.authorize() denied (${result.code})`, scopes.join(", "));
+  return result;
+}
+
 async function requestAuth(scopes, reason = DEFAULT_AUTH_REASON) {
   return run("auth", async () => {
-    if (!state.client) await createClient();
-    let ok = false;
-    if (state.client.auth?.request) {
-      ok = await state.client.auth.request({
-        scopes,
-        reason,
-      });
-      if (ok) log("ok", "cohub.auth.request() granted", scopes.join(", "));
-    } else {
-      log("warn", "SDK auth helper missing", "falling back to App runtime wire protocol");
-      const response = await runtimeRequest({
-        type: "cohub.app.authorize",
-        scopes,
-        reason,
-      }, 120000);
-      ok = Boolean(response?.token);
-      if (response?.token) applyToken(response.token);
-      if (ok) log("ok", "Wire authorization granted", scopes.join(", "));
-    }
-    if (!ok) throw new Error("Authorization was cancelled or denied.");
-    return ok;
+    const result = await authorizeScopes(scopes, reason);
+    if (result.status !== "granted") throw new Error("Authorization was cancelled or denied.");
+    log("ok", "cohub.auth.authorize() granted", `${scopes.join(", ")} · ${authorizationSummary(result)}`);
+    return result;
   });
 }
 
 // One consent: the viewer picks a Space and grants the scopes on it. The
-// result names the pick, so the app knows exactly where it may act.
+// result names the actual target, so the app knows exactly where it may act.
 async function requestSpaceAuth(alwaysAsk = false) {
   return run("authSpace", async () => {
-    if (!state.client) await createClient();
-    if (!state.client.auth?.requestSpace) throw new Error("This SDK build does not expose auth.requestSpace().");
-    const result = await state.client.auth.requestSpace({
-      scopes: ["file.view", "session.view"],
-      reason: "App SDK Lab reads the Space you pick to demo per-space viewer grants.",
-      ...(alwaysAsk ? { alwaysAsk: true } : {}),
-    });
-    if (!result.granted || !result.space) throw new Error("Authorization was cancelled or denied.");
-    log("ok", "cohub.auth.requestSpace() granted", `${result.space.name || "unnamed"} (${result.space.id})`);
+    const result = await authorizeScopes(
+      ["file.view", "session.view"],
+      "App SDK Lab reads the Space you pick to demo per-space viewer grants.",
+      { target: { kind: "pick-space" }, ...(alwaysAsk ? { alwaysAsk: true } : {}) },
+    );
+    if (result.status !== "granted" || result.target.kind !== "space") throw new Error("Authorization was cancelled or denied.");
+    log("ok", "cohub.auth.authorize({ target: 'pick-space' }) granted", `${result.target.name || "unnamed"} (${result.target.spaceId})`);
     // Prove the grant end-to-end with a scoped read on the picked Space.
-    const picked = state.client.space(result.space.id);
+    const picked = state.client.space(result.target.spaceId);
     const files = await picked.files.list();
     const count = Array.isArray(files.entries) ? files.entries.length : "unknown";
     log("ok", "picked space.files.list() accepted", `${count} entries`);
@@ -426,18 +432,18 @@ async function requestSpaceAuth(alwaysAsk = false) {
 }
 
 // alwaysAsk skips silent reuse: the consent dialog opens even when a previous
-// grant already covers the scopes, so the viewer can re-confirm or change it.
+// grant already covers the scopes, so the viewer can re-confirm or choose
+// another Space.
 async function requestAuthAgain() {
   return run("authAsk", async () => {
-    if (!state.client) await createClient();
-    const ok = await state.client.auth.request({
-      scopes: ["session.prompt.readonly"],
-      reason: "App SDK Lab asks again to demo alwaysAsk.",
-      alwaysAsk: true,
-    });
-    if (!ok) throw new Error("Authorization was cancelled or denied.");
-    log("ok", "auth.request({ alwaysAsk: true }) granted", "session.prompt.readonly");
-    return ok;
+    const result = await authorizeScopes(
+      ["session.prompt.readonly"],
+      "App SDK Lab asks again to demo alwaysAsk.",
+      { alwaysAsk: true },
+    );
+    if (result.status !== "granted") throw new Error("Authorization was cancelled or denied.");
+    log("ok", "auth.authorize({ alwaysAsk: true }) granted", `session.prompt.readonly · ${authorizationSummary(result)}`);
+    return result;
   });
 }
 
@@ -463,7 +469,6 @@ async function ensureClient() {
 async function ensureAccountScope(scope, reason) {
   await requestAuth([scope], reason);
 }
-
 async function accountSpaces() {
   return run("accountSpaces", async () => {
     await ensureAccountScope("user.space.list", "This probe lists your Spaces.");

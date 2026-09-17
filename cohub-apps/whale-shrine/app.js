@@ -11,11 +11,11 @@
 const CONFIG = {
   SDK_URL: "https://esm.sh/@neta-art/cohub?bundle&target=es2022",
   /** Space-root-relative path for files.read() and shell commands. */
-  DATA_PATH: "docs/examples/app-capability-lab/whale-shrine/data/shouts.jsonl",
+  DATA_PATH: "cohub-apps/whale-shrine/data/shouts.jsonl",
   /** App-root-relative path for standalone preview fetch(). */
   PREVIEW_DATA_PATH: "data/shouts.jsonl",
   /** Space-root-relative path for the shell script (!-command). */
-  SCRIPT_PATH: "docs/examples/app-capability-lab/whale-shrine/post-shout.mjs",
+  SCRIPT_PATH: "cohub-apps/whale-shrine/post-shout.mjs",
   PRODUCT_KEY: "burn_one_offering",
   POST_PRICE_USD: 5,
   POLL_INTERVAL_MS: 700,
@@ -245,8 +245,15 @@ async function summon(shout) {
       return;
     }
 
-    // Auth + post via direct shell command
-    await state.cohub.auth.request({ scopes: ["session.prompt.fullaccess"], reason: "Record your echo." });
+    // Auth + post via direct shell command. The target is the Space the App is
+    // running in, and the grant is incremental: it adds prompt access without
+    // dropping the Space read scope the App already holds.
+    const consent = await state.cohub.auth.authorize({
+      target: { kind: "space", spaceId: state.context.space.id },
+      scopes: ["session.prompt.fullaccess"],
+      reason: "Record your echo.",
+    });
+    if (consent.status !== "granted") throw new Error("Summon needs your permission to post your echo.");
     await state.space.prompt({
       accessMode: "full_access",
       intent: "followup",

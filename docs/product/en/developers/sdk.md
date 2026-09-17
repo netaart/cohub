@@ -97,7 +97,8 @@ const client = createCohubClient(); // token comes from the App runtime
 const context = await client.context();
 // App identity, Space identity, viewer state
 
-await client.auth.request({
+await client.auth.authorize({
+  target: { kind: "space", spaceId },
   scopes: ["session.prompt.readonly"],
   reason: "Continue the demo chat",
 });

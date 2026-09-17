@@ -29,8 +29,8 @@ App 属于一个 Space，并记录：
 
 | 目标 | 最适合 | 说明 |
 | --- | --- | --- |
-| File | 单个 HTML 文档 | 路径应以 `.html` / `.htm` 结尾 |
-| Directory | 静态站点 | 通常需要 `index.html` 与相对资源 |
+| File | 单个 HTML 文档 | 路径以 `.html` / `.htm` 结尾；大小 1 byte – 1 GiB |
+| Directory | 静态站点 | 必须包含 `index.html`，1–1000 个文件，总计 ≤ 1 GiB |
 | Port | Sandbox 中的 live app | 进程须监听受支持的公开端口 |
 
 选择能匹配输出的最简单目标。
@@ -56,6 +56,15 @@ App 也会出现在 Space 侧栏的 Apps 下。
 - 从当前目标发布新版本
 - 禁用或删除 App
 - 复制 App id 供 CLI / SDK 使用
+
+预览标签以 App id 为键，可通过 `?window=app:<appId>` 深链，并与文件、Board、
+port 预览共用 workspace 的标签预算。Space 中的 Agent 可以在发起对话的标签页
+打开同一预览，并调用 App 暴露的方法：
+
+```bash
+cohub desktop open <app> --call selection.get
+cohub desktop open <app> --call board.focus --data '{"nodeId":"n1"}'
+```
 
 重要行为：
 
@@ -110,6 +119,33 @@ cohub apps publish-version <appId>
 ```
 
 `apps download` 直接从 CDN 恢复新发布的文件或目录产物，并校验 checksum。带有配套资源的 HTML 文件会恢复为目录 bundle。Board 和 port App 不支持下载。
+
+## 推广链接
+
+推广链接为每个渠道提供不可变 URL 与分渠道统计：
+
+```bash
+cohub apps promotions create <app> --name "Launch video A" --provider meta \
+  --utm-source instagram --utm-medium paid_social --utm-campaign launch_2026
+cohub apps promotions list <app>
+cohub apps promotions stats <app> <promotion-id>
+```
+
+`generic`（默认）只在本地记录落地与就绪事件，不加载第三方代码。`meta` 会额
+外把 App ready、首次注册、购买确认与进入结账事件发送给部署侧配置的 Meta
+Pixel 与 Conversions API。归因按 App 存入本地存储 30 天，登录与结账跳转都能
+保留；Cohub 不保留访客级推广记录。
+
+## 常见问题
+
+| 现象 | 检查项 |
+| --- | --- |
+| 无法生成公开链接 | 所有者有 username，且 Space 有 slug |
+| File App 发布失败 | 目标在 1 byte – 1 GiB；Board 文件有效且引用 ≤1000 个资源、≤1 GiB |
+| Directory App 发布失败 | 包含 `index.html`，1–1000 个文件，总计 ≤1 GiB |
+| App 能打开但 Cohub API 失败 | 必须运行在已发布 App runtime 内；检查 `appScopes` 与 `context().permissions` |
+| 授权被拒绝 | 访客本身必须已在目标 Space 持有全部所请求的权限 |
+| 账户数据返回 403 | 对应的 `user.*` scope 需要单独授权 |
 
 ## 实用建议
 

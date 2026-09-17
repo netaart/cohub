@@ -97,7 +97,8 @@ const client = createCohubClient(); // token 来自 App runtime
 const context = await client.context();
 // App 身份、Space 身份、viewer 状态
 
-await client.auth.request({
+await client.auth.authorize({
+  target: { kind: "space", spaceId },
   scopes: ["session.prompt.readonly"],
   reason: "Continue the demo chat",
 });

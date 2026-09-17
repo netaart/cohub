@@ -2,7 +2,7 @@
 
 A standalone first-party Cohub App for discovering and installing Apps.
 
-The App uses `cohub.context()` and takes `invocation.spaceId` as its initial Space. It requests the existing `file.view` and `file.edit` scopes for that Space, reads `.cohub/apps.json`, and writes validated marketplace entries back with the current file revision. It does not introduce a separate App-management permission.
+The App uses `cohub.context()` and takes `invocation.spaceId` as its initial Space. It requests the existing `file.view` and `file.edit` scopes for that Space with `cohub.auth.authorize()`, reads `.cohub/apps.json`, and writes validated marketplace entries back with the current file revision. It does not introduce a separate App-management permission.
 
 ## Develop
 

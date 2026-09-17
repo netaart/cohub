@@ -240,11 +240,13 @@ These runtime-only APIs are available **exclusively inside a published App**:
   null); `invocation.spaceId` is the same Space for compatibility.
   Returns `null` outside an App runtime. `client.app.onContextChanged()` pushes
   fresh state.
-- `client.auth.request({ scopes, reason, spaceId?, alwaysAsk? })` — ensures
-  the app holds these scopes; silent when a grant covers them, consent dialog
-  otherwise.
-- `client.auth.requestSpace({ scopes, reason })` — one consent: the viewer
-  picks a Space and grants the scopes on it.
+- `client.auth.authorize({ target, scopes, reason?, alwaysAsk?, fallback? })`
+  — requests consent for an account, a specific Space, or a viewer-picked
+  Space. Silent when a grant covers the scopes. Returns the actual target,
+  how it was resolved, and the authoritative grant; see the
+  [authorization contract](../../docs/app-authorization.md).
+  `client.auth.request()` / `requestSpace()` / `requestCreateSpace()` remain
+  available for older Apps.
 - `client.context().permissions.viewerGrants` — render the viewer's current
   per-space grants. Grant management uses an account-authenticated client or
   the CLI; an App session cannot manage its own grants.
@@ -269,10 +271,16 @@ const spaceId = ctx.shell?.space?.id ?? ctx.invocation?.spaceId ?? ctx.app.homeS
 const space = client.space(spaceId);
 
 // Request viewer grants from a user gesture (button click)
-await client.auth.request({
+const consent = await client.auth.authorize({
+  target: { kind: "space", spaceId },
   scopes: ["session.prompt.fullaccess", "generation.create"],
   reason: "This app sends prompts and generates images.",
 });
+if (consent.status !== "granted") return;
+// Act on the granted target, which may differ from the request.
+const activeSpace = consent.target.kind === "space"
+  ? client.space(consent.target.spaceId)
+  : space;
 ```
 
 ### The permission model (critical)
@@ -297,7 +305,7 @@ lets you send a prompt but does NOT let you read the reply — that needs
 polling its result needs `taskrun.view`.
 
 Render grant state from `ctx.permissions.viewerGrants`; act through
-`auth.request` (silent when covered). `allowedViewerScopes` is deprecated —
+`auth.authorize()` (silent when covered). `allowedViewerScopes` is deprecated —
 viewer grants are no longer gated by the app configuration.
 
 ### Realtime rooms
