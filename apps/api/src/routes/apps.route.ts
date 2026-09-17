@@ -50,7 +50,7 @@ import { createAppPublicUrl } from "../lib/app-public-url.js";
 import { applyRequestSourceToMeta, getRequestSource } from "../lib/request-source.js";
 import { dispatchAppVersionPublished } from "../app-events.js";
 import { resolveAppVersionSources } from "../app-version-source.js";
-import { ensureUserProfileByUuid } from "../user-profiles.js";
+import { ensureUserProfileByUuid, fallbackPublicUserProfile, type PublicUserProfile } from "../user-profiles.js";
 import {
   getAppTotalViews,
   getAppViewStats,
@@ -184,6 +184,25 @@ async function ensureAppPublicIdentity(c: Context, spaceId: string, actor: AuthU
   }
   if (missingOwner) return c.json({ message: "apps require an owner username" }, 400);
   return c.json({ message: "apps require a space slug" }, 400);
+}
+
+/**
+ * Public identity of the member who published an App. The public URL and share
+ * metadata keep the Space owner's identity, so attribution to the actual
+ * publisher is reported separately.
+ */
+async function resolveAppPublisher(userUuid: string): Promise<PublicUserProfile> {
+  const [profile] = await db
+    .select({
+      userUuid: userProfiles.userUuid,
+      username: userProfiles.username,
+      displayName: userProfiles.displayName,
+      avatarUrl: userProfiles.avatarUrl,
+    })
+    .from(userProfiles)
+    .where(eq(userProfiles.userUuid, userUuid))
+    .limit(1);
+  return profile ?? fallbackPublicUserProfile(userUuid);
 }
 
 const ensureUniqueAppSlug = async (input: { spaceId: string; slug: string; excludeId?: string }) => {
@@ -578,6 +597,7 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
     ...wrapAppRecord(wire, serializeApp(row.app)),
     space: { id: row.space.id, slug: row.space.slug, name: row.space.name, userUuid: row.space.userUuid, publicProfile: getSpacePublicProfile(row.space) },
     owner: { ...row.owner, username: row.owner.username },
+    publisher: await resolveAppPublisher(row.app.userUuid),
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: row.app.slug, status: row.app.status }),
     content,
     version: version ? publicVersionSummary(version, null) : null,
@@ -672,6 +692,7 @@ router.get("/:id/public", async (c) => {
     ...wrapAppRecord(wire, serializeApp(app)),
     space,
     owner: { ...row.owner, username: row.owner.username },
+    publisher: await resolveAppPublisher(app.userUuid),
     content,
     totalViews,
   });
@@ -719,6 +740,7 @@ router.get("/:id", async (c) => {
     ...wrapAppRecord(wire, serializeApp(app)),
     space,
     owner: { ...row.owner, username: row.owner.username },
+    publisher: await resolveAppPublisher(app.userUuid),
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: app.slug, status: app.status }),
     content,
     totalViews,

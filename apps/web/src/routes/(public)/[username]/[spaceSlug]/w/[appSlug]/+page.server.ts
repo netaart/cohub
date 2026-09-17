@@ -42,6 +42,7 @@ export const load: PageServerLoad = async ({
 			work: app,
 			space: result.detail.space,
 			owner: result.detail.owner,
+			publisher: result.detail.publisher,
 			content: result.detail.content,
 			publicUrl: result.detail.publicUrl,
 			totalViews: result.detail.totalViews ?? null,

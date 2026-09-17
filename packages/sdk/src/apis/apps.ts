@@ -1,7 +1,7 @@
 import type { HttpTransport } from "../transport.js";
 import type { RequestSource } from "@cohub/protocol/provenance";
 import type { AppArtifactDescriptor, AppContentKind, AppPromotionEventKey, AppVersionSource } from "@cohub/protocol";
-import type { Permission, SpacePublicProfile } from "../types.js";
+import type { Permission, PublicUserProfile, SpacePublicProfile } from "../types.js";
 
 export type AppTargetType = "file" | "directory" | "port";
 export type AppStatus = "published" | "disabled";
@@ -167,7 +167,10 @@ export type AppPublicOwnerRecord = {
 export type AppDetailResponse = {
   app: AppRecord;
   space: AppPublicSpaceRecord;
+  /** Space owner: the public URL and share metadata use this identity. */
   owner: AppPublicOwnerRecord;
+  /** Member who published this App, which may differ from the Space owner. */
+  publisher: PublicUserProfile;
   publicUrl: string | null;
   content: AppContent | null;
   /** Version whose content is served; the current version when omitted. */

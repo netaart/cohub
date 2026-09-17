@@ -62,6 +62,8 @@ type Props = {
 	>;
 	space?: AppSpace | null;
 	owner?: AppOwner;
+	/** Member who published the App; the Cohub bar credits this identity, falling back to the Space owner. */
+	publisher?: AppOwner;
 	content?: AppContent | null;
 	/** All-time view count shown in the public Cohub bar. */
 	totalViews?: number | null;
@@ -98,6 +100,7 @@ const {
 	app,
 	space = null,
 	owner = null,
+	publisher = null,
 	content = null,
 	totalViews = null,
 	mode = "page",
@@ -370,7 +373,7 @@ onMount(() => {
 
 <div class="app-surface {mode}">
 	{#if mode === "page" && !hideCohubBar}
-		<CohubBar {app} {space} {owner} {totalViews} actions={barActions} />
+		<CohubBar {app} {space} {owner} {publisher} {totalViews} actions={barActions} />
 	{/if}
 
 	{#if boardContent}

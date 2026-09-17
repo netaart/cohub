@@ -27,6 +27,7 @@ type ReadyView = {
 	app: AppDetailResponse["app"];
 	space: AppDetailResponse["space"];
 	owner: AppDetailResponse["owner"];
+	publisher: AppDetailResponse["publisher"];
 	content: AppDetailResponse["content"];
 	publicUrl: AppDetailResponse["publicUrl"];
 	totalViews: number | null;
@@ -185,6 +186,7 @@ function toReadyView(
 		app: detail.app,
 		space: detail.space,
 		owner: detail.owner,
+		publisher: detail.publisher,
 		content: detail.content,
 		publicUrl: detail.publicUrl,
 		totalViews: detail.totalViews ?? null,
@@ -412,6 +414,7 @@ function handleSelectVersion(version: number | null) {
 		app={ready.app}
 		space={ready.space}
 		owner={ready.owner}
+		publisher={ready.publisher}
 		content={ready.content}
 		totalViews={ready.totalViews}
 		{launchState}

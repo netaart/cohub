@@ -6,5 +6,6 @@
 
 - `app_source` uploads (used by the local CLI / local agent publish path) now require `app.publish`; `space_avatar` stays on `space.edit`.
 - App deletion: hosts may delete any App, builders only the Apps they published themselves.
+- App detail responses now report the actual `publisher` (App creator), and the public Cohub bar credits that identity instead of always showing the Space owner.
 - The App management page shows Edit / Disable / Update version for `app.publish` holders, and Delete only for hosts or the App's publisher.
 - The `Permission` union gains `"app.publish"`.

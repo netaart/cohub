@@ -28,6 +28,8 @@ type Props = {
 	app: Pick<AppRecord, "slug" | "meta">;
 	space?: CohubBarSpace | null;
 	owner?: CohubBarOwner;
+	/** Member who published the App; credits "Published by", falling back to the Space owner. */
+	publisher?: CohubBarOwner;
 	/** All-time view count; null hides the stat instead of rendering 0. */
 	totalViews?: number | null;
 	/** Extra controls rendered before the stats (e.g. version switcher). */
@@ -38,6 +40,7 @@ const {
 	app,
 	space = null,
 	owner = null,
+	publisher = null,
 	totalViews = null,
 	actions = undefined,
 }: Props = $props();
@@ -51,8 +54,11 @@ const homeLabel = $derived(
 );
 const spaceName = $derived(space?.name || space?.slug || "Space");
 const appTitle = $derived(appDisplayTitle(app?.meta, app?.slug ?? "App"));
-const publisherName = $derived(owner?.displayName ?? "Cohub");
-const publisherAvatarUrl = $derived(owner?.avatarUrl?.trim() || null);
+const publisherIdentity = $derived(publisher ?? owner);
+const publisherName = $derived(publisherIdentity?.displayName ?? "Cohub");
+const publisherAvatarUrl = $derived(
+	publisherIdentity?.avatarUrl?.trim() || null,
+);
 const totalViewsText = $derived(
 	typeof totalViews === "number" && totalViews > 0
 		? formatCompactNumber(totalViews, locale)
@@ -135,7 +141,7 @@ const totalViewsTitle = $derived(
 		<UserIdentity
 			name={publisherName}
 			avatarUrl={publisherAvatarUrl}
-			username={owner?.username}
+			username={publisherIdentity?.username}
 			size="xs"
 			class="min-w-0 text-text-secondary"
 			avatarClass="h-5 w-5 rounded-full bg-bg-elevated text-[8px]"
