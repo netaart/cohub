@@ -6,11 +6,19 @@ import { join } from "node:path";
 /**
  * Picks the released Android binary a device E2E run installs before OTA.
  *
- * The golden binary must embed the same runtime (native fingerprint) as the
- * target commit, otherwise the OTA server refuses the update and the run tests
- * nothing. It must also predate the target commit, because expo-updates only
- * downloads an update newer than the embedded bundle; a golden built from the
- * target itself has nothing to fetch.
+ * Two hashes are involved and must not be confused:
+ *  - The APK-embedded runtime (`assets/fingerprint`) identifies the native binary and is
+ *    the runtime production OTA is published against. Expo Updates' Gradle plugin writes
+ *    it after prebuild, so it equals neither the source fingerprint nor any value
+ *    computed here. Read it from the installed APK when it matters.
+ *  - The source fingerprint (`cohub-android-native-fingerprint.txt`, and the local
+ *    `@expo/fingerprint` run) is the native-compatibility value the OTA server compares
+ *    between publishes. It is computed before prebuild, and `fingerprint.config.js`
+ *    skips version fields so it only moves with native changes.
+ *
+ * The golden must therefore carry the matching source fingerprint, so the target commit
+ * is native-compatible with an installed binary, and predate the target commit, because
+ * expo-updates only downloads an update newer than its own embedded bundle.
  */
 
 const DEFAULT_REPOSITORY = "markbang/cohub-mobile";
@@ -36,13 +44,11 @@ export function parseFingerprint(value, source) {
 }
 
 /**
- * `fingerprint.config.js` skips version fields, so the hash only changes with
- * native code. `app.config.ts` folds EXPO_PUBLIC_UPDATES_URL into the public
- * config, so the build-time value must be set here too or the hash differs from
- * the one embedded in the released APK.
+ * Keeps releases whose source fingerprint matches the target commit, then prefers one
+ * that predates the target commit so a newer OTA bundle is actually pending.
  */
 export function selectGolden(releases) {
-  const eligible = releases.filter((release) => release.fingerprintMatches && release.apkName);
+  const eligible = releases.filter((release) => release.sourceFingerprintMatches && release.apkName);
   if (eligible.length === 0) return null;
   const withUpdate = eligible.find((release) => release.aheadBy > 0);
   return withUpdate ?? eligible[0];
@@ -58,7 +64,11 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 
-function computeFingerprint() {
+/**
+ * `app.config.ts` folds EXPO_PUBLIC_UPDATES_URL into the public config, so the build-time
+ * value must be set here too or the hash will not match the released source fingerprint.
+ */
+function computeSourceFingerprint() {
   const updatesUrl = process.env.EXPO_PUBLIC_UPDATES_URL?.trim();
   if (!updatesUrl) {
     throw new Error(
@@ -74,7 +84,7 @@ function computeFingerprint() {
   } catch {
     throw new Error("The fingerprint CLI did not return JSON. Run it directly to inspect the output.");
   }
-  return parseFingerprint(parsed.hash, "The current commit's Android fingerprint");
+  return parseFingerprint(parsed.hash, "The current commit's Android source fingerprint");
 }
 
 function listReleases(repository) {
@@ -92,7 +102,7 @@ function releaseAssets(repository, tag) {
   return JSON.parse(raw).assets;
 }
 
-function releasedFingerprint(repository, tag) {
+function releasedSourceFingerprint(repository, tag) {
   const directory = mkdtempSync(join(tmpdir(), "golden-"));
   try {
     run("gh", ["release", "download", tag, "--repo", repository, "--pattern", FINGERPRINT_ASSET, "--dir", directory]);
@@ -116,7 +126,7 @@ function describe(release, targetCommit) {
   return [
     `Golden: ${release.tag}`,
     `  apk        ${release.apkName} (${release.apkDigest ?? "no digest"})`,
-    `  runtime    ${release.fingerprint}`,
+    `  source fp  ${release.sourceFingerprint}`,
     `  tag commit ${release.commit}`,
     `  target     ${targetCommit}`,
     `  ota        ${status}`,
@@ -137,7 +147,7 @@ function parseArgs(argv) {
 }
 
 export async function resolveGolden(options) {
-  const fingerprint = computeFingerprint();
+  const sourceFingerprint = computeSourceFingerprint();
   const targetCommit = options.commit || run("gh", ["api", `repos/${options.repository}/commits/main`, "--jq", ".sha"]).trim();
   if (!/^[0-9a-f]{7,40}$/.test(targetCommit)) throw new Error(`Invalid target commit "${targetCommit}".`);
 
@@ -150,7 +160,7 @@ export async function resolveGolden(options) {
       tag: tagName,
       publishedAt,
       commit: run("gh", ["api", `repos/${options.repository}/commits/${tagName}`, "--jq", ".sha"]).trim(),
-      fingerprint: releasedFingerprint(options.repository, tagName),
+      sourceFingerprint: releasedSourceFingerprint(options.repository, tagName),
       apkName: apk.name,
       apkDigest: apk.digest ?? null,
       targetCommit,
@@ -159,17 +169,17 @@ export async function resolveGolden(options) {
 
   const candidates = releases.map((release) => ({
     ...release,
-    fingerprintMatches: release.fingerprint === fingerprint,
+    sourceFingerprintMatches: release.sourceFingerprint === sourceFingerprint,
     aheadBy: commitsAhead(options.repository, release.commit, targetCommit),
   }));
 
   const golden = selectGolden(candidates);
   if (!golden) {
     throw new Error(
-      `No released Android APK embeds runtime ${fingerprint}. Ship a native distribution for this commit first; JS-only changes can ride an existing one.`,
+      `No released Android distribution carries source fingerprint ${sourceFingerprint}. Ship a native distribution for this commit first; JS-only changes can ride an existing one.`,
     );
   }
-  return { fingerprint, targetCommit, golden, candidates };
+  return { sourceFingerprint, targetCommit, golden, candidates };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
