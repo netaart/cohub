@@ -1,6 +1,6 @@
 # Debug Diagnostics
 
-The mobile client records an opt-in diagnostic session in SQLite and submits it only when a user sends feedback. It never uploads credentials, message bodies, attachment bytes, image data, or raw Cohub IDs.
+The mobile client records diagnostic sessions in SQLite by default; the switch in About turns recording off. It keeps the most recent sessions and prunes older ones on the next launch, and it submits one session only when a user sends feedback. It never uploads credentials, message bodies, attachment bytes, image data, or raw Cohub IDs.
 
 ## Ingest contract
 
@@ -101,3 +101,7 @@ Geometry fields may include composer, bubble, marker, keyboard, and scroll frame
 ## Local verification
 
 The client can be tested without a network by enabling diagnostics, exercising a flow, and inspecting the `debug_sessions` and `debug_events` tables in `cohub-mobile.db`. Upload failures must not affect chat sending or navigation.
+
+## Retention and export
+
+A session is one app process lifetime; a relaunch starts a new one and marks the previous session closed when it is next read. The newest `SESSION_RETENTION` sessions are kept and the rest pruned at session start. Export writes every retained session to one JSONL file, newest first: each session contributes one `cohub-diagnostics-v1` header line followed by its events, so a single-session file still parses like before. Feedback sends only the most relevant session: the live one when it captured activity beyond its start markers, otherwise the most recent stored session (typically the frozen session that a relaunch shadowed). The chat scroll trace stays opt-in: it records only while the Scroll Diagnostics screen's Recording switch is on, and its events are written to the current session. Turning recording off deletes every stored session, retained ones included.

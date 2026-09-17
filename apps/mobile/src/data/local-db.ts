@@ -264,11 +264,22 @@ export async function loadDebugEvents(sessionId: string): Promise<DebugEventRow[
   return db.getAllAsync<DebugEventRow>("SELECT session_id AS sessionId, sequence, timestamp, name, payload FROM debug_events WHERE session_id = ? ORDER BY sequence ASC", sessionId);
 }
 
-export async function clearDebugSession(sessionId: string) {
+/** Keep the newest `keep` sessions and drop the rest. The subquery is materialized before
+the delete, so the session rows are still all visible when events are pruned. */
+export async function pruneDebugSessions(keep: number) {
   const db = await database();
   await db.withTransactionAsync(async () => {
-    await db.runAsync("DELETE FROM debug_events WHERE session_id = ?", sessionId);
-    await db.runAsync("DELETE FROM debug_sessions WHERE session_id = ?", sessionId);
+    await db.runAsync("DELETE FROM debug_events WHERE session_id NOT IN (SELECT session_id FROM debug_sessions ORDER BY updated_at DESC LIMIT ?)", keep);
+    await db.runAsync("DELETE FROM debug_sessions WHERE session_id NOT IN (SELECT session_id FROM debug_sessions ORDER BY updated_at DESC LIMIT ?)", keep);
+  });
+}
+
+/** Drop every session, live or retained: used when recording is turned off. */
+export async function clearAllDebugSessions() {
+  const db = await database();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM debug_events");
+    await db.runAsync("DELETE FROM debug_sessions");
   });
 }
 

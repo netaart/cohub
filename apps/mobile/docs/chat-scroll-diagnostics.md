@@ -1,6 +1,6 @@
 # Chat Scroll Diagnostics
 
-This is an opt-in Android investigation tool. The real chat timeline now disables Android's `scrollsChildToFocus` behavior independently of recording; the Test screen can compare the native default against this setting.
+This is the Android investigation screen for the chat scroll trace, which is off by default; start it with the Recording switch. While debug diagnostics are on, its events are also written to the diagnostic session, which survives a restart. The real chat timeline disables Android's `scrollsChildToFocus` behavior independently of recording; the Test screen can compare the native default against this setting.
 
 ## Open And Record
 
@@ -10,7 +10,7 @@ This is an opt-in Android investigation tool. The real chat timeline now disable
 4. Reproduce one scenario, wait one second for trailing scroll events, then return and copy or share the log using the header icons. Export automatically pauses recording.
 5. When recording, the real chat's more-actions menu includes **Scroll Diagnostics**. Opening it adds a marker. Android Back also returns to the diagnostics page when the chat was opened from its Chats tab.
 
-Logs are memory-only and are cleared on app restart or authenticated navigation teardown (including sign-out/account changes). There is no upload. Export before restarting. Keep recordings short: only the latest 4,000 entries are retained; the page and export header report overwritten entries. The Logs tab displays the latest 150 entries, newest first; copy/share includes all retained entries in chronological order. Sharing sends text through the native share sheet; for a large recording, use clipboard copy if the share destination rejects it.
+Logs are cleared from memory on app restart or authenticated navigation teardown (including sign-out/account changes). With debug diagnostics on, the same events are also written to the persisted diagnostic session, which survives a restart and is what the About export reads. There is no upload. Export before restarting. Keep recordings short: only the latest 4,000 entries are retained; the page and export header report overwritten entries. The Logs tab displays the latest 150 entries, newest first; copy/share includes all retained entries in chronological order. Sharing sends text through the native share sheet; for a large recording, use clipboard copy if the share destination rejects it.
 
 ## Experiments
 

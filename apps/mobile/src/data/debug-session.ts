@@ -4,11 +4,15 @@ import * as Updates from "expo-updates";
 import { useEffect, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { config } from "@/src/config";
-import { clearDebugSession, loadDebugEvents, loadDebugSessions, saveDebugEvent, upsertDebugSession, type DebugEventRow } from "@/src/data/local-db";
+import { clearAllDebugSessions, loadDebugEvents, loadDebugSessions, pruneDebugSessions, saveDebugEvent, upsertDebugSession, type DebugEventRow } from "@/src/data/local-db";
 import { chatScrollTrace, setDebugTraceSink } from "@/src/data/chat-scroll-trace";
 
 const ENABLED_KEY = "cohub.debug.diagnostics.enabled";
 const EVENT_CAPACITY = 4000;
+/** Sessions kept on disk; older ones are pruned when a new one starts. */
+const SESSION_RETENTION = 5;
+/** Sessions always write these on start, so alone they are not evidence of activity. */
+const STARTUP_EVENTS = new Set(["diagnostics.session.started", "chat.scroll.recording.start"]);
 
 type DebugFields = Record<string, unknown>;
 type ActiveSession = { id: string; startedAt: string; sequence: number; dropped: number; events: DebugEventRow[]; writes: Promise<void> };
@@ -48,10 +52,6 @@ function updateMetadata() {
   }
 }
 
-function startChatTrace() {
-  if (!chatScrollTrace.isRecording()) chatScrollTrace.start({ diagnostics: true, platform: Platform.OS });
-}
-
 function stopChatTrace() {
   if (!chatScrollTrace.isRecording()) return;
   chatScrollTrace.pause();
@@ -61,7 +61,9 @@ function stopChatTrace() {
 async function ensureLoaded() {
   if (loadPromise) return loadPromise;
   loadPromise = AsyncStorage.getItem(ENABLED_KEY).then((value) => {
-    enabled = value === "true";
+    // Recording is on by default so a freeze can be captured without enabling anything first;
+    // only an explicit `false` (the switch turned off) disables it.
+    enabled = value !== "false";
     setDebugTraceSink(enabled ? (name, fields) => record(name, fields) : null);
     if (enabled) void startSession();
     return enabled;
@@ -70,15 +72,14 @@ async function ensureLoaded() {
 }
 
 async function startSession() {
-  if (activeSession) {
-    startChatTrace();
-    return activeSession;
-  }
+  if (activeSession) return activeSession;
   const session: ActiveSession = { id: newId("debug"), startedAt: new Date().toISOString(), sequence: 0, dropped: 0, events: [], writes: Promise.resolve() };
   activeSession = session;
   await upsertDebugSession({ sessionId: session.id, startedAt: session.startedAt, updatedAt: Date.now(), closedAt: null, uploadedAt: null });
+  // A freeze leaves its session open in SQLite; prune only after the new session exists so
+  // later launches cannot push the crashed one out of the retention window.
+  void pruneDebugSessions(SESSION_RETENTION).catch(() => undefined);
   record("diagnostics.session.started", { platform: Platform.OS, appVersion: Constants.expoConfig?.version ?? null, ...updateMetadata() });
-  startChatTrace();
   return session;
 }
 
@@ -90,17 +91,15 @@ export async function setDebugDiagnosticsEnabled(value: boolean) {
     await startSession();
     return;
   }
-  if (activeSession) {
-    record("diagnostics.session.stopping");
-    stopChatTrace();
-    const session = activeSession;
-    await session.writes;
-    await clearDebugSession(session.id);
-    activeSession = null;
-  }
+  // Turning recording off is an opt-out: drop every retained session, not just the live one.
   enabled = false;
   setDebugTraceSink(null);
+  const session = activeSession;
+  activeSession = null;
+  stopChatTrace();
   await AsyncStorage.setItem(ENABLED_KEY, "false");
+  if (session) await session.writes;
+  await clearAllDebugSessions();
 }
 
 export async function isDebugDiagnosticsEnabled() {
@@ -125,46 +124,70 @@ export function record(name: string, fields: DebugFields = {}) {
   session.writes = session.writes.then(() => saveDebugEvent(event)).catch(() => undefined);
 }
 
-export async function snapshot(): Promise<DebugSnapshot | null> {
-  await ensureLoaded();
-  // A frozen screen kills the JS thread before anything can run, so the crashed
-  // session stays open in SQLite. Prefer the most recent session that actually
-  // has events: usually the crash itself, since the restarted app opens a new one.
-  if (activeSession && activeSession.events.length > 0) {
-    await activeSession.writes;
-    return { sessionId: activeSession.id, startedAt: activeSession.startedAt, dropped: activeSession.dropped, events: [...activeSession.events] };
-  }
+function hasCapturedActivity(snapshot: DebugSnapshot) {
+  return snapshot.events.some((event) => !STARTUP_EVENTS.has(event.name));
+}
+
+async function loadActiveSnapshot(): Promise<DebugSnapshot | null> {
+  if (!activeSession) return null;
+  const session = activeSession;
+  await session.writes;
+  // Copy: the live session keeps appending after the snapshot is handed out.
+  return { sessionId: session.id, startedAt: session.startedAt, dropped: session.dropped, events: [...session.events] };
+}
+
+async function loadStoredSnapshots(): Promise<DebugSnapshot[]> {
   const sessions = await loadDebugSessions();
+  const snapshots: DebugSnapshot[] = [];
   for (const session of sessions) {
     if (activeSession?.id === session.sessionId) continue;
     const events = await loadDebugEvents(session.sessionId);
     if (events.length === 0) continue;
     if (session.closedAt === null) await upsertDebugSession({ ...session, closedAt: new Date().toISOString() });
-    return { sessionId: session.sessionId, startedAt: session.startedAt, dropped: Math.max(0, events.at(-1)!.sequence - events.length), events };
+    snapshots.push({ sessionId: session.sessionId, startedAt: session.startedAt, dropped: Math.max(0, events.at(-1)!.sequence - events.length), events });
   }
-  return null;
+  return snapshots;
 }
 
-/** JSON Lines so a long session can be inspected line by line or grepped for a phase. */
-export function formatDiagnostics(snapshot: DebugSnapshot): string {
-  return [
+/** The one session feedback attaches: the live session when it captured activity, otherwise the
+most recent stored one. A relaunch writes only startup markers, so without this the frozen
+session it replaced would always be shadowed. */
+export async function snapshot(): Promise<DebugSnapshot | null> {
+  await ensureLoaded();
+  const active = await loadActiveSnapshot();
+  const stored = await loadStoredSnapshots();
+  if (active && hasCapturedActivity(active)) return active;
+  return stored.find(hasCapturedActivity) ?? active ?? stored[0] ?? null;
+}
+
+/** Every retained session, newest first: the live one followed by the stored ones. */
+export async function listSnapshots(): Promise<DebugSnapshot[]> {
+  await ensureLoaded();
+  const active = await loadActiveSnapshot();
+  return [...(active && active.events.length > 0 ? [active] : []), ...await loadStoredSnapshots()];
+}
+
+/** JSON Lines, one `cohub-diagnostics-v1` header per session followed by its events, so a long
+export can be inspected line by line or grepped for a phase. */
+export function formatDiagnostics(snapshots: DebugSnapshot[]): string {
+  return snapshots.flatMap((snapshot) => [
     JSON.stringify({ format: "cohub-diagnostics-v1", sessionId: snapshot.sessionId, startedAt: snapshot.startedAt, dropped: snapshot.dropped, events: snapshot.events.length, privacy: "Diagnostic events only. Fields whose names look like message text, titles, tokens or bodies are stripped before they are stored." }),
     ...snapshot.events.map((event) => JSON.stringify({ at: event.timestamp, seq: event.sequence, name: event.name, payload: event.payload })),
-  ].join("\n");
+  ]).join("\n");
 }
 
-/** Local export for sharing or copying; no server round trip. */
+/** Local export of every retained session for sharing or copying; no server round trip. */
 export async function exportDiagnostics(): Promise<string> {
-  const current = await snapshot();
-  if (!current) throw new Error("Enable debug diagnostics and reproduce the issue first.");
-  return formatDiagnostics(current);
+  const snapshots = await listSnapshots();
+  if (snapshots.length === 0) throw new Error("No diagnostic sessions recorded yet. Reproduce the issue, then export again.");
+  return formatDiagnostics(snapshots);
 }
 
 export async function submitFeedback(input: FeedbackInput): Promise<FeedbackReceipt> {
   const description = input.description.trim();
   if (!description) throw new Error("Feedback description is required.");
   const current = await snapshot();
-  if (!current) throw new Error("Enable debug diagnostics before submitting feedback.");
+  if (!current) throw new Error("No diagnostic session recorded yet. Reproduce the issue before submitting feedback.");
   const response = await fetch(`${config.diagnosticsOrigin}/v1/feedback`, {
     method: "POST",
     headers: { "content-type": "application/json" },
