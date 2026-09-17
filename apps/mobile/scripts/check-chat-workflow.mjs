@@ -887,7 +887,15 @@ const bubbleScope = {
   ImageGallery: "ImageGallery", ToolCall: "ToolCall", SystemNoteRow: "SystemNoteRow",
   imageUri: (block) => block.source?.type === "url" ? block.source.url : null,
 };
-const bubbleRender = new Function(...Object.keys(bubbleScope), ts.transpileModule(`${bubbleFunctions.join("\n")}\nreturn MessageContent;`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText)(...Object.values(bubbleScope));
+const bubbleModule = new Function(...Object.keys(bubbleScope), ts.transpileModule(`${bubbleFunctions.join("\n")}\nreturn { MessageContent, enrichedMarkdownStyle };`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText)(...Object.values(bubbleScope));
+const bubbleRender = bubbleModule.MessageContent;
+const markdownTheme = { colors: { text: "text", textMuted: "muted", accentBorder: "accent-border", accent: "accent", border: "border", surfaceRaised: "raised", userBubbleCodeBackground: "user-code" } };
+const userInlineCode = bubbleModule.enrichedMarkdownStyle(markdownTheme, "user-text", "user-link", true).code;
+assert.equal(userInlineCode.color, "user-text", "inline code on a user bubble keeps the bubble foreground");
+assert.equal(userInlineCode.backgroundColor, "user-code", "inline code on a user bubble uses its theme surface");
+const assistantInlineCode = bubbleModule.enrichedMarkdownStyle(markdownTheme, "body-text", "link", false).code;
+assert.equal(assistantInlineCode.color, "text");
+assert.equal(assistantInlineCode.backgroundColor, "raised");
 function footerPlacements(node, footer, found = []) {
   if (Array.isArray(node)) { node.forEach((child) => footerPlacements(child, footer, found)); return found; }
   if (!node || typeof node !== "object") return found;
@@ -2000,7 +2008,7 @@ function panelPagerHarness(initialPanel = null) {
     interpolate: (value, input, output) => Math.min(output[1], Math.max(output[0], value / input[1])), Extrapolation: { CLAMP: "clamp" },
     Reanimated: { ScrollView: "Pager", View: "AnimatedView" }, BackHandler: { addEventListener: () => ({ remove() {} }) },
     PANEL_WIDTH_RATIO: 0.86, MAX_PANEL_WIDTH: 360, PANEL_SCROLL_IDLE_MS: 140, PANEL_CLOSE_SETTLE_MS: 380,
-    panelForScrollOffset, chatScrollTrace: { record() {} }, ChatPanel: "ChatPanel", FilesPanel: "FilesPanel", PanelGesturePreview: "PanelGesturePreview",
+    panelForScrollOffset, chatScrollTrace: { record() {} }, ChatPanel: "ChatPanel", FilesPanel: "FilesPanel",
   });
   let tree;
   const render = () => {
@@ -2044,6 +2052,8 @@ for (const order of ["content-first", "viewport-first"]) {
   assert.equal(harness.contentShift(), 0, "native acknowledgement removes content-only compensation");
 }
 const delayedPager = panelPagerHarness();
+assert.ok(delayedPager.nodes().some((node) => node.type === "ChatPanel"), "Chats are mounted before the first swipe reveals them");
+assert.ok(delayedPager.nodes().some((node) => node.type === "FilesPanel"), "Files are mounted and start loading before the first swipe reveals them");
 assert.equal(delayedPager.pager().props.scrollEnabled, false, "unseeded native pages cannot be dragged into view");
 assert.equal(delayedPager.contentShift(), -344, "only the page strip compensates for native offset zero");
 delayedPager.scroll(0);
@@ -2070,11 +2080,11 @@ for (let cycle = 0; cycle < 2; cycle++) {
   delayedPager.scroll(688);
   delayedPager.pager().props.onMomentumScrollEnd();
   delayedPager.render();
-  assert.ok(delayedPager.nodes().some((node) => node.type === "FilesPanel"), "every repeated swipe mounts an interactive Files panel");
+  assert.ok(delayedPager.nodes().some((node) => node.type === "FilesPanel"), "every repeated swipe reveals the preloaded Files panel");
   delayedPager.scroll(344);
   delayedPager.pager().props.onMomentumScrollEnd();
   delayedPager.render();
-  assert.ok(!delayedPager.nodes().some((node) => node.type === "FilesPanel"));
+  assert.ok(delayedPager.nodes().some((node) => node.type === "FilesPanel"), "closing keeps Files warm for the next swipe");
 }
 delayedPager.setPanel("chat");
 assert.deepEqual(delayedPager.commands.at(-1), { x: 0, animated: true }, "external menu commands still open the requested panel");
@@ -2116,7 +2126,7 @@ const seedFilesPanel = closingSeed.nodes().find((node) => node.type === "FilesPa
 seedFilesPanel.props.onClose();
 closingSeed.render();
 assert.equal(closingSeed.nativeX(), 344);
-assert.ok(!closingSeed.nodes().some((node) => node.type === "FilesPanel"), "closing before seed acknowledgement must clear the panel and its touch-blocking scrim");
+assert.ok(closingSeed.nodes().some((node) => node.type === "FilesPanel"), "closing before seed acknowledgement keeps the preloaded panel mounted");
 closingSeed.scroll(344);
 closingSeed.render();
 assert.equal(closingSeed.pager().props.scrollEnabled, true);

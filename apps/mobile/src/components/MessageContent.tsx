@@ -60,7 +60,7 @@ function useOpenMessageLink(spaceId: string | null) {
   };
 }
 
-function enrichedMarkdownStyle(theme: AppTheme, color: string, linkColor = theme.colors.accent): MarkdownStyle {
+function enrichedMarkdownStyle(theme: AppTheme, color: string, linkColor = theme.colors.accent, onUserBubble = false): MarkdownStyle {
   const body = { fontSize: typography.chatBody.fontSize, lineHeight: typography.chatBody.lineHeight, color };
   const heading = (size: number): MarkdownStyle["h1"] => ({ ...body, fontSize: scaleFontSize(size), fontWeight: "700", marginTop: 3 });
   return {
@@ -92,7 +92,7 @@ function enrichedMarkdownStyle(theme: AppTheme, color: string, linkColor = theme
       cellPaddingVertical: 6,
     },
     codeBlock: { fontFamily: "SpaceMono", fontSize: typography.code.fontSize, lineHeight: typography.code.lineHeight, color: theme.colors.text, backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border, borderWidth: 1, borderRadius: 10, padding: 12 },
-    code: { fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color: theme.colors.text, backgroundColor: theme.colors.surfaceRaised, borderColor: "transparent" },
+    code: { fontFamily: "SpaceMono", fontSize: Math.max(11, typography.chatBody.fontSize - 2), color: onUserBubble ? color : theme.colors.text, backgroundColor: onUserBubble ? theme.colors.userBubbleCodeBackground : theme.colors.surfaceRaised, borderColor: "transparent" },
     math: { color: theme.colors.text, backgroundColor: "transparent" },
     inlineMath: { color: theme.colors.text },
   };
@@ -100,10 +100,10 @@ function enrichedMarkdownStyle(theme: AppTheme, color: string, linkColor = theme
 
 function TextBlock({ value, muted = false, color, linkColor, streaming = false, footer }: { value: string; muted?: boolean; color?: string; linkColor?: string; streaming?: boolean; footer?: ReactNode }) {
   const theme = useAppTheme();
-  const { spaceId } = useContext(BubbleContext);
+  const { onUser, spaceId } = useContext(BubbleContext);
   const openLink = useOpenMessageLink(spaceId);
   const textColor = muted ? theme.colors.textMuted : (color ?? theme.colors.text);
-  const markdownStyle = useMemo(() => enrichedMarkdownStyle(theme, textColor, linkColor), [linkColor, theme, textColor]);
+  const markdownStyle = useMemo(() => enrichedMarkdownStyle(theme, textColor, linkColor, onUser), [linkColor, onUser, theme, textColor]);
   // Paced prefix: the renderer is native, so this only decides how much Markdown it has been given.
   const paced = useRevealedStreamText(value, streaming);
   // Native Markdown has no onTextLayout. A hidden Text measuring the source wraps differently

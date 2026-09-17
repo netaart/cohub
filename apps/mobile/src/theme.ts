@@ -26,6 +26,7 @@ export type AppTheme = {
     userBubble: string;
     userBubbleText: string;
     userBubbleLink: string;
+    userBubbleCodeBackground: string;
     userBubbleMeta: string;
     assistantBubble: string;
     success: string;
@@ -77,6 +78,7 @@ const darkTheme: AppTheme = {
     userBubble: "#c45d32",
     userBubbleText: "#fff6f0",
     userBubbleLink: "#ffd2b8",
+    userBubbleCodeBackground: "rgba(15, 17, 20, 0.24)",
     userBubbleMeta: "rgba(255, 246, 240, 0.64)",
     assistantBubble: "#22262e",
     success: "#62c994",
@@ -104,6 +106,7 @@ const pureBlackDarkTheme: AppTheme = {
     surfacePressed: "#23262b",
     border: "#25292f",
     borderStrong: "#3b424d",
+    userBubbleCodeBackground: "rgba(0, 0, 0, 0.24)",
     assistantBubble: "#15171a",
   },
 };
@@ -130,6 +133,7 @@ const lightTheme: AppTheme = {
     userBubble: "#b85427",
     userBubbleText: "#ffffff",
     userBubbleLink: "#ffe0cf",
+    userBubbleCodeBackground: "rgba(29, 32, 36, 0.18)",
     userBubbleMeta: "rgba(255, 255, 255, 0.72)",
     assistantBubble: "#eceee9",
     success: "#238552",
