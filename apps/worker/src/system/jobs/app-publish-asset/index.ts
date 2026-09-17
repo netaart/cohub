@@ -239,9 +239,9 @@ function getMimeType(path: string) {
 }
 
 function getWorkAssetCacheControl(contentType: string) {
-  // HTML may be stored, but must be revalidated before reuse.
+  // HTML stays fresh for three days; other assets retain immutable caching.
   return contentType.split(";", 1)[0]?.trim().toLowerCase() === "text/html"
-    ? "public, no-cache"
+    ? "public, max-age=259200"
     : IMMUTABLE_PUBLIC_CACHE_CONTROL;
 }
 
