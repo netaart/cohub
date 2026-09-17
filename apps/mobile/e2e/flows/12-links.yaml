@@ -1,0 +1,57 @@
+appId: io.github.markbang.cohubmobile
+name: Message link resolution
+---
+# Deep links and notification payloads are untrusted routing input, so the resolver is
+# part of the security surface. The presets at the bottom feed known URL families.
+- openLink: "cohub://debug/links"
+- assertVisible: "解析结果"
+- scrollUntilVisible:
+    element:
+      text: "web 会话"
+    direction: DOWN
+- tapOn: "web 会话"
+- scrollUntilVisible:
+    element:
+      text: "kind.*session"
+    direction: UP
+- assertVisible: "kind.*session"
+- scrollUntilVisible:
+    element:
+      text: "web 空间"
+    direction: DOWN
+- tapOn: "web 空间"
+- scrollUntilVisible:
+    element:
+      text: "kind.*space"
+    direction: UP
+- assertVisible: "kind.*space"
+- scrollUntilVisible:
+    element:
+      text: "沙箱文件"
+    direction: DOWN
+- tapOn: "沙箱文件"
+- scrollUntilVisible:
+    element:
+      text: "kind.*file"
+    direction: UP
+- assertVisible: "kind.*file"
+- scrollUntilVisible:
+    element:
+      text: "外部链接"
+    direction: DOWN
+- tapOn: "外部链接"
+- scrollUntilVisible:
+    element:
+      text: "kind.*external"
+    direction: UP
+- assertVisible: "kind.*external"
+- scrollUntilVisible:
+    element:
+      text: "非法"
+    direction: DOWN
+- tapOn: "非法"
+- scrollUntilVisible:
+    element:
+      text: "无效或不受支持的 scheme"
+    direction: UP
+- assertVisible: "无效或不受支持的 scheme"

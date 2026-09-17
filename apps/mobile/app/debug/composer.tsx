@@ -61,7 +61,7 @@ export default function DebugComposerScreen() {
           <Toggle label="onStop" on={hasStop} onPress={() => setHasStop((v) => !v)} />
         </View>
         <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-          <Text selectable style={[typography.code, { color: theme.colors.textSecondary }]}>
+          <Text testID="debug.composer.state" selectable style={[typography.code, { color: theme.colors.textSecondary }]}>
             {`blocked=${live.blocked}  hasDraft=${live.hasDraft}  canSend=${live.canSend}  canStop=${live.canStop}`}
           </Text>
         </View>

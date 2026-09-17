@@ -1,0 +1,24 @@
+appId: io.github.markbang.cohubmobile
+name: OTA acceptance
+---
+# Runs after the runner has cold-launched twice, so the downloaded bundle is active.
+- openLink: "cohub://debug/updates"
+- assertVisible:
+    id: "debug.updates.enabled"
+- copyTextFrom:
+    id: "debug.updates.enabled"
+- assertTrue: "${maestro.copiedText === 'enabled'}"
+- copyTextFrom:
+    id: "debug.updates.runtime"
+- assertTrue: "${maestro.copiedText.length >= 40}"
+- scrollUntilVisible:
+    element:
+      id: "debug.updates.embedded"
+    direction: DOWN
+# Embedded means the release bundle is running and OTA never landed.
+- copyTextFrom:
+    id: "debug.updates.embedded"
+- assertTrue: "${maestro.copiedText === 'false'}"
+- copyTextFrom:
+    id: "debug.updates.updateId"
+- assertTrue: "${maestro.copiedText !== '—'}"

@@ -87,7 +87,7 @@ export function SettingsHomeScreen() {
         onPress={() => { setError(null); setSignOutOpen(true); }}
         style={({ pressed }) => ({ marginTop: theme.spacing.xl, minHeight: 48, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.dangerSoft : "transparent" })}
       ><Text style={[typography.bodyMedium, { color: theme.colors.danger }]}>{signingOut ? t("profile.signingOut") : t("common.signOut")}</Text></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={t("profile.version")} onPress={unlockDebug} style={{ minHeight: 44, alignItems: "center", justifyContent: "center" }}>
+      <Pressable testID="settings.version" accessibilityRole="button" accessibilityLabel={t("profile.version")} onPress={unlockDebug} style={{ minHeight: 44, alignItems: "center", justifyContent: "center" }}>
         <Text style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center" }]}>Cohub Mobile · {version}</Text>
       </Pressable>
     </ScrollView>

@@ -67,23 +67,23 @@ export default function ChatScrollDebugScreen() {
     <View style={{ paddingHorizontal: 12, paddingVertical: 6, gap: 6, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
         <Text style={[typography.bodyMedium, { color: theme.colors.text, flexGrow: 1 }]}>Recording</Text>
-        <Switch accessibilityLabel="Record scroll diagnostics" value={recording} onValueChange={(enabled) => { if (!enabled) chatScrollTrace.pause(); else if (snapshot.startedAt) chatScrollTrace.resume(); else start(); refresh(); }} />
-        <IconButton name="refresh" label="Start new recording" onPress={start} />
-        <IconButton name="trash" label="Clear log" onPress={() => { chatScrollTrace.reset(); refresh(); }} />
+        <Switch testID="debug.chat-scroll.record" accessibilityLabel="Record scroll diagnostics" value={recording} onValueChange={(enabled) => { if (!enabled) chatScrollTrace.pause(); else if (snapshot.startedAt) chatScrollTrace.resume(); else start(); refresh(); }} />
+        <IconButton testID="debug.chat-scroll.start" name="refresh" label="Start new recording" onPress={start} />
+        <IconButton testID="debug.chat-scroll.clear" name="trash" label="Clear log" onPress={() => { chatScrollTrace.reset(); refresh(); }} />
         <IconButton name="bookmark" label="Mark experiment" disabled={!recording} onPress={() => { chatScrollTrace.record("experiment.mark", "debug", { tab, inverted, fixture, fixtureFocusScroll: focusScroll }); refresh(); }} />
       </View>
-      <Text style={[typography.micro, { color: snapshot.dropped ? theme.colors.danger : theme.colors.textMuted }]}>{`${recording ? "Recording" : "Stopped"} | ${snapshot.entries.length}/4000 events | ${snapshot.dropped} overwritten`}</Text>
+      <Text testID="debug.chat-scroll.summary" style={[typography.micro, { color: snapshot.dropped ? theme.colors.danger : theme.colors.textMuted }]}>{`${recording ? "Recording" : "Stopped"} | ${snapshot.entries.length}/4000 events | ${snapshot.dropped} overwritten`}</Text>
       <View style={{ flexDirection: "row" }}>{(["Test", "Chats", "Logs"] as const).map((value) => <Pressable key={value} accessibilityRole="tab" accessibilityState={{ selected: tab === value }} onPress={() => { chatScrollTrace.record("debug.tab", "debug", { tab: value }); setTab(value); refresh(); }} style={{ flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", borderBottomWidth: 2, borderBottomColor: tab === value ? theme.colors.accent : "transparent" }}><Text style={[typography.bodyMedium, { color: tab === value ? theme.colors.accent : theme.colors.textMuted }]}>{value}</Text></Pressable>)}</View>
     </View>
     {tab === "Test" ? <>
       <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, gap: 6 }}>
         <Text style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>Inverted</Text>
-        <Switch accessibilityLabel="Inverted test list" value={inverted} onValueChange={(value) => { chatScrollTrace.record("fixture.mode", "debug", { inverted: value, fixture }); setInverted(value); }} />
+        <Switch testID="debug.chat-scroll.inverted" accessibilityLabel="Inverted test list" value={inverted} onValueChange={(value) => { chatScrollTrace.record("fixture.mode", "debug", { inverted: value, fixture }); setInverted(value); }} />
         {["Paragraph", "Markdown"].map((label, index) => <Pressable key={label} accessibilityRole="tab" accessibilityState={{ selected: fixture === index }} onPress={() => { chatScrollTrace.record("fixture.mode", "debug", { inverted, fixture: index }); setFixture(index); }} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 6 }}><Text style={[typography.caption, { color: fixture === index ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>)}
       </View>
       {Platform.OS === "android" ? <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, minHeight: 44, gap: 8 }}>
         <Text style={[typography.caption, { color: theme.colors.text, flex: 1 }]}>Focus scroll</Text>
-        <Switch accessibilityLabel="Focus scroll in test list" value={focusScroll} onValueChange={(value) => {
+        <Switch testID="debug.chat-scroll.focusScroll" accessibilityLabel="Focus scroll in test list" value={focusScroll} onValueChange={(value) => {
           chatScrollTrace.record("fixture.focusScrollChange", "debug", { previous: focusScroll, scrollsChildToFocus: value, inverted, fixture, remount: true });
           setFocusScroll(value);
         }} />

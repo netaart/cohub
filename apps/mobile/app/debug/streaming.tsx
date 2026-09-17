@@ -181,7 +181,7 @@ export default function DebugStreamingScreen() {
         <ControlChip icon={tools ? "check" : "x"} label={tools ? "工具" : "无工具"} onPress={() => setTools((current) => !current)} />
       </View>
       <View style={[styles.metrics, { borderTopColor: theme.colors.border }]}>
-        <Text style={[typography.micro, { color: theme.colors.textMuted, flex: 1 }]}>
+        <Text testID="debug.streaming.metrics" style={[typography.micro, { color: theme.colors.textMuted, flex: 1 }]}>
           重渲染 {renders} · 已输出 {Math.min(visible, totalChars).toLocaleString()} / {totalChars.toLocaleString()} 字 · 约 {(speed * 1000 / FRAME_MS).toLocaleString()} 字/秒
         </Text>
       </View>

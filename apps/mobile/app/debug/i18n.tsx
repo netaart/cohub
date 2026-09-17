@@ -30,10 +30,10 @@ export default function DebugI18nScreen() {
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
         <SectionHeader title="当前语言" />
         <View style={[styles.group, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-          <Row label="locale" value={locale} />
-          <Row label="preference" value={preference} />
+          <Row label="locale" value={locale} testID="debug.i18n.locale" />
+          <Row label="preference" value={preference} testID="debug.i18n.preference" />
           <Row label="device" value={getDeviceLocale()} />
-          <Row label="keys" value={`${keys.length}（缺失 ${missing.length}）`} />
+          <Row label="keys" value={`${keys.length}（缺失 ${missing.length}）`} testID="debug.i18n.keys" />
         </View>
 
         <SectionHeader title="切换" />
@@ -83,12 +83,12 @@ export default function DebugI18nScreen() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value, testID }: { label: string; value: string; testID?: string }) {
   const theme = useAppTheme();
   return (
     <View style={{ minHeight: 50, paddingHorizontal: 13, paddingVertical: 9, flexDirection: "row", alignItems: "center", gap: 11, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
       <Text style={[typography.caption, { color: theme.colors.textMuted, width: 110 }]}>{label}</Text>
-      <Text selectable style={[typography.caption, { color: theme.colors.text, flex: 1, textAlign: "right" }]}>{value}</Text>
+      <Text testID={testID} selectable style={[typography.caption, { color: theme.colors.text, flex: 1, textAlign: "right" }]}>{value}</Text>
     </View>
   );
 }

@@ -69,13 +69,14 @@ export function Avatar({ name, uri, size = 42, online = false }: { name: string;
   );
 }
 
-export function IconButton({ name, onPress, label, size = 44, tone = "default", disabled = false }: { name: IconName; onPress: (event: GestureResponderEvent) => void; label: string; size?: number; tone?: "default" | "accent" | "danger"; disabled?: boolean }) {
+export function IconButton({ name, onPress, label, testID, size = 44, tone = "default", disabled = false }: { name: IconName; onPress: (event: GestureResponderEvent) => void; label: string; testID?: string; size?: number; tone?: "default" | "accent" | "danger"; disabled?: boolean }) {
   const theme = useAppTheme();
   const color = tone === "accent" ? theme.colors.accent : tone === "danger" ? theme.colors.danger : theme.colors.textSecondary;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      testID={testID}
       hitSlop={6}
       disabled={disabled}
       onPress={onPress}

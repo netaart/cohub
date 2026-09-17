@@ -207,7 +207,7 @@ export default function DebugBubblesScreen() {
           onPress={() => setRateIndex((current) => (current + 1) % RATES.length)}
         />
         <ControlChip icon="trash" label="清空" onPress={clear} />
-        <Text style={[typography.micro, { color: theme.colors.textMuted, flex: 1, textAlign: "right" }]}>
+        <Text testID="debug.bubbles.metrics" style={[typography.micro, { color: theme.colors.textMuted, flex: 1, textAlign: "right" }]}>
           列表 {messages.length} · FPS {fps}
         </Text>
       </View>

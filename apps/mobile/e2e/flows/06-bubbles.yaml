@@ -1,0 +1,20 @@
+appId: io.github.markbang.cohubmobile
+name: High-rate bubble rendering
+---
+- openLink: "cohub://debug/bubbles"
+# Fresh mount: idle, rolling mode, nothing in the list.
+- assertVisible: "^开始$"
+- assertVisible: "^滚动$"
+- assertVisible:
+    id: "debug.bubbles.metrics"
+- assertVisible: "列表 0 · FPS 0"
+- tapOn: "^开始$"
+- assertVisible: "^暂停$"
+- tapOn: "^x128$"
+- assertVisible: "^x512$"
+- tapOn: "^滚动$"
+- assertVisible: "^追加$"
+- assertVisible: "列表 [1-9][0-9]* · FPS [0-9]+"
+# Clearing must stop the loop and empty the list.
+- tapOn: "^清空$"
+- assertVisible: "列表 0 · FPS 0"

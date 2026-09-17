@@ -38,14 +38,14 @@ export default function BubbleLayoutDebugScreen() {
     <View style={{ paddingHorizontal: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.border, gap: 4 }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
         <Text style={[typography.caption, { color: theme.colors.text }]}>Record</Text>
-        <Switch accessibilityLabel="Record bubble layout" value={recording} onValueChange={(enabled) => {
+        <Switch testID="debug.bubble-layout.record" accessibilityLabel="Record bubble layout" value={recording} onValueChange={(enabled) => {
           if (enabled) chatScrollTrace.start({ platform: Platform.OS, osVersion: String(Platform.Version), width: availableWidth, fontScale, theme: theme.mode, textSize, experiment: "bubble-layout" });
           else chatScrollTrace.pause();
         }} />
         <Text style={[typography.caption, { color: theme.colors.text }]}>280 pt</Text>
-        <Switch accessibilityLabel="Narrow viewport" value={narrow} onValueChange={(value) => { log("experiment.widthChange"); setNarrow(value); }} />
+        <Switch testID="debug.bubble-layout.narrow" accessibilityLabel="Narrow viewport" value={narrow} onValueChange={(value) => { log("experiment.widthChange"); setNarrow(value); }} />
         <Text style={[typography.caption, { color: theme.colors.text }]}>Inverted</Text>
-        <Switch accessibilityLabel="Inverted fixture list" value={inverted} onValueChange={(value) => { log("experiment.inversionChange"); setInverted(value); }} />
+        <Switch testID="debug.bubble-layout.inverted" accessibilityLabel="Inverted fixture list" value={inverted} onValueChange={(value) => { log("experiment.inversionChange"); setInverted(value); }} />
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
         <IconButton name={theme.mode === "dark" ? "sun" : "moon"} label="Toggle app theme" onPress={() => run(setThemePreference(theme.mode === "dark" ? "light" : "dark"))} />
@@ -84,9 +84,9 @@ function StreamingFixture({ availableWidth, inverted }: { availableWidth: number
   const completed = visible === STREAM_TEXT.length;
   return <>
     <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 12 }}>
-      <IconButton name={running ? "stop" : "arrow-right"} label={running ? "Pause stream" : "Start stream"} onPress={() => { setFailed(false); setRunning(!running); }} />
-      <IconButton name="refresh" label="Restart stream" onPress={() => { setFailed(false); setVisible(0); setRunning(true); }} />
-      <IconButton name="alert" label="Interrupt stream" onPress={() => { setRunning(false); setFailed(true); }} />
+      <IconButton testID="debug.bubble-layout.stream.toggle" name={running ? "stop" : "arrow-right"} label={running ? "Pause stream" : "Start stream"} onPress={() => { setFailed(false); setRunning(!running); }} />
+      <IconButton testID="debug.bubble-layout.stream.restart" name="refresh" label="Restart stream" onPress={() => { setFailed(false); setVisible(0); setRunning(true); }} />
+      <IconButton testID="debug.bubble-layout.stream.interrupt" name="alert" label="Interrupt stream" onPress={() => { setRunning(false); setFailed(true); }} />
     </View>
     <FlatList inverted={inverted} data={inverted ? ["sample", "pending"] : ["pending", "sample"]} keyExtractor={(value) => value} renderItem={({ item }) => item === "pending" ? <StreamCard content={[]} status="pending" availableWidth={availableWidth} /> : completed && !failed ? <MessageBubble availableWidth={availableWidth} message={fixtureMessage({ id: "stream-final", title: "Final", group: "States", text: STREAM_TEXT }, "assistant")} /> : <StreamCard availableWidth={availableWidth} content={visible > 0 ? [{ type: "text", text: STREAM_TEXT.slice(0, visible) }] : []} status={failed ? "interrupted" : "streaming"} />} />
   </>;

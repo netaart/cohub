@@ -1,0 +1,17 @@
+appId: io.github.markbang.cohubmobile
+name: Tool expansion heights
+---
+- openLink: "cohub://debug/tools"
+- assertVisible: "下面覆盖长输出、报错、编辑 diff 和运行中的工具调用。"
+- assertVisible: "git status --short"
+- assertVisible: "src/data/markdown.ts"
+# Long output sits below the fold and must expand without leaving a blank gap.
+- scrollUntilVisible:
+    element:
+      text: "npm run typecheck"
+    direction: DOWN
+- tapOn: "npm run typecheck"
+- assertVisible: "Found 24 errors in 1 file."
+# Collapsing returns the row to its one-line caption.
+- tapOn: "npm run typecheck"
+- assertNotVisible: "Found 24 errors in 1 file."

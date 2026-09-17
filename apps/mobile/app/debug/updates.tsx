@@ -144,12 +144,13 @@ export default function DebugUpdatesScreen() {
             icon={updatesEnabled ? "check-circle" : "cloud-off"}
             label="OTA 是否启用"
             value={updatesEnabled ? "enabled" : "disabled"}
+            testID="debug.updates.enabled"
             tone={updatesEnabled ? "success" : "muted"}
           />
-          <Row icon="zap" label="runtimeVersion" value={safe(() => Updates.runtimeVersion, null) ?? "—"} />
-          <Row icon="wifi" label="channel" value={safe(() => Updates.channel, null) ?? "—"} />
-          <Row icon="layers" label="updateId" value={safe(() => Updates.updateId, null) ?? "—"} />
-          <Row icon="download" label="嵌入启动" value={String(safe(() => Updates.isEmbeddedLaunch, false))} />
+          <Row icon="zap" label="runtimeVersion" value={safe(() => Updates.runtimeVersion, null) ?? "—"} testID="debug.updates.runtime" />
+          <Row icon="wifi" label="channel" value={safe(() => Updates.channel, null) ?? "—"} testID="debug.updates.channel" />
+          <Row icon="layers" label="updateId" value={safe(() => Updates.updateId, null) ?? "—"} testID="debug.updates.updateId" />
+          <Row icon="download" label="嵌入启动" value={String(safe(() => Updates.isEmbeddedLaunch, false))} testID="debug.updates.embedded" />
           <Row
             icon="alert"
             label="应急启动"
@@ -228,7 +229,7 @@ export default function DebugUpdatesScreen() {
   );
 }
 
-function Row({ icon, label, value, tone = "default" }: { icon: IconName; label: string; value: string; tone?: "default" | "success" | "danger" | "accent" | "muted" }) {
+function Row({ icon, label, value, testID, tone = "default" }: { icon: IconName; label: string; value: string; testID?: string; tone?: "default" | "success" | "danger" | "accent" | "muted" }) {
   const theme = useAppTheme();
   const color = tone === "success" ? theme.colors.success : tone === "danger" ? theme.colors.danger : tone === "accent" ? theme.colors.accent : tone === "muted" ? theme.colors.textMuted : theme.colors.text;
   const iconColor = tone === "danger" ? theme.colors.danger : tone === "success" ? theme.colors.success : theme.colors.textMuted;
@@ -238,7 +239,7 @@ function Row({ icon, label, value, tone = "default" }: { icon: IconName; label: 
         <AppIcon name={icon} size={16} color={iconColor} />
       </View>
       <Text style={[typography.caption, { color: theme.colors.textMuted, width: 118 }]}>{label}</Text>
-      <Text selectable numberOfLines={3} style={[typography.caption, { color, flex: 1, textAlign: "right" }]}>{value}</Text>
+      <Text testID={testID} selectable numberOfLines={3} style={[typography.caption, { color, flex: 1, textAlign: "right" }]}>{value}</Text>
     </View>
   );
 }

@@ -1,0 +1,21 @@
+appId: io.github.markbang.cohubmobile
+name: Debug menu entry
+---
+- launchApp:
+    clearState: false
+# The debug screens are the test surface, so reaching them is the first flow.
+# The custom scheme is the fast path; expo-router gives every app/debug route a URL.
+- openLink: "cohub://debug"
+- runFlow:
+    when:
+      notVisible: "Scroll Diagnostics"
+    commands:
+      # Fallback: the hidden entry is five taps on the version row in Settings.
+      - openLink: "cohub://settings"
+      - repeat:
+          times: 5
+          commands:
+            - tapOn:
+                id: "settings.version"
+- assertVisible: "Scroll Diagnostics"
+- assertVisible: "Bubble Layout"

@@ -1,0 +1,32 @@
+appId: io.github.markbang.cohubmobile
+name: Chat scroll diagnostics fixture
+---
+# Fixture tab only: no account, no backend, so this runs on any install.
+- openLink: "cohub://debug/chat-scroll"
+- assertVisible:
+    id: "debug.chat-scroll.summary"
+# Clear first: the trace is a module singleton, so a previous run may have left it recording.
+- tapOn:
+    id: "debug.chat-scroll.clear"
+- assertVisible: "Stopped"
+- assertVisible: "0/4000 events"
+- tapOn:
+    id: "debug.chat-scroll.record"
+- assertVisible: "Recording"
+# Focus scroll remounts the fixture list and records the toggle; this is the
+# swallowed scroll-seed path, so it must survive without throwing.
+- tapOn:
+    id: "debug.chat-scroll.focusScroll"
+- swipe:
+    direction: DOWN
+    duration: 400
+- swipe:
+    direction: UP
+    duration: 400
+- assertVisible: "[1-9][0-9]*/4000 events"
+- assertVisible: "0 overwritten"
+# The log view is the machine-readable readout: events must actually be recorded.
+- tapOn: "Logs"
+- assertVisible: "list.scroll"
+- assertVisible: "fixture.focusScrollChange"
+- tapOn: "Test"

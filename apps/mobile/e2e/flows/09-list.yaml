@@ -1,0 +1,13 @@
+appId: io.github.markbang.cohubmobile
+name: Long list sizes
+---
+- openLink: "cohub://debug/list"
+- assertVisible: "^500$"
+- tapOn: "^2000$"
+- assertVisible: "^2000$"
+- tapOn: "^10000$"
+- assertVisible: "^10000$"
+- tapOn: "回到底部"
+- assertVisible: "回到底部"
+# Message bodies render in a native Markdown view, so this covers the remount at each
+# size and the scroll-to-latest command, not the row content itself.

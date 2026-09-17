@@ -1,0 +1,23 @@
+appId: io.github.markbang.cohubmobile
+name: i18n coverage
+---
+- openLink: "cohub://debug/i18n"
+- assertVisible:
+    id: "debug.i18n.keys"
+# A missing zh key is a regression: the count is asserted, not just displayed.
+- copyTextFrom:
+    id: "debug.i18n.keys"
+- assertTrue: "${maestro.copiedText.endsWith('（缺失 0）')}"
+- tapOn: "^zh$"
+- copyTextFrom:
+    id: "debug.i18n.preference"
+- assertTrue: "${maestro.copiedText === 'zh'}"
+- tapOn: "^en$"
+- copyTextFrom:
+    id: "debug.i18n.preference"
+- assertTrue: "${maestro.copiedText === 'en'}"
+# Leave the app on the device default so later flows and manual use are unaffected.
+- tapOn: "^system$"
+- copyTextFrom:
+    id: "debug.i18n.preference"
+- assertTrue: "${maestro.copiedText === 'system'}"
