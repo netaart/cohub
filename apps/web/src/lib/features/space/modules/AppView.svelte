@@ -24,6 +24,7 @@ import {
 	buildSpaceSessionRoute,
 	buildSpaceSessionTurnRoute,
 } from "$lib/space-routes";
+import { authStore } from "$lib/stores/auth.svelte";
 import { formatDateTime } from "../space-utils";
 import AppPromotions from "./AppPromotions.svelte";
 import AppViewStats from "./AppViewStats.svelte";
@@ -40,6 +41,8 @@ type Props = {
 	ownerUsername: string | null;
 	spaceSlug: string | null;
 	canEditSpace: boolean;
+	/** Whether the viewer may publish/update/disable Apps (builder capability). */
+	canPublishApp: boolean;
 	onDetailLoaded?: (app: AppRecord | null) => void;
 	/** Show this app in the workspace window pane, beside the detail page. */
 	onPreviewApp?: (app: AppRecord) => void;
@@ -51,6 +54,7 @@ let {
 	ownerUsername,
 	spaceSlug,
 	canEditSpace,
+	canPublishApp,
 	onDetailLoaded,
 	onPreviewApp,
 }: Props = $props();
@@ -67,6 +71,10 @@ const appDetailController = createAppDetailController({
 });
 
 const appDetail = $derived(appDetailController.detail);
+// Hosts delete any App; builders only the Apps they published themselves.
+const canDeleteApp = $derived(
+	canEditSpace || (canPublishApp && appDetail?.userUuid === authStore.userUuid),
+);
 const appDetailLoading = $derived(appDetailController.loading);
 const appDetailError = $derived(appDetailController.error);
 const appActionInProgress = $derived(appDetailController.actionInProgress);
@@ -182,6 +190,7 @@ onDestroy(() => {
               <span>{m.app_view_new_tab({}, { locale })}</span>
             </a>
           {/if}
+          {#if canPublishApp}
           <button type="button" class="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-[5px] bg-bg-elevated px-3 py-2 text-[12px] font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary sm:w-auto" onclick={() => { appDetailController.syncFormFromDetail(); appDetailController.editMode = !appDetailController.editMode; }}>
             <Pencil class="h-3.5 w-3.5" />
             <span>{appDetailController.editMode ? m.close_edit({}, { locale }) : m.common_edit({}, { locale })}</span>
@@ -190,10 +199,13 @@ onDestroy(() => {
             {#if appActionInProgress}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else if appDetail.status === 'published'}<Power class="h-3.5 w-3.5" />{:else}<Rocket class="h-3.5 w-3.5" />{/if}
             <span>{appDetail.status === 'published' ? 'Disable' : 'Publish'}</span>
           </button>
+          {/if}
+          {#if canDeleteApp}
           <button type="button" class="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-[5px] px-3 py-2 text-[12px] font-medium text-text-tertiary transition-colors hover:bg-bg-hover hover:text-error-soft disabled:opacity-50 sm:w-auto" onclick={appDetailController.deleteApp} disabled={appActionInProgress || appDeleteInProgress}>
             {#if appDeleteInProgress}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else}<Trash2 class="h-3.5 w-3.5" />{/if}
             <span>{appDeleteInProgress ? 'Deleting…' : 'Delete'}</span>
           </button>
+          {/if}
         </div>
       </header>
 
@@ -301,7 +313,7 @@ onDestroy(() => {
                   <div class="text-[10px] font-medium uppercase tracking-[0.18em] text-text-placeholder">Target</div>
                   <div class="mt-1 font-mono text-[11px] text-text-placeholder">Current v{appDetail.latestVersion || 0}</div>
                 </div>
-                {#if appDetail.status === 'published'}
+                {#if canPublishApp && appDetail.status === 'published'}
                   <button type="button" class="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-[5px] bg-brand px-3 py-2 text-[12px] font-medium text-brand-contrast-fg transition-colors hover:bg-brand-hover disabled:opacity-50 sm:w-auto" onclick={() => void appDetailController.publishVersion()} disabled={appPublishSubmitting}>
                     {#if appPublishSubmitting}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else}<Rocket class="h-3.5 w-3.5" />{/if}
                     <span>{appPublishSubmitting ? 'Updating…' : 'Update version'}</span>

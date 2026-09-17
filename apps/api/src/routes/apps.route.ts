@@ -1065,7 +1065,10 @@ router.delete("/:id", async (c) => {
   if (!requireValidId(id)) return c.json({ message: "app not found" }, 404);
   const app = await getAppById(id);
   if (!app) return c.json({ message: "app not found" }, 404);
-  if (!(await hasPermission(user, "space.edit", { spaceId: app.spaceId }))) return authzDenied(c);
+  // Hosts delete any App; builders only the Apps they published themselves.
+  const canDelete = (await hasPermission(user, "space.edit", { spaceId: app.spaceId }))
+    || (app.userUuid === user.uuid && (await hasPermission(user, "app.publish", { spaceId: app.spaceId })));
+  if (!canDelete) return authzDenied(c);
   await db.transaction(async (tx) => {
     const promotions = await tx
       .select({ id: appPromotions.id })
