@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -21,8 +21,6 @@ const APK_CACHE_ROOT = "dist/e2e-cache";
 const DEFAULT_FLOWS = ["e2e/flows"];
 const LOGIN_FLOW = "e2e/auth/login.yaml";
 const DEFAULT_OTA_WAIT_MS = 45_000;
-const SCREENSHOT_INTERVAL_MS = 5000;
-const SCREENSHOT_FRAMES = 40;
 
 export function parseArgs(argv) {
   const options = {
@@ -159,35 +157,29 @@ export async function runAndroid(options) {
   coldLaunch(serial);
   wait(10_000);
 
-  const maestroArgs = ["test", "--device", serial, "--debug-output", join(evidence, "maestro")];
+  // Maestro writes the reason for a failure into its JUnit report; the console summary alone
+  // drops it for flows that never start, which is exactly the case worth diagnosing.
+  const maestroArgs = [
+    "test", "--device", serial,
+    "--debug-output", join(evidence, "maestro"),
+    "--format", "junit",
+    "--output", join(evidence, "maestro-junit.xml"),
+  ];
   const email = process.env.E2E_ACCOUNT_EMAIL?.trim();
   const password = process.env.E2E_ACCOUNT_PASSWORD?.trim();
+  const flowsIncludeLogin = options.flows.includes(LOGIN_FLOW);
   // Every route is behind Logto, and the production tenant only offers an email code, so the
   // flows need a password-enabled dev account. Without it they cannot reach any screen.
   if (email && password) {
     maestroArgs.push("-e", `E2E_ACCOUNT_EMAIL=${email}`, "-e", `E2E_ACCOUNT_PASSWORD=${password}`);
-    maestroArgs.push(LOGIN_FLOW);
+    if (!flowsIncludeLogin) maestroArgs.push(LOGIN_FLOW);
   }
   maestroArgs.push(...options.flows);
-
-  // Maestro's own debug output is not dependable, and a failing selector gives no view of the
-  // screen, so capture frames from the device while the run proceeds. This is what makes an
-  // unfamiliar surface (the Logto page in a Custom Tab) diagnosable from CI.
-  const shotsDirectory = join(evidence, "shots");
-  mkdirSync(shotsDirectory, { recursive: true });
-  const frameLoop = spawn(
-    "bash",
-    [
-      "-c",
-      `for index in $(seq 1 ${SCREENSHOT_FRAMES}); do adb -s ${serial} exec-out screencap -p > "${shotsDirectory}/$(date +%s)-$index.png" 2>/dev/null; sleep ${SCREENSHOT_INTERVAL_MS / 1000}; done`,
-    ],
-    { stdio: "ignore", detached: true },
-  );
+  process.stdout.write(`Flows: ${options.flows.join(", ")}${email && password && !flowsIncludeLogin ? ` (after ${LOGIN_FLOW})` : ""}\n`);
   const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
-  frameLoop.kill();
-  // Maestro's default artifacts hold per-command screenshots and the view hierarchy.
+  // Maestro keeps per-command screenshots and view hierarchies here.
   const maestroArtifacts = join(homedir(), ".maestro", "tests");
-  if (existsSync(maestroArtifacts)) cpSync(maestroArtifacts, join(evidence, "maestro"), { recursive: true });
+  if (existsSync(maestroArtifacts)) cpSync(maestroArtifacts, join(evidence, "maestro-artifacts"), { recursive: true });
 
   // A full logcat dump can exceed the default pipe buffer, so stream it straight to disk.
   const logcatPath = join(evidence, "logcat.txt");

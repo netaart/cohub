@@ -6,6 +6,11 @@ name: E2E Android
 # test would not be on any channel yet.
 on:
   workflow_dispatch:
+    inputs:
+      flows:
+        description: Flows to run, comma-separated. Defaults to the whole suite.
+        required: false
+        type: string
   workflow_run:
     workflows: ["Publish OTA"]
     types: [completed]
@@ -110,7 +115,7 @@ jobs:
           target: google_apis
           emulator-boot-timeout: 900
           disable-animations: true
-          script: node scripts/e2e/android.mjs --abi x86_64
+          script: node scripts/e2e/android.mjs --abi x86_64 --flows "${{ inputs.flows || 'e2e/flows' }}"
 
       - name: Upload evidence
         if: always()
