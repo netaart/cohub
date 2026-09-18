@@ -50,9 +50,9 @@ name: Message link resolution
 - assertVisible: '[\s\S]*"kind": "external"[\s\S]*'
 - scrollUntilVisible:
     element:
-      text: "非法"
+      text: ".*非法.*"
     direction: DOWN
-- tapOn: "非法"
+- tapOn: ".*非法.*"
 - scrollUntilVisible:
     element:
       text: ".*无效或不受支持的 scheme.*"

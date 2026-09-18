@@ -2,12 +2,12 @@ appId: io.github.markbang.cohubmobile
 name: Debug menu entry
 ---
 # Each other flow deep-links straight to its screen, so this covers the hidden entry instead:
-# five taps on the version row at the bottom of Settings.
+# five taps on the version row at the bottom of Settings, which needs scrolling into view.
 - openLink: "cohub://settings"
-- extendedWaitUntil:
-    visible:
+- scrollUntilVisible:
+    element:
       id: "settings.version"
-    timeout: 15000
+    direction: DOWN
 - repeat:
     times: 5
     commands:

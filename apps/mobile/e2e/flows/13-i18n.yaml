@@ -6,10 +6,8 @@ name: i18n coverage
     visible:
       id: "debug.i18n.keys"
     timeout: 15000
-# A missing zh key is a regression: the count is asserted, not just displayed.
-- copyTextFrom:
-    id: "debug.i18n.keys"
-- assertTrue: "${maestro.copiedText.includes('缺失 0')}"
+# A missing zh key is a regression, so the count is pinned rather than just displayed.
+- assertVisible: ".*缺失 0.*"
 - tapOn: "^zh$"
 - copyTextFrom:
     id: "debug.i18n.preference"

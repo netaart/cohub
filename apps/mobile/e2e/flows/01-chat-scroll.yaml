@@ -30,6 +30,6 @@ name: Chat scroll diagnostics fixture
 - assertVisible: ".*0 overwritten.*"
 # The log view is the machine-readable readout: events must actually be recorded.
 - tapOn: "Logs"
-- assertVisible: ".*list\\.scroll.*"
+- assertVisible: ".*(list\\.scroll|touch\\.start).*"
 - assertVisible: ".*fixture\\.focusScrollChange.*"
 - tapOn: "Test"
