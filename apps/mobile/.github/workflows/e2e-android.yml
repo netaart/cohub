@@ -34,6 +34,8 @@ jobs:
     env:
       EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
       GH_TOKEN: ${{ github.token }}
+      E2E_ACCOUNT_EMAIL: ${{ secrets.E2E_ACCOUNT_EMAIL }}
+      E2E_ACCOUNT_PASSWORD: ${{ secrets.E2E_ACCOUNT_PASSWORD }}
     steps:
       - name: Checkout tested commit
         uses: actions/checkout@v7
@@ -83,8 +85,22 @@ jobs:
             exit "$status"
           fi
 
+      # Every route, including app/debug, sits behind Logto (app/_layout.tsx renders
+      # AuthScreen until a session exists). The production tenant signs in with an email
+      # code only, which CI cannot read, and the dev tenant enables password sign-in.
+      - name: Check E2E account
+        id: account
+        run: |
+          set -euo pipefail
+          if [ -z "${E2E_ACCOUNT_EMAIL:-}" ] || [ -z "${E2E_ACCOUNT_PASSWORD:-}" ]; then
+            echo "::warning title=E2E skipped::No E2E account is configured. Add E2E_ACCOUNT_EMAIL and E2E_ACCOUNT_PASSWORD (dev tenant) to run the device flows."
+            echo "ready=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=yes" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run device E2E
-        if: steps.golden.outputs.available == 'yes'
+        if: steps.golden.outputs.available == 'yes' && steps.account.outputs.ready == 'yes'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           # API 35 keeps to system images the action builds reliably; the release APK
