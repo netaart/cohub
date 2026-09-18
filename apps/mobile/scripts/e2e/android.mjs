@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { resolveGolden } from "./resolve-golden.mjs";
 
@@ -116,6 +115,27 @@ function wait(milliseconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
+function expandFlows(flows) {
+  const files = [];
+  for (const entry of flows) {
+    if (/\.ya?ml$/.test(entry)) files.push(entry);
+    else for (const name of readdirSync(entry).filter((value) => value.endsWith(".yaml")).sort()) files.push(join(entry, name));
+  }
+  return files;
+}
+
+/** The accessibility tree is exactly what a selector has to match; the PNG is for the human. */
+function captureWindow(serial, directory) {
+  run("adb", ["-s", serial, "shell", "uiautomator", "dump", "/sdcard/e2e-window.xml"]);
+  run("adb", ["-s", serial, "pull", "/sdcard/e2e-window.xml", join(directory, "window.xml")]);
+  const fd = openSync(join(directory, "screen.png"), "w");
+  try {
+    spawnSync("adb", ["-s", serial, "exec-out", "screencap", "-p"], { stdio: ["ignore", fd, "inherit"] });
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export async function runAndroid(options) {
   requireCommand("gh", "Install the GitHub CLI and authenticate with `gh auth login`.");
 
@@ -157,45 +177,29 @@ export async function runAndroid(options) {
   coldLaunch(serial);
   wait(10_000);
 
-  // Maestro writes the reason for a failure into its JUnit report; the console summary alone
-  // drops it for flows that never start, which is exactly the case worth diagnosing.
-  const maestroArgs = [
-    "test", "--device", serial,
-    "--debug-output", join(evidence, "maestro"),
-    "--format", "junit",
-    "--output", join(evidence, "maestro-junit.xml"),
-  ];
   const email = process.env.E2E_ACCOUNT_EMAIL?.trim();
   const password = process.env.E2E_ACCOUNT_PASSWORD?.trim();
-  const flowsIncludeLogin = options.flows.includes(LOGIN_FLOW);
-  // Every route is behind Logto, and the production tenant only offers an email code, so the
-  // flows need a password-enabled dev account. Without it they cannot reach any screen.
-  if (email && password) {
-    maestroArgs.push("-e", `E2E_ACCOUNT_EMAIL=${email}`, "-e", `E2E_ACCOUNT_PASSWORD=${password}`);
-    if (!flowsIncludeLogin) maestroArgs.push(LOGIN_FLOW);
+  if (!email || !password) {
+    throw new Error("E2E_ACCOUNT_EMAIL and E2E_ACCOUNT_PASSWORD are required: every screen renders AuthScreen until a Logto session exists.");
   }
-  maestroArgs.push(...options.flows);
-  process.stdout.write(`Flows: ${options.flows.join(", ")}${email && password && !flowsIncludeLogin ? ` (after ${LOGIN_FLOW})` : ""}\n`);
-  const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
-  // The device stays on the screen where a flow stopped, so capture it after the run. The
-  // accessibility dump is what a selector has to match; the PNG is for the human reading it.
-  run("adb", ["-s", serial, "shell", "uiautomator", "dump", "/sdcard/e2e-window.xml"]);
-  run("adb", ["-s", serial, "pull", "/sdcard/e2e-window.xml", join(evidence, "final-window.xml")]);
-  const screenFd = openSync(join(evidence, "final-screen.png"), "w");
-  try {
-    spawnSync("adb", ["-s", serial, "exec-out", "screencap", "-p"], { stdio: ["ignore", screenFd, "inherit"] });
-  } finally {
-    closeSync(screenFd);
-  }
-  // Maestro confines takeScreenshot to its own output folder and appends the extension, so
-  // gather that folder plus any flow screenshot it left elsewhere.
-  for (const directory of [join(process.cwd(), "screenshots"), join(homedir(), ".maestro", "tests")]) {
-    if (existsSync(directory)) cpSync(directory, join(evidence, "screenshots"), { recursive: true });
-  }
-  const stray = run("bash", ["-c", "find . -name 'log*-*.png' -not -path './node_modules/*' -not -path './dist/*' 2>/dev/null"]);
-  for (const file of (stray.stdout ?? "").split("\n").map((value) => value.trim()).filter(Boolean)) {
-    mkdirSync(join(evidence, "screenshots"), { recursive: true });
-    cpSync(file, join(evidence, "screenshots", basename(file)));
+  const credentials = ["-e", `E2E_ACCOUNT_EMAIL=${email}`, "-e", `E2E_ACCOUNT_PASSWORD=${password}`];
+  const flowFiles = [...new Set([LOGIN_FLOW, ...expandFlows(options.flows)])];
+
+  // Run each flow as its own Maestro invocation. A failure leaves the device on the screen that
+  // failed, so the window can be captured per flow instead of only for whichever ran last.
+  const failures = [];
+  for (const flowFile of flowFiles) {
+    const name = basename(flowFile, ".yaml");
+    const directory = join(evidence, "flows", name);
+    mkdirSync(directory, { recursive: true });
+    process.stdout.write(`\n=== ${name} ===\n`);
+    const result = run(
+      "maestro",
+      ["test", "--device", serial, "--format", "junit", "--output", join(directory, "result.xml"), ...credentials, flowFile],
+      { stdio: "inherit" },
+    );
+    captureWindow(serial, directory);
+    if (result.status !== 0) failures.push(name);
   }
 
   // A full logcat dump can exceed the default pipe buffer, so stream it straight to disk.
@@ -208,8 +212,9 @@ export async function runAndroid(options) {
   }
   writeFileSync(join(evidence, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
 
-  if (maestro.status !== 0) {
-    throw new Error(`Maestro failed. Evidence and logcat are in ${evidence}.`);
+  process.stdout.write(`\n${flowFiles.length - failures.length}/${flowFiles.length} flows passed.\n`);
+  if (failures.length > 0) {
+    throw new Error(`Failed flows: ${failures.join(", ")}. Evidence: ${evidence}`);
   }
   return { plan, evidence };
 }
