@@ -16,10 +16,6 @@ name: Chat scroll diagnostics fixture
 - tapOn:
     id: "debug.chat-scroll.record"
 - assertVisible: ".*Recording.*"
-# Focus scroll remounts the fixture list and records the toggle; this is the
-# swallowed scroll-seed path, so it must survive without throwing.
-- tapOn:
-    id: "debug.chat-scroll.focusScroll"
 - swipe:
     direction: DOWN
     duration: 400
@@ -28,10 +24,12 @@ name: Chat scroll diagnostics fixture
     duration: 400
 - assertVisible: ".*[1-9][0-9]*/4000 events.*"
 - assertVisible: ".*0 overwritten.*"
-# The log view is the machine-readable readout: events must actually be recorded.
+# Focus scroll remounts the fixture list and records the toggle: this is the swallowed
+# scroll-seed path. Toggle it last so its log entry is the newest, and the log view scrolls
+# the newest entries into view.
+- tapOn:
+    id: "debug.chat-scroll.focusScroll"
 - tapOn: "Logs"
-# The fixture toggle is the regression under test, so assert it directly; the generic log line
-# proves the view renders entries, since a Maestro swipe does not always reach a JS scroll handler.
 - assertVisible: ".*fixture\\.focusScrollChange.*"
 - assertVisible: ".*#\\d+ \\+\\d+ms.*"
 - tapOn: "Test"
