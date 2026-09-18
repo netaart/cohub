@@ -174,6 +174,8 @@ export async function runAndroid(options) {
     maestroArgs.push("-e", `E2E_ACCOUNT_EMAIL=${email}`, "-e", `E2E_ACCOUNT_PASSWORD=${password}`);
     if (!flowsIncludeLogin) maestroArgs.push(LOGIN_FLOW);
   }
+  // Flows can drop screenshots straight into the uploaded evidence.
+  maestroArgs.push("-e", `EVIDENCE_DIR=${evidence}`);
   maestroArgs.push(...options.flows);
   process.stdout.write(`Flows: ${options.flows.join(", ")}${email && password && !flowsIncludeLogin ? ` (after ${LOGIN_FLOW})` : ""}\n`);
   const maestro = run("maestro", maestroArgs, { stdio: "inherit" });

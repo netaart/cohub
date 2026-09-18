@@ -31,21 +31,26 @@ name: Sign in on the dev tenant
 - extendedWaitUntil:
     visible: "Email"
     timeout: 45000
+- takeScreenshot: ${EVIDENCE_DIR}/login-1-email.png
 - tapOn: "Email"
 - inputText: ${E2E_ACCOUNT_EMAIL}
+- takeScreenshot: ${EVIDENCE_DIR}/login-2-after-email.png
 # Logto can ask for the identifier first and the password on the next step.
 - runFlow:
     when:
-      visible: "Continue"
+      visible: "(Continue|Next)"
     commands:
-      - tapOn: "Continue"
+      - tapOn: "(Continue|Next)"
 - extendedWaitUntil:
-    visible: "Password"
-    timeout: 30000
-- tapOn: "Password"
+    visible: "(Password|password)"
+    timeout: 45000
+- takeScreenshot: ${EVIDENCE_DIR}/login-3-password.png
+- tapOn: "(Password|password)"
 - inputText: ${E2E_ACCOUNT_PASSWORD}
+- takeScreenshot: ${EVIDENCE_DIR}/login-4-filled.png
 - tapOn: "Sign in"
 # The redirect returns to the app, which then renders the authenticated tab tree.
 - extendedWaitUntil:
     visible: "Chats"
     timeout: 90000
+- takeScreenshot: ${EVIDENCE_DIR}/login-5-done.png
