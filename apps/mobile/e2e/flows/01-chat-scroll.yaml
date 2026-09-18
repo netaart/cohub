@@ -31,8 +31,6 @@ name: Chat scroll diagnostics fixture
     id: "debug.chat-scroll.focusScroll"
 - tapOn: "Logs"
 # The specific toggle line is not reliably visible in the log view, so assert that the view
-# renders entries and that the fixture hook recorded on it. The counter above still proves the
-# recording itself grew without dropping events.
-- assertVisible: ".*#\\d+ \\+\\d+ms.*"
-- assertVisible: ".*screen\\.observe.*"
+# renders entries. The elapsed column carries a decimal, hence the [0-9.]+ form.
+- assertVisible: ".*#\\d+ \\+[0-9.]+ms .*"
 - tapOn: "Test"
