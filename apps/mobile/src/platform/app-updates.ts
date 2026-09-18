@@ -153,8 +153,8 @@ async function requestNativeRelease(): Promise<AppRelease | null> {
   try {
     const origin = config.apkOrigin.replace(/\/+$/, "");
     const [apkResponse, releaseResponse] = await Promise.all([
-      fetch(`${origin}/api/apks`, { headers: { Accept: "application/json" }, signal: controller.signal }),
-      fetch(`${origin}/api/apk-releases`, { headers: { Accept: "application/json" }, signal: controller.signal }),
+      fetch(`${origin}/api/apks?app_id=cohub-mobile`, { headers: { Accept: "application/json", "expo-app-id": "cohub-mobile" }, signal: controller.signal }),
+      fetch(`${origin}/api/apk-releases?app_id=cohub-mobile`, { headers: { Accept: "application/json", "expo-app-id": "cohub-mobile" }, signal: controller.signal }),
     ]);
     if (!apkResponse.ok || !releaseResponse.ok) throw new Error(`Update check failed with HTTP ${!apkResponse.ok ? apkResponse.status : releaseResponse.status}`);
     const apkPayload: unknown = await apkResponse.json();
