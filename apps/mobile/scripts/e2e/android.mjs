@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { resolveGolden } from "./resolve-golden.mjs";
 
 /**
@@ -134,7 +134,7 @@ export async function runAndroid(options) {
 
   const serial = options.serial || firstDevice();
   const apkPath = ensureApk(options, golden);
-  const evidence = join(EVIDENCE_ROOT, golden.tag, new Date().toISOString().replace(/[:.]/g, "-"));
+  const evidence = resolve(join(EVIDENCE_ROOT, golden.tag, new Date().toISOString().replace(/[:.]/g, "-")));
   mkdirSync(evidence, { recursive: true });
 
   if (!options.skipInstall) {
@@ -179,7 +179,13 @@ export async function runAndroid(options) {
   maestroArgs.push(...options.flows);
   process.stdout.write(`Flows: ${options.flows.join(", ")}${email && password && !flowsIncludeLogin ? ` (after ${LOGIN_FLOW})` : ""}\n`);
   const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
-  // Maestro keeps per-command screenshots and view hierarchies here.
+  // A failed parameter substitution can leave takeScreenshot files anywhere under the project,
+  // so sweep them up alongside the artifacts Maestro keeps in its own directory.
+  const stray = run("bash", ["-c", "find . -name '*.png' -not -path './node_modules/*' -not -path './dist/*' 2>/dev/null"]);
+  for (const file of (stray.stdout ?? "").split("\n").map((value) => value.trim()).filter(Boolean)) {
+    mkdirSync(join(evidence, "screenshots"), { recursive: true });
+    cpSync(file, join(evidence, "screenshots", basename(file)));
+  }
   const maestroArtifacts = join(homedir(), ".maestro", "tests");
   if (existsSync(maestroArtifacts)) cpSync(maestroArtifacts, join(evidence, "maestro-artifacts"), { recursive: true });
 
