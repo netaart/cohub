@@ -9,15 +9,18 @@ name: i18n coverage
 # A missing zh key is a regression, so the count is pinned rather than just displayed.
 - assertVisible: ".*缺失 0.*"
 - tapOn: "^zh$"
+- waitForAnimationToEnd
 - copyTextFrom:
     id: "debug.i18n.preference"
 - assertTrue: "${maestro.copiedText === 'zh'}"
 - tapOn: "^en$"
+- waitForAnimationToEnd
 - copyTextFrom:
     id: "debug.i18n.preference"
 - assertTrue: "${maestro.copiedText === 'en'}"
 # Leave the app on the device default so later flows and manual use are unaffected.
 - tapOn: "^system$"
+- waitForAnimationToEnd
 - copyTextFrom:
     id: "debug.i18n.preference"
 - assertTrue: "${maestro.copiedText === 'system'}"

@@ -9,9 +9,9 @@ name: Streaming render harness
     timeout: 15000
 - tapOn: "^暂停$"
 - assertVisible: "^继续$"
-# Long body plus tool blocks is the expensive render path.
-- tapOn: "^长文$"
-- assertVisible: "^短文$"
+# Long body plus tool blocks is the expensive render path. The chip shows the current mode.
+- tapOn: "^短文$"
+- assertVisible: "^长文$"
 - tapOn: "^工具$"
 - assertVisible: "^无工具$"
 - tapOn: "^继续$"

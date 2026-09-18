@@ -8,10 +8,10 @@ name: Debug menu entry
     element:
       id: "settings.version"
     direction: DOWN
-- repeat:
-    times: 5
-    commands:
-      - tapOn:
-          id: "settings.version"
+# The unlock needs five taps inside its reset window, so they cannot be spread out.
+- tapOn:
+    id: "settings.version"
+    repeat: 5
+    delay: 100
 - assertVisible: "Scroll Diagnostics"
 - assertVisible: "Bubble Layout"

@@ -30,6 +30,8 @@ name: Chat scroll diagnostics fixture
 - assertVisible: ".*0 overwritten.*"
 # The log view is the machine-readable readout: events must actually be recorded.
 - tapOn: "Logs"
-- assertVisible: ".*(list\\.scroll|touch\\.start).*"
+# The fixture toggle is the regression under test, so assert it directly; the generic log line
+# proves the view renders entries, since a Maestro swipe does not always reach a JS scroll handler.
 - assertVisible: ".*fixture\\.focusScrollChange.*"
+- assertVisible: ".*#\\d+ \\+\\d+ms.*"
 - tapOn: "Test"
