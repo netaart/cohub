@@ -173,24 +173,21 @@ async function main() {
     fail(`Group "${groupName}" is an internal group; internal testers receive builds automatically and are not distributed through this step.`);
   }
 
-  const memberships = await ascRequest(`/v1/builds/${buildId}/betaGroups`, { token });
-  if ((memberships?.data ?? []).some((candidate) => candidate.id === group.id)) {
-    console.log(`Build ${buildNumber} is already assigned to external group "${groupName}".`);
-  } else {
-    await ascRequest(`/v1/builds/${buildId}/relationships/betaGroups`, {
-      method: "POST",
-      token,
-      body: { data: [{ type: "betaGroups", id: group.id }] },
-    }).catch((error) => {
-      // Reruns and race with the web UI surface as a conflict; membership already means done.
-      if (error.status === 409) {
-        console.log(`App Store Connect reports build ${buildNumber} is already in the group.`);
-        return null;
-      }
-      throw error;
-    });
-    console.log(`Build ${buildNumber} is assigned to external group "${groupName}".`);
-  }
+  // The betaGroups relationship only allows CREATE and DELETE, so there is no read-back
+  // pre-check; a rerun that already assigned the build surfaces as a 409 conflict below.
+  await ascRequest(`/v1/builds/${buildId}/relationships/betaGroups`, {
+    method: "POST",
+    token,
+    body: { data: [{ type: "betaGroups", id: group.id }] },
+  }).catch((error) => {
+    // Reruns and race with the web UI surface as a conflict; membership already means done.
+    if (error.status === 409) {
+      console.log(`App Store Connect reports build ${buildNumber} is already in the group.`);
+      return null;
+    }
+    throw error;
+  });
+  console.log(`Build ${buildNumber} is assigned to external group "${groupName}".`);
 
   const betaDetail = await ascRequest(`/v1/builds/${buildId}/buildBetaDetail`, { token });
   const externalState = betaDetail?.data?.attributes?.externalBuildState ?? "unknown";
