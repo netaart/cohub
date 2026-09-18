@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { resolveGolden } from "./resolve-golden.mjs";
 
 /**
@@ -115,15 +115,6 @@ function wait(milliseconds) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
-function expandFlows(flows) {
-  const files = [];
-  for (const entry of flows) {
-    if (/\.ya?ml$/.test(entry)) files.push(entry);
-    else for (const name of readdirSync(entry).filter((value) => value.endsWith(".yaml")).sort()) files.push(join(entry, name));
-  }
-  return files;
-}
-
 /** The accessibility tree is exactly what a selector has to match; the PNG is for the human. */
 function captureWindow(serial, directory) {
   run("adb", ["-s", serial, "shell", "uiautomator", "dump", "/sdcard/e2e-window.xml"]);
@@ -133,23 +124,6 @@ function captureWindow(serial, directory) {
     spawnSync("adb", ["-s", serial, "exec-out", "screencap", "-p"], { stdio: ["ignore", fd, "inherit"] });
   } finally {
     closeSync(fd);
-  }
-}
-
-function runMaestroFlow(serial, credentials, flowFile, directory) {
-  return run(
-    "maestro",
-    ["test", "--device", serial, "--format", "junit", "--output", join(directory, "result.xml"), ...credentials, flowFile],
-    { stdio: "inherit" },
-  );
-}
-
-/** Maestro's Android device server dies mid-flow often enough that one retry is worth it. */
-function isDeviceServerFailure(resultPath) {
-  try {
-    return /DeviceServerDied|device server/i.test(readFileSync(resultPath, "utf8"));
-  } catch {
-    return false;
   }
 }
 
@@ -199,27 +173,22 @@ export async function runAndroid(options) {
   if (!email || !password) {
     throw new Error("E2E_ACCOUNT_EMAIL and E2E_ACCOUNT_PASSWORD are required: every screen renders AuthScreen until a Logto session exists.");
   }
-  const credentials = ["-e", `E2E_ACCOUNT_EMAIL=${email}`, "-e", `E2E_ACCOUNT_PASSWORD=${password}`];
-  const flowFiles = [...new Set([LOGIN_FLOW, ...expandFlows(options.flows)])];
-
-  // Run each flow as its own Maestro invocation. A failure leaves the device on the screen that
-  // failed, so the window can be captured per flow instead of only for whichever ran last.
-  const failures = [];
-  for (const flowFile of flowFiles) {
-    const name = basename(flowFile, ".yaml");
-    const directory = join(evidence, "flows", name);
-    mkdirSync(directory, { recursive: true });
-    process.stdout.write(`\n=== ${name} ===\n`);
-    let result = runMaestroFlow(serial, credentials, flowFile, directory);
-    if (result.status !== 0 && isDeviceServerFailure(join(directory, "result.xml"))) {
-      process.stdout.write(`${name}: the device server died, retrying once\n`);
-      wait(5000);
-      result = runMaestroFlow(serial, credentials, flowFile, directory);
-      writeFileSync(join(directory, "retried"), "true\n");
-    }
-    captureWindow(serial, directory);
-    if (result.status !== 0) failures.push(name);
-  }
+  const flowsIncludeLogin = options.flows.includes(LOGIN_FLOW);
+  // Run the suite in one Maestro session. Invoking Maestro per flow left later deep links
+  // unhandled and the app on the wrong screen, so the run stayed a single batch and the
+  // per-flow JUnit report is what pinpoints a failure.
+  const maestroArgs = [
+    "test", "--device", serial,
+    "--format", "junit",
+    "--output", join(evidence, "maestro-junit.xml"),
+    "-e", `E2E_ACCOUNT_EMAIL=${email}`,
+    "-e", `E2E_ACCOUNT_PASSWORD=${password}`,
+  ];
+  if (!flowsIncludeLogin) maestroArgs.push(LOGIN_FLOW);
+  maestroArgs.push(...options.flows);
+  const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
+  // The device stays on the screen where the run stopped; the tree is what a selector matched.
+  captureWindow(serial, evidence);
 
   // A full logcat dump can exceed the default pipe buffer, so stream it straight to disk.
   const logcatPath = join(evidence, "logcat.txt");
@@ -231,9 +200,8 @@ export async function runAndroid(options) {
   }
   writeFileSync(join(evidence, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
 
-  process.stdout.write(`\n${flowFiles.length - failures.length}/${flowFiles.length} flows passed.\n`);
-  if (failures.length > 0) {
-    throw new Error(`Failed flows: ${failures.join(", ")}. Evidence: ${evidence}`);
+  if (maestro.status !== 0) {
+    throw new Error(`Maestro reported failures. Evidence: ${evidence}`);
   }
   return { plan, evidence };
 }
