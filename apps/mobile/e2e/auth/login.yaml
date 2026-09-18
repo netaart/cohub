@@ -1,0 +1,23 @@
+appId: io.github.markbang.cohubmobile
+name: Sign in on the dev tenant
+---
+# Every route, including app/debug, renders AuthScreen until a Logto session exists, so this
+# runs before the debug flows. The production tenant signs in with an email code only; the dev
+# tenant enables password sign-in, and the login screen can switch environments.
+- launchApp:
+    clearState: false
+- tapOn: "Development"
+- tapOn: "Continue with Cohub"
+# Logto's hosted page opens in a Custom Tab, outside the app under test.
+- extendedWaitUntil:
+    visible: "Email"
+    timeout: 45000
+- tapOn: "Email"
+- inputText: ${E2E_ACCOUNT_EMAIL}
+- tapOn: "Password"
+- inputText: ${E2E_ACCOUNT_PASSWORD}
+- tapOn: "Sign in"
+# The redirect returns to the app, which then renders the authenticated tab tree.
+- extendedWaitUntil:
+    visible: "Chats"
+    timeout: 90000

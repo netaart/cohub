@@ -16,6 +16,7 @@ import { resolveGolden } from "./resolve-golden.mjs";
 const PACKAGE_ID = "io.github.markbang.cohubmobile";
 const EVIDENCE_ROOT = "dist/e2e";
 const DEFAULT_FLOWS = ["e2e/flows"];
+const LOGIN_FLOW = "e2e/auth/login.yaml";
 const DEFAULT_OTA_WAIT_MS = 45_000;
 
 export function parseArgs(argv) {
@@ -150,7 +151,17 @@ export async function runAndroid(options) {
   coldLaunch(serial);
   wait(10_000);
 
-  const maestro = run("maestro", ["test", "--device", serial, ...options.flows], { stdio: "inherit" });
+  const maestroArgs = ["test", "--device", serial, "--debug-output", join(evidence, "maestro")];
+  const email = process.env.E2E_ACCOUNT_EMAIL?.trim();
+  const password = process.env.E2E_ACCOUNT_PASSWORD?.trim();
+  // Every route is behind Logto, and the production tenant only offers an email code, so the
+  // flows need a password-enabled dev account. Without it they cannot reach any screen.
+  if (email && password) {
+    maestroArgs.push("-e", `E2E_ACCOUNT_EMAIL=${email}`, "-e", `E2E_ACCOUNT_PASSWORD=${password}`);
+    maestroArgs.push(LOGIN_FLOW);
+  }
+  maestroArgs.push(...options.flows);
+  const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
   // A full logcat dump can exceed the default pipe buffer, so stream it straight to disk.
   const logcatPath = join(evidence, "logcat.txt");
   const logcatFd = openSync(logcatPath, "w");
