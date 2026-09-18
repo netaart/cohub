@@ -151,7 +151,7 @@ async function requestNativeRelease(): Promise<AppRelease | null> {
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const origin = config.apkOrigin.replace(/\/+$/, "");
-    const response = await fetch(`${origin}/api/ota/catalog?app_id=cohub-mobile`, { headers: { Accept: "application/json", "expo-app-id": "cohub-mobile" }, signal: controller.signal });
+    const response = await fetch(`${origin}/api/apk/catalog?app_id=cohub-mobile`, { headers: { Accept: "application/json", "expo-app-id": "cohub-mobile" }, signal: controller.signal });
     if (!response.ok) throw new Error(`Update check failed with HTTP ${response.status}`);
     const payload: unknown = await response.json();
     return selectYaotaAndroidUpdate(payload, config.apkOrigin, abi);
