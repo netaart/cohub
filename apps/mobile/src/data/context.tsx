@@ -478,7 +478,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "session-status-reset":
       return { ...state, sessionLatestTurns: {}, sessionTurnStatuses: {}, sessionStatusRequests: 0, sessionStatusError: null };
     case "session-status-end":
-      return { ...state, sessionStatusRequests: state.sessionStatusRequests - (action.silent ? 0 : 1), sessionStatusError: action.error ?? null };
+      return { ...state, sessionStatusRequests: state.sessionStatusRequests - (action.silent ? 0 : 1), sessionStatusError: action.silent ? state.sessionStatusError : action.error ?? null };
     case "session-latest-turn":
       return updateLatestTurn(state, action.sessionId, action.turn);
     case "home-error":

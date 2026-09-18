@@ -85,7 +85,7 @@ export default function ChatsScreen() {
     if (filter !== "completed" || !filterPreference.loaded) return;
     const updateCutoff = () => setCutoff(sessionFilterCutoff(filterPreference.minutes, Date.now()));
     updateCutoff();
-    void refreshSessionStatuses(sessionsRef.current);
+    void refreshSessionStatuses(sessionsRef.current, { silent: true });
     const timer = setInterval(updateCutoff, 30_000);
     return () => clearInterval(timer);
   }, [filter, filterPreference.loaded, filterPreference.minutes, refreshSessionStatuses]));

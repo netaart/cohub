@@ -550,7 +550,7 @@ function ChatPanel({ spaceId, spaceName, sessions, client, onChipsTouchChange, o
       if (generation !== scopeGenerationRef.current) return;
       tailLoadedRef.current = true;
       setExtraSessions((current) => mergePanelSessions(current, response.sessions, spaceId, spaceName));
-      void refreshSessionStatuses(response.sessions);
+      void refreshSessionStatuses(response.sessions, { silent: true });
       setScopeCursor(response.pageInfo?.nextCursor ?? null);
       setScopeHasMore(Boolean(response.pageInfo?.hasMore));
       setScopeInitialized(true);
