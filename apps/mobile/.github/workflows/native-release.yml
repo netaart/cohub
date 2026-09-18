@@ -321,7 +321,9 @@ jobs:
       - name: Checkout validated ref
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.metadata.outputs.target_sha }}
+          # A distribute-only rerun only calls the App Store Connect API with main's script; it
+          # neither builds nor signs, so it does not need the pinned release tag's code.
+          ref: ${{ inputs.distribute_only == true && 'main' || needs.metadata.outputs.target_sha }}
           fetch-depth: 0
 
       - name: Set up Node
