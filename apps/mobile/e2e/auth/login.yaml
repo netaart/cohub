@@ -31,26 +31,20 @@ name: Sign in on the dev tenant
 - extendedWaitUntil:
     visible: "Email"
     timeout: 45000
-- takeScreenshot: login-1-email
 - tapOn: "Email"
 - inputText: ${E2E_ACCOUNT_EMAIL}
-- takeScreenshot: login-2-after-email
-# Logto can ask for the identifier first and the password on the next step.
-- runFlow:
-    when:
-      visible: "(Continue|Next)"
-    commands:
-      - tapOn: "(Continue|Next)"
+# The tenant requires the terms consent before it accepts the identifier.
+- tapOn: "I have read and agree to the Terms of Use and Privacy Policy"
+# "Sign in" is also the page title, so anchor to the button alone.
+- tapOn: "^(Sign in|Continue)$"
+# The password step only appears after the identifier is submitted.
 - extendedWaitUntil:
-    visible: "(Password|password)"
+    visible: "Password"
     timeout: 45000
-- takeScreenshot: login-3-password
-- tapOn: "(Password|password)"
+- tapOn: "Password"
 - inputText: ${E2E_ACCOUNT_PASSWORD}
-- takeScreenshot: login-4-filled
-- tapOn: "Sign in"
+- tapOn: "^(Sign in|Continue)$"
 # The redirect returns to the app, which then renders the authenticated tab tree.
 - extendedWaitUntil:
     visible: "Chats"
     timeout: 90000
-- takeScreenshot: login-5-done
