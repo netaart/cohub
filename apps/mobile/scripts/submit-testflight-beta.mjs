@@ -142,7 +142,7 @@ async function main() {
   let build = null;
   for (let attempt = 1; attempt <= BUILD_POLL_ATTEMPTS; attempt += 1) {
     const buildsPayload = await ascRequest(
-      `/v1/builds?filter[app]=${appId}&filter[version]=${encodeURIComponent(buildNumber)}&sort=-uploadedDate&page[limit]=10`,
+      `/v1/builds?filter[app]=${appId}&filter[version]=${encodeURIComponent(buildNumber)}&sort=-uploadedDate`,
       { token },
     );
     const candidates = buildsPayload?.data ?? [];
