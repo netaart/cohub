@@ -162,7 +162,7 @@ async function main() {
   }
   const buildId = build.id;
 
-  const groupsPayload = await ascRequest(`/v1/betaGroups?filter[app]=${appId}&page[limit]=200`, { token });
+  const groupsPayload = await ascRequest(`/v1/betaGroups?filter[app]=${appId}`, { token });
   const groups = groupsPayload?.data ?? [];
   const group = groups.find((candidate) => candidate.attributes?.name === groupName);
   if (!group) {
@@ -173,7 +173,7 @@ async function main() {
     fail(`Group "${groupName}" is an internal group; internal testers receive builds automatically and are not distributed through this step.`);
   }
 
-  const memberships = await ascRequest(`/v1/builds/${buildId}/betaGroups?page[limit]=200`, { token });
+  const memberships = await ascRequest(`/v1/builds/${buildId}/betaGroups`, { token });
   if ((memberships?.data ?? []).some((candidate) => candidate.id === group.id)) {
     console.log(`Build ${buildNumber} is already assigned to external group "${groupName}".`);
   } else {
