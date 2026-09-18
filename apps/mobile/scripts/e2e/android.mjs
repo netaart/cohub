@@ -174,20 +174,19 @@ export async function runAndroid(options) {
     maestroArgs.push("-e", `E2E_ACCOUNT_EMAIL=${email}`, "-e", `E2E_ACCOUNT_PASSWORD=${password}`);
     if (!flowsIncludeLogin) maestroArgs.push(LOGIN_FLOW);
   }
-  // Flows can drop screenshots straight into the uploaded evidence.
-  maestroArgs.push("-e", `EVIDENCE_DIR=${evidence}`);
   maestroArgs.push(...options.flows);
   process.stdout.write(`Flows: ${options.flows.join(", ")}${email && password && !flowsIncludeLogin ? ` (after ${LOGIN_FLOW})` : ""}\n`);
   const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
-  // A failed parameter substitution can leave takeScreenshot files anywhere under the project,
-  // so sweep them up alongside the artifacts Maestro keeps in its own directory.
-  const stray = run("bash", ["-c", "find . -name '*.png' -not -path './node_modules/*' -not -path './dist/*' 2>/dev/null"]);
+  // Maestro confines takeScreenshot to its own output folder and appends the extension, so
+  // gather that folder plus any flow screenshot it left elsewhere.
+  for (const directory of [join(process.cwd(), "screenshots"), join(homedir(), ".maestro", "tests")]) {
+    if (existsSync(directory)) cpSync(directory, join(evidence, "screenshots"), { recursive: true });
+  }
+  const stray = run("bash", ["-c", "find . -name 'log*-*.png' -not -path './node_modules/*' -not -path './dist/*' 2>/dev/null"]);
   for (const file of (stray.stdout ?? "").split("\n").map((value) => value.trim()).filter(Boolean)) {
     mkdirSync(join(evidence, "screenshots"), { recursive: true });
     cpSync(file, join(evidence, "screenshots", basename(file)));
   }
-  const maestroArtifacts = join(homedir(), ".maestro", "tests");
-  if (existsSync(maestroArtifacts)) cpSync(maestroArtifacts, join(evidence, "maestro-artifacts"), { recursive: true });
 
   // A full logcat dump can exceed the default pipe buffer, so stream it straight to disk.
   const logcatPath = join(evidence, "logcat.txt");
