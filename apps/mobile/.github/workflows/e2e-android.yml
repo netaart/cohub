@@ -55,6 +55,15 @@ jobs:
           curl -Ls "https://get.maestro.mobile.dev" | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
+      # The runner user cannot use /dev/kvm by default, and without it the emulator
+      # falls back to software emulation and never finishes booting.
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
       # Fail fast, before paying for an emulator boot, when this commit needs a new
       # native distribution and no released APK can receive its OTA.
       - name: Resolve golden release
@@ -83,6 +92,7 @@ jobs:
           api-level: 35
           arch: x86_64
           target: google_apis
+          emulator-boot-timeout: 900
           disable-animations: true
           script: node scripts/e2e/android.mjs --abi x86_64
 
