@@ -1,12 +1,11 @@
 /**
- * Upload signed ABI APKs to Yaota after they are attached to the GitHub Release.
- * In-app Android updates download from this origin so devices that cannot reach
- * GitHub still receive the package. GitHub remains the archival copy.
+ * Publish one version's ABI APKs to Yaota's app-scoped catalog.
+ * GitHub Release remains the archival copy; Yaota serves in-app updates.
  */
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { basename } from "node:path";
-import { androidUpdateApkName, androidUpdateApkUrl, isAndroidUpdateAbi } from "../src/data/update-assets.ts";
+import { isAndroidUpdateAbi } from "../src/data/update-assets.ts";
 
 const NAME = /^cohub-v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-android-(arm64-v8a|armeabi-v7a|x86|x86_64)\.apk$/;
 
@@ -31,10 +30,12 @@ function originFromEnv() {
 
 const apiKey = process.env.OTA_API_KEY?.trim();
 if (!apiKey) fail("OTA_API_KEY is required to publish APKs");
-const releaseTitle = process.env.RELEASE_TITLE?.trim() || null;
-const releaseNotes = process.env.RELEASE_NOTES ?? null;
-const releaseUrl = process.env.RELEASE_URL?.trim() || null;
 const origin = originFromEnv();
+const appId = process.env.YAOTA_APP_ID?.trim();
+if (!appId || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(appId)) fail("YAOTA_APP_ID is required");
+const releaseTitle = process.env.RELEASE_TITLE?.trim() || "";
+const releaseNotes = process.env.RELEASE_NOTES ?? "";
+const releaseUrl = process.env.RELEASE_URL?.trim() || "";
 const files = process.argv.slice(2);
 if (files.length === 0) fail("Pass one or more cohub-vX.Y.Z-android-<abi>.apk paths");
 
@@ -44,28 +45,26 @@ for (const file of files) {
   if (!match || !isAndroidUpdateAbi(match[2])) fail(`Unexpected APK name: ${name}`);
   const version = match[1];
   const arch = match[2];
-  const expectedName = androidUpdateApkName(version, arch);
-  if (name !== expectedName) fail(`APK name ${name} does not match ${expectedName}`);
   const bytes = readFileSync(file);
   const size = statSync(file).size;
   if (size !== bytes.length || size <= 0) fail(`${name} has an invalid size`);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const presign = await fetch(`${origin}/api/apks/presign`, {
+  const form = new FormData();
+  form.set("app_id", appId);
+  form.set("version", version);
+  form.set("arch", arch);
+  form.set("sha256", sha256);
+  form.set("title", releaseTitle);
+  form.set("notes", releaseNotes);
+  form.set("release_url", releaseUrl);
+  form.set("file", new Blob([bytes], { type: "application/vnd.android.package-archive" }), name);
+  const response = await fetch(`${origin}/ota-publish/apks`, {
     method: "POST",
-    headers: { "content-type": "application/json", "x-ota-api-key": apiKey },
-    body: JSON.stringify({ version, arch, size, sha256, title: releaseTitle, notes: releaseNotes, releaseUrl }),
+    headers: { "x-ota-api-key": apiKey },
+    body: form,
   });
-  if (!presign.ok) fail(`presign failed for ${name}: HTTP ${presign.status} ${await presign.text()}`);
-  const payload = await presign.json();
-  const publicUrl = androidUpdateApkUrl(origin, version, arch);
-  if (payload?.publicUrl !== publicUrl) fail(`Yaota returned ${payload?.publicUrl}, expected ${publicUrl}`);
-  const uploadUrl = typeof payload.uploadUrl === "string" ? payload.uploadUrl : "";
-  if (!uploadUrl.startsWith(`${origin}/api/apks/upload/`)) fail(`Unexpected upload URL for ${name}`);
-  const uploaded = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: { "content-type": "application/vnd.android.package-archive", "x-ota-api-key": apiKey },
-    body: bytes,
-  });
-  if (!uploaded.ok) fail(`upload failed for ${name}: HTTP ${uploaded.status} ${await uploaded.text()}`);
-  console.log(`[publish-yaota-apks] ${name} -> ${publicUrl}`);
+  if (!response.ok) fail(`upload failed for ${name}: HTTP ${response.status} ${await response.text()}`);
+  const payload = await response.json();
+  if (!payload?.apk?.downloadUrl) fail(`Yaota returned no download URL for ${name}`);
+  console.log(`[publish-yaota-apks] ${name} -> ${payload.apk.downloadUrl}`);
 }

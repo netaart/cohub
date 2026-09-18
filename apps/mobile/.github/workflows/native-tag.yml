@@ -144,6 +144,7 @@ jobs:
         env:
           OTA_SERVER: ${{ vars.OTA_SERVER }}
           OTA_API_KEY: ${{ secrets.OTA_API_KEY }}
+          YAOTA_APP_ID: cohub-mobile
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |

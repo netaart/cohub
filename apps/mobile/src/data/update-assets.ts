@@ -57,9 +57,7 @@ export function isAllowedAndroidUpdateUrl(origin: string, value: string) {
   try {
     const expected = androidUpdateOrigin(origin);
     const url = new URL(value);
-    if (url.origin !== expected || url.search || url.hash) return false;
-    const match = /^\/apk\/cohub-v([0-9.]+)-android-(arm64-v8a|armeabi-v7a|x86|x86_64)\.apk$/.exec(url.pathname);
-    return Boolean(match && VERSION.test(match[1] ?? "") && isAndroidUpdateAbi(match[2] ?? ""));
+    return url.origin === expected && !url.search && !url.hash && /^\/apk\/(?!.*\.\.)[^/]+(?:\/[^/]+)*$/.test(url.pathname);
   } catch {
     return false;
   }
@@ -85,8 +83,8 @@ export function validateAndroidUpdateAsset(asset: AndroidUpdateAsset, origin: st
   if (!name || !abi || !isAndroidUpdateAbi(abi)) {
     throw new Error("This release does not include a valid APK for this device. Check for updates again.");
   }
-  const url = androidUpdateApkUrl(origin, asset.version, abi);
-  if (asset.downloadUrl !== url) {
+  const url = asset.downloadUrl;
+  if (!url || !isAllowedAndroidUpdateUrl(origin, url)) {
     throw new Error("The APK download URL does not match the published distribution. Check for updates again.");
   }
   const size = asset.downloadSize;
@@ -130,16 +128,18 @@ function apkFromYaotaRecord(value: unknown, origin: string, abi: AndroidUpdateAb
   const version = typeof value.version === "string" ? value.version.trim() : "";
   const arch = typeof value.arch === "string" ? value.arch.trim() : "";
   const status = typeof value.status === "string" ? value.status.trim() : "Available";
-  const size = typeof value.size === "number" ? value.size : typeof value.size === "string" ? Number(value.size) : NaN;
+  const sizeValue = value.sizeBytes ?? value.size;
+  const size = typeof sizeValue === "number" ? sizeValue : typeof sizeValue === "string" ? Number(sizeValue) : NaN;
   const sha256 = typeof value.sha256 === "string" ? value.sha256.trim().toLowerCase() : "";
   const publishedAt = typeof value.createdAt === "string" && !Number.isNaN(Date.parse(value.createdAt))
     ? value.createdAt
     : null;
   if (!VERSION.test(version) || arch !== abi || status !== "Available") return null;
   if (!Number.isSafeInteger(size) || size <= 0 || !/^[a-f0-9]{64}$/.test(sha256)) return null;
-  const name = androidUpdateApkName(version, abi);
-  const downloadUrl = androidUpdateApkUrl(origin, version, abi);
-  if (typeof value.url === "string" && value.url.trim() !== downloadUrl) return null;
+  const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : androidUpdateApkName(version, abi);
+  const rawUrl = typeof value.downloadUrl === "string" ? value.downloadUrl.trim() : typeof value.url === "string" ? value.url.trim() : "";
+  const downloadUrl = rawUrl || androidUpdateApkUrl(origin, version, abi);
+  if (!isAllowedAndroidUpdateUrl(origin, downloadUrl)) return null;
   return {
     version,
     title: null,
@@ -162,12 +162,28 @@ export function applyYaotaReleaseNote(release: YaotaAndroidRelease | null, paylo
 
 export function selectYaotaAndroidUpdate(payload: unknown, origin: string, abi: AndroidUpdateAbi): YaotaAndroidRelease | null {
   androidUpdateOrigin(origin);
-  if (!isRecord(payload) || !Array.isArray(payload.apks)) throw new Error("The update catalog is invalid.");
+  if (!isRecord(payload)) throw new Error("The update catalog is invalid.");
+  const releaseGroups = Array.isArray(payload.releases) ? payload.releases : null;
+  const records = releaseGroups
+    ? releaseGroups.flatMap((group) => {
+      if (!isRecord(group) || !Array.isArray(group.apks)) return [];
+      return group.apks.map((asset) => ({ asset, metadata: group }));
+    })
+    : Array.isArray(payload.apks) ? payload.apks.map((asset) => ({ asset, metadata: null })) : null;
+  if (!records) throw new Error("The update catalog is invalid.");
   let newest: YaotaAndroidRelease | null = null;
-  for (const item of payload.apks) {
-    const release = apkFromYaotaRecord(item, origin, abi);
+  for (const record of records) {
+    const release = apkFromYaotaRecord(record.asset, origin, abi);
     if (!release) continue;
-    if (!newest || isNewerVersion(newest.version, release.version)) newest = release;
+    const metadata = record.metadata;
+    const enriched = metadata && isRecord(metadata) ? {
+      ...release,
+      title: typeof metadata.title === "string" ? metadata.title.trim() || null : release.title,
+      notes: typeof metadata.notes === "string" ? metadata.notes : release.notes,
+      url: typeof metadata.releaseUrl === "string" && metadata.releaseUrl.trim() ? metadata.releaseUrl.trim() : release.url,
+      publishedAt: typeof metadata.publishedAt === "string" ? metadata.publishedAt : release.publishedAt,
+    } : release;
+    if (!newest || isNewerVersion(newest.version, enriched.version)) newest = enriched;
   }
   return newest;
 }
