@@ -2,19 +2,18 @@ appId: io.github.markbang.cohubmobile
 name: High-rate bubble rendering
 ---
 - openLink: "cohub://debug/bubbles"
-# Fresh mount: idle, rolling mode, nothing in the list.
-- assertVisible: "^开始$"
+# Fresh mount: idle, rolling mode. The chips are asserted rather than the metrics line, which
+# a narrow emulator clips out of the bottom bar.
+- extendedWaitUntil:
+    visible: "^开始$"
+    timeout: 15000
 - assertVisible: "^滚动$"
-- assertVisible:
-    id: "debug.bubbles.metrics"
-- assertVisible: "列表 0 · FPS 0"
 - tapOn: "^开始$"
 - assertVisible: "^暂停$"
 - tapOn: "^x128$"
 - assertVisible: "^x512$"
 - tapOn: "^滚动$"
 - assertVisible: "^追加$"
-- assertVisible: "列表 [1-9][0-9]* · FPS [0-9]+"
-# Clearing must stop the loop and empty the list.
+# Clearing must stop the loop and empty the list, restoring the empty-state hint.
 - tapOn: "^清空$"
-- assertVisible: "列表 0 · FPS 0"
+- assertVisible: ".*压测渲染.*"

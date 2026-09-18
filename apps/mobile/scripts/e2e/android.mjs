@@ -136,6 +136,23 @@ function captureWindow(serial, directory) {
   }
 }
 
+function runMaestroFlow(serial, credentials, flowFile, directory) {
+  return run(
+    "maestro",
+    ["test", "--device", serial, "--format", "junit", "--output", join(directory, "result.xml"), ...credentials, flowFile],
+    { stdio: "inherit" },
+  );
+}
+
+/** Maestro's Android device server dies mid-flow often enough that one retry is worth it. */
+function isDeviceServerFailure(resultPath) {
+  try {
+    return /DeviceServerDied|device server/i.test(readFileSync(resultPath, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 export async function runAndroid(options) {
   requireCommand("gh", "Install the GitHub CLI and authenticate with `gh auth login`.");
 
@@ -193,11 +210,13 @@ export async function runAndroid(options) {
     const directory = join(evidence, "flows", name);
     mkdirSync(directory, { recursive: true });
     process.stdout.write(`\n=== ${name} ===\n`);
-    const result = run(
-      "maestro",
-      ["test", "--device", serial, "--format", "junit", "--output", join(directory, "result.xml"), ...credentials, flowFile],
-      { stdio: "inherit" },
-    );
+    let result = runMaestroFlow(serial, credentials, flowFile, directory);
+    if (result.status !== 0 && isDeviceServerFailure(join(directory, "result.xml"))) {
+      process.stdout.write(`${name}: the device server died, retrying once\n`);
+      wait(5000);
+      result = runMaestroFlow(serial, credentials, flowFile, directory);
+      writeFileSync(join(directory, "retried"), "true\n");
+    }
     captureWindow(serial, directory);
     if (result.status !== 0) failures.push(name);
   }

@@ -2,13 +2,15 @@ appId: io.github.markbang.cohubmobile
 name: Markdown render harness
 ---
 - openLink: "cohub://debug/markdown"
-- assertVisible: "检查表格对齐、代码高亮、长单词换行和列表缩进。"
-- assertVisible: "长按选择排查：第一段是裸的原生 Markdown 组件，下面才是消息气泡。"
+- extendedWaitUntil:
+    visible: ".*检查表格对齐.*"
+    timeout: 15000
+- assertVisible: ".*长按选择排查.*"
 - scrollUntilVisible:
     element:
-      text: "非反转列表"
+      text: ".*非反转列表.*"
     direction: DOWN
-- assertVisible: "非反转列表"
+- assertVisible: ".*非反转列表.*"
 # The Markdown bodies render in a native view, so their text is not addressable here.
 # Table alignment, code highlighting, long-word wrapping, and the inverted-list
 # selection difference stay a visual check on this screen.

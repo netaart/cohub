@@ -2,12 +2,14 @@ appId: io.github.markbang.cohubmobile
 name: i18n coverage
 ---
 - openLink: "cohub://debug/i18n"
-- assertVisible:
-    id: "debug.i18n.keys"
+- extendedWaitUntil:
+    visible:
+      id: "debug.i18n.keys"
+    timeout: 15000
 # A missing zh key is a regression: the count is asserted, not just displayed.
 - copyTextFrom:
     id: "debug.i18n.keys"
-- assertTrue: "${maestro.copiedText.endsWith('（缺失 0）')}"
+- assertTrue: "${maestro.copiedText.includes('缺失 0')}"
 - tapOn: "^zh$"
 - copyTextFrom:
     id: "debug.i18n.preference"

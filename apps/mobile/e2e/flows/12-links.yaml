@@ -1,20 +1,23 @@
 appId: io.github.markbang.cohubmobile
 name: Message link resolution
 ---
-# Deep links and notification payloads are untrusted routing input, so the resolver is
-# part of the security surface. The presets at the bottom feed known URL families.
+# Deep links and notification payloads are untrusted routing input, so the resolver is part of
+# the security surface. The presets at the bottom feed known URL families.
 - openLink: "cohub://debug/links"
-- assertVisible: "解析结果"
+- extendedWaitUntil:
+    visible: "解析结果"
+    timeout: 15000
 - scrollUntilVisible:
     element:
       text: "web 会话"
     direction: DOWN
 - tapOn: "web 会话"
+# The result is one pretty-printed JSON node, so the match spans newlines and pins the field.
 - scrollUntilVisible:
     element:
-      text: "kind.*session"
+      text: '[\s\S]*"kind": "session"[\s\S]*'
     direction: UP
-- assertVisible: "kind.*session"
+- assertVisible: '[\s\S]*"kind": "session"[\s\S]*'
 - scrollUntilVisible:
     element:
       text: "web 空间"
@@ -22,9 +25,9 @@ name: Message link resolution
 - tapOn: "web 空间"
 - scrollUntilVisible:
     element:
-      text: "kind.*space"
+      text: '[\s\S]*"kind": "space"[\s\S]*'
     direction: UP
-- assertVisible: "kind.*space"
+- assertVisible: '[\s\S]*"kind": "space"[\s\S]*'
 - scrollUntilVisible:
     element:
       text: "沙箱文件"
@@ -32,9 +35,9 @@ name: Message link resolution
 - tapOn: "沙箱文件"
 - scrollUntilVisible:
     element:
-      text: "kind.*file"
+      text: '[\s\S]*"kind": "file"[\s\S]*'
     direction: UP
-- assertVisible: "kind.*file"
+- assertVisible: '[\s\S]*"kind": "file"[\s\S]*'
 - scrollUntilVisible:
     element:
       text: "外部链接"
@@ -42,9 +45,9 @@ name: Message link resolution
 - tapOn: "外部链接"
 - scrollUntilVisible:
     element:
-      text: "kind.*external"
+      text: '[\s\S]*"kind": "external"[\s\S]*'
     direction: UP
-- assertVisible: "kind.*external"
+- assertVisible: '[\s\S]*"kind": "external"[\s\S]*'
 - scrollUntilVisible:
     element:
       text: "非法"
@@ -52,6 +55,6 @@ name: Message link resolution
 - tapOn: "非法"
 - scrollUntilVisible:
     element:
-      text: "无效或不受支持的 scheme"
+      text: ".*无效或不受支持的 scheme.*"
     direction: UP
-- assertVisible: "无效或不受支持的 scheme"
+- assertVisible: ".*无效或不受支持的 scheme.*"
