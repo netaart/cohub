@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.2.14](https://github.com/markbang/cohub-mobile/compare/v2.2.13...v2.2.14) (2026-09-18)
+
+
+### Features
+
+* **diagnostics:** keep recent sessions and export them all ([df1e5db](https://github.com/markbang/cohub-mobile/commit/df1e5db65bf5933f566c4161f3aa2c37b3b5e6ec))
+
+
+### Fixes
+
+* **chat:** keep inline code readable on user bubbles ([d4ae23a](https://github.com/markbang/cohub-mobile/commit/d4ae23a4e8ba510a7cdbf19c4b468e7e36ecdaaf))
+* **composer:** auto-expand the editor for a long dictation ([c7c603c](https://github.com/markbang/cohub-mobile/commit/c7c603cc96631178a327686a905a570b595777ea))
+* **composer:** expand on the dictation append, not on active recording ([a32cd65](https://github.com/markbang/cohub-mobile/commit/a32cd6536f8337879f1dd738c67f2b95848950d4))
+* **composer:** keep the voice-appended tail in view ([eb09eb6](https://github.com/markbang/cohub-mobile/commit/eb09eb62bdf71b18b91df08d56bc4e673a8861a7))
+* **composer:** unstick dictation growth with a text-derived height ([0892a77](https://github.com/markbang/cohub-mobile/commit/0892a77ca442deb55929f38b6f27999e54d25acb))
+* **e2e:** stream logcat to disk instead of buffering it ([419396e](https://github.com/markbang/cohub-mobile/commit/419396e25f02d3245cb4628d525ced4d0bb6e383))
+* **landing:** stop scroll reveals from flashing into view ([254c39b](https://github.com/markbang/cohub-mobile/commit/254c39b556fb8bb2551e41c7b927de412146a43a))
+* **space:** preload the chat and files panels behind the pager ([962d316](https://github.com/markbang/cohub-mobile/commit/962d31691e45a1c292fbc93531ac3de194469e9d))
+* **space:** recover a swallowed panel seed ([58385d3](https://github.com/markbang/cohub-mobile/commit/58385d365c279bb4614b2d3541ecccd5be3ee045))
+* **ui:** guard native text, measurement, and paging callbacks ([40d58d2](https://github.com/markbang/cohub-mobile/commit/40d58d27411391e3c5e0a63861d74ee78ec8f5d3))
+
+
+### Refactoring
+
+* **e2e:** separate the source fingerprint from the embedded runtime ([7d1be28](https://github.com/markbang/cohub-mobile/commit/7d1be28596c1575d8ade12f65bb105c0b9f19564))
+
+
+### CI
+
+* **e2e:** enable KVM before booting the emulator ([03bc463](https://github.com/markbang/cohub-mobile/commit/03bc4634b7d3641646dc570e830f4cbeb36c965b))
+* **e2e:** run the Android device flows after Publish OTA ([bb014fc](https://github.com/markbang/cohub-mobile/commit/bb014fcae646ec2b30bf1d88d3949d90a952fb10))
+* **e2e:** skip the device run until an E2E account is configured ([b12a250](https://github.com/markbang/cohub-mobile/commit/b12a2504f3f704863abc1574c19f40fe06549f34))
+* **ios:** distribute TestFlight builds to the external beta group automatically ([ab5c3ec](https://github.com/markbang/cohub-mobile/commit/ab5c3ec2cc61851d410efd62a4669875d43b5776))
+
 ## [2.2.13](https://github.com/markbang/cohub-mobile/compare/v2.2.12...v2.2.13) (2026-09-17)
 
 
