@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveGolden } from "./resolve-golden.mjs";
 
@@ -151,8 +151,14 @@ export async function runAndroid(options) {
   wait(10_000);
 
   const maestro = run("maestro", ["test", "--device", serial, ...options.flows], { stdio: "inherit" });
-  const logcat = run("adb", ["-s", serial, "logcat", "-d"]);
-  writeFileSync(join(evidence, "logcat.txt"), logcat.stdout ?? "");
+  // A full logcat dump can exceed the default pipe buffer, so stream it straight to disk.
+  const logcatPath = join(evidence, "logcat.txt");
+  const logcatFd = openSync(logcatPath, "w");
+  try {
+    spawnSync("adb", ["-s", serial, "logcat", "-d"], { stdio: ["ignore", logcatFd, "inherit"] });
+  } finally {
+    closeSync(logcatFd);
+  }
   writeFileSync(join(evidence, "plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
 
   if (maestro.status !== 0) {
