@@ -127,6 +127,14 @@ function captureWindow(serial, directory) {
   }
 }
 
+function hitDeviceServerFailure(resultPath) {
+  try {
+    return /DeviceServerDied|Unknown error/i.test(readFileSync(resultPath, "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 export async function runAndroid(options) {
   requireCommand("gh", "Install the GitHub CLI and authenticate with `gh auth login`.");
 
@@ -186,7 +194,15 @@ export async function runAndroid(options) {
   ];
   if (!flowsIncludeLogin) maestroArgs.push(LOGIN_FLOW);
   maestroArgs.push(...options.flows);
-  const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
+  let maestro = run("maestro", maestroArgs, { stdio: "inherit" });
+  // Maestro's Android device server dies mid-run often enough that one retry is worth it; the
+  // failure shows up as an instrumentation crash and a flow reported as "Unknown error".
+  if (maestro.status !== 0 && hitDeviceServerFailure(join(evidence, "maestro-junit.xml"))) {
+    process.stdout.write("The device server died mid-run; retrying the suite once.\n");
+    wait(10000);
+    maestro = run("maestro", maestroArgs, { stdio: "inherit" });
+    writeFileSync(join(evidence, "retried"), "true\n");
+  }
   // The device stays on the screen where the run stopped; the tree is what a selector matched.
   captureWindow(serial, evidence);
 
