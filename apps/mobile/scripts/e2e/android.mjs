@@ -177,6 +177,16 @@ export async function runAndroid(options) {
   maestroArgs.push(...options.flows);
   process.stdout.write(`Flows: ${options.flows.join(", ")}${email && password && !flowsIncludeLogin ? ` (after ${LOGIN_FLOW})` : ""}\n`);
   const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
+  // The device stays on the screen where a flow stopped, so capture it after the run. The
+  // accessibility dump is what a selector has to match; the PNG is for the human reading it.
+  run("adb", ["-s", serial, "shell", "uiautomator", "dump", "/sdcard/e2e-window.xml"]);
+  run("adb", ["-s", serial, "pull", "/sdcard/e2e-window.xml", join(evidence, "final-window.xml")]);
+  const screenFd = openSync(join(evidence, "final-screen.png"), "w");
+  try {
+    spawnSync("adb", ["-s", serial, "exec-out", "screencap", "-p"], { stdio: ["ignore", screenFd, "inherit"] });
+  } finally {
+    closeSync(screenFd);
+  }
   // Maestro confines takeScreenshot to its own output folder and appends the extension, so
   // gather that folder plus any flow screenshot it left elsewhere.
   for (const directory of [join(process.cwd(), "screenshots"), join(homedir(), ".maestro", "tests")]) {
