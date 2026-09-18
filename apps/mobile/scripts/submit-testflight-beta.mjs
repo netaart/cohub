@@ -54,7 +54,7 @@ function appStoreConnectToken({ issuerId, keyId, privateKeyPem }) {
   const header = base64url(JSON.stringify({ alg: "ES256", kid: keyId, typ: "JWT" }));
   const payload = base64url(JSON.stringify({
     iss: issuerId,
-    iat: issuedAt,
+    iat: issuedAt - 60,
     exp: issuedAt + 20 * 60,
     aud: "appstoreconnect-v1",
   }));
