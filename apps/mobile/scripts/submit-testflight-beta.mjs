@@ -93,7 +93,16 @@ async function ascRequest(path, { method = "GET", token, body } = {}) {
 }
 
 // Mirrors scripts/print-native-identifiers.mjs: read the resolved Expo config the native build used.
+// A distribute-only rerun targets an existing release build, so the build number comes from the
+// env override instead of the checkout's config.
 async function resolveIosBuildTarget(root = process.cwd()) {
+  const override = process.env.COHUB_IOS_BUILD_NUMBER?.trim();
+  if (override) {
+    if (!/^\d+$/.test(override)) {
+      throw new Error(`COHUB_IOS_BUILD_NUMBER must be numeric, received: ${override}`);
+    }
+    return { bundleId: "io.github.markbang.cohubmobile", buildNumber: override, version: null };
+  }
   const { stdout } = await execFileAsync(
     "npx",
     ["expo", "config", "--type", "public", "--json"],
@@ -121,7 +130,7 @@ async function main() {
   const groupName = requireEnv("TESTFLIGHT_EXTERNAL_BETA_GROUP");
 
   const { bundleId, buildNumber, version } = await resolveIosBuildTarget();
-  console.log(`Looking up build ${buildNumber} of ${bundleId} (app version ${version}).`);
+  console.log(`Looking up build ${buildNumber} of ${bundleId}${version ? ` (app version ${version})` : ""}.`);
   const token = appStoreConnectToken({ issuerId, keyId, privateKeyPem });
 
   const appsPayload = await ascRequest(`/v1/apps?filter[bundleId]=${encodeURIComponent(bundleId)}`, { token });

@@ -75,6 +75,11 @@ on:
         description: Required for distribution and production, for example v1.2.0
         required: true
         type: string
+      distribute_only:
+        description: Skip building and only assign the released build (v2.2.14, build 2002014) to the external TestFlight group
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -307,7 +312,7 @@ jobs:
   ios:
     name: iOS release
     needs: metadata
-    if: inputs.profile == 'production' && (inputs.platform == 'all' || inputs.platform == 'ios')
+    if: inputs.profile == 'production' && (inputs.platform == 'all' || inputs.platform == 'ios' || inputs.distribute_only == true)
     runs-on: macos-latest
     timeout-minutes: 65
     env:
@@ -326,9 +331,11 @@ jobs:
           cache: npm
 
       - name: Install dependencies
+        if: inputs.distribute_only != true
         run: npm ci
 
       - name: Validate source metadata
+        if: inputs.distribute_only != true
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -338,14 +345,16 @@ jobs:
           fi
 
       - name: Generate iOS project and install pods
+        if: inputs.distribute_only != true
         run: npm run native:ios:prepare
 
       - name: Resolve iOS identifier
+        if: inputs.distribute_only != true
         id: identifiers
         run: node scripts/print-native-identifiers.mjs
 
       - name: Validate iOS signing inputs
-        if: inputs.profile == 'production'
+        if: inputs.distribute_only != true && inputs.profile == 'production'
         env:
           ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
           API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
@@ -368,14 +377,14 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Import iOS distribution certificate
-        if: inputs.profile == 'production'
+        if: inputs.distribute_only != true && inputs.profile == 'production'
         uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
           p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
 
       - name: Download iOS provisioning profile
-        if: inputs.profile == 'production'
+        if: inputs.distribute_only != true && inputs.profile == 'production'
         id: profiles
         uses: apple-actions/download-provisioning-profiles@v6
         with:
@@ -386,7 +395,7 @@ jobs:
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
 
       - name: Resolve provisioning profile name
-        if: inputs.profile == 'production'
+        if: inputs.distribute_only != true && inputs.profile == 'production'
         env:
           PROFILES_JSON: ${{ steps.profiles.outputs.profiles }}
         run: |
@@ -394,11 +403,12 @@ jobs:
           echo "IOS_PROFILE_NAME=$profile_name" >> "$GITHUB_ENV"
 
       - name: Build production IPA
-        if: inputs.profile == 'production'
+        if: inputs.distribute_only != true && inputs.profile == 'production'
         run: npm run native:ios:release
 
       # Publish OTA resolves the iOS runtime from this file, mirroring assets/fingerprint in the Android APK.
       - name: Record iOS OTA fingerprint
+        if: inputs.distribute_only != true
         run: |
           set -euo pipefail
           mkdir -p build/native-release
@@ -414,6 +424,7 @@ jobs:
           echo "Recorded iOS OTA fingerprint $fingerprint"
 
       - name: Upload iOS artifact
+        if: inputs.distribute_only != true
         uses: actions/upload-artifact@v7
         with:
           name: cohub-ios-${{ inputs.profile }}-${{ github.run_id }}
@@ -424,7 +435,7 @@ jobs:
           retention-days: 30
 
       - name: Submit iOS to TestFlight
-        if: inputs.profile == 'production' && inputs.submit == true
+        if: inputs.distribute_only != true && inputs.profile == 'production' && inputs.submit == true
         uses: apple-actions/upload-testflight-build@v5
         with:
           app-path: build/export/Cohub.ipa
@@ -436,18 +447,21 @@ jobs:
       # Assigning the external group also submits the first build of each app version
       # for Beta App Review; Apple reviews asynchronously and this job does not wait for it.
       - name: Distribute iOS to external TestFlight testers
-        if: inputs.profile == 'production' && inputs.submit == true
+        if: inputs.profile == 'production' && (inputs.submit == true || inputs.distribute_only == true)
         env:
           APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
           APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
           APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
           TESTFLIGHT_EXTERNAL_BETA_GROUP: ${{ vars.TESTFLIGHT_EXTERNAL_BETA_GROUP }}
+          # A distribute-only rerun targets the v2.2.14 build (2002014) already on TestFlight;
+          # a build that was never uploaded would spin the wait window and fail.
+          COHUB_IOS_BUILD_NUMBER: ${{ inputs.distribute_only == true && '2002014' || '' }}
         run: node scripts/submit-testflight-beta.mjs
 
   attach-ios-fingerprint:
     name: Attach iOS OTA fingerprint
     needs: ios
-    if: inputs.submit == true
+    if: inputs.submit == true && inputs.distribute_only != true
     runs-on: ubuntu-latest
     permissions:
       contents: write
