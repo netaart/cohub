@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { icons, type IconName } from "@/src/icons";
 import { getComposerActionState } from "@/src/data/composer-state";
-import { COMPOSER_TEXT_PADDING, getComposerLayout, shouldAutoExpandComposer } from "@/src/ui/composer-layout";
+import { COMPOSER_TEXT_PADDING, estimateComposerContentHeight, getComposerLayout, shouldAutoExpandComposer } from "@/src/ui/composer-layout";
 import { useTranslation } from "@/src/i18n";
 import { edgeChrome, useAppTheme, typography } from "@/src/theme";
 import type { ActivityItem, ConnectionState } from "@/src/data/types";
@@ -237,9 +237,13 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
     if (expanded) setExpanded(false);
   }
   const { blocked, canSend, canStop } = getComposerActionState({ text: value, hasAttachment, disabled, sending, running, hasStopHandler: Boolean(onStop) });
+  // A JS-driven append is invisible to the native measurement (Android's watcher reads a
+  // stale layout and never re-fires; iOS defers the event until the height prop changes),
+  // so the width-aware estimate stands in for it; a later real measurement still wins.
+  const measuredContentHeight = Math.max(contentHeight, estimateComposerContentHeight(value, typography.body.lineHeight * fontScale));
   const layout = getComposerLayout({
     text: value,
-    contentHeight,
+    contentHeight: measuredContentHeight,
     lineHeight: typography.body.lineHeight * fontScale,
     availableHeight: Math.min(windowHeight, keyboardTop ?? windowHeight) - insets.top - (keyboardVisible ? 0 : insets.bottom),
     expanded,

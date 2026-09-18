@@ -10,7 +10,7 @@ import { StreamRevealController } from "../src/data/stream-reveal.ts";
 import { formatMessageClock } from "../src/data/chat-format.ts";
 import { getComposerActionState } from "../src/data/composer-state.ts";
 import { imageViewerPageIndex } from "../src/data/image-viewer.ts";
-import { collapsedComposerHeight, COMPOSER_CHROME_HEIGHT, COMPOSER_TEXT_PADDING, getComposerLayout, shouldAutoExpandComposer } from "../src/ui/composer-layout.ts";
+import { collapsedComposerHeight, COMPOSER_CHROME_HEIGHT, COMPOSER_TEXT_PADDING, estimateComposerContentHeight, getComposerLayout, shouldAutoExpandComposer } from "../src/ui/composer-layout.ts";
 import { BUBBLE_META_GAP, bubbleTextLines, getBubbleMaxWidth, getBubbleMetaLayout } from "../src/ui/message-bubble-layout.ts";
 import { getComposerMenuLayout } from "../src/ui/composer-menu-layout.ts";
 import { getAnchoredMenuLayout } from "../src/ui/anchored-menu-layout.ts";
@@ -2398,9 +2398,8 @@ assert.deepEqual(getComposerLayout({ ...composerLayoutInput, contentHeight: 600 
 assert.deepEqual(getComposerLayout({ ...composerLayoutInput, contentHeight: 600, expanded: true }), {
   expanded: true, showExpandButton: true, height: 320, scrollEnabled: true,
 });
-assert.deepEqual(getComposerLayout({ ...composerLayoutInput, contentHeight: 52, expanded: true }), {
-  expanded: true, showExpandButton: true, height: 320, scrollEnabled: false,
-});
+assert.equal(getComposerLayout({ ...composerLayoutInput, contentHeight: 52, expanded: true }).height, 320, "an expanded editor keeps its height even when the content fits");
+assert.equal(getComposerLayout({ ...composerLayoutInput, contentHeight: 52, expanded: true }).scrollEnabled, true, "an expanded editor stays scrollable because the estimate may undershoot real wraps");
 assert.equal(getComposerLayout({ ...composerLayoutInput, expanded: true }).showExpandButton, true, "collapse remains available after deleting back to one line");
 assert.deepEqual(getComposerLayout({ ...composerLayoutInput, text: "", contentHeight: 600, expanded: true }), {
   expanded: false, showExpandButton: false, height: 44, scrollEnabled: false,
@@ -2419,6 +2418,16 @@ assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "a very long 
 assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "a very long dictation transcript", autoExpandedFor: "a very long dictation transcript" }), false, "the append expands once so a manual collapse sticks while the transcript is reviewed");
 assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "first sentence. a longer final sentence.", lastUserText: "first sentence.", autoExpandedFor: "first sentence." }), true, "the next dictation final re-arms the expansion");
 assert.equal(shouldAutoExpandComposer({ ...autoExpandInput, value: "a very long dictation transcript", expanded: true }), false, "an already-expanded editor needs no expansion");
+// Android's stale-watcher deadlock: a JS-driven final leaves the native measurement stale, so
+// the text-derived estimate must expose the overflow and raise the collapsed height on its own.
+const lineHeight = 22;
+assert.equal(estimateComposerContentHeight("", lineHeight), 0, "empty text measures nothing");
+assert.equal(estimateComposerContentHeight("word ".repeat(45), lineHeight), 7 * lineHeight + COMPOSER_TEXT_PADDING, "the estimate wraps long prose into multiple lines");
+assert.equal(estimateComposerContentHeight("这是一段比较长的中文语音转写内容，".repeat(6), lineHeight), 6 * lineHeight + COMPOSER_TEXT_PADDING, "CJK glyphs count double so Chinese lines are not under-counted");
+assert.equal(estimateComposerContentHeight("a\nb\nc", lineHeight), 3 * lineHeight + COMPOSER_TEXT_PADDING, "explicit newlines each take a line");
+assert.equal(estimateComposerContentHeight("a very long dictation transcript", lineHeight), lineHeight + COMPOSER_TEXT_PADDING, "a short append still estimates one line");
+assert.equal(getComposerLayout({ text: "word ".repeat(45), contentHeight: Math.max(30, estimateComposerContentHeight("word ".repeat(45), lineHeight)), lineHeight, availableHeight: 800, expanded: false }).scrollEnabled, true, "the estimate alone unsticks the overflow signal when the native measurement is stale");
+assert.equal(getComposerLayout({ text: "word ".repeat(45), contentHeight: Math.max(30, estimateComposerContentHeight("word ".repeat(45), lineHeight)), lineHeight, availableHeight: 800, expanded: false }).height, 120, "the estimated overflow still respects the collapsed height cap");
 assert.equal(COMPOSER_CHROME_HEIGHT, 132);
 assert.equal(collapsedComposerHeight(34), 166);
 assert.equal(collapsedComposerHeight(0), 132);

@@ -2,6 +2,19 @@ export const COMPOSER_TEXT_PADDING = 8;
 /** Empty collapsed composer chrome in `src/ui.tsx` (`composerWrap` + `composer` + input + toolbar), excluding the home-indicator inset. */
 export const COMPOSER_CHROME_HEIGHT = 132;
 
+/**
+ * Layout columns per rendered line at `typography.body` width, measured in Latin glyphs. The
+ * estimate only needs to be close: typed text carries a real native measurement, and a
+ * JS-appended dictation final is corrected by one on iOS and carried by the estimate on
+ * Android until the user types.
+ */
+const COLUMNS_PER_LINE = 34;
+
+/** CJK, Hangul, Kana, and fullwidth punctuation occupy roughly two Latin columns. */
+function columnWidth(ch: string) {
+  return ch.charCodeAt(0) >= 0x2e80 ? 2 : 1;
+}
+
 export function collapsedComposerHeight(bottomInset: number) {
   return COMPOSER_CHROME_HEIGHT + Math.max(0, bottomInset);
 }
@@ -20,6 +33,23 @@ export type ComposerLayout = {
   height: number;
   scrollEnabled: boolean;
 };
+
+/**
+ * Android's content-size watcher reads a stale layout when JS replaces the text (a dictation
+ * final) and never fires again, so native measurement alone cannot detect the growth. The
+ * estimate is derived from the text itself and only raises the measurement; a later real
+ * native measurement always wins.
+ */
+export function estimateComposerContentHeight(text: string, lineHeight: number) {
+  if (!text) return 0;
+  let lines = 0;
+  for (const line of text.split("\n")) {
+    let columns = 0;
+    for (const ch of line) columns += columnWidth(ch);
+    lines += Math.max(1, Math.ceil(columns / COLUMNS_PER_LINE));
+  }
+  return lines * lineHeight + COMPOSER_TEXT_PADDING;
+}
 
 export function shouldAutoExpandComposer(input: {
   value: string;
@@ -51,6 +81,8 @@ export function getComposerLayout(input: ComposerLayoutInput): ComposerLayout {
     expanded,
     showExpandButton: expanded || multiline,
     height,
-    scrollEnabled: contentHeight > height,
+    // While expanded, the estimate may undershoot the real content and clipping beats a
+    // height fight, so keep the editor scrollable there regardless of the measurement.
+    scrollEnabled: expanded || contentHeight > height,
   };
 }
