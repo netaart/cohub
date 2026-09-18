@@ -1,6 +1,7 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveGolden } from "./resolve-golden.mjs";
 
@@ -15,9 +16,13 @@ import { resolveGolden } from "./resolve-golden.mjs";
 
 const PACKAGE_ID = "io.github.markbang.cohubmobile";
 const EVIDENCE_ROOT = "dist/e2e";
+// Kept outside the evidence path so the released APK never lands in the uploaded artifact.
+const APK_CACHE_ROOT = "dist/e2e-cache";
 const DEFAULT_FLOWS = ["e2e/flows"];
 const LOGIN_FLOW = "e2e/auth/login.yaml";
 const DEFAULT_OTA_WAIT_MS = 45_000;
+const SCREENSHOT_INTERVAL_MS = 5000;
+const SCREENSHOT_FRAMES = 40;
 
 export function parseArgs(argv) {
   const options = {
@@ -87,7 +92,7 @@ function sha256(path) {
 }
 
 function ensureApk(options, golden) {
-  const directory = join(EVIDENCE_ROOT, golden.tag);
+  const directory = join(APK_CACHE_ROOT, golden.tag);
   mkdirSync(directory, { recursive: true });
   const apkPath = join(directory, golden.apkName);
   const expected = golden.apkDigest?.replace(/^sha256:/, "") ?? null;
@@ -141,6 +146,9 @@ export async function runAndroid(options) {
   for (const scale of ["window_animation_scale", "transition_animation_scale", "animator_duration_scale"]) {
     adb(serial, ["shell", "settings", "put", "global", scale, "0"]);
   }
+  // Maestro logs an accessibility dump per lookup, which evicts older lines fast; a bigger
+  // buffer keeps the run's own output when the logcat is collected afterwards.
+  adb(serial, ["shell", "logcat", "-G", "16M"]);
   adb(serial, ["logcat", "-c"]);
 
   // The first cold launch downloads the OTA bundle in the background; the second
@@ -161,7 +169,26 @@ export async function runAndroid(options) {
     maestroArgs.push(LOGIN_FLOW);
   }
   maestroArgs.push(...options.flows);
+
+  // Maestro's own debug output is not dependable, and a failing selector gives no view of the
+  // screen, so capture frames from the device while the run proceeds. This is what makes an
+  // unfamiliar surface (the Logto page in a Custom Tab) diagnosable from CI.
+  const shotsDirectory = join(evidence, "shots");
+  mkdirSync(shotsDirectory, { recursive: true });
+  const frameLoop = spawn(
+    "bash",
+    [
+      "-c",
+      `for index in $(seq 1 ${SCREENSHOT_FRAMES}); do adb -s ${serial} exec-out screencap -p > "${shotsDirectory}/$(date +%s)-$index.png" 2>/dev/null; sleep ${SCREENSHOT_INTERVAL_MS / 1000}; done`,
+    ],
+    { stdio: "ignore", detached: true },
+  );
   const maestro = run("maestro", maestroArgs, { stdio: "inherit" });
+  frameLoop.kill();
+  // Maestro's default artifacts hold per-command screenshots and the view hierarchy.
+  const maestroArtifacts = join(homedir(), ".maestro", "tests");
+  if (existsSync(maestroArtifacts)) cpSync(maestroArtifacts, join(evidence, "maestro"), { recursive: true });
+
   // A full logcat dump can exceed the default pipe buffer, so stream it straight to disk.
   const logcatPath = join(evidence, "logcat.txt");
   const logcatFd = openSync(logcatPath, "w");

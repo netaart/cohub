@@ -8,12 +8,35 @@ name: Sign in on the dev tenant
     clearState: false
 - tapOn: "Development"
 - tapOn: "Continue with Cohub"
-# Logto's hosted page opens in a Custom Tab, outside the app under test.
+# Logto's hosted page opens in a Custom Tab, outside the app under test. A fresh emulator can
+# show Chrome's first-run screens before it, so wait for either and dismiss what appears.
+- extendedWaitUntil:
+    visible: "(Welcome to Chrome|Accept & continue|Email|Sign in)"
+    timeout: 60000
+- runFlow:
+    when:
+      visible: "Accept & continue"
+    commands:
+      - tapOn: "Accept & continue"
+- runFlow:
+    when:
+      visible: "No thanks"
+    commands:
+      - tapOn: "No thanks"
 - extendedWaitUntil:
     visible: "Email"
-    timeout: 45000
+    timeout: 30000
 - tapOn: "Email"
 - inputText: ${E2E_ACCOUNT_EMAIL}
+# Logto can ask for the identifier first and the password on the next step.
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- extendedWaitUntil:
+    visible: "Password"
+    timeout: 30000
 - tapOn: "Password"
 - inputText: ${E2E_ACCOUNT_PASSWORD}
 - tapOn: "Sign in"
