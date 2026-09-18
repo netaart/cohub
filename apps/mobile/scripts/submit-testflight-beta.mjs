@@ -5,7 +5,7 @@
  * become available to external testers as soon as processing completes.
  */
 import { Buffer } from "node:buffer";
-import { createHash, createPrivateKey, sign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -60,7 +60,16 @@ function appStoreConnectToken({ issuerId, keyId, privateKeyPem }) {
   }));
   const signingInput = `${header}.${payload}`;
   const digest = createHash("sha256").update(signingInput).digest();
-  const der = sign(null, digest, createPrivateKey(privateKeyPem));
+  const privateKey = createPrivateKey(privateKeyPem);
+  const der = sign(null, digest, privateKey);
+  // Diagnostics for NOT_AUTHORIZED loops: the public-key fingerprint and JWT claims identify
+  // which key and issuer the token actually carries without exposing any secret material.
+  const publicKey = createPublicKey(privateKey);
+  const fingerprint = createHash("sha256").update(publicKey.export({ type: "spki", format: "der" })).digest("hex");
+  console.log(`[submit-testflight-beta] token key: ${publicKey.asymmetricKeyType} ${publicKey.asymmetricKeyTypeDetails?.namedCurve ?? ""} fingerprint=${fingerprint}`);
+  console.log(`[submit-testflight-beta] token claims: ${Buffer.from(payload, "base64url").toString("utf8")}`);
+  const verified = verify(null, digest, publicKey, der);
+  if (!verified) fail("The generated ECDSA signature failed local verification; the signing logic is broken.");
   return `${signingInput}.${derSignatureToRaw(der).toString("base64url")}`;
 }
 
@@ -87,6 +96,10 @@ async function ascRequest(path, { method = "GET", token, body } = {}) {
       : `${response.status} ${response.statusText}`;
     const error = new Error(`App Store Connect ${method} ${path} failed: ${details}`);
     error.status = response.status;
+    if (response.status === 401) {
+      console.error(`[submit-testflight-beta] ${details}`);
+      fail("App Store Connect rejected the bearer token. Confirm in App Store Connect → Users and Access → Integrations that this key id still exists and is active, that its role covers Beta App Management, and that the APPSTORE_API_PRIVATE_KEY secret contains exactly that key's p8 contents.");
+    }
     throw error;
   }
   return payload;
