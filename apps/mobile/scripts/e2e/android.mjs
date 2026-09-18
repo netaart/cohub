@@ -172,6 +172,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exit(1);
+    // 3 tells CI to skip: no released native binary is compatible with this commit.
+    process.exit(error?.code === "NO_GOLDEN" ? 3 : 1);
   }
 }

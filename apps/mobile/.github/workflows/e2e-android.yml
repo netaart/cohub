@@ -1,0 +1,96 @@
+name: E2E Android
+
+# The device run installs a released APK and lets production OTA deliver the current
+# JS, so it only makes sense once Publish OTA has published that commit. It therefore
+# chains off Publish OTA instead of running on every pull request, where the JS under
+# test would not be on any channel yet.
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Publish OTA"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-android
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  EXPO_NO_TELEMETRY: "1"
+
+jobs:
+  android:
+    name: Android device E2E
+    # A manual staging dispatch publishes a bundle no released binary can fetch.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          set -euo pipefail
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      # Fail fast, before paying for an emulator boot, when this commit needs a new
+      # native distribution and no released APK can receive its OTA.
+      - name: Resolve golden release
+        id: golden
+        run: |
+          set -euo pipefail
+          set +e
+          node scripts/e2e/android.mjs --plan-only --abi x86_64
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "available=yes" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -eq 3 ]; then
+            echo "::warning title=E2E skipped::No released APK is native-compatible with this commit. Ship a native distribution first; JS-only changes can ride an existing one."
+            echo "available=no" >> "$GITHUB_OUTPUT"
+          else
+            exit "$status"
+          fi
+
+      - name: Run device E2E
+        if: steps.golden.outputs.available == 'yes'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # API 35 keeps to system images the action builds reliably; the release APK
+          # only needs its own minSdk satisfied.
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: node scripts/e2e/android.mjs --abi x86_64
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-e2e-android-${{ github.run_id }}
+          path: dist/e2e
+          if-no-files-found: ignore
+          retention-days: 14

@@ -175,8 +175,14 @@ export async function resolveGolden(options) {
 
   const golden = selectGolden(candidates);
   if (!golden) {
-    throw new Error(
-      `No released Android distribution carries source fingerprint ${sourceFingerprint}. Ship a native distribution for this commit first; JS-only changes can ride an existing one.`,
+    // Native-only compatibility gap: a native change needs a new distribution before any
+    // JS can OTA. Callers skip instead of failing, so a native bump does not read as a
+    // broken E2E job.
+    throw Object.assign(
+      new Error(
+        `No released Android distribution carries source fingerprint ${sourceFingerprint}. Ship a native distribution for this commit first; JS-only changes can ride an existing one.`,
+      ),
+      { code: "NO_GOLDEN" },
     );
   }
   return { sourceFingerprint, targetCommit, golden, candidates };
