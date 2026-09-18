@@ -173,14 +173,14 @@ async function main() {
     fail(`Group "${groupName}" is an internal group; internal testers receive builds automatically and are not distributed through this step.`);
   }
 
-  // The betaGroups relationship only allows CREATE and DELETE, so there is no read-back
-  // pre-check; a rerun that already assigned the build surfaces as a 409 conflict below.
-  await ascRequest(`/v1/builds/${buildId}/relationships/betaGroups`, {
+  // The documented assignment endpoint is group-side ("Add builds to a beta group"); the
+  // build-side relationship is not part of the published API and rejects with FORBIDDEN.
+  // A rerun that already assigned the build surfaces as a 409 conflict.
+  await ascRequest(`/v1/betaGroups/${group.id}/relationships/builds`, {
     method: "POST",
     token,
-    body: { data: [{ type: "betaGroups", id: group.id }] },
+    body: { data: [{ type: "builds", id: buildId }] },
   }).catch((error) => {
-    // Reruns and race with the web UI surface as a conflict; membership already means done.
     if (error.status === 409) {
       console.log(`App Store Connect reports build ${buildNumber} is already in the group.`);
       return null;
