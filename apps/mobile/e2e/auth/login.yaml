@@ -43,6 +43,11 @@ name: Sign in on the dev tenant
     timeout: 45000
 - tapOn: "Password"
 - inputText: ${E2E_ACCOUNT_PASSWORD}
+# The on-screen keyboard covers the submit button, so dismiss it before tapping.
+- hideKeyboard
+- extendedWaitUntil:
+    visible: "^(Sign in|Continue)$"
+    timeout: 20000
 - tapOn: "^(Sign in|Continue)$"
 # The redirect returns to the app, which then renders the authenticated tab tree.
 - extendedWaitUntil:
