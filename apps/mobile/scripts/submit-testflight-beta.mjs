@@ -5,7 +5,7 @@
  * become available to external testers as soon as processing completes.
  */
 import { Buffer } from "node:buffer";
-import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, createSign } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -30,25 +30,6 @@ function base64url(value) {
   return Buffer.from(value).toString("base64url");
 }
 
-// App Store Connect rejects DER-encoded ECDSA signatures; JWT ES256 needs raw 64-byte r||s.
-function derSignatureToRaw(der) {
-  if (der[0] !== 0x30 || der[2] !== 0x02) throw new Error("Unexpected ECDSA DER signature layout");
-  const rLength = der[3];
-  const sMarker = 4 + rLength;
-  if (der[sMarker] !== 0x02) throw new Error("Unexpected ECDSA DER signature layout");
-  // DER pads a positive integer with a leading zero when its high bit is set; strip it before right-aligning.
-  let r = der.subarray(4, 4 + rLength);
-  while (r.length > 32 && r[0] === 0) r = r.subarray(1);
-  if (r.length > 32) throw new Error("ECDSA signature r value does not fit 32 bytes");
-  let s = der.subarray(sMarker + 2, sMarker + 2 + der[sMarker + 1]);
-  while (s.length > 32 && s[0] === 0) s = s.subarray(1);
-  if (s.length > 32) throw new Error("ECDSA signature s value does not fit 32 bytes");
-  const raw = Buffer.alloc(64);
-  r.copy(raw, 32 - r.length);
-  s.copy(raw, 64 - s.length);
-  return raw;
-}
-
 function appStoreConnectToken({ issuerId, keyId, privateKeyPem }) {
   const issuedAt = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: "ES256", kid: keyId, typ: "JWT" }));
@@ -59,18 +40,23 @@ function appStoreConnectToken({ issuerId, keyId, privateKeyPem }) {
     aud: "appstoreconnect-v1",
   }));
   const signingInput = `${header}.${payload}`;
-  const digest = createHash("sha256").update(signingInput).digest();
-  const privateKey = createPrivateKey(privateKeyPem);
-  const der = sign(null, digest, privateKey);
+  // Mirror apple-actions' signer exactly (createSign + ieee-p1363); the same secret passes
+  // ASC with it during the upload step, so every remaining byte of the token matches.
+  const signer = createSign("SHA256");
+  signer.update(signingInput);
+  signer.end();
+  const signature = signer.sign({ key: privateKeyPem, dsaEncoding: "ieee-p1363" });
+  if (signature.length !== 64) {
+    fail(`The App Store Connect API key must be an EC P-256 key; the signature came out ${signature.length} bytes.`);
+  }
   // Diagnostics for NOT_AUTHORIZED loops: the public-key fingerprint and JWT claims identify
   // which key and issuer the token actually carries without exposing any secret material.
+  const privateKey = createPrivateKey(privateKeyPem);
   const publicKey = createPublicKey(privateKey);
   const fingerprint = createHash("sha256").update(publicKey.export({ type: "spki", format: "der" })).digest("hex");
-  console.log(`[submit-testflight-beta] token key: ${publicKey.asymmetricKeyType} ${publicKey.asymmetricKeyTypeDetails?.namedCurve ?? ""} fingerprint=${fingerprint}`);
+  console.log(`[submit-testflight-beta] token key: ${publicKey.asymmetricKeyType} fingerprint=${fingerprint}`);
   console.log(`[submit-testflight-beta] token claims: ${Buffer.from(payload, "base64url").toString("utf8")}`);
-  const verified = verify(null, digest, publicKey, der);
-  if (!verified) fail("The generated ECDSA signature failed local verification; the signing logic is broken.");
-  return `${signingInput}.${derSignatureToRaw(der).toString("base64url")}`;
+  return `${signingInput}.${signature.toString("base64url")}`;
 }
 
 async function ascRequest(path, { method = "GET", token, body } = {}) {
