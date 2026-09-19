@@ -331,7 +331,35 @@ export default function SpaceSettingsScreen() {
         </View>
 
         <View>
-          <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.mods")}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.mods")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                Alert.prompt(
+                  t("space.settings.addMod"),
+                  t("space.settings.addModPrompt"),
+                  async (modSpaceId) => {
+                    if (!client || !spaceId || !modSpaceId?.trim()) return;
+                    try {
+                      await client.space(spaceId).mods.create({ modSpaceId: modSpaceId.trim() });
+                      const result = await client.space(spaceId).mods.list();
+                      setMods(result.items);
+                      Alert.alert(t("space.settings.modAdded"), t("space.settings.modAddedRestart"));
+                    } catch (error) {
+                      toast({ title: t("space.settings.modAddFailed"), message: error instanceof Error ? error.message : undefined, tone: "danger" });
+                    }
+                  },
+                  "plain-text",
+                  "",
+                  "default"
+                );
+              }}
+              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+            >
+              <AppIcon name="plus" size={20} color={theme.colors.accent} />
+            </Pressable>
+          </View>
           {mods.length === 0 ? (
             <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.noMods")}</Text>
           ) : (
@@ -351,6 +379,9 @@ export default function SpaceSettingsScreen() {
                       await space.mods.update(mod.id, { enabled });
                       setMods((current) => current.map((m) => m.id === mod.id ? { ...m, enabled } : m));
                       toast({ title: enabled ? t("space.settings.modEnabled") : t("space.settings.modDisabled") });
+                      if (enabled) {
+                        Alert.alert(t("space.settings.modEnabled"), t("space.settings.modEnabledRestart"));
+                      }
                     } catch (error) {
                       toast({ title: t("space.settings.modToggleFailed"), message: error instanceof Error ? error.message : undefined, tone: "danger" });
                     }
