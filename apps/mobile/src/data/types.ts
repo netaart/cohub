@@ -33,6 +33,12 @@ export type ChatModelSelection = {
 
 export type ChatModelCatalogItem = ModelCatalogEntry;
 
+export type NewChatMessageResult = {
+  session: SessionRecord;
+  turn: SessionTurnRecord;
+  message: MessageRecord;
+};
+
 export type StreamView = {
   status: "pending" | "streaming" | "completed" | "failed" | "interrupted";
   contentBlocks: ContentBlock[];

@@ -29,16 +29,20 @@ import { sessionSourceFilterKeys, type SessionSourceFilter } from "@/src/data/se
 import { cacheRetentionCutoff, loadCacheRetention } from "@/src/data/cache-retention";
 import { createStreamBatch } from "@/src/data/chat-rendering";
 import {
+  clearComposerDraft as clearLocalComposerDraft,
   clearUserCache,
   hydrateHome,
+  loadComposerDraft as loadLocalComposerDraft,
   loadMessages,
   loadSessionReadSequence,
   pruneUserCache,
+  saveComposerDraft as saveLocalComposerDraft,
   saveHome,
   saveMessages,
   saveSessionReadSequence,
   saveSessions,
   saveSpaces,
+  type ComposerDraftScope,
 } from "@/src/data/local-db";
 import type {
   ActivityItem,
@@ -47,6 +51,7 @@ import type {
   ChatModelCatalogItem,
   ChatModelSelection,
   ConnectionState,
+  NewChatMessageResult,
   SessionView,
   StreamView,
 } from "@/src/data/types";
@@ -781,7 +786,10 @@ export type AppContextValue = {
   loadTurnIndex: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
   jumpToTurn: (sessionId: string, target: number | { turnId: string }) => Promise<number>;
   sendMessage: (sessionId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null; onOptimistic?: (message: MessageRecord) => void }) => Promise<void>;
-  sendNewMessage: (spaceId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<SessionRecord>;
+  sendNewMessage: (spaceId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<NewChatMessageResult>;
+  loadComposerDraft: (spaceId: string, scope: ComposerDraftScope) => Promise<string>;
+  saveComposerDraft: (spaceId: string, scope: ComposerDraftScope, text: string) => Promise<void>;
+  clearComposerDraft: (spaceId: string, scope: ComposerDraftScope) => Promise<void>;
   abortSession: (sessionId: string) => Promise<void>;
   models: ChatModelCatalogItem[];
   modelsLoading: boolean;
@@ -1939,12 +1947,52 @@ export function AppProvider({
             }
           : null,
       };
+      const turn = withFallbackUserContent(result.turn, content, text);
+      const messages = messagesFromTurns([turn]);
+      const message = messages.find((item) => item.role === "user");
+      if (!message) throw new Error(translate("data.newChatNotCreated"));
       dispatch({ type: "session-upsert", session });
+      if (space) {
+        dispatch({
+          type: "session-success",
+          sessionId: result.session.id,
+          space,
+          session: result.session,
+          messages,
+          turns: [turn],
+          hasMoreOlder: false,
+          hasMoreNewer: false,
+          oldestCursor: turn.sequence,
+          newestCursor: turn.sequence,
+        });
+      } else {
+        dispatch({ type: "session-start", sessionId: result.session.id, session: result.session });
+      }
+      // Seed the accepted turn before the new-chat surface mounts. The reducer derives a
+      // pending stream for active turns, so the first reply can continue in place without
+      // a route transition or a blank loading screen.
+      dispatch({ type: "turn-upsert", sessionId: result.session.id, session: result.session, turn });
       void saveSessions(userKey, [session]).catch(() => undefined);
+      void saveMessages(userKey, result.session.id, messages).catch(() => undefined);
       sync.invalidate();
-      return result.session;
+      return { session: result.session, turn, message };
     },
     [client, dispatch, sync, userKey],
+  );
+
+  const loadComposerDraftForUser = useCallback(
+    (spaceId: string, scope: ComposerDraftScope) => loadLocalComposerDraft(userKey, spaceId, scope),
+    [userKey],
+  );
+
+  const saveComposerDraftForUser = useCallback(
+    (spaceId: string, scope: ComposerDraftScope, text: string) => saveLocalComposerDraft(userKey, spaceId, scope, text),
+    [userKey],
+  );
+
+  const clearComposerDraftForUser = useCallback(
+    (spaceId: string, scope: ComposerDraftScope) => clearLocalComposerDraft(userKey, spaceId, scope),
+    [userKey],
   );
 
   const createSpace = useCallback(
@@ -2152,6 +2200,9 @@ export function AppProvider({
       jumpToTurn,
       sendMessage,
       sendNewMessage,
+      loadComposerDraft: loadComposerDraftForUser,
+      saveComposerDraft: saveComposerDraftForUser,
+      clearComposerDraft: clearComposerDraftForUser,
       abortSession,
       models,
       modelsLoading,
@@ -2215,6 +2266,9 @@ export function AppProvider({
       forkSession,
       sendMessage,
       sendNewMessage,
+      loadComposerDraftForUser,
+      saveComposerDraftForUser,
+      clearComposerDraftForUser,
       state,
       upsertSpace,
       userUuid,

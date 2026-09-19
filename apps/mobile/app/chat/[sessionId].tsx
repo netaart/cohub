@@ -33,7 +33,7 @@ import { cancelQueuedFollowup, followupQueueItems, isOptimisticFollowup, isSendQ
 import { isActiveTurnStatus, isLiveStreamStatus, isTerminalTurnStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
 import { liveReplyAnchor, MessageMeasurements, rowHeightMeasurement } from "@/src/data/chat-rendering";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
-import type { CohubClient, MessageRecord, SessionTurnRecord } from "@neta-art/cohub";
+import type { CohubClient, MessageRecord, SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
 import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage, withTurnSequences } from "@/src/data/session-history";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
@@ -44,6 +44,8 @@ import { displaySessionTitle, displaySpaceName, hasRenderableMessage, isAssistan
 import { EdgeFooter, EdgeHeader, useEdgeChrome } from "@/src/ui/EdgeChrome";
 
 type RouteParams = { sessionId?: string | string[]; spaceId?: string | string[]; turn?: string | string[]; turnId?: string | string[] };
+type CreatedChat = { sessionId: string; transition: SendBubbleTransition | null };
+const NEW_COMPOSER_DRAFT_SCOPE = { kind: "new" } as const;
 const messageViewabilityConfig = { itemVisiblePercentThreshold: 20 };
 /** Only used to estimate the destination of a jump the list cannot resolve on its own. */
 const FALLBACK_ROW_HEIGHT = 140;
@@ -83,6 +85,7 @@ type ChatScrollEvent = {
 };
 
 export default function ChatScreen() {
+  const router = useRouter();
   const params = useLocalSearchParams<RouteParams>();
   const sessionId = Array.isArray(params.sessionId) ? params.sessionId[0] : params.sessionId;
   const spaceId = Array.isArray(params.spaceId) ? params.spaceId[0] : params.spaceId;
@@ -91,9 +94,22 @@ export default function ChatScreen() {
   const parsedTurn = rawTurn ? Number(rawTurn) : NaN;
   const initialTurnSequence = Number.isSafeInteger(parsedTurn) && parsedTurn > 0 ? parsedTurn : null;
   const initialTurnId = rawTurnId?.trim() || null;
+  const [createdChat, setCreatedChat] = useState<CreatedChat | null>(null);
   if (!sessionId) return <MissingChat />;
-  if (sessionId === "new") return spaceId ? <DraftChatContent spaceId={spaceId} /> : <MissingChat />;
-  return <ChatContent key={sessionId} sessionId={sessionId} initialTurnSequence={initialTurnSequence} initialTurnId={initialTurnId} />;
+  if (sessionId === "new") {
+    return spaceId
+      ? <DraftChatContent
+          spaceId={spaceId}
+          onCreated={({ session, transition }) => {
+            setCreatedChat({ sessionId: session.id, transition });
+            // Update the deep-linkable identity without pushing a new screen or replaying
+            // the native stack transition. The current surface continues in place.
+            router.setParams({ sessionId: session.id });
+          }}
+        />
+      : <MissingChat />;
+  }
+  return <ChatContent key={sessionId} sessionId={sessionId} initialTurnSequence={initialTurnSequence} initialTurnId={initialTurnId} initialSendTransition={createdChat?.sessionId === sessionId ? createdChat.transition : null} />;
 }
 
 // iOS swipe-back is silently cancelled when the SpacePanels pager wins the horizontal drag; the
@@ -115,19 +131,22 @@ function useBackPressTrace(source: string, root: ReturnType<typeof useNavigation
   }, [root, source]);
 }
 
-function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessionId: string; initialTurnSequence: number | null; initialTurnId: string | null }) {
+function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSendTransition }: { sessionId: string; initialTurnSequence: number | null; initialTurnId: string | null; initialSendTransition?: SendBubbleTransition | null }) {
   const router = useRouter();
   const rootNavigation = useNavigationContainerRef();
   const traceBackPress = useBackPressTrace("chat", rootNavigation);
   const theme = useAppTheme();
   const { t } = useTranslation();
   const showToast = useToast();
-  const { state, client, connectionState, refreshHome, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, forkSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadSessionReadSequence, saveSessionReadSequence } = useApp();
+  const { state, client, connectionState, refreshHome, sendMessage, abortSession, refreshSession, loadOlderTurns, loadNewerTurns, loadTurnIndex, jumpToTurn, renameSession, forkSession, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadSessionReadSequence, saveSessionReadSequence, loadComposerDraft, saveComposerDraft, clearComposerDraft } = useApp();
   const view = useSession(sessionId);
+  const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
+  const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
+  const spaceId = view.space?.id ?? session?.spaceId ?? sessionSummary?.spaceId ?? "";
   useSyncScope(`chat:${sessionId}:tail`, () => refreshSession(sessionId, { silent: true, throwOnError: true }), 60_000, view.historyLoaded && !view.hasMoreNewer && !view.stream);
   const { headerHeight, footerHeight, onHeaderLayout, onFooterLayout } = useEdgeChrome({ reserveComposer: true });
   const composerRef = useRef<View>(null);
-  const [sendTransition, setSendTransition] = useState<SendBubbleTransition | null>(null);
+  const [sendTransition, setSendTransition] = useState<SendBubbleTransition | null>(() => initialSendTransition ?? null);
   const composerMeasurementRef = useRef<ComposerInputMeasurement>({ input: null, scrollY: 0 });
   const sendRootRef = useAnimatedRef<View>();
   const sendBubbleRef = useAnimatedRef<View>();
@@ -154,9 +173,49 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     return () => subscription.remove();
   }, []);
   const [input, setInput] = useState("");
+  const inputRef = useRef("");
+  const inputEditedRef = useRef(false);
+  const draftLoadedRef = useRef(false);
+  const draftScope = useMemo(() => ({ kind: "session" as const, sessionId }), [sessionId]);
+  const updateInput = useCallback((next: string) => {
+    inputEditedRef.current = true;
+    inputRef.current = next;
+    setInput(next);
+  }, []);
   const [sendFeedback, setSendFeedback] = useState<"idle" | "success">("idle");
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
   useEffect(() => { if (attachments.length === 0) attachmentScrollYRef.current = 0; }, [attachments.length]);
+  useEffect(() => {
+    let active = true;
+    inputEditedRef.current = false;
+    draftLoadedRef.current = false;
+    inputRef.current = "";
+    void loadComposerDraft(spaceId, draftScope)
+      .then((draft) => {
+        if (!active) return;
+        draftLoadedRef.current = true;
+        if (inputEditedRef.current) {
+          void saveComposerDraft(spaceId, draftScope, inputRef.current).catch(() => undefined);
+          return;
+        }
+        inputRef.current = draft;
+        setInput(draft);
+      })
+      .catch(() => {
+        if (active) draftLoadedRef.current = true;
+      });
+    return () => { active = false; };
+  }, [draftScope, loadComposerDraft, saveComposerDraft, spaceId]);
+  useEffect(() => {
+    if (!draftLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      void saveComposerDraft(spaceId, draftScope, input).catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [draftScope, input, saveComposerDraft, spaceId]);
+  useEffect(() => () => {
+    if (draftLoadedRef.current) void saveComposerDraft(spaceId, draftScope, inputRef.current).catch(() => undefined);
+  }, [draftScope, saveComposerDraft, spaceId]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -317,9 +376,6 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     if (visualTop?.item) setCurrentTurnSequence(turnSequenceForMessage(visualTop.item as { meta: Record<string, unknown> | null }));
   }, [saveSessionReadSequence, sessionId, trace]);
   const { onViewableItemsChanged, measureVisibleRows, trackRow } = useChatVisibleRows({ viewportRef: listContainerRef, topInset: headerHeight, bottomInset: footerHeight, onVisible: onVisibleRows });
-  const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
-  const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
-  const spaceId = view.space?.id ?? session?.spaceId ?? sessionSummary?.spaceId ?? "";
   useSpaceRealtime(spaceId ? [spaceId] : []);
   const spaceName = view.space ? displaySpaceName(view.space) : sessionSummary?.space?.name || t("space.fallbackName");
   const spaceSessions = useMemo(() => state.sessions.filter((item) => item.spaceId === spaceId), [spaceId, state.sessions]);
@@ -434,7 +490,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     hasLiveActivity: Boolean(liveStream || view.sending),
   });
   const running = state.sessionLatestTurns[sessionId]?.status === "running" || view.sending || (liveStream && isLiveStreamStatus(view.stream?.status ?? ""));
-  const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
+  const appendVoiceText = useCallback((text: string) => {
+    const current = inputRef.current.trim();
+    updateInput(current ? `${current} ${text}` : text);
+  }, [updateInput]);
+  const voice = useNativeVoiceInput({ getAccessToken, onFinal: appendVoiceText });
 
   const handleListLoad = useCallback(() => {
     setListLoaded(true);
@@ -826,8 +886,10 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
       if (generation !== sendGenerationRef.current) return;
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setSendTransition(null);
+      inputRef.current = "";
       setInput("");
       setAttachments([]);
+      void clearComposerDraft(spaceId, draftScope).catch(() => undefined);
       recordDebugEvent("chat.send.composer_cleared");
       const requestModel = modelOverride ? selectedModel : recordedModel;
       await sendMessage(sessionId, text, files, {
@@ -849,7 +911,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
     } catch {
       recordDebugEvent("chat.send.transition_cancelled");
       // Keep any next message typed while the request was in flight.
-      setInput((current) => [text, current].filter(Boolean).join("\n\n"));
+      updateInput([text, inputRef.current].filter(Boolean).join("\n\n"));
       setAttachments((current) => [...files, ...current]);
       setSendTransition(null);
     } finally {
@@ -974,7 +1036,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId }: { sessio
         </View> : null}
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, backgroundColor: theme.colors.background }}><View ref={attachmentSourceRef} collapsable={false} style={{ maxHeight: 136 }}><ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 7 }} keyboardShouldPersistTaps="handled" onScroll={(event) => { attachmentScrollYRef.current = event.nativeEvent.contentOffset.y; }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} uri={attachment.uri} mimeType={attachment.mimeType} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</ScrollView></View></View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
-        <ComposerInput anchorRef={composerRef} measurementRef={composerMeasurementRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} sendFeedback={sendFeedback} value={input} onChangeText={setInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? t("ui.composer.working") : t("ui.composer.placeholder")} />
+        <ComposerInput anchorRef={composerRef} measurementRef={composerMeasurementRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} sendFeedback={sendFeedback} value={input} onChangeText={updateInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? t("ui.composer.working") : t("ui.composer.placeholder")} />
         </EdgeFooter>
         {sendTransition && transitionMessage && (sendTransition.destination === "bubble" || transitionQueueItem) ? <SendBubbleOverlay key={sendTransition.message.id} transition={sendTransition} message={transitionMessage} queueItem={transitionQueueItem} rootRef={sendRootRef} targetRef={queueTransitionActive ? sendQueueRef : sendBubbleRef} availableWidth={listWidth || windowWidth} spaceId={spaceId || null} onComplete={completeSendTransition} /> : null}
         {labelSheetOpen && client && session && spaceId ? <SessionLabelSheet client={client} spaceId={spaceId} session={session} labels={chatLabels} labelsError={null} onLabelsReload={() => { if (client && spaceId) void fetchSessionLabels(client, spaceId).then((tree) => setChatLabels(toUserSessionLabels(tree))).catch(() => undefined); }} onClose={() => setLabelSheetOpen(false)} onChanged={() => undefined} /> : null}
@@ -1054,25 +1116,73 @@ function TurnMarker({ sequence, status }: { sequence: number; status?: string })
   return <View onLayout={(event) => recordDebugEvent("chat.turn_marker.layout", { sequence, status: status ?? null, ...event.nativeEvent.layout })} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingTop: 13, paddingBottom: 2 }}><View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} /><Text style={[typography.micro, { color }]}>#{sequence}</Text><View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} /></View>;
 }
 
-function DraftChatContent({ spaceId }: { spaceId: string }) {
+function DraftChatContent({ spaceId, onCreated }: { spaceId: string; onCreated: (created: { session: SessionRecord; transition: SendBubbleTransition | null }) => void }) {
   useSpaceRealtime([spaceId]);
   const router = useRouter();
   const theme = useAppTheme();
   const { t } = useTranslation();
   const showToast = useToast();
-  const { state, client, connectionState, sendNewMessage, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError } = useApp();
+  const { state, client, connectionState, sendNewMessage, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadComposerDraft, saveComposerDraft, clearComposerDraft } = useApp();
   const space = state.spaces.find((item) => item.id === spaceId) ?? null;
   const { headerHeight, onHeaderLayout } = useEdgeChrome();
   const composerRef = useRef<View>(null);
+  const composerMeasurementRef = useRef<ComposerInputMeasurement>({ input: null, scrollY: 0 });
+  const sendRootRef = useRef<View>(null);
+  const attachmentSourceRef = useRef<View>(null);
+  const attachmentScrollYRef = useRef(0);
+  const reducedMotion = useReducedMotion();
   const [input, setInput] = useState("");
+  const inputRef = useRef("");
+  const inputEditedRef = useRef(false);
+  const draftLoadedRef = useRef(false);
+  const updateInput = useCallback((next: string) => {
+    inputEditedRef.current = true;
+    inputRef.current = next;
+    setInput(next);
+  }, []);
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
+  useEffect(() => {
+    let active = true;
+    inputEditedRef.current = false;
+    draftLoadedRef.current = false;
+    inputRef.current = "";
+    void loadComposerDraft(spaceId, NEW_COMPOSER_DRAFT_SCOPE)
+      .then((draft) => {
+        if (!active) return;
+        draftLoadedRef.current = true;
+        if (inputEditedRef.current) {
+          void saveComposerDraft(spaceId, NEW_COMPOSER_DRAFT_SCOPE, inputRef.current).catch(() => undefined);
+          return;
+        }
+        inputRef.current = draft;
+        setInput(draft);
+      })
+      .catch(() => {
+        if (active) draftLoadedRef.current = true;
+      });
+    return () => { active = false; };
+  }, [loadComposerDraft, saveComposerDraft, spaceId]);
+  useEffect(() => {
+    if (!draftLoadedRef.current) return;
+    const timer = setTimeout(() => {
+      void saveComposerDraft(spaceId, NEW_COMPOSER_DRAFT_SCOPE, input).catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [input, saveComposerDraft, spaceId]);
+  useEffect(() => () => {
+    if (draftLoadedRef.current) void saveComposerDraft(spaceId, NEW_COMPOSER_DRAFT_SCOPE, inputRef.current).catch(() => undefined);
+  }, [saveComposerDraft, spaceId]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ChatModelSelection | null>(null);
   const [activePanel, setActivePanel] = useState<SpacePanel | null>(null);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
-  const voice = useNativeVoiceInput({ getAccessToken, onFinal: (text) => setInput((current) => current.trim() ? `${current.trim()} ${text}` : text) });
+  const appendVoiceText = useCallback((text: string) => {
+    const current = inputRef.current.trim();
+    updateInput(current ? `${current} ${text}` : text);
+  }, [updateInput]);
+  const voice = useNativeVoiceInput({ getAccessToken, onFinal: appendVoiceText });
   const appendAttachments = (next: AttachmentDraft[]) => setAttachments((current) => [...current, ...next].slice(0, 6));
   const pickAttachments = async () => { setAttachmentMenuOpen(false); try { const result = await DocumentPicker.getDocumentAsync({ type: "*/*", multiple: true, copyToCacheDirectory: true }); if (result.canceled) return; appendAttachments(result.assets.map((asset) => ({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || "application/octet-stream", size: asset.size ?? 0 }))); } catch (error) { showToast({ title: t("chat.attachmentUnavailable.title"), message: error instanceof Error ? error.message : t("chat.attachmentUnavailable.body"), tone: "danger" }); } };
   const pickPhotos = async () => { setAttachmentMenuOpen(false); try { const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) { showToast({ title: t("chat.photoOff.title"), message: t("chat.photoOff.body"), tone: "danger" }); return; } const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: true, quality: 0.88 }); if (result.canceled) return; appendAttachments(result.assets.map((asset, index) => ({ uri: asset.uri, name: asset.fileName || `image-${index + 1}.jpg`, mimeType: asset.mimeType || "image/jpeg", size: asset.fileSize ?? 0 }))); } catch (error) { showToast({ title: t("chat.photoPickerUnavailable.title"), message: error instanceof Error ? error.message : t("chat.photoPickerUnavailable.body"), tone: "danger" }); } };
@@ -1081,10 +1191,32 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
     if (!space || sending || (!input.trim() && attachments.length === 0)) return;
     const text = input;
     const files = attachments;
-    setInput("");
-    setAttachments([]);
     setSending(true);
-    try { const session = await sendNewMessage(space.id, text, files, { model: selectedModel }); router.replace({ pathname: "/chat/[sessionId]", params: { sessionId: session.id } }); } catch (error) { setInput(text); setAttachments(files); showToast({ title: t("chat.startFailed.title"), message: error instanceof Error ? error.message : t("chat.startFailed.body"), tone: "danger" }); } finally { setSending(false); }
+    try {
+      const { input: field, scrollY } = composerMeasurementRef.current;
+      const source = reducedMotion
+        ? null
+        : await measureSendBubbleSource(
+            files.length > 0 ? attachmentSourceRef.current : field,
+            sendRootRef.current,
+            files.length > 0 ? attachmentScrollYRef.current : scrollY,
+          );
+      inputRef.current = "";
+      setInput("");
+      setAttachments([]);
+      void clearComposerDraft(space.id, NEW_COMPOSER_DRAFT_SCOPE).catch(() => undefined);
+      const result = await sendNewMessage(space.id, text, files, { model: selectedModel });
+      onCreated({
+        session: result.session,
+        transition: source ? { message: result.message, text, source, attachments: files, destination: "bubble" } : null,
+      });
+    } catch (error) {
+      updateInput(text);
+      setAttachments(files);
+      showToast({ title: t("chat.startFailed.title"), message: error instanceof Error ? error.message : t("chat.startFailed.body"), tone: "danger" });
+    } finally {
+      setSending(false);
+    }
   };
   if (!space) return <Screen><TopBar title={t("chat.spaceUnavailable")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("chat.spaceUnavailable.body")}</Text></View></Screen>;
   const spaceName = displaySpaceName(space);
@@ -1094,16 +1226,21 @@ function DraftChatContent({ spaceId }: { spaceId: string }) {
   const selectedStatus = selectedModel ? modelAvailabilityLevel(modelStatus?.models[selectedModel.id]) : "unknown";
   return <Screen keyboard edgeToEdge>
     <SpacePanels edgeToEdge key={space.id} spaceId={space.id} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} onOpenFile={(path) => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: space.id, path } })} onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}>
-      <View style={{ flex: 1, minHeight: 0 }}>
+      <View ref={sendRootRef} collapsable={false} style={{ flex: 1, minHeight: 0 }}>
         <EdgeHeader onLayout={onHeaderLayout}>
         <TopBar transparent title={spaceName} onBack={() => router.back()} actions={<><IconButton name="messages" label={t("chat.actions.openChats")} size={38} onPress={() => setActivePanel("chat")} /><IconButton name="folder-open" label={t("chat.actions.openFiles")} size={38} onPress={() => setActivePanel("files")} /></>} />
         <ConnectionBanner state={connectionState} />
         </EdgeHeader>
         <View style={{ flex: 1, minHeight: 0, paddingTop: headerHeight }}>
-          <View style={{ flex: 1, minHeight: 0, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingBottom: 18 }}><AppIcon name="sparkles" size={28} color={theme.colors.textMuted} /><Text style={[typography.heading, { color: theme.colors.text, marginTop: 15, textAlign: "center" }]}>{t("chat.draft.title")}</Text></View>
-          {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
+          <View style={{ flex: 1, minHeight: 0, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingBottom: 18 }}>
+            <View style={{ width: 58, height: 58, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accentBorder }}><AppIcon name="sparkles" size={27} color={theme.colors.accent} /></View>
+            <Text style={[typography.heading, { color: theme.colors.text, marginTop: 15, textAlign: "center" }]}>{t("chat.draft.title")}</Text>
+            <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 6, maxWidth: 290, textAlign: "center" }]}>{t("chat.draft.body")}</Text>
+            <Text style={[typography.caption, { color: theme.colors.textFaint, marginTop: 14 }]}>{t("chat.draft.subtitle")}</Text>
+          </View>
+          {attachments.length > 0 ? <View ref={attachmentSourceRef} collapsable={false} style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} uri={attachment.uri} mimeType={attachment.mimeType} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
           {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
-          <ComposerInput anchorRef={composerRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} value={input} onChangeText={setInput} onSend={() => void submit()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? t("chat.draft.starting") : t("ui.composer.placeholder")} />
+          <ComposerInput anchorRef={composerRef} measurementRef={composerMeasurementRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} value={input} onChangeText={updateInput} onSend={() => void submit()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? t("chat.draft.starting") : t("ui.composer.placeholder")} />
         </View>
         {modelSelectorOpen ? <ModelSelectorMenu anchorRef={composerRef} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={selectedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelSelectorOpen(false); }} /> : null}
         {attachmentMenuOpen ? <AttachmentMenu anchorRef={composerRef} onClose={() => setAttachmentMenuOpen(false)} onCamera={() => void takePhoto()} onPhotos={() => void pickPhotos()} onFile={() => void pickAttachments()} /> : null}

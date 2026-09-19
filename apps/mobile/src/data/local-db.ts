@@ -7,6 +7,16 @@ export type CachedHome = {
   sessions: UserSessionListItem[];
 };
 
+export type ComposerDraftScope =
+  | { kind: "new" }
+  | { kind: "session"; sessionId: string };
+
+const COMPOSER_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function composerDraftKey(spaceId: string, scope: ComposerDraftScope) {
+  return JSON.stringify([spaceId, scope.kind, scope.kind === "session" ? scope.sessionId : null]);
+}
+
 let databasePromise: Promise<SQLiteDatabase> | null = null;
 
 function database(): Promise<SQLiteDatabase> {
@@ -60,6 +70,13 @@ async function initializeDatabase(): Promise<SQLiteDatabase> {
       sequence INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (user_key, session_id)
+    );
+    CREATE TABLE IF NOT EXISTS composer_drafts (
+      user_key TEXT NOT NULL,
+      draft_key TEXT NOT NULL,
+      text TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_key, draft_key)
     );
     CREATE TABLE IF NOT EXISTS debug_sessions (
       session_id TEXT PRIMARY KEY NOT NULL,
@@ -240,6 +257,47 @@ export async function saveSessionReadSequence(userKey: string, sessionId: string
   );
 }
 
+export async function loadComposerDraft(userKey: string, spaceId: string, scope: ComposerDraftScope) {
+  const db = await database();
+  const draftKey = composerDraftKey(spaceId, scope);
+  const row = await db.getFirstAsync<{ text: string; updatedAt: number }>(
+    "SELECT text, updated_at AS updatedAt FROM composer_drafts WHERE user_key = ? AND draft_key = ?",
+    userKey,
+    draftKey,
+  );
+  if (!row) return "";
+  if (typeof row.text !== "string" || !Number.isFinite(row.updatedAt) || Date.now() - row.updatedAt > COMPOSER_DRAFT_TTL_MS) {
+    await db.runAsync("DELETE FROM composer_drafts WHERE user_key = ? AND draft_key = ?", userKey, draftKey);
+    return "";
+  }
+  return row.text;
+}
+
+export async function saveComposerDraft(userKey: string, spaceId: string, scope: ComposerDraftScope, text: string) {
+  const db = await database();
+  const draftKey = composerDraftKey(spaceId, scope);
+  if (!text.trim()) {
+    await db.runAsync("DELETE FROM composer_drafts WHERE user_key = ? AND draft_key = ?", userKey, draftKey);
+    return;
+  }
+  await db.runAsync(
+    "INSERT OR REPLACE INTO composer_drafts (user_key, draft_key, text, updated_at) VALUES (?, ?, ?, ?)",
+    userKey,
+    draftKey,
+    text,
+    Date.now(),
+  );
+}
+
+export async function clearComposerDraft(userKey: string, spaceId: string, scope: ComposerDraftScope) {
+  const db = await database();
+  await db.runAsync(
+    "DELETE FROM composer_drafts WHERE user_key = ? AND draft_key = ?",
+    userKey,
+    composerDraftKey(spaceId, scope),
+  );
+}
+
 export type DebugSessionRow = { sessionId: string; startedAt: string; updatedAt: number; closedAt: string | null; uploadedAt: string | null };
 export type DebugEventRow = { sessionId: string; sequence: number; timestamp: string; name: string; payload: string };
 
@@ -290,6 +348,7 @@ export async function clearUserCache(userKey: string) {
     await db.runAsync("DELETE FROM sessions WHERE user_key = ?", userKey);
     await db.runAsync("DELETE FROM spaces WHERE user_key = ?", userKey);
     await db.runAsync("DELETE FROM session_read_state WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM composer_drafts WHERE user_key = ?", userKey);
     await db.runAsync("DELETE FROM space_list_cache WHERE user_key = ?", userKey);
     await db.runAsync("DELETE FROM space_visits WHERE user_key = ?", userKey);
   });
