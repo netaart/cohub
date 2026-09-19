@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Text, View } from "react-native";
 import type { SpaceUsageHourlyStat } from "@neta-art/cohub";
 import { useAppTheme, typography } from "@/src/theme";
@@ -12,7 +12,7 @@ const CELL_SIZE = 10;
 const CELL_GAP = 2;
 const DAYS_IN_WEEK = 7;
 
-export function ActivityHeatmap({ hourly, days }: HeatmapProps) {
+export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: HeatmapProps) {
   const theme = useAppTheme();
 
   const { grid, maxValue, weeks } = useMemo(() => {
@@ -143,4 +143,4 @@ export function ActivityHeatmap({ hourly, days }: HeatmapProps) {
       </View>
     </View>
   );
-}
+});

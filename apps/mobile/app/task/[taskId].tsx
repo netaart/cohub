@@ -1,6 +1,6 @@
 import type { GenerationContentBlock, TaskRunDetailResponse } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import { useApp } from "@/src/data/context";
 import { useSyncScope } from "@/src/data/use-sync-scope";
@@ -21,6 +21,27 @@ export default function TaskScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
   const generation = useRef(0);
+  
+  // Memoize expensive JSON stringification and limit size
+  const jsonString = useMemo(() => {
+    if (!detail?.run) return "";
+    try {
+      const cleaned = JSON.parse(JSON.stringify(detail.run, (_key, value) => {
+        // Skip very large fields to prevent performance issues
+        if (typeof value === "string" && value.length > 10000) {
+          return `[Large string: ${value.length} chars]`;
+        }
+        // Limit array length
+        if (Array.isArray(value) && value.length > 100) {
+          return [...value.slice(0, 100), `[...${value.length - 100} more items]`];
+        }
+        return value;
+      }));
+      return JSON.stringify(cleaned, null, 2);
+    } catch {
+      return "[Unable to serialize]";
+    }
+  }, [detail]);
   useEffect(() => () => { generation.current += 1; }, [client, taskId]);
   useSyncScope(`task:${taskId}`, async () => {
     if (!client || !taskId) return;
@@ -78,11 +99,13 @@ export default function TaskScreen() {
           </Pressable>
 
           {showJson && run && (
-            <View style={{ padding: 12, borderRadius: 10, backgroundColor: theme.colors.surfaceRaised }}>
-              <Text selectable style={[typography.caption, { color: theme.colors.text, fontSize: 11, lineHeight: 16, fontFamily: "monospace" }]}>
-                {JSON.stringify(run, null, 2)}
-              </Text>
-            </View>
+            <ScrollView horizontal style={{ maxHeight: 400 }}>
+              <View style={{ padding: 12, borderRadius: 10, backgroundColor: theme.colors.surfaceRaised }}>
+                <Text selectable style={[typography.caption, { color: theme.colors.text, fontSize: 11, lineHeight: 16, fontFamily: "monospace" }]}>
+                  {jsonString}
+                </Text>
+              </View>
+            </ScrollView>
           )}
 
           {output.length > 0 && (
