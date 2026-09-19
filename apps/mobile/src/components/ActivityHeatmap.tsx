@@ -8,8 +8,8 @@ type HeatmapProps = {
   days: number;
 };
 
-const CELL_SIZE = 10;
-const CELL_GAP = 2;
+const CELL_SIZE = 11;
+const CELL_GAP = 3;
 const DAYS_IN_WEEK = 7;
 
 export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: HeatmapProps) {
@@ -64,16 +64,17 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
   }, [hourly, days]);
 
   const getColor = (value: number, isEmpty: boolean) => {
-    if (isEmpty || value === 0) return theme.colors.surfaceRaised;
+    if (isEmpty) return 'transparent';
+    if (value === 0) return theme.colors.border;
     
     const intensity = maxValue > 0 ? value / maxValue : 0;
     
-    // GitHub-style 5-level color scale
-    if (intensity < 0.2) return theme.colors.accentSoft;
-    if (intensity < 0.4) return `${theme.colors.accent}60`;
-    if (intensity < 0.6) return `${theme.colors.accent}80`;
-    if (intensity < 0.8) return `${theme.colors.accent}cc`;
-    return theme.colors.accent;
+    // GitHub-style color scale with better contrast
+    if (intensity < 0.25) return `${theme.colors.accent}33`; // 20%
+    if (intensity < 0.5) return `${theme.colors.accent}66`;  // 40%
+    if (intensity < 0.75) return `${theme.colors.accent}99`; // 60%
+    if (intensity < 0.9) return `${theme.colors.accent}cc`;  // 80%
+    return theme.colors.accent; // 100%
   };
 
   const cellWithGap = CELL_SIZE + CELL_GAP;
@@ -81,7 +82,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
 
   return (
     <View style={{ gap: 8 }}>
-      <Text style={[typography.caption, { color: theme.colors.textMuted }]}>(
+      <Text style={[typography.caption, { color: theme.colors.textMuted }]}>
         Activity over the last {days} days
       </Text>
       
@@ -111,7 +112,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
                       style={{
                         width: CELL_SIZE,
                         height: CELL_SIZE,
-                        borderRadius: 2,
+                        borderRadius: 3,
                         backgroundColor: getColor(cell.value, cell.isEmpty),
                       }}
                     />
@@ -133,7 +134,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
               style={{
                 width: CELL_SIZE,
                 height: CELL_SIZE,
-                borderRadius: 2,
+                borderRadius: 3,
                 backgroundColor: getColor(intensity * (maxValue || 1), false),
               }}
             />
