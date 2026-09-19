@@ -2,18 +2,21 @@ import { memo, useMemo } from "react";
 import { Text, View } from "react-native";
 import type { SpaceUsageHourlyStat } from "@neta-art/cohub";
 import { useAppTheme, typography } from "@/src/theme";
+import { localDateKey } from "@/src/data/activity";
+import { useTranslation } from "@/src/i18n";
 
 type HeatmapProps = {
   hourly: SpaceUsageHourlyStat[];
   days: number;
 };
 
-const CELL_SIZE = 11;
+const LEGEND_CELL_SIZE = 11;
 const CELL_GAP = 3;
 const DAYS_IN_WEEK = 7;
 
 export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: HeatmapProps) {
   const theme = useAppTheme();
+  const { t, locale } = useTranslation();
 
   const { grid, maxValue, weeks } = useMemo(() => {
     // Aggregate hourly data to daily totals
@@ -21,7 +24,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
     
     for (const stat of hourly) {
       const date = new Date(stat.bucketStartAt);
-      const dateKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+      const dateKey = localDateKey(date);
       const current = dailyMap.get(dateKey) || 0;
       dailyMap.set(dateKey, current + stat.totalTokens);
     }
@@ -31,6 +34,7 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
     endDate.setHours(0, 0, 0, 0);
     const startDate = new Date(endDate);
     startDate.setDate(startDate.getDate() - days + 1);
+    const rangeStart = new Date(startDate);
 
     // Adjust to start on Sunday
     const startDay = startDate.getDay();
@@ -46,13 +50,13 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
     today.setHours(0, 0, 0, 0);
 
     // Calculate total cells needed (round up to full weeks)
-    const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const totalDays = days + rangeStart.getDay();
     const totalWeeks = Math.ceil(totalDays / DAYS_IN_WEEK);
 
     for (let i = 0; i < totalWeeks * DAYS_IN_WEEK; i++) {
-      const dateKey = currentDate.toISOString().split('T')[0];
+      const dateKey = localDateKey(currentDate);
       const value = dailyMap.get(dateKey) || 0;
-      const isEmpty = currentDate < startDate || currentDate > today;
+      const isEmpty = currentDate < rangeStart || currentDate > today;
       
       if (value > maxValue && !isEmpty) maxValue = value;
       grid.push({ value, date: new Date(currentDate), isEmpty });
@@ -63,11 +67,9 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
     return { grid, maxValue, weeks: totalWeeks };
   }, [hourly, days]);
 
-  const getColor = (value: number, isEmpty: boolean) => {
-    if (isEmpty) return 'transparent';
-    if (value === 0) return theme.colors.border;
-    
-    const intensity = maxValue > 0 ? value / maxValue : 0;
+  const getColor = (intensity: number, isEmpty = false) => {
+    if (isEmpty) return "transparent";
+    if (intensity === 0) return theme.colors.border;
     
     // GitHub-style color scale with better contrast
     if (intensity < 0.25) return `${theme.colors.accent}33`; // 20%
@@ -77,70 +79,57 @@ export const ActivityHeatmap = memo(function ActivityHeatmap({ hourly, days }: H
     return theme.colors.accent; // 100%
   };
 
-  const cellWithGap = CELL_SIZE + CELL_GAP;
-  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const weekdayFormatter = new Intl.DateTimeFormat(locale, { weekday: "short" });
+  const weekdays = Array.from({ length: DAYS_IN_WEEK }, (_, day) => weekdayFormatter.format(new Date(2024, 0, 7 + day)));
+  const cellColor = (cell: (typeof grid)[number]) => getColor(maxValue > 0 ? cell.value / maxValue : 0, cell.isEmpty);
 
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ alignSelf: "stretch", gap: theme.spacing.sm }}>
       <Text style={[typography.caption, { color: theme.colors.textMuted }]}>
-        Activity over the last {days} days
+        {t("activity.heatmap.range", { days })}
       </Text>
-      
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        {/* Weekday labels */}
-        <View style={{ justifyContent: "space-between", height: DAYS_IN_WEEK * cellWithGap - CELL_GAP, paddingTop: 16 }}>
-          {[1, 3, 5].map((idx) => (
-            <Text key={idx} style={[typography.micro, { color: theme.colors.textFaint, fontSize: 9, lineHeight: 10 }]}>
-              {weekdays[idx]}
-            </Text>
-          ))}
-        </View>
 
-        {/* Heatmap grid (weeks × days) */}
-        <View>
-          <View style={{ flexDirection: "row", gap: CELL_GAP }}>
-            {Array.from({ length: weeks }).map((_, weekIdx) => (
-              <View key={weekIdx} style={{ gap: CELL_GAP }}>
-                {Array.from({ length: DAYS_IN_WEEK }).map((_, dayIdx) => {
-                  const cellIdx = weekIdx * DAYS_IN_WEEK + dayIdx;
-                  const cell = grid[cellIdx];
-                  if (!cell) return null;
-
-                  return (
-                    <View
-                      key={dayIdx}
-                      style={{
-                        width: CELL_SIZE,
-                        height: CELL_SIZE,
-                        borderRadius: 3,
-                        backgroundColor: getColor(cell.value, cell.isEmpty),
-                      }}
-                    />
-                  );
-                })}
-              </View>
-            ))}
-          </View>
+      {/* A short range reads left-to-right; stretching one week-column would make a seven-screen-tall grid. */}
+      {days <= DAYS_IN_WEEK ? <View testID="activity-heatmap-week" style={{ flexDirection: "row", gap: CELL_GAP }}>
+        {grid.filter((cell) => !cell.isEmpty).map((cell) => <View key={localDateKey(cell.date)} style={{ flex: 1, minWidth: 0, gap: theme.spacing.xs }}>
+          <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textFaint, textAlign: "center" }]}>{weekdays[cell.date.getDay()]}</Text>
+          <View accessible accessibilityLabel={`${localDateKey(cell.date)}: ${cell.value.toLocaleString()} tokens`} style={{ aspectRatio: 1, borderRadius: 3, backgroundColor: cellColor(cell) }} />
+        </View>)}
+      </View> : <View style={{ flexDirection: "row", gap: theme.spacing.sm }}>
+        <View style={{ gap: CELL_GAP }}>
+          {weekdays.map((label, index) => <View key={index} style={{ flex: 1, justifyContent: "center" }}>
+            <Text numberOfLines={1} style={[typography.micro, { color: theme.colors.textFaint }]}>{index % 2 === 1 ? label : ""}</Text>
+          </View>)}
         </View>
-      </View>
+        <View testID="activity-heatmap-grid" style={{ flex: 1, minWidth: 0, flexDirection: "row", gap: CELL_GAP }}>
+          {Array.from({ length: weeks }, (_, weekIdx) => <View key={weekIdx} style={{ flex: 1, minWidth: 0, gap: CELL_GAP }}>
+            {grid.slice(weekIdx * DAYS_IN_WEEK, (weekIdx + 1) * DAYS_IN_WEEK).map((cell) => <View
+              key={localDateKey(cell.date)}
+              accessible={!cell.isEmpty}
+              accessibilityLabel={cell.isEmpty ? undefined : `${localDateKey(cell.date)}: ${cell.value.toLocaleString()} tokens`}
+              style={{ aspectRatio: 1, borderRadius: 3, backgroundColor: cellColor(cell) }}
+            />)}
+          </View>)}
+        </View>
+      </View>}
 
       {/* Legend */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
-        <Text style={[typography.micro, { color: theme.colors.textFaint, fontSize: 9 }]}>Less</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: theme.spacing.xs }}>
+        <Text style={[typography.micro, { color: theme.colors.textFaint }]}>{t("activity.heatmap.less")}</Text>
         <View style={{ flexDirection: "row", gap: 2 }}>
           {[0, 0.2, 0.4, 0.6, 0.8, 1].map((intensity) => (
             <View
               key={intensity}
               style={{
-                width: CELL_SIZE,
-                height: CELL_SIZE,
+                width: LEGEND_CELL_SIZE,
+                height: LEGEND_CELL_SIZE,
                 borderRadius: 3,
-                backgroundColor: getColor(intensity * (maxValue || 1), false),
+                backgroundColor: getColor(intensity),
               }}
             />
           ))}
         </View>
-        <Text style={[typography.micro, { color: theme.colors.textFaint, fontSize: 9 }]}>More</Text>
+        <Text style={[typography.micro, { color: theme.colors.textFaint }]}>{t("activity.heatmap.more")}</Text>
       </View>
     </View>
   );

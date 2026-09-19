@@ -1,14 +1,16 @@
 import * as Clipboard from "expo-clipboard";
 import type { CronJobRecord, SandboxSpecId, SpaceMember, SpaceModListItem, SpaceRole, SpaceSandboxAutoDestroyPolicy, SpaceSandboxConfig } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useToast } from "@/src/components/Toast";
+import { installSpaceMod } from "@/src/data/space-mods";
 import { useApp } from "@/src/data/context";
 import { useTranslation, type Translate } from "@/src/i18n";
 import { openWebLink } from "@/src/platform/browser";
 import { useAppTheme, typography } from "@/src/theme";
-import { AppIcon, Avatar, IconButton, Screen, TopBar, type IconName } from "@/src/ui";
+import { AppIcon, Avatar, IconButton, PrimaryButton, Screen, TopBar, type IconName } from "@/src/ui";
 import { formatRelativeTime } from "@/src/utils";
 
 type EnvItem = { name: string; value: string };
@@ -36,6 +38,11 @@ export default function SpaceSettingsScreen() {
   const [members, setMembers] = useState<SpaceMember[]>([]);
   const [invitations, setInvitations] = useState<InvitationItem[]>([]);
   const [mods, setMods] = useState<SpaceModListItem[]>([]);
+  const [addModOpen, setAddModOpen] = useState(false);
+  const [modSpaceId, setModSpaceId] = useState("");
+  const [addingMod, setAddingMod] = useState(false);
+  const [modError, setModError] = useState<string | null>(null);
+  const modSubmitLock = useRef(false);
   const [schedules, setSchedules] = useState<CronJobRecord[]>([]);
 
   useEffect(() => {
@@ -164,6 +171,26 @@ export default function SpaceSettingsScreen() {
         { text: t("space.settings.spec.restartNow"), style: "destructive", onPress: () => void restartSandbox() },
       ],
     );
+  };
+
+  const addMod = async () => {
+    if (!client || !spaceId || !modSpaceId.trim() || modSubmitLock.current) return;
+    modSubmitLock.current = true;
+    setAddingMod(true);
+    setModError(null);
+    try {
+      const result = await installSpaceMod(client, spaceId, modSpaceId);
+      // The create response is authoritative; a subsequent list failure must not invite a duplicate install.
+      setMods((current) => [...current.filter((mod) => mod.id !== result.item.id), result.item]);
+      setAddModOpen(false);
+      setModSpaceId("");
+      toast({ title: t("space.settings.modAdded"), message: t(result.sandboxRestarting ? "space.settings.modRestarting" : "space.settings.modAddedRestart") });
+    } catch (error) {
+      setModError(error instanceof Error ? error.message : t("space.settings.modAddFailed"));
+    } finally {
+      modSubmitLock.current = false;
+      setAddingMod(false);
+    }
   };
 
   const inputStyle = [
@@ -333,32 +360,13 @@ export default function SpaceSettingsScreen() {
         <View>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.mods")}</Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                Alert.prompt(
-                  t("space.settings.addMod"),
-                  t("space.settings.addModPrompt"),
-                  async (modSpaceId) => {
-                    if (!client || !spaceId || !modSpaceId?.trim()) return;
-                    try {
-                      await client.space(spaceId).mods.create({ modSpaceId: modSpaceId.trim() });
-                      const result = await client.space(spaceId).mods.list();
-                      setMods(result.items);
-                      Alert.alert(t("space.settings.modAdded"), t("space.settings.modAddedRestart"));
-                    } catch (error) {
-                      toast({ title: t("space.settings.modAddFailed"), message: error instanceof Error ? error.message : undefined, tone: "danger" });
-                    }
-                  },
-                  "plain-text",
-                  "",
-                  "default"
-                );
-              }}
-              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-            >
-              <AppIcon name="plus" size={20} color={theme.colors.accent} />
-            </Pressable>
+            <IconButton
+              name="plus"
+              label={t("space.settings.addMod")}
+              tone="accent"
+              disabled={!client || !spaceId}
+              onPress={() => { setModError(null); setAddModOpen(true); }}
+            />
           </View>
           {mods.length === 0 ? (
             <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.noMods")}</Text>
@@ -418,6 +426,33 @@ export default function SpaceSettingsScreen() {
           )}
         </View>
       </ScrollView>
+      {addModOpen ? <AdaptiveSheet
+        visible
+        title={t("space.settings.addMod")}
+        subtitle={t("space.settings.addModPrompt")}
+        onClose={() => setAddModOpen(false)}
+        dismissible={!addingMod}
+        testID="space-add-mod-sheet"
+      >
+        <View style={{ gap: theme.spacing.md }}>
+          <TextInput
+            testID="space-add-mod-input"
+            value={modSpaceId}
+            onChangeText={setModSpaceId}
+            accessibilityLabel={t("space.settings.addModPrompt")}
+            placeholder={t("space.settings.addModPrompt")}
+            placeholderTextColor={theme.colors.textFaint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!addingMod}
+            returnKeyType="done"
+            onSubmitEditing={() => void addMod()}
+            style={[typography.body, { minHeight: 48, borderWidth: 1, borderRadius: theme.radius.md, borderCurve: "continuous", padding: theme.spacing.md, borderColor: theme.colors.border, color: theme.colors.text, backgroundColor: theme.colors.background }]}
+          />
+          {modError ? <Text selectable accessibilityLiveRegion="polite" style={[typography.caption, { color: theme.colors.danger }]}>{modError}</Text> : null}
+          <PrimaryButton label={t("space.settings.addMod")} icon="plus" loading={addingMod} disabled={!client || !modSpaceId.trim()} onPress={() => void addMod()} />
+        </View>
+      </AdaptiveSheet> : null}
     </Screen>
   );
 }

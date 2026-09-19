@@ -48,7 +48,8 @@ import { isSettingsSection, settingsMenu } from "../src/data/settings-navigation
 import { parseBrowserPreference } from "../src/data/browser-preference.ts";
 import { channelHealthState, createSettingsChannel, createWeChatLoginPoller, isChannelProvider, missingChannelField } from "../src/data/channel-settings.ts";
 
-import { activityRange, localDateKey, tokenDays } from "../src/data/activity.ts";
+import { activityContributorName, activityRange, localDateKey, tokenDays } from "../src/data/activity.ts";
+import { installSpaceMod } from "../src/data/space-mods.ts";
 
 const flushSync = async () => { for (let tick = 0; tick < 20; tick++) await Promise.resolve(); };
 mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
@@ -347,7 +348,7 @@ function loadChromeComponent(path, name, scope) {
   const source = ts.createSourceFile(path, readFileSync(new URL(path, import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const statements = source.statements.filter((statement) =>
     (ts.isFunctionDeclaration(statement) && statement.name?.text === name) ||
-    (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => declaration.name.getText(source) === "styles"))
+    (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => [name, "styles"].includes(declaration.name.getText(source))))
   ).map((statement) => statement.getText(source).replace(/^export (?:default )?/, ""));
   const code = ts.transpileModule(`${statements.join("\n")}\nreturn ${name};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText;
   return new Function(...Object.keys(scope), code)(...Object.values(scope));
@@ -367,6 +368,126 @@ const chromeScope = {
   typography: { heading: { fontSize: 17 }, caption: { fontSize: 12 }, body: { fontSize: 15 } },
   useAppTheme: () => ({ colors: { background: "background", text: "text", textMuted: "muted", textSecondary: "secondary", accent: "accent", accentSoft: "selected", surfacePressed: "pressed" } }),
 };
+// Adding a Mod must open a real input on Android too; Alert.prompt is iOS-only.
+{
+  let cursor = 0;
+  const slots = [];
+  const requests = [];
+  const alerts = [];
+  const client = { space: () => ({ mods: { create: (input) => {
+    const pending = Promise.withResolvers(); requests.push({ input, ...pending }); return pending.promise;
+  } } }) };
+  const renderSettings = loadChromeComponent("../app/space/[spaceId]/settings.tsx", "SpaceSettingsScreen", {
+    ...chromeScope,
+    useState: (initial) => { const index = cursor++; if (!(index in slots)) slots[index] = typeof initial === "function" ? initial() : initial; return [slots[index], (value) => { slots[index] = typeof value === "function" ? value(slots[index]) : value; }]; },
+    useRef: (current) => { const index = cursor++; if (!(index in slots)) slots[index] = { current }; return slots[index]; },
+    useEffect: () => {}, useRouter: () => ({}), useLocalSearchParams: () => ({ spaceId: "space" }),
+    useApp: () => ({ client }), useToast: () => (notice) => alerts.push(notice),
+    useAppTheme: () => ({ colors: {}, spacing: { md: 12 }, radius: { md: 12 } }),
+    installSpaceMod,
+    Alert: { prompt: () => {}, alert: (...args) => alerts.push(args) },
+    Screen: "Screen", ScrollView: "ScrollView", SegmentedControl: "SegmentedControl", ActionButton: "ActionButton", Switch: "Switch",
+    AdaptiveSheet: "AdaptiveSheet", PrimaryButton: "PrimaryButton", ActivityIndicator: "ActivityIndicator",
+    SPEC_OPTIONS: ["standard", "boost", "ultra"], SLEEP_OPTIONS: ["never", "0.5h", "2h"],
+    specNeedsRestart: () => false, sleepFromConfig: () => "2h",
+  });
+  const render = () => { cursor = 0; return chromeNodes(renderSettings()); };
+  const add = render().find((node) => node.props?.label === "space.settings.addMod" || String(node.props?.onPress).includes("Alert.prompt"));
+  assert.ok(add, "Mods has an accessible Add control");
+  add.props.onPress();
+  const sheet = () => render().find((node) => node.type === "AdaptiveSheet");
+  const input = () => render().find((node) => node.props.testID === "space-add-mod-input");
+  const submit = () => render().find((node) => node.type === "PrimaryButton");
+  assert.ok(sheet()?.props.visible, "Android Add opens the cross-platform Mod input instead of the unsupported Alert.prompt");
+  assert.equal(submit().props.disabled, true, "an empty Mod ID cannot be submitted");
+  sheet().props.onClose();
+  assert.equal(sheet(), undefined, "Cancel dismisses without creating a Mod");
+  assert.equal(requests.length, 0);
+  add.props.onPress();
+  const modId = "7a316e62-207b-480d-9cb0-7b62564129dc";
+  input().props.onChangeText(`  ${modId}  `);
+  const send = submit().props.onPress;
+  send(); send();
+  assert.equal(requests.length, 1, "rapid taps cannot install the same Mod twice");
+  assert.deepEqual(requests[0].input, { modSpaceId: modId });
+  assert.equal(input().props.editable, false);
+  assert.equal(sheet().props.dismissible, false);
+  assert.equal(submit().props.loading, true);
+  requests[0].reject(new Error("Permission denied"));
+  await flushSync();
+  assert.equal(input().props.value, `  ${modId}  `, "a failed install keeps the entered ID for retry");
+  assert.equal(sheet().props.dismissible, true);
+  assert.ok(render().some((node) => node.type === "Text" && node.props.children.includes("Permission denied")));
+  submit().props.onPress();
+  const installed = { id: "mod", name: "Project tools", mountSlug: "tools", mountPath: "/mods/tools", modSpaceId: modId, enabled: true };
+  requests[1].resolve({ item: installed, sandboxRestarting: true });
+  await flushSync();
+  assert.equal(sheet(), undefined, "successful installation closes the input sheet");
+  assert.ok(render().some((node) => node.type === "Text" && node.props.children.includes(installed.name)), "the accepted Mod appears without another list request");
+  assert.equal(alerts.at(-1).message, "space.settings.modRestarting");
+  add.props.onPress();
+  assert.equal(input().props.value, "");
+  await assert.rejects(installSpaceMod(client, "space", "  "), /Mod Space ID/);
+  assert.equal(requests.length, 2, "invalid input never reaches the SDK");
+}
+
+// The Space contributor renderer must show a human name, including when the API uses a UUID placeholder.
+{
+  const source = ts.createSourceFile("space.tsx", readFileSync(new URL("../app/space/[spaceId]/index.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let expression;
+  function findContributors(node) {
+    if (ts.isCallExpression(node) && node.expression.getText(source) === "activity.contributors.items.slice(0, 5).map") expression = node.getText(source);
+    ts.forEachChild(node, findContributors);
+  }
+  findContributors(source);
+  assert.ok(expression);
+  const scope = { ...chromeScope, Avatar: "Avatar", activityContributorName, t: (key) => key, theme: { colors: {}, spacing: { sm: 8 } } };
+  const render = new Function(...Object.keys(scope), "activity", ts.transpileModule(`return (${expression});`, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText);
+  const uuid = "7a316e62-207b-480d-9cb0-7b62564129dc";
+  for (const [profile, expected] of [
+    [{ displayName: "  Alice Chen  ", username: "alice" }, "Alice Chen"],
+    [{ displayName: uuid, username: "alice" }, "alice"],
+    [{ displayName: " ", username: "  alice  " }, "alice"],
+    [{ displayName: uuid.toUpperCase(), username: uuid }, "space.activity.unknownContributor"],
+    [null, "space.activity.unknownContributor"],
+  ]) {
+    const nodes = chromeNodes(render(...Object.values(scope), { contributors: { items: [{ userUuid: uuid, profile, requests: 42 }] } }));
+    assert.equal(nodes.find((node) => node.type === "Avatar").props.name, expected);
+    assert.ok(nodes.some((node) => node.type === "Text" && node.props.children.includes(expected)), "the name must be visible, not only passed to Avatar");
+    assert.ok(!nodes.some((node) => node.type === "Text" && node.props.children.includes(uuid)));
+    assert.equal(nodes.find((node) => node.type === "Text" && node.props.children.includes(expected)).props.numberOfLines, 1, "long names cannot overlap the request count");
+  }
+}
+
+mock.timers.enable({ apis: ["Date"], now: activityNow.getTime() });
+try {
+  for (const [accent, border] of [["#b85427", "#e1e3df"], ["#f08349", "#2d333c"]]) {
+    const renderHeatmap = loadChromeComponent("../src/components/ActivityHeatmap.tsx", "ActivityHeatmap", {
+      ...chromeScope, memo: (component) => component, useMemo: (factory) => factory(),
+      useAppTheme: () => ({ colors: { accent, border }, spacing: { xs: 4, sm: 8 } }),
+      useTranslation: () => ({ locale: "en", t: (key) => key }), localDateKey,
+      LEGEND_CELL_SIZE: 11, CELL_GAP: 3, DAYS_IN_WEEK: 7,
+    });
+    for (const days of [7, 30, 91]) {
+      const tree = renderHeatmap({ hourly: [], days });
+      const nodes = chromeNodes(tree);
+      assert.equal(tree.props.style.alignSelf, "stretch");
+      const grid = nodes.find((node) => node.props.testID === (days === 7 ? "activity-heatmap-week" : "activity-heatmap-grid"));
+      assert.ok(grid);
+      if (days > 7) assert.equal(grid.props.style.flex, 1, "the grid fills the width remaining beside weekday labels");
+      const columns = grid.props.children.flat().filter(Boolean);
+      assert.ok(columns.every((node) => node.props.style.flex === 1 && node.props.style.width === undefined), "columns divide all available width instead of staying 11px wide");
+      const cells = chromeNodes(grid).filter((node) => node.props.style?.aspectRatio === 1);
+      assert.ok(cells.every((node) => node.props.style.width === undefined && node.props.style.height === undefined));
+      assert.equal(cells.filter((node) => node.props.accessible).length, days, "only requested dates are active; calendar padding remains blank");
+      if (days === 7) assert.equal(columns.length, 7, "a short range uses one full-width row, not oversized vertical weeks");
+      assert.ok(cells.filter((node) => node.props.accessible).every((node) => node.props.style.backgroundColor === border), "an empty dataset remains an empty grid in either theme");
+    }
+    const populated = chromeNodes(renderHeatmap({ hourly: [{ bucketStartAt: activityNow.toISOString(), totalTokens: 20 }], days: 7 }));
+    assert.equal(populated.find((node) => node.props.accessibilityLabel?.includes(": 20 tokens")).props.style.backgroundColor, accent);
+  }
+} finally { mock.timers.reset(); }
+
 // Data requests triggered by tab focus must not activate the pull-to-refresh control.
 for (const [tab, component, expectedRequests] of [
   ["activity", "ActivityScreen", ["activity"]],
@@ -380,7 +501,7 @@ for (const [tab, component, expectedRequests] of [
   const request = (resource) => { requests.push(resource); return pending.promise; };
   const state = { booting: false, refreshing: true, spaces: [], sessions: [], sessionViews: {}, sessionLatestTurns: {}, sessionTurnStatuses: {}, runningSessions: {}, sessionStatusRequests: 0 };
   const spaceList = { loading: true, overview: {}, visits: [], refresh: () => request("spaces") };
-  const activityData = { loading: true, credits: { data: { netUsd: 1 }, error: null }, days: { data: [], error: null }, refresh: () => request("activity") };
+  const activityData = { loading: true, credits: { data: { netUsd: 1 }, error: null }, days: { data: [], error: null }, activity: { data: { hourly: [], days: 91 }, error: null }, refresh: () => request("activity") };
   const renderTab = loadChromeComponent(`../app/(tabs)/${tab}.tsx`, component, {
     ...chromeScope,
     useState: (initial) => {
@@ -407,7 +528,7 @@ for (const [tab, component, expectedRequests] of [
     sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [], emptyRunningSessions, runningSessionCandidates, sessionListStatus,
     CHAT_SEARCH_TYPES: ["session", "turn", "space"], SPACE_SEARCH_TYPES: ["space"],
     Screen: "Screen", ScrollView: "ScrollView", LegendList: "LegendList", RefreshControl: "RefreshControl",
-    AccountAvatar: "AccountAvatar", TokenHeatmap: "TokenHeatmap", PressableScale: "PressableScale",
+    AccountAvatar: "AccountAvatar", TokenHeatmap: "TokenHeatmap", ActivityHeatmap: "ActivityHeatmap", PressableScale: "PressableScale",
     ConnectionBanner: "ConnectionBanner", DataError: "DataError", LoadingRows: "LoadingRows", SectionHeader: "SectionHeader",
     EmptyState: "EmptyState", ExpandableSearchBar: "ExpandableSearchBar", ActivityIndicator: "ActivityIndicator",
     AdaptiveSheet: "AdaptiveSheet", PrimaryButton: "PrimaryButton", SpaceFilterChip: "SpaceFilterChip", FilterChip: "FilterChip",

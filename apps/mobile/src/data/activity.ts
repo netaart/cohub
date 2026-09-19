@@ -1,4 +1,13 @@
-import type { SpaceUsageHourlyStat } from "@neta-art/cohub";
+import type { SpaceActivityContributor, SpaceUsageHourlyStat } from "@neta-art/cohub";
+
+export function activityContributorName(contributor: Pick<SpaceActivityContributor, "userUuid" | "profile">, unknownName: string): string {
+  // The activity API can use the UUID as a placeholder displayName when a profile is missing.
+  for (const candidate of [contributor.profile?.displayName, contributor.profile?.username]) {
+    const name = candidate?.trim();
+    if (name && name.toLowerCase() !== contributor.userUuid.toLowerCase()) return name;
+  }
+  return unknownName;
+}
 
 export type TokenDay = { date: string; tokens: number; level: number };
 

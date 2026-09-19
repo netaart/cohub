@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionRow } from "@/src/components/SessionRow";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
 import { useApp } from "@/src/data/context";
+import { activityContributorName } from "@/src/data/activity";
 import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useSpaceRealtime } from "@/src/data/use-space-realtime";
 import { mergeTaskRuns, refreshTaskRuns } from "@/src/data/task-sync";
@@ -388,13 +389,15 @@ export default function SpaceScreen() {
         {activity.contributors.items.length > 0 && (
           <View>
             <Text style={[typography.bodyMedium, { color: theme.colors.text, marginBottom: 8 }]}>{t("space.activity.contributors")}</Text>
-            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-              {activity.contributors.items.slice(0, 5).map((contributor) => (
-                <View key={contributor.userUuid} style={{ alignItems: "center", gap: 4 }}>
-                  <Avatar name={contributor.profile?.displayName || "User"} uri={contributor.profile?.avatarUrl} size={32} />
-                  <Text style={[typography.micro, { color: theme.colors.textMuted }]}>{contributor.requests}</Text>
-                </View>
-              ))}
+            <View style={{ gap: theme.spacing.sm }}>
+              {activity.contributors.items.slice(0, 5).map((contributor) => {
+                const contributorName = activityContributorName(contributor, t("space.activity.unknownContributor"));
+                return <View key={contributor.userUuid} style={{ flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}>
+                  <Avatar name={contributorName} uri={contributor.profile?.avatarUrl} size={32} />
+                  <Text numberOfLines={1} style={[typography.body, { flex: 1, minWidth: 0, color: theme.colors.text }]}>{contributorName}</Text>
+                  <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{t("activity.metric.requests")} · {contributor.requests.toLocaleString()}</Text>
+                </View>;
+              })}
             </View>
           </View>
         )}
