@@ -1,14 +1,15 @@
 import * as Clipboard from "expo-clipboard";
-import type { SandboxSpecId, SpaceMember, SpaceRole, SpaceSandboxAutoDestroyPolicy, SpaceSandboxConfig } from "@neta-art/cohub";
+import type { CronJobRecord, SandboxSpecId, SpaceMember, SpaceModListItem, SpaceRole, SpaceSandboxAutoDestroyPolicy, SpaceSandboxConfig } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { useToast } from "@/src/components/Toast";
 import { useApp } from "@/src/data/context";
 import { useTranslation, type Translate } from "@/src/i18n";
 import { openWebLink } from "@/src/platform/browser";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, Avatar, IconButton, Screen, TopBar, type IconName } from "@/src/ui";
+import { formatRelativeTime } from "@/src/utils";
 
 type EnvItem = { name: string; value: string };
 type InvitationItem = { token: string; role: SpaceRole; status: string };
@@ -34,6 +35,8 @@ export default function SpaceSettingsScreen() {
   const [allowedSpec, setAllowedSpec] = useState<SandboxSpecId>("standard");
   const [members, setMembers] = useState<SpaceMember[]>([]);
   const [invitations, setInvitations] = useState<InvitationItem[]>([]);
+  const [mods, setMods] = useState<SpaceModListItem[]>([]);
+  const [schedules, setSchedules] = useState<CronJobRecord[]>([]);
 
   useEffect(() => {
     if (!client || !spaceId) return;
@@ -46,13 +49,17 @@ export default function SpaceSettingsScreen() {
       client.billing.getFeatureEntitlement("sandbox.spec.ultra"),
       space.members.list(),
       space.invitations.list(),
-    ]).then(([environment, settings, endpointResult, boost, ultra, memberResult, invitationResult]) => {
+      space.mods.list(),
+      client.cronJobs.list(spaceId),
+    ]).then(([environment, settings, endpointResult, boost, ultra, memberResult, invitationResult, modResult, scheduleResult]) => {
       setEnv(environment.env);
       setConfig(settings.config.sandbox);
       setPorts(endpointResult.endpoints);
       setAllowedSpec(ultra.enabled ? "ultra" : boost.enabled ? "boost" : "standard");
       setMembers(memberResult.items);
       setInvitations(invitationResult.items);
+      setMods(modResult.items);
+      setSchedules(scheduleResult.jobs);
     });
   }, [client, spaceId]);
 
@@ -322,6 +329,63 @@ export default function SpaceSettingsScreen() {
             </Pressable>
           ))}
         </View>
+
+        <View>
+          <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.mods")}</Text>
+          {mods.length === 0 ? (
+            <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.noMods")}</Text>
+          ) : (
+            mods.map((mod) => (
+              <View key={mod.id} style={[styles.modRow, { borderBottomColor: theme.colors.border }]}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text }]}>{mod.name || mod.mountSlug}</Text>
+                  <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{mod.mountPath}</Text>
+                  <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>Space: {mod.modSpaceId}</Text>
+                </View>
+                <Switch
+                  value={mod.enabled}
+                  onValueChange={async (enabled) => {
+                    if (!client || !spaceId) return;
+                    const space = client.space(spaceId);
+                    try {
+                      await space.mods.update(mod.id, { enabled });
+                      setMods((current) => current.map((m) => m.id === mod.id ? { ...m, enabled } : m));
+                      toast({ title: enabled ? t("space.settings.modEnabled") : t("space.settings.modDisabled") });
+                    } catch (error) {
+                      toast({ title: t("space.settings.modToggleFailed"), message: error instanceof Error ? error.message : undefined, tone: "danger" });
+                    }
+                  }}
+                  trackColor={{ false: theme.colors.border, true: theme.colors.accent }}
+                  thumbColor={theme.colors.background}
+                />
+              </View>
+            ))
+          )}
+        </View>
+
+        <View>
+          <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.schedules")}</Text>
+          {schedules.length === 0 ? (
+            <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.noSchedules")}</Text>
+          ) : (
+            schedules.map((schedule) => (
+              <ScheduleRow
+                key={schedule.id}
+                schedule={schedule}
+                onToggle={async (enabled) => {
+                  if (!client) return;
+                  try {
+                    await client.cronJobs.toggle(schedule.id, enabled);
+                    setSchedules((current) => current.map((s) => s.id === schedule.id ? { ...s, enabled } : s));
+                    toast({ title: enabled ? t("space.settings.schedule.enabled") : t("space.settings.schedule.disabled") });
+                  } catch (error) {
+                    toast({ title: t("space.settings.schedule.toggleFailed"), message: error instanceof Error ? error.message : undefined, tone: "danger" });
+                  }
+                }}
+              />
+            ))
+          )}
+        </View>
       </ScrollView>
     </Screen>
   );
@@ -443,6 +507,42 @@ function SegmentedControl<T extends string>({
   );
 }
 
+function ScheduleRow({ schedule, onToggle }: { schedule: CronJobRecord; onToggle: (enabled: boolean) => Promise<void> }) {
+  const theme = useAppTheme();
+  const { t } = useTranslation();
+  const [toggling, setToggling] = useState(false);
+  
+  const handleToggle = async (enabled: boolean) => {
+    setToggling(true);
+    try {
+      await onToggle(enabled);
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  return (
+    <View style={[styles.scheduleRow, { borderBottomColor: theme.colors.border }]}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text }]}>{schedule.title || t("space.settings.schedule.unnamed")}</Text>
+        <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 2 }]}>{schedule.cronExpression}</Text>
+        {schedule.updatedAt && (
+          <Text style={[typography.micro, { color: theme.colors.textFaint, marginTop: 4 }]}>
+            {t("space.settings.schedule.lastRun")}: {formatRelativeTime(schedule.updatedAt)}
+          </Text>
+        )}
+      </View>
+      <Switch
+        value={schedule.enabled}
+        onValueChange={handleToggle}
+        disabled={toggling}
+        trackColor={{ false: theme.colors.border, true: theme.colors.accent }}
+        thumbColor={theme.colors.surface}
+      />
+    </View>
+  );
+}
+
 function memberDisplayName(member: SpaceMember, fallback: string) {
   const displayName = member.profile?.displayName?.trim();
   const username = member.profile?.username?.trim();
@@ -504,4 +604,6 @@ const styles = StyleSheet.create({
   restartBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   restartButton: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 5 },
   portRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, marginTop: 8, borderRadius: 12 },
+  modRow: { paddingVertical: 12, borderBottomWidth: 1 },
+  scheduleRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 12, borderBottomWidth: 1 },
 });

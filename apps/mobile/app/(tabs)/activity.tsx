@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
-import { TokenHeatmap } from "@/src/components/TokenHeatmap";
+import { ActivityHeatmap } from "@/src/components/ActivityHeatmap";
 import { useApp } from "@/src/data/context";
 import { useActivity } from "@/src/data/use-activity";
 import { useBillingHistory } from "@/src/data/use-billing-history";
@@ -21,7 +21,7 @@ export default function ActivityScreen() {
   const tabBarInset = useFloatingTabBarInset();
   const { headerHeight, onHeaderLayout } = useEdgeChrome();
   const { connectionState } = useApp();
-  const { credits, days, refresh } = useActivity();
+  const { credits, activity, refresh } = useActivity();
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const subscriptions = useBillingHistory("subscriptions");
   const subscriptionItems = subscriptions.data?.kind === "subscriptions" ? subscriptions.data.list.items as BillingSubscriptionHistoryStatus[] : [];
@@ -61,8 +61,8 @@ export default function ActivityScreen() {
         {(["activity", "referrals"] as const).map((section) => <PressableScale key={section} accessibilityRole="button" onPress={() => router.push(`/settings/${section}`)} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}><AppIcon name={section === "activity" ? "activity" : "gift"} size={16} color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.accent }]}>{t(section === "activity" ? "activity.usageDetails" : "settings.section.referrals")}</Text></PressableScale>)}
       </View>
       <SectionHeader title={t("activity.heatmap.title")} />
-      {days.error ? <DataError message={days.error} onRetry={retry} /> : null}
-      {days.data ? <TokenHeatmap days={days.data} /> : !days.error ? <LoadingRows count={2} /> : null}
+      {activity.error ? <DataError message={activity.error} onRetry={retry} /> : null}
+      {activity.data ? <View style={{ paddingHorizontal: theme.spacing.lg }}><ActivityHeatmap hourly={activity.data.hourly} days={activity.data.days} /></View> : !activity.error ? <LoadingRows count={2} /> : null}
     </ScrollView>
   </Screen>;
 }

@@ -1,13 +1,14 @@
 import type { GenerationContentBlock, TaskRunDetailResponse } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { Image, ScrollView, Text } from "react-native";
+import { Image, Pressable, ScrollView, Text, View } from "react-native";
 import { useApp } from "@/src/data/context";
 import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useSpaceRealtime } from "@/src/data/use-space-realtime";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
-import { LoadingRows, Screen, TopBar } from "@/src/ui";
+import { AppIcon, LoadingRows, Screen, StatusPill, TopBar } from "@/src/ui";
+import { formatRelativeTime } from "@/src/utils";
 
 export default function TaskScreen() {
   const { taskId } = useLocalSearchParams<{ taskId: string }>();
@@ -18,6 +19,7 @@ export default function TaskScreen() {
   const [detail, setDetail] = useState<TaskRunDetailResponse | null>(null);
   useSpaceRealtime(detail?.run.spaceId ? [detail.run.spaceId] : []);
   const [error, setError] = useState<string | null>(null);
+  const [showJson, setShowJson] = useState(false);
   const generation = useRef(0);
   useEffect(() => () => { generation.current += 1; }, [client, taskId]);
   useSyncScope(`task:${taskId}`, async () => {
@@ -34,7 +36,80 @@ export default function TaskScreen() {
     }
   }, !detail || detail.run.status === "running" || detail.run.status === "pending" ? 5_000 : 60_000, Boolean(taskId));
   const output = generationOutput(detail?.run.result);
-  return <Screen><TopBar title={t("task.title")} onBack={() => router.back()} /><ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>{error ? <Text style={[typography.body, { color: theme.colors.danger }]}>{error}</Text> : !detail ? <LoadingRows count={4} /> : output.length === 0 ? <Text style={[typography.body, { color: theme.colors.textMuted }]}>{t("task.noOutput")}</Text> : output.map((block, index) => <GenerationBlock key={index} block={block} />)}</ScrollView></Screen>;
+  const run = detail?.run;
+  
+  return <Screen>
+    <TopBar title={t("task.title")} onBack={() => router.back()} />
+    <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
+      {error ? <Text style={[typography.body, { color: theme.colors.danger }]}>{error}</Text> : !detail ? <LoadingRows count={4} /> : (
+        <>
+          <View style={{ gap: 12 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{run?.taskType.replaceAll("_", " ")}</Text>
+              <StatusPill 
+                label={run?.status ?? "unknown"} 
+                tone={run?.status === "failed" ? "danger" : run?.status === "running" || run?.status === "pending" ? "warning" : "success"} 
+              />
+            </View>
+            
+            <View style={{ gap: 8 }}>
+              <InfoRow icon="clock" label={t("task.created")} value={formatRelativeTime(run?.createdAt ?? "")} />
+              <InfoRow icon="clock" label={t("task.updated")} value={formatRelativeTime(run?.updatedAt ?? "")} />
+              <InfoRow icon="activity" label={t("task.attempts")} value={String(run?.attemptCount ?? 0)} />
+              {run?.sessionId && <InfoRow icon="message-square" label={t("task.session")} value={run.sessionId.slice(0, 8)} />}
+              {run?.errorMessage && <InfoRow icon="alert" label={t("task.error")} value={run.errorMessage} valueColor={theme.colors.danger} />}
+            </View>
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setShowJson(!showJson)}
+            style={({ pressed }) => ({
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: 12,
+              borderRadius: 10,
+              backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface,
+            })}
+          >
+            <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("task.showJson")}</Text>
+            <AppIcon name={showJson ? "chevron-up" : "chevron-down"} size={16} color={theme.colors.textMuted} />
+          </Pressable>
+
+          {showJson && run && (
+            <View style={{ padding: 12, borderRadius: 10, backgroundColor: theme.colors.surfaceRaised }}>
+              <Text selectable style={[typography.caption, { color: theme.colors.text, fontSize: 11, lineHeight: 16, fontFamily: "monospace" }]}>
+                {JSON.stringify(run, null, 2)}
+              </Text>
+            </View>
+          )}
+
+          {output.length > 0 && (
+            <View style={{ gap: 12, marginTop: 8 }}>
+              <Text style={[typography.heading, { color: theme.colors.text }]}>{t("task.output")}</Text>
+              {output.map((block, index) => <GenerationBlock key={index} block={block} />)}
+            </View>
+          )}
+
+          {output.length === 0 && !run?.errorMessage && run?.status === "completed" && (
+            <Text style={[typography.body, { color: theme.colors.textMuted }]}>{t("task.noOutput")}</Text>
+          )}
+        </>
+      )}
+    </ScrollView>
+  </Screen>;
 }
+function InfoRow({ icon, label, value, valueColor }: { icon: React.ComponentProps<typeof AppIcon>["name"]; label: string; value: string; valueColor?: string }) {
+  const theme = useAppTheme();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+      <AppIcon name={icon} size={14} color={theme.colors.textMuted} />
+      <Text style={[typography.caption, { color: theme.colors.textMuted, minWidth: 70 }]}>{label}</Text>
+      <Text selectable style={[typography.caption, { color: valueColor ?? theme.colors.text, flex: 1 }]}>{value}</Text>
+    </View>
+  );
+}
+
 function generationOutput(result: unknown): GenerationContentBlock[] { if (!result || typeof result !== "object" || !Array.isArray((result as { output?: unknown }).output)) return []; return (result as { output: GenerationContentBlock[] }).output; }
 function GenerationBlock({ block }: { block: GenerationContentBlock }) { const theme = useAppTheme(); if (block.type === "text") return <Text selectable style={[typography.body, { color: theme.colors.text, lineHeight: 24 }]}>{block.text}</Text>; const source = block.source as unknown as { url?: string; data?: string; mimeType?: string }; const uri = source.url ?? (source.data && source.mimeType ? `data:${source.mimeType};base64,${source.data}` : null); return uri ? <Image accessibilityLabel={`${block.type} output`} source={{ uri }} resizeMode="contain" style={{ width: "100%", height: 320, backgroundColor: theme.colors.surfaceRaised }} /> : <Text style={[typography.caption, { color: theme.colors.textMuted }]}>{block.type}</Text>; }

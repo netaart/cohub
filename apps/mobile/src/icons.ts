@@ -19,6 +19,7 @@ import CircleX from "lucide-react-native/icons/circle-x";
 import Clock from "lucide-react-native/icons/clock";
 import ChevronDown from "lucide-react-native/icons/chevron-down";
 import ChevronRight from "lucide-react-native/icons/chevron-right";
+import ChevronUp from "lucide-react-native/icons/chevron-up";
 import CloudOff from "lucide-react-native/icons/cloud-off";
 import Compass from "lucide-react-native/icons/compass";
 import Copy from "lucide-react-native/icons/copy";
@@ -41,6 +42,7 @@ import Layers2 from "lucide-react-native/icons/layers-2";
 import ListFilter from "lucide-react-native/icons/list-filter";
 import ListTree from "lucide-react-native/icons/list-tree";
 import MessagesSquare from "lucide-react-native/icons/messages-square";
+import MessageSquare from "lucide-react-native/icons/message-square";
 import Maximize2 from "lucide-react-native/icons/maximize-2";
 import Minimize2 from "lucide-react-native/icons/minimize-2";
 import Monitor from "lucide-react-native/icons/monitor";
@@ -91,6 +93,7 @@ export const icons = {
   clock: Clock,
   "chevron-down": ChevronDown,
   "chevron-right": ChevronRight,
+  "chevron-up": ChevronUp,
   "cloud-off": CloudOff,
   compass: Compass,
   copy: Copy,
@@ -112,6 +115,7 @@ export const icons = {
   layers: Layers2,
   "list-tree": ListTree,
   messages: MessagesSquare,
+  "message-square": MessageSquare,
   maximize: Maximize2,
   minimize: Minimize2,
   monitor: Monitor,

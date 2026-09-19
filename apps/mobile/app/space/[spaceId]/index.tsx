@@ -1,8 +1,9 @@
-import type { AppRecord, CheckpointRecord, SpaceRecord, TaskRunRecord, UserSessionListItem } from "@neta-art/cohub";
+import type { AppRecord, CheckpointRecord, SpaceActivityResponse, SpaceRecord, TaskRunRecord, UserSessionListItem } from "@neta-art/cohub";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
+import { ActivityHeatmap } from "@/src/components/ActivityHeatmap";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionRow } from "@/src/components/SessionRow";
 import { SpacePanels, type SpacePanel } from "@/src/components/SpacePanels";
@@ -22,15 +23,16 @@ type Resources = {
   checkpoints: CheckpointRecord[];
   apps: AppRecord[];
   tasks: TaskRunRecord[];
+  activity: SpaceActivityResponse | null;
 };
 
 type ResourceKey = keyof Resources;
 type ResourceFailures = Record<ResourceKey, boolean>;
 type ResourceLoading = Record<ResourceKey, boolean>;
 
-const emptyResources: Resources = { checkpoints: [], apps: [], tasks: [] };
-const noResourceFailures: ResourceFailures = { checkpoints: false, apps: false, tasks: false };
-const allResourcesLoading: ResourceLoading = { checkpoints: true, apps: true, tasks: true };
+const emptyResources: Resources = { checkpoints: [], apps: [], tasks: [], activity: null };
+const noResourceFailures: ResourceFailures = { checkpoints: false, apps: false, tasks: false, activity: false };
+const allResourcesLoading: ResourceLoading = { checkpoints: true, apps: true, tasks: true, activity: true };
 const SPACE_REFRESH_INTERVAL_MS = 60_000;
 
 export default function SpaceScreen() {
@@ -50,7 +52,7 @@ export default function SpaceScreen() {
   const [spaceError, setSpaceError] = useState<string | null>(null);
   const [resources, setResources] = useState<Resources>(emptyResources);
   const [resourceLoading, setResourceLoading] = useState<ResourceLoading>(allResourcesLoading);
-  const loadingResources = resourceLoading.checkpoints || resourceLoading.apps || resourceLoading.tasks;
+  const loadingResources = resourceLoading.checkpoints || resourceLoading.apps || resourceLoading.tasks || resourceLoading.activity;
   const [taskCursor, setTaskCursor] = useState<string | null>(null);
   const [tasksLoadingMore, setTasksLoadingMore] = useState(false);
   const [resourceFailures, setResourceFailures] = useState<ResourceFailures>(noResourceFailures);
@@ -171,7 +173,14 @@ export default function SpaceScreen() {
       settle("tasks", false);
       return result;
     }).catch((error: unknown) => { settle("tasks", true); throw error; });
-    const results = await Promise.allSettled([checkpointRequest, appRequest, taskRequest]);
+    const activityRequest = client.space(spaceId).activity.get(7).then((result) => {
+      if (resourcesRequestRef.current === requestToken) {
+        setResources((current) => ({ ...current, activity: result }));
+      }
+      settle("activity", false);
+      return result;
+    }).catch((error: unknown) => { settle("activity", true); throw error; });
+    const results = await Promise.allSettled([checkpointRequest, appRequest, taskRequest, activityRequest]);
     resourcesInFlightRef.current = false;
     if (resourcesRequestRef.current !== requestToken) return;
     if (results.every((result) => result.status === "fulfilled")) resourcesRefreshAtRef.current = Date.now();
@@ -305,7 +314,8 @@ export default function SpaceScreen() {
       setCheckpointing(false);
     }
   };
-  const detailsFailed = resourceFailures.checkpoints || resourceFailures.apps || resourceFailures.tasks || sessionsFailed;
+  const detailsFailed = resourceFailures.checkpoints || resourceFailures.apps || resourceFailures.tasks || resourceFailures.activity || sessionsFailed;
+  const activity = resources.activity;
   return <Screen>
     <View style={{ flex: 1 }} accessibilityElementsHidden={spaceActionsOpen} importantForAccessibility={spaceActionsOpen ? "no-hide-descendants" : "auto"}>
     <SpacePanels
@@ -343,6 +353,42 @@ export default function SpaceScreen() {
       <SpaceMetric icon="rocket" label={t("space.metric.works")} value={String(resources.apps.length)} />
       <SpaceMetric icon="activity" label={t("space.metric.running")} value={String(activeTasks)} />
     </View>
+    
+    {activity && (
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 16 }}>
+        <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.activity.title")}</Text>
+        
+        <ActivityHeatmap hourly={activity.hourly} days={activity.days} />
+        
+        {activity.rankings.apps.length > 0 && (
+          <View>
+            <Text style={[typography.bodyMedium, { color: theme.colors.text, marginBottom: 8 }]}>{t("space.activity.topApps")}</Text>
+            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+              {activity.rankings.apps.slice(0, 3).map((app) => (
+                <View key={app.appId} style={{ flex: 1, minWidth: 100, padding: 10, borderRadius: 10, backgroundColor: theme.colors.surface }}>
+                  <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text }]}>{app.title || "App"}</Text>
+                  <Text style={[typography.micro, { color: theme.colors.textMuted, marginTop: 2 }]}>{app.viewCount} views</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+        
+        {activity.contributors.items.length > 0 && (
+          <View>
+            <Text style={[typography.bodyMedium, { color: theme.colors.text, marginBottom: 8 }]}>{t("space.activity.contributors")}</Text>
+            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+              {activity.contributors.items.slice(0, 5).map((contributor) => (
+                <View key={contributor.userUuid} style={{ alignItems: "center", gap: 4 }}>
+                  <Avatar name={contributor.profile?.displayName || "User"} uri={contributor.profile?.avatarUrl} size={32} />
+                  <Text style={[typography.micro, { color: theme.colors.textMuted }]}>{contributor.requests}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+      </View>
+    )}
     {detailsFailed ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, marginTop: 12 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{t("space.resourcesFailed")}</Text><Pressable accessibilityRole="button" accessibilityLabel={t("space.resourcesRetry")} disabled={loadingResources || sessionsLoading} onPress={() => void reloadDetails()} hitSlop={8} style={({ pressed }) => ({ opacity: loadingResources || sessionsLoading ? 0.5 : pressed ? 0.6 : 1 })}><Text style={[typography.micro, { color: theme.colors.accent }]}>{t("common.retry")}</Text></Pressable></View> : null}
 
     <SectionHeader title={t("space.section.chats")} action={{ icon: "plus", label: t("space.newChat"), onPress: () => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } }) }} />
@@ -368,6 +414,7 @@ export default function SpaceScreen() {
       onClose={closeSpaceActions}
       actions={[
         { icon: "messages", title: t("chat.actions.openChats"), onPress: () => setActivePanel("chat") },
+        { icon: "square-pen", title: t("space.edit.action"), onPress: () => router.push({ pathname: "/space/[spaceId]/edit", params: { spaceId: space.id } }) },
         { icon: space.isPinned ? "pin-off" : "pin", title: space.isPinned ? t("space.unpin") : t("space.pin"), disabled: pinning, onPress: () => void togglePin() },
         { icon: "folder-open", title: t("space.openFiles"), onPress: () => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } }) },
         { icon: "bookmark", title: checkpointing ? t("space.saveCheckpointSaving") : t("space.saveCheckpoint"), disabled: checkpointing, onPress: () => void createCheckpoint() },

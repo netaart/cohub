@@ -1,4 +1,4 @@
-import type { BillingCreditStatus } from "@neta-art/cohub";
+import type { BillingCreditStatus, UserActivityResponse } from "@neta-art/cohub";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSyncScope } from "./use-sync-scope";
 import { useFocusEffect } from "expo-router";
@@ -9,10 +9,11 @@ type Resource<T> = { data: T | null; error: string | null };
 type ActivityData = {
   credits: Resource<BillingCreditStatus>;
   days: Resource<TokenDay[]>;
+  activity: Resource<UserActivityResponse>;
 };
 const ACTIVITY_POLL_INTERVAL_MS = 60_000;
 const empty: ActivityData = {
-  credits: { data: null, error: null }, days: { data: null, error: null },
+  credits: { data: null, error: null }, days: { data: null, error: null }, activity: { data: null, error: null },
 };
 
 export function useActivity() {
@@ -43,7 +44,11 @@ export function useActivity() {
       }
       await Promise.all([
         load("credits", () => client.billing.getCredits()),
-        load("days", async () => tokenDays((await client.user.getActivity(range)).hourly, range.from, range.to)),
+        load("activity", () => client.user.getActivity(range)),
+        load("days", async () => {
+          const activityData = await client.user.getActivity(range);
+          return tokenDays(activityData.hourly, range.from, range.to);
+        }),
       ]);
       if (requestGeneration === generation.current && !options.silent) setLoading(false);
       if (options.silent && errors.length) throw errors[0];

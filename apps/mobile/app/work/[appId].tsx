@@ -39,7 +39,17 @@ export default function WorkScreen() {
 
   const title = detail?.app.meta?.title || detail?.app.meta?.name || detail?.app.slug || t("work.fallbackTitle");
   return <Screen>
-    <TopBar title={title} subtitle={detail?.space.name || t("work.published")} onBack={() => router.back()} actions={contentUrl ? <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void openWebLink(contentUrl).catch(() => undefined)} /> : undefined} />
+    <TopBar 
+      title={title} 
+      subtitle={detail?.space.name || t("work.published")} 
+      onBack={() => router.back()} 
+      actions={(
+        <>
+          {detail && <IconButton name="square-pen" label={t("app.edit.action")} size={40} onPress={() => router.push({ pathname: "/work/[appId]/edit", params: { appId: detail.app.id } })} />}
+          {contentUrl && <IconButton name="external-link" label={t("file.openExternally")} size={40} onPress={() => void openWebLink(contentUrl).catch(() => undefined)} />}
+        </>
+      )} 
+    />
     {error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center" }]}>{error}</Text></View> : !detail ? <LoadingRows count={6} /> : !contentUrl ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("work.noContent")}</Text></View> : <WebView
       source={{ uri: contentUrl }}
       style={{ flex: 1, backgroundColor: theme.colors.background }}
