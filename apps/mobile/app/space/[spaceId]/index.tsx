@@ -173,13 +173,24 @@ export default function SpaceScreen() {
       settle("tasks", false);
       return result;
     }).catch((error: unknown) => { settle("tasks", true); throw error; });
-    const activityRequest = client.space(spaceId).activity.get(7).then((result) => {
-      if (resourcesRequestRef.current === requestToken) {
-        setResources((current) => ({ ...current, activity: result }));
+    const activityRequest = (async () => {
+      try {
+        const space = client.space(spaceId);
+        if (!space.activity?.get) {
+          settle("activity", false);
+          return null;
+        }
+        const result = await space.activity.get(7);
+        if (resourcesRequestRef.current === requestToken) {
+          setResources((current) => ({ ...current, activity: result }));
+        }
+        settle("activity", false);
+        return result;
+      } catch (error: unknown) {
+        settle("activity", true);
+        throw error;
       }
-      settle("activity", false);
-      return result;
-    }).catch((error: unknown) => { settle("activity", true); throw error; });
+    })();
     const results = await Promise.allSettled([checkpointRequest, appRequest, taskRequest, activityRequest]);
     resourcesInFlightRef.current = false;
     if (resourcesRequestRef.current !== requestToken) return;

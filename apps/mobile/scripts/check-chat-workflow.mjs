@@ -698,20 +698,22 @@ for (const isPinned of [false, true]) {
   for (const pinning of [false, true]) {
     const events = [];
     const actions = buildSpaceActions({ id: "space-123", isPinned }, pinning, (key) => key, (panel) => events.push(panel), () => events.push("togglePin"), { push: (route) => events.push(route) }, false, () => events.push("checkpoint"));
-    assert.deepEqual(actions.map((action) => action.icon), ["messages", isPinned ? "pin-off" : "pin", "folder-open", "bookmark"]);
-    assert.equal(actions[1].title, isPinned ? "space.unpin" : "space.pin");
-    assert.equal(actions[1].disabled, pinning);
+    assert.deepEqual(actions.map((action) => action.icon), ["messages", "square-pen", isPinned ? "pin-off" : "pin", "folder-open", "bookmark"]);
+    assert.equal(actions[2].title, isPinned ? "space.unpin" : "space.pin");
+    assert.equal(actions[2].disabled, pinning);
     menuFocused = true;
     const spaceMenu = renderChatMenu({ anchorRef: { current: null }, title: "Space", testID: "space-actions-menu", onClose: () => events.push("close"), actions });
     assert.equal(chromeNodes(spaceMenu).find((node) => node.props?.accessibilityRole === "menu").props.testID, "space-actions-menu");
     const items = chromeNodes(spaceMenu).filter((node) => node.props?.accessibilityRole === "menuitem");
     items[0].props.onPress();
     assert.deepEqual(events.splice(0), ["close", "chat"]);
+    items[1].props.onPress();
+    assert.deepEqual(events.splice(0), ["close", { pathname: "/space/[spaceId]/edit", params: { spaceId: "space-123" } }]);
     if (!pinning) {
-      items[1].props.onPress();
+      items[2].props.onPress();
       assert.deepEqual(events.splice(0), ["close", "togglePin"]);
-    } else assert.equal(items[1].props.disabled, true);
-    items[2].props.onPress();
+    } else assert.equal(items[2].props.disabled, true);
+    items[3].props.onPress();
     assert.deepEqual(events.splice(0), ["close", { pathname: "/space/[spaceId]/files", params: { spaceId: "space-123" } }]);
   }
 }

@@ -61,8 +61,8 @@ export default function ActivityScreen() {
         {(["activity", "referrals"] as const).map((section) => <PressableScale key={section} accessibilityRole="button" onPress={() => router.push(`/settings/${section}`)} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: theme.spacing.sm }}><AppIcon name={section === "activity" ? "activity" : "gift"} size={16} color={theme.colors.accent} /><Text style={[typography.caption, { color: theme.colors.accent }]}>{t(section === "activity" ? "activity.usageDetails" : "settings.section.referrals")}</Text></PressableScale>)}
       </View>
       <SectionHeader title={t("activity.heatmap.title")} />
-      {activity.error ? <DataError message={activity.error} onRetry={retry} /> : null}
-      {activity.data ? <View style={{ paddingHorizontal: theme.spacing.lg }}><ActivityHeatmap hourly={activity.data.hourly} days={activity.data.days} /></View> : !activity.error ? <LoadingRows count={2} /> : null}
+      {activity?.error ? <DataError message={activity.error} onRetry={retry} /> : null}
+      {activity?.data ? <View style={{ paddingHorizontal: theme.spacing.lg }}><ActivityHeatmap hourly={activity.data.hourly} days={activity.data.days} /></View> : !activity?.error ? <LoadingRows count={2} /> : null}
     </ScrollView>
   </Screen>;
 }
