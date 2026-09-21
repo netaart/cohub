@@ -4,6 +4,7 @@ import { LegendList, type LegendListRef, type ViewToken } from "@legendapp/list/
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
+import { FilterChip } from "@/src/components/FilterChip";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { SessionSearchRow, SpaceSearchRow } from "@/src/components/SearchResultRow";
 import { SessionRow } from "@/src/components/SessionRow";
@@ -212,7 +213,7 @@ export default function ChatsScreen() {
                 style={{ minHeight: 48, width: 48, alignItems: "center", justifyContent: "center" }}
               >
                 {({ pressed }) => (
-                  <View style={{ height: 32, width: 32, borderRadius: theme.radius.sm, borderCurve: "continuous", alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : sourceFilter !== "all" ? theme.colors.accentSoft : theme.colors.surfaceRaised }}>
+                  <View style={{ height: 32, width: 32, borderRadius: theme.radius.pill, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : sourceFilter !== "all" ? theme.colors.accentSoft : theme.colors.surfaceRaised }}>
                     <AppIcon name="filter" size={16} color={sourceFilter !== "all" ? theme.colors.accent : theme.colors.textMuted} />
                   </View>
                 )}
@@ -238,25 +239,5 @@ export default function ChatsScreen() {
         ]}
       /> : null}
     </Screen>
-  );
-}
-
-function FilterChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
-  const theme = useAppTheme();
-  // Keep the touch target generous without turning the label into a full-height button.
-  return (
-    <Pressable
-      accessibilityRole="tab"
-      accessibilityLabel={label}
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={{ minHeight: 48, minWidth: 48, paddingVertical: theme.spacing.sm, justifyContent: "center" }}
-    >
-      {({ pressed }) => (
-        <View style={{ minHeight: 32, paddingVertical: theme.spacing.xs, paddingHorizontal: theme.spacing.md, borderRadius: theme.radius.sm, borderCurve: "continuous", alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : selected ? theme.colors.accentSoft : "transparent" }}>
-          <Text style={[typography.caption, { fontWeight: "600", color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text>
-        </View>
-      )}
-    </Pressable>
   );
 }

@@ -1,8 +1,9 @@
 import { useFocusEffect, useRouter, useScrollToTop } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { LegendList, type LegendListRef, type ViewToken } from "@legendapp/list/react-native";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Text, TextInput, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { FilterChip } from "@/src/components/FilterChip";
 import { useFloatingTabBarInset } from "@/src/components/FloatingTabBar";
 import { AccountAvatar } from "@/src/components/AccountAvatar";
 import { SpaceSearchRow } from "@/src/components/SearchResultRow";
@@ -14,7 +15,7 @@ import { useApp } from "@/src/data/context";
 import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
-import { AppIcon, DataError, EmptyState, ExpandableSearchBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
+import { DataError, EmptyState, ExpandableSearchBar, IconButton, LoadingRows, PrimaryButton, Screen } from "@/src/ui";
 import { displaySpaceName } from "@/src/utils";
 import { EdgeHeader, useEdgeChrome } from "@/src/ui/EdgeChrome";
 
@@ -176,10 +177,10 @@ export default function SpacesScreen() {
       scrollIndicatorInsets={{ top: headerHeight, bottom: tabBarInset }}
       contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
       ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingVertical: 4 }}>
-          <SpaceFilterChip label={t("spaces.filter.recent")} selected={filter === "recent"} onPress={() => setFilter("recent")} />
-          <SpaceFilterChip label={t("spaces.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} />
-          <SpaceFilterChip label={t("spaces.filter.pinned")} icon="pin" selected={filter === "pinned"} onPress={() => setFilter("pinned")} />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: theme.spacing.xs }}>
+          <FilterChip label={t("spaces.filter.recent")} selected={filter === "recent"} onPress={() => setFilter("recent")} />
+          <FilterChip label={t("spaces.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} />
+          <FilterChip label={t("spaces.filter.pinned")} icon="pin" selected={filter === "pinned"} onPress={() => setFilter("pinned")} />
         </View>
         {remoteSearch.query === trimmedQuery && remoteSearch.loading ? <View style={{ alignItems: "flex-end", minHeight: 16 }}><ActivityIndicator accessibilityLabel={t("spaces.searching")} size="small" color={theme.colors.accent} /></View> : null}
         {remoteSearch.query === trimmedQuery && remoteSearch.error && trimmedQuery.length >= 2 ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable style={[typography.micro, { color: theme.colors.danger, flex: 1 }]}>{remoteSearch.error}</Text><IconButton name="refresh" label={t("spaces.search.retry")} onPress={remoteSearch.retry} tone="accent" /></View> : null}
@@ -202,9 +203,4 @@ export default function SpacesScreen() {
       {createError ? <Text style={[typography.caption, { color: theme.colors.danger, marginTop: 10 }]}>{createError}</Text> : null}
     </AdaptiveSheet>
   </Screen>;
-}
-
-function SpaceFilterChip({ label, icon, selected, onPress }: { label: string; icon?: React.ComponentProps<typeof AppIcon>["name"]; selected: boolean; onPress: () => void }) {
-  const theme = useAppTheme();
-  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => ({ minHeight: 48, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border, backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, flexDirection: "row", alignItems: "center", gap: 5 })}>{icon ? <AppIcon name={icon} size={13} color={selected ? theme.colors.accent : theme.colors.textMuted} /> : null}<Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }
