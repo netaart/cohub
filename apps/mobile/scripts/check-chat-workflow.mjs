@@ -364,6 +364,7 @@ const chromeScope = {
   StyleSheet: { create: (styles) => styles },
   COMPOSER_TEXT_PADDING,
   edgeChrome: { headerMinHeight: 56, fade: 24 },
+  recordDebugEvent: () => {},
   useTranslation: () => ({ t: (key) => key }),
   typography: { heading: { fontSize: 17 }, caption: { fontSize: 12 }, body: { fontSize: 15 } },
   useAppTheme: () => ({ colors: { background: "background", text: "text", textMuted: "muted", textSecondary: "secondary", accent: "accent", accentSoft: "selected", surfacePressed: "pressed" } }),
@@ -657,7 +658,8 @@ for (const success of ["#238552", "#62c994"]) {
   assert.equal(chromeNodes(renderHeatmap({ days: activityDays })).find((node) => node.type === "Pressable").props.accessibilityState.selected, true);
 }
 for (const background of ["#f7f7f5", "#0f1114", "#000000"]) {
-  const renderTopBar = loadChromeComponent("../src/ui.tsx", "TopBar", { ...chromeScope, useAppTheme: () => ({ colors: { background } }) });
+  const backEvents = [];
+  const renderTopBar = loadChromeComponent("../src/ui.tsx", "TopBar", { ...chromeScope, useAppTheme: () => ({ colors: { background } }), recordDebugEvent: (name) => backEvents.push(name) });
   let backCount = 0;
   const header = renderTopBar({ title: "A long inline title", subtitle: "Space / file.ts", onBack: () => backCount++, actions: { type: "actions" } });
   const headerStyle = Object.assign({}, ...header.props.style);
@@ -677,8 +679,13 @@ for (const background of ["#f7f7f5", "#0f1114", "#000000"]) {
   assert.equal(headerStyle.borderBottomWidth, undefined);
   const headerNodes = chromeNodes(header);
   assert.equal(headerNodes.find((node) => node.props?.accessibilityRole === "header").props.numberOfLines, 1);
-  headerNodes.find((node) => node.type === "IconButton").props.onPress();
+  const backButton = headerNodes.find((node) => node.type === "IconButton");
+  backButton.props.onPressIn();
+  backButton.props.onPressOut();
+  backButton.props.onTouchCancel();
+  backButton.props.onPress();
   assert.equal(backCount, 1);
+  assert.deepEqual(backEvents, ["navigation.back.press_in", "navigation.back.press_out", "navigation.back.touch_cancel", "navigation.back.dispatch"]);
   assert.ok(headerNodes.some((node) => node.type === "actions"));
   const searchHeader = renderTopBar({ title: "Chats", children: { type: "search-input" } });
   assert.ok(chromeNodes(searchHeader).some((node) => node.type === "search-input"));
@@ -2123,6 +2130,7 @@ function panelPagerHarness(initialPanel = null) {
   let measuredContent = false;
   let nativeX = 0;
   const commands = [];
+  const diagnostics = [];
   const slot = (create) => { const index = cursor++; if (!(index in slots)) slots[index] = create(); return [index, slots[index]]; };
   const effect = (callback, deps) => {
     const [index, previous] = slot(() => null);
@@ -2151,7 +2159,7 @@ function panelPagerHarness(initialPanel = null) {
     Reanimated: { ScrollView: "Pager", View: "AnimatedView" }, BackHandler: { addEventListener: () => ({ remove() {} }) },
     PANEL_WIDTH_RATIO: 0.86, MAX_PANEL_WIDTH: 360, PANEL_SCROLL_IDLE_MS: 140, PANEL_CLOSE_SETTLE_MS: 380,
     PANEL_SEED_RETRY_MS: 240, PANEL_SEED_FORCE_MS: 480,
-    isPagerHeaderTouch, panelForScrollOffset, chatScrollTrace: { record() {} }, ChatPanel: "ChatPanel", FilesPanel: "FilesPanel",
+    isPagerHeaderTouch, panelForScrollOffset, recordDebugEvent: (name, fields) => diagnostics.push({ name, fields }), chatScrollTrace: { record() {} }, ChatPanel: "ChatPanel", FilesPanel: "FilesPanel",
   });
   let tree;
   const render = () => {
@@ -2167,7 +2175,7 @@ function panelPagerHarness(initialPanel = null) {
   const layout = (height = 800) => { measuredViewport = height > 0; pager.props.onLayout?.({ nativeEvent: { layout: { width: viewportWidth, height } } }); };
   const style = (node) => Object.assign({}, ...[node.props.style].flat(Infinity).filter(Boolean).map((value) => value.animated ? value.animated() : value));
   return {
-    commands, commits, content, layout,
+    commands, commits, diagnostics: () => diagnostics, content, layout,
     resize: (width) => { viewportWidth = width; measuredContent = measuredViewport = false; pager = render(); },
     nodes: () => chromeNodes(tree),
     render: () => (pager = render()),
@@ -2224,6 +2232,9 @@ assert.equal(delayedPager.pager().props.scrollEnabled, true, "the pager unlocks 
 delayedPager.pager().props.onTouchStart({ nativeEvent: { locationY: 80 } });
 delayedPager.render();
 assert.equal(delayedPager.pager().props.scrollEnabled, true, "body touches keep the panel pager enabled");
+assert.ok(delayedPager.diagnostics().some(({ name }) => name === "navigation.pager.drag_begin"), "pager drags are visible to diagnostics");
+assert.ok(delayedPager.diagnostics().some(({ name }) => name === "navigation.pager.header_touch_start"), "header touch starts are visible to diagnostics");
+assert.ok(delayedPager.diagnostics().some(({ name }) => name === "navigation.pager.header_touch_end"), "header touch ends are visible to diagnostics");
 const commandsAfterSeed = delayedPager.commands.length;
 delayedPager.content();
 delayedPager.layout();

@@ -115,19 +115,29 @@ export default function ChatScreen() {
 
 // iOS swipe-back is silently cancelled when the SpacePanels pager wins the horizontal drag; the
 // cancelled interactive pop can then desync the JS stack, so later back presses dispatch
-// GO_BACK against an already-popped root (silently unhandled in production). This breadcrumb
-// distinguishes that failure from a press that never reached JS.
+// GO_BACK against an already-popped root (silently unhandled in production). Keep a before/after
+// breadcrumb so the diagnostics distinguish a cancelled touch from a navigation action that did
+// not change the root state.
+function backNavigationState(root: ReturnType<typeof useNavigationContainerRef>) {
+  if (!root.isReady()) return { rootReady: false, canGoBack: null, rootIndex: null, topRouteName: null, chatStackDepth: null, chatStackIndex: null };
+  const state = root.getState();
+  const stack = state?.routes.at(-1)?.state;
+  return {
+    rootReady: true,
+    canGoBack: root.canGoBack(),
+    rootIndex: state?.index ?? null,
+    topRouteName: state?.routes.at(-1)?.name ?? null,
+    chatStackDepth: stack?.type === "stack" ? stack.routes.length : null,
+    chatStackIndex: stack?.type === "stack" ? stack.index : null,
+  };
+}
+
 function useBackPressTrace(source: string, root: ReturnType<typeof useNavigationContainerRef>) {
   return useCallback(() => {
-    if (!root.isReady()) return;
-    const state = root.getState();
-    const stack = state?.routes.at(-1)?.state;
-    recordDebugEvent("chat.back.pressed", {
-      source,
-      canGoBack: root.canGoBack(),
-      rootIndex: state?.index ?? null,
-      chatStackDepth: stack?.type === "stack" ? stack.routes.length : null,
-      chatStackIndex: stack?.type === "stack" ? stack.index : null,
+    recordDebugEvent("chat.back.pressed", { source, ...backNavigationState(root) });
+    requestAnimationFrame(() => {
+      recordDebugEvent("chat.back.state_after", { source, phase: "frame", ...backNavigationState(root) });
+      setTimeout(() => recordDebugEvent("chat.back.state_after", { source, phase: "settled", ...backNavigationState(root) }), 400);
     });
   }, [root, source]);
 }
@@ -711,10 +721,21 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
     } catch (error) { showToast({ title: t("chat.cameraUnavailable.title"), message: error instanceof Error ? error.message : t("chat.cameraUnavailable.body"), tone: "danger" }); }
   };
   const stopGeneration = async () => {
-    if (stopping) return;
+    recordDebugEvent("chat.stop.pressed", { stopping });
+    if (stopping) {
+      recordDebugEvent("chat.stop.ignored", { reason: "already_in_flight" });
+      return;
+    }
     setStopping(true);
+    recordDebugEvent("chat.stop.started");
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    try { await abortSession(sessionId); } catch (error) { showToast({ title: t("chat.stopFailed.title"), message: error instanceof Error ? error.message : t("chat.stopFailed.body"), tone: "danger" }); } finally { setStopping(false); }
+    try {
+      await abortSession(sessionId);
+      recordDebugEvent("chat.stop.ended", { outcome: "success" });
+    } catch (error) {
+      recordDebugEvent("chat.stop.ended", { outcome: "failed" });
+      showToast({ title: t("chat.stopFailed.title"), message: error instanceof Error ? error.message : t("chat.stopFailed.body"), tone: "danger" });
+    } finally { setStopping(false); }
   };
   const runFollowupAction = async (turnId: string, action: "steer" | "cancel") => {
     if (!client || !spaceId || pendingFollowupAction !== null) return;

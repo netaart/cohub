@@ -28,6 +28,7 @@ import {
   type SessionSourceGroup,
 } from "@/src/data/session-labels";
 import { isPagerHeaderTouch, panelForScrollOffset, type PanelName } from "@/src/data/space-panel-pager";
+import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
 import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField, TopBar } from "@/src/ui";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
@@ -288,21 +289,35 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     return { transform: [{ translateX: pagerNativeX.value - pagerTarget.value }] };
   });
   const handleScrollBeginDrag = useCallback(() => {
+    recordDebugEvent("navigation.pager.drag_begin", { pagerReady, pagerScrollEnabled });
     clearIdleTimer();
-  }, [clearIdleTimer]);
+  }, [clearIdleTimer, pagerReady, pagerScrollEnabled]);
+  const handleScrollEndDrag = useCallback(() => {
+    recordDebugEvent("navigation.pager.drag_end", { pagerReady, pagerScrollEnabled });
+    scheduleSettle();
+  }, [pagerReady, pagerScrollEnabled, scheduleSettle]);
 
   const handlePagerTouchStart = useCallback((event: GestureResponderEvent) => {
     // The pager is a native horizontal responder. Lock it for top chrome touches so iOS's
     // edge-back gesture and the header's Pressables do not get cancelled by the pager.
     if (!isPagerHeaderTouch(event.nativeEvent.locationY, pagerHeaderTouchHeight)) return;
     headerTouchActiveRef.current = true;
+    recordDebugEvent("navigation.pager.header_touch_start", {
+      locationY: event.nativeEvent.locationY,
+      headerHeight: pagerHeaderTouchHeight,
+      pagerReady,
+      pagerScrollEnabled,
+    });
     setPagerScrollEnabled(false);
-  }, [pagerHeaderTouchHeight]);
-  const releasePagerHeaderTouch = useCallback(() => {
+  }, [pagerHeaderTouchHeight, pagerReady, pagerScrollEnabled]);
+  const releasePagerHeaderTouch = useCallback((phase: "end" | "cancel") => {
     if (!headerTouchActiveRef.current) return;
     headerTouchActiveRef.current = false;
+    recordDebugEvent(`navigation.pager.header_touch_${phase}`, { pagerReady, pagerScrollEnabled });
     setPagerScrollEnabled(!chipsTouchActiveRef.current);
-  }, []);
+  }, [pagerReady, pagerScrollEnabled]);
+  const handlePagerTouchEnd = useCallback(() => { releasePagerHeaderTouch("end"); }, [releasePagerHeaderTouch]);
+  const handlePagerTouchCancel = useCallback(() => { releasePagerHeaderTouch("cancel"); }, [releasePagerHeaderTouch]);
   const handleChipsTouchChange = useCallback((touching: boolean) => {
     // The filter chips are a nested horizontal ScrollView; it only wins its drag while the
     // pager is not scrolling, so touch-start there disables the pager for this gesture.
@@ -339,10 +354,10 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         disableIntervalMomentum
         onScroll={scrollHandler}
         onTouchStart={handlePagerTouchStart}
-        onTouchEnd={releasePagerHeaderTouch}
-        onTouchCancel={releasePagerHeaderTouch}
+        onTouchEnd={handlePagerTouchEnd}
+        onTouchCancel={handlePagerTouchCancel}
         onScrollBeginDrag={handleScrollBeginDrag}
-        onScrollEndDrag={scheduleSettle}
+        onScrollEndDrag={handleScrollEndDrag}
         onMomentumScrollBegin={clearIdleTimer}
         onMomentumScrollEnd={settle}
         onLayout={({ nativeEvent: { layout } }) => {

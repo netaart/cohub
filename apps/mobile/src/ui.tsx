@@ -22,6 +22,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { G, Path, Rect } from "react-native-svg";
 import { icons, type IconName } from "@/src/icons";
+import { record as recordDebugEvent } from "@/src/data/debug-session";
 import { getComposerActionState } from "@/src/data/composer-state";
 import { COMPOSER_TEXT_PADDING, estimateComposerContentHeight, getComposerLayout, shouldAutoExpandComposer } from "@/src/ui/composer-layout";
 import { useTranslation } from "@/src/i18n";
@@ -69,7 +70,7 @@ export function Avatar({ name, uri, size = 42, online = false }: { name: string;
   );
 }
 
-export function IconButton({ name, onPress, label, testID, size = 44, tone = "default", disabled = false }: { name: IconName; onPress: (event: GestureResponderEvent) => void; label: string; testID?: string; size?: number; tone?: "default" | "accent" | "danger"; disabled?: boolean }) {
+export function IconButton({ name, onPress, label, testID, size = 44, tone = "default", disabled = false, onPressIn, onPressOut, onTouchCancel }: { name: IconName; onPress: (event: GestureResponderEvent) => void; label: string; testID?: string; size?: number; tone?: "default" | "accent" | "danger"; disabled?: boolean; onPressIn?: (event: GestureResponderEvent) => void; onPressOut?: (event: GestureResponderEvent) => void; onTouchCancel?: (event: GestureResponderEvent) => void }) {
   const theme = useAppTheme();
   const color = tone === "accent" ? theme.colors.accent : tone === "danger" ? theme.colors.danger : theme.colors.textSecondary;
   return (
@@ -79,6 +80,9 @@ export function IconButton({ name, onPress, label, testID, size = 44, tone = "de
       testID={testID}
       hitSlop={6}
       disabled={disabled}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      onTouchCancel={onTouchCancel}
       onPress={onPress}
      
       style={({ pressed }) => [styles.iconButton, { width: Math.max(44, size), height: Math.max(44, size), borderRadius: Math.max(44, size) / 2, backgroundColor: pressed ? (tone === "accent" ? theme.colors.accentSoft : theme.colors.surfacePressed) : "transparent", opacity: disabled ? 0.45 : 1 }]}
@@ -131,7 +135,14 @@ export function TopBar({ title, subtitle, onBack, backLabel, leading, actions, c
   </>;
   return (
     <View testID="app-top-bar" style={[styles.topBar, { backgroundColor: transparent ? "transparent" : theme.colors.background }]}>
-      {onBack ? <IconButton name="arrow-left" label={backLabel ?? t("ui.detail.back")} onPress={onBack} /> : leading ? <View style={styles.topBarLeading}>{leading}</View> : null}
+      {onBack ? <IconButton
+        name="arrow-left"
+        label={backLabel ?? t("ui.detail.back")}
+        onPress={() => { recordDebugEvent("navigation.back.dispatch"); onBack(); }}
+        onPressIn={() => recordDebugEvent("navigation.back.press_in")}
+        onPressOut={() => recordDebugEvent("navigation.back.press_out")}
+        onTouchCancel={() => recordDebugEvent("navigation.back.touch_cancel")}
+      /> : leading ? <View style={styles.topBarLeading}>{leading}</View> : null}
       <View ref={titleRef} collapsable={false} style={styles.topBarTitle}>
         {onTitleLongPress ? <Pressable accessibilityRole="header" accessibilityLabel={titleLongPressLabel ?? title} onLongPress={onTitleLongPress} style={({ pressed }) => [styles.topBarTitlePressable, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}>{titleContent}</Pressable> : titleContent}
       </View>
