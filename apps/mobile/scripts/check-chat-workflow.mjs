@@ -369,12 +369,61 @@ const chromeScope = {
   typography: { heading: { fontSize: 17 }, caption: { fontSize: 12 }, body: { fontSize: 15 } },
   useAppTheme: () => ({ colors: { background: "background", text: "text", textMuted: "muted", textSecondary: "secondary", accent: "accent", accentSoft: "selected", surfacePressed: "pressed" } }),
 };
+// A minimal hook runner exercises real screen callbacks, not native layout or gestures.
+function createScreenHooks() {
+  let cursor = 0;
+  const slots = [];
+  const effects = [];
+  const changed = (previous, deps) => !previous || !deps || deps.some((value, index) => value !== previous.deps[index]);
+  const hooks = {
+    useState(initial) {
+      const index = cursor++;
+      if (!(index in slots)) {
+        const slot = { value: typeof initial === "function" ? initial() : initial };
+        slot.set = (next) => { slot.value = typeof next === "function" ? next(slot.value) : next; };
+        slots[index] = slot;
+      }
+      return [slots[index].value, slots[index].set];
+    },
+    useRef(current) { const index = cursor++; return slots[index] ??= { current }; },
+    useMemo(factory, deps) {
+      const index = cursor++;
+      if (changed(slots[index], deps)) slots[index] = { deps, value: factory() };
+      return slots[index].value;
+    },
+    useCallback(callback, deps) { return hooks.useMemo(() => callback, deps); },
+    useEffect(callback, deps) {
+      const index = cursor++;
+      if (changed(slots[index], deps)) effects.push(() => {
+        slots[index]?.cleanup?.();
+        slots[index] = { deps, cleanup: callback() };
+      });
+    },
+  };
+  return {
+    hooks,
+    render(run) { cursor = 0; const result = run(); while (effects.length) effects.shift()(); return result; },
+    unmount() { for (const slot of slots) slot?.cleanup?.(); },
+  };
+}
+const translateForScreen = (key) => key;
+const resourceKeys = ["env", "config", "ports", "allowedSpec", "members", "invitations", "mods", "schedules"];
+const formScope = {
+  ...chromeScope,
+  useTranslation: () => ({ t: translateForScreen }),
+  useAppTheme: () => ({ colors: {}, spacing: { md: 12, lg: 16 }, radius: { md: 12 } }),
+  Screen: "Screen", ScrollView: "ScrollView", Avatar: "Avatar", PrimaryButton: "PrimaryButton",
+  LoadingRows: "LoadingRows", LoadingBlock: "LoadingBlock", DataError: "DataError", InlineError: "InlineError",
+  SettingsGroup: "SettingsGroup", SettingsRow: "SettingsRow", SectionHeader: "SectionHeader", Metric: "Metric",
+};
+
 // Adding a Mod must open a real input on Android too; Alert.prompt is iOS-only.
 {
   let cursor = 0;
   const slots = [];
   const requests = [];
   const alerts = [];
+  let mods = [];
   const client = { space: () => ({ mods: { create: (input) => {
     const pending = Promise.withResolvers(); requests.push({ input, ...pending }); return pending.promise;
   } } }) };
@@ -384,6 +433,8 @@ const chromeScope = {
     useRef: (current) => { const index = cursor++; if (!(index in slots)) slots[index] = { current }; return slots[index]; },
     useEffect: () => {}, useRouter: () => ({}), useLocalSearchParams: () => ({ spaceId: "space" }),
     useApp: () => ({ client }), useToast: () => (notice) => alerts.push(notice),
+    useSpaceSettings: () => ({ env: [], config: null, ports: {}, allowedSpec: "standard", members: [], invitations: [], mods, setMods: (next) => { mods = next(mods); }, schedules: [], resources: Object.fromEntries(resourceKeys.map((key) => [key, { loaded: true, loading: false, error: null }])), loadResource: async () => {} }),
+    ResourceStatus: "ResourceStatus",
     useAppTheme: () => ({ colors: {}, spacing: { md: 12 }, radius: { md: 12 } }),
     installSpaceMod,
     Alert: { prompt: () => {}, alert: (...args) => alerts.push(args) },
@@ -491,7 +542,7 @@ try {
 
 // Data requests triggered by tab focus must not activate the pull-to-refresh control.
 for (const [tab, component, expectedRequests] of [
-  ["activity", "ActivityScreen", ["activity"]],
+  ["activity", "ActivityScreen", ["activity", "subscriptions"]],
   ["spaces", "SpacesScreen", ["home", "spaces"]],
   ["index", "ChatsScreen", ["home"]],
 ]) {
@@ -519,7 +570,7 @@ for (const [tab, component, expectedRequests] of [
     useRouter: () => ({}), useIsFocused: () => true, useScrollToTop: () => {}, useFloatingTabBarInset: () => 80,
     useEdgeChrome: () => ({ headerHeight: 103, onHeaderLayout: () => {} }), EdgeHeader: "EdgeHeader",
     useApp: () => ({ state, spaceList, userUuid: "user", client: {}, connectionState: "open", refreshHome: () => request("home") }),
-    useActivity: () => activityData, useBillingHistory: () => ({ data: null }),
+    useActivity: () => activityData, useBillingHistory: () => ({ data: null, loading: true, load: () => request("subscriptions") }),
     useAppTheme: () => ({ colors: {}, spacing: {} }),
     useRemoteSearch: () => ({ query: "", sessions: [], spaces: [] }), useSpaceSessionCounts: () => ({}),
     useSourceSessions: () => ({ sessions: [], loading: false, loadingMore: false, error: null, hasMore: false, initialized: true, loadMore: () => {}, reload: () => {} }),
@@ -627,6 +678,288 @@ for (const [tab, component, expectedRequests] of [
     spaceList.overview = null;
     assert.equal(control().props.ListEmptyComponent.type, "LoadingRows", "the first Spaces load still has a placeholder");
     assert.equal(control().props.refreshing, false, "the first Spaces load is not a pull gesture");
+  }
+}
+
+// Independent settings reads retain successful sections and only retry the failed resource.
+{
+  const runner = createScreenHooks();
+  let ports = Promise.withResolvers();
+  let portReads = 0;
+  let memberReads = 0;
+  const client = {
+    space: () => ({
+      env: { list: async () => ({ env: [{ name: "MODE", value: "test" }] }) },
+      getConfig: async () => ({ config: { sandbox: { spec: "boost" } } }),
+      sandbox: { ports: () => { portReads++; return ports.promise; } },
+      members: { list: async () => { memberReads++; return { items: [{ userId: "member" }] }; } },
+      invitations: { list: async () => ({ items: [] }) }, mods: { list: async () => ({ items: [] }) },
+    }),
+    billing: { getFeatureEntitlement: async () => ({ enabled: true }) },
+    cronJobs: { list: async () => ({ jobs: [] }) },
+  };
+  const useSettings = loadChromeComponent("../src/data/use-space-settings.ts", "useSpaceSettings", { ...formScope, ...runner.hooks, RESOURCE_KEYS: resourceKeys });
+  const render = () => runner.render(() => useSettings(client, "space"));
+  render(); await flushSync();
+  assert.equal(render().resources.members.loaded, true, "a slow port read does not delay members");
+  assert.equal(render().resources.ports.loading, true);
+  ports.reject(new Error("Ports unavailable")); await flushSync();
+  assert.equal(render().resources.ports.error, "Ports unavailable");
+  assert.equal(render().resources.ports.loaded, false, "a failed first read is not an empty success");
+  assert.equal(render().members.length, 1);
+  ports = Promise.withResolvers();
+  const retry = render().loadResource("ports");
+  assert.equal(render().resources.ports.error, null);
+  ports.resolve({ endpoints: { app: { port: 3000 } } }); await retry;
+  assert.equal(render().ports.app.port, 3000);
+  assert.equal(portReads, 2); assert.equal(memberReads, 1, "retry does not reload unrelated sections");
+  const older = Promise.withResolvers(); ports = older;
+  const first = render().loadResource("ports");
+  ports = Promise.withResolvers();
+  const second = render().loadResource("ports");
+  ports.resolve({ endpoints: { app: { port: 4000 } } }); await second;
+  older.resolve({ endpoints: { app: { port: 2000 } } }); await first;
+  assert.equal(render().ports.app.port, 4000, "a late read cannot overwrite a newer retry");
+  ports = Promise.withResolvers();
+  const abandoned = render().loadResource("ports"); runner.unmount();
+  ports.resolve({ endpoints: { app: { port: 5000 } } }); await abandoned;
+  assert.equal(render().ports.app.port, 4000, "unmount invalidates pending reads");
+}
+
+// Navigation-level file protection shares the toolbar's editing/confirmation behavior.
+{
+  const runner = createScreenHooks();
+  let guard;
+  const alerts = [];
+  let write = Promise.withResolvers();
+  const file = { kind: "text", encoding: "utf-8", content: "original", size: 8, mtimeMs: 1 };
+  const client = { space: () => ({ files: { read: async () => file, write: () => write.promise } }) };
+  const renderFile = loadChromeComponent("../app/space/[spaceId]/file.tsx", "FileScreen", {
+    ...formScope, ...runner.hooks,
+    useRouter: () => ({ back() {} }), useLocalSearchParams: () => ({ spaceId: "space", path: "notes.txt" }),
+    firstParam: (value) => value ?? "", useApp: () => ({ client }), useToast: () => () => {},
+    usePreventRemove: (enabled, callback) => { guard = { enabled, callback }; },
+    Alert: { alert: (...args) => alerts.push(args) }, detectCodeLanguage: () => "text", isEditableTextFile, isFileConflictError, classifySaveConflict,
+    MAX_EDITABLE_CODE_BYTES: 512 * 1024, CodeBlock: "CodeBlock", CodeEditor: "CodeEditor", SaveBanner: "SaveBanner", FileError: "FileError", ActivityIndicator: "ActivityIndicator",
+  });
+  const render = () => chromeNodes(runner.render(renderFile));
+  const actions = () => chromeNodes(render().find((node) => node.type === "TopBar").props.actions);
+  render(); await flushSync(); render();
+  assert.equal(guard.enabled, false, "read-only files do not block navigation");
+  actions().find((node) => node.props.label === "file.edit").props.onPress(); render();
+  assert.equal(guard.enabled, true);
+  guard.callback({ data: { action: { type: "GO_BACK" } } });
+  assert.equal(render().some((node) => node.type === "CodeEditor"), false, "the first system back exits clean editing");
+  actions().find((node) => node.props.label === "file.edit").props.onPress();
+  render().find((node) => node.type === "CodeEditor").props.onChangeText("unsaved"); render();
+  guard.callback({ data: { action: { type: "GO_BACK" } } });
+  assert.equal(alerts.at(-1)[0], "file.discard.title");
+  assert.equal(render().find((node) => node.type === "CodeEditor").props.value, "unsaved", "canceling removal keeps edits");
+  actions().find((node) => node.props.label === "file.save").props.onPress(); render();
+  const alertCount = alerts.length;
+  guard.callback({ data: { action: { type: "GO_BACK" } } });
+  assert.equal(alerts.length, alertCount, "saving blocks removal without offering to discard an in-flight write");
+  write.reject(new Error("offline")); await flushSync();
+  assert.equal(render().find((node) => node.type === "CodeEditor").props.value, "unsaved");
+  write = Promise.withResolvers();
+  actions().find((node) => node.props.label === "file.save").props.onPress();
+  write.resolve({ size: 7, mtimeMs: 2 }); await flushSync(); render();
+  assert.equal(guard.enabled, false, "a successful save releases navigation protection");
+  actions().find((node) => node.props.label === "file.edit").props.onPress();
+  render().find((node) => node.type === "CodeEditor").props.onChangeText("discard me"); render();
+  guard.callback({ data: { action: { type: "GO_BACK" } } });
+  alerts.at(-1)[2].find((button) => button.style === "destructive").onPress(); render();
+  assert.equal(guard.enabled, false, "confirmed discard returns to the file preview");
+  runner.unmount();
+}
+
+// A failed profile mutation leaves the real form and Save action available, without reloading.
+{
+  const runner = createScreenHooks();
+  let fail = true;
+  let reads = 0;
+  const writes = [];
+  const profile = { displayName: "Old name", username: "old" };
+  const client = { user: {
+    getMe: async () => { reads++; return { profile, uuid: "user" }; },
+    updateProfile: async (input) => { writes.push(input); if (fail) throw new Error("offline"); return { profile: input }; },
+  } };
+  const getClaims = async () => ({});
+  const showNotice = () => {};
+  const renderProfile = loadChromeComponent("../src/components/SettingsScreen.tsx", "ProfileSection", {
+    ...formScope, ...runner.hooks, useProfileSession: () => ({ getClaims }),
+  });
+  const render = () => chromeNodes(runner.render(() => renderProfile({ client, onNotice: showNotice })));
+  render(); await flushSync();
+  render().find((node) => node.props.placeholder === "settings.profile.displayNamePlaceholder").props.onChangeText("New name");
+  render().find((node) => node.type === "PrimaryButton").props.onPress(); await flushSync();
+  assert.equal(render().some((node) => node.type === "InlineError"), false, "save errors cannot replace the form with a reload action");
+  assert.equal(render().find((node) => node.props.placeholder === "settings.profile.displayNamePlaceholder").props.value, "New name");
+  assert.ok(render().some((node) => node.props.accessibilityRole === "alert" && node.props.children.includes("offline")));
+  fail = false;
+  render().find((node) => node.type === "PrimaryButton").props.onPress(); await flushSync();
+  assert.deepEqual(writes.map((input) => input.displayName), ["New name", "New name"]);
+  assert.equal(reads, 1, "retry saves the draft rather than fetching the old profile");
+  runner.unmount();
+}
+
+// Range changes must isolate data, errors, and loading state from older requests.
+{
+  const runner = createScreenHooks();
+  const requests = [];
+  const client = { user: { getActivity: ({ days }) => { const pending = Promise.withResolvers(); requests.push({ days, ...pending }); return pending.promise; } } };
+  const renderActivity = loadChromeComponent("../src/components/SettingsScreen.tsx", "ActivitySection", { ...formScope, ...runner.hooks, formatNumber: String });
+  const render = () => chromeNodes(runner.render(() => renderActivity({ client })));
+  const data = (tokens) => ({ summary: { totalTokens: tokens }, rankings: { llmModels: [] } });
+  render(); await flushSync();
+  render().filter((node) => node.type === "Pressable")[0].props.onPress(); render(); await flushSync();
+  assert.deepEqual(requests.map((request) => request.days), [30, 7]);
+  requests[1].resolve(data(7)); await flushSync();
+  requests[0].resolve(data(30)); await flushSync();
+  assert.equal(render().find((node) => node.type === "Metric").props.value, "7");
+  render().filter((node) => node.type === "Pressable")[2].props.onPress(); render(); await flushSync();
+  render().filter((node) => node.type === "Pressable")[0].props.onPress(); render(); await flushSync();
+  requests[2].reject(new Error("old range failed")); await flushSync();
+  assert.ok(render().some((node) => node.type === "LoadingBlock"), "a superseded request cannot stop the current spinner");
+  requests[3].resolve(data(77)); await flushSync();
+  assert.equal(render().find((node) => node.type === "Metric").props.value, "77");
+  assert.equal(render().some((node) => node.type === "InlineError"), false);
+  runner.unmount();
+}
+
+// Returning from Work editing reloads authoritative metadata, retaining content if refresh fails.
+{
+  const runner = createScreenHooks();
+  let focus;
+  const requests = [];
+  const client = { apps: { get: () => { const pending = Promise.withResolvers(); requests.push(pending); return pending.promise; } } };
+  const renderWork = loadChromeComponent("../app/work/[appId].tsx", "WorkScreen", {
+    ...formScope, ...runner.hooks, useFocusEffect: (callback) => { focus = callback; },
+    useRouter: () => ({}), useLocalSearchParams: () => ({ appId: "work" }), useApp: () => ({ client }), WebView: "WebView",
+  });
+  const render = () => chromeNodes(runner.render(renderWork));
+  const detail = (title) => ({ app: { id: "work", meta: { title } }, space: { name: "Space" }, content: { url: "https://example.com/work" } });
+  render(); let blur = focus();
+  requests[0].resolve(detail("Old title")); await flushSync(); render();
+  blur(); blur = focus();
+  requests[1].resolve(detail("Saved title")); await flushSync();
+  assert.equal(render().find((node) => node.type === "TopBar").props.title, "Saved title");
+  blur(); blur = focus();
+  requests[2].reject(new Error("offline")); await flushSync();
+  assert.ok(render().some((node) => node.type === "WebView"), "refresh errors do not hide cached Work content");
+  render().find((node) => node.type === "DataError").props.onRetry();
+  requests[3].resolve(detail("Retried title")); await flushSync();
+  assert.equal(render().some((node) => node.type === "DataError"), false);
+  assert.equal(render().find((node) => node.type === "TopBar").props.title, "Retried title");
+  blur(); runner.unmount();
+}
+
+// The real refresh entry point must bootstrap discovery after an uncached Chat failed to open.
+{
+  const source = ts.createSourceFile("context.tsx", readFileSync(new URL("../src/data/context.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let callback;
+  function findRefresh(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "refreshSession") callback = node.initializer.getText(source);
+    ts.forEachChild(node, findRefresh);
+  }
+  findRefresh(source); assert.ok(callback);
+  let loads = 0;
+  const scope = {
+    useCallback: (fn) => fn, client: {}, dispatch: () => {}, userKey: "user",
+    stateRef: { current: { sessionViews: {}, sessions: [] } },
+    sessionLoadRef: { current: async (id) => { assert.equal(id, "uncached"); loads++; } },
+  };
+  const refresh = new Function(...Object.keys(scope), ts.transpileModule(`return (${callback});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(scope));
+  await refresh("uncached");
+  assert.equal(loads, 1, "Retry must start the complete load, not return without a request");
+  scope.stateRef.current.sessionViews.uncached = { session: { id: "uncached", spaceId: "space" }, space: null };
+  await refresh("uncached");
+  assert.equal(loads, 2, "a cached summary still needs the missing Space context and subscription setup");
+}
+
+// Subscription loading/failure is not "no subscription", and the card opens the matching history.
+{
+  const runner = createScreenHooks();
+  const routes = [];
+  let retries = 0;
+  const subscriptions = { data: null, loading: true, error: null, load: async () => { retries++; } };
+  const renderActivity = loadChromeComponent("../app/(tabs)/activity.tsx", "ActivityScreen", {
+    ...formScope, ...runner.hooks,
+    useRouter: () => ({ push: (route) => routes.push(route) }), useScrollToTop: () => {}, useFloatingTabBarInset: () => 80,
+    useEdgeChrome: () => ({ headerHeight: 100 }), useApp: () => ({ connectionState: "open" }),
+    useActivity: () => ({ credits: { data: null, error: null }, activity: { data: null, error: null }, refresh: async () => {} }),
+    useBillingHistory: () => subscriptions,
+    EdgeHeader: "EdgeHeader", AccountAvatar: "AccountAvatar", RefreshControl: "RefreshControl", ConnectionBanner: "ConnectionBanner", PressableScale: "PressableScale",
+  });
+  const render = () => chromeNodes(runner.render(renderActivity));
+  const empty = () => render().some((node) => node.props.children?.includes("activity.subscription.none"));
+  assert.equal(empty(), false);
+  subscriptions.loading = false; subscriptions.error = "offline";
+  assert.equal(empty(), false, "an unsuccessful first read cannot become an empty subscription");
+  render().find((node) => node.type === "DataError").props.onRetry();
+  assert.equal(retries, 1);
+  subscriptions.error = null; subscriptions.data = { kind: "subscriptions", list: { items: [] } };
+  assert.equal(empty(), true, "only a resolved empty response displays no subscription");
+  subscriptions.data.list.items = [{ status: "active", productName: "Current plan" }]; subscriptions.error = "refresh failed";
+  assert.ok(render().some((node) => node.props.children?.includes("Current plan")), "refresh failure retains the last known subscription");
+  render().find((node) => node.props.accessibilityLabel === "activity.subscription.title").props.onPress();
+  assert.deepEqual(routes[0], { pathname: "/settings/billing-history", params: { kind: "subscriptions" } });
+  const route = loadChromeComponent("../app/settings/billing-history.tsx", "BillingHistoryRoute", { ...chromeScope, useLocalSearchParams: () => routes[0].params, BillingHistoryScreen: "BillingHistoryScreen" });
+  assert.equal(route().props.kind, "subscriptions");
+}
+
+// New Chat preserves cached spaces, separates initial loading/error/empty, and offers a next step.
+{
+  const runner = createScreenHooks();
+  const state = { spaces: [], booting: true, refreshing: false, spacesError: null, error: null };
+  let retries = 0;
+  let destination;
+  const renderNewChat = loadChromeComponent("../app/new-chat.tsx", "NewChatScreen", {
+    ...formScope, ...runner.hooks, EmptyState: "EmptyState",
+    useLocalSearchParams: () => ({}), useRouter: () => ({ dismissTo: (path) => { destination = path; } }),
+    useApp: () => ({ state, refreshHome: async () => { retries++; } }), displaySpaceName: (space) => space.name,
+  });
+  const render = () => chromeNodes(runner.render(renderNewChat));
+  assert.ok(render().some((node) => node.type === "LoadingRows"));
+  assert.equal(render().some((node) => node.type === "EmptyState"), false);
+  state.booting = false; state.spacesError = "offline";
+  assert.equal(render().some((node) => node.type === "EmptyState"), false);
+  render().find((node) => node.type === "DataError").props.onRetry(); assert.equal(retries, 1);
+  state.spaces = [{ id: "space", name: "Cached Space" }];
+  assert.ok(render().some((node) => node.props.children?.includes("Cached Space")), "cached choices stay usable during a refresh failure");
+  state.spaces = []; state.spacesError = null;
+  render().find((node) => node.type === "EmptyState").props.action.onPress();
+  assert.equal(destination, "/(tabs)/spaces");
+}
+
+// Tap targets remain usable with large text, and empty-state actions have visible labels.
+{
+  for (const [path, name] of [["../app/(tabs)/index.tsx", "FilterChip"], ["../app/(tabs)/spaces.tsx", "SpaceFilterChip"]]) {
+    const chip = loadChromeComponent(path, name, formScope)({ label: "Long filter label", selected: false, onPress() {} });
+    assert.ok(chip.props.style({ pressed: false }).minHeight >= 48);
+    assert.equal(chip.props.style({ pressed: false }).height, undefined, "fixed height cannot clip enlarged text");
+  }
+  let pressed = 0;
+  const empty = loadChromeComponent("../src/ui.tsx", "EmptyState", formScope)({ icon: "search", title: "No results", action: { icon: "x", label: "Clear filters", onPress: () => { pressed++; } } });
+  const nodes = chromeNodes(empty);
+  assert.ok(nodes.some((node) => node.type === "Text" && node.props.children.includes("Clear filters")), "action text must be visible, not only an accessibility label");
+  nodes.find((node) => node.type === "Pressable").props.onPress(); assert.equal(pressed, 1);
+}
+
+// Check the actual light/dark bubble tokens, including alpha-composited timestamps.
+{
+  const rgb = (hex) => hex.slice(1).match(/../g).map((value) => parseInt(value, 16));
+  const luminance = (color) => color.map((value) => { const s = value / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; }).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+  const ratio = (left, right) => (Math.max(luminance(left), luminance(right)) + .05) / (Math.min(luminance(left), luminance(right)) + .05);
+  for (const name of ["lightTheme", "darkTheme"]) {
+    const { colors } = loadChromeComponent("../src/theme.ts", name, {});
+    const background = rgb(colors.userBubble);
+    for (const key of ["userBubbleText", "userBubbleLink", "userBubbleMeta"]) {
+      const color = colors[key];
+      const [r, g, b, alpha] = color.startsWith("rgba") ? color.match(/[\d.]+/g).map(Number) : [...rgb(color), 1];
+      const foreground = [r, g, b].map((value, index) => value * alpha + background[index] * (1 - alpha));
+      assert.ok(ratio(foreground, background) >= 4.5, `${name}.${key} must meet 4.5:1 contrast for small text`);
+    }
   }
 }
 

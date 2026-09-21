@@ -1,13 +1,13 @@
 import type { AppDetailResponse } from "@neta-art/cohub";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useApp } from "@/src/data/context";
 import { openWebLink } from "@/src/platform/browser";
 import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
-import { TopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
+import { DataError, TopBar, IconButton, LoadingRows, Screen } from "@/src/ui";
 
 type Params = { appId?: string | string[] };
 
@@ -20,22 +20,28 @@ export default function WorkScreen() {
   const { client } = useApp();
   const [detail, setDetail] = useState<AppDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const generation = useRef(0);
   const contentUrl = detail?.content?.url ?? null;
   const initialOrigin = useMemo(() => {
     if (!contentUrl) return null;
     try { return new URL(contentUrl).origin; } catch { return null; }
   }, [contentUrl]);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!client || !appId) return;
-    let active = true;
-    void client.apps.get(appId).then((result) => {
-      if (active) setDetail(result);
-    }).catch((caught) => {
-      if (active) setError(caught instanceof Error ? caught.message : t("work.error"));
-    });
-    return () => { active = false; };
+    const request = ++generation.current;
+    setError(null);
+    try {
+      const result = await client.apps.get(appId);
+      if (request === generation.current) setDetail(result);
+    } catch (caught) {
+      if (request === generation.current) setError(caught instanceof Error ? caught.message : t("work.error"));
+    }
   }, [appId, client, t]);
+  useFocusEffect(useCallback(() => {
+    void load();
+    return () => { generation.current += 1; };
+  }, [load]));
 
   const title = detail?.app.meta?.title || detail?.app.meta?.name || detail?.app.slug || t("work.fallbackTitle");
   return <Screen>
@@ -50,7 +56,8 @@ export default function WorkScreen() {
         </>
       )} 
     />
-    {error ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.danger, textAlign: "center" }]}>{error}</Text></View> : !detail ? <LoadingRows count={6} /> : !contentUrl ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("work.noContent")}</Text></View> : <WebView
+    {error ? <DataError message={error} onRetry={() => void load()} /> : null}
+    {!detail ? (error ? null : <LoadingRows count={6} />) : !contentUrl ? <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("work.noContent")}</Text></View> : <WebView
       source={{ uri: contentUrl }}
       style={{ flex: 1, backgroundColor: theme.colors.background }}
       originWhitelist={["https://*"]}

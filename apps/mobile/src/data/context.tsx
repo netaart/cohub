@@ -1379,9 +1379,12 @@ export function AppProvider({
     async (sessionId: string, options: { silent?: boolean; throwOnError?: boolean } = {}) => {
       if (!client) return;
       const view = stateRef.current.sessionViews[sessionId];
-      const sessionSummary = stateRef.current.sessions.find((item) => item.id === sessionId);
-      const spaceId = view?.session?.spaceId ?? sessionSummary?.spaceId;
-      if (!spaceId) return;
+      // A failed initial detail read needs discovery and subscriptions, not just a history refresh.
+      if (!view?.session || !view.space) {
+        await sessionLoadRef.current(sessionId);
+        return;
+      }
+      const spaceId = view.session.spaceId;
       const openToken = openTokens.current.get(sessionId);
       const isCurrentRequest = () => openTokens.current.get(sessionId) === openToken;
       const key = `refresh:${sessionId}:${openToken}`;

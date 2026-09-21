@@ -1,6 +1,7 @@
 import * as Clipboard from "expo-clipboard";
 import type { SpaceFsFileResponse } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { usePreventRemove } from "expo-router/react-navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
@@ -115,6 +116,9 @@ export default function FileScreen() {
       { text: t("file.discard.confirm"), style: "destructive", onPress: exitEditing },
     ]);
   }, [dirty, editing, exitEditing, router, saving, t]);
+
+  // Editing is in-screen state: system back and swipe-back cancel it just like the toolbar.
+  usePreventRemove(editing || saving, handleBack);
 
   const save = useCallback(async (force = false) => {
     if (!client || !spaceId || !path || !file || draft === null) return;

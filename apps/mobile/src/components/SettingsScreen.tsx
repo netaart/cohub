@@ -11,7 +11,7 @@ import type {
 } from "@neta-art/cohub";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
 	ActivityIndicator,
 	Linking,
@@ -371,9 +371,9 @@ function ProfileSection({
 
 	return (
 		<View>
-			{loading ? (
+			{loading && !data.profile ? (
 				<LoadingBlock />
-			) : error ? (
+			) : error && !data.profile ? (
 				<InlineError message={error} onRetry={() => void load()} />
 			) : (
 				<>
@@ -502,6 +502,7 @@ function ProfileSection({
 									},
 								]}
 							/>
+							{error ? <Text accessibilityRole="alert" selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 12 }]}>{error}</Text> : null}
 							<PrimaryButton
 								label={saving ? t("settings.profile.saving") : t("settings.profile.save")}
 								icon="check"
@@ -540,7 +541,9 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 	const [data, setData] = useState<UserActivityResponse | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const generation = useRef(0);
 	const load = useCallback(async () => {
+		const request = ++generation.current;
 		if (!client) {
 			setLoading(false);
 			setError(t("settings.activity.connect"));
@@ -549,17 +552,20 @@ function ActivitySection({ client }: { client: CohubClient | null }) {
 		setLoading(true);
 		setError(null);
 		try {
-			setData(await client.user.getActivity({ days }));
+			const result = await client.user.getActivity({ days });
+			if (request === generation.current) setData(result);
 		} catch (caught) {
-			setError(
+			if (request === generation.current) setError(
 				caught instanceof Error ? caught.message : t("settings.activity.error"),
 			);
 		} finally {
-			setLoading(false);
+			if (request === generation.current) setLoading(false);
 		}
 	}, [client, days, t]);
 	useEffect(() => {
-		void Promise.resolve().then(() => load());
+		let active = true;
+		void Promise.resolve().then(() => { if (active) void load(); });
+		return () => { active = false; generation.current += 1; };
 	}, [load]);
 	const summary = data?.summary;
 	return (

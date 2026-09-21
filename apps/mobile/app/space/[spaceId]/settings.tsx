@@ -1,20 +1,18 @@
 import * as Clipboard from "expo-clipboard";
-import type { CronJobRecord, SandboxSpecId, SpaceMember, SpaceModListItem, SpaceRole, SpaceSandboxAutoDestroyPolicy, SpaceSandboxConfig } from "@neta-art/cohub";
+import type { CronJobRecord, SandboxSpecId, SpaceMember, SpaceRole, SpaceSandboxAutoDestroyPolicy, SpaceSandboxConfig } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
 import { useToast } from "@/src/components/Toast";
 import { installSpaceMod } from "@/src/data/space-mods";
 import { useApp } from "@/src/data/context";
+import { useSpaceSettings, type SpaceEnvironmentItem, type SpaceSettingsResourceState } from "@/src/data/use-space-settings";
 import { useTranslation, type Translate } from "@/src/i18n";
 import { openWebLink } from "@/src/platform/browser";
 import { useAppTheme, typography } from "@/src/theme";
 import { AppIcon, Avatar, IconButton, PrimaryButton, Screen, TopBar, type IconName } from "@/src/ui";
 import { formatRelativeTime } from "@/src/utils";
-
-type EnvItem = { name: string; value: string };
-type InvitationItem = { token: string; role: SpaceRole; status: string };
 
 const SPEC_OPTIONS = ["standard", "boost", "ultra"] as const;
 const SLEEP_OPTIONS = ["never", "0.5h", "2h"] as const;
@@ -26,49 +24,17 @@ export default function SpaceSettingsScreen() {
   const { t } = useTranslation();
   const toast = useToast();
   const { client } = useApp();
-  const [env, setEnv] = useState<EnvItem[]>([]);
+  const { env, setEnv, config, setConfig, ports, allowedSpec, members, setMembers, invitations, setInvitations, mods, setMods, schedules, setSchedules, resources, loadResource } = useSpaceSettings(client, spaceId);
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
-  const [config, setConfig] = useState<SpaceSandboxConfig | null>(null);
-  const [ports, setPorts] = useState<Record<string, { url?: string; port?: number }>>({});
   const [busy, setBusy] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [visibleEnv, setVisibleEnv] = useState<Set<string>>(new Set());
-  const [allowedSpec, setAllowedSpec] = useState<SandboxSpecId>("standard");
-  const [members, setMembers] = useState<SpaceMember[]>([]);
-  const [invitations, setInvitations] = useState<InvitationItem[]>([]);
-  const [mods, setMods] = useState<SpaceModListItem[]>([]);
   const [addModOpen, setAddModOpen] = useState(false);
   const [modSpaceId, setModSpaceId] = useState("");
   const [addingMod, setAddingMod] = useState(false);
   const [modError, setModError] = useState<string | null>(null);
   const modSubmitLock = useRef(false);
-  const [schedules, setSchedules] = useState<CronJobRecord[]>([]);
-
-  useEffect(() => {
-    if (!client || !spaceId) return;
-    const space = client.space(spaceId);
-    void Promise.all([
-      space.env.list(),
-      space.getConfig(),
-      space.sandbox.ports(),
-      client.billing.getFeatureEntitlement("sandbox.spec.boost"),
-      client.billing.getFeatureEntitlement("sandbox.spec.ultra"),
-      space.members.list(),
-      space.invitations.list(),
-      space.mods.list(),
-      client.cronJobs.list(spaceId),
-    ]).then(([environment, settings, endpointResult, boost, ultra, memberResult, invitationResult, modResult, scheduleResult]) => {
-      setEnv(environment.env);
-      setConfig(settings.config.sandbox);
-      setPorts(endpointResult.endpoints);
-      setAllowedSpec(ultra.enabled ? "ultra" : boost.enabled ? "boost" : "standard");
-      setMembers(memberResult.items);
-      setInvitations(invitationResult.items);
-      setMods(modResult.items);
-      setSchedules(scheduleResult.jobs);
-    });
-  }, [client, spaceId]);
 
   const addEnv = async () => {
     if (!client || !spaceId || !name.trim()) return;
@@ -79,6 +45,8 @@ export default function SpaceSettingsScreen() {
       setName("");
       setValue("");
       toast({ title: t("space.settings.saved") });
+    } catch (error) {
+      toast({ title: t("space.settings.saveFailed"), message: error instanceof Error ? error.message : undefined, tone: "danger" });
     } finally {
       setBusy(false);
     }
@@ -141,6 +109,8 @@ export default function SpaceSettingsScreen() {
       } else {
         toast({ title: t("space.settings.saved") });
       }
+    } catch (error) {
+      toast({ title: t("space.settings.saveFailed"), message: error instanceof Error ? error.message : undefined, tone: "danger" });
     } finally {
       setBusy(false);
     }
@@ -205,6 +175,7 @@ export default function SpaceSettingsScreen() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View>
           <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.collaborators")}</Text>
+          <ResourceStatus state={resources.members} onRetry={() => void loadResource("members")} />
           {members.map((member) => {
             const displayName = memberDisplayName(member, t("settings.profile.fallbackName"));
             return (
@@ -232,6 +203,7 @@ export default function SpaceSettingsScreen() {
               </View>
             );
           })}
+          <ResourceStatus state={resources.invitations} onRetry={() => void loadResource("invitations")} />
           <View style={styles.inviteRow}>
             <ActionButton label={t("space.settings.inviteBuilder")} icon="plus" onPress={() => void createInvite("builder")} />
             <ActionButton label={t("space.settings.inviteGuest")} icon="plus" onPress={() => void createInvite("guest")} />
@@ -245,6 +217,7 @@ export default function SpaceSettingsScreen() {
 
         <View>
           <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.environment")}</Text>
+          <ResourceStatus state={resources.env} onRetry={() => void loadResource("env")} />
           <View style={styles.envRow}>
             <TextInput
               value={name}
@@ -268,13 +241,13 @@ export default function SpaceSettingsScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t("space.settings.addEnvironment")}
-              disabled={busy || !name.trim()}
+              disabled={busy || resources.env.loading || !name.trim()}
               onPress={() => void addEnv()}
               style={({ pressed }) => [
                 styles.envAdd,
                 {
                   backgroundColor: pressed ? theme.colors.accentPressed : theme.colors.accent,
-                  opacity: busy || !name.trim() ? 0.45 : 1,
+                  opacity: busy || resources.env.loading || !name.trim() ? 0.45 : 1,
                 },
               ]}
             >
@@ -299,12 +272,15 @@ export default function SpaceSettingsScreen() {
 
         <View>
           <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.sandbox")}</Text>
+          <ResourceStatus state={resources.config} onRetry={() => void loadResource("config")} />
+          {resources.config.loaded ? <>
           <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 10 }]}>{t("space.settings.spec")}</Text>
+          <ResourceStatus state={resources.allowedSpec} onRetry={() => void loadResource("allowedSpec")} />
           <SegmentedControl
             values={SPEC_OPTIONS}
             value={config?.spec ?? "standard"}
             maxValue={allowedSpec}
-            disabled={busy || restarting}
+            disabled={busy || restarting || resources.config.loading || resources.allowedSpec.loading || !resources.allowedSpec.loaded}
             labels={[t("space.settings.spec.standard"), t("space.settings.spec.boost"), t("space.settings.spec.ultra")]}
             onChange={(spec) => void updateSandbox({ spec })}
             onLocked={() => toast({ title: t("space.settings.upgradeRequired"), message: t("space.settings.upgradeRequired.body"), tone: "danger" })}
@@ -331,13 +307,15 @@ export default function SpaceSettingsScreen() {
             values={SLEEP_OPTIONS}
             value={sleepFromConfig(config)}
             labels={[t("space.settings.sleep.never"), t("space.settings.sleep.halfHour"), t("space.settings.sleep.twoHours")]}
-            disabled={busy || restarting}
+            disabled={busy || restarting || resources.config.loading}
             onChange={(selected) => void updateSandbox({ autoDestroy: sleepToPolicy(selected) })}
           />
+          </> : null}
         </View>
 
         <View>
           <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.ports")}</Text>
+          <ResourceStatus state={resources.ports} onRetry={() => void loadResource("ports")} />
           {Object.entries(ports).map(([key, endpoint]) => (
             <Pressable
               key={key}
@@ -364,12 +342,13 @@ export default function SpaceSettingsScreen() {
               name="plus"
               label={t("space.settings.addMod")}
               tone="accent"
-              disabled={!client || !spaceId}
+              disabled={!client || !spaceId || resources.mods.loading}
               onPress={() => { setModError(null); setAddModOpen(true); }}
             />
           </View>
+          <ResourceStatus state={resources.mods} onRetry={() => void loadResource("mods")} />
           {mods.length === 0 ? (
-            <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.noMods")}</Text>
+            resources.mods.loaded && !resources.mods.error && !resources.mods.loading ? <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.noMods")}</Text> : null
           ) : (
             mods.map((mod) => (
               <View key={mod.id} style={[styles.modRow, { borderBottomColor: theme.colors.border }]}>
@@ -404,8 +383,9 @@ export default function SpaceSettingsScreen() {
 
         <View>
           <Text style={[typography.heading, { color: theme.colors.text }]}>{t("space.settings.schedules")}</Text>
+          <ResourceStatus state={resources.schedules} onRetry={() => void loadResource("schedules")} />
           {schedules.length === 0 ? (
-            <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.noSchedules")}</Text>
+            resources.schedules.loaded && !resources.schedules.error && !resources.schedules.loading ? <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.noSchedules")}</Text> : null
           ) : (
             schedules.map((schedule) => (
               <ScheduleRow
@@ -457,7 +437,15 @@ export default function SpaceSettingsScreen() {
   );
 }
 
-function EnvironmentRow({ item, visible, onToggle, onCopy }: { item: EnvItem; visible: boolean; onToggle: () => void; onCopy: () => void }) {
+function ResourceStatus({ state, onRetry }: { state: SpaceSettingsResourceState; onRetry: () => void }) {
+  const theme = useAppTheme();
+  const { t } = useTranslation();
+  if (state.loading) return <Text accessibilityLiveRegion="polite" style={[typography.caption, { color: theme.colors.textMuted, marginTop: 8 }]}>{t("space.settings.loading")}</Text>;
+  if (!state.error) return null;
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Text selectable accessibilityRole="alert" style={[typography.caption, { flex: 1, color: theme.colors.danger }]}>{state.error}</Text><IconButton name="refresh" label={t("common.retry")} onPress={onRetry} /></View>;
+}
+
+function EnvironmentRow({ item, visible, onToggle, onCopy }: { item: SpaceEnvironmentItem; visible: boolean; onToggle: () => void; onCopy: () => void }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   return (

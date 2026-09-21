@@ -209,7 +209,7 @@ export default function ChatsScreen() {
                 accessibilityLabel={t("chats.source.filter")}
                 accessibilityState={{ expanded: sourceMenuOpen, selected: sourceFilter !== "all" }}
                 onPress={() => setSourceMenuOpen(true)}
-                style={({ pressed }) => ({ minHeight: 34, width: 38, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: sourceFilter !== "all" ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: sourceFilter !== "all" ? theme.colors.accentBorder : theme.colors.border })}
+                style={({ pressed }) => ({ minHeight: 48, width: 48, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: sourceFilter !== "all" ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: sourceFilter !== "all" ? theme.colors.accentBorder : theme.colors.border })}
               >
                 <AppIcon name="filter" size={16} color={sourceFilter !== "all" ? theme.colors.accent : theme.colors.textMuted} />
               </Pressable>
@@ -239,5 +239,5 @@ export default function ChatsScreen() {
 
 function FilterChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
   const theme = useAppTheme();
-  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => ({ minHeight: 34, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
+  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => ({ minHeight: 48, paddingVertical: 8, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
 }

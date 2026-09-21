@@ -570,6 +570,7 @@ export const en = {
     "Choose a Space to open its conversation composer. The first message will give the Chat its title automatically.",
   "newChat.readyForWork": "Ready for work",
   "newChat.noSpaces": "No accessible Spaces found.",
+  "newChat.createSpaceHint": "Create a Space in the Spaces tab to start a Chat.",
 
   // Chat screen
   "chat.title": "Chat",
@@ -837,6 +838,8 @@ export const en = {
   "space.settings.schedule.disabled": "Schedule disabled",
   "space.settings.schedule.toggleFailed": "Unable to toggle schedule",
   "space.settings.loading": "Loading settings…",
+  "space.settings.loadFailed": "Unable to load these settings. Please retry.",
+  "space.settings.saveFailed": "Unable to save settings",
   "space.saveCheckpoint": "Save checkpoint",
   "space.saveCheckpointSaving": "Saving checkpoint…",
   "space.openFilesDetail": "Browse files in this Space",

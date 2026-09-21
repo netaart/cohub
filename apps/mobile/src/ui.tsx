@@ -185,7 +185,7 @@ export function EmptyState({ icon, title, description, action }: { icon: IconNam
       <AppIcon name={icon} size={28} color={theme.colors.textMuted} />
       <Text style={[typography.heading, { color: theme.colors.text, marginTop: 14, textAlign: "center" }]}>{title}</Text>
       {description ? <Text style={[typography.body, { color: theme.colors.textMuted, marginTop: 6, textAlign: "center", maxWidth: 300 }]}>{description}</Text> : null}
-      {action ? <View style={{ marginTop: 12 }}><IconButton name={action.icon} label={action.label} onPress={action.onPress} tone="accent" /></View> : null}
+      {action ? <Pressable accessibilityRole="button" accessibilityLabel={action.label} onPress={action.onPress} style={({ pressed }) => ({ marginTop: 12, minHeight: 48, paddingHorizontal: 16, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: theme.radius.md, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" })}><AppIcon name={action.icon} size={18} color={theme.colors.accent} /><Text style={[typography.bodyMedium, { color: theme.colors.accent, flexShrink: 1, textAlign: "center" }]}>{action.label}</Text></Pressable> : null}
     </View>
   );
 }

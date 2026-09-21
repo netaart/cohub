@@ -546,6 +546,7 @@ export const zh: Record<TranslationKey, string> = {
     "选择一个空间以打开它的对话输入框。第一条消息会自动成为聊天标题。",
   "newChat.readyForWork": "准备就绪",
   "newChat.noSpaces": "没有可访问的空间。",
+  "newChat.createSpaceHint": "前往空间页面创建一个空间，即可开始聊天。",
 
   // Chat screen
   "chat.title": "聊天",
@@ -810,6 +811,8 @@ export const zh: Record<TranslationKey, string> = {
   "space.settings.schedule.disabled": "定时任务已禁用",
   "space.settings.schedule.toggleFailed": "无法切换定时任务",
   "space.settings.loading": "正在加载设置…",
+  "space.settings.loadFailed": "无法加载这些设置，请重试。",
+  "space.settings.saveFailed": "无法保存设置",
   "space.saveCheckpoint": "保存检查点",
   "space.saveCheckpointSaving": "正在保存检查点…",
   "space.openFilesDetail": "浏览此空间中的文件",
