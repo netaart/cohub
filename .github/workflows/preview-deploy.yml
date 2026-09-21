@@ -165,6 +165,7 @@ jobs:
           # 前端指向 preview 后端；登录用 dev Logto（用户数据在 dev 库）
           cat > .env <<EOF
           PUBLIC_COHUB_ENV=dev
+          PUBLIC_APP_STANDALONE_HOST_TEMPLATE=${{ vars.APP_STANDALONE_HOST_TEMPLATE_DEV }}
           PUBLIC_API_ORIGIN=https://${{ env.API_HOSTNAME }}
           PUBLIC_GATEWAY_ORIGIN=https://${{ env.GATEWAY_HOSTNAME }}
           PUBLIC_PREVIEW_ORIGIN=https://preview-dev.cohub.live
