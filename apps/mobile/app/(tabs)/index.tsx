@@ -179,7 +179,8 @@ export default function ChatsScreen() {
         data={listItems}
         extraData={rowExtraData}
         estimatedItemSize={76}
-        maintainVisibleContentPosition
+        // Recent-activity reordering must not scroll the list to follow an old row.
+        maintainVisibleContentPosition={false}
         onViewableItemsChanged={onViewableItemsChanged}
         keyExtractor={(item) => item.kind === "remote-session" ? `remote-session:${item.hit.sessionId}` : item.kind === "local-session" ? `session:${item.session.id}` : item.kind === "remote-space" ? `remote-space:${item.hit.spaceId}` : `space:${item.space.id}`}
         renderItem={({ item }) => {

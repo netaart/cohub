@@ -564,6 +564,52 @@ for (const [tab, component, expectedRequests] of [
   }
   state.error = null;
   if (tab === "index") {
+    // Replay the installed list's anchor algorithm with the real screen props.
+    // This checks automatic scroll requests, not native navigation/layout itself.
+    const legendSource = ts.createSourceFile("legend.js", readFileSync(new URL("../node_modules/@legendapp/list/react-native.js", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const mvcpCode = ["normalizeMaintainVisibleContentPosition", "prepareMVCP", "updateAnchorLock", "shouldQueueNativeMVCPAdjust"].map((name) => {
+      const declaration = legendSource.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name);
+      assert.ok(declaration, `installed LegendList has ${name}`);
+      return declaration.getText(legendSource);
+    }).join("\n");
+    for (const platform of ["ios", "android"]) {
+      for (const scroll of [0, 228]) {
+        for (const change of ["status", "reorder", "prepend", "append", "remove", "empty"]) {
+          state.sessions = Array.from({ length: 12 }, (_, index) => ({ ...runningFixture, id: `chat-${index}` }));
+          const before = control().props;
+          const adjustments = [];
+          const scope = {
+            Platform: { OS: platform }, MVCP_POSITION_EPSILON: 0.1,
+            getContentSize: ({ state: listState }) => listState.props.data.length * before.estimatedItemSize + 153,
+            requestAdjust: (_ctx, amount) => adjustments.push(amount),
+          };
+          const { prepareMVCP, normalizeMaintainVisibleContentPosition } = new Function(...Object.keys(scope), `${mvcpCode}\nreturn { prepareMVCP, normalizeMaintainVisibleContentPosition };`)(...Object.values(scope));
+          const firstVisible = Math.floor(scroll / before.estimatedItemSize);
+          const listState = {
+            props: { data: before.data, maintainVisibleContentPosition: normalizeMaintainVisibleContentPosition(before.maintainVisibleContentPosition) },
+            idsInView: before.data.slice(firstVisible, firstVisible + 7).map(before.keyExtractor),
+            indexByKey: new Map(before.data.map((row, index) => [before.keyExtractor(row), index])),
+            positions: before.data.map((_, index) => index * before.estimatedItemSize),
+            scroll, scrollLength: 600, didContainersLayout: true,
+          };
+          const restore = prepareMVCP({ state: listState }, true);
+          const sessions = state.sessions;
+          const newSession = { ...runningFixture, id: "new-chat" };
+          state.sessions = change === "reorder" ? [sessions[2], sessions[0], sessions[1], ...sessions.slice(3)]
+            : change === "prepend" ? [newSession, ...sessions]
+            : change === "append" ? [...sessions, newSession]
+            : change === "remove" ? sessions.slice(1)
+            : change === "empty" ? []
+            : sessions.map((session) => ({ ...session, activeTurn: null }));
+          const after = control().props;
+          listState.props.data = after.data;
+          listState.indexByKey.clear();
+          after.data.forEach((row, index) => { listState.indexByKey.set(after.keyExtractor(row), index); listState.positions[index] = index * after.estimatedItemSize; });
+          restore?.();
+          assert.deepEqual(adjustments, [], `${platform}/${change} at ${scroll}: Chats updates must not scroll the filter header or change the user's offset`);
+        }
+      }
+    }
     state.sessions = [runningFixture];
     state.runningSessions.all = { ...emptyRunningSessions, loading: true };
     chromeNodes(control().props.ListHeaderComponent).find((node) => node.props?.label === "chats.filter.running").props.onPress();
