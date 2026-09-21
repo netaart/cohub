@@ -4,7 +4,7 @@ import type { CohubClient, SpaceFsEntry, UserSessionListItem } from "@neta-art/c
 import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LegendList } from "@legendapp/list/react-native";
-import { ActivityIndicator, BackHandler, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, BackHandler, Pressable, ScrollView, Text, View, useWindowDimensions, type GestureResponderEvent } from "react-native";
 import Reanimated, { Extrapolation, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,7 +12,7 @@ import { SessionSearchRow } from "@/src/components/SearchResultRow";
 import { SessionRow } from "@/src/components/SessionRow";
 import { SessionLabelSheet } from "@/src/components/SessionLabelSheet";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
-import { useAppTheme, typography } from "@/src/theme";
+import { edgeChrome, useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSessionSearchHit, type SessionNavigationTarget } from "@/src/data/session-search";
 import { useApp } from "@/src/data/context";
@@ -27,7 +27,7 @@ import {
   type SessionLabel,
   type SessionSourceGroup,
 } from "@/src/data/session-labels";
-import { panelForScrollOffset, type PanelName } from "@/src/data/space-panel-pager";
+import { isPagerHeaderTouch, panelForScrollOffset, type PanelName } from "@/src/data/space-panel-pager";
 import { chatScrollTrace } from "@/src/data/chat-scroll-trace";
 import { AppIcon, Avatar, IconButton, PrimaryButton, SearchField, TopBar } from "@/src/ui";
 import { normalizeSpacePath, parentSpacePath, sortByRecent, spacePathName } from "@/src/utils";
@@ -91,6 +91,9 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
   const [interactive, setInteractive] = useState(Boolean(activePanel));
   const visiblePanelRef = useRef<PanelName | null>(activePanel);
   const activePanelRef = useRef<PanelName | null>(activePanel);
+  const headerTouchActiveRef = useRef(false);
+  const chipsTouchActiveRef = useRef(false);
+  const pagerHeaderTouchHeight = (edgeToEdge ? insets.top : 0) + edgeChrome.headerMinHeight;
   const layoutRef = useRef({ width: 0, height: 0, contentWidth: 0 });
   const [pagerReady, setPagerReady] = useState(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -288,10 +291,23 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
     clearIdleTimer();
   }, [clearIdleTimer]);
 
+  const handlePagerTouchStart = useCallback((event: GestureResponderEvent) => {
+    // The pager is a native horizontal responder. Lock it for top chrome touches so iOS's
+    // edge-back gesture and the header's Pressables do not get cancelled by the pager.
+    if (!isPagerHeaderTouch(event.nativeEvent.locationY, pagerHeaderTouchHeight)) return;
+    headerTouchActiveRef.current = true;
+    setPagerScrollEnabled(false);
+  }, [pagerHeaderTouchHeight]);
+  const releasePagerHeaderTouch = useCallback(() => {
+    if (!headerTouchActiveRef.current) return;
+    headerTouchActiveRef.current = false;
+    setPagerScrollEnabled(!chipsTouchActiveRef.current);
+  }, []);
   const handleChipsTouchChange = useCallback((touching: boolean) => {
     // The filter chips are a nested horizontal ScrollView; it only wins its drag while the
     // pager is not scrolling, so touch-start there disables the pager for this gesture.
-    setPagerScrollEnabled(!touching);
+    chipsTouchActiveRef.current = touching;
+    setPagerScrollEnabled(!touching && !headerTouchActiveRef.current);
   }, []);
 
   const pageStyle = (panel: PanelName) => [
@@ -322,6 +338,9 @@ export function SpacePanels({ spaceId, spaceName, sessions, client, activePanel,
         decelerationRate="fast"
         disableIntervalMomentum
         onScroll={scrollHandler}
+        onTouchStart={handlePagerTouchStart}
+        onTouchEnd={releasePagerHeaderTouch}
+        onTouchCancel={releasePagerHeaderTouch}
         onScrollBeginDrag={handleScrollBeginDrag}
         onScrollEndDrag={scheduleSettle}
         onMomentumScrollBegin={clearIdleTimer}

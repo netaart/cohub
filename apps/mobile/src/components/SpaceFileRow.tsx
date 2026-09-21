@@ -1,3 +1,4 @@
+import * as Clipboard from "expo-clipboard";
 import type { SpaceFsEntry } from "@neta-art/cohub";
 import type { LucideIcon } from "lucide-react-native";
 import Braces from "lucide-react-native/icons/braces";
@@ -10,6 +11,7 @@ import FileText from "lucide-react-native/icons/file-text";
 import Music from "lucide-react-native/icons/music";
 import Video from "lucide-react-native/icons/video";
 import { Text, View } from "react-native";
+import { useToast } from "@/src/components/Toast";
 import { AppIcon, type IconName } from "@/src/ui";
 import { PressableScale } from "@/src/ui/PressableScale";
 import { useAppTheme, typography } from "@/src/theme";
@@ -49,6 +51,7 @@ export function formatSpaceFileBytes(value: number) {
 export function SpaceFileRow({ entry, onPress, onLongPress, compact = false }: SpaceFileRowProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
+  const showToast = useToast();
   const isDirectory = entry.type === "dir";
   const isSymlink = entry.type === "symlink";
   const icon: IconName = isDirectory ? "folder" : isSymlink ? "external-link" : "file-text";
@@ -59,13 +62,18 @@ export function SpaceFileRow({ entry, onPress, onLongPress, compact = false }: S
     : isSymlink
       ? t("space.file.symlink")
       : t("space.file.type", { type: entry.mimeType || t("space.file.generic"), size: formatSpaceFileBytes(entry.size) });
+  const handleLongPress = onLongPress ?? (() => {
+    void Clipboard.setStringAsync(entry.path)
+      .then(() => showToast({ title: t("file.pathCopied") }))
+      .catch((caught: unknown) => showToast({ title: t("file.copyPathFailed.title"), message: caught instanceof Error ? caught.message : t("file.copyPathFailed.body"), tone: "danger" }));
+  });
 
   return (
     <PressableScale
       accessibilityRole="button"
       accessibilityLabel={isDirectory ? t("space.file.openFolder", { name: entry.name }) : t("space.file.openFile", { name: entry.name })}
       onPress={onPress}
-      onLongPress={onLongPress}
+      onLongPress={handleLongPress}
       haptic
       style={{
         minHeight: compact ? 60 : 63,

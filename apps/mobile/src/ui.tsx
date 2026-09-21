@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -117,19 +117,23 @@ type TopBarProps = {
   actions?: ReactNode;
   children?: ReactNode;
   transparent?: boolean;
+  titleRef?: RefObject<View | null>;
+  onTitleLongPress?: () => void;
+  titleLongPressLabel?: string;
 };
 
-export function TopBar({ title, subtitle, onBack, backLabel, leading, actions, children, transparent = false }: TopBarProps) {
+export function TopBar({ title, subtitle, onBack, backLabel, leading, actions, children, transparent = false, titleRef, onTitleLongPress, titleLongPressLabel }: TopBarProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
+  const titleContent = children ?? <>
+    <Text accessibilityRole={onTitleLongPress ? undefined : "header"} numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
+    {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textSecondary, marginTop: 1 }]}>{subtitle}</Text> : null}
+  </>;
   return (
     <View testID="app-top-bar" style={[styles.topBar, { backgroundColor: transparent ? "transparent" : theme.colors.background }]}>
       {onBack ? <IconButton name="arrow-left" label={backLabel ?? t("ui.detail.back")} onPress={onBack} /> : leading ? <View style={styles.topBarLeading}>{leading}</View> : null}
-      <View style={styles.topBarTitle}>
-        {children ?? <>
-          <Text accessibilityRole="header" numberOfLines={1} style={[typography.heading, { color: theme.colors.text }]}>{title}</Text>
-          {subtitle ? <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textSecondary, marginTop: 1 }]}>{subtitle}</Text> : null}
-        </>}
+      <View ref={titleRef} collapsable={false} style={styles.topBarTitle}>
+        {onTitleLongPress ? <Pressable accessibilityRole="header" accessibilityLabel={titleLongPressLabel ?? title} onLongPress={onTitleLongPress} style={({ pressed }) => [styles.topBarTitlePressable, { backgroundColor: pressed ? theme.colors.surfacePressed : "transparent" }]}>{titleContent}</Pressable> : titleContent}
       </View>
       {actions ? <View style={styles.topBarActions}>{actions}</View> : null}
     </View>
@@ -365,6 +369,7 @@ const styles = StyleSheet.create({
   topBar: { minHeight: edgeChrome.headerMinHeight, flexShrink: 0, paddingHorizontal: 8, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 },
   topBarLeading: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   topBarTitle: { flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 4 },
+  topBarTitlePressable: { flex: 1, minWidth: 0, justifyContent: "center", borderRadius: 10, borderCurve: "continuous" },
   topBarActions: { flexShrink: 0, flexDirection: "row", alignItems: "center" },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 22, paddingBottom: 10 },
   emptyState: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, minHeight: 260 },

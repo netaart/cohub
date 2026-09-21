@@ -1,5 +1,10 @@
 export type PanelName = "chat" | "files";
 
+/** Header touches belong to native navigation and must not start the horizontal pager. */
+export function isPagerHeaderTouch(locationY: number, headerHeight: number) {
+  return locationY >= 0 && locationY < headerHeight;
+}
+
 /**
  * Nearest-page resolution for the push-style panel pager: `null` means the chat page is
  * the closest snap point (i.e. no panel open).

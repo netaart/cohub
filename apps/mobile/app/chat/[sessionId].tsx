@@ -1,3 +1,4 @@
+import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
@@ -219,8 +220,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [titleMenuOpen, setTitleMenuOpen] = useState(false);
   const moreButtonRef = useRef<View>(null);
+  const titleRef = useRef<View>(null);
   const closeMore = useCallback(() => setMoreOpen(false), []);
+  const closeTitleMenu = useCallback(() => setTitleMenuOpen(false), []);
   const [labelSheetOpen, setLabelSheetOpen] = useState(false);
   const [chatLabels, setChatLabels] = useState<SessionLabel[]>([]);
   const [renameValue, setRenameValue] = useState("");
@@ -736,6 +740,20 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
     const url = `https://cohub.live/spaces/${encodeURIComponent(spaceId)}/sessions/${encodeURIComponent(sessionId)}`;
     await Share.share({ message: `${title}\n${url}`, url, title });
   };
+  const copySessionTitle = useCallback(async () => {
+    const title = session ? displaySessionTitle(session) : t("chat.title");
+    try {
+      await Clipboard.setStringAsync(title);
+      showToast({ title: t("chat.titleCopied") });
+    } catch (error) {
+      showToast({ title: t("chat.copyTitleFailed.title"), message: error instanceof Error ? error.message : t("chat.copyTitleFailed.body"), tone: "danger" });
+    }
+  }, [session, showToast, t]);
+  const openTitleMenu = useCallback(() => {
+    setMoreOpen(false);
+    setTitleMenuOpen(true);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+  }, []);
   const openRename = () => { setRenameValue(session ? displaySessionTitle(session) : ""); setRenameOpen(true); };
   const openLabelSheet = () => {
     setLabelSheetOpen(true);
@@ -970,11 +988,11 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
 
   if (view.loading && !session && view.messages.length === 0 && view.turns.length === 0) return <Screen edgeToEdge><EdgeHeader onLayout={onHeaderLayout}><TopBar transparent title={t("chat.title")} onBack={() => { traceBackPress(); router.back(); }} /></EdgeHeader><View style={{ flex: 1, paddingTop: headerHeight }}><ChatThreadPlaceholder kind="opening" /></View></Screen>;
   return <Screen keyboard edgeToEdge>
-    <View style={{ flex: 1 }} accessibilityElementsHidden={moreOpen} importantForAccessibility={moreOpen ? "no-hide-descendants" : "auto"}>
+    <View style={{ flex: 1 }} accessibilityElementsHidden={moreOpen || titleMenuOpen} importantForAccessibility={moreOpen || titleMenuOpen ? "no-hide-descendants" : "auto"}>
     <SpacePanels edgeToEdge key={spaceId || sessionId} spaceId={spaceId} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => { if (spaceId) router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId } }); }} onOpenFile={(path) => { if (spaceId) router.push({ pathname: "/space/[spaceId]/file", params: { spaceId, path } }); }} onOpenFilesPage={() => { if (spaceId) router.push({ pathname: "/space/[spaceId]/files", params: { spaceId } }); }}>
       <Animated.View ref={sendRootRef} collapsable={false} style={{ flex: 1, minHeight: 0 }}>
         <EdgeHeader onLayout={onHeaderLayout}>
-        <TopBar transparent title={session ? displaySessionTitle(session) : t("chat.title")} subtitle={spaceName} onBack={() => { traceBackPress(); router.back(); }} actions={<><IconButton name="list-tree" label={t("chat.turns.open")} size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><View ref={moreButtonRef} collapsable={false}><IconButton name="more" label={t("chat.more")} size={38} onPress={() => setMoreOpen(true)} /></View></>} />
+        <TopBar transparent title={session ? displaySessionTitle(session) : t("chat.title")} subtitle={spaceName} titleRef={titleRef} onTitleLongPress={session ? openTitleMenu : undefined} titleLongPressLabel={t("chat.titleActions.open")} onBack={() => { traceBackPress(); router.back(); }} actions={<><IconButton name="list-tree" label={t("chat.turns.open")} size={38} onPress={() => setTurnNavigatorOpen(true)} disabled={view.turnIndex.length === 0 && view.loading} /><View ref={moreButtonRef} collapsable={false}><IconButton name="more" label={t("chat.more")} size={38} onPress={() => { setTitleMenuOpen(false); setMoreOpen(true); }} /></View></>} />
         <ConnectionBanner state={connectionState} />
         {view.error ? <Pressable onPress={() => void refreshSession(sessionId)} style={({ pressed }) => ({ marginHorizontal: 16, marginTop: 12, padding: 11, borderRadius: 12, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.dangerSoft, flexDirection: "row", alignItems: "center", gap: 8 })}><AppIcon name="alert" size={16} color={theme.colors.danger} /><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{view.error}</Text><Text style={[typography.caption, { color: theme.colors.danger }]}>{t("common.retry")}</Text></Pressable> : null}
         </EdgeHeader>
@@ -1048,6 +1066,16 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
       </Animated.View>
     </SpacePanels>
     </View>
+    {titleMenuOpen ? <AnchoredActionMenu
+      anchorRef={titleRef}
+      title={session ? displaySessionTitle(session) : t("chat.title")}
+      testID="chat-title-actions-menu"
+      onClose={closeTitleMenu}
+      actions={[
+        { icon: "copy", title: t("chat.titleActions.copy"), onPress: () => void copySessionTitle() },
+        { icon: "square-pen", title: t("chat.titleActions.edit"), onPress: openRename },
+      ]}
+    /> : null}
     {moreOpen ? <AnchoredActionMenu
       anchorRef={moreButtonRef}
       title={session ? displaySessionTitle(session) : t("chat.title")}

@@ -37,7 +37,7 @@ import { classifySaveConflict, isEditableTextFile, isFileConflictError } from ".
 import { detectCodeLanguage, resolveCodeLanguage } from "../src/data/code-language.ts";
 import { StreamingCodeTokenizer } from "../src/data/code-highlight-stream.ts";
 import { connectionDisplayState, createSessionResyncCoordinator, isTransportRecovery } from "../src/data/session-reconnect.ts";
-import { panelForScrollOffset } from "../src/data/space-panel-pager.ts";
+import { isPagerHeaderTouch, panelForScrollOffset } from "../src/data/space-panel-pager.ts";
 import { getSpaceSessionCount, loadSpaceSessionCounts, publishSpaceSessionCount } from "../src/data/space-session-counts.ts";
 import { cacheRetentionCutoff, DEFAULT_CACHE_RETENTION } from "../src/data/cache-retention.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
@@ -2092,6 +2092,10 @@ assert.equal(panelForScrollOffset(360, 360, 760), null);
 assert.equal(panelForScrollOffset(760, 360, 760), "files");
 assert.equal(panelForScrollOffset(150, 360, 760), "chat");
 assert.equal(panelForScrollOffset(620, 360, 760), "files");
+assert.equal(isPagerHeaderTouch(0, 56), true);
+assert.equal(isPagerHeaderTouch(55, 56), true);
+assert.equal(isPagerHeaderTouch(56, 56), false);
+assert.equal(isPagerHeaderTouch(-1, 56), false);
 
 // Filter touches re-render the pager to toggle scrollEnabled. Reapplying a closed-page
 // contentOffset can reset the native scroll position even though no close was requested.
@@ -2147,7 +2151,7 @@ function panelPagerHarness(initialPanel = null) {
     Reanimated: { ScrollView: "Pager", View: "AnimatedView" }, BackHandler: { addEventListener: () => ({ remove() {} }) },
     PANEL_WIDTH_RATIO: 0.86, MAX_PANEL_WIDTH: 360, PANEL_SCROLL_IDLE_MS: 140, PANEL_CLOSE_SETTLE_MS: 380,
     PANEL_SEED_RETRY_MS: 240, PANEL_SEED_FORCE_MS: 480,
-    panelForScrollOffset, chatScrollTrace: { record() {} }, ChatPanel: "ChatPanel", FilesPanel: "FilesPanel",
+    isPagerHeaderTouch, panelForScrollOffset, chatScrollTrace: { record() {} }, ChatPanel: "ChatPanel", FilesPanel: "FilesPanel",
   });
   let tree;
   const render = () => {
@@ -2209,6 +2213,17 @@ assert.equal(delayedPager.contentShift(), -344, "an early drag callback cannot d
 delayedPager.scroll(344);
 delayedPager.render();
 assert.equal(delayedPager.pager().props.scrollEnabled, true);
+// Header touches temporarily disable the pager so the native horizontal responder cannot cancel
+// the back button or iOS edge-back gesture. Body touches leave panel swiping available.
+delayedPager.pager().props.onTouchStart({ nativeEvent: { locationY: 20 } });
+delayedPager.render();
+assert.equal(delayedPager.pager().props.scrollEnabled, false, "header touches lock the pager for navigation controls");
+delayedPager.pager().props.onTouchEnd();
+delayedPager.render();
+assert.equal(delayedPager.pager().props.scrollEnabled, true, "the pager unlocks after a header touch ends");
+delayedPager.pager().props.onTouchStart({ nativeEvent: { locationY: 80 } });
+delayedPager.render();
+assert.equal(delayedPager.pager().props.scrollEnabled, true, "body touches keep the panel pager enabled");
 const commandsAfterSeed = delayedPager.commands.length;
 delayedPager.content();
 delayedPager.layout();

@@ -1,12 +1,15 @@
+import * as Clipboard from "expo-clipboard";
 import type { SpaceFsFileResponse } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
+import { AnchoredActionMenu } from "@/src/components/AnchoredActionMenu";
 import { CodeBlock } from "@/src/components/CodeBlock";
 import { CodeEditor } from "@/src/components/CodeEditor";
 import { detectCodeLanguage } from "@/src/data/code-language";
 import { classifySaveConflict, isEditableTextFile, isFileConflictError, MAX_EDITABLE_CODE_BYTES } from "@/src/data/code-file";
+import { useToast } from "@/src/components/Toast";
 import { useApp } from "@/src/data/context";
 import { useTranslation } from "@/src/i18n";
 import { openWebLink } from "@/src/platform/browser";
@@ -26,6 +29,7 @@ export default function FileScreen() {
   const path = Array.isArray(params.path) ? params.path.join("/") : params.path ?? "";
   const theme = useAppTheme();
   const { t } = useTranslation();
+  const showToast = useToast();
   const { client } = useApp();
   const [file, setFile] = useState<SpaceFsFileResponse | null>(null);
   const requestIdRef = useRef(0);
@@ -37,6 +41,8 @@ export default function FileScreen() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  const [pathMenuOpen, setPathMenuOpen] = useState(false);
+  const pathTitleRef = useRef<View>(null);
 
   const loadFile = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -170,6 +176,14 @@ export default function FileScreen() {
     }
   }, [client, path, spaceId, t]);
 
+  const copyPath = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(path);
+      showToast({ title: t("file.pathCopied") });
+    } catch (caught) {
+      showToast({ title: t("file.copyPathFailed.title"), message: caught instanceof Error ? caught.message : t("file.copyPathFailed.body"), tone: "danger" });
+    }
+  }, [path, showToast, t]);
   const title = path.split("/").pop() || t("file.title");
   const subtitle = editing ? (dirty ? t("file.unsaved") : t("file.editing")) : path || t("files.workspace");
   const showWebView = Boolean(file && url && inlineContent === null);
@@ -179,6 +193,9 @@ export default function FileScreen() {
       <TopBar
         title={title}
         subtitle={subtitle}
+        titleRef={pathTitleRef}
+        onTitleLongPress={path ? () => setPathMenuOpen(true) : undefined}
+        titleLongPressLabel={t("file.pathActions.open")}
         onBack={handleBack}
         actions={
           editing ? (
@@ -250,6 +267,13 @@ export default function FileScreen() {
           </ScrollView>
         )
       ) : null}
+      {pathMenuOpen ? <AnchoredActionMenu
+        anchorRef={pathTitleRef}
+        title={title}
+        testID="file-path-actions-menu"
+        onClose={() => setPathMenuOpen(false)}
+        actions={[{ icon: "copy", title: t("file.copyPath"), onPress: () => void copyPath() }]}
+      /> : null}
     </Screen>
   );
 }

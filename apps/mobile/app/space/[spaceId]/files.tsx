@@ -1,9 +1,11 @@
+import * as Clipboard from "expo-clipboard";
 import type { SpaceFsEntry } from "@neta-art/cohub";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LegendList } from "@legendapp/list/react-native";
 import { Alert, Pressable, Share, Text, View } from "react-native";
 import { SpaceFileRow } from "@/src/components/SpaceFileRow";
+import { useToast } from "@/src/components/Toast";
 import { useApp } from "@/src/data/context";
 import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useSpaceRealtime } from "@/src/data/use-space-realtime";
@@ -31,6 +33,7 @@ export default function FilesScreen() {
   const currentPath = normalizeSpacePath(firstParam(params.path));
   const theme = useAppTheme();
   const { t } = useTranslation();
+  const showToast = useToast();
   const { client, state } = useApp();
   const space = state.spaces.find((item) => item.id === spaceId);
   const [entries, setEntries] = useState<SpaceFsEntry[]>([]);
@@ -115,13 +118,23 @@ export default function FilesScreen() {
     [openPath, router, spaceId],
   );
 
+  const copyFilePath = useCallback(async (path: string) => {
+    try {
+      await Clipboard.setStringAsync(path);
+      showToast({ title: t("file.pathCopied") });
+    } catch (caught) {
+      showToast({ title: t("file.copyPathFailed.title"), message: caught instanceof Error ? caught.message : t("file.copyPathFailed.body"), tone: "danger" });
+    }
+  }, [showToast, t]);
+
   const showFileActions = useCallback((entry: SpaceFsEntry) => {
     Alert.alert(entry.name, undefined, [
+      { text: t("file.copyPath"), onPress: () => void copyFilePath(entry.path) },
       { text: t("file.openExternally"), onPress: () => openEntry(entry) },
       { text: "Share", onPress: () => void Share.share({ message: entry.path }).catch(() => undefined) },
       { text: t("common.cancel"), style: "cancel" },
     ]);
-  }, [openEntry, t]);
+  }, [copyFilePath, openEntry, t]);
 
   const goToParent = useCallback(() => {
     dismissPath(parentSpacePath(currentPath));
