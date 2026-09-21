@@ -1,5 +1,31 @@
 # @neta-art/cohub-cli
 
+## 7.1.0
+
+### Minor Changes
+
+- 6fbea1e: Project durable Session Turns into native Pi and Codex harness history, so a resumed local Runtime continues from the exact conversation instead of replaying it. Projections are incremental and bounded, honor compaction boundaries, keep the native harness files safe, and validate the source cursor. Turn and message fetches accept an `AbortSignal`, and the projection helpers and types are exported from the SDK.
+  
+  把持久化的 Session Turn 投影为 Pi 与 Codex 的原生 harness 历史，本地 Runtime 恢复时从准确位置续写而非重放整段对话。投影为增量且有界，遵循压缩边界，保证原生 harness 文件安全并校验来源游标。Turn 与消息请求支持 `AbortSignal`，投影辅助函数与类型从 SDK 导出。
+
+### Patch Changes
+
+- 42909b6: Local Runtime remembers a Space per canonical directory, account, and environment, so repeated `cohub runtime up` commands reuse the same Space. Explicit Space targets update the binding, and space-scoped CLI commands use the current directory binding before Home.
+  
+  Local Runtime 按规范化目录、账号和环境记住对应的 Space，重复执行 `cohub runtime up` 时复用同一个 Space。显式 Space 目标会更新绑定，其他 Space-scoped CLI 命令也会优先使用当前目录绑定，再回退到 Home。
+- 21d5227: Expose nullable file-monitoring health in Runtime status and use a single backend-neutral watcher event source. Sandbox archive validation accepts the currently published `v1.82.4` binary-only artifact during the one-time release transition and validates the native release shape with license notices. The sandbox binary pin remains unchanged until new CDN artifacts are verified.
+  
+  Runtime 状态增加可空的文件监听健康信息，文件事件统一使用通用后端来源。Sandbox 归档在本次发布过渡期间接受当前已发布的 `v1.82.4` 单二进制格式，同时校验带许可证的新制品。新的 CDN 制品验证完成前保持现有 Sandbox 二进制版本 pin。
+- 5394f11: Add redacted, local-only Runtime diagnostics with bounded JSONL rotation, incremental `runtime logs`, sandboxd output capture, stable runtime identity, and request/trace correlation across the Agent, Gateway, API, and Web status surfaces.
+  
+  增加脱敏且仅保存在本机的 Runtime 诊断能力：有界 JSONL 轮转、增量 `runtime logs`、sandboxd 输出采集、稳定 Runtime ID，以及贯通 Agent、Gateway、API 和 Web 状态页的 request/trace 关联。
+- Updated dependencies [50f5c60]
+- Updated dependencies [21d5227]
+- Updated dependencies [5394f11]
+- Updated dependencies [6fbea1e]
+- Updated dependencies [25f9a5b]
+  - @neta-art/cohub@8.20.0
+
 ## 7.0.1
 
 ### Patch Changes
