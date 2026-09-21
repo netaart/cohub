@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -24,6 +23,7 @@ const (
 	readyTimeout             = 15 * time.Second
 	requestTimeout           = 10 * time.Second
 	restartDelay             = 2 * time.Second
+	downloadRetryDelay       = time.Minute
 	maxResponseBytes         = 2 * 1024 * 1024
 	commandBufferSize        = 128
 	activationRetryBaseDelay = 500 * time.Millisecond
@@ -62,10 +62,11 @@ type command struct {
 }
 
 type Manager struct {
-	cfg    env.Config
-	logger *slog.Logger
-	client *client
-	binary string
+	cfg        env.Config
+	logger     *slog.Logger
+	client     *client
+	downloader *downloader
+	binary     string
 
 	enabled               atomic.Bool
 	processReady          atomic.Bool
@@ -82,9 +83,9 @@ type Manager struct {
 	closeMu     sync.Once
 }
 
-// NewManager only enables search when an explicitly configured or known local
-// binary exists. This keeps the feature optional while the standalone binary is
-// being tested and lets older sandbox images continue unchanged.
+// NewManager enables optional workspace search for cloud sandboxes. A local or
+// explicitly configured binary wins; otherwise the supervisor downloads the
+// latest checksum-verified release without blocking the main sandbox runtime.
 func NewManager(cfg env.Config, logger *slog.Logger) *Manager {
 	binary := resolveBinary(cfg.SearchBinaryPath)
 	manager := &Manager{
@@ -92,12 +93,13 @@ func NewManager(cfg env.Config, logger *slog.Logger) *Manager {
 		logger:      logger,
 		binary:      binary,
 		client:      newClient(cfg.SearchSocketPath),
+		downloader:  newDownloader(),
 		commands:    make(chan command, commandBufferSize),
 		control:     make(chan command, 8),
 		commandDone: make(chan struct{}),
 		processDone: make(chan struct{}),
 	}
-	if binary != "" && !cfg.IsLocal() {
+	if cfg.SearchEnabled && !cfg.IsLocal() {
 		manager.enabled.Store(true)
 	}
 	return manager
@@ -105,7 +107,7 @@ func NewManager(cfg env.Config, logger *slog.Logger) *Manager {
 
 func (m *Manager) Start() {
 	if !m.Enabled() || !m.started.CompareAndSwap(false, true) {
-		m.logger.Debug("search index disabled", slog.String("reason", "binary not found or local mode"))
+		m.logger.Debug("search index disabled", slog.String("reason", "feature disabled or local mode"))
 		return
 	}
 
@@ -115,6 +117,7 @@ func (m *Manager) Start() {
 	go m.commandLoop(ctx)
 	m.logger.Info("search index enabled",
 		slog.String("binary", m.binary),
+		slog.String("version", m.cfg.SearchVersion),
 		slog.String("indexDir", m.cfg.SearchIndexDir),
 		slog.String("socket", m.cfg.SearchSocketPath),
 	)
@@ -344,6 +347,25 @@ func (m *Manager) supervise(ctx context.Context) {
 	defer close(m.processDone)
 	for {
 		m.processReady.Store(false)
+		if m.binary == "" {
+			binary, err := m.downloader.ensure(ctx, m.cfg, m.logger)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				m.logger.Warn("search binary unavailable; feature remains disabled until retry",
+					slog.String("error", err.Error()),
+					slog.Duration("retryAfter", downloadRetryDelay),
+				)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(downloadRetryDelay):
+					continue
+				}
+			}
+			m.binary = binary
+		}
 		if err := m.runProcess(ctx); err != nil && ctx.Err() == nil {
 			m.logger.Warn("search process exited", slog.String("error", err.Error()))
 		}
@@ -376,6 +398,9 @@ func processArgs(cfg env.Config) []string {
 }
 
 func (m *Manager) runProcess(ctx context.Context) error {
+	if m.binary == "" {
+		return fmt.Errorf("search binary is unavailable")
+	}
 	cmd := exec.CommandContext(ctx, m.binary, processArgs(m.cfg)...)
 	cmd.Stdout = &logWriter{logger: m.logger, level: slog.LevelInfo, prefix: "search"}
 	cmd.Stderr = &logWriter{logger: m.logger, level: slog.LevelWarn, prefix: "search"}
@@ -482,9 +507,9 @@ func resolveBinary(configured string) string {
 		if candidate == "" {
 			continue
 		}
-		info, err := os.Stat(filepath.Clean(candidate))
-		if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return filepath.Clean(candidate)
+		candidate = filepath.Clean(candidate)
+		if isExecutableFile(candidate) {
+			return candidate
 		}
 	}
 	return ""

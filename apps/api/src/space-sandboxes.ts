@@ -555,6 +555,9 @@ export const reconcileSpaceSandbox = async (input: {
       { name: "WORKSPACE_DIR", value: "/workspace" },
       { name: "PLATFORM_AGENTS_DIR", value: "/configs/platform/.agents" },
       { name: "USER_AGENTS_DIR", value: "/configs/user/.agents" },
+      { name: "COHUB_SEARCH_ENABLED", value: String(config.sandboxSearchEnabled) },
+      { name: "COHUB_SEARCH_VERSION", value: config.sandboxSearchVersion },
+      { name: "COHUB_SEARCH_CDN_BASE_URL", value: config.sandboxSearchCdnBaseUrl },
       { name: "COHUB_SANDBOX_VERSION", value: toSandboxImageVersion(config.sandboxImage) },
       { name: "POD_IP", valueFrom: { fieldRef: { fieldPath: "status.podIP" } } },
       {

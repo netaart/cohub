@@ -11,6 +11,7 @@ Version tags build a static `linux/amd64` musl binary. GitHub Release assets
 are private; the public download is:
 
 ```text
+https://public.cohub.live/search/latest.json
 https://public.cohub.live/search/<version>/cohub-search-linux-amd64
 https://public.cohub.live/search/<version>/cohub-search-linux-amd64.sha256
 ```
@@ -66,9 +67,10 @@ Incremental updates are coalesced for three seconds before a Tantivy commit.
 The index directory contains a manifest with the family, generation, schema,
 analyzer version, and a persistent file snapshot. Restart reconciliation uses
 file metadata first, so a valid index is reused without rereading every file.
-Full builds remain available for first creation and recovery. Future index
-families can live beside `workspace.candidates` without changing this
-provider's contract.
+Full builds remain available for first creation and recovery. The sandbox
+runtime treats this binary as an optional workspace-search feature: new cloud
+sandboxes resolve `latest.json`, verify the immutable release checksum, and
+start the indexer when available.
 
 The indexer skips binary files, files larger than 4 MiB, VCS metadata, common
 package-manager directories, and build/cache output.

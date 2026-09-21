@@ -36,6 +36,26 @@ func TestProcessArgsIncludeNormalizedFilewatchIgnores(t *testing.T) {
 	}
 }
 
+func TestManagerHonorsDisabledFeature(t *testing.T) {
+	manager := NewManager(env.Config{
+		Mode:          env.ModeListen,
+		SearchEnabled: false,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if manager.Enabled() {
+		t.Fatal("search should stay disabled")
+	}
+}
+
+func TestManagerEnablesOptionalDownloadWithoutPreinstalledBinary(t *testing.T) {
+	manager := NewManager(env.Config{
+		Mode:          env.ModeListen,
+		SearchEnabled: true,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if !manager.Enabled() {
+		t.Fatal("search should be enabled while the binary download is pending")
+	}
+}
+
 func TestCrashingBinaryDoesNotBlockManagerShutdown(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test requires an executable shell script")
@@ -49,6 +69,7 @@ func TestCrashingBinaryDoesNotBlockManagerShutdown(t *testing.T) {
 
 	manager := NewManager(env.Config{
 		Mode:             env.ModeListen,
+		SearchEnabled:    true,
 		WorkspaceDir:     root,
 		SearchBinaryPath: binary,
 		SearchIndexDir:   filepath.Join(root, "index"),

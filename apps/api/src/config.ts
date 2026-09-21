@@ -17,6 +17,9 @@ export type AppConfig = {
   /** Optional checkpoint to bootstrap first-time Home spaces from; blank when unset. */
   homeBootstrapCheckpointId?: string;
   sandboxImage: string;
+  sandboxSearchEnabled: boolean;
+  sandboxSearchVersion: string;
+  sandboxSearchCdnBaseUrl: string;
   sandboxNodeSelector: Record<string, string>;
   sandboxTolerations: SandboxToleration[];
   bullmqRedisUrl: string;
@@ -189,6 +192,11 @@ export const config: AppConfig = {
   homeBootstrapCheckpointId: process.env.HOME_BOOTSTRAP_CHECKPOINT_ID?.trim() || undefined,
   sandboxImage:
     process.env.SANDBOX_IMAGE ?? getDefaultSandboxImage(env),
+  sandboxSearchEnabled: process.env.SANDBOX_SEARCH_ENABLED?.trim().toLowerCase() !== "false",
+  sandboxSearchVersion: process.env.SANDBOX_SEARCH_VERSION?.trim() || "latest",
+  sandboxSearchCdnBaseUrl:
+    process.env.SANDBOX_SEARCH_CDN_BASE_URL?.trim().replace(/\/+$/, "") ||
+    "https://public.cohub.live/search",
   sandboxNodeSelector: parseSandboxNodeSelector(process.env.SANDBOX_NODE_SELECTOR),
   sandboxTolerations: parseSandboxTolerations(process.env.SANDBOX_TOLERATIONS),
   bullmqRedisUrl:

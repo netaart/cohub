@@ -74,7 +74,7 @@ jobs:
       - name: Stage upload
         run: |
           set -euo pipefail
-          mkdir -p upload
+          mkdir -p upload latest-pointer
           BINARY=$(find artifacts -type f -name 'cohub-search-linux-amd64' | head -n 1)
           if [[ -z "${BINARY}" ]]; then
             echo "cohub-search-linux-amd64 artifact file not found" >&2
@@ -83,7 +83,8 @@ jobs:
           fi
           cp "${BINARY}" upload/cohub-search-linux-amd64
           (cd upload && sha256sum cohub-search-linux-amd64 > cohub-search-linux-amd64.sha256)
-          ls -la upload
+          printf '{"version":"%s"}\n' "${GITHUB_REF_NAME}" > latest-pointer/latest.json
+          ls -la upload latest-pointer
 
       - name: Configure AWS CLI for Alibaba Cloud OSS
         # OSS (us-west-1, a non-mainland-China region) is incompatible with
@@ -116,4 +117,7 @@ jobs:
             --endpoint-url "${OSS_ENDPOINT}" \
             --recursive \
             --cache-control "public, max-age=31536000, immutable"
-          echo "Published cohub-search ${VERSION} to https://public.cohub.live/search/${VERSION}/"
+          aws s3 cp latest-pointer/latest.json "s3://${OSS_BUCKET}/search/latest.json" \
+            --endpoint-url "${OSS_ENDPOINT}" \
+            --cache-control "no-cache, max-age=0"
+          echo "Published cohub-search ${VERSION} to https://public.cohub.live/search/${VERSION}/ and updated latest.json"

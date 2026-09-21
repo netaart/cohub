@@ -15,9 +15,12 @@ type FilesystemRoot struct {
 }
 
 const (
-	DefaultSandboxWSHost = "0.0.0.0"
-	DefaultSandboxWSPort = 8788
-	DefaultHeartbeatSecs = 5
+	DefaultSandboxWSHost     = "0.0.0.0"
+	DefaultSandboxWSPort     = 8788
+	DefaultHeartbeatSecs     = 5
+	DefaultSearchVersion     = "latest"
+	DefaultSearchCDNBaseURL  = "https://public.cohub.live/search"
+	DefaultSearchDownloadDir = "/tmp/cohub-search/bin"
 )
 
 // Mode selects how the sandbox exposes itself.
@@ -43,7 +46,11 @@ type Config struct {
 	PublicPorts                    []int
 	ZombieSelfHealThreshold        int
 	ZombieSelfHealConsecutiveTicks int
+	SearchEnabled                  bool
 	SearchBinaryPath               string
+	SearchVersion                  string
+	SearchCDNBaseURL               string
+	SearchDownloadDir              string
 	SearchIndexDir                 string
 	SearchSocketPath               string
 
@@ -110,7 +117,11 @@ func Load() (Config, error) {
 		PublicPorts:                    parsePortsEnv("COHUB_PUBLIC_PORTS", []int{3000, 5173}),
 		ZombieSelfHealThreshold:        parseIntEnv("ZOMBIE_SELF_HEAL_THRESHOLD", 0),
 		ZombieSelfHealConsecutiveTicks: parseIntEnv("ZOMBIE_SELF_HEAL_CONSECUTIVE_TICKS", 3),
+		SearchEnabled:                  parseBoolEnv("COHUB_SEARCH_ENABLED", true),
 		SearchBinaryPath:               strings.TrimSpace(os.Getenv("COHUB_SEARCH_BIN")),
+		SearchVersion:                  resolveSearchVersion(),
+		SearchCDNBaseURL:               resolveSearchCDNBaseURL(),
+		SearchDownloadDir:              resolveSearchDownloadDir(),
 		SearchIndexDir:                 resolveSearchIndexDir(),
 		SearchSocketPath:               resolveSearchSocketPath(),
 	}, nil
@@ -172,13 +183,38 @@ func LoadLocal(opts LocalOptions) (Config, error) {
 		UserAgentsDir:     filepath.Join(cacheDir, "user-agents"),
 		ImageVersion:      imageVersion,
 		PublicPorts:       parsePortsEnv("COHUB_PUBLIC_PORTS", []int{3000, 5173}),
+		SearchEnabled:     false,
 		SearchBinaryPath:  strings.TrimSpace(os.Getenv("COHUB_SEARCH_BIN")),
+		SearchVersion:     resolveSearchVersion(),
+		SearchCDNBaseURL:  resolveSearchCDNBaseURL(),
+		SearchDownloadDir: filepath.Join(cacheDir, "search-bin"),
 		SearchIndexDir:    filepath.Join(cacheDir, "index", "workspace-candidates"),
 		SearchSocketPath:  filepath.Join(cacheDir, "search.sock"),
 		RelayURL:          strings.TrimSpace(opts.RelayURL),
 		RelayToken:        strings.TrimSpace(opts.RelayToken),
 		Fence:             true,
 	}, nil
+}
+
+func resolveSearchVersion() string {
+	if value := strings.TrimSpace(os.Getenv("COHUB_SEARCH_VERSION")); value != "" {
+		return value
+	}
+	return DefaultSearchVersion
+}
+
+func resolveSearchCDNBaseURL() string {
+	if value := strings.TrimSpace(os.Getenv("COHUB_SEARCH_CDN_BASE_URL")); value != "" {
+		return strings.TrimRight(value, "/")
+	}
+	return DefaultSearchCDNBaseURL
+}
+
+func resolveSearchDownloadDir() string {
+	if value := strings.TrimSpace(os.Getenv("COHUB_SEARCH_DOWNLOAD_DIR")); value != "" {
+		return filepath.Clean(value)
+	}
+	return DefaultSearchDownloadDir
 }
 
 func resolveSearchIndexDir() string {
@@ -193,6 +229,18 @@ func resolveSearchSocketPath() string {
 		return filepath.Clean(value)
 	}
 	return "/tmp/cohub-search/search.sock"
+}
+
+func parseBoolEnv(name string, defaultValue bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return defaultValue
+	}
+	return value
 }
 
 func parseIntEnv(name string, defaultValue int) int {
