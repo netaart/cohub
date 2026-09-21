@@ -199,19 +199,23 @@ export default function ChatsScreen() {
         scrollIndicatorInsets={{ top: headerHeight, bottom: tabBarInset }}
         contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: tabBarInset, flexGrow: listItems.length === 0 ? 1 : undefined }}
         ListHeaderComponent={<View style={{ paddingHorizontal: 16, paddingTop: 4, paddingBottom: 4 }}>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, paddingVertical: 4 }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: theme.spacing.xs }}>
             <FilterChip label={t("chats.filter.all")} selected={filter === "all"} onPress={() => setFilter("all")} />
             <FilterChip label={t("chats.filter.running")} selected={filter === "running"} onPress={() => setFilter("running")} />
             <FilterChip label={t("chats.filter.completed")} selected={filter === "completed"} onPress={() => setFilter("completed")} />
-            <View ref={sourceButtonRef} collapsable={false}>
+            <View ref={sourceButtonRef} collapsable={false} style={{ marginLeft: "auto" }}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t("chats.source.filter")}
                 accessibilityState={{ expanded: sourceMenuOpen, selected: sourceFilter !== "all" }}
                 onPress={() => setSourceMenuOpen(true)}
-                style={({ pressed }) => ({ minHeight: 48, width: 48, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: sourceFilter !== "all" ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: sourceFilter !== "all" ? theme.colors.accentBorder : theme.colors.border })}
+                style={{ minHeight: 48, width: 48, alignItems: "center", justifyContent: "center" }}
               >
-                <AppIcon name="filter" size={16} color={sourceFilter !== "all" ? theme.colors.accent : theme.colors.textMuted} />
+                {({ pressed }) => (
+                  <View style={{ height: 32, width: 32, borderRadius: theme.radius.sm, borderCurve: "continuous", alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : sourceFilter !== "all" ? theme.colors.accentSoft : theme.colors.surfaceRaised }}>
+                    <AppIcon name="filter" size={16} color={sourceFilter !== "all" ? theme.colors.accent : theme.colors.textMuted} />
+                  </View>
+                )}
               </Pressable>
             </View>
           </View>
@@ -239,5 +243,20 @@ export default function ChatsScreen() {
 
 function FilterChip({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
   const theme = useAppTheme();
-  return <Pressable accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected }} onPress={onPress} style={({ pressed }) => ({ minHeight: 48, paddingVertical: 8, paddingHorizontal: 13, borderRadius: 999, justifyContent: "center", backgroundColor: selected ? theme.colors.accentSoft : pressed ? theme.colors.surfacePressed : theme.colors.surface, borderWidth: 1, borderColor: selected ? theme.colors.accentBorder : theme.colors.border })}><Text style={[typography.caption, { color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text></Pressable>;
+  // Keep the touch target generous without turning the label into a full-height button.
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={{ minHeight: 48, minWidth: 48, paddingVertical: theme.spacing.sm, justifyContent: "center" }}
+    >
+      {({ pressed }) => (
+        <View style={{ minHeight: 32, paddingVertical: theme.spacing.xs, paddingHorizontal: theme.spacing.md, borderRadius: theme.radius.sm, borderCurve: "continuous", alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.colors.surfacePressed : selected ? theme.colors.accentSoft : "transparent" }}>
+          <Text style={[typography.caption, { fontWeight: "600", color: selected ? theme.colors.accent : theme.colors.textMuted }]}>{label}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
 }

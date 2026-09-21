@@ -936,14 +936,39 @@ for (const [tab, component, expectedRequests] of [
 {
   for (const [path, name] of [["../app/(tabs)/index.tsx", "FilterChip"], ["../app/(tabs)/spaces.tsx", "SpaceFilterChip"]]) {
     const chip = loadChromeComponent(path, name, formScope)({ label: "Long filter label", selected: false, onPress() {} });
-    assert.ok(chip.props.style({ pressed: false }).minHeight >= 48);
-    assert.equal(chip.props.style({ pressed: false }).height, undefined, "fixed height cannot clip enlarged text");
+    const style = typeof chip.props.style === "function" ? chip.props.style({ pressed: false }) : chip.props.style;
+    assert.ok(style.minHeight >= 48);
+    assert.equal(style.height, undefined, "fixed height cannot clip enlarged text");
   }
   let pressed = 0;
   const empty = loadChromeComponent("../src/ui.tsx", "EmptyState", formScope)({ icon: "search", title: "No results", action: { icon: "x", label: "Clear filters", onPress: () => { pressed++; } } });
   const nodes = chromeNodes(empty);
   assert.ok(nodes.some((node) => node.type === "Text" && node.props.children.includes("Clear filters")), "action text must be visible, not only an accessibility label");
   nodes.find((node) => node.type === "Pressable").props.onPress(); assert.equal(pressed, 1);
+}
+
+// Chat filters separate compact visual surfaces from full-sized touch targets in both themes.
+{
+  for (const name of ["lightTheme", "darkTheme"]) {
+    const theme = loadChromeComponent("../src/theme.ts", name, {});
+    const renderChip = loadChromeComponent("../app/(tabs)/index.tsx", "FilterChip", { ...formScope, useAppTheme: () => theme });
+    for (const selected of [false, true]) {
+      let taps = 0;
+      const chip = renderChip({ label: "Completed", selected, onPress: () => { taps++; } });
+      assert.equal(chip.props.accessibilityState.selected, selected);
+      assert.ok(chip.props.style.minWidth >= 48);
+      assert.equal(chip.props.style.backgroundColor, undefined, "the touch target must not become the visible surface");
+      const surface = chip.props.children[0]({ pressed: false });
+      assert.equal(surface.props.style.minHeight, 32);
+      assert.equal(surface.props.style.height, undefined, "the label must still grow with larger text");
+      assert.equal(surface.props.style.borderRadius, theme.radius.sm);
+      assert.equal(surface.props.style.borderWidth, undefined);
+      assert.equal(surface.props.style.backgroundColor, selected ? theme.colors.accentSoft : "transparent");
+      assert.equal(chip.props.children[0]({ pressed: true }).props.style.backgroundColor, theme.colors.surfacePressed);
+      chip.props.onPress();
+      assert.equal(taps, 1);
+    }
+  }
 }
 
 // Check the actual light/dark bubble tokens, including alpha-composited timestamps.
@@ -1229,7 +1254,8 @@ for (const [path, component, labels] of [
   ["../app/(tabs)/index.tsx", "FilterChip", ["All", "Running", "Completed"]],
   ["../app/(tabs)/spaces.tsx", "SpaceFilterChip", ["Recent", "All", "Pinned"]],
 ]) {
-  const renderChip = loadChromeComponent(path, component, { ...chromeScope, PressableScale: "PressableScale" });
+  const theme = loadChromeComponent("../src/theme.ts", "darkTheme", {});
+  const renderChip = loadChromeComponent(path, component, { ...chromeScope, useAppTheme: () => theme, PressableScale: "PressableScale" });
   for (const label of labels) {
     for (const selected of [false, true]) {
       let pressed = false;
@@ -1237,8 +1263,9 @@ for (const [path, component, labels] of [
       assert.equal(chip.props.accessibilityRole, "tab");
       assert.equal(chip.props.accessibilityState.selected, selected);
       assert.equal(chip.props.accessibilityLabel, label);
-      assert.deepEqual(chromeNodes(chip).filter((node) => node.type === "Text").flatMap((node) => node.props.children), [label], "filter names must be visible without long-pressing");
-      if (label === "Pinned") assert.ok(chromeNodes(chip).some((node) => node.type === "AppIcon" && node.props.name === "pin"));
+      const content = typeof chip.props.children[0] === "function" ? chip.props.children[0]({ pressed: false }) : chip;
+      assert.deepEqual(chromeNodes(content).filter((node) => node.type === "Text").flatMap((node) => node.props.children), [label], "filter names must be visible without long-pressing");
+      if (label === "Pinned") assert.ok(chromeNodes(content).some((node) => node.type === "AppIcon" && node.props.name === "pin"));
       chip.props.onPress();
       assert.equal(pressed, true);
     }
