@@ -46,11 +46,21 @@ test("composer context alone enables the App Surface message host", () => {
 
 test("runtime context waits for the embedded document handshake", () => {
 	assert.match(source, /let runtimeReady = \$state\(false\)/);
-	assert.match(source, /if \(!runtimeReady \|\| !frameOrigin\) return/);
+	assert.match(
+		source,
+		/if \(!runtimeReady\) return;\s+postFrameMessage\(payload\)/,
+	);
 	assert.match(source, /parseAppRuntimeReady\(event\.data\)/);
 	assert.match(
 		source,
 		/runtimeReady = false;\s+surfaceHost\?\.reset\(\);\s+reportReady\(\);/,
+	);
+});
+
+test("frame messages require a resolved embedded origin", () => {
+	assert.match(
+		source,
+		/function postFrameMessage[\s\S]*?if \(!frameOrigin\) return/,
 	);
 });
 
