@@ -3,592 +3,261 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Cohub — native Cohub client for iOS and Android</title>
+    <title>Cohub Mobile — Big ideas. Small screen.</title>
     <meta
       name="description"
       content="Cohub Mobile is a native iOS and Android client for Cohub: Chats, Spaces, live agent sessions, voice input, and push notifications."
     />
-    <meta name="theme-color" content="#0f1114" />
-    <meta property="og:title" content="Cohub — native Cohub client for iOS and Android" />
+    <meta name="theme-color" content="#f8f7f3" />
+    <meta property="og:title" content="Cohub Mobile — Big ideas. Small screen." />
     <meta
       property="og:description"
       content="Chats, Spaces, live agent sessions, voice input, and push notifications, in a native app."
     />
     <meta property="og:type" content="website" />
-    <style>
-      /* Tokens mirror the app dark theme in src/theme.ts */
-      :root {
-        --background: #0f1114;
-        --surface: #171a1f;
-        --surface-raised: #22262e;
-        --border: #2b3039;
-        --text: #f7f8fa;
-        --text-secondary: #d0d5dd;
-        --text-muted: #a2aab6;
-        --text-faint: #747e8c;
-        --accent: #f08349;
-        --accent-pressed: #d96835;
-        --accent-soft: #36251e;
-        --accent-border: #865038;
-        --accent-text: #2a150c;
-        --radius: 14px;
-        --radius-lg: 22px;
-        --max-width: 1080px;
-      }
-
-      *,
-      *::before,
-      *::after {
-        box-sizing: border-box;
-      }
-
-      html {
-        scroll-behavior: smooth;
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        html {
-          scroll-behavior: auto;
-        }
-      }
-
-      /* Reveal targets are hidden from the first paint until GSAP animates them in,
-         otherwise each scroll-triggered tween snaps an already visible element back
-         to opacity 0 and it flashes. The class is added only when motion is allowed
-         and is removed if the motion scripts do not run, so no-JS and reduced-motion
-         visitors keep seeing a fully visible page. Targets mirror the tween selectors
-         below; do not hide [data-hero='cta'] itself, only the animated children. */
-      html.motion-pending [data-hero="eyebrow"],
-      html.motion-pending [data-hero="title"],
-      html.motion-pending [data-hero="lead"],
-      html.motion-pending [data-hero="cta"] > *,
-      html.motion-pending [data-reveal],
-      html.motion-pending [data-shot],
-      html.motion-pending [data-card] {
-        visibility: hidden;
-      }
-
-      body {
-        margin: 0;
-        background: var(--background);
-        color: var(--text);
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        line-height: 1.6;
-        -webkit-font-smoothing: antialiased;
-      }
-
-      a {
-        color: var(--accent);
-      }
-
-      .skip-link {
-        position: absolute;
-        left: -9999px;
-        top: 0;
-        background: var(--accent);
-        color: var(--accent-text);
-        padding: 12px 18px;
-        border-radius: 0 0 var(--radius) 0;
-        font-weight: 600;
-        z-index: 10;
-      }
-
-      .skip-link:focus {
-        left: 0;
-      }
-
-      :focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 3px;
-      }
-
-      .wrap {
-        width: 100%;
-        max-width: var(--max-width);
-        margin: 0 auto;
-        padding: 0 24px;
-      }
-
-      header.site {
-        border-bottom: 1px solid var(--border);
-        background: rgba(15, 17, 20, 0.9);
-        backdrop-filter: blur(12px);
-        position: sticky;
-        top: 0;
-        z-index: 5;
-      }
-
-      .site-inner {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        min-height: 64px;
-      }
-
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-weight: 700;
-        letter-spacing: -0.01em;
-        color: var(--text);
-        text-decoration: none;
-      }
-
-      .brand-mark {
-        width: 30px;
-        height: 30px;
-        border-radius: 9px;
-        background: var(--surface-raised);
-        border: 1px solid var(--border);
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 4px;
-        place-content: center;
-        padding: 7px;
-      }
-
-      .brand-mark span {
-        display: block;
-        width: 6px;
-        height: 9px;
-        border-radius: 3px;
-        background: var(--text);
-      }
-
-      nav.site a {
-        color: var(--text-secondary);
-        text-decoration: none;
-        font-size: 0.95rem;
-        margin-left: 20px;
-      }
-
-      nav.site a:hover {
-        color: var(--text);
-      }
-
-      @media (max-width: 620px) {
-        nav.site a:not(.nav-primary) {
-          display: none;
-        }
-        nav.site a {
-          margin-left: 0;
-        }
-      }
-
-      section {
-        padding: 88px 0;
-        /* Keep anchor jumps clear of the sticky header */
-        scroll-margin-top: 80px;
-      }
-
-      section + section {
-        border-top: 1px solid var(--border);
-      }
-
-      h1 {
-        font-size: clamp(2.2rem, 6vw, 3.5rem);
-        line-height: 1.1;
-        letter-spacing: -0.03em;
-        margin: 0 0 20px;
-      }
-
-      h2 {
-        font-size: clamp(1.5rem, 3.4vw, 2.1rem);
-        letter-spacing: -0.02em;
-        margin: 0 0 14px;
-      }
-
-      h3 {
-        font-size: 1.05rem;
-        margin: 0 0 8px;
-      }
-
-      p.lead {
-        font-size: clamp(1.05rem, 2.2vw, 1.25rem);
-        color: var(--text-secondary);
-        max-width: 62ch;
-        margin: 0 0 32px;
-      }
-
-      .eyebrow {
-        display: inline-block;
-        font-size: 0.8rem;
-        font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--accent);
-        background: var(--accent-soft);
-        border: 1px solid var(--accent-border);
-        border-radius: 999px;
-        padding: 6px 14px;
-        margin-bottom: 24px;
-      }
-
-      /* Download buttons */
-      .dl-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 14px;
-      }
-
-      .dl-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 12px;
-        min-height: 60px;
-        padding: 12px 24px;
-        border-radius: var(--radius);
-        border: 1px solid var(--border);
-        background: var(--surface-raised);
-        color: var(--text);
-        text-decoration: none;
-        font-weight: 650;
-        will-change: transform;
-      }
-
-      .dl-btn:hover {
-        border-color: var(--accent-border);
-      }
-
-      .dl-btn svg {
-        width: 26px;
-        height: 26px;
-        flex: none;
-        fill: currentColor;
-      }
-
-      .dl-btn .dl-label {
-        display: flex;
-        flex-direction: column;
-        line-height: 1.25;
-        text-align: left;
-      }
-
-      .dl-btn .dl-label small {
-        font-weight: 500;
-        font-size: 0.78rem;
-        color: var(--text-muted);
-      }
-
-      .dl-btn--primary {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: var(--accent-text);
-      }
-
-      .dl-btn--primary:hover {
-        background: var(--accent-pressed);
-        border-color: var(--accent-pressed);
-      }
-
-      .dl-btn--primary .dl-label small {
-        color: rgba(42, 21, 12, 0.72);
-      }
-
-      .shots {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 24px;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-
-      @media (max-width: 800px) {
-        .shots {
-          grid-template-columns: 1fr;
-          max-width: 380px;
-          margin: 0 auto;
-        }
-      }
-
-      .shot img {
-        display: block;
-        width: 100%;
-        height: auto;
-        border-radius: var(--radius-lg);
-        background: var(--surface);
-      }
-
-      .shot figcaption {
-        margin-top: 14px;
-      }
-
-      .shot figcaption strong {
-        display: block;
-        font-size: 1rem;
-      }
-
-      .shot figcaption span {
-        color: var(--text-muted);
-        font-size: 0.92rem;
-      }
-
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: 18px;
-      }
-
-      .card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 22px;
-      }
-
-      .card p {
-        margin: 0;
-        color: var(--text-muted);
-        font-size: 0.95rem;
-      }
-
-      footer.site {
-        border-top: 1px solid var(--border);
-        padding: 40px 0 56px;
-        color: var(--text-faint);
-        font-size: 0.9rem;
-      }
-
-      footer.site nav {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 18px;
-        margin-bottom: 14px;
-      }
-
-      footer.site a {
-        color: var(--text-secondary);
-        text-decoration: none;
-      }
-
-      footer.site a:hover {
-        color: var(--text);
-      }
-    </style>
-    <script>
-      // Hide reveal targets before the first paint so their tweens never flash.
-      if (window.matchMedia("(prefers-reduced-motion: no-preference)").matches) {
-        document.documentElement.classList.add("motion-pending");
-      }
-    </script>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="fonts/manrope-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
-    <header class="site">
-      <div class="wrap site-inner">
-        <a class="brand" href="#main">
-          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
-          Cohub
+    <svg class="sr-only" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-arrow" viewBox="0 0 24 24">
+          <path d="M5 12h14m-6-6 6 6-6 6" />
+        </symbol>
+        <symbol id="i-download" viewBox="0 0 24 24">
+          <path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4" />
+        </symbol>
+        <symbol id="i-phone" viewBox="0 0 24 24">
+          <rect x="6" y="2.5" width="12" height="19" rx="3" />
+          <path d="M10 5h4m-3 13.5h2" />
+        </symbol>
+        <symbol id="i-live" viewBox="0 0 24 24">
+          <path d="M2 12h5l3-7 4 14 3-7h5" />
+        </symbol>
+        <symbol id="i-code" viewBox="0 0 24 24">
+          <path d="m7 7-5 5 5 5m10-10 5 5-5 5m-3-14-4 18" />
+        </symbol>
+        <symbol id="i-mic" viewBox="0 0 24 24">
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-3 0h6" />
+        </symbol>
+        <symbol id="i-bell" viewBox="0 0 24 24">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-9 12a3 3 0 0 0 6 0" />
+        </symbol>
+        <symbol id="i-sliders" viewBox="0 0 24 24">
+          <path d="M4 7h3m6 0h7M4 17h9m6 0h1" />
+          <circle cx="10" cy="7" r="3" /><circle cx="16" cy="17" r="3" />
+        </symbol>
+        <symbol id="i-cache" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="5" rx="8" ry="3" />
+          <path d="M4 5v7c0 4 16 4 16 0V5M4 12v7c0 4 16 4 16 0v-7" />
+        </symbol>
+        <symbol id="i-android" viewBox="0 0 24 24">
+          <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5743-6.1185-9.4396" />
+        </symbol>
+        <symbol id="i-apple" viewBox="0 0 24 24">
+          <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <a class="brand" href="#main" aria-label="Cohub Mobile home">
+          <span class="brand-mark" aria-hidden="true"></span>
+          Cohub<span class="brand-edition">MOBILE</span>
         </a>
-        <nav class="site" aria-label="Primary">
-          <a href="#screens">Screens</a>
-          <a href="#features">Features</a>
-          <a href="https://github.com/markbang/cohub-mobile">GitHub</a>
-          <a class="nav-primary" href="#download">Download</a>
+        <nav class="site-nav" aria-label="Primary">
+          <a href="#screens">The app</a>
+          <a href="#features">Why Cohub</a>
+          <a href="https://github.com/markbang/cohub-mobile">GitHub ↗</a>
         </nav>
+        <a class="header-download" href="#download">
+          Get the app <svg class="icon" aria-hidden="true"><use href="#i-download" /></svg>
+        </a>
       </div>
     </header>
 
     <main id="main">
-      <section id="hero">
-        <div class="wrap">
-          <span class="eyebrow" data-hero="eyebrow">iOS &amp; Android</span>
-          <h1 data-hero="title">Your Cohub agents, native on your phone.</h1>
-          <p class="lead" data-hero="lead">
-            Chats, Spaces, and live agent sessions in a real native client. Cache-first startup,
-            streaming turns, voice input, and push notifications that open straight to the right
-            conversation.
+      <section class="hero wrap" id="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Your agents. No desk required.</p>
+          <h1 id="hero-title">Big ideas.<br /><span>Small screen.</span></h1>
+          <p class="hero-lead">
+            Keep your agents close. Chats, Spaces, and work in progress — now in a native app
+            for iOS and Android.
           </p>
-
-          <div class="dl-row" data-hero="cta">
-            <!-- Original href is the GitHub fallback; data-dl-android rewrites it from Yaota. -->
-            <a
-              class="dl-btn dl-btn--primary"
-              data-press
-              data-dl-android
-              href="https://github.com/markbang/cohub-mobile/releases/latest"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path
-                  d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5743-6.1185-9.4396"
-                />
-              </svg>
-              <span class="dl-label">
-                Android
-                <small data-dl-android-note>APK</small>
-              </span>
+          <div class="dl-row">
+            <!-- The catalog resolver below updates both Android download links. -->
+            <a class="dl-btn dl-btn--primary" data-dl-android href="https://github.com/markbang/cohub-mobile/releases/latest">
+              <svg class="icon icon--fill" aria-hidden="true"><use href="#i-android" /></svg>
+              <span class="dl-label"><small>Download for</small>Android<small data-dl-android-note>APK · Direct install</small></span>
             </a>
-
-            <a class="dl-btn" data-press href="https://testflight.apple.com/join/KWhztpkP">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path
-                  d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
-                />
-              </svg>
-              <span class="dl-label">
-                iOS
-                <small>TestFlight</small>
-              </span>
+            <a class="dl-btn" href="https://testflight.apple.com/join/KWhztpkP">
+              <svg class="icon icon--fill" aria-hidden="true"><use href="#i-apple" /></svg>
+              <span class="dl-label"><small>Join the beta on</small>iOS<small>Available via TestFlight</small></span>
             </a>
           </div>
+          <p class="hero-note">
+            <svg class="icon" aria-hidden="true"><use href="#i-code" /></svg>
+            Open source. Built for your Cohub workspace.
+          </p>
+        </div>
+        <div class="hero-art">
+          <div class="orbit" aria-hidden="true"></div>
+          <img class="hero-phone hero-phone--back" src="screenshots/chats.png" width="1307" height="2732"
+            alt="Cohub Chats on Android, with a live agent session and running filter" decoding="async" />
+          <img class="hero-phone hero-phone--front" src="screenshots/spaces.png" width="1307" height="2732"
+            alt="Cohub Spaces on Android, with recent projects and pinned workspaces" fetchpriority="high" decoding="async" />
+          <div class="art-note">
+            <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
+            <div><strong>A little more freedom.</strong><span>Your workspace, wherever you are.</span></div>
+          </div>
+          <span class="art-caption">Real app. Real screenshots.</span>
         </div>
       </section>
 
-      <section id="screens">
-        <div class="wrap">
-          <h2 data-reveal>Screens</h2>
-          <ul class="shots">
-            <li data-shot>
-              <figure class="shot">
-                <img
-                  src="screenshots/chats.png"
-                  width="1307"
-                  height="2732"
-                  alt="Cohub Chats inbox showing All, Running, and Completed filters with a running chat session"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <figcaption>
-                  <strong>Chats</strong>
-                  <span>Cross-Space inbox with running and attention filters.</span>
-                </figcaption>
-              </figure>
-            </li>
-            <li data-shot>
-              <figure class="shot">
-                <img
-                  src="screenshots/spaces.png"
-                  width="1307"
-                  height="2732"
-                  alt="Cohub Spaces list with recent Spaces, chat counts, activity times, and pin controls"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <figcaption>
-                  <strong>Spaces</strong>
-                  <span>Recent, all, and pinned Spaces with live activity.</span>
-                </figcaption>
-              </figure>
-            </li>
-            <li data-shot>
-              <figure class="shot">
-                <img
-                  src="screenshots/settings.png"
-                  width="1307"
-                  height="2732"
-                  alt="Cohub Settings screen with profile, appearance, language, notifications, rules, and storage sections"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <figcaption>
-                  <strong>Settings</strong>
-                  <span>Appearance, language, notifications, rules, and cache.</span>
-                </figcaption>
-              </figure>
-            </li>
-          </ul>
+      <div class="principles wrap" role="group" aria-label="Cohub at a glance">
+        <p>A smaller screen.<br />Not a smaller workspace.</p>
+        <ul>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>Native iOS &amp; Android</li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-live" /></svg>Live agent sessions</li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-code" /></svg>Open source by design</li>
+        </ul>
+      </div>
+
+      <section class="section wrap" id="screens" aria-labelledby="screens-title">
+        <div class="section-heading" data-reveal>
+          <div>
+            <p class="eyebrow">Familiar workspace. Fresh perspective.</p>
+            <h2 id="screens-title">Everything in its place.<br />And in your pocket.</h2>
+          </div>
+          <p>Your conversations, projects, and preferences. A familiar home, made for a smaller screen.</p>
+        </div>
+        <fieldset class="screen-explorer">
+          <legend class="sr-only">Explore the app screens</legend>
+          <input class="sr-only" type="radio" name="screen" id="screen-chats" aria-labelledby="label-chats" aria-controls="panel-chats" checked />
+          <label class="screen-option" for="screen-chats">
+            <span class="option-number">01</span>
+            <span><span class="option-title" id="label-chats"><span class="option-desktop">Keep the conversation going.</span><span class="option-mobile">Chats</span></span>
+              <span class="option-copy">One inbox for Chats across your Spaces. Follow live replies, find what needs your attention, and pick up where you left off.</span>
+            </span>
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </label>
+          <input class="sr-only" type="radio" name="screen" id="screen-spaces" aria-labelledby="label-spaces" aria-controls="panel-spaces" />
+          <label class="screen-option" for="screen-spaces">
+            <span class="option-number">02</span>
+            <span><span class="option-title" id="label-spaces"><span class="option-desktop">A Space for every idea.</span><span class="option-mobile">Spaces</span></span>
+              <span class="option-copy">Chats, Files, Saves, Works, and Task Runs, together in each Space. Pin your favorites and get straight to what matters.</span>
+            </span>
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </label>
+          <input class="sr-only" type="radio" name="screen" id="screen-settings" aria-labelledby="label-settings" aria-controls="panel-settings" />
+          <label class="screen-option" for="screen-settings">
+            <span class="option-number">03</span>
+            <span><span class="option-title" id="label-settings"><span class="option-desktop">Make yourself at home.</span><span class="option-mobile">Settings</span></span>
+              <span class="option-copy">Set your appearance, manage notifications, and tune your rules. Your workspace should feel like yours.</span>
+            </span>
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </label>
+          <div class="screen-stage">
+            <figure class="screen-panel" id="panel-chats">
+              <figcaption><span>01 / Chats</span><span>Inside the app</span></figcaption>
+              <img src="screenshots/chats.png" width="1307" height="2732" alt="Chats inbox with All, Running, and Completed filters and a live session" loading="lazy" decoding="async" />
+            </figure>
+            <figure class="screen-panel" id="panel-spaces">
+              <figcaption><span>02 / Spaces</span><span>Inside the app</span></figcaption>
+              <img src="screenshots/spaces.png" width="1307" height="2732" alt="Spaces with recent projects, activity times, chat counts, and pin controls" loading="lazy" decoding="async" />
+            </figure>
+            <figure class="screen-panel" id="panel-settings">
+              <figcaption><span>03 / Settings</span><span>Inside the app</span></figcaption>
+              <img src="screenshots/settings.png" width="1307" height="2732" alt="Settings for appearance, language, notifications, rules, and storage" loading="lazy" decoding="async" />
+            </figure>
+          </div>
+        </fieldset>
+      </section>
+
+      <section class="section wrap" id="features" aria-labelledby="features-title">
+        <div class="section-heading" data-reveal>
+          <div>
+            <p class="eyebrow">Made for life away from your desk</p>
+            <h2 id="features-title">Go about your day.<br />Keep your ideas moving.</h2>
+          </div>
+          <p>Not a browser tab in disguise. Native features that make working on your phone feel natural.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card feature-card--voice" data-reveal>
+            <div class="voice-visual" aria-hidden="true">
+              <svg class="icon"><use href="#i-mic" /></svg>
+              <div class="waveform">
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+            </div>
+            <div>
+              <h3>Good ideas don’t wait for a keyboard.</h3>
+              <p>Say what’s on your mind. Native voice input turns your words into a message, ready for your agent.</p>
+            </div>
+          </article>
+          <article class="feature-card" data-reveal>
+            <div class="notification-visual" aria-hidden="true">
+              <svg class="icon"><use href="#i-bell" /></svg>
+              <div><strong>Less checking in.</strong><span>More getting on with your day.</span></div>
+            </div>
+            <div>
+              <h3>Step away.<br />Stay in the loop.</h3>
+              <p>Let notifications bring you back when it matters. One tap opens the right conversation, with the latest updates.</p>
+            </div>
+          </article>
+          <article class="feature-detail" data-reveal>
+            <svg class="icon" aria-hidden="true"><use href="#i-sliders" /></svg>
+            <div><h3>The right model for the moment.</h3><p>Check availability, compare context limits, and choose a thinking level before you send.</p></div>
+          </article>
+          <article class="feature-detail" data-reveal>
+            <svg class="icon" aria-hidden="true"><use href="#i-cache" /></svg>
+            <div><h3>A head start, every time you open.</h3><p>Your cached workspace loads first. Fresh updates follow when you reconnect, so you’re not starting from a blank screen.</p></div>
+          </article>
         </div>
       </section>
 
-      <section id="features">
-        <div class="wrap">
-          <h2 data-reveal>What is inside</h2>
-          <div class="grid">
-            <article class="card" data-card>
-              <h3>Live agent sessions</h3>
-              <p>
-                Streaming turn patches, optimistic sends, stop, rename, and stable scroll position
-                across pagination.
-              </p>
-            </article>
-            <article class="card" data-card>
-              <h3>Spaces and Works</h3>
-              <p>
-                Chats, Files, Saves, Works, and Task Runs per Space, with a native file viewer and
-                origin-constrained previews for published Works.
-              </p>
-            </article>
-            <article class="card" data-card>
-              <h3>Model picker</h3>
-              <p>
-                Availability lights, provider and context metadata, and per-model thinking levels
-                before you send.
-              </p>
-            </article>
-            <article class="card" data-card>
-              <h3>Voice input</h3>
-              <p>Native PCM capture wired into Cohub ASR, for when typing is not practical.</p>
-            </article>
-            <article class="card" data-card>
-              <h3>Push that lands correctly</h3>
-              <p>
-                APNs and FCM notifications route into the target chat and refetch authoritative state
-                instead of trusting the payload.
-              </p>
-            </article>
-            <article class="card" data-card>
-              <h3>Offline-aware startup</h3>
-              <p>
-                User-scoped SQLite cache hydrates instantly, then reconciles against the server on
-                reconnect.
-              </p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section id="download">
-        <div class="wrap">
-          <h2 data-reveal>Download</h2>
-          <div class="dl-row" data-reveal>
-            <a
-              class="dl-btn dl-btn--primary"
-              data-press
-              data-dl-android
-              href="https://github.com/markbang/cohub-mobile/releases/latest"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path
-                  d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5743-6.1185-9.4396"
-                />
-              </svg>
-              <span class="dl-label">
-                Android
-                <small data-dl-android-note>APK</small>
-              </span>
+      <section class="download-section wrap" id="download" aria-labelledby="download-title">
+        <div class="download-panel" data-reveal>
+          <p class="eyebrow">Take it with you</p>
+          <h2 id="download-title">Your workspace.<br />Now pocket-sized.</h2>
+          <p>A little less desk. A little more possibility.</p>
+          <div class="dl-row">
+            <a class="dl-btn dl-btn--primary" data-dl-android href="https://github.com/markbang/cohub-mobile/releases/latest">
+              <svg class="icon icon--fill" aria-hidden="true"><use href="#i-android" /></svg>
+              <span class="dl-label"><small>Download for</small>Android<small data-dl-android-note>APK · Direct install</small></span>
             </a>
-
-            <a class="dl-btn" data-press href="https://testflight.apple.com/join/KWhztpkP">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path
-                  d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
-                />
-              </svg>
-              <span class="dl-label">
-                iOS
-                <small>TestFlight</small>
-              </span>
+            <a class="dl-btn" href="https://testflight.apple.com/join/KWhztpkP">
+              <svg class="icon icon--fill" aria-hidden="true"><use href="#i-apple" /></svg>
+              <span class="dl-label"><small>Join the beta on</small>iOS<small>Available via TestFlight</small></span>
             </a>
           </div>
+          <div class="download-note">Sign in with your Cohub account. On iOS, install Apple’s TestFlight app first, then open the beta invite.</div>
+          <div class="download-mascot" aria-hidden="true"></div>
         </div>
       </section>
     </main>
 
-    <footer class="site">
-      <div class="wrap">
-        <nav aria-label="Footer">
-          <a href="https://github.com/markbang/cohub-mobile">Source</a>
-          <a href="https://github.com/markbang/cohub-mobile/releases">Releases</a>
-          <a href="https://github.com/markbang/cohub-mobile/blob/main/CHANGELOG.md">Changelog</a>
-          <a href="https://github.com/markbang/cohub-mobile/issues">Issues</a>
-        </nav>
-        <p>Cohub Mobile is open source under the terms in the repository LICENSE.</p>
+    <footer class="site-footer wrap">
+      <div>
+        <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"></span>Cohub</a>
+        <p>A native home for your Cohub workspace.</p>
       </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/markbang/cohub-mobile">Source ↗</a>
+        <a href="https://github.com/markbang/cohub-mobile/releases">Releases</a>
+        <a href="https://github.com/markbang/cohub-mobile/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/markbang/cohub-mobile/issues">Issues</a>
+        <a href="https://github.com/markbang/cohub-mobile/blob/main/LICENSE">License</a>
+      </nav>
     </footer>
 
     <script>
@@ -660,116 +329,34 @@
     <script src="vendor/ScrollTrigger.min.js"></script>
     <script>
       (() => {
-        // Without both scripts the page stays fully visible; motion is additive.
-        if (!window.gsap || !window.ScrollTrigger) {
-          document.documentElement.classList.remove("motion-pending");
-          return;
-        }
+        // Content and the screen explorer remain usable when motion scripts are unavailable.
+        if (!window.gsap || !window.ScrollTrigger) return;
         gsap.registerPlugin(ScrollTrigger);
 
-        // Durations follow src/motion.ts (fade 150ms → sendBubble 360ms) rather than
-        // library defaults, so the page settles at the same speed as the app.
-        const mm = gsap.matchMedia();
-
-        mm.add(
-          {
-            reduce: "(prefers-reduced-motion: reduce)",
-            motionOk: "(prefers-reduced-motion: no-preference)",
-          },
-          (context) => {
-            if (context.conditions.reduce) {
-              document.documentElement.classList.remove("motion-pending");
-              return;
-            }
-
-            // fromTo, not from: the pre-paint CSS above is the start state, and a
-            // from tween would read that hidden state as its end value.
-            const hero = gsap.timeline({ defaults: { ease: "power2.out", duration: 0.42 } });
-            hero
-              .fromTo("[data-hero='eyebrow']", { y: 10, autoAlpha: 0 }, { y: 0, autoAlpha: 1 }, 0)
-              .fromTo("[data-hero='title']", { y: 16, autoAlpha: 0 }, { y: 0, autoAlpha: 1 }, 0.06)
-              .fromTo("[data-hero='lead']", { y: 16, autoAlpha: 0 }, { y: 0, autoAlpha: 1 }, 0.12)
-              .fromTo(
-                "[data-hero='cta'] > *",
-                { y: 14, autoAlpha: 0 },
-                { y: 0, autoAlpha: 1, stagger: 0.08 },
-                0.18,
-              );
-
-            ScrollTrigger.batch("[data-reveal]", {
-              start: "top 85%",
-              once: true,
-              onEnter: (elements) =>
-                gsap.fromTo(
-                  elements,
-                  { y: 14, autoAlpha: 0 },
-                  {
-                    y: 0,
-                    autoAlpha: 1,
-                    duration: 0.36,
-                    ease: "power2.out",
-                    stagger: 0.08,
-                    overwrite: true,
-                  },
-                ),
+        gsap.matchMedia().add("(prefers-reduced-motion: no-preference)", () => {
+          gsap.from(".hero-copy > *", {
+            y: 14,
+            duration: 0.42,
+            stagger: 0.05,
+            ease: "power2.out",
+            clearProps: "transform",
+          });
+          gsap.from(".hero-art", {
+            y: 20,
+            duration: 0.6,
+            ease: "power2.out",
+            clearProps: "transform",
+          });
+          gsap.utils.toArray("[data-reveal]").forEach((element) => {
+            gsap.from(element, {
+              y: 18,
+              duration: 0.45,
+              ease: "power2.out",
+              clearProps: "transform",
+              scrollTrigger: { trigger: element, start: "top 92%", once: true },
             });
-
-            ScrollTrigger.batch("[data-shot]", {
-              start: "top 82%",
-              once: true,
-              onEnter: (elements) =>
-                gsap.fromTo(
-                  elements,
-                  { y: 22, autoAlpha: 0 },
-                  {
-                    y: 0,
-                    autoAlpha: 1,
-                    duration: 0.5,
-                    ease: "power2.out",
-                    stagger: 0.1,
-                    overwrite: true,
-                  },
-                ),
-            });
-
-            ScrollTrigger.batch("[data-card]", {
-              start: "top 88%",
-              once: true,
-              onEnter: (elements) =>
-                gsap.fromTo(
-                  elements,
-                  { y: 14, autoAlpha: 0 },
-                  {
-                    y: 0,
-                    autoAlpha: 1,
-                    duration: 0.36,
-                    ease: "power2.out",
-                    stagger: 0.06,
-                    overwrite: true,
-                  },
-                ),
-            });
-
-            // Press feedback mirrors the app's pressIn (90ms) and press.scale.
-            const pressTweens = [];
-            document.querySelectorAll("[data-press]").forEach((el) => {
-              const scaleTo = gsap.quickTo(el, "scale", { duration: 0.09, ease: "power2.out" });
-              const down = () => scaleTo(0.975);
-              const up = () => scaleTo(1);
-              el.addEventListener("pointerdown", down);
-              el.addEventListener("pointerup", up);
-              el.addEventListener("pointerleave", up);
-              pressTweens.push({ el, down, up });
-            });
-            context.add(() => {
-              pressTweens.forEach(({ el, down, up }) => {
-                el.removeEventListener("pointerdown", down);
-                el.removeEventListener("pointerup", up);
-                el.removeEventListener("pointerleave", up);
-              });
-            });
-          },
-        );
+          });
+        });
       })();
     </script>
   </body>
