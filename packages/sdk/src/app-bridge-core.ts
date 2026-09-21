@@ -236,6 +236,27 @@ function clonePermissionScopes(scopes: readonly Permission[] | null | undefined)
 }
 
 /**
+ * Invocation contexts can originate in reactive host state. Copy nested
+ * objects before putting the context on a postMessage payload: a shallow copy
+ * of the invocation itself would leave `embedder` as a framework Proxy.
+ */
+function cloneInvocation(
+	invocation: AppRuntimeInvocationContext,
+): AppRuntimeInvocationContext {
+	return {
+		...invocation,
+		...(invocation.embedder
+			? {
+					embedder: {
+						appId: invocation.embedder.appId,
+						slug: invocation.embedder.slug,
+					},
+				}
+			: {}),
+	};
+}
+
+/**
  * Scopes arriving over postMessage are untrusted: keep only known permission
  * names (in first-seen order, deduplicated) so a malicious app cannot push
  * arbitrary strings, duplicates, or oversized arrays into the consent dialog.
@@ -533,7 +554,7 @@ export function createAppBridgeCore(
 			// Kept for clients that still read context.space.
 			space: { id: app.spaceId },
 			viewer: viewerUuid ? { userUuid: viewerUuid } : null,
-			...(invocation ? { invocation: { ...invocation } } : {}),
+			...(invocation ? { invocation: cloneInvocation(invocation) } : {}),
 			...(shell
 				? {
 						shell: {

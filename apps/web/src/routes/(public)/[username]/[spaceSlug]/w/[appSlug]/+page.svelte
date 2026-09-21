@@ -112,7 +112,16 @@ const invocation = $derived<AppRuntimeInvocationContext | undefined>(
 		? {
 				surface: "page",
 				source: "embed",
-				...(embedder ? { embedder } : {}),
+				// `embedder` is backed by Svelte state. Rebuild the nested value so
+				// the bridge only ever receives structured-cloneable data.
+				...(embedder
+					? {
+							embedder: {
+								appId: embedder.appId,
+								slug: embedder.slug,
+							},
+						}
+					: {}),
 				...(trustedEmbed?.shell?.space
 					? { spaceId: trustedEmbed.shell.space.id }
 					: {}),

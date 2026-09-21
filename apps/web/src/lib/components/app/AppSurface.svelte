@@ -215,6 +215,20 @@ const shouldRenderFrame = $derived(
 	Boolean(bridgeReady && hasFrameSource && !nativeContent),
 );
 const frameReplyTarget = $derived(frameOrigin ?? page.url.origin);
+
+/**
+ * `postMessage` structured-clones synchronously. A reactive value that leaks
+ * through a bridge payload must not take down the host's message handler.
+ */
+function postFrameMessage(message: Record<string, unknown>) {
+	if (!frameOrigin) return;
+	try {
+		frame?.contentWindow?.postMessage(message, frameReplyTarget);
+	} catch (cause) {
+		console.warn("[app-bridge] Failed to post a message to the App.", cause);
+	}
+}
+
 // A new document invalidates any announced methods.
 $effect(() => {
 	void iframeSrc;
@@ -244,15 +258,11 @@ const host = untrack(() =>
 		notify: (payload) => {
 			// Only a ready runtime can receive unsolicited context updates. The
 			// iframe may have navigated without changing iframeSrc.
-			if (!runtimeReady || !frameOrigin) return;
-			frame?.contentWindow?.postMessage(payload, frameReplyTarget);
+			if (!runtimeReady) return;
+			postFrameMessage(payload);
 		},
 		reply: (requestId, payload) => {
-			if (!frameOrigin) return;
-			frame?.contentWindow?.postMessage(
-				{ requestId, ...payload },
-				frameReplyTarget,
-			);
+			postFrameMessage({ requestId, ...payload });
 		},
 		getCheckoutState: () => checkoutState,
 	}),
@@ -326,7 +336,7 @@ async function onFrameMessage(event: MessageEvent) {
 		} catch {
 			result = { handled: false as const, reason: "inaccessible" as const };
 		}
-		frame?.contentWindow?.postMessage(
+		postFrameMessage(
 			buildAppNavigationOpenResponse({
 				requestId: navigation.requestId,
 				...(result ?? {
@@ -334,7 +344,6 @@ async function onFrameMessage(event: MessageEvent) {
 					reason: "inaccessible" as const,
 				}),
 			}),
-			frameReplyTarget,
 		);
 		return;
 	}
