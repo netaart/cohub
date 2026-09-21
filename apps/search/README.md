@@ -16,6 +16,18 @@ https://public.cohub.live/search/<version>/cohub-search-linux-amd64
 https://public.cohub.live/search/<version>/cohub-search-linux-amd64.sha256
 ```
 
+Versioned uploads run independently. A separate serialized job promotes
+`latest.json` only to a newer `vX.Y.Z`; rerunning older or equal versions leaves
+it unchanged. Promotion reads OSS directly, not the CDN. Release credentials
+need `oss:GetObject` for `cohub-public/search/latest.json` in addition to the
+existing upload permissions. Only a missing object allows first-time creation;
+other read errors fail without updating the pointer.
+
+版本文件独立上传，`latest.json` 由单独的串行任务更新，且只允许升级到更高的
+`vX.Y.Z`。旧版或同版本重跑不会覆盖指针。更新时直接读取 OSS，不经过 CDN；
+发布凭据除上传权限外，还需对 `cohub-public/search/latest.json` 拥有
+`oss:GetObject` 权限。仅对象不存在时允许首次创建，其他读取错误会终止更新。
+
 ```bash
 VERSION=v2.42.0
 curl -fsSL "https://public.cohub.live/search/${VERSION}/cohub-search-linux-amd64" -o cohub-search-linux-amd64

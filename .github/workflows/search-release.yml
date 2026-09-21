@@ -74,7 +74,7 @@ jobs:
       - name: Stage upload
         run: |
           set -euo pipefail
-          mkdir -p upload latest-pointer
+          mkdir -p upload
           BINARY=$(find artifacts -type f -name 'cohub-search-linux-amd64' | head -n 1)
           if [[ -z "${BINARY}" ]]; then
             echo "cohub-search-linux-amd64 artifact file not found" >&2
@@ -83,8 +83,7 @@ jobs:
           fi
           cp "${BINARY}" upload/cohub-search-linux-amd64
           (cd upload && sha256sum cohub-search-linux-amd64 > cohub-search-linux-amd64.sha256)
-          printf '{"version":"%s"}\n' "${GITHUB_REF_NAME}" > latest-pointer/latest.json
-          ls -la upload latest-pointer
+          ls -la upload
 
       - name: Configure AWS CLI for Alibaba Cloud OSS
         # OSS (us-west-1, a non-mainland-China region) is incompatible with
@@ -117,7 +116,35 @@ jobs:
             --endpoint-url "${OSS_ENDPOINT}" \
             --recursive \
             --cache-control "public, max-age=31536000, immutable"
-          aws s3 cp latest-pointer/latest.json "s3://${OSS_BUCKET}/search/latest.json" \
-            --endpoint-url "${OSS_ENDPOINT}" \
-            --cache-control "no-cache, max-age=0"
-          echo "Published cohub-search ${VERSION} to https://public.cohub.live/search/${VERSION}/ and updated latest.json"
+          echo "Published cohub-search ${VERSION} to https://public.cohub.live/search/${VERSION}/"
+
+  promote-latest:
+    needs: publish-cdn
+    runs-on: ubuntu-latest
+    # Serialize only pointer promotion; every tag must still upload its assets.
+    concurrency:
+      group: cohub-search-latest
+      cancel-in-progress: false
+    env:
+      OSS_BUCKET: cohub-public
+      OSS_ENDPOINT: https://oss-us-west-1.aliyuncs.com
+      AWS_DEFAULT_REGION: us-west-1
+      AWS_ACCESS_KEY_ID: ${{ secrets.PUBLIC_ASSET_OSS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_ASSET_OSS_SECRET_ACCESS_KEY }}
+      VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Configure AWS CLI for Alibaba Cloud OSS
+        run: |
+          mkdir -p ~/.aws
+          printf '[default]\nrequest_checksum_calculation = when_required\nresponse_checksum_validation = when_required\ns3 =\n    addressing_style = virtual\n' > ~/.aws/config
+
+      - name: Promote latest release without downgrading
+        run: node scripts/search/promote-latest.mjs

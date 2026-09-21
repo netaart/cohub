@@ -16,6 +16,35 @@ import (
 	"github.com/cohub/apps/sandbox/env"
 )
 
+func TestDownloaderHonorsConfiguredSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test requires Unix executable permissions and symlinks")
+	}
+	root := t.TempDir()
+	binary := filepath.Join(root, "cohub-search-v1")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, searchBinaryName)
+	if err := os.Symlink(binary, link); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := newDownloader().ensure(context.Background(), env.Config{
+		SearchBinaryPath: link,
+		SearchVersion:    "invalid",
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("configured binary should bypass release resolution: %v", err)
+	}
+	if path != link {
+		t.Fatalf("selected binary = %q, want %q", path, link)
+	}
+	if isExecutableFile(link) {
+		t.Fatal("downloaded binary validation must still reject symlinks")
+	}
+}
+
 func TestDownloaderResolvesLatestAndVerifiesBinary(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skip("search release binary is linux/amd64")

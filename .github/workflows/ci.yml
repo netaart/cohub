@@ -55,6 +55,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test search release promotion
+        run: node --test scripts/search/promote-latest.test.mjs
+
       - name: Lint
         run: pnpm lint
 
@@ -113,3 +116,7 @@ jobs:
       - name: Test
         working-directory: apps/sandbox
         run: go test ./...
+
+      - name: Test search startup with race detector
+        working-directory: apps/sandbox
+        run: go test -race ./search

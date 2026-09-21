@@ -56,6 +56,37 @@ func TestManagerEnablesOptionalDownloadWithoutPreinstalledBinary(t *testing.T) {
 	}
 }
 
+func TestManagerStartsWithCachedBinary(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("search release binary is linux/amd64")
+	}
+
+	root := t.TempDir()
+	versionDir := filepath.Join(root, "bin", "v1.2.3")
+	if err := os.MkdirAll(versionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(versionDir, searchBinaryName)
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := NewManager(env.Config{
+		Mode:              env.ModeListen,
+		SearchEnabled:     true,
+		SearchVersion:     "v1.2.3",
+		SearchDownloadDir: filepath.Join(root, "bin"),
+		SearchSocketPath:  filepath.Join(root, "search.sock"),
+		SearchIndexDir:    filepath.Join(root, "index"),
+		WorkspaceDir:      root,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	manager.Start()
+	manager.Close()
+	if manager.binary != binary {
+		t.Fatalf("selected binary = %q, want %q", manager.binary, binary)
+	}
+}
+
 func TestCrashingBinaryDoesNotBlockManagerShutdown(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test requires an executable shell script")

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -113,14 +114,14 @@ func (m *Manager) Start() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
-	go m.supervise(ctx)
-	go m.commandLoop(ctx)
 	m.logger.Info("search index enabled",
 		slog.String("binary", m.binary),
 		slog.String("version", m.cfg.SearchVersion),
 		slog.String("indexDir", m.cfg.SearchIndexDir),
 		slog.String("socket", m.cfg.SearchSocketPath),
 	)
+	go m.supervise(ctx)
+	go m.commandLoop(ctx)
 }
 
 func (m *Manager) Enabled() bool {
@@ -508,7 +509,8 @@ func resolveBinary(configured string) string {
 			continue
 		}
 		candidate = filepath.Clean(candidate)
-		if isExecutableFile(candidate) {
+		info, err := os.Stat(candidate)
+		if err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
 			return candidate
 		}
 	}
