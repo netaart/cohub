@@ -22,6 +22,7 @@ export type RuntimeRelayDependencies = {
   release: (spaceId: string, record: RuntimeRegistration) => Promise<void>;
   heartbeatMs?: number;
   recover?: (spaceId: string, ownerUserId: string, execution: RuntimePendingExecution) => Promise<unknown>;
+  nativeEvent?: (spaceId: string, ownerUserId: string, requestId: string, event: import("@cohub/protocol").NativeRuntimeEvent) => Promise<unknown>;
 };
 export function createRuntimeRecoveryLifecycle(input: { enqueue: (spaceId: string, ownerUserId: string, execution: RuntimePendingExecution) => Promise<unknown>; close: () => Promise<unknown> }) {
   const pending = new Set<Promise<unknown>>();
@@ -160,7 +161,15 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             authorizedAt = Date.now();
             logger.debug("runtime.control.auth_refreshed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           } else if (frame.type === "runtime.heartbeat") lastHeartbeat = Date.now();
-          else if (frame.type === "runtime.recovery") {
+          else if (frame.type === "runtime.native") {
+            if (!deps.nativeEvent) throw new Error("Native runtime events are unavailable");
+            try {
+              const result = await deps.nativeEvent(current.spaceId, current.record.ownerUserId, frame.requestId, frame.event);
+              send(socket, { type: "runtime.native.result", requestId: frame.requestId, result });
+            } catch (error) {
+              send(socket, { type: "runtime.native.result", requestId: frame.requestId, error: error instanceof Error ? error.message : String(error) });
+            }
+          } else if (frame.type === "runtime.recovery") {
             logger.info("runtime.recovery_batch_received", { spaceId: current.spaceId, runtimeId: current.record.runtimeId, count: frame.executions.length });
             for (const execution of frame.executions) {
               const task = deps.recover?.(current.spaceId, current.record.ownerUserId, execution);

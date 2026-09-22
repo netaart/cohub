@@ -40,7 +40,8 @@ for (const persistent of [false, true]) test(`Runtime retries lease conflict wit
       onReady: () => { ready++; controller.abort(); },
     });
     if (persistent) await assert.rejects(running, /already connected/); else await running;
-    assert.equal(attempts, 2);
+    if (persistent) assert(attempts >= 2 && attempts <= 3, "jittered retries remain bounded by the lease conflict deadline");
+    else assert.equal(attempts, 2);
     assert.equal(ready, persistent ? 0 : 1);
   } finally { controller.abort(); await close(server); }
 });

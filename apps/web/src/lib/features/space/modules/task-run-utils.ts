@@ -184,6 +184,8 @@ export function saveCheckpointProgressLabel(
 		commit_checkpoint: m.task_stage_commit({}, { locale }),
 		materialize_latest: m.task_stage_materialize({}, { locale }),
 		write_checkpoint_record: m.task_stage_write({}, { locale }),
+		mirror_repository: m.task_stage_mirror({}, { locale }),
+		// Keep rendering progress emitted by older workers during rolling deploys.
 		mirror_gitea: m.task_stage_mirror({}, { locale }),
 		completed: m.task_stage_completed({}, { locale }),
 	};

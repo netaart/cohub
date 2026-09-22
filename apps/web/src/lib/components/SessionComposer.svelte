@@ -15,10 +15,11 @@ import {
 	X,
 } from "lucide-svelte";
 import { onMount } from "svelte";
+import ComposerHarnessPicker from "$lib/components/composer/ComposerHarnessPicker.svelte";
 import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
-import ComposerSelect from "$lib/components/composer/ComposerSelect.svelte";
 import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
 import ComposerSurface from "$lib/components/composer/ComposerSurface.svelte";
+import ModelSelector from "$lib/components/ModelSelector.svelte";
 import { mediaLightbox } from "$lib/components/media-lightbox.svelte";
 import SessionChatQuickActions from "$lib/components/SessionChatQuickActions.svelte";
 import SlashCommandMenu, {
@@ -180,41 +181,34 @@ const composerPlaceholder = $derived(
 	placeholder || m.composer_placeholder({}, { locale }),
 );
 
-const harnessOptions = $derived(
-	[...new Set([...harnesses, harness])].map((item) => ({
-		value: item,
-		label: harnessLabels[item],
-		disabled: !harnesses.includes(item),
+let showLocalModelSelector = $state(false);
+const localModelCatalog = $derived(
+	localModels.map((model) => ({
+		provider: model.provider,
+		id: model.id,
+		model: { name: model.name ?? model.id },
 	})),
 );
-const harnessTitle = $derived(
-	harness === "cohub"
-		? m.runtime_cloud({}, { locale })
-		: localRuntime && !runtimeOnline
-			? m.runtime_offline({}, { locale })
-			: m.runtime_local({}, { locale }),
-);
-const localModelValue = $derived(
-	localModel ? JSON.stringify([localModel.provider, localModel.id]) : "",
-);
-const localModelOptions = $derived([
-	{ value: "", label: m.runtime_default_model({}, { locale }) },
-	...localModels.map((model) => ({
-		value: JSON.stringify([model.provider, model.id]),
-		label: model.name ?? model.id,
-	})),
-]);
 const localModelTitle = $derived(
 	localModel?.name ?? localModel?.id ?? m.runtime_default_model({}, { locale }),
 );
 
-function selectLocalModel(raw: string) {
+function selectLocalModel(selected: { provider: string; id: string } | null) {
 	onlocalmodelchange?.(
-		localModels.find(
-			(model) => JSON.stringify([model.provider, model.id]) === raw,
-		) ?? null,
+		selected
+			? (localModels.find(
+					(model) =>
+						model.provider === selected.provider && model.id === selected.id,
+				) ?? null)
+			: null,
 	);
+	showLocalModelSelector = false;
 }
+
+$effect(() => {
+	if (mode !== "agent" || harness === "cohub" || !runtimeOnline)
+		showLocalModelSelector = false;
+});
 
 let textareaEl = $state<HTMLTextAreaElement | null>(null);
 let mentionMirrorEl = $state<HTMLDivElement | null>(null);
@@ -1580,25 +1574,22 @@ $effect(() => {
 							{/if}
 
 							{#if onharnesschange && mode === "agent" && (localRuntime || harnesses.length > 1 || harness !== "cohub")}
-								<ComposerSelect
+								<ComposerHarnessPicker
 									value={harness}
-									options={harnessOptions}
-									online={localRuntime ? runtimeOnline : undefined}
-									onchange={(next) => onharnesschange?.(next as Harness)}
+									available={harnesses}
+									online={runtimeOnline}
+									onchange={(next) => onharnesschange?.(next)}
 									onopen={onharnessopen}
 									disabled={disabled || sending}
-									ariaLabel={m.runtime_harness({}, { locale })}
-									title={harnessTitle}
 								/>
 							{/if}
 							{#if mode === "agent" && harness !== "cohub"}
-								<ComposerSelect
-									value={localModelValue}
-									options={localModelOptions}
-									onchange={selectLocalModel}
-									disabled={disabled || sending || !runtimeOnline}
+								<ComposerModelTrigger
+									label={localModelTitle}
 									ariaLabel={m.runtime_model({}, { locale })}
-									title={localModelTitle}
+									expanded={showLocalModelSelector}
+									disabled={disabled || sending || !runtimeOnline}
+									onclick={() => { onharnessopen?.(); showLocalModelSelector = true; }}
 								/>
 							{/if}
 
@@ -1663,6 +1654,18 @@ $effect(() => {
 		</ComposerSurface>
 	</div>
 </div>
+
+<ModelSelector
+	open={showLocalModelSelector}
+	onClose={() => { showLocalModelSelector = false; }}
+	onSelect={selectLocalModel}
+	onSelectDefault={() => selectLocalModel(null)}
+	showGeneration={false}
+	title={`${harnessLabels[harness]} · ${m.runtime_model({}, { locale })}`}
+	defaultLabel={m.runtime_default_model({}, { locale })}
+	models={localModelCatalog}
+	currentModel={localModel}
+/>
 
 <style>
 	.voice-record-button {

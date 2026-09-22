@@ -42,7 +42,7 @@ function extractThinkingLevel(meta: unknown): ModelThinkingLevel | null {
   return typeof level === "string" && THINKING_LEVEL_SET.has(level) ? level as ModelThinkingLevel : null;
 }
 
-const addUsage = (a: Usage | null | undefined, b: Usage | null | undefined): Usage | null => {
+export const addUsage = (a: Usage | null | undefined, b: Usage | null | undefined): Usage | null => {
   if (!a && !b) return null;
   return {
     input: (a?.input ?? 0) + (b?.input ?? 0) || undefined,
@@ -482,8 +482,8 @@ export const findLatestVisibleAgentEntryId = async (sessionId: string, throughSe
   return entryId || null;
 };
 
-export const buildIntermediateObjectsForTurn = async (input: { spaceId: string; sessionId: string; turnId: string }) => {
-  const rows = await db.select().from(sessionMessages).where(and(
+export const buildIntermediateObjectsForTurn = async (input: { spaceId: string; sessionId: string; turnId: string }, suppliedRows?: Array<typeof sessionMessages.$inferSelect>) => {
+  const rows = suppliedRows ?? await db.select().from(sessionMessages).where(and(
     eq(sessionMessages.sessionId, input.sessionId),
     eq(sessionMessages.turnId, input.turnId),
   )).orderBy(asc(sessionMessages.sequence), asc(sessionMessages.createdAt));

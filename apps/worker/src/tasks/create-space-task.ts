@@ -16,8 +16,7 @@ import { restoreWorkspaceFromCheckpoint, restoreSystemRepoFromCheckpoint } from 
 import { ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/paths.js";
 import { materializeLatest } from "../checkpoint/materialize.js";
 import { scanWorkspace } from "../checkpoint/scan.js";
-import { buildInternalRepoRemoteUrl, createInternalRepository } from "../gitea.js";
-import { runGit as runSystemGit } from "../checkpoint/git.js";
+import { isGiteaMirrorEnabled, mirrorRepositoryToGitea } from "../gitea.js";
 import { ensureWorkerLocalTmpDir, getWorkerLocalTmpDir, removeWorkerLocalTmpDir } from "../local-tmp.js";
 import {
   resolveCreateSpaceSource,
@@ -125,18 +124,6 @@ const timeIt = async <T>(label: string, fn: () => Promise<T>): Promise<{ result:
   return { result, duration };
 };
 
-async function mirrorSystemRepo(repoDir: string, repoName: string) {
-  await createInternalRepository(repoName, true);
-  const remoteUrl = buildInternalRepoRemoteUrl(repoName);
-  await runSystemGit(["remote", "remove", "cohub"], repoDir).catch(() => undefined);
-  await runSystemGit(["remote", "add", "cohub", remoteUrl], repoDir);
-  try {
-    await runSystemGit(["push", "-u", "cohub", "main"], repoDir);
-  } finally {
-    await runSystemGit(["remote", "remove", "cohub"], repoDir).catch(() => undefined);
-  }
-}
-
 async function createCheckpointAlias(input: {
   targetSpace: typeof spaces.$inferSelect;
   sourceCheckpoint: typeof checkpoints.$inferSelect;
@@ -221,8 +208,11 @@ async function postCheckpointRestore(input: {
   }).then(({ result, duration }) => ({ status: "ready", durationMs: duration, files: result }), (error) => ({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
   stages.latestMaterialization = latest;
 
-  const mirror = await timeIt("mirrorSystemRepo", () => mirrorSystemRepo(dirs.repoDir, input.targetSpace.storageRepoName))
-    .then(({ duration }) => ({ status: "pushed", durationMs: duration }), (error) => ({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
+  const mirror = await timeIt("mirrorSystemRepo", async () => {
+    if (!isGiteaMirrorEnabled()) return { status: "disabled" as const };
+    await mirrorRepositoryToGitea(dirs.repoDir, input.targetSpace.storageRepoName, "main");
+    return { status: "pushed" as const };
+  }).then(({ result, duration }) => ({ ...result, durationMs: duration }), (error) => ({ status: "failed" as const, error: error instanceof Error ? error.message : String(error) }));
   stages.mirror = mirror;
   return stages;
 }

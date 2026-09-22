@@ -73,6 +73,44 @@ test("tone follows connection and fresh watcher health", () => {
 	);
 });
 
+test("an online Harness never hides a disconnected file bridge or an expired status", () => {
+	const now = Date.now();
+	const observedAt = new Date(now).toISOString();
+	assert.equal(
+		runtimeTone(
+			status({ observedAt, workspace: { online: false, observedAt: null } }),
+			now,
+		),
+		"attention",
+	);
+	assert.equal(
+		runtimeTone(
+			status({ observedAt, workspace: { online: true, observedAt } }),
+			now,
+		),
+		"online",
+	);
+	assert.equal(
+		runtimeTone(
+			status({ observedAt: new Date(now - 60_000).toISOString() }),
+			now,
+		),
+		"unknown",
+	);
+	assert.equal(
+		runtimeTone(
+			status({
+				workspace: {
+					online: true,
+					observedAt: new Date(now - 60_000).toISOString(),
+				},
+			}),
+			now,
+		),
+		"attention",
+	);
+});
+
 test("model counts are grouped by harness", () => {
 	assert.deepEqual(harnessModelCounts(null), { pi: 0, codex: 0 });
 	assert.deepEqual(

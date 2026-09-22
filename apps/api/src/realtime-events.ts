@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { sessionMessages } from "@cohub/db";
 import type { RealtimeMessageRecord, RealtimeSessionRecord, RealtimeTaskRecord, RealtimeTurnRecord, SpacePresenceSnapshot } from "@cohub/protocol/realtime";
 import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
@@ -20,6 +21,7 @@ const pickRealtimeMessageMeta = (meta: Record<string, unknown> | null | undefine
   if (!meta) return null;
   const keys = [
     "messageKind",
+    "messageOrdinal",
     "clientMessageId",
     "anchorUserMessageId",
     "userId",
@@ -66,6 +68,15 @@ export const toRealtimeSessionRecord = (session: SessionRecord | {
   lastMessageId: session.lastMessageId,
   createdAt: toIso(session.createdAt),
   updatedAt: toIso(session.updatedAt),
+});
+
+export const messageRecordFromRow = (message: typeof sessionMessages.$inferSelect): MessageRecord => ({
+  ...message,
+  role: message.role as MessageRecord["role"],
+  meta: message.meta && typeof message.meta === "object" && !Array.isArray(message.meta) ? message.meta as Record<string, unknown> : null,
+  startedAt: toIsoOrNull(message.startedAt),
+  completedAt: toIsoOrNull(message.completedAt),
+  createdAt: toIso(message.createdAt),
 });
 
 export const toRealtimeMessageRecord = (message: MessageRecord): RealtimeMessageRecord => ({

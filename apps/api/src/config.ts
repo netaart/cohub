@@ -17,6 +17,7 @@ export type AppConfig = {
   /** Optional checkpoint to bootstrap first-time Home spaces from; blank when unset. */
   homeBootstrapCheckpointId?: string;
   sandboxImage: string;
+  sandboxImagePullSecret?: string;
   sandboxSearchEnabled: boolean;
   sandboxSearchVersion: string;
   sandboxSearchCdnBaseUrl: string;
@@ -192,6 +193,7 @@ export const config: AppConfig = {
   homeBootstrapCheckpointId: process.env.HOME_BOOTSTRAP_CHECKPOINT_ID?.trim() || undefined,
   sandboxImage:
     process.env.SANDBOX_IMAGE ?? getDefaultSandboxImage(env),
+  sandboxImagePullSecret: (process.env.SANDBOX_IMAGE_PULL_SECRET ?? "gitea-registry").trim() || undefined,
   sandboxSearchEnabled: process.env.SANDBOX_SEARCH_ENABLED?.trim().toLowerCase() !== "false",
   sandboxSearchVersion: process.env.SANDBOX_SEARCH_VERSION?.trim() || "latest",
   sandboxSearchCdnBaseUrl:

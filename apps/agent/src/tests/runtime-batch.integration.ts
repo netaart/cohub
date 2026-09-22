@@ -14,11 +14,11 @@ const registration = { connectionId: randomUUID(), ownerUserId: "host-owner", en
 mock.module("../env.js", { exports: { env: {} } });
 mock.module("../db.js", { exports: { db: {
   select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ status, meta: {} }] }) }) }),
-  update: () => ({ set: () => ({ where: async () => {} }) }),
+  update: () => ({ set: () => ({ where: () => ({ returning: async () => [{ meta: {} }] }) }) }),
 } } });
 mock.module("../redis.js", { exports: { redis: { get: async () => online ? JSON.stringify(registration) : null }, sendOutput: async (event: { turnId?: string }) => { outputs.push(event); } } });
 mock.module("../api.js", { exports: { getSpaceSandbox: async () => ({ sandbox: { provider: "local" } }) } });
-mock.module("../logger.js", { exports: { logger: { warn() {}, debug() {}, error() {} } } });
+mock.module("../logger.js", { exports: { logger: { info() {}, warn() {}, debug() {}, error() {} } } });
 mock.module("../runtime/context-store.js", { exports: { loadRuntimeContext: async (input: { beforeSequence?: number; throughTurnId?: string }) => {
   contexts.push(input); return { revision: input.throughTurnId ? "completed" : "previous", throughTurnId: input.throughTurnId ?? null, messages: [] };
 } } });

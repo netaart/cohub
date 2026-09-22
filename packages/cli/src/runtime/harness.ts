@@ -1,3 +1,6 @@
+import { access, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { delimiter, join, resolve, win32 } from "node:path";
 import type { ContentBlock, RuntimeCapabilities, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "./json-rpc.js";
 import type { RuntimeSessionStore, NativeSession } from "./session-store.js";
@@ -7,6 +10,33 @@ import { downloadPublicImage } from "../safe-remote-image.js";
 import { serializeDiagnosticError, type RuntimeDiagnostics, type RuntimeDiagnosticContext } from "./diagnostics.js";
 
 export type HarnessOptions = { pi?: string; codex?: string };
+
+export function harnessExecutableCandidates(binary: string, cwd: string, path: string, platform = process.platform, pathExt = process.env.PATHEXT): string[] {
+  const windows = platform === "win32";
+  const paths = windows ? win32 : { delimiter, join, resolve };
+  const extensions = windows && !win32.extname(binary)
+    ? ["", ...(pathExt || ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => /^\.[a-z0-9]+$/i.test(ext))]
+    : [""];
+  const roots = binary.includes("/") || binary.includes("\\")
+    ? [paths.resolve(cwd, binary)]
+    : path.split(paths.delimiter).map((directory) => directory.replace(/^"(.*)"$/, "$1")).filter(Boolean).map((directory) => paths.resolve(cwd, directory, binary));
+  return roots.flatMap((root) => extensions.map((ext) => `${root}${ext}`));
+}
+
+/** Discover installed executables only; authentication/capability errors stay explicit. */
+export async function installedHarnesses(cwd: string, options: HarnessOptions, path = process.env.PATH ?? ""): Promise<("pi" | "codex")[]> {
+  const names = options.pi || options.codex ? (["pi", "codex"] as const).filter((name) => options[name]) : ["pi", "codex"] as const;
+  const found = await Promise.all(names.map(async (name) => {
+    const binary = options[name] || name;
+    const candidates = harnessExecutableCandidates(binary, cwd, path);
+    for (const candidate of candidates) {
+      try { await access(candidate, process.platform === "win32" ? constants.F_OK : constants.X_OK); if ((await stat(candidate)).isFile()) return name; }
+      catch { /* Try the next PATH entry. */ }
+    }
+    return null;
+  }));
+  return found.filter((name): name is "pi" | "codex" => name !== null);
+}
 export type HarnessResult = { state: NativeSession; event: Extract<RuntimeExecutionEvent, { type: "turn.end" }> };
 const runtimeEnvironment = (input: RuntimeTurnInput) => ({ COHUB_SPACE_ID: input.spaceId, COHUB_SESSION_ID: input.sessionId, COHUB_TURN_ID: input.turnId });
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
@@ -54,7 +84,8 @@ function createAbortEscalation(rpc: JsonRpcProcess, signal: AbortSignal, interru
 
 /** Native files stay authoritative; archival failure only degrades cross-host resume. */
 async function finishHarnessTurn(store: RuntimeSessionStore, state: NativeSession, message: RuntimeMessage, resume: HarnessResult["event"]["resume"], turnId: string, diagnosticContext?: RuntimeDiagnosticContext): Promise<HarnessResult> {
-  const archive = await store.archive(state, turnId, diagnosticContext).catch((error) => { console.error("Native archive unavailable; local files retained:", error); return null; });
+  // The store records a redacted diagnostic; native files remain authoritative.
+  const archive = await store.archive(state, turnId, diagnosticContext).catch(() => null);
   return { state, event: { type: "turn.end", message, resume, archive } };
 }
 

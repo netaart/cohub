@@ -37,6 +37,9 @@ type Options struct {
 	// Token is the user's access token, used by the gateway to authorize the
 	// caller against the target space.
 	Token string
+	// CurrentToken supplies refreshed credentials from the local supervisor.
+	CurrentToken   func() string
+	OnDisconnected func()
 	// SpaceID identifies the space this sandbox serves.
 	SpaceID string
 	// RuntimeID identifies one local `runtime up` process across reconnects.
@@ -208,7 +211,10 @@ func (c *Client) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if isFatalRelayError(err) {
+		if opts.OnDisconnected != nil {
+			opts.OnDisconnected()
+		}
+		if isFatalRelayError(err) && opts.CurrentToken == nil {
 			opts.Logger.Error("relay access token was rejected; re-run `cohub runtime up` after logging in again", slog.String("error", err.Error()))
 			return err
 		}
@@ -251,6 +257,9 @@ func Run(ctx context.Context, opts Options) error {
 
 func (c *Client) connectControl(ctx context.Context) error {
 	opts := c.opts
+	if opts.CurrentToken != nil {
+		opts.Token = opts.CurrentToken()
+	}
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 
@@ -291,10 +300,14 @@ func (c *Client) connectControl(ctx context.Context) error {
 	defer c.setConn(nil)
 	pingErr := make(chan error, 1)
 	go controlPingLoop(ctx, conn, cancelLoop, pingErr)
+	pendingToken := ""
 
 	for {
 		var frame controlFrame
-		if err := wsjson.Read(ctx, conn, &frame); err != nil {
+		readCtx, readCancel := context.WithTimeout(ctx, 2*controlPingInterval)
+		err := wsjson.Read(readCtx, conn, &frame)
+		readCancel()
+		if err != nil {
 			select {
 			case err := <-pingErr:
 				return fmt.Errorf("ping control: %w", err)
@@ -319,8 +332,25 @@ func (c *Client) connectControl(ctx context.Context) error {
 			return controlRejection(frame.Status, frame.Message)
 		case "ping":
 			_ = wsjson.Write(ctx, conn, controlFrame{Type: "pong"})
+		case "authenticated":
+			if pendingToken != "" {
+				opts.Token = pendingToken
+				pendingToken = ""
+			}
 		case "pong":
 			c.publishWatcherStatus()
+			if opts.CurrentToken != nil && pendingToken == "" {
+				next := opts.CurrentToken()
+				if next != "" && next != opts.Token {
+					writeCtx, writeCancel := context.WithTimeout(ctx, 5*time.Second)
+					err := wsjson.Write(writeCtx, conn, controlFrame{Type: "auth", Token: next})
+					writeCancel()
+					if err != nil {
+						return fmt.Errorf("refresh relay credentials: %w", err)
+					}
+					pendingToken = next
+				}
+			}
 		default:
 			opts.Logger.Warn("unknown control frame", slog.String("type", frame.Type))
 		}
@@ -335,7 +365,10 @@ func controlPingLoop(ctx context.Context, conn *websocket.Conn, cancel context.C
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := wsjson.Write(ctx, conn, controlFrame{Type: "ping"}); err != nil {
+			writeCtx, writeCancel := context.WithTimeout(ctx, 5*time.Second)
+			err := wsjson.Write(writeCtx, conn, controlFrame{Type: "ping"})
+			writeCancel()
+			if err != nil {
 				select {
 				case result <- err:
 				default:

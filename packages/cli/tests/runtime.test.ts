@@ -13,10 +13,10 @@ import { Command } from "commander";
 import { parseRuntimeHarnesses, registerRuntime } from "../src/commands/runtime.js";
 import { codexArchiveTotals, codexTokenTotals, codexUsage, subtractCodexTokens } from "../src/runtime/codex-usage.js";
 
-test("Runtime CLI exposes only the up and status commands", () => {
+test("Runtime CLI exposes the complete lifecycle without legacy sandbox commands", () => {
   const program = new Command();
   registerRuntime(program);
-  assert.deepEqual(program.commands[0]?.commands.map((command) => command.name()), ["up", "status", "logs"]);
+  assert.deepEqual(program.commands[0]?.commands.map((command) => command.name()), ["up", "attach", "detach", "status", "down", "logs"]);
 });
 
 const spaceId = "11111111-1111-4111-8111-111111111111";

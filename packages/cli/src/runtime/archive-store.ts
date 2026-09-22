@@ -72,19 +72,20 @@ export class RuntimeArchiveStore {
     try { return harnessArchiveIndexSchema.parse(JSON.parse(await readFile(path, "utf8"))); }
     catch (error) { if (missing(error)) return null; throw error; }
   }
-  stage(state: { sessionId: string; harness: "pi" | "codex"; nativeSessionId: string; path: string }, turnId: string): Promise<HarnessArchive> {
+  stage(state: { sessionId: string; harness: "pi" | "codex"; nativeSessionId: string; path: string; sizeBytes?: number; expectedChecksum?: string }, turnId: string): Promise<HarnessArchive> {
     const existing = this.capturing.get(turnId);
     if (existing) return existing;
     const task = this.capture(state, turnId).finally(() => this.capturing.delete(turnId));
     this.capturing.set(turnId, task);
     return task;
   }
-  private async capture(state: { sessionId: string; harness: "pi" | "codex"; nativeSessionId: string; path: string }, turnId: string): Promise<HarnessArchive> {
+  private async capture(state: { sessionId: string; harness: "pi" | "codex"; nativeSessionId: string; path: string; sizeBytes?: number; expectedChecksum?: string }, turnId: string): Promise<HarnessArchive> {
     const identity = { sessionId: state.sessionId, turnId, harness: state.harness };
     const headPath = join(this.root, "heads", `${state.sessionId}.${state.harness}.json`);
     const saved = await this.readIndex(this.version(turnId));
     if (saved) {
       if (saved.sessionId !== state.sessionId || saved.harness !== state.harness) throw new Error("Archive identity mismatch");
+      if (state.expectedChecksum && state.expectedChecksum !== saved.sha256) throw new Error("Native Turn bytes changed; original archive retained");
       const committed = await stat(join(this.root, "ready", `${turnId}.json`)).catch((error) => { if (missing(error)) return null; throw error; });
       if (!committed) await atomicRuntimeJson(join(this.root, "pending", `${turnId}.json`), saved);
       if (!await this.readIndex(headPath)) await atomicRuntimeJson(headPath, saved);
@@ -96,12 +97,14 @@ export class RuntimeArchiveStore {
     try {
       const before = await file.stat();
       if (!before.isFile() || !before.size) throw new Error("Native archive is empty");
+      const sizeBytes = state.sizeBytes ?? before.size;
+      if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > before.size) throw new Error("Native archive boundary is unavailable");
       const buffer = Buffer.alloc(RUNTIME_ARCHIVE_SEGMENT_BYTES);
       let offset = 0;
       let digest = createHash("sha256");
       let parent: HarnessArchiveIndex | null = null;
       // Hash the old prefix, not just its size: equal-size and growing rewrites are valid.
-      if (previous && previous.nativeSessionId === state.nativeSessionId && previous.sizeBytes <= before.size) {
+      if (previous && previous.nativeSessionId === state.nativeSessionId && previous.sizeBytes <= sizeBytes) {
         while (offset < previous.sizeBytes) {
           const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, previous.sizeBytes - offset), offset);
           if (!bytesRead) throw new Error("Native file changed during capture");
@@ -112,8 +115,8 @@ export class RuntimeArchiveStore {
       if (!parent) { offset = 0; digest = createHash("sha256"); }
       const segments: HarnessArchiveIndex["segments"] = [];
       await mkdir(join(this.root, "objects"), { recursive: true, mode: 0o700 });
-      while (offset < before.size) {
-        const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, before.size - offset), offset);
+      while (offset < sizeBytes) {
+        const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, sizeBytes - offset), offset);
         if (!bytesRead) throw new Error("Native file changed during capture");
         const bytes = buffer.subarray(0, bytesRead);
         digest.update(bytes);
@@ -122,15 +125,22 @@ export class RuntimeArchiveStore {
         segments.push(segment); offset += bytesRead;
       }
       const after = await stat(state.path);
-      if (before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("Native file changed during capture");
+      if (before.ino !== after.ino || after.size < sizeBytes || state.sizeBytes === undefined && (before.size !== after.size || before.mtimeMs !== after.mtimeMs)) throw new Error("Native file changed during capture");
+      if (state.sizeBytes !== undefined) {
+        // Native clients may append while an earlier Turn is captured. Validate the exact prefix twice.
+        const verified = createHash("sha256");
+        for await (const bytes of createReadStream(state.path, { end: sizeBytes - 1 })) verified.update(bytes);
+        if (verified.digest("hex") !== digest.copy().digest("hex")) throw new Error("Native prefix changed during capture");
+      }
       if (process.platform !== "win32") {
         const directory = await open(join(this.root, "objects"), "r");
         try { await directory.sync(); } finally { await directory.close(); }
       }
       index = harnessArchiveIndexSchema.parse({ ...identity, version: 1, nativeSessionId: state.nativeSessionId,
         nativeFormat: state.harness === "pi" ? "pi.jsonl" : "codex.rollout", parentTurnId: parent?.turnId ?? null,
-        sizeBytes: before.size, sha256: digest.digest("hex"), segments });
+        sizeBytes, sha256: digest.digest("hex"), segments });
       validateArchiveBoundary(index, parent);
+      if (state.expectedChecksum && index.sha256 !== state.expectedChecksum) throw new Error("Native Turn bytes changed during capture; original retained");
     } finally { await file.close(); }
     // Publish the outbox before advancing the local head. Neither points at mutable files.
     await atomicRuntimeJson(join(this.root, "pending", `${turnId}.json`), index);
@@ -187,7 +197,6 @@ export class RuntimeArchiveStore {
       } catch (error) {
         if (!signal.aborted) {
           this.errorReporter?.(error, index);
-          console.error("Archive pending; native segments retained:", error);
         }
       }
     }

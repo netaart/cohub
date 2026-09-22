@@ -9,7 +9,7 @@ import type { RuntimeStatus } from "@neta-art/cohub";
  */
 
 /** `attention` means online but its file monitoring is degraded. */
-export type RuntimeTone = "online" | "attention" | "offline";
+export type RuntimeTone = "online" | "attention" | "offline" | "unknown";
 export type RuntimeWatcher = NonNullable<RuntimeStatus["fileWatcher"]>;
 
 /** File-watcher telemetry older than this is treated as unknown. */
@@ -22,7 +22,7 @@ export function isStale(
 	maxAgeMs = RUNTIME_WATCHER_FRESHNESS_MS,
 ): boolean {
 	const at = Date.parse(observedAt);
-	return !Number.isFinite(at) || now - at >= maxAgeMs;
+	return !Number.isFinite(at) || now - at >= maxAgeMs || at - now > maxAgeMs;
 }
 
 /** Fresh file-watcher telemetry, or null when absent/expired. */
@@ -43,7 +43,15 @@ export function runtimeTone(
 	status: RuntimeStatus | null | undefined,
 	now: number,
 ): RuntimeTone {
+	if (status?.observedAt && isStale(status.observedAt, now)) return "unknown";
 	if (!status?.online) return "offline";
+	if (
+		status.workspace &&
+		(!status.workspace.online ||
+			!status.workspace.observedAt ||
+			isStale(status.workspace.observedAt, now))
+	)
+		return "attention";
 	const watcher = freshWatcher(status, now);
 	return watcher && watcher.state !== "running" ? "attention" : "online";
 }

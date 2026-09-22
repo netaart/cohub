@@ -2263,9 +2263,9 @@ export class SpaceClient {
     );
   }
 
-  getRuntime(customFetch?: Fetch) {
+  getRuntime(customFetch?: Fetch, options: { signal?: AbortSignal } = {}) {
     return this.transport.request<import("@cohub/protocol").RuntimeStatus>(
-      `/api/spaces/${this.id}/runtime`, { fetch: customFetch },
+      `/api/spaces/${this.id}/runtime`, { fetch: customFetch, signal: options.signal },
     );
   }
 

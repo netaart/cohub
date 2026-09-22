@@ -30,7 +30,7 @@ import {
 } from "@cohub/db";
 import { getSpaceSandboxBySpaceId, updateSpaceSandbox } from "./space-sandboxes.js";
 import { buildSessionOutputsForPersistedMessage, dispatchSessionOutputs, dispatchTurnFinalized, dispatchTurnUpdated } from "./session-output.js";
-import { dispatchLabelAssignmentsUpdated, dispatchSessionCreated, dispatchSessionUpdated, dispatchTurnCreated } from "./realtime-events.js";
+import { dispatchLabelAssignmentsUpdated, dispatchSessionCreated, dispatchSessionUpdated, dispatchTurnCreated, messageRecordFromRow } from "./realtime-events.js";
 import { finalizeSessionTurnFromMessage, getSessionTurnById, hydrateTurnAuthorProfiles } from "./session-turns.js";
 import { enqueueAgentSessionForkJob } from "./agent-turn-queue.js";
 import { requestAgentTurnAbort } from "./agent-turn-abort.js";
@@ -747,15 +747,7 @@ export const persistMessageNode = async (input: PersistMessageInput & { message:
     }
   }
 
-  const realtimeMessage = {
-    ...messageNode,
-    role: messageNode.role as "user" | "assistant" | "system",
-    meta: (messageNode.meta as Record<string, unknown> | null) ?? null,
-    startedAt: messageNode.startedAt instanceof Date ? messageNode.startedAt.toISOString() : null,
-    completedAt: messageNode.completedAt instanceof Date ? messageNode.completedAt.toISOString() : null,
-    durationMs: messageNode.durationMs ?? null,
-    createdAt: messageNode.createdAt instanceof Date ? messageNode.createdAt.toISOString() : new Date().toISOString(),
-  };
+  const realtimeMessage = messageRecordFromRow(messageNode);
   const outputs = await buildSessionOutputsForPersistedMessage({
     spaceId: session.spaceId,
     sessionId: session.id,

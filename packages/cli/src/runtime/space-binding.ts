@@ -139,7 +139,7 @@ function upsertRuntimeSpaceBinding(
   return { file: { version: 1, bindings }, changed: true };
 }
 
-async function writeRuntimeSpaceBindings(path: string, file: RuntimeSpaceBindingsFile): Promise<void> {
+async function writeRuntimeJson(path: string, file: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
@@ -285,7 +285,7 @@ async function persistRuntimeSpaceBinding(path: string, binding: RuntimeSpaceBin
   await withRuntimeSpaceBindingsLock(async () => {
     const file = await readRuntimeSpaceBindings(path);
     const result = upsertRuntimeSpaceBinding(file, binding);
-    if (result.changed) await writeRuntimeSpaceBindings(path, result.file);
+    if (result.changed) await writeRuntimeJson(path, result.file);
   }, { path, lockPath: `${path}${GLOBAL_LOCK_SUFFIX}` });
 }
 
@@ -309,6 +309,9 @@ export async function resolveRuntimeSpace(input: {
   root: string;
   identityKey: string | null | undefined;
   explicitSpaceId?: string | null;
+  /** Explicit new selection; compare the binding observed before prompting. */
+  newSpace?: boolean;
+  expectedSpaceId?: string | null;
   createSpace: () => Promise<string>;
   validateSpace?: (spaceId: string) => Promise<void>;
   path?: string;
@@ -334,27 +337,57 @@ export async function resolveRuntimeSpace(input: {
 
   return withRuntimeSpaceBindingsLock(async () => {
     const file = await readRuntimeSpaceBindings(path);
+    const receiptPath = `${lockPath}.creation.json`;
     if (explicitSpaceId) {
       await input.validateSpace?.(explicitSpaceId);
       await persistRuntimeSpaceBinding(path, { root, key: bindingKey, spaceId: explicitSpaceId });
+      // Preserve an ambiguous creation receipt for diagnosis, rather than deleting it.
+      if (await statIfPresent(receiptPath)) await rename(receiptPath, `${receiptPath}.${randomUUID()}.resolved`);
       return { spaceId: explicitSpaceId, source: "explicit" };
     }
 
     const existing = findRuntimeSpaceBinding(file, { root, key: bindingKey });
-    if (existing) {
+    if (input.newSpace && (existing?.spaceId ?? null) !== (input.expectedSpaceId ?? null)) {
+      throw new RuntimeSpaceBindingsError("Directory binding changed; run up again / 目录绑定已变化，请重新运行 up");
+    }
+    if (existing && !input.newSpace) {
       await input.validateSpace?.(existing.spaceId);
       return { spaceId: existing.spaceId, source: "binding" };
     }
 
-    // Remote creation and the local binding commit are separate durability
-    // domains; a server-side idempotency key is needed to close this crash window.
-    const createdSpaceId = await input.createSpace();
+    // Fail closed across the remote-create/local-commit crash window. A saved ID
+    // resumes binding; an ambiguous request must be resolved with --space, never replayed.
+    let receipt: { operationId: string; spaceId?: string } | null = null;
+    try {
+      receipt = JSON.parse(await readFile(receiptPath, "utf8"));
+      if (!receipt || !nonEmptyString(receipt.operationId) || receipt.spaceId !== undefined && !nonEmptyString(receipt.spaceId)) {
+        throw new RuntimeSpaceBindingsError(`Invalid creation receipt; original retained / 创建回执无效，原始信息已保留: ${receiptPath}`);
+      }
+    } catch (error) { if (!missing(error)) throw error; }
+    if (receipt && !receipt.spaceId) throw new RuntimeSpaceBindingsError(
+      `A previous Space creation has an unknown outcome. Check your Spaces and use --space <id> / 上次创建结果未知，请检查 Space 后使用 --space <id>。${receiptPath}`,
+    );
+    if (!receipt) {
+      receipt = { operationId: randomUUID() };
+      await writeRuntimeJson(receiptPath, receipt);
+    }
+    let createdSpaceId = receipt.spaceId;
+    if (!createdSpaceId) {
+      try { createdSpaceId = await input.createSpace(); }
+      catch (error) {
+        const status = (error as { status?: number })?.status;
+        if (status && status >= 400 && status < 500 && status !== 408) await rm(receiptPath);
+        throw error;
+      }
+      await writeRuntimeJson(receiptPath, { ...receipt, spaceId: createdSpaceId });
+    }
     if (!nonEmptyString(createdSpaceId)) {
       throw new RuntimeSpaceBindingsError("Local Runtime Space creation returned no Space ID");
     }
     const spaceId = createdSpaceId.trim();
     await input.validateSpace?.(spaceId);
     await persistRuntimeSpaceBinding(path, { root, key: bindingKey, spaceId });
+    await rm(receiptPath);
     return { spaceId, source: "created" };
   }, { path, lockPath });
 }

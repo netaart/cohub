@@ -27,11 +27,12 @@ import { ensureGitRepo, runGit, runGitWithOutput } from "../checkpoint/git.js";
 import { collectUserGitRepos } from "../checkpoint/git-bundles.js";
 import { saveBoardCheckpointSnapshots } from "../checkpoint/board.js";
 import { materializeLatest } from "../checkpoint/materialize.js";
+import { updateCheckpointMeta } from "../checkpoint/metadata.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH, ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/paths.js";
 import { syncSystemRepo, type CheckpointAsset } from "../checkpoint/repo-sync.js";
 import { saveCheckpointWithLock, type SaveCheckpointInput, type SaveCheckpointResult } from "../checkpoint/save.js";
 import { hashFile, scanWorkspace, type ScannedFile } from "../checkpoint/scan.js";
-import { buildInternalRepoRemoteUrl, createInternalRepository } from "../gitea.js";
+import { isGiteaMirrorEnabled, mirrorRepositoryToGitea } from "../gitea.js";
 
 const SAVE_VERSION = 2;
 
@@ -62,18 +63,6 @@ const timeIt = async <T>(timings: SaveCheckpointTimings, label: string, fn: () =
     console.info(`[save_checkpoint] ⏱ ${label}: ${duration}ms`);
   }
 };
-
-async function mirrorToGitea(repoDir: string, repoName: string, branch: string) {
-  await createInternalRepository(repoName, true);
-  const remoteUrl = buildInternalRepoRemoteUrl(repoName);
-  await runGit(["remote", "remove", "cohub"], repoDir).catch(() => undefined);
-  await runGit(["remote", "add", "cohub", remoteUrl], repoDir);
-  try {
-    await runGit(["push", "-u", "cohub", branch], repoDir);
-  } finally {
-    await runGit(["remote", "remove", "cohub"], repoDir).catch(() => undefined);
-  }
-}
 
 export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promise<SaveCheckpointResult> => {
   const spaceId = input.spaceId;
@@ -283,22 +272,22 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
     ]);
   }
   const boardSnapshots = await timeIt(timings, "saveBoardCheckpointSnapshots", () => saveBoardCheckpointSnapshots({ checkpointId: checkpoint.id, spaceId }));
-  await timeIt(timings, "updateCheckpointBoardMeta", () => db.update(checkpoints).set({ meta: { ...(checkpoint.meta as Record<string, unknown> | null), timings, board: { snapshotCount: boardSnapshots.count } } }).where(eq(checkpoints.id, checkpoint.id)));
+  await timeIt(timings, "updateCheckpointBoardMeta", () => updateCheckpointMeta(db, checkpoint.id, { board: { snapshotCount: boardSnapshots.count }, timings }));
   await timeIt(timings, "updateSpaceHead", () => db.update(spaces).set({ headCheckpointId: checkpoint.id, updatedAt: new Date() }).where(eq(spaces.id, spaceId)));
 
-  await progress("mirror_gitea");
-  let mirrorMeta: { status: "pushed"; pushedAt: string } | { status: "failed"; error: string };
-  await timeIt(timings, "mirrorGitea", async () => {
+  if (isGiteaMirrorEnabled()) await progress("mirror_repository");
+  const mirrorMeta = await timeIt(timings, "mirrorRepository", async () => {
+    if (!isGiteaMirrorEnabled()) return { provider: "none" as const, status: "disabled" as const };
     try {
-      await mirrorToGitea(dirs.repoDir, space.storageRepoName, branch);
-      mirrorMeta = { status: "pushed", pushedAt: new Date().toISOString() };
+      await mirrorRepositoryToGitea(dirs.repoDir, space.storageRepoName, branch);
+      return { provider: "gitea" as const, status: "pushed" as const, pushedAt: new Date().toISOString() };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      mirrorMeta = { status: "failed", error: message };
       console.warn(`[save_checkpoint] failed to mirror repo for space=${spaceId} checkpoint=${checkpoint.id}:`, error);
+      return { provider: "gitea" as const, status: "failed" as const, error: message };
     }
   });
-  await timeIt(timings, "updateMirrorMeta", () => db.update(checkpoints).set({ meta: { ...(checkpoint.meta as Record<string, unknown> | null), timings, mirror: mirrorMeta } }).where(eq(checkpoints.id, checkpoint.id)));
+  await timeIt(timings, "updateMirrorMeta", () => updateCheckpointMeta(db, checkpoint.id, { mirror: mirrorMeta, timings }));
 
   let publishedUserConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
   if (space.name === "config") {
@@ -321,16 +310,7 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
   }
 
   if (publishWarnings.length > 0) {
-    await timeIt(timings, "updatePublishWarningsMeta", async () => {
-      const [latestCheckpoint] = await db.select({ meta: checkpoints.meta }).from(checkpoints).where(eq(checkpoints.id, checkpoint.id)).limit(1);
-      await db.update(checkpoints).set({
-        meta: {
-          ...((latestCheckpoint?.meta as Record<string, unknown> | null) ?? {}),
-          publishWarnings,
-          timings,
-        },
-      }).where(eq(checkpoints.id, checkpoint.id));
-    });
+    await timeIt(timings, "updatePublishWarningsMeta", () => updateCheckpointMeta(db, checkpoint.id, { publishWarnings, timings }));
   }
 
   await progress("completed", { checkpointId: checkpoint.id, commitHash, ...(publishWarnings.length > 0 ? { publishWarnings } : {}) });

@@ -26,9 +26,9 @@ function makeTurn(outcome: "saved" | "unknown" | "offline" = "unknown") {
 }
 
 function params(where: SQL) { return dialect.sqlToQuery(where).params; }
-function matchingTurns(where: SQL) {
+function matchingTurns(where: SQL, requireSession = true) {
   const values = params(where);
-  return [...rows.values()].filter((row) => values.includes(row.id) && values.includes(row.sessionId) && ["running", "abort_requested"].includes(row.status));
+  return [...rows.values()].filter((row) => values.includes(row.id) && (!requireSession || values.includes(row.sessionId)) && ["running", "abort_requested"].includes(row.status));
 }
 
 const db = {
@@ -53,7 +53,7 @@ const db = {
     return { set: (value: { meta: SQL }) => ({ where: (where: SQL) => ({ returning: async () => {
       const patch = params(value.meta).find((param): param is string => typeof param === "string" && param.startsWith("{"));
       assert(patch);
-      const updated = matchingTurns(where);
+      const updated = matchingTurns(where, false);
       for (const row of updated) Object.assign(row.meta, JSON.parse(patch));
       return updated.map((row) => ({ id: row.id }));
     } }) }) };

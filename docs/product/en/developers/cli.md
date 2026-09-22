@@ -152,17 +152,27 @@ Expose a local folder as the Space Runtime:
 ```bash
 cd ./my-project
 
-# The first run creates and remembers the directory's Space.
+# The first run prompts to create and name the directory's Space.
 cohub runtime up
 
-# Later runs reuse it instead of creating another Space.
-cohub runtime up
+# Later runs recommend reusing it.
+cohub runtime up -d
 cohub runtime status
+cohub runtime logs --level warn --follow
+cohub runtime down
+
+# Optional: request a new Space (-n is --new, not --name).
+cohub runtime up -n --name another-project
 ```
 
 Bindings are scoped by local directory, account, and environment, and stored in
 `~/.config/cohub/runtime-spaces.json`. Omitting `--space` reads the binding;
 an explicit `--space` or `COHUB_SPACE_ID` overrides and updates it.
+`-d` returns the Space link, process ID and log location, then runs in the background.
+If not ready within 30 seconds, it returns exit code 2 and continues connecting.
+`--yes` authorizes local execution without interaction. `down` retains all data and
+requires `--yes` when work is unconfirmed. Network reconnection is automatic; it does
+not replay model or tool work, and a disconnect does not confirm a task stopped.
 
 ### Boards
 

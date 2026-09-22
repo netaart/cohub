@@ -336,15 +336,33 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 	// Create the relay client first so the runtime's watchers can publish
 	// fs.changed / ports.changed over the control channel (kept off data
 	// sessions to avoid double-publishing; the gateway republishes them).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	var managed *relay.ManagedControl
+	if os.Getenv("COHUB_RUNTIME_MANAGED") == "1" {
+		control := os.NewFile(3, "runtime-control")
+		defer control.Close()
+		managed = relay.NewManagedControl(cfg.RelayToken, os.Stdin, control, stop)
+	}
 	requestFSResync := func() {}
-	client := relay.NewClient(relay.Options{
-		RelayURL:     cfg.RelayURL,
-		Token:        cfg.RelayToken,
-		SpaceID:      cfg.SpaceID,
-		RuntimeID:    runtimeID,
-		OnRegistered: func() { requestFSResync() },
-		Logger:       logger,
-	})
+	opts := relay.Options{
+		RelayURL:  cfg.RelayURL,
+		Token:     cfg.RelayToken,
+		SpaceID:   cfg.SpaceID,
+		RuntimeID: runtimeID,
+		OnRegistered: func() {
+			requestFSResync()
+			if managed != nil {
+				managed.Notify("connected")
+			}
+		},
+		Logger: logger,
+	}
+	if managed != nil {
+		opts.CurrentToken = managed.Token
+		opts.OnDisconnected = func() { managed.Notify("disconnected") }
+	}
+	client := relay.NewClient(opts)
 
 	fsSink := func(payload protocol.FSChangedPayload) {
 		client.PublishEvent("fs.changed", payload)
@@ -358,9 +376,6 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 	requestFSResync = watcherResync
 	client.SetServer(server)
 	client.SetWatcherStatus(watchStatus)
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	logger.Info("local sandbox starting",
 		slog.String("spaceId", cfg.SpaceID),

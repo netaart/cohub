@@ -84,12 +84,37 @@ COHUB_SPACE_ID=<spaceId> cohub spaces prompt "message" --json
 
 Connect one local workspace to a Space and select Pi or Codex per turn.
 
+To keep using native terminals with ordinary Cohub Chats / Turns:
+使用原生终端，并同步到普通 Cohub Chat / Turn：
+
+```bash
+cohub runtime up -d --harness pi --harness codex
+cohub runtime attach --harness pi --harness codex
+# Reload Pi / restart Codex and approve its hook trust prompt.
+# 重载 Pi / 重启 Codex，并审核 Hook 信任提示。
+cohub runtime detach --harness pi --harness codex # Pause; retain data / 暂停，保留数据
+```
+
+`attach` explicitly authorizes this project's opened conversation history and raw native archives.
+The Runtime Supervisor is the single local Daemon: Pi / Codex integrations use its private IPC,
+while native Turn events use the existing Runtime WebSocket. Configuration is backed up, existing
+Runtime bindings are reused, and competing continuations fork at complete Turns without blocking native work. Requires Pi 0.85.1+ or Codex with stable
+Hooks enabled. User-level integrations remain inert outside opted-in directories. See
+[boundaries and privacy](../../docs/local-runtime.md#native-clients--原生客户端).
+
+`attach` 明确授权上传当前项目打开的对话历史与原生归档；复用现有绑定，配置修改前备份。
+冲突时按完整 Turn 分支，不阻塞本地执行。用户级集成在未授权目录中不会采集数据。
+
+
 ```bash
 cohub runtime up ./project --harness pi --harness codex
 cohub runtime up ./project --space <spaceId> --harness codex
 cohub -s <spaceId> spaces prompt "Continue" --harness codex
 cohub runtime status --space <spaceId>
 cohub runtime logs --space <spaceId> --follow
+cohub runtime up -d
+cohub runtime down
+cohub runtime up -n --name another-project
 ```
 
 Runtime diagnostics stay as redacted JSONL under the local Runtime state directory and
@@ -105,8 +130,21 @@ confirmation. See [Runtime details](../../docs/local-runtime.md).
 
 When `--space` is omitted, Runtime remembers a Space for the canonical local directory,
 account, and environment in `~/.config/cohub/runtime-spaces.json`. The first start creates
-and records a local Space; later starts reuse it. An explicit `--space` or `COHUB_SPACE_ID`
-overrides and updates the directory binding.
+and records a local Space after prompting; later starts recommend reuse. `-n` now means
+`--new` (boolean); use `--name <name>` for naming. An explicit `--space` or `COHUB_SPACE_ID`
+overrides and updates the directory binding. `--yes` accepts defaults and local execution;
+with explicit `--new`, it creates another Space.
+
+`-d` runs the same supervisor in the background and returns the URL, PID and log location.
+Readiness requires both Harness and files. If it is still starting after 30 seconds, exit
+code 2 means it remains in the background trying to connect. `status --json` includes
+local process and remote component status. `down` retains all data and requires `--yes`
+when executions remain unconfirmed. `logs --level warn --follow` shows sensitive events;
+foreground startup prints these automatically. Runtime commands never fall back to Home.
+
+普通使用只需 `cohub runtime up`，首次提示新建，后续优先复用。`-n` 是 `--new` 的简写，
+`--name` 单独指定名称。`-d` 后台运行并返回链接、PID 和日志位置；`down` 停止但保留所有数据。
+断网及临时凭证错误自动重试；断连不代表任务已停止，也不会自动重跑工具。
 
 ## Chats and prompts
 

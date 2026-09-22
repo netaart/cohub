@@ -406,6 +406,7 @@ export const reportLocalSandboxStatus = async (input: {
   hostname?: string | null;
   gatewayNodeId?: string | null;
   runtimeId?: string | null;
+  connectionId?: string;
 }): Promise<void> => {
   const response = await fetch(`${gatewayConfig.apiBaseUrl}/internal/gateway/local-sandbox/status`, {
     method: "POST",
@@ -415,6 +416,7 @@ export const reportLocalSandboxStatus = async (input: {
       ...buildTraceHeaders(),
     },
     body: JSON.stringify(input),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");

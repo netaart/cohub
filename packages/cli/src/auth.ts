@@ -1,5 +1,7 @@
 import { resolveCohubEnvironment, type CohubEnvironment } from "@neta-art/cohub";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { withRuntimeSpaceBindingsLock } from "./runtime/space-binding.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -82,7 +84,11 @@ const legacyTokenPath = (env = currentEnv()) => join(CONFIG_DIR, env === "dev" ?
 
 const writePrivateJson = (path: string, value: unknown) => {
   mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf-8", mode: 0o600, flag: "wx" });
+    renameSync(temporary, path);
+  } finally { rmSync(temporary, { force: true }); }
 };
 
 const readJson = <T>(path: string): T | null => {
@@ -107,6 +113,7 @@ const formPost = async (url: string, body: URLSearchParams) => {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
+    signal: AbortSignal.timeout(15_000),
   });
   const contentType = response.headers.get("content-type") ?? "";
   const data = contentType.includes("application/json")
@@ -195,8 +202,23 @@ export async function requireAccessToken(): Promise<string> {
   return token;
 }
 
-export async function refreshAccessToken(session = readAuthSession()): Promise<string | null> {
-  if (!session?.refreshToken) throw new AuthRequiredError();
+let refreshInFlight: Promise<string | null> | null = null;
+
+export function refreshAccessToken(session = readAuthSession()): Promise<string | null> {
+  if (!session?.refreshToken) return Promise.reject(new AuthRequiredError());
+  if (refreshInFlight) return refreshInFlight;
+  const path = sessionPath(session.env);
+  refreshInFlight = withRuntimeSpaceBindingsLock(async () => {
+    const current = readJson<AuthSession>(path);
+    if (!current) throw new AuthRequiredError();
+    // Another process may already have rotated this refresh token.
+    if (current.refreshToken !== session.refreshToken || current.updatedAt !== session.updatedAt) return current.accessToken;
+    return performRefresh(current);
+  }, { path, lockPath: `${path}.refresh.lock` }).finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
+async function performRefresh(session: AuthSession): Promise<string | null> {
   const config = authConfig(session.env);
   const { response, data } = await formPost(tokenEndpoint(session.issuer), new URLSearchParams({
     client_id: session.clientId,
@@ -208,13 +230,17 @@ export async function refreshAccessToken(session = readAuthSession()): Promise<s
 
   if (!response.ok) {
     if (isUnrecoverableRefreshError(data)) {
-      clearAuthSession();
+      if (readJson<AuthSession>(sessionPath(session.env))?.refreshToken === session.refreshToken) clearAuthSession();
       return null;
     }
     throw new Error(formatAuthError(data, response.status));
   }
 
   const next = toSession(data as LogtoTokenResponse, config, session.env, session);
+  // Never overwrite a login/logout that completed while the request was in flight.
+  const current = readJson<AuthSession>(sessionPath(session.env));
+  if (!current) throw new AuthRequiredError();
+  if (current.refreshToken !== session.refreshToken) return current.accessToken;
   writePrivateJson(sessionPath(session.env), next);
   return next.accessToken;
 }

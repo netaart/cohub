@@ -1,9 +1,11 @@
-import { CohubClient, CohubHttpClient, readRequestSourceFromEnv } from "@neta-art/cohub";
-import { clearAuthSession, resolveAccessToken } from "./auth.js";
+import { CohubClient, CohubHttpClient, readRequestSourceFromEnv, type CohubClientOptions } from "@neta-art/cohub";
+import { clearAuthSession, readAuthSession, resolveAccessToken } from "./auth.js";
 
 const clientOptions = () => ({
   getAccessToken: resolveAccessToken,
-  onUnauthorized: clearAuthSession,
+  onUnauthorized: (context: Parameters<NonNullable<CohubClientOptions["onUnauthorized"]>>[0]) => {
+    if (!process.env.COHUB_EXECUTION_TOKEN?.trim() && context.matchesRejectedToken(readAuthSession()?.accessToken ?? null)) clearAuthSession();
+  },
   requestSource: () =>
     readRequestSourceFromEnv(process.env as Record<string, string | undefined>, { via: "cli" }) ?? {
       via: "cli" as const,

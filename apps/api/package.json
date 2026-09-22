@@ -12,6 +12,7 @@
     "lint": "biome lint .",
     "test": "node ../../scripts/test/run.mjs --test-isolation=none 'src/**/*.test.ts' 'tests/**/*.test.ts'",
     "test:runtime:archives": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test tests/runtime-archives.integration.mjs",
+    "test:runtime:native-sync": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test tests/native-turns.integration.mjs",
     "lint:fix": "biome lint --write .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --import ./dist/register-otel-esm-hook.js dist/index.js",

@@ -44,6 +44,7 @@ import {
 	cachedRuntimeStatus,
 	refreshRuntimeStatus,
 } from "$lib/features/space/runtime-status.svelte";
+import { isStale } from "$lib/features/space/runtime-status-view";
 import { asRecord } from "$lib/features/space/space-utils";
 import { resolvePreferredGenerationModel } from "$lib/generation-model-catalog";
 import { formatGenerationPolicyLabel } from "$lib/generation-policy-label";
@@ -2949,6 +2950,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		if (harness === "cohub") return true;
 		return Boolean(
 			runtimeCatalog?.online &&
+				(!runtimeCatalog.observedAt ||
+					!isStale(runtimeCatalog.observedAt, Date.now())) &&
 				runtimeCatalog.capabilities?.harnesses.includes(harness),
 		);
 	}

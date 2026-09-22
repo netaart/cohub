@@ -60,6 +60,8 @@ export type RuntimeDiagnosticsOptions = {
   logFlushIntervalMs?: number;
   maxLogFileBytes?: number;
   maxTotalLogBytes?: number;
+  /** Receives only the redacted event, before asynchronous disk I/O. */
+  onEvent?: (event: RuntimeDiagnostic) => void;
 };
 
 export type ReadRuntimeDiagnosticsOptions = {
@@ -193,6 +195,7 @@ export class RuntimeDiagnostics {
 
   private readonly spaceId: string;
   private readonly component: string;
+  private readonly onEvent?: (event: RuntimeDiagnostic) => void;
   private readonly logFlushIntervalMs: number;
   private readonly maxLogFileBytes: number;
   private readonly maxTotalLogBytes: number;
@@ -213,6 +216,7 @@ export class RuntimeDiagnostics {
     this.runtimeId = options.runtimeId ?? randomUUID();
     this.spaceId = options.spaceId;
     this.component = options.component ?? "runtime";
+    this.onEvent = options.onEvent;
     this.logFlushIntervalMs = options.logFlushIntervalMs ?? DEFAULT_LOG_FLUSH_INTERVAL_MS;
     this.maxLogFileBytes = options.maxLogFileBytes ?? DEFAULT_MAX_LOG_FILE_BYTES;
     this.maxTotalLogBytes = options.maxTotalLogBytes ?? DEFAULT_MAX_TOTAL_LOG_BYTES;
@@ -260,6 +264,7 @@ export class RuntimeDiagnostics {
       ...(diagnosticError ? { error: diagnosticError } : {}),
     });
     this.enqueueWrite(value);
+    this.onEvent?.(value);
   }
 
   async close(): Promise<void> {

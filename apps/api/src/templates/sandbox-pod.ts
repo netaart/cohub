@@ -44,7 +44,9 @@ export const SANDBOX_POD_TEMPLATE = {
     ...(config.sandboxTolerations.length > 0
       ? { tolerations: config.sandboxTolerations }
       : {}),
-    imagePullSecrets: [{ name: "gitea-registry" }],
+    ...(config.sandboxImagePullSecret
+      ? { imagePullSecrets: [{ name: config.sandboxImagePullSecret }] }
+      : {}),
     securityContext: {
       runAsUser: 1000,
       runAsGroup: 1000,

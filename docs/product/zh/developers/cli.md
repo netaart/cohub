@@ -147,16 +147,24 @@ cohub desktop open <app> --call board.focus --data '{"nodeId":"n1"}'
 ```bash
 cd ./my-project
 
-# 第一次会创建并记住该目录的 Space
+# 首次提示创建和命名，并记住该目录的 Space
 cohub runtime up
 
-# 再次运行会自动复用，不会重复创建
-cohub runtime up
+# 再次运行优先复用；-d 在后台运行
+cohub runtime up -d
 cohub runtime status
+cohub runtime logs --level warn --follow
+cohub runtime down
+
+# 可选：请求新建 Space（-n 是 --new，不再是 --name）
+cohub runtime up -n --name another-project
 ```
 
 绑定按本地目录、账号和环境隔离，保存在 `~/.config/cohub/runtime-spaces.json`。
 省略 `--space` 时会自动读取；显式传入 `--space` 或设置 `COHUB_SPACE_ID` 会覆盖并更新当前目录绑定。
+`-d` 返回 Space 链接、进程 ID 和日志位置后在后台运行；30 秒内尚未就绪时返回退出码 2，进程继续连接。
+`--yes` 用于非交互执行授权。`down` 保留所有数据，存在未确认执行时需加 `--yes`。
+断网会自动重连，但不会自动重跑模型或工具；断连不代表任务已经停止。
 
 ### Boards
 
