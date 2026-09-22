@@ -1,25 +1,32 @@
 name: Search Binary Release
 
-# Always build and attach cohub-search on version tags, even when the tag
-# commit did not touch apps/search. Daily CI stays on search-build.yml with
-# path filters so unrelated PRs never start a Rust job.
+# Release Search explicitly from a selected version tag. Ordinary project tags
+# do not rebuild or publish Search; source-change CI stays on search-build.yml.
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release tag
+        run: |
+          if [[ ! "${GITHUB_REF}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Select an existing vX.Y.Z tag / 请选择已有的 vX.Y.Z 标签" >&2
+            echo "gh workflow run search-release.yml --ref vX.Y.Z" >&2
+            exit 1
+          fi
+
   build:
+    needs: validate-release
     uses: ./.github/workflows/search-build.yml
 
   publish:
     needs: build
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -58,7 +65,6 @@ jobs:
     # The repo is private, so GitHub Release assets are not publicly
     # downloadable. Mirror the musl binary to the cohub-public OSS bucket
     # under search/<version>/, same pattern as sandboxd.
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     env:
       OSS_BUCKET: cohub-public

@@ -1,0 +1,8 @@
+{
+  "family": "workspace.candidates",
+  "schemaVersion": 1,
+  "fields": {
+    "content": { "kind": "trigram", "stored": false },
+    "fingerprint": { "kind": "keyword", "stored": true }
+  }
+}

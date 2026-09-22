@@ -1,8 +1,8 @@
 name: Search Binary Build
 
 # Daily PR/main runs only when search sources change, so ordinary development
-# does not pay for a Rust toolchain. Tag releases are handled separately by
-# search-release.yml so every v*.*.* tag still gets a built binary.
+# does not pay for a Rust toolchain. Explicit manual releases use
+# search-release.yml; ordinary project tags do not build or publish Search.
 
 on:
   push:
@@ -10,10 +10,16 @@ on:
       - main
     paths:
       - 'apps/search/**'
+      - 'apps/sandbox/search/**'
+      - 'packages/protocol/src/search/**'
+      - 'deploy/platform-config/platform/.cohub/search/**'
       - '.github/workflows/search-build.yml'
   pull_request:
     paths:
       - 'apps/search/**'
+      - 'apps/sandbox/search/**'
+      - 'packages/protocol/src/search/**'
+      - 'deploy/platform-config/platform/.cohub/search/**'
       - '.github/workflows/search-build.yml'
   workflow_dispatch:
   workflow_call:
@@ -65,11 +71,23 @@ jobs:
       - name: Test
         run: cargo test --locked --all-targets
 
-      - name: Install musl toolchain
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: apps/sandbox/go.sum
+
+      - name: Install build and workspace tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools ripgrep
 
       - name: Build static binary
         run: cargo build --locked --release --target x86_64-unknown-linux-musl
+
+      - name: Test workspace adapter against the release binary
+        working-directory: apps/sandbox
+        env:
+          COHUB_SEARCH_TEST_BIN: ${{ github.workspace }}/apps/search/target/x86_64-unknown-linux-musl/release/cohub-search
+        run: go test -race ./search
 
       - name: Stage binary
         run: |
