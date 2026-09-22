@@ -1,0 +1,5 @@
+{
+  "terms": [{ "field": "content", "value": "发布计" }],
+  "filters": [{ "field": "_space", "operation": "equal", "value": "space-1" }],
+  "limit": 20
+}
