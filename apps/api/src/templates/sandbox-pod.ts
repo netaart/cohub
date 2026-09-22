@@ -103,6 +103,12 @@ export const SANDBOX_POD_TEMPLATE = {
           },
           {
             name: "space-storage",
+            mountPath: "/configs/platform/.cohub/search",
+            subPath: "${CONFIGS_SUBPATH}/platform/.cohub/search",
+            readOnly: true,
+          },
+          {
+            name: "space-storage",
             mountPath: "/configs/user/.agents",
             subPath: "${CONFIGS_SUBPATH}/users/${OWNER_USER_ID}/.agents",
             readOnly: true,

@@ -1,0 +1,9 @@
+{
+  "family": "business.documents",
+  "schemaVersion": 1,
+  "fields": {
+    "title": { "kind": "text", "stored": true },
+    "content": { "kind": "trigram", "stored": false },
+    "label": { "kind": "keyword", "stored": true }
+  }
+}
