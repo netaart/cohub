@@ -21,6 +21,7 @@ const (
 	DefaultSearchVersion     = "latest"
 	DefaultSearchCDNBaseURL  = "https://public.cohub.live/search"
 	DefaultSearchDownloadDir = "/tmp/cohub-search/bin"
+	DefaultSearchSchemaPath  = "/configs/platform/.cohub/search/workspace.candidates.json"
 )
 
 // Mode selects how the sandbox exposes itself.
@@ -51,6 +52,7 @@ type Config struct {
 	SearchVersion                  string
 	SearchCDNBaseURL               string
 	SearchDownloadDir              string
+	SearchSchemaPath               string
 	SearchIndexDir                 string
 	SearchSocketPath               string
 
@@ -122,6 +124,7 @@ func Load() (Config, error) {
 		SearchVersion:                  resolveSearchVersion(),
 		SearchCDNBaseURL:               resolveSearchCDNBaseURL(),
 		SearchDownloadDir:              resolveSearchDownloadDir(),
+		SearchSchemaPath:               resolveSearchSchemaPath(),
 		SearchIndexDir:                 resolveSearchIndexDir(),
 		SearchSocketPath:               resolveSearchSocketPath(),
 	}, nil
@@ -215,6 +218,13 @@ func resolveSearchDownloadDir() string {
 		return filepath.Clean(value)
 	}
 	return DefaultSearchDownloadDir
+}
+
+func resolveSearchSchemaPath() string {
+	if value := strings.TrimSpace(os.Getenv("COHUB_SEARCH_SCHEMA")); value != "" {
+		return filepath.Clean(value)
+	}
+	return DefaultSearchSchemaPath
 }
 
 func resolveSearchIndexDir() string {

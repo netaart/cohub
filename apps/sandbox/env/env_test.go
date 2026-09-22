@@ -4,6 +4,7 @@ import "testing"
 
 func TestCloudSearchDefaultsToEnabledLatestRelease(t *testing.T) {
 	t.Setenv("COHUB_SPACE_ID", "00000000-0000-0000-0000-000000000001")
+	t.Setenv("COHUB_SEARCH_SCHEMA", "")
 	t.Setenv("COHUB_SEARCH_ENABLED", "")
 	t.Setenv("COHUB_SEARCH_VERSION", "")
 	cfg, err := Load()
@@ -15,6 +16,21 @@ func TestCloudSearchDefaultsToEnabledLatestRelease(t *testing.T) {
 	}
 	if cfg.SearchVersion != DefaultSearchVersion {
 		t.Fatalf("SearchVersion = %q", cfg.SearchVersion)
+	}
+	if cfg.SearchSchemaPath != "/configs/platform/.cohub/search/workspace.candidates.json" {
+		t.Fatalf("SearchSchemaPath = %q", cfg.SearchSchemaPath)
+	}
+}
+
+func TestSearchSchemaPathOverride(t *testing.T) {
+	t.Setenv("COHUB_SPACE_ID", "00000000-0000-0000-0000-000000000001")
+	t.Setenv("COHUB_SEARCH_SCHEMA", " /custom/platform/.cohub/search/workspace.json ")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SearchSchemaPath != "/custom/platform/.cohub/search/workspace.json" {
+		t.Fatalf("SearchSchemaPath = %q", cfg.SearchSchemaPath)
 	}
 }
 
