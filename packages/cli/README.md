@@ -85,14 +85,12 @@ COHUB_SPACE_ID=<spaceId> cohub spaces prompt "message" --json
 Connect one local workspace to a Space and select Pi or Codex per turn.
 
 To keep using native terminals with ordinary Cohub Chats / Turns:
-使用原生终端，并同步到普通 Cohub Chat / Turn：
 
 ```bash
 cohub runtime up -d --harness pi --harness codex
 # Answer the native sync consent (default yes), then reload Pi / restart Codex
 # and approve its hook trust prompt.
-# 确认原生同步授权（默认 yes），重载 Pi / 重启 Codex，并审核 Hook 信任提示。
-cohub runtime detach --harness pi --harness codex # Pause; retain data / 暂停，保留数据
+cohub runtime detach --harness pi --harness codex # Pause; retain data
 ```
 
 `up` installs native sync by default after one explicit consent (default yes); declining or a
@@ -101,12 +99,7 @@ Supervisor is the single local Daemon: Pi / Codex integrations use its private I
 while native Turn events use the existing Runtime WebSocket. Configuration is backed up, existing
 Runtime bindings are reused, and competing continuations fork at complete Turns without blocking native work. Requires Pi 0.85.1+ or Codex with stable
 Hooks enabled. User-level integrations remain inert outside opted-in directories. See
-[boundaries and privacy](../../docs/local-runtime.md#native-clients--原生客户端).
-
-`up` 默认启用原生同步，单独确认一次（默认 yes）；拒绝或能力不满足时 Runtime 照常运行，
-且 `up` 幂等。复用现有绑定，配置修改前备份；冲突时按完整 Turn 分支，不阻塞本地执行。
-用户级集成在未授权目录中不会采集数据。
-
+[boundaries and privacy](../../docs/local-runtime.md#native-clients).
 
 ```bash
 cohub runtime up ./project --harness pi --harness codex
@@ -143,10 +136,6 @@ code 2 means it remains in the background trying to connect. `status --json` inc
 local process and remote component status. `down` retains all data and requires `--yes`
 when executions remain unconfirmed. `logs --level warn --follow` shows sensitive events;
 foreground startup prints these automatically. Runtime commands never fall back to Home.
-
-普通使用只需 `cohub runtime up`，首次提示新建，后续优先复用。`-n` 是 `--new` 的简写，
-`--name` 单独指定名称。`-d` 后台运行并返回链接、PID 和日志位置；`down` 停止但保留所有数据。
-断网及临时凭证错误自动重试；断连不代表任务已停止，也不会自动重跑工具。
 
 ## Chats and prompts
 

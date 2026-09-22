@@ -1,10 +1,10 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createClient } from "../client.js";
 import { currentIdentityKey } from "../space.js";
 import { canonicalRuntimeRoot, getRuntimeSpaceBinding } from "./space-binding.js";
-import { readNativeTranscript } from "./native-transcript.js";
+import { readNativeTranscript, readNativeTranscriptHeader } from "./native-transcript.js";
 import { findRuntimeNativeSession } from "./session-store.js";
 import { listNativeSyncStores, nativeIdentityHash, NativeSyncStore, type NativeSyncTransport } from "./native-sync-store.js";
 import type { NativeRuntimeEvent } from "@neta-art/cohub";
@@ -12,6 +12,90 @@ import type { NativeRuntimeEvent } from "@neta-art/cohub";
 export type NativeSyncConfig = { version: 1; identity: string; spaceId: string; root: string; harnesses: ("pi" | "codex")[] };
 export const nativeRuntimeRoot = (spaceId: string) => join(homedir(), ".local", "state", "cohub", "runtime", spaceId);
 export const nativeSyncConfigPath = (runtimeRoot: string, identity: string) => join(runtimeRoot, "native", nativeIdentityHash(identity), "config.json");
+
+const piSessionDirectory = (cwd: string) => {
+  const custom = process.env.PI_CODING_AGENT_SESSION_DIR?.trim();
+  if (custom) return custom;
+  const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
+  const safePath = `--${cwd.replace(/^[/\\\\]/, "").replace(/[/\\\\:]/g, "-")}--`;
+  return join(agentDir, "sessions", safePath);
+};
+const codexSessionDirectory = () => join(process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"), "sessions");
+type ImportScanError = { harness: "pi" | "codex"; path: string; message: string };
+const LARGE_TRANSCRIPT_BYTES = 64 * 1024 * 1024;
+
+async function nativeTranscriptPaths(root: string, harness: "pi" | "codex", signal?: AbortSignal) {
+  const pending = [harness === "pi" ? piSessionDirectory(root) : codexSessionDirectory()];
+  const paths: string[] = [];
+  const errors: ImportScanError[] = [];
+  while (pending.length) {
+    signal?.throwIfAborted();
+    const directory = pending.pop();
+    if (!directory) continue;
+    const entries = await readdir(directory, { withFileTypes: true }).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      errors.push({ harness, path: directory, message: error instanceof Error ? error.message : String(error) });
+      return [];
+    });
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) pending.push(path);
+      else if (entry.isFile() && entry.name.endsWith(".jsonl")) paths.push(path);
+    }
+  }
+  return { paths, errors };
+}
+
+export type NativeImportCandidate = {
+  harness: "pi" | "codex";
+  path: string;
+  nativeSessionId: string;
+  turnCount: number;
+  sessionStartedAt: string | undefined;
+};
+
+/** Find existing native transcripts for exactly one bound project. */
+export async function discoverNativeImportCandidates(root: string, harnesses: ("pi" | "codex")[], options: {
+  signal?: AbortSignal;
+  onProgress?: (progress: { harness: "pi" | "codex"; scanned: number; candidates: number }) => void;
+} = {}) {
+  const candidates: NativeImportCandidate[] = [];
+  const errors: Array<{ harness: "pi" | "codex"; path: string; message: string }> = [];
+  for (const harness of harnesses) {
+    options.signal?.throwIfAborted();
+    const scanned = await nativeTranscriptPaths(root, harness, options.signal);
+    errors.push(...scanned.errors);
+    let start = 0;
+    while (start < scanned.paths.length) {
+      options.signal?.throwIfAborted();
+      const paths = scanned.paths.slice(start, start + 2);
+      const sizes = await Promise.all(paths.map((path) => stat(path).then((value) => value.size).catch(() => 0)));
+      const concurrency = sizes.some((size) => size > LARGE_TRANSCRIPT_BYTES) ? 1 : 2;
+      const batch = await Promise.all(paths.slice(0, concurrency).map(async (path) => {
+        try {
+          const header = await readNativeTranscriptHeader(path, harness, options.signal);
+          if (await canonicalRuntimeRoot(header.cwd) !== root) return null;
+          const transcript = await readNativeTranscript(path, harness, { settled: true, signal: options.signal });
+          if (transcript.turns.length === 0) return { error: { harness, path, message: "Transcript contains no importable Turns" } satisfies ImportScanError };
+          return { harness, path, nativeSessionId: transcript.nativeSessionId, turnCount: transcript.turns.length,
+            sessionStartedAt: transcript.turns.map((turn) => turn.startedAt).sort()[0] } satisfies NativeImportCandidate;
+        } catch (error) {
+          return { error: { harness, path, message: error instanceof Error ? error.message : String(error) } satisfies ImportScanError };
+        }
+      }));
+      for (const result of batch) {
+        options.signal?.throwIfAborted();
+        if (!result) continue;
+        if ("error" in result) {
+          if (result.error) errors.push(result.error);
+        } else candidates.push(result);
+        options.onProgress?.({ harness, scanned: start + batch.length, candidates: candidates.length });
+      }
+      start += concurrency;
+    }
+  }
+  return { candidates, errors };
+}
 
 export function nativeArchiveTransport(spaceId: string, identity: string): Pick<NativeSyncTransport, "prepareRuntimeArchive" | "commitRuntimeArchive" | "getRuntimeArchive"> {
   const client = createClient().space(spaceId);
@@ -39,7 +123,7 @@ export async function readNativeSyncConfig(runtimeRoot: string, identity: string
 const nativeStores = new Map<string, NativeSyncStore>();
 
 /** Local capture only. Neither Pi callbacks nor Codex hooks wait for Cohub's network. */
-export async function captureNativeSession(input: { harness: "pi" | "codex"; cwd: string; path: string; nativeSessionId?: string; settled?: boolean; leafId?: string | null }): Promise<NativeSyncStore | null> {
+export async function captureNativeSession(input: { harness: "pi" | "codex"; cwd: string; path: string; nativeSessionId?: string; settled?: boolean; leafId?: string | null; sessionStartedAt?: string; origin?: "local_import" }): Promise<NativeSyncStore | null> {
   if (process.env.COHUB_TURN_ID || process.env.COHUB_EXECUTION_TOKEN) return null;
   const identity = currentIdentityKey();
   if (!identity) return null;
@@ -70,7 +154,7 @@ export async function captureNativeSession(input: { harness: "pi" | "codex"; cwd
     if (nativeStores.size >= 256) nativeStores.delete(nativeStores.keys().next().value ?? "");
     nativeStores.set(key, store);
   }
-  await store.capture(path, transcript);
+  await store.capture(path, transcript, { sessionStartedAt: input.sessionStartedAt, origin: input.origin });
   return store;
 }
 

@@ -34,9 +34,34 @@ const iso = (value: unknown) => {
   if (!Number.isFinite(date.getTime())) throw new Error("Invalid native timestamp");
   return date.toISOString();
 };
+export const NATIVE_MAX_RECORD_BYTES = 256 * 1024 * 1024;
+export const NATIVE_MAX_TRANSCRIPT_BYTES = 1024 * 1024 * 1024;
+const NATIVE_HEADER_MAX_BYTES = 1024 * 1024;
+
+/** Read only the session header before deciding whether a global Codex file belongs to this project. */
+export async function readNativeTranscriptHeader(path: string, harness: "pi" | "codex", signal?: AbortSignal) {
+  const stream = createReadStream(path, { signal });
+  let buffer = Buffer.alloc(0);
+  try {
+    for await (const chunk of stream) {
+      buffer = Buffer.concat([buffer, chunk as Buffer]);
+      const newline = buffer.indexOf(10);
+      if (newline >= 0) {
+        const value = record(JSON.parse(buffer.subarray(0, newline).toString("utf8")));
+        const payload = record(value.payload);
+        const nativeSessionId = harness === "pi" ? text(value.id) : text(payload.id);
+        const cwd = harness === "pi" ? text(value.cwd) : text(payload.cwd);
+        if ((harness === "pi" && value.type !== "session") || (harness === "codex" && value.type !== "session_meta") || !nativeSessionId || !cwd) throw new Error("Invalid native session header");
+        return { nativeSessionId, cwd };
+      }
+      if (buffer.length > NATIVE_HEADER_MAX_BYTES) throw new Error("Native session header is too large");
+    }
+    throw new Error("Native transcript is empty");
+  } finally { stream.destroy(); }
+}
 
 /** Partial trailing records are retried, never parsed or acknowledged as complete. */
-export async function readNativeTranscript(path: string, harness: "pi" | "codex", options: { settled?: boolean; leafId?: string | null } = {}): Promise<NativeTranscript> {
+export async function readNativeTranscript(path: string, harness: "pi" | "codex", options: { settled?: boolean; leafId?: string | null; signal?: AbortSignal } = {}): Promise<NativeTranscript> {
   const lines: Line[] = [];
   const prefixes = new Map<number, string>();
   let fragments: Buffer[] = [], pendingBytes = 0, offset = 0;
@@ -44,10 +69,10 @@ export async function readNativeTranscript(path: string, harness: "pi" | "codex"
   const append = (bytes: Buffer) => {
     if (!bytes.length) return;
     fragments.push(bytes); pendingBytes += bytes.length; checksum.update(bytes);
-    if (pendingBytes > 32 * 1024 * 1024) throw new Error("Native record is too large");
-    if (offset + pendingBytes > 128 * 1024 * 1024) throw new Error("Native transcript exceeds the capture limit; original retained");
+    if (pendingBytes > NATIVE_MAX_RECORD_BYTES) throw new Error("Native record exceeds the 256 MiB local parse limit; original retained");
+    if (offset + pendingBytes > NATIVE_MAX_TRANSCRIPT_BYTES) throw new Error("Native transcript exceeds the 1 GiB local parse limit; original retained");
   };
-  for await (const chunk of createReadStream(path)) {
+  for await (const chunk of createReadStream(path, { signal: options.signal })) {
     let start = 0;
     for (let end = chunk.indexOf(10); end >= 0; end = chunk.indexOf(10, start)) {
       append(chunk.subarray(start, end + 1));

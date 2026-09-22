@@ -118,8 +118,9 @@ Boundaries:
 - Native-only UI / direct-shell records do not become separate Agent Turns. Their original bytes remain
   local and are included in subsequent Turn archives; the bridge does not invent message-level anchors.
   原生 UI / 直接 Shell 记录不另建 Agent Turn，原件保留在本地并随后续 Turn 归档，不虚构 message 级锚点。
-- Capture currently reads at most 128 MiB per transcript; API receipts are limited to 32 MiB. Limits
-  retain originals and surface diagnostics instead of truncating data.
+- Import parsing accepts native records up to 256 MiB and transcripts up to 1 GiB. Runtime/API
+  normalized frames remain limited to 32 MiB; oversized normalized Turns retain their original
+  archive and surface diagnostics instead of truncating data.
 - Pi can honor a remote abort while its extension is connected. Codex hooks are not a remote control
   channel; stop an active native Codex run in its terminal. Unknown outcomes retain the existing explicit
   stop-confirmation boundary. Completed Chats can continue through the regular Runtime.

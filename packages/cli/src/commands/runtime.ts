@@ -6,8 +6,9 @@ import { currentIdentityKey } from "../space.js";
 import { resolveRuntimeTarget, runtimeUp, parseRuntimeHarnesses, type RuntimeUpOptions } from "../runtime/launch.js";
 import { canonicalRuntimeRoot, getRuntimeSpaceBinding } from "../runtime/space-binding.js";
 import { installNativeSync } from "../runtime/native-install.js";
-import { readNativeSyncConfig } from "../runtime/native-sync.js";
+import { discoverNativeImportCandidates, nativeRuntimeRoot, readNativeSyncConfig } from "../runtime/native-sync.js";
 import { listNativeSyncStores } from "../runtime/native-sync-store.js";
+import { requestNativeDaemon } from "../runtime/native-ipc.js";
 import { requestRuntimeInstance, runtimeInstanceDirectory } from "../runtime/instance.js";
 import { atLeastLevel, diagnosticLevels, formatDiagnostic, formatNativeSync, printRuntimeSummary } from "../runtime/presentation.js";
 import { RuntimeSessionStore } from "../runtime/session-store.js";
@@ -58,6 +59,102 @@ export function registerRuntime(program: Command) {
         if (jsonRequested(options)) outJson({ ...result, enabled: false });
         else process.stdout.write("Native sync paused; all local records retained\n");
       } catch (cause) { reportFailure(cause); }
+    });
+
+  runtime.command("import [dir]")
+    .description("Import local conversations")
+    .option("-s, --space <id>", "Target Space")
+    .option("--harness <name>", "Filter by harness; repeatable", (value: string, previous: string[]) => [...previous, value], [])
+    .option("--session <id>", "Filter by native session ID")
+    .option("--dry-run", "Preview without importing")
+    .option("-y, --yes", "Skip confirmation")
+    .option("--json", "Output as JSON")
+    .action(async (dir: string | undefined, options: TargetOptions & { harness: string[]; session?: string; dryRun?: boolean; yes?: boolean }) => {
+      const controller = new AbortController();
+      const stop = () => controller.abort();
+      process.once("SIGINT", stop); process.once("SIGTERM", stop);
+      try {
+        const identity = currentIdentityKey();
+        if (!identity) throw new Error("Sign in first");
+        const root = await canonicalRuntimeRoot(dir ?? process.cwd());
+        const spaceId = await resolveRuntimeTarget(program, options.space);
+        const binding = await getRuntimeSpaceBinding(root, identity);
+        if (!binding || binding.spaceId !== spaceId) throw new Error("Bind this directory with runtime up first");
+        const local = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
+        if (!local) throw new Error("Local Runtime is not running");
+        const config = await readNativeSyncConfig(nativeRuntimeRoot(spaceId), identity);
+        if (!config || config.root !== root) throw new Error("Native sync is not enabled for this directory");
+        const harnesses = parseRuntimeHarnesses(options.harness.length ? options.harness : config.harnesses);
+        let lastProgress = 0;
+        const discovered = await discoverNativeImportCandidates(root, harnesses, {
+          signal: controller.signal,
+          onProgress: ({ harness, scanned, candidates: found }) => {
+            if (jsonRequested(options) || scanned - lastProgress < 25) return;
+            lastProgress = scanned;
+            process.stderr.write(`Scanned ${scanned} ${harness} transcript${scanned === 1 ? "" : "s"}; found ${found}\n`);
+          },
+        });
+        const candidates = discovered.candidates.filter((candidate) => !options.session || candidate.nativeSessionId === options.session);
+        const result = {
+          spaceId, root, harnesses, candidates, errors: discovered.errors,
+          imported: 0, failed: [] as Array<{ path: string; message: string }>, dryRun: Boolean(options.dryRun),
+          complete: discovered.errors.length === 0,
+        };
+        if (jsonRequested(options) && options.dryRun) {
+          result.complete = result.complete && result.failed.length === 0;
+          outJson(result);
+          if (!result.complete) process.exitCode = 1;
+          return;
+        }
+        if (!candidates.length) {
+          if (!result.complete) process.exitCode = 1;
+          if (jsonRequested(options)) outJson(result);
+          else process.stdout.write("No existing native conversations found\n");
+          return;
+        }
+        if (options.dryRun) {
+          if (jsonRequested(options)) outJson(result);
+          else {
+            process.stdout.write(`Found ${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}\n`);
+            for (const candidate of candidates) process.stdout.write(`  ${candidate.harness} ${candidate.nativeSessionId} ${candidate.turnCount} Turn${candidate.turnCount === 1 ? "" : "s"} ${candidate.path}\n`);
+            for (const error of discovered.errors) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
+          }
+          if (!result.complete) process.exitCode = 1;
+          return;
+        }
+        if (!options.yes) {
+          if (!process.stdin.isTTY) throw new Error("Use --yes in non-interactive mode");
+          const { createInterface } = await import("node:readline/promises");
+          const rl = createInterface({ input: process.stdin, output: process.stderr });
+          try {
+            const answer = await rl.question(`Import ${candidates.length} native conversation${candidates.length === 1 ? "" : "s"} to Space ${spaceId}? [Y/n] `);
+            if (!/^(|y(es)?)$/i.test(answer.trim())) {
+              if (jsonRequested(options)) outJson({ ...result, cancelled: true });
+              else process.stdout.write("Import cancelled\n");
+              return;
+            }
+          } finally { rl.close(); }
+        }
+        for (const candidate of candidates) {
+          try {
+            const response = await requestNativeDaemon({ harness: candidate.harness, cwd: root, path: candidate.path, nativeSessionId: candidate.nativeSessionId,
+              sessionStartedAt: candidate.sessionStartedAt, origin: "local_import", settled: true });
+            if (!response.ok) throw new Error(response.message);
+            result.imported += 1;
+          } catch (error) {
+            result.failed.push({ path: candidate.path, message: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        result.complete = result.complete && result.failed.length === 0;
+        if (jsonRequested(options)) outJson(result);
+        else {
+          process.stdout.write(`Imported ${result.imported}/${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}\n`);
+          for (const error of [...discovered.errors, ...result.failed]) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
+          process.stdout.write("Uploads continue in the local Runtime background\n");
+        }
+        if (!result.complete) process.exitCode = 1;
+      } catch (cause) { reportFailure(cause); }
+      finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
     });
 
   runtime.command("status").description("Local and server status")

@@ -16,13 +16,17 @@ type NativeIpcRequest = {
   nativeSessionId: string;
   settled?: boolean;
   leafId?: string | null;
+  sessionStartedAt?: string;
+  origin?: "local_import";
 };
 type NativeIpcResponse = { ok: true; pendingTurns: number } | { ok: false; message: string };
 
 const parse = (raw: string): NativeIpcRequest => {
   const value = JSON.parse(raw) as NativeIpcRequest;
   if (value?.type !== "native.capture" || !["pi", "codex"].includes(value.harness)
-    || typeof value.cwd !== "string" || typeof value.path !== "string" || typeof value.nativeSessionId !== "string") {
+    || typeof value.cwd !== "string" || typeof value.path !== "string" || typeof value.nativeSessionId !== "string"
+    || value.origin !== undefined && value.origin !== "local_import"
+    || value.sessionStartedAt !== undefined && typeof value.sessionStartedAt !== "string") {
     throw new Error("Invalid native daemon request");
   }
   return value;

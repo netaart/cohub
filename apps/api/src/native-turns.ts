@@ -85,7 +85,12 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
       sessionId = input.branchSessionId;
       const [collision] = await tx.select({ id: spaceSessions.id }).from(spaceSessions).where(eq(spaceSessions.id, sessionId));
       if (collision) conflict("Session identity already exists / 会话身份已存在");
-      await tx.insert(spaceSessions).values({ id: sessionId, spaceId, userUuid: userId, source: NATIVE_SYNC_SOURCE, meta: addSessionParticipantMeta({}, userId) });
+      const sessionMeta = input.origin ? {
+        nativeSync: { version: 1, origin: input.origin, harness: input.harness, nativeSessionId: input.nativeSessionId, originalStartedAt: input.sessionStartedAt ?? input.startedAt },
+      } : {};
+      const sessionStartedAt = new Date(input.sessionStartedAt ?? input.startedAt);
+      await tx.insert(spaceSessions).values({ id: sessionId, spaceId, userUuid: userId, source: NATIVE_SYNC_SOURCE,
+        meta: addSessionParticipantMeta(sessionMeta, userId), createdAt: sessionStartedAt });
       await tx.insert(sessionTurnSegments).values({ sessionId, ordinal: 1, sourceSessionId: sessionId, fromSequence: 1, toSequence: null });
     }
     const userContent = sanitizeContentBlocksForPostgresJson(input.userContent);
@@ -95,16 +100,18 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     const meta = {
       source: NATIVE_SYNC_SOURCE, harness: input.harness, runtime: "local", actorUserId: userId, userMessageId,
       runtimeRecovery: { state: "executing", ownerUserId: userId },
-      nativeSync: { version: 1, spaceId, requestDigest, nativeSessionId: input.nativeSessionId, parentTurnId: input.parentTurnId, observedAt: new Date().toISOString() },
+      nativeSync: { version: 1, spaceId, requestDigest, nativeSessionId: input.nativeSessionId, parentTurnId: input.parentTurnId, observedAt: new Date().toISOString(),
+        ...(input.origin ? { origin: input.origin, originalStartedAt: input.startedAt } : {}) },
     };
-    await tx.insert(sessionTurns).values({ id: input.turnId, sessionId, userUuid: userId, sequence, status: "running", intent: "followup", userContent, userText, meta, startedAt });
+    await tx.insert(sessionTurns).values({ id: input.turnId, sessionId, userUuid: userId, sequence, status: "running", intent: "followup", userContent, userText, meta, startedAt, createdAt: startedAt });
     const [last] = await tx.select({ sequence: sessionMessages.sequence }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId)).orderBy(desc(sessionMessages.sequence)).limit(1);
-    await tx.insert(sessionMessages).values({ id: userMessageId, sessionId, turnId: input.turnId, role: "user", content: userContent, text: userText, sequence: (last?.sequence ?? 0) + 1, idempotencyKey: `native:${input.turnId}:user`, meta: { ...meta, turnId: input.turnId, messageKind: "user" }, startedAt, completedAt: startedAt });
+    await tx.insert(sessionMessages).values({ id: userMessageId, sessionId, turnId: input.turnId, role: "user", content: userContent, text: userText, sequence: (last?.sequence ?? 0) + 1, idempotencyKey: `native:${input.turnId}:user`, meta: { ...meta, turnId: input.turnId, messageKind: "user" }, startedAt, completedAt: startedAt, createdAt: startedAt });
     const [before] = await tx.select({ meta: spaceSessions.meta }).from(spaceSessions).where(eq(spaceSessions.id, sessionId));
     const [session] = await tx.update(spaceSessions).set({
       meta: sanitizePostgresJsonValue(addSessionParticipantMeta(before?.meta, userId)),
       title: sql`coalesce(${spaceSessions.title}, ${deriveSessionFallbackTitle({ content: userContent })})`,
-      latestMessageText: userText, lastMessageId: userMessageId, lastMessageAt: new Date(), updatedAt: new Date(),
+      latestMessageText: userText, lastMessageId: userMessageId,
+      lastMessageAt: sql`greatest(coalesce(${spaceSessions.lastMessageAt}, ${startedAt}), ${startedAt})`, updatedAt: new Date(),
     }).where(eq(spaceSessions.id, sessionId)).returning();
     if (!session) throw new Error("Failed to update native Session");
     const binding: NativeTurnBinding = { sessionId, turnId: input.turnId, forked: input.sessionId !== null && sessionId !== input.sessionId };
@@ -129,6 +136,7 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
     const [turn] = await tx.select().from(sessionTurns).where(eq(sessionTurns.id, turnId)).for("update");
     if (!turn) throw new NativeTurnError(404, "Turn not found / Turn 不存在");
     const meta = record(turn.meta), receipt = record(meta.nativeSync);
+    const imported = receipt.origin === "local_import";
     if (record(meta.runtimeRecovery).state === "confirmed_stopped") conflict("Execution was resolved; retain the local receipt / 执行已确认停止，请保留本地回执");
     if (receipt.completionDigest && receipt.completionDigest !== completionDigest) conflict("Turn result is immutable / Turn 结果不可覆盖");
     if (terminal.has(turn.status)) {
@@ -144,7 +152,9 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
         id: messageId(turnId, ordinal), sessionId, turnId, role: "assistant", content, text: deriveMessagePreviewText({ content }) || null,
         sequence: ordinal, idempotencyKey: `native:${turnId}:${ordinal}`, provider: message.provider ?? null, model: message.model ?? null,
         stopReason: message.stopReason ?? null, errorMessage: message.errorMessage ? sanitizePostgresJsonValue(message.errorMessage) : null, usage: message.usage ?? null,
-        meta: { turnId, messageOrdinal: ordinal, harness: record(turn.meta).harness, runtime: "local", source: NATIVE_SYNC_SOURCE, actorUserId: userId, anchorUserMessageId: record(turn.meta).userMessageId, messageKind: final ? input.status === "completed" ? "assistant_final" : "assistant_error" : "assistant_intermediate" },
+        meta: { turnId, messageOrdinal: ordinal, harness: record(turn.meta).harness, runtime: "local", source: NATIVE_SYNC_SOURCE, actorUserId: userId, anchorUserMessageId: record(turn.meta).userMessageId,
+          ...(imported ? { origin: "local_import", originalStartedAt: turn.startedAt, originalCompletedAt: input.completedAt } : {}),
+          messageKind: final ? input.status === "completed" ? "assistant_final" : "assistant_error" : "assistant_intermediate" },
         startedAt: turn.startedAt, completedAt, durationMs: null, usageAggregatedAt: null, createdAt: completedAt,
       };
     });
@@ -157,10 +167,11 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
       errorMessage: final?.errorMessage ?? null, finalUsage: final?.usage ?? null, totalUsage,
       summary: { text: final?.text ?? null, finishReason: input.status },
       completedAt, durationMs: Math.min(2_147_483_647, Math.max(0, completedAt.getTime() - (turn.startedAt?.getTime() ?? completedAt.getTime()))), updatedAt: new Date(),
-      meta: { ...meta, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest } },
+      meta: { ...meta, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
     }).where(and(eq(sessionTurns.id, turnId), runtimeResolutionOpen, inArray(sessionTurns.status, ["running", "abort_requested"]))).returning();
     if (!next) conflict("Execution was resolved / 执行已确认停止");
-    await tx.update(spaceSessions).set({ latestMessageText: final?.text ?? turn.userText, ...(final ? { lastMessageId: final.id } : {}), lastMessageAt: new Date(), updatedAt: new Date() }).where(eq(spaceSessions.id, sessionId));
+    await tx.update(spaceSessions).set({ latestMessageText: final?.text ?? turn.userText, ...(final ? { lastMessageId: final.id } : {}),
+      lastMessageAt: sql`greatest(coalesce(${spaceSessions.lastMessageAt}, ${completedAt}), ${completedAt})`, updatedAt: new Date() }).where(eq(spaceSessions.id, sessionId));
     return { changed: true, turn: next, messages };
   });
   let artifactsPending = false;

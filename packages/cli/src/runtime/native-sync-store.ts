@@ -46,6 +46,8 @@ export type NativeTurnReceipt = {
   endBytes: number;
   contentEndBytes?: number;
   result: NativeTurnComplete | null;
+  sessionStartedAt?: string;
+  origin?: "local_import";
   progress?: NativeTurnProgress;
 };
 export type NativeSyncTransport = ArchiveTransport & {
@@ -133,7 +135,7 @@ export class NativeSyncStore {
     await atomicRuntimeJson(this.bindingPath(), binding);
     return binding;
   }
-  async capture(path: string, transcript: NativeTranscript) {
+  async capture(path: string, transcript: NativeTranscript, context: { sessionStartedAt?: string; origin?: "local_import" } = {}) {
     if (transcript.nativeSessionId !== this.options.nativeSessionId) throw new Error("Native session identity mismatch");
     await withRuntimeSpaceBindingsLock(async () => {
       const binding = await this.initialize(path, transcript);
@@ -173,6 +175,8 @@ export class NativeSyncStore {
         const result = turn.result ? nativeTurnCompleteSchema.parse(turn.result) : null;
         const receipt: NativeTurnReceipt = { version: 1, turnId, key: turn.key, parentKey, parentCloudTurnId: parentKey ? null : parentCloudTurnId,
           userContent: turn.userContent, startedAt: turn.startedAt, endBytes: turn.endBytes, contentEndBytes: turn.contentEndBytes, result,
+          ...(context.sessionStartedAt ? { sessionStartedAt: context.sessionStartedAt } : {}),
+          ...(context.origin ? { origin: context.origin } : {}),
           ...(!result ? { progress: nativeTurnProgressSchema.parse({ revision: turn.endBytes, messages: turn.messages }) } : {}) };
         if (old && (JSON.stringify(old.userContent) !== JSON.stringify(receipt.userContent) || old.parentKey !== receipt.parentKey)) throw new Error("Native Turn changed; original receipt retained");
         // Capture immutable native bytes before publishing the completed receipt. Subsequent Turns may change the source.
@@ -241,7 +245,8 @@ export class NativeSyncStore {
         let request = await readJson<NativeTurnStart>(this.requestPath(receipt.turnId));
         if (!request) {
           request = nativeTurnStartSchema.parse({ turnId: receipt.turnId, sessionId: parent?.sessionId ?? binding.sessionId, parentTurnId: parent?.turnId ?? receipt.parentCloudTurnId,
-            branchSessionId: nativeStableId(`${receipt.turnId}:branch`), harness: binding.harness, nativeSessionId: binding.nativeSessionId, userContent: receipt.userContent, startedAt: receipt.startedAt });
+            branchSessionId: nativeStableId(`${receipt.turnId}:branch`), harness: binding.harness, nativeSessionId: binding.nativeSessionId, userContent: receipt.userContent, startedAt: receipt.startedAt,
+            ...(receipt.sessionStartedAt ? { sessionStartedAt: receipt.sessionStartedAt } : {}), ...(receipt.origin ? { origin: receipt.origin } : {}) });
           await atomicRuntimeJson(this.requestPath(receipt.turnId), request);
         }
         let remote = await readJson<NativeTurnBinding>(this.cloudBindingPath(receipt.turnId));

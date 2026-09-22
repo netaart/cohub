@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, writeFile, readFile, rm, readdir, mkdir, symlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { readNativeTranscript } from "../src/runtime/native-transcript.js";
+import { discoverNativeImportCandidates } from "../src/runtime/native-sync.js";
 import { NativeSyncStore, nativeStableId, type NativeSyncTransport } from "../src/runtime/native-sync-store.js";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
 import { codexNativeHookBlock } from "../src/runtime/native-install.js";
@@ -30,6 +31,32 @@ async function fixture() {
   const options = { runtimeRoot: join(root, "state"), spaceId, identity: "test:owner", harness: "pi" as const, nativeSessionId };
   return { root, path, nativeSessionId, options, header: piHeader(nativeSessionId, root), cleanup: () => rm(root, { recursive: true, force: true }) };
 }
+
+test("native import discovery stays scoped to the bound project and reports invalid files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cohub-native-discovery-"));
+  const other = await mkdtemp(join(tmpdir(), "cohub-native-discovery-other-"));
+  const previous = process.env.PI_CODING_AGENT_SESSION_DIR;
+  process.env.PI_CODING_AGENT_SESSION_DIR = join(root, "sessions");
+  try {
+    const currentPath = join(root, "sessions", "current.jsonl");
+    const otherPath = join(root, "sessions", "other.jsonl");
+    await mkdir(dirname(currentPath), { recursive: true });
+    await writeFile(currentPath, piHeader(randomUUID(), root) + piTurn(1));
+    await writeFile(otherPath, piHeader(randomUUID(), other) + piTurn(1));
+    await writeFile(join(root, "sessions", "invalid.jsonl"), "not json\n");
+    const result = await discoverNativeImportCandidates(root, ["pi"]);
+    assert.equal(result.candidates.length, 1);
+    assert.equal(result.candidates[0]?.path, currentPath);
+    assert.equal(result.candidates[0]?.turnCount, 1);
+    assert.equal(result.errors.length, 1);
+    assert.equal(result.errors[0]?.path, join(root, "sessions", "invalid.jsonl"));
+  } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+    else process.env.PI_CODING_AGENT_SESSION_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+    await rm(other, { recursive: true, force: true });
+  }
+});
 
 test("Pi captures complete user Turns, preserves tools/thinking, and excludes partial trailing records", async () => {
   const f = await fixture();
