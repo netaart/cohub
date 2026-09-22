@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -12,27 +13,11 @@ import (
 	"github.com/cohub/apps/sandbox/env"
 )
 
-func TestProcessArgsIncludeNormalizedFilewatchIgnores(t *testing.T) {
-	t.Setenv("FS_WATCH_IGNORE", "custom/cache, .idea,../invalid")
-	args := processArgs(env.Config{
-		WorkspaceDir:     "/workspace",
-		SearchIndexDir:   "/index",
-		SearchSocketPath: "/tmp/search.sock",
-	})
-
-	contains := func(value string) bool {
-		for _, arg := range args {
-			if arg == value {
-				return true
-			}
-		}
-		return false
-	}
-	if !contains("--ignore=custom/cache") || !contains("--ignore=.idea") {
-		t.Fatalf("custom ignore patterns missing from process args: %v", args)
-	}
-	if contains("--ignore=../invalid") {
-		t.Fatalf("unsafe ignore pattern passed to process: %v", args)
+func TestProcessArgsUseConfiguredSchemaAndIndex(t *testing.T) {
+	args := processArgs(env.Config{WorkspaceDir: "/workspace", SearchSchemaPath: env.DefaultSearchSchemaPath, SearchIndexDir: "/index", SearchSocketPath: "/tmp/search.sock"})
+	want := []string{"serve", "--schema", "/configs/platform/.cohub/search/workspace.candidates.json", "--index", "/index/index", "--socket", "/tmp/search.sock"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
 	}
 }
 
@@ -103,6 +88,7 @@ func TestCrashingBinaryDoesNotBlockManagerShutdown(t *testing.T) {
 		SearchEnabled:    true,
 		WorkspaceDir:     root,
 		SearchBinaryPath: binary,
+		SearchSchemaPath: testWorkspaceSchema(t),
 		SearchIndexDir:   filepath.Join(root, "index"),
 		SearchSocketPath: filepath.Join(root, "run", "search.sock"),
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))

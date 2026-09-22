@@ -10,8 +10,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,23 +49,16 @@ type QueryResult struct {
 	Coverage      string   `json:"coverage"`
 }
 
-type indexChange struct {
-	Path     string `json:"path"`
-	OldPath  string `json:"oldPath,omitempty"`
-	Kind     string `json:"kind"`
-	NodeType string `json:"nodeType,omitempty"`
-}
-
 type command struct {
 	activate  bool
 	reconcile bool
+	schema    bool
 	batch     *filewatch.Batch
 }
 
 type Manager struct {
 	cfg        env.Config
 	logger     *slog.Logger
-	client     *client
 	downloader *downloader
 	binary     string
 
@@ -82,6 +75,15 @@ type Manager struct {
 	commandDone chan struct{}
 	processDone chan struct{}
 	closeMu     sync.Once
+
+	generationMu       sync.RWMutex
+	active             *searchGeneration
+	retired            []*searchGeneration
+	activated          atomic.Bool
+	changeSeq          atomic.Uint64
+	schemaPending      atomic.Bool
+	schemaPollInterval time.Duration
+	reloadDone         chan struct{}
 }
 
 // NewManager enables optional workspace search for cloud sandboxes. A local or
@@ -90,15 +92,16 @@ type Manager struct {
 func NewManager(cfg env.Config, logger *slog.Logger) *Manager {
 	binary := resolveBinary(cfg.SearchBinaryPath)
 	manager := &Manager{
-		cfg:         cfg,
-		logger:      logger,
-		binary:      binary,
-		client:      newClient(cfg.SearchSocketPath),
-		downloader:  newDownloader(),
-		commands:    make(chan command, commandBufferSize),
-		control:     make(chan command, 8),
-		commandDone: make(chan struct{}),
-		processDone: make(chan struct{}),
+		cfg:                cfg,
+		logger:             logger,
+		binary:             binary,
+		downloader:         newDownloader(),
+		commands:           make(chan command, commandBufferSize),
+		control:            make(chan command, 8),
+		commandDone:        make(chan struct{}),
+		processDone:        make(chan struct{}),
+		schemaPollInterval: 5 * time.Second,
+		reloadDone:         make(chan struct{}),
 	}
 	if cfg.SearchEnabled && !cfg.IsLocal() {
 		manager.enabled.Store(true)
@@ -122,6 +125,7 @@ func (m *Manager) Start() {
 	)
 	go m.supervise(ctx)
 	go m.commandLoop(ctx)
+	go m.watchSchema(ctx)
 }
 
 func (m *Manager) Enabled() bool {
@@ -144,12 +148,12 @@ func (m *Manager) Activate() {
 	m.enqueueControl(command{activate: true})
 }
 
-// Apply forwards an already debounced filewatch batch. The Rust process owns
-// the second-level debounce and commit policy.
+// Apply queues an already debounced filewatch batch for the workspace adapter.
 func (m *Manager) Apply(batch filewatch.Batch) {
 	if !m.Enabled() || m.closed.Load() {
 		return
 	}
+	m.changeSeq.Add(1)
 	m.enqueue(command{batch: &batch})
 }
 
@@ -157,17 +161,45 @@ func (m *Manager) Query(ctx context.Context, input QueryInput) (QueryResult, err
 	if !m.Enabled() {
 		return QueryResult{}, fmt.Errorf("search index is unavailable")
 	}
-	payload := queryRequest{
-		Literals:   input.Literals,
-		PathPrefix: input.PathPrefix,
-		Glob:       input.Glob,
-		Limit:      input.Limit,
+	m.generationMu.RLock()
+	generation := m.active
+	if generation == nil {
+		m.generationMu.RUnlock()
+		return QueryResult{}, fmt.Errorf("search index is unavailable / 搜索索引暂不可用")
 	}
-	var result QueryResult
-	if err := m.client.doJSON(ctx, http.MethodPost, "/query", payload, &result); err != nil {
+	generation.queries.Add(1)
+	m.generationMu.RUnlock()
+	defer generation.queries.Done()
+	query := documentQuery{Terms: []searchTerm{}, Filters: generation.workspace.filters(), Limit: input.Limit}
+	if query.Limit <= 0 {
+		query.Limit = 1000
+	}
+	if query.Limit > 5000 {
+		query.Limit = 5000
+	}
+	for _, literal := range input.Literals {
+		query.Terms = append(query.Terms, searchTerm{Field: "content", Value: literal})
+	}
+	if prefix := strings.Trim(input.PathPrefix, "/"); prefix != "" && prefix != "." {
+		prefix = escapeGlob(prefix)
+		query.Filters = append(query.Filters, searchFilter{Field: "_id", Operation: "glob", Value: "{" + prefix + "," + prefix + "/**}"})
+	}
+	if input.Glob != "" {
+		query.Filters = append(query.Filters, searchFilter{Field: "_id", Operation: "glob", Value: input.Glob})
+	}
+	result, err := generation.client.query(ctx, query)
+	if err != nil {
 		return QueryResult{}, err
 	}
-	return result, nil
+	matches := make([]string, 0, len(result.Hits))
+	for _, hit := range result.Hits {
+		matches = append(matches, hit.Document.ID)
+	}
+	state := result.State
+	if state == "building" {
+		state = "indexing"
+	}
+	return QueryResult{Matches: matches, Truncated: result.Truncated, State: state, IndexFamily: result.Family, SchemaVersion: result.SchemaVersion, Coverage: result.Coverage}, nil
 }
 
 func (m *Manager) Close() {
@@ -179,6 +211,7 @@ func (m *Manager) Close() {
 		if m.started.Load() {
 			<-m.commandDone
 			<-m.processDone
+			<-m.reloadDone
 		}
 	})
 }
@@ -234,7 +267,17 @@ func (m *Manager) commandLoop(ctx context.Context) {
 				continue
 			}
 			activated = true
+			m.activated.Store(true)
 			activationAttempt = 0
+			continue
+		}
+		if value.schema {
+			m.schemaPending.Store(false)
+			if activated {
+				if err := m.reloadSchema(ctx); err != nil && ctx.Err() == nil {
+					m.logger.Warn("search schema update rejected; keeping current index / schema 更新失败，保留当前索引", slog.String("error", err.Error()))
+				}
+			}
 			continue
 		}
 		if value.reconcile {
@@ -311,13 +354,18 @@ func (m *Manager) scheduleReconcileRetry(ctx context.Context) {
 func (m *Manager) requestReconcile(ctx context.Context) error {
 	deadline := time.Now().Add(readyTimeout)
 	for time.Now().Before(deadline) {
-		if err := m.client.health(ctx); err == nil {
-			m.processReady.Store(true)
-			if err := m.client.reconcile(ctx); err != nil {
-				return err
+		m.generationMu.RLock()
+		generation := m.active
+		m.generationMu.RUnlock()
+		if generation != nil {
+			if _, err := generation.client.status(ctx); err == nil {
+				if err := generation.workspace.reconcile(ctx); err != nil {
+					return err
+				}
+				m.processReady.Store(true)
+				m.reconcileRetryAttempt.Store(0)
+				return nil
 			}
-			m.reconcileRetryAttempt.Store(0)
-			return nil
 		}
 		select {
 		case <-ctx.Done():
@@ -329,19 +377,13 @@ func (m *Manager) requestReconcile(ctx context.Context) error {
 }
 
 func (m *Manager) sendBatch(ctx context.Context, batch filewatch.Batch) error {
-	if batch.Resync {
-		return m.client.reconcile(ctx)
+	m.generationMu.RLock()
+	generation := m.active
+	m.generationMu.RUnlock()
+	if generation == nil {
+		return fmt.Errorf("search process unavailable / 搜索进程暂不可用")
 	}
-	changes := make([]indexChange, 0, len(batch.Changes))
-	for _, change := range batch.Changes {
-		changes = append(changes, indexChange{
-			Path:     change.Path,
-			OldPath:  change.OldPath,
-			Kind:     change.Kind,
-			NodeType: change.NodeType,
-		})
-	}
-	return m.client.update(ctx, changes)
+	return generation.workspace.update(ctx, batch)
 }
 
 func (m *Manager) supervise(ctx context.Context) {
@@ -367,16 +409,12 @@ func (m *Manager) supervise(ctx context.Context) {
 			}
 			m.binary = binary
 		}
-		if err := m.runProcess(ctx); err != nil && ctx.Err() == nil {
-			m.logger.Warn("search process exited", slog.String("error", err.Error()))
+		if err := m.superviseGenerations(ctx); err != nil && ctx.Err() == nil {
+			m.logger.Warn("search process unavailable / 搜索进程暂不可用", slog.String("error", err.Error()))
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		// A restarted process may have opened a recovered or incomplete index.
-		// Reconcile restores the startup guarantee and only falls back to a full
-		// build when the persistent snapshot is unavailable.
-		m.enqueueControl(command{reconcile: true})
 		select {
 		case <-ctx.Done():
 			return
@@ -386,41 +424,12 @@ func (m *Manager) supervise(ctx context.Context) {
 }
 
 func processArgs(cfg env.Config) []string {
-	args := []string{
+	return []string{
 		"serve",
-		"--workspace", cfg.WorkspaceDir,
-		"--index", cfg.SearchIndexDir,
+		"--schema", cfg.SearchSchemaPath,
+		"--index", filepath.Join(cfg.SearchIndexDir, "index"),
 		"--socket", cfg.SearchSocketPath,
 	}
-	for _, pattern := range filewatch.IgnorePatterns() {
-		args = append(args, "--ignore="+pattern)
-	}
-	return args
-}
-
-func (m *Manager) runProcess(ctx context.Context) error {
-	if m.binary == "" {
-		return fmt.Errorf("search binary is unavailable")
-	}
-	cmd := exec.CommandContext(ctx, m.binary, processArgs(m.cfg)...)
-	cmd.Stdout = &logWriter{logger: m.logger, level: slog.LevelInfo, prefix: "search"}
-	cmd.Stderr = &logWriter{logger: m.logger, level: slog.LevelWarn, prefix: "search"}
-	if err := cmd.Run(); err != nil {
-		m.processReady.Store(false)
-		if ctx.Err() != nil {
-			return nil
-		}
-		return err
-	}
-	m.processReady.Store(false)
-	return nil
-}
-
-type queryRequest struct {
-	Literals   []string `json:"literals"`
-	PathPrefix string   `json:"pathPrefix,omitempty"`
-	Glob       string   `json:"glob,omitempty"`
-	Limit      int      `json:"limit,omitempty"`
 }
 
 type client struct {
@@ -438,18 +447,6 @@ func newClient(socket string) *client {
 		http:   &http.Client{Transport: transport, Timeout: requestTimeout},
 		socket: socket,
 	}
-}
-
-func (c *client) health(ctx context.Context) error {
-	return c.doJSON(ctx, http.MethodGet, "/healthz", nil, nil)
-}
-
-func (c *client) reconcile(ctx context.Context) error {
-	return c.doJSON(ctx, http.MethodPost, "/index/reconcile", map[string]any{}, nil)
-}
-
-func (c *client) update(ctx context.Context, changes []indexChange) error {
-	return c.doJSON(ctx, http.MethodPost, "/index/update", map[string]any{"changes": changes}, nil)
 }
 
 func (c *client) doJSON(ctx context.Context, method, path string, payload any, result any) error {
@@ -473,9 +470,12 @@ func (c *client) doJSON(ctx context.Context, method, path string, payload any, r
 		return err
 	}
 	defer response.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
 		return err
+	}
+	if len(responseBody) > maxResponseBytes {
+		return fmt.Errorf("search response exceeds limit / 搜索响应超过大小限制")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("search HTTP %s: %s", response.Status, string(responseBody))
