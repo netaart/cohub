@@ -12,7 +12,8 @@
       "@cohub/infra/logging": ["../infra/dist/logging/index.d.ts"],
       "@cohub/protocol/sandbox": ["../protocol/dist/sandbox/index.d.ts"],
       "@cohub/protocol/fs": ["../protocol/dist/fs/index.d.ts"],
-      "@cohub/protocol/ports": ["../protocol/dist/ports/index.d.ts"]
+      "@cohub/protocol/ports": ["../protocol/dist/ports/index.d.ts"],
+      "@cohub/protocol/search": ["../protocol/dist/search/index.d.ts"]
     }
   },
   "include": ["src"]

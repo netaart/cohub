@@ -10,7 +10,8 @@
       "@cohub/infra/logging": ["../infra/src/logging/index.ts"],
       "@cohub/protocol/sandbox": ["../protocol/src/sandbox/index.ts"],
       "@cohub/protocol/fs": ["../protocol/src/fs/index.ts"],
-      "@cohub/protocol/ports": ["../protocol/src/ports/index.ts"]
+      "@cohub/protocol/ports": ["../protocol/src/ports/index.ts"],
+      "@cohub/protocol/search": ["../protocol/src/search/index.ts"]
     }
   },
   "include": ["src"]
