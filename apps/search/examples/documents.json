@@ -1,0 +1,17 @@
+{
+  "expectedCursor": null,
+  "cursor": "initial-import-1",
+  "coverage": "complete",
+  "changes": [
+    {
+      "operation": "upsert",
+      "document": { "type": "app", "spaceId": "space-1", "id": "app-1" },
+      "fields": { "title": "Release planner", "content": "发布计划与待办事项", "label": "team" }
+    },
+    {
+      "operation": "upsert",
+      "document": { "type": "session", "spaceId": "space-1", "id": "session-1" },
+      "fields": { "title": "Release discussion", "content": "讨论发布计划", "label": "team" }
+    }
+  ]
+}
