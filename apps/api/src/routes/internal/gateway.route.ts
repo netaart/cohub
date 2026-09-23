@@ -39,6 +39,18 @@ import { and, asc, inArray, sql } from "drizzle-orm";
 import { sessionMessages, sessionTurns } from "@cohub/db";
 
 const nativeLogger = createLogger({ serviceName: "cohub-api" });
+const nativeErrorFields = ["code", "detail", "hint", "constraint", "table", "column", "schema", "position"] as const;
+const serializeNativeError = (error: unknown): unknown => {
+  if (!(error instanceof Error)) return error;
+  const source = error as Error & Record<string, unknown>;
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    ...Object.fromEntries(nativeErrorFields.flatMap((key) => source[key] === undefined ? [] : [[key, source[key]]])),
+    cause: source.cause instanceof Error ? serializeNativeError(source.cause) : source.cause,
+  };
+};
 import {
   beginSpaceUploadComplete,
   buildSpaceUploadObjectKey,
@@ -285,8 +297,8 @@ router.post("/native-runtime-event", async (c) => {
   const ownerUserId = typeof body?.ownerUserId === "string" ? body.ownerUserId.trim() : "";
   const parsed = nativeRuntimeEventSchema.safeParse(body?.event);
   if (!requireValidId(spaceId) || !ownerUserId || !parsed.success) return c.json({ message: "invalid native runtime event" }, 400);
+  const event = parsed.data;
   try {
-    const event = parsed.data;
     if (event.type === "start") {
       const { binding, session, created, fork } = await startNativeTurn(spaceId, ownerUserId, event.input);
       const turn = await getSessionTurnById(binding.sessionId, binding.turnId);
@@ -349,7 +361,11 @@ router.post("/native-runtime-event", async (c) => {
   } catch (error) {
     // Business rejections keep their status; unexpected failures stay 500 so the Daemon retries the same receipt.
     if (error instanceof NativeTurnError) return c.json({ message: error.message }, error.status);
-    nativeLogger.error("[NativeTurn] event failed; client receipt retained", { errorName: error instanceof Error ? error.name : typeof error });
+    const sessionId = event.type === "start" ? event.input.sessionId : event.sessionId;
+    const turnId = event.type === "start" ? event.input.turnId : event.turnId;
+    nativeLogger.error("[NativeTurn] event failed; client receipt retained", {
+      eventType: event.type, spaceId, ownerUserId, sessionId, turnId, error: serializeNativeError(error),
+    });
     return c.json({ message: "Native sync unavailable; retry with the same receipt" }, 500);
   }
 });

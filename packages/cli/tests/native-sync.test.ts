@@ -121,7 +121,9 @@ test("offline Turns survive restart; lost start/result ACKs replay receipts, not
     const signal = new AbortController().signal;
     const reconnect = () => new NativeSyncStore({ ...f.options, transport }).flush(signal);
     await assert.rejects(reconnect(), /lost start ACK/);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
     await assert.rejects(reconnect(), /lost result ACK/);
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
     await reconnect();
     assert.equal(starts.size, 2); assert.equal(results.size, 2);
     assert.deepEqual(requests[0], requests[1]);
@@ -136,6 +138,23 @@ test("offline Turns survive restart; lost start/result ACKs replay receipts, not
     await reconnect();
     assert.equal(requests.length, 3);
     assert.equal((await readdir(join(local.root, "turns"))).length, 2, "ACK never removes original receipts");
+  } finally { await storage.close(); await f.cleanup(); }
+});
+
+test("failed native receipts keep a durable backoff across immediate flushes", async () => {
+  const f = await fixture();
+  const storage = await archiveStorageFixture();
+  let starts = 0;
+  try {
+    await writeFile(f.path, f.header + piTurn(1));
+    const store = new NativeSyncStore({ ...f.options, transport: {
+      ...storage.transport,
+      startNativeTurn: async () => { starts++; throw new Error("temporary native failure"); },
+    } });
+    await store.capture(f.path, await readNativeTranscript(f.path, "pi", { settled: true }));
+    await assert.rejects(store.flush(new AbortController().signal), /temporary native failure/);
+    await store.flush(new AbortController().signal);
+    assert.equal(starts, 1);
   } finally { await storage.close(); await f.cleanup(); }
 });
 

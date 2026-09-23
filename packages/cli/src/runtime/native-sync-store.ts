@@ -83,6 +83,7 @@ export class NativeSyncStore {
   private acknowledgementPath(id: string) { return join(this.root, "acknowledged", `${id}.json`); }
   private pendingPath(id: string) { return join(this.root, "pending", `${id}.json`); }
   private requestPath(id: string) { return join(this.root, "requests", `${id}.json`); }
+  private retryPath(id: string) { return join(this.root, "retries", `${id}.json`); }
   private cloudBindingPath(id: string) { return join(this.root, "bindings", `${id}.json`); }
   async binding() {
     const value = await readJson<NativeBinding>(this.bindingPath());
@@ -231,6 +232,8 @@ export class NativeSyncStore {
         if (await readJson(this.acknowledgementPath(receipt.turnId))) { await rm(this.pendingPath(receipt.turnId), { force: true }); return true; }
         if (processed.has(receipt.key)) return false;
         processed.add(receipt.key);
+        const retry = await readJson<{ nextAt: number }>(this.retryPath(receipt.turnId));
+        if (retry && retry.nextAt > Date.now()) return false;
         let parent: NativeTurnBinding | null = null;
         if (receipt.parentKey) {
           const parentId = this.turnId(receipt.parentKey);
@@ -285,6 +288,7 @@ export class NativeSyncStore {
           throw new Error("Native artifacts are pending; completion replays later");
         }
         await rm(backoffPath, { force: true });
+        await rm(this.retryPath(receipt.turnId), { force: true });
         await atomicRuntimeJson(this.acknowledgementPath(receipt.turnId), remote);
         await rm(this.pendingPath(receipt.turnId), { force: true });
         return true;
@@ -293,24 +297,34 @@ export class NativeSyncStore {
       for (const receipt of pending.values()) {
         if (!processed.has(receipt.key)) {
           try { await visit(receipt); }
-          catch (error) { failures.push(error); }
+          catch (error) {
+            const previous = await readJson<{ attempt: number }>(this.retryPath(receipt.turnId));
+            const attempt = Math.min((previous?.attempt ?? 0) + 1, 6);
+            const base = Math.min(30_000, 1_000 * 2 ** (attempt - 1));
+            const jitter = base * (0.8 + Math.random() * 0.4);
+            await atomicRuntimeJson(this.retryPath(receipt.turnId), { attempt, nextAt: Date.now() + Math.round(jitter) });
+            failures.push(error);
+          }
         }
       }
       // Resolve Session identities before the archive dependency walk. A fork baseline must not
       // wait for an unrelated parent Session's failed upload. Immutable local versions stay untouched.
       const archivePending = join(this.archives.root, "pending");
+      let archiveBlocked = false;
       const indexes = await readdir(archivePending).catch((error) => { if (missing(error)) return []; throw error; });
       for (const name of indexes) {
         if (!name.endsWith(".json")) continue;
         try {
           const path = join(archivePending, name);
           const index = harnessArchiveIndexSchema.parse(await readJson(path));
+          const retry = await readJson<{ nextAt: number }>(this.retryPath(index.turnId));
+          if (retry && retry.nextAt > Date.now()) { archiveBlocked = true; continue; }
           const resolved = await this.cloudArchive(index);
           if (JSON.stringify(index) !== JSON.stringify(resolved)) await atomicRuntimeJson(path, resolved);
         } catch (error) { failures.push(error); }
       }
       this.archiveFailure = undefined;
-      await this.archives.flush(signal);
+      if (!archiveBlocked) await this.archives.flush(signal);
       if (failures.length) throw failures[0];
       if (this.archiveFailure) throw this.archiveFailure;
     }, { lockPath: join(this.root, "flush.lock") });

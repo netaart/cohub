@@ -8,7 +8,9 @@ import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from 
 import { db } from "./db/index.js";
 import { createSessionForkInTransaction, findSegmentForTurn } from "./session-forks.js";
 import { addUsage, buildIntermediateObjectsForTurn } from "./session-turns.js";
+import { createLogger } from "@cohub/infra/logging";
 
+const nativeLogger = createLogger({ serviceName: "cohub-api" });
 const terminal = new Set(["completed", "failed", "interrupted", "cancelled", "merged"]);
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -28,10 +30,38 @@ function messageId(turnId: string, ordinal: number) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
+/** Session summaries are projections; they must not be able to roll back a durable Turn. */
+async function projectNativeSession(input: { sessionId: string; userId?: string; title?: string | null; latestMessageText?: string | null; lastMessageId?: string; lastMessageAt?: Date }) {
+  return db.transaction(async (tx) => {
+    const [current] = await tx.select({ meta: spaceSessions.meta }).from(spaceSessions).where(eq(spaceSessions.id, input.sessionId)).for("update");
+    if (!current) throw new Error("Native Session disappeared before projection");
+    const messageAt = input.lastMessageAt?.toISOString();
+    const newestMessage = messageAt ? sql`(${spaceSessions.lastMessageAt} is null or ${spaceSessions.lastMessageAt} <= ${messageAt}::timestamptz)` : null;
+    const [session] = await tx.update(spaceSessions).set({
+      ...(input.userId ? { meta: sanitizePostgresJsonValue(addSessionParticipantMeta(current.meta, input.userId)) } : {}),
+      ...(input.title != null ? { title: sql`coalesce(${spaceSessions.title}, ${input.title})` } : {}),
+      ...(input.latestMessageText !== undefined ? { latestMessageText: newestMessage ? sql`case when ${newestMessage} then ${input.latestMessageText} else ${spaceSessions.latestMessageText} end` : input.latestMessageText } : {}),
+      ...(input.lastMessageId ? { lastMessageId: newestMessage ? sql`case when ${newestMessage} then ${input.lastMessageId} else ${spaceSessions.lastMessageId} end` : input.lastMessageId } : {}),
+      ...(messageAt ? { lastMessageAt: sql`greatest(coalesce(${spaceSessions.lastMessageAt}, ${messageAt}::timestamptz), ${messageAt}::timestamptz)` } : {}),
+      updatedAt: new Date(),
+    }).where(eq(spaceSessions.id, input.sessionId)).returning();
+    if (!session) throw new Error("Failed to update native Session projection");
+    return session;
+  });
+}
+
+async function bestEffortNativeSessionProjection(input: Parameters<typeof projectNativeSession>[0]) {
+  try { return await projectNativeSession(input); }
+  catch (error) {
+    nativeLogger.error("[NativeTurn] Session projection failed", { sessionId: input.sessionId, error });
+    return null;
+  }
+}
+
 /** Shares the Session row lock with createSessionTurn and the Agent's batch claim. */
 export async function startNativeTurn(spaceId: string, userId: string, input: NativeTurnStart) {
   const requestDigest = digest(input);
-  return db.transaction(async (tx) => {
+  const committed = await db.transaction(async (tx) => {
     // Retries may name the original parent even after the first request forked. Serialize by receipt ID first.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.turnId}, 0))`);
     const [existing] = await tx.select().from(sessionTurns).where(eq(sessionTurns.id, input.turnId)).limit(1);
@@ -43,7 +73,9 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
       await assertSessionPromptPermission(spaceId, userId, existing.sessionId);
       const [session] = await tx.select().from(spaceSessions).where(eq(spaceSessions.id, existing.sessionId));
       if (!session) throw new NativeTurnError(404, "Session not found");
-      return { binding: { sessionId: session.id, turnId: existing.id, forked: input.sessionId !== null && session.id !== input.sessionId }, session, created: false, fork: null };
+      const userContent = sanitizeContentBlocksForPostgresJson(input.userContent);
+      return { binding: { sessionId: session.id, turnId: existing.id, forked: input.sessionId !== null && session.id !== input.sessionId }, session, created: false, fork: null,
+        projection: { userText: deriveMessagePreviewText({ content: userContent }) || null, userMessageId: messageId(input.turnId, -1), startedAt: new Date(input.startedAt), title: deriveSessionFallbackTitle({ content: userContent }) } };
     }
 
     let sessionId = input.sessionId;
@@ -106,17 +138,16 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     await tx.insert(sessionTurns).values({ id: input.turnId, sessionId, userUuid: userId, sequence, status: "running", intent: "followup", userContent, userText, meta, startedAt, createdAt: startedAt });
     const [last] = await tx.select({ sequence: sessionMessages.sequence }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId)).orderBy(desc(sessionMessages.sequence)).limit(1);
     await tx.insert(sessionMessages).values({ id: userMessageId, sessionId, turnId: input.turnId, role: "user", content: userContent, text: userText, sequence: (last?.sequence ?? 0) + 1, idempotencyKey: `native:${input.turnId}:user`, meta: { ...meta, turnId: input.turnId, messageKind: "user" }, startedAt, completedAt: startedAt, createdAt: startedAt });
-    const [before] = await tx.select({ meta: spaceSessions.meta }).from(spaceSessions).where(eq(spaceSessions.id, sessionId));
-    const [session] = await tx.update(spaceSessions).set({
-      meta: sanitizePostgresJsonValue(addSessionParticipantMeta(before?.meta, userId)),
-      title: sql`coalesce(${spaceSessions.title}, ${deriveSessionFallbackTitle({ content: userContent })})`,
-      latestMessageText: userText, lastMessageId: userMessageId,
-      lastMessageAt: sql`greatest(coalesce(${spaceSessions.lastMessageAt}, ${startedAt}), ${startedAt})`, updatedAt: new Date(),
-    }).where(eq(spaceSessions.id, sessionId)).returning();
-    if (!session) throw new Error("Failed to update native Session");
+    const [session] = await tx.select().from(spaceSessions).where(eq(spaceSessions.id, sessionId)).limit(1);
+    if (!session) throw new Error("Native Session disappeared before commit");
     const binding: NativeTurnBinding = { sessionId, turnId: input.turnId, forked: input.sessionId !== null && sessionId !== input.sessionId };
-    return { binding, session, created: true, fork };
+    return { binding, session, created: true, fork, projection: { userText, userMessageId, startedAt, title: deriveSessionFallbackTitle({ content: userContent }) } };
   });
+  if (!committed.projection) return committed;
+  const projection = committed.projection;
+  const session = await bestEffortNativeSessionProjection({ sessionId: committed.binding.sessionId, userId, title: projection.title,
+    latestMessageText: projection.userText, lastMessageId: projection.userMessageId, lastMessageAt: projection.startedAt }) ?? committed.session;
+  return { ...committed, session };
 }
 
 export async function getOwnedNativeTurn(spaceId: string, userId: string, sessionId: string, turnId: string) {
@@ -142,7 +173,7 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
     if (terminal.has(turn.status)) {
       // Replay of the exact same completion: only the artifact snapshot may still be missing.
       if (receipt.completionDigest !== completionDigest) conflict("Turn already finalized");
-      return { changed: false, turn, messages: [] };
+      return { changed: false, turn, messages: [], projection: null };
     }
     const completedAt = new Date(input.completedAt);
     const messages = input.messages.map((message, ordinal): typeof sessionMessages.$inferSelect => {
@@ -170,10 +201,12 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
       meta: { ...meta, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
     }).where(and(eq(sessionTurns.id, turnId), runtimeResolutionOpen, inArray(sessionTurns.status, ["running", "abort_requested"]))).returning();
     if (!next) conflict("Execution was resolved");
-    await tx.update(spaceSessions).set({ latestMessageText: final?.text ?? turn.userText, ...(final ? { lastMessageId: final.id } : {}),
-      lastMessageAt: sql`greatest(coalesce(${spaceSessions.lastMessageAt}, ${completedAt}), ${completedAt})`, updatedAt: new Date() }).where(eq(spaceSessions.id, sessionId));
-    return { changed: true, turn: next, messages };
+    return { changed: true, turn: next, messages, projection: { latestMessageText: final?.text ?? turn.userText, lastMessageId: final?.id, completedAt } };
   });
+  if (committed.changed && committed.projection) {
+    await bestEffortNativeSessionProjection({ sessionId, latestMessageText: committed.projection.latestMessageText,
+      ...(committed.projection.lastMessageId ? { lastMessageId: committed.projection.lastMessageId } : {}), lastMessageAt: committed.projection.completedAt });
+  }
   let artifactsPending = false;
   if (committed.changed) {
     // Durable-first: the terminal Turn state never rolls back; a failed artifact snapshot keeps the

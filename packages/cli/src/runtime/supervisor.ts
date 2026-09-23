@@ -204,12 +204,14 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     let nativeRetryDelay = 1000;
     const wakeNativeSync = () => {
       nativeWakePending = true;
-      if (nativeRetryTimer) { clearTimeout(nativeRetryTimer); nativeRetryTimer = undefined; }
-      nativeWake?.();
-      nativeWake = null;
+      // A new capture may wake healthy work, but it must not cancel a failed receipt's backoff.
+      if (!nativeRetryTimer) {
+        nativeWake?.();
+        nativeWake = null;
+      }
     };
     const waitForNativeWake = async () => {
-      if (nativeWakePending) { nativeWakePending = false; return; }
+      if (nativeWakePending && !nativeRetryTimer) { nativeWakePending = false; return; }
       await new Promise<void>((resolve) => {
         const finish = () => {
           signal.removeEventListener("abort", finish);
@@ -236,7 +238,8 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
           if (!signal.aborted) { report(error); failed = true; }
         }
         if (failed && !signal.aborted) {
-          nativeRetryTimer = setTimeout(() => { nativeRetryTimer = undefined; wakeNativeSync(); }, nativeRetryDelay);
+          nativeWakePending = false;
+          if (!nativeRetryTimer) nativeRetryTimer = setTimeout(() => { nativeRetryTimer = undefined; wakeNativeSync(); }, nativeRetryDelay);
           nativeRetryDelay = Math.min(30_000, nativeRetryDelay * 2);
         } else if (!failed) {
           nativeRetryDelay = 1000;
