@@ -12,7 +12,7 @@
 
 ## Worker 入口
 
-`wrangler.*.toml` 的 `main` 指向 `src/entry.worker.ts`：它先处理已发布 App 的独立域名，其余请求交给
+`wrangler.*.toml` 的 `main` 指向 `entry.worker.ts`：它先处理已发布 App 的独立域名，其余请求交给
 SvelteKit adapter 生成的 Worker。
 
 独立域名下每个 host 只对应一个 App，因此该 host 上的**所有**路径都归它；而 adapter 会把预渲染路径
@@ -31,7 +31,7 @@ SvelteKit adapter 生成的 Worker。
 
 > 注意：adapter 会把生成的 Worker 写到**它所读取配置**的 `main` 路径，因此构建期它读的是
 > `wrangler.adapter.toml`（不含入口），部署用的 `wrangler.toml` / `wrangler.prod.toml` 才指向
-> `src/entry.worker.ts`。改动这两组路径时务必保持同步。
+> `entry.worker.ts`。改动这两组路径时务必保持同步。
 
 ## App 独立域名（可选）
 

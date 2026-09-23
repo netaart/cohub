@@ -4,7 +4,7 @@
 #
 # 1. It writes the generated Worker to the `main` path of the config it reads,
 #    so it must not read the deployment configs — those point `main` at
-#    `src/entry.worker.ts`, the hand-written wrapper around the generated Worker.
+#    `entry.worker.ts`, the hand-written wrapper around the generated Worker.
 # 2. `assets.directory` is also resolved from the config it reads, and defaults
 #    to the build root instead of `assets/`. Declaring it here keeps the layout
 #    the deployment configs expect (`.svelte-kit/cloudflare/assets`).
