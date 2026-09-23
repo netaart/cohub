@@ -38,7 +38,6 @@ router.post("/uploads", async (c) => {
 
   // chat_attachment is user-scoped: authenticated is enough.
   // Optional spaceId/sessionId are association hints only and do not gate upload.
-  // Rate limits: avatar 60/h; chat image specialization 300/h (demotes to file on failure).
 
   try {
     const plan = createPublicAssetUploadPlan({
@@ -49,7 +48,7 @@ router.post("/uploads", async (c) => {
       sessionId: body.sessionId,
       file: body.file,
     });
-    await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: 1 });
+    await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: 1, totalBytes: body.file.size });
     return c.json(plan);
   } catch (error) {
     if (error instanceof UploadRateLimitError) {

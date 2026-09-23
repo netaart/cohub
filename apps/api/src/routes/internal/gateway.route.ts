@@ -421,8 +421,9 @@ router.post("/attachments/plan", async (c) => {
   const requestedImages = Array.isArray(body?.images) ? body.images : [];
   const requestedFiles = Array.isArray(body?.files) ? body.files : [];
   if (requestedImages.length > MAX_GATEWAY_ATTACHMENT_IMAGES) return c.json({ message: "too many images" }, 413);
-  // Image demote slots use ids prefixed with `imgfile-` and share image quota, not ordinary file quota.
-  const ordinaryFileCount = requestedFiles.filter((file) => !String(file?.id ?? "").startsWith("imgfile-")).length;
+  // An image's private file slot is a fallback for the same bytes, not another attachment.
+  const imageFileIds = new Set(requestedImages.map((image) => `imgfile-${image.id}`));
+  const ordinaryFileCount = requestedFiles.filter((file) => !imageFileIds.has(String(file?.id ?? ""))).length;
   const imageFileSlotCount = requestedFiles.length - ordinaryFileCount;
   if (ordinaryFileCount > MAX_GATEWAY_ATTACHMENT_FILES) return c.json({ message: "too many files" }, 413);
   if (imageFileSlotCount > MAX_GATEWAY_ATTACHMENT_IMAGES) return c.json({ message: "too many images" }, 413);
@@ -459,20 +460,6 @@ router.post("/attachments/plan", async (c) => {
       throw error;
     }
   }
-  // Rate-limit durable image plans after validation (same quota as web chat_attachment).
-  try {
-    await consumeUploadQuota(redisCommandClient, resolved.userId, { entryCount: imagePlans.length });
-  } catch (error) {
-    if (error instanceof UploadRateLimitError) {
-      c.header("Retry-After", String(error.retryAfterSeconds));
-      return c.json({ message: error.message }, 429);
-    }
-    if (error instanceof PublicAssetValidationError) {
-      return c.json({ message: error.message }, error.message.startsWith("too many") ? 429 : 400);
-    }
-    throw error;
-  }
-
   const files = requestedFiles;
   const uploadId = files.length > 0 ? createSpaceUploadId() : null;
   const fileEntries: SpaceUploadManifestEntry[] = [];
@@ -498,20 +485,19 @@ router.post("/attachments/plan", async (c) => {
       });
     }
   }
-  // Space materialize quota after file entry validation.
-  if (fileEntries.length > 0) {
-    try {
-      await consumeUploadQuota(redisCommandClient, resolved.userId, {
-        entryCount: fileEntries.length,
-        totalBytes: fileEntries.reduce((sum, file) => sum + file.size, 0),
-      });
-    } catch (error) {
-      if (error instanceof UploadRateLimitError) {
-        c.header("Retry-After", String(error.retryAfterSeconds));
-        return c.json({ message: error.message }, 429);
-      }
-      throw error;
-    }
+  // Charge the logical attachments once. Image file slots are fallback paths
+  // for the same image bytes, not additional uploads.
+  const ordinaryFiles = fileEntries.filter((file) => !imageFileIds.has(file.id));
+  try {
+    await consumeUploadQuota(redisCommandClient, resolved.userId, {
+      entryCount: imagePlans.length + ordinaryFiles.length,
+      totalBytes: requestedImages.reduce((sum, image) => sum + image.size, 0)
+        + ordinaryFiles.reduce((sum, file) => sum + file.size, 0),
+    });
+  } catch (error) {
+    if (!(error instanceof UploadRateLimitError)) throw error;
+    c.header("Retry-After", String(error.retryAfterSeconds));
+    return c.json({ message: error.message }, 429);
   }
   if (uploadId && fileEntries.length > 0) {
     await saveSpaceUploadManifest({
