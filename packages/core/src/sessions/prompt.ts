@@ -258,7 +258,7 @@ export class SubmitSessionPromptError extends Error {
 
 export class HarnessUnavailableError extends Error {
   readonly code = "harness_unavailable";
-  constructor(message = "Local Harness is unavailable / 本地 Harness 不可用") { super(message); this.name = "HarnessUnavailableError"; }
+  constructor(message = "Local Harness is unavailable") { super(message); this.name = "HarnessUnavailableError"; }
 }
 
 export class ModelUnavailableError extends Error {

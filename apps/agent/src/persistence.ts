@@ -761,7 +761,7 @@ export async function persistBatchUserMessages(input: { spaceId: string; session
   for (const user of users) {
     const previous = existing.get(user.userMessageId);
     if (previous) {
-      if (previous.turnId !== user.turnId || previous.role !== "user") throw new Error("Batch message identity mismatch / 批次消息身份不匹配");
+      if (previous.turnId !== user.turnId || previous.role !== "user") throw new Error("Batch message identity mismatch");
       continue;
     }
     await persistUserMessage({ spaceId: input.spaceId, sessionId: input.sessionId, ...user });

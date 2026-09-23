@@ -106,7 +106,7 @@ func Start(root string, logger *slog.Logger, handler Handler) (*Watcher, error) 
 	} else if backend.name() != "scan" {
 		w.enqueueResync()
 	}
-	logger.Info("file monitoring started / 文件监听已启动", slog.String("backend", w.Status().Backend))
+	logger.Info("file monitoring started", slog.String("backend", w.Status().Backend))
 	return w, nil
 }
 
@@ -255,7 +255,7 @@ func (w *Watcher) handleBackendEvent(event backendEvent) {
 			reason = "watch_error"
 		}
 		w.markFailure(reason)
-		w.logger.Warn("workspace watch root changed; restart Runtime / 工作区监听根目录已变化，请重启 Runtime")
+		w.logger.Warn("workspace watch root changed; restart Runtime")
 	}
 	rel, ok := w.relative(event.path)
 	if event.path != "" && (!ok || w.isIgnored(rel)) {

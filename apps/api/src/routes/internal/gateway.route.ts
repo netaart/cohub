@@ -350,7 +350,7 @@ router.post("/native-runtime-event", async (c) => {
     // Business rejections keep their status; unexpected failures stay 500 so the Daemon retries the same receipt.
     if (error instanceof NativeTurnError) return c.json({ message: error.message }, error.status);
     nativeLogger.error("[NativeTurn] event failed; client receipt retained", { errorName: error instanceof Error ? error.name : typeof error });
-    return c.json({ message: "Native sync unavailable; retry with the same receipt / 原生同步暂不可用，请使用原回执重试" }, 500);
+    return c.json({ message: "Native sync unavailable; retry with the same receipt" }, 500);
   }
 });
 
@@ -394,7 +394,7 @@ router.post("/local-sandbox/status", async (c) => {
   const body = await c.req.json<LocalRuntimeStatusReport>().catch(() => null);
   const spaceId = typeof body?.spaceId === "string" ? body.spaceId.trim() : "";
   if (!body || !requireValidId(spaceId)) return c.json({ ok: false, message: "spaceId is required" }, 400);
-  if (!["ready", "stopped"].includes(body.status)) return c.json({ ok: false, message: "Invalid status / 状态无效" }, 400);
+  if (!["ready", "stopped"].includes(body.status)) return c.json({ ok: false, message: "Invalid status" }, 400);
   const found = await reportLocalRuntimeStatus(db, { ...body, spaceId }, () => redisCommandClient.get(runtimeWorkspaceKey(spaceId)));
   if (!found) return c.json({ ok: false, message: "local sandbox not found" }, 404);
 

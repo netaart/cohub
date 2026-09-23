@@ -186,7 +186,7 @@ export async function serveStandaloneApp(input: {
 	fetcher: typeof fetch;
 }): Promise<Response> {
 	if (input.request.method !== "GET" && input.request.method !== "HEAD") {
-		return new Response("Method not allowed / 不支持该请求方法", {
+		return new Response("Method not allowed", {
 			status: 405,
 			headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" },
 		});
@@ -198,27 +198,27 @@ export async function serveStandaloneApp(input: {
 		recordView: isDocumentRequest(input.request, input.url),
 	});
 	if (detailResult.status === "unavailable") {
-		return new Response("App metadata unavailable / 应用信息暂时不可用", {
+		return new Response("App metadata unavailable", {
 			status: 502,
 			headers: { "Cache-Control": "no-store" },
 		});
 	}
 	if (detailResult.status === "not_found") {
-		return new Response("App not found / 未找到应用", {
+		return new Response("App not found", {
 			status: 404,
 			headers: { "Cache-Control": "no-store" },
 		});
 	}
 	const content = detailResult.detail.content;
 	if (content?.kind !== "web") {
-		return new Response("App not found / 未找到应用", {
+		return new Response("App not found", {
 			status: 404,
 			headers: { "Cache-Control": "no-store" },
 		});
 	}
 	const assetUrl = resolveStandaloneAssetUrl(content, input.url.pathname);
 	if (!assetUrl)
-		return new Response("File not found / 未找到文件", {
+		return new Response("File not found", {
 			status: 404,
 			headers: { "Cache-Control": "no-store" },
 		});
@@ -238,7 +238,7 @@ export async function serveStandaloneApp(input: {
 		}
 		return proxyResponse(upstream, input.request.method);
 	} catch {
-		return new Response("App asset unavailable / 应用资源暂时不可用", {
+		return new Response("App asset unavailable", {
 			status: 502,
 			headers: { "Cache-Control": "no-store" },
 		});

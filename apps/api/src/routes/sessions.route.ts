@@ -385,7 +385,7 @@ router.post("/:id/abort", async (c) => {
   if (turnId && !requireValidId(turnId)) return c.json({ message: "invalid turn id" }, 400);
   const target = turnId ? await getSessionTurnById(session.id, turnId) : await getSessionRuntimeTurn(session.spaceId, session.id);
   if (target && isNativeClientTurn(target.meta) && (target.meta as { harness?: string }).harness === "codex" && ["running", "abort_requested"].includes(target.status)) {
-    return c.json({ message: "Stop this native Codex run in its terminal / 请在终端中停止此原生 Codex 任务" }, 409);
+    return c.json({ message: "Stop this native Codex run in its terminal" }, 409);
   }
 
   await enqueueSessionAbort({

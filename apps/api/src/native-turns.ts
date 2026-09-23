@@ -16,7 +16,7 @@ export class NativeTurnError extends Error {
   constructor(readonly status: 403 | 404 | 409, message: string) { super(message); }
 }
 const conflict = (message: string): never => { throw new NativeTurnError(409, message); };
-const nativePermissionError = (): never => { throw new NativeTurnError(403, "No permission to prompt this Session / 无权限向此会话发送消息"); };
+const nativePermissionError = (): never => { throw new NativeTurnError(403, "No permission to prompt this Session"); };
 
 /** Runtime lease holders keep space-level authority, but Session-level prompt rules still apply. */
 async function assertSessionPromptPermission(spaceId: string, userId: string, sessionId: string) {
@@ -38,11 +38,11 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     if (existing) {
       const meta = record(existing.meta);
       const receipt = record(meta.nativeSync);
-      if (existing.userUuid !== userId || receipt.spaceId !== spaceId || receipt.requestDigest !== requestDigest) conflict("Native Turn identity mismatch / 原生 Turn 身份不匹配");
+      if (existing.userUuid !== userId || receipt.spaceId !== spaceId || receipt.requestDigest !== requestDigest) conflict("Native Turn identity mismatch");
       // Re-verify on retry: a permission revoked after the first start must stop future receipts.
       await assertSessionPromptPermission(spaceId, userId, existing.sessionId);
       const [session] = await tx.select().from(spaceSessions).where(eq(spaceSessions.id, existing.sessionId));
-      if (!session) throw new NativeTurnError(404, "Session not found / 会话不存在");
+      if (!session) throw new NativeTurnError(404, "Session not found");
       return { binding: { sessionId: session.id, turnId: existing.id, forked: input.sessionId !== null && session.id !== input.sessionId }, session, created: false, fork: null };
     }
 
@@ -51,7 +51,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     let sequence = 1;
     if (sessionId) {
       const [parent] = await tx.select().from(spaceSessions).where(and(eq(spaceSessions.id, sessionId), eq(spaceSessions.spaceId, spaceId))).for("update").limit(1);
-      if (!parent) throw new NativeTurnError(404, "Session not found / 会话不存在");
+      if (!parent) throw new NativeTurnError(404, "Session not found");
       // Same gate as regular prompt submission: Runtime lease authority is not Session-level authority.
       await assertSessionPromptPermission(spaceId, userId, sessionId);
       let segments = await tx.select().from(sessionTurnSegments).where(eq(sessionTurnSegments.sessionId, sessionId)).orderBy(asc(sessionTurnSegments.ordinal));
@@ -59,7 +59,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
       let anchor: typeof sessionTurns.$inferSelect | undefined;
       if (input.parentTurnId) {
         [anchor] = await tx.select().from(sessionTurns).where(eq(sessionTurns.id, input.parentTurnId)).limit(1);
-        if (!anchor || !terminal.has(anchor.status) || !findSegmentForTurn(segments, { sourceSessionId: anchor.sessionId, sequence: anchor.sequence })) conflict("Fork requires a visible, settled Turn / 分支需要可见且已结束的 Turn");
+        if (!anchor || !terminal.has(anchor.status) || !findSegmentForTurn(segments, { sourceSessionId: anchor.sessionId, sequence: anchor.sequence })) conflict("Fork requires a visible, settled Turn");
       }
       let head: typeof sessionTurns.$inferSelect | undefined;
       for (const segment of segments) {
@@ -75,7 +75,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
       if (canAppend) sequence = (head?.sequence ?? 0) + 1;
       else if (anchor) {
         const [collision] = await tx.select({ id: spaceSessions.id }).from(spaceSessions).where(eq(spaceSessions.id, input.branchSessionId));
-        if (collision) conflict("Branch Session identity already exists / 分支会话身份已存在");
+        if (collision) conflict("Branch Session identity already exists");
         fork = await createSessionForkInTransaction(tx, { spaceId, parentSessionId: sessionId, childSessionId: input.branchSessionId, turnId: anchor.id, sequence: anchor.sequence, createdBy: userId });
         sessionId = fork.session.id;
         sequence = anchor.sequence + 1;
@@ -84,7 +84,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     if (!sessionId) {
       sessionId = input.branchSessionId;
       const [collision] = await tx.select({ id: spaceSessions.id }).from(spaceSessions).where(eq(spaceSessions.id, sessionId));
-      if (collision) conflict("Session identity already exists / 会话身份已存在");
+      if (collision) conflict("Session identity already exists");
       const sessionMeta = input.origin ? {
         nativeSync: { version: 1, origin: input.origin, harness: input.harness, nativeSessionId: input.nativeSessionId, originalStartedAt: input.sessionStartedAt ?? input.startedAt },
       } : {};
@@ -122,8 +122,8 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
 export async function getOwnedNativeTurn(spaceId: string, userId: string, sessionId: string, turnId: string) {
   const [row] = await db.select({ turn: sessionTurns }).from(sessionTurns).innerJoin(spaceSessions, eq(spaceSessions.id, sessionTurns.sessionId))
     .where(and(eq(spaceSessions.spaceId, spaceId), eq(sessionTurns.sessionId, sessionId), eq(sessionTurns.id, turnId))).limit(1);
-  if (!row) throw new NativeTurnError(404, "Turn not found / Turn 不存在");
-  if (row.turn.userUuid !== userId || !isNativeClientTurn(row.turn.meta) || record(record(row.turn.meta).nativeSync).spaceId !== spaceId) throw new NativeTurnError(403, "Native Turn owner mismatch / 原生 Turn 所有者不匹配");
+  if (!row) throw new NativeTurnError(404, "Turn not found");
+  if (row.turn.userUuid !== userId || !isNativeClientTurn(row.turn.meta) || record(record(row.turn.meta).nativeSync).spaceId !== spaceId) throw new NativeTurnError(403, "Native Turn owner mismatch");
   return row.turn;
 }
 
@@ -134,14 +134,14 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
   const committed = await db.transaction(async (tx) => {
     await tx.select({ id: spaceSessions.id }).from(spaceSessions).where(eq(spaceSessions.id, sessionId)).for("update");
     const [turn] = await tx.select().from(sessionTurns).where(eq(sessionTurns.id, turnId)).for("update");
-    if (!turn) throw new NativeTurnError(404, "Turn not found / Turn 不存在");
+    if (!turn) throw new NativeTurnError(404, "Turn not found");
     const meta = record(turn.meta), receipt = record(meta.nativeSync);
     const imported = receipt.origin === "local_import";
-    if (record(meta.runtimeRecovery).state === "confirmed_stopped") conflict("Execution was resolved; retain the local receipt / 执行已确认停止，请保留本地回执");
-    if (receipt.completionDigest && receipt.completionDigest !== completionDigest) conflict("Turn result is immutable / Turn 结果不可覆盖");
+    if (record(meta.runtimeRecovery).state === "confirmed_stopped") conflict("Execution was resolved; retain the local receipt");
+    if (receipt.completionDigest && receipt.completionDigest !== completionDigest) conflict("Turn result is immutable");
     if (terminal.has(turn.status)) {
       // Replay of the exact same completion: only the artifact snapshot may still be missing.
-      if (receipt.completionDigest !== completionDigest) conflict("Turn already finalized / Turn 已结束");
+      if (receipt.completionDigest !== completionDigest) conflict("Turn already finalized");
       return { changed: false, turn, messages: [] };
     }
     const completedAt = new Date(input.completedAt);
@@ -169,7 +169,7 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
       completedAt, durationMs: Math.min(2_147_483_647, Math.max(0, completedAt.getTime() - (turn.startedAt?.getTime() ?? completedAt.getTime()))), updatedAt: new Date(),
       meta: { ...meta, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
     }).where(and(eq(sessionTurns.id, turnId), runtimeResolutionOpen, inArray(sessionTurns.status, ["running", "abort_requested"]))).returning();
-    if (!next) conflict("Execution was resolved / 执行已确认停止");
+    if (!next) conflict("Execution was resolved");
     await tx.update(spaceSessions).set({ latestMessageText: final?.text ?? turn.userText, ...(final ? { lastMessageId: final.id } : {}),
       lastMessageAt: sql`greatest(coalesce(${spaceSessions.lastMessageAt}, ${completedAt}), ${completedAt})`, updatedAt: new Date() }).where(eq(spaceSessions.id, sessionId));
     return { changed: true, turn: next, messages };

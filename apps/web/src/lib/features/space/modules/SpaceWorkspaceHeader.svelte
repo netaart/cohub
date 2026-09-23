@@ -6,8 +6,8 @@ import type {
 } from "@neta-art/cohub";
 import {
 	Check,
-	GalleryThumbnails,
 	Globe,
+	Images,
 	ListTree,
 	Loader2,
 	Menu,
@@ -170,10 +170,10 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 			type="button"
 			class="header-action-btn is-square"
 			onclick={() => runAction(actions.openTaskBrowser)}
-			title="Browse generated media / 查看生成媒体"
-			aria-label="Browse generated media / 查看生成媒体"
+			title={m.space_header_browse_media({}, { locale })}
+			aria-label={m.space_header_browse_media({}, { locale })}
 		>
-			<GalleryThumbnails class="h-4 w-4 shrink-0" />
+			<Images class="h-4 w-4 shrink-0" />
 		</button>
 	{/if}
 	{#if context.activeSessionId && context.canManageSessionAccess}
