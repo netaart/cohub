@@ -105,12 +105,14 @@ function taskQueryKey() {
 
 async function authorizeSelectedScope() {
   const request = accessRequestFor(selectedScope);
-  const granted = await client.auth.request({
+  const result = await client.auth.authorize({
     scopes: request.scopes,
+    target: selectedScope.kind === "mine"
+      ? { kind: "account" }
+      : { kind: "space", spaceId: selectedScope.spaceId },
     reason: request.reason,
-    ...(selectedScope.kind !== "mine" ? { spaceId: selectedScope.spaceId } : {}),
   });
-  return granted;
+  return result.status === "granted";
 }
 
 async function fetchTasks(mode: LoadMode, version: number, cacheKey: string) {
@@ -336,19 +338,19 @@ async function requestSpaceAccess() {
   authorizingSpace = true;
   error = null;
   try {
-    const result = await client.auth.requestSpace({
+    const result = await client.auth.authorize({
+      target: { kind: "pick-space" },
       scopes: ["taskrun.view"],
       reason: "Browse generation tasks in a Space you choose.",
       alwaysAsk: true,
     });
-    if (!result.granted || !result.space) return;
-    const { space } = result;
-    const scope = { kind: "space", spaceId: space.id } as const;
+    if (result.status !== "granted" || result.target.kind !== "space") return;
+    const scope = { kind: "space", spaceId: result.target.spaceId } as const;
     scopes = [
       ...scopes.filter((item) => !(item.kind === "space" && item.spaceId === scope.spaceId)),
       scope,
     ];
-    if (space.name) spaceNames = { ...spaceNames, [scope.spaceId]: space.name };
+    if (result.target.name) spaceNames = { ...spaceNames, [scope.spaceId]: result.target.name };
     selectedScope = scope;
     resetResultsForQuery();
     await load();
