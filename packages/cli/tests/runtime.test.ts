@@ -21,7 +21,7 @@ const jsonl = (value: unknown) => `${JSON.stringify(value)}\n`;
 test("Runtime CLI exposes the complete lifecycle without legacy sandbox commands", () => {
   const program = new Command();
   registerRuntime(program);
-  assert.deepEqual(program.commands[0]?.commands.map((command) => command.name()), ["up", "detach", "status", "down", "logs"]);
+  assert.deepEqual(program.commands[0]?.commands.map((command) => command.name()), ["up", "detach", "import", "status", "down", "logs"]);
 });
 
 test("native sync consent and idempotence decide installation without blocking startup", async () => {
