@@ -38,7 +38,6 @@ async function reconcileSpace(spaceId: string, minScanIntervalMs: number) {
 
 registerSystemJob(WORKSPACE_USAGE_DISPATCH_JOB, async () => {
   const policy = usagePolicy();
-  if (!policy.enabled) return { skipped: "disabled" };
   // This bounded inventory repairs missing/evicted Redis records without touching NAS.
   // Cursor is only a hint: repeating a page after a crash is safe.
   const cursor = await redis.get(cursorKey);
@@ -69,7 +68,6 @@ registerSystemJob(WORKSPACE_USAGE_DISPATCH_JOB, async () => {
 
 async function processUsageScan(job: Job<{ spaceId: string }>) {
   const policy = usagePolicy();
-  if (!policy.enabled) return { skipped: "disabled" };
   const spaceId = job.data?.spaceId;
   if (!spaceId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(spaceId)) throw new Error("Invalid space ID / Space ID 无效");
   await redis.zadd(pendingKey, Date.now() + 600_000, spaceId);

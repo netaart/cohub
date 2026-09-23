@@ -83,20 +83,13 @@ only the workspace root summary. Read errors, nonzero exit, malformed output,
 overflow, timeout, or a lost lease prevent publishing a new value. This is not a
 billing ledger.
 
-## Configuration
+## Fixed Policy
 
-Set these in worker deployment values. Dev/prod scripts forward them to the
-ConfigMap. All replicas in an environment must use the same settings.
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `WORKSPACE_USAGE_ENABLED` | `true` | Enable dispatch and scans |
-| `WORKSPACE_USAGE_CONCURRENCY` | `1` | Global scan slots per environment |
-| `WORKSPACE_USAGE_THREADS` | `1` | Threads per pdu process |
-| `WORKSPACE_USAGE_TIMEOUT_MS` | `300000` | Scan timeout |
-| `WORKSPACE_USAGE_MIN_SCAN_INTERVAL_MS` | `172800000` | Minimum 48-hour gap between scan attempts |
-| `WORKSPACE_USAGE_BATCH_SIZE` | `50` | Pending window and dispatch batch size |
-| `WORKSPACE_USAGE_PDU_PATH` | `pdu` | Optional local binary override |
+The initial NAS protection policy is intentionally fixed in worker code: one
+global scan slot per environment, one pdu thread, a five-minute timeout, a
+48-hour minimum interval per workspace, and a dispatch batch size of 50. The
+dispatcher runs every minute. These values are not deployment settings. A local
+`WORKSPACE_USAGE_PDU_PATH` override is available for tests and development only.
 
 `workspaceUsage` is included in normal space detail/list responses and SDK
 `SpaceRecord`. `cohub spaces get [id] --json` exposes it unchanged; normal CLI

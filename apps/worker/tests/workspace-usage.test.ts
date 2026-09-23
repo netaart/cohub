@@ -28,12 +28,13 @@ test("rejects partial pdu results even with exit code zero", () => {
 });
 
 test("limits NAS concurrency and treats uncertain sandbox lifecycle as writable", () => {
-  assert.equal(usagePolicy({}).concurrency, 1);
-  assert.equal(usagePolicy({}).threads, 1);
-  assert.equal(usagePolicy({}).minScanIntervalMs, 48 * 60 * 60_000);
-  assert.equal(usagePolicy({ WORKSPACE_USAGE_ENABLED: "false" }).enabled, false);
-  assert.throws(() => usagePolicy({ WORKSPACE_USAGE_THREADS: "0" }));
-  assert.throws(() => usagePolicy({ WORKSPACE_USAGE_THREADS: "999" }));
+  assert.deepEqual(usagePolicy(), {
+    threads: 1,
+    concurrency: 1,
+    timeoutMs: 300_000,
+    minScanIntervalMs: 48 * 60 * 60_000,
+    batchSize: 50,
+  });
   const sandbox = { provider: "cloud", status: "error", podName: "pod", stoppedAt: null, meta: {} };
   assert.equal(workspaceRuntime(sandbox).running, true);
   assert.equal(workspaceRuntime({ ...sandbox, status: "stopped" }).running, false);
