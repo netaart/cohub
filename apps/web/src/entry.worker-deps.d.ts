@@ -15,9 +15,18 @@
  * not cover, and `include` cannot be extended without replacing that list.
  */
 
+/** The part of the Workers `ExecutionContext` the entry relies on. */
+export interface WorkerExecutionContext {
+	waitUntil(promise: Promise<unknown>): void;
+}
+
 /** The Worker the SvelteKit adapter generates. */
 export declare const adapter: {
-	fetch(request: Request, env: unknown, ctx: unknown): Promise<Response>;
+	fetch(
+		request: Request,
+		env: unknown,
+		ctx: WorkerExecutionContext,
+	): Promise<Response>;
 };
 
 /** Origin of the API this deployment talks to. */

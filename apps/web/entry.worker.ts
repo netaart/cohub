@@ -34,6 +34,7 @@ const entry: typeof adapter = {
 			template: PUBLIC_APP_STANDALONE_HOST_TEMPLATE,
 			apiOrigin: PUBLIC_API_ORIGIN,
 			fetcher: fetch.bind(globalThis),
+			waitUntil: (promise) => ctx.waitUntil(promise),
 		});
 		if (standalone) return standalone;
 		return adapter.fetch(request, env, ctx);

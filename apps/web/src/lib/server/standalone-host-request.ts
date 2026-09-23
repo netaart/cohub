@@ -1,5 +1,5 @@
 import { isCohubAppHostname, parseCohubAppHostTemplate } from "@cohub/protocol";
-import { serveStandaloneApp } from "./standalone-app.ts";
+import { serveStandaloneApp, type WaitUntil } from "./standalone-app.ts";
 
 /**
  * Serves a request addressed to a published App's standalone origin, or null
@@ -23,6 +23,7 @@ export function serveStandaloneHostRequest(input: {
 	template: string | null;
 	apiOrigin: string;
 	fetcher: typeof fetch;
+	waitUntil: WaitUntil;
 }): Promise<Response> | null {
 	const template = parseCohubAppHostTemplate(input.template);
 	if (!template || !isCohubAppHostname(input.url.hostname, template))
@@ -32,5 +33,6 @@ export function serveStandaloneHostRequest(input: {
 		url: input.url,
 		apiOrigin: input.apiOrigin,
 		fetcher: input.fetcher,
+		waitUntil: input.waitUntil,
 	});
 }

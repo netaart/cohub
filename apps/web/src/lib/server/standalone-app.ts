@@ -48,36 +48,22 @@ function asAppDetail(value: unknown): AppDetailResponse | null {
 	return value as AppDetailResponse;
 }
 
-export async function loadStandaloneAppDetail(input: {
-	apiOrigin: string;
-	origin: string;
-	fetcher: typeof fetch;
-	recordView?: boolean;
-}): Promise<StandaloneDetailResult> {
-	const apiOrigin = input.apiOrigin.replace(/\/+$/, "");
-	if (!apiOrigin) return { status: "unavailable" };
-	if (!input.recordView) {
-		const cached = standaloneDetailCache.get(input.origin);
-		if (cached && cached.expiresAt > Date.now()) {
-			standaloneDetailCache.delete(input.origin);
-			standaloneDetailCache.set(input.origin, cached);
-			return { status: "ok", detail: cached.detail };
-		}
-		if (cached) standaloneDetailCache.delete(input.origin);
-	}
-	const query = `?origin=${encodeURIComponent(input.origin)}${input.recordView ? "&view=1" : ""}`;
-	const response = await input
-		.fetcher(`${apiOrigin}/api/apps/by-origin${query}`, {
-			headers: { Accept: "application/json" },
-		})
-		.catch(() => null);
-	if (!response) return { status: "unavailable" };
-	if (response.status === 404) return { status: "not_found" };
-	if (!response.ok) return { status: "unavailable" };
-	const parsed = await response.json().catch(() => undefined);
-	const detail = asAppDetail(parsed);
-	if (!detail) return { status: "unavailable" };
-	standaloneDetailCache.set(input.origin, {
+/** Schedules work that must finish after the response, e.g. `ctx.waitUntil`. */
+export type WaitUntil = (promise: Promise<unknown>) => void;
+
+function readCachedDetail(origin: string): AppDetailResponse | null {
+	const cached = standaloneDetailCache.get(origin);
+	if (!cached) return null;
+	standaloneDetailCache.delete(origin);
+	if (cached.expiresAt <= Date.now()) return null;
+	// Re-insert to keep Map order least-recently-used first.
+	standaloneDetailCache.set(origin, cached);
+	return cached.detail;
+}
+
+function writeCachedDetail(origin: string, detail: AppDetailResponse) {
+	standaloneDetailCache.delete(origin);
+	standaloneDetailCache.set(origin, {
 		expiresAt: Date.now() + STANDALONE_DETAIL_CACHE_TTL_MS,
 		detail,
 	});
@@ -86,7 +72,54 @@ export async function loadStandaloneAppDetail(input: {
 		if (typeof oldest !== "string") break;
 		standaloneDetailCache.delete(oldest);
 	}
+}
+
+async function fetchStandaloneAppDetail(input: {
+	apiOrigin: string;
+	origin: string;
+	fetcher: typeof fetch;
+	recordView: boolean;
+}): Promise<StandaloneDetailResult> {
+	const query = `?origin=${encodeURIComponent(input.origin)}${input.recordView ? "&view=1" : ""}`;
+	const response = await input
+		.fetcher(`${input.apiOrigin}/api/apps/by-origin${query}`, {
+			headers: { Accept: "application/json" },
+		})
+		.catch(() => null);
+	if (!response) return { status: "unavailable" };
+	if (response.status === 404) {
+		standaloneDetailCache.delete(input.origin);
+		return { status: "not_found" };
+	}
+	if (!response.ok) return { status: "unavailable" };
+	const parsed = await response.json().catch(() => undefined);
+	const detail = asAppDetail(parsed);
+	if (!detail) return { status: "unavailable" };
+	writeCachedDetail(input.origin, detail);
 	return { status: "ok", detail };
+}
+
+/**
+ * Resolves the App behind a standalone origin, serving from the short-lived
+ * cache when possible.
+ *
+ * A document navigation records a view through the same API call. On a cache
+ * hit that call runs after the response via `waitUntil`, so recording views
+ * never delays the page; it also refreshes the cached detail.
+ */
+export async function loadStandaloneAppDetail(input: {
+	apiOrigin: string;
+	origin: string;
+	fetcher: typeof fetch;
+	waitUntil: WaitUntil;
+	recordView: boolean;
+}): Promise<StandaloneDetailResult> {
+	const request = { ...input, apiOrigin: input.apiOrigin.replace(/\/+$/, "") };
+	if (!request.apiOrigin) return { status: "unavailable" };
+	const cached = readCachedDetail(input.origin);
+	if (!cached) return fetchStandaloneAppDetail(request);
+	if (input.recordView) input.waitUntil(fetchStandaloneAppDetail(request));
+	return { status: "ok", detail: cached };
 }
 
 export function resolveStandaloneAssetUrl(
@@ -184,6 +217,7 @@ export async function serveStandaloneApp(input: {
 	url: URL;
 	apiOrigin: string;
 	fetcher: typeof fetch;
+	waitUntil: WaitUntil;
 }): Promise<Response> {
 	if (input.request.method !== "GET" && input.request.method !== "HEAD") {
 		return new Response("Method not allowed", {
@@ -195,6 +229,7 @@ export async function serveStandaloneApp(input: {
 		apiOrigin: input.apiOrigin,
 		origin: input.url.origin,
 		fetcher: input.fetcher,
+		waitUntil: input.waitUntil,
 		recordView: isDocumentRequest(input.request, input.url),
 	});
 	if (detailResult.status === "unavailable") {

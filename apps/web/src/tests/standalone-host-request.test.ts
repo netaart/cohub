@@ -21,6 +21,7 @@ function call(
 		apiOrigin: API_ORIGIN,
 		fetcher:
 			fetcher ?? (async () => new Response("App not found", { status: 404 })),
+		waitUntil: () => {},
 	});
 }
 
