@@ -1,3 +1,5 @@
+import type { WorkspaceUsage } from "@cohub/protocol";
+export type { WorkspaceUsage } from "@cohub/protocol";
 import type {
   SessionBindingRecord as ProtocolSessionBindingRecord,
   SessionRecord as ProtocolSessionRecord,
@@ -847,6 +849,8 @@ export type SpaceMeta = JsonObject & {
 };
 
 export type SpaceRecord = {
+  /** Cloud-only cached storage measurement; null for local sandboxes. */
+  workspaceUsage?: WorkspaceUsage | null;
   id: string;
   userUuid: string;
   name: string | null;

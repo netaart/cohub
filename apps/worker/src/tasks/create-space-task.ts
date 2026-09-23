@@ -1,3 +1,6 @@
+import { withWorkspaceUsageWrite } from "@cohub/infra/workspace-usage";
+import { redisCommandClient } from "../redis.js";
+import { config } from "../config.js";
 import { isBillingAccessBlockedError } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
 import { eq, sql } from "drizzle-orm";
@@ -318,4 +321,8 @@ const createSpaceHandler = async (job: Job) => {
   }
 };
 
-registerTask("create_space", createSpaceHandler);
+registerTask("create_space", async (job) => {
+  const spaceId = (job.data as TaskPayload).spaceId;
+  if (!spaceId) throw new Error("spaceId is required for create_space task / 创建空间缺少 Space ID");
+  return withWorkspaceUsageWrite(redisCommandClient, config.env, spaceId, () => createSpaceHandler(job));
+});

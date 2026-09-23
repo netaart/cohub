@@ -1,3 +1,4 @@
+import { readWorkspaceUsages } from "../workspace-usage.js";
 import { timingSafeEqual } from "node:crypto";
 import type { Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
@@ -182,9 +183,11 @@ export const getSpacePublicProfile = (space: Pick<typeof spaces.$inferSelect, "m
 
 export const buildSpaceListItem = async (space: typeof spaces.$inferSelect) => {
   const sandbox = await getSpaceSandboxBySpaceId(space.id);
+  const usages = await readWorkspaceUsages(sandbox?.provider === "local" ? [] : [space.id]);
   return {
     ...space,
     publicProfile: getSpacePublicProfile(space),
+    workspaceUsage: sandbox?.provider === "local" ? null : usages.get(space.id),
     sandboxStatus: sandbox?.status ?? null,
   };
 };
@@ -197,17 +200,20 @@ export const buildSpaceListItems = async (spaceList: typeof spaces.$inferSelect[
   if (spaceList.length === 0) return [];
 
   const sandboxRows = await db
-    .select({ spaceId: spaceSandboxes.spaceId, status: spaceSandboxes.status })
+    .select({ spaceId: spaceSandboxes.spaceId, status: spaceSandboxes.status, provider: spaceSandboxes.provider })
     .from(spaceSandboxes)
     .where(inArray(spaceSandboxes.spaceId, spaceList.map((s) => s.id)));
 
   const statusBySpaceId = new Map(sandboxRows.map((r) => [r.spaceId, r.status]));
+  const localIds = new Set(sandboxRows.filter((r) => r.provider === "local").map((r) => r.spaceId));
+  const usages = await readWorkspaceUsages(spaceList.filter((s) => !localIds.has(s.id)).map((s) => s.id));
   const profileByUserUuid = await getProfilesByUuids(spaceList.map((space) => space.userUuid));
 
   return spaceList.map((space) => ({
     ...space,
     publicProfile: getSpacePublicProfile(space),
     sandboxStatus: statusBySpaceId.get(space.id) ?? null,
+    workspaceUsage: localIds.has(space.id) ? null : usages.get(space.id),
     ownerProfile: profileByUserUuid.get(space.userUuid) ?? null,
   }));
 };

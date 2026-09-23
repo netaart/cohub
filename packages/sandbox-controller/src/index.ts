@@ -1,3 +1,4 @@
+import { markWorkspaceUsage } from "@cohub/infra/workspace-usage";
 import { asc, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { spaceSandboxes, spaces } from "@cohub/db";
@@ -410,6 +411,7 @@ export function createSandboxLifecycleController(input: {
   const logger = input.logger ?? console;
   const lockTtlMs = input.lockTtlMs ?? DEFAULT_LOCK_TTL_MS;
   const infra = input.infra;
+  const inputRedis = input.redis;
 
   async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T | { locked: true }> {
     if (!input.redis) return fn();
@@ -515,6 +517,7 @@ export function createSandboxLifecycleController(input: {
         meta: sql`coalesce(${spaceSandboxes.meta}, '{}'::jsonb) || ${JSON.stringify({ resumeReason: input.reason, resumeStartedAt: new Date().toISOString() })}::jsonb`,
         updatedAt: new Date(),
       }).where(eq(spaceSandboxes.spaceId, input.spaceId));
+      if (inputRedis) await markWorkspaceUsage(inputRedis, resolvedEnv, input.spaceId, 0, true);
       await infra.resumeSandbox(input);
       return { ok: true as const, status: "provisioning", resumed: true };
     });
@@ -565,6 +568,7 @@ export function createSandboxLifecycleController(input: {
         })}::jsonb`,
         updatedAt: stoppedAt,
       }).where(eq(spaceSandboxes.spaceId, input.spaceId)).returning();
+      if (inputRedis) await markWorkspaceUsage(inputRedis, resolvedEnv, input.spaceId, 0, false);
       return { ok: true as const, status: updated?.status ?? "stopped", stoppedAt };
     });
     return "locked" in result ? { ok: true as const, status: sandbox.status, skipped: true, locked: true } : result;
@@ -652,6 +656,7 @@ export function createSandboxLifecycleController(input: {
         })}::jsonb`,
         updatedAt: stoppedAt,
       }).where(eq(spaceSandboxes.spaceId, input.spaceId)).returning();
+      if (inputRedis) await markWorkspaceUsage(inputRedis, resolvedEnv, input.spaceId, 0, false);
       return { ok: true as const, status: updated?.status ?? "stopped", stoppedAt };
     });
     return "locked" in result ? { ok: true as const, status: input.status, skipped: true, locked: true } : result;

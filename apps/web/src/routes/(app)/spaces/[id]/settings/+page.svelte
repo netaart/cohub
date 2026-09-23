@@ -42,7 +42,7 @@ import {
 	X,
 	Zap,
 } from "lucide-svelte";
-import { onDestroy } from "svelte";
+import { onDestroy, untrack } from "svelte";
 import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
 import { PUBLIC_COHUB_ENV } from "$env/static/public";
@@ -57,6 +57,8 @@ import Sheet from "$lib/components/Sheet.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UploadProgress from "$lib/components/UploadProgress.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
+import { subscribeSpaceChannel } from "$lib/features/session-chat/space-channel";
+import { formatBytes } from "$lib/format-bytes";
 import { formatDateTime } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -67,7 +69,10 @@ import { validateSpaceSlugInput } from "$lib/slug-rules";
 import { buildSpaceLandingRoute } from "$lib/space-routes";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 import { invalidateCachedSpaceMembers } from "$lib/stores/space-profile-cache";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+import {
+	cacheSpaceRecordSoon,
+	getCachedSpaceRecord,
+} from "$lib/stores/space-record-cache";
 import SandboxSpecPicker from "./SandboxSpecPicker.svelte";
 
 const locale = $derived(getLocale());
@@ -786,8 +791,12 @@ async function forceRecoverSandbox() {
 	}
 }
 
-async function loadPage() {
-	loading = true;
+async function loadPage(requestedSpaceId: string) {
+	if (space?.id !== requestedSpaceId) space = null;
+	const cached = await getCachedSpaceRecord(requestedSpaceId).catch(() => null);
+	if (spaceId !== requestedSpaceId) return;
+	if (!space && cached?.space) space = cached.space;
+	loading = !space;
 	error = "";
 	invitationsError = "";
 	try {
@@ -850,6 +859,7 @@ async function loadPage() {
 				.catch(() => null),
 			invitationPromise,
 		]);
+		if (spaceId !== requestedSpaceId) return;
 		space = spaceResult;
 		spaceDescriptionDraft = spaceResult.description ?? "";
 		cacheSpaceRecordSoon(spaceResult);
@@ -880,9 +890,43 @@ async function loadPage() {
 		error =
 			err instanceof Error ? err.message : m.space_failed_load({}, { locale });
 	} finally {
-		loading = false;
+		if (spaceId === requestedSpaceId) loading = false;
 	}
 }
+
+$effect(() => {
+	if (!browser || !spaceId) return;
+	const currentSpaceId = spaceId;
+	let disposed = false;
+	let refreshing = false;
+	const refreshUsage = async () => {
+		if (refreshing || disposed) return;
+		refreshing = true;
+		try {
+			const next = await sdk.space(currentSpaceId).get();
+			if (!disposed && space && space.id === currentSpaceId) {
+				space = { ...space, workspaceUsage: next.workspaceUsage };
+				cacheSpaceRecordSoon(space);
+			}
+		} catch {
+			/* Keep the last server measurement when offline. */
+		} finally {
+			refreshing = false;
+		}
+	};
+	const unsubscribe = subscribeSpaceChannel(currentSpaceId, (event) => {
+		if (event.type === "space.workspace.usage.updated") void refreshUsage();
+	});
+	const onFocus = () => {
+		void refreshUsage();
+	};
+	window.addEventListener("focus", onFocus);
+	return () => {
+		disposed = true;
+		unsubscribe();
+		window.removeEventListener("focus", onFocus);
+	};
+});
 
 async function refreshChannelHealth() {
 	if (loading) return;
@@ -1562,7 +1606,11 @@ function bindScrollSpy(main: HTMLElement | null) {
 }
 
 $effect(() => {
-	void loadPage();
+	const currentSpaceId = spaceId;
+	if (browser)
+		untrack(() => {
+			void loadPage(currentSpaceId);
+		});
 });
 
 $effect(() => {
@@ -2040,6 +2088,23 @@ $effect(() => {
 
 						<!-- Settings rows -->
 						<div class="divide-y divide-border-subtle border-b border-border-subtle">
+							{#if space?.workspaceUsage}
+								{@const usage = space.workspaceUsage}
+								<div class="flex flex-wrap items-start justify-between gap-x-6 gap-y-2 py-4">
+									<div class="min-w-0">
+										<div class="text-[14px] text-text-primary">{m.space_storage_usage({}, { locale })}</div>
+										<div class="mt-1 text-[12px] leading-5 text-text-tertiary">
+											{#if usage.measuredAt}
+												{m.space_storage_measured({ time: formatDateTime(usage.measuredAt, locale) }, { locale })}
+											{:else}
+												{m.space_storage_pending({}, { locale })}
+											{/if}
+											{#if usage.status === 'error'} · {m.space_storage_retry({}, { locale })}{/if}
+										</div>
+									</div>
+									<span class="shrink-0 text-[14px] font-medium tabular-nums text-text-primary">{usage.bytes === null ? '—' : formatBytes(usage.bytes)}</span>
+								</div>
+							{/if}
 							<!-- Compute spec -->
 							<div class="py-4">
 								<div class="flex items-center justify-between gap-4">

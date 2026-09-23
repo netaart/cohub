@@ -75,6 +75,10 @@
     "./logging": {
       "types": "./dist/logging/index.d.ts",
       "default": "./dist/logging/index.js"
+    },
+    "./workspace-usage": {
+      "types": "./dist/workspace-usage/index.d.ts",
+      "default": "./dist/workspace-usage/index.js"
     }
   },
   "types": "./dist/index.d.ts",

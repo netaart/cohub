@@ -1,3 +1,4 @@
+import { markWorkspaceUsage } from "@cohub/infra/workspace-usage";
 import { asc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { billingOperations, COHUB_BILLING_FEATURES } from "@cohub/billing";
 import {
@@ -512,6 +513,8 @@ export const reconcileSpaceSandbox = async (input: {
       desiredSpecResources: desiredSpecConfig.resources,
     },
   });
+
+  await markWorkspaceUsage(redisCommandClient, config.env, input.spaceId, 0, true);
 
   const pod = renderSandboxPodTemplate({
     SPACE_ID: input.spaceId,

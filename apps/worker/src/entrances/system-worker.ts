@@ -27,6 +27,7 @@ import {
   APP_PROMOTION_STATS_FLUSH_JOB,
   APP_PROMOTION_STATS_FLUSH_SCHEDULER_ID,
   APP_VIEW_STATS_FLUSH_INTERVAL_MS,
+  WORKSPACE_USAGE_DISPATCH_JOB,
   APP_VIEW_STATS_FLUSH_JOB,
   APP_VIEW_STATS_FLUSH_SCHEDULER_ID,
 } from "@cohub/protocol";
@@ -196,6 +197,12 @@ try {
     error: error instanceof Error ? error.message : String(error),
   });
 }
+
+// Dispatch only schedules ordinary system jobs; there is no extra queue/consumer.
+await systemQueue.upsertJobScheduler("workspace-usage-dispatch", { every: 60_000 }, {
+  name: WORKSPACE_USAGE_DISPATCH_JOB, data: {},
+  opts: { attempts: 3, backoff: { type: "exponential", delay: 5_000 }, ...defaultJobRetention },
+});
 
 const stopReferralRewardRetry = startSystemReferralRewardRetryLoop();
 

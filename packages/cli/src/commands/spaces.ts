@@ -566,13 +566,19 @@ export function registerSpaces(program: Command): void {
       try {
         const space = await client.spaces.get(spaceId);
         if (jsonRequested(opts)) return outJson(space);
-        table([space], [
+        const usage = space.workspaceUsage;
+        table([{ ...space, workspaceBytes: usage?.bytes ?? "—", workspaceMeasuredAt: usage?.measuredAt ?? "—", workspaceUsageStatus: usage?.status ?? "—" }], [
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
           { key: "slug", label: "Slug" },
           { key: "description", label: "Description" },
           { key: "status", label: "Status" },
           { key: "createdAt", label: "Created" },
+          ...(usage ? [
+            { key: "workspaceBytes", label: "Workspace bytes / 工作区字节" },
+            { key: "workspaceMeasuredAt", label: "Measured at / 统计时间" },
+            { key: "workspaceUsageStatus", label: "Usage status / 统计状态" },
+          ] : []),
         ]);
       } catch (e: unknown) {
         handleHttp(e);

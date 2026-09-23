@@ -1936,5 +1936,9 @@
 	"purchase_add_balance_title": "Add balance to continue",
 	"purchase_add_balance_message": "Select a plan or balance pack to resume.",
 	"purchase_return_confirming": "Confirming payment",
-	"purchase_return_confirming_detail": "Your balance updates the moment the payment settles."
+	"purchase_return_confirming_detail": "Your balance updates the moment the payment settles.",
+	"space_storage_usage": "Workspace storage",
+	"space_storage_measured": "Measured {time}",
+	"space_storage_pending": "Waiting for measurement",
+	"space_storage_retry": "Update will retry"
 }
