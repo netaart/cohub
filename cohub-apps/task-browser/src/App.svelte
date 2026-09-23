@@ -49,6 +49,7 @@ let loading = $state(true);
 let loadingMore = $state(false);
 let refreshing = false;
 let authorizing = $state(false);
+let automaticAuthorizationAttempted = false;
 let error = $state<string | null>(null);
 let accessDenied = $state(false);
 let pageInfo = $state<TaskPageInfo>({ hasMore: false, nextCursor: null });
@@ -102,6 +103,16 @@ function taskQueryKey() {
   return `${scopeKey(selectedScope)}:${status}`;
 }
 
+async function authorizeSelectedScope() {
+  const request = accessRequestFor(selectedScope);
+  const granted = await client.auth.request({
+    scopes: request.scopes,
+    reason: request.reason,
+    ...(selectedScope.kind !== "mine" ? { spaceId: selectedScope.spaceId } : {}),
+  });
+  return granted;
+}
+
 async function fetchTasks(mode: LoadMode, version: number, cacheKey: string) {
   if (mode === "append") {
     loadingMore = true;
@@ -130,6 +141,17 @@ async function fetchTasks(mode: LoadMode, version: number, cacheKey: string) {
   } catch (cause) {
     if (version !== requestVersion) return;
     if (isAccessError(cause)) {
+      if (mode === "replace" && !automaticAuthorizationAttempted && !authorizing) {
+        automaticAuthorizationAttempted = true;
+        try {
+          if (await authorizeSelectedScope()) {
+            await load();
+            return;
+          }
+        } catch {
+          // Fall through to the explicit access state when silent authorization is unavailable.
+        }
+      }
       tasks = [];
       pageInfo = { hasMore: false, nextCursor: null };
       clearTaskCache(cacheIdentity, cacheKey);
@@ -183,18 +205,9 @@ async function requestAccess() {
   authorizing = true;
   error = null;
   try {
-    const request = accessRequestFor(selectedScope);
-    const result = await client.auth.authorize({
-      scopes: request.scopes,
-      target: selectedScope.kind === "mine" ? { kind: "account" } : { kind: "space", spaceId: selectedScope.spaceId },
-    });
-    if (result.status !== "granted") {
+    if (!(await authorizeSelectedScope())) {
       error = "Access was not granted.";
       return;
-    }
-    if (result.target.kind === "space" && selectedScope.kind !== "mine" && result.target.spaceId !== selectedScope.spaceId) {
-      selectedScope = { kind: "space", spaceId: result.target.spaceId };
-      resetResultsForQuery();
     }
     await load();
   } catch (cause) {
@@ -205,6 +218,7 @@ async function requestAccess() {
 }
 
 function resetResultsForQuery() {
+  automaticAuthorizationAttempted = false;
   tasks = [];
   pageInfo = { hasMore: false, nextCursor: null };
   accessDenied = false;
@@ -291,7 +305,10 @@ function closeLightbox() {
 
 function applyRuntimeContext(context: Awaited<ReturnType<typeof client.context>>) {
   appReady = Boolean(context?.app?.id);
-  homeSpace = context?.app?.homeSpace ? { id: context.app.homeSpace.id, name: context.app.homeSpace.name ?? null } : null;
+  const appHomeSpace = (context?.app as {
+    homeSpace?: { id: string; name?: string | null } | null;
+  } | undefined)?.homeSpace;
+  homeSpace = appHomeSpace ? { id: appHomeSpace.id, name: appHomeSpace.name ?? null } : null;
   sourceSpaceId = context?.invocation?.spaceId ?? null;
   cacheIdentity = context?.app?.id
     ? { appId: context.app.id, viewerId: context.viewer?.userUuid ?? null }
@@ -319,20 +336,20 @@ async function requestSpaceAccess() {
   authorizingSpace = true;
   error = null;
   try {
-    const result = await client.auth.authorize({
-      target: { kind: "pick-space" },
+    const result = await client.auth.requestSpace({
       scopes: ["taskrun.view"],
       reason: "Browse generation tasks in a Space you choose.",
       alwaysAsk: true,
     });
-    if (result.status !== "granted" || result.target.kind !== "space") return;
-    const space = { kind: "space", spaceId: result.target.spaceId } as const;
+    if (!result.granted || !result.space) return;
+    const { space } = result;
+    const scope = { kind: "space", spaceId: space.id } as const;
     scopes = [
-      ...scopes.filter((scope) => !(scope.kind === "space" && scope.spaceId === space.spaceId)),
-      space,
+      ...scopes.filter((item) => !(item.kind === "space" && item.spaceId === scope.spaceId)),
+      scope,
     ];
-    if (result.target.name) spaceNames = { ...spaceNames, [space.spaceId]: result.target.name };
-    selectedScope = space;
+    if (space.name) spaceNames = { ...spaceNames, [scope.spaceId]: space.name };
+    selectedScope = scope;
     resetResultsForQuery();
     await load();
   } catch (cause) {

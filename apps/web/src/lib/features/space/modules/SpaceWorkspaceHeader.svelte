@@ -6,6 +6,7 @@ import type {
 } from "@neta-art/cohub";
 import {
 	Check,
+	GalleryThumbnails,
 	Globe,
 	ListTree,
 	Loader2,
@@ -56,6 +57,7 @@ export type SpaceWorkspaceHeaderContext = {
 	onlineUsers: SpacePresenceUser[];
 	activeRouteDetailHeader: RouteDetailHeader | null;
 	activeSessionId: string | null;
+	hasGenerationTasks: boolean;
 	canManageSessionAccess: boolean;
 	isActiveSessionPublic: boolean;
 	spaceHasMinimalAccess: boolean;
@@ -76,6 +78,7 @@ export type ResourceActionState = {
 
 export type SpaceWorkspaceHeaderActions = {
 	openShareModal: (sessionId: string) => void;
+	openTaskBrowser: () => void | Promise<void>;
 	startSessionRename: () => void;
 	cancelSessionRename: () => void;
 	submitSessionRename: () => void | Promise<void>;
@@ -162,6 +165,17 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 
 {#snippet HeaderActions()}
 	<SpaceRuntimeStatus spaceId={context.spaceId} canManage={context.space?.access?.permissions.includes("sandbox.manage") === true} />
+	{#if context.activeSessionId && context.hasGenerationTasks}
+		<button
+			type="button"
+			class="header-action-btn is-square"
+			onclick={() => runAction(actions.openTaskBrowser)}
+			title="Browse generated media / 查看生成媒体"
+			aria-label="Browse generated media / 查看生成媒体"
+		>
+			<GalleryThumbnails class="h-4 w-4 shrink-0" />
+		</button>
+	{/if}
 	{#if context.activeSessionId && context.canManageSessionAccess}
 		<button
 			type="button"

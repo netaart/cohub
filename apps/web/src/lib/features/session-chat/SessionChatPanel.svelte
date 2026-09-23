@@ -5,14 +5,7 @@
  */
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
-import {
-	ArrowDown,
-	FileCode2,
-	ListChecks,
-	ListTree,
-	Plus,
-	Upload,
-} from "lucide-svelte";
+import { ArrowDown, FileCode2, ListTree, Plus, Upload } from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { untrack } from "svelte";
 import AccessStateView from "$lib/components/AccessStateView.svelte";
@@ -48,7 +41,6 @@ let {
 	newChatBackgroundSpaceId = null,
 	onNewChatBackgroundComposerChip,
 	onNavigationOpen,
-	onOpenTaskBrowser,
 	onOpenUrl,
 	shouldShowNewChatProfile = false,
 	newChatProfileExpanded = false,
@@ -71,7 +63,6 @@ let {
 			"protocol" | "version" | "type" | "requestId"
 		>
 	>;
-	onOpenTaskBrowser?: () => void | Promise<void>;
 	onOpenUrl?: (href: string, event: MouseEvent) => void | Promise<void>;
 	shouldShowNewChatProfile?: boolean;
 	newChatProfileExpanded?: boolean;
@@ -315,17 +306,6 @@ async function handleDraftDrop(event: DragEvent) {
 		ondragleave={handleDraftDragLeave}
 		ondrop={handleDraftDrop}
 	>
-		{#if activeSessionId && host.hasGenerationTasks && onOpenTaskBrowser}
-			<button
-				type="button"
-				class="absolute right-3 top-3 z-20 inline-flex h-7 w-7 items-center justify-center rounded-[6px] border border-border-subtle bg-bg-elevated/95 text-text-tertiary shadow-sm transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50"
-				title="Browse generation tasks / 查看生成任务"
-				aria-label="Browse generation tasks / 查看生成任务"
-				onclick={() => void onOpenTaskBrowser?.()}
-			>
-				<ListChecks class="h-3.5 w-3.5" />
-			</button>
-		{/if}
 		{#if draftDropKind}
 			<div
 				class="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-[28px] border border-dashed border-brand/40 bg-bg-primary/72 backdrop-blur-[2px]"

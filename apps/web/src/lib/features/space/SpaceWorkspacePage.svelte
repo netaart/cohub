@@ -3036,6 +3036,7 @@ const headerContext = $derived({
 	onlineUsers,
 	activeRouteDetailHeader,
 	activeSessionId,
+	hasGenerationTasks: sessionChat.hasGenerationTasks,
 	canManageSessionAccess,
 	isActiveSessionPublic: activeSessionId
 		? sessionChat.share.hasPermission(activeSessionId)
@@ -3056,6 +3057,7 @@ const resourceActionState = $derived({
 });
 const headerActions = {
 	openShareModal: (id: string) => sessionChat.openShareModal(id),
+	openTaskBrowser,
 	startSessionRename,
 	cancelSessionRename,
 	submitSessionRename,
@@ -3199,7 +3201,6 @@ const headerActions = {
         newChatBackgroundSpaceId={spaceId}
         onNewChatBackgroundComposerChip={handleNewChatBackgroundComposerChip}
         onNavigationOpen={handleAppNavigationOpen}
-        onOpenTaskBrowser={openTaskBrowser}
         onOpenUrl={openMessageUrl}
         {shouldShowNewChatProfile}
         {newChatProfileExpanded}
