@@ -1,5 +1,22 @@
 # @neta-art/cohub-cli
 
+## 8.1.0
+
+### Minor Changes
+
+- d84afb3: Merge `cohub runtime attach` into `runtime up`: native chat sync is now installed by default after one explicit consent (default yes), with all interactive prompts defaulting to yes. `up` is idempotent — an already-enabled configuration is skipped silently, and after `detach` the next `up` asks again — while declining or a capability failure keeps the Runtime running without native sync. `runtime status` now reports native sync enablement (`nativeSync`) and per-Harness pending Turns/archives. The standalone `attach` command is removed. Add `cohub runtime import` to safely discover and import existing Pi/Codex conversations for the bound project while preserving original timestamps and local transcripts.
+  
+  `cohub runtime attach` 并入 `runtime up`：原生对话同步默认在单独确认一次（默认 yes）后安装，所有交互询问默认 yes。`up` 幂等——已启用则静默跳过，`detach` 后下次再询问；拒绝或能力不满足时 Runtime 照常运行。`runtime status` 新增原生同步开关（`nativeSync`）与各 Harness 的待同步 Turn / 归档明细，并移除独立的 `attach` 命令。新增 `cohub runtime import`，可安全发现并导入当前绑定项目已有的 Pi/Codex 对话，同时保留原始时间与本地 transcript。
+
+### Patch Changes
+
+- 9c3ce38: Bundle `sandboxd` `v2.55.0`, keeping the same compatible runner protocol while aligning the CLI download with the `v2.55` platform release.
+  
+  内置 `sandboxd` 升级至 `v2.55.0`，保持兼容的 runner 协议不变，并让 CLI 下载版本与 `v2.55` 平台版本对齐。
+- 979e172: Fix diagnostics URL redaction: healthy URLs stay byte-identical instead of being re-encoded (the trailing `"` from wrapped log lines no longer becomes `%22`), and the matcher no longer swallows quotes or angle brackets. Bilingual summary: 修复诊断日志的 URL 脱敏——无敏感参数的 URL 保持原样（不再把日志换行携带的 `"` 重编码成 `%22`），匹配也不再吞掉引号与尖括号。
+- Updated dependencies [886f6b1]
+  - @neta-art/cohub@8.21.1
+
 ## 8.0.1
 
 ### Patch Changes
