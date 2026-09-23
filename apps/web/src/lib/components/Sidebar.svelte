@@ -16,6 +16,7 @@ import {
 	Activity,
 	ArrowLeft,
 	BarChart3,
+	BookOpen,
 	Check,
 	ChevronDown,
 	Clock,
@@ -4643,6 +4644,13 @@ $effect(() => {
 	          <span>{m.sidebar_help({}, { locale })}</span>
 	          <span class="ml-auto rounded-[4px] border border-border-subtle bg-bg-surface px-1.5 py-px font-mono text-[10px] leading-4 text-text-placeholder">?</span>
 	        </button>
+        <a
+          href={locale === "zh-CN" ? "/zh/docs" : "/docs"}
+          class="flex items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
+        >
+          <BookOpen class="w-3.5 h-3.5" />
+          <span>{m.sidebar_docs({}, { locale })}</span>
+        </a>
         <a
           href="/changelog"
           class="flex items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"

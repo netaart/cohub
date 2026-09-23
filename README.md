@@ -46,7 +46,7 @@ cohub auth login
 
 ## Docs
 
-Product docs: [cohub.live/docs](https://cohub.live/docs) · [中文](https://cohub.live/docs/zh)
+Product docs: [cohub.live/docs](https://cohub.live/docs) · [中文](https://cohub.live/zh/docs)
 
 Source of truth: `docs/product/en/` · `docs/product/zh/`
 
