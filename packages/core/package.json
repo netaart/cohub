@@ -125,6 +125,7 @@
   "dependencies": {
     "@cohub/billing": "workspace:*",
     "@cohub/db": "workspace:*",
+    "@cohub/infra": "workspace:*",
     "@cohub/protocol": "workspace:*",
     "@cohub/sandbox-controller": "workspace:*",
     "drizzle-orm": "^0.45.2",

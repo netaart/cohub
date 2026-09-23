@@ -10,7 +10,7 @@ import { db } from "./db/index.js";
 import { config } from "./config.js";
 import { redisCommandClient } from "./redis.js";
 import { expandPromptTemplate, type LoadPromptTemplatesOptions, type ExpandedPromptTemplate } from "./prompt-templates.js";
-import { expandSkillCommand, type ExpandedSkill } from "./skills.js";
+import { expandSkillCommand, type ExpandedSkill, type LoadSkillsOptions } from "./skills.js";
 import { ensureSpaceSandbox, recoverSpaceSandbox } from "./space-sandboxes.js";
 import { getSpaceSessionById, getSpaceById } from "./space-sessions.js";
 import { touchSpaceActivity } from "./space-activity.js";
@@ -30,7 +30,7 @@ export type PromptTemplateService = {
 };
 
 export type SkillService = {
-  expand(text: string, options?: LoadPromptTemplatesOptions): Promise<ExpandedSkill | null>;
+  expand(text: string, options?: LoadSkillsOptions): Promise<ExpandedSkill | null>;
 };
 
 const defaultPromptTemplateService: PromptTemplateService = {
