@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build && node ./scripts/ensure-i18n.mjs --stamp",
+		"build": "vite build && node ./scripts/generate-worker-entry-env.mjs && node ./scripts/ensure-i18n.mjs --stamp",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --strategy globalVariable baseLocale --emit-ts-declarations --silent",
 		"lint": "biome lint .",
 		"lint:fix": "biome lint --write .",

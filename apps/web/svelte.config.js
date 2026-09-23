@@ -13,7 +13,10 @@ const config = {
 		sourcemap: true,
 	},
 	kit: {
-		adapter: adapter(),
+		// The adapter writes its generated Worker to the `main` path of the config
+		// it reads, so point it at a build-only config; the deployment configs
+		// declare `main = "src/entry.worker.ts"` to wrap the generated Worker.
+		adapter: adapter({ config: "./wrangler.adapter.toml" }),
 		output: {
 			bundleStrategy: "split",
 		},

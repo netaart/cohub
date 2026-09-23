@@ -1,0 +1,45 @@
+// Cloudflare Worker entry for the web app.
+//
+// Standalone App origins get one App per hostname, so every path on such a host
+// belongs to that App. Those requests must be resolved here, before the
+// SvelteKit adapter runs: the adapter serves prerendered paths (`/`, `/docs`,
+// `/pricing`, …) straight from static assets, which would otherwise answer with
+// the marketing shell instead of the App.
+//
+// Wrangler bundles this entry together with the adapter's `_worker.js` and its
+// build-output imports, so `main` points here instead of at the adapter file.
+// This is the only place standalone origins are resolved. `vite dev` serves the
+// SvelteKit dev server and `pnpm preview` runs `wrangler dev`, both without this
+// entry, so standalone origins are not served there.
+//
+// `_worker.js` and `worker-entry-env.js` are build outputs: `entry.worker.d.ts`
+// types them, and `scripts/generate-worker-entry-env.mjs` writes matching
+// declarations next to them so TypeScript resolves those instead of checking the
+// generated JavaScript. Delegating to the adapter keeps the handler shape, so
+// the parameters below inherit their types from the adapter's declaration.
+// The request logic lives in `src/lib/server/standalone-host-request.ts`.
+
+import adapter from "../.svelte-kit/cloudflare/_worker.js";
+import {
+	PUBLIC_API_ORIGIN,
+	PUBLIC_APP_STANDALONE_HOST_TEMPLATE,
+} from "../.svelte-kit/cloudflare/worker-entry-env.js";
+import { serveStandaloneHostRequest } from "./lib/server/standalone-host-request.ts";
+
+const entry: typeof adapter = {
+	fetch(request, env, ctx) {
+		// Cloudflare requires `fetch` bound to its global receiver; handler
+		// entrypoints are called as plain functions, so `this` is not usable.
+		const standalone = serveStandaloneHostRequest({
+			request,
+			url: new URL(request.url),
+			template: PUBLIC_APP_STANDALONE_HOST_TEMPLATE,
+			apiOrigin: PUBLIC_API_ORIGIN,
+			fetcher: fetch.bind(globalThis),
+		});
+		if (standalone) return standalone;
+		return adapter.fetch(request, env, ctx);
+	},
+};
+
+export default entry;
