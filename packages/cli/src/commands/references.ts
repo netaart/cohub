@@ -7,7 +7,7 @@ import {
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
+import { formatLocalDateTime, table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
 
 const RESOURCE_TYPES = new Set<ReferenceQueryableType>([
   "turn",
@@ -129,7 +129,7 @@ Examples:
           source: `${r.sourceType}:${r.sourceId.slice(0, 8)}`,
           target: formatTarget(r.targetType, r.targetId),
           count: r.count,
-          lastSeen: r.updatedAt.slice(0, 10),
+          lastSeen: formatLocalDateTime(r.updatedAt).slice(0, 10),
         }));
         table(rows, [
           { key: "kind", label: "Kind" },

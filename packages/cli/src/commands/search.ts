@@ -1,7 +1,7 @@
 import { isUuid, type GlobalSearchResult, type GlobalSearchType } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
+import { formatLocalDateTime, table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_TITLE_LENGTH = 72;
@@ -60,7 +60,7 @@ function rowsFor(items: GlobalSearchResult[]): Row[] {
     title: truncate(item.title, MAX_TITLE_LENGTH),
     context: truncate(contextFor(item), MAX_CONTEXT_LENGTH),
     match: item.matchedField,
-    updated: item.updatedAt ? item.updatedAt.slice(0, 10) : "",
+    updated: item.updatedAt ? formatLocalDateTime(item.updatedAt).slice(0, 10) : "",
     href: item.href,
   }));
 }

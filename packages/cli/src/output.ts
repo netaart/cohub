@@ -17,11 +17,36 @@ export type Column = {
 };
 
 /**
- * Epoch milliseconds → ISO 8601, matching the ISO timestamps other tables print.
+ * Timestamp → local ISO-style date and time with the system's UTC offset.
+ *
+ * CLI tables are for people and follow the machine's local timezone. Structured
+ * output remains untouched so scripts continue to receive the server value.
+ */
+export function formatLocalDateTime(value: unknown): string {
+  const date = value instanceof Date
+    ? value
+    : typeof value === "number"
+      ? new Date(value)
+      : typeof value === "string" && value.trim() !== ""
+        ? new Date(value)
+        : null;
+  if (!date || Number.isNaN(date.getTime())) return "";
+
+  const pad = (part: number) => String(part).padStart(2, "0");
+  const offsetMinutes = -date.getTimezoneOffset();
+  const offsetSign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offset = `${offsetSign}${pad(Math.floor(absoluteOffset / 60))}:${pad(absoluteOffset % 60)}`;
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${offset}`;
+}
+
+/**
+ * Epoch milliseconds → local date and time.
  *
  * Absent values render empty rather than falling through `Number()` coercion:
  * `null` and `""` both become 0 there, which would print a confident-looking
- * `1970-01-01T00:00:00.000Z` for a timestamp the server never sent.
+ * Unix epoch for a timestamp the server never sent.
  */
 export function formatEpochMs(value: unknown): string {
   const ms =
@@ -31,13 +56,13 @@ export function formatEpochMs(value: unknown): string {
         ? Number(value)
         : Number.NaN;
   if (!Number.isFinite(ms)) return "";
-  const date = new Date(ms);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+  return formatLocalDateTime(ms);
 }
 
 function cellText(column: Column, row: Row): string {
   const raw = row[column.key];
   if (column.format) return column.format(raw, row);
+  if (/(?:At|Timestamp)$/.test(column.key)) return formatLocalDateTime(raw);
   const v = raw ?? "";
   return typeof v === "object" ? JSON.stringify(v) : String(v);
 }
