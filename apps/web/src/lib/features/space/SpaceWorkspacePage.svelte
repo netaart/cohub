@@ -375,6 +375,7 @@ const sessionChat = createSessionChatHost({
 // Host is the unique owner of chat controllers and session records.
 
 const activeSessionId = $derived(sessionChat.activeSessionId);
+const TASK_BROWSER_APP_REF = "tzwm/cohub/task-browser";
 const appShell = $derived.by<AppRuntimeShellContext>(() => {
 	const currentTurnSequence = sessionChat.currentTurnSequence;
 	const currentTurn =
@@ -521,6 +522,25 @@ async function openWorkspaceApp(input: PublishedAppOpenInput) {
 		showWorkspaceNotice(OVERLAY_LIMIT_MESSAGE);
 	}
 	return opened;
+}
+
+async function openTaskBrowser() {
+	if (!activeSessionId) return;
+	try {
+		const { detail, launch } = await resolveAppNavigation(
+			sdk.apps,
+			TASK_BROWSER_APP_REF,
+		);
+		await openWorkspaceApp({
+			appId: detail.app.id,
+			label: appDisplayTitle(detail.app.meta, detail.app.slug),
+			launch: launch ?? null,
+			openContext: { source: "user", sessionId: activeSessionId },
+			meta: detail.app.meta,
+		});
+	} catch (error) {
+		console.warn("[workspace] failed to open Task Browser", error);
+	}
 }
 
 async function callOpenedApp(
@@ -3179,6 +3199,7 @@ const headerActions = {
         newChatBackgroundSpaceId={spaceId}
         onNewChatBackgroundComposerChip={handleNewChatBackgroundComposerChip}
         onNavigationOpen={handleAppNavigationOpen}
+        onOpenTaskBrowser={openTaskBrowser}
         onOpenUrl={openMessageUrl}
         {shouldShowNewChatProfile}
         {newChatProfileExpanded}

@@ -188,6 +188,7 @@ const TERMINAL_GENERATION_STATUSES = new Set([
 	"failed",
 	"interrupted",
 ]);
+const GENERATION_TASK_QUERY_LIMIT = 1;
 
 export type SessionChatHostOptions = SessionChatEnvironment & {
 	getConnectionState: () =>
@@ -309,6 +310,50 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				? (sessionStateById[activeSessionId] ?? null)
 				: null,
 	);
+	let generationTaskQueryKey = "";
+	let generationTaskQueryVersion = 0;
+	const generationTaskQueriesInFlight = new Set<string>();
+	let hasGenerationTasks = $state(false);
+
+	async function refreshGenerationTaskAvailability(
+		queryKey = `${spaceId}:${activeSessionId ?? ""}`,
+	) {
+		const sessionId = activeSessionId;
+		if (!spaceId || !sessionId || isNewSessionRoute) return;
+		if (generationTaskQueriesInFlight.has(queryKey)) return;
+		generationTaskQueriesInFlight.add(queryKey);
+		const version = ++generationTaskQueryVersion;
+		try {
+			const response = await sdk.tasks.list({
+				spaceId,
+				sessionId,
+				taskType: "generation",
+				limit: GENERATION_TASK_QUERY_LIMIT,
+			});
+			if (
+				disposed ||
+				version !== generationTaskQueryVersion ||
+				queryKey !== `${spaceId}:${activeSessionId ?? ""}`
+			)
+				return;
+			hasGenerationTasks = (response.runs?.length ?? 0) > 0;
+		} catch {
+			if (version === generationTaskQueryVersion) hasGenerationTasks = false;
+		} finally {
+			generationTaskQueriesInFlight.delete(queryKey);
+		}
+	}
+
+	$effect(() => {
+		const queryKey = `${spaceId}:${activeSessionId ?? ""}`;
+		if (queryKey === generationTaskQueryKey) return;
+		generationTaskQueryKey = queryKey;
+		generationTaskQueryVersion += 1;
+		hasGenerationTasks = false;
+		if (activeSessionId && !isNewSessionRoute)
+			void refreshGenerationTaskAvailability(queryKey);
+	});
+
 	const activeSessionInitialLoadingVisible = $derived.by(() =>
 		Boolean(
 			activeSessionId && visibleInitialLoadingSessionIds[activeSessionId],
@@ -3935,6 +3980,32 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			) {
 				return;
 			}
+			if (payload.type === "task.created" || payload.type === "task.updated") {
+				const task = (
+					payload.payload as {
+						task?: {
+							taskType?: unknown;
+							sessionId?: unknown;
+						};
+					}
+				).task;
+				if (typeof payload.spaceId === "string" && payload.spaceId !== spaceId)
+					return;
+				const taskSessionId =
+					typeof task?.sessionId === "string"
+						? task.sessionId
+						: typeof payload.sessionId === "string"
+							? payload.sessionId
+							: null;
+				if (
+					task?.taskType === "generation" &&
+					taskSessionId === activeSessionId &&
+					!hasGenerationTasks
+				) {
+					void refreshGenerationTaskAvailability();
+				}
+				return;
+			}
 			if (
 				payload.type === "session.created" ||
 				payload.type === "session.updated"
@@ -4696,6 +4767,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		get activeTurnRailItems() {
 			return activeTurnRailItems;
+		},
+		get hasGenerationTasks() {
+			return hasGenerationTasks;
 		},
 		get unloadedOlderTurnCount() {
 			return unloadedOlderTurnCount;
