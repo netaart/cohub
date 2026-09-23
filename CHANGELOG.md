@@ -4,6 +4,19 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.56 — 2026-09-23
+
+- **Session media browser**: the workspace header now surfaces a `Browse generated media` action whenever a session has generation tasks, opening the Task Browser App against that session so generated images and media can be reviewed in place. Availability is discovered from a single bounded `tasks.list` query and refreshed by `task.created` / `task.updated` realtime events instead of polling, and the App itself now uses the current `auth.authorize` scope model with a silent one-shot grant attempt before falling back to the explicit access prompt.
+- **Event-driven native sync**: native Pi/Codex reconciliation no longer runs on fixed 5-second scans. The Runtime supervisor wakes sync only on a native capture or a channel reconnect, then applies bounded exponential backoff (1s → 30s) after a failed flush, so idle Runtimes stop scanning while reconnects and missed Codex hooks are still closed. Lazily-created transcripts, vanished workspaces, and unbound projects are classified as ordinary skips rather than capture failures.
+- **Local-time CLI output**: `cohub` tables and summaries now print timestamps in the machine's local timezone with an explicit UTC offset instead of raw UTC ISO strings. Every column whose key ends in `At`/`Timestamp` is formatted centrally, structured `--json` output still returns the untouched server values, and absent values render empty rather than a confident-looking epoch.
+- **Dedicated queue Redis**: the gateway now requires an explicit `BULLMQ_REDIS_URL` and fails fast at startup instead of silently falling back to `REDIS_URL` or `localhost`. Queue traffic stays isolated from cache/session Redis in every environment, with the deployment secret templates updated to match.
+
+### Bug Fixes
+
+- Native sync skips are only a warning-free no-op — Pi and Codex adapters no longer surface `Cohub sync pending` for not-yet-written transcripts, and `cohub runtime import` records such captures as skipped rather than failed, so a normal skip no longer flips the command's exit code.
+- `cohub runtime import` reports skipped and failed conversations separately, keeping real transcript and daemon errors actionable while remaining quiet about expected skips.
+- CLI diagnostics and runtime strings are now English-only across CLI, server, API, SDK, logs, and developer tooling, with web UI copy moving fully onto the i18n/Paraglide messages — each surface renders exactly one locale instead of inline bilingual strings.
+
 ## v2.55 — 2026-09-23
 
 - **Native runtime sync and import**: `cohub runtime attach` is folded into `cohub runtime up` — native chat sync now installs after a single default-yes consent, `up` is idempotent (skips already-enabled configs, re-asks after `detach`), and `runtime status` reports sync enablement plus per-Harness pending Turns and archives. A new `cohub runtime import` safely discovers and imports existing Pi/Codex conversations for the bound project while preserving original timestamps and local transcripts.
