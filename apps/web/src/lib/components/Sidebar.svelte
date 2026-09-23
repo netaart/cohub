@@ -40,6 +40,7 @@ import {
 	Save,
 	Search,
 	Settings,
+	Sparkles,
 	Tags,
 	Trash2,
 	X,
@@ -225,7 +226,9 @@ const TASK_PAGE_SIZE = 10;
 let sidebarRootEl: HTMLElement | null = $state(null);
 let userMenuAnchorEl: HTMLDivElement | null = $state(null);
 let expandedUserMenuAnchorEl: HTMLDivElement | null = $state(null);
+let helpMenuAnchorEl: HTMLDivElement | null = $state(null);
 let showUserMenu = $state(false);
+let showHelpMenu = $state(false);
 // Hydrate synchronously from the local cache so a freshly mounted sidebar
 // (e.g. the mobile drawer, which unmounts on close) can resolve the current
 // space on first paint instead of flashing the empty "Select a space" state
@@ -2477,6 +2480,7 @@ function returnFromSettings() {
 
 function openHelpPanel() {
 	showUserMenu = false;
+	showHelpMenu = false;
 	onClose?.();
 	window.dispatchEvent(new CustomEvent("cohub:open-help-panel"));
 }
@@ -3222,6 +3226,9 @@ onMount(() => {
 		if (!(target instanceof Element)) return;
 		if (!target.closest("[data-user-menu]")) {
 			showUserMenu = false;
+		}
+		if (!target.closest("[data-help-menu]")) {
+			showHelpMenu = false;
 		}
 		if (
 			renamingSessionId &&
@@ -4636,21 +4643,6 @@ $effect(() => {
           <BarChart3 class="w-3.5 h-3.5" />
           <span>{m.sidebar_trending({}, { locale })}</span>
         </a>
-        <a
-          href={locale === "zh-CN" ? "/zh/docs" : "/docs"}
-          class="flex items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
-        >
-          <BookOpen class="w-3.5 h-3.5" />
-          <span>{m.sidebar_docs({}, { locale })}</span>
-        </a>
-        <a
-          href="/changelog"
-          class="flex items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
-          onclick={(e) => { e.preventDefault(); showUserMenu = false; handleNavigate('/changelog'); }}
-        >
-          <History class="w-3.5 h-3.5" />
-          <span>{m.sidebar_changelog({}, { locale })}</span>
-        </a>
 	        <button
 	          type="button"
 	          class="flex items-center gap-2 w-full px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
@@ -4675,7 +4667,7 @@ $effect(() => {
         type="button"
         data-user-menu
         class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-[6px] rounded-[5px] hover:bg-bg-hover transition-colors duration-100 cursor-pointer"
-        onclick={() => { showUserMenu = !showUserMenu; }}
+        onclick={() => { showHelpMenu = false; showUserMenu = !showUserMenu; }}
       >
         <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="xs" class="h-[22px] w-[22px] border-0" />
         <div class="flex-1 min-w-0 text-left">
@@ -4683,15 +4675,57 @@ $effect(() => {
         </div>
         <ChevronDown class={'w-3 h-3 text-text-tertiary shrink-0 transition-transform duration-150 ' + (showUserMenu ? 'rotate-180' : '')} />
       </button>
-      <button
-        type="button"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[5px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-        aria-label={m.sidebar_help({}, { locale })}
-        title={m.sidebar_help({}, { locale })}
-        onclick={openHelpPanel}
-      >
-        <CircleHelp class="h-[18px] w-[18px]" />
-      </button>
+      <div class="relative shrink-0" bind:this={helpMenuAnchorEl} data-help-menu>
+        {#if showHelpMenu}
+          <div
+            class="w-64 overflow-hidden rounded-md border border-border-subtle bg-bg-primary py-1 shadow-lg"
+            data-help-menu
+            use:floatNear={{
+              getAnchor: () => helpMenuAnchorEl,
+              placement: "top-start",
+              gap: 4,
+              width: 256,
+              zIndex: 90,
+            }}
+          >
+            <a
+              href="/changelog"
+              class="flex items-center gap-2.5 px-3 py-2 text-[13px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              onclick={(e) => { e.preventDefault(); showHelpMenu = false; void handleNavigate('/changelog'); }}
+            >
+              <Sparkles class="h-4 w-4 shrink-0 text-text-tertiary" />
+              <span>{m.sidebar_whats_new({}, { locale })}</span>
+            </a>
+            <div class="mx-3 my-1 h-px bg-border-subtle"></div>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              onclick={openHelpPanel}
+            >
+              <Keyboard class="h-4 w-4 shrink-0 text-text-tertiary" />
+              <span>{m.sidebar_help({}, { locale })}</span>
+            </button>
+            <a
+              href={locale === "zh-CN" ? "/zh/docs" : "/docs"}
+              class="flex items-center gap-2.5 px-3 py-2 text-[13px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              onclick={(e) => { e.preventDefault(); showHelpMenu = false; void handleNavigate(locale === "zh-CN" ? "/zh/docs" : "/docs"); }}
+            >
+              <BookOpen class="h-4 w-4 shrink-0 text-text-tertiary" />
+              <span>{m.sidebar_docs({}, { locale })}</span>
+            </a>
+          </div>
+        {/if}
+        <button
+          type="button"
+          class="flex h-8 w-8 items-center justify-center rounded-[5px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          aria-label={m.sidebar_open_help_menu({}, { locale })}
+          title={m.sidebar_open_help_menu({}, { locale })}
+          aria-expanded={showHelpMenu}
+          onclick={() => { showUserMenu = false; showHelpMenu = !showHelpMenu; }}
+        >
+          <CircleHelp class="h-[18px] w-[18px]" />
+        </button>
+      </div>
     </div>
   </div>
 </aside>
