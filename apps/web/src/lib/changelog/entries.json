@@ -1,5 +1,21 @@
 [
 	{
+		"version": "2.55",
+		"date": "2026-09-23",
+		"tags": ["v2.55.0"],
+		"highlights": [
+			"**Native runtime sync and import**: `cohub runtime attach` is folded into `cohub runtime up` — native chat sync now installs after a single default-yes consent, `up` is idempotent (skips already-enabled configs, re-asks after `detach`), and `runtime status` reports sync enablement plus per-Harness pending Turns and archives. A new `cohub runtime import` safely discovers and imports existing Pi/Codex conversations for the bound project while preserving original timestamps and local transcripts.",
+			"**Sidebar App icons and recency ordering**: the Apps list now renders icon + title + slug instead of bare monospace identifiers, adds a reusable `AppIcon` with lettered fallback and bounded retry across the expanded list, collapsed flyout, active row, and drag ghost, and serves apps newest-updated-first so an edit floats back to the top. Backed by a new `v2_idx_apps_space_updated` index (migration 0066) that turns the list into a pure index scan, with realtime snapshots re-sorted to avoid pinning stale positions.",
+			"**Unified upload limits and quota**: every durable upload path (space files, public files, chat/app attachments, avatars, gateway attachments) now shares one set of caps from `@cohub/protocol` instead of per-feature constants, and a single Redis-backed fixed-window per-user quota (5k files / 10 GiB per hour) replaces three separate rate limiters (token bucket, public-file windows, chat/avatar gates), while raising gateway single-file to 1 GiB, batch totals to 2 GiB / 2000 files, and inline uploads to 64 MiB.",
+			"**Cross-replica relay data dials**: runner data dials landing on a gateway replica that does not own the pending peer are now forwarded over an in-cluster WebSocket to the pairing pod via a Redis-published cluster hint, eliminating the ~50% 4404/4408 pairing failures across replicas; hint publish failures degrade gracefully to prior behavior."
+		],
+		"fixes": [
+			"Billing access blocks are now handled as terminal, user-facing results across inbound channels: a stable de-duplicated notice with a conversion link is enqueued before the event is acknowledged instead of surfacing as a transport failure, and the billing conversion URL is exposed on `BillingConversionIntent.primaryAction.href` for clients without an in-app action.",
+			"CLI diagnostics URL redaction no longer re-encodes healthy URLs — URLs without sensitive query keys stay byte-identical (wrapped-log trailing quotes no longer become `%22`) and the matcher no longer swallows quotes or angle brackets.",
+			"Public assets and gateway attachments are now charged against the shared byte quota without double-counting image fallback slots."
+		]
+	},
+	{
 		"version": "2.54",
 		"date": "2026-09-22",
 		"tags": ["v2.54.0", "v2.54.1"],
