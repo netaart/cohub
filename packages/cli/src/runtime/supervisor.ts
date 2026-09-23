@@ -14,7 +14,7 @@ import { RuntimeDiagnostics, serializeDiagnosticError, type RuntimeDiagnostic, t
 import { ownRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
 import { createDiagnosticConsole, type RuntimeSummary } from "./presentation.js";
 import { RuntimeSessionStore } from "./session-store.js";
-import { captureNativeSession, flushNativeSessions, nativeWebSocketTransport } from "./native-sync.js";
+import { captureNativeSession, flushNativeSessions, nativeWebSocketTransport, summarizeNativeSyncErrors } from "./native-sync.js";
 import type { NativeRuntimeEvent } from "@neta-art/cohub";
 import { serveNativeDaemon } from "./native-ipc.js";
 
@@ -225,17 +225,39 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
       nativeWakePending = false;
     };
     nativeSyncTask = (async () => {
-      const report = (error: unknown) => diagnostics.log("warn", "native.sync_pending", { error: serializeDiagnosticError(error) });
+      let lastFailureLogAt = 0;
+      let failureStartedAt = 0;
+      let accumulatedErrors: unknown[] = [];
       while (!signal.aborted) {
         await waitForNativeWake();
         if (signal.aborted) break;
         if (!nativeSend) continue;
         let failed = false;
+        const cycleErrors: unknown[] = [];
         try {
-          failed = await flushNativeSessions(config.spaceId, config.identity, signal, report, nativeWebSocketTransport(config.spaceId, config.identity, nativeSend));
+          failed = await flushNativeSessions(config.spaceId, config.identity, signal, (error) => cycleErrors.push(error), nativeWebSocketTransport(config.spaceId, config.identity, nativeSend));
         }
         catch (error) {
-          if (!signal.aborted) { report(error); failed = true; }
+          if (!signal.aborted) { cycleErrors.push(error); failed = true; }
+        }
+        if (cycleErrors.length && !signal.aborted) {
+          const now = Date.now();
+          failureStartedAt ||= now;
+          accumulatedErrors.push(...cycleErrors);
+          if (!lastFailureLogAt || now - lastFailureLogAt >= 60_000) {
+            diagnostics.log("warn", "native.sync_pending", {
+              failedStores: accumulatedErrors.length,
+              retryInMs: nativeRetryDelay,
+              errors: summarizeNativeSyncErrors(accumulatedErrors),
+            });
+            accumulatedErrors = [];
+            lastFailureLogAt = now;
+          }
+        } else if (!signal.aborted && !failed && failureStartedAt) {
+          diagnostics.log("info", "native.sync_recovered", { durationMs: Date.now() - failureStartedAt });
+          failureStartedAt = 0;
+          lastFailureLogAt = 0;
+          accumulatedErrors = [];
         }
         if (failed && !signal.aborted) {
           nativeWakePending = false;

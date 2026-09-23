@@ -8,6 +8,7 @@ import { readNativeTranscript, readNativeTranscriptHeader } from "./native-trans
 import { findRuntimeNativeSession } from "./session-store.js";
 import { listNativeSyncStores, nativeIdentityHash, NativeSyncStore, type NativeSyncTransport } from "./native-sync-store.js";
 import type { NativeRuntimeEvent } from "@neta-art/cohub";
+import { serializeDiagnosticError } from "./diagnostics.js";
 
 export type NativeSyncConfig = { version: 1; identity: string; spaceId: string; root: string; harnesses: ("pi" | "codex")[] };
 export const nativeRuntimeRoot = (spaceId: string) => join(homedir(), ".local", "state", "cohub", "runtime", spaceId);
@@ -178,6 +179,34 @@ export function nativeWebSocketTransport(spaceId: string, identity: string, send
   };
 }
 
+export const NATIVE_SYNC_SESSION_CONCURRENCY = 4;
+
+export async function runNativeSyncPool<T>(items: readonly T[], concurrency: number, signal: AbortSignal, processItem: (item: T) => Promise<void>) {
+  let next = 0;
+  const worker = async () => {
+    while (!signal.aborted) {
+      const index = next++;
+      if (index >= items.length) return;
+      await processItem(items[index] as T);
+    }
+  };
+  const results = await Promise.allSettled(Array.from({ length: Math.min(items.length, Math.max(1, concurrency)) }, worker));
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) throw failure.reason;
+}
+
+export function summarizeNativeSyncErrors(errors: unknown[]) {
+  const groups = new Map<string, { name: string; message: string; code?: string; status?: number; count: number }>();
+  for (const error of errors) {
+    const value = serializeDiagnosticError(error);
+    const key = JSON.stringify([value.name, value.code, value.status, value.causeCode, value.message]);
+    const group = groups.get(key);
+    if (group) group.count += 1;
+    else groups.set(key, { name: value.name ?? "Error", message: value.message, ...(value.code ? { code: value.code } : {}), ...(value.status ? { status: value.status } : {}), count: 1 });
+  }
+  return [...groups.values()];
+}
+
 export async function flushNativeSessions(spaceId: string, identity: string, signal: AbortSignal, report: (error: unknown) => void, transportOverride?: NativeSyncTransport): Promise<boolean> {
   if (currentIdentityKey() !== identity) return false;
   const runtimeRoot = nativeRuntimeRoot(spaceId);
@@ -187,11 +216,11 @@ export async function flushNativeSessions(spaceId: string, identity: string, sig
   if (!transport) return false;
   const stores = await listNativeSyncStores(runtimeRoot, spaceId, identity, transport);
   let failed = false;
-  for (const store of stores) {
-    signal.throwIfAborted();
-    const binding = await store.binding();
-    if (!config.harnesses.includes(binding.harness)) continue;
+  await runNativeSyncPool(stores, NATIVE_SYNC_SESSION_CONCURRENCY, signal, async (store) => {
     try {
+      signal.throwIfAborted();
+      const binding = await store.binding();
+      if (!config.harnesses.includes(binding.harness)) return;
       // Codex hooks trigger captures; re-reading here also closes gaps after reconnects or missed hooks.
       if (binding.harness === "codex") await store.capture(binding.path, await readNativeTranscript(binding.path, "codex"));
       await store.flush(AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
@@ -202,6 +231,6 @@ export async function flushNativeSessions(spaceId: string, identity: string, sig
         report(error);
       }
     }
-  }
+  });
   return failed;
 }

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { readNativeTranscript } from "../src/runtime/native-transcript.js";
-import { discoverNativeImportCandidates } from "../src/runtime/native-sync.js";
+import { discoverNativeImportCandidates, NATIVE_SYNC_SESSION_CONCURRENCY, runNativeSyncPool, summarizeNativeSyncErrors } from "../src/runtime/native-sync.js";
 import { NativeSyncStore, nativeStableId, type NativeSyncTransport } from "../src/runtime/native-sync-store.js";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
 import { codexNativeHookBlock } from "../src/runtime/native-install.js";
@@ -15,6 +15,54 @@ import type { RuntimeTurnInput } from "@neta-art/cohub";
 import type { NativeTurnBinding, NativeTurnComplete, NativeTurnStart } from "@neta-art/cohub";
 
 const at = "2026-09-21T00:00:00.000Z";
+
+test("native sync processes independent sessions with bounded concurrency", async () => {
+  const activeByItem = new Map<number, number>();
+  let active = 0;
+  let maximum = 0;
+  await runNativeSyncPool(Array.from({ length: 16 }, (_, index) => index), NATIVE_SYNC_SESSION_CONCURRENCY, new AbortController().signal, async (item) => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    activeByItem.set(item, (activeByItem.get(item) ?? 0) + 1);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active -= 1;
+  });
+  assert.equal(maximum, NATIVE_SYNC_SESSION_CONCURRENCY);
+  assert.equal(activeByItem.size, 16);
+  assert.ok([...activeByItem.values()].every((count) => count === 1));
+});
+
+test("native sync cancellation stops new sessions and waits for active sessions", async () => {
+  const controller = new AbortController();
+  let active = 0;
+  let started = 0;
+  let resolveStarted = () => {};
+  let release: (() => void) | undefined;
+  const bothStarted = new Promise<void>((resolve) => { resolveStarted = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const flush = runNativeSyncPool([1, 2, 3, 4], 2, controller.signal, async () => {
+    active += 1;
+    started += 1;
+    if (active === 2) resolveStarted();
+    await gate;
+    active -= 1;
+  });
+  await bothStarted;
+  controller.abort();
+  release?.();
+  await flush;
+  assert.equal(started, 2);
+  assert.equal(active, 0);
+});
+
+test("native sync diagnostics group repeated errors without retaining stack traces", () => {
+  const timeout = Object.assign(new Error("Native Runtime event timed out"), { code: "ETIMEDOUT" });
+  const grouped = summarizeNativeSyncErrors([timeout, timeout, new Error("connection closed")]);
+  assert.equal(grouped.length, 2);
+  assert.equal(grouped.find((item) => item.code === "ETIMEDOUT")?.count, 2);
+  assert.equal(grouped.find((item) => item.message === "connection closed")?.count, 1);
+  assert.equal(Object.hasOwn(grouped[0] ?? {}, "stack"), false);
+});
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
 function piHeader(id: string, cwd: string) { return line({ type: "session", version: 3, id, cwd, timestamp: at }); }
 function piMessage(id: string, parentId: string | null, role: string, content: unknown, extra: Record<string, unknown> = {}) {

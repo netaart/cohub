@@ -112,7 +112,7 @@ export function registerRuntime(program: Command) {
         const candidates = discovered.candidates.filter((candidate) => !options.session || candidate.nativeSessionId === options.session);
         const result = {
           spaceId, root, harnesses, candidates, errors: discovered.errors,
-          imported: 0, failed: [] as Array<{ path: string; message: string }>, skipped: [] as Array<{ path: string; message: string }>, dryRun: Boolean(options.dryRun),
+          imported: 0, pendingTurns: 0, failed: [] as Array<{ path: string; message: string }>, skipped: [] as Array<{ path: string; message: string }>, dryRun: Boolean(options.dryRun),
           complete: discovered.errors.length === 0,
         };
         if (jsonRequested(options) && options.dryRun) {
@@ -150,23 +150,33 @@ export function registerRuntime(program: Command) {
             }
           } finally { rl.close(); }
         }
+        let processed = 0;
         for (const candidate of candidates) {
+          if (controller.signal.aborted) break;
           try {
             const response = await requestNativeDaemon({ harness: candidate.harness, cwd: root, path: candidate.path, nativeSessionId: candidate.nativeSessionId,
               sessionStartedAt: candidate.sessionStartedAt, origin: "local_import", settled: true });
             applyNativeImportResponse(result, candidate.path, response);
+            if (response.ok) result.pendingTurns += response.pendingTurns;
           } catch (error) {
-            result.failed.push({ path: candidate.path, message: error instanceof Error ? error.message : String(error) });
+            if (!controller.signal.aborted) result.failed.push({ path: candidate.path, message: error instanceof Error ? error.message : String(error) });
+          } finally {
+            processed += 1;
+            if (!jsonRequested(options) && !controller.signal.aborted) {
+              process.stderr.write(`\rSubmitted ${result.imported}/${candidates.length} · pending ${result.pendingTurns} Turns`);
+            }
           }
         }
-        result.complete = result.complete && result.failed.length === 0;
-        if (jsonRequested(options)) outJson(result);
+        const cancelled = controller.signal.aborted;
+        result.complete = result.complete && result.failed.length === 0 && !cancelled;
+        if (jsonRequested(options)) outJson({ ...result, cancelled, processed });
         else {
-          process.stdout.write(`Imported ${result.imported}/${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}\n`);
+          if (processed) process.stderr.write("\n");
+          process.stdout.write(`Submitted ${result.imported}/${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}${cancelled ? " (interrupted)" : ""}\n`);
           for (const error of [...discovered.errors, ...result.skipped, ...result.failed]) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
-          process.stdout.write("Uploads continue in the local Runtime background\n");
+          process.stdout.write("Uploads continue in the local Runtime background; use runtime status to check confirmation\n");
         }
-        if (!result.complete) process.exitCode = 1;
+        if (!result.complete && !cancelled) process.exitCode = 1;
       } catch (cause) { reportFailure(cause); }
       finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
     });
