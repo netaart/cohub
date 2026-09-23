@@ -26,9 +26,10 @@ import { Readable } from "node:stream";
 // v2.54.1 keeps the same wire protocol and adds relay diagnostics: data-channel
 // pairing outlives the runner's dial timeout, dial failures distinguish a
 // timeout from an explicit rejection, and teardown-time websocket write
-// failures log at debug instead of warn. No new capability is required, so this
-// pin is a diagnostics upgrade only.
-export const SANDBOXD_VERSION = "v2.54.1";
+// failures log at debug instead of warn. v2.55.0 republishes that compatible
+// runner alongside the matching platform release; no new runner capability is
+// required.
+export const SANDBOXD_VERSION = "v2.55.0";
 
 const BINARY_NAME = "cohub-sandboxd";
 
