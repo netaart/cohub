@@ -7,7 +7,7 @@ export async function runCodexNativeHook(payload: unknown) {
   if (!value || typeof value.cwd !== "string" || typeof value.session_id !== "string") throw new Error("Invalid Codex hook identity");
   if (typeof value.transcript_path !== "string" || !value.transcript_path) return;
   const result = await requestNativeDaemon({ harness: "codex", cwd: value.cwd, path: value.transcript_path, nativeSessionId: value.session_id });
-  if (!result.ok) throw new Error(result.message);
+  if (!result.ok && !result.skipped) throw new Error(result.message);
 }
 
 async function main() {

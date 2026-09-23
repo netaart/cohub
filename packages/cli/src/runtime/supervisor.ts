@@ -196,25 +196,65 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
       }
     };
     bridgeTask = runBridge();
-    closeNativeDaemon = await serveNativeDaemon({ runtimeRoot: store.root, handle: async (request) => ({
-      store: await captureNativeSession(request),
-    }) });
+    // Native reconciliation is event-driven: captures and channel reconnects wake it, while failures
+    // get bounded exponential retries so idle Runtimes do not scan every few seconds.
+    let nativeWakePending = true;
+    let nativeWake: (() => void) | null = null;
+    let nativeRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let nativeRetryDelay = 1000;
+    const wakeNativeSync = () => {
+      nativeWakePending = true;
+      if (nativeRetryTimer) { clearTimeout(nativeRetryTimer); nativeRetryTimer = undefined; }
+      nativeWake?.();
+      nativeWake = null;
+    };
+    const waitForNativeWake = async () => {
+      if (nativeWakePending) { nativeWakePending = false; return; }
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          signal.removeEventListener("abort", finish);
+          if (nativeWake === finish) nativeWake = null;
+          resolve();
+        };
+        nativeWake = finish;
+        signal.addEventListener("abort", finish, { once: true });
+        if (signal.aborted) finish();
+      });
+      nativeWakePending = false;
+    };
     nativeSyncTask = (async () => {
       const report = (error: unknown) => diagnostics.log("warn", "native.sync_pending", { error: serializeDiagnosticError(error) });
       while (!signal.aborted) {
+        await waitForNativeWake();
+        if (signal.aborted) break;
+        if (!nativeSend) continue;
+        let failed = false;
         try {
-          if (nativeSend) await flushNativeSessions(config.spaceId, config.identity, signal, report, nativeWebSocketTransport(config.spaceId, config.identity, nativeSend));
+          failed = await flushNativeSessions(config.spaceId, config.identity, signal, report, nativeWebSocketTransport(config.spaceId, config.identity, nativeSend));
         }
-        catch (error) { if (!signal.aborted) report(error); }
-        await delay(5000, undefined, { signal }).catch(() => undefined);
+        catch (error) {
+          if (!signal.aborted) { report(error); failed = true; }
+        }
+        if (failed && !signal.aborted) {
+          nativeRetryTimer = setTimeout(() => { nativeRetryTimer = undefined; wakeNativeSync(); }, nativeRetryDelay);
+          nativeRetryDelay = Math.min(30_000, nativeRetryDelay * 2);
+        } else if (!failed) {
+          nativeRetryDelay = 1000;
+        }
       }
+      if (nativeRetryTimer) clearTimeout(nativeRetryTimer);
     })();
+    closeNativeDaemon = await serveNativeDaemon({ runtimeRoot: store.root, handle: async (request) => {
+      const result = { store: await captureNativeSession(request) };
+      if (result.store) wakeNativeSync();
+      return result;
+    } });
     await serveRuntime({
       spaceId: config.spaceId, cwd: config.root, url: url.toString(), capabilities,
       harnesses: config.executables, runtimeId: status.runtimeId, diagnostics, token, signal, store,
       onReady: () => update({ harnessConnected: true }),
       onDisconnected: () => { nativeSend = null; update({ harnessConnected: false }); },
-      onNativeChannel: (send) => { nativeSend = send; },
+      onNativeChannel: (send) => { nativeSend = send; wakeNativeSync(); },
     });
   } catch (error) {
     if (!signal.aborted) {

@@ -13,7 +13,7 @@ import { discoverHarnesses, executePi, executeCodex } from "../src/runtime/harne
 import { askNativeSyncConsent, nativeSyncSatisfied } from "../src/runtime/native-attach.js";
 import { formatNativeSync } from "../src/runtime/presentation.js";
 import { Command } from "commander";
-import { parseRuntimeHarnesses, registerRuntime } from "../src/commands/runtime.js";
+import { parseRuntimeHarnesses, registerRuntime, applyNativeImportResponse } from "../src/commands/runtime.js";
 import { codexArchiveTotals, codexTokenTotals, codexUsage, subtractCodexTokens } from "../src/runtime/codex-usage.js";
 
 const jsonl = (value: unknown) => `${JSON.stringify(value)}\n`;
@@ -22,6 +22,19 @@ test("Runtime CLI exposes the complete lifecycle without legacy sandbox commands
   const program = new Command();
   registerRuntime(program);
   assert.deepEqual(program.commands[0]?.commands.map((command) => command.name()), ["up", "detach", "import", "status", "down", "logs"]);
+});
+
+test("runtime import records skipped captures without turning them into failures", () => {
+  const result = { imported: 0, failed: [] as Array<{ path: string; message: string }>, skipped: [] as Array<{ path: string; message: string }> };
+  applyNativeImportResponse(result, "/tmp/disappeared.jsonl", { ok: false, skipped: true, message: "No native capture is pending" });
+  assert.deepEqual(result, {
+    imported: 0,
+    failed: [],
+    skipped: [{ path: "/tmp/disappeared.jsonl", message: "No native capture is pending" }],
+  });
+  applyNativeImportResponse(result, "/tmp/imported.jsonl", { ok: true, pendingTurns: 1 });
+  assert.equal(result.imported, 1);
+  assert.throws(() => applyNativeImportResponse(result, "/tmp/failed.jsonl", { ok: false, message: "Native Runtime failed" }), /Native Runtime failed/);
 });
 
 test("native sync consent and idempotence decide installation without blocking startup", async () => {

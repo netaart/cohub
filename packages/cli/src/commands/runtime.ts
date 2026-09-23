@@ -8,7 +8,7 @@ import { canonicalRuntimeRoot, getRuntimeSpaceBinding } from "../runtime/space-b
 import { installNativeSync } from "../runtime/native-install.js";
 import { discoverNativeImportCandidates, nativeRuntimeRoot, readNativeSyncConfig } from "../runtime/native-sync.js";
 import { listNativeSyncStores } from "../runtime/native-sync-store.js";
-import { requestNativeDaemon } from "../runtime/native-ipc.js";
+import { requestNativeDaemon, type NativeIpcResponse } from "../runtime/native-ipc.js";
 import { requestRuntimeInstance, runtimeInstanceDirectory } from "../runtime/instance.js";
 import { atLeastLevel, diagnosticLevels, formatDiagnostic, formatNativeSync, printRuntimeSummary } from "../runtime/presentation.js";
 import { RuntimeSessionStore } from "../runtime/session-store.js";
@@ -21,6 +21,21 @@ const reportFailure = (cause: unknown) => {
   process.exitCode = 1;
 };
 type TargetOptions = { space?: string; json?: boolean };
+
+export function applyNativeImportResponse(result: {
+  imported: number;
+  failed: Array<{ path: string; message: string }>;
+  skipped: Array<{ path: string; message: string }>;
+}, path: string, response: NativeIpcResponse): void {
+  if (!response.ok) {
+    if (response.skipped) {
+      result.skipped.push({ path, message: response.message });
+      return;
+    }
+    throw new Error(response.message);
+  }
+  result.imported += 1;
+}
 
 export function registerRuntime(program: Command) {
   const runtime = program.command("runtime").description("Connect a local workspace");
@@ -97,7 +112,7 @@ export function registerRuntime(program: Command) {
         const candidates = discovered.candidates.filter((candidate) => !options.session || candidate.nativeSessionId === options.session);
         const result = {
           spaceId, root, harnesses, candidates, errors: discovered.errors,
-          imported: 0, failed: [] as Array<{ path: string; message: string }>, dryRun: Boolean(options.dryRun),
+          imported: 0, failed: [] as Array<{ path: string; message: string }>, skipped: [] as Array<{ path: string; message: string }>, dryRun: Boolean(options.dryRun),
           complete: discovered.errors.length === 0,
         };
         if (jsonRequested(options) && options.dryRun) {
@@ -139,8 +154,7 @@ export function registerRuntime(program: Command) {
           try {
             const response = await requestNativeDaemon({ harness: candidate.harness, cwd: root, path: candidate.path, nativeSessionId: candidate.nativeSessionId,
               sessionStartedAt: candidate.sessionStartedAt, origin: "local_import", settled: true });
-            if (!response.ok) throw new Error(response.message);
-            result.imported += 1;
+            applyNativeImportResponse(result, candidate.path, response);
           } catch (error) {
             result.failed.push({ path: candidate.path, message: error instanceof Error ? error.message : String(error) });
           }
@@ -149,7 +163,7 @@ export function registerRuntime(program: Command) {
         if (jsonRequested(options)) outJson(result);
         else {
           process.stdout.write(`Imported ${result.imported}/${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}\n`);
-          for (const error of [...discovered.errors, ...result.failed]) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
+          for (const error of [...discovered.errors, ...result.skipped, ...result.failed]) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
           process.stdout.write("Uploads continue in the local Runtime background\n");
         }
         if (!result.complete) process.exitCode = 1;

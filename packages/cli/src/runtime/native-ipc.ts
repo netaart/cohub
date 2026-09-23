@@ -19,7 +19,17 @@ type NativeIpcRequest = {
   sessionStartedAt?: string;
   origin?: "local_import";
 };
-type NativeIpcResponse = { ok: true; pendingTurns: number } | { ok: false; message: string };
+export type NativeIpcResponse = { ok: true; pendingTurns: number } | { ok: false; skipped?: true; message: string };
+
+/**
+ * `store: null` means the request was valid but nothing was applicable yet (an unbound
+ * workspace, or a transcript a harness has not written). That is not a sync failure, so
+ * clients stay silent instead of warning about it.
+ */
+export async function nativeCaptureResponse(result: { store: NativeSyncStore | null }): Promise<NativeIpcResponse> {
+  if (!result.store) return { ok: false, skipped: true, message: "No native capture is pending" };
+  return { ok: true, pendingTurns: (await result.store.status()).pendingTurns };
+}
 
 const parse = (raw: string): NativeIpcRequest => {
   const value = JSON.parse(raw) as NativeIpcRequest;
@@ -35,14 +45,17 @@ const parse = (raw: string): NativeIpcRequest => {
 export async function nativeDaemonSocketFor(cwd: string): Promise<string | null> {
   const identity = currentIdentityKey();
   if (!identity) return null;
-  const root = await canonicalRuntimeRoot(cwd);
+  // A vanished workspace is unbound, not an error; the terminal has nothing left to sync.
+  const root = await canonicalRuntimeRoot(cwd).catch((error) => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; });
+  if (!root) return null;
   const binding = await getRuntimeSpaceBinding(root, identity);
   return binding ? socketPath(nativeRuntimeRoot(binding.spaceId)) : null;
 }
 
 export async function requestNativeDaemon(input: Omit<NativeIpcRequest, "type">): Promise<NativeIpcResponse> {
   const path = await nativeDaemonSocketFor(input.cwd);
-  if (!path) return { ok: false, message: "Native Runtime is not bound" };
+  // An unbound workspace is a normal state, not an error the terminal should surface.
+  if (!path) return { ok: false, skipped: true, message: "Native Runtime is not bound" };
   return new Promise((resolve, reject) => {
     const socket = createConnection(path);
     let buffer = "";
@@ -90,7 +103,7 @@ export async function serveNativeDaemon(input: {
       void (async () => {
         const request = parse(buffer.slice(0, newline));
         const result = await input.handle(request);
-        respond({ ok: true, pendingTurns: result.store ? (await result.store.status()).pendingTurns : 0 });
+        respond(await nativeCaptureResponse(result));
       })().catch((error) => respond({ ok: false, message: error instanceof Error ? error.message : String(error) }));
     });
   });

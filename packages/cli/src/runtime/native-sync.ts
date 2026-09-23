@@ -121,21 +121,29 @@ export async function readNativeSyncConfig(runtimeRoot: string, identity: string
 }
 
 const nativeStores = new Map<string, NativeSyncStore>();
+const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
+
+/** Canonical alias, but a missing target reports itself instead of failing capture. */
+const canonicalPathOrNull = async (path: string) => canonicalRuntimeRoot(path).catch((error) => { if (missing(error)) return null; throw error; });
 
 /** Local capture only. Neither Pi callbacks nor Codex hooks wait for Cohub's network. */
 export async function captureNativeSession(input: { harness: "pi" | "codex"; cwd: string; path: string; nativeSessionId?: string; settled?: boolean; leafId?: string | null; sessionStartedAt?: string; origin?: "local_import" }): Promise<NativeSyncStore | null> {
   if (process.env.COHUB_TURN_ID || process.env.COHUB_EXECUTION_TOKEN) return null;
   const identity = currentIdentityKey();
   if (!identity) return null;
-  const root = await canonicalRuntimeRoot(input.cwd);
+  // Pi and Codex create their transcripts lazily, so a pending capture for a file that does
+  // not exist yet (or a workspace that has since been removed) is not a sync failure.
+  const root = await canonicalPathOrNull(input.cwd);
+  if (!root) return null;
   const space = await getRuntimeSpaceBinding(root, identity);
   if (!space) return null;
   const runtimeRoot = nativeRuntimeRoot(space.spaceId);
   const config = await readNativeSyncConfig(runtimeRoot, identity);
   if (!config || config.root !== root || config.spaceId !== space.spaceId || !config.harnesses.includes(input.harness)) return null;
-  const path = await canonicalRuntimeRoot(input.path);
+  const path = await canonicalPathOrNull(input.path);
+  if (!path) return null;
   const transcript = await readNativeTranscript(path, input.harness, input);
-  if (await canonicalRuntimeRoot(transcript.cwd) !== root || input.nativeSessionId && transcript.nativeSessionId !== input.nativeSessionId) throw new Error("Native transcript belongs to another project or Session");
+  if (await canonicalPathOrNull(transcript.cwd) !== root || input.nativeSessionId && transcript.nativeSessionId !== input.nativeSessionId) throw new Error("Native transcript belongs to another project or Session");
   const key = JSON.stringify([identity, space.spaceId, input.harness, transcript.nativeSessionId, path]);
   let store = nativeStores.get(key);
   if (!store) {
@@ -145,7 +153,7 @@ export async function captureNativeSession(input: { harness: "pi" | "codex"; cwd
     for (const candidate of candidates) if ((await candidate.binding()).path === path) { store = candidate; break; }
     if (!store) {
       const managed = await findRuntimeNativeSession(runtimeRoot, input.harness, transcript.nativeSessionId, path);
-      const managedPath = managed ? await canonicalRuntimeRoot(managed.path).catch((error) => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }) : null;
+      const managedPath = managed ? await canonicalPathOrNull(managed.path) : null;
       if (candidates.length && managedPath !== path) throw new Error("Native path changed; original bindings retained");
       // Restored Pi working copies can share a native ID. Existing Cohub sidecars disambiguate them.
       store = new NativeSyncStore({ runtimeRoot, spaceId: space.spaceId, identity, harness: input.harness, nativeSessionId: transcript.nativeSessionId,
@@ -170,24 +178,30 @@ export function nativeWebSocketTransport(spaceId: string, identity: string, send
   };
 }
 
-export async function flushNativeSessions(spaceId: string, identity: string, signal: AbortSignal, report: (error: unknown) => void, transportOverride?: NativeSyncTransport) {
-  if (currentIdentityKey() !== identity) return;
+export async function flushNativeSessions(spaceId: string, identity: string, signal: AbortSignal, report: (error: unknown) => void, transportOverride?: NativeSyncTransport): Promise<boolean> {
+  if (currentIdentityKey() !== identity) return false;
   const runtimeRoot = nativeRuntimeRoot(spaceId);
   const config = await readNativeSyncConfig(runtimeRoot, identity);
-  if (!config || config.spaceId !== spaceId) return;
+  if (!config || config.spaceId !== spaceId) return false;
   const transport = transportOverride;
-  if (!transport) return;
+  if (!transport) return false;
   const stores = await listNativeSyncStores(runtimeRoot, spaceId, identity, transport);
+  let failed = false;
   for (const store of stores) {
     signal.throwIfAborted();
     const binding = await store.binding();
     if (!config.harnesses.includes(binding.harness)) continue;
     try {
-      // Codex hooks only push capture requests while its terminal lives; the Daemon keeps re-reading
-      // the transcript between hooks so Stop-flushed Turns are picked up even if a hook is missed.
+      // Codex hooks trigger captures; re-reading here also closes gaps after reconnects or missed hooks.
       if (binding.harness === "codex") await store.capture(binding.path, await readNativeTranscript(binding.path, "codex"));
       await store.flush(AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
     }
-    catch (error) { if (!signal.aborted) report(error); }
+    catch (error) {
+      if (!signal.aborted) {
+        failed = true;
+        report(error);
+      }
+    }
   }
+  return failed;
 }
