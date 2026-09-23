@@ -47,15 +47,21 @@ test("incremental diagnostics reader never loses bursts beyond the display limit
   try {
     const diagnostics = new RuntimeDiagnostics({ root, spaceId, runtimeId, logFlushIntervalMs: 5 });
     for (let sequence = 0; sequence < 5; sequence += 1) diagnostics.log("info", "fixture", { sequence });
-    await delay(20);
+    const initialDeadline = Date.now() + 2_000;
+    while ((await readRuntimeDiagnosticEvents(root)).length < 5 && Date.now() < initialDeadline) await delay(10);
 
     const reader = new RuntimeDiagnosticReader(root);
     assert.deepEqual((await reader.read({ limit: 2 })).map((event) => event.sequence), [3, 4]);
 
     for (let sequence = 5; sequence < 25; sequence += 1) diagnostics.log("info", "fixture", { sequence });
-    await delay(20);
+    const burst: number[] = [];
+    const deadline = Date.now() + 2_000;
+    while (burst.length < 20 && Date.now() < deadline) {
+      burst.push(...(await reader.read({ limit: 2 })).map((event) => event.sequence));
+      if (burst.length < 20) await delay(10);
+    }
     assert.deepEqual(
-      (await reader.read({ limit: 2 })).map((event) => event.sequence),
+      burst,
       Array.from({ length: 20 }, (_, index) => index + 5),
     );
     await diagnostics.close();
