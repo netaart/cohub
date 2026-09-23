@@ -2,8 +2,8 @@
 
 `cohub-search` is the standalone Tantivy indexer used by sandbox workspaces.
 It owns the index writer and exposes a small HTTP API over a Unix socket.
-The current provider is `workspace.candidates`: it returns candidate paths for
-exact `rg` verification, rather than replacing grep semantics.
+`workspace.candidates` returns content candidates for exact `rg` verification;
+`workspace.paths` serves `fs.find`-style path globs from a persistent snapshot.
 
 ## Release artifacts
 
@@ -52,15 +52,20 @@ curl --unix-socket /tmp/cohub-search/search.sock \
   -H 'content-type: application/json' \
   -d '{"literals":["workspace"],"limit":20}' \
   http://localhost/query
+curl --unix-socket /tmp/cohub-search/search.sock \
+  -H 'content-type: application/json' \
+  -d '{"pattern":"**/*.ts","fullPath":true,"limit":20}' \
+  http://localhost/paths/query
 ```
 
 Repeat `--ignore` on `serve`, `full`, `update`, `query`, and `status` to exclude
 directory names or workspace-relative directory prefixes. The sandbox passes its
 normalized filewatch ignore rules as `--ignore=pattern`.
 
-The index stores workspace-relative paths and lower-cased 3-gram content. It is
-used to produce candidate paths; `rg` remains responsible for exact matching,
-line numbers, context, and regular-expression semantics.
+The content index stores workspace-relative paths and lower-cased 3-gram
+content. It produces candidate paths; `rg` remains responsible for exact
+matching, line numbers, context, and regular-expression semantics. The path
+snapshot separately stores visible files and directories for glob queries.
 
 ## API
 
@@ -70,15 +75,26 @@ line numbers, context, and regular-expression semantics.
 - `POST /index/reconcile` (compare the persistent file snapshot with the workspace)
 - `POST /index/update` with `{ "changes": [...] }`
 - `POST /query` with `{ "literals": [...], "pathPrefix": "", "glob": "...", "limit": 1000 }`
+- `POST /paths/query` with `{ "pattern": "**/*.ts", "pathPrefix": "", "fullPath": true, "ignore": [], "limit": 1000 }`
 
 Search literals must contain at least 3 non-whitespace characters. The
 service default socket directory is private (`0700`) and the socket is
 `0600`.
 
 Incremental updates are coalesced for three seconds before a Tantivy commit.
+While changes are accepted but not yet committed, `/status`, `/query`, and
+`/paths/query` report `coverage: "partial"` so callers fall back to an exact
+scan. Coverage
+is `"complete"` once the in-process file snapshot has been produced or
+verified by this process, and `"stale"` after a restart until reconcile
+confirms the snapshot loaded from disk.
 The index directory contains a manifest with the family, generation, schema,
-analyzer version, and a persistent file snapshot. Restart reconciliation uses
-file metadata first, so a valid index is reused without rereading every file.
+analyzer version, a persistent file snapshot, and a separate path snapshot for
+`workspace.paths`. The path snapshot contains workspace-relative files and
+directories in the same ignored workspace domain as the watcher/search index,
+and is queried in memory for `fs.find`-style glob lookups. Restart
+reconciliation uses file metadata first, so a valid index is reused without
+rereading every file.
 Full builds remain available for first creation and recovery. The sandbox
 runtime treats this binary as an optional workspace-search feature: new cloud
 sandboxes resolve `latest.json`, verify the immutable release checksum, and

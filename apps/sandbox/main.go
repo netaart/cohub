@@ -150,7 +150,12 @@ func buildRuntime(
 	portsSink func(protocol.PortsChangedPayload),
 ) (*ws.Server, func(), func(), *search.Manager, func() filewatch.Status) {
 	processManager := process.NewManager(logger)
-	searchManager := search.NewManager(cfg, logger)
+	// The watcher is created below; the search manager resolves it lazily so
+	// coverage can reflect unflushed filewatch events.
+	var watcherRef *filewatch.Watcher
+	searchManager := search.NewManager(cfg, logger, func() bool {
+		return watcherRef != nil && watcherRef.HasPending()
+	})
 	searchManager.Start()
 	dispatcher := rpc.NewDispatcher(cfg, processManager, logger)
 	dispatcher.SetSearchManager(searchManager)
@@ -179,6 +184,7 @@ func buildRuntime(
 	}); err != nil {
 		logger.Warn("file watcher disabled", slog.String("error", err.Error()))
 	} else {
+		watcherRef = watcher
 		requestFSResync = watcher.RequestResync
 		watchStatus = watcher.Status
 		closers = append(closers, func() { watcher.Close() })

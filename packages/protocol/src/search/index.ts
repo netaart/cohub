@@ -1,6 +1,7 @@
 /** Family names are provider-owned strings. Keep only the active family as a
  * constant; new families should not require a protocol-package release. */
 export const WORKSPACE_CANDIDATE_INDEX_FAMILY = "workspace.candidates";
+export const WORKSPACE_PATH_INDEX_FAMILY = "workspace.paths";
 export type SearchIndexFamily = string;
 export type SearchDocumentType = string;
 

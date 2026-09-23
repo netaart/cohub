@@ -32,6 +32,12 @@ import {
   createLocalCrossSpaceReadTool,
 } from "../runtime/tools/local-cross-space-query-tools.js";
 import { formatRgJsonGrepResult } from "../runtime/tools/grep-json-format.js";
+import {
+  chunkGrepFileArgs,
+  extractRequiredGrepLiterals,
+  filterGrepCandidatesByGlob,
+  joinGrepCandidatePath,
+} from "../runtime/tools/grep-index-candidates.js";
 
 
 import { encodeGenerationPolicy, GENERATION_POLICY_ENV_KEY } from "@cohub/protocol/generation";
@@ -753,12 +759,17 @@ const FD_FIND_MAX_STDOUT_BYTES = DEFAULT_MAX_BYTES * 8;
 const FD_FIND_MAX_STDERR_BYTES = 8 * 1024;
 const FD_FIND_OUTPUT_LIMIT_MESSAGE = "Find output limit reached. Refine pattern or path.";
 
-function buildFdFindArgv(input: { pattern: string; path: string; limit: number; ignore?: string[] }) {
-  const useFullPath = input.pattern.includes("/");
-  let effectivePattern = input.pattern;
+function buildFdFindPattern(pattern: string) {
+  const useFullPath = pattern.includes("/");
+  let effectivePattern = pattern;
   if (useFullPath && !effectivePattern.startsWith("/") && !effectivePattern.startsWith("**/") && effectivePattern !== "**") {
     effectivePattern = `**/${effectivePattern}`;
   }
+  return { effectivePattern, useFullPath };
+}
+
+function buildFdFindArgv(input: { pattern: string; path: string; limit: number; ignore?: string[] }) {
+  const { effectivePattern, useFullPath } = buildFdFindPattern(input.pattern);
 
   const argv = [
     "fd",
@@ -775,6 +786,47 @@ function buildFdFindArgv(input: { pattern: string; path: string; limit: number; 
   }
   argv.push("--max-results", String(input.limit), "--", effectivePattern, input.path);
   return argv;
+}
+
+async function resolveFindIndexMatches(
+  connection: SandboxConnection,
+  pattern: string,
+  path: string,
+  limit: number,
+  ignore: string[] | undefined,
+  context: ToolRpcContext,
+): Promise<string[] | null> {
+  if (
+    connection.capabilities?.fsPathSearch !== true ||
+    !isSandboxWorkspacePath(path) ||
+    pattern.startsWith("/")
+  ) return null;
+  const { effectivePattern, useFullPath } = buildFdFindPattern(pattern);
+  try {
+    const result = await tracedRpc(
+      connection,
+      "fs.pathSearch",
+      {
+        pattern: effectivePattern,
+        path,
+        cwd: SANDBOX_WORKSPACE_PATH,
+        limit,
+        fullPath: useFullPath,
+        ignore,
+      },
+      { context },
+      false,
+    );
+    if (result.coverage !== "complete" || result.state !== "ready") {
+      logger.debug(`[Tool:find] path index not authoritative coverage=${result.coverage} state=${result.state ?? "unknown"}`);
+      return null;
+    }
+    logger.debug(`[Tool:find] path index matches=${result.matches.length}`);
+    return result.matches;
+  } catch (error) {
+    logger.debug(`[Tool:find] path index unavailable, falling back to fd: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 function formatFdFindPath(filePath: string, searchPath: string) {
@@ -817,12 +869,62 @@ function createRemoteFindOperations(): FindOperations {
 
         const connection = await getCurrentConnection();
         if (connection.capabilities?.processStartArgv) {
+          const rpcContext = captureToolRpcContext({ toolCallId });
+          const baseRelative = sandboxWorkspaceRelativePath(path);
+          const filter = await createCurrentWorkspaceVisibilityFilter(undefined, baseRelative ?? "");
+          const indexedMatches = await resolveFindIndexMatches(
+            connection,
+            pattern,
+            path,
+            options.limit,
+            options.ignore,
+            rpcContext,
+          );
+          const filterFindMatches = (rawMatches: string[]) => rawMatches
+            .map((match) => toPosixPath(match).replace(/^\.\//, "").replace(/\/$/, ""))
+            .filter((match) => {
+              if (baseRelative == null) return true;
+              const relativePath = match === "." ? baseRelative : baseRelative ? `${baseRelative}/${match}` : match;
+              return filter.isVisible(relativePath);
+            })
+            .slice(0, options.limit);
+          if (indexedMatches) return filterFindMatches(indexedMatches);
+
+          // A search-enabled sandbox has one structured fallback for find. It
+          // preserves the same ignore domain as the path index when the index
+          // is stale or unavailable; older sandboxes keep the direct fd path.
+          if (connection.capabilities?.fsPathSearch === true) {
+            const { effectivePattern, useFullPath } = buildFdFindPattern(pattern);
+            try {
+              const result = await tracedRpc(
+                connection,
+                "fs.find",
+                {
+                  pattern: effectivePattern,
+                  path,
+                  cwd: SANDBOX_WORKSPACE_PATH,
+                  limit: options.limit,
+                  maxResults: options.limit,
+                  mode: "glob",
+                  hidden: true,
+                  requireGit: false,
+                  ignoreVcs: false,
+                  fullPath: useFullPath,
+                  ignore: options.ignore,
+                },
+                { context: rpcContext },
+                false,
+              );
+              return filterFindMatches(result.matches);
+            } catch (error) {
+              logger.debug(`[Tool:find] structured fallback unavailable, using fd: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+
           const argv = buildFdFindArgv({ pattern, path, limit: options.limit, ignore: options.ignore });
           const stderrChunks: string[] = [];
           const matches: string[] = [];
           const updates = createThrottledTextToolUpdate(options.onUpdate, { maxChars: DEFAULT_MAX_BYTES });
-          const baseRelative = sandboxWorkspaceRelativePath(path);
-          const filter = await createCurrentWorkspaceVisibilityFilter(undefined, baseRelative ?? "");
           let lineBuffer = "";
           let stdoutBytes = 0;
           let stderrBytes = 0;
@@ -830,7 +932,6 @@ function createRemoteFindOperations(): FindOperations {
           let aborted = false;
           let activeProcessId: string | null = null;
           let abortSent = false;
-          const rpcContext = captureToolRpcContext({ toolCallId });
           const unregisterProcessAborts: Array<() => void> = [];
           const abortProcess = (processId: string) => {
             if (abortSent) return;
@@ -972,8 +1073,15 @@ const RG_GREP_TIMEOUT_SECS = 30;
 const RG_GREP_MAX_STDOUT_BYTES = DEFAULT_MAX_BYTES * 8;
 const RG_GREP_MAX_STDERR_BYTES = 8 * 1024;
 const RG_GREP_OUTPUT_LIMIT_MESSAGE = "Grep output limit reached. Refine pattern, path, or glob.";
+// Stay under the sandbox process.start argv limits (256 items, 64 KiB) when
+// index candidates are passed to rg as explicit files.
+const RG_GREP_ARGV_LIMITS = { maxItems: 240, maxBytes: 60 * 1024 };
+// Beyond this the literal is too common for the index to narrow the search;
+// a truncated candidate set falls back to a full rg walk.
+const GREP_INDEX_MAX_CANDIDATES = 512;
 
-function buildRgGrepArgv(input: GrepToolInput, searchPath: string) {
+/** rg argv without search targets; callers append a directory or explicit files. */
+function buildRgGrepArgv(input: GrepToolInput) {
   const argv = [
     "rg",
     "--line-number",
@@ -992,8 +1100,52 @@ function buildRgGrepArgv(input: GrepToolInput, searchPath: string) {
   if (input.ignoreCase) argv.push("--ignore-case");
   if (input.literal) argv.push("--fixed-strings");
   if (input.glob?.trim()) argv.push("--glob", input.glob);
-  argv.push("--", input.pattern, searchPath);
+  argv.push("--", input.pattern);
   return argv;
+}
+
+function isSandboxWorkspacePath(searchPath: string) {
+  if (!searchPath.startsWith("/")) return true;
+  return searchPath === SANDBOX_WORKSPACE_PATH || searchPath.startsWith(`${SANDBOX_WORKSPACE_PATH}/`);
+}
+
+/**
+ * Ask the sandbox trigram index for files that can contain every required
+ * literal of the pattern. Returns null whenever the index cannot answer
+ * authoritatively (feature missing, no usable literal, stale coverage, too
+ * many candidates, or any RPC failure) so the caller runs a full rg walk.
+ * An empty array is authoritative: no indexed file can match.
+ */
+async function resolveGrepIndexCandidates(
+  connection: SandboxConnection,
+  input: GrepToolInput,
+  searchPath: string,
+  context: ToolRpcContext,
+): Promise<string[] | null> {
+  if (connection.capabilities?.fsSearch !== true || !isSandboxWorkspacePath(searchPath)) return null;
+  const literals = extractRequiredGrepLiterals(input.pattern, { literal: input.literal });
+  if (literals.length === 0) return null;
+
+  let result: RpcRequestMap["fs.search"]["result"];
+  try {
+    result = await tracedRpc(
+      connection,
+      "fs.search",
+      { literals, path: searchPath, cwd: SANDBOX_WORKSPACE_PATH, limit: GREP_INDEX_MAX_CANDIDATES },
+      { context },
+      false,
+    );
+  } catch (error) {
+    logger.debug(`[Tool:grep] index unavailable, falling back to rg walk: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+  if (result.coverage !== "complete" || result.truncated) {
+    logger.debug(`[Tool:grep] index not authoritative coverage=${result.coverage} truncated=${result.truncated === true}`);
+    return null;
+  }
+  const files = filterGrepCandidatesByGlob(result.matches, input.glob);
+  logger.debug(`[Tool:grep] index candidates=${files.length} literals=${literals.length}`);
+  return files.map((relative) => joinGrepCandidatePath(searchPath, relative));
 }
 
 function isRgNoMatchOutput(lines: string[]) {
@@ -1087,7 +1239,14 @@ function createRemoteGrepTool() {
           let stdoutBytes = 0;
           let stderrBytes = 0;
           let stdoutLimitReached = false;
-          const argv = buildRgGrepArgv(grepInput, searchPath);
+          const baseArgv = buildRgGrepArgv(grepInput);
+          const candidates = await resolveGrepIndexCandidates(connection, grepInput, searchPath, rpcContext);
+          if (candidates && candidates.length === 0) {
+            return formatRgJsonGrepResult({ lines: [], searchPath: grepInput.path, limit: effectiveLimit });
+          }
+          const argvRuns = candidates
+            ? chunkGrepFileArgs(baseArgv, candidates, RG_GREP_ARGV_LIMITS).map((files) => [...baseArgv, ...files])
+            : [[...baseArgv, searchPath]];
           const emitPartial = () => {
             const partial = formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
             const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
@@ -1107,55 +1266,77 @@ function createRemoteGrepTool() {
             if (changed) emitPartial();
           };
 
-          const result = await tracedRpc(
-            connection,
-            "process.start",
-            {
-              argv,
-              cwd: SANDBOX_WORKSPACE_PATH,
-              timeoutSecs: RG_GREP_TIMEOUT_SECS,
-            },
-            {
-              context: rpcContext,
-              onEvent(event) {
-                if (event.type === "started") {
-                  activeProcessId = event.processId;
-                  logger.info(`[Tool:grep] process started processId=${event.processId} turnId=${rpcContext.turnId ?? ""} toolCallId=${toolCallId}`);
-                  if (rpcContext.turnId) {
-                    unregisterProcessAborts.push(registerActiveAbortHandle(rpcContext.turnId, {
-                      id: `grep:${toolCallId}:${event.processId}`,
-                      kind: "tool",
-                      toolName: "grep",
-                      abort: () => abortProcess(event.processId),
-                    }));
-                  }
-                  if (aborted) abortProcess(event.processId);
-                  return;
-                }
-
-                if (event.type === "stdout") {
-                  stdoutBytes += Buffer.byteLength(event.chunk, "utf8");
-                  if (stdoutBytes > RG_GREP_MAX_STDOUT_BYTES && activeProcessId) {
-                    stdoutLimitReached = true;
-                    abortProcess(activeProcessId);
+          const runRg = async (argv: string[]) => {
+            const result = await tracedRpc(
+              connection,
+              "process.start",
+              {
+                argv,
+                cwd: SANDBOX_WORKSPACE_PATH,
+                timeoutSecs: RG_GREP_TIMEOUT_SECS,
+              },
+              {
+                context: rpcContext,
+                onEvent(event) {
+                  if (event.type === "started") {
+                    activeProcessId = event.processId;
+                    logger.info(`[Tool:grep] process started processId=${event.processId} turnId=${rpcContext.turnId ?? ""} toolCallId=${toolCallId}`);
+                    if (rpcContext.turnId) {
+                      unregisterProcessAborts.push(registerActiveAbortHandle(rpcContext.turnId, {
+                        id: `grep:${toolCallId}:${event.processId}`,
+                        kind: "tool",
+                        toolName: "grep",
+                        abort: () => abortProcess(event.processId),
+                      }));
+                    }
+                    if (aborted) abortProcess(event.processId);
                     return;
                   }
-                  consumeStdout(event.chunk);
-                  return;
-                }
 
-                if (event.type === "stderr") {
-                  stderrBytes += Buffer.byteLength(event.chunk, "utf8");
-                  if (stderrBytes <= RG_GREP_MAX_STDERR_BYTES) stderrChunks.push(event.chunk);
-                }
+                  if (event.type === "stdout") {
+                    stdoutBytes += Buffer.byteLength(event.chunk, "utf8");
+                    if (stdoutBytes > RG_GREP_MAX_STDOUT_BYTES && activeProcessId) {
+                      stdoutLimitReached = true;
+                      abortProcess(activeProcessId);
+                      return;
+                    }
+                    consumeStdout(event.chunk);
+                    return;
+                  }
+
+                  if (event.type === "stderr") {
+                    stderrBytes += Buffer.byteLength(event.chunk, "utf8");
+                    if (stderrBytes <= RG_GREP_MAX_STDERR_BYTES) stderrChunks.push(event.chunk);
+                  }
+                },
               },
-            },
-          );
+            );
 
-          if (lineBuffer.trim()) {
-            lines.push(lineBuffer.trim());
-            lineBuffer = "";
-            emitPartial();
+            if (lineBuffer.trim()) {
+              lines.push(lineBuffer.trim());
+              lineBuffer = "";
+              emitPartial();
+            }
+            return result.exitCode ?? 0;
+          };
+
+          // Candidate chunks run sequentially and stop as soon as the match
+          // limit is covered; a full walk is a single run over searchPath.
+          for (const argv of argvRuns) {
+            const runStart = lines.length;
+            const exitCode = await runRg(argv);
+            if (aborted || stdoutLimitReached) break;
+
+            const stderr = stderrChunks.join("").trim();
+            const ignorableRgError = stderr.includes("No files were searched");
+            if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(lines.slice(runStart))) && !ignorableRgError) {
+              updates.flush();
+              return {
+                content: [{ type: "text" as const, text: stderr || `rg exited with code ${exitCode}` }],
+                details: createToolFailure(stderr || `rg exited with code ${exitCode}`),
+              };
+            }
+            if (lines.length >= effectiveLimit) break;
           }
           updates.flush();
 
@@ -1174,16 +1355,6 @@ function createRemoteGrepTool() {
             return {
               content: [{ type: "text" as const, text: partialText && partialText !== "No matches found" ? `${partialText}\n\n[${RG_GREP_OUTPUT_LIMIT_MESSAGE}]` : RG_GREP_OUTPUT_LIMIT_MESSAGE }],
               details: { ...(partial.details ?? {}), outputLimitReached: true, partial: true },
-            };
-          }
-
-          const exitCode = result.exitCode ?? 0;
-          const stderr = stderrChunks.join("").trim();
-          const ignorableRgError = stderr.includes("No files were searched");
-          if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(lines)) && !ignorableRgError) {
-            return {
-              content: [{ type: "text" as const, text: stderr || `rg exited with code ${exitCode}` }],
-              details: createToolFailure(stderr || `rg exited with code ${exitCode}`),
             };
           }
 

@@ -1,4 +1,4 @@
-import type { WORKSPACE_CANDIDATE_INDEX_FAMILY } from "../search/index.js";
+import type { WORKSPACE_CANDIDATE_INDEX_FAMILY, WORKSPACE_PATH_INDEX_FAMILY } from "../search/index.js";
 
 export const AGENT_SANDBOX_PROTOCOL_VERSION = "1" as const;
 
@@ -26,6 +26,7 @@ export const RPC_METHODS = [
   "fs.find",
   "fs.grep",
   "fs.search",
+  "fs.pathSearch",
   "process.start",
   "process.abort",
 ] as const;
@@ -134,6 +135,8 @@ export type SandboxCapabilities = {
   fsGrep: boolean;
   /** Tantivy-backed candidate search is available in the sandbox. */
   fsSearch?: boolean;
+  /** Persistent path-glob search is available in the sandbox. */
+  fsPathSearch?: boolean;
   processStart: boolean;
   /** process.start supports argv exec mode (no shell). */
   processStartArgv?: boolean;
@@ -401,6 +404,25 @@ export type FsSearchResult = {
   state?: "ready" | "indexing" | "error";
 };
 
+export type FsPathSearchParams = {
+  pattern: string;
+  path?: string;
+  cwd?: string;
+  limit?: number;
+  fullPath?: boolean;
+  ignore?: string[];
+};
+
+export type FsPathSearchResult = {
+  path: string;
+  matches: string[];
+  indexFamily: typeof WORKSPACE_PATH_INDEX_FAMILY;
+  schemaVersion: number;
+  coverage: "complete" | "partial" | "stale";
+  truncated?: boolean;
+  state?: "ready" | "indexing" | "error";
+};
+
 export type ProcessStartParams = {
   /** Shell command mode. Preserves existing `bash -c` semantics. */
   command?: string;
@@ -476,6 +498,10 @@ export type RpcRequestMap = {
   "fs.search": {
     params: FsSearchParams;
     result: FsSearchResult;
+  };
+  "fs.pathSearch": {
+    params: FsPathSearchParams;
+    result: FsPathSearchResult;
   };
   "process.start": {
     params: ProcessStartParams;

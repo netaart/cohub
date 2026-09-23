@@ -40,7 +40,24 @@ type QueryInput struct {
 	Limit      int
 }
 
+type PathQueryInput struct {
+	Pattern    string
+	PathPrefix string
+	FullPath   bool
+	Ignore     []string
+	Limit      int
+}
+
 type QueryResult struct {
+	Matches       []string `json:"matches"`
+	Truncated     bool     `json:"truncated"`
+	State         string   `json:"state"`
+	IndexFamily   string   `json:"indexFamily"`
+	SchemaVersion int      `json:"schemaVersion"`
+	Coverage      string   `json:"coverage"`
+}
+
+type PathQueryResult struct {
 	Matches       []string `json:"matches"`
 	Truncated     bool     `json:"truncated"`
 	State         string   `json:"state"`
@@ -75,6 +92,9 @@ type Manager struct {
 	closed                atomic.Bool
 	reconcileRetryPending atomic.Bool
 	reconcileRetryAttempt atomic.Int32
+	commandQueueDepth     atomic.Int32
+
+	filewatchHasPending func() bool
 
 	commands    chan command
 	control     chan command
@@ -87,18 +107,19 @@ type Manager struct {
 // NewManager enables optional workspace search for cloud sandboxes. A local or
 // explicitly configured binary wins; otherwise the supervisor downloads the
 // latest checksum-verified release without blocking the main sandbox runtime.
-func NewManager(cfg env.Config, logger *slog.Logger) *Manager {
+func NewManager(cfg env.Config, logger *slog.Logger, filewatchHasPending func() bool) *Manager {
 	binary := resolveBinary(cfg.SearchBinaryPath)
 	manager := &Manager{
-		cfg:         cfg,
-		logger:      logger,
-		binary:      binary,
-		client:      newClient(cfg.SearchSocketPath),
-		downloader:  newDownloader(),
-		commands:    make(chan command, commandBufferSize),
-		control:     make(chan command, 8),
-		commandDone: make(chan struct{}),
-		processDone: make(chan struct{}),
+		cfg:                 cfg,
+		logger:              logger,
+		binary:              binary,
+		client:              newClient(cfg.SearchSocketPath),
+		downloader:          newDownloader(),
+		filewatchHasPending: filewatchHasPending,
+		commands:            make(chan command, commandBufferSize),
+		control:             make(chan command, 8),
+		commandDone:         make(chan struct{}),
+		processDone:         make(chan struct{}),
 	}
 	if cfg.SearchEnabled && !cfg.IsLocal() {
 		manager.enabled.Store(true)
@@ -167,7 +188,40 @@ func (m *Manager) Query(ctx context.Context, input QueryInput) (QueryResult, err
 	if err := m.client.doJSON(ctx, http.MethodPost, "/query", payload, &result); err != nil {
 		return QueryResult{}, err
 	}
+	m.adjustCoverage(&result.Coverage)
 	return result, nil
+}
+
+func (m *Manager) PathQuery(ctx context.Context, input PathQueryInput) (PathQueryResult, error) {
+	if !m.Enabled() {
+		return PathQueryResult{}, fmt.Errorf("search index is unavailable")
+	}
+	payload := pathQueryRequest{
+		Pattern:    input.Pattern,
+		PathPrefix: input.PathPrefix,
+		FullPath:   input.FullPath,
+		Ignore:     input.Ignore,
+		Limit:      input.Limit,
+	}
+	var result PathQueryResult
+	if err := m.client.doJSON(ctx, http.MethodPost, "/paths/query", payload, &result); err != nil {
+		return PathQueryResult{}, err
+	}
+	m.adjustCoverage(&result.Coverage)
+	return result, nil
+}
+
+func (m *Manager) adjustCoverage(coverage *string) {
+	// Degrade coverage to partial when the filewatch or command queue has
+	// changes that the Rust process has not yet indexed. An agent that writes
+	// a file and immediately searches must see that its change is not covered.
+	if *coverage == "complete" {
+		if m.filewatchHasPending != nil && m.filewatchHasPending() {
+			*coverage = "partial"
+		} else if m.commandQueueDepth.Load() > 0 {
+			*coverage = "partial"
+		}
+	}
 }
 
 func (m *Manager) Close() {
@@ -184,12 +238,14 @@ func (m *Manager) Close() {
 }
 
 func (m *Manager) enqueue(value command) {
+	m.commandQueueDepth.Add(1)
 	select {
 	case m.commands <- value:
 	default:
 		// A dropped incremental batch is repaired by a metadata reconcile. The
 		// reconcile compares the persistent snapshot with the current workspace.
 		m.logger.Warn("search command queue full; requesting reconcile")
+		m.commandQueueDepth.Add(-1)
 		m.enqueueControl(command{reconcile: true})
 	}
 }
@@ -218,6 +274,7 @@ func (m *Manager) commandLoop(ctx context.Context) {
 				return
 			case value = <-m.control:
 			case value = <-m.commands:
+				m.commandQueueDepth.Add(-1)
 			}
 		}
 		if value.activate {
@@ -420,6 +477,14 @@ type queryRequest struct {
 	Literals   []string `json:"literals"`
 	PathPrefix string   `json:"pathPrefix,omitempty"`
 	Glob       string   `json:"glob,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
+}
+
+type pathQueryRequest struct {
+	Pattern    string   `json:"pattern"`
+	PathPrefix string   `json:"pathPrefix,omitempty"`
+	FullPath   bool     `json:"fullPath,omitempty"`
+	Ignore     []string `json:"ignore,omitempty"`
 	Limit      int      `json:"limit,omitempty"`
 }
 

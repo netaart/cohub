@@ -40,7 +40,7 @@ func TestManagerHonorsDisabledFeature(t *testing.T) {
 	manager := NewManager(env.Config{
 		Mode:          env.ModeListen,
 		SearchEnabled: false,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if manager.Enabled() {
 		t.Fatal("search should stay disabled")
 	}
@@ -50,7 +50,7 @@ func TestManagerEnablesOptionalDownloadWithoutPreinstalledBinary(t *testing.T) {
 	manager := NewManager(env.Config{
 		Mode:          env.ModeListen,
 		SearchEnabled: true,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if !manager.Enabled() {
 		t.Fatal("search should be enabled while the binary download is pending")
 	}
@@ -79,7 +79,7 @@ func TestManagerStartsWithCachedBinary(t *testing.T) {
 		SearchSocketPath:  filepath.Join(root, "search.sock"),
 		SearchIndexDir:    filepath.Join(root, "index"),
 		WorkspaceDir:      root,
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	manager.Start()
 	manager.Close()
 	if manager.binary != binary {
@@ -105,7 +105,7 @@ func TestCrashingBinaryDoesNotBlockManagerShutdown(t *testing.T) {
 		SearchBinaryPath: binary,
 		SearchIndexDir:   filepath.Join(root, "index"),
 		SearchSocketPath: filepath.Join(root, "run", "search.sock"),
-	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if !manager.Enabled() {
 		t.Fatal("manager should be enabled for an executable binary")
 	}

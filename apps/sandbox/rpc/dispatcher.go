@@ -21,6 +21,7 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 
 	"github.com/cohub/apps/sandbox/env"
+	"github.com/cohub/apps/sandbox/filewatch"
 	"github.com/cohub/apps/sandbox/process"
 	"github.com/cohub/apps/sandbox/protocol"
 	"github.com/cohub/apps/sandbox/search"
@@ -155,6 +156,8 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.complete(request, accepted.OpID, d.handleFSGrep(request))
 	case "fs.search":
 		return accepted, d.complete(request, accepted.OpID, d.handleFSSearch(request))
+	case "fs.pathSearch":
+		return accepted, d.complete(request, accepted.OpID, d.handleFSPathSearch(request))
 	case "process.start":
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
@@ -238,6 +241,15 @@ type fsSearchParams struct {
 	CWD      string   `json:"cwd"`
 	Glob     string   `json:"glob"`
 	Limit    int      `json:"limit"`
+}
+
+type fsPathSearchParams struct {
+	Pattern  string   `json:"pattern"`
+	Path     string   `json:"path"`
+	CWD      string   `json:"cwd"`
+	Limit    int      `json:"limit"`
+	FullPath bool     `json:"fullPath"`
+	Ignore   []string `json:"ignore"`
 }
 
 func validateSearchLiterals(literals []string) error {
@@ -906,6 +918,17 @@ func (d *Dispatcher) handleFSFind(request protocol.RPCRequest) interface{} {
 	if params.IgnoreVcs {
 		args = append(args, "--no-ignore-vcs")
 	}
+	// Keep the search-enabled fallback in the same workspace domain as the
+	// persistent path index. Search-disabled sandboxes preserve legacy find
+	// behavior, and shell commands remain unrestricted.
+	d.mu.Lock()
+	searchEnabled := d.searchManager != nil && d.searchManager.Enabled()
+	d.mu.Unlock()
+	if searchEnabled {
+		for _, pattern := range filewatch.IgnorePatterns() {
+			args = append(args, "--exclude", pattern)
+		}
+	}
 	if params.FullPath {
 		args = append(args, "--full-path")
 	}
@@ -1000,6 +1023,74 @@ func (d *Dispatcher) handleFSSearch(request protocol.RPCRequest) interface{} {
 		Literals:   params.Literals,
 		PathPrefix: pathPrefix,
 		Glob:       params.Glob,
+		Limit:      limit,
+	})
+	if err != nil {
+		return d.failed(request, "", "INTERNAL_ERROR", err.Error())
+	}
+
+	matches := make([]string, 0, len(result.Matches))
+	for _, match := range result.Matches {
+		absolute := filepath.Join(d.cfg.WorkspaceDir, filepath.FromSlash(match))
+		relative, relErr := filepath.Rel(resolved.path, absolute)
+		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			continue
+		}
+		matches = append(matches, filepath.ToSlash(relative))
+	}
+	return map[string]interface{}{
+		"path":          resolved.path,
+		"matches":       matches,
+		"indexFamily":   result.IndexFamily,
+		"schemaVersion": result.SchemaVersion,
+		"coverage":      result.Coverage,
+		"truncated":     result.Truncated,
+		"state":         result.State,
+	}
+}
+
+func (d *Dispatcher) handleFSPathSearch(request protocol.RPCRequest) interface{} {
+	var params fsPathSearchParams
+	if err := json.Unmarshal(request.Params, &params); err != nil {
+		return d.failed(request, "", "BAD_REQUEST", err.Error())
+	}
+
+	resolved, errResponse, ok := d.resolvePathForRequest(request, params.Path, params.CWD)
+	if !ok {
+		return errResponse
+	}
+
+	d.mu.Lock()
+	manager := d.searchManager
+	d.mu.Unlock()
+	if manager == nil || !manager.Enabled() {
+		return d.failed(request, "", "INTERNAL_ERROR", "path search index is unavailable")
+	}
+	if !manager.ProcessReady() {
+		failed := d.failed(request, "", "SEARCH_UNAVAILABLE", "path search index is not ready; retry later")
+		failed.Error.Retryable = true
+		return failed
+	}
+
+	pathPrefix, err := filepath.Rel(d.cfg.WorkspaceDir, resolved.path)
+	if err != nil {
+		return d.failed(request, "", "IO_ERROR", err.Error())
+	}
+	if pathPrefix == "." {
+		pathPrefix = ""
+	} else {
+		pathPrefix = filepath.ToSlash(pathPrefix)
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 1000
+	}
+	result, err := manager.PathQuery(context.Background(), search.PathQueryInput{
+		Pattern:    params.Pattern,
+		PathPrefix: pathPrefix,
+		FullPath:   params.FullPath,
+		Ignore:     params.Ignore,
 		Limit:      limit,
 	})
 	if err != nil {

@@ -218,6 +218,7 @@ func (s *Server) sendHeartbeat(session *connectionSession, includeSnapshot bool)
 			FSFind:             true,
 			FSGrep:             true,
 			FSSearch:           s.isSearchEnabled(),
+			FSPathSearch:       s.isSearchEnabled(),
 			ProcessStart:       true,
 			ProcessStartArgv:   true,
 			ProcessAbort:       true,

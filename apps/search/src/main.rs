@@ -48,8 +48,12 @@ const DEFAULT_QUERY_LIMIT: usize = 1000;
 const MAX_QUERY_LIMIT: usize = 5000;
 const INDEX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const FILE_SNAPSHOT_NAME: &str = "files.json";
+const PATH_SNAPSHOT_NAME: &str = "paths.json";
 const FILE_SNAPSHOT_DIRTY_NAME: &str = ".files-dirty";
+const PATH_SNAPSHOT_DIRTY_NAME: &str = ".paths-dirty";
 const REBUILD_DIRTY_NAME: &str = ".rebuild-dirty";
+const PATH_INDEX_FAMILY: &str = "workspace.paths";
+const PATH_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Parser)]
 #[command(name = "cohub-search", version, about = "Cohub workspace search index")]
@@ -123,6 +127,13 @@ struct IndexStore {
     path_field: Field,
     content_field: Field,
     snapshot: Mutex<Option<HashMap<String, FileFingerprint>>>,
+    paths: Mutex<Option<HashSet<String>>>,
+    /// True once the in-memory snapshot was produced or verified by this
+    /// process. A snapshot loaded from disk beside a dirty marker is untrusted
+    /// until reconcile confirms it; the dirty marker itself only tracks
+    /// whether `files.json` lags the live index for restart recovery.
+    snapshot_verified: AtomicBool,
+    path_snapshot_verified: AtomicBool,
     reader: Mutex<IndexReader>,
     writer: Mutex<IndexWriter>,
 }
@@ -141,6 +152,14 @@ struct IndexManifest {
 struct FileFingerprint {
     size: u64,
     mtime_ns: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PathSnapshot {
+    family: String,
+    schema_version: u32,
+    paths: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -193,12 +212,45 @@ struct QueryRequest {
     limit: usize,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PathQueryRequest {
+    pattern: String,
+    #[serde(default)]
+    path_prefix: String,
+    #[serde(default)]
+    full_path: bool,
+    #[serde(default)]
+    ignore: Vec<String>,
+    #[serde(default)]
+    limit: usize,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct QueryResponse {
     matches: Vec<String>,
     truncated: bool,
     state: String,
+    index_family: String,
+    schema_version: u32,
+    coverage: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PathQueryResponse {
+    matches: Vec<String>,
+    truncated: bool,
+    state: String,
+    index_family: String,
+    schema_version: u32,
+    coverage: String,
+}
+
+struct PathQueryResult {
+    matches: Vec<String>,
+    truncated: bool,
     index_family: String,
     schema_version: u32,
     coverage: String,
@@ -293,6 +345,7 @@ async fn serve(args: ServeArgs) -> Result<()> {
         .route("/index/reconcile", post(reconcile_handler))
         .route("/index/update", post(update_handler))
         .route("/query", post(query_handler))
+        .route("/paths/query", post(path_query_handler))
         .with_state(state);
 
     let listener = UnixListener::bind(&args.socket)
@@ -500,6 +553,30 @@ async fn query_handler(
     }))
 }
 
+async fn path_query_handler(
+    State(state): State<AppState>,
+    Json(request): Json<PathQueryRequest>,
+) -> Result<Json<PathQueryResponse>, ApiError> {
+    let result = state
+        .store
+        .path_query(&request)
+        .map_err(|error| ApiError(StatusCode::BAD_REQUEST, error.to_string()))?;
+    let status = status_snapshot(&state);
+    let coverage = if status.coverage == "complete" {
+        result.coverage
+    } else {
+        status.coverage
+    };
+    Ok(Json(PathQueryResponse {
+        matches: result.matches,
+        truncated: result.truncated,
+        state: status.state,
+        index_family: result.index_family,
+        schema_version: result.schema_version,
+        coverage,
+    }))
+}
+
 async fn index_worker(mut receiver: mpsc::Receiver<Job>, state: AppState) {
     while let Some(job) = receiver.recv().await {
         match job {
@@ -684,11 +761,17 @@ impl IndexStatus {
 }
 
 fn status_snapshot(state: &AppState) -> IndexStatus {
-    state
+    let mut status = state
         .status
         .lock()
         .expect("index status mutex poisoned")
-        .clone()
+        .clone();
+    // Accepted but not yet committed changes are invisible to queries; a
+    // caller must not treat the index as authoritative during the debounce.
+    if status.pending_changes > 0 {
+        status.coverage = "partial".to_string();
+    }
+    status
 }
 
 fn open_store_for_serve(
@@ -719,6 +802,8 @@ fn should_quarantine_index(error: &anyhow::Error) -> bool {
             .to_string()
             .contains("unsupported search index manifest")
         || error.to_string().contains("parse file snapshot")
+        || error.to_string().contains("parse path snapshot")
+        || error.to_string().contains("unsupported path snapshot")
     {
         return true;
     }
@@ -813,8 +898,16 @@ fn snapshot_path(index_dir: &Path) -> PathBuf {
     index_dir.join(FILE_SNAPSHOT_NAME)
 }
 
+fn path_snapshot_path(index_dir: &Path) -> PathBuf {
+    index_dir.join(PATH_SNAPSHOT_NAME)
+}
+
 fn snapshot_dirty_path(index_dir: &Path) -> PathBuf {
     index_dir.join(FILE_SNAPSHOT_DIRTY_NAME)
+}
+
+fn path_snapshot_dirty_path(index_dir: &Path) -> PathBuf {
+    index_dir.join(PATH_SNAPSHOT_DIRTY_NAME)
 }
 
 fn rebuild_dirty_path(index_dir: &Path) -> PathBuf {
@@ -830,6 +923,15 @@ fn mark_snapshot_dirty(index_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn mark_path_snapshot_dirty(index_dir: &Path) -> Result<()> {
+    let path = path_snapshot_dirty_path(index_dir);
+    if !path.exists() {
+        fs::write(&path, b"dirty")
+            .with_context(|| format!("mark path snapshot dirty {}", path.display()))?;
+    }
+    Ok(())
+}
+
 fn mark_rebuild_dirty(index_dir: &Path) -> Result<()> {
     let path = rebuild_dirty_path(index_dir);
     if !path.exists() {
@@ -839,16 +941,27 @@ fn mark_rebuild_dirty(index_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn clear_dirty_markers(index_dir: &Path) -> Result<()> {
+fn clear_file_dirty_markers(index_dir: &Path) -> Result<()> {
     match fs::remove_file(snapshot_dirty_path(index_dir)) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error).context("clear dirty file snapshot marker"),
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("clear dirty file snapshot marker"),
     }
+}
+
+fn clear_rebuild_dirty_marker(index_dir: &Path) -> Result<()> {
     match fs::remove_file(rebuild_dirty_path(index_dir)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error).context("clear dirty rebuild marker"),
+    }
+}
+
+fn clear_path_dirty_marker(index_dir: &Path) -> Result<()> {
+    match fs::remove_file(path_snapshot_dirty_path(index_dir)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("clear dirty path snapshot marker"),
     }
 }
 
@@ -863,6 +976,20 @@ fn load_snapshot(index_dir: &Path) -> Result<Option<HashMap<String, FileFingerpr
     Ok(Some(snapshot))
 }
 
+fn load_path_snapshot(index_dir: &Path) -> Result<Option<HashSet<String>>> {
+    let path = path_snapshot_path(index_dir);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read(&path).with_context(|| format!("read path snapshot {}", path.display()))?;
+    let snapshot: PathSnapshot = serde_json::from_slice(&data)
+        .with_context(|| format!("parse path snapshot {}", path.display()))?;
+    if snapshot.family != PATH_INDEX_FAMILY || snapshot.schema_version != PATH_SCHEMA_VERSION {
+        return Err(anyhow!("unsupported path snapshot"));
+    }
+    Ok(Some(snapshot.paths))
+}
+
 fn persist_snapshot(index_dir: &Path, snapshot: &HashMap<String, FileFingerprint>) -> Result<()> {
     let path = snapshot_path(index_dir);
     let temporary = index_dir.join(format!(".files-{}.tmp", std::process::id()));
@@ -871,7 +998,25 @@ fn persist_snapshot(index_dir: &Path, snapshot: &HashMap<String, FileFingerprint
         .with_context(|| format!("write file snapshot {}", temporary.display()))?;
     fs::rename(&temporary, &path)
         .with_context(|| format!("install file snapshot {}", path.display()))?;
-    clear_dirty_markers(index_dir)?;
+    clear_file_dirty_markers(index_dir)?;
+    Ok(())
+}
+
+fn persist_path_snapshot(index_dir: &Path, paths: &HashSet<String>) -> Result<()> {
+    let path = path_snapshot_path(index_dir);
+    let temporary = index_dir.join(format!(".paths-{}.tmp", std::process::id()));
+    let snapshot = PathSnapshot {
+        family: PATH_INDEX_FAMILY.to_string(),
+        schema_version: PATH_SCHEMA_VERSION,
+        paths: paths.clone(),
+    };
+    let data = serde_json::to_vec(&snapshot).context("serialize path snapshot")?;
+    fs::write(&temporary, data)
+        .with_context(|| format!("write path snapshot {}", temporary.display()))?;
+    fs::rename(&temporary, &path)
+        .with_context(|| format!("install path snapshot {}", path.display()))?;
+    clear_path_dirty_marker(index_dir)?;
+    clear_rebuild_dirty_marker(index_dir)?;
     Ok(())
 }
 
@@ -895,11 +1040,12 @@ fn is_not_found_error(error: &anyhow::Error) -> bool {
         .is_some_and(|error| error.kind() == io::ErrorKind::NotFound)
 }
 
-fn scan_workspace_snapshot(
+fn scan_workspace_state(
     workspace: &Path,
     ignore_patterns: &[String],
-) -> Result<HashMap<String, FileFingerprint>> {
+) -> Result<(HashMap<String, FileFingerprint>, HashSet<String>)> {
     let mut snapshot = HashMap::new();
+    let mut paths = HashSet::new();
     let filter_workspace = workspace.to_path_buf();
     let filter_ignore_patterns = ignore_patterns.to_vec();
     for entry in WalkBuilder::new(workspace)
@@ -914,18 +1060,24 @@ fn scan_workspace_snapshot(
         .build()
     {
         let entry = entry.context("walk workspace while reconciling")?;
-        if !entry
-            .file_type()
-            .map(|kind| kind.is_file())
-            .unwrap_or(false)
-        {
+        let Some(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() && !file_type.is_dir() && !file_type.is_symlink() {
             continue;
         }
         let path = entry.into_path();
         let relative = path
             .strip_prefix(workspace)
             .with_context(|| format!("path outside workspace: {}", path.display()))?;
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
         let relative = normalize_relative_path(&relative.to_string_lossy())?;
+        paths.insert(relative.clone());
+        if !file_type.is_file() {
+            continue;
+        }
         let fingerprint = match file_fingerprint(&path) {
             Ok(fingerprint) => fingerprint,
             Err(error) if is_not_found_error(&error) => continue,
@@ -935,7 +1087,7 @@ fn scan_workspace_snapshot(
         };
         snapshot.insert(relative, fingerprint);
     }
-    Ok(snapshot)
+    Ok((snapshot, paths))
 }
 
 impl IndexStore {
@@ -974,6 +1126,13 @@ impl IndexStore {
         validate_schema(&schema)?;
         let manifest = load_or_create_manifest(index_dir)?;
         let snapshot = load_snapshot(index_dir)?;
+        let paths = load_path_snapshot(index_dir)?;
+        let snapshot_verified = snapshot.is_some()
+            && !snapshot_dirty_path(index_dir).exists()
+            && !rebuild_dirty_path(index_dir).exists();
+        let path_snapshot_verified = paths.is_some()
+            && !path_snapshot_dirty_path(index_dir).exists()
+            && !rebuild_dirty_path(index_dir).exists();
         register_tokenizer(&index)?;
         let reader = index
             .reader_builder()
@@ -994,24 +1153,122 @@ impl IndexStore {
                 .get_field("content")
                 .context("content field missing")?,
             snapshot: Mutex::new(snapshot),
+            paths: Mutex::new(paths),
+            snapshot_verified: AtomicBool::new(snapshot_verified),
+            path_snapshot_verified: AtomicBool::new(path_snapshot_verified),
             reader: Mutex::new(reader),
             writer: Mutex::new(writer),
         })
     }
 
     fn coverage(&self) -> &'static str {
-        if self
-            .snapshot
-            .lock()
-            .expect("file snapshot mutex poisoned")
-            .is_some()
-            && !snapshot_dirty_path(&self.index_dir).exists()
-            && !rebuild_dirty_path(&self.index_dir).exists()
-        {
+        if self.snapshot_verified.load(Ordering::Acquire) {
             "complete"
         } else {
             "stale"
         }
+    }
+
+    fn install_snapshot(&self, snapshot: HashMap<String, FileFingerprint>) {
+        *self.snapshot.lock().expect("file snapshot mutex poisoned") = Some(snapshot);
+        self.snapshot_verified.store(true, Ordering::Release);
+    }
+
+    fn path_coverage(&self) -> &'static str {
+        if self.path_snapshot_verified.load(Ordering::Acquire) {
+            "complete"
+        } else {
+            "stale"
+        }
+    }
+
+    fn install_paths(&self, paths: HashSet<String>) {
+        *self.paths.lock().expect("path snapshot mutex poisoned") = Some(paths);
+        self.path_snapshot_verified.store(true, Ordering::Release);
+    }
+
+    fn path_query(&self, request: &PathQueryRequest) -> Result<PathQueryResult> {
+        let limit = if request.limit == 0 {
+            DEFAULT_QUERY_LIMIT
+        } else {
+            request.limit.min(MAX_QUERY_LIMIT)
+        };
+        let pattern = if request.pattern.is_empty() {
+            "**"
+        } else {
+            request.pattern.as_str()
+        };
+        let mut matcher_builder = globset::GlobBuilder::new(pattern);
+        matcher_builder
+            .literal_separator(request.full_path)
+            .case_insensitive(!pattern.chars().any(char::is_uppercase));
+        let matcher = matcher_builder
+            .build()
+            .context("invalid path glob")?
+            .compile_matcher();
+        let path_prefix = normalize_prefix(&request.path_prefix);
+        let ignore_matchers = request
+            .ignore
+            .iter()
+            .filter(|pattern| !pattern.trim().is_empty())
+            .map(|pattern| {
+                let mut builder = globset::GlobBuilder::new(pattern);
+                builder
+                    .literal_separator(false)
+                    .case_insensitive(!pattern.chars().any(char::is_uppercase));
+                builder
+                    .build()
+                    .with_context(|| format!("invalid path ignore glob: {pattern}"))
+                    .map(|glob| glob.compile_matcher())
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut paths = self
+            .paths
+            .lock()
+            .expect("path snapshot mutex poisoned")
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<Vec<_>>();
+        paths.sort();
+        let mut matches = Vec::with_capacity(limit);
+        let mut truncated = false;
+        for path in paths {
+            if path_prefix
+                .as_deref()
+                .is_some_and(|prefix| path == prefix || !path_has_prefix(&path, prefix))
+            {
+                continue;
+            }
+            if path_matches_ignore_globs(&path, &ignore_matchers) {
+                continue;
+            }
+            let candidate = if request.full_path {
+                path.as_str()
+            } else {
+                Path::new(&path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(path.as_str())
+            };
+            if !matcher.is_match(candidate) {
+                continue;
+            }
+            if matches.len() == limit {
+                truncated = true;
+                break;
+            }
+            matches.push(path);
+        }
+
+        Ok(PathQueryResult {
+            matches,
+            truncated,
+            index_family: PATH_INDEX_FAMILY.to_string(),
+            schema_version: PATH_SCHEMA_VERSION,
+            coverage: self.path_coverage().to_string(),
+        })
     }
 
     fn full_rebuild(&self) -> Result<()> {
@@ -1019,6 +1276,8 @@ impl IndexStore {
         // rebuild fails after clearing documents, the next reconcile must not
         // trust the previous file snapshot.
         mark_rebuild_dirty(&self.index_dir)?;
+        self.snapshot_verified.store(false, Ordering::Release);
+        self.path_snapshot_verified.store(false, Ordering::Release);
         let mut writer = self.writer.lock().expect("tantivy writer mutex poisoned");
         let result = (|| -> Result<()> {
             writer.delete_all_documents().context("clear index")?;
@@ -1026,6 +1285,7 @@ impl IndexStore {
             self.reload_reader()?;
 
             let mut next_snapshot = HashMap::new();
+            let mut next_paths = HashSet::new();
             let filter_workspace = self.workspace.clone();
             let filter_ignore_patterns = self.ignore_patterns.clone();
             let walker = WalkBuilder::new(&self.workspace)
@@ -1045,18 +1305,25 @@ impl IndexStore {
 
             for entry in walker {
                 let entry = entry.context("walk workspace while building index")?;
-                if !entry
-                    .file_type()
-                    .map(|kind| kind.is_file())
-                    .unwrap_or(false)
-                {
+                let Some(file_type) = entry.file_type() else {
                     continue;
-                }
+                };
+                let is_file = file_type.is_file();
+                let is_path = is_file || file_type.is_dir() || file_type.is_symlink();
                 let path = entry.into_path();
                 let relative = path
                     .strip_prefix(&self.workspace)
                     .with_context(|| format!("path outside workspace: {}", path.display()))?;
+                if relative.as_os_str().is_empty() {
+                    continue;
+                }
                 let relative = normalize_relative_path(&relative.to_string_lossy())?;
+                if is_path {
+                    next_paths.insert(relative.clone());
+                }
+                if !is_file {
+                    continue;
+                }
                 let fingerprint = match file_fingerprint(&path) {
                     Ok(fingerprint) => fingerprint,
                     Err(error) if is_not_found_error(&error) => continue,
@@ -1075,7 +1342,9 @@ impl IndexStore {
             writer.commit().context("commit full index")?;
             self.reload_reader()?;
             persist_snapshot(&self.index_dir, &next_snapshot)?;
-            *self.snapshot.lock().expect("file snapshot mutex poisoned") = Some(next_snapshot);
+            persist_path_snapshot(&self.index_dir, &next_paths)?;
+            self.install_snapshot(next_snapshot);
+            self.install_paths(next_paths);
             Ok(())
         })();
         if let Err(error) = result {
@@ -1097,7 +1366,8 @@ impl IndexStore {
         if rebuild_dirty_path(&self.index_dir).exists() {
             return self.full_rebuild();
         }
-        let current = scan_workspace_snapshot(&self.workspace, &self.ignore_patterns)?;
+        let (current, current_paths) =
+            scan_workspace_state(&self.workspace, &self.ignore_patterns)?;
         let mut changes = Vec::new();
 
         for (path, fingerprint) in &current {
@@ -1133,11 +1403,16 @@ impl IndexStore {
         if changes.is_empty() {
             if snapshot_dirty_path(&self.index_dir).exists() {
                 persist_snapshot(&self.index_dir, &current)?;
-                *self.snapshot.lock().expect("file snapshot mutex poisoned") = Some(current);
             }
+            persist_path_snapshot(&self.index_dir, &current_paths)?;
+            self.install_snapshot(current);
+            self.install_paths(current_paths);
             return Ok(());
         }
-        self.apply_document_changes(&changes, current, true)
+        self.apply_document_changes(&changes, current, true)?;
+        persist_path_snapshot(&self.index_dir, &current_paths)?;
+        self.install_paths(current_paths);
+        Ok(())
     }
 
     fn apply_changes(&self, changes: &[IndexChange]) -> Result<()> {
@@ -1156,6 +1431,14 @@ impl IndexStore {
         let Some(mut next_snapshot) = previous else {
             return self.full_rebuild();
         };
+        let previous_paths = self
+            .paths
+            .lock()
+            .expect("path snapshot mutex poisoned")
+            .clone();
+        let Some(mut next_paths) = previous_paths else {
+            return self.reconcile();
+        };
 
         let mut delete_prefixes = HashSet::new();
         for change in changes {
@@ -1167,6 +1450,11 @@ impl IndexStore {
             }
         }
         let delete_prefixes = compact_path_prefixes(delete_prefixes);
+        next_paths.retain(|path| {
+            !delete_prefixes
+                .iter()
+                .any(|prefix| path_has_prefix(path, prefix))
+        });
 
         let mut deleted_paths = Vec::new();
         next_snapshot.retain(|path, _| {
@@ -1193,10 +1481,17 @@ impl IndexStore {
         document_changes.sort_by(|left, right| left.path.cmp(&right.path));
 
         for change in changes {
+            let normalized = normalize_relative_path(&change.path)?;
+            if change.kind != "delete" {
+                if let Some(path) = self.path_snapshot_entry(&normalized)? {
+                    next_paths.insert(path);
+                } else {
+                    next_paths.remove(&normalized);
+                }
+            }
             if change.kind == "delete" || change.node_type.as_deref() == Some("dir") {
                 continue;
             }
-            let normalized = normalize_relative_path(&change.path)?;
             if let Some((path, fingerprint)) = self.snapshot_entry(&normalized)? {
                 next_snapshot.insert(path.clone(), fingerprint);
                 document_changes.push(IndexChange {
@@ -1215,7 +1510,15 @@ impl IndexStore {
                 });
             }
         }
-        self.apply_document_changes(&document_changes, next_snapshot, false)
+        if document_changes.is_empty() {
+            mark_path_snapshot_dirty(&self.index_dir)?;
+            self.install_paths(next_paths);
+            return Ok(());
+        }
+        self.apply_document_changes(&document_changes, next_snapshot, false)?;
+        mark_path_snapshot_dirty(&self.index_dir)?;
+        self.install_paths(next_paths);
+        Ok(())
     }
 
     fn apply_document_changes(
@@ -1279,8 +1582,32 @@ impl IndexStore {
         } else {
             mark_snapshot_dirty(&self.index_dir)?;
         }
-        *self.snapshot.lock().expect("file snapshot mutex poisoned") = Some(next_snapshot);
+        self.install_snapshot(next_snapshot);
         Ok(())
+    }
+
+    fn path_snapshot_entry(&self, relative: &str) -> Result<Option<String>> {
+        let normalized = normalize_relative_path(relative)?;
+        let absolute = self.workspace.join(&normalized);
+        let metadata = match fs::symlink_metadata(&absolute) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(error).with_context(|| format!("stat {}", absolute.display()))
+            }
+        };
+        if !metadata.file_type().is_file()
+            && !metadata.file_type().is_dir()
+            && !metadata.file_type().is_symlink()
+        {
+            return Ok(None);
+        }
+        if is_ignored_path(&normalized, &self.ignore_patterns)
+            || is_git_ignored(&self.workspace, &absolute, metadata.is_dir())
+        {
+            return Ok(None);
+        }
+        Ok(Some(normalized))
     }
 
     fn snapshot_entry(&self, relative: &str) -> Result<Option<(String, FileFingerprint)>> {
@@ -1579,6 +1906,21 @@ fn is_ignored_path(path: &str, ignore_patterns: &[String]) -> bool {
             .any(|pattern| path_matches_ignore_pattern(path, pattern))
 }
 
+fn path_matches_ignore_globs(path: &str, matchers: &[globset::GlobMatcher]) -> bool {
+    if matchers.is_empty() {
+        return false;
+    }
+    let basename = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path);
+    matchers.iter().any(|matcher| {
+        matcher.is_match(path)
+            || matcher.is_match(basename)
+            || path.split('/').any(|segment| matcher.is_match(segment))
+    })
+}
+
 fn is_ignored_workspace_path(workspace: &Path, path: &Path, ignore_patterns: &[String]) -> bool {
     let Ok(relative) = path.strip_prefix(workspace) else {
         return true;
@@ -1770,7 +2112,40 @@ mod tests {
             .expect("query new term");
         assert_eq!(result.matches, vec!["src/main.ts"]);
         assert!(snapshot_dirty_path(index.path()).exists());
+        // The live index is current; only the on-disk snapshot lags. Coverage
+        // must not report stale for the rest of the session.
+        assert_eq!(store.coverage(), "complete");
         store.reconcile().expect("persist reconciled snapshot");
+        assert!(!snapshot_dirty_path(index.path()).exists());
+    }
+
+    #[test]
+    fn reopened_store_beside_dirty_marker_is_stale_until_reconciled() {
+        let workspace = TempDir::new().expect("workspace tempdir");
+        let index = TempDir::new().expect("index tempdir");
+        fs::write(workspace.path().join("a.txt"), "needle one\n").expect("file");
+
+        {
+            let store = IndexStore::open(workspace.path(), index.path()).expect("open store");
+            store.full_rebuild().expect("full rebuild");
+            fs::write(workspace.path().join("a.txt"), "needle two\n").expect("changed file");
+            store
+                .apply_changes(&[IndexChange {
+                    path: "a.txt".to_string(),
+                    old_path: None,
+                    kind: "modify".to_string(),
+                    node_type: Some("file".to_string()),
+                }])
+                .expect("incremental update");
+            assert!(snapshot_dirty_path(index.path()).exists());
+        }
+
+        // Simulates a restart: files.json predates the last commit, so the
+        // loaded snapshot cannot be trusted until reconcile verifies it.
+        let store = IndexStore::open(workspace.path(), index.path()).expect("reopen store");
+        assert_eq!(store.coverage(), "stale");
+        store.reconcile().expect("reconcile");
+        assert_eq!(store.coverage(), "complete");
         assert!(!snapshot_dirty_path(index.path()).exists());
     }
 
@@ -2140,6 +2515,115 @@ mod tests {
             })
             .expect("query newly visible file");
         assert_eq!(result.matches, vec!["ignored.txt"]);
+    }
+
+    #[test]
+    fn path_query_matches_files_and_directories_with_fd_style_globs() {
+        let workspace = TempDir::new().expect("workspace tempdir");
+        let index = TempDir::new().expect("index tempdir");
+        fs::create_dir_all(workspace.path().join("src/nested")).expect("source directory");
+        fs::write(workspace.path().join("src/main.ts"), "main").expect("main file");
+        fs::write(workspace.path().join("src/nested/child.ts"), "child").expect("child file");
+        fs::write(workspace.path().join("README.md"), "readme").expect("readme");
+
+        let store = IndexStore::open(workspace.path(), index.path()).expect("open store");
+        store.full_rebuild().expect("full rebuild");
+
+        let result = store
+            .path_query(&PathQueryRequest {
+                pattern: "*.ts".to_string(),
+                path_prefix: String::new(),
+                full_path: false,
+                ignore: Vec::new(),
+                limit: 10,
+            })
+            .expect("basename path query");
+        assert_eq!(result.matches, vec!["src/main.ts", "src/nested/child.ts"]);
+
+        let result = store
+            .path_query(&PathQueryRequest {
+                pattern: "readme.md".to_string(),
+                path_prefix: String::new(),
+                full_path: false,
+                ignore: Vec::new(),
+                limit: 10,
+            })
+            .expect("smart-case path query");
+        assert_eq!(result.matches, vec!["README.md"]);
+
+        let result = store
+            .path_query(&PathQueryRequest {
+                pattern: "**/src/*.ts".to_string(),
+                path_prefix: String::new(),
+                full_path: true,
+                ignore: Vec::new(),
+                limit: 10,
+            })
+            .expect("full path query");
+        assert_eq!(result.matches, vec!["src/main.ts"]);
+
+        let result = store
+            .path_query(&PathQueryRequest {
+                pattern: "*".to_string(),
+                path_prefix: "src".to_string(),
+                full_path: false,
+                ignore: vec!["nested".to_string()],
+                limit: 10,
+            })
+            .expect("scoped path query");
+        assert_eq!(result.matches, vec!["src/main.ts"]);
+    }
+
+    #[test]
+    fn path_query_updates_incrementally_and_reports_truncation() {
+        let workspace = TempDir::new().expect("workspace tempdir");
+        let index = TempDir::new().expect("index tempdir");
+        fs::write(workspace.path().join("one.ts"), "one").expect("first file");
+
+        let store = IndexStore::open(workspace.path(), index.path()).expect("open store");
+        store.full_rebuild().expect("full rebuild");
+        fs::write(workspace.path().join("two.ts"), "two").expect("second file");
+        fs::create_dir(workspace.path().join("new-dir")).expect("new directory");
+        store
+            .apply_changes(&[
+                IndexChange {
+                    path: "two.ts".to_string(),
+                    old_path: None,
+                    kind: "create".to_string(),
+                    node_type: Some("file".to_string()),
+                },
+                IndexChange {
+                    path: "new-dir".to_string(),
+                    old_path: None,
+                    kind: "create".to_string(),
+                    node_type: Some("dir".to_string()),
+                },
+            ])
+            .expect("incremental update");
+
+        let directory_result = store
+            .path_query(&PathQueryRequest {
+                pattern: "new-dir".to_string(),
+                path_prefix: String::new(),
+                full_path: false,
+                ignore: Vec::new(),
+                limit: 10,
+            })
+            .expect("directory path query");
+        assert_eq!(directory_result.matches, vec!["new-dir"]);
+
+        let result = store
+            .path_query(&PathQueryRequest {
+                pattern: "*.ts".to_string(),
+                path_prefix: String::new(),
+                full_path: false,
+                ignore: Vec::new(),
+                limit: 1,
+            })
+            .expect("path query");
+        assert_eq!(result.matches, vec!["one.ts"]);
+        assert!(result.truncated);
+        assert_eq!(store.path_coverage(), "complete");
     }
 
     #[test]

@@ -55,6 +55,7 @@ type SandboxCapabilities struct {
 	FSFind             bool `json:"fsFind"`
 	FSGrep             bool `json:"fsGrep"`
 	FSSearch           bool `json:"fsSearch,omitempty"`
+	FSPathSearch       bool `json:"fsPathSearch,omitempty"`
 	ProcessStart       bool `json:"processStart"`
 	ProcessStartArgv   bool `json:"processStartArgv,omitempty"`
 	ProcessAbort       bool `json:"processAbort"`
@@ -187,6 +188,25 @@ type FSSearchParams struct {
 }
 
 type FSSearchResult struct {
+	Path          string   `json:"path"`
+	Matches       []string `json:"matches"`
+	IndexFamily   string   `json:"indexFamily"`
+	SchemaVersion int      `json:"schemaVersion"`
+	Coverage      string   `json:"coverage"`
+	Truncated     bool     `json:"truncated,omitempty"`
+	State         string   `json:"state,omitempty"`
+}
+
+type FSPathSearchParams struct {
+	Pattern  string   `json:"pattern"`
+	Path     string   `json:"path,omitempty"`
+	CWD      string   `json:"cwd,omitempty"`
+	Limit    int      `json:"limit,omitempty"`
+	FullPath bool     `json:"fullPath,omitempty"`
+	Ignore   []string `json:"ignore,omitempty"`
+}
+
+type FSPathSearchResult struct {
 	Path          string   `json:"path"`
 	Matches       []string `json:"matches"`
 	IndexFamily   string   `json:"indexFamily"`
