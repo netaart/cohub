@@ -19,6 +19,7 @@ import {
 	BookOpen,
 	Check,
 	ChevronDown,
+	CircleHelp,
 	Clock,
 	CreditCard,
 	Download,
@@ -4635,15 +4636,6 @@ $effect(() => {
           <BarChart3 class="w-3.5 h-3.5" />
           <span>{m.sidebar_trending({}, { locale })}</span>
         </a>
-	        <button
-	          type="button"
-	          class="flex items-center gap-2 w-full px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
-	          onclick={openHelpPanel}
-        >
-          <Keyboard class="w-3.5 h-3.5" />
-	          <span>{m.sidebar_help({}, { locale })}</span>
-	          <span class="ml-auto rounded-[4px] border border-border-subtle bg-bg-surface px-1.5 py-px font-mono text-[10px] leading-4 text-text-placeholder">?</span>
-	        </button>
         <a
           href={locale === "zh-CN" ? "/zh/docs" : "/docs"}
           class="flex items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
@@ -4678,18 +4670,29 @@ $effect(() => {
       </div>
     {/if}
 
-    <button
-      type="button"
-      data-user-menu
-      class="flex items-center gap-2 w-full px-1.5 py-[6px] rounded-[5px] hover:bg-bg-hover transition-colors duration-100 cursor-pointer"
-      onclick={() => { showUserMenu = !showUserMenu; }}
-    >
-      <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="xs" class="h-[22px] w-[22px] border-0" />
-      <div class="flex-1 min-w-0 text-left">
-        <p class="text-[12px] text-text-secondary truncate">{userDisplayName}</p>
-      </div>
-      <ChevronDown class={'w-3 h-3 text-text-tertiary shrink-0 transition-transform duration-150 ' + (showUserMenu ? 'rotate-180' : '')} />
-    </button>
+    <div class="flex items-center gap-1">
+      <button
+        type="button"
+        data-user-menu
+        class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-[6px] rounded-[5px] hover:bg-bg-hover transition-colors duration-100 cursor-pointer"
+        onclick={() => { showUserMenu = !showUserMenu; }}
+      >
+        <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="xs" class="h-[22px] w-[22px] border-0" />
+        <div class="flex-1 min-w-0 text-left">
+          <p class="text-[12px] text-text-secondary truncate">{userDisplayName}</p>
+        </div>
+        <ChevronDown class={'w-3 h-3 text-text-tertiary shrink-0 transition-transform duration-150 ' + (showUserMenu ? 'rotate-180' : '')} />
+      </button>
+      <button
+        type="button"
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[5px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        aria-label={m.sidebar_help({}, { locale })}
+        title={m.sidebar_help({}, { locale })}
+        onclick={openHelpPanel}
+      >
+        <CircleHelp class="h-[18px] w-[18px]" />
+      </button>
+    </div>
   </div>
 </aside>
 {/if}
