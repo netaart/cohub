@@ -142,6 +142,8 @@ export type SceneSyncInput = {
 	items: BoardItem[];
 	/** Relations to draw. Resolved against the live item frames each sync. */
 	connections?: readonly BoardConnection[];
+	/** Stable cull rect for relations; null draws them all. */
+	cullRect?: Rect | null;
 	/** Connection ids the overlay is previewing, so they are not drawn twice. */
 	connectionSkipIds?: ReadonlySet<string>;
 	/** Selected connection ids, drawn in their selected state. */
@@ -373,25 +375,52 @@ export function createBoardScene(options: {
 	 * exactly what the far layer exists to avoid. Iteration order follows `items`
 	 * so plates stack the way the document says.
 	 */
-	function rebuildFarLayer(
-		items: BoardItem[],
-		context: BoardRenderContext,
-		visibleIds: Set<string> | null,
-		pinnedIds: Set<string>,
-	) {
+	function rebuildFarLayer(input: SceneSyncInput) {
+		const { context, getItem, pinnedIds } = input;
 		farLayer.clear();
-		for (const item of items) {
-			if (visibleIds !== null && !visibleIds.has(item.id)) continue;
+		for (const id of visibleFacts(input).orderedIds) {
 			// Pinned items are live containers, so drawing them here would double them.
-			if (pinnedIds.has(item.id)) continue;
+			const item = pinnedIds.has(id) ? null : getItem(id);
+			if (!item) continue;
 			const renderer = getRenderer(item, context);
 			renderer.renderFar?.(farLayer, item, context);
 		}
 	}
 
-	/** Whether an item is drawn by the far layer rather than a container. */
-	function isFarDrawn(item: BoardItem, context: BoardRenderContext): boolean {
-		return Boolean(getRenderer(item, context).renderFar);
+	/** Visible-set facts memoised per set and structure (renderers follow item type). */
+	let visibleMemo: {
+		ids: Set<string> | null;
+		structureVersion: number;
+		signature: number;
+		orderedIds: string[];
+		unbatched: Set<string>;
+	} | null = null;
+	function visibleFacts(input: SceneSyncInput) {
+		const { items, visibleIds, structureVersion, context, getItem } = input;
+		if (
+			visibleMemo?.ids === visibleIds &&
+			visibleMemo.structureVersion === structureVersion
+		)
+			return visibleMemo;
+		const orderedIds =
+			visibleIds === null
+				? items.map((item) => item.id)
+				: [...visibleIds].sort(
+						(a, b) => (orderById.get(a) ?? 0) - (orderById.get(b) ?? 0),
+					);
+		const unbatched = new Set<string>();
+		for (const id of orderedIds) {
+			const item = getItem(id);
+			if (item && !getRenderer(item, context).renderFar) unbatched.add(id);
+		}
+		visibleMemo = {
+			ids: visibleIds,
+			structureVersion,
+			signature: visibleIds === null ? 0 : idSetSignature(visibleIds),
+			orderedIds,
+			unbatched,
+		};
+		return visibleMemo;
 	}
 
 	function sync(input: SceneSyncInput) {
@@ -407,10 +436,6 @@ export function createBoardScene(options: {
 			gestureActive,
 		} = input;
 
-		// Connections are redrawn every sync rather than diffed: their geometry is
-		// derived from node frames, so any drag invalidates them anyway, and the whole
-		// set is one batched Graphics. Resolution skips relations whose endpoints are
-		// off-screen because `getItem` returns null for them.
 		const connections = input.connections ?? EMPTY_CONNECTIONS;
 		if (connections.length > 0 || connectionsDrawn) {
 			connectionLayer.sync({
@@ -419,6 +444,8 @@ export function createBoardScene(options: {
 				colors: context.colors,
 				colorScheme: context.colorScheme,
 				zoom: context.zoom,
+				cullRect: input.cullRect ?? null,
+				liveNodeIds: pinnedIds,
 				...(input.selectedConnectionIds
 					? { selectedIds: input.selectedConnectionIds }
 					: {}),
@@ -428,6 +455,18 @@ export function createBoardScene(options: {
 					: {}),
 			});
 			connectionsDrawn = connections.length > 0;
+		}
+
+		// Structure pass: only when membership/order actually changed. This is
+		// what keeps a pan, hover or drag off the O(n) path.
+		const structureChanged = structureVersion !== lastStructureVersion;
+		if (structureChanged) {
+			lastStructureVersion = structureVersion;
+			const liveIds = new Set(items.map((item) => item.id));
+			for (const [id, entry] of [...cards]) {
+				if (!liveIds.has(id)) recycle(id, entry, context, false);
+			}
+			orderById = new Map(items.map((item, index) => [item.id, index]));
 		}
 
 		// Decide the LOD for this frame. Hysteresis around the threshold keeps a
@@ -450,10 +489,10 @@ export function createBoardScene(options: {
 				geometryVersion,
 				globalSig,
 				idSetSignature(pinnedIds),
-				visibleIds === null ? "all" : idSetSignature(visibleIds),
+				visibleIds === null ? "all" : visibleFacts(input).signature,
 			].join("|");
-			if (nextFarSig !== farSig && !gestureActive) {
-				rebuildFarLayer(items, context, visibleIds, pinnedIds);
+			if (farSig === null || (nextFarSig !== farSig && !gestureActive)) {
+				rebuildFarLayer(input);
 				farSig = nextFarSig;
 			}
 		} else if (farModeChanged) {
@@ -461,25 +500,14 @@ export function createBoardScene(options: {
 			farSig = null;
 		}
 
-		// Structure pass: only when membership/order actually changed. This is
-		// what keeps a pan, hover or drag off the O(n) path.
-		const structureChanged = structureVersion !== lastStructureVersion;
-		if (structureChanged) {
-			lastStructureVersion = structureVersion;
-			const liveIds = new Set(items.map((item) => item.id));
-			for (const [id, entry] of [...cards]) {
-				if (!liveIds.has(id)) recycle(id, entry, context, false);
-			}
-			orderById = new Map(items.map((item, index) => [item.id, index]));
-		}
-
 		// Appearance pass over the visible set only — never over `items`. `wanted` is
 		// the set of ids that must exist as live containers this frame.
 		const wanted = new Set<string>(pinnedIds);
-		if (visibleIds === null) {
-			for (const item of items) {
-				if (!farActive || !isFarDrawn(item, context)) wanted.add(item.id);
-			}
+		if (farActive) {
+			const { unbatched } = visibleFacts(input);
+			for (const id of unbatched) wanted.add(id);
+		} else if (visibleIds === null) {
+			for (const item of items) wanted.add(item.id);
 		} else {
 			for (const id of visibleIds) wanted.add(id);
 		}
@@ -499,16 +527,6 @@ export function createBoardScene(options: {
 		for (const id of wanted) {
 			const item = getItem(id);
 			if (!item) continue;
-			// In far mode a batched card only materialises when it is pinned.
-			if (farActive && !pinnedIds.has(id) && isFarDrawn(item, context)) {
-				const existing = cards.get(id);
-				if (existing) {
-					recycle(id, existing, context, false);
-					liveSetChanged = true;
-				}
-				continue;
-			}
-
 			let entry = cards.get(id);
 			const renderer = getRenderer(item, context);
 			if (entry && entry.renderer.id !== renderer.id) {
@@ -718,6 +736,7 @@ export function createBoardScene(options: {
 		farLayer.clear();
 		farSig = null;
 		farActive = false;
+		visibleMemo = null;
 		lastStructureVersion = -1;
 	}
 
