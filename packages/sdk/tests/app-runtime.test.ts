@@ -961,7 +961,6 @@ test("CohubClient resolves a dev standalone App without runtime configuration", 
 			return Response.json({
 				app: { id: appId, slug: "demo", spaceId: "space-1", appScopes: ["file.view"] },
 				space: { id: "space-1", name: "Studio" },
-				standaloneUrl: `https://${origin}`,
 			});
 		},
 	});

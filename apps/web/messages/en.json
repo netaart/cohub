@@ -1725,7 +1725,6 @@
 	"space_new_no_env": "No extra env configured",
 	"space_new_no_channels": "No channels available",
 	"app_view_new_tab": "New tab",
-	"app_view_standalone_url": "Standalone origin",
 	"app_view_copy_url": "Copy URL",
 	"app_view_url_copied": "URL copied",
 	"app_view_space_access_detail": "Space access follows this Space's permissions.",

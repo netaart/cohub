@@ -172,8 +172,6 @@ export type AppDetailResponse = {
   /** Member who published this App, which may differ from the Space owner. */
   publisher: PublicUserProfile;
   publicUrl: string | null;
-  /** Direct standalone URL. Unlike publicUrl, this page has no Cohub shell. */
-  standaloneUrl?: string | null;
   content: AppContent | null;
   /** Version whose content is served; the current version when omitted. */
   version?: PublicAppVersionSummary | null;
@@ -343,7 +341,7 @@ export class AppsApi {
   }
 
   create(input: AppCreateInput) {
-    return this.transport.request<{ app: AppRecord; standaloneUrl?: string | null }>("/api/apps", {
+    return this.transport.request<{ app: AppRecord }>("/api/apps", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
@@ -351,7 +349,7 @@ export class AppsApi {
   }
 
   update(id: string, input: AppUpdateInput) {
-    return this.transport.request<{ app: AppRecord; standaloneUrl?: string | null }>(`/api/apps/${id}`, {
+    return this.transport.request<{ app: AppRecord }>(`/api/apps/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
@@ -438,7 +436,7 @@ export class AppsApi {
   }
 
   publishVersion(appId: string, input?: { meta?: AppMeta | null }) {
-    return this.transport.request<{ app: AppRecord; standaloneUrl?: string | null; version: AppVersionRecord }>(`/api/apps/${appId}/versions`, {
+    return this.transport.request<{ app: AppRecord; version: AppVersionRecord }>(`/api/apps/${appId}/versions`, {
       method: "POST",
       headers: input ? { "Content-Type": "application/json" } : undefined,
       body: input ? JSON.stringify(input) : undefined,

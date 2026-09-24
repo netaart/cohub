@@ -1725,7 +1725,6 @@
 	"space_new_no_env": "未配置额外环境变量",
 	"space_new_no_channels": "暂无可用频道",
 	"app_view_new_tab": "新建标签页",
-	"app_view_standalone_url": "独立域名",
 	"app_view_copy_url": "复制地址",
 	"app_view_url_copied": "地址已复制",
 	"app_view_space_access_detail": "Space 访问遵循该 Space 的权限。",

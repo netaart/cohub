@@ -785,7 +785,6 @@ export type AppVersionPublishedEvent = {
   payload: {
     app: RealtimeAppRecord;
     version: RealtimeAppVersionRecord;
-    standaloneUrl?: string | null;
     previousVersionId: string | null;
     actor: { userId: string };
     source: RequestSource | null;

@@ -53,14 +53,12 @@ test("parseAppVersionPublished validates the app relationship", () => {
 		payload: {
 			app: app(2, "2026-07-20T00:00:00.000Z"),
 			version: version(2),
-			standaloneUrl: "https://app.example",
 			previousVersionId: "version-1",
 		},
 	} as ChannelEnvelope;
 	assert.deepEqual(parseAppVersionPublished(event), {
 		app: event.payload.app,
 		version: event.payload.version,
-		standaloneUrl: "https://app.example",
 		previousVersionId: "version-1",
 	});
 
@@ -69,19 +67,6 @@ test("parseAppVersionPublished validates the app relationship", () => {
 		payload: { ...event.payload, version: { ...version(2), appId: "other" } },
 	};
 	assert.equal(parseAppVersionPublished(invalid), null);
-	const legacy = {
-		...event,
-		payload: { ...event.payload, standaloneUrl: undefined },
-	} as ChannelEnvelope;
-	assert.equal(
-		"standaloneUrl" in (parseAppVersionPublished(legacy) ?? {}),
-		false,
-	);
-	const cleared = {
-		...event,
-		payload: { ...event.payload, standaloneUrl: null },
-	} as ChannelEnvelope;
-	assert.equal(parseAppVersionPublished(cleared)?.standaloneUrl, null);
 });
 
 test("upsertAppSnapshot ignores older and stale same-version snapshots", () => {

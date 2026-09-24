@@ -46,7 +46,7 @@ import {
 import { createLogger } from "@cohub/infra/logging";
 import { billingOperations, COHUB_BILLING_FEATURES } from "@cohub/billing";
 import { featureGateResponse } from "../lib/feature-gate.js";
-import { createAppPublicUrl, createAppStandaloneUrl } from "../lib/app-public-url.js";
+import { createAppPublicUrl } from "../lib/app-public-url.js";
 import { applyRequestSourceToMeta, getRequestSource } from "../lib/request-source.js";
 import { dispatchAppVersionPublished } from "../app-events.js";
 import { resolveAppVersionSources } from "../app-version-source.js";
@@ -556,7 +556,6 @@ async function getStandaloneAppDetail(app: typeof apps.$inferSelect) {
   return {
     ...wrapAppRecord(wire, serializeApp(app)),
     space: { id: app.spaceId },
-    standaloneUrl: createAppStandaloneUrl({ appId: app.id, status: app.status, visibility: app.visibility, targetType: content?.targetType ?? app.targetType, contentKind: content?.kind }),
     content,
   };
 }
@@ -573,7 +572,6 @@ async function getPublicAppDetail(app: typeof apps.$inferSelect) {
     ...identity,
     publisher,
     publicUrl: createAppPublicUrl({ ownerUsername: identity.owner.username, spaceSlug: identity.space.slug, appSlug: app.slug, status: app.status }),
-    standaloneUrl: createAppStandaloneUrl({ appId: app.id, status: app.status, visibility: app.visibility, targetType: content?.targetType ?? app.targetType, contentKind: content?.kind }),
     content,
     totalViews,
   };
@@ -670,7 +668,6 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
     owner: { ...row.owner, username: row.owner.username },
     publisher: await resolveAppPublisher(row.app.userUuid),
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: row.app.slug, status: row.app.status }),
-    standaloneUrl: createAppStandaloneUrl({ appId: row.app.id, status: row.app.status, visibility: row.app.visibility, targetType: content?.targetType ?? row.app.targetType, contentKind: content?.kind }),
     content,
     version: version ? publicVersionSummary(version, null) : null,
     totalViews,
@@ -797,7 +794,6 @@ router.get("/:id", async (c) => {
     owner: { ...row.owner, username: row.owner.username },
     publisher: await resolveAppPublisher(app.userUuid),
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: app.slug, status: app.status }),
-    standaloneUrl: createAppStandaloneUrl({ appId: app.id, status: app.status, visibility: app.visibility, targetType: content?.targetType ?? app.targetType, contentKind: content?.kind }),
     content,
     totalViews,
   });
@@ -894,15 +890,6 @@ router.post("/", async (c) => {
       await cleanupAppAssets(assetKey, { appId: "new", spaceId, reason: "create_slug_conflict" });
       return c.json({ message: "slug already exists" }, 409);
     }
-    const standaloneUrl = result.version
-      ? createAppStandaloneUrl({
-          appId: result.app.id,
-          status: result.app.status,
-          visibility: result.app.visibility,
-          targetType: result.version.targetType,
-          contentKind: result.version.contentKind,
-        })
-      : null;
     if (result.version) {
       const source = (
         await resolveAppVersionSources({ versions: [result.version], spaceId, user })
@@ -910,7 +897,6 @@ router.post("/", async (c) => {
       await dispatchAppVersionPublished({
         app: serializeAppRecord(result.app, "canonical"),
         version: serializeAppVersionRecord(result.version, "canonical", source),
-        standaloneUrl,
         previousVersionId: null,
         actorUserId: user.uuid,
         source: getRequestSource(c),
@@ -924,7 +910,6 @@ router.post("/", async (c) => {
     }
     return c.json({
       ...wrapAppRecord(wire, serializeApp(result.app)),
-      standaloneUrl,
     }, 201);
   } catch (error) {
     await cleanupAppAssets(assetKey, { appId: "new", spaceId, reason: "create_failed" });
@@ -1007,16 +992,8 @@ async function updateApp(
     throw error;
   });
   if (!app) return c.json({ message: "slug already exists" }, 409);
-  const currentVersion = await getAppCurrentVersion(app);
   return c.json({
     ...wrapAppRecord(wire, serializeApp(app)),
-    standaloneUrl: createAppStandaloneUrl({
-      appId: app.id,
-      status: app.status,
-      visibility: app.visibility,
-      targetType: currentVersion?.targetType ?? app.targetType,
-      contentKind: currentVersion?.contentKind,
-    }),
   });
 }
 
@@ -1090,17 +1067,9 @@ async function publishAppVersion(
     const source = (
       await resolveAppVersionSources({ versions: [result.version], spaceId: current.spaceId, user: options.actor })
     ).get(result.version.id) ?? null;
-    const standaloneUrl = createAppStandaloneUrl({
-      appId: result.app.id,
-      status: result.app.status,
-      visibility: result.app.visibility,
-      targetType: result.version.targetType,
-      contentKind: result.version.contentKind,
-    });
     await dispatchAppVersionPublished({
       app: serializeAppRecord(result.app, "canonical"),
       version: serializeAppVersionRecord(result.version, "canonical", source),
-      standaloneUrl,
       previousVersionId: result.previousVersionId,
       actorUserId: options.actor.uuid,
       source: getRequestSource(c),
@@ -1113,7 +1082,6 @@ async function publishAppVersion(
     });
     return c.json({
       ...wrapAppRecord(wire, serializeApp(result.app)),
-      standaloneUrl,
       version: serializeAppVersion(result.version, source),
     });
   } catch (error) {

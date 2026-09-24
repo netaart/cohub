@@ -9,7 +9,6 @@ import { dispatchSpaceDomainEvent } from "./space-events.js";
 export async function dispatchAppVersionPublished(input: {
   app: RealtimeAppRecord;
   version: RealtimeAppVersionRecord;
-  standaloneUrl: string | null;
   previousVersionId: string | null;
   actorUserId: string;
   source: RequestSource | null;
@@ -24,7 +23,6 @@ export async function dispatchAppVersionPublished(input: {
     payload: {
       app: input.app,
       version: input.version,
-      standaloneUrl: input.standaloneUrl,
       previousVersionId: input.previousVersionId,
       actor: { userId: input.actorUserId },
       source: input.source,

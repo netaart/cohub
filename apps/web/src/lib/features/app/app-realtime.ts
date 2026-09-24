@@ -8,7 +8,6 @@ export const INSTALLED_APPS_CHANGED_EVENT = "cohub:installed-apps-changed";
 export type AppVersionPublishedPayload = {
 	app: AppRecord;
 	version: AppVersionRecord;
-	standaloneUrl?: string | null;
 	previousVersionId: string | null;
 };
 
@@ -16,7 +15,6 @@ export type AppsChangedDetail = {
 	spaceId: string;
 	app?: AppRecord;
 	version?: AppVersionRecord;
-	standaloneUrl?: string | null;
 	deletedAppId?: string;
 };
 
@@ -46,10 +44,6 @@ export function parseAppVersionPublished(
 	return {
 		app: app as AppRecord,
 		version: version as AppVersionRecord,
-		...(typeof event.payload.standaloneUrl === "string" ||
-		event.payload.standaloneUrl === null
-			? { standaloneUrl: event.payload.standaloneUrl }
-			: {}),
 		previousVersionId:
 			typeof event.payload.previousVersionId === "string"
 				? event.payload.previousVersionId
