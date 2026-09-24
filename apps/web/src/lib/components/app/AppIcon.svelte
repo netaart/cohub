@@ -1,8 +1,34 @@
+<script lang="ts" module>
+type Size = "xs" | "sm" | "md";
+type Tile = { box: string; pair: string; single: string };
+
+/**
+ * `md` spans a two-line list row (16px title + 12px caption). A lone glyph
+ * (CJK, emoji, single letter) renders larger than a two-letter pair.
+ */
+const SIZES = {
+	xs: {
+		box: "h-4 w-4 rounded-[4px]",
+		pair: "text-[7px] font-semibold",
+		single: "text-[9px] font-medium",
+	},
+	sm: {
+		box: "h-5 w-5 rounded-[5px]",
+		pair: "text-[8px] font-semibold",
+		single: "text-[11px] font-medium",
+	},
+	md: {
+		box: "h-7 w-7 rounded-[7px]",
+		pair: "text-[11px] font-semibold",
+		single: "text-[14px] font-medium",
+	},
+} as const satisfies Record<Size, Tile>;
+</script>
+
 <script lang="ts">
 import type { AppMeta } from "@neta-art/cohub";
 import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
-
-type Size = "xs" | "sm" | "md";
+import { avatarInitials, isSingleGlyph } from "$lib/avatar-initials";
 
 type Props = {
 	meta?: AppMeta | null;
@@ -23,12 +49,9 @@ let {
 const iconUrl = $derived(appIconUrl(meta));
 const label = $derived(appDisplayTitle(meta, slug ?? "App"));
 
-const sizeClass = $derived(
-	size === "xs"
-		? "h-4 w-4 rounded-[4px] text-[8px]"
-		: size === "md"
-			? "h-8 w-8 rounded-[6px] text-[11px]"
-			: "h-5 w-5 rounded-[5px] text-[9px]",
+const mark = $derived(avatarInitials(label, "A"));
+const markClass = $derived(
+	isSingleGlyph(mark) ? SIZES[size].single : SIZES[size].pair,
 );
 
 /**
@@ -53,22 +76,10 @@ const src = $derived(
 		? `${iconUrl}${iconUrl.includes("?") ? "&" : "?"}cohub_icon_retry=${attempt}`
 		: iconUrl,
 );
-
-/** Two-letter mark from the display title, CJK-safe via `slice`. */
-function initials(value: string) {
-	const text = value.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
-	if (!text) return "A";
-	const parts = text.split(" ");
-	const letters =
-		parts.length >= 2
-			? `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`
-			: text.slice(0, 2);
-	return letters.toUpperCase();
-}
 </script>
 
 <span
-	class={`inline-flex shrink-0 items-center justify-center overflow-hidden border border-border-subtle bg-bg-elevated font-semibold text-text-tertiary ${sizeClass} ${className}`}
+	class={`inline-flex shrink-0 items-center justify-center overflow-hidden border border-border-subtle bg-bg-elevated text-text-tertiary ${SIZES[size].box} ${className}`}
 	aria-hidden="true"
 >
 	{#if showIcon && src}
@@ -84,6 +95,6 @@ function initials(value: string) {
 			}}
 		/>
 	{:else}
-		<span class="translate-y-px tracking-[0.02em]">{initials(label)}</span>
+		<span class={`whitespace-nowrap leading-none tracking-[0.02em] ${markClass}`}>{mark}</span>
 	{/if}
 </span>
