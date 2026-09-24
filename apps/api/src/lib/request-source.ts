@@ -6,10 +6,27 @@ import {
   stripControlChars,
   type RequestSource,
 } from "@cohub/protocol/provenance";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
+import { readRuntimeRecovery } from "@cohub/core/sessions";
+import { getSessionRuntimeTurn } from "../runtime.js";
 
 export const getRequestSource = (c: Context): RequestSource | null =>
-  parseRequestSourceFromHeaders((name) => c.req.header(name));
+  (c.get("requestSource") as RequestSource | null | undefined) ?? parseRequestSourceFromHeaders((name) => c.req.header(name));
+
+/**
+ * A long-lived local harness (a terminal Pi, a shared Codex server) runs many Turns in one process,
+ * so its tools can name their Session but not the Turn.
+ */
+export const resolveRequestSourceTurn: MiddlewareHandler = async (c, next) => {
+  const source = parseRequestSourceFromHeaders((name) => c.req.header(name));
+  const principal = c.get("principal") as { type: string; user?: { uuid: string } } | null | undefined;
+  if (source?.spaceId && source.sessionId && !source.turnId && principal?.type === "user" && principal.user) {
+    const turn = await getSessionRuntimeTurn(source.spaceId, source.sessionId).catch(() => null);
+    const owner = turn ? readRuntimeRecovery(turn.meta)?.ownerUserId ?? turn.userUuid : null;
+    if (turn && owner === principal.user.uuid) c.set("requestSource", { ...source, turnId: turn.id });
+  }
+  await next();
+};
 
 /** body.source > header via > fallback. Display-only, not auth. */
 export const resolveSessionSourceFromRequest = (

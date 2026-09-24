@@ -671,6 +671,9 @@ importers:
       sharp:
         specifier: ^0.35.4
         version: 0.35.4(@types/node@26.4.0)
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
     devDependencies:
       '@types/node':
         specifier: ^26.4.0
@@ -681,9 +684,6 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
-      ws:
-        specifier: ^8.21.3
-        version: 8.21.3
     optionalDependencies:
       '@napi-rs/canvas':
         specifier: ^1.0.8

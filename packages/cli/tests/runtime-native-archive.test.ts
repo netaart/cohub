@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { importNativeArchive } from "../src/runtime/native-archive.js";
+import { importNativeArchive } from "../src/runtime/native/archive.js";
 
 for (const harness of ["pi", "codex"] as const) test(`${harness} import changes only a working-copy header and preserves opaque history bytes`, async () => {
   const root = await mkdtemp(join(tmpdir(), "native-import-"));

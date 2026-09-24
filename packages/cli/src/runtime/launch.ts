@@ -10,8 +10,8 @@ import { requireAccessToken } from "../auth.js";
 import { createClient } from "../client.js";
 import { currentIdentityKey, explicitSpace } from "../space.js";
 import { canonicalRuntimeRoot, getRuntimeSpaceBinding, resolveRuntimeSpace } from "./space-binding.js";
-import { requestRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
-import { ensureNativeSync } from "./native-attach.js";
+import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
+import { ensureNativeSync } from "./native/attach.js";
 import type { RuntimeDiagnostic } from "./diagnostics.js";
 import { createDiagnosticConsole, printRuntimeSummary, runtimeWebUrl, type RuntimeSummary } from "./presentation.js";
 import { runRuntime, type RuntimeLaunch } from "./supervisor.js";
@@ -82,7 +82,11 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
       }
       // `up` is the single idempotent entry: a reused instance adopts its running
       // Harnesses (unless explicitly overridden) and completes native sync setup.
-      await ensureNativeSync({ root, spaceId: existing.spaceId, identity, harnesses: options.harness.length ? harnesses : parseRuntimeHarnesses(existing.harnesses), yes: options.yes, executables: { pi: options.pi, codex: options.codex } });
+      const native = await ensureNativeSync({ root, spaceId: existing.spaceId, identity, harnesses: options.harness.length ? harnesses : parseRuntimeHarnesses(existing.harnesses), yes: options.yes, executables: { pi: options.pi, codex: options.codex } });
+      // The running Runtime applies consent given now without restarting.
+      const directory = runtimeInstanceDirectory(identity, existing.spaceId);
+      await controlRuntimeInstance(directory, "reload").catch(() => undefined);
+      if (native.importHistory) await controlRuntimeInstance(directory, "import", { command: "start" }, 60_000).catch(() => undefined);
       printRuntimeSummary(existing, options.json, true);
       return;
     }
@@ -128,8 +132,8 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
     },
   });
   // Consent (or --yes) precedes any user-level integration install; failure never blocks startup.
-  await ensureNativeSync({ root, spaceId, identity, harnesses, yes: options.yes, executables: { pi: options.pi, codex: options.codex } });
-  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables: { pi: options.pi, codex: options.codex }, background: Boolean(options.detach), verbose: options.verbose };
+  const native = await ensureNativeSync({ root, spaceId, identity, harnesses, yes: options.yes, executables: { pi: options.pi, codex: options.codex } });
+  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables: { pi: options.pi, codex: options.codex }, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory };
   const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
   if (existing) {
     if (existing.root !== root) throw new Error("This Space is running in another directory");

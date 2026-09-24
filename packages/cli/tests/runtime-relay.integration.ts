@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { TestRuntimeSessionStore } from "./fixtures/runtime-projection-source.js";
+import { testNativeRuntime } from "./fixtures/runtime-native.js";
 import { test } from "node:test";
 import { createServer } from "node:http";
-import { mkdtemp, chmod, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
 import WebSocket, { WebSocketServer } from "ws";
 import type { RuntimeRegistration, RuntimeTurnInput } from "@cohub/protocol";
 import { createRuntimeRelay } from "../../../apps/gateway/src/relay/runtime-relay.js";
@@ -62,8 +61,6 @@ test("multiple removed blocks keep stable stream identities through the SDK redu
 for (const harness of ["pi", "codex"] as const) for (const disconnect of ["all", "peer", "ack-error"] as const) {
   test(`${harness}: actual Gateway -> Runtime -> SDK, lost ack (${disconnect} disconnect)`,  { timeout: 25_000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), "cohub-relay-integration-"));
-    const fixture = fileURLToPath(new URL(`./fixtures/runtime-${harness}.mjs`, import.meta.url));
-    await chmod(fixture, 0o755);
     const registrations = new Map<string, RuntimeRegistration>();
     const server = createServer();
     const wss = new WebSocketServer({ noServer: true });
@@ -104,14 +101,15 @@ for (const harness of ["pi", "codex"] as const) for (const disconnect of ["all",
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address(); assert(address && typeof address !== "string"); port = address.port;
     const controller = new AbortController();
-    const store = new TestRuntimeSessionStore(spaceId, join(root, "state"));
-    const acknowledge = store.acknowledge.bind(store);
+    const runtime = await testNativeRuntime({ spaceId, root, harnesses: [harness] });
+    const { results } = runtime.native.executor;
+    const acknowledge = results.acknowledge.bind(results);
     let failAcknowledgement = disconnect === "ack-error";
-    store.acknowledge = async (...args) => {
+    results.acknowledge = async (...args) => {
       if (failAcknowledgement) { failAcknowledgement = false; throw new Error("Simulated local write failure"); }
       return acknowledge(...args);
     };
-    const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${port}/runtime`, capabilities: { harnesses: [harness], models: [] }, harnesses: { [harness]: fixture }, token: async () => "test-token", signal: controller.signal, store, onReady: () => { readyCount++; readyResolve(); } });
+    const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${port}/runtime`, capabilities: { harnesses: [harness], models: [] }, token: async () => "test-token", signal: controller.signal, executor: runtime.native.executor, onReady: () => { readyCount++; readyResolve(); } });
     const turnId = crypto.randomUUID();
     const input: RuntimeTurnInput = { spaceId, sessionId, turnId, userMessageId: turnId, harness, accessMode: "full_access", messages: [
       { turnId: crypto.randomUUID(), userMessageId: crypto.randomUUID(), userId: "earlier-author", content: [{ type: "text", text: "first batch input" }] },
@@ -151,18 +149,19 @@ for (const harness of ["pi", "codex"] as const) for (const disconnect of ["all",
       assert(patches > 0, "native stream reaches the SDK path");
       assert(visibleTexts.some((value) => /new session|native resumed/.test(value)), "SDK receives actual streamed answer text");
       assert.deepEqual(syncErrors, [], "stream identities and sequence numbers stay consistent");
-      const receipt = await store.recoverResult(input, requestId);
-      assert(receipt);
-      const native = await readFile(receipt.state.path, "utf8");
+      // An acknowledged result leaves no receipt behind; one whose local acknowledgement failed is kept.
+      if (disconnect === "ack-error") assert(await results.recover(input, requestId));
+      else assert.equal(await results.recover(input, requestId), null);
+      const next = await runtime.native.executor.sessions.prepare({ ...input, cwd: root, turnId: crypto.randomUUID(), context: { complete: false, revision: "completed", throughTurnId: turnId, messages: [] }, resumable: () => true });
+      assert.equal(next.resume, "native");
+      const native = await readFile(next.session.path, "utf8");
       assert(native.includes("first batch input")); assert(!native.includes("earlier-author")); assert(!native.includes("owner-author"));
-      assert.equal(receipt.state.throughTurnId === turnId || receipt.state.pendingTurnId === turnId, true);
-      if (harness === "pi") assert.equal(native.split('"id":"user-fixture"').length - 1, 1, "no repeated model execution");
-      else assert.equal(native.split('"type":"response_item"').length - 1, 1, "no repeated Codex turn");
-      assert.equal((await store.prepare({ ...input, turnId: crypto.randomUUID(), context: { complete: false, revision: "completed", throughTurnId: turnId, messages: [] } }, root)).resume, "native");
+      if (harness === "pi") assert.equal(native.split('"role":"user"').length - 1, 1, "no repeated model execution");
+      else assert.equal(native.split('"type":"turn_started"').length - 1, 1, "no repeated Codex turn");
       const unauthorized = new WebSocket(registrations.get(spaceId)?.endpoint ?? "", { headers: { "x-worker-secret": "wrong" } });
       assert.equal(await new Promise<number>((resolve) => unauthorized.once("close", resolve)), 4401);
     } finally {
-      controller.abort(); await running; stream.dispose(); unsubscribe();
+      controller.abort(); await running; await runtime.close(); stream.dispose(); unsubscribe();
       for (const connected of wss.clients) connected.terminate();
       await new Promise<void>((resolve) => wss.close(() => server.close(() => resolve())));
       await rm(root, { recursive: true, force: true });

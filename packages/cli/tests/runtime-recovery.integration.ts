@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { TestRuntimeSessionStore } from "./fixtures/runtime-projection-source.js";
+import { testNativeRuntime, type TestNativeRuntime } from "./fixtures/runtime-native.js";
 import { test } from "node:test";
 import { createServer } from "node:http";
-import { mkdtemp, chmod, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import type { RuntimeRegistration, RuntimeTurnInput } from "@cohub/protocol";
 import { createRuntimeRelay } from "../../../apps/gateway/src/relay/runtime-relay.js";
@@ -14,7 +13,6 @@ import { serveRuntime } from "../src/runtime/connection.js";
 
 for (const harness of ["pi", "codex"] as const) test(`${harness}: cold Runtime restart recovers after the original exchange expires, without a Harness executable`, { timeout: 20_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "cohub-runtime-recover-"));
-  const fixture = fileURLToPath(new URL(`./fixtures/runtime-${harness}.mjs`, import.meta.url)); await chmod(fixture, 0o755);
   const server = createServer(), sockets = new WebSocketServer({ noServer: true });
   const spaceId = crypto.randomUUID();
   let registration: RuntimeRegistration | null = null;
@@ -41,11 +39,11 @@ for (const harness of ["pi", "codex"] as const) test(`${harness}: cold Runtime r
   }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert(address && typeof address !== "string"); port = address.port;
-  const store = new TestRuntimeSessionStore(spaceId, join(root, "state"));
   let controller = new AbortController();
-  const start = (binary: string) => serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${port}/runtime`, capabilities: { harnesses: [harness], models: [] }, harnesses: { [harness]: binary }, token: async () => "token", signal: controller.signal, store, onReady: () => onReady() });
+  let runtime: TestNativeRuntime = await testNativeRuntime({ spaceId, root, harnesses: [harness] });
+  const start = () => serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${port}/runtime`, capabilities: { harnesses: [harness], models: [] }, token: async () => "token", signal: controller.signal, executor: runtime.native.executor, onReady: () => onReady() });
   let ready = new Promise<void>((resolve) => { onReady = resolve; });
-  let running = start(fixture);
+  let running = start();
   const turnId = crypto.randomUUID(), userMessageId = crypto.randomUUID();
   const turn: RuntimeTurnInput = { spaceId, sessionId: crypto.randomUUID(), turnId, userMessageId, harness, accessMode: "full_access",
     messages: [
@@ -59,13 +57,14 @@ for (const harness of ["pi", "codex"] as const) test(`${harness}: cold Runtime r
     await assert.rejects(() => exchangeRuntimeTurn({ input: turn, requestId: turn.turnId, signal: new AbortController().signal, endpoint, headers: { "x-worker-secret": "secret" }, reconnectMs: 10,
       event: async () => {},
     }), RuntimeExecutionUncertainError);
-    controller.abort(); await running;
-    const receipt = await store.recoverResult(turn); assert(receipt);
-    const native = await readFile(receipt.state.path, "utf8");
+    controller.abort(); await running; await runtime.close();
+    runtime = await testNativeRuntime({ spaceId, root, harnesses: [harness], executables: { [harness]: join(root, "missing-harness-binary") } });
+    const receipt = await runtime.native.executor.results.recover(turn); assert(receipt);
+    const native = await readFile(receipt.session.path, "utf8");
     assert(native.includes("original batch input")); assert(!native.includes("earlier-author"));
     controller = new AbortController(); dropResult = false;
     ready = new Promise<void>((resolve) => { onReady = resolve; });
-    running = start(join(root, "missing-harness-binary"));
+    running = start();
     await ready;
     await exchangeRuntimeTurn({ input: turn, recovery: true, signal: new AbortController().signal, endpoint, headers: { "x-worker-secret": "secret" },
       event: async (event, send, requestId) => {
@@ -74,13 +73,14 @@ for (const harness of ["pi", "codex"] as const) test(`${harness}: cold Runtime r
       },
     });
     assert.equal(commits, 1); assert(wakeups >= 2);
-    assert.equal(await readFile(receipt.state.path, "utf8"), native, "no model/tool replay");
-    assert.equal((await store.prepare({ ...turn, turnId: crypto.randomUUID(), context: { complete: false, throughTurnId: turn.turnId, revision: "completed", messages: [] } }, root)).resume, "native");
+    assert.equal(await readFile(receipt.session.path, "utf8"), native, "no model/tool replay");
+    const next = await runtime.native.executor.sessions.prepare({ ...turn, cwd: root, turnId: crypto.randomUUID(), context: { complete: false, throughTurnId: turn.turnId, revision: "completed", messages: [] }, resumable: () => true });
+    assert.equal(next.resume, "native");
     const unknown = { ...turn, sessionId: crypto.randomUUID(), turnId: crypto.randomUUID() };
     await assert.rejects(() => exchangeRuntimeTurn({ input: unknown, recovery: true, signal: new AbortController().signal, endpoint, headers: { "x-worker-secret": "secret" }, event: async () => { assert.fail("unknown execution must not fabricate a result"); } }), RuntimeExecutionUncertainError);
-    assert.equal(await store.recoverResult(unknown), null);
+    assert.equal(await runtime.native.executor.results.recover(unknown), null);
   } finally {
-    controller.abort(); await running;
+    controller.abort(); await running; await runtime.close();
     for (const socket of sockets.clients) socket.terminate();
     await new Promise<void>((resolve) => sockets.close(() => server.close(() => resolve())));
     await rm(root, { recursive: true, force: true });

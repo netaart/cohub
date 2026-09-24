@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { SessionTurnIntent, SessionTurnRecord } from "@cohub/protocol/model";
-import type { ModelThinkingLevel } from "@cohub/protocol";
+import { AGENT_TURN_ABORT_CHANNEL, type ModelThinkingLevel } from "@cohub/protocol";
 import { sessionTurnSegments, sessionTurns, spaceSessions, spaces } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
 import {
@@ -51,7 +51,6 @@ export type AgentTurnQueue = {
 
 export type SessionServices = ReturnType<typeof createSessionServices>;
 
-const AGENT_TURN_ABORT_CHANNEL = "pubsub:agent:turn_abort";
 const getAgentTurnAbortKey = (turnId: string) => `agent:turn:${turnId}:abort`;
 
 const imagePreviewLabel = (count: number) => (count === 1 ? "Image" : `${count} images`);
