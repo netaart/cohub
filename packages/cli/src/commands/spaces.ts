@@ -13,7 +13,7 @@ import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset } from "../avatar.js";
 import { createClient } from "../client.js";
 import { putLocalFile } from "../http-put.js";
-import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs } from "../output.js";
+import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
 import { resolveSpace } from "../space.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
 import { registerSpaceActivity } from "./space-activity.js";
@@ -93,6 +93,8 @@ const defaultIdleTtlSeconds = cliEnv === "prod" ? 12 * 60 * 60 : 10 * 60;
 const SPACE_ROLES = ["host", "builder", "guest"] as const;
 const SANDBOX_SPEC_IDS = ["standard", "boost", "ultra"] as const;
 const LABEL_RESOURCE_TYPES = ["session", "checkpoint", "file"] as const;
+/** Table cell width for space descriptions; `--json` keeps the full value. */
+const SPACE_DESCRIPTION_COLUMN_WIDTH = 40;
 
 function parseInteger(value: string, name: string, options: { min?: number; max?: number } = {}): number {
   if (!/^-?\d+$/.test(value.trim())) return error(`Invalid ${name}`, `${name} must be an integer`);
@@ -547,6 +549,7 @@ export function registerSpaces(program: Command): void {
         table(filtered, [
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
+          { key: "description", label: "Description", format: (value) => truncateText(value, SPACE_DESCRIPTION_COLUMN_WIDTH) },
           { key: "isPinned", label: "Pinned" },
           { key: "createdAt", label: "Created" },
         ]);
@@ -570,7 +573,7 @@ export function registerSpaces(program: Command): void {
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
           { key: "slug", label: "Slug" },
-          { key: "description", label: "Description" },
+          { key: "description", label: "Description", format: (value) => truncateText(value, SPACE_DESCRIPTION_COLUMN_WIDTH) },
           { key: "status", label: "Status" },
           { key: "createdAt", label: "Created" },
         ]);

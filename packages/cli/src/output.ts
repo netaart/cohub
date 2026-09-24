@@ -59,6 +59,17 @@ export function formatEpochMs(value: unknown): string {
   return formatLocalDateTime(ms);
 }
 
+/**
+ * Collapse whitespace and clip long text for a single-line table cell, so
+ * multi-line values cannot break the row layout. `--json` output keeps the
+ * raw value; only the human-facing table is shortened.
+ */
+export function truncateText(value: unknown, maxLength: number): string {
+  const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
 function cellText(column: Column, row: Row): string {
   const raw = row[column.key];
   if (column.format) return column.format(raw, row);

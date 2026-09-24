@@ -1,7 +1,7 @@
 import { isUuid, type GlobalSearchResult, type GlobalSearchType } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { formatLocalDateTime, table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
+import { formatLocalDateTime, table, json as outJson, jsonRequested, error, handleHttp, truncateText, type Row } from "../output.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_TITLE_LENGTH = 72;
@@ -21,12 +21,6 @@ function clampLimit(value: string | undefined): number {
   const parsed = Number(value ?? DEFAULT_LIMIT);
   if (!Number.isFinite(parsed)) return DEFAULT_LIMIT;
   return Math.min(Math.max(Math.floor(parsed), 1), 50);
-}
-
-function truncate(value: string | null | undefined, maxLength: number): string {
-  const text = (value ?? "").replace(/\s+/g, " ").trim();
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 function contextFor(item: GlobalSearchResult): string {
@@ -57,8 +51,8 @@ function parseSearchInput(opts: SearchCliOptions) {
 function rowsFor(items: GlobalSearchResult[]): Row[] {
   return items.map((item) => ({
     type: item.type,
-    title: truncate(item.title, MAX_TITLE_LENGTH),
-    context: truncate(contextFor(item), MAX_CONTEXT_LENGTH),
+    title: truncateText(item.title, MAX_TITLE_LENGTH),
+    context: truncateText(contextFor(item), MAX_CONTEXT_LENGTH),
     match: item.matchedField,
     updated: item.updatedAt ? formatLocalDateTime(item.updatedAt).slice(0, 10) : "",
     href: item.href,
