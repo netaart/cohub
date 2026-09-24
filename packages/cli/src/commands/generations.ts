@@ -325,7 +325,8 @@ Examples:
           throw policyError;
         }
 
-        const meta = parseMeta(opts.meta);
+        let meta = parseMeta(opts.meta);
+        if (opts.model === "suno_music_chirp_fenix" && !opts.meta) meta = { gpt_description_prompt: prompt };
         const client = createClient();
         const created = await client.generations.create({
           spaceId,
