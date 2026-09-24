@@ -1,5 +1,18 @@
 # @neta-art/cohub-cli
 
+## 8.3.0
+
+### Minor Changes
+
+- c276360: Local Runtime native sessions, rebuilt around the harnesses' own files and control interfaces. Pi and Codex session files are now the only durable record: the Runtime watches them (the bound folder and its subdirectories, unless one is bound to a Space of its own), sends new Turns over its WebSocket, and after a restart asks the server which Turns it already has instead of keeping local delivery receipts. Codex's internal threads and spawned sub-agents are skipped. Pi is driven through a self-contained extension (`cohub runtime attach --harness pi`, or on `runtime up`), so the web streams, stops and continues terminal Pi sessions; Codex 0.156+ uses its shared app-server on consent, so web and terminal drive the same live thread, falling back to a private app-server with read-only terminal sync. Codex hooks and the Pi capture extension are removed. `runtime import` keeps its options but now runs inside the Runtime: newest first, four at a time (`--concurrency` up to 8), Ctrl-C pauses and running it again resumes. Persistence is event-driven and separate from the live preview: a transcript is parsed only when a Turn begins or ends, previews send only changed messages, stops are pushed to the Runtime instead of polled, and a connected Pi's tools see the current Turn in `COHUB_TURN_ID`. The SDK exports the new `ingest` / `known` / `status` native event schemas and the `runtime.native.stop` frame in place of `start` / `complete` / `heartbeat`. 本地 Runtime 原生会话改为以 Pi / Codex 自身的会话文件为唯一记录，服务端为唯一账本，不再有本地回执；Pi 通过扩展、Codex 通过官方共享 app-server 接入，Web 可实时查看、停止并继续终端会话；`runtime import` 在 Runtime 内执行，最近优先、可暂停与续传。
+
+### Patch Changes
+
+- Updated dependencies [58ec12e]
+- Updated dependencies [c276360]
+- Updated dependencies [589c62c]
+  - @neta-art/cohub@8.22.0
+
 ## 8.2.0
 
 ### Minor Changes
