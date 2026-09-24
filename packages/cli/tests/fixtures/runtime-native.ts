@@ -7,6 +7,7 @@ import type { NativeConfig } from "../../src/runtime/native/config.js";
 import { NativeRuntime } from "../../src/runtime/native/daemon.js";
 import type { SessionTurnProjectionClient } from "../../src/runtime/turn-projection.js";
 import { runtimeProjectionSource, type RuntimeProjectionSourceFixture } from "./runtime-projection-source.js";
+import { scratch } from "./scratch.js";
 
 export type TestNativeRuntime = {
   native: NativeRuntime;
@@ -60,7 +61,7 @@ export async function testNativeRuntime(options: {
 export const fixture = (harness: "pi" | "codex") => new URL(`./runtime-${harness}.mjs`, import.meta.url).pathname;
 
 /** An executor that is never asked to run a Turn: for tests of the connection alone. */
-export function idleExecutor(spaceId: string, root = join(tmpdir(), `cohub-idle-${spaceId}`)) {
+export function idleExecutor(spaceId: string, root = join(scratch, `idle-${spaceId}`)) {
   const stateRoot = join(root, "state");
   return new NativeRuntime({
     spaceId, root, stateRoot, harnesses: ["pi"], executables: {}, identity: "test", config: null,

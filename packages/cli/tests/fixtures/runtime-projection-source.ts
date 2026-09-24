@@ -1,7 +1,7 @@
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ContentBlock, SessionTurnRecord } from "@neta-art/cohub";
 import type { SessionTurnProjectionClient } from "../../src/runtime/turn-projection.js";
+import { scratch } from "./scratch.js";
 
 export type RuntimeProjectionSourceFixture = SessionTurnProjectionClient & {
   addTurn(sessionId: string, turnId: string, options?: {
@@ -14,8 +14,8 @@ export type RuntimeProjectionSourceFixture = SessionTurnProjectionClient & {
 };
 
 const timestamp = "2026-01-01T00:00:00.000Z";
-process.env.PI_CODING_AGENT_SESSION_DIR ??= join(tmpdir(), `cohub-runtime-pi-${process.pid}`);
-process.env.CODEX_HOME ??= join(tmpdir(), `cohub-runtime-codex-${process.pid}`);
+process.env.PI_CODING_AGENT_SESSION_DIR ??= join(scratch, "pi");
+process.env.CODEX_HOME ??= join(scratch, "codex");
 
 export function runtimeProjectionSource(): RuntimeProjectionSourceFixture {
   const sessions = new Map<string, SessionTurnRecord[]>();
