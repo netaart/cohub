@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { RUNTIME_RECOVERY_BATCH_SIZE, runtimeEventSchema, serializeProjectionRecords, type RuntimeExecutionEvent, type HarnessArchive, type RuntimePendingExecution, type RuntimeTurnInput } from "@neta-art/cohub";
 import { RuntimeArchiveStore, checksumNativeFile, atomicRuntimeJson as atomicJson, type ArchiveTransport } from "./archive-store.js";
 import type { CodexTokenTotals } from "./codex-usage.js";
-import { importNativeArchive, readCodexArchiveTotals } from "./native-archive.js";
+import { ArchiveNotRestorableError, importNativeArchive, readCodexArchiveTotals } from "./native-archive.js";
 import { serializeDiagnosticError, type RuntimeDiagnosticContext, type RuntimeDiagnostics } from "./diagnostics.js";
 import type { SessionTurnProjectionClient } from "./turn-projection.js";
 import { ProjectionStore, rebindProjectionNativeSession } from "./projection-store.js";
@@ -392,12 +392,24 @@ export class RuntimeSessionStore {
       projectionVersion: 1, sourceSequence: null, sourceTurnId: null, sourceFingerprint: null,
     };
     if (restore) {
-      try {
+      // Failed restores keep their raw bytes for diagnosis; remembering the verdict stops a
+      // post-rollover archive from being re-downloaded on every resume when it can never import.
+      const failureMarker = join(this.root, "archives", "restore-failures", `${archive.turnId}.json`);
+      const knownFailure = await readFile(failureMarker, "utf8").then(() => true, (error) => { if (missing(error)) return false; throw error; });
+      signal?.throwIfAborted();
+      if (!knownFailure) try {
         const restored = await this.archives.restore(archive, rawPath, signal);
         Object.assign(state, await importNativeArchive({ source: rawPath, target: path, harness: input.harness, nativeSessionId: restored.nativeSessionId, id, cwd, signal }));
+        // The imported working copy replaces the staged download; the raw duplicate is no longer needed.
+        await rm(rawPath, { force: true }).catch(() => undefined);
         return { state, resume: "restored" };
       } catch (error) {
         signal?.throwIfAborted();
+        // Only structurally unrestorable archives get remembered: transient network or disk
+        // failures must stay retryable on the next resume.
+        if (error instanceof ArchiveNotRestorableError) {
+          await atomicJson(failureMarker, { turnId: archive.turnId, failedAt: new Date().toISOString(), error: serializeDiagnosticError(error) }).catch(() => undefined);
+        }
         this.diagnostics?.log("warn", "archive.restore_failed", { error: serializeDiagnosticError(error) }, { component: "archive" });
       }
     }

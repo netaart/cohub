@@ -169,16 +169,36 @@ for (const harness of ["pi", "codex"] as const) test(`${harness}: failed archive
     assert.equal(result.resume, "handoff");
     if (harness === "pi") assert.match(await readFile(result.state.path, "utf8"), /historical DB fact/);
     for (const raw of rawFiles) assert.equal(await readFile(raw, "utf8"), "corrupt native archive");
+    // A transient failure is not remembered: the next resume retries the restore.
+    let transientRetries = 0;
     store.archives.restore = async (_reference, target) => {
+      transientRetries += 1;
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, "invalid native header");
       return { version: 1, sessionId, turnId: priorTurnId, harness, nativeFormat: harness === "pi" ? "pi.jsonl" : "codex.rollout",
         nativeSessionId: randomUUID(), parentTurnId: null, segments: [], sha256: "a".repeat(64), sizeBytes: 21 };
     };
     assert.equal((await store.prepare(turn, root)).resume, "handoff", "an invalid native header also rebuilds from Turn API");
+    assert.ok(transientRetries > 0, "the transient failure stays retryable");
+    // A cancelled prepare still propagates, and cancellation must not poison the retry verdict.
     const controller = new AbortController();
-    store.archives.restore = async () => { controller.abort(new Error("cancelled")); controller.signal.throwIfAborted(); throw new Error("unreachable"); };
+    controller.abort(new Error("cancelled"));
     await assert.rejects(store.prepare(turn, root, controller.signal), /cancelled/);
+    // Structurally unrestorable archives (a Codex leaf without its ancestor) are remembered once.
+    if (harness === "codex") {
+      store.archives.restore = async (_reference, target) => {
+        await mkdir(dirname(target), { recursive: true });
+        const nativeSessionId = randomUUID();
+        await writeFile(target, `${JSON.stringify({ type: "session_meta", payload: { id: nativeSessionId, cwd: root, history_mode: "paginated", history_base: { thread_id: randomUUID(), end_ordinal_exclusive: 2, end_byte_offset: 40 } } })}\n`);
+        return { version: 1, sessionId, turnId: priorTurnId, harness, nativeFormat: "codex.rollout",
+          nativeSessionId, parentTurnId: null, segments: [], sha256: "b".repeat(64), sizeBytes: 60 };
+      };
+      assert.equal((await store.prepare(turn, root)).resume, "handoff", "an unrestorable archive rebuilds from Turn API");
+      const restoreCalls: string[] = [];
+      store.archives.restore = async (reference, _target) => { restoreCalls.push(reference.turnId); throw new Error("unreachable"); };
+      assert.equal((await store.prepare(turn, root)).resume, "handoff", "the remembered verdict skips the known-unrestorable archive");
+      assert.deepEqual(restoreCalls, [], "no second download for a structural failure");
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { mkdtemp, writeFile, readFile, rm, readdir, mkdir, symlink, realpath } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, writeFile, readFile, rm, readdir, mkdir, stat, symlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { readNativeTranscript } from "../src/runtime/native-transcript.js";
+import { readNativeTranscript, readNativeTranscriptHeader, ensurePlainCodexRollout } from "../src/runtime/native-transcript.js";
 import { discoverNativeImportCandidates, NATIVE_SYNC_SESSION_CONCURRENCY, runNativeSyncPool, summarizeNativeSyncErrors } from "../src/runtime/native-sync.js";
 import { NativeSyncStore, nativeStableId, type NativeSyncTransport } from "../src/runtime/native-sync-store.js";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
@@ -64,6 +64,12 @@ test("native sync diagnostics group repeated errors without retaining stack trac
   assert.equal(Object.hasOwn(grouped[0] ?? {}, "stack"), false);
 });
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+/** Paginated rollouts stamp every record with a file-wide continuous ordinal. */
+const writeRollout = async (path: string, header: Record<string, unknown>, ...groups: Array<Array<Record<string, unknown>>>) => {
+  const rows = [header, ...groups.flat()].map((row, ordinal) => ({ timestamp: at, ...row, ordinal }));
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, rows.map(line).join(""));
+};
 function piHeader(id: string, cwd: string) { return line({ type: "session", version: 3, id, cwd, timestamp: at }); }
 function piMessage(id: string, parentId: string | null, role: string, content: unknown, extra: Record<string, unknown> = {}) {
   return line({ type: "message", id, parentId, timestamp: at, message: { role, content, timestamp: Date.parse(at), ...extra } });
@@ -132,7 +138,6 @@ test("large UTF-8 native records keep exact byte boundaries and hashes across re
     const raw = f.header + piMessage("u1", null, "user", text) + piMessage("a1", "u1", "assistant", [{ type: "text", text: "done" }], { stopReason: "stop" });
     await writeFile(f.path, raw);
     const turn = (await readNativeTranscript(f.path, "pi", { settled: true })).turns[0];
-    const { createHash } = await import("node:crypto");
     assert.deepEqual(turn?.userContent, [{ type: "text", text }]);
     assert.equal(turn?.endBytes, Buffer.byteLength(raw));
     assert.equal(turn?.sha256, createHash("sha256").update(raw).digest("hex"));
@@ -283,7 +288,6 @@ test("existing Runtime Session/Turn binding is reused; original native file is n
     const bytes = f.header + piTurn(1);
     await writeFile(f.path, bytes);
     await mkdir(join(f.options.runtimeRoot, "pi"), { recursive: true });
-    const { createHash } = await import("node:crypto");
     await writeFile(join(f.options.runtimeRoot, "pi", `${sessionId}.json`), JSON.stringify({ version: 1, harness: "pi", sessionId, nativeSessionId: f.nativeSessionId, path: f.path, throughTurnId, pendingTurnId: null, checksum: createHash("sha256").update(bytes).digest("hex") }));
     const copyPath = join(f.root, "managed-copy.jsonl"), copySessionId = randomUUID(), copyTurnId = randomUUID();
     await writeFile(copyPath, bytes);
@@ -316,7 +320,6 @@ test("managed archive checkpoints resolve whole-Turn rewinds and tolerate traili
     const source = { sessionId, harness: "pi" as const, nativeSessionId: f.nativeSessionId, path: f.path };
     await writeFile(f.path, raw1); await archives.stage(source, first);
     await writeFile(f.path, raw2); await archives.stage(source, second);
-    const { createHash } = await import("node:crypto");
     await mkdir(join(f.options.runtimeRoot, "pi"), { recursive: true });
     await writeFile(join(f.options.runtimeRoot, "pi", `${sessionId}.json`), JSON.stringify({ version: 1, harness: "pi", sessionId, nativeSessionId: f.nativeSessionId, path: f.path, throughTurnId: second, pendingTurnId: null, checksum: createHash("sha256").update(raw2).digest("hex") }));
     const store = new NativeSyncStore(f.options);
@@ -410,7 +413,6 @@ test("Runtime continuation preserves an interactive native file even through a s
     await symlink(first.state.path, alias);
     await mkdir(join(store.root, "pi"), { recursive: true });
     await writeFile(join(store.root, "pi", `${sessionId}.json`), JSON.stringify({ ...first.state, path: alias }));
-    const { createHash } = await import("node:crypto");
     const marker = createHash("sha256").update(await realpath(first.state.path)).digest("hex");
     await mkdir(join(store.root, "native-owners"), { recursive: true });
     await writeFile(join(store.root, "native-owners", `${marker}.json`), "{}");
@@ -441,15 +443,624 @@ test("Codex terminal errors remain failed, rather than becoming successful compl
   } finally { await f.cleanup(); }
 });
 
-test("Codex referenced history fails explicitly; hook commands quote paths without disabling trust", async () => {
+test("Codex lineage stitches a rollout chain with exact history bases; hook commands quote paths without disabling trust", async () => {
   const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
   try {
-    await writeFile(f.path, line({ type: "session_meta", payload: { id: f.nativeSessionId, cwd: f.root, history_base: { rollout_id: "parent" } } }));
-    await assert.rejects(readNativeTranscript(f.path, "codex"), /references another rollout/);
+    // Ancestor rollout under sessions/YYYY/MM/DD with two settled Turns.
+    const ancestorDir = join(home, "sessions", "2026", "09", "21");
+    await mkdir(ancestorDir, { recursive: true });
+    const ancestorId = randomUUID();
+    const ancestorPath = join(ancestorDir, `rollout-2026-09-21T00-00-00-${ancestorId}.jsonl`);
+    const ancestorTurn = (n: number) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: `a${n}` } },
+      { type: "event_msg", payload: { type: "user_message", message: `q${n}` } },
+      { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `a${n}` }] } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: `a${n}` } },
+    ];
+    await writeRollout(ancestorPath, { type: "session_meta", payload: { id: ancestorId, cwd: f.root, history_mode: "paginated" } }, ancestorTurn(1), ancestorTurn(2));
+    const endByteOffset = (await stat(ancestorPath)).size;
+    // Leaf rollout references the ancestor prefix through history_base.
+    const leafDir = join(home, "sessions", "2026", "09", "22");
+    await mkdir(leafDir, { recursive: true });
+    const leafThread = randomUUID();
+    const leafPath = join(leafDir, `rollout-2026-09-22T00-00-00-${leafThread}.jsonl`);
+    await writeRollout(leafPath, { type: "session_meta", payload: { id: leafThread, cwd: f.root, history_mode: "paginated", history_base: { thread_id: ancestorId, end_ordinal_exclusive: 9, end_byte_offset: endByteOffset } } },
+      [{ type: "event_msg", payload: { type: "turn_started", turn_id: "l1" } },
+       { type: "event_msg", payload: { type: "user_message", message: "leaf question" } },
+       { type: "event_msg", payload: { type: "turn_complete", turn_id: "l1", last_agent_message: "leaf answer" } }]);
+
+    const transcript = await readNativeTranscript(leafPath, "codex");
+    assert.equal(transcript.nativeSessionId, leafThread);
+    assert.equal(transcript.turns.length, 3);
+    assert.deepEqual(transcript.turns.map((turn) => turn.key), ["a1", "a2", "l1"]);
+    assert.deepEqual(transcript.turns.map((turn) => turn.parentKey), [null, "a1", "a2"]);
+    assert.equal(transcript.turns[0]?.path, ancestorPath);
+    assert.equal(transcript.turns[2]?.path, leafPath);
+    assert.equal(transcript.turns[2]?.sequence, 2);
+    assert.deepEqual(transcript.lineagePaths, [ancestorPath, leafPath]);
+
+    // Incomplete ancestor prefix: the referenced boundary must sit at a settled Turn end.
+    const midTurn = Buffer.byteLength(
+      [ { type: "session_meta", payload: { id: ancestorId, cwd: f.root, history_mode: "paginated" } }, ...ancestorTurn(1), ancestorTurn(2)[0], ancestorTurn(2)[1] ]
+        .map((row, ordinal) => ({ timestamp: at, ...row, ordinal })).map(line).join(""),
+    );
+    const brokenPath = join(leafDir, `rollout-2026-09-22T01-00-00-${randomUUID()}.jsonl`);
+    // The cut lands mid-Turn (after a2's user message, ordinal 5): the settled-Turn check fires
+    // first via the ordinal bound, since 5 != any whole-Turn edge; both errors are acceptable.
+    await writeFile(brokenPath, line({ type: "session_meta", payload: { id: randomUUID(), cwd: f.root, history_mode: "paginated", history_base: { thread_id: ancestorId, end_ordinal_exclusive: 6, end_byte_offset: midTurn } } }));
+    await assert.rejects(readNativeTranscript(brokenPath, "codex"), /not at a completed Turn|ordinal bound/);
+
     const block = codexNativeHookBlock("/a b/node", "/a'b/hook.js");
     assert.match(block, /\[\[hooks.Stop\]\]/);
     assert.match(block, /\[\[hooks.UserPromptSubmit\]\]/);
     assert(!block.includes("bypass_hook_trust"));
     assert(block.includes("'/a b/node'"));
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("Codex rollover follows the leaf rollout: one conversation, archives track their source files", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const storage = await archiveStorageFixture();
+    const transport: NativeSyncTransport = { ...storage.transport,
+      startNativeTurn: async (request) => ({ sessionId: request.sessionId ?? request.branchSessionId, turnId: request.turnId, forked: false }),
+      completeNativeTurn: async () => ({ completed: true }),
+    };
+    const day = (n: number) => join(home, "sessions", "2026", "09", n < 10 ? `0${n}` : `${n}`);
+    const rollout = (n: number, id: string) => join(day(n), `rollout-2026-09-${n < 10 ? `0${n}` : n}T00-00-00-${id}.jsonl`);
+    const turn = (key: string, question: string, answer: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: question } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: answer } },
+    ];
+    // Root rollout holds two Turns, then Codex rolls over to a fresh leaf referencing it.
+    const threadId = randomUUID();
+    const rootPath = rollout(21, threadId);
+    await writeRollout(rootPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated" } }, turn("r1", "q1", "a1"), turn("r2", "q2", "a2"));
+    const rootEnd = (await stat(rootPath)).size;
+    const leafId = `${threadId}_${randomUUID()}`;
+    const leafPath = rollout(22, leafId);
+    const leafHeader = { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 7, end_byte_offset: rootEnd } } };
+    await writeRollout(leafPath, leafHeader, turn("l1", "q3", "a3"));
+
+    const options = { ...f.options, harness: "codex" as const, nativeSessionId: threadId };
+    const store = new NativeSyncStore({ ...options, transport });
+    await store.capture(leafPath, await readNativeTranscript(leafPath, "codex"));
+    const receipts = await store.receipts();
+    assert.deepEqual(receipts.map((receipt) => receipt.key), ["r1", "r2", "l1"], "one conversation across both files");
+    assert.equal((await store.binding()).path, leafPath);
+    // Ancestor Turn bytes are archived from the ancestor file, the leaf Turn from the leaf file.
+    const versions = join(store.archives.root, "versions");
+    const indexes = await Promise.all(receipts.map((receipt) => readFile(join(versions, `${receipt.turnId}.json`), "utf8").then((raw) => JSON.parse(raw))));
+    assert.deepEqual(indexes.map((index) => index.nativeSessionId), [threadId, threadId, threadId]);
+    const ancestorBytes = await readFile(rootPath);
+    // header + the three rows of the first Turn = the first four lines.
+    const lines = ancestorBytes.toString().split("\n").filter(Boolean);
+    const r1Bytes = Buffer.byteLength(lines.slice(0, 4).map((l) => `${l}\n`).join(""));
+    assert.equal(indexes[0]?.sizeBytes, r1Bytes, "the ancestor Turn archives exactly its own bytes");
+    await store.flush(new AbortController().signal);
+    // Continuing in the leaf appends Turns without re-importing the ancestor.
+    await writeRollout(leafPath, leafHeader, turn("l1", "q3", "a3"), turn("l2", "q4", "a4"));
+    await store.capture(leafPath, await readNativeTranscript(leafPath, "codex"));
+    assert.deepEqual((await store.receipts()).map((receipt) => receipt.key), ["r1", "r2", "l1", "l2"]);
+    await store.flush(new AbortController().signal);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("Codex import discovery skips lineage ancestors and counts the stitched conversation once", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const day = (n: number) => join(home, "sessions", "2026", "09", n < 10 ? `0${n}` : `${n}`);
+    const rollout = (n: number, id: string) => join(day(n), `rollout-2026-09-${n < 10 ? `0${n}` : n}T00-00-00-${id}.jsonl`);
+    const turn = (key: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+    const threadId = randomUUID();
+    const rootPath = rollout(21, threadId);
+    await writeRollout(rootPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated" } }, turn("r1"));
+    const rootEnd = (await stat(rootPath)).size;
+    const leafPath = rollout(22, `${threadId}_${randomUUID()}`);
+    await writeRollout(leafPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 4, end_byte_offset: rootEnd } } }, turn("l1"));
+
+    const result = await discoverNativeImportCandidates(f.root, ["codex"]);
+    assert.equal(result.candidates.length, 1, "only the leaf rollout is a candidate");
+    assert.equal(result.candidates[0]?.path, leafPath);
+    assert.equal(result.candidates[0]?.turnCount, 2, "the stitched conversation includes ancestor Turns");
+    assert.equal(result.errors.length, 0);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("managed Runtime rollover keeps settled cloud Turns; no duplicate receipts after the binding moves", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    // A managed Runtime session: turns already archived and acknowledged in the cloud.
+    const day = (n: number) => join(home, "sessions", "2026", "09", `0${n}`);
+    const rollout = (n: number, id: string) => join(day(n), `rollout-2026-09-0${n}T00-00-00-${id}.jsonl`);
+    const turn = (key: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+    const threadId = randomUUID(), sessionId = randomUUID(), cloudTurn1 = randomUUID(), cloudTurn2 = randomUUID();
+    const rootPath = rollout(1, threadId);
+    // Managed Runtime state: projected Turns carry their cloud Turn ids (r1, r2).
+    const projectedTurn = (key: string, cloudTurnId: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: `q ${key}` }] }, metadata: { cohub: { turnId: cloudTurnId } } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+    await writeRollout(rootPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated" } }, projectedTurn("r1", cloudTurn1), projectedTurn("r2", cloudTurn2));
+    const rootContent = await readFile(rootPath);
+    await mkdir(join(f.options.runtimeRoot, "codex"), { recursive: true });
+    await writeFile(join(f.options.runtimeRoot, "codex", `${sessionId}.json`), JSON.stringify({ version: 1, harness: "codex", sessionId, nativeSessionId: threadId, path: rootPath, throughTurnId: cloudTurn2, pendingTurnId: null, checksum: createHash("sha256").update(rootContent).digest("hex") }));
+    const rootEnd = rootContent.length;
+
+    const options = { ...f.options, harness: "codex" as const, nativeSessionId: threadId };
+    const store = new NativeSyncStore(options);
+    await store.capture(rootPath, await readNativeTranscript(rootPath, "codex"));
+    assert.deepEqual((await store.receipts()).map((receipt) => receipt.key), [], "projected cloud Turns produce no receipts");
+
+    // Codex rolls over: the native client continues in a fresh leaf referencing the root rollout.
+    const leafPath = rollout(2, `${threadId}_${randomUUID()}`);
+    await writeRollout(leafPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 7, end_byte_offset: rootEnd } } }, turn("l1"));
+    await store.capture(leafPath, await readNativeTranscript(leafPath, "codex"));
+    const receipts = await store.receipts();
+    assert.deepEqual(receipts.map((receipt) => receipt.key), ["l1"], "only the post-rollover Turn becomes a receipt");
+    assert.equal(receipts[0]?.parentCloudTurnId, cloudTurn2, "the new Turn continues the settled cloud Turn");
+    assert.equal((await store.binding()).path, leafPath, "the binding follows the leaf");
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("a forked parent rollout stays importable; only same-thread rollovers are skipped", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const day = (n: number) => join(home, "sessions", "2026", "09", `0${n}`);
+    const rollout = (n: number, id: string) => join(day(n), `rollout-2026-09-0${n}T00-00-00-${id}.jsonl`);
+    const turn = (key: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+
+    // Parent A keeps growing after B forked from its middle: a partial history_base reference.
+    const parentThread = randomUUID();
+    const parentPath = rollout(1, parentThread);
+    await writeRollout(parentPath, { type: "session_meta", payload: { id: parentThread, cwd: f.root, history_mode: "paginated" } }, turn("p1"), turn("p2"), turn("p3"));
+    // The fork references the parent through its first two Turns: header + 6 rows = 7 lines.
+    const parentLines = (await readFile(parentPath)).toString().split("\n").filter(Boolean);
+    const forkOffset = Buffer.byteLength(parentLines.slice(0, 7).map((l) => `${l}\n`).join(""));
+
+    const forkThread = randomUUID();
+    const forkPath = rollout(2, `${forkThread}_${randomUUID()}`);
+    // Fork references the parent's rollout id, covering only its first two Turns.
+    await writeRollout(forkPath, { type: "session_meta", payload: { id: forkThread, cwd: f.root, history_mode: "paginated", history_base: { thread_id: parentThread, end_ordinal_exclusive: 7, end_byte_offset: forkOffset } } }, turn("f1"));
+
+    const result = await discoverNativeImportCandidates(f.root, ["codex"]);
+    // Both conversations import: the fork stitched with its inherited prefix (p1, p2, f1), and the parent in full.
+    assert.deepEqual(result.candidates.map((candidate) => candidate.turnCount).sort(), [3, 3]);
+    assert.equal(result.candidates.filter((candidate) => candidate.path === parentPath).length, 1, "the partially referenced parent stays a candidate");
+    assert.equal(result.errors.length, 0);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("Codex lineage rejects an ordinal bound that does not match the ancestor prefix", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const dir = join(home, "sessions", "2026", "09", "21");
+    await mkdir(dir, { recursive: true });
+    const ancestorId = randomUUID();
+    const ancestorPath = join(dir, `rollout-2026-09-21T00-00-00-${ancestorId}.jsonl`);
+    // A paginated ancestor stamps every record with its ordinal.
+    const rows = [{ timestamp: at, type: "session_meta", payload: { id: ancestorId, cwd: f.root, history_mode: "paginated" }, ordinal: 0 }];
+    const addTurn = (key: string) => {
+      for (const payload of [
+        { type: "turn_started", turn_id: key },
+        { type: "user_message", message: `q ${key}` },
+        { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` },
+      ]) rows.push({ timestamp: at, type: "event_msg", payload, ordinal: rows.length });
+    };
+    addTurn("a1");
+    await writeFile(ancestorPath, rows.map(line).join(""));
+    const endBytes = (await stat(ancestorPath)).size;
+    const leafDir = join(home, "sessions", "2026", "09", "22");
+    await mkdir(leafDir, { recursive: true });
+    const leaf = (n: number) => join(leafDir, `rollout-2026-09-22T0${n}-00-00-${randomUUID()}.jsonl`);
+    const goodLeaf = leaf(1), badLeaf = leaf(2);
+    // Correct bound: the last ordinal is 3, so end_ordinal_exclusive is 4.
+    await writeFile(goodLeaf, line({ type: "session_meta", payload: { id: randomUUID(), cwd: f.root, history_mode: "paginated", history_base: { thread_id: ancestorId, end_ordinal_exclusive: 4, end_byte_offset: endBytes } }, ordinal: 0 }));
+    const transcript = await readNativeTranscript(goodLeaf, "codex");
+    assert.equal(transcript.turns.length, 1);
+    // A wrong ordinal must be rejected even when the byte bound is valid.
+    await writeFile(badLeaf, line({ type: "session_meta", payload: { id: randomUUID(), cwd: f.root, history_mode: "paginated", history_base: { thread_id: ancestorId, end_ordinal_exclusive: 999, end_byte_offset: endBytes } }, ordinal: 0 }));
+    await assert.rejects(readNativeTranscript(badLeaf, "codex"), /ordinal bound/);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("a missing .zst rollout fails immediately instead of hanging", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const dir = join(home, "sessions", "2026", "09", "21");
+    await mkdir(dir, { recursive: true });
+    const missingPath = join(dir, `rollout-2026-09-21T00-00-00-${randomUUID()}.jsonl.zst`);
+    // Only the header read is needed to trigger the source open; it must surface ENOENT.
+    await assert.rejects(readNativeTranscriptHeader(missingPath, "codex"), /ENOENT/);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("decompressing an oversized rollout stops at the local limit", async () => {
+  const { zstdCompressSync } = await import("node:zlib");
+  const f = await fixture();
+  try {
+    const compressed = join(f.root, "huge.jsonl.zst");
+    await writeFile(compressed, zstdCompressSync(Buffer.alloc(64 * 1024, 97)));
+    const cache = join(f.root, "cache");
+    await assert.rejects(ensurePlainCodexRollout(compressed, cache, undefined, 1024), /local limit/);
+    assert.deepEqual(await readdir(cache), [], "the failed temporary file is cleaned up");
+    // The default bound passes and the plain file is cached once.
+    const plain = await ensurePlainCodexRollout(compressed, cache);
+    assert.equal((await stat(plain)).size, 64 * 1024);
   } finally { await f.cleanup(); }
+});
+
+test("a pending ancestor Turn completes before the rollover; the leaf continues cleanly", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const day = (n: number) => join(home, "sessions", "2026", "09", `0${n}`);
+    const rollout = (n: number, id: string) => join(day(n), `rollout-2026-09-0${n}T00-00-00-${id}.jsonl`);
+    const turnRows = (key: string, complete: boolean) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      ...(complete ? [{ type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } }] : []),
+    ];
+    const threadId = randomUUID();
+    const rootPath = rollout(1, threadId);
+    const rootBytes = (...groups: Array<Array<Record<string, unknown>>>) => writeRollout(rootPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated" } }, ...groups);
+    // Mid-turn hook snapshot: r2 has started but not completed, so its receipt stays pending.
+    await rootBytes(turnRows("r1", true), turnRows("r2", false));
+    const store = new NativeSyncStore({ ...f.options, harness: "codex" as const, nativeSessionId: threadId });
+    await store.capture(rootPath, await readNativeTranscript(rootPath, "codex"));
+    const pending = (await store.receipts()).find((receipt) => receipt.key === "r2");
+    assert.ok(pending?.result == null, "r2's receipt is pending (no result)");
+
+    // The Turn finishes in the same file, then Codex rolls over. The settled ancestor prefix
+    // keeps the whole conversation importable and the pending receipt completes first.
+    await rootBytes(turnRows("r1", true), turnRows("r2", true));
+    await store.capture(rootPath, await readNativeTranscript(rootPath, "codex"));
+    assert.equal((await store.receipts()).find((receipt) => receipt.key === "r2")?.result?.status, "completed", "the pending receipt completes in place");
+
+    const rootEnd = (await stat(rootPath)).size;
+    const leafPath = rollout(2, `${threadId}_${randomUUID()}`);
+    await writeRollout(leafPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 7, end_byte_offset: rootEnd } } }, turnRows("l1", true));
+    await store.capture(leafPath, await readNativeTranscript(leafPath, "codex"));
+    assert.deepEqual((await store.receipts()).map((receipt) => receipt.key), ["r1", "r2", "l1"]);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("a Codex header larger than one read chunk still parses exactly at its newline", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const dir = join(home, "sessions", "2026", "09", "21");
+    await mkdir(dir, { recursive: true });
+    const threadId = randomUUID();
+    const path = join(dir, `rollout-2026-09-21T00-00-00-${threadId}.jsonl`);
+    // base_instructions can be hundreds of KiB; the header spans many 64 KiB read chunks.
+    const header = { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", base_instructions: "x".repeat(200 * 1024) } };
+    await writeFile(path, `${JSON.stringify(header)}\n${[
+      { timestamp: at, type: "event_msg", payload: { type: "turn_started", turn_id: "t1" } },
+      { timestamp: at, type: "event_msg", payload: { type: "user_message", message: "q" } },
+      { timestamp: at, type: "event_msg", payload: { type: "turn_complete", turn_id: "t1", last_agent_message: "a" } },
+    ].map(line).join("")}`);
+    const transcript = await readNativeTranscript(path, "codex");
+    assert.equal(transcript.nativeSessionId, threadId);
+    assert.equal(transcript.turns.length, 1);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("two sibling rollouts of one thread import only the newest; the loser is reported", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const day = (n: number) => join(home, "sessions", "2026", "09", `0${n}`);
+    const rollout = (n: number, h: number, id: string) => join(day(n), `rollout-2026-09-0${n}T0${h}-00-00-${id}.jsonl`);
+    const turn = (key: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+    // A is the shared parent; B and C both revert from A and survive absorption.
+    const threadId = randomUUID();
+    const a = rollout(1, 0, threadId);
+    await writeRollout(a, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated" } }, turn("a1"));
+    const aEnd = (await stat(a)).size;
+    const b = rollout(2, 0, `${threadId}_${randomUUID()}`);
+    await writeRollout(b, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 4, end_byte_offset: aEnd } } }, turn("b1"));
+    const c = rollout(3, 0, `${threadId}_${randomUUID()}`);
+    await writeRollout(c, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 4, end_byte_offset: aEnd } } }, turn("c1"));
+    const result = await discoverNativeImportCandidates(f.root, ["codex"]);
+    assert.equal(result.candidates.length, 1, "only the newest sibling imports");
+    assert.equal(result.candidates[0]?.path, c);
+    assert.ok(result.superseded.some((skip) => skip.path === b && /Superseded/.test(skip.message)), "the older sibling is reported as superseded");
+    assert.equal(result.errors.length, 0, "superseded siblings are not errors");
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("header prescan discovers every rollout beyond the concurrency limit", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const day = (n: number) => join(home, "sessions", "2026", "09", `0${n}`);
+    const threads = Array.from({ length: 20 }, () => randomUUID());
+    let ordinal = 0;
+    for (const threadId of threads) {
+      const path = join(day(1 + ordinal % 3), `rollout-2026-09-0${1 + ordinal % 3}T00-00-${String(ordinal).padStart(2, "0")}-${threadId}.jsonl`);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, line({ type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated" } })
+        + [
+          { timestamp: at, type: "event_msg", payload: { type: "turn_started", turn_id: "t1" } },
+          { timestamp: at, type: "event_msg", payload: { type: "user_message", message: "q" } },
+          { timestamp: at, type: "event_msg", payload: { type: "turn_complete", turn_id: "t1", last_agent_message: "a" } },
+        ].map(line).join(""));
+      ordinal += 1;
+    }
+    const result = await discoverNativeImportCandidates(f.root, ["codex"]);
+    assert.equal(result.candidates.length, 20, "every file beyond the 16-worker prescan is found");
+    assert.equal(result.errors.length, 0);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("a compressed ancestor archives every Turn through the plain-copy cache", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const { zstdCompressSync } = await import("node:zlib");
+    const storage = await archiveStorageFixture();
+    const transport: NativeSyncTransport = { ...storage.transport,
+      startNativeTurn: async (request) => ({ sessionId: request.sessionId ?? request.branchSessionId, turnId: request.turnId, forked: false }),
+      completeNativeTurn: async () => ({ completed: true }),
+    };
+    const day = (n: number) => join(home, "sessions", "2026", "09", `0${n}`);
+    const rollout = (n: number, id: string) => join(day(n), `rollout-2026-09-0${n}T00-00-00-${id}.jsonl`);
+    const turn = (key: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+    // The ancestor lives in archived storage, compressed cold by Codex's worker.
+    const threadId = randomUUID();
+    const ancestorPath = join(home, "archived_sessions", "2026", "09", "01", `rollout-2026-09-01T00-00-00-${threadId}.jsonl`);
+    const plainAncestor = join(f.root, "ancestor-plain.jsonl");
+    await writeRollout(plainAncestor, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated" } }, turn("r1"), turn("r2"));
+    const ancestorContent = await readFile(plainAncestor);
+    await mkdir(dirname(ancestorPath), { recursive: true });
+    await writeFile(`${ancestorPath}.zst`, zstdCompressSync(ancestorContent));
+    const ancestorEnd = ancestorContent.length;
+    const leafPath = rollout(2, `${threadId}_${randomUUID()}`);
+    await writeRollout(leafPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 7, end_byte_offset: ancestorEnd } } }, turn("l1"));
+
+    const store = new NativeSyncStore({ ...f.options, harness: "codex" as const, nativeSessionId: threadId, transport });
+    await store.capture(leafPath, await readNativeTranscript(leafPath, "codex"));
+    const receipts = await store.receipts();
+    assert.deepEqual(receipts.map((receipt) => receipt.key), ["r1", "r2", "l1"], "every ancestor Turn archives from the compressed source");
+    const versions = join(store.archives.root, "versions");
+    for (const receipt of receipts.slice(0, 2)) {
+      const index = JSON.parse(await readFile(join(versions, `${receipt.turnId}.json`), "utf8"));
+      const prefix = ancestorContent.subarray(0, index.sizeBytes);
+      assert.equal(createHash("sha256").update(prefix).digest("hex"), index.sha256, "archived bytes match the logical ancestor prefix");
+    }
+    await store.flush(new AbortController().signal);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("a damaged .zst cache copy heals itself during capture", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const { zstdCompressSync } = await import("node:zlib");
+    const storage = await archiveStorageFixture();
+    const transport: NativeSyncTransport = { ...storage.transport,
+      startNativeTurn: async (request) => ({ sessionId: request.sessionId ?? request.branchSessionId, turnId: request.turnId, forked: false }),
+      completeNativeTurn: async () => ({ completed: true }),
+    };
+    const day = (n: number) => join(home, "sessions", "2026", "09", `0${n}`);
+    const rollout = (n: number, id: string) => join(day(n), `rollout-2026-09-0${n}T00-00-00-${id}.jsonl`);
+    const turn = (key: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+    const threadId = randomUUID();
+    const ancestorPath = join(home, "archived_sessions", "2026", "09", "01", `rollout-2026-09-01T00-00-00-${threadId}.jsonl`);
+    const plainAncestor = join(f.root, "ancestor-plain.jsonl");
+    await writeRollout(plainAncestor, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated" } }, turn("r1"), turn("r2"));
+    const ancestorContent = await readFile(plainAncestor);
+    await mkdir(dirname(ancestorPath), { recursive: true });
+    await writeFile(`${ancestorPath}.zst`, zstdCompressSync(ancestorContent));
+    const leafPath = rollout(2, `${threadId}_${randomUUID()}`);
+    await writeRollout(leafPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 7, end_byte_offset: ancestorContent.length } } }, turn("l1"));
+
+    // Seed a truncated cache copy, as a power loss would leave behind.
+    const store = new NativeSyncStore({ ...f.options, harness: "codex" as const, nativeSessionId: threadId, transport });
+    const cache = join(f.options.runtimeRoot, "native", "cache", "rollouts");
+    const cached = join(cache, `${createHash("sha256").update(`${ancestorPath}.zst`).digest("hex")}.jsonl`);
+    await mkdir(cache, { recursive: true });
+    await writeFile(cached, ancestorContent.subarray(0, ancestorContent.length - 30));
+    await store.capture(leafPath, await readNativeTranscript(leafPath, "codex"));
+    assert.deepEqual((await store.receipts()).map((receipt) => receipt.key), ["r1", "r2", "l1"], "a truncated cache rebuilds and archives every Turn");
+    await store.flush(new AbortController().signal);
+
+    // A cache whose bytes were corrupted in place heals the same way. A fresh CODEX_HOME avoids
+    // the process-wide rollout index's short TTL hiding the newly written files.
+    const home2 = join(f.root, "codex-home-2");
+    process.env.CODEX_HOME = home2;
+    const other = randomUUID();
+    const ancestor2 = join(home2, "archived_sessions", "2026", "09", "03", `rollout-2026-09-03T00-00-00-${other}.jsonl`);
+    const plain2 = join(f.root, "ancestor2-plain.jsonl");
+    await writeRollout(plain2, { type: "session_meta", payload: { id: other, cwd: f.root, history_mode: "paginated" } }, turn("x1"));
+    const content2 = await readFile(plain2);
+    await mkdir(dirname(ancestor2), { recursive: true });
+    await writeFile(`${ancestor2}.zst`, zstdCompressSync(content2));
+    const cached2 = join(cache, `${createHash("sha256").update(`${ancestor2}.zst`).digest("hex")}.jsonl`);
+    await writeFile(cached2, Buffer.from("garbage that parses as no header at all"));
+    const leaf2 = join(home2, "sessions", "2026", "09", "04", `rollout-2026-09-04T00-00-00-${other}_${randomUUID()}.jsonl`);
+    await writeRollout(leaf2, { type: "session_meta", payload: { id: other, cwd: f.root, history_mode: "paginated", history_base: { thread_id: other, end_ordinal_exclusive: 4, end_byte_offset: content2.length } } }, turn("y1"));
+    const store2 = new NativeSyncStore({ ...f.options, harness: "codex" as const, nativeSessionId: other, transport });
+    await store2.capture(leaf2, await readNativeTranscript(leaf2, "codex"));
+    assert.deepEqual((await store2.receipts()).map((receipt) => receipt.key), ["x1", "y1"], "a corrupted cache rebuilds and archives every Turn");
+    await store2.flush(new AbortController().signal);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("import discovery finds archived and compressed rollouts", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  try {
+    const { zstdCompressSync } = await import("node:zlib");
+    const turn = (key: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+    // A compressed rollout still under sessions/ and a plain one in archived_sessions/.
+    const activeThread = randomUUID();
+    const activeZst = join(home, "sessions", "2026", "09", "01", `rollout-2026-09-01T00-00-00-${activeThread}.jsonl.zst`);
+    const plainActive = join(f.root, "active-plain.jsonl");
+    await writeRollout(plainActive, { type: "session_meta", payload: { id: activeThread, cwd: f.root, history_mode: "paginated" } }, turn("z1"));
+    await mkdir(dirname(activeZst), { recursive: true });
+    await writeFile(activeZst, zstdCompressSync(await readFile(plainActive)));
+    const archivedThread = randomUUID();
+    const archived = join(home, "archived_sessions", "2026", "09", "02", `rollout-2026-09-02T00-00-00-${archivedThread}.jsonl`);
+    await writeRollout(archived, { type: "session_meta", payload: { id: archivedThread, cwd: f.root, history_mode: "paginated" } }, turn("a1"));
+
+    const result = await discoverNativeImportCandidates(f.root, ["codex"]);
+    assert.deepEqual(result.candidates.map((candidate) => candidate.path).sort(), [archived, activeZst].sort());
+    assert.equal(result.errors.length, 0);
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test("a lineage crossing projects is rejected instead of importing foreign history", async () => {
+  const f = await fixture();
+  const previousHome = process.env.CODEX_HOME;
+  const home = join(f.root, "codex-home");
+  process.env.CODEX_HOME = home;
+  const other = await mkdtemp(join(tmpdir(), "other-project-"));
+  try {
+    const day = (n: number) => join(home, "sessions", "2026", "09", `0${n}`);
+    const rollout = (n: number, id: string) => join(day(n), `rollout-2026-09-0${n}T00-00-00-${id}.jsonl`);
+    const turn = (key: string) => [
+      { type: "event_msg", payload: { type: "turn_started", turn_id: key } },
+      { type: "event_msg", payload: { type: "user_message", message: `q ${key}` } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } },
+    ];
+    const threadId = randomUUID();
+    const ancestorPath = rollout(1, threadId);
+    await writeRollout(ancestorPath, { type: "session_meta", payload: { id: threadId, cwd: other, history_mode: "paginated" } }, turn("x1"));
+    const ancestorEnd = (await stat(ancestorPath)).size;
+    const leafPath = rollout(2, `${threadId}_${randomUUID()}`);
+    await writeRollout(leafPath, { type: "session_meta", payload: { id: threadId, cwd: f.root, history_mode: "paginated", history_base: { thread_id: threadId, end_ordinal_exclusive: 4, end_byte_offset: ancestorEnd } } }, turn("l1"));
+
+    await assert.rejects(readNativeTranscript(leafPath, "codex"), /crosses projects/);
+    const result = await discoverNativeImportCandidates(f.root, ["codex"]);
+    assert.equal(result.candidates.length, 0, "the foreign-history leaf is not importable");
+    assert.ok(result.errors.some((error) => error.path === leafPath && /crosses projects/.test(error.message)));
+  } finally {
+    if (previousHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousHome;
+    await rm(other, { recursive: true, force: true });
+    await f.cleanup();
+  }
 });

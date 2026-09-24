@@ -110,10 +110,11 @@ export function registerRuntime(program: Command) {
           },
         });
         const candidates = discovered.candidates.filter((candidate) => !options.session || candidate.nativeSessionId === options.session);
+        const superseded = discovered.superseded.filter((skip) => !options.session || skip.nativeSessionId === options.session);
         const result = {
           spaceId, root, harnesses, candidates, errors: discovered.errors,
-          imported: 0, pendingTurns: 0, failed: [] as Array<{ path: string; message: string }>, skipped: [] as Array<{ path: string; message: string }>, dryRun: Boolean(options.dryRun),
-          complete: discovered.errors.length === 0,
+          imported: 0, pendingTurns: 0, failed: [] as Array<{ path: string; message: string }>, skipped: [] as Array<{ path: string; message: string }>, superseded, dryRun: Boolean(options.dryRun),
+          complete: discovered.errors.length === 0 && superseded.length === 0,
         };
         if (jsonRequested(options) && options.dryRun) {
           result.complete = result.complete && result.failed.length === 0;
@@ -124,7 +125,11 @@ export function registerRuntime(program: Command) {
         if (!candidates.length) {
           if (!result.complete) process.exitCode = 1;
           if (jsonRequested(options)) outJson(result);
-          else process.stdout.write("No existing native conversations found\n");
+          else {
+            process.stdout.write("No existing native conversations found\n");
+            for (const error of discovered.errors) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
+            for (const skip of superseded) process.stdout.write(`Superseded ${skip.path}: ${skip.message}\n`);
+          }
           return;
         }
         if (options.dryRun) {
@@ -133,6 +138,7 @@ export function registerRuntime(program: Command) {
             process.stdout.write(`Found ${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}\n`);
             for (const candidate of candidates) process.stdout.write(`  ${candidate.harness} ${candidate.nativeSessionId} ${candidate.turnCount} Turn${candidate.turnCount === 1 ? "" : "s"} ${candidate.path}\n`);
             for (const error of discovered.errors) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
+            for (const skip of superseded) process.stdout.write(`Superseded ${skip.path}: ${skip.message}\n`);
           }
           if (!result.complete) process.exitCode = 1;
           return;
@@ -174,6 +180,7 @@ export function registerRuntime(program: Command) {
           if (processed) process.stderr.write("\n");
           process.stdout.write(`Submitted ${result.imported}/${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}${cancelled ? " (interrupted)" : ""}\n`);
           for (const error of [...discovered.errors, ...result.skipped, ...result.failed]) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
+          for (const skip of result.superseded) process.stdout.write(`Superseded ${skip.path}: ${skip.message}\n`);
           process.stdout.write("Uploads continue in the local Runtime background; use runtime status to check confirmation\n");
         }
         if (!result.complete && !cancelled) process.exitCode = 1;

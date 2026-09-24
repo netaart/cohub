@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, readFile, readdir, stat, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { HarnessArchiveIndex, NativeTurnBinding, NativeTurnComplete, NativeTurnStart, NativeTurnProgress } from "@neta-art/cohub";
 import { nativeTurnCompleteSchema, nativeTurnStartSchema, nativeTurnProgressSchema, harnessArchiveIndexSchema } from "@neta-art/cohub";
-import { RuntimeArchiveStore, atomicRuntimeJson, type ArchiveTransport } from "./archive-store.js";
+import { ArchiveCaptureIntegrityError, RuntimeArchiveStore, atomicRuntimeJson, type ArchiveTransport } from "./archive-store.js";
+import { codexRolloutCachePath, codexRolloutIdOf, codexRolloutBytes, ensurePlainCodexRollout } from "./native-transcript.js";
 import { findRuntimeNativeSession } from "./session-store.js";
 import { withRuntimeSpaceBindingsLock } from "./space-binding.js";
-import type { NativeTranscript } from "./native-transcript.js";
+import type { NativeTranscript, NativeTranscriptTurn } from "./native-transcript.js";
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -34,6 +35,8 @@ type NativeBinding = {
   throughTurnId: string | null;
   throughBytes: number;
   anchors: Array<{ turnId: string; sizeBytes: number; sha256: string }>;
+  /** After a Codex rollover: the superseded rollout's settled boundary, addressed by rollout id. */
+  ancestor?: { rolloutId: string; throughBytes: number; anchors: Array<{ turnId: string; sizeBytes: number; sha256: string }> };
 };
 export type NativeTurnReceipt = {
   version: 1;
@@ -49,6 +52,8 @@ export type NativeTurnReceipt = {
   sessionStartedAt?: string;
   origin?: "local_import";
   progress?: NativeTurnProgress;
+  /** Merged lineage order across Codex rollout files. */
+  sequence?: number;
 };
 export type NativeSyncTransport = ArchiveTransport & {
   startNativeTurn?(input: NativeTurnStart, options?: { signal?: AbortSignal }): Promise<NativeTurnBinding>;
@@ -57,6 +62,28 @@ export type NativeSyncTransport = ArchiveTransport & {
   updateNativeTurn?(sessionId: string, turnId: string, input: NativeTurnProgress, options?: { signal?: AbortSignal }): Promise<{ accepted: boolean }>;
 };
 export type NativeSyncOptions = { runtimeRoot: string; spaceId: string; identity: string; harness: "pi" | "codex"; nativeSessionId: string; instanceKey?: string; transport?: NativeSyncTransport };
+
+type NativeAnchor = { turnId: string; sizeBytes: number; sha256: string };
+
+/** Whole-Turn archive checkpoints only; native offsets never become cloud fork anchors. */
+function matchAnchor(turn: Pick<NativeTranscriptTurn, "contentEndBytes" | "boundaries">, anchors: readonly NativeAnchor[]): NativeAnchor[] {
+  return anchors.filter((anchor) => anchor.sizeBytes >= turn.contentEndBytes && turn.boundaries[anchor.sizeBytes] === anchor.sha256);
+}
+
+/** Archive checkpoints of one managed session, optionally bounded by a byte prefix. */
+async function collectArchiveAnchors(runtimeRoot: string, managed: { sessionId: string; harness: "pi" | "codex"; nativeSessionId: string }, throughBytes = Number.POSITIVE_INFINITY): Promise<NativeAnchor[]> {
+  const anchors: NativeAnchor[] = [];
+  const versions = join(runtimeRoot, "archives", "versions");
+  const names = await readdir(versions).catch((error) => { if (missing(error)) return []; throw error; });
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const version = harnessArchiveIndexSchema.parse(await readJson(join(versions, name)));
+    if (version.sessionId === managed.sessionId && version.harness === managed.harness && version.nativeSessionId === managed.nativeSessionId && version.sizeBytes <= throughBytes) {
+      anchors.push({ turnId: version.turnId, sizeBytes: version.sizeBytes, sha256: version.sha256 });
+    }
+  }
+  return anchors;
+}
 
 /** Turn receipts are append-only. Capture never waits for the network; network ACKs live in separate files. */
 export class NativeSyncStore {
@@ -90,10 +117,30 @@ export class NativeSyncStore {
     if (value?.version !== 1 || value.identity !== this.options.identity || value.spaceId !== this.options.spaceId || value.nativeSessionId !== this.options.nativeSessionId || value.instanceKey !== this.options.instanceKey || value.harness !== this.options.harness) throw new Error("Native binding mismatch");
     return value;
   }
-  private async initialize(path: string, transcript: NativeTranscript) {
+  private async initialize(path: string, transcript: NativeTranscript, signal?: AbortSignal) {
     const existing = await readJson<NativeBinding>(this.bindingPath());
     if (existing) {
       const binding = await this.binding();
+      // Codex rollover keeps the thread id but moves appends to a fresh rollout that references
+      // the old one as its history base. Follow the reference instead of failing — matched by
+      // rollout id, so archiving or compressing the ancestor still migrates cleanly. When the
+      // previous rollout is the leaf itself (the same file merely moved or compressed), the
+      // byte boundary stays valid: only the path changes.
+      const previousRolloutId = codexRolloutIdOf(basename(binding.path));
+      const lineageRolloutIds = transcript.lineageRolloutIds ?? [];
+      if (binding.path !== path && previousRolloutId && lineageRolloutIds.includes(previousRolloutId)) {
+        const sameRollout = lineageRolloutIds.at(-1) === previousRolloutId;
+        let moved: NativeBinding = { ...binding, path };
+        if (!sameRollout) {
+          // Byte offsets from the old rollout no longer address the new one; the settled
+          // boundary moves into the ancestor record and the binding restarts at the leaf.
+          moved = { ...moved, throughBytes: 0, anchors: [] };
+          if (binding.throughBytes > 0) moved.ancestor = { rolloutId: previousRolloutId, throughBytes: binding.throughBytes, anchors: binding.anchors };
+        }
+        await atomicRuntimeJson(join(this.options.runtimeRoot, "native-owners", `${hash(path)}.json`), { path, nativeSessionId: binding.nativeSessionId });
+        await atomicRuntimeJson(this.bindingPath(), moved);
+        return moved;
+      }
       if (binding.path !== path) throw new Error("Native path changed; original binding retained");
       return binding;
     }
@@ -102,6 +149,37 @@ export class NativeSyncStore {
     const anchors: NativeBinding["anchors"] = [];
     if (managed) {
       if (managed.pendingTurnId) throw new Error("Reconcile the managed Turn before native continuation");
+      // A Codex rollover before the first native capture: the managed projection lives on an
+      // ancestor rollout now. Its byte boundary addresses the ancestor, so express it as the
+      // ancestor record instead of validating it against the new leaf.
+      const managedRolloutId = codexRolloutIdOf(basename(managed.path));
+      const lineageRolloutIds = transcript.lineageRolloutIds ?? [];
+      const managedInLineage = this.options.harness === "codex" && managedRolloutId != null && lineageRolloutIds.slice(0, -1).includes(managedRolloutId);
+      if (managedInLineage && managed.throughTurnId) {
+        anchors.push(...await collectArchiveAnchors(this.options.runtimeRoot, managed));
+        // The managed projection is the whole ancestor rollout: verify its bytes still match the
+        // recorded checksum, measured on the logical JSONL (decompressed when the file is cold).
+        const ancestorIndex = lineageRolloutIds.indexOf(managedRolloutId);
+        const ancestorPath = transcript.lineagePaths?.[ancestorIndex] ?? managed.path;
+        const checksum = createHash("sha256");
+        let ancestorBytes = 0;
+        for await (const bytes of codexRolloutBytes(ancestorPath, null, signal)) { checksum.update(bytes); ancestorBytes += bytes.length; }
+        if (!managed.checksum) throw new Error("Managed rollout has no checksum to validate its settled boundary");
+        if (checksum.digest("hex") !== managed.checksum) throw new Error("Runtime history prefix changed");
+        // The verified whole-file boundary is a synthetic anchor, mirroring the regular first
+        // binding: trailing records after the last Turn (e.g. usage) make contentEndBytes
+        // undershoot the file size, and matchAnchor resolves through `boundaries`.
+        anchors.push({ turnId: managed.throughTurnId, sizeBytes: ancestorBytes, sha256: managed.checksum });
+        const binding: NativeBinding = { version: 1, identity: this.options.identity, spaceId: this.options.spaceId, harness: this.options.harness,
+          nativeSessionId: transcript.nativeSessionId, instanceKey: this.options.instanceKey, path, originSessionId: nativeStableId(`${this.root}:archive`),
+          sessionId: managed.sessionId, throughTurnId: managed.throughTurnId, throughBytes: 0, anchors: [],
+          ancestor: { rolloutId: managedRolloutId, throughBytes: ancestorBytes, anchors } };
+        // Persist like any first binding: the owner marker keeps the managed Runtime out of this
+        // leaf file, and flush/status read binding.json before touching any receipt.
+        await atomicRuntimeJson(join(this.options.runtimeRoot, "native-owners", `${hash(path)}.json`), { path, nativeSessionId: binding.nativeSessionId });
+        await atomicRuntimeJson(this.bindingPath(), binding);
+        return binding;
+      }
       if (managed.throughTurnId) {
         const index = await readJson<HarnessArchiveIndex>(join(this.options.runtimeRoot, "archives", "versions", `${managed.throughTurnId}.json`));
         if (index) {
@@ -117,15 +195,7 @@ export class NativeSyncStore {
           throughBytes = (await stat(path)).size;
           anchors.push({ turnId: managed.throughTurnId, sizeBytes: throughBytes, sha256: managed.checksum });
         }
-        const versions = join(this.options.runtimeRoot, "archives", "versions");
-        const names = await readdir(versions).catch((error) => { if (missing(error)) return []; throw error; });
-        for (const name of names) {
-          if (!name.endsWith(".json")) continue;
-          const version = harnessArchiveIndexSchema.parse(await readJson(join(versions, name)));
-          if (version.sessionId === managed.sessionId && version.harness === managed.harness && version.nativeSessionId === managed.nativeSessionId && version.sizeBytes <= throughBytes) {
-            anchors.push({ turnId: version.turnId, sizeBytes: version.sizeBytes, sha256: version.sha256 });
-          }
-        }
+        anchors.push(...await collectArchiveAnchors(this.options.runtimeRoot, managed, throughBytes));
       }
     }
     const binding: NativeBinding = { version: 1, identity: this.options.identity, spaceId: this.options.spaceId, harness: this.options.harness,
@@ -136,10 +206,11 @@ export class NativeSyncStore {
     await atomicRuntimeJson(this.bindingPath(), binding);
     return binding;
   }
-  async capture(path: string, transcript: NativeTranscript, context: { sessionStartedAt?: string; origin?: "local_import" } = {}) {
+  async capture(path: string, transcript: NativeTranscript, context: { sessionStartedAt?: string; origin?: "local_import"; signal?: AbortSignal } = {}) {
+    const signal = context.signal;
     if (transcript.nativeSessionId !== this.options.nativeSessionId) throw new Error("Native session identity mismatch");
     await withRuntimeSpaceBindingsLock(async () => {
-      const binding = await this.initialize(path, transcript);
+      const binding = await this.initialize(path, transcript, signal);
       if (binding.throughBytes > 0) {
         const anchor = binding.anchors.find((entry) => entry.sizeBytes === binding.throughBytes);
         if (!anchor || transcript.prefixes.get(binding.throughBytes) !== anchor.sha256) throw new Error("Runtime history prefix changed; original binding retained");
@@ -147,10 +218,14 @@ export class NativeSyncStore {
       let parentKey: string | null = null;
       let parentCloudTurnId = binding.throughTurnId;
       let knownBoundary = binding.throughBytes === 0;
+      const ancestor = binding.ancestor;
+      const leafRolloutId = transcript.lineageRolloutIds?.at(-1);
       for (const turn of transcript.turns) {
-        if (turn.startBytes < binding.throughBytes) {
-          // Native offsets only validate whole-Turn archive checkpoints; they never become cloud fork anchors.
-          const matches = (binding.anchors ?? []).filter((anchor) => anchor.sizeBytes >= turn.contentEndBytes && turn.boundaries[anchor.sizeBytes] === anchor.sha256);
+        // Lineage Turns keep their own rollout's offsets; only Turns from the binding's rollout
+        // (the leaf, however it is now represented on disk) address the binding's byte boundary.
+        const inLeafRollout = !turn.rolloutId || turn.rolloutId === leafRolloutId;
+        if (inLeafRollout && turn.startBytes < binding.throughBytes) {
+          const matches = matchAnchor(turn, binding.anchors ?? []);
           if (new Set(matches.map((anchor) => anchor.turnId)).size > 1) throw new Error("Ambiguous Runtime Turn boundary");
           parentCloudTurnId = matches[0]?.turnId ?? null;
           knownBoundary = matches.length > 0;
@@ -163,25 +238,57 @@ export class NativeSyncStore {
           parentKey = null;
           continue;
         }
-        if (!parentKey && !knownBoundary) throw new Error("Native continuation is not at a complete Runtime Turn boundary");
         const turnId = this.turnId(turn.key);
         const old = await readJson<NativeTurnReceipt>(this.receiptPath(turnId));
         if (old?.result) {
           if (turn.contentEndBytes < (old.contentEndBytes ?? old.endBytes) || JSON.stringify(turn.userContent) !== JSON.stringify(old.userContent) || turn.result && JSON.stringify(nativeTurnCompleteSchema.parse(turn.result)) !== JSON.stringify(old.result)) {
             throw new Error("Native branch is inside a settled Turn; only whole-Turn forks are supported");
           }
+          // Receipts written before lineage support lack the merged order; backfill it from the immutable chain.
+          if (turn.sequence != null && old.sequence == null) await atomicRuntimeJson(this.receiptPath(turnId), { ...old, sequence: turn.sequence });
           parentKey = turn.key;
           continue;
         }
+        // After a rollover, ancestor Turns below the superseded rollout's settled boundary are
+        // already durable cloud history (the retained ancestor record); anything above it is
+        // new native work — including Turns whose pending receipts still need finishing.
+        if (ancestor && turn.rolloutId === ancestor.rolloutId && turn.contentEndBytes <= ancestor.throughBytes) {
+          const matches = matchAnchor(turn, ancestor.anchors);
+          if (new Set(matches.map((anchor) => anchor.turnId)).size > 1) throw new Error("Ambiguous Runtime Turn boundary");
+          parentCloudTurnId = matches[0]?.turnId ?? null;
+          knownBoundary = matches.length > 0;
+          parentKey = null;
+          continue;
+        }
+        if (!parentKey && !knownBoundary) throw new Error("Native continuation is not at a complete Runtime Turn boundary");
         const result = turn.result ? nativeTurnCompleteSchema.parse(turn.result) : null;
         const receipt: NativeTurnReceipt = { version: 1, turnId, key: turn.key, parentKey, parentCloudTurnId: parentKey ? null : parentCloudTurnId,
           userContent: turn.userContent, startedAt: turn.startedAt, endBytes: turn.endBytes, contentEndBytes: turn.contentEndBytes, result,
+          ...(turn.sequence != null ? { sequence: turn.sequence } : {}),
           ...(context.sessionStartedAt ? { sessionStartedAt: context.sessionStartedAt } : {}),
           ...(context.origin ? { origin: context.origin } : {}),
           ...(!result ? { progress: nativeTurnProgressSchema.parse({ revision: turn.endBytes, messages: turn.messages }) } : {}) };
         if (old && (JSON.stringify(old.userContent) !== JSON.stringify(receipt.userContent) || old.parentKey !== receipt.parentKey)) throw new Error("Native Turn changed; original receipt retained");
         // Capture immutable native bytes before publishing the completed receipt. Subsequent Turns may change the source.
-        if (result) await this.archives.stage({ sessionId: binding.originSessionId, harness: binding.harness, nativeSessionId: binding.nativeSessionId, path, sizeBytes: turn.endBytes, expectedChecksum: turn.sha256 }, turnId);
+        if (result) {
+          const cache = join(this.options.runtimeRoot, "native", "cache", "rollouts");
+          const source = turn.path ?? path;
+          const state = { sessionId: binding.originSessionId, harness: binding.harness, nativeSessionId: binding.nativeSessionId, sizeBytes: turn.endBytes, expectedChecksum: turn.sha256 };
+          const stage = async () => this.archives.stage({ ...state, path: await ensurePlainCodexRollout(source, cache, signal) }, turnId);
+          try {
+            await stage();
+          } catch (error) {
+            // A corrupted `.zst` cache copy (bad checksum, truncation) is rebuilt once. A
+            // mismatch against an already-saved index is not a cache problem: that index is
+            // immutable, so rebuilding would only repeat a full decompression before failing.
+            if (!source.endsWith(".zst") || !(error instanceof ArchiveCaptureIntegrityError)) throw error;
+            const savedIndex = await readJson(join(this.archives.root, "versions", `${turnId}.json`)).catch(() => { throw error; });
+            if (!savedIndex) {
+              await rm(codexRolloutCachePath(source, cache), { force: true });
+              await stage();
+            } else throw error;
+          }
+        }
         if (JSON.stringify(old) !== JSON.stringify(receipt)) {
           // The pending index precedes the receipt, so a crash cannot silently strand an unacknowledged Turn.
           await atomicRuntimeJson(this.pendingPath(turnId), { turnId });
@@ -206,7 +313,7 @@ export class NativeSyncStore {
       if (receipt?.version !== 1 || receipt.turnId !== this.turnId(receipt.key)) throw new Error("Native receipt is corrupt; original retained");
       receipts.push(receipt);
     }
-    return receipts.sort((a, b) => a.endBytes - b.endBytes || a.turnId.localeCompare(b.turnId));
+    return receipts.sort((a, b) => (a.sequence ?? Infinity) - (b.sequence ?? Infinity) || a.endBytes - b.endBytes || a.turnId.localeCompare(b.turnId));
   }
   async status() {
     const binding = await this.binding();
