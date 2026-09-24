@@ -85,10 +85,20 @@ export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStat
   const [optionsOpenFor, setOptionsOpenFor] = useState<string | null>(null);
 
   const visibleModels = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const filtered = models
-      .filter((entry) => entry.model?.hidden !== true)
-      .filter((entry) => !needle || [entry.provider, entry.id, modelDisplayName(entry)].some((value) => value.toLowerCase().includes(needle)));
+    const exact = query.trim();
+    const needle = exact.toLowerCase();
+    // Hidden models stay resolvable by an exact id (mirrors the web picker), and the
+    // current selection stays visible so reopening the picker can keep or clear it.
+    const revealedHidden = models.filter(
+      (entry) =>
+        entry.model?.hidden === true &&
+        (entry.id === exact ||
+          (currentModel?.provider === entry.provider && currentModel.id === entry.id)),
+    );
+    const filtered = [
+      ...models.filter((entry) => entry.model?.hidden !== true),
+      ...revealedHidden,
+    ].filter((entry) => !needle || [entry.provider, entry.id, modelDisplayName(entry)].some((value) => value.toLowerCase().includes(needle)));
     if (!needle && currentModel) {
       filtered.sort((left, right) => {
         const leftCurrent = left.provider === currentModel.provider && left.id === currentModel.id;
