@@ -50,3 +50,4 @@ export * from "./app-catalog.js";
 export * from "./navigation.js";
 export * from "./app-view-stats.js";
 export * from "./app-promotion-stats.js";
+export * from "./workspace-usage.js";

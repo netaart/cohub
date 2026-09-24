@@ -78,6 +78,13 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
   fi
 
+# Pinned Linux amd64 binary (the worker image's supported deployment platform).
+FROM node:24-slim AS pdu
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
+  curl -fsSL --retry 3 https://github.com/KSXGitHub/parallel-disk-usage/releases/download/0.24.0/pdu-x86_64-unknown-linux-musl -o /usr/local/bin/pdu && \
+  echo 'b991a68c1555d9144ea8ef2dd8cab91efb0b90ec8be53fdec4d0b2dd0e596f56  /usr/local/bin/pdu' | sha256sum -c - && \
+  chmod 755 /usr/local/bin/pdu
+
 # ============================================
 # Stage 2: runtime
 # ============================================
@@ -91,7 +98,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 WORKDIR /app
 
 COPY --from=builder /prod/worker ./
+COPY --from=pdu /usr/local/bin/pdu /usr/local/bin/pdu
 COPY LICENSE NOTICE ./
+COPY apps/worker/licenses/pdu-LICENSE ./licenses/pdu-LICENSE
 
 USER node
 

@@ -37,7 +37,7 @@ export const queueDefinitions = [
     criticality: "normal",
     concurrencyEnv: "SYSTEM_WORKER_CONCURRENCY",
     defaultConcurrencyPerWorker: DEFAULT_SYSTEM_WORKER_CONCURRENCY,
-    registeredJobs: ["cdn_cache.warm_file", "sandbox.idle_check", "sandbox.idle_reaper", "work.publish_asset", "work.view_stats.flush", "references.index", "session.message.postprocess", "session.title.generate", "space_hook.dispatch"],
+    registeredJobs: ["workspace.usage.scan", "workspace.usage.dispatch", "cdn_cache.warm_file", "sandbox.idle_check", "sandbox.idle_reaper", "work.publish_asset", "work.view_stats.flush", "references.index", "session.message.postprocess", "session.title.generate", "space_hook.dispatch"],
   },
 ] as const;
 

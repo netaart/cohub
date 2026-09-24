@@ -134,6 +134,9 @@
       ],
       "@cohub/core/fs-cdn": [
         "../../packages/core/src/fs-cdn/index.ts"
+      ],
+      "@cohub/infra/workspace-usage": [
+        "../../packages/infra/src/workspace-usage/index.ts"
       ]
     }
   },

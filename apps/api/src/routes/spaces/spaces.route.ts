@@ -1,3 +1,4 @@
+import { readWorkspaceUsages } from "../../workspace-usage.js";
 import { BillingAccessBlockedError, COHUB_BILLING_FEATURES, billingOperations } from "@cohub/billing";
 import { DEFAULT_SANDBOX_SPEC_ID, SANDBOX_SPECS, getSandboxSpecRank, isSandboxSpecId, type SandboxSpecId } from "@cohub/sandbox-controller";
 import { createLogger } from "@cohub/infra/logging";
@@ -1033,7 +1034,8 @@ router.post("/", async (c) => {
  * SDK type, so the response stays type-compatible.
  */
 function stripSensitiveSpaceFields(item: Record<string, unknown>): Record<string, unknown> {
-  const { storageRepoName, sandboxStatus, access, meta, ...rest } = item;
+  const { storageRepoName, sandboxStatus, workspaceUsage, access, meta, ...rest } = item;
+  void workspaceUsage;
   void storageRepoName;
   void sandboxStatus;
   void access;
@@ -1061,6 +1063,7 @@ async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user
   ]);
   const profileMap = await getProfilesByUuids([space.userUuid]);
   const ownerProfile = profileMap.get(space.userUuid) ?? fallbackPublicUserProfile(space.userUuid);
+  const usages = await readWorkspaceUsages(sandbox?.provider === "local" ? [] : [space.id]);
 
   return {
     ...space,
@@ -1068,6 +1071,7 @@ async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user
     publicProfile: getSpacePublicProfile(space),
     sandboxStatus: sandbox?.status ?? null,
     sandbox: attachSandboxPublicEndpoints(sandbox),
+    workspaceUsage: sandbox?.provider === "local" ? null : usages.get(space.id),
     access,
     ownerProfile,
   };

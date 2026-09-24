@@ -866,6 +866,9 @@ importers:
       '@cohub/db':
         specifier: workspace:*
         version: link:../db
+      '@cohub/infra':
+        specifier: workspace:*
+        version: link:../infra
       '@cohub/protocol':
         specifier: workspace:*
         version: link:../protocol

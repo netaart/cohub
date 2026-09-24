@@ -1939,5 +1939,9 @@
 	"purchase_add_balance_title": "充值以继续",
 	"purchase_add_balance_message": "选择套餐或余额包继续。",
 	"purchase_return_confirming": "正在确认支付",
-	"purchase_return_confirming_detail": "支付到账后余额会立即更新。"
+	"purchase_return_confirming_detail": "支付到账后余额会立即更新。",
+	"space_storage_usage": "工作区占用",
+	"space_storage_measured": "统计于 {time}",
+	"space_storage_pending": "等待统计",
+	"space_storage_retry": "更新将自动重试"
 }
