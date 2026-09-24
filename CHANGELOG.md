@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.57 — 2026-09-24
+
+- **Codex rollout lineage in native sync and import**: native sync now follows Codex `history_base` pointers across rollout files, so a thread that was rolled over, reverted, or compressed still imports and continues as one coherent Chat. Ancestor rollouts are tracked as settled boundaries addressed by rollout id, Turns carry a merged lineage `sequence` for stable ordering, archived and `.zst`-compressed sessions are discovered transparently (decompressed once into a bounded cache), and superseded siblings are reported rather than imported twice.
+- **Capability-aware skill expansion**: `/skill:` expansion is now gated by where the turn actually executes. A single shared loader resolves the execution target (cloud sandbox, local sandbox, or native harness), filters out scopes the target cannot reach instead of surfacing broken paths, fails closed on provider lookup errors, and serves workspace-relative skill locations to native Pi/Codex harnesses while passing unknown skills through verbatim. The API and worker now share one implementation instead of duplicating scope IO and expansion logic.
+- **Standalone App origins resolved at the Worker entry**: a new hand-written Cloudflare Worker entry runs before the SvelteKit adapter, so every path on a published App's standalone hostname — including prerendered routes like `/`, `/docs`, and `/pricing` — resolves to that App rather than the marketing shell. The entry is bundled with the generated adapter but keeps a single source of truth for public env values through a build-time generated module and typed declarations.
+- **Faster standalone App page loads**: standalone App navigations now serve the cached App detail immediately and record the view through `ctx.waitUntil` after the response, instead of blocking every load on a `view=1` API call that bypassed the detail cache. Repeat navigations no longer wait on the API, a background refresh that finds the App gone drops the cached detail, and cold-cache loads still resolve and record in one call.
+- **Sidebar help menu**: help resources now live in a dedicated sidebar footer menu that groups What's new, keyboard shortcuts, and Docs, replacing the scattered inline shortcuts and changelog links and keeping the footer controls consistent across desktop and mobile.
+
+### Bug Fixes
+
+- Importing a Codex leaf archive that references history it does not carry now fails explicitly instead of silently resuming with truncated history, and the caller rebuilds from durable cloud Turns.
+- `cohub runtime import` now streams progress with pending-Turn counts, reports skipped and failed conversations separately, treats an interrupt as cancelled rather than a failure, and keeps a normal skip from flipping the exit code.
+- Native sync failures are aggregated into a single throttled warning with a retry delay and summarized causes instead of per-flush noise, and emit a recovery log when the Runtime reconnects.
+
 ## v2.56 — 2026-09-23
 
 - **Durable-first native Turn persistence**: native Turn durability is now fully decoupled from Session projections. Title, latest-message, participant, and timestamp metadata are applied as best-effort post-commit projections, so a Session summary update can never roll back an already-committed Turn — projection failures are logged and swallowed instead. Each projection takes a row lock and advances monotonically (newer-message guards plus `GREATEST` on `lastMessageAt`), so delayed or out-of-order native events can no longer regress the chat list or clobber a newer title.
