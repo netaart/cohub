@@ -79,7 +79,8 @@ type BoardPreviewControllerOptions = {
 export function createBoardWindowController(
 	options: BoardPreviewControllerOptions,
 ) {
-	let boards = $state<InlineBoardPanelState[]>([]);
+	// Raw: records are replaced wholesale; keeps document identity for echo checks.
+	let boards = $state.raw<InlineBoardPanelState[]>([]);
 	let activeBoardPath = $state<string | null>(null);
 	let requestTokenByPath = $state<Record<string, number>>({});
 	let syncVersionByBoardId = $state<Record<string, number | null>>({});

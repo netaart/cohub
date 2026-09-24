@@ -86,6 +86,17 @@ export const FIT_PADDING = 64;
  */
 export const VIEWPORT_MARGIN_RATIO = 0.5;
 
+/** Viewport plus margin, snapped to a grid so small pans return the same rect. */
+export function stableCullRect(view: Rect): Rect {
+	const margin = Math.max(view.width, view.height, 1) * VIEWPORT_MARGIN_RATIO;
+	const step = 2 ** Math.floor(Math.log2(margin / 2));
+	const left = Math.floor((view.x - margin) / step) * step;
+	const top = Math.floor((view.y - margin) / step) * step;
+	const right = Math.ceil((view.x + view.width + margin) / step) * step;
+	const bottom = Math.ceil((view.y + view.height + margin) / step) * step;
+	return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 export function clampZoom(zoom: number) {
 	const value = Number.isFinite(zoom) ? zoom : DEFAULT_BOARD_VIEWPORT.zoom;
 	return Math.min(MAX_BOARD_ZOOM, Math.max(MIN_BOARD_ZOOM, value));

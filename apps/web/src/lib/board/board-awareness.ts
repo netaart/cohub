@@ -560,6 +560,10 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 	}
 
 	function reconcile(items: BoardItem[]) {
+		const waiting = [...peers.values()].some(
+			(peer) => peer.gesture && peer.gestureEndedAt != null,
+		);
+		if (!waiting) return;
 		const itemsById = new Map(items.map((item) => [item.id, item]));
 		let changed = false;
 		for (const peer of peers.values()) {

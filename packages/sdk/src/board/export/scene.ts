@@ -149,6 +149,7 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
       colors: context.colors,
       colorScheme: input.colorScheme,
       zoom: input.scale,
+      cullRect: input.world,
     });
   }
 
