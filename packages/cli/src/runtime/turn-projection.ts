@@ -84,7 +84,7 @@ async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper:
   return results;
 }
 
-export async function hydrateSessionTurn(
+async function hydrateSessionTurn(
   turn: SessionTurnRecord,
   client: ReturnType<SessionTurnProjectionClient["session"]>,
   signal?: AbortSignal,
@@ -147,13 +147,6 @@ export async function listSessionProjectionTurns(
   return mapWithConcurrency(turns, 4, (turn) => hydrateSessionTurn(turn, client, options.signal));
 }
 
-export async function getSessionProjectionTurn(source: SessionTurnProjectionClient, sessionId: string, turnId: string, signal?: AbortSignal) {
-  const client = source.session(sessionId);
-  return hydrateSessionTurn((await client.turns.get(turnId, { signal })).turn, client, signal);
-}
-
-export function projectTurnBatch(input: Omit<ProjectionInput, "turns"> & { turns: ProjectionSourceTurn[] }, target: ProjectionTarget, includeHeader = true) {
-  const projection = projectNativeSession(input, target);
-  if (includeHeader) return projection;
-  return { ...projection, records: projection.records.filter((record) => record.sourceTurnId !== null) };
+export function projectTurnBatch(input: Omit<ProjectionInput, "turns"> & { turns: ProjectionSourceTurn[] }, target: ProjectionTarget) {
+  return projectNativeSession(input, target);
 }

@@ -7,15 +7,20 @@ import { basename, join } from "node:path";
 import { createZstdDecompress } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import type { ContentBlock, NativeTurnComplete, NativeTurnMessage } from "@neta-art/cohub";
-import { piContent } from "./harness.js";
-import { codexTokenTotals, codexUsage } from "./codex-usage.js";
-import { record, type JsonRecord } from "./json-rpc.js";
+import { piContent } from "../harness.js";
+import { codexTokenTotals, codexUsage } from "../codex-usage.js";
+import { record, type JsonRecord } from "../json-rpc.js";
 
 export type NativeTranscriptTurn = {
   key: string;
   parentKey: string | null;
   cloudTurnId?: string;
   userContent: ContentBlock[];
+  /**
+   * Codex records a prompt in several steps and the final form last; until this is set the user
+   * content may still change.
+   */
+  userFinal?: boolean;
   messages: NativeTurnMessage[];
   startedAt: string;
   startBytes: number;
@@ -24,11 +29,8 @@ export type NativeTranscriptTurn = {
   boundaries: Record<number, string>;
   sha256: string;
   result: NativeTurnComplete | null;
-  /** Codex lineage: the rollout file this Turn was read from. */
   path?: string;
-  /** Codex lineage: the rollout id of the file this Turn was read from. */
   rolloutId?: string;
-  /** Codex lineage: merged order across rollout files. */
   sequence?: number;
 };
 export type NativeTranscript = {
@@ -37,9 +39,7 @@ export type NativeTranscript = {
   cloudSessionId?: string;
   turns: NativeTranscriptTurn[];
   prefixes: ReadonlyMap<number, string>;
-  /** Codex lineage: every rollout file oldest-to-leaf, including the leaf itself. */
   lineagePaths?: string[];
-  /** Codex lineage: rollout ids matching `lineagePaths` order. */
   lineageRolloutIds?: string[];
 };
 type Line = { value: JsonRecord; startBytes: number; endBytes: number; sha256: string };
@@ -272,6 +272,7 @@ function parsePiTranscript(lines: Line[], options: { settled?: boolean; leafId?:
   let cloudSessionId = text(record(header.cohub).sessionId) || text(record(header.affinity).sessionId);
   let current: NativeTranscriptTurn | null = null;
   let messages: NativeTurnMessage[] = [];
+  let pendingMarker: string | null = null;
   let completedAt = iso(header.timestamp);
   const finish = (settled: boolean) => {
     if (!current) return;
@@ -282,6 +283,9 @@ function parsePiTranscript(lines: Line[], options: { settled?: boolean; leafId?:
   for (const line of branch) {
     const entry = line.value;
     if (entry.type !== "message") {
+      // Cohub writes a marker entry immediately before a user message it sends, so a Turn it
+      // started can be matched to the cloud Turn without guessing at byte offsets.
+      if (entry.type === "custom" && text(entry.customType) === "cohub.turn") pendingMarker = text(record(entry.data).turnId) || null;
       if (current) { current.endBytes = line.endBytes; current.sha256 = line.sha256; current.boundaries[line.endBytes] = line.sha256; }
       continue;
     }
@@ -295,7 +299,9 @@ function parsePiTranscript(lines: Line[], options: { settled?: boolean; leafId?:
     if (message.role === "user") {
       finish(true);
       completedAt = timestamp;
-      const cloudTurnId = text(record(message.meta).turnId);
+      const metaTurnId = text(record(message.meta).turnId);
+      const cloudTurnId = metaTurnId || pendingMarker || "";
+      pendingMarker = null;
       if (cloudTurnId && !text(record(header.cohub).sessionId) && !text(record(header.affinity).sessionId)) cloudSessionId = text(record(message.meta).sourceSessionId) || cloudSessionId;
       current = { key: text(entry.id), parentKey: turns.at(-1)?.key ?? null, ...(cloudTurnId ? { cloudTurnId } : {}), userContent: typeof message.content === "string" ? [{ type: "text", text: message.content }] : piContent(message.content), messages: [], startedAt: completedAt, startBytes: line.startBytes, endBytes: line.endBytes, contentEndBytes: line.endBytes, boundaries: {}, sha256: line.sha256, result: null };
       messages = current.messages;
@@ -337,8 +343,8 @@ async function resolveCodexLineage(leafPath: string, signal?: AbortSignal): Prom
   for (;;) {
     if (segments.length >= CODEX_HISTORY_MAX_DEPTH) throw new Error("Codex history chain is too deep; retain the original files");
     const header = await readCodexHeader(path, signal);
-    // Every segment of one conversation must belong to the same project: a cross-project
-    // reference would import another workspace's history into this one.
+    // Every segment of one conversation must belong to the same project: a cross-project reference
+    // would import another workspace's history into this one.
     if (header.cwd && leafCwd != null && header.cwd !== leafCwd) throw new Error("Codex lineage crosses projects; retain the original files");
     leafCwd ??= header.cwd;
     if (!header.historyBase) {
@@ -425,9 +431,23 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
         assistant().content.push({ type: "tool_result", tool_use_id: text(payload.call_id), content: typeof payload.output === "string" ? payload.output : JSON.stringify(payload.output ?? null) });
       }
     }
-    if (entry.type === "event_msg" && payload.type === "user_message" && !userFromResponse) {
-      current.userContent = [{ type: "text", text: text(payload.message) }];
+    if (entry.type === "event_msg" && payload.type === "item_completed") {
+      // Cohub tags a Turn it starts with its own cloud Turn id, so the file itself records which
+      // Turns already belong to a cloud Turn (and must not be ingested twice).
+      const item = record(payload.item);
+      if (item.type === "UserMessage") {
+        const clientId = text(item.client_id);
+        if (clientId) current.cloudTurnId = clientId;
+        // The typed input, without the environment context Codex injects as a user item.
+        const typed = codexContent(item.content);
+        if (typed.length) { current.userContent = typed; userFromResponse = true; }
+        current.userFinal = true;
+      }
+    }
+    if (entry.type === "event_msg" && payload.type === "user_message") {
+      if (!userFromResponse) current.userContent = [{ type: "text", text: text(payload.message) }];
       userFromResponse = true;
+      current.userFinal = true;
     }
     if (entry.type === "event_msg" && ["turn_complete", "task_complete", "turn_aborted"].includes(text(payload.type))) {
       if (payload.turn_id && payload.turn_id !== current.key) throw new Error("Codex Turn boundary mismatch");
@@ -451,8 +471,8 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
 }
 
 const codexSegmentMemo = new Map<string, { turns: NativeTranscriptTurn[]; prefixes: Map<number, string>; cloudSessionId?: string; settled: boolean; bytes: number }>();
-// Ancestor prefixes are immutable, so the cache is a pure win; parsed objects inflate in
-// memory several-fold over raw bytes, hence a conservative budget.
+// Ancestor prefixes are immutable, so the cache is a pure win; parsed objects inflate in memory
+// several-fold over raw bytes, hence a conservative budget.
 const CODEX_MEMO_MAX_BYTES = 128 * 1024 * 1024;
 
 /** Ancestors are immutable; only their bounded prefixes are worth caching, bounded by bytes. */
@@ -470,7 +490,7 @@ async function parseCodexSegment(segment: CodexLineageSegment, signal?: AbortSig
   if (!read.lines.length) throw new Error("Native transcript is empty");
   const parsed = parseCodexLines(read.lines, segment);
   // A paginated ancestor stamps every record with its ordinal; the referenced prefix must end
-  // exactly at the ordinal bound. Records without the stamp cannot validate a paginated bound.
+  // exactly at the ordinal bound.
   if (segment.endBytes != null && segment.endOrdinal != null) {
     const ordinal = read.lines.at(-1)?.value.ordinal;
     if (typeof ordinal !== "number" || ordinal !== segment.endOrdinal - 1) throw new Error("Codex history ordinal bound does not match the prefix; retain the original files");

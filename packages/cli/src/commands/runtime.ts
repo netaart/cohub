@@ -5,13 +5,14 @@ import { json as outJson, jsonRequested } from "../output.js";
 import { currentIdentityKey } from "../space.js";
 import { resolveRuntimeTarget, runtimeUp, parseRuntimeHarnesses, type RuntimeUpOptions } from "../runtime/launch.js";
 import { canonicalRuntimeRoot, getRuntimeSpaceBinding } from "../runtime/space-binding.js";
-import { installNativeSync } from "../runtime/native-install.js";
-import { discoverNativeImportCandidates, nativeRuntimeRoot, readNativeSyncConfig } from "../runtime/native-sync.js";
-import { listNativeSyncStores } from "../runtime/native-sync-store.js";
-import { requestNativeDaemon, type NativeIpcResponse } from "../runtime/native-ipc.js";
-import { requestRuntimeInstance, runtimeInstanceDirectory } from "../runtime/instance.js";
-import { atLeastLevel, diagnosticLevels, formatDiagnostic, formatNativeSync, printRuntimeSummary } from "../runtime/presentation.js";
-import { RuntimeSessionStore } from "../runtime/session-store.js";
+import { join } from "node:path";
+import { RuntimeArchiveStore } from "../runtime/archive-store.js";
+import { readNativeConfig, runtimeStateRoot, writeNativeConfig } from "../runtime/native/config.js";
+import type { NativeStatus } from "../runtime/native/daemon.js";
+import { MAX_IMPORT_CONCURRENCY, DEFAULT_IMPORT_CONCURRENCY, type ImportJob } from "../runtime/native/ingest.js";
+import { installPiExtension, piExtensionState } from "../runtime/native/install.js";
+import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "../runtime/instance.js";
+import { atLeastLevel, diagnosticLevels, formatDiagnostic, formatImportProgress, formatNativeSync, printRuntimeSummary } from "../runtime/presentation.js";
 import { readRuntimeDiagnosticEvents, RuntimeDiagnosticReader, runtimeDiagnosticsDirectory, serializeDiagnosticError, type RuntimeDiagnosticLevel } from "../runtime/diagnostics.js";
 
 export { resolveLocalSpaceName, parseRuntimeHarnesses } from "../runtime/launch.js";
@@ -22,19 +23,20 @@ const reportFailure = (cause: unknown) => {
 };
 type TargetOptions = { space?: string; json?: boolean };
 
-export function applyNativeImportResponse(result: {
-  imported: number;
-  failed: Array<{ path: string; message: string }>;
-  skipped: Array<{ path: string; message: string }>;
-}, path: string, response: NativeIpcResponse): void {
-  if (!response.ok) {
-    if (response.skipped) {
-      result.skipped.push({ path, message: response.message });
-      return;
-    }
-    throw new Error(response.message);
-  }
-  result.imported += 1;
+type ImportPlan = { files: number; bytes: number; sample: Array<{ harness: string; path: string; nativeSessionId?: string; mtimeMs: number; size: number }> };
+type ImportStatus = NativeStatus["import"];
+
+const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+/** The bound Space of a directory, with its running Runtime; import and attach act through it. */
+async function boundRuntime(program: Command, dir: string | undefined, space: string | undefined) {
+  const identity = currentIdentityKey();
+  if (!identity) throw new Error("Sign in first");
+  const root = await canonicalRuntimeRoot(dir ?? process.cwd());
+  const spaceId = await resolveRuntimeTarget(program, space);
+  const binding = await getRuntimeSpaceBinding(root, identity);
+  if (!binding || binding.spaceId !== spaceId) throw new Error("Bind this directory with runtime up first");
+  return { identity, root, spaceId, directory: runtimeInstanceDirectory(identity, spaceId) };
 }
 
 export function registerRuntime(program: Command) {
@@ -56,91 +58,85 @@ export function registerRuntime(program: Command) {
       catch (cause) { reportFailure(cause); }
     });
 
+  runtime.command("attach")
+    .description("Connect native harnesses to Cohub: install the Pi extension")
+    .option("-s, --space <id>", "Target Space")
+    .option("--harness <name>", "Pi; repeatable", (value: string, previous: string[]) => [...previous, value], [])
+    .option("--json", "JSON output")
+    .action(async (options: TargetOptions & { harness: string[] }) => {
+      try {
+        const harnesses = parseRuntimeHarnesses(options.harness.length ? options.harness : ["pi"]);
+        if (!harnesses.includes("pi")) throw new Error("Codex needs no extension; runtime up offers its shared app-server");
+        const before = await piExtensionState();
+        if (before === "foreign") throw new Error("A Pi extension named cohub exists and is not managed by Cohub; move it aside, then retry");
+        await installPiExtension();
+        const spaceId = await resolveRuntimeTarget(program, options.space).catch(() => null);
+        const identity = currentIdentityKey();
+        if (spaceId && identity) await controlRuntimeInstance(runtimeInstanceDirectory(identity, spaceId), "reload").catch(() => undefined);
+        if (jsonRequested(options)) outJson({ harness: "pi", extension: "installed", updated: before !== "installed" });
+        else process.stdout.write(before === "installed" ? "Pi extension is up to date\n" : "Pi extension installed. Run /reload in open Pi sessions to connect them\n");
+      } catch (cause) { reportFailure(cause); }
+    });
+
   runtime.command("detach")
-    .description("Pause native sync; retain all receipts")
+    .description("Pause native sync; keep all data")
     .option("-s, --space <id>", "Target Space")
     .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { harness: string[] }) => {
       try {
-        const spaceId = await resolveRuntimeTarget(program, options.space);
-        const identity = currentIdentityKey();
-        if (!identity) throw new Error("Sign in first");
-        const root = await canonicalRuntimeRoot(process.cwd());
-        if ((await getRuntimeSpaceBinding(root, identity))?.spaceId !== spaceId) throw new Error("Bind this directory with runtime up first");
-        const instance = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
-        const harnesses = parseRuntimeHarnesses(options.harness.length ? options.harness : instance?.harnesses ?? ["pi", "codex"]);
-        const result = await installNativeSync({ root, spaceId, identity, harnesses, disabled: true });
-        if (jsonRequested(options)) outJson({ ...result, enabled: false });
-        else process.stdout.write("Native sync paused; all local records retained\n");
+        const { identity, spaceId, directory } = await boundRuntime(program, undefined, options.space);
+        const stateRoot = runtimeStateRoot(spaceId);
+        const config = await readNativeConfig(stateRoot, identity);
+        const paused = parseRuntimeHarnesses(options.harness.length ? options.harness : config?.harnesses ?? ["pi", "codex"]);
+        const harnesses = (config?.harnesses ?? []).filter((harness) => !paused.includes(harness));
+        if (config) await writeNativeConfig(stateRoot, { ...config, harnesses, codexShared: harnesses.includes("codex") && config.codexShared });
+        await controlRuntimeInstance(directory, "reload").catch(() => undefined);
+        const codexWasShared = Boolean(config?.codexShared) && paused.includes("codex");
+        if (jsonRequested(options)) outJson({ spaceId, harnesses, paused, enabled: harnesses.length > 0 });
+        else {
+          process.stdout.write(harnesses.length ? `Native sync paused for ${paused.join(", ")}; still syncing ${harnesses.join(", ")}\n` : "Native sync paused; all data retained\n");
+          // Cohub never stops a server that terminal clients may be attached to.
+          if (codexWasShared) process.stdout.write("Codex's shared app-server keeps running; stop it with codex app-server daemon stop\n");
+        }
       } catch (cause) { reportFailure(cause); }
     });
 
   runtime.command("import [dir]")
-    .description("Import local conversations")
+    .description("Import earlier local conversations, newest first")
     .option("-s, --space <id>", "Target Space")
     .option("--harness <name>", "Filter by harness; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--session <id>", "Filter by native session ID")
+    .option("--concurrency <count>", `Conversations read in parallel, 1 to ${MAX_IMPORT_CONCURRENCY}`, String(DEFAULT_IMPORT_CONCURRENCY))
     .option("--dry-run", "Preview without importing")
     .option("-y, --yes", "Skip confirmation")
     .option("--json", "Output as JSON")
-    .action(async (dir: string | undefined, options: TargetOptions & { harness: string[]; session?: string; dryRun?: boolean; yes?: boolean }) => {
+    .action(async (dir: string | undefined, options: TargetOptions & { harness: string[]; session?: string; concurrency: string; dryRun?: boolean; yes?: boolean }) => {
       const controller = new AbortController();
       const stop = () => controller.abort();
       process.once("SIGINT", stop); process.once("SIGTERM", stop);
+      const asJson = jsonRequested(options);
       try {
-        const identity = currentIdentityKey();
-        if (!identity) throw new Error("Sign in first");
-        const root = await canonicalRuntimeRoot(dir ?? process.cwd());
-        const spaceId = await resolveRuntimeTarget(program, options.space);
-        const binding = await getRuntimeSpaceBinding(root, identity);
-        if (!binding || binding.spaceId !== spaceId) throw new Error("Bind this directory with runtime up first");
-        const local = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
-        if (!local) throw new Error("Local Runtime is not running");
-        const config = await readNativeSyncConfig(nativeRuntimeRoot(spaceId), identity);
-        if (!config || config.root !== root) throw new Error("Native sync is not enabled for this directory");
-        const harnesses = parseRuntimeHarnesses(options.harness.length ? options.harness : config.harnesses);
-        let lastProgress = 0;
-        const discovered = await discoverNativeImportCandidates(root, harnesses, {
-          signal: controller.signal,
-          onProgress: ({ harness, scanned, candidates: found }) => {
-            if (jsonRequested(options) || scanned - lastProgress < 25) return;
-            lastProgress = scanned;
-            process.stderr.write(`Scanned ${scanned} ${harness} transcript${scanned === 1 ? "" : "s"}; found ${found}\n`);
-          },
-        });
-        const candidates = discovered.candidates.filter((candidate) => !options.session || candidate.nativeSessionId === options.session);
-        const superseded = discovered.superseded.filter((skip) => !options.session || skip.nativeSessionId === options.session);
-        const result = {
-          spaceId, root, harnesses, candidates, errors: discovered.errors,
-          imported: 0, pendingTurns: 0, failed: [] as Array<{ path: string; message: string }>, skipped: [] as Array<{ path: string; message: string }>, superseded, dryRun: Boolean(options.dryRun),
-          complete: discovered.errors.length === 0 && superseded.length === 0,
+        const concurrency = Number(options.concurrency);
+        if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > MAX_IMPORT_CONCURRENCY) throw new Error(`Use a concurrency from 1 to ${MAX_IMPORT_CONCURRENCY}`);
+        const { spaceId, root, directory } = await boundRuntime(program, dir, options.space);
+        // The Runtime does the work, so an import survives this command: Ctrl-C only pauses it.
+        const filter = { harnesses: options.harness.length ? parseRuntimeHarnesses(options.harness) : [], ...(options.session ? { nativeSessionId: options.session } : {}) };
+        const control = async <T>(command: string, timeoutMs = 60_000) => {
+          const response = await controlRuntimeInstance(directory, "import", { ...filter, command, concurrency }, timeoutMs);
+          if (!response) throw new Error("Local Runtime is not running; start it with cohub runtime up");
+          return response.result as T;
         };
-        if (jsonRequested(options) && options.dryRun) {
-          result.complete = result.complete && result.failed.length === 0;
-          outJson(result);
-          if (!result.complete) process.exitCode = 1;
-          return;
-        }
-        if (!candidates.length) {
-          if (!result.complete) process.exitCode = 1;
-          if (jsonRequested(options)) outJson(result);
+        const plan = await control<ImportPlan>("plan");
+        const summary = { spaceId, root, ...plan, dryRun: Boolean(options.dryRun) };
+        if (options.dryRun || !plan.files) {
+          if (asJson) outJson(summary);
+          else if (!plan.files) process.stdout.write("No earlier conversations left to import\n");
           else {
-            process.stdout.write("No existing native conversations found\n");
-            for (const error of discovered.errors) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
-            for (const skip of superseded) process.stdout.write(`Superseded ${skip.path}: ${skip.message}\n`);
+            process.stdout.write(`Found ${plan.files} conversation${plan.files === 1 ? "" : "s"} · ${megabytes(plan.bytes)}\n`);
+            for (const item of plan.sample) process.stdout.write(`  ${item.harness.padEnd(5)} ${new Date(item.mtimeMs).toISOString().slice(0, 16).replace("T", " ")}  ${item.nativeSessionId ?? ""}  ${item.path}\n`);
+            if (plan.files > plan.sample.length) process.stdout.write(`  … and ${plan.files - plan.sample.length} more\n`);
           }
-          return;
-        }
-        if (options.dryRun) {
-          if (jsonRequested(options)) outJson(result);
-          else {
-            process.stdout.write(`Found ${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}\n`);
-            for (const candidate of candidates) process.stdout.write(`  ${candidate.harness} ${candidate.nativeSessionId} ${candidate.turnCount} Turn${candidate.turnCount === 1 ? "" : "s"} ${candidate.path}\n`);
-            for (const error of discovered.errors) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
-            for (const skip of superseded) process.stdout.write(`Superseded ${skip.path}: ${skip.message}\n`);
-          }
-          if (!result.complete) process.exitCode = 1;
           return;
         }
         if (!options.yes) {
@@ -148,42 +144,32 @@ export function registerRuntime(program: Command) {
           const { createInterface } = await import("node:readline/promises");
           const rl = createInterface({ input: process.stdin, output: process.stderr });
           try {
-            const answer = await rl.question(`Import ${candidates.length} native conversation${candidates.length === 1 ? "" : "s"} to Space ${spaceId}? [Y/n] `);
+            const answer = await rl.question(`Import ${plan.files} conversation${plan.files === 1 ? "" : "s"} (${megabytes(plan.bytes)}) to Space ${spaceId}? [Y/n] `);
             if (!/^(|y(es)?)$/i.test(answer.trim())) {
-              if (jsonRequested(options)) outJson({ ...result, cancelled: true });
+              if (asJson) outJson({ ...summary, cancelled: true });
               else process.stdout.write("Import cancelled\n");
               return;
             }
           } finally { rl.close(); }
         }
-        let processed = 0;
-        for (const candidate of candidates) {
-          if (controller.signal.aborted) break;
-          try {
-            const response = await requestNativeDaemon({ harness: candidate.harness, cwd: root, path: candidate.path, nativeSessionId: candidate.nativeSessionId,
-              sessionStartedAt: candidate.sessionStartedAt, origin: "local_import", settled: true });
-            applyNativeImportResponse(result, candidate.path, response);
-            if (response.ok) result.pendingTurns += response.pendingTurns;
-          } catch (error) {
-            if (!controller.signal.aborted) result.failed.push({ path: candidate.path, message: error instanceof Error ? error.message : String(error) });
-          } finally {
-            processed += 1;
-            if (!jsonRequested(options) && !controller.signal.aborted) {
-              process.stderr.write(`\rSubmitted ${result.imported}/${candidates.length} · pending ${result.pendingTurns} Turns`);
-            }
-          }
+        let job = await control<ImportJob>("start");
+        while (!controller.signal.aborted && job.state === "running") {
+          if (!asJson && process.stderr.isTTY) process.stderr.write(`\r\x1b[2KImporting ${formatImportProgress(job as ImportStatus)}`);
+          await delay(500, undefined, { signal: controller.signal }).catch(() => undefined);
+          const status = await requestRuntimeInstance(directory);
+          if (!status?.native) throw new Error("Local Runtime stopped; the import resumes when it starts again");
+          job = status.native.import;
         }
-        const cancelled = controller.signal.aborted;
-        result.complete = result.complete && result.failed.length === 0 && !cancelled;
-        if (jsonRequested(options)) outJson({ ...result, cancelled, processed });
+        if (controller.signal.aborted) job = await control<ImportJob>("pause", 5_000);
+        const paused = job.state === "paused";
+        if (asJson) outJson({ ...summary, ...job, paused });
         else {
-          if (processed) process.stderr.write("\n");
-          process.stdout.write(`Submitted ${result.imported}/${candidates.length} native conversation${candidates.length === 1 ? "" : "s"}${cancelled ? " (interrupted)" : ""}\n`);
-          for (const error of [...discovered.errors, ...result.skipped, ...result.failed]) process.stdout.write(`Skipped ${error.path}: ${error.message}\n`);
-          for (const skip of result.superseded) process.stdout.write(`Superseded ${skip.path}: ${skip.message}\n`);
-          process.stdout.write("Uploads continue in the local Runtime background; use runtime status to check confirmation\n");
+          if (process.stderr.isTTY) process.stderr.write("\r\x1b[2K");
+          process.stdout.write(`${paused ? "Paused" : "Imported"} ${formatImportProgress(job as ImportStatus)}\n`);
+          for (const failure of job.failed) process.stdout.write(`Skipped ${failure.path}: ${failure.message}\n`);
+          if (paused) process.stdout.write("Run cohub runtime import again to continue\n");
         }
-        if (!result.complete && !cancelled) process.exitCode = 1;
+        if (job.failed.length) process.exitCode = 1;
       } catch (cause) { reportFailure(cause); }
       finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
     });
@@ -197,22 +183,21 @@ export function registerRuntime(program: Command) {
         const identity = currentIdentityKey();
         const local = identity ? await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId)) : null;
         const space = createClient().space(spaceId);
-        const store = new RuntimeSessionStore(spaceId, { projectionSource: space, archiveTransport: null });
-        const [remote, pendingLocalArchives, failedLocalArchives, nativeStores] = await Promise.all([
+        const stateRoot = runtimeStateRoot(spaceId);
+        const archives = new RuntimeArchiveStore(join(stateRoot, "archives"));
+        const [remote, pendingLocalArchives, failedLocalArchives] = await Promise.all([
           space.getRuntime(undefined, { signal: AbortSignal.timeout(5000) }).then((value) => ({ value, error: null })).catch((error) => ({ value: null, error: serializeDiagnosticError(error).message })),
-          store.archives.pendingCount(), store.archives.failedCaptureCount(),
-          identity ? listNativeSyncStores(store.root, spaceId, identity) : [],
+          archives.pendingCount(), archives.failedCaptureCount(),
         ]);
-        const nativeSessions = await Promise.all(nativeStores.map((native) => native.status()));
         // A corrupt native sync config must never take down the whole status report.
-        const nativeSync = identity ? await readNativeSyncConfig(store.root, identity).then((config) => ({ config, error: null as string | null }), (error: unknown) => ({ config: null, error: serializeDiagnosticError(error).message })) : { config: null, error: null as string | null };
-        const result = { ...remote.value, spaceId, local, remote: remote.value, remoteError: remote.error, diagnosticsPath: runtimeDiagnosticsDirectory(store.root), pendingLocalArchives, failedLocalArchives, nativeSync: nativeSync.config, nativeSyncError: nativeSync.error, nativeSessions };
+        const nativeSync = identity ? await readNativeConfig(stateRoot, identity).then((config) => ({ config, error: null as string | null }), (error: unknown) => ({ config: null, error: serializeDiagnosticError(error).message })) : { config: null, error: null as string | null };
+        const result = { ...remote.value, spaceId, local, remote: remote.value, remoteError: remote.error, diagnosticsPath: runtimeDiagnosticsDirectory(stateRoot), pendingLocalArchives, failedLocalArchives, nativeSync: nativeSync.config, nativeSyncError: nativeSync.error, native: local?.native ?? null };
         if (jsonRequested(options)) outJson(result);
         else {
           if (local) printRuntimeSummary(local);
           else process.stdout.write(`Local process  Not running\nSpace  ${spaceId}\nLogs  ${result.diagnosticsPath}\n`);
           process.stdout.write(`Server  ${remote.error ? `Unknown — ${remote.error}` : remote.value?.online ? "Harness connected" : "Offline"}\nArchives  ${pendingLocalArchives} pending · ${failedLocalArchives} failed\n`);
-          process.stdout.write(formatNativeSync(nativeSync.config, nativeSessions, nativeSync.error));
+          process.stdout.write(formatNativeSync(nativeSync.config, local?.native, nativeSync.error));
         }
       } catch (cause) { reportFailure(cause); }
     });
@@ -237,7 +222,11 @@ export function registerRuntime(program: Command) {
         }
         if (running) throw new Error("Runtime is still stopping; inspect logs");
         if (jsonRequested(options)) outJson({ spaceId, stopped: true });
-        else process.stdout.write("Runtime stopped; data retained\n");
+        else {
+          process.stdout.write("Runtime stopped; data retained\n");
+          // Terminal clients may still be attached to it, so it is never stopped for them.
+          if (local?.native?.codex?.control === "shared") process.stdout.write("Codex's shared app-server keeps running; stop it with codex app-server daemon stop\n");
+        }
       } catch (cause) { reportFailure(cause); }
     });
 
@@ -252,15 +241,15 @@ export function registerRuntime(program: Command) {
       const stop = () => controller.abort();
       try {
         const spaceId = await resolveRuntimeTarget(program, options.space);
-        const store = new RuntimeSessionStore(spaceId, { projectionSource: createClient().space(spaceId), archiveTransport: null });
+        const stateRoot = runtimeStateRoot(spaceId);
         const limit = Number(options.limit);
         if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) throw new Error("Use a limit from 1 to 10000");
         if (!diagnosticLevels.includes(options.level)) throw new Error("Use debug, info, warn or error");
         const asJson = jsonRequested(options);
-        const reader = new RuntimeDiagnosticReader(store.root);
+        const reader = new RuntimeDiagnosticReader(stateRoot);
         process.once("SIGINT", stop); process.once("SIGTERM", stop);
         do {
-          const events = (options.follow ? await reader.read({ limit }) : await readRuntimeDiagnosticEvents(store.root, { limit }))
+          const events = (options.follow ? await reader.read({ limit }) : await readRuntimeDiagnosticEvents(stateRoot, { limit }))
             .filter((event) => atLeastLevel(event.level, options.level));
           if (asJson && !options.follow) outJson(events);
           else for (const event of events) process.stdout.write(asJson ? `${JSON.stringify(event)}\n` : formatDiagnostic(event, true));

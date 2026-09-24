@@ -13,10 +13,10 @@ import { discoverHarnesses, type HarnessOptions } from "./harness.js";
 import { RuntimeDiagnostics, serializeDiagnosticError, type RuntimeDiagnostic, type RuntimeDiagnosticLevel } from "./diagnostics.js";
 import { ownRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
 import { createDiagnosticConsole, type RuntimeSummary } from "./presentation.js";
-import { RuntimeSessionStore } from "./session-store.js";
-import { captureNativeSession, flushNativeSessions, nativeWebSocketTransport, summarizeNativeSyncErrors } from "./native-sync.js";
-import type { NativeRuntimeEvent } from "@neta-art/cohub";
-import { serveNativeDaemon } from "./native-ipc.js";
+import { join } from "node:path";
+import { RuntimeArchiveStore } from "./archive-store.js";
+import { readNativeConfig, runtimeStateRoot } from "./native/config.js";
+import { NativeRuntime } from "./native/daemon.js";
 
 export type RuntimeLaunch = {
   spaceId: string;
@@ -27,6 +27,8 @@ export type RuntimeLaunch = {
   capabilities?: RuntimeCapabilities;
   background: boolean;
   verbose?: boolean;
+  /** Start importing earlier conversations as soon as the Runtime is connected. */
+  importHistory?: boolean;
 };
 
 export function sandboxOutputLevel(value: unknown, stream: "stdout" | "stderr"): RuntimeDiagnosticLevel {
@@ -42,19 +44,28 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   const client = createClient();
   const space = client.space(config.spaceId);
-  const store = new RuntimeSessionStore(config.spaceId, { projectionSource: space, archiveTransport: space });
+  const stateRoot = runtimeStateRoot(config.spaceId);
+  const archives = new RuntimeArchiveStore(join(stateRoot, "archives"), space);
   const consoleSink = config.background ? undefined : createDiagnosticConsole(config.verbose);
   const diagnostics = new RuntimeDiagnostics({
-    root: store.root, spaceId: config.spaceId, runtimeId: randomUUID(),
+    root: stateRoot, spaceId: config.spaceId, runtimeId: randomUUID(),
     onEvent: (event) => { consoleSink?.(event); onDiagnostic?.(event); },
   });
-  store.setDiagnostics(diagnostics);
+  archives.setErrorReporter((error, index) => diagnostics.log("warn", "archive.upload_pending", { error: serializeDiagnosticError(error) }, {
+    component: "archive", sessionId: index?.sessionId, turnId: index?.turnId, harness: index?.harness,
+  }));
+  const native = new NativeRuntime({
+    spaceId: config.spaceId, root: config.root, stateRoot, harnesses: config.harnesses, executables: config.executables,
+    identity: config.identity, config: await readNativeConfig(stateRoot, config.identity).catch(() => null),
+    archives, projectionSource: space, diagnostics,
+  });
   let status: RuntimeSummary = {
     spaceId: config.spaceId, root: config.root, runtimeId: diagnostics.runtimeId,
     pid: process.pid, harnesses: config.harnesses, background: config.background,
     state: "starting", harnessConnected: false, workspaceConnected: false,
     diagnosticsPath: diagnostics.directory,
   };
+  const summary = (): RuntimeSummary => ({ ...status, native: native.status() });
   let hasBeenReady = false;
   const update = (patch: Partial<RuntimeSummary>) => {
     const next = { ...status, ...patch };
@@ -67,9 +78,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   };
   let closeInstance: (() => Promise<void>) | undefined;
   let bridgeTask: Promise<void> | undefined;
-  let nativeSyncTask: Promise<void> | undefined;
-  let closeNativeDaemon: (() => Promise<void>) | undefined;
-  let nativeSend: ((event: NativeRuntimeEvent) => Promise<unknown>) | null = null;
+  let nativeStarted = false;
   let tokenInFlight: Promise<string> | null = null;
   const token = (forceRefresh = false) => {
     tokenInFlight ??= (async () => {
@@ -82,13 +91,13 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     return tokenInFlight;
   };
   try {
-    closeInstance = await ownRuntimeInstance(runtimeInstanceDirectory(config.identity, config.spaceId), () => status, async (force) => {
-      if (!force) for await (const batch of store.pendingExecutionBatches()) {
+    closeInstance = await ownRuntimeInstance(runtimeInstanceDirectory(config.identity, config.spaceId), summary, async (force) => {
+      if (!force) for await (const batch of native.executor.results.pendingBatches()) {
         if (batch.length) throw new Error("Unconfirmed executions remain. Use down --yes to stop; results and files are retained");
       }
       update({ state: "stopping" });
       setTimeout(stop, 30);
-    });
+    }, (action, message) => native.control(action, message));
     onState({ ...status });
     diagnostics.log("info", "runtime.cli_started", { platform: process.platform, node: process.versions.node, harnesses: config.harnesses });
     const [binary, capabilities] = await Promise.all([
@@ -196,90 +205,21 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
       }
     };
     bridgeTask = runBridge();
-    // Native reconciliation is event-driven: captures and channel reconnects wake it, while failures
-    // get bounded exponential retries so idle Runtimes do not scan every few seconds.
-    let nativeWakePending = true;
-    let nativeWake: (() => void) | null = null;
-    let nativeRetryTimer: ReturnType<typeof setTimeout> | undefined;
-    let nativeRetryDelay = 1000;
-    const wakeNativeSync = () => {
-      nativeWakePending = true;
-      // A new capture may wake healthy work, but it must not cancel a failed receipt's backoff.
-      if (!nativeRetryTimer) {
-        nativeWake?.();
-        nativeWake = null;
-      }
-    };
-    const waitForNativeWake = async () => {
-      if (nativeWakePending && !nativeRetryTimer) { nativeWakePending = false; return; }
-      await new Promise<void>((resolve) => {
-        const finish = () => {
-          signal.removeEventListener("abort", finish);
-          if (nativeWake === finish) nativeWake = null;
-          resolve();
-        };
-        nativeWake = finish;
-        signal.addEventListener("abort", finish, { once: true });
-        if (signal.aborted) finish();
-      });
-      nativeWakePending = false;
-    };
-    nativeSyncTask = (async () => {
-      let lastFailureLogAt = 0;
-      let failureStartedAt = 0;
-      let accumulatedErrors: unknown[] = [];
-      while (!signal.aborted) {
-        await waitForNativeWake();
-        if (signal.aborted) break;
-        if (!nativeSend) continue;
-        let failed = false;
-        const cycleErrors: unknown[] = [];
-        try {
-          failed = await flushNativeSessions(config.spaceId, config.identity, signal, (error) => cycleErrors.push(error), nativeWebSocketTransport(config.spaceId, config.identity, nativeSend));
-        }
-        catch (error) {
-          if (!signal.aborted) { cycleErrors.push(error); failed = true; }
-        }
-        if (cycleErrors.length && !signal.aborted) {
-          const now = Date.now();
-          failureStartedAt ||= now;
-          accumulatedErrors.push(...cycleErrors);
-          if (!lastFailureLogAt || now - lastFailureLogAt >= 60_000) {
-            diagnostics.log("warn", "native.sync_pending", {
-              failedStores: accumulatedErrors.length,
-              retryInMs: nativeRetryDelay,
-              errors: summarizeNativeSyncErrors(accumulatedErrors),
-            });
-            accumulatedErrors = [];
-            lastFailureLogAt = now;
-          }
-        } else if (!signal.aborted && !failed && failureStartedAt) {
-          diagnostics.log("info", "native.sync_recovered", { durationMs: Date.now() - failureStartedAt });
-          failureStartedAt = 0;
-          lastFailureLogAt = 0;
-          accumulatedErrors = [];
-        }
-        if (failed && !signal.aborted) {
-          nativeWakePending = false;
-          if (!nativeRetryTimer) nativeRetryTimer = setTimeout(() => { nativeRetryTimer = undefined; wakeNativeSync(); }, nativeRetryDelay);
-          nativeRetryDelay = Math.min(30_000, nativeRetryDelay * 2);
-        } else if (!failed) {
-          nativeRetryDelay = 1000;
-        }
-      }
-      if (nativeRetryTimer) clearTimeout(nativeRetryTimer);
-    })();
-    closeNativeDaemon = await serveNativeDaemon({ runtimeRoot: store.root, handle: async (request) => {
-      const result = { store: await captureNativeSession(request) };
-      if (result.store) wakeNativeSync();
-      return result;
-    } });
+    await native.start(signal);
+    nativeStarted = true;
+    let importRequested = Boolean(config.importHistory);
     await serveRuntime({
       spaceId: config.spaceId, cwd: config.root, url: url.toString(), capabilities,
-      harnesses: config.executables, runtimeId: status.runtimeId, diagnostics, token, signal, store,
+      runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor,
       onReady: () => update({ harnessConnected: true }),
-      onDisconnected: () => { nativeSend = null; update({ harnessConnected: false }); },
-      onNativeChannel: (send) => { nativeSend = send; wakeNativeSync(); },
+      onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); },
+      onNativeStop: (stop) => { native.stop(stop.sessionId, stop.turnId); },
+      onNativeChannel: (send) => {
+        native.connect(send);
+        if (!importRequested) return;
+        importRequested = false;
+        void native.control("import", { command: "start" }).catch((error: unknown) => diagnostics.log("warn", "native.import_failed", { error: serializeDiagnosticError(error) }));
+      },
     });
   } catch (error) {
     if (!signal.aborted) {
@@ -290,8 +230,8 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   } finally {
     controller.abort();
     try {
-      await Promise.all([bridgeTask, nativeSyncTask]);
-      await closeNativeDaemon?.();
+      await bridgeTask;
+      if (nativeStarted) await native.close(AbortSignal.timeout(5_000));
     } finally {
       try {
         await diagnostics.close();

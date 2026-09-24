@@ -49,7 +49,7 @@ import {
 import { markChannelDegraded, touchChannelOutbound } from "./channel-health.js";
 import { handleAsrWebSocketConnection } from "./asr/session.js";
 import { handleRelayControlConnection, handleRelayDataConnection, handleRelayDataForwardConnection, handleRelayPeerConnection } from "./relay/index.js";
-import { closeRuntimeRelay, handleRuntimeConnection, handleRuntimePeer } from "./relay/runtime.js";
+import { closeRuntimeRelay, handleRuntimeConnection, handleRuntimePeer, startRuntimeStopSubscriber } from "./relay/runtime.js";
 import {
   createPubSubRedisClient,
   redisCommandClient,
@@ -810,6 +810,7 @@ async function main() {
 
   startWsConnectionSweeper();
   await startSpaceOutputSubscriber();
+  await startRuntimeStopSubscriber();
 
   const reconcileRetryDelaysMs = [1_000, 3_000, 10_000, 30_000];
   let reconcileInFlight = false;

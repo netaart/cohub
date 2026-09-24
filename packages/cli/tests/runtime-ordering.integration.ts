@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { TestRuntimeSessionStore } from "./fixtures/runtime-projection-source.js";
+import { idleExecutor } from "./fixtures/runtime-native.js";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocketServer } from "ws";
@@ -36,7 +36,7 @@ for (const persistent of [false, true]) test(`Runtime retries lease conflict wit
   });
   const turn = input();
   try {
-    const running = serveRuntime({ url, spaceId: turn.spaceId, cwd: process.cwd(), capabilities: { harnesses: ["pi"], models: [] }, harnesses: {}, token: async () => "fixture", signal: controller.signal, store: new TestRuntimeSessionStore(turn.spaceId), leaseConflictTimeoutMs: 400,
+    const running = serveRuntime({ url, spaceId: turn.spaceId, cwd: process.cwd(), capabilities: { harnesses: ["pi"], models: [] }, token: async () => "fixture", signal: controller.signal, executor: idleExecutor(turn.spaceId), leaseConflictTimeoutMs: 400,
       onReady: () => { ready++; controller.abort(); },
     });
     if (persistent) await assert.rejects(running, /already connected/); else await running;
@@ -120,7 +120,7 @@ for (const kind of ["missing", "invalid", "changed"]) test(`CLI refuses ${kind} 
   const turn = input();
   const timeout = setTimeout(() => controller.abort(), 3000);
   try {
-    await serveRuntime({ url, spaceId: turn.spaceId, cwd: process.cwd(), capabilities: { harnesses: ["pi"], models: [] }, harnesses: {}, token: async () => "fixture", signal: controller.signal, store: new TestRuntimeSessionStore(turn.spaceId), onReady: () => { ready++; } });
+    await serveRuntime({ url, spaceId: turn.spaceId, cwd: process.cwd(), capabilities: { harnesses: ["pi"], models: [] }, token: async () => "fixture", signal: controller.signal, executor: idleExecutor(turn.spaceId), onReady: () => { ready++; } });
     assert.equal(ready, kind === "changed" ? 1 : 0);
   } finally { clearTimeout(timeout); controller.abort(); await close(server); }
 });

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { HttpError, type RuntimeTurnInput } from "@neta-art/cohub";
+import type { RuntimeTurnInput } from "@neta-art/cohub";
 import type { SessionTurnRecord, TurnIntermediateMessagesFile } from "@cohub/protocol";
 import { ProjectionStore } from "../src/runtime/projection-store.js";
-import { runtimeProjectionSource, TestRuntimeSessionStore } from "./fixtures/runtime-projection-source.js";
+import { testNativeRuntime } from "./fixtures/runtime-native.js";
 import { listSessionProjectionTurns } from "../src/runtime/turn-projection.js";
 
 const sessionId = "11111111-1111-4111-8111-111111111111";
@@ -131,126 +131,46 @@ test("completed generation results are not duplicated with final assistant conte
   assert.deepEqual(result[0]?.messages.map((message) => message.id), [`${source.id}:user`, "generation"]);
 });
 
-test("Pi append uses the current native leaf after harness execution", async () => {
-  const root = await mkdtemp(join(tmpdir(), "cohub-projection-leaf-"));
-  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  const previousSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
-  process.env.PI_CODING_AGENT_DIR = join(root, "pi-agent");
-  delete process.env.PI_CODING_AGENT_SESSION_DIR;
-  try {
-    const source = runtimeProjectionSource();
-    const firstTurn = source.addTurn(sessionId, turnId, { sequence: 1, userContent: [{ type: "text", text: "first" }] });
-    const store = new TestRuntimeSessionStore("space", join(root, "state"), undefined, source);
-    const input: RuntimeTurnInput = { spaceId: "space", sessionId, turnId: "44444444-4444-4444-8444-444444444444", userMessageId: "44444444-4444-4444-8444-444444444444", harness: "pi", messages: [], accessMode: "full_access", context: { revision: "one", throughTurnId: firstTurn.id, messages: [] } };
-    const first = await store.prepare(input, "/repo");
-    await store.started(first.state, input.turnId);
-    const harnessLeaf = "native-harness-leaf";
-    await appendFile(first.state.path, `${JSON.stringify({ type: "message", id: harnessLeaf, parentId: first.state.nativeLeafId, message: { role: "assistant", content: [{ type: "text", text: "native" }] } })}\n`);
-    await store.recordResult(first.state, "request", []);
-    source.addTurn(sessionId, input.turnId, { sequence: 2, assistantContent: [{ type: "text", text: "completed" }] });
-    await store.acknowledge(first.state, input.turnId, "two");
-    const nextTurnId = "55555555-5555-4555-8555-555555555555";
-    source.addTurn(sessionId, nextTurnId, { sequence: 3, userContent: [{ type: "text", text: "next" }] });
-    const next = await store.prepare({ ...input, turnId: "66666666-6666-4666-8666-666666666666", userMessageId: "66666666-6666-4666-8666-666666666666", context: { revision: "three", throughTurnId: nextTurnId, messages: [] } }, "/repo");
-    const rows = (await readFile(next.state.path, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    const appended = rows.find((row) => row.message?.content?.some((block: { text?: string }) => block.text === "next"));
-    assert.equal(appended?.parentId, harnessLeaf);
-  } finally {
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    if (previousSessionDir === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
-    else process.env.PI_CODING_AGENT_SESSION_DIR = previousSessionDir;
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("RuntimeSessionStore preserves an externally edited file and starts a new source projection", async () => {
+test("a Session that moved past its native file is projected into a new file; the old file is untouched", async () => {
   const root = await mkdtemp(join(tmpdir(), "cohub-projection-safety-"));
-  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-  const previousSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
-  process.env.PI_CODING_AGENT_DIR = join(root, "pi-agent");
-  delete process.env.PI_CODING_AGENT_SESSION_DIR;
+  const prior = turn(1);
+  const current = turn(2, "44444444-4444-4444-8444-444444444444");
+  const runtime = await testNativeRuntime({ spaceId: "space", root, harnesses: ["pi"], projectionSource: client([prior, current]) });
   try {
-    const prior = turn(1);
-    const current = turn(2, "44444444-4444-4444-8444-444444444444");
-    const store = new TestRuntimeSessionStore("space", join(root, "state"), undefined, client([prior, current]));
+    const { sessions, ingest } = runtime.native.executor;
     const input: RuntimeTurnInput = {
-      spaceId: "space",
-      sessionId,
-      turnId: current.id,
-      userMessageId: current.id,
-      harness: "pi",
-      messages: [],
-      accessMode: "full_access",
+      spaceId: "space", sessionId, turnId: current.id, userMessageId: current.id, harness: "pi", messages: [], accessMode: "full_access",
       context: { complete: true, revision: "one", throughTurnId: prior.id, messages: [] },
     };
-    const first = await store.prepare(input, "/repo");
-    await store.started(first.state, current.id);
-    await store.acknowledge(first.state, current.id, "one");
-    const original = await readFile(first.state.path, "utf8");
-    await appendFile(first.state.path, "external edit\n");
-
-    const rebuilt = await store.prepare({
-      ...input,
-      turnId: "55555555-5555-4555-8555-555555555555",
-      userMessageId: "55555555-5555-4555-8555-555555555555",
-      context: { ...input.context, revision: "two", throughTurnId: current.id },
-    }, "/repo");
-    assert.notEqual(rebuilt.state.path, first.state.path);
-    assert.equal(await readFile(first.state.path, "utf8"), `${original}external edit\n`);
-    assert.match(await readFile(rebuilt.state.path, "utf8"), /user-2/);
+    const first = await sessions.prepare({ ...input, cwd: root, resumable: () => true });
+    ingest.advance(first.session.path, current.id);
+    const original = await readFile(first.session.path, "utf8");
+    // Elsewhere the Session gained a Turn this file does not have.
+    const rebuilt = await sessions.prepare({ ...input, cwd: root, turnId: "55555555-5555-4555-8555-555555555555", context: { ...input.context, revision: "two", throughTurnId: "66666666-6666-4666-8666-666666666666" }, resumable: () => true });
+    assert.equal(rebuilt.resume, "handoff");
+    assert.notEqual(rebuilt.session.path, first.session.path);
+    assert.equal(await readFile(first.session.path, "utf8"), original);
+    // The file that does end at the Session head is continued in place.
+    const resumed = await sessions.prepare({ ...input, cwd: root, turnId: "77777777-7777-4777-8777-777777777777", context: { ...input.context, revision: "two", throughTurnId: current.id }, resumable: () => true });
+    assert.equal(resumed.resume, "native");
+    assert.equal(resumed.session.path, first.session.path);
   } finally {
-    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-    if (previousSessionDir === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
-    else process.env.PI_CODING_AGENT_SESSION_DIR = previousSessionDir;
+    await runtime.close();
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("ProjectionStore returns an append-only batch after validating its durable anchor", async () => {
+test("ProjectionStore projects every settled Turn through the head, without the running Turn", async () => {
   const first = turn(1);
   const second = turn(2, "44444444-4444-4444-8444-444444444444");
-  const store = new ProjectionStore(client([first, second]));
   const input = {
-    spaceId: "space",
-    sessionId,
-    turnId: "55555555-5555-4555-8555-555555555555",
-    nativeSessionId: "native",
-    cwd: "/repo",
-    target: "pi" as const,
-    throughTurnId: second.id,
+    spaceId: "space", sessionId, turnId: "55555555-5555-4555-8555-555555555555", nativeSessionId: "native", cwd: "/repo", target: "pi" as const, throughTurnId: second.id,
   };
-  const initial = await store.project({ ...input, cursor: null });
-  const cursor = await store.cursorForTurn(sessionId, first.id);
-  assert(cursor);
-  const append = await store.project({ ...input, cursor });
-  assert.equal(initial.append, false);
-  assert.equal(append.append, true);
-  assert.deepEqual(append.turns.map((item) => item.id), [second.id]);
-  assert.equal(append.projection.records.some((record) => record.sourceTurnId === null), false);
-
+  const projected = await new ProjectionStore(client([first, second])).project(input);
+  assert.deepEqual(projected.turns.map((item) => item.id), [first.id, second.id]);
+  assert(projected.projection.records.some((record) => record.sourceTurnId === null), "a projection is a complete file with its header");
+  const head = await new ProjectionStore(client([first, second])).project({ ...input, throughTurnId: first.id });
+  assert.deepEqual(head.turns.map((item) => item.id), [first.id]);
   const offline = new ProjectionStore(client([first, second], null, new Error("network unavailable")));
-  await assert.rejects(offline.project({ ...input, cursor }), /network unavailable/);
-
-  const missing = new ProjectionStore(client([first, second], null, (id) => id === first.id ? new HttpError("missing", 404, null) : undefined));
-  const rebuilt = await missing.project({ ...input, cursor });
-  assert.equal(rebuilt.append, false);
-  assert.equal(rebuilt.turns.length, 2);
-});
-
-test("empty rebuild clears the old cursor so later history is not skipped", async () => {
-  const boundary = turn(2, "44444444-4444-4444-8444-444444444444");
-  const turns = [boundary];
-  const missingAnchor = "77777777-7777-4777-8777-777777777777";
-  const store = new ProjectionStore(client(turns, null, (id) => id === missingAnchor ? new HttpError("missing", 404, null) : undefined));
-  const input = { spaceId: "space", sessionId, turnId: boundary.id, nativeSessionId: "native", cwd: "/repo", target: "pi" as const, throughTurnId: boundary.id };
-  const rebuilt = await store.project({ ...input, cursor: { throughSequence: 1, throughTurnId: missingAnchor, sourceFingerprint: "old" } });
-  assert.equal(rebuilt.append, false);
-  assert.deepEqual(rebuilt.turns, []);
-  assert.deepEqual(rebuilt.cursor, { throughSequence: null, throughTurnId: null, sourceFingerprint: null });
-
-  turns.unshift(turn(1));
-  const next = await store.project({ ...input, cursor: rebuilt.cursor });
-  assert.deepEqual(next.turns.map((item) => item.sequence), [1]);
+  await assert.rejects(offline.project(input), /network unavailable/);
 });

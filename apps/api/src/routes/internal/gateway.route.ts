@@ -24,19 +24,9 @@ import {
 } from "../../public-asset-storage.js";
 import { UserUploadConfigError } from "../../user-upload-storage.js";
 import { nativeRuntimeEventSchema } from "@cohub/protocol";
-import { NativeTurnError, startNativeTurn, completeNativeTurn, getOwnedNativeTurn } from "../../native-turns.js";
-import { adoptNativeStreamSnapshot, cacheNativeTurnBinding, clearNativeTurnBinding, publishNativeProgress, releaseNativeStreamSnapshot } from "../../native-turn-progress.js";
-import { getSessionTurnById, hydrateTurnAuthorProfiles } from "../../session-turns.js";
-import { getSpaceSessionById } from "../../space-sessions.js";
-import { dispatchSessionCreated, dispatchSessionUpdated, dispatchTurnCreated, messageRecordFromRow } from "../../realtime-events.js";
-import { dispatchSessionOutput, dispatchTurnFinalized, dispatchTurnUpdated } from "../../session-output.js";
-import { enqueueSessionMessagePostprocess } from "../../session-message-postprocess-queue.js";
-import { enqueueAgentTurnJob } from "../../agent-turn-queue.js";
-import { publishSessionFork } from "../../session-forks.js";
-import { runtimeResolutionOpen } from "@cohub/core/sessions";
-import { touchSpaceActivity } from "../../space-activity.js";
-import { and, asc, inArray, sql } from "drizzle-orm";
-import { sessionMessages, sessionTurns } from "@cohub/db";
+import { NativeTurnError, ingestNativeTurns, knownNativeTurns, observeNativeTurn } from "../../native-turns.js";
+import { publishNativeIngest } from "../../native-ingest-events.js";
+import { publishNativeProgress } from "../../native-turn-progress.js";
 
 const nativeLogger = createLogger({ serviceName: "cohub-api" });
 const nativeErrorFields = ["code", "detail", "hint", "constraint", "table", "column", "schema", "position"] as const;
@@ -296,77 +286,29 @@ router.post("/native-runtime-event", async (c) => {
   const spaceId = typeof body?.spaceId === "string" ? body.spaceId.trim() : "";
   const ownerUserId = typeof body?.ownerUserId === "string" ? body.ownerUserId.trim() : "";
   const parsed = nativeRuntimeEventSchema.safeParse(body?.event);
-  if (!requireValidId(spaceId) || !ownerUserId || !parsed.success) return c.json({ message: "invalid native runtime event" }, 400);
+  if (!requireValidId(spaceId) || !ownerUserId) return c.json({ message: "invalid native runtime event" }, 400);
+  // Earlier CLIs send `start` / `complete` / `heartbeat`; they keep running Cohub Turns, and this says why their native sync stopped.
+  if (!parsed.success) return c.json({ message: "Unsupported native sync event; upgrade the Cohub CLI" }, 400);
   const event = parsed.data;
   try {
-    if (event.type === "start") {
-      const { binding, session, created, fork } = await startNativeTurn(spaceId, ownerUserId, event.input);
-      const turn = await getSessionTurnById(binding.sessionId, binding.turnId);
-      await cacheNativeTurnBinding({ ...binding, spaceId, ownerUserId, userMessageId: (turn?.meta as { userMessageId?: string } | null)?.userMessageId ?? "" });
-      // A new Turn takes over the stream snapshot atomically; a stale finalized Turn can never block it.
-      await adoptNativeStreamSnapshot(spaceId, binding.sessionId, binding.turnId, (turn?.meta as { userMessageId?: string } | null)?.userMessageId ?? "");
-      // Realtime mirrors the durable write only; each notification fails independently.
-      void (async () => {
-        if (fork) await publishSessionFork(fork).catch((error) => nativeLogger.warn("[NativeTurn] fork publish failed", { error }));
-        await dispatchSessionCreated(session).catch((error) => nativeLogger.warn("[NativeTurn] session.created failed", { error }));
-        if (turn) await dispatchTurnCreated({ spaceId, sessionId: binding.sessionId, turn: (await hydrateTurnAuthorProfiles([turn]))[0] ?? turn }).catch((error) => nativeLogger.warn("[NativeTurn] turn.created failed", { error }));
-        if (created && turn) {
-          const [message] = await db.select().from(sessionMessages).where(and(eq(sessionMessages.turnId, turn.id), eq(sessionMessages.role, "user"))).limit(1);
-          if (message) await dispatchSessionOutput({ type: "session.message.persisted", spaceId, sessionId: binding.sessionId, message: messageRecordFromRow(message) }).catch((error) => nativeLogger.warn("[NativeTurn] user message notify failed", { error }));
-        }
-        await touchSpaceActivity(spaceId).catch((error) => nativeLogger.warn("[NativeTurn] activity touch failed", { error }));
-      })();
-      return c.json({ result: binding });
+    if (event.type === "ingest") {
+      const { effects, ...result } = await ingestNativeTurns(spaceId, ownerUserId, event.input);
+      void publishNativeIngest(spaceId, effects).catch((error) => nativeLogger.warn("[NativeTurn] ingest notify failed", { error }));
+      return c.json({ result });
     }
+    if (event.type === "known") return c.json({ result: await knownNativeTurns(spaceId, event.input.turnIds) });
     if (event.type === "progress") return c.json({ result: await publishNativeProgress(spaceId, ownerUserId, event.sessionId, event.turnId, event.progress) });
-    if (event.type === "complete") {
-      const result = await completeNativeTurn(spaceId, ownerUserId, event.sessionId, event.turnId, event.result);
-      await clearNativeTurnBinding(event.turnId);
-      if (result.changed) {
-        // A finalized Turn releases the stream snapshot so the next Turn's progress is never blocked.
-        await releaseNativeStreamSnapshot(spaceId, event.sessionId, event.turnId);
-      }
-      // Queue drain runs on every completion, including exact replays: the wakeup jobId is
-      // idempotent per Session, so re-enqueue after a transient failure is safe and needed —
-      // a replay has changed: false and would otherwise never retry the drain.
-      // A failed enqueue surfaces as 500 so the Daemon's next flush cycle retries this receipt;
-      // BullMQ itself also retries the job (attempts: 2) once enqueued.
-      try { await enqueueAgentTurnJob({ spaceId, sessionId: event.sessionId, reason: "drain" }); }
-      catch (error) { nativeLogger.error("[NativeTurn] queue drain failed; receipt stays pending for retry", { error }); throw error; }
-      void (async () => {
-        const turn = await getSessionTurnById(event.sessionId, event.turnId);
-        if (turn) {
-          await dispatchTurnUpdated({ spaceId, sessionId: event.sessionId, turn }).catch((error) => nativeLogger.warn("[NativeTurn] turn.updated failed", { error }));
-          if (result.changed) {
-            await dispatchTurnFinalized({ spaceId, sessionId: event.sessionId, turn }).catch((error) => nativeLogger.warn("[NativeTurn] turn.finalized failed", { error }));
-            const messages = await db.select().from(sessionMessages).where(and(eq(sessionMessages.turnId, event.turnId), eq(sessionMessages.role, "assistant"))).orderBy(asc(sessionMessages.sequence));
-            for (const message of messages) {
-              await dispatchSessionOutput({ type: "session.message.persisted", spaceId, sessionId: event.sessionId, message: messageRecordFromRow(message) }).catch((error) => nativeLogger.warn("[NativeTurn] message notify failed", { error }));
-              await enqueueSessionMessagePostprocess({ sessionId: event.sessionId, messageId: message.id }).catch((error) => nativeLogger.warn("[NativeTurn] postprocess enqueue failed", { error }));
-            }
-          }
-        }
-        const session = await getSpaceSessionById(event.sessionId);
-        if (session) await dispatchSessionUpdated({ session, changed: ["latestMessageText", "lastMessageAt", "lastMessageId"] }).catch((error) => nativeLogger.warn("[NativeTurn] session.updated failed", { error }));
-        await touchSpaceActivity(spaceId).catch((error) => nativeLogger.warn("[NativeTurn] activity touch failed", { error }));
-      })();
-      // artifactsPending keeps the Daemon's receipt unacknowledged; it replays this exact completion later.
-      return c.json({ result: { completed: result.completed, artifactsPending: result.artifactsPending } });
-    }
-    const turn = await getOwnedNativeTurn(spaceId, ownerUserId, event.sessionId, event.turnId);
-    // Restore liveness and the executing state so the attention watchdog only fires on real disconnection.
-    await db.update(sessionTurns).set({ meta: sql`jsonb_set(jsonb_set(${sessionTurns.meta}, '{nativeSync,observedAt}', to_jsonb(${new Date().toISOString()}::text)), '{runtimeRecovery,state}', '"executing"'::jsonb)` })
-      .where(and(eq(sessionTurns.id, event.turnId), inArray(sessionTurns.status, ["running", "abort_requested"]), runtimeResolutionOpen));
-    return c.json({ result: { abortRequested: turn.status === "abort_requested", status: turn.status } });
+    return c.json({ result: await observeNativeTurn(spaceId, ownerUserId, event.sessionId, event.turnId, event.controllable) });
   } catch (error) {
-    // Business rejections keep their status; unexpected failures stay 500 so the Daemon retries the same receipt.
+    // Business rejections keep their status; unexpected failures stay 500 so the Daemon retries the same batch.
     if (error instanceof NativeTurnError) return c.json({ message: error.message }, error.status);
-    const sessionId = event.type === "start" ? event.input.sessionId : event.sessionId;
-    const turnId = event.type === "start" ? event.input.turnId : event.turnId;
-    nativeLogger.error("[NativeTurn] event failed; client receipt retained", {
-      eventType: event.type, spaceId, ownerUserId, sessionId, turnId, error: serializeNativeError(error),
+    const identity = event.type === "ingest"
+      ? { sessionId: null, turnId: event.input.turns[0]?.turnId ?? null }
+      : event.type === "known" ? { sessionId: null, turnId: null } : { sessionId: event.sessionId, turnId: event.turnId };
+    nativeLogger.error("[NativeTurn] event failed; client batch retained", {
+      eventType: event.type, spaceId, ownerUserId, ...identity, error: serializeNativeError(error),
     });
-    return c.json({ message: "Native sync unavailable; retry with the same receipt" }, 500);
+    return c.json({ message: "Native sync unavailable; retry the same batch" }, 500);
   }
 });
 

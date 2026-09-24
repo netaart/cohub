@@ -1,5 +1,6 @@
 import { resolveCohubEnvironment } from "@neta-art/cohub";
-import type { NativeSyncConfig } from "./native-sync.js";
+import type { NativeConfig } from "./native/config.js";
+import type { NativeStatus } from "./native/daemon.js";
 import type { RuntimeDiagnostic, RuntimeDiagnosticLevel } from "./diagnostics.js";
 
 export const diagnosticLevels: RuntimeDiagnosticLevel[] = ["debug", "info", "warn", "error"];
@@ -23,7 +24,9 @@ const messages: Record<string, string> = {
   "runtime.execution_transport_detached": "Execution continues locally; result replays after reconnect",
   "runtime.execution_transport_invalidated": "Execution interrupted; outcome needs reconciliation",
   "archive.upload_pending": "Archive upload pending; local data retained",
-  "native.sync_pending": "Native sync pending; local records retained",
+  "native.sync_pending": "Native sync pending; the native file is the record and is retried",
+  "native.stop_failed": "Could not stop the native Turn; stop it in the terminal",
+  "native.import_failed": "Import did not start; run cohub runtime import",
   "archive.capture_pending": "Archive capture pending",
   "archive.capture_unavailable": "Archive unavailable; original receipt retained",
   "archive.restore_failed": "Native restore unavailable; using saved history",
@@ -70,6 +73,7 @@ export type RuntimeSummary = {
   workspaceConnected: boolean;
   diagnosticsPath: string;
   background: boolean;
+  native?: NativeStatus;
 };
 
 export function printRuntimeSummary(summary: RuntimeSummary, json = false, reused = false) {
@@ -92,17 +96,37 @@ export function printRuntimeSummary(summary: RuntimeSummary, json = false, reuse
   process.stdout.write("\n");
 }
 
-export type NativeSessionStatus = { harness: "pi" | "codex"; nativeSessionId: string; sessionId: string | null; pendingTurns: number; pendingArchives: number };
+const plural = (count: number, word: string) => `${count.toLocaleString("en-US")} ${word}${count === 1 ? "" : "s"}`;
+const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 
-/** `runtime status` native sync block: installation state plus per-Harness pending work. */
-export function formatNativeSync(config: NativeSyncConfig | null, sessions: NativeSessionStatus[], error: string | null = null): string {
+/** One line of import progress: files and bytes, with an estimate once enough is known. */
+export function formatImportProgress(job: NativeStatus["import"], now = Date.now()): string {
+  const parts = [`${job.done.toLocaleString("en-US")}/${plural(job.files, "conversation")}`, plural(job.turns, "Turn"), `${megabytes(job.bytes)}/${megabytes(job.totalBytes)}`];
+  const elapsed = job.startedAt ? now - Date.parse(job.startedAt) : 0;
+  if (job.state === "running" && job.bytes > 0 && elapsed > 2_000 && job.totalBytes > job.bytes) {
+    const seconds = Math.round((job.totalBytes - job.bytes) / (job.bytes / elapsed) / 1_000);
+    parts.push(`about ${seconds < 90 ? `${seconds}s` : `${Math.round(seconds / 60)}m`} left`);
+  }
+  return parts.join(" · ");
+}
+
+/** `runtime status` native block: what syncs, what can be driven, and backfill progress. */
+export function formatNativeSync(config: NativeConfig | null, native: NativeStatus | undefined, error: string | null = null): string {
   if (error) return `Native sync  unknown — ${error} · fix or remove the config, then runtime up\n`;
   if (!config?.harnesses.length) return "Native sync  off · run cohub runtime up to enable\n";
-  const lines = [`Native sync  enabled · ${config.harnesses.join(", ")}`];
-  for (const session of sessions) {
-    lines.push(`  ${session.harness.padEnd(5)} ${session.nativeSessionId.slice(0, 8)}  ${session.pendingTurns} Turns · ${session.pendingArchives} archives pending`);
+  const lines = [`Native sync  ${config.harnesses.map((harness) => harness === "pi" ? "Pi" : "Codex").join(" · ")}`];
+  if (!native) return `${lines[0]} · Runtime not running\n`;
+  if (native.pi) {
+    lines.push(native.pi.unavailable ? `  Pi     read-only · ${native.pi.unavailable}`
+      : native.pi.extension === "installed"
+      ? `  Pi     ${plural(native.pi.connected, "session")} connected`
+      : "  Pi     read-only · install the extension with cohub runtime attach --harness pi, then /reload");
   }
-  if (!sessions.length) lines.push("  No native chats captured yet");
-  else if (sessions.every((session) => !session.pendingTurns && !session.pendingArchives)) lines.push("  Up to date");
+  if (native.codex) lines.push(native.codex.control === "shared" ? "  Codex  shared app-server" : "  Codex  read-only in the terminal · Cohub Turns use a private app-server");
+  lines.push(`  Files  ${plural(native.transcripts, "transcript")}${native.running ? ` · ${plural(native.running, "Turn")} running` : ""}`);
+  const job = native.import;
+  if (job.state === "running") lines.push(`  Import ${formatImportProgress(job)}`);
+  else if (job.state === "paused") lines.push(`  Import paused at ${job.done}/${job.files} · run cohub runtime import to continue`);
+  if (job.failed.length) lines.push(`  ${plural(job.failed.length, "conversation")} failed to import · cohub runtime logs`);
   return `${lines.join("\n")}\n`;
 }

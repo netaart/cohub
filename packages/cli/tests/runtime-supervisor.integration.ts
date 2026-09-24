@@ -11,7 +11,7 @@ import { startBackgroundRuntime } from "../src/runtime/launch.js";
 import { ownRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "../src/runtime/instance.js";
 import type { RuntimeSummary } from "../src/runtime/presentation.js";
 import { currentIdentityKey } from "../src/space.js";
-import { TestRuntimeSessionStore } from "./fixtures/runtime-projection-source.js";
+import { idleExecutor } from "./fixtures/runtime-native.js";
 import { readRuntimeDiagnosticEvents, RuntimeDiagnostics } from "../src/runtime/diagnostics.js";
 import { runRuntime } from "../src/runtime/supervisor.js";
 import { createServer } from "node:net";
@@ -111,9 +111,9 @@ test("credential network failures and rejected access tokens recover without res
     });
   });
   const spaceId = crypto.randomUUID();
-  const running = serveRuntime({ spaceId, cwd: root, url: fixture.url, capabilities: { harnesses: ["pi"], models: [] }, harnesses: {},
+  const running = serveRuntime({ spaceId, cwd: root, url: fixture.url, capabilities: { harnesses: ["pi"], models: [] },
     token: async (force) => { if (force) refreshes++; if (++attempts < 3) throw new TypeError("fetch failed"); return "fixture"; },
-    signal: controller.signal, store: new TestRuntimeSessionStore(spaceId, root), onReady: ready,
+    signal: controller.signal, executor: idleExecutor(spaceId, root), onReady: ready,
   });
   try { await connected; assert(attempts >= 4); assert.equal(refreshes, 1); assert.equal(connections, 2); }
   finally { controller.abort(); await running; await fixture.close(); await rm(root, { recursive: true, force: true }); }

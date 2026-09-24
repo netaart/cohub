@@ -307,5 +307,18 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       }
     });
   }
-  return { control, peer };
+  /**
+   * Forward a stop request to the Space's Runtime if it is connected here. The Runtime ignores Turns it
+   * is not watching, so every stop can be forwarded without knowing which Turns are native.
+   */
+  function stop(input: { spaceId: string; sessionId: string; turnId: string }): boolean {
+    const registration = registrations.get(input.spaceId);
+    if (!registration) return false;
+    try { send(registration.socket, { type: "runtime.native.stop", ...input }); return true; }
+    catch (error) {
+      logger.warn("runtime.native.stop_failed", { spaceId: input.spaceId, turnId: input.turnId, error });
+      return false;
+    }
+  }
+  return { control, peer, stop };
 }

@@ -1,8 +1,6 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ContentBlock, SessionTurnRecord } from "@neta-art/cohub";
-import type { ArchiveTransport } from "../../src/runtime/archive-store.js";
-import { RuntimeSessionStore } from "../../src/runtime/session-store.js";
 import type { SessionTurnProjectionClient } from "../../src/runtime/turn-projection.js";
 
 export type RuntimeProjectionSourceFixture = SessionTurnProjectionClient & {
@@ -89,13 +87,4 @@ export function runtimeProjectionSource(): RuntimeProjectionSourceFixture {
       },
     }),
   };
-}
-
-export class TestRuntimeSessionStore extends RuntimeSessionStore {
-  readonly projectionSource: RuntimeProjectionSourceFixture;
-
-  constructor(spaceId: string, stateRoot?: string, transport?: ArchiveTransport, source = runtimeProjectionSource()) {
-    super(spaceId, { stateRoot, archiveTransport: transport ?? null, projectionSource: source });
-    this.projectionSource = source;
-  }
 }
