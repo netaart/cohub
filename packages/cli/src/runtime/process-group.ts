@@ -24,8 +24,8 @@ async function probeLinux(pid: number): Promise<ProcessGroupState> {
       const [state, , processGroupId] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
       if (processGroupId !== undefined && Number(processGroupId) === pid) members.push({ pid: Number(entry), state: state ?? "U" });
     } catch (error) {
-      // The member exited between readdir and read; it cannot execute anymore.
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      // Exited between readdir and read.
+      if (!["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
     }
   }
   return members.some(executable) ? { state: "alive", members } : { state: "quiescent", members };

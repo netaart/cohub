@@ -1,6 +1,6 @@
 import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
 import { imageForPi, type HarnessOptions } from "../harness.js";
-import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
+import { JsonRpcProcess, record, RpcProcessClosedError, type JsonRecord } from "../json-rpc.js";
 import { ProcessCleanupUncertainError } from "../process-group.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
 import { serializeDiagnosticError, type RuntimeDiagnosticContext, type RuntimeDiagnostics } from "../diagnostics.js";
@@ -296,7 +296,9 @@ async function codexPrompt(input: RuntimeTurnInput): Promise<JsonRecord[]> {
 
 function watchHost(host: JsonRpcProcess, diagnostics: RuntimeDiagnostics | undefined, context: RuntimeDiagnosticContext | undefined) {
   if (!diagnostics) return;
-  host.onFailure((error) => diagnostics.log("error", "harness.rpc_process_failed", { error: serializeDiagnosticError(error) }, { ...context, component: "harness" }));
+  host.onFailure((error) => {
+    if (!(error instanceof RpcProcessClosedError)) diagnostics.log("error", "harness.rpc_process_failed", { error: serializeDiagnosticError(error) }, { ...context, component: "harness" });
+  });
   host.onTimeout((method, timeoutMs) => diagnostics.log("error", "harness.rpc_timeout", { method, timeoutMs }, { ...context, component: "harness" }));
 }
 

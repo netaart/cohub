@@ -1,11 +1,11 @@
 import type { ContentBlock, NativeTurnProgress, RuntimeExecutionEvent, RuntimeMessage } from "@neta-art/cohub";
-import { codexItemContent, piContent } from "../harness.js";
+import { codexItemContent, identifiable, piContent } from "../harness.js";
 import { codexTokenTotals, codexUsage, subtractCodexTokens, type CodexTokenTotals } from "../codex-usage.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
-const identifiable = (value: unknown) => typeof value === "string" && value.length > 0;
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+const hasToolCall = (content: readonly ContentBlock[], id: string) => content.some((block) => block.type === "tool_use" && block.id === id);
 
 /** Harness events mapped onto Cohub's streaming protocol. */
 export type Translator = {
@@ -28,19 +28,18 @@ export function piTranslator(emit: (event: RuntimeExecutionEvent) => void): Tran
         current = piContent(message.content);
         emit({ type: "content.replace", ordinal, content: current });
       }
+      const toolCallId = text(event.toolCallId);
       if (type === "tool_execution_start") {
-        const id = text(event.toolCallId);
-        if (identifiable(id) && identifiable(event.toolName) && !current.some((block) => block.type === "tool_use" && block.id === id)) current.push({ type: "tool_use", id, name: text(event.toolName), input: record(event.args), _meta: { toolStatus: "running" } });
-        emit({ type: "content.replace", ordinal, content: [...current] });
+        if (identifiable(toolCallId) && identifiable(event.toolName) && !hasToolCall(current, toolCallId)) {
+          current.push({ type: "tool_use", id: toolCallId, name: event.toolName, input: record(event.args), _meta: { toolStatus: "running" } });
+          emit({ type: "content.replace", ordinal, content: [...current] });
+        }
       }
-      if (type === "tool_execution_update" || type === "tool_execution_end") {
-        const id = text(event.toolCallId);
+      if ((type === "tool_execution_update" || type === "tool_execution_end") && hasToolCall(current, toolCallId)) {
         const raw = type === "tool_execution_end" ? event.result : event.partialResult;
         const resultContent = typeof raw === "string" ? raw : piContent(record(raw).content);
-        if (identifiable(id)) {
-          current = current.filter((block) => block.type !== "tool_result" || block.tool_use_id !== id);
-          current.push({ type: "tool_result", tool_use_id: id, content: resultContent, is_error: Boolean(event.isError), _meta: { toolStatus: type === "tool_execution_end" ? "done" : "running" } });
-        }
+        current = current.filter((block) => block.type !== "tool_result" || block.tool_use_id !== toolCallId);
+        current.push({ type: "tool_result", tool_use_id: toolCallId, content: resultContent, is_error: Boolean(event.isError), _meta: { toolStatus: type === "tool_execution_end" ? "done" : "running" } });
         emit({ type: "content.replace", ordinal, content: [...current] });
       }
       if (type === "message_update") {
@@ -51,8 +50,8 @@ export function piTranslator(emit: (event: RuntimeExecutionEvent) => void): Tran
         const content = piContent(message.content);
         for (const value of list(event.toolResults)) {
           const result = record(value);
-          if (!identifiable(result.toolCallId)) continue;
-          content.push({ type: "tool_result", tool_use_id: text(result.toolCallId), content: typeof result.content === "string" ? result.content : piContent(result.content), is_error: Boolean(result.isError) });
+          const id = text(result.toolCallId);
+          if (hasToolCall(content, id)) content.push({ type: "tool_result", tool_use_id: id, content: typeof result.content === "string" ? result.content : piContent(result.content), is_error: Boolean(result.isError) });
         }
         const stopReason = text(message.stopReason);
         last = { ordinal: Math.max(0, ordinal), content, provider: text(message.provider) || null, model: text(message.model) || null, usage: message.usage as RuntimeMessage["usage"], stopReason: stopReason === "toolUse" ? "tool_use" : stopReason || "stop", errorMessage: text(message.errorMessage) || null };

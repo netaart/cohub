@@ -103,7 +103,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
       }
       options.onDisconnected?.();
       if (options.signal.aborted) return;
-      if (outcome.kind === "fatal") throw new Error(`Runtime connection rejected (${outcome.code}${outcome.reason ? ` ${outcome.reason}` : ""}); check permissions or upgrade the CLI`);
+      if (outcome.kind === "fatal") throw new Error(`Runtime connection rejected (${[outcome.code, outcome.reason].filter(Boolean).join(" ")}); ${outcome.code === 4403 ? "check Space permissions" : "upgrade the CLI"}`);
       if (readyAt && Date.now() - readyAt >= 60_000) { backoff = 500; attempt = 0; }
       if (outcome.kind === "conflict") {
         conflictSince ??= Date.now();

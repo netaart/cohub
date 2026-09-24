@@ -3,10 +3,23 @@ import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { JsonRpcProcess } from "../src/runtime/json-rpc.js";
+import { JsonRpcProcess, RpcProcessClosedError } from "../src/runtime/json-rpc.js";
 import { ProcessCleanupUncertainError, confirmQuiescentProcessGroup, stopProcessGroup } from "../src/runtime/process-group.js";
 
 const eperm = () => { const error = new Error("kill EPERM") as NodeJS.ErrnoException; error.code = "EPERM"; return error; };
+
+test("an RPC process closed by the host is not a failure; one killed from outside reports the signal", { skip: process.platform === "win32", timeout: 10_000 }, async () => {
+  const failure = async (stop: (rpc: JsonRpcProcess) => Promise<unknown>) => {
+    const rpc = new JsonRpcProcess(process.execPath, ["-e", "setInterval(() => {}, 1000)"], process.cwd(), "pi");
+    const failed = new Promise<Error>((resolve) => rpc.onFailure(resolve));
+    await stop(rpc);
+    const error = await failed;
+    await rpc.close();
+    return error;
+  };
+  assert.ok(await failure((rpc) => rpc.close()) instanceof RpcProcessClosedError);
+  assert.match((await failure(async (rpc) => process.kill(rpc.processGroupId ?? 0, "SIGTERM"))).message, /terminated by SIGTERM/);
+});
 
 test("RPC close waits for a SIGTERM-resistant descendant with detached pipes", { skip: process.platform !== "linux", timeout: 10_000 }, async () => {
   const rpc = new JsonRpcProcess(process.execPath, [fileURLToPath(new URL("./fixtures/runtime-process-tree.mjs", import.meta.url))], process.cwd(), "codex");

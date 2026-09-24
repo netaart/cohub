@@ -36,6 +36,11 @@ export class JsonLineDecoder {
   end() { this.append(this.decoder.end()); this.emit(); }
 }
 
+/** Anything surfacing while the host closes the process; not a failure. */
+export class RpcProcessClosedError extends Error {
+  constructor() { super("RPC process closed"); this.name = "RpcProcessClosedError"; }
+}
+
 export function harnessEnvironment(): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("COHUB_") && !["WORKER_SECRET", "DATABASE_URL", "REDIS_URL"].includes(key)));
 }
@@ -53,8 +58,6 @@ export class JsonRpcProcess {
   private stderr = "";
   private closed: Promise<void>;
   private closing: Promise<void> | null = null;
-  /** An exit the host initiated itself is an orderly end, never a failure broadcast. */
-  private stopping = false;
   constructor(binary: string, args: string[], cwd: string, private mode: "pi" | "codex", context: Record<string, string> = {}) {
     this.child = spawn(binary, args, { cwd, env: { ...harnessEnvironment(), ...context }, stdio: "pipe", detached: process.platform !== "win32" });
     this.closed = new Promise((resolve) => this.child.once("close", () => resolve()));
@@ -64,11 +67,11 @@ export class JsonRpcProcess {
     this.child.stderr.on("data", (chunk: Buffer) => { this.stderr = (this.stderr + chunk.toString()).slice(-8192); });
     this.child.on("error", (error) => this.fail(error));
     this.child.stdin.on("error", (error) => this.fail(error));
-    this.child.once("close", (code, signal) => { if (!this.stopping) this.fail(new Error(signal ? `${binary} terminated by ${signal}: ${this.stderr}` : `${binary} exited (${code}): ${this.stderr}`)); });
+    this.child.once("close", (code, signal) => this.fail(new Error(signal ? `${binary} terminated by ${signal}: ${this.stderr}` : `${binary} exited (${code}): ${this.stderr}`)));
   }
   private fail(value: unknown) {
     if (this.failure) return;
-    this.failure = value instanceof Error ? value : new Error(String(value));
+    this.failure = this.closing ? new RpcProcessClosedError() : value instanceof Error ? value : new Error(String(value));
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(this.failure); }
     this.pending.clear();
     for (const listener of this.failureListeners) listener(this.failure);
@@ -121,12 +124,11 @@ export class JsonRpcProcess {
     return this.closing;
   }
   private async closeProcessGroup() {
-    this.stopping = true;
     try {
       if (this.child.pid) await stopProcessGroup(this.child.pid);
     } finally {
       this.child.stdin.destroy(); this.child.stdout.destroy(); this.child.stderr.destroy();
-      this.fail(new Error("RPC process closed"));
+      this.fail(new RpcProcessClosedError());
       this.listeners.clear(); this.failureListeners.clear(); this.timeoutListeners.clear();
     }
     await this.closed;

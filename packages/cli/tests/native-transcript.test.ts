@@ -45,29 +45,43 @@ test("Pi captures complete user Turns, preserves tools/thinking, and excludes pa
   } finally { await f.cleanup(); }
 });
 
-test("a stream cut off mid tool call leaves empty residue that is dropped, keeping the ingest payload valid", async () => {
+test("Pi drops aborted tool residue and attaches results to the message carrying their call", async () => {
   const f = await fixture();
   try {
-    const raw = f.header + piMessage("u1", null, "user", "问题")
+    await writeFile(f.path, f.header + piMessage("u1", null, "user", "q")
       + piMessage("a1", "u1", "assistant", [
-        { type: "thinking", thinking: "思考" },
-        { type: "text", text: "回答" },
-        { type: "toolCall", id: "functions.write:16", name: "write", arguments: { path: "/tmp/a" } },
-        { type: "text", text: " HE" },
+        { type: "toolCall", id: "call", name: "bash", arguments: {} },
+        { type: "toolCall", id: "nameless", name: "", arguments: {} },
         { type: "toolCall", id: "", name: "", arguments: {} },
-      ], { stopReason: "aborted" })
-      + piMessage("r0", "a1", "toolResult", [{ type: "text", text: "output" }], { toolCallId: "functions.write:16" })
-      + piMessage("r1", "r0", "toolResult", [{ type: "text", text: "orphan" }], { toolCallId: "" });
-    await writeFile(f.path, raw);
+      ], { stopReason: "toolUse" })
+      + piMessage("a2", "a1", "assistant", [{ type: "text", text: "later" }], { stopReason: "aborted" })
+      + piMessage("r1", "a2", "toolResult", "ok", { toolCallId: "call" })
+      + piMessage("r2", "r1", "toolResult", "orphan", { toolCallId: "nameless" }));
     const turn = (await readNativeTranscript(f.path, "pi", { settled: true })).turns[0];
-    const content = turn?.result?.messages[0]?.content ?? [];
-    assert.deepEqual(content.map((block) => block.type), ["thinking", "text", "tool_use", "text", "tool_result"]);
-    // The schema the gateway applies is the contract; the sanitized payload must satisfy it.
-    const check = nativeIngestTurnSchema.safeParse({
-      turnId: randomUUID(), parentTurnId: null, userContent: turn?.userContent, startedAt: turn?.startedAt,
-      result: turn?.result,
-    });
-    assert.equal(check.success, true, JSON.stringify(check.success ? null : check.error.issues));
+    assert.deepEqual(turn?.result?.messages.map((message) => message.content.map((block) => block.type)), [["tool_use", "tool_result"], ["text"]]);
+    assert.ok(nativeIngestTurnSchema.safeParse({ turnId: randomUUID(), parentTurnId: null, userContent: turn?.userContent, startedAt: turn?.startedAt, result: turn?.result }).success);
+  } finally { await f.cleanup(); }
+});
+
+test("Codex drops aborted tool residue and outputs that pair with no call in their Turn", async () => {
+  const f = await fixture();
+  try {
+    const call = (call_id: string, name = "exec_command") => ({ type: "response_item", payload: { type: "function_call", name, call_id, arguments: "{}" } });
+    const output = (call_id: string) => ({ type: "response_item", payload: { type: "function_call_output", call_id, output: "ok" } });
+    const rows = [
+      { type: "session_meta", payload: { id: f.nativeSessionId, cwd: f.root } },
+      { type: "event_msg", payload: { type: "turn_started", turn_id: "t1" } },
+      call("call"), output("call"), call("nameless", ""), output("nameless"), call("", ""), call("late"),
+      { type: "event_msg", payload: { type: "turn_aborted", turn_id: "t1" } },
+      output("late"),
+      { type: "event_msg", payload: { type: "turn_started", turn_id: "t2" } },
+      output("late"),
+      { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "done" }] } },
+      { type: "event_msg", payload: { type: "turn_complete", turn_id: "t2" } },
+    ];
+    await writeFile(f.path, rows.map((row) => line({ timestamp: at, ...row })).join(""));
+    const turns = (await readNativeTranscript(f.path, "codex")).turns;
+    assert.deepEqual(turns.map((turn) => turn.result?.messages.flatMap((message) => message.content.map((block) => block.type))), [["tool_use", "tool_result", "tool_use"], ["text"]]);
   } finally { await f.cleanup(); }
 });
 

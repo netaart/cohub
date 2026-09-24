@@ -7,7 +7,7 @@ import { basename, join } from "node:path";
 import { createZstdDecompress } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import type { ContentBlock, NativeTurnComplete, NativeTurnMessage } from "@neta-art/cohub";
-import { piContent } from "../harness.js";
+import { identifiable, piContent } from "../harness.js";
 import { codexTokenTotals, codexUsage } from "../codex-usage.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 
@@ -44,8 +44,6 @@ export type NativeTranscript = {
 };
 type Line = { value: JsonRecord; startBytes: number; endBytes: number; sha256: string };
 const text = (value: unknown) => typeof value === "string" ? value : "";
-/** A stream cut off mid tool call leaves ids that never arrived; such residue pairs with nothing. */
-const identifiable = (value: unknown) => typeof value === "string" && value.length > 0;
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const iso = (value: unknown) => {
   const date = new Date(typeof value === "number" || typeof value === "string" ? value : 0);
@@ -274,6 +272,7 @@ function parsePiTranscript(lines: Line[], options: { settled?: boolean; leafId?:
   let cloudSessionId = text(record(header.cohub).sessionId) || text(record(header.affinity).sessionId);
   let current: NativeTranscriptTurn | null = null;
   let messages: NativeTurnMessage[] = [];
+  const calls = new Map<string, NativeTurnMessage>(); // tool call id → owning message
   let pendingMarker: string | null = null;
   let completedAt = iso(header.timestamp);
   const finish = (settled: boolean) => {
@@ -306,17 +305,15 @@ function parsePiTranscript(lines: Line[], options: { settled?: boolean; leafId?:
       pendingMarker = null;
       if (cloudTurnId && !text(record(header.cohub).sessionId) && !text(record(header.affinity).sessionId)) cloudSessionId = text(record(message.meta).sourceSessionId) || cloudSessionId;
       current = { key: text(entry.id), parentKey: turns.at(-1)?.key ?? null, ...(cloudTurnId ? { cloudTurnId } : {}), userContent: typeof message.content === "string" ? [{ type: "text", text: message.content }] : piContent(message.content), messages: [], startedAt: completedAt, startBytes: line.startBytes, endBytes: line.endBytes, contentEndBytes: line.endBytes, boundaries: {}, sha256: line.sha256, result: null };
-      messages = current.messages;
+      messages = current.messages; calls.clear();
     } else if (current && message.role === "assistant") {
-      messages.push({ content: piContent(message.content), provider: text(message.provider) || null, model: text(message.model) || null,
-        usage: record(message.usage), stopReason: text(message.stopReason) || null, errorMessage: text(message.errorMessage) || null });
+      const assistant: NativeTurnMessage = { content: piContent(message.content), provider: text(message.provider) || null, model: text(message.model) || null,
+        usage: record(message.usage), stopReason: text(message.stopReason) || null, errorMessage: text(message.errorMessage) || null };
+      messages.push(assistant);
+      for (const block of assistant.content) if (block.type === "tool_use") calls.set(block.id, assistant);
     } else if (current && message.role === "toolResult") {
-      // A stream cut off mid tool call leaves results whose id never arrived; they pair with nothing.
-      if (identifiable(message.toolCallId)) {
-        const assistant = messages.at(-1);
-        if (!assistant) throw new Error("Pi tool result has no assistant Turn");
-        assistant.content.push({ type: "tool_result", tool_use_id: text(message.toolCallId), content: typeof message.content === "string" ? message.content : piContent(message.content), is_error: Boolean(message.isError) });
-      }
+      const id = text(message.toolCallId);
+      calls.get(id)?.content.push({ type: "tool_result", tool_use_id: id, content: typeof message.content === "string" ? message.content : piContent(message.content), is_error: Boolean(message.isError) });
     }
     if (current) { current.endBytes = line.endBytes; current.contentEndBytes = line.endBytes; current.sha256 = line.sha256; current.boundaries[line.endBytes] = line.sha256; }
     completedAt = timestamp;
@@ -379,6 +376,7 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
   const turns: NativeTranscriptTurn[] = [];
   let current: NativeTranscriptTurn | null = null;
   let messages: NativeTurnMessage[] = [];
+  const calls = new Map<string, NativeTurnMessage>(); // tool call id → owning message
   let model: string | null = null;
   let cloudSessionId = text(record(metadata.cohub).sessionId);
   let provider: string | null = text(metadata.model_provider) || null;
@@ -396,7 +394,7 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
       if (current) turns.push(current);
       current = { key: text(payload.turn_id), parentKey: turns.at(-1)?.key ?? null, userContent: [], messages: [], startedAt: iso(entry.timestamp), startBytes: line.startBytes, endBytes: line.endBytes, contentEndBytes: line.endBytes, boundaries: {}, sha256: line.sha256, result: null, path: segment.path, rolloutId: segment.rolloutId };
       if (!current.key) throw new Error("Codex Turn identity is missing");
-      messages = current.messages; userFromResponse = false;
+      messages = current.messages; userFromResponse = false; calls.clear();
     }
     if (entry.type === "token_usage_record") {
       const usage = record(payload.turn_token_usage);
@@ -431,10 +429,14 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
         let input: Record<string, unknown>;
         try { input = payload.type === "custom_tool_call" ? { input: payload.input } : record(JSON.parse(text(payload.arguments))); }
         catch { input = { raw: payload.arguments }; }
-        // An aborted stream can leave a call whose id and name never arrived; it says nothing.
-        if (identifiable(payload.call_id) && identifiable(payload.name)) assistant().content.push({ type: "tool_use", id: text(payload.call_id), name: text(payload.name), input });
+        if (identifiable(payload.call_id) && identifiable(payload.name)) {
+          const owner = assistant();
+          owner.content.push({ type: "tool_use", id: payload.call_id, name: payload.name, input });
+          calls.set(payload.call_id, owner);
+        }
       } else if (["function_call_output", "custom_tool_call_output"].includes(text(payload.type))) {
-        if (identifiable(payload.call_id)) assistant().content.push({ type: "tool_result", tool_use_id: text(payload.call_id), content: typeof payload.output === "string" ? payload.output : JSON.stringify(payload.output ?? null) });
+        const id = text(payload.call_id);
+        calls.get(id)?.content.push({ type: "tool_result", tool_use_id: id, content: typeof payload.output === "string" ? payload.output : JSON.stringify(payload.output ?? null) });
       }
     }
     if (entry.type === "event_msg" && payload.type === "item_completed") {

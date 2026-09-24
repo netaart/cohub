@@ -1,7 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
-import { z } from "zod";
 import { createLogger } from "@cohub/infra/logging";
 import { isUuid, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
 
@@ -43,14 +42,22 @@ export function createRuntimeRecoveryLifecycle(input: { enqueue: (spaceId: strin
 
 const secretsEqual = (left: unknown, right: string) => typeof left === "string" && right.length > 0 && Buffer.byteLength(left) === Buffer.byteLength(right) && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 
-/** A frame the relay will not process; native exchanges answer it instead of dying by it. */
-class FrameError extends Error {
-  constructor(message: string, readonly cause: unknown, readonly frameType: string | null = null) { super(message); }
+/** Closes with 4400; any other error is a server fault and closes with a retryable 1011. */
+class RuntimeProtocolError extends Error {
+  constructor(message: string, readonly issues?: string) { super(issues ? `${message}: ${issues}` : message); this.name = "RuntimeProtocolError"; }
 }
 
-const firstIssues = (error: unknown): string | null => error instanceof z.ZodError
-  ? error.issues.slice(0, 3).map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`).join("; ")
-  : null;
+const parseFrame = (data: string): unknown => {
+  try { return JSON.parse(data); } catch { throw new RuntimeProtocolError("Malformed JSON"); }
+};
+
+const summarizeIssues = (issues: readonly { path: readonly PropertyKey[]; message: string }[]) =>
+  issues.slice(0, 3).map((issue) => `${issue.path.map(String).join(".") || "(root)"} ${issue.message}`).join("; ");
+
+const nativeRequestId = (raw: unknown) => {
+  const frame = raw as { type?: unknown; requestId?: unknown } | null;
+  return frame?.type === "runtime.native" && isUuid(frame.requestId) ? frame.requestId : null;
+};
 
 export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
   const registrations = new Map<string, { socket: WebSocket; record: RuntimeRegistration; peers: Map<string, WebSocket> }>();
@@ -131,21 +138,22 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       const bytes = Buffer.byteLength(data as Buffer);
       queuedBytes += bytes;
       if (queuedBytes > RUNTIME_MAX_FRAME_BYTES * 2) { socket.terminate(); return; }
-      let raw: unknown;
       chain = chain.then(async () => {
         if (closed) return;
-        try { raw = JSON.parse(data.toString()); }
-        catch (error) { throw new FrameError("Malformed JSON", error); }
-        // A native event is a request/response exchange: a payload the server cannot take answers
-        // through the same channel instead of taking down the Runtime connection with it.
+        const raw = parseFrame(data.toString());
         const parsed = runtimeClientFrameSchema.safeParse(raw);
         if (!parsed.success) {
-          const type = typeof (raw as { type?: unknown } | null)?.type === "string" ? (raw as { type: string }).type : null;
-          throw new FrameError(`Invalid ${type ?? "unknown"} frame`, parsed.error, type);
+          const issues = summarizeIssues(parsed.error.issues);
+          const requestId = current ? nativeRequestId(raw) : null;
+          if (!requestId) throw new RuntimeProtocolError("Invalid Runtime frame", issues);
+          // One bad native request fails alone; the connection stays.
+          logger.warn("runtime.control.native_frame_rejected", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, requestId, issues });
+          send(socket, { type: "runtime.native.result", requestId, error: `Invalid runtime.native frame: ${issues}` });
+          return;
         }
         const frame = parsed.data;
         if (frame.type === "runtime.hello") {
-          if (current) throw new Error("Runtime already registered");
+          if (current) throw new RuntimeProtocolError("Runtime already registered");
           const auth = await deps.authorize(frame.token, frame.spaceId);
           if (!auth.ok) {
             logger.warn("runtime.control.authorization_rejected", { spaceId: frame.spaceId, status: auth.status, runtimeId: advertisedRuntimeId });
@@ -174,7 +182,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           });
           send(socket, { type: "runtime.ready", connectionId });
         } else {
-          if (!current) throw new Error("Runtime is not registered");
+          if (!current) throw new RuntimeProtocolError("Runtime is not registered");
           if (frame.type === "runtime.auth") {
             const auth = await deps.authorize(frame.token, current.spaceId);
             if (!auth.ok) {
@@ -192,8 +200,8 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             logger.debug("runtime.control.auth_refreshed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           } else if (frame.type === "runtime.heartbeat") lastHeartbeat = Date.now();
           else if (frame.type === "runtime.native") {
-            if (!deps.nativeEvent) throw new Error("Native runtime events are unavailable");
             try {
+              if (!deps.nativeEvent) throw new Error("Native runtime events are unavailable");
               const result = await deps.nativeEvent(current.spaceId, current.record.ownerUserId, frame.requestId, frame.event);
               send(socket, { type: "runtime.native.result", requestId: frame.requestId, result });
             } catch (error) {
@@ -211,18 +219,14 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           }
         }
       }).catch((error) => {
-        const issues = error instanceof FrameError ? firstIssues(error.cause) : null;
-        logger.warn("runtime.control.protocol_error", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, ...(issues ? { issues } : {}), error });
-        // A native request whose payload the server cannot take is answered on its own channel: one
-        // bad conversation must not take the Runtime connection down with it.
-        const requestId = typeof (raw as { requestId?: unknown } | null)?.requestId === "string" ? (raw as { requestId: string }).requestId : null;
-        if (current && error instanceof FrameError && error.frameType === "runtime.native" && requestId) {
-          try {
-            send(socket, { type: "runtime.native.result", requestId, error: `${error.message}${issues ? ` (${issues})` : ""}` });
-            return;
-          } catch { /* The transport is already gone; the close below ends the exchange. */ }
+        const context = { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId };
+        if (error instanceof RuntimeProtocolError) {
+          logger.warn("runtime.control.protocol_error", { ...context, ...(error.issues ? { issues: error.issues } : {}), error });
+          socket.close(4400, "Invalid Runtime frame");
+          return;
         }
-        socket.close(4400, "Invalid Runtime frame");
+        logger.error("runtime.control.frame_failed", { ...context, error });
+        socket.close(1011, "Runtime relay unavailable");
       }).finally(() => { queuedBytes -= bytes; });
     });
     socket.on("error", (error) => {
