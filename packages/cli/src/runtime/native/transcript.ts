@@ -44,6 +44,8 @@ export type NativeTranscript = {
 };
 type Line = { value: JsonRecord; startBytes: number; endBytes: number; sha256: string };
 const text = (value: unknown) => typeof value === "string" ? value : "";
+/** A stream cut off mid tool call leaves ids that never arrived; such residue pairs with nothing. */
+const identifiable = (value: unknown) => typeof value === "string" && value.length > 0;
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const iso = (value: unknown) => {
   const date = new Date(typeof value === "number" || typeof value === "string" ? value : 0);
@@ -309,9 +311,12 @@ function parsePiTranscript(lines: Line[], options: { settled?: boolean; leafId?:
       messages.push({ content: piContent(message.content), provider: text(message.provider) || null, model: text(message.model) || null,
         usage: record(message.usage), stopReason: text(message.stopReason) || null, errorMessage: text(message.errorMessage) || null });
     } else if (current && message.role === "toolResult") {
-      const assistant = messages.at(-1);
-      if (!assistant) throw new Error("Pi tool result has no assistant Turn");
-      assistant.content.push({ type: "tool_result", tool_use_id: text(message.toolCallId), content: typeof message.content === "string" ? message.content : piContent(message.content), is_error: Boolean(message.isError) });
+      // A stream cut off mid tool call leaves results whose id never arrived; they pair with nothing.
+      if (identifiable(message.toolCallId)) {
+        const assistant = messages.at(-1);
+        if (!assistant) throw new Error("Pi tool result has no assistant Turn");
+        assistant.content.push({ type: "tool_result", tool_use_id: text(message.toolCallId), content: typeof message.content === "string" ? message.content : piContent(message.content), is_error: Boolean(message.isError) });
+      }
     }
     if (current) { current.endBytes = line.endBytes; current.contentEndBytes = line.endBytes; current.sha256 = line.sha256; current.boundaries[line.endBytes] = line.sha256; }
     completedAt = timestamp;
@@ -426,9 +431,10 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
         let input: Record<string, unknown>;
         try { input = payload.type === "custom_tool_call" ? { input: payload.input } : record(JSON.parse(text(payload.arguments))); }
         catch { input = { raw: payload.arguments }; }
-        assistant().content.push({ type: "tool_use", id: text(payload.call_id), name: text(payload.name), input });
+        // An aborted stream can leave a call whose id and name never arrived; it says nothing.
+        if (identifiable(payload.call_id) && identifiable(payload.name)) assistant().content.push({ type: "tool_use", id: text(payload.call_id), name: text(payload.name), input });
       } else if (["function_call_output", "custom_tool_call_output"].includes(text(payload.type))) {
-        assistant().content.push({ type: "tool_result", tool_use_id: text(payload.call_id), content: typeof payload.output === "string" ? payload.output : JSON.stringify(payload.output ?? null) });
+        if (identifiable(payload.call_id)) assistant().content.push({ type: "tool_result", tool_use_id: text(payload.call_id), content: typeof payload.output === "string" ? payload.output : JSON.stringify(payload.output ?? null) });
       }
     }
     if (entry.type === "event_msg" && payload.type === "item_completed") {

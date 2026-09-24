@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { readNativeTranscript, readNativeTranscriptHeader, ensurePlainCodexRollout } from "../src/runtime/native/transcript.js";
+import { nativeIngestTurnSchema } from "@neta-art/cohub";
 
 const at = "2026-09-21T00:00:00.000Z";
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
@@ -41,6 +42,32 @@ test("Pi captures complete user Turns, preserves tools/thinking, and excludes pa
     assert.equal(settled.turns[0]?.result?.messages.length, 2);
     assert.deepEqual(settled.turns[0]?.result?.messages[0]?.content.map((block) => block.type), ["thinking", "tool_use", "tool_result"]);
     assert.equal(settled.turns[0]?.result?.status, "completed");
+  } finally { await f.cleanup(); }
+});
+
+test("a stream cut off mid tool call leaves empty residue that is dropped, keeping the ingest payload valid", async () => {
+  const f = await fixture();
+  try {
+    const raw = f.header + piMessage("u1", null, "user", "问题")
+      + piMessage("a1", "u1", "assistant", [
+        { type: "thinking", thinking: "思考" },
+        { type: "text", text: "回答" },
+        { type: "toolCall", id: "functions.write:16", name: "write", arguments: { path: "/tmp/a" } },
+        { type: "text", text: " HE" },
+        { type: "toolCall", id: "", name: "", arguments: {} },
+      ], { stopReason: "aborted" })
+      + piMessage("r0", "a1", "toolResult", [{ type: "text", text: "output" }], { toolCallId: "functions.write:16" })
+      + piMessage("r1", "r0", "toolResult", [{ type: "text", text: "orphan" }], { toolCallId: "" });
+    await writeFile(f.path, raw);
+    const turn = (await readNativeTranscript(f.path, "pi", { settled: true })).turns[0];
+    const content = turn?.result?.messages[0]?.content ?? [];
+    assert.deepEqual(content.map((block) => block.type), ["thinking", "text", "tool_use", "text", "tool_result"]);
+    // The schema the gateway applies is the contract; the sanitized payload must satisfy it.
+    const check = nativeIngestTurnSchema.safeParse({
+      turnId: randomUUID(), parentTurnId: null, userContent: turn?.userContent, startedAt: turn?.startedAt,
+      result: turn?.result,
+    });
+    assert.equal(check.success, true, JSON.stringify(check.success ? null : check.error.issues));
   } finally { await f.cleanup(); }
 });
 

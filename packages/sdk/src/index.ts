@@ -3,7 +3,7 @@ export {
   contextToPiMessages, selectRuntimeContextMessages, isLocalHarness, resolveHarness,
   fingerprintProjectionTurns, isProjectionCompaction, projectNativeMessageMeta, projectNativeSession, serializeProjection, serializeProjectionRecords, trimProjectionTurnsToCompaction,
   RUNTIME_ARCHIVE_SEGMENT_BYTES, harnessArchiveIndexSchema, validateArchiveBoundary,
-  nativeTurnCompleteSchema, nativeTurnProgressSchema, nativeRuntimeEventSchema, runtimeNativeStopSchema, NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, NATIVE_SYNC_SOURCE, isNativeClientTurn,
+  nativeTurnCompleteSchema, nativeTurnProgressSchema, nativeIngestTurnSchema, nativeRuntimeEventSchema, runtimeNativeStopSchema, NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, NATIVE_SYNC_SOURCE, isNativeClientTurn,
 } from "@cohub/protocol";
 export type {
   ContentBlock, HarnessKind, LocalHarness, RuntimeCapabilities, RuntimeCommand, RuntimeContext, RuntimePendingExecution,

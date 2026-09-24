@@ -37,12 +37,16 @@ export async function installedHarnesses(cwd: string, options: HarnessOptions, p
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const text = (value: unknown) => typeof value === "string" ? value : "";
 
+/** A stream cut off mid tool call leaves an empty shell; it says nothing and travels nowhere. */
+const identifiable = (id: unknown) => typeof id === "string" && id.length > 0;
+
+/** Map Pi content onto Cohub blocks, dropping streaming residue: tool calls and results without an id. */
 export function piContent(value: unknown): ContentBlock[] {
   return array(value).flatMap((entry): ContentBlock[] => {
     const block = record(entry);
     if (block.type === "text") return [{ type: "text", text: text(block.text) }];
     if (block.type === "thinking") return [{ type: "thinking", thinking: text(block.thinking), ...(typeof (block.thinkingSignature ?? block.signature) === "string" ? { signature: String(block.thinkingSignature ?? block.signature) } : {}) }];
-    if (block.type === "toolCall") return [{ type: "tool_use", id: text(block.id), name: text(block.name), input: record(block.arguments) }];
+    if (block.type === "toolCall") return identifiable(block.id) && identifiable(block.name) ? [{ type: "tool_use", id: text(block.id), name: text(block.name), input: record(block.arguments) }] : [];
     if (block.type === "image") return [{ type: "image", source: { type: "base64", data: text(block.data), media_type: text(block.mimeType) } }];
     return [{ type: "text", text: JSON.stringify(block) }];
   });
@@ -96,6 +100,7 @@ export function codexItemContent(item: JsonRecord): ContentBlock[] {
   if (item.type === "userMessage") return [];
   if (item.type === "contextCompaction") return [{ type: "system_note", note_type: "compacted", text: "Context compacted" }];
   const id = text(item.id);
+  if (!identifiable(item.id)) return [];
   const name = item.type === "commandExecution" ? "bash" : item.type === "fileChange" ? "apply_patch" : text(item.tool) || text(item.type);
   const input = item.type === "commandExecution" ? { command: item.command, cwd: item.cwd } : item.type === "fileChange" ? { changes: item.changes } : record(item.arguments);
   return [

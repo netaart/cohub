@@ -4,6 +4,7 @@ import { codexTokenTotals, codexUsage, subtractCodexTokens, type CodexTokenTotal
 import { record, type JsonRecord } from "../json-rpc.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
+const identifiable = (value: unknown) => typeof value === "string" && value.length > 0;
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 
 /** Harness events mapped onto Cohub's streaming protocol. */
@@ -29,15 +30,17 @@ export function piTranslator(emit: (event: RuntimeExecutionEvent) => void): Tran
       }
       if (type === "tool_execution_start") {
         const id = text(event.toolCallId);
-        if (!current.some((block) => block.type === "tool_use" && block.id === id)) current.push({ type: "tool_use", id, name: text(event.toolName), input: record(event.args), _meta: { toolStatus: "running" } });
+        if (identifiable(id) && identifiable(event.toolName) && !current.some((block) => block.type === "tool_use" && block.id === id)) current.push({ type: "tool_use", id, name: text(event.toolName), input: record(event.args), _meta: { toolStatus: "running" } });
         emit({ type: "content.replace", ordinal, content: [...current] });
       }
       if (type === "tool_execution_update" || type === "tool_execution_end") {
         const id = text(event.toolCallId);
         const raw = type === "tool_execution_end" ? event.result : event.partialResult;
         const resultContent = typeof raw === "string" ? raw : piContent(record(raw).content);
-        current = current.filter((block) => block.type !== "tool_result" || block.tool_use_id !== id);
-        current.push({ type: "tool_result", tool_use_id: id, content: resultContent, is_error: Boolean(event.isError), _meta: { toolStatus: type === "tool_execution_end" ? "done" : "running" } });
+        if (identifiable(id)) {
+          current = current.filter((block) => block.type !== "tool_result" || block.tool_use_id !== id);
+          current.push({ type: "tool_result", tool_use_id: id, content: resultContent, is_error: Boolean(event.isError), _meta: { toolStatus: type === "tool_execution_end" ? "done" : "running" } });
+        }
         emit({ type: "content.replace", ordinal, content: [...current] });
       }
       if (type === "message_update") {
@@ -48,6 +51,7 @@ export function piTranslator(emit: (event: RuntimeExecutionEvent) => void): Tran
         const content = piContent(message.content);
         for (const value of list(event.toolResults)) {
           const result = record(value);
+          if (!identifiable(result.toolCallId)) continue;
           content.push({ type: "tool_result", tool_use_id: text(result.toolCallId), content: typeof result.content === "string" ? result.content : piContent(result.content), is_error: Boolean(result.isError) });
         }
         const stopReason = text(message.stopReason);

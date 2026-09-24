@@ -83,7 +83,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
     while (!options.signal.aborted) {
       attempt += 1;
       let readyAt = 0;
-      let outcome: "retry" | "fatal" | "conflict";
+      let outcome: ConnectOutcome;
       try {
         outcome = await connect({
           ...options,
@@ -99,13 +99,13 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
       } catch (error) {
         if (options.signal.aborted) return;
         log("warn", "runtime.connection_failed", { error: serializeDiagnosticError(error) });
-        outcome = "retry";
+        outcome = { kind: "retry" };
       }
       options.onDisconnected?.();
       if (options.signal.aborted) return;
-      if (outcome === "fatal") throw new Error("Runtime connection rejected; check permissions or upgrade the CLI");
+      if (outcome.kind === "fatal") throw new Error(`Runtime connection rejected (${outcome.code}${outcome.reason ? ` ${outcome.reason}` : ""}); check permissions or upgrade the CLI`);
       if (readyAt && Date.now() - readyAt >= 60_000) { backoff = 500; attempt = 0; }
-      if (outcome === "conflict") {
+      if (outcome.kind === "conflict") {
         conflictSince ??= Date.now();
         if (Date.now() - conflictSince >= (options.leaseConflictTimeoutMs ?? 90_000)) {
           throw new Error("Space is already connected to another Runtime");
@@ -114,7 +114,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
       log("debug", "runtime.reconnect_scheduled", {
         attempt: attempt || 1,
         delayMs: backoff,
-        outcome,
+        outcome: outcome.kind,
       });
       await delay(backoff / 2 + Math.random() * backoff / 2, undefined, { signal: options.signal }).catch(() => undefined);
       backoff = Math.min(30_000, backoff * 2);
@@ -131,6 +131,11 @@ type ConnectOptions = RuntimeConnectionOptions & {
   runtimeId: string;
   attempt: number;
 };
+
+type ConnectOutcome =
+  | { kind: "retry" }
+  | { kind: "fatal"; code: number; reason: string }
+  | { kind: "conflict" };
 
 function executionContext(
   connectionId: string | null,
@@ -152,7 +157,7 @@ function executionContext(
   };
 }
 
-async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "conflict"> {
+async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
   const log = (
     level: "debug" | "info" | "warn" | "error",
     event: string,
@@ -183,6 +188,8 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
   let lastHeartbeat = Date.now();
   let connectionId: string | null = null;
   let fatal = false;
+  let fatalCode = 0;
+  let fatalReason = "";
   let conflict = false;
   let unauthorized = false;
   let readyTimer: ReturnType<typeof setTimeout>;
@@ -262,9 +269,10 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
     socket.addEventListener("close", (event) => {
       unauthorized = event.code === 4401;
       fatal = [4400, 4403].includes(event.code);
+      if (fatal) { fatalCode = event.code; fatalReason = event.reason; }
       conflict = event.code === 4409;
       disconnected.abort();
-      log(options.signal.aborted ? "debug" : fatal || conflict ? "error" : "warn", "runtime.websocket.closed", {
+      log(options.signal.aborted ? "debug" : fatal || conflict ? "error" : "warn", fatal ? "runtime.websocket.rejected" : "runtime.websocket.closed", {
         code: event.code,
         reason: event.reason,
         durationMs: Date.now() - connectedAt,
@@ -612,5 +620,5 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
     options.signal.removeEventListener("abort", shutdown);
   }
   if (unauthorized && !options.signal.aborted) await options.token(true);
-  return fatal ? "fatal" : conflict ? "conflict" : "retry";
+  return fatal ? { kind: "fatal", code: fatalCode, reason: fatalReason } : conflict ? { kind: "conflict" } : { kind: "retry" };
 }

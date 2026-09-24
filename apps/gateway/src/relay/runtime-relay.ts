@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
+import { z } from "zod";
 import { createLogger } from "@cohub/infra/logging";
 import { isUuid, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
 
@@ -41,6 +42,15 @@ export function createRuntimeRecoveryLifecycle(input: { enqueue: (spaceId: strin
 }
 
 const secretsEqual = (left: unknown, right: string) => typeof left === "string" && right.length > 0 && Buffer.byteLength(left) === Buffer.byteLength(right) && timingSafeEqual(Buffer.from(left), Buffer.from(right));
+
+/** A frame the relay will not process; native exchanges answer it instead of dying by it. */
+class FrameError extends Error {
+  constructor(message: string, readonly cause: unknown, readonly frameType: string | null = null) { super(message); }
+}
+
+const firstIssues = (error: unknown): string | null => error instanceof z.ZodError
+  ? error.issues.slice(0, 3).map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`).join("; ")
+  : null;
 
 export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
   const registrations = new Map<string, { socket: WebSocket; record: RuntimeRegistration; peers: Map<string, WebSocket> }>();
@@ -121,9 +131,19 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       const bytes = Buffer.byteLength(data as Buffer);
       queuedBytes += bytes;
       if (queuedBytes > RUNTIME_MAX_FRAME_BYTES * 2) { socket.terminate(); return; }
+      let raw: unknown;
       chain = chain.then(async () => {
         if (closed) return;
-        const frame = runtimeClientFrameSchema.parse(JSON.parse(data.toString()));
+        try { raw = JSON.parse(data.toString()); }
+        catch (error) { throw new FrameError("Malformed JSON", error); }
+        // A native event is a request/response exchange: a payload the server cannot take answers
+        // through the same channel instead of taking down the Runtime connection with it.
+        const parsed = runtimeClientFrameSchema.safeParse(raw);
+        if (!parsed.success) {
+          const type = typeof (raw as { type?: unknown } | null)?.type === "string" ? (raw as { type: string }).type : null;
+          throw new FrameError(`Invalid ${type ?? "unknown"} frame`, parsed.error, type);
+        }
+        const frame = parsed.data;
         if (frame.type === "runtime.hello") {
           if (current) throw new Error("Runtime already registered");
           const auth = await deps.authorize(frame.token, frame.spaceId);
@@ -191,7 +211,17 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           }
         }
       }).catch((error) => {
-        logger.warn("runtime.control.protocol_error", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, error });
+        const issues = error instanceof FrameError ? firstIssues(error.cause) : null;
+        logger.warn("runtime.control.protocol_error", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, ...(issues ? { issues } : {}), error });
+        // A native request whose payload the server cannot take is answered on its own channel: one
+        // bad conversation must not take the Runtime connection down with it.
+        const requestId = typeof (raw as { requestId?: unknown } | null)?.requestId === "string" ? (raw as { requestId: string }).requestId : null;
+        if (current && error instanceof FrameError && error.frameType === "runtime.native" && requestId) {
+          try {
+            send(socket, { type: "runtime.native.result", requestId, error: `${error.message}${issues ? ` (${issues})` : ""}` });
+            return;
+          } catch { /* The transport is already gone; the close below ends the exchange. */ }
+        }
         socket.close(4400, "Invalid Runtime frame");
       }).finally(() => { queuedBytes -= bytes; });
     });

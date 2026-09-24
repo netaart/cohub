@@ -13,6 +13,7 @@ const messages: Record<string, string> = {
   "runtime.ready": "Harness connected",
   "runtime.available": "Runtime ready",
   "runtime.websocket.closed": "Connection lost; reconnecting",
+  "runtime.websocket.rejected": "Connection rejected; the Runtime cannot serve this Space",
   "runtime.heartbeat_timeout": "Connection timed out; reconnecting",
   "runtime.auth_token_failed": "Cannot obtain credentials; retrying",
   "runtime.auth_required": "Sign in with cohub auth login",
