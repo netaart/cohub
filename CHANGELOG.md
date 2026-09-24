@@ -4,6 +4,18 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.58 — 2026-09-24
+
+- **Native Runtime sessions rebuilt on harness files and control planes**: Pi and Codex session files are now the only durable record and outbox while the server is the only ledger — no local delivery receipts. The Runtime watches bound folders, ingests Turns in small idempotent WebSocket batches, asks the server what it already has after a restart, drives Pi via a self-contained extension and Codex 0.156+ through its shared app-server, and removes the Codex hooks, Pi capture extension, IPC capture, and native sync stores.
+- **Large-Board rendering made cheap**: the connection layer caches per-layer relation geometry, redraws only relations touching manipulated nodes, culls to a new `cullRect` input (exports pass their region), clips dashes, degrades unreadable dashes/arrowheads/labels to plain strokes or nothing, and falls back to solid strokes past a fixed dash budget — pans, hovers, and drags stay off the O(relations) path; the document itself never changes. `createConnectionGeometryCache`, `connectionHitRadius`, and `stableCullRect` are now exported.
+- **Runtime import runs inside the Runtime**: imports are newest-first, pausable with Ctrl-C and resumable, with bounded concurrency up to 8; persistence is event-driven and separate from live previews, transcripts parse only when a Turn begins or ends, previews send only changed messages, and stops are pushed through the Gateway instead of polled.
+- **Native turn lifecycle and realtime restored for native sessions**: realtime and message post-processing work again for native Turns, imported history is announced once per Session, unlinked silent Turns are surfaced for attention instead of being guessed finished, and a connected Pi exposes the current Turn to its tools via `COHUB_TURN_ID`.
+- **Standalone App URL removed end to end**: the `standaloneUrl` field and its broker helpers are gone from API responses, the version-published realtime event, protocol/SDK types, and the web detail and publish views, leaving one fewer origin abstraction to keep consistent.
+
+### Bug Fixes
+
+- **Space tables**: `spaces ls` and `spaces get` render whitespace-collapsed, width-clipped descriptions so multi-line text no longer breaks row layout, while `--json` keeps the raw value; the shared truncation helper also deduplicates the same logic in `search`.
+
 ## v2.57 — 2026-09-24
 
 - **Codex rollout lineage in native sync and import**: native sync now follows Codex `history_base` pointers across rollout files, so a thread that was rolled over, reverted, or compressed still imports and continues as one coherent Chat. Ancestor rollouts are tracked as settled boundaries addressed by rollout id, Turns carry a merged lineage `sequence` for stable ordering, archived and `.zst`-compressed sessions are discovered transparently (decompressed once into a bounded cache), and superseded siblings are reported rather than imported twice.
