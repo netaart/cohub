@@ -11,7 +11,7 @@ import { createClient } from "../client.js";
 import { currentIdentityKey, explicitSpace } from "../space.js";
 import { canonicalRuntimeRoot, getRuntimeSpaceBinding, resolveRuntimeSpace } from "./space-binding.js";
 import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
-import { ensureNativeSync } from "./native/attach.js";
+import { ensureNativeSync, repairIntegrations } from "./native/attach.js";
 import type { RuntimeDiagnostic } from "./diagnostics.js";
 import { createDiagnosticConsole, printRuntimeSummary, runtimeWebUrl, type RuntimeSummary } from "./presentation.js";
 import { runRuntime, type RuntimeLaunch } from "./supervisor.js";
@@ -119,6 +119,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   if (createNew && binding && await requestRuntimeInstance(runtimeInstanceDirectory(identity, binding.spaceId))) {
     throw new Error("Stop the existing Runtime before rebinding this directory");
   }
+  await repairIntegrations(options.pi);
   // Fail local preflight before creating remote state; the worker reuses this catalog.
   const capabilities = await discoverHarnesses(harnesses, options, root);
   const client = createClient();

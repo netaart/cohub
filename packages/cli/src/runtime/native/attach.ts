@@ -83,10 +83,22 @@ export async function ensureNativeSync(input: Input, log: (line: string) => void
   return { enabled: true, harnesses, codexShared, importHistory };
 }
 
-/** Keep integrations current on every `up`. Pi without the extension still syncs, read-only. */
+/** Keep integrations current on every `up`. */
 async function maintain(config: NativeConfig, log: (line: string) => void, piBinary: string | undefined, announce = false) {
-  if (config.harnesses.includes("codex")) await removeLegacyCodexHooks().catch(() => undefined);
-  if (!config.harnesses.includes("pi")) return;
+  if (config.harnesses.includes("pi")) await maintainPiExtension(piBinary, log, announce);
+}
+
+/**
+ * Before any harness starts, repair what earlier releases installed: an outdated Pi extension can keep
+ * Pi from starting, and legacy Codex hooks run a script that is gone. Both had consent back then.
+ */
+export async function repairIntegrations(piBinary: string | undefined, log: (line: string) => void = (line) => process.stderr.write(line)) {
+  await removeLegacyCodexHooks().catch(() => undefined);
+  if (await piExtensionState().catch(() => null) === "outdated") await maintainPiExtension(piBinary, log);
+}
+
+/** Pi without the extension still syncs, read-only. */
+async function maintainPiExtension(piBinary: string | undefined, log: (line: string) => void, announce = false) {
   const version = await harnessVersion(piBinary || "pi");
   if (!atLeast(version, PI_MIN_VERSION)) {
     log(`Pi ${formatVersion(version)} predates the Cohub extension (${PI_MIN_VERSION.join(".")}+); Pi chats sync read-only\n`);

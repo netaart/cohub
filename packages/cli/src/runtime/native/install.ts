@@ -9,8 +9,8 @@ const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "E
 
 /** First line of the installed extension; a file without it belongs to someone else. */
 const PI_EXTENSION_HEADER = "// Cohub control extension for Pi. Managed by `cohub runtime`; local edits are replaced on upgrade.\n";
-/** Earlier releases installed a re-export under this name; it points at a module that no longer exists. */
-const LEGACY_PI_EXTENSION_HEADER = "// Cohub native Turn sync\n";
+/** CLI 8.0–8.2 installed a re-export under this comment; its module is gone, so Pi fails to start while it remains. */
+const LEGACY_PI_EXTENSION_HEADER = "// Cohub native Turn sync";
 /** Earlier releases installed Codex hooks; they are removed on upgrade. */
 const LEGACY_CODEX_HOOKS = /\n*# BEGIN COHUB NATIVE SYNC\n[\s\S]*?# END COHUB NATIVE SYNC\n?/;
 
@@ -19,13 +19,16 @@ const codexConfigPath = () => join(process.env.CODEX_HOME?.trim() || join(homedi
 
 /** The extension shipped with this CLI: one self-contained module, loadable by Pi as is. */
 export const piExtensionSource = () => fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./pi-extension.ts" : "./pi-extension.js", import.meta.url));
-const piExtensionTarget = (source: string) => join(piAgentDirectory(), "extensions", `cohub${extname(source)}`);
+const piExtensionPath = (extension: string) => join(piAgentDirectory(), "extensions", `cohub${extension}`);
+const readOptional = (path: string) => readFile(path, "utf8").catch((error) => { if (missing(error)) return null; throw error; });
+const isLegacy = (text: string | null) => Boolean(text?.startsWith(LEGACY_PI_EXTENSION_HEADER));
 
 export type PiExtensionState = "installed" | "outdated" | "missing" | "foreign";
 
 export async function piExtensionState(): Promise<PiExtensionState> {
   const source = piExtensionSource();
-  const [expected, current] = await Promise.all([readFile(source, "utf8"), readFile(piExtensionTarget(source), "utf8").catch((error) => { if (missing(error)) return null; throw error; })]);
+  const [expected, current, legacy] = await Promise.all([readFile(source, "utf8"), readOptional(piExtensionPath(extname(source))), readOptional(piExtensionPath(".ts"))]);
+  if (isLegacy(legacy)) return "outdated";
   if (current === null) return "missing";
   if (current === PI_EXTENSION_HEADER + expected) return "installed";
   return current.startsWith(PI_EXTENSION_HEADER) ? "outdated" : "foreign";
@@ -35,14 +38,15 @@ export async function piExtensionState(): Promise<PiExtensionState> {
 export async function installPiExtension(): Promise<PiExtensionState> {
   const source = piExtensionSource();
   const content = PI_EXTENSION_HEADER + await readFile(source, "utf8");
-  const target = piExtensionTarget(source);
+  const target = piExtensionPath(extname(source));
   await writeManaged(target, (existing) => {
-    if (existing !== null && !existing.startsWith(PI_EXTENSION_HEADER)) throw new Error(`${target} exists and is not managed by Cohub; move it aside, then retry`);
+    if (existing !== null && !existing.startsWith(PI_EXTENSION_HEADER) && !isLegacy(existing)) throw new Error(`${target} exists and is not managed by Cohub; move it aside, then retry`);
     return content;
   }, { backup: false });
-  for (const legacy of ["cohub.ts", "cohub.js"].map((name) => join(dirname(target), name)).filter((path) => path !== target)) {
-    const text = await readFile(legacy, "utf8").catch(() => null);
-    if (text?.startsWith(LEGACY_PI_EXTENSION_HEADER) || text?.startsWith(PI_EXTENSION_HEADER)) await rm(legacy, { force: true });
+  // Pi loads every file here: drop a legacy or managed copy under the other extension.
+  for (const other of [".ts", ".js"].map(piExtensionPath).filter((path) => path !== target)) {
+    const text = await readOptional(other).catch(() => null);
+    if (isLegacy(text) || text?.startsWith(PI_EXTENSION_HEADER)) await rm(other, { force: true });
   }
   return "installed";
 }
@@ -50,6 +54,8 @@ export async function installPiExtension(): Promise<PiExtensionState> {
 /** Remove the Codex hooks earlier releases installed; Cohub now reads Codex's own files instead. */
 export async function removeLegacyCodexHooks(): Promise<boolean> {
   const path = codexConfigPath();
+  // Read first: the lock would create `~/.codex` for someone who never used Codex.
+  if (!LEGACY_CODEX_HOOKS.test(await readOptional(path) ?? "")) return false;
   let removed = false;
   await writeManaged(path, (existing) => {
     if (existing === null || !LEGACY_CODEX_HOOKS.test(existing)) return existing;
