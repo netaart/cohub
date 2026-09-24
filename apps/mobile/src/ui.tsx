@@ -222,7 +222,7 @@ export function LoadingRows({ count = 5 }: { count?: number }) {
 
 export type ComposerInputMeasurement = { input: TextInput | null; scrollY: number };
 
-export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel, modelStatus = "unknown", disabled = false, sending = false, sendFeedback = "idle", running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder, anchorRef, measurementRef, attachmentMenuOpen = false, modelMenuOpen = false }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; sendFeedback?: "idle" | "success"; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string; anchorRef?: React.RefObject<View | null>; measurementRef?: React.RefObject<ComposerInputMeasurement>; attachmentMenuOpen?: boolean; modelMenuOpen?: boolean }) {
+export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, onVoice, onModelPress, modelLabel, modelStatus = "unknown", disabled = false, sending = false, sendFeedback = "idle", running = false, voiceActive = false, voiceStarting = false, hasAttachment = false, placeholder, anchorRef, measurementRef, attachmentMenuOpen = false, modelMenuOpen = false, showHarnessPicker = false, harnessLabel, harnessMenuOpen = false, onHarnessPress }: { value: string; onChangeText: (value: string) => void; onSend: () => void; onStop?: () => void; onAttach: () => void; onVoice?: () => void; onModelPress?: () => void; modelLabel?: string; modelStatus?: "available" | "degraded" | "outage" | "unknown"; disabled?: boolean; sending?: boolean; sendFeedback?: "idle" | "success"; running?: boolean; voiceActive?: boolean; voiceStarting?: boolean; hasAttachment?: boolean; placeholder?: string; anchorRef?: React.RefObject<View | null>; measurementRef?: React.RefObject<ComposerInputMeasurement>; attachmentMenuOpen?: boolean; modelMenuOpen?: boolean; showHarnessPicker?: boolean; harnessLabel?: string; harnessMenuOpen?: boolean; onHarnessPress?: () => void }) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -327,6 +327,11 @@ export function ComposerInput({ value, onChangeText, onSend, onStop, onAttach, o
         </View>
         <View style={styles.composerToolbar}>
           <Pressable testID="chat-composer-attach" accessibilityRole="button" accessibilityLabel={t("ui.composer.addAttachment")} accessibilityState={{ expanded: attachmentMenuOpen, disabled: blocked }} disabled={blocked} onPress={() => { Keyboard.dismiss(); onAttach(); }} style={({ pressed }) => [styles.composerCircleButton, { backgroundColor: pressed || attachmentMenuOpen ? theme.colors.surfacePressed : theme.colors.surfaceRaised, opacity: blocked ? 0.45 : 1 }]}><AppIcon name={attachmentMenuOpen ? "x" : "plus"} size={22} color={theme.colors.textSecondary} /></Pressable>
+          {showHarnessPicker ? <Pressable testID="chat-composer-harness" accessibilityRole="button" accessibilityLabel={t("runtime.harness.current", { harness: harnessLabel ?? "Cohub" })} accessibilityState={{ expanded: harnessMenuOpen, disabled: blocked }} disabled={blocked} onPress={() => { Keyboard.dismiss(); onHarnessPress?.(); }} style={({ pressed }) => [styles.composerHarness, { backgroundColor: pressed || harnessMenuOpen ? theme.colors.surfacePressed : theme.colors.surfaceRaised, opacity: blocked ? 0.5 : 1 }]}>
+            <AppIcon name={harnessLabel === "Cohub" ? "cloud" : "monitor"} size={16} color={theme.colors.textSecondary} />
+            <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.text, flexShrink: 1 }]}>{harnessLabel}</Text>
+            <AppIcon name="chevron-down" size={13} color={theme.colors.textMuted} />
+          </Pressable> : null}
           {onModelPress ? <Pressable testID="chat-composer-model" accessibilityRole="button" accessibilityLabel={t("ui.composer.chooseModel", { model: resolvedModelLabel, status: modelStatusLabel })} accessibilityState={{ expanded: modelMenuOpen, disabled: blocked }} disabled={blocked} onPress={() => { Keyboard.dismiss(); onModelPress(); }} style={({ pressed }) => [styles.composerModel, { backgroundColor: pressed || modelMenuOpen ? theme.colors.surfacePressed : theme.colors.surfaceRaised, opacity: blocked ? 0.5 : 1 }]}>
             <AppIcon name="zap" size={18} color={theme.colors.textSecondary} />
             <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flexShrink: 1 }]}>{resolvedModelLabel}</Text>
@@ -396,6 +401,7 @@ const styles = StyleSheet.create({
   composerExpandButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   composerToolbar: { height: 44, flexDirection: "row", alignItems: "center", gap: 6 },
   composerToolbarSpacer: { flex: 1, minWidth: 0 },
+  composerHarness: { height: 40, maxWidth: 104, flexShrink: 1, minWidth: 0, paddingHorizontal: 8, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 5, overflow: "hidden" },
   composerModel: { height: 44, maxWidth: "58%", flexShrink: 1, minWidth: 0, paddingHorizontal: 10, borderRadius: 22, flexDirection: "row", alignItems: "center", gap: 6, overflow: "hidden" },
   composerCircleButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   sendButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },

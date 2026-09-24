@@ -31,6 +31,9 @@ export type ModelSelectorMenuProps = {
   modelStatus?: Record<string, ModelStatusEntry> | null;
   modelStatusLoading?: boolean;
   currentModel: ChatModelSelection | null;
+  title?: string;
+  automaticLabel?: string;
+  automaticDetail?: string;
   onClose: () => void;
   onRetry: () => void;
   onSelect: (model: ChatModelSelection | null) => void;
@@ -75,7 +78,7 @@ function makeSelection(entry: ModelCatalogEntry, level?: ChatModelSelection["thi
   return { provider: entry.provider, id: entry.id, name: modelDisplayName(entry), ...(level ? { thinkingLevel: level } : {}) };
 }
 
-export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStatus = null, modelStatusLoading = false, currentModel, onClose, onRetry, onSelect }: ModelSelectorMenuProps) {
+export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStatus = null, modelStatusLoading = false, currentModel, title, automaticLabel, automaticDetail, onClose, onRetry, onSelect }: ModelSelectorMenuProps) {
   const theme = useAppTheme();
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -146,7 +149,7 @@ export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStat
     </View>;
   };
 
-  return <ComposerMenu anchorRef={anchorRef} title={t("model.title")} onClose={onClose} preferredWidth={360} fillHeight testID="chat-model-selector-menu">
+  return <ComposerMenu anchorRef={anchorRef} title={title ?? t("model.title")} onClose={onClose} preferredWidth={360} fillHeight testID="chat-model-selector-menu">
     <View style={[styles.searchRow, { borderBottomColor: theme.colors.border }]}>
       <AppIcon name="search" size={18} color={theme.colors.textMuted} />
       <TextInput accessibilityLabel={t("model.search")} value={query} onChangeText={setQuery} placeholder={t("model.search")} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { flex: 1, minWidth: 0, color: theme.colors.text, paddingVertical: 8 }]} returnKeyType="search" autoCorrect={false} autoCapitalize="none" />
@@ -164,9 +167,9 @@ export function ModelSelectorMenu({ anchorRef, models, loading, error, modelStat
       nestedScrollEnabled
       keyboardShouldPersistTaps="always"
             ListHeaderComponent={<>
-        <Pressable testID="model-option-automatic" accessibilityRole="radio" accessibilityLabel={t("model.automaticA11y")} accessibilityState={{ checked: currentModel === null }} onPress={() => { onSelect(null); setOptionsOpenFor(null); }} style={({ pressed }) => [styles.automaticRow, { backgroundColor: pressed ? theme.colors.surfacePressed : currentModel === null ? theme.colors.surfaceRaised : "transparent" }]}>
+        <Pressable testID="model-option-automatic" accessibilityRole="radio" accessibilityLabel={automaticLabel ?? t("model.automaticA11y")} accessibilityState={{ checked: currentModel === null }} onPress={() => { onSelect(null); setOptionsOpenFor(null); }} style={({ pressed }) => [styles.automaticRow, { backgroundColor: pressed ? theme.colors.surfacePressed : currentModel === null ? theme.colors.surfaceRaised : "transparent" }]}>
           <View style={styles.modelIcon}><AppIcon name="sparkles" size={22} color={theme.colors.textSecondary} /></View>
-          <View style={styles.modelText}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("model.automatic")}</Text><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted }]}>{t("model.automaticDetail")}</Text></View>
+          <View style={styles.modelText}><Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{automaticLabel ?? t("model.automatic")}</Text><Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted }]}>{automaticDetail ?? t("model.automaticDetail")}</Text></View>
           <View style={styles.selectionMark}>{currentModel === null ? <AppIcon name="check" size={18} color={theme.colors.text} /> : null}</View>
         </Pressable>
         {error ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10 }}><Text style={[typography.caption, { color: theme.colors.danger, flex: 1 }]}>{error}</Text><IconButton name="refresh" label={t("model.retry")} onPress={onRetry} disabled={loading || modelStatusLoading} /></View> : null}

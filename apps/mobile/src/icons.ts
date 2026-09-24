@@ -14,6 +14,7 @@ import Camera from "lucide-react-native/icons/camera";
 import Check from "lucide-react-native/icons/check";
 import CheckCheck from "lucide-react-native/icons/check-check";
 import Code from "lucide-react-native/icons/code";
+import Cloud from "lucide-react-native/icons/cloud";
 import CircleCheck from "lucide-react-native/icons/circle-check";
 import CircleX from "lucide-react-native/icons/circle-x";
 import Clock from "lucide-react-native/icons/clock";
@@ -88,6 +89,7 @@ export const icons = {
   check: Check,
   "check-check": CheckCheck,
   code: Code,
+  cloud: Cloud,
   "check-circle": CircleCheck,
   "circle-x": CircleX,
   clock: Clock,

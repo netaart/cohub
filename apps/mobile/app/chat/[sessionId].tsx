@@ -16,6 +16,7 @@ import { QueuedFollowupRow } from "@/src/components/QueuedFollowupRow";
 import { isSendBubbleMessage, measureSendBubbleSource, type SendBubbleTransition } from "@/src/ui/send-bubble-motion";
 import { StreamingTurnProcess, TurnProcess } from "@/src/components/TurnProcess";
 import { ModelSelectorMenu } from "@/src/components/ModelSelectorMenu";
+import { HarnessPicker } from "@/src/components/ExecutionHarnessMenu";
 import { AttachmentMenu } from "@/src/components/AttachmentMenu";
 import { SessionLabelSheet } from "@/src/components/SessionLabelSheet";
 import { fetchSessionLabels, toUserSessionLabels, type SessionLabel } from "@/src/data/session-labels";
@@ -34,7 +35,9 @@ import { cancelQueuedFollowup, followupQueueItems, isOptimisticFollowup, isSendQ
 import { isActiveTurnStatus, isLiveStreamStatus, isTerminalTurnStatus, shouldShowLiveStream } from "@/src/data/chat-stream";
 import { liveReplyAnchor, MessageMeasurements, rowHeightMeasurement } from "@/src/data/chat-rendering";
 import type { AttachmentDraft, ChatModelSelection } from "@/src/data/types";
-import type { CohubClient, MessageRecord, SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
+import { canUseRuntimeHarness, localModelsForHarness, runtimeHarnessFromTurn, type RuntimeHarness, type SpaceRuntimeStatus } from "@/src/data/runtime";
+import { useSpaceRuntime } from "@/src/data/use-space-runtime";
+import type { CohubClient, MessageRecord, ModelCatalogEntry, SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
 import { chatThreadPlaceholder, mergeDisplayMessages, messageIndexForTurn, messagesFromTurns, turnSequenceForMessage, withTurnSequences } from "@/src/data/session-history";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
@@ -154,6 +157,7 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
   const session = view.session ?? state.sessions.find((item) => item.id === sessionId) ?? null;
   const sessionSummary = state.sessions.find((item) => item.id === sessionId) ?? null;
   const spaceId = view.space?.id ?? session?.spaceId ?? sessionSummary?.spaceId ?? "";
+  const runtime = useSpaceRuntime(spaceId);
   useSyncScope(`chat:${sessionId}:tail`, () => refreshSession(sessionId, { silent: true, throwOnError: true }), 60_000, view.historyLoaded && !view.hasMoreNewer && !view.stream);
   const { headerHeight, footerHeight, onHeaderLayout, onFooterLayout } = useEdgeChrome({ reserveComposer: true });
   const composerRef = useRef<View>(null);
@@ -242,6 +246,9 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
   const [pendingFollowupAction, setPendingFollowupAction] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [harnessMenuOpen, setHarnessMenuOpen] = useState(false);
+  const [selectedHarness, setSelectedHarness] = useState<RuntimeHarness | null>(null);
+  const [localModelsByHarness, setLocalModelsByHarness] = useState<Partial<Record<"pi" | "codex", ChatModelSelection | null>>>({});
   const [selectedModel, setSelectedModel] = useState<ChatModelSelection | null>(null);
   const [modelOverride, setModelOverride] = useState(false);
   const [activePanel, setActivePanel] = useState<SpacePanel | null>(null);
@@ -489,10 +496,15 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
       break;
     }
   }
-  const activeModel = modelOverride ? selectedModel : recordedModel;
-  const activeStatus = activeModel ? modelAvailabilityLevel(modelStatus?.models[activeModel.id]) : "unknown";
-  const modelLabel = activeModel?.name || activeModel?.id || t("chat.model.automatic");
-  const modelTriggerLabel = activeModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(activeModel.thinkingLevel)}` : modelLabel;
+  const lastAgentTurn = [...view.turns].reverse().find((turn) => turn.executionKind !== "direct_generation");
+  const composerHarness = selectedHarness ?? runtimeHarnessFromTurn(lastAgentTurn);
+  const recordedLocalModel = composerHarness === "cohub" ? null : [...view.turns].reverse().find((turn) => runtimeHarnessFromTurn(turn) === composerHarness && turn.model);
+  const activeModel = composerHarness === "cohub"
+    ? (modelOverride ? selectedModel : recordedModel)
+    : (Object.hasOwn(localModelsByHarness, composerHarness) ? localModelsByHarness[composerHarness] ?? null : recordedLocalModel ? { provider: recordedLocalModel.provider ?? composerHarness, id: recordedLocalModel.model! } : null);
+  const activeStatus = composerHarness === "cohub" && activeModel ? modelAvailabilityLevel(modelStatus?.models[activeModel.id]) : "unknown";
+  const modelLabel = activeModel?.name || activeModel?.id || (composerHarness === "cohub" ? t("chat.model.automatic") : t("model.runtimeAutomatic"));
+  const modelTriggerLabel = composerHarness === "cohub" && activeModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(activeModel.thinkingLevel)}` : modelLabel;
   const liveStream = shouldShowLiveStream(view.stream, messages);
   // Mounting LegendList empty then filling it drops `initialScrollAtEnd`, so the first paint
   // would show the oldest rows and jump. Wait until there is a tail to pin to.
@@ -920,6 +932,12 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
     const files = attachments;
     recordDebugEvent("chat.send.pressed", { hasText: Boolean(text.trim()), attachmentCount: files.length, keyboardExpected: true });
     try {
+      const lastAgentTurn = [...view.turns].reverse().find((turn) => turn.executionKind !== "direct_generation");
+      const harness = selectedHarness ?? runtimeHarnessFromTurn(lastAgentTurn);
+      if (!canUseRuntimeHarness(runtime.status, harness)) {
+        showToast({ title: t("runtime.unavailable.title"), message: t("runtime.unavailable.body"), tone: "danger" });
+        return;
+      }
       const { input: field, scrollY } = composerMeasurementRef.current;
       const source = reducedMotion ? null : await measureSendBubbleSource(files.length > 0 ? attachmentSourceRef.current : field, sendRootRef.current, files.length > 0 ? attachmentScrollYRef.current : scrollY);
       if (generation !== sendGenerationRef.current) return;
@@ -930,9 +948,13 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
       setAttachments([]);
       void clearComposerDraft(spaceId, draftScope).catch(() => undefined);
       recordDebugEvent("chat.send.composer_cleared");
-      const requestModel = modelOverride ? selectedModel : recordedModel;
+      const recordedLocalModel = harness === "cohub" ? null : [...view.turns].reverse().find((turn) => runtimeHarnessFromTurn(turn) === harness && turn.model);
+      const requestModel = harness === "cohub"
+        ? (modelOverride ? selectedModel : recordedModel)
+        : (Object.hasOwn(localModelsByHarness, harness) ? localModelsByHarness[harness] ?? null : recordedLocalModel ? { provider: recordedLocalModel.provider ?? harness, id: recordedLocalModel.model! } : null);
       await sendMessage(sessionId, text, files, {
         model: requestModel,
+        harness,
         onOptimistic: (message) => {
           if (source) {
             recordDebugEvent("chat.send_transition.source_measured", { ...source });
@@ -1075,13 +1097,14 @@ function ChatContent({ sessionId, initialTurnSequence, initialTurnId, initialSen
         </View> : null}
         {attachments.length > 0 ? <View style={{ paddingHorizontal: 12, paddingTop: 4, backgroundColor: theme.colors.background }}><View ref={attachmentSourceRef} collapsable={false} style={{ maxHeight: 136 }}><ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 7 }} keyboardShouldPersistTaps="handled" onScroll={(event) => { attachmentScrollYRef.current = event.nativeEvent.contentOffset.y; }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} uri={attachment.uri} mimeType={attachment.mimeType} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</ScrollView></View></View> : null}
         {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
-        <ComposerInput anchorRef={composerRef} measurementRef={composerMeasurementRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} sendFeedback={sendFeedback} value={input} onChangeText={updateInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? t("ui.composer.working") : t("ui.composer.placeholder")} />
+        <ComposerInput anchorRef={composerRef} measurementRef={composerMeasurementRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} showHarnessPicker={runtime.status?.kind === "local"} harnessLabel={t(`runtime.harness.${composerHarness}`)} harnessMenuOpen={harnessMenuOpen} onHarnessPress={() => { setModelSelectorOpen(false); setHarnessMenuOpen(true); void runtime.refresh(); }} sendFeedback={sendFeedback} value={input} onChangeText={updateInput} onSend={() => void submit()} onStop={() => void stopGeneration()} onAttach={() => { setModelSelectorOpen(false); setHarnessMenuOpen(false); setAttachmentMenuOpen(true); }} sending={view.sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); if (composerHarness === "cohub") void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); else void runtime.refresh(); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={activeStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={view.loading || stopping} running={running} hasAttachment={attachments.length > 0} placeholder={running ? t("ui.composer.working") : t("ui.composer.placeholder")} />
         </EdgeFooter>
         {sendTransition && transitionMessage && (sendTransition.destination === "bubble" || transitionQueueItem) ? <SendBubbleOverlay key={sendTransition.message.id} transition={sendTransition} message={transitionMessage} queueItem={transitionQueueItem} rootRef={sendRootRef} targetRef={queueTransitionActive ? sendQueueRef : sendBubbleRef} availableWidth={listWidth || windowWidth} spaceId={spaceId || null} onComplete={completeSendTransition} /> : null}
         {labelSheetOpen && client && session && spaceId ? <SessionLabelSheet client={client} spaceId={spaceId} session={session} labels={chatLabels} labelsError={null} onLabelsReload={() => { if (client && spaceId) void fetchSessionLabels(client, spaceId).then((tree) => setChatLabels(toUserSessionLabels(tree))).catch(() => undefined); }} onClose={() => setLabelSheetOpen(false)} onChanged={() => undefined} /> : null}
         {attachmentMenuOpen ? <AttachmentMenu anchorRef={composerRef} onClose={() => setAttachmentMenuOpen(false)} onCamera={() => void takePhoto()} onPhotos={() => void pickPhotos()} onFile={() => void pickAttachments()} /> : null}
         <TurnNavigatorSheet visible={turnNavigatorOpen} turns={view.turnIndex} currentSequence={currentTurnSequence} loading={view.turnIndexLoading} loadingSequence={loadingSequence} onClose={() => setTurnNavigatorOpen(false)} onJump={(sequence) => handleTurnJump(sequence)} onRetry={() => void loadTurnIndex(sessionId, { force: true }).catch(() => undefined)} />
-        {modelSelectorOpen ? <ModelSelectorMenu anchorRef={composerRef} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={modelOverride ? selectedModel : recordedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelOverride(true); setModelSelectorOpen(false); }} /> : null}
+        {runtime.status?.kind === "local" ? <HarnessPicker anchorRef={composerRef} value={composerHarness} status={runtime.status} open={harnessMenuOpen} onClose={() => setHarnessMenuOpen(false)} onRefresh={() => void runtime.refresh()} onSelect={(harness) => { setSelectedHarness(harness); setHarnessMenuOpen(false); }} /> : null}
+        {modelSelectorOpen ? composerHarness === "cohub" ? <ModelSelectorMenu anchorRef={composerRef} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={modelOverride ? selectedModel : recordedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelOverride(true); setModelSelectorOpen(false); }} /> : <ModelSelectorMenu anchorRef={composerRef} title={t("model.runtimeTitle", { harness: t(`runtime.harness.${composerHarness}`) })} automaticLabel={t("model.runtimeAutomatic")} automaticDetail={t("model.runtimeAutomaticDetail")} models={runtimeCatalogModels(runtime.status, composerHarness)} loading={runtime.loading} error={runtime.error} currentModel={activeModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void runtime.refresh()} onSelect={(model) => { setLocalModelsByHarness((current) => ({ ...current, [composerHarness]: model })); setModelSelectorOpen(false); }} /> : null}
         <AdaptiveSheet visible={notice !== null} title={notice?.title ?? t("common.notice")} onClose={() => setNotice(null)} scrollable={false} testID="chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
         <Modal visible={renameOpen} transparent animationType="fade" onRequestClose={() => setRenameOpen(false)}><View style={{ flex: 1, justifyContent: "center", padding: 22, backgroundColor: "rgba(0,0,0,0.6)" }}><View style={{ borderRadius: 18, padding: 18, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}><Text style={[typography.heading, { color: theme.colors.text }]}>{t("chat.rename.title")}</Text><TextInput autoFocus value={renameValue} onChangeText={setRenameValue} maxLength={80} placeholder={t("chat.rename.placeholder")} placeholderTextColor={theme.colors.textFaint} style={[typography.body, { color: theme.colors.text, minHeight: 48, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, paddingHorizontal: 12, marginTop: 14 }]} /><View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 16 }}><Pressable onPress={() => setRenameOpen(false)} style={{ minHeight: 44, paddingHorizontal: 14, justifyContent: "center" }}><Text style={[typography.bodyMedium, { color: theme.colors.textMuted }]}>{t("common.cancel")}</Text></Pressable><PrimaryButton label={t("common.save")} onPress={() => void saveRename()} style={{ minHeight: 44, paddingHorizontal: 16 }} /></View></View></View></Modal>
       </Animated.View>
@@ -1172,6 +1195,7 @@ function DraftChatContent({ spaceId, onCreated }: { spaceId: string; onCreated: 
   const { t } = useTranslation();
   const showToast = useToast();
   const { state, client, connectionState, sendNewMessage, getAccessToken, loadModels, loadModelStatus, models, modelsLoading, modelsError, modelStatus, modelStatusLoading, modelStatusError, loadComposerDraft, saveComposerDraft, clearComposerDraft } = useApp();
+  const runtime = useSpaceRuntime(spaceId);
   const space = state.spaces.find((item) => item.id === spaceId) ?? null;
   const { headerHeight, onHeaderLayout } = useEdgeChrome();
   const composerRef = useRef<View>(null);
@@ -1223,6 +1247,9 @@ function DraftChatContent({ spaceId, onCreated }: { spaceId: string; onCreated: 
   }, [saveComposerDraft, spaceId]);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [harnessMenuOpen, setHarnessMenuOpen] = useState(false);
+  const [selectedHarness, setSelectedHarness] = useState<RuntimeHarness>("cohub");
+  const [localModelsByHarness, setLocalModelsByHarness] = useState<Partial<Record<"pi" | "codex", ChatModelSelection | null>>>({});
   const [selectedModel, setSelectedModel] = useState<ChatModelSelection | null>(null);
   const [activePanel, setActivePanel] = useState<SpacePanel | null>(null);
   const [sending, setSending] = useState(false);
@@ -1242,6 +1269,10 @@ function DraftChatContent({ spaceId, onCreated }: { spaceId: string; onCreated: 
     const files = attachments;
     setSending(true);
     try {
+      if (!canUseRuntimeHarness(runtime.status, selectedHarness)) {
+        showToast({ title: t("runtime.unavailable.title"), message: t("runtime.unavailable.body"), tone: "danger" });
+        return;
+      }
       const { input: field, scrollY } = composerMeasurementRef.current;
       const source = reducedMotion
         ? null
@@ -1254,7 +1285,8 @@ function DraftChatContent({ spaceId, onCreated }: { spaceId: string; onCreated: 
       setInput("");
       setAttachments([]);
       void clearComposerDraft(space.id, NEW_COMPOSER_DRAFT_SCOPE).catch(() => undefined);
-      const result = await sendNewMessage(space.id, text, files, { model: selectedModel });
+      const requestModel = selectedHarness === "cohub" ? selectedModel : localModelsByHarness[selectedHarness] ?? null;
+      const result = await sendNewMessage(space.id, text, files, { model: requestModel, harness: selectedHarness });
       onCreated({
         session: result.session,
         transition: source ? { message: result.message, text, source, attachments: files, destination: "bubble" } : null,
@@ -1270,9 +1302,10 @@ function DraftChatContent({ spaceId, onCreated }: { spaceId: string; onCreated: 
   if (!space) return <Screen><TopBar title={t("chat.spaceUnavailable")} onBack={() => router.back()} /><View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}><Text style={[typography.body, { color: theme.colors.textMuted, textAlign: "center" }]}>{t("chat.spaceUnavailable.body")}</Text></View></Screen>;
   const spaceName = displaySpaceName(space);
   const spaceSessions = state.sessions.filter((item) => item.spaceId === space.id);
-  const modelLabel = selectedModel?.name || selectedModel?.id || t("chat.model.automatic");
-  const modelTriggerLabel = selectedModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(selectedModel.thinkingLevel)}` : modelLabel;
-  const selectedStatus = selectedModel ? modelAvailabilityLevel(modelStatus?.models[selectedModel.id]) : "unknown";
+  const activeModel = selectedHarness === "cohub" ? selectedModel : localModelsByHarness[selectedHarness] ?? null;
+  const modelLabel = activeModel?.name || activeModel?.id || (selectedHarness === "cohub" ? t("chat.model.automatic") : t("model.runtimeAutomatic"));
+  const modelTriggerLabel = selectedHarness === "cohub" && activeModel?.thinkingLevel ? `${modelLabel} · ${formatThinkingLevel(activeModel.thinkingLevel)}` : modelLabel;
+  const selectedStatus = selectedHarness === "cohub" && activeModel ? modelAvailabilityLevel(modelStatus?.models[activeModel.id]) : "unknown";
   return <Screen keyboard edgeToEdge>
     <SpacePanels edgeToEdge key={space.id} spaceId={space.id} spaceName={spaceName} sessions={spaceSessions} client={client} activePanel={activePanel} onActivePanelChange={setActivePanel} onOpenSession={(nextSessionId, target) => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: nextSessionId, ...(target?.turn != null ? { turn: String(target.turn) } : {}), ...(target?.turnId ? { turnId: target.turnId } : {}) } })} onNewChat={() => router.push({ pathname: "/chat/[sessionId]", params: { sessionId: "new", spaceId: space.id } })} onOpenFile={(path) => router.push({ pathname: "/space/[spaceId]/file", params: { spaceId: space.id, path } })} onOpenFilesPage={() => router.push({ pathname: "/space/[spaceId]/files", params: { spaceId: space.id } })}>
       <View ref={sendRootRef} collapsable={false} style={{ flex: 1, minHeight: 0 }}>
@@ -1289,14 +1322,19 @@ function DraftChatContent({ spaceId, onCreated }: { spaceId: string; onCreated: 
           </View>
           {attachments.length > 0 ? <View ref={attachmentSourceRef} collapsable={false} style={{ paddingHorizontal: 12, paddingTop: 4, gap: 7, backgroundColor: theme.colors.background }}>{attachments.map((attachment, index) => <AttachmentChip key={`${attachment.uri}-${index}`} name={attachment.name} uri={attachment.uri} mimeType={attachment.mimeType} onRemove={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}</View> : null}
           {voice.partial || voice.error ? <View style={{ paddingHorizontal: 16, paddingTop: 5, backgroundColor: theme.colors.background }}><Text style={[typography.caption, { color: voice.error ? theme.colors.danger : theme.colors.textMuted }]}>{voice.error ? voice.error : t("chat.listening", { text: voice.partial })}</Text></View> : null}
-          <ComposerInput anchorRef={composerRef} measurementRef={composerMeasurementRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} value={input} onChangeText={updateInput} onSend={() => void submit()} onAttach={() => { setModelSelectorOpen(false); setAttachmentMenuOpen(true); }} sending={sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? t("chat.draft.starting") : t("ui.composer.placeholder")} />
+          <ComposerInput anchorRef={composerRef} measurementRef={composerMeasurementRef} attachmentMenuOpen={attachmentMenuOpen} modelMenuOpen={modelSelectorOpen} showHarnessPicker={runtime.status?.kind === "local"} harnessLabel={t(`runtime.harness.${selectedHarness}`)} harnessMenuOpen={harnessMenuOpen} onHarnessPress={() => { setModelSelectorOpen(false); setHarnessMenuOpen(true); void runtime.refresh(); }} value={input} onChangeText={updateInput} onSend={() => void submit()} onAttach={() => { setModelSelectorOpen(false); setHarnessMenuOpen(false); setAttachmentMenuOpen(true); }} sending={sending} onVoice={() => voice.isRecording ? voice.stop() : void voice.start()} onModelPress={() => { setAttachmentMenuOpen(false); if (selectedHarness === "cohub") void Promise.all([loadModels(), loadModelStatus()]).catch(() => undefined); else void runtime.refresh(); setModelSelectorOpen(true); }} modelLabel={modelTriggerLabel} modelStatus={selectedStatus} voiceActive={voice.isRecording} voiceStarting={voice.isStarting} disabled={sending} hasAttachment={attachments.length > 0} placeholder={sending ? t("chat.draft.starting") : t("ui.composer.placeholder")} />
         </View>
-        {modelSelectorOpen ? <ModelSelectorMenu anchorRef={composerRef} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={selectedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelSelectorOpen(false); }} /> : null}
+        {runtime.status?.kind === "local" ? <HarnessPicker anchorRef={composerRef} value={selectedHarness} status={runtime.status} open={harnessMenuOpen} onClose={() => setHarnessMenuOpen(false)} onRefresh={() => void runtime.refresh()} onSelect={(harness) => { setSelectedHarness(harness); setHarnessMenuOpen(false); }} /> : null}
+        {modelSelectorOpen ? selectedHarness === "cohub" ? <ModelSelectorMenu anchorRef={composerRef} models={models} loading={modelsLoading} error={modelsError || modelStatusError} modelStatus={modelStatus?.models ?? null} modelStatusLoading={modelStatusLoading} currentModel={selectedModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void Promise.all([loadModels({ force: true }), loadModelStatus({ force: true })]).catch(() => undefined)} onSelect={(model) => { setSelectedModel(model); setModelSelectorOpen(false); }} /> : <ModelSelectorMenu anchorRef={composerRef} title={t("model.runtimeTitle", { harness: t(`runtime.harness.${selectedHarness}`) })} automaticLabel={t("model.runtimeAutomatic")} automaticDetail={t("model.runtimeAutomaticDetail")} models={runtimeCatalogModels(runtime.status, selectedHarness)} loading={runtime.loading} error={runtime.error} currentModel={activeModel} onClose={() => setModelSelectorOpen(false)} onRetry={() => void runtime.refresh()} onSelect={(model) => { setLocalModelsByHarness((current) => ({ ...current, [selectedHarness]: model })); setModelSelectorOpen(false); }} /> : null}
         {attachmentMenuOpen ? <AttachmentMenu anchorRef={composerRef} onClose={() => setAttachmentMenuOpen(false)} onCamera={() => void takePhoto()} onPhotos={() => void pickPhotos()} onFile={() => void pickAttachments()} /> : null}
         <AdaptiveSheet visible={notice !== null} title={notice?.title ?? t("common.notice")} onClose={() => setNotice(null)} scrollable={false} testID="new-chat-notice-sheet"><Text style={[typography.body, { color: theme.colors.textSecondary }]}>{notice?.message ?? ""}</Text></AdaptiveSheet>
       </View>
     </SpacePanels>
   </Screen>;
+}
+
+function runtimeCatalogModels(status: SpaceRuntimeStatus | null, harness: RuntimeHarness): ModelCatalogEntry[] {
+  return localModelsForHarness(status, harness).map((model) => ({ provider: model.provider, id: model.id, model: { name: model.name } } as ModelCatalogEntry));
 }
 
 function MissingChat() {

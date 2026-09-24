@@ -785,8 +785,8 @@ export type AppContextValue = {
   loadNewerTurns: (sessionId: string) => Promise<void>;
   loadTurnIndex: (sessionId: string, options?: { force?: boolean }) => Promise<void>;
   jumpToTurn: (sessionId: string, target: number | { turnId: string }) => Promise<number>;
-  sendMessage: (sessionId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null; onOptimistic?: (message: MessageRecord) => void }) => Promise<void>;
-  sendNewMessage: (spaceId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null }) => Promise<NewChatMessageResult>;
+  sendMessage: (sessionId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null; harness?: "cohub" | "pi" | "codex"; onOptimistic?: (message: MessageRecord) => void }) => Promise<void>;
+  sendNewMessage: (spaceId: string, text: string, attachments?: AttachmentDraft[], options?: { model?: ChatModelSelection | null; harness?: "cohub" | "pi" | "codex" }) => Promise<NewChatMessageResult>;
   loadComposerDraft: (spaceId: string, scope: ComposerDraftScope) => Promise<string>;
   saveComposerDraft: (spaceId: string, scope: ComposerDraftScope, text: string) => Promise<void>;
   clearComposerDraft: (spaceId: string, scope: ComposerDraftScope) => Promise<void>;
@@ -1826,7 +1826,7 @@ export function AppProvider({
       sessionId: string,
       rawText: string,
       attachments: AttachmentDraft[] = [],
-      options: { model?: ChatModelSelection | null; onOptimistic?: (message: MessageRecord) => void } = {},
+      options: { model?: ChatModelSelection | null; harness?: "cohub" | "pi" | "codex"; onOptimistic?: (message: MessageRecord) => void } = {},
     ) => {
       if (!client) throw new Error(translate("data.stillConnecting"));
       const text = rawText.trim();
@@ -1866,7 +1866,7 @@ export function AppProvider({
         stopReason: null,
         errorMessage: null,
         usage: null,
-        meta: { optimistic: true, queuedFollowup: shouldQueueFollowup(view?.turns ?? [], view?.stream), clientMessageId, turnSequence, ...(options.model?.thinkingLevel ? { requestedThinkingLevel: options.model.thinkingLevel } : {}) },
+        meta: { optimistic: true, queuedFollowup: shouldQueueFollowup(view?.turns ?? [], view?.stream), clientMessageId, turnSequence, ...(options.harness ? { harness: options.harness } : {}), ...(options.model?.thinkingLevel ? { requestedThinkingLevel: options.model.thinkingLevel } : {}) },
         authorUuid: userUuid,
         authorProfile: null,
         startedAt: null,
@@ -1895,7 +1895,9 @@ export function AppProvider({
           accessMode: "full_access",
           intent: "followup",
           schedule: { mode: "immediate" },
-          ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
+          ...(options.model ? { model: options.model.id, provider: options.model.provider } : {}),
+          ...(options.harness ? { harness: options.harness } : {}),
+          ...(options.harness !== "pi" && options.harness !== "codex" && options.model?.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}),
         });
         if (response.mode !== "immediate") throw new Error(translate("data.messageNotAccepted"));
         recordDebugEvent("chat.send.server_accepted", { turnSequence: response.turn.sequence, status: response.turn.status });
@@ -1915,7 +1917,7 @@ export function AppProvider({
       spaceId: string,
       rawText: string,
       attachments: AttachmentDraft[] = [],
-      options: { model?: ChatModelSelection | null } = {},
+      options: { model?: ChatModelSelection | null; harness?: "cohub" | "pi" | "codex" } = {},
     ) => {
       if (!client) throw new Error(translate("data.stillConnecting"));
       const text = rawText.trim();
@@ -1932,7 +1934,9 @@ export function AppProvider({
         accessMode: "full_access",
         intent: "followup",
         schedule: { mode: "immediate" },
-        ...(options.model ? { model: options.model.id, provider: options.model.provider, ...(options.model.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}) } : {}),
+        ...(options.model ? { model: options.model.id, provider: options.model.provider } : {}),
+        ...(options.harness ? { harness: options.harness } : {}),
+        ...(options.harness !== "pi" && options.harness !== "codex" && options.model?.thinkingLevel ? { thinkingLevel: options.model.thinkingLevel } : {}),
       });
       if (result.mode !== "immediate" || !result.session) {
         throw new Error(translate("data.newChatNotCreated"));
