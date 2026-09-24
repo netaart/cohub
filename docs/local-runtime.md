@@ -230,8 +230,13 @@ Execution uses the owner's authorization; author permissions are never combined.
 anywhere in the batch makes the entire batch read-only (Pi rejects this before dispatch).
 
 Each source turn/message and its author, requested Harness and original content remain intact.
-Earlier turns point to the owner through `mergedIntoTurnId`. Local adapters receive the batch content verbatim:
-no prefixes, ordinals, separators, explanations or internal user/turn/message IDs are added to prompt text.
+Earlier turns point to the owner through `mergedIntoTurnId`. Local adapters receive the batch content
+verbatim: no prefixes, ordinals, separators, explanations or internal user/turn/message IDs are added
+to prompt text. Platform-side one-shot expansion still applies at submission — prompt templates
+(`/name args`) expand everywhere; project-scoped skills expand with workspace-relative locations,
+while skills the platform does not know pass through verbatim so a Harness' local skill files can
+serve them. Direct `!` shell commands execute on the Cohub sandbox only and pass through verbatim
+to Local Harnesses.
 Representable blocks and tool pairing are preserved; URL images, system notes and unknown blocks are dropped from
 the model input, never described in text, and their durable copy stays in the platform. Only the existing system
 prompt builder may author platform instructions. Streaming, results, usage and native archive references

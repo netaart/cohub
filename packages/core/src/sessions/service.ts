@@ -13,14 +13,14 @@ import {
   normalizeSessionTitle,
   setSessionTitleMeta,
 } from "./session-meta.js";
-import { submitSessionPrompt, type ExpandedPromptTemplate, type ExpandedSkillCommand, expandPromptContent, type SubmitSessionPromptHooks, type SubmitSessionPromptInput, type SubmitSessionPromptOptions } from "./prompt.js";
+import { submitSessionPrompt, type PromptHarness, type ExpandedPromptTemplate, type ExpandedSkillCommand, expandPromptContent, type SubmitSessionPromptHooks, type SubmitSessionPromptInput, type SubmitSessionPromptOptions } from "./prompt.js";
 
 export type PromptTemplateService = {
   expand(text: string, options?: { userId?: string | null; spaceId?: string | null; sessionId?: string | null }): Promise<ExpandedPromptTemplate | null>;
 };
 
 export type SkillService = {
-  expand(text: string, options?: { userId?: string | null; spaceId?: string | null }): Promise<ExpandedSkillCommand | null>;
+  expand(text: string, options?: { userId?: string | null; spaceId?: string | null; harness?: PromptHarness | null }): Promise<ExpandedSkillCommand | null>;
 };
 
 type DrizzleDb = PostgresJsDatabase<Record<string, unknown>>;
@@ -381,7 +381,7 @@ export function createSessionServices(input: {
       randomUUID,
       expandPromptTemplate: ({ text, userId, spaceId, sessionId }) => input.promptTemplateService.expand(text, { userId, spaceId, sessionId }),
       expandSkillCommand: skillService
-        ? ({ text, userId, spaceId }) => skillService.expand(text, { userId, spaceId })
+        ? ({ text, userId, spaceId, harness }) => skillService.expand(text, { userId, spaceId, harness })
         : undefined,
       createSessionTurn,
       enqueueSpacePrompt,
@@ -397,11 +397,13 @@ export function createSessionServices(input: {
     userId: string;
     spaceId: string;
     sessionId?: string | null;
+    harness?: PromptHarness | null;
+    sandboxSemantics?: boolean;
   }) {
     return expandPromptContent({
       expandPromptTemplate: ({ text, userId, spaceId, sessionId }) => input.promptTemplateService.expand(text, { userId, spaceId, sessionId }),
       expandSkillCommand: skillService
-        ? ({ text, userId, spaceId }) => skillService.expand(text, { userId, spaceId })
+        ? ({ text, userId, spaceId, harness }) => skillService.expand(text, { userId, spaceId, harness })
         : undefined,
     }, promptInput);
   }
