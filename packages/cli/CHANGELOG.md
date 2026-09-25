@@ -1,5 +1,29 @@
 # @neta-art/cohub-cli
 
+## 8.4.0
+
+### Minor Changes
+
+- 574bfe8: Lighter media delivery for generation results.
+  
+  - SDK: `mediaPreviewCandidates()`, `imageVariantUrl()`, and `videoFrameUrl()` derive CDN image variants and video stills for OSS-backed hosts, in priority order with the original as fallback. `probeMediaInfo()` reads dimensions, duration, frame count, and first/last frames from OSS meta headers, then `image/info`. `publicAssets.uploadGenerationInput()` uploads a local generation input to an unlisted public URL.
+  - CLI: `cohub generate` uploads local `--image`/`--video`/`--audio` files instead of inlining base64 (inline stays the fallback), and prints each output's size, duration, and last frame; `--json` adds them as `outputMedia`.
+  - Task list views (`tasks.list`, `tasks.getMany`) no longer carry inline generation inputs; such blocks are marked `deferredBase64` and the full run stays available from `tasks.get`.
+- 414397b: Add generation task views and session file listings.
+  
+  - SDK: `toGenerationTaskView()` projects a generation Task Run into display-ready outputs (prompt, model, cover-folded media), with `generationOutputSource()` for inline payloads. `space(id).session(id).files()` lists Space files a session's Agent wrote or edited.
+  - CLI: `cohub spaces sessions files <sessionId>` lists Space files a session's Agent wrote or edited.
+
+### Patch Changes
+
+- Updated dependencies [d23129c]
+- Updated dependencies [d23129c]
+- Updated dependencies [574bfe8]
+- Updated dependencies [574bfe8]
+- Updated dependencies [d23129c]
+- Updated dependencies [414397b]
+  - @neta-art/cohub@8.23.0
+
 ## 8.3.1
 
 ### Patch Changes
