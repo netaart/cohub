@@ -8,7 +8,6 @@ import {
 import {
 	AlertCircle,
 	AudioLines,
-	FileText,
 	Film,
 	Image as ImageIcon,
 	Info,
@@ -84,7 +83,7 @@ $effect(() => {
 	};
 });
 const candidates = $derived(
-	output && output.type !== "text"
+	output
 		? mediaPreviewCandidates(
 				{ type: output.type, url: output.url, previewUrl: output.previewUrl },
 				{ size: previewSize, fit: "cover" },
@@ -124,11 +123,6 @@ const durationMs = $derived(output?.durationMs ?? probed?.durationMs);
 					{m.generation_status_failed({}, { locale })}
 				</span>
 				<span class="mt-1 line-clamp-3 text-[11px] leading-4 text-text-tertiary">{task.prompt ?? task.errorMessage ?? ""}</span>
-			</span>
-		{:else if output?.type === "text"}
-			<span class="tile-placeholder">
-				<FileText class="h-3.5 w-3.5 shrink-0 text-text-placeholder" />
-				<span class="mt-1 line-clamp-4 text-[11px] leading-4 text-text-secondary">{output.text}</span>
 			</span>
 		{:else}
 			<MediaImage {candidates} alt={task.prompt ?? ""} class="tile-media">

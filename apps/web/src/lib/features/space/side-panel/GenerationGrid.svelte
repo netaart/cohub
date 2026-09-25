@@ -54,13 +54,10 @@ const items = $derived.by(() =>
 	}),
 );
 
-type MediaGridItem = GridItem & {
-	output: GenerationTaskOutput & { type: MediaItem["type"] };
-};
+type MediaGridItem = GridItem & { output: GenerationTaskOutput };
 
 function isMedia(item: GridItem): item is MediaGridItem {
-	const type = item.output?.type;
-	return type === "image" || type === "video" || type === "audio";
+	return item.output !== null;
 }
 
 /** Inline payloads live on the run; deferred ones need the run detail. */

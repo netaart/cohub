@@ -73,7 +73,12 @@ export class GenerationFeed {
 	failed = $state(false);
 	loadMoreFailed = $state(false);
 
-	readonly tasks = $derived(this.#runs.map(viewOf));
+	/** Completed tasks without media (a text-only refusal) have nothing to show. */
+	readonly tasks = $derived(
+		this.#runs
+			.map(viewOf)
+			.filter((task) => task.status !== "completed" || task.outputs.length > 0),
+	);
 	readonly activeCount = $derived(
 		this.tasks.filter((task) => isActiveGenerationTask(task)).length,
 	);

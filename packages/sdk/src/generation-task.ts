@@ -3,7 +3,6 @@ import {
 	blockMimeType,
 	blockNaturalSize,
 	blockPreviewUrl,
-	blockText,
 	blockTitle,
 	blockUrl,
 	contentBlocks,
@@ -15,7 +14,8 @@ import {
 } from "./generation-blocks.js";
 import type { TaskRunRecord } from "./types.js";
 
-export type GenerationOutputType = "image" | "video" | "audio" | "text";
+/** Media a generation delivers; text blocks (revised prompts, refusals) are not outputs. */
+export type GenerationOutputType = "image" | "video" | "audio";
 
 export type GenerationTaskOutput = {
 	index: number;
@@ -25,7 +25,6 @@ export type GenerationTaskOutput = {
 	previewUrl: string | null;
 	title: string | null;
 	mimeType: string | null;
-	text: string | null;
 	width: number | null;
 	height: number | null;
 	durationMs: number | null;
@@ -63,12 +62,13 @@ const DEFAULT_MEDIA_TYPES: Record<string, string> = {
 };
 
 function outputType(value: unknown): GenerationOutputType | null {
-	return value === "image" || value === "video" || value === "audio" || value === "text"
-		? value
-		: null;
+	return value === "image" || value === "video" || value === "audio" ? value : null;
 }
 
-/** Covers fold into the media they depict instead of listing as images. */
+/**
+ * Only media blocks become outputs; text such as a revised prompt or a refusal
+ * stays in the raw result. Covers fold into the media they depict.
+ */
 function projectOutputs(run: TaskRunRecord): GenerationTaskOutput[] {
 	const blocks = generationOutput(run);
 	const covers = generationCovers(blocks);
@@ -82,21 +82,18 @@ function projectOutputs(run: TaskRunRecord): GenerationTaskOutput[] {
 		const type = outputType(block.type);
 		if (!type || coverIndexes.has(index)) return [];
 		const size = blockNaturalSize(block);
-		const text = type === "text" ? (blockText(block) ?? null) : null;
-		if (type === "text" && !text) return [];
 		return [
 			{
 				index,
 				type,
-				url: type === "text" ? null : (blockUrl(block) ?? null),
+				url: blockUrl(block) ?? null,
 				previewUrl: blockPreviewUrl(block) ?? coverUrl(index) ?? null,
 				title: blockTitle(block) ?? null,
 				mimeType: blockMimeType(block) ?? null,
-				text,
 				width: size.naturalWidth ?? null,
 				height: size.naturalHeight ?? null,
 				durationMs: blockDurationMs(block) ?? null,
-				deferred: type !== "text" && isDeferred(block),
+				deferred: isDeferred(block),
 			},
 		];
 	});

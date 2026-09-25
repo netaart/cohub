@@ -48,8 +48,7 @@ test("projects prompt, model, and outputs", () => {
 					},
 					{ type: "image", source: { deferredBase64: true, mediaType: "image/png" } },
 					{ type: "audio", source: { data: "AAAA", mediaType: "audio/mpeg" } },
-					{ type: "text", text: "  caption  " },
-					{ type: "text", text: "   " },
+					{ type: "text", meta: { role: "revised_prompt" }, text: "A calm lake at dawn" },
 				],
 			},
 		}),
@@ -62,11 +61,16 @@ test("projects prompt, model, and outputs", () => {
 			[0, "image", "https://cdn.example.com/a.png", false],
 			[1, "image", null, true],
 			[2, "audio", null, false],
-			[3, "text", null, false],
 		],
 	);
 	assert.equal(view.outputs[0]?.width, 1600);
-	assert.equal(view.outputs[3]?.text, "caption");
+});
+
+test("leaves text-only results without outputs", () => {
+	const view = toGenerationTaskView(
+		taskRun({ result: { output: [{ type: "text", text: "Could you try again?" }] } }),
+	);
+	assert.deepEqual(view.outputs, []);
 });
 
 test("folds a cover image into media sharing its provider id", () => {
