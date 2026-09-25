@@ -4,6 +4,21 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.59 — 2026-09-25
+
+- **Apps platform**: trusted Apps published or installed in the Shell Space now receive Host consent and run without an authorization dialog, declared file handlers register in `.cohub/apps.json` with per-file windows and "Open with", and the new `cohub.app.runtime` protocol plus SDK `client.app.window`, `onBeforeClose`, `onDrop`, `onLaunch`, appearance sync, and locale wiring let Apps own their window, follow the host, and receive dropped or opened Cohub resources.
+- **Workspace side panel**: rebuilt around chat outputs as This chat | Files · Media · Apps, with live queued/running generation progress, files an Agent wrote or edited, a Space-wide filterable Media view, and the old header button retired. Data renders from IndexedDB first and reconciles silently over `task.*` realtime envelopes without polling. Backed by `GET /api/sessions/:id/files`, SDK `toGenerationTaskView()` and `session(id).files()`, and `cohub spaces sessions files`.
+- **Media delivery**: a new `@neta-art/cohub/media` module resolves previews and metadata through one ordered strategy chain — CDN image variants, video stills, OSS meta headers, then `image/info` — with the original as fallback, and folds provider covers into the media they depict (a video's first frame, music art) under one shared rule. Generation inputs are uploaded to unlisted URLs instead of inlined base64, and task list views drop inline payloads (100 runs fell from 20 MB to 0.26 MB), with `cohub generate` now reporting each output's size, duration, and last frame.
+- **Media viewer**: the lightbox now previews images, video, and audio as a single swipeable gallery driven by a dedicated gallery-swipe gesture layer, with deferred outputs resolving on demand, real filenames on download, and a fixed CSS cascade bug that let pinch zoom scale the page and swallow swipes.
+- **Runtime reliability**: the CLI/gateway runtime now pairs tool results with the message carrying their call, keeps one aborted stream from killing the Runtime connection, and repairs legacy Pi extensions and Codex hooks before any harness starts, so upgrades from CLI 8.0–8.2 no longer fail with `Cannot find module …/native-pi-extension.js`.
+
+### Bug Fixes
+
+- Unparseable `runtime.native` frames are answered through `runtime.native.result` with the first zod issue paths instead of closing the socket with 4400, so one bad conversation fails alone and the import continues.
+- A JsonRpcProcess close it initiated itself no longer broadcasts a harness failure, and a signalled exit reads "terminated by SIGTERM" instead of "exited (143)"; a fatal close code and reason now surface in the terminal error.
+- Sidebar App icons span both lines at 28px and use grapheme-segmented, CJK-safe initials, so names like "我的" or leading emoji no longer wrap or split into broken surrogates.
+- Task lists strip inline audio, and cached summaries are slimmed in place rather than re-fetched.
+
 ## v2.58 — 2026-09-24
 
 - **Native Runtime sessions rebuilt on harness files and control planes**: Pi and Codex session files are now the only durable record and outbox while the server is the only ledger — no local delivery receipts. The Runtime watches bound folders, ingests Turns in small idempotent WebSocket batches, asks the server what it already has after a restart, drives Pi via a self-contained extension and Codex 0.156+ through its shared app-server, and removes the Codex hooks, Pi capture extension, IPC capture, and native sync stores.
