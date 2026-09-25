@@ -1,6 +1,5 @@
 import {
 	blockDurationMs,
-	blockIdentity,
 	blockMimeType,
 	blockNaturalSize,
 	blockPreviewUrl,
@@ -8,6 +7,7 @@ import {
 	blockTitle,
 	blockUrl,
 	contentBlocks,
+	generationCovers,
 	generationOutput,
 	generationPrompt,
 	record,
@@ -68,31 +68,15 @@ function outputType(value: unknown): GenerationOutputType | null {
 		: null;
 }
 
-/** A cover sharing a provider id with media becomes that media's preview. */
+/** Covers fold into the media they depict instead of listing as images. */
 function projectOutputs(run: TaskRunRecord): GenerationTaskOutput[] {
 	const blocks = generationOutput(run);
-	const coverByGroup = new Map<string, string>();
-	const coverIndexes = new Set<number>();
-	const groupKey = (block: Record<string, unknown>, index: number) =>
-		blockIdentity(block) ?? `output-${index}`;
-
-	blocks.forEach((block, index) => {
-		if (block.type !== "video" && block.type !== "audio") return;
-		const key = groupKey(block, index);
-		if (coverByGroup.has(key)) return;
-		const coverIndex = blocks.findIndex(
-			(candidate, candidateIndex) =>
-				candidate.type === "image" &&
-				!coverIndexes.has(candidateIndex) &&
-				blockIdentity(candidate) !== undefined &&
-				groupKey(candidate, candidateIndex) === key,
-		);
-		const coverUrl = coverIndex >= 0 ? blockUrl(blocks[coverIndex] as Record<string, unknown>) : undefined;
-		if (coverIndex >= 0 && coverUrl) {
-			coverIndexes.add(coverIndex);
-			coverByGroup.set(key, coverUrl);
-		}
-	});
+	const covers = generationCovers(blocks);
+	const coverIndexes = new Set(covers.values());
+	const coverUrl = (index: number) => {
+		const cover = covers.get(index);
+		return cover === undefined ? undefined : blockUrl(blocks[cover] ?? {});
+	};
 
 	return blocks.flatMap((block, index): GenerationTaskOutput[] => {
 		const type = outputType(block.type);
@@ -105,7 +89,7 @@ function projectOutputs(run: TaskRunRecord): GenerationTaskOutput[] {
 				index,
 				type,
 				url: type === "text" ? null : (blockUrl(block) ?? null),
-				previewUrl: blockPreviewUrl(block) ?? coverByGroup.get(groupKey(block, index)) ?? null,
+				previewUrl: blockPreviewUrl(block) ?? coverUrl(index) ?? null,
 				title: blockTitle(block) ?? null,
 				mimeType: blockMimeType(block) ?? null,
 				text,

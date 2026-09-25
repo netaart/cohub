@@ -41,7 +41,7 @@ const views = new WeakMap<TaskRunRecord, GenerationTaskView>();
 const liveFeeds = new Set<GenerationFeed>();
 const pendingHydration = new Map<string, Set<string>>();
 const hydrationTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const resolvingSources = new Map<string, Promise<string | null>>();
+const resolvingResults = new Map<string, Promise<unknown>>();
 
 function scopeKey(scope: GenerationFeedScope) {
 	return `${getCacheUserKey()}:${scope.spaceId}:${scope.sessionId ?? "*"}`;
@@ -298,18 +298,19 @@ export function ingestGenerationTaskEvent(
 }
 
 /** Only in-flight requests are shared; data URLs are too large to keep. */
-export function resolveGenerationOutputSource(
+export async function resolveGenerationOutputSource(
 	taskRunId: string,
 	outputIndex: number,
 ) {
-	const key = `${taskRunId}:${outputIndex}`;
-	let pending = resolvingSources.get(key);
-	if (!pending) {
-		pending = sdk.tasks
+	// One detail request serves every output of the task (the viewer resolves
+	// neighbours together); only the chosen payload outlives it.
+	let result = resolvingResults.get(taskRunId);
+	if (!result) {
+		result = sdk.tasks
 			.get(taskRunId)
-			.then((detail) => generationOutputSource(detail.run.result, outputIndex))
-			.finally(() => resolvingSources.delete(key));
-		resolvingSources.set(key, pending);
+			.then((detail) => detail.run.result)
+			.finally(() => resolvingResults.delete(taskRunId));
+		resolvingResults.set(taskRunId, result);
 	}
-	return pending;
+	return generationOutputSource(await result, outputIndex);
 }

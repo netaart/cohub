@@ -13,6 +13,7 @@ import {
 	blockTitle,
 	blockUrl,
 	cleanExcerpt,
+	generationCovers,
 	generationOutput,
 	generationPrompt,
 	taskData,
@@ -36,44 +37,52 @@ function artifactId(
 }
 
 /**
- * Group provider blocks into user-facing works. A cover/poster sharing a stable
- * provider id with playable media belongs to that work instead of becoming a
- * competing image result.
+ * Group provider blocks into user-facing works. A cover belongs to the media
+ * it depicts (see `generationCovers`) instead of becoming a competing image.
  */
 export function taskArtifacts(
 	blocks: Record<string, unknown>[],
 ): BoardTaskArtifact[] {
-	const groups = new Map<string, Record<string, unknown>[]>();
+	// Board keeps remote media only, so a cover of inline media stays an image.
+	const covers = new Map(
+		[...generationCovers(blocks)].filter(([media]) =>
+			Boolean(blockUrl(blocks[media] ?? {})),
+		),
+	);
+	const coverIndexes = new Set(covers.values());
+	const coverUrl = (index: number) => {
+		const cover = covers.get(index);
+		return cover === undefined ? undefined : blockUrl(blocks[cover] ?? {});
+	};
+	type Entry = { block: Record<string, unknown>; index: number; url?: string };
+	const groups = new Map<string, Entry[]>();
 	blocks.forEach((block, index) => {
+		if (coverIndexes.has(index)) return;
 		const key = blockIdentity(block) ?? `output-${index + 1}`;
+		const entry = { block, index, url: blockUrl(block) };
 		const group = groups.get(key);
-		if (group) group.push(block);
-		else groups.set(key, [block]);
+		if (group) group.push(entry);
+		else groups.set(key, [entry]);
 	});
+	const withUrl = (entry: Entry): entry is Entry & { url: string } =>
+		Boolean(entry.url);
 
 	const artifacts: BoardTaskArtifact[] = [];
 	const usedIds = new Set<string>();
 	for (const [groupId, blocksInGroup] of groups) {
 		const images = blocksInGroup
-			.filter((block) => block.type === "image")
-			.map((block) => ({ block, url: blockUrl(block) }))
-			.filter(
-				(entry): entry is typeof entry & { url: string } => Boolean(entry.url),
-			);
+			.filter(({ block }) => block.type === "image")
+			.filter(withUrl);
 		const media = blocksInGroup
-			.filter((block) => block.type === "video" || block.type === "audio")
-			.map((block) => ({ block, url: blockUrl(block) }))
-			.filter(
-				(entry): entry is typeof entry & { url: string } => Boolean(entry.url),
-			);
-		const pairedPreview = images[0];
+			.filter(({ block }) => block.type === "video" || block.type === "audio")
+			.filter(withUrl);
 
-		media.forEach(({ block, url }, mediaIndex) => {
+		media.forEach(({ block, index, url }, mediaIndex) => {
 			const type = block.type as "video" | "audio";
 			const mimeType = blockMimeType(block);
 			const title = blockTitle(block);
 			const durationMs = blockDurationMs(block);
-			const previewUrl = blockPreviewUrl(block) ?? pairedPreview?.url;
+			const previewUrl = blockPreviewUrl(block) ?? coverUrl(index);
 			const id = artifactId(
 				groupId,
 				usedIds,
@@ -103,15 +112,14 @@ export function taskArtifacts(
 			});
 		});
 
-		const firstUnpairedImage = media.length > 0 ? 1 : 0;
-		images.slice(firstUnpairedImage).forEach(({ block, url }, imageIndex) => {
+		images.forEach(({ block, url }, imageIndex) => {
 			const mimeType = blockMimeType(block);
 			const title = blockTitle(block);
 			artifacts.push({
 				id: artifactId(
 					groupId,
 					usedIds,
-					images.length - firstUnpairedImage > 1
+					images.length > 1
 						? `image-${imageIndex + 1}`
 						: undefined,
 				),
@@ -124,8 +132,8 @@ export function taskArtifacts(
 		});
 
 		blocksInGroup
-			.filter((block) => block.type === "text")
-			.forEach((block, textIndex, texts) => {
+			.filter(({ block }) => block.type === "text")
+			.forEach(({ block }, textIndex, texts) => {
 				const textExcerpt = blockText(block);
 				if (!textExcerpt) return;
 				const title = blockTitle(block);

@@ -4,6 +4,7 @@ import { hasPermission } from "../permissions.js";
 import { authzDenied, requireValidId, useAuth } from "../lib/middleware.js";
 import {
   createPublicAssetUploadPlan,
+  isPublicAssetPurpose,
   PublicAssetConfigError,
   PublicAssetValidationError,
   type CreatePublicAssetUploadInput,
@@ -21,7 +22,7 @@ router.post("/uploads", async (c) => {
   if (user instanceof Response) return user;
   const body = await c.req.json<CreatePublicAssetUploadInput>().catch(() => null);
   if (!body || typeof body !== "object") return c.json({ message: "invalid body" }, 400);
-  if (body.purpose !== "user_avatar" && body.purpose !== "space_avatar" && body.purpose !== "chat_attachment" && body.purpose !== "app_source") {
+  if (!isPublicAssetPurpose(body.purpose)) {
     return c.json({ message: "invalid public asset purpose" }, 400);
   }
   if (body.uploadProtocol !== "presigned_put_v1") {
@@ -36,7 +37,7 @@ router.post("/uploads", async (c) => {
     if (body.purpose === "app_source" && !body.sessionId) return c.json({ message: "sessionId is required" }, 400);
   }
 
-  // chat_attachment is user-scoped: authenticated is enough.
+  // chat_attachment and generation_input are user-scoped: authenticated is enough.
   // Optional spaceId/sessionId are association hints only and do not gate upload.
 
   try {

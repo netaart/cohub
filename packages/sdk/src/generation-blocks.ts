@@ -141,3 +141,59 @@ export function blockPreviewUrl(block: Record<string, unknown>): string | undefi
 			block.previewUrl,
 	);
 }
+
+/**
+ * Image roles that depict playable media, by the media types they may cover;
+ * `last_frame` stays a result of its own.
+ */
+const COVER_ROLES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["first_frame", new Set(["video"])],
+	["cover", new Set(["video", "audio"])],
+	["poster", new Set(["video", "audio"])],
+	["thumbnail", new Set(["video", "audio"])],
+]);
+
+function isPlayable(block: Record<string, unknown>) {
+	return block.type === "video" || block.type === "audio";
+}
+
+/**
+ * Pair playable media with its cover image, returning media index → cover
+ * index. An image sharing the provider id wins (music tracks and their art,
+ * shared by every media of that id); otherwise cover-role images pair in
+ * order with remaining media their role fits (a video and its `first_frame`).
+ * Covers need a remote URL, so an inline image is never folded away.
+ */
+export function generationCovers(
+	blocks: readonly Record<string, unknown>[],
+): Map<number, number> {
+	const covers = new Map<number, number>();
+	// A `last_frame` is a result even when it shares the media's provider id.
+	const isCover = (block: Record<string, unknown>) =>
+		block.type === "image" &&
+		blockUrl(block) !== undefined &&
+		blockMeta(block)?.role !== "last_frame";
+
+	blocks.forEach((block, index) => {
+		const id = blockIdentity(block);
+		if (!isPlayable(block) || id === undefined) return;
+		const cover = blocks.findIndex(
+			(candidate) => isCover(candidate) && blockIdentity(candidate) === id,
+		);
+		if (cover >= 0) covers.set(index, cover);
+	});
+
+	const paired = new Set(covers.values());
+	const roleCovers = blocks.flatMap((block, index) => {
+		const role = blockMeta(block)?.role;
+		const types = typeof role === "string" ? COVER_ROLES.get(role) : undefined;
+		return isCover(block) && !paired.has(index) && types ? [{ index, types }] : [];
+	});
+	blocks.forEach((block, index) => {
+		if (!isPlayable(block) || covers.has(index)) return;
+		const at = roleCovers.findIndex(({ types }) => types.has(String(block.type)));
+		const [cover] = at < 0 ? [] : roleCovers.splice(at, 1);
+		if (cover) covers.set(index, cover.index);
+	});
+	return covers;
+}

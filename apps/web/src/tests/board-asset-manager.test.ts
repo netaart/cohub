@@ -28,6 +28,22 @@ function videoItem(id: string, path: string, mtimeMs?: number): BoardItem {
 	};
 }
 
+function taskItem(artifact: Record<string, unknown>): BoardItem {
+	return {
+		id: "task",
+		type: "task",
+		taskRunId: "run",
+		snapshot: {
+			taskType: "generation",
+			status: "completed",
+			title: "Task",
+			artifactCount: 1,
+			artifacts: [{ id: "a", ...artifact }],
+		},
+		frame: { x: 0, y: 0, width: 160, height: 160, rotation: 0 },
+	} as BoardItem;
+}
+
 /** Build a manager backed by fake textures, a controllable clock, and load/unload spies. */
 function harness(budget: { maxCount: number; maxBytes: number }) {
 	let clock = 0;
@@ -64,6 +80,28 @@ function harness(budget: { maxCount: number; maxBytes: number }) {
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("task cards render bounded CDN stills before decoding video", () => {
+	const oss = "https://router-files.neta.art/files/a";
+	assert.equal(
+		boardAssetKey(taskItem({ type: "image", url: `${oss}/out.png` })),
+		`url:${oss}/out.png?x-oss-process=image/resize,m_lfit,w_1536,h_1536/quality,q_82/format,webp`,
+	);
+	assert.equal(
+		boardAssetKey(taskItem({ type: "video", url: `${oss}/clip.mp4` })),
+		`url:${oss}/clip.mp4?x-oss-process=video/snapshot,t_0,f_jpg,w_768,m_fast`,
+	);
+	assert.equal(
+		boardAssetKey(
+			taskItem({ type: "video", url: "https://cdn.example.com/clip.mp4" }),
+		),
+		`video-url:${encodeURIComponent("https://cdn.example.com/clip.mp4")}`,
+	);
+	assert.equal(
+		boardAssetKey(taskItem({ type: "audio", url: `${oss}/song.m4a` })),
+		null,
+	);
+});
 
 test("video preview keys are shared by path and invalidated by file version", () => {
 	const first = boardAssetKey(videoItem("a", "media/demo: 1.mp4", 100));

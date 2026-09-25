@@ -5,6 +5,7 @@ import type {
 	SessionForkRecord,
 	SessionTurnRecord,
 } from "@cohub/protocol/model";
+import { sanitizeTaskRunForList } from "@cohub/protocol/task";
 import type {
 	LabelAssignmentListItem,
 	LabelAssignmentPageInfo,
@@ -19,7 +20,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 17;
+export const DB_VERSION = 18;
 
 export type SessionListForkRecord = Partial<SessionForkRecord> & {
 	childSessionId: string;
@@ -573,6 +574,31 @@ function createStore(
 	for (const index of indexes) store.createIndex(index.name, index.keyPath);
 }
 
+/**
+ * Summaries cached before list views dropped inline generation media can hold
+ * megabytes each. Slim them in place so the first screen keeps its cache.
+ */
+function slimTaskRunSummaries(transaction: IDBTransaction | null) {
+	const cursorRequest = transaction
+		?.objectStore("task_run_summaries")
+		.openCursor();
+	if (!cursorRequest) return;
+	cursorRequest.onsuccess = () => {
+		const cursor = cursorRequest.result;
+		if (!cursor) return;
+		// One malformed record must not abort the upgrade transaction.
+		try {
+			const record = cursor.value as TaskRunSummaryCacheRecord | undefined;
+			const run = record?.run && sanitizeTaskRunForList(record.run);
+			if (record && run && run !== record.run)
+				cursor.update({ ...record, run });
+		} catch (error) {
+			console.warn("[cache] skipped a task run summary while slimming", error);
+		}
+		cursor.continue();
+	};
+}
+
 export async function openCacheDb(): Promise<IDBDatabase | null> {
 	if (!isBrowser()) return null;
 	// Hot path: already open. Avoid re-entering timeout races on every idb op.
@@ -622,8 +648,15 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 		};
 		request.onupgradeneeded = (event) => {
 			const db = request.result;
+			const { oldVersion } = event as IDBVersionChangeEvent;
 			if (
-				(event as IDBVersionChangeEvent).oldVersion < 15 &&
+				oldVersion < 18 &&
+				db.objectStoreNames.contains("task_run_summaries")
+			) {
+				slimTaskRunSummaries(request.transaction);
+			}
+			if (
+				oldVersion < 15 &&
 				db.objectStoreNames.contains("board_pending_txs")
 			) {
 				// Pending records used the removed raw operation shape. With no live

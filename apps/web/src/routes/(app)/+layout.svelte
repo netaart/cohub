@@ -11,6 +11,7 @@ import DragGhostLayer from "$lib/components/DragGhostLayer.svelte";
 import HelpPanel from "$lib/components/HelpPanel.svelte";
 import MediaLightbox from "$lib/components/MediaLightbox.svelte";
 import MobileSidebarDrawer from "$lib/components/MobileSidebarDrawer.svelte";
+import { mediaLightbox } from "$lib/components/media-lightbox";
 import Sidebar from "$lib/components/Sidebar.svelte";
 import TurnNotificationStack from "$lib/components/TurnNotificationStack.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
@@ -231,8 +232,8 @@ function findTrackedTouch(touches: TouchList) {
 function handleTouchStart(e: TouchEvent) {
 	if (window.innerWidth >= DESKTOP_SHELL_MIN_WIDTH_PX || activeTouchId !== null)
 		return;
-	// A resource drag owns the pointer; the drawer must not also swipe.
-	if (pointerDrag.active) return;
+	// A resource drag or the lightbox owns the pointer; drawers must not swipe.
+	if (pointerDrag.active || mediaLightbox.open) return;
 	const touch = e.changedTouches[0];
 	if (!touch) return;
 

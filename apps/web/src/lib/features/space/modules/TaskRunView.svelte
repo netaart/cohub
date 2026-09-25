@@ -1,11 +1,14 @@
 <script lang="ts">
 import type { TaskRunRecord, UserProfile } from "@neta-art/cohub";
+import { mediaPreviewCandidates } from "@neta-art/cohub/media";
 import { Check, Copy, GitCommitHorizontal } from "lucide-svelte";
 import { onDestroy } from "svelte";
 import { goto } from "$app/navigation";
 import AudioPlayer from "$lib/components/AudioPlayer.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
+import MediaImage from "$lib/components/MediaImage.svelte";
 import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
+import { mediaLightbox } from "$lib/components/media-lightbox";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import {
 	buildSpaceCheckpointRoute,
@@ -59,6 +62,23 @@ let {
 }: Props = $props();
 
 const locale = $derived(getLocale());
+
+/** Output stills fill a 60vh column; the largest variant covers it on any screen (video frames cap themselves). */
+const OUTPUT_PREVIEW_SIZE = 1536;
+
+/** Opens the run's image outputs as one gallery, starting at `start`. */
+function openOutputImage(blocks: Record<string, unknown>[], start: number) {
+	const images = blocks.flatMap((block, index) => {
+		const src = block.type === "image" ? generationBlockSource(block) : null;
+		if (!src) return [];
+		const alt = generationBlockLabel(block, index);
+		return [{ index, item: { type: "image" as const, src, alt } }];
+	});
+	mediaLightbox.show(
+		images.map(({ item }) => item),
+		images.findIndex(({ index }) => index === start),
+	);
+}
 
 const taskDetail = createTaskRunDetailController({
 	getSpaceId: () => spaceId,
@@ -286,9 +306,16 @@ function userTitle(
 											{#if blockText !== null}
 												<div class="whitespace-pre-wrap break-words text-[13px] leading-6 text-text-secondary">{blockText}</div>
 											{:else if block.type === "image" && blockSrc}
-												<img src={blockSrc} alt={generationBlockLabel(block, index)} class="max-h-[60vh] w-full rounded-[6px] object-contain" loading="lazy" />
+												<button type="button" class="block w-full cursor-zoom-in" onclick={() => openOutputImage(generationBlocks, index)}>
+													<MediaImage
+														candidates={mediaPreviewCandidates({ type: "image", url: blockSrc }, { size: OUTPUT_PREVIEW_SIZE })}
+														alt={generationBlockLabel(block, index)}
+														class="max-h-[60vh] w-full rounded-[6px] object-contain"
+													/>
+												</button>
 											{:else if block.type === "video" && blockSrc}
-												<video src={blockSrc} controls class="max-h-[60vh] w-full rounded-[6px]"><track kind="captions" label={m.track_generated_video({}, { locale })} /></video>
+												{@const [poster] = mediaPreviewCandidates({ type: "video", url: blockSrc }, { size: OUTPUT_PREVIEW_SIZE })}
+												<video src={blockSrc} {poster} controls preload={poster ? "none" : "metadata"} class="max-h-[60vh] w-full rounded-[6px]"><track kind="captions" label={m.track_generated_video({}, { locale })} /></video>
 											{:else if block.type === "audio" && blockSrc}
 												<AudioPlayer
 													src={blockSrc}

@@ -1,10 +1,11 @@
 import {
 	type BoardItem,
+	type BoardTaskArtifact,
 	boardImageKeySource,
 	featuredTaskArtifact,
 	imageAssetKey,
-	taskArtifactPreviewUrl,
 } from "@neta-art/cohub/board";
+import { mediaPreviewCandidates } from "@neta-art/cohub/media";
 import type { Texture } from "pixi.js";
 import {
 	DEFAULT_LRU_BUDGET,
@@ -30,15 +31,28 @@ type BoardAssetSource = {
 	value: string;
 };
 
+/** Long edge of task textures: 3× the default 480 card, and bounded GPU memory. */
+const TASK_TEXTURE_SIZE = 1536;
+
+/**
+ * A task card renders a bounded still: its cover or a CDN variant/snapshot.
+ * Decoding the video itself is the last resort for hosts without processing.
+ * This deliberately differs from the SDK's `taskArtifactPreviewUrl`, which
+ * names the original for renderers without a texture budget (export, headless).
+ */
+function taskPreviewKey(artifact: BoardTaskArtifact | undefined) {
+	if (!artifact || artifact.type === "text") return null;
+	const [still] = mediaPreviewCandidates(artifact, { size: TASK_TEXTURE_SIZE });
+	if (still) return `url:${still}`;
+	return artifact.type === "video"
+		? `video-url:${encodeURIComponent(artifact.url)}`
+		: null;
+}
+
 /** Stable preview key shared by cards that reference the same file version. */
 export function boardAssetKey(item: BoardItem): string | null {
 	if (item.type === "task") {
-		const artifact = featuredTaskArtifact(item.snapshot.artifacts);
-		if (artifact?.type === "video" && !artifact.previewUrl) {
-			return `video-url:${encodeURIComponent(artifact.url)}`;
-		}
-		const previewUrl = taskArtifactPreviewUrl(artifact);
-		return previewUrl ? `url:${previewUrl}` : null;
+		return taskPreviewKey(featuredTaskArtifact(item.snapshot.artifacts));
 	}
 	if (item.type === "video") {
 		const path = encodeURIComponent(item.ref.path);

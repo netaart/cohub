@@ -301,6 +301,7 @@ function openComposerImagePreview(attachment: ComposerImageAttachment) {
 			src: item.previewUrl,
 			type: "image" as const,
 			alt: item.name,
+			filename: item.name,
 		})),
 		index,
 	);

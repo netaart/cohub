@@ -22,10 +22,7 @@ const packagesRoot = resolvePath(here, "..", "..", "..", "packages");
  * it to an unbuilt `dist`.
  */
 const PACKAGE_SOURCES = [
-	[
-		"@neta-art/cohub/space-picker",
-		`${packagesRoot}/sdk/src/space-picker.ts`,
-	],
+	["@neta-art/cohub/space-picker", `${packagesRoot}/sdk/src/space-picker.ts`],
 	[
 		"@neta-art/cohub/board/headless",
 		`${packagesRoot}/sdk/src/board/headless/index.ts`,
@@ -56,6 +53,7 @@ const PACKAGE_SOURCES = [
 		"@cohub/protocol/desktop-command",
 		`${packagesRoot}/protocol/src/desktop-command.ts`,
 	],
+	["@cohub/protocol/task", `${packagesRoot}/protocol/src/task/index.ts`],
 	["@cohub/protocol", `${packagesRoot}/protocol/src/index.ts`],
 ];
 

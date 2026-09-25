@@ -28,6 +28,7 @@ export default defineConfig([
       "voice-input": "src/voice-input.ts",
       debugger: "src/debugger.ts",
       "space-picker": "src/space-picker.ts",
+      media: "src/media.ts",
     },
     clean: true,
     outputOptions: {

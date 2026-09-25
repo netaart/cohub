@@ -7,8 +7,11 @@ import {
 	type TaskRunRecord,
 } from "@neta-art/cohub";
 import { taskRunToBoardTaskSnapshot } from "@neta-art/cohub/board";
+import { SvelteSet } from "svelte/reactivity";
+import { inScrollView } from "$lib/actions/in-scroll-view";
 import { type MediaItem, mediaLightbox } from "$lib/components/media-lightbox";
 import { setCohubResourceDragData } from "$lib/drag/cohub-resource-drag";
+import { screenVariantSize } from "$lib/media/media-info";
 import GenerationTile from "./GenerationTile.svelte";
 import { resolveGenerationOutputSource } from "./generation-feed.svelte";
 
@@ -29,14 +32,16 @@ const {
 	onOpenTask,
 }: Props = $props();
 
+const MIN_TILE_PX = 88;
+const GAP_PX = 4;
+/** Rows per virtualized chunk; offscreen chunks keep only their height. */
+const CHUNK_ROWS = 6;
+
 type GridItem = {
 	key: string;
 	task: GenerationTaskView;
 	output: GenerationTaskOutput | null;
 };
-
-let openingKey = $state<string | null>(null);
-let audio = $state<{ key: string; src: string } | null>(null);
 
 const items = $derived.by(() =>
 	tasks.flatMap((task): GridItem[] => {
@@ -49,68 +54,81 @@ const items = $derived.by(() =>
 	}),
 );
 
-function lightboxItem(item: GridItem, src: string): MediaItem {
+type MediaGridItem = GridItem & {
+	output: GenerationTaskOutput & { type: MediaItem["type"] };
+};
+
+function isMedia(item: GridItem): item is MediaGridItem {
+	const type = item.output?.type;
+	return type === "image" || type === "video" || type === "audio";
+}
+
+/** Inline payloads live on the run; deferred ones need the run detail. */
+function resolveSource({ task, output }: MediaGridItem) {
+	const inline = generationOutputSource(
+		resolveRun(task.id)?.result,
+		output.index,
+	);
+	if (inline || !output.deferred) return Promise.resolve(inline);
+	return resolveGenerationOutputSource(task.id, output.index);
+}
+
+function mediaItem(item: MediaGridItem): MediaItem {
+	const { task, output } = item;
 	return {
-		src,
-		type: item.output?.type === "video" ? "video" : "image",
-		alt: item.task.prompt ?? undefined,
-		poster: item.output?.previewUrl ?? undefined,
+		type: output.type,
+		src: output.url ?? undefined,
+		resolve: output.url ? undefined : () => resolveSource(item),
+		alt: output.title ?? task.prompt ?? undefined,
+		poster: output.previewUrl ?? undefined,
+		title: task.prompt ?? undefined,
+		subtitle: task.model ?? undefined,
+		mimeType: output.mimeType ?? undefined,
+		width: output.width ?? undefined,
+		height: output.height ?? undefined,
+		onDetails: () => onOpenTask(task.id),
 	};
 }
 
-async function resolveSource(item: GridItem) {
-	const output = item.output;
-	if (!output) return null;
-	if (output.url) return output.url;
-	const inline = generationOutputSource(
-		resolveRun(item.task.id)?.result,
-		output.index,
-	);
-	if (inline || !output.deferred) return inline;
-	openingKey = item.key;
-	try {
-		return await resolveGenerationOutputSource(item.task.id, output.index);
-	} catch {
-		return null;
-	} finally {
-		if (openingKey === item.key) openingKey = null;
-	}
-}
-
-async function activate(item: GridItem) {
-	const output = item.output;
-	if (!output || output.type === "text") {
+/** Media opens in one gallery that follows the grid order and filter. */
+function activate(item: GridItem) {
+	if (!isMedia(item)) {
 		onOpenTask(item.task.id);
 		return;
 	}
-	if (output.type === "audio") {
-		if (audio?.key === item.key) return;
-		const src = await resolveSource(item);
-		if (src) audio = { key: item.key, src };
-		else onOpenTask(item.task.id);
-		return;
-	}
-	if (!output.url) {
-		const src = await resolveSource(item);
-		if (src) mediaLightbox.show(lightboxItem(item, src));
-		else onOpenTask(item.task.id);
-		return;
-	}
-	const visual = items.filter(
-		(candidate) =>
-			(candidate.output?.type === "image" ||
-				candidate.output?.type === "video") &&
-			candidate.output.url,
+	const gallery = items.filter(isMedia);
+	mediaLightbox.show(gallery.map(mediaItem), gallery.indexOf(item));
+}
+
+// Geometry mirrors `repeat(auto-fill, minmax(88px, 1fr))`, so a placeholder
+// chunk is exactly as tall as the tiles it stands in for.
+let width = $state(0);
+const columns = $derived(
+	Math.max(1, Math.floor((width + GAP_PX) / (MIN_TILE_PX + GAP_PX))),
+);
+const tilePx = $derived(
+	width > 0 ? (width - GAP_PX * (columns - 1)) / columns : MIN_TILE_PX,
+);
+const previewSize = $derived(screenVariantSize(tilePx));
+const chunks = $derived.by(() => {
+	const size = columns * CHUNK_ROWS;
+	return Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
+		items.slice(index * size, (index + 1) * size),
 	);
-	mediaLightbox.show(
-		visual.map((candidate) =>
-			lightboxItem(candidate, candidate.output?.url as string),
-		),
-		Math.max(
-			0,
-			visual.findIndex((candidate) => candidate.key === item.key),
-		),
-	);
+});
+// Two chunks cover a tall panel on first paint, before the observer reports.
+const visibleChunks = new SvelteSet<number>([0, 1]);
+
+function chunkHeight(count: number) {
+	const rows = Math.ceil(count / columns);
+	return rows * tilePx + (rows - 1) * GAP_PX;
+}
+
+function trackChunk(index: number) {
+	return (visible: boolean) => {
+		if (visible) visibleChunks.add(index);
+		else visibleChunks.delete(index);
+	};
 }
 
 function dragStart(event: DragEvent, item: GridItem) {
@@ -141,19 +159,27 @@ function dragStart(event: DragEvent, item: GridItem) {
 </script>
 
 {#if items.length > 0}
-	<div class="generation-grid">
-		{#each items as item (item.key)}
-			<GenerationTile
-				task={item.task}
-				output={item.output}
-				{draggable}
-				opening={openingKey === item.key}
-				audioSrc={audio?.key === item.key ? audio.src : null}
-				onActivate={() => void activate(item)}
-				onOpenTask={() => onOpenTask(item.task.id)}
-				onCloseAudio={() => (audio = null)}
-				onDragStart={(event) => dragStart(event, item)}
-			/>
+	<div class="flex flex-col gap-1" bind:clientWidth={width}>
+		{#each chunks as chunk, index (index)}
+			<div
+				class="generation-grid"
+				style:height={visibleChunks.has(index) ? undefined : `${chunkHeight(chunk.length)}px`}
+				use:inScrollView={trackChunk(index)}
+			>
+				{#if visibleChunks.has(index)}
+					{#each chunk as item (item.key)}
+						<GenerationTile
+							task={item.task}
+							output={item.output}
+							{previewSize}
+							{draggable}
+							onActivate={() => activate(item)}
+							onOpenTask={() => onOpenTask(item.task.id)}
+							onDragStart={(event) => dragStart(event, item)}
+						/>
+					{/each}
+				{/if}
+			</div>
 		{/each}
 	</div>
 {/if}

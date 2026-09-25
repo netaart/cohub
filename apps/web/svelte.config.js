@@ -43,6 +43,7 @@ const config = {
 			// sdk subpaths
 			"@neta-art/cohub/debugger": `${sdkDir}/debugger.ts`,
 			"@neta-art/cohub/http": `${sdkDir}/http.ts`,
+			"@neta-art/cohub/media": `${sdkDir}/media.ts`,
 			"@neta-art/cohub/websocket": `${sdkDir}/websocket.ts`,
 			// Board subpaths must precede the SDK wildcard alias.
 			"@neta-art/cohub/board/render": `${sdkDir}/board/render/index.ts`,

@@ -1,3 +1,4 @@
+import { sanitizeTaskRunForList } from "@cohub/protocol/task";
 import type { TaskRunRecord } from "@neta-art/cohub";
 import {
 	idbDelete,
@@ -47,7 +48,8 @@ function toSummaryRecord(
 		taskRunId: run.id,
 		taskType: run.taskType,
 		status: run.status,
-		run,
+		// Summaries back list views, which never carry inline media.
+		run: sanitizeTaskRunForList(run),
 		updatedAt: Date.parse(run.updatedAt ?? "") || timestamp,
 		lastAccessedAt: timestamp,
 	};

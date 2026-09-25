@@ -92,6 +92,77 @@ test("folds a cover image into media sharing its provider id", () => {
 	assert.equal(view.outputs[0]?.durationMs, 30_000);
 });
 
+test("folds cover-role frames into videos in order, keeping last frames", () => {
+	const url = (name: string) => `https://cdn.example.com/${name}`;
+	const view = toGenerationTaskView(
+		taskRun({
+			result: {
+				output: [
+					{ type: "video", source: { url: url("a.mp4") } },
+					{ type: "video", source: { url: url("b.mp4") } },
+					{ type: "image", meta: { role: "first_frame" }, source: { url: url("a.webp") } },
+					{ type: "image", meta: { role: "first_frame" }, source: { url: url("b.webp") } },
+					{ type: "image", meta: { role: "last_frame" }, source: { url: url("end.webp") } },
+					{ type: "image", meta: { role: "cover" }, source: { data: "AAAA" } },
+				],
+			},
+		}),
+	);
+	assert.deepEqual(
+		view.outputs.map((output) => [output.index, output.type, output.previewUrl]),
+		[
+			[0, "video", url("a.webp")],
+			[1, "video", url("b.webp")],
+			[4, "image", null],
+			[5, "image", null],
+		],
+	);
+});
+
+test("keeps a last frame that shares the video's provider id", () => {
+	const url = (name: string) => `https://cdn.example.com/${name}`;
+	const view = toGenerationTaskView(
+		taskRun({
+			result: {
+				output: [
+					{ type: "video", meta: { id: "t1" }, source: { url: url("clip.mp4") } },
+					{ type: "image", meta: { id: "t1", role: "last_frame" }, source: { url: url("last.webp") } },
+					{ type: "image", meta: { id: "t1", role: "first_frame" }, source: { url: url("first.webp") } },
+				],
+			},
+		}),
+	);
+	assert.deepEqual(
+		view.outputs.map((output) => [output.index, output.type, output.previewUrl]),
+		[
+			[0, "video", url("first.webp")],
+			[1, "image", null],
+		],
+	);
+});
+
+test("never gives a video frame to audio listed before the video", () => {
+	const frame = "https://cdn.example.com/first.webp";
+	const view = toGenerationTaskView(
+		taskRun({
+			result: {
+				output: [
+					{ type: "audio", source: { url: "https://cdn.example.com/song.mp3" } },
+					{ type: "video", source: { url: "https://cdn.example.com/clip.mp4" } },
+					{ type: "image", meta: { role: "first_frame" }, source: { url: frame } },
+				],
+			},
+		}),
+	);
+	assert.deepEqual(
+		view.outputs.map((output) => [output.type, output.previewUrl]),
+		[
+			["audio", null],
+			["video", frame],
+		],
+	);
+});
+
 test("resolves remote and inline output sources", () => {
 	const result = {
 		output: [

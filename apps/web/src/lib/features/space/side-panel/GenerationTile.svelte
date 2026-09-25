@@ -1,51 +1,48 @@
 <script lang="ts">
 import type { GenerationTaskOutput, GenerationTaskView } from "@neta-art/cohub";
 import {
+	type MediaInfo,
+	type MediaVariantSize,
+	mediaPreviewCandidates,
+} from "@neta-art/cohub/media";
+import {
 	AlertCircle,
 	AudioLines,
 	FileText,
 	Film,
 	Image as ImageIcon,
 	Info,
-	Loader2,
 	Play,
-	X,
 } from "lucide-svelte";
-import { nearViewport } from "$lib/actions/near-viewport";
-import AudioPlayer from "$lib/components/AudioPlayer.svelte";
+import { clock } from "$lib/clock.svelte";
+import MediaImage from "$lib/components/MediaImage.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { cachedMediaInfo, loadMediaInfo } from "$lib/media/media-info";
 import { m } from "$lib/paraglide/messages.js";
 import { formatElapsed } from "./side-panel-data";
 
 type Props = {
 	task: GenerationTaskView;
 	output: GenerationTaskOutput | null;
-	opening: boolean;
-	/** Set while this audio output plays inline. */
-	audioSrc: string | null;
+	/** Preview variant for this tile's rendered size. */
+	previewSize: MediaVariantSize;
 	draggable: boolean;
 	onActivate: () => void;
 	onOpenTask: () => void;
-	onCloseAudio: () => void;
 	onDragStart: (event: DragEvent) => void;
 };
 
 const {
 	task,
 	output,
-	opening,
-	audioSrc,
+	previewSize,
 	draggable,
 	onActivate,
 	onOpenTask,
-	onCloseAudio,
 	onDragStart,
 }: Props = $props();
 
 const locale = $derived(getLocale());
-const ELAPSED_TICK_MS = 1_000;
-let videoVisible = $state(false);
-let now = $state(Date.now());
 
 const tileKind = $derived(
 	output ? "output" : task.status === "failed" ? "failed" : "active",
@@ -55,17 +52,10 @@ const statusLabel = $derived(
 		? m.generation_status_queued({}, { locale })
 		: m.generation_status_running({}, { locale }),
 );
-$effect(() => {
-	if (tileKind !== "active") return;
-	now = Date.now();
-	const timer = setInterval(() => {
-		now = Date.now();
-	}, ELAPSED_TICK_MS);
-	return () => clearInterval(timer);
-});
 const elapsed = $derived.by(() => {
+	if (tileKind !== "active") return "";
 	const startedAt = Date.parse(task.startedAt ?? task.createdAt);
-	return Number.isFinite(startedAt) ? formatElapsed(now - startedAt) : "";
+	return Number.isFinite(startedAt) ? formatElapsed(clock.now - startedAt) : "";
 });
 const label = $derived([task.prompt, task.model].filter(Boolean).join(" · "));
 const audioName = $derived(output?.title || label);
@@ -76,120 +66,102 @@ const surfaceLabel = $derived(
 			: m.generation_play_audio({}, { locale })
 		: label || statusLabel,
 );
-const thumbnail = $derived(
-	output?.type === "image" ? output.url : (output?.previewUrl ?? null),
+
+// Tiles mount only near the viewport, so probing here stays bounded.
+const videoUrl = $derived(output?.type === "video" ? output.url : null);
+let probed = $state<MediaInfo | undefined>();
+$effect(() => {
+	const url = videoUrl;
+	const cached = url ? cachedMediaInfo(url) : undefined;
+	probed = cached;
+	if (!url || cached) return;
+	let live = true;
+	void loadMediaInfo(url, "video").then((info) => {
+		if (live) probed = info;
+	});
+	return () => {
+		live = false;
+	};
+});
+const candidates = $derived(
+	output && output.type !== "text"
+		? mediaPreviewCandidates(
+				{ type: output.type, url: output.url, previewUrl: output.previewUrl },
+				{ size: previewSize, fit: "cover" },
+				probed,
+			)
+		: [],
 );
+const durationMs = $derived(output?.durationMs ?? probed?.durationMs);
 </script>
 
-{#if tileKind === "output" && output?.type === "audio" && audioSrc}
-	<div class="relative col-span-full min-w-0">
-		<AudioPlayer
-			src={audioSrc}
-			title={output.title ?? task.prompt}
-			subtitle={task.model}
-		/>
-		<button
-			type="button"
-			class="tile-action audio-close"
-			title={m.common_close({}, { locale })}
-			aria-label={m.common_close({}, { locale })}
-			onclick={onCloseAudio}
-		>
-			<X class="h-3 w-3" />
-		</button>
-	</div>
-{:else}
-	<div class="tile group" class:tile--failed={tileKind === "failed"}>
-		<button
-			type="button"
-			class="tile-surface"
-			title={tileKind === "failed" ? (task.errorMessage ?? label) : label}
-			aria-label={surfaceLabel}
-			draggable={draggable && tileKind === "output"}
-			ondragstart={onDragStart}
-			onclick={tileKind === "output" ? onActivate : onOpenTask}
-		>
-			{#if tileKind === "active"}
-				<span class="tile-placeholder">
-					<span class="line-clamp-2 text-[11px] leading-4 text-text-tertiary">{task.prompt ?? task.model ?? ""}</span>
-					<span class="mt-auto flex items-center gap-1.5 text-[10px] leading-4 text-text-secondary">
-						<span class="status-dot" class:status-dot--running={task.status === "running"}></span>
-						<span class="truncate">{statusLabel}</span>
+<div class="tile group" class:tile--failed={tileKind === "failed"}>
+	<button
+		type="button"
+		class="tile-surface"
+		title={tileKind === "failed" ? (task.errorMessage ?? label) : label}
+		aria-label={surfaceLabel}
+		draggable={draggable && tileKind === "output"}
+		ondragstart={onDragStart}
+		onclick={tileKind === "output" ? onActivate : onOpenTask}
+	>
+		{#if tileKind === "active"}
+			<span class="tile-placeholder">
+				<span class="line-clamp-2 text-[11px] leading-4 text-text-tertiary">{task.prompt ?? task.model ?? ""}</span>
+				<span class="mt-auto flex items-center gap-1.5 text-[10px] leading-4 text-text-secondary">
+					<span class="status-dot" class:status-dot--running={task.status === "running"}></span>
+					<span class="truncate">{statusLabel}</span>
+				</span>
+				<span class="font-mono text-[10px] leading-4 tabular-nums text-text-placeholder">{elapsed}</span>
+				{#if task.status === "running"}
+					<span class="progress-track" aria-hidden="true"><span class="progress-bar"></span></span>
+				{/if}
+			</span>
+		{:else if tileKind === "failed"}
+			<span class="tile-placeholder">
+				<span class="flex items-center gap-1 text-[10px] font-medium text-error-soft">
+					<AlertCircle class="h-3 w-3 shrink-0" />
+					{m.generation_status_failed({}, { locale })}
+				</span>
+				<span class="mt-1 line-clamp-3 text-[11px] leading-4 text-text-tertiary">{task.prompt ?? task.errorMessage ?? ""}</span>
+			</span>
+		{:else if output?.type === "text"}
+			<span class="tile-placeholder">
+				<FileText class="h-3.5 w-3.5 shrink-0 text-text-placeholder" />
+				<span class="mt-1 line-clamp-4 text-[11px] leading-4 text-text-secondary">{output.text}</span>
+			</span>
+		{:else}
+			<MediaImage {candidates} alt={task.prompt ?? ""} class="tile-media">
+				{#snippet fallback()}
+					<span class="tile-placeholder items-center justify-center text-text-placeholder">
+						{#if output?.type === "audio"}
+							<AudioLines class="h-5 w-5" />
+						{:else if output?.type === "video"}
+							<Film class="h-5 w-5" />
+						{:else}
+							<ImageIcon class="h-5 w-5" />
+						{/if}
 					</span>
-					<span class="font-mono text-[10px] leading-4 tabular-nums text-text-placeholder">{elapsed}</span>
-					{#if task.status === "running"}
-						<span class="progress-track" aria-hidden="true"><span class="progress-bar"></span></span>
-					{/if}
-				</span>
-			{:else if tileKind === "failed"}
-				<span class="tile-placeholder">
-					<span class="flex items-center gap-1 text-[10px] font-medium text-error-soft">
-						<AlertCircle class="h-3 w-3 shrink-0" />
-						{m.generation_status_failed({}, { locale })}
-					</span>
-					<span class="mt-1 line-clamp-3 text-[11px] leading-4 text-text-tertiary">{task.prompt ?? task.errorMessage ?? ""}</span>
-				</span>
-			{:else if output?.type === "text"}
-				<span class="tile-placeholder">
-					<FileText class="h-3.5 w-3.5 shrink-0 text-text-placeholder" />
-					<span class="mt-1 line-clamp-4 text-[11px] leading-4 text-text-secondary">{output.text}</span>
-				</span>
-			{:else if thumbnail}
-				<img
-					src={thumbnail}
-					alt={task.prompt ?? ""}
-					class="tile-media"
-					loading="lazy"
-					decoding="async"
-					draggable="false"
-				/>
-			{:else if output?.type === "video" && output.url}
-				<span class="block h-full w-full" use:nearViewport={() => (videoVisible = true)}>
-					{#if videoVisible}
-						<video
-							src={output.url}
-							class="tile-media"
-							preload="metadata"
-							muted
-							playsinline
-							disablepictureinpicture
-						></video>
-					{/if}
-				</span>
-			{:else}
-				<span class="tile-placeholder items-center justify-center text-text-placeholder">
-					{#if output?.type === "audio"}
-						<AudioLines class="h-5 w-5" />
-					{:else if output?.type === "video"}
-						<Film class="h-5 w-5" />
-					{:else}
-						<ImageIcon class="h-5 w-5" />
-					{/if}
-				</span>
-			{/if}
-
-			{#if output?.type === "video" || output?.type === "audio"}
-				<span class="tile-badge">
-					{#if opening}
-						<Loader2 class="h-3 w-3 animate-spin" />
-					{:else}
-						<Play class="h-3 w-3" />
-					{/if}
-				</span>
-			{:else if opening}
-				<span class="tile-badge"><Loader2 class="h-3 w-3 animate-spin" /></span>
-			{/if}
-		</button>
-
-		{#if tileKind === "output"}
-			<div class="tile-actions">
-				<button type="button" class="tile-action" title={m.generation_task_details({}, { locale })} aria-label={m.generation_task_details({}, { locale })} onclick={onOpenTask}>
-					<Info class="h-3 w-3" />
-				</button>
-			</div>
+				{/snippet}
+			</MediaImage>
 		{/if}
-	</div>
-{/if}
+
+		{#if output?.type === "video" || output?.type === "audio"}
+			<span class="tile-badge"><Play class="h-3 w-3" /></span>
+			{#if durationMs}
+				<span class="tile-duration">{formatElapsed(durationMs)}</span>
+			{/if}
+		{/if}
+	</button>
+
+	{#if tileKind === "output"}
+		<div class="tile-actions">
+			<button type="button" class="tile-action" title={m.generation_task_details({}, { locale })} aria-label={m.generation_task_details({}, { locale })} onclick={onOpenTask}>
+				<Info class="h-3 w-3" />
+			</button>
+		</div>
+	{/if}
+</div>
 
 <style>
 	.tile {
@@ -219,14 +191,14 @@ const thumbnail = $derived(
 		border-radius: 6px;
 	}
 
-	.tile-media {
+	.tile-surface :global(.tile-media) {
 		width: 100%;
 		height: 100%;
 		object-fit: cover;
 		transition: opacity 160ms ease;
 	}
 
-	.tile-surface:hover .tile-media {
+	.tile-surface:hover :global(.tile-media) {
 		opacity: 0.92;
 	}
 
@@ -249,6 +221,21 @@ const thumbnail = $derived(
 		justify-content: center;
 		border-radius: 999px;
 		background: var(--overlay-control-bg);
+		color: var(--overlay-control-text);
+		pointer-events: none;
+	}
+
+	.tile-duration {
+		position: absolute;
+		right: 6px;
+		bottom: 6px;
+		border-radius: 4px;
+		background: var(--overlay-control-bg);
+		padding: 0 4px;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		line-height: 16px;
+		font-variant-numeric: tabular-nums;
 		color: var(--overlay-control-text);
 		pointer-events: none;
 	}
@@ -284,16 +271,6 @@ const thumbnail = $derived(
 		background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
 		color: var(--text-secondary);
 		transition: color 100ms ease, background-color 100ms ease;
-	}
-
-	/* Sits on the corner so it never covers the player's own controls. */
-	.audio-close {
-		position: absolute;
-		top: -6px;
-		right: -6px;
-		border: 1px solid var(--border-subtle);
-		border-radius: 999px;
-		background: var(--bg-primary);
 	}
 
 	.tile-action:hover {
