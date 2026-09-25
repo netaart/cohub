@@ -65,10 +65,15 @@ type Watcher struct {
 	mu        sync.Mutex
 	pending   map[string]Change
 	resync    bool
-	seq       int64
-	timer     *time.Timer
-	ignored   []string
-	closed    chan struct{}
+	// flushing counts batches handed to the handler that have not returned;
+	// discovering counts registration walks whose changes are not queued yet.
+	flushing    int
+	discovering int
+	seq         int64
+	timer       *time.Timer
+	ignored     []string
+	barrier     *syncBarrier
+	closed      chan struct{}
 }
 
 func Start(root string, logger *slog.Logger, handler Handler) (*Watcher, error) {
@@ -94,11 +99,16 @@ func Start(root string, logger *slog.Logger, handler Handler) (*Watcher, error) 
 		if err != nil {
 			return nil, err
 		}
+		if w.barrier, err = newSyncBarrier(w.watcher); err != nil {
+			logger.Warn("file watcher sync barrier unavailable", slog.String("error", err.Error()))
+		}
 	}
 	go w.loop()
 	go w.repairLoop()
 	if backend == nil {
+		w.beginDiscovery()
 		go func() {
+			defer w.endDiscovery()
 			w.addRecursiveBestEffort(w.root)
 			// Ask consumers to refresh changes missed during registration.
 			w.enqueueResync()
@@ -159,6 +169,9 @@ func (w *Watcher) Close() error {
 		} else if w.watcher != nil {
 			w.closeErr = w.watcher.Close()
 		}
+		if w.barrier != nil {
+			w.barrier.close()
+		}
 	})
 	return w.closeErr
 }
@@ -192,6 +205,9 @@ func (w *Watcher) loop() {
 					w.enqueueResync()
 				}
 				return
+			}
+			if w.barrier != nil && w.barrier.observe(event.Name) {
+				continue
 			}
 			w.handleEvent(event)
 		case err, ok := <-w.watcher.Errors:
@@ -365,8 +381,24 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	if discoverSubtree {
 		// Keep the fsnotify loop responsive while a copied or extracted subtree
 		// is scanned. enqueue is synchronized and switches to resync at the cap.
-		go w.discoverAndWatchSubtree(event.Name, w.enqueue)
+		w.beginDiscovery()
+		go func() {
+			defer w.endDiscovery()
+			w.discoverAndWatchSubtree(event.Name, w.enqueue)
+		}()
 	}
+}
+
+func (w *Watcher) beginDiscovery() {
+	w.mu.Lock()
+	w.discovering++
+	w.mu.Unlock()
+}
+
+func (w *Watcher) endDiscovery() {
+	w.mu.Lock()
+	w.discovering--
+	w.mu.Unlock()
 }
 
 // addRecursiveBestEffort registers every visible directory below root and
@@ -550,7 +582,13 @@ func (w *Watcher) flush() {
 	}
 	w.seq++
 	seq := w.seq
+	w.flushing++
 	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		w.flushing--
+		w.mu.Unlock()
+	}()
 
 	sort.Slice(changes, func(i, j int) bool {
 		return changes[i].Path < changes[j].Path

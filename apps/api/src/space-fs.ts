@@ -1,11 +1,10 @@
 
 import { constants, type Stats } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { context, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { createLogger } from "@cohub/infra/logging";
-import { BOARD_EXTENSION, BOARD_MIME_TYPE, INLINE_UPLOAD_MAX_FILE_BYTES, INLINE_UPLOAD_MAX_FILES } from "@cohub/protocol";
 import { getTracer } from "@cohub/infra/tracing/propagator";
 import {
   buildPreparingFile,
@@ -33,7 +32,10 @@ import {
   type SpaceFsUploadTargetVersion,
   type SpaceFsWriteFileInput,
 } from "@cohub/protocol/fs";
-import { isTextMime } from "./space-fs-mime.js";
+import { getMimeType, isTextMime } from "./space-fs-mime.js";
+import { DIRECT_UPLOAD_LIMIT, prepareUploadCandidates } from "./space-fs-upload.js";
+
+export { sanitizeFileName } from "./space-fs-upload.js";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_BATCH_READ_FILES = 50;
@@ -57,86 +59,7 @@ export class SpaceFsError extends Error {
   }
 }
 
-const mimeByExt: Record<string, string> = {
-  ".txt": "text/plain",
-  ".md": "text/markdown",
-  ".markdown": "text/markdown",
-  ".json": "application/json",
-  ".jsonl": "application/x-ndjson",
-  ".csv": "text/csv",
-  [BOARD_EXTENSION]: BOARD_MIME_TYPE,
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".cjs": "text/javascript",
-  ".ts": "text/typescript",
-  ".tsx": "text/tsx",
-  ".jsx": "text/jsx",
-  ".svelte": "text/x-svelte",
-  ".css": "text/css",
-  ".scss": "text/x-scss",
-  ".html": "text/html",
-  ".xml": "application/xml",
-  ".yaml": "application/yaml",
-  ".yml": "application/yaml",
-  ".toml": "application/toml",
-  ".ini": "text/plain",
-  ".env": "text/plain",
-  ".sh": "text/x-shellscript",
-  ".bash": "text/x-shellscript",
-  ".py": "text/x-python",
-  ".go": "text/x-go",
-  ".rs": "text/x-rust",
-  ".java": "text/x-java-source",
-  ".c": "text/x-c",
-  ".h": "text/x-c",
-  ".cpp": "text/x-c++src",
-  ".hpp": "text/x-c++hdr",
-  ".sql": "application/sql",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".avif": "image/avif",
-  ".bmp": "image/bmp",
-  ".ico": "image/x-icon",
-  ".mp4": "video/mp4",
-  ".webm": "video/webm",
-  ".mov": "video/quicktime",
-  ".m4v": "video/x-m4v",
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".ogg": "audio/ogg",
-  ".m4a": "audio/mp4",
-  ".aac": "audio/aac",
-  ".flac": "audio/flac",
-  ".opus": "audio/ogg",
-  ".zip": "application/zip",
-  ".gz": "application/gzip",
-  ".tar": "application/x-tar",
-  ".rar": "application/vnd.rar",
-  ".7z": "application/x-7z-compressed",
-  ".pdf": "application/pdf",
-  ".exe": "application/x-msdownload",
-  ".dmg": "application/x-apple-diskimage",
-  ".deb": "application/vnd.debian.binary-package",
-  ".rpm": "application/x-rpm",
-};
-
-export function getMimeType(path: string) {
-  const lower = basename(path).toLowerCase();
-  if (lower === "dockerfile") return "text/x-dockerfile";
-  if (lower === "makefile") return "text/x-makefile";
-
-  const extMimeType = mimeByExt[extname(lower)];
-  if (extMimeType) return extMimeType;
-
-  if (lower.startsWith(".")) return "text/plain";
-  return null;
-}
-
-export { isTextMime, normalizeMime, resolveReadMimeType } from "./space-fs-mime.js";
+export { getMimeType, isTextMime, normalizeMime, resolveReadMimeType } from "./space-fs-mime.js";
 
 /**
  * Prefer inline UTF-8 for text-like files even when CDN policy would otherwise
@@ -1320,52 +1243,13 @@ export async function moveSpaceNode(spaceId: string, input: SpaceFsMoveInput) {
   return { fromPath: from.relativePath, toPath: to.relativePath, nodeType, createdDirs };
 }
 
-export function sanitizeFileName(name: string): string | null {
-  const cleaned = name
-    .replace(/[<>:"/\\|?*]/g, "")
-    .split("")
-    .filter((c) => c.charCodeAt(0) > 0x1f)
-    .join("")
-    .replace(/^\.+/, "")
-    .trim()
-    .slice(0, 255);
-  return cleaned || null;
-}
-
-type DirectUploadCandidate = { file: File; name: string; relativePath: string };
-
-function prepareDirectUploadCandidates(
-  files: File[],
-  targetDir: string,
-): { candidates: DirectUploadCandidate[]; errors: SpaceFsUploadResponse["errors"] } {
-  const candidates: DirectUploadCandidate[] = [];
-  const errors: SpaceFsUploadResponse["errors"] = [];
-  for (const file of files.slice(0, INLINE_UPLOAD_MAX_FILES)) {
-    const safeName = sanitizeFileName(file.name);
-    if (!safeName) {
-      errors.push({ name: file.name, code: "name_invalid", message: "invalid file name" });
-      continue;
-    }
-    if (file.size > INLINE_UPLOAD_MAX_FILE_BYTES) {
-      errors.push({ name: safeName, code: "file_too_large", message: `file exceeds ${INLINE_UPLOAD_MAX_FILE_BYTES / (1024 * 1024)}MB limit` });
-      continue;
-    }
-    candidates.push({
-      file,
-      name: safeName,
-      relativePath: targetDir ? `${targetDir}/${safeName}` : safeName,
-    });
-  }
-  return { candidates, errors };
-}
-
 export async function uploadSpaceFiles(
   spaceId: string,
   files: File[],
   targetDir: string,
 ): Promise<SpaceFsUploadResponse> {
   const safeTargetDir = targetDir ? assertSafeRelativePath(targetDir, { allowEmpty: true }) : "";
-  const { candidates, errors } = prepareDirectUploadCandidates(files, safeTargetDir);
+  const { candidates, errors } = prepareUploadCandidates(files, safeTargetDir, DIRECT_UPLOAD_LIMIT);
   if (candidates.length === 0) return { uploaded: [], errors, createdDirs: [] };
 
   const { workspaceDir } = await ensureSpaceWorkspaceReady(spaceId);

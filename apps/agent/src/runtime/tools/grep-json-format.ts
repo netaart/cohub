@@ -101,3 +101,53 @@ export function formatRgJsonGrepResult(input: {
 
   return { content: [{ type: "text" as const, text: output }], details: Object.keys(details).length > 0 ? details : undefined };
 }
+
+/**
+ * Accumulates streamed `rg --json` stdout. Formatting always sees every line,
+ * so the tool limit counts matches rather than rg's begin/end/context events.
+ */
+export function createRgJsonGrepCollector(input: { searchPath?: string; limit: number }) {
+  const lines: string[] = [];
+  let pending = "";
+  let matches = 0;
+  const append = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    lines.push(trimmed);
+    if (isRgMatchLine(trimmed)) matches += 1;
+    return true;
+  };
+  return {
+    lines: lines as readonly string[],
+    /** Number of rg match events seen so far. */
+    get matches() {
+      return matches;
+    },
+    /** Returns true when the chunk completed at least one line. */
+    push(chunk: string) {
+      pending += chunk;
+      const complete = pending.split("\n");
+      pending = complete.pop() ?? "";
+      let added = false;
+      for (const line of complete) added = append(line) || added;
+      return added;
+    },
+    /** Flushes a final line that had no trailing newline. */
+    end() {
+      const added = append(pending);
+      pending = "";
+      return added;
+    },
+    format() {
+      return formatRgJsonGrepResult({ lines, searchPath: input.searchPath, limit: input.limit });
+    },
+  };
+}
+
+function isRgMatchLine(line: string) {
+  try {
+    return (JSON.parse(line) as RgJsonEvent).type === "match";
+  } catch {
+    return false;
+  }
+}

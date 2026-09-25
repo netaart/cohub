@@ -31,7 +31,15 @@ import {
   createLocalCrossSpaceLsTool,
   createLocalCrossSpaceReadTool,
 } from "../runtime/tools/local-cross-space-query-tools.js";
-import { formatRgJsonGrepResult } from "../runtime/tools/grep-json-format.js";
+import { createRgJsonGrepCollector, formatRgJsonGrepResult } from "../runtime/tools/grep-json-format.js";
+import {
+  buildRgPlanRuns,
+  chunkArgs,
+  joinSearchPath,
+  onlyVanishedTargets,
+  PROCESS_ARGV_LIMITS,
+  type RgRun,
+} from "../runtime/tools/search-plan.js";
 
 
 import { encodeGenerationPolicy, GENERATION_POLICY_ENV_KEY } from "@cohub/protocol/generation";
@@ -39,7 +47,7 @@ import type { TaskPayload } from "@cohub/protocol/task";
 import { RUN_COMMAND_TASK_TYPE } from "@cohub/core/commands";
 import { enqueueTaskRun } from "@cohub/core/tasks";
 import { COHUB_TASKS_QUEUE, createBullmqQueue } from "@cohub/infra/bullmq";
-import type { RpcMethod, RpcRequestMap } from "@cohub/protocol/sandbox";
+import type { ProcessTermination, RpcMethod, RpcRequestMap } from "@cohub/protocol/sandbox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { wrapToolCall, wrapSandboxRpc, getAgentTracer } from "@cohub/infra/tracing/agent";
 import { createSandboxLifecycleController } from "@cohub/sandbox-controller";
@@ -753,28 +761,181 @@ const FD_FIND_MAX_STDOUT_BYTES = DEFAULT_MAX_BYTES * 8;
 const FD_FIND_MAX_STDERR_BYTES = 8 * 1024;
 const FD_FIND_OUTPUT_LIMIT_MESSAGE = "Find output limit reached. Refine pattern or path.";
 
-function buildFdFindArgv(input: { pattern: string; path: string; limit: number; ignore?: string[] }) {
-  const useFullPath = input.pattern.includes("/");
-  let effectivePattern = input.pattern;
+type StreamedProcessResult = {
+  exitCode: number | null;
+  termination?: ProcessTermination;
+  stderr: string;
+  stdoutLimitReached: boolean;
+};
+
+/**
+ * Runs the sandbox processes of one tool call. Abort handling and the stdout
+ * budget span every process the call starts.
+ */
+class SandboxProcessRunner {
+  aborted = false;
+  private activeProcessId: string | null = null;
+  private readonly abortedProcesses = new Set<string>();
+  private readonly unregisterAborts: Array<() => void> = [];
+  private stdoutBytes = 0;
+
+  constructor(private readonly input: {
+    connection: SandboxConnection;
+    context: ToolRpcContext;
+    toolName: "find" | "grep";
+    toolCallId: string;
+    timeoutSecs: number;
+    maxStdoutBytes: number;
+    maxStderrBytes: number;
+    signal?: AbortSignal;
+  }) {
+    if (input.signal) {
+      if (input.signal.aborted) this.onAbort();
+      else input.signal.addEventListener("abort", this.onAbort, { once: true });
+    }
+  }
+
+  private readonly onAbort = () => {
+    this.aborted = true;
+    if (this.activeProcessId) this.abortProcess(this.activeProcessId);
+  };
+
+  private abortProcess(processId: string) {
+    if (this.abortedProcesses.has(processId)) return;
+    this.abortedProcesses.add(processId);
+    const { context, toolCallId, toolName } = this.input;
+    logger.info(`[Tool:${toolName}] abort requested processId=${processId} turnId=${context.turnId ?? ""} toolCallId=${toolCallId}`);
+    void tracedRpcAbortProcess(this.input.connection, processId, context);
+  }
+
+  async run(argv: string[], onStdout: (chunk: string) => void): Promise<StreamedProcessResult> {
+    const { connection, context, toolCallId, toolName } = this.input;
+    const stderrChunks: string[] = [];
+    let stderrBytes = 0;
+    let stdoutLimitReached = false;
+    try {
+      const result = await tracedRpc(
+        connection,
+        "process.start",
+        { argv, cwd: SANDBOX_WORKSPACE_PATH, timeoutSecs: this.input.timeoutSecs },
+        {
+          context,
+          onEvent: (event) => {
+            if (event.type === "started") {
+              this.activeProcessId = event.processId;
+              logger.info(`[Tool:${toolName}] process started processId=${event.processId} turnId=${context.turnId ?? ""} toolCallId=${toolCallId}`);
+              if (context.turnId) {
+                this.unregisterAborts.push(registerActiveAbortHandle(context.turnId, {
+                  id: `${toolName}:${toolCallId}:${event.processId}`,
+                  kind: "tool",
+                  toolName,
+                  abort: () => this.abortProcess(event.processId),
+                }));
+              }
+              if (this.aborted) this.abortProcess(event.processId);
+              return;
+            }
+            if (event.type === "stdout") {
+              if (stdoutLimitReached) return;
+              this.stdoutBytes += Buffer.byteLength(event.chunk, "utf8");
+              if (this.stdoutBytes > this.input.maxStdoutBytes) {
+                stdoutLimitReached = true;
+                if (this.activeProcessId) this.abortProcess(this.activeProcessId);
+                return;
+              }
+              onStdout(event.chunk);
+              return;
+            }
+            if (event.type === "stderr") {
+              stderrBytes += Buffer.byteLength(event.chunk, "utf8");
+              if (stderrBytes <= this.input.maxStderrBytes) stderrChunks.push(event.chunk);
+            }
+          },
+        },
+      );
+      return { exitCode: result.exitCode, termination: result.termination, stderr: stderrChunks.join(""), stdoutLimitReached };
+    } finally {
+      this.activeProcessId = null;
+    }
+  }
+
+  dispose() {
+    this.input.signal?.removeEventListener("abort", this.onAbort);
+    for (const unregister of this.unregisterAborts) unregister();
+  }
+}
+
+function buildFdFindPattern(pattern: string) {
+  const useFullPath = pattern.includes("/");
+  let effectivePattern = pattern;
   if (useFullPath && !effectivePattern.startsWith("/") && !effectivePattern.startsWith("**/") && effectivePattern !== "**") {
     effectivePattern = `**/${effectivePattern}`;
   }
+  return { effectivePattern, useFullPath };
+}
 
+/**
+ * fd flags without targets. Only files, directories and symlinks are listed,
+ * and user-level fd ignore files do not apply, so the workspace path index
+ * can answer the same query exactly.
+ */
+function buildFdFindFlags(input: { useFullPath: boolean; ignore?: string[] }) {
   const argv = [
     "fd",
     "--color=never",
     "--glob",
     "--hidden",
     "--no-require-git",
+    "--no-global-ignore-file",
     "--exclude",
     ".git",
+    "--type",
+    "f",
+    "--type",
+    "d",
+    "--type",
+    "l",
   ];
-  if (useFullPath) argv.push("--full-path");
+  if (input.useFullPath) argv.push("--full-path");
   for (const ignore of input.ignore ?? []) {
     if (ignore) argv.push("--exclude", ignore);
   }
-  argv.push("--max-results", String(input.limit), "--", effectivePattern, input.path);
   return argv;
+}
+
+function isSandboxWorkspacePath(searchPath: string) {
+  if (!searchPath.startsWith("/")) return true;
+  return searchPath === SANDBOX_WORKSPACE_PATH || searchPath.startsWith(`${SANDBOX_WORKSPACE_PATH}/`);
+}
+
+/**
+ * Asks the workspace path index what fd would list. Returns null whenever the
+ * index cannot answer exactly, so the caller runs fd over the whole path.
+ */
+async function resolveFindIndexMatches(
+  connection: SandboxConnection,
+  input: { pattern: string; useFullPath: boolean; path: string; limit: number },
+  context: ToolRpcContext,
+): Promise<{ matches: string[]; truncated: boolean; dirs: string[] } | null> {
+  if (connection.capabilities?.fsSearchIndex !== true || !isSandboxWorkspacePath(input.path)) return null;
+  try {
+    const result = await tracedRpc(
+      connection,
+      "fs.pathSearch",
+      { pattern: input.pattern, path: input.path, cwd: SANDBOX_WORKSPACE_PATH, limit: input.limit, fullPath: input.useFullPath },
+      { context },
+      false,
+    );
+    if (result.fallback !== undefined) {
+      logger.debug(`[Tool:find] path index fallback=${result.fallback}`);
+      return null;
+    }
+    logger.debug(`[Tool:find] path index matches=${result.matches.length} dirs=${result.dirs.length}`);
+    return result;
+  } catch (error) {
+    logger.debug(`[Tool:find] path index unavailable, running fd: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
 }
 
 function formatFdFindPath(filePath: string, searchPath: string) {
@@ -783,6 +944,10 @@ function formatFdFindPath(filePath: string, searchPath: string) {
   if (file === search) return ".";
   if (file.startsWith(`${search}/`)) return file.slice(search.length + 1);
   return file.replace(/^\.\//, "");
+}
+
+function findLimitNote(limit: number) {
+  return `${limit} results limit reached. Use limit=${limit * 2} for more, or refine pattern`;
 }
 
 function createRemoteFindOperations(): FindOperations {
@@ -817,31 +982,15 @@ function createRemoteFindOperations(): FindOperations {
 
         const connection = await getCurrentConnection();
         if (connection.capabilities?.processStartArgv) {
-          const argv = buildFdFindArgv({ pattern, path, limit: options.limit, ignore: options.ignore });
-          const stderrChunks: string[] = [];
-          const matches: string[] = [];
-          const updates = createThrottledTextToolUpdate(options.onUpdate, { maxChars: DEFAULT_MAX_BYTES });
+          const rpcContext = captureToolRpcContext({ toolCallId });
           const baseRelative = sandboxWorkspaceRelativePath(path);
           const filter = await createCurrentWorkspaceVisibilityFilter(undefined, baseRelative ?? "");
-          let lineBuffer = "";
-          let stdoutBytes = 0;
-          let stderrBytes = 0;
-          let stdoutLimitReached = false;
-          let aborted = false;
-          let activeProcessId: string | null = null;
-          let abortSent = false;
-          const rpcContext = captureToolRpcContext({ toolCallId });
-          const unregisterProcessAborts: Array<() => void> = [];
-          const abortProcess = (processId: string) => {
-            if (abortSent) return;
-            abortSent = true;
-            logger.info(`[Tool:find] abort requested processId=${processId} turnId=${rpcContext.turnId ?? ""} toolCallId=${toolCallId}`);
-            void tracedRpcAbortProcess(connection, processId, rpcContext);
-          };
-          const pushMatch = (rawMatch: string) => {
-            const trimmed = rawMatch.trim();
-            if (!trimmed || matches.length >= options.limit) return;
-            const match = formatFdFindPath(trimmed, path);
+          const { effectivePattern, useFullPath } = buildFdFindPattern(pattern);
+          const flags = buildFdFindFlags({ useFullPath, ignore: options.ignore });
+          const matches: string[] = [];
+          const updates = createThrottledTextToolUpdate(options.onUpdate, { maxChars: DEFAULT_MAX_BYTES });
+          const pushMatch = (match: string) => {
+            if (!match || matches.length >= options.limit) return;
             if (baseRelative != null) {
               const relativePath = match === "." ? baseRelative : baseRelative ? `${baseRelative}/${match}` : match;
               if (!filter.isVisible(relativePath)) return;
@@ -849,90 +998,55 @@ function createRemoteFindOperations(): FindOperations {
             matches.push(match);
             updates.push(matches.join("\n"));
           };
-          const consumeStdout = (chunk: string) => {
-            lineBuffer += chunk;
-            const lines = lineBuffer.split("\n");
-            lineBuffer = lines.pop() ?? "";
-            for (const line of lines) pushMatch(line);
-          };
-          const onAbort = () => {
-            aborted = true;
-            if (activeProcessId) abortProcess(activeProcessId);
-          };
-          if (toolCtx?.abortSignal) {
-            if (toolCtx.abortSignal.aborted) onAbort();
-            else toolCtx.abortSignal.addEventListener("abort", onAbort, { once: true });
-          }
 
+          const indexed = options.ignore?.length
+            ? null
+            : await resolveFindIndexMatches(connection, { pattern: effectivePattern, useFullPath, path, limit: options.limit }, rpcContext);
+          for (const match of indexed?.matches ?? []) pushMatch(match);
+          // The index lists every entry except the contents of directories
+          // outside the watched domain, which fd still walks.
+          const roots = indexed ? indexed.dirs.map((dir) => joinSearchPath(path, dir)) : [path];
+
+          const runner = new SandboxProcessRunner({
+            connection,
+            context: rpcContext,
+            toolName: "find",
+            toolCallId,
+            timeoutSecs: FD_FIND_TIMEOUT_SECS,
+            maxStdoutBytes: FD_FIND_MAX_STDOUT_BYTES,
+            maxStderrBytes: FD_FIND_MAX_STDERR_BYTES,
+            signal: toolCtx?.abortSignal,
+          });
           try {
-            const result = await tracedRpc(
-              connection,
-              "process.start",
-              {
-                argv,
-                cwd: SANDBOX_WORKSPACE_PATH,
-                timeoutSecs: FD_FIND_TIMEOUT_SECS,
-              },
-              {
-                context: rpcContext,
-                onEvent(event) {
-                  if (event.type === "started") {
-                    activeProcessId = event.processId;
-                    logger.info(`[Tool:find] process started processId=${event.processId} turnId=${rpcContext.turnId ?? ""} toolCallId=${toolCallId}`);
-                    if (rpcContext.turnId) {
-                      unregisterProcessAborts.push(registerActiveAbortHandle(rpcContext.turnId, {
-                        id: `find:${toolCallId}:${event.processId}`,
-                        kind: "tool",
-                        toolName: "find",
-                        abort: () => abortProcess(event.processId),
-                      }));
-                    }
-                    if (toolCtx?.abortSignal?.aborted) abortProcess(event.processId);
-                    return;
-                  }
+            const head = [...flags, "--max-results", String(options.limit), "--", effectivePattern];
+            for (const chunk of chunkArgs(head, roots, PROCESS_ARGV_LIMITS)) {
+              if (matches.length >= options.limit) break;
+              let lineBuffer = "";
+              const argv = [...flags, "--max-results", String(options.limit - matches.length), "--", effectivePattern, ...chunk];
+              const result = await runner.run(argv, (output) => {
+                lineBuffer += output;
+                const lines = lineBuffer.split("\n");
+                lineBuffer = lines.pop() ?? "";
+                for (const line of lines) pushMatch(formatFdFindPath(line.trim(), path));
+              });
+              if (lineBuffer.trim()) pushMatch(formatFdFindPath(lineBuffer.trim(), path));
+              updates.flush();
 
-                  if (event.type === "stdout") {
-                    stdoutBytes += Buffer.byteLength(event.chunk, "utf8");
-                    if (stdoutBytes > FD_FIND_MAX_STDOUT_BYTES) {
-                      stdoutLimitReached = true;
-                      if (activeProcessId) abortProcess(activeProcessId);
-                      return;
-                    }
-                    consumeStdout(event.chunk);
-                    return;
-                  }
-
-                  if (event.type === "stderr") {
-                    stderrBytes += Buffer.byteLength(event.chunk, "utf8");
-                    if (stderrBytes <= FD_FIND_MAX_STDERR_BYTES) stderrChunks.push(event.chunk);
-                  }
-                },
-              },
-            );
-
-            if (lineBuffer) {
-              pushMatch(lineBuffer);
-              lineBuffer = "";
+              if (runner.aborted) return { matches, note: "Operation aborted." };
+              if (result.stdoutLimitReached) return { matches, note: FD_FIND_OUTPUT_LIMIT_MESSAGE, details: { outputLimitReached: true, partial: true } };
+              const termination = result.termination;
+              if (termination && termination.reason !== "exited") {
+                if (termination.reason === "aborted") return { matches, note: termination.message ?? "Operation aborted." };
+                throw new Error(termination.message || `fd ${termination.reason}`);
+              }
+              if (result.exitCode == null) throw new Error("fd exited without an exit code");
+              if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `fd exited with code ${result.exitCode}`);
             }
             updates.flush();
-
-            if (aborted || toolCtx?.abortSignal?.aborted) return { matches, note: "Operation aborted." };
-            if (stdoutLimitReached) return { matches, note: FD_FIND_OUTPUT_LIMIT_MESSAGE, details: { outputLimitReached: true, partial: true } };
-
-            const termination = result.termination;
-            if (termination && termination.reason !== "exited") {
-              if (termination.reason === "aborted") return { matches, note: termination.message ?? "Operation aborted." };
-              throw new Error(termination.message || `fd ${termination.reason}`);
-            }
-            if (result.exitCode == null) throw new Error("fd exited without an exit code");
-            const exitCode = result.exitCode;
-            const stderr = stderrChunks.join("").trim();
-            if (exitCode !== 0) throw new Error(stderr || `fd exited with code ${exitCode}`);
-
+            if (indexed?.truncated || matches.length >= options.limit) return { matches, note: findLimitNote(options.limit) };
             return matches;
           } finally {
-            if (toolCtx?.abortSignal) toolCtx.abortSignal.removeEventListener("abort", onAbort);
-            for (const unregister of unregisterProcessAborts) unregister();
+            runner.dispose();
           }
         }
 
@@ -940,12 +1054,7 @@ function createRemoteFindOperations(): FindOperations {
         // In --full-path mode fd matches against the absolute candidate path,
         // so a path-containing pattern like 'src/**/*.spec.ts' needs a leading
         // '**/' to match anything (matching pi-coding-agent logic).
-        let effectivePattern = pattern;
-        const useFullPath = pattern.includes("/");
-        if (useFullPath && !pattern.startsWith("/") && !pattern.startsWith("**/") && pattern !== "**") {
-          effectivePattern = `**/${pattern}`;
-        }
-
+        const { effectivePattern, useFullPath } = buildFdFindPattern(pattern);
         const result = await tracedRpc(connection, "fs.find", {
           pattern: effectivePattern,
           path,
@@ -972,8 +1081,16 @@ const RG_GREP_TIMEOUT_SECS = 30;
 const RG_GREP_MAX_STDOUT_BYTES = DEFAULT_MAX_BYTES * 8;
 const RG_GREP_MAX_STDERR_BYTES = 8 * 1024;
 const RG_GREP_OUTPUT_LIMIT_MESSAGE = "Grep output limit reached. Refine pattern, path, or glob.";
+// Beyond this many targets the index barely narrows the search; the plan
+// falls back to a single rg walk.
+const GREP_INDEX_MAX_TARGETS = 512;
 
-function buildRgGrepArgv(input: GrepToolInput, searchPath: string) {
+/**
+ * rg flags without the glob, pattern or targets. `--no-config` keeps the
+ * search independent of a user ripgrep config, and `!.git` hides git metadata
+ * at any depth, like the fd invocation and the workspace index.
+ */
+function buildRgGrepFlags(input: GrepToolInput) {
   const argv = [
     "rg",
     "--line-number",
@@ -981,22 +1098,65 @@ function buildRgGrepArgv(input: GrepToolInput, searchPath: string) {
     "--json",
     "--hidden",
     "--no-require-git",
+    "--no-config",
     "--glob",
-    "!.git/**",
+    "!.git",
   ];
   // Match the legacy fs.grep request: maxCount is only sent when the user
-  // explicitly provides limit, while limit itself is applied to returned JSON
-  // lines for compatibility during rollout.
+  // explicitly provides limit. The total limit counts matches when formatting.
   if (input.limit && input.limit > 0) argv.push("--max-count", String(input.limit));
   if (input.context && input.context > 0) argv.push("--context", String(input.context));
   if (input.ignoreCase) argv.push("--ignore-case");
   if (input.literal) argv.push("--fixed-strings");
-  if (input.glob?.trim()) argv.push("--glob", input.glob);
-  argv.push("--", input.pattern, searchPath);
   return argv;
 }
 
-function isRgNoMatchOutput(lines: string[]) {
+/**
+ * Asks the workspace index for rg invocations equivalent to one rg walk of
+ * `searchPath`. Returns null whenever the index cannot answer exactly, so the
+ * caller runs the walk.
+ */
+async function resolveGrepIndexRuns(
+  connection: SandboxConnection,
+  input: { grep: GrepToolInput; searchPath: string; flags: string[]; globArgv: string[] },
+  context: ToolRpcContext,
+): Promise<RgRun[] | null> {
+  const { grep, searchPath } = input;
+  if (connection.capabilities?.fsSearchIndex !== true || !isSandboxWorkspacePath(searchPath)) return null;
+  let result: RpcRequestMap["fs.search"]["result"];
+  try {
+    result = await tracedRpc(
+      connection,
+      "fs.search",
+      {
+        pattern: grep.pattern,
+        path: searchPath,
+        cwd: SANDBOX_WORKSPACE_PATH,
+        fixedStrings: grep.literal === true,
+        ignoreCase: grep.ignoreCase === true,
+        glob: grep.glob?.trim() || undefined,
+        limit: GREP_INDEX_MAX_TARGETS,
+      },
+      { context },
+      false,
+    );
+  } catch (error) {
+    logger.debug(`[Tool:grep] index unavailable, running rg walk: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+  if (result.fallback !== undefined) {
+    logger.debug(`[Tool:grep] index fallback=${result.fallback}`);
+    return null;
+  }
+  const runs = buildRgPlanRuns({ flags: input.flags, globArgv: input.globArgv, pattern: grep.pattern, searchPath, plan: result });
+  if (!runs) return null;
+  logger.debug(`[Tool:grep] index files=${result.files.length} walkFiles=${result.walkFiles.length} dirs=${result.dirs.length} runs=${runs.length}`);
+  // With no candidates rg still validates the pattern, so syntax errors are
+  // reported exactly as a walk would report them.
+  return runs.length > 0 ? runs : [{ argv: [...input.flags, "--", grep.pattern, "/dev/null"], targets: [] }];
+}
+
+function isRgNoMatchOutput(lines: readonly string[]) {
   if (lines.length === 0) return true;
   return lines.every((line) => {
     try {
@@ -1051,11 +1211,91 @@ function createRemoteGrepTool() {
       }
 
       const effectiveLimit = Math.max(1, grepInput.limit ?? 100);
+      const rpcContext = captureToolRpcContext({ toolCallId });
+      const connection = await getCurrentConnection();
+      const searchPath = mapSandboxInputPath(grepInput.path);
+      if (searchPath.startsWith(SANDBOX_WORKSPACE_PATH) || !searchPath.startsWith("/")) {
+        await assertSandboxPathVisible(searchPath.startsWith("/") ? searchPath : `${SANDBOX_WORKSPACE_PATH}/${searchPath}`, { isDirectory: true });
+      }
 
-      // Set up abort handling.
+      if (connection.capabilities?.processStartArgv) {
+        const collector = createRgJsonGrepCollector({ searchPath: grepInput.path, limit: effectiveLimit });
+        const updates = createThrottledTextToolUpdate(onUpdate, { maxChars: DEFAULT_MAX_BYTES });
+        const emitPartial = () => {
+          const partial = collector.format();
+          const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
+          if (partialText && partialText !== "No matches found") updates.push(partialText);
+        };
+        const partialResult = (note: string, details: Record<string, unknown>) => {
+          const partial = collector.format();
+          const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
+          return {
+            content: [{ type: "text" as const, text: partialText && partialText !== "No matches found" ? `${partialText}\n\n[${note}]` : `[${note}]` }],
+            details: { ...(partial.details ?? {}), ...details },
+          };
+        };
+
+        const flags = buildRgGrepFlags(grepInput);
+        const globArgv = grepInput.glob?.trim() ? ["--glob", grepInput.glob] : [];
+        const runs = await resolveGrepIndexRuns(connection, { grep: grepInput, searchPath, flags, globArgv }, rpcContext)
+          ?? [{ argv: [...flags, ...globArgv, "--", grepInput.pattern, searchPath], targets: [searchPath] }];
+        const runner = new SandboxProcessRunner({
+          connection,
+          context: rpcContext,
+          toolName: "grep",
+          toolCallId,
+          timeoutSecs: RG_GREP_TIMEOUT_SECS,
+          maxStdoutBytes: RG_GREP_MAX_STDOUT_BYTES,
+          maxStderrBytes: RG_GREP_MAX_STDERR_BYTES,
+          signal,
+        });
+        try {
+          // Runs execute in order and stop once the match limit is covered.
+          for (const run of runs) {
+            if (runner.aborted) {
+              updates.flush();
+              return partialResult("Operation aborted.", { termination: { reason: "aborted", exitCode: null, message: "Operation aborted." } });
+            }
+            const runStart = collector.lines.length;
+            const result = await runner.run(run.argv, (chunk) => {
+              if (collector.push(chunk)) emitPartial();
+            });
+            if (collector.end()) emitPartial();
+
+            if (runner.aborted) {
+              updates.flush();
+              return partialResult("Operation aborted.", { termination: { reason: "aborted", exitCode: null, message: "Operation aborted." } });
+            }
+            if (result.stdoutLimitReached || result.termination?.outputTruncated) {
+              updates.flush();
+              return partialResult(RG_GREP_OUTPUT_LIMIT_MESSAGE, { outputLimitReached: true, partial: true });
+            }
+            if (result.termination && result.termination.reason !== "exited") {
+              updates.flush();
+              const message = result.termination.message || `rg ${result.termination.reason}`;
+              return partialResult(`${message}. Results may be incomplete.`, { termination: result.termination, partial: true });
+            }
+            const exitCode = result.exitCode ?? 0;
+            const stderr = result.stderr.trim();
+            const ignorableRgError = stderr.includes("No files were searched") || onlyVanishedTargets(stderr, run.targets);
+            if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(collector.lines.slice(runStart))) && !ignorableRgError) {
+              updates.flush();
+              return {
+                content: [{ type: "text" as const, text: stderr || `rg exited with code ${exitCode}` }],
+                details: createToolFailure(stderr || `rg exited with code ${exitCode}`),
+              };
+            }
+            if (collector.matches >= effectiveLimit) break;
+          }
+          updates.flush();
+          return collector.format();
+        } finally {
+          runner.dispose();
+        }
+      }
+
       let aborted = false;
       let activeProcessId: string | null = null;
-      const rpcContext = captureToolRpcContext({ toolCallId });
       let abortSent = false;
       const unregisterProcessAborts: Array<() => void> = [];
       const abortProcess = (processId: string) => {
@@ -1072,124 +1312,7 @@ function createRemoteGrepTool() {
         if (signal.aborted) onAbort();
         else signal.addEventListener("abort", onAbort, { once: true });
       }
-
-      const connection = await getCurrentConnection();
-      const searchPath = mapSandboxInputPath(grepInput.path);
-      if (searchPath.startsWith(SANDBOX_WORKSPACE_PATH) || !searchPath.startsWith("/")) {
-        await assertSandboxPathVisible(searchPath.startsWith("/") ? searchPath : `${SANDBOX_WORKSPACE_PATH}/${searchPath}`, { isDirectory: true });
-      }
       try {
-        if (connection.capabilities?.processStartArgv) {
-          const lines: string[] = [];
-          const stderrChunks: string[] = [];
-          const updates = createThrottledTextToolUpdate(onUpdate, { maxChars: DEFAULT_MAX_BYTES });
-          let lineBuffer = "";
-          let stdoutBytes = 0;
-          let stderrBytes = 0;
-          let stdoutLimitReached = false;
-          const argv = buildRgGrepArgv(grepInput, searchPath);
-          const emitPartial = () => {
-            const partial = formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
-            const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
-            if (partialText && partialText !== "No matches found") updates.push(partialText);
-          };
-          const consumeStdout = (chunk: string) => {
-            lineBuffer += chunk;
-            const completeLines = lineBuffer.split("\n");
-            lineBuffer = completeLines.pop() ?? "";
-            let changed = false;
-            for (const line of completeLines) {
-              const trimmed = line.trim();
-              if (!trimmed) continue;
-              lines.push(trimmed);
-              changed = true;
-            }
-            if (changed) emitPartial();
-          };
-
-          const result = await tracedRpc(
-            connection,
-            "process.start",
-            {
-              argv,
-              cwd: SANDBOX_WORKSPACE_PATH,
-              timeoutSecs: RG_GREP_TIMEOUT_SECS,
-            },
-            {
-              context: rpcContext,
-              onEvent(event) {
-                if (event.type === "started") {
-                  activeProcessId = event.processId;
-                  logger.info(`[Tool:grep] process started processId=${event.processId} turnId=${rpcContext.turnId ?? ""} toolCallId=${toolCallId}`);
-                  if (rpcContext.turnId) {
-                    unregisterProcessAborts.push(registerActiveAbortHandle(rpcContext.turnId, {
-                      id: `grep:${toolCallId}:${event.processId}`,
-                      kind: "tool",
-                      toolName: "grep",
-                      abort: () => abortProcess(event.processId),
-                    }));
-                  }
-                  if (aborted) abortProcess(event.processId);
-                  return;
-                }
-
-                if (event.type === "stdout") {
-                  stdoutBytes += Buffer.byteLength(event.chunk, "utf8");
-                  if (stdoutBytes > RG_GREP_MAX_STDOUT_BYTES && activeProcessId) {
-                    stdoutLimitReached = true;
-                    abortProcess(activeProcessId);
-                    return;
-                  }
-                  consumeStdout(event.chunk);
-                  return;
-                }
-
-                if (event.type === "stderr") {
-                  stderrBytes += Buffer.byteLength(event.chunk, "utf8");
-                  if (stderrBytes <= RG_GREP_MAX_STDERR_BYTES) stderrChunks.push(event.chunk);
-                }
-              },
-            },
-          );
-
-          if (lineBuffer.trim()) {
-            lines.push(lineBuffer.trim());
-            lineBuffer = "";
-            emitPartial();
-          }
-          updates.flush();
-
-          if (aborted) {
-            const partial = formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
-            const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
-            return {
-              content: [{ type: "text" as const, text: partialText && partialText !== "No matches found" ? `${partialText}\n\n[Operation aborted.]` : "[Operation aborted.]" }],
-              details: { ...(partial.details ?? {}), termination: { reason: "aborted", exitCode: null, message: "Operation aborted." } },
-            };
-          }
-
-          if (stdoutLimitReached) {
-            const partial = formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
-            const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
-            return {
-              content: [{ type: "text" as const, text: partialText && partialText !== "No matches found" ? `${partialText}\n\n[${RG_GREP_OUTPUT_LIMIT_MESSAGE}]` : RG_GREP_OUTPUT_LIMIT_MESSAGE }],
-              details: { ...(partial.details ?? {}), outputLimitReached: true, partial: true },
-            };
-          }
-
-          const exitCode = result.exitCode ?? 0;
-          const stderr = stderrChunks.join("").trim();
-          const ignorableRgError = stderr.includes("No files were searched");
-          if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(lines)) && !ignorableRgError) {
-            return {
-              content: [{ type: "text" as const, text: stderr || `rg exited with code ${exitCode}` }],
-              details: createToolFailure(stderr || `rg exited with code ${exitCode}`),
-            };
-          }
-
-          return formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
-        }
-
         const result = await tracedRpc(
           connection,
           "fs.grep",

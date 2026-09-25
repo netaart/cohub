@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -150,7 +151,15 @@ func buildRuntime(
 	portsSink func(protocol.PortsChangedPayload),
 ) (*ws.Server, func(), func(), *search.Manager, func() filewatch.Status) {
 	processManager := process.NewManager(logger)
-	searchManager := search.NewManager(cfg, logger)
+	// The watcher feeds the search manager, so it starts afterwards; queries
+	// resolve it lazily and stay on rg and fd while it is missing.
+	var watcherRef atomic.Pointer[filewatch.Watcher]
+	searchManager := search.NewManager(cfg, logger, func() search.Watch {
+		if watcher := watcherRef.Load(); watcher != nil {
+			return watcher
+		}
+		return nil
+	})
 	searchManager.Start()
 	dispatcher := rpc.NewDispatcher(cfg, processManager, logger)
 	dispatcher.SetSearchManager(searchManager)
@@ -179,6 +188,7 @@ func buildRuntime(
 	}); err != nil {
 		logger.Warn("file watcher disabled", slog.String("error", err.Error()))
 	} else {
+		watcherRef.Store(watcher)
 		requestFSResync = watcher.RequestResync
 		watchStatus = watcher.Status
 		closers = append(closers, func() { watcher.Close() })
@@ -267,7 +277,6 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 				}
 			}
 
-			searchManager.Activate()
 			logger.Info("workspace mount ready",
 				slog.String("workspaceDir", summary.WorkspaceDir),
 				slog.String("platformAgentsDir", summary.PlatformAgentsDir),
@@ -289,7 +298,13 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 					"wsEndpoint":        sandboxWSEndpoint(cfg.PodIP),
 				},
 			}); reportErr != nil {
-				logger.Warn("failed to report sandbox ready", slog.String("error", reportErr.Error()))
+				logger.Warn("failed to report sandbox ready; workspace search stays inactive", slog.String("error", reportErr.Error()))
+			} else {
+				// Until the API sees this report it writes to the workspace volume
+				// directly, unseen by the watcher. Indexing only afterwards means
+				// every such write finished before the activation reconcile, or
+				// finished once the API saw this sandbox and sent fs.reconcile.
+				searchManager.Activate()
 			}
 		}
 	}()
