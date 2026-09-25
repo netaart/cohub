@@ -148,6 +148,14 @@ export type {
   GenerationStreamTurnUpdatedEvent,
 } from "./session-generation-stream.js";
 export * from "./types.js";
+export {
+  generationOutputSource,
+  isActiveGenerationTask,
+  toGenerationTaskView,
+  type GenerationOutputType,
+  type GenerationTaskOutput,
+  type GenerationTaskView,
+} from "./generation-task.js";
 export type {
   BoardAwarenessGesture,
   BoardAwarenessNodePreview,

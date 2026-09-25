@@ -1,5 +1,6 @@
 import type { TaskRunRecord } from "@neta-art/cohub";
 import {
+	idbDelete,
 	idbDeleteWhere,
 	idbGet,
 	idbGetAllByIndex,
@@ -173,6 +174,19 @@ export async function writeTaskRunSummaries(
 		SUMMARY_LIMIT_PER_SPACE,
 		SUMMARY_TTL_MS,
 	).catch(() => undefined);
+}
+
+export async function deleteTaskRunSummaries(
+	spaceId: string,
+	taskRunIds: readonly string[],
+) {
+	const userKey = await resolveUserKey();
+	if (!userKey) return;
+	await Promise.all(
+		taskRunIds.map((taskRunId) =>
+			idbDelete("task_run_summaries", taskRunKey(userKey, spaceId, taskRunId)),
+		),
+	);
 }
 
 export async function writeTaskRunDetail(

@@ -853,6 +853,17 @@ export function createFileWorkspaceController(
 		return loadFileTree(true);
 	}
 
+	async function revealPath(path: string) {
+		const segments = path.split("/").filter(Boolean);
+		let dirPath = "";
+		for (const segment of segments.slice(0, -1)) {
+			dirPath = dirPath ? `${dirPath}/${segment}` : segment;
+			const node = findFsNode(dirPath);
+			if (node?.type !== "dir") return;
+			if (!node.isOpen) await expandDirectory(node);
+		}
+	}
+
 	/** Open a file in the unified preview surface (Files column). */
 	async function openSpaceFile(path: string) {
 		if (
@@ -1994,6 +2005,7 @@ export function createFileWorkspaceController(
 		expandDirectory,
 		refreshFileTree,
 		openSpaceFile,
+		revealPath,
 		openInlineFile,
 		closeInlineFile,
 		activateInlineFile: (path: string) => {

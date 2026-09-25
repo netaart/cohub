@@ -1,6 +1,7 @@
 import type { BoardSemanticMutation } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type {
+	SessionFileRecord,
 	SessionForkRecord,
 	SessionTurnRecord,
 } from "@cohub/protocol/model";
@@ -18,7 +19,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 16;
+export const DB_VERSION = 17;
 
 export type SessionListForkRecord = Partial<SessionForkRecord> & {
 	childSessionId: string;
@@ -252,6 +253,16 @@ export type BoardPendingTransactionCacheRecord = {
 	lastAttemptAt: number | null;
 };
 
+export type SessionFilesCacheRecord = {
+	key: string;
+	userKey: string;
+	spaceId: string;
+	sessionId: string;
+	files: SessionFileRecord[];
+	updatedAt: number;
+	lastAccessedAt: number;
+};
+
 export type TaskRunDetailCacheRecord = {
 	key: string;
 	userKey: string;
@@ -283,7 +294,8 @@ export type StoreName =
 	| "file_pending_drafts"
 	| "board_pending_txs"
 	| "task_run_summaries"
-	| "task_run_details";
+	| "task_run_details"
+	| "session_files";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 /** Resolved connection for O(1) reuse after open; cleared on versionchange/reset. */
@@ -732,6 +744,10 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				},
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
+			]);
+			createStore(db, "session_files", [
+				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			createStore(db, "task_run_details", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },

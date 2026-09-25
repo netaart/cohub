@@ -49,6 +49,7 @@ import type {
   StoredIntermediateMessage,
   StoredToolCall,
   TurnIntermediateMessagesFile,
+  SessionFilesResponse,
   SessionRecord,
   SpaceAccessPolicy,
   SpaceCheckpointDetailResponse,
@@ -948,6 +949,15 @@ export class SessionClient {
       {
         fetch: customFetch,
       },
+    );
+  }
+
+  /** Space files changed by this session's agent write/edit tool calls. */
+  files(options: { limit?: number; signal?: AbortSignal } = {}) {
+    const query = options.limit ? `?limit=${options.limit}` : "";
+    return this.transport.request<SessionFilesResponse>(
+      `/api/sessions/${this.id}/files${query}`,
+      { signal: options.signal },
     );
   }
 

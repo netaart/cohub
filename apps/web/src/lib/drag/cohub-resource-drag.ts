@@ -25,6 +25,7 @@ export type CohubDragOrigin =
 	| { kind: "sidebar-session-list" }
 	| { kind: "space-file-tree" }
 	| { kind: "task-list" }
+	| { kind: "side-panel" }
 	| { kind: "label-items"; labelRef: string; labelName?: string };
 
 export type CohubResourceDragPayload = {
@@ -69,7 +70,8 @@ function normalizeOrigin(origin: unknown): CohubDragOrigin | undefined {
 	if (
 		value.kind === "sidebar-session-list" ||
 		value.kind === "space-file-tree" ||
-		value.kind === "task-list"
+		value.kind === "task-list" ||
+		value.kind === "side-panel"
 	) {
 		return { kind: value.kind };
 	}

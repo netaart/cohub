@@ -112,6 +112,7 @@ cohub spaces sessions ls
 cohub -s <spaceId> spaces sessions ls
 cohub spaces sessions create "<title>"
 cohub spaces sessions get <sessionId>
+cohub spaces sessions files <sessionId>          # Space files the Chat changed
 cohub spaces sessions rename <sessionId> "<new title>"
 ```
 

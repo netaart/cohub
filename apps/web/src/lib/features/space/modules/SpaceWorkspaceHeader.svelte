@@ -7,7 +7,6 @@ import type {
 import {
 	Check,
 	Globe,
-	Images,
 	ListTree,
 	Loader2,
 	Menu,
@@ -57,7 +56,6 @@ export type SpaceWorkspaceHeaderContext = {
 	onlineUsers: SpacePresenceUser[];
 	activeRouteDetailHeader: RouteDetailHeader | null;
 	activeSessionId: string | null;
-	hasGenerationTasks: boolean;
 	canManageSessionAccess: boolean;
 	isActiveSessionPublic: boolean;
 	spaceHasMinimalAccess: boolean;
@@ -78,7 +76,6 @@ export type ResourceActionState = {
 
 export type SpaceWorkspaceHeaderActions = {
 	openShareModal: (sessionId: string) => void;
-	openTaskBrowser: () => void | Promise<void>;
 	startSessionRename: () => void;
 	cancelSessionRename: () => void;
 	submitSessionRename: () => void | Promise<void>;
@@ -165,17 +162,6 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 
 {#snippet HeaderActions()}
 	<SpaceRuntimeStatus spaceId={context.spaceId} canManage={context.space?.access?.permissions.includes("sandbox.manage") === true} />
-	{#if context.activeSessionId && context.hasGenerationTasks}
-		<button
-			type="button"
-			class="header-action-btn is-square"
-			onclick={() => runAction(actions.openTaskBrowser)}
-			title={m.space_header_browse_media({}, { locale })}
-			aria-label={m.space_header_browse_media({}, { locale })}
-		>
-			<Images class="h-4 w-4 shrink-0" />
-		</button>
-	{/if}
 	{#if context.activeSessionId && context.canManageSessionAccess}
 		<button
 			type="button"
@@ -248,8 +234,8 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 			type="button"
 			class="header-action-btn"
 			onclick={() => runAction(actions.toggleRightSidebar)}
-			title={context.rightSidebarCollapsed ? "Show files (Ctrl+Alt+→ / ⌃⌥→)" : "Hide files (Ctrl+Alt+→ / ⌃⌥→)"}
-			aria-label={context.rightSidebarCollapsed ? "Show files" : "Hide files"}
+			title={`${context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })} (Ctrl+Alt+→ / ⌃⌥→)`}
+			aria-label={context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })}
 		>
 			{#if context.rightSidebarCollapsed}
 				<PanelRightOpen class="h-4 w-4 shrink-0" />

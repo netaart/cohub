@@ -66,7 +66,7 @@ function sanitizeGenerationResultForList(result: unknown) {
   const nextOutput = output.map((block) => {
     if (!block || typeof block !== "object" || Array.isArray(block)) return block;
     const current = block as Record<string, unknown>;
-    if (current.type !== "image" && current.type !== "video") return block;
+    if (current.type !== "image" && current.type !== "video" && current.type !== "audio") return block;
     const nextBlock = { ...current };
     let blockChanged = false;
     for (const key of ["data", "base64", "contentBase64"]) {

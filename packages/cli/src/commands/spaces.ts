@@ -1461,6 +1461,43 @@ function registerSessions(spacesCmd: Command): void {
     });
 
   sessionsCmd
+    .command("files <id>")
+    .description("List Space files changed by a session")
+    .option("--limit <n>", "Maximum files to list; the server caps it", "200")
+    .option("--json", "Output as JSON")
+    .action(async (id: string, opts: { limit: string; json?: boolean }) => {
+      const spaceId = await resolveSpace(spacesCmd);
+      const limit = Number.parseInt(opts.limit, 10);
+      if (!Number.isInteger(limit) || limit < 1) {
+        return error("Invalid limit", "--limit must be a positive integer");
+      }
+      const client = createClient();
+      try {
+        const result = await client.space(spaceId).session(id).files({ limit });
+        if (jsonRequested(opts)) return outJson(result);
+        if (result.files.length === 0) {
+          console.log("  (empty)");
+          return;
+        }
+        table(result.files.map((file) => ({
+          path: file.path,
+          change: file.lastKind,
+          count: file.changeCount,
+          turn: file.lastTurnSequence,
+          changedAt: file.lastChangedAt,
+        })), [
+          { key: "path", label: "Path" },
+          { key: "change", label: "Change" },
+          { key: "count", label: "Count" },
+          { key: "turn", label: "Turn" },
+          { key: "changedAt", label: "Changed" },
+        ]);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  sessionsCmd
     .command("rename <id> <name>")
     .description("Rename a session")
     .action(async (id: string, name: string) => {

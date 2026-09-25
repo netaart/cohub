@@ -191,3 +191,23 @@ export type MessageRecord = {
   durationMs: number | null;
   createdAt: string;
 };
+
+export type SessionFileChangeKind = "write" | "edit";
+
+/** A Space file changed by a session's agent tools. */
+export type SessionFileRecord = {
+  /** Space workspace path, relative and without a leading slash. */
+  path: string;
+  lastKind: SessionFileChangeKind;
+  kinds: SessionFileChangeKind[];
+  changeCount: number;
+  firstChangedAt: string;
+  lastChangedAt: string;
+  lastTurnId: string;
+  lastTurnSequence: number;
+};
+
+export type SessionFilesResponse = {
+  sessionId: string;
+  files: SessionFileRecord[];
+};

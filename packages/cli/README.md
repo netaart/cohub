@@ -178,6 +178,7 @@ Scheduling rules:
 cohub -s <spaceId> spaces sessions ls --json
 cohub -s <spaceId> spaces sessions create "<title>" --json
 cohub -s <spaceId> spaces sessions get <sessionId> --json
+cohub -s <spaceId> spaces sessions files <sessionId> --json
 cohub -s <spaceId> spaces sessions rename <sessionId> "<new title>"
 ```
 

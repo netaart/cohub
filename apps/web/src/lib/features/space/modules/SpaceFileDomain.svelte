@@ -28,11 +28,12 @@ import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import type { LocalUploadEntry } from "$lib/upload-entries";
 import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
 import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
+import WorkspaceSidePanel from "../side-panel/WorkspaceSidePanel.svelte";
+import type { WorkspaceSidePanelController } from "../side-panel/workspace-side-panel-controller.svelte";
 import AppWindow from "./AppWindow.svelte";
 import type { InlineAppPreview } from "./app-window-controller.svelte";
 import BoardWindow from "./BoardWindow.svelte";
 import type { InlineBoardPanelState } from "./board-window-controller.svelte";
-import FilesSidebarPanel from "./FilesSidebarPanel.svelte";
 import type { FileWorkspaceInlineFile } from "./file-workspace-controller.svelte";
 import InlineFilePanel from "./InlineFilePanel.svelte";
 import PortWindow from "./PortWindow.svelte";
@@ -47,6 +48,9 @@ type PublishTarget = {
 
 export type SpaceFileDomainProps = {
 	spaceId: string;
+	sidePanel: WorkspaceSidePanelController;
+	hasSession: boolean;
+	canViewTasks: boolean;
 	spaceOwnerUsername: string | null;
 	spaceSlug: string | null;
 	spaceHasMinimalAccess: boolean;
@@ -142,6 +146,9 @@ export type SpaceFileDomainProps = {
 	resolveWorkspaceAsset: ResolveWorkspaceAsset;
 	onOpenInlineBoard: (path: string) => void | Promise<void>;
 	onOpenTask: (taskRunId: string) => void | Promise<void>;
+	onRevealPath: (path: string) => void | Promise<void>;
+	onJumpToTurn?: (sequence: number) => void | Promise<void>;
+	onOpenTaskBrowser?: () => void | Promise<void>;
 	onActivateInlineFile: (path: string) => void;
 	onCloseInlineFileTab: (path: string) => void;
 	onActivateInlineBoard: (path: string) => void;
@@ -213,6 +220,9 @@ export type SpaceFileDomainProps = {
 
 let {
 	spaceId,
+	sidePanel,
+	hasSession,
+	canViewTasks,
 	spaceOwnerUsername,
 	spaceSlug,
 	spaceHasMinimalAccess,
@@ -298,6 +308,9 @@ let {
 	resolveWorkspaceAsset,
 	onOpenInlineBoard,
 	onOpenTask,
+	onRevealPath,
+	onJumpToTurn,
+	onOpenTaskBrowser,
 	onActivateInlineFile,
 	onCloseInlineFileTab,
 	onActivateInlineBoard,
@@ -341,6 +354,12 @@ let {
 
 function closeMobileDrawerIfNeeded(mobile: boolean) {
 	if (mobile) onMobileRightDrawerClose();
+}
+
+function openSpacePath(path: string) {
+	if (workspaceFilePreviewKind(path, activeFsReadonly) === "board")
+		void onOpenInlineBoard(path);
+	else void onOpenInlineFile(path);
 }
 
 function publishInlineFile() {
@@ -593,8 +612,11 @@ function previewContentOut(node: Element) {
 	{/if}
 </WorkspaceWindowsPane>
 
-<FilesSidebarPanel
+<WorkspaceSidePanel
 	{spaceId}
+	{sidePanel}
+	{hasSession}
+	canViewTasks={canViewTasks && !spaceHasMinimalAccess}
 	nodes={spaceHasMinimalAccess ? [] : fileTree}
 	selectedPath={selectedFilePath}
 	loading={!spaceHasMinimalAccess && fileTreeLoading}
@@ -620,13 +642,27 @@ function previewContentOut(node: Element) {
 	{pendingUploadFiles}
 	{pendingUploadEntries}
 	onToggle={onToggleDirectory}
-	onSelect={(node, options) => {
-		if (node.type !== "file") return;
-		if (workspaceFilePreviewKind(node.path, activeFsReadonly) === "board")
-			void onOpenInlineBoard(node.path);
-		else void onOpenInlineFile(node.path);
+	onOpenPath={(path, options) => {
+		openSpacePath(path);
 		closeMobileDrawerIfNeeded(options.mobile);
 	}}
+	onRevealPath={async (path, options) => {
+		// Expand first so the tree can scroll to the row once it is selected.
+		await onRevealPath(path);
+		openSpacePath(path);
+		closeMobileDrawerIfNeeded(options.mobile);
+	}}
+	onOpenTask={(taskRunId, options) => {
+		void onOpenTask(taskRunId);
+		closeMobileDrawerIfNeeded(options.mobile);
+	}}
+	onJumpToTurn={onJumpToTurn
+		? (sequence, options) => {
+				void onJumpToTurn(sequence);
+				closeMobileDrawerIfNeeded(options.mobile);
+			}
+		: undefined}
+	onOpenTaskBrowser={onOpenTaskBrowser ? () => void onOpenTaskBrowser() : undefined}
 	onRefresh={onRefreshFileTree}
 	onCreateFile={onCreateFile}
 	onCreateBoard={onCreateBoard}

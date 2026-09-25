@@ -22,6 +22,19 @@ Use multiple Chats when goals diverge. Keep one Chat focused when continuity mat
 | Composer | Input, model, attachments, slash tools |
 | Header / actions | Rename, share/access, related tools |
 
+## Side panel
+
+The right side panel keeps what a Chat produces next to it.
+
+| Tab | Shows |
+| --- | --- |
+| This chat | Media the Chat generated, with live progress, and the files it changed |
+| Files | The Space file tree; files changed in this Chat carry a dot |
+| Media | Every generation in the Space, filterable by type |
+| Apps | Installed Apps |
+
+Changed files come from the Agent's write and edit tool calls. Files written by shell commands are not attributed to a Chat. The CLI lists the same data with `cohub spaces sessions files <sessionId>`.
+
 ## Composer
 
 The composer is how you steer the Agent.

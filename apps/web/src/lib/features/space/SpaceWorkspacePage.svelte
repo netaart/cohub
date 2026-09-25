@@ -192,6 +192,7 @@ import {
 	type PublishedAppOpenInput,
 } from "./modules/workspace-app-open";
 import { createWorkspaceLayoutController } from "./modules/workspace-layout-controller.svelte";
+import { createWorkspaceSidePanelController } from "./side-panel/workspace-side-panel-controller.svelte";
 import { displayUserName, fallbackUserName } from "./space-utils";
 
 type Props = {
@@ -525,7 +526,6 @@ async function openWorkspaceApp(input: PublishedAppOpenInput) {
 }
 
 async function openTaskBrowser() {
-	if (!activeSessionId) return;
 	try {
 		const { detail, launch } = await resolveAppNavigation(
 			sdk.apps,
@@ -535,7 +535,10 @@ async function openTaskBrowser() {
 			appId: detail.app.id,
 			label: appDisplayTitle(detail.app.meta, detail.app.slug),
 			launch: launch ?? null,
-			openContext: { source: "user", sessionId: activeSessionId },
+			openContext: {
+				source: "user",
+				...(activeSessionId ? { sessionId: activeSessionId } : {}),
+			},
 			meta: detail.app.meta,
 		});
 	} catch (error) {
@@ -689,6 +692,18 @@ const isRightDrawerVisible = $derived(
 	rightSidebarAvailable &&
 		(uiState.rightIsDragging || uiState.mobileRightDrawerOpen),
 );
+const canViewTaskRuns = $derived(hasAccessPermission("taskrun.view"));
+const sidePanel = createWorkspaceSidePanelController({
+	getSpaceId: () => spaceId,
+	getSessionId: () => (isNewSessionRoute ? null : (activeSessionId ?? null)),
+	getCanViewTasks: () => rightSidebarAvailable && canViewTaskRuns,
+	getCanViewFiles: () =>
+		rightSidebarAvailable && hasAccessPermission("file.view"),
+	getVisible: () =>
+		isMobile
+			? isRightDrawerVisible
+			: !filesColumnHidden && !effectiveRightSidebarCollapsed,
+});
 const spaceMembers = $derived(spaceStatus.members);
 const spaceMembersLoadedFor = $derived(spaceStatus.membersLoadedFor);
 const spaceUsage = $derived(spaceStatus.usage);
@@ -1162,6 +1177,7 @@ const spaceRealtime = createSpaceRealtimeController({
 	},
 	onConnectionRecovered: () => {
 		void sessionChat.onConnectionRecovered();
+		sidePanel.refresh();
 		previewAppsLoadedFor = null;
 		dispatchAppsChanged({ spaceId });
 		scheduleDanmakuCatchup();
@@ -1739,6 +1755,7 @@ async function refreshSpaceFsBatch(batch: SpaceFsRefreshBatch) {
 
 async function handleWsEvent(payload: ChannelEnvelope) {
 	try {
+		sidePanel.ingest(payload);
 		// Shell consumers only. Chat kernel is a single fan-out below so we never
 		// double-apply session/task semantics against the same host state.
 		if (payload.type === "space.ports.changed") {
@@ -2872,6 +2889,9 @@ const spaceFileDomainProps = $derived.by<
 	>
 >(() => ({
 	spaceId,
+	sidePanel,
+	hasSession: Boolean(activeSessionId && !isNewSessionRoute),
+	canViewTasks: canViewTaskRuns,
 	spaceOwnerUsername,
 	spaceSlug,
 	spaceHasMinimalAccess,
@@ -2958,6 +2978,9 @@ const spaceFileDomainProps = $derived.by<
 	resolveWorkspaceAsset,
 	onOpenInlineBoard: openInlineBoard,
 	onOpenTask: openTask,
+	onRevealPath: (path) => fileWorkspace.revealPath(path),
+	onJumpToTurn: (sequence) => sessionChat.jumpToTurnAndUpdateUrl(sequence),
+	onOpenTaskBrowser: openTaskBrowser,
 	onActivateInlineBoard: activateInlineBoardTab,
 	onCloseInlineBoardTab: closeInlineBoardTab,
 	onActivateInlinePort: activateInlinePortTab,
@@ -3035,7 +3058,6 @@ const headerContext = $derived({
 	onlineUsers,
 	activeRouteDetailHeader,
 	activeSessionId,
-	hasGenerationTasks: sessionChat.hasGenerationTasks,
 	canManageSessionAccess,
 	isActiveSessionPublic: activeSessionId
 		? sessionChat.share.hasPermission(activeSessionId)
@@ -3056,7 +3078,6 @@ const resourceActionState = $derived({
 });
 const headerActions = {
 	openShareModal: (id: string) => sessionChat.openShareModal(id),
-	openTaskBrowser,
 	startSessionRename,
 	cancelSessionRename,
 	submitSessionRename,
