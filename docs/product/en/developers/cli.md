@@ -155,7 +155,8 @@ cd ./my-project
 # The first run prompts to create and name the directory's Space.
 cohub runtime up
 
-# Later runs recommend reusing it.
+# Later runs recommend reusing it; native chat sync is enabled by default
+# after one consent (default yes).
 cohub runtime up -d
 cohub runtime status
 cohub runtime logs --level warn --follow

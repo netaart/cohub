@@ -3,7 +3,7 @@ export {
   contextToPiMessages, selectRuntimeContextMessages, isLocalHarness, resolveHarness,
   fingerprintProjectionTurns, isProjectionCompaction, projectNativeMessageMeta, projectNativeSession, serializeProjection, serializeProjectionRecords, trimProjectionTurnsToCompaction,
   RUNTIME_ARCHIVE_SEGMENT_BYTES, harnessArchiveIndexSchema, validateArchiveBoundary,
-  nativeTurnStartSchema, nativeTurnCompleteSchema, nativeTurnProgressSchema, NATIVE_SYNC_SOURCE, isNativeClientTurn,
+  nativeTurnCompleteSchema, nativeTurnProgressSchema, nativeIngestTurnSchema, nativeRuntimeEventSchema, runtimeNativeStopSchema, NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, NATIVE_SYNC_SOURCE, isNativeClientTurn,
 } from "@cohub/protocol";
 export type {
   ContentBlock, HarnessKind, LocalHarness, RuntimeCapabilities, RuntimeCommand, RuntimeContext, RuntimePendingExecution,
@@ -11,7 +11,7 @@ export type {
   CanonicalProjectionMessage, CanonicalProjectionTurn, NativeProjection, ProjectionCursor, ProjectionInput, ProjectionRecord, ProjectionTarget, ProjectionWarning,
   RuntimeStatus, RuntimeSessionRecoveryStatus, RuntimeStopConfirmation, HarnessArchiveIndex, RuntimeArchiveSegment, RuntimeArchiveUpload, RuntimeArchivePage,
   RuntimeTraceContext, MessageToolCallsFile, SessionTurnRecord, StoredIntermediateMessage, StoredToolCall, TurnIntermediateMessagesFile,
-  NativeTurnStart, NativeTurnBinding, NativeTurnMessage, NativeTurnComplete, NativeTurnProgress, NativeRuntimeEvent,
+  NativeTurnMessage, NativeTurnComplete, NativeTurnProgress, NativeRuntimeEvent, NativeIngest, NativeIngestTurn, NativeIngestResult, NativeKnownResult, RuntimeNativeStop,
 } from "@cohub/protocol";
 export { CohubHttpClient, createHttpClient } from "./http.js";
 export { BillingApi } from "./apis/billing.js";
@@ -44,6 +44,10 @@ export type { AppAuthorizationResult, AppAuthorizationTarget, AppAuthorizationGr
 export { ParentBridgeTransport, PopupBrokerTransport, OriginBrokerTransport, AppRuntimeError, AppRuntimeApi, createOriginAppResolver, createSlugAppIdResolver, createAppRuntime, resolveAppTransport } from "./app-runtime.js";
 export type { AppContextChangedListener, AppDiagnostic, AppDiagnosticListener, AppIdResolver, AppRuntimeAppResolver, AppRuntimeResolvedApp, AppRuntimeInvocationContext, AppRuntimeModeConfig, AppRuntimeRequestOptions, AppRuntimeShellContext, AppRuntimeTransport, AppRuntimeConfigureRequest, AppRuntimeAnchor, AppRuntimeRect } from "./app-runtime.js";
 export { attachAppEmbed } from "./app-embed.js";
+export { AppWindowApi, applyAppAppearance } from "./app-window.js";
+export type { AppDropEvent, AppDropHandler, AppDropPoint, AppDropResource, AppDropResourceType, AppLaunch, AppWindowState } from "./app-window.js";
+export { APP_APPEARANCE_TOKENS, appAppearanceVar } from "@cohub/protocol/app-runtime";
+export type { AppAppearance, AppAppearanceToken, AppWindowStatus } from "@cohub/protocol/app-runtime";
 export type { AppEmbedAttachOptions, AppEmbedHandle, AppEmbedShell } from "./app-embed.js";
 export type { AppNavigationCall, AppNavigationLaunch, AppNavigationOpenMessage, AppNavigationOpenResponse, AppNavigationTarget } from "@cohub/protocol/app-navigation";
 export { createAppBridgeCore } from "./app-bridge-core.js";
@@ -148,6 +152,14 @@ export type {
   GenerationStreamTurnUpdatedEvent,
 } from "./session-generation-stream.js";
 export * from "./types.js";
+export {
+  generationOutputSource,
+  isActiveGenerationTask,
+  toGenerationTaskView,
+  type GenerationOutputType,
+  type GenerationTaskOutput,
+  type GenerationTaskView,
+} from "./generation-task.js";
 export type {
   BoardAwarenessGesture,
   BoardAwarenessNodePreview,
@@ -219,7 +231,7 @@ export {
   parseBoardPlaybackPolicy,
 } from "@cohub/protocol";
 export * from "./board/animation.js";
-export type { CreatePublicAssetUploadInput, CreatePublicAssetUploadResponse, PublicAssetMimeType, PublicAssetPurpose, PublicAssetUploadProgress, PublicAssetUploadProtocol, UploadAppSourceInput, UploadChatAttachmentInput, UploadChatImageAttachmentInput, UploadPublicAssetInput } from "./apis/public-assets.js";
+export type { CreatePublicAssetUploadInput, CreatePublicAssetUploadResponse, PublicAssetMimeType, PublicAssetPurpose, PublicAssetUploadProgress, PublicAssetUploadProtocol, UploadAppSourceInput, UploadChatAttachmentInput, UploadChatImageAttachmentInput, UploadGenerationInputInput, UploadPublicAssetInput } from "./apis/public-assets.js";
 export type { AppActionRunResponse, AppAuthorizeResponse, AppContent, AppContentDownload, AppCreateInput, AppDetailResponse, AppExtractedPageMeta, AppGetResponse, AppMeta, AppPresentationMeta, AppPromotionCreateInput, AppPromotionEventResponse, AppPromotionProvider, AppPromotionProviderStatus, AppPromotionRecord, AppPromotionStatsResponse, AppPublicOwnerRecord, AppPublicSpaceRecord, AppRecord, AppResolveResponse, AppSessionResponse, AppStatus, AppTargetType, AppUpdateInput, AppVersionRecord, AppViewerGrantRecord, AppViewSource, AppViewStatsResponse, AppVisibility, PublicAppVersionSummary } from "./apis/apps.js";
 export type {
   PublicFileCreateUploadInput,

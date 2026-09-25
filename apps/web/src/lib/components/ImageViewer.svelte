@@ -1,7 +1,11 @@
 <script lang="ts">
 import { Minus, Plus } from "lucide-svelte";
 import {
+	clampImageZoom,
 	createImageGestureHandlers,
+	IMAGE_MAX_ZOOM,
+	IMAGE_MIN_ZOOM,
+	IMAGE_ZOOM_STEP,
 	type ImageGestureState,
 	imageTransform,
 } from "$lib/gestures/image-gesture";
@@ -15,6 +19,7 @@ let {
 	dragging = $bindable(false),
 	showControls = false,
 	class: className = "",
+	onerror,
 }: {
 	src: string;
 	alt?: string;
@@ -24,11 +29,11 @@ let {
 	dragging?: boolean;
 	showControls?: boolean;
 	class?: string;
+	/** The image failed to load; hosts may swap `src` for a fallback. */
+	onerror?: () => void;
 } = $props();
 
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 4;
-const ZOOM_STEP = 0.25;
+/** Discrete mouse-wheel notch; trackpad pinch / scroll zoom continuously. */
 const WHEEL_STEP = 0.12;
 const PINCH_INTENSITY = 0.018;
 const SCROLL_INTENSITY = 0.0035;
@@ -53,8 +58,7 @@ function reset() {
 }
 
 function zoomBy(delta: number) {
-	const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom + delta));
-	setView({ zoom: next, panX: 0, panY: 0 });
+	setView({ zoom: clampImageZoom(zoom + delta), panX: 0, panY: 0 });
 }
 
 function onWheel(event: WheelEvent) {
@@ -70,11 +74,11 @@ function onWheel(event: WheelEvent) {
 		zoomBy(delta < 0 ? WHEEL_STEP : -WHEEL_STEP);
 		return;
 	}
-	const next = Math.min(
-		MAX_ZOOM,
-		Math.max(MIN_ZOOM, zoom * Math.exp(-delta * factor)),
-	);
-	setView({ zoom: next, panX, panY });
+	setView({
+		zoom: clampImageZoom(zoom * Math.exp(-delta * factor)),
+		panX,
+		panY,
+	});
 }
 
 const cursor = $derived(dragging ? "grabbing" : zoom > 1 ? "grab" : "zoom-in");
@@ -105,6 +109,7 @@ $effect(() => {
 		src={src}
 		alt={alt}
 		draggable="false"
+		{onerror}
 		style={`transform: ${imageTransform({ zoom, panX, panY })}; ${dragging ? "" : "transition: transform 150ms ease;"}`}
 		class="max-h-full max-w-full select-none will-change-transform"
 	/>
@@ -113,8 +118,8 @@ $effect(() => {
 			<button
 				type="button"
 				class="flex h-8 w-8 items-center justify-center rounded-full text-overlay-control-text transition-colors hover:bg-overlay-control-hover disabled:opacity-40"
-				onclick={() => zoomBy(-ZOOM_STEP)}
-				disabled={zoom <= MIN_ZOOM}
+				onclick={() => zoomBy(-IMAGE_ZOOM_STEP)}
+				disabled={zoom <= IMAGE_MIN_ZOOM}
 				aria-label="Zoom out"
 				title="Zoom out"
 			>
@@ -132,8 +137,8 @@ $effect(() => {
 			<button
 				type="button"
 				class="flex h-8 w-8 items-center justify-center rounded-full text-overlay-control-text transition-colors hover:bg-overlay-control-hover disabled:opacity-40"
-				onclick={() => zoomBy(ZOOM_STEP)}
-				disabled={zoom >= MAX_ZOOM}
+				onclick={() => zoomBy(IMAGE_ZOOM_STEP)}
+				disabled={zoom >= IMAGE_MAX_ZOOM}
 				aria-label="Zoom in"
 				title="Zoom in"
 			>

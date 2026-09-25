@@ -2,32 +2,26 @@ import {
   ListObjectsV2Command,
   S3Client,
 } from "@aws-sdk/client-s3";
-import type {
-  PublicFileCreateUploadInput,
-  PublicFileCreateUploadResponse,
-  PublicFileListEntry,
-  PublicFileListResponse,
-  PublicFileUrlResponse,
+import {
+  UPLOAD_MAX_BATCH_BYTES,
+  UPLOAD_MAX_BATCH_FILES,
+  UPLOAD_MAX_FILE_BYTES,
+  type PublicFileCreateUploadInput,
+  type PublicFileCreateUploadResponse,
+  type PublicFileListEntry,
+  type PublicFileListResponse,
+  type PublicFileUrlResponse,
 } from "@cohub/protocol";
 import { config } from "./config.js";
-import { redisCommandClient } from "./redis.js";
 import {
   createPresignedPutObjectUrl,
   type PresignStorageConfig,
 } from "./object-presign.js";
 
-export const MAX_PUBLIC_FILE_BYTES = 1024 * 1024 * 1024;
-export const MAX_PUBLIC_UPLOAD_BYTES = 1024 * 1024 * 1024;
-export const MAX_PUBLIC_UPLOAD_FILES = 1000;
 export const PUBLIC_FILE_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=3600";
 
 const DEFAULT_LIST_LIMIT = 200;
 const MAX_LIST_LIMIT = 1000;
-const PUBLIC_UPLOAD_QUOTA_WINDOW_SECONDS = 60 * 60;
-const PUBLIC_UPLOAD_USER_MAX_FILES = 3000;
-const PUBLIC_UPLOAD_SPACE_MAX_FILES = 10_000;
-const PUBLIC_UPLOAD_USER_MAX_BYTES = 10 * 1024 * 1024 * 1024;
-const PUBLIC_UPLOAD_SPACE_MAX_BYTES = 50 * 1024 * 1024 * 1024;
 
 export class PublicFileConfigError extends Error {
   override name = "PublicFileConfigError";
@@ -35,10 +29,6 @@ export class PublicFileConfigError extends Error {
 
 export class PublicFileValidationError extends Error {
   override name = "PublicFileValidationError";
-}
-
-export class PublicFileRateLimitError extends Error {
-  override name = "PublicFileRateLimitError";
 }
 
 type RequiredStorage = PresignStorageConfig & {
@@ -124,40 +114,6 @@ export const buildPublicFileUrl = (spaceId: string, path: string) => {
   return `${baseUrl}/${objectKey.split("/").map(encodeURIComponent).join("/")}`;
 };
 
-async function consumeQuota(key: string, count: number, max: number) {
-  const next = await redisCommandClient.incrby(key, count);
-  if (next === count) await redisCommandClient.expire(key, PUBLIC_UPLOAD_QUOTA_WINDOW_SECONDS);
-  if (next <= max) return;
-  await redisCommandClient.decrby(key, count).catch(() => undefined);
-  throw new PublicFileRateLimitError("too many public uploads, please try again later");
-}
-
-export async function consumePublicFileUploadQuota(input: {
-  userId: string;
-  spaceId: string;
-  entryCount: number;
-  totalBytes: number;
-}) {
-  const quotas = [
-    [`public_file_upload:user:${input.userId}:files`, input.entryCount, PUBLIC_UPLOAD_USER_MAX_FILES],
-    [`public_file_upload:user:${input.userId}:bytes`, input.totalBytes, PUBLIC_UPLOAD_USER_MAX_BYTES],
-    [`public_file_upload:space:${input.spaceId}:files`, input.entryCount, PUBLIC_UPLOAD_SPACE_MAX_FILES],
-    [`public_file_upload:space:${input.spaceId}:bytes`, input.totalBytes, PUBLIC_UPLOAD_SPACE_MAX_BYTES],
-  ] as const;
-  const consumed: Array<{ key: string; count: number }> = [];
-  try {
-    for (const [key, rawCount, max] of quotas) {
-      const count = Math.max(0, Math.floor(rawCount));
-      if (count === 0) continue;
-      await consumeQuota(key, count, max);
-      consumed.push({ key, count });
-    }
-  } catch (error) {
-    await Promise.all(consumed.map(({ key, count }) =>
-      redisCommandClient.decrby(key, count).catch(() => undefined)));
-    throw error;
-  }
-}
 
 function normalizeMimeType(value: string | null | undefined) {
   if (value == null || value === "") return "application/octet-stream";
@@ -177,7 +133,7 @@ export function createPublicFileUpload(
   if (input.overwrite != null && typeof input.overwrite !== "boolean") {
     throw new PublicFileValidationError("overwrite must be a boolean");
   }
-  if (input.entries.length > MAX_PUBLIC_UPLOAD_FILES) throw new PublicFileValidationError("too many files");
+  if (input.entries.length > UPLOAD_MAX_BATCH_FILES) throw new PublicFileValidationError("too many files");
 
   const seenIds = new Set<string>();
   const seenPaths = new Set<string>();
@@ -190,11 +146,11 @@ export function createPublicFileUpload(
     const path = normalizePublicFilePath(entry.relativePath);
     if (seenPaths.has(path)) throw new PublicFileValidationError("duplicate public path");
     seenPaths.add(path);
-    if (!Number.isSafeInteger(entry.size) || entry.size < 0 || entry.size > MAX_PUBLIC_FILE_BYTES) {
+    if (!Number.isSafeInteger(entry.size) || entry.size < 0 || entry.size > UPLOAD_MAX_FILE_BYTES) {
       throw new PublicFileValidationError("file too large");
     }
     totalBytes += entry.size;
-    if (totalBytes > MAX_PUBLIC_UPLOAD_BYTES) throw new PublicFileValidationError("upload too large");
+    if (totalBytes > UPLOAD_MAX_BATCH_BYTES) throw new PublicFileValidationError("upload too large");
     return {
       id: entry.id,
       path,

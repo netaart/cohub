@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MarketplaceCatalogSchema, ManifestSchema, isPermissionError, parseCatalog, toInstalledApp } from "./catalog";
+import { MarketplaceCatalogSchema, ManifestSchema, isPermissionError, parseCatalog, toInstalledApp, unclaimedFileHandlers } from "./catalog";
 
 const id = "123e4567-e89b-42d3-a456-426614174000";
 const entry = { id, ref: "tzwm/cohub/task-browser", name: "Task Browser", url: "https://cdn.example.com/task-browser/index.html" };
@@ -28,4 +28,23 @@ test("marketplace entries convert into a manifest-compatible installed app", () 
 test("permission errors are separated from data errors", () => {
   assert.equal(isPermissionError({ status: 403 }), true);
   assert.equal(isPermissionError(new Error("catalog unavailable")), false);
+});
+
+test("installed Apps keep unknown fields, and install claims only free file types", () => {
+  const [listed] = parseCatalog({ format: "cohub.app-marketplace", version: 1, apps: [entry] });
+  assert.ok(listed);
+  const manifest = ManifestSchema.parse({
+    format: "cohub.space-apps",
+    version: 1,
+    future: true,
+    apps: [{ ...toInstalledApp(listed, undefined, [".board"]), pinned: true }],
+  });
+  assert.equal((manifest as Record<string, unknown>).future, true);
+  assert.equal((manifest.apps[0] as Record<string, unknown>).pinned, true);
+  assert.deepEqual(manifest.apps[0]?.opens, [".board"]);
+  assert.deepEqual(unclaimedFileHandlers(manifest, [".board", "BOARD", ".md", "MD", "no pe", 1]), [".md"]);
+  assert.deepEqual(unclaimedFileHandlers(manifest, undefined), []);
+  const disabled = { ...manifest, apps: manifest.apps.map((app) => ({ ...app, enabled: false })) };
+  assert.deepEqual(unclaimedFileHandlers(disabled, [".board"]), [".board"]);
+  assert.equal("opens" in toInstalledApp(listed), false);
 });

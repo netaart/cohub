@@ -48,87 +48,122 @@ accepted. `--yes` accepts the explicit local execution consent for non-interacti
 
 ```bash
 cohub runtime up -d --harness pi --harness codex
-cohub runtime attach --harness pi --harness codex
-# Reload Pi or restart Codex; review native extension / hook trust prompts.
-# 重载 Pi 或重启 Codex，并审核原生扩展 / Hook 信任提示。
-pi
+# One consent for this folder (default yes); Codex asks once more before sharing its app-server.
+# 首次授权一次（默认 yes）；Codex 共享 app-server 另确认一次。
+pi                                   # run /reload in Pi sessions that were already open
 codex
-cohub runtime status --json
-cohub runtime detach --harness pi --harness codex
+cohub runtime status
+cohub runtime import                 # earlier conversations, newest first; Ctrl-C pauses
+cohub runtime attach --harness pi    # install the Pi extension by hand
+cohub runtime detach --harness codex
 ```
 
-`attach` installs a user-level Pi extension / Codex hook block, but enables collection only
-for the explicitly bound directory, account and environment. It confirms uploading opened
-conversations (including existing history), tool output and original session archives to the
-Space. These may contain sensitive data and follow the Space's access policy. Credentials,
-configuration files and Codex's private SQLite database are never collected. Existing native
-configuration is backed up; conflicting managed blocks and symlinks are not overwritten.
-`--yes` accepts this upload consent; it never bypasses native hook trust.
+**Data plane.** A harness's own session file is the durable record and the outbox. The Runtime
+watches Pi's and Codex's session trees (the bound folder and its subdirectories, except a subdirectory
+bound to a Space of its own) and sends Turns over
+its Runtime WebSocket. Persistence is event-driven and separate from realtime: a transcript is parsed
+only when a Turn begins or ends in it — reported by the control plane (Pi's prompt and settle, Codex's
+`turn/completed`) or found as a boundary record in the bytes the harness just appended. Between those
+moments the Runtime only searches new bytes for boundaries; it never re-parses, re-sends a running
+Turn, or polls. A Pi without the extension settles after one quiet-period timer. A send that fails is
+retried with backoff; while offline, changes wait and are sent on reconnect.
 
-`attach` 安装用户级集成，但仅采集明确绑定的目录、账号和环境。上传范围包含打开的对话、
-已有历史、工具输出和原始会话归档，可能含敏感数据，遵循 Space 权限。不会采集认证文件、
-配置或 Codex 私有 SQLite 数据库。原有配置会备份，冲突配置及符号链接不会被覆盖。
-`--yes` 仅确认上传授权，不绕过原生 Hook 信任检查。
+The server is the only ledger: after a restart or disconnect the Runtime asks which Turns the server
+already has and reads forward from there, so there are no local delivery receipts and a replay never
+duplicates. Turn identity is derived from the Space and the file (Codex turn id; Pi session id + entry
+id), so a folder bound to a new Space syncs there afresh. Only a rebuildable cache lives locally
+(`~/.local/state/cohub/runtime/<space-id>/native/ledger.jsonl`, an append-only journal compacted when
+it outgrows its content). Codex's own threads (reviews, compaction, memory) and
+spawned sub-agents are skipped. Raw bytes of the latest settled Turn are
+archived so a conversation can be restored natively on another machine.
 
-The local Runtime Supervisor is the single per-binding Daemon. Pi Extensions and Codex Hooks
-connect only to its private local socket; they do not hold Cohub tokens or open API connections.
-The Daemon owns one authenticated Runtime WebSocket, native receipts, archive outbox and native
-Turn routing. Native start / progress / completion events use that WebSocket; presigned HTTP is
-used only for archive bytes. A Plugin process can disappear without losing the local receipt.
+**数据面。** 原生会话文件就是唯一的持久记录和发件箱。Runtime 监听 Pi / Codex 的会话目录（绑定目录及其子目录），
+只在 Turn 开始或结束时解析并经 Runtime WS 上报（由控制面事件或新追加字节中的边界记录触发），其间只扫描新字节、不重解析、不轮询。服务端是唯一账本：重启或断线后先询问服务端已有哪些 Turn 再继续读，
+本地不再保存投递回执，重放不会重复。本地只有可重建的缓存。Codex 自身的内部线程与子 Agent 不同步。
 
-原生客户端由每个绑定对应的 Local Runtime Daemon 统一管理。Pi Extension 和 Codex Hook 只连接
-本机私有 IPC，不持有 Cohub Token，也不直接连接 API。Daemon 统一持有认证后的 Runtime WS、
-Turn 回执、归档 outbox 和原生 Turn 路由。原生 Turn 的开始、进度和完成走 WS，HTTP 只上传归档
-字节。插件进程退出不会丢失本地回执。
+**Control plane.** Each harness is driven through the interface its own terminal client uses:
 
-Native executions use ordinary Cohub Chats and Turns, including existing stream snapshots,
-intermediate history, usage, native archives and continuation. Native work never waits for the
-cloud queue or network. Per-Turn local receipts precede delivery; reconnect replays receipts,
-never models or tools. An atomic Session-row operation appends at the supplied settled Turn
-or creates a standard Turn fork if the cloud has advanced, is executing or has queued work.
-An empty local history starts a separate root when there is no Turn to fork. Forked archives
-start a new baseline rather than referring to another Session's archive chain.
+- **Pi**: a self-contained extension (`~/.pi/agent/extensions/cohub.js`, installed on consent)
+  connects each Pi process to the Runtime's local socket. Through it the web streams a terminal Turn
+  live, stops it, and sends prompts into the terminal's own session. A Pi that Cohub starts
+  (`pi --mode rpc`) loads the same extension, so both paths are one. Without the extension a Pi
+  session syncs read-only; `runtime status` says so, and `/reload` connects it after installing.
+- **Codex** (0.156+): on consent, the Runtime uses Codex's shared app-server
+  (`codex app-server daemon start` if none is running). A terminal `codex` attaches to that server
+  by default, so web and terminal drive the same live thread. Cohub never restarts or stops it:
+  `detach` and `down` print `codex app-server daemon stop` instead. The server is started with the
+  login environment minus Cohub credentials; each thread only gets its cwd, an explicitly chosen
+  model, a read-only sandbox when requested, and `COHUB_SPACE_ID` / `COHUB_SESSION_ID`. Cohub
+  refuses approvals of the Turns it started and never answers a terminal user's approvals.
+  Declining, an older Codex or a failed start degrade the same way: Cohub Turns use a private
+  `codex app-server --listen stdio://`, and terminal Codex sessions sync read-only.
 
-原生执行进入普通 Chat / Turn，复用现有进度展示、历史、用量、归档和继续执行能力。
-本地执行不等待云端队列或网络；逐 Turn 回执持久化后补传，重连不重跑模型或工具。
-云端已前进、正在执行或存在排队任务时，从本地已确认的完整 Turn 自动分支；没有父 Turn
-的空历史则创建独立会话。分支归档使用新基线，不跨 Session 串接增量归档链。
+**Realtime.** Previews of a Turn someone runs in a terminal stream from the control plane — Pi's
+extension events, and for Codex the shared server's events (the Runtime joins every busy thread of
+this project it hears about) — at most every 250 ms, sending only the messages that changed. A client
+Cohub cannot reach is previewed from its file every 2 s, less often for a long file. A web stop is
+pushed to the Runtime through the Gateway (the same stop channel the Agent uses); the Runtime asks for
+running Turns' state once after reconnecting. A native Turn stays alive while its owner's Runtime holds
+the Space's lease; there is no per-Turn heartbeat. Whether Cohub can stop a running Turn is updated as
+its native client connects or leaves; one it cannot stop says to stop it in the terminal. A Turn no
+client is linked to reports signs of life (its file growing) every few minutes; after 30 minutes of
+silence it asks for attention, since a killed client writes no end record, and the user confirms the
+stop. It is never guessed finished.
 
-Existing Runtime Session / Turn sidecars and raw projection metadata seed the native binding.
-The native client's file remains its own: subsequent Runtime execution rebuilds or restores a
-separate projection, never writes into the interactive client's file. Turn forks do **not**
-isolate workspace files; parallel branches may still edit the same project directory.
+**Tool environment.** Tools find their Space, Session and Turn in `COHUB_SPACE_ID`,
+`COHUB_SESSION_ID` and `COHUB_TURN_ID`. A process Cohub starts gets all three. A connected Pi runs
+many Turns, so the extension updates its process environment per Turn, for web and terminal Turns
+alike. A shared Codex thread carries Space and Session in its thread config; per-Turn ids are not
+possible there. When a request names a Session but no Turn, the API fills in the Session's running
+local Turn if it belongs to the caller's Runtime.
 
-复用现有 Runtime 的 Session / Turn 关联与历史投影元数据。Runtime 继续执行时使用独立
-原生文件，不覆盖交互式客户端的记录。Turn 分支不隔离工作目录，并行分支仍可能修改相同文件。
+**实时面** 与持久化分开：Pi 通过扩展、共享 Codex 通过服务端事件逐 token 推送预览（每 250ms 至多一次，只发生变化的消息）；
+无法连接的客户端按文件每 2 秒预览一次。停止请求由服务端经 Gateway 推送到 Runtime，不靠轮询；Runtime 只在重连后查询一次运行中 Turn 的状态。
+Turn 的存活由 Runtime 连接租约判断，不再逐 Turn 心跳；未接入控制面的 Turn 静默 30 分钟后请用户确认停止，绝不猜测已结束。
+
+**控制面。** Pi 通过自带扩展接入本机 socket，Web 可实时查看、停止终端 Turn，并向终端会话发送消息；
+Cohub 启动的 Pi 加载同一扩展。未安装扩展时只读同步。Codex 0.156+ 经同意后使用官方共享 app-server，
+终端 `codex` 默认连接同一服务，Web 与终端共同驱动同一线程；Cohub 从不重启或停止它。拒绝、版本过低或启动失败
+统一降级：Cohub 的 Turn 使用私有 stdio app-server，终端会话只读同步。
+
+A Turn Cohub starts writes its cloud Turn id into the native file (Pi `custom: cohub.turn` entry;
+Codex `clientUserMessageId`), so the file proves which Turns are Cohub's and they are never ingested
+twice. A Session is continued in its native file only when that file ends at the Session head and a
+live client (or Cohub itself) owns it; otherwise Cohub restores the archive or projects the Session
+into a new file and never writes into a file a terminal holds.
+
+**Import.** `runtime import` backfills conversations from before consent. The Runtime does the work;
+the command plans, confirms and shows progress (conversations, Turns, bytes, estimate). Newest first,
+four conversations at a time (`--concurrency` up to 8); live Turns are never starved. Ctrl-C pauses and
+running it again continues; progress survives restarts because the server recognizes what it has.
+`--dry-run`, `--harness`, `--session`, `--yes` and `--json` are supported. `up` offers the import on
+first consent. Imported Turns carry `meta.nativeSync.origin = "local_import"` and their original times;
+they appear as ordinary Chats.
+
+**导入。** `runtime import` 在 Runtime 内执行，命令只负责规划、确认和显示进度；按最近优先、默认并发 4，
+不挤占实时同步；Ctrl-C 暂停，再次运行继续，重启后也可继续且不重复。
 
 Boundaries:
-- Pi requires 0.85.1+ with `agent_settled`; Codex requires enabled stable Hooks. Startup capability
-  checks fail explicitly. Pi 0.86.1 and Codex 0.155.1 smoke tests use a deterministic loopback model fixture.
-- Progress follows durable native messages, not every token. Codex hooks only register local watches;
-  the existing Runtime supervisor reads flushed Turn boundaries and retries uploads every five seconds.
-- Ephemeral sessions without a durable transcript are not collected. A native file belonging to an
-  unconfirmed managed Runtime execution cannot be adopted; finish or reconcile that execution first.
-- Only whole-Turn anchors are supported. Pi intra-Turn rewinds and Codex rollouts referencing missing
-  parent history fail explicitly with originals retained; they are never silently rounded to another anchor.
-- Native-only UI / direct-shell records do not become separate Agent Turns. Their original bytes remain
-  local and are included in subsequent Turn archives; the bridge does not invent message-level anchors.
-  原生 UI / 直接 Shell 记录不另建 Agent Turn，原件保留在本地并随后续 Turn 归档，不虚构 message 级锚点。
-- Capture currently reads at most 128 MiB per transcript; API receipts are limited to 32 MiB. Limits
-  retain originals and surface diagnostics instead of truncating data.
-- Pi can honor a remote abort while its extension is connected. Codex hooks are not a remote control
-  channel; stop an active native Codex run in its terminal. Unknown outcomes retain the existing explicit
-  stop-confirmation boundary. Completed Chats can continue through the regular Runtime.
-- `detach` pauses collection and future uploads, preserving receipts, files and cloud history. In-flight
-  requests may finish. `down` stops the Runtime supervisor, not independently launched native clients.
+- Terminal Codex clients started with `-c`, `--search` or `--enable` run an embedded server and are
+  not attached; their Turns still sync, read-only.
+- Pi 0.85.1+ is driven through the extension. An older Pi, or a control socket that cannot listen,
+  leaves Pi sessions read-only; `runtime status` and a Cohub Pi Turn say why.
+- Pi without the extension cannot be stopped from the web; Pi's last Turn counts as ended when its
+  extension reports it settled, or after 10 s of quiet following a reply that ended. One left mid-tool
+  waits for its next record, or asks for attention after 30 minutes.
+- A Codex Turn followed by another without its own end record (its client died) is recorded as interrupted.
+- A Cohub Turn sent to a terminal Pi that is busy waits for the terminal's Turn to settle, then runs.
+- A model or thinking level chosen on the web for a Turn in a live terminal session stays selected
+  there, as if chosen in the terminal; a shared Codex thread keeps it the same way.
+- Turn forks do **not** isolate workspace files; parallel branches may edit the same directory.
+- `detach` pauses sync and live previews at once, for transcripts already tracked too; a Turn running
+  then asks for attention if its end never arrives. A paused terminal file is not continued from the
+  web. Nothing is deleted. `down` stops the Runtime, never a user's own clients.
 
-边界：只支持完整 Turn 分支，不新增 message 级锚点。消息随原生持久记录更新，不保证逐 token。
-无法识别的中途分支、缺失父历史和超限记录会明确报错并保留原件。Pi 扩展在线时可接收停止请求；
-Codex Hooks 不提供远程控制，运行中的原生任务需在终端停止，结果未知时仍须明确确认。
-`detach` 暂停后续采集和上传，不删除数据；`down` 不终止用户独立启动的原生客户端。
-
-Deploy API before the updated CLI and restart an older Runtime before `attach`. No DB migration is needed.
-先部署 API，再更新 CLI；接入前重启旧 Runtime。无需数据库迁移。
+Deploy the API before the updated CLI. No DB migration is needed. Earlier CLIs keep running Cohub Turns,
+but their native sync is refused with "upgrade the Cohub CLI". Native sync state from those releases is
+not carried over; sync starts afresh.
+先部署 API，再更新 CLI；无需数据库迁移。旧版 CLI 仍可执行 Cohub Turn，但原生同步会被拒绝并提示升级；旧版原生同步状态不迁移，重新开始同步。
 
 ## Lifecycle / 生命周期
 
@@ -202,18 +237,20 @@ arguments, file contents and credentials are not recorded.
 ```text
 API prompt -> BullMQ -> Session lock -> Harness dispatch
                                       |-- Cohub runtime
-                                      `-- Gateway WS -> local Pi RPC / Codex app-server
+                                      `-- Gateway WS -> Pi extension / Codex app-server (shared or private)
 
 Harness events -> Agent sendOutput -> existing snapshot / patch -> Web / SDK
 Harness messages -> existing persistence / finalize -> DB / realtime
+Local native file -> ingest over Runtime WS -> ordinary Chats / Turns
 Local native session -> durable segments -> CLI presigned PUT -> object storage
 Archive metadata -> API confirmation -> turn.harnessIndex
 Object storage -> CLI presigned GET -> verified native restore
 Cloud native session <- DB context (no harness archive)
 ```
 
-Managed execution has no HTTP polling/claim/result endpoints. Native-client receipts use
-`/api/spaces/:id/runtime/native-turns` for ingestion only; they never dispatch or replay model/tool work.
+Managed execution has no HTTP polling/claim/result endpoints. Native ingest travels on the Runtime
+WebSocket (`runtime.native`: `ingest`, `known`, `progress`, `status`); stops arrive as `runtime.native.stop`
+pushes. It never dispatches or replays model/tool work.
 The outbound managed connection uses `/runtime/relay`; internal Agent peers use `/internal/runtime-relay/:spaceId`.
 The existing workspace relay remains responsible for files and processes.
 
@@ -224,8 +261,13 @@ Execution uses the owner's authorization; author permissions are never combined.
 anywhere in the batch makes the entire batch read-only (Pi rejects this before dispatch).
 
 Each source turn/message and its author, requested Harness and original content remain intact.
-Earlier turns point to the owner through `mergedIntoTurnId`. Local adapters receive the batch content verbatim:
-no prefixes, ordinals, separators, explanations or internal user/turn/message IDs are added to prompt text.
+Earlier turns point to the owner through `mergedIntoTurnId`. Local adapters receive the batch content
+verbatim: no prefixes, ordinals, separators, explanations or internal user/turn/message IDs are added
+to prompt text. Platform-side one-shot expansion still applies at submission — prompt templates
+(`/name args`) expand everywhere; project-scoped skills expand with workspace-relative locations,
+while skills the platform does not know pass through verbatim so a Harness' local skill files can
+serve them. Direct `!` shell commands execute on the Cohub sandbox only and pass through verbatim
+to Local Harnesses.
 Representable blocks and tool pairing are preserved; URL images, system notes and unknown blocks are dropped from
 the model input, never described in text, and their durable copy stays in the platform. Only the existing system
 prompt builder may author platform instructions. Streaming, results, usage and native archive references
@@ -276,14 +318,13 @@ requiring `sandbox.manage`. Confirmation is bound to that Session, active turn a
 revision; newer executions are never included. Original turn input, committed
 messages, native files and result receipts are retained. A durable resolution note
 records that prior effects remain unknown; late results cannot replace this terminal
-state. Local projections are retired before rebuilding from server context. If an ACK
-was lost before switching Harnesses, the Runtime asks only about its current pending
-projection and rebuilds from the latest durable context when switching back.
+state. The native file of a confirmed-stopped Turn is not continued; the next Turn restores or
+projects the Session instead.
 
-An orphaned local projection never blocks a Harness permanently: once the server
-reports that turn as terminal, the projection is archived under `retired/` and rebuilt,
-whether or not a local result receipt survived. Only turns the server still considers
-active require explicit local confirmation. Native files are never deleted.
+A receipt never blocks a Harness permanently: once the server reports its Turn as terminal, the
+receipt is released. A receipt whose result was lost is rebuilt from the native file, found by the
+Turn's Cohub marker; an unfinished or interrupted Turn is never guessed complete. Only Turns the
+server still considers active require explicit confirmation. Native files are never deleted.
 
 Transport uncertainty is surfaced immediately on the active Session. Reconnect and
 bounded queue retries can still recover a saved result; an explicit missing-result response
@@ -292,13 +333,11 @@ Never infer that a disconnected execution has stopped.
 
 ## Boundaries
 
-- Adapters currently start an RPC process per turn. Native conversation history
-  resumes, but in-process PTY handles, background terminals and interactive
-  extension state are not guaranteed to survive between turns. This is not full
-  interactive-native parity; persistent Harness processes require a separate lifecycle design.
-- Use Pi versions exposing RPC session events and Codex versions supporting
-  app-server thread resume/fork. Verified with Pi 0.85.1 and Codex 0.154.0.
-  Codex rollout-path recovery is an upstream experimental API; incompatible versions fail explicitly.
+- A Turn sent to a live terminal client runs in that process. Otherwise Cohub starts a Pi (or a
+  private Codex app-server) for the Turn; in-process PTY handles and background terminals do not
+  survive between such Turns. A shared Codex app-server keeps its threads loaded across Turns.
+- Verified with Pi 0.86.1 and Codex 0.156.1. Codex rollout-path recovery is an upstream
+  experimental API; incompatible versions fail explicitly.
 - Native approval escalation is never automatically granted. Requests requiring
   an interactive local approval are rejected by the unattended adapter. Pi
   read-only execution is rejected because it cannot enforce the requested limit.
@@ -314,10 +353,8 @@ Never infer that a disconnected execution has stopped.
   a new baseline. Each turn stores only its parent reference and new segments, not the whole list.
 - Uploads retry every 10 seconds while Runtime is running, including after restart with no new turn.
   Model-result ACK and archive confirmation are independent. `runtime status` reports `pendingLocalArchives`;
-  Web shows pending/ready/unavailable archive state. Failed capture is retried before another turn can mutate the file.
-- Missing/changed native files and malformed capture receipts are quarantined under `archives/failed/captures/`.
-  The exact receipt and failure reason are retained; native files stay untouched. These failures stop retrying and
-  are reported by `runtime status.failedLocalArchives`. Transient I/O errors keep retrying.
+  Web shows pending/ready/unavailable archive state. A failed capture costs only cross-machine native
+  resume; the next settled Turn captures the file again, since every version is a prefix of the next.
 - Confirmation validates authorization, parent identity, contiguous offsets, object lengths and storage-verified MD5.
   Restoration verifies every SHA-256 and every version digest before atomically publishing a new file.
   Only ready, valid indexes are offered for native recovery. Pending, failed or invalid indexes use DB history.
@@ -354,29 +391,14 @@ Deploy Worker, API, Gateway and every Agent instance
 before enabling the updated Web/CLI. Worker must understand local usage before local
 results arrive, so they cannot be charged as cloud executions.
 
-Native plugin smoke tests use isolated homes, the published JS layout, and a deterministic
-loopback model fixture. They do not read real credentials or contact a Cohub server.
-原生插件冒烟测试使用隔离目录与本地模型桩，不读取真实凭证、不连接 Cohub 服务端。
+The native smoke test drives real Pi and Codex binaries with isolated homes and a deterministic
+loopback model: a Cohub Turn in a Pi Cohub starts; a terminal Pi syncing with live preview; a web
+prompt and a web stop reaching that terminal Pi; the same through Codex's shared app-server with a
+second client as the terminal; and the private app-server fallback. It reads no credentials and
+contacts no Cohub server. 原生冒烟测试使用真实 Pi / Codex、隔离目录与本地模型桩，不读取凭证、不连接服务端。
 
 ```bash
-# Build protocol, SDK and CLI first / 先构建 protocol、SDK 和 CLI
-COHUB_NATIVE_PI_BIN=/path/to/pi \
+COHUB_NATIVE_PI_BIN=$(which pi) \
 COHUB_NATIVE_CODEX_BIN=/path/to/codex \
-pnpm --filter @neta-art/cohub-cli test:runtime:plugins
-```
-
-For opt-in real-model testing, prepare an isolated directory containing `home/`,
-`pi/` and `codex/`, with native authentication/configuration. This test makes model
-requests and writes temporary files; archive storage is injected in-memory and it never connects to a Cohub server. Set
-`COHUB_NATIVE_TEST_PI_BIN` / `COHUB_NATIVE_TEST_CODEX_BIN` to override executables.
-
-```bash
-COHUB_NATIVE_TEST_HOME=/path/to/isolated-config \
-COHUB_NATIVE_TEST_PROVIDER=your-provider \
-COHUB_NATIVE_TEST_MODEL=your-model \
 pnpm --filter @neta-art/cohub-cli test:runtime:native
 ```
-
-The native matrix checks streaming, real file-writing tools, native resume,
-archive import, Pi/Codex handoff and abort with partial-output retention. Provider
-features and sandbox permissions come from the test configuration, not Cohub overrides.

@@ -81,22 +81,12 @@ That means you can iterate in the Space, then deliberately publish when the outp
 
 ## Permissions
 
-An App's effective permission for one Space is the union of two grant sources —
-either one is enough:
+An App's effective permission is the union of publisher-granted app scopes and
+viewer consents. The full model, scope lists, and the API → scope map live in
+[App development](/docs/developers/apps#permissions) — decide scopes there,
+set them here at publish time.
 
-1. **App scopes** — eight bounded scopes (`space.view`, `session.view`,
-   `file.view`, `file.edit`, `taskrun.view`, `session.prompt.readonly`,
-   `session.prompt.fullaccess`, `command.execute`) granted at publish time.
-   They apply only to the App's own Space.
-2. **Viewer grants** — any permission the viewer holds, on any Space they
-   choose, approved through a consent dialog at runtime. Grants are per Space,
-   last 14 days, and never exceed what the viewer can already do there. A
-   viewer can review and revoke their grants at any time (`cohub apps grants`,
-   `cohub apps revoke`).
-
-This matters when an App uses the Cohub SDK inside the published runtime to read context, prompt, generate, or access approved resources.
-
-If your App is only static HTML, you may need little or no runtime scope.
+If your App is only static HTML, publish with little or no scope.
 
 ## Runtime note
 

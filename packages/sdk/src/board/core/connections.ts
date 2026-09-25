@@ -439,6 +439,67 @@ export function connectionBounds(resolved: ResolvedConnection, strokeSize: numbe
 	};
 }
 
+export type ConnectionGeometry = {
+	connection: BoardConnection;
+	resolved: ResolvedConnection;
+	bounds: Rect;
+};
+
+/**
+ * Resolved geometry reused until the connection or an endpoint frame changes
+ * identity, so unchanged relations keep returning the same object.
+ */
+export type ConnectionGeometryCache = {
+	get: (connection: BoardConnection, getFrame: FrameLookup) => ConnectionGeometry | null;
+	peek: (connectionId: string) => ConnectionGeometry | null;
+	retain: (connections: readonly BoardConnection[]) => void;
+	clear: () => void;
+};
+
+export function createConnectionGeometryCache(): ConnectionGeometryCache {
+	const entries = new Map<
+		string,
+		{ source: BoardFrame; target: BoardFrame; geometry: ConnectionGeometry }
+	>();
+	return {
+		get(connection, getFrame) {
+			const source = getFrame(connection.source.itemId);
+			const target = getFrame(connection.target.itemId);
+			if (!source || !target) {
+				entries.delete(connection.id);
+				return null;
+			}
+			const entry = entries.get(connection.id);
+			if (
+				entry &&
+				entry.geometry.connection === connection &&
+				entry.source === source &&
+				entry.target === target
+			)
+				return entry.geometry;
+			const resolved = resolveConnection(connection, getFrame);
+			if (!resolved) {
+				entries.delete(connection.id);
+				return null;
+			}
+			const geometry = {
+				connection,
+				resolved,
+				bounds: connectionBounds(resolved, connection.style.size),
+			};
+			entries.set(connection.id, { source, target, geometry });
+			return geometry;
+		},
+		peek: (connectionId) => entries.get(connectionId)?.geometry ?? null,
+		retain(connections) {
+			if (entries.size === 0) return;
+			const live = new Set(connections.map((connection) => connection.id));
+			for (const id of entries.keys()) if (!live.has(id)) entries.delete(id);
+		},
+		clear: () => entries.clear(),
+	};
+}
+
 /** Distance from a world point to a resolved connection's path. */
 export function distanceToConnection(
 	resolved: ResolvedConnection,
@@ -470,7 +531,11 @@ export function connectionHitTest(
 	point: WorldPoint,
 	strokeSize: number,
 ): boolean {
-	return distanceToConnection(resolved, point) <= Math.max(8, strokeSize * 2.5);
+	return distanceToConnection(resolved, point) <= connectionHitRadius(strokeSize);
+}
+
+export function connectionHitRadius(strokeSize: number): number {
+	return Math.max(8, strokeSize * 2.5);
 }
 
 /** Whether the connection draws an arrowhead at its source / target. */

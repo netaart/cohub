@@ -1,3 +1,4 @@
+import { parseAppFileHandlers } from "@cohub/protocol";
 import type { AppSurfaceRole, HtmlPageMeta } from "./html-meta.js";
 
 export type AppExtractedPageMeta = HtmlPageMeta & {
@@ -14,6 +15,8 @@ export type AppPublishExtractedPageMeta = {
   lang: string | null;
   themeColor: string | null;
   surface: AppSurfaceRole | null;
+  /** Absent from workers that predate file handlers. */
+  fileHandlers?: string[];
   sourcePath: string;
 };
 
@@ -214,7 +217,7 @@ export function isWeakAppPageMediaRef(ref: string | null | undefined): boolean {
 }
 
 export function materializeHtmlPageMeta(
-  page: HtmlPageMeta & { sourcePath?: string },
+  page: Omit<HtmlPageMeta, "fileHandlers"> & { fileHandlers?: string[]; sourcePath?: string },
   assetKey: string | null | undefined,
   toPublicUrl: (objectKey: string) => string,
   extractedAt = new Date().toISOString(),
@@ -227,6 +230,7 @@ export function materializeHtmlPageMeta(
     lang: cleanAppMetaText(page.lang, 32),
     themeColor: cleanAppMetaText(page.themeColor, 64),
     surface: page.surface,
+    fileHandlers: parseAppFileHandlers(page.fileHandlers),
     sourcePath: page.sourcePath,
     extractedAt,
   };
@@ -274,6 +278,9 @@ function ownedByExtraction(
  * keeps following the page. Pinning is done by editing the page itself, or by
  * setting a value that differs from it.
  */
+const sameList = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
+
 export function mergeAppPageMeta(
   current: AppPageMetaInput,
   extracted: AppExtractedPageMeta | null | undefined,
@@ -290,6 +297,7 @@ export function mergeAppPageMeta(
     lang: extracted.lang ?? null,
     themeColor: extracted.themeColor ?? null,
     surface: extracted.surface ?? null,
+    fileHandlers: parseAppFileHandlers(extracted.fileHandlers),
     sourcePath: extracted.sourcePath ?? null,
     extractedAt: extracted.extractedAt ?? new Date().toISOString(),
   };
@@ -318,6 +326,17 @@ export function mergeAppPageMeta(
   }
   if (Object.keys(presentation).length) meta.presentation = presentation;
   else delete meta.presentation;
+
+  // File handlers follow the page like surface does; a hand-set list wins.
+  const handlers = meta.fileHandlers === undefined ? null : parseAppFileHandlers(meta.fileHandlers);
+  const previousHandlers = previous ? parseAppFileHandlers(previous.fileHandlers) : [];
+  if (handlers === null || sameList(handlers, previousHandlers)) {
+    const next = parseAppFileHandlers(extracted.fileHandlers);
+    if (next.length) meta.fileHandlers = next;
+    else delete meta.fileHandlers;
+  } else {
+    meta.fileHandlers = handlers;
+  }
 
   return Object.keys(meta).length ? meta : null;
 }

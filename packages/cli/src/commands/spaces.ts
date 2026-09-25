@@ -13,7 +13,7 @@ import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset } from "../avatar.js";
 import { createClient } from "../client.js";
 import { putLocalFile } from "../http-put.js";
-import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs } from "../output.js";
+import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
 import { resolveSpace } from "../space.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
 import { registerSpaceActivity } from "./space-activity.js";
@@ -93,6 +93,8 @@ const defaultIdleTtlSeconds = cliEnv === "prod" ? 12 * 60 * 60 : 10 * 60;
 const SPACE_ROLES = ["host", "builder", "guest"] as const;
 const SANDBOX_SPEC_IDS = ["standard", "boost", "ultra"] as const;
 const LABEL_RESOURCE_TYPES = ["session", "checkpoint", "file"] as const;
+/** Table cell width for space descriptions; `--json` keeps the full value. */
+const SPACE_DESCRIPTION_COLUMN_WIDTH = 40;
 
 function parseInteger(value: string, name: string, options: { min?: number; max?: number } = {}): number {
   if (!/^-?\d+$/.test(value.trim())) return error(`Invalid ${name}`, `${name} must be an integer`);
@@ -547,6 +549,7 @@ export function registerSpaces(program: Command): void {
         table(filtered, [
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
+          { key: "description", label: "Description", format: (value) => truncateText(value, SPACE_DESCRIPTION_COLUMN_WIDTH) },
           { key: "isPinned", label: "Pinned" },
           { key: "createdAt", label: "Created" },
         ]);
@@ -570,7 +573,7 @@ export function registerSpaces(program: Command): void {
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
           { key: "slug", label: "Slug" },
-          { key: "description", label: "Description" },
+          { key: "description", label: "Description", format: (value) => truncateText(value, SPACE_DESCRIPTION_COLUMN_WIDTH) },
           { key: "status", label: "Status" },
           { key: "createdAt", label: "Created" },
         ]);
@@ -1451,6 +1454,43 @@ function registerSessions(spacesCmd: Command): void {
           { key: "totalMessages", label: "Messages" },
           { key: "totalToolCalls", label: "Tool Calls" },
           { key: "createdAt", label: "Created" },
+        ]);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  sessionsCmd
+    .command("files <id>")
+    .description("List Space files changed by a session")
+    .option("--limit <n>", "Maximum files to list; the server caps it", "200")
+    .option("--json", "Output as JSON")
+    .action(async (id: string, opts: { limit: string; json?: boolean }) => {
+      const spaceId = await resolveSpace(spacesCmd);
+      const limit = Number.parseInt(opts.limit, 10);
+      if (!Number.isInteger(limit) || limit < 1) {
+        return error("Invalid limit", "--limit must be a positive integer");
+      }
+      const client = createClient();
+      try {
+        const result = await client.space(spaceId).session(id).files({ limit });
+        if (jsonRequested(opts)) return outJson(result);
+        if (result.files.length === 0) {
+          console.log("  (empty)");
+          return;
+        }
+        table(result.files.map((file) => ({
+          path: file.path,
+          change: file.lastKind,
+          count: file.changeCount,
+          turn: file.lastTurnSequence,
+          changedAt: file.lastChangedAt,
+        })), [
+          { key: "path", label: "Path" },
+          { key: "change", label: "Change" },
+          { key: "count", label: "Count" },
+          { key: "turn", label: "Turn" },
+          { key: "changedAt", label: "Changed" },
         ]);
       } catch (e: unknown) {
         handleHttp(e);

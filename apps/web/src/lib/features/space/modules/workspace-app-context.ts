@@ -5,6 +5,8 @@ export type WorkspaceAppOpenContext = {
 	sessionId?: string;
 	turnId?: string;
 	toolCallId?: string;
+	/** The workspace file this open hands to a file-handling App. */
+	file?: { path: string };
 };
 
 export type WorkspaceAppInvocation = AppRuntimeInvocationContext & {
@@ -25,5 +27,8 @@ export function createWorkspaceAppInvocation(
 		...(input.sessionId ? { sessionId: input.sessionId } : {}),
 		...(input.turnId ? { turnId: input.turnId } : {}),
 		...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
+		...(input.file ? { file: { path: input.file.path } } : {}),
+		// A fresh id per open lets a running App tell a repeat open from a context update.
+		id: crypto.randomUUID(),
 	};
 }

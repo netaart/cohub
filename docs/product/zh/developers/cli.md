@@ -150,7 +150,7 @@ cd ./my-project
 # 首次提示创建和命名，并记住该目录的 Space
 cohub runtime up
 
-# 再次运行优先复用；-d 在后台运行
+# 再次运行优先复用；-d 在后台运行；原生对话同步默认开启（确认一次，默认 yes）
 cohub runtime up -d
 cohub runtime status
 cohub runtime logs --level warn --follow

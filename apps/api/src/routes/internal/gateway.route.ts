@@ -2,7 +2,8 @@ import { context, trace, SpanStatusCode } from "@opentelemetry/api";
 import { boards, apps } from "@cohub/db";
 import { createLogger } from "@cohub/infra/logging";
 import { getTracer, extractTrace } from "@cohub/infra/tracing/propagator";
-import { GATEWAY_ATTACHMENT_MAX_BYTES, gatewayInboundEventSchema, type GatewayInboundEvent } from "@cohub/protocol/gateway";
+import { gatewayInboundEventSchema, type GatewayInboundEvent } from "@cohub/protocol/gateway";
+import { UPLOAD_MAX_BATCH_BYTES, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 import { parseRealtimeRoom } from "@cohub/protocol/realtime";
 import { dispatchSpacePresenceUpdated } from "../../realtime-events.js";
 import { getSpacePresenceSnapshot } from "../../space-presence.js";
@@ -18,41 +19,41 @@ import { redisCommandClient } from "../../redis.js";
 import {
   PublicAssetConfigError,
   PublicAssetValidationError,
-  consumePublicAssetUploadQuota,
   createInternalPublicAssetUploadPlan,
   isAllowedPublicAssetDownloadUrl,
 } from "../../public-asset-storage.js";
 import { UserUploadConfigError } from "../../user-upload-storage.js";
 import { nativeRuntimeEventSchema } from "@cohub/protocol";
-import { NativeTurnError, startNativeTurn, completeNativeTurn, getOwnedNativeTurn } from "../../native-turns.js";
-import { adoptNativeStreamSnapshot, cacheNativeTurnBinding, clearNativeTurnBinding, publishNativeProgress, releaseNativeStreamSnapshot } from "../../native-turn-progress.js";
-import { getSessionTurnById, hydrateTurnAuthorProfiles } from "../../session-turns.js";
-import { getSpaceSessionById } from "../../space-sessions.js";
-import { dispatchSessionCreated, dispatchSessionUpdated, dispatchTurnCreated, messageRecordFromRow } from "../../realtime-events.js";
-import { dispatchSessionOutput, dispatchTurnFinalized, dispatchTurnUpdated } from "../../session-output.js";
-import { enqueueSessionMessagePostprocess } from "../../session-message-postprocess-queue.js";
-import { enqueueAgentTurnJob } from "../../agent-turn-queue.js";
-import { publishSessionFork } from "../../session-forks.js";
-import { runtimeResolutionOpen } from "@cohub/core/sessions";
-import { touchSpaceActivity } from "../../space-activity.js";
-import { and, asc, inArray, sql } from "drizzle-orm";
-import { sessionMessages, sessionTurns } from "@cohub/db";
+import { NativeTurnError, ingestNativeTurns, knownNativeTurns, observeNativeTurn } from "../../native-turns.js";
+import { publishNativeIngest } from "../../native-ingest-events.js";
+import { publishNativeProgress } from "../../native-turn-progress.js";
 
 const nativeLogger = createLogger({ serviceName: "cohub-api" });
+const nativeErrorFields = ["code", "detail", "hint", "constraint", "table", "column", "schema", "position"] as const;
+const serializeNativeError = (error: unknown): unknown => {
+  if (!(error instanceof Error)) return error;
+  const source = error as Error & Record<string, unknown>;
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+    ...Object.fromEntries(nativeErrorFields.flatMap((key) => source[key] === undefined ? [] : [[key, source[key]]])),
+    cause: source.cause instanceof Error ? serializeNativeError(source.cause) : source.cause,
+  };
+};
 import {
   beginSpaceUploadComplete,
   buildSpaceUploadObjectKey,
   cancelSpaceUploadComplete,
-  consumeSpaceUploadQuota,
   createPresignedGetUrl,
   createPresignedPutUrl,
   createSpaceUploadId,
   deleteSpaceUploadManifest,
   getSpaceUploadManifest,
   saveSpaceUploadManifest,
-  SpaceUploadRateLimitError,
   type SpaceUploadManifestEntry,
 } from "../../space-upload-storage.js";
+import { consumeUploadQuota, UploadRateLimitError } from "../../upload-quota.js";
 import { enqueueSandboxUploadFilesJob } from "../../sandbox-bash-queue.js";
 import { db } from "../../db/index.js";
 import { eq } from "drizzle-orm";
@@ -285,73 +286,29 @@ router.post("/native-runtime-event", async (c) => {
   const spaceId = typeof body?.spaceId === "string" ? body.spaceId.trim() : "";
   const ownerUserId = typeof body?.ownerUserId === "string" ? body.ownerUserId.trim() : "";
   const parsed = nativeRuntimeEventSchema.safeParse(body?.event);
-  if (!requireValidId(spaceId) || !ownerUserId || !parsed.success) return c.json({ message: "invalid native runtime event" }, 400);
+  if (!requireValidId(spaceId) || !ownerUserId) return c.json({ message: "invalid native runtime event" }, 400);
+  // Earlier CLIs send `start` / `complete` / `heartbeat`; they keep running Cohub Turns, and this says why their native sync stopped.
+  if (!parsed.success) return c.json({ message: "Unsupported native sync event; upgrade the Cohub CLI" }, 400);
+  const event = parsed.data;
   try {
-    const event = parsed.data;
-    if (event.type === "start") {
-      const { binding, session, created, fork } = await startNativeTurn(spaceId, ownerUserId, event.input);
-      const turn = await getSessionTurnById(binding.sessionId, binding.turnId);
-      await cacheNativeTurnBinding({ ...binding, spaceId, ownerUserId, userMessageId: (turn?.meta as { userMessageId?: string } | null)?.userMessageId ?? "" });
-      // A new Turn takes over the stream snapshot atomically; a stale finalized Turn can never block it.
-      await adoptNativeStreamSnapshot(spaceId, binding.sessionId, binding.turnId, (turn?.meta as { userMessageId?: string } | null)?.userMessageId ?? "");
-      // Realtime mirrors the durable write only; each notification fails independently.
-      void (async () => {
-        if (fork) await publishSessionFork(fork).catch((error) => nativeLogger.warn("[NativeTurn] fork publish failed", { error }));
-        await dispatchSessionCreated(session).catch((error) => nativeLogger.warn("[NativeTurn] session.created failed", { error }));
-        if (turn) await dispatchTurnCreated({ spaceId, sessionId: binding.sessionId, turn: (await hydrateTurnAuthorProfiles([turn]))[0] ?? turn }).catch((error) => nativeLogger.warn("[NativeTurn] turn.created failed", { error }));
-        if (created && turn) {
-          const [message] = await db.select().from(sessionMessages).where(and(eq(sessionMessages.turnId, turn.id), eq(sessionMessages.role, "user"))).limit(1);
-          if (message) await dispatchSessionOutput({ type: "session.message.persisted", spaceId, sessionId: binding.sessionId, message: messageRecordFromRow(message) }).catch((error) => nativeLogger.warn("[NativeTurn] user message notify failed", { error }));
-        }
-        await touchSpaceActivity(spaceId).catch((error) => nativeLogger.warn("[NativeTurn] activity touch failed", { error }));
-      })();
-      return c.json({ result: binding });
+    if (event.type === "ingest") {
+      const { effects, ...result } = await ingestNativeTurns(spaceId, ownerUserId, event.input);
+      void publishNativeIngest(spaceId, effects).catch((error) => nativeLogger.warn("[NativeTurn] ingest notify failed", { error }));
+      return c.json({ result });
     }
+    if (event.type === "known") return c.json({ result: await knownNativeTurns(spaceId, event.input.turnIds) });
     if (event.type === "progress") return c.json({ result: await publishNativeProgress(spaceId, ownerUserId, event.sessionId, event.turnId, event.progress) });
-    if (event.type === "complete") {
-      const result = await completeNativeTurn(spaceId, ownerUserId, event.sessionId, event.turnId, event.result);
-      await clearNativeTurnBinding(event.turnId);
-      if (result.changed) {
-        // A finalized Turn releases the stream snapshot so the next Turn's progress is never blocked.
-        await releaseNativeStreamSnapshot(spaceId, event.sessionId, event.turnId);
-      }
-      // Queue drain runs on every completion, including exact replays: the wakeup jobId is
-      // idempotent per Session, so re-enqueue after a transient failure is safe and needed —
-      // a replay has changed: false and would otherwise never retry the drain.
-      // A failed enqueue surfaces as 500 so the Daemon's next flush cycle retries this receipt;
-      // BullMQ itself also retries the job (attempts: 2) once enqueued.
-      try { await enqueueAgentTurnJob({ spaceId, sessionId: event.sessionId, reason: "drain" }); }
-      catch (error) { nativeLogger.error("[NativeTurn] queue drain failed; receipt stays pending for retry", { error }); throw error; }
-      void (async () => {
-        const turn = await getSessionTurnById(event.sessionId, event.turnId);
-        if (turn) {
-          await dispatchTurnUpdated({ spaceId, sessionId: event.sessionId, turn }).catch((error) => nativeLogger.warn("[NativeTurn] turn.updated failed", { error }));
-          if (result.changed) {
-            await dispatchTurnFinalized({ spaceId, sessionId: event.sessionId, turn }).catch((error) => nativeLogger.warn("[NativeTurn] turn.finalized failed", { error }));
-            const messages = await db.select().from(sessionMessages).where(and(eq(sessionMessages.turnId, event.turnId), eq(sessionMessages.role, "assistant"))).orderBy(asc(sessionMessages.sequence));
-            for (const message of messages) {
-              await dispatchSessionOutput({ type: "session.message.persisted", spaceId, sessionId: event.sessionId, message: messageRecordFromRow(message) }).catch((error) => nativeLogger.warn("[NativeTurn] message notify failed", { error }));
-              await enqueueSessionMessagePostprocess({ sessionId: event.sessionId, messageId: message.id }).catch((error) => nativeLogger.warn("[NativeTurn] postprocess enqueue failed", { error }));
-            }
-          }
-        }
-        const session = await getSpaceSessionById(event.sessionId);
-        if (session) await dispatchSessionUpdated({ session, changed: ["latestMessageText", "lastMessageAt", "lastMessageId"] }).catch((error) => nativeLogger.warn("[NativeTurn] session.updated failed", { error }));
-        await touchSpaceActivity(spaceId).catch((error) => nativeLogger.warn("[NativeTurn] activity touch failed", { error }));
-      })();
-      // artifactsPending keeps the Daemon's receipt unacknowledged; it replays this exact completion later.
-      return c.json({ result: { completed: result.completed, artifactsPending: result.artifactsPending } });
-    }
-    const turn = await getOwnedNativeTurn(spaceId, ownerUserId, event.sessionId, event.turnId);
-    // Restore liveness and the executing state so the attention watchdog only fires on real disconnection.
-    await db.update(sessionTurns).set({ meta: sql`jsonb_set(jsonb_set(${sessionTurns.meta}, '{nativeSync,observedAt}', to_jsonb(${new Date().toISOString()}::text)), '{runtimeRecovery,state}', '"executing"'::jsonb)` })
-      .where(and(eq(sessionTurns.id, event.turnId), inArray(sessionTurns.status, ["running", "abort_requested"]), runtimeResolutionOpen));
-    return c.json({ result: { abortRequested: turn.status === "abort_requested", status: turn.status } });
+    return c.json({ result: await observeNativeTurn(spaceId, ownerUserId, event.sessionId, event.turnId, event.controllable) });
   } catch (error) {
-    // Business rejections keep their status; unexpected failures stay 500 so the Daemon retries the same receipt.
+    // Business rejections keep their status; unexpected failures stay 500 so the Daemon retries the same batch.
     if (error instanceof NativeTurnError) return c.json({ message: error.message }, error.status);
-    nativeLogger.error("[NativeTurn] event failed; client receipt retained", { errorName: error instanceof Error ? error.name : typeof error });
-    return c.json({ message: "Native sync unavailable; retry with the same receipt / 原生同步暂不可用，请使用原回执重试" }, 500);
+    const identity = event.type === "ingest"
+      ? { sessionId: null, turnId: event.input.turns[0]?.turnId ?? null }
+      : event.type === "known" ? { sessionId: null, turnId: null } : { sessionId: event.sessionId, turnId: event.turnId };
+    nativeLogger.error("[NativeTurn] event failed; client batch retained", {
+      eventType: event.type, spaceId, ownerUserId, ...identity, error: serializeNativeError(error),
+    });
+    return c.json({ message: "Native sync unavailable; retry the same batch" }, 500);
   }
 });
 
@@ -395,7 +352,7 @@ router.post("/local-sandbox/status", async (c) => {
   const body = await c.req.json<LocalRuntimeStatusReport>().catch(() => null);
   const spaceId = typeof body?.spaceId === "string" ? body.spaceId.trim() : "";
   if (!body || !requireValidId(spaceId)) return c.json({ ok: false, message: "spaceId is required" }, 400);
-  if (!["ready", "stopped"].includes(body.status)) return c.json({ ok: false, message: "Invalid status / 状态无效" }, 400);
+  if (!["ready", "stopped"].includes(body.status)) return c.json({ ok: false, message: "Invalid status" }, 400);
   const found = await reportLocalRuntimeStatus(db, { ...body, spaceId }, () => redisCommandClient.get(runtimeWorkspaceKey(spaceId)));
   if (!found) return c.json({ ok: false, message: "local sandbox not found" }, 404);
 
@@ -422,8 +379,9 @@ router.post("/attachments/plan", async (c) => {
   const requestedImages = Array.isArray(body?.images) ? body.images : [];
   const requestedFiles = Array.isArray(body?.files) ? body.files : [];
   if (requestedImages.length > MAX_GATEWAY_ATTACHMENT_IMAGES) return c.json({ message: "too many images" }, 413);
-  // Image demote slots use ids prefixed with `imgfile-` and share image quota, not ordinary file quota.
-  const ordinaryFileCount = requestedFiles.filter((file) => !String(file?.id ?? "").startsWith("imgfile-")).length;
+  // An image's private file slot is a fallback for the same bytes, not another attachment.
+  const imageFileIds = new Set(requestedImages.map((image) => `imgfile-${image.id}`));
+  const ordinaryFileCount = requestedFiles.filter((file) => !imageFileIds.has(String(file?.id ?? ""))).length;
   const imageFileSlotCount = requestedFiles.length - ordinaryFileCount;
   if (ordinaryFileCount > MAX_GATEWAY_ATTACHMENT_FILES) return c.json({ message: "too many files" }, 413);
   if (imageFileSlotCount > MAX_GATEWAY_ATTACHMENT_IMAGES) return c.json({ message: "too many images" }, 413);
@@ -460,16 +418,6 @@ router.post("/attachments/plan", async (c) => {
       throw error;
     }
   }
-  // Rate-limit durable image plans after validation (same quota as web chat_attachment).
-  try {
-    await consumePublicAssetUploadQuota(resolved.userId, "chat_attachment", imagePlans.length);
-  } catch (error) {
-    if (error instanceof PublicAssetValidationError) {
-      return c.json({ message: error.message }, error.message.startsWith("too many") ? 429 : 400);
-    }
-    throw error;
-  }
-
   const files = requestedFiles;
   const uploadId = files.length > 0 ? createSpaceUploadId() : null;
   const fileEntries: SpaceUploadManifestEntry[] = [];
@@ -479,7 +427,7 @@ router.post("/attachments/plan", async (c) => {
     for (const file of files) {
       if (!/^[a-zA-Z0-9_-]{1,80}$/.test(file.id) || seenFileIds.has(file.id)) return c.json({ message: "file ids must be unique safe strings" }, 400);
       seenFileIds.add(file.id);
-      if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > GATEWAY_ATTACHMENT_MAX_BYTES) return c.json({ message: "file too large" }, 413);
+      if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > UPLOAD_MAX_FILE_BYTES) return c.json({ message: "file too large" }, 413);
       const relativePath = safeUploadPath(file.relativePath?.trim() || file.name);
       if (!relativePath) return c.json({ message: "invalid upload path" }, 400);
       if (seenRelativePaths.has(relativePath)) return c.json({ message: "duplicate upload path" }, 400);
@@ -495,16 +443,19 @@ router.post("/attachments/plan", async (c) => {
       });
     }
   }
-  // Space materialize quota after file entry validation.
-  if (fileEntries.length > 0) {
-    try {
-      await consumeSpaceUploadQuota(resolved.userId, fileEntries.length);
-    } catch (error) {
-      if (error instanceof SpaceUploadRateLimitError) {
-        return c.json({ message: error.message }, 429);
-      }
-      throw error;
-    }
+  // Charge the logical attachments once. Image file slots are fallback paths
+  // for the same image bytes, not additional uploads.
+  const ordinaryFiles = fileEntries.filter((file) => !imageFileIds.has(file.id));
+  try {
+    await consumeUploadQuota(redisCommandClient, resolved.userId, {
+      entryCount: imagePlans.length + ordinaryFiles.length,
+      totalBytes: requestedImages.reduce((sum, image) => sum + image.size, 0)
+        + ordinaryFiles.reduce((sum, file) => sum + file.size, 0),
+    });
+  } catch (error) {
+    if (!(error instanceof UploadRateLimitError)) throw error;
+    c.header("Retry-After", String(error.retryAfterSeconds));
+    return c.json({ message: error.message }, 429);
   }
   if (uploadId && fileEntries.length > 0) {
     await saveSpaceUploadManifest({
@@ -584,14 +535,14 @@ router.post("/attachments/materialize", async (c) => {
       if (!relativePath) return c.json({ message: "invalid upload path" }, 400);
       if (seenPaths.has(relativePath)) return c.json({ message: "duplicate upload path" }, 400);
       seenPaths.add(relativePath);
-      if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > GATEWAY_ATTACHMENT_MAX_BYTES) {
+      if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > UPLOAD_MAX_FILE_BYTES) {
         return c.json({ message: "file too large" }, 413);
       }
       if (typeof file.downloadUrl !== "string" || !isAllowedPublicAssetDownloadUrl(file.downloadUrl)) {
         return c.json({ message: "invalid download url" }, 400);
       }
       totalBytes += file.size;
-      if (totalBytes > 2 * 1024 * 1024 * 1024) return c.json({ message: "upload too large" }, 413);
+      if (totalBytes > UPLOAD_MAX_BATCH_BYTES) return c.json({ message: "upload too large" }, 413);
       prepared.push({
         id: typeof file.id === "string" ? file.id : null,
         relativePath,
@@ -603,7 +554,10 @@ router.post("/attachments/materialize", async (c) => {
     }
 
     if (userId) {
-      await consumeSpaceUploadQuota(userId, prepared.length);
+      await consumeUploadQuota(redisCommandClient, userId, {
+        entryCount: prepared.length,
+        totalBytes: prepared.reduce((sum, file) => sum + file.size, 0),
+      });
     }
 
     const uploadId = createSpaceUploadId();
@@ -638,7 +592,8 @@ router.post("/attachments/materialize", async (c) => {
 
     return c.json({ ok: true, uploaded: result.uploaded, pathById });
   } catch (error) {
-    if (error instanceof SpaceUploadRateLimitError) {
+    if (error instanceof UploadRateLimitError) {
+      c.header("Retry-After", String(error.retryAfterSeconds));
       return c.json({ message: error.message }, 429);
     }
     logger.error("[GatewayAttachment] failed to materialize remote files", error, { spaceId });

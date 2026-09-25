@@ -7,20 +7,19 @@ import type {
 } from "@neta-art/cohub/board";
 import {
 	type BoardShapeColors,
-	expandRect,
 	featuredTaskArtifact,
 	isStrokeCorner,
 	pickBoardColor,
 	pointToWorld,
+	type Rect,
 	resolveArrow,
-	resolveConnection,
 	type ScreenPoint,
 	sampleRadius,
 	screenPoint,
 	screenToWorld,
 	shapeCapabilities,
+	stableCullRect,
 	taskRunToBoardTaskSnapshot as taskBoardSnapshot,
-	VIEWPORT_MARGIN_RATIO,
 	visibleWorldRect,
 	worldPoint,
 } from "@neta-art/cohub/board";
@@ -180,21 +179,36 @@ let resizeFrame = 0;
 // board draws nothing. Each scene sync schedules exactly one render for the
 // next animation frame, coalescing bursts of updates into a single draw.
 let renderFrame = 0;
-// Culling cache: the visible-id set is recomputed only when the camera or the
-// item structure (ids/order) actually changes. During a drag the camera is
-// static and only the (pinned, always-rendered) selection moves, so this cache
-// removes the per-frame spatial-index query + rebuild that a drag otherwise
-// triggered — the single biggest interaction cost on large boards.
-let cullCache: {
-	cameraKey: string;
-	structureKey: number;
-	geometryKey: number;
-	visibleIds: Set<string>;
-} | null = null;
 let dropActive = $state(false);
 let surface = $state<{ width: number; height: number }>({
 	width: 0,
 	height: 0,
+});
+
+// Keep the previous rect object while the snapped rect is unchanged.
+let lastCullRect: Rect | null = null;
+const cullRect = $derived.by<Rect | null>(() => {
+	if (surface.width === 0 || surface.height === 0) return null;
+	const next = stableCullRect(
+		visibleWorldRect(editor.camera, surface.width, surface.height),
+	);
+	const last = lastCullRect;
+	if (
+		last &&
+		last.x === next.x &&
+		last.y === next.y &&
+		last.width === next.width &&
+		last.height === next.height
+	)
+		return last;
+	lastCullRect = next;
+	return next;
+});
+
+const visibleIds = $derived.by<Set<string> | null>(() => {
+	editor.structureVersion;
+	editor.geometryVersion;
+	return cullRect ? new Set(editor.idsInRect(cullRect)) : null;
 });
 // Bumped whenever the asset manager resolves a new thumbnail URL, so cards
 // re-sync and images pop in.
@@ -292,14 +306,8 @@ function getPalette(): BoardRenderPalette {
 // so this stays proportional to what is near the viewport rather than to the
 // document size.
 $effect(() => {
-	editor.structureVersion;
-	editor.geometryVersion;
 	previewVersion;
-	const camera = editor.camera;
-	const width = surface.width;
-	const height = surface.height;
-	if (width === 0 || height === 0) return;
-	for (const item of itemsNearViewport(camera, width, height)) {
+	for (const item of itemsNearViewport()) {
 		if (assets.assetKey(item)) assets.requestItem(item);
 	}
 });
@@ -310,16 +318,10 @@ $effect(() => {
 // later user resize. Only nearby nodes can have a resolved texture, which bounds
 // this work to the same spatial candidate set.
 $effect(() => {
-	editor.structureVersion;
-	editor.geometryVersion;
-	const camera = editor.camera;
-	const width = surface.width;
-	const height = surface.height;
 	// Re-run when a texture lands.
 	assetVersion;
-	if (width === 0 || height === 0) return;
 	const pending: Array<{ id: string; width: number; height: number }> = [];
-	for (const item of itemsNearViewport(camera, width, height)) {
+	for (const item of itemsNearViewport()) {
 		const taskArtifact =
 			item.type === "task"
 				? featuredTaskArtifact(item.snapshot.artifacts)
@@ -344,19 +346,11 @@ $effect(() => {
 	if (pending.length > 0) editor.adoptMediaNaturalSizes(pending);
 });
 
-/** Items intersecting the viewport plus the preload margin, via the index. */
-function itemsNearViewport(
-	camera: { x: number; y: number; zoom: number },
-	width: number,
-	height: number,
-): BoardItem[] {
-	const visible = visibleWorldRect(camera, width, height);
-	const preload = expandRect(
-		visible,
-		Math.max(visible.width, visible.height) * VIEWPORT_MARGIN_RATIO,
-	);
+function itemsNearViewport(): BoardItem[] {
+	const ids = visibleIds;
+	if (!ids) return [];
 	const result: BoardItem[] = [];
-	for (const id of editor.idsInRect(preload)) {
+	for (const id of ids) {
 		const item = editor.itemById(id);
 		if (item) result.push(item);
 	}
@@ -375,17 +369,10 @@ function itemsNearViewport(
 // it, so cards render from the snapshot captured at publish time.
 $effect(() => {
 	if (readonly) return;
-	editor.structureVersion;
-	editor.geometryVersion;
-	const camera = editor.camera;
-	const width = surface.width;
-	const height = surface.height;
 	// Re-run when a file change invalidates a cached preview.
 	previewVersion;
-	if (width === 0 || height === 0) return;
-
 	const targets: Array<{ id: string; path: string }> = [];
-	for (const item of itemsNearViewport(camera, width, height)) {
+	for (const item of itemsNearViewport()) {
 		if (item.type !== "file") continue;
 		const path = item.ref.path;
 		const stale = isFilePreviewStale(spaceId, path);
@@ -426,33 +413,6 @@ function buildContext(
 		acquireTexture: (key) => assets.acquire(key),
 		releaseTexture: (key) => assets.release(key),
 	};
-}
-
-function computeVisibleIds(): Set<string> | null {
-	const width = surface.width;
-	const height = surface.height;
-	if (width === 0 || height === 0) return null;
-	const camera = editor.camera;
-	const cameraKey = `${camera.x}|${camera.y}|${camera.zoom}|${width}x${height}`;
-	// structureVersion: membership/order. geometryVersion: moves/resizes (nudge,
-	// align, drag commit). Both are O(1) keys — no per-frame O(n) id join.
-	const structureKey = editor.structureVersion;
-	const geometryKey = editor.geometryVersion;
-	if (
-		cullCache &&
-		cullCache.cameraKey === cameraKey &&
-		cullCache.structureKey === structureKey &&
-		cullCache.geometryKey === geometryKey
-	)
-		return cullCache.visibleIds;
-	const visible = visibleWorldRect(camera, width, height);
-	const culled = expandRect(
-		visible,
-		Math.max(visible.width, visible.height) * VIEWPORT_MARGIN_RATIO,
-	);
-	const visibleIds = new Set(editor.idsInRect(culled));
-	cullCache = { cameraKey, structureKey, geometryKey, visibleIds };
-	return visibleIds;
 }
 
 function sameBackdrop(
@@ -580,7 +540,6 @@ function syncStage() {
 	const getDisplayItem = (id: string) =>
 		previewItems.get(id) ?? editor.itemById(id);
 	const context = buildContext(palette, getDisplayItem);
-	const visibleIds = computeVisibleIds();
 	animationRuntime?.setEnteringItems(editor.consumeRecentlyAdded());
 	const animationIds =
 		animationRuntime?.nodeIdsToMaterialize() ?? new Set<string>();
@@ -609,11 +568,13 @@ function syncStage() {
 		context,
 		getItem: getDisplayItem,
 		visibleIds,
+		cullRect,
 		pinnedIds,
 		globalSig,
 		structureVersion: editor.structureVersion,
 		geometryVersion: editor.geometryVersion,
-		gestureActive: editor.gestureActive,
+		gestureActive:
+			editor.gestureActive && editor.interaction.type !== "panning",
 	});
 
 	animationRuntime?.invalidatePoses();

@@ -1839,7 +1839,7 @@ router.get("/:id/sessions/:sessionId/runtime", async (c) => {
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
   const sessionId = c.req.param("sessionId");
-  if (!requireValidId(spaceId) || !requireValidId(sessionId)) return c.json({ message: "Session not found / Session 不存在" }, 404);
+  if (!requireValidId(spaceId) || !requireValidId(sessionId)) return c.json({ message: "Session not found" }, 404);
   if (!(await hasPermission(user, "session.view", { spaceId, sessionId }))) return authzDenied(c);
   const [recovery, canManage] = await Promise.all([
     getSessionRuntimeRecovery(spaceId, sessionId),
@@ -1853,12 +1853,12 @@ router.post("/:id/sessions/:sessionId/runtime/confirm-stopped", async (c) => {
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
   const sessionId = c.req.param("sessionId");
-  if (!requireValidId(spaceId) || !requireValidId(sessionId)) return c.json({ message: "Session not found / Session 不存在" }, 404);
+  if (!requireValidId(spaceId) || !requireValidId(sessionId)) return c.json({ message: "Session not found" }, 404);
   if (!(await hasPermission(user, "sandbox.manage", { spaceId }))) return authzDenied(c);
   const parsed = runtimeStopConfirmationSchema.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ message: "Invalid confirmation / 确认请求无效" }, 400);
+  if (!parsed.success) return c.json({ message: "Invalid confirmation" }, 400);
   const accepted = await confirmRuntimeStopped(spaceId, sessionId, user.uuid, parsed.data);
-  if (!accepted) return c.json({ message: "Runtime state changed; refresh before confirming / Runtime 状态已变化，请刷新后确认" }, 409);
+  if (!accepted) return c.json({ message: "Runtime state changed; refresh before confirming" }, 409);
   return c.json({ accepted: true }, 202);
 });
 

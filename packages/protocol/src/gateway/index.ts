@@ -1,8 +1,6 @@
 import { z } from "zod";
 import type { ContentBlock } from "../core/content.js";
 import type { MessageRecord } from "../model/session.js";
-
-export const GATEWAY_ATTACHMENT_MAX_BYTES = 500 * 1024 * 1024;
 export type {
   ChannelConfig,
   DiscordChannelConfig,

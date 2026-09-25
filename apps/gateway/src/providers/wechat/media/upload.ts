@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
-import { GATEWAY_ATTACHMENT_MAX_BYTES, type GatewayMediaItem } from "@cohub/protocol/gateway";
+import { UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
+import type { GatewayMediaItem } from "@cohub/protocol/gateway";
 import {
   base64ToTempMediaFile,
   hashTempMediaFile,
@@ -13,7 +14,7 @@ import { aesEcbPaddedSize } from "./crypto.js";
 import { detectImageMimeType } from "./mime.js";
 import { safeFetch } from "./url.js";
 
-export const WECHAT_OUTBOUND_ATTACHMENT_MAX_BYTES = GATEWAY_ATTACHMENT_MAX_BYTES;
+export const WECHAT_OUTBOUND_ATTACHMENT_MAX_BYTES = UPLOAD_MAX_FILE_BYTES;
 const LARGE_MEDIA_TIMEOUT_MS = 10 * 60 * 1000;
 
 const mediaUploadType = (kind: GatewayMediaItem["kind"]) => {

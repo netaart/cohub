@@ -1,5 +1,53 @@
 # @neta-art/cohub
 
+## 8.23.0
+
+### Minor Changes
+
+- d23129c: Apps can now match the host, own their window, and open files. The context carries `locale`, `appearance` (color scheme, theme, and resolved design tokens), `window.visible`, and the opened `invocation.file`; `client.app.appearance.sync()` applies them as `--cohub-*` variables. `client.app.window.setState()` reports the tab title, save status, and unsaved work, and `onBeforeClose()` flushes before the host closes, reloads, or leaves a dirty App. `client.app.onDrop()` receives Cohub files, Tasks, and Apps dragged onto the App, and unhandled Ctrl / Cmd chords reach host shortcuts. Apps declare the file types they open with `<meta name="cohub:file-handlers">`; installing registers them in `.cohub/apps.json` unless another App already opens them. Each file opens in its own window, and `client.app.onLaunch()` receives it when it opens, opens again, or moves.
+  
+  App 现在可以跟随 host 外观、管理自己的窗口并打开文件。context 新增 `locale`、`appearance`（配色方案、主题和解析后的设计 token）、`window.visible` 以及打开的 `invocation.file`；`client.app.appearance.sync()` 会把它们写成 `--cohub-*` 变量。`client.app.window.setState()` 上报标签标题、保存状态和未保存的工作，`onBeforeClose()` 会在 host 关闭、重新加载或离开未保存的 App 之前写完数据。`client.app.onDrop()` 接收拖到 App 上的 Cohub 文件、Task 和 App，App 没有处理的 Ctrl / Cmd 组合键会交给 host 快捷键。App 通过 `<meta name="cohub:file-handlers">` 声明能打开的文件类型；安装时会在 `.cohub/apps.json` 中注册这些类型，除非已有其他 App 打开它们。每个文件在单独的窗口中打开，`client.app.onLaunch()` 会在文件打开、再次打开或移动时收到它。
+- 574bfe8: Lighter media delivery for generation results.
+  
+  - SDK: `mediaPreviewCandidates()`, `imageVariantUrl()`, and `videoFrameUrl()` derive CDN image variants and video stills for OSS-backed hosts, in priority order with the original as fallback. `probeMediaInfo()` reads dimensions, duration, frame count, and first/last frames from OSS meta headers, then `image/info`. `publicAssets.uploadGenerationInput()` uploads a local generation input to an unlisted public URL.
+  - CLI: `cohub generate` uploads local `--image`/`--video`/`--audio` files instead of inlining base64 (inline stays the fallback), and prints each output's size, duration, and last frame; `--json` adds them as `outputMedia`.
+  - Task list views (`tasks.list`, `tasks.getMany`) no longer carry inline generation inputs; such blocks are marked `deferredBase64` and the full run stays available from `tasks.get`.
+- d23129c: Apps the Shell Space published or installed are now authorized without a dialog, including on a first visit and for `file.edit`. The Shell sends Host consent (`consent: "host"`), so the API can create the grant instead of only renewing one, while a grant the viewer revoked still asks again. Other Apps keep the renew-only path, so opening an unknown App never hands it the Space. Hosts report installation through the new `isInstalledIn` option of `createAppBridgeCore`. The API caps Host consent at the read-only Shell scopes plus `file.edit`.
+  
+  当前 Space 发布或安装的 App 现在可以免弹窗授权，首次访问和 `file.edit` 也不例外。Shell 以 Host 同意（`consent: "host"`）发起请求，API 可以新建授权而不只是续期；访客撤销过的授权仍会重新询问。其他 App 仍然只能续期已有授权，打开一个陌生 App 不会让它拿到这个 Space。Host 通过 `createAppBridgeCore` 新增的 `isInstalledIn` 选项告知安装状态。API 将 Host 同意的范围限定为只读 Shell 权限加 `file.edit`。
+- 414397b: Add generation task views and session file listings.
+  
+  - SDK: `toGenerationTaskView()` projects a generation Task Run into display-ready outputs (prompt, model, cover-folded media), with `generationOutputSource()` for inline payloads. `space(id).session(id).files()` lists Space files a session's Agent wrote or edited.
+  - CLI: `cohub spaces sessions files <sessionId>` lists Space files a session's Agent wrote or edited.
+
+### Patch Changes
+
+- d23129c: Surface methods, composer chips, and the runtime handshake an App announces during startup no longer get lost. The host clears what a document announced when its frame loads, which can come after the App's scripts ran, so it now asks the App to announce again; the SDK repeats its runtime `ready`, surface methods, composer chip, reported window state, and drop types. This also covers pages an App navigates to inside its frame.
+  
+  App 启动时宣告的 surface 方法、composer chip 和运行时握手不会再丢失。host 会在 frame 加载完成时清掉页面宣告过的状态，而这可能晚于 App 脚本的执行，所以 host 现在会请 App 再宣告一次；SDK 会重新发送运行时 `ready`、surface 方法、composer chip、已上报的窗口状态和可接受的拖放类型。App 在 frame 内跳转到其他页面时同样生效。
+- 574bfe8: Fold cover-role images into the media they depict. `toGenerationTaskView()` and Board task snapshots now share one pairing rule: an image sharing the provider id (music art), else a `first_frame` / `cover` / `poster` / `thumbnail` image in order (a video's first frame). `last_frame` images stay separate results.
+
+## 8.22.0
+
+### Minor Changes
+
+- 58ec12e: Make large Boards with thousands of relations cheap to render. The connection layer now caches its tessellated geometry per layer and only redraws relations touching nodes being manipulated, culls relations to a new `cullRect` input (exports pass their region), clips dashes to it, and draws dashes, arrowheads and labels too small to read as plain strokes or not at all. Past a fixed dash budget a frame draws all dashed relations solid, including exports. The document is never changed. Visible differences: dashes use butt caps, and relations are stroked in style groups rather than strict document order. New exports: `createConnectionGeometryCache` (memoised relation geometry), `connectionHitRadius`, and `stableCullRect` (a viewport cull rect that stays constant across small pans).
+  
+  让包含数千条连线的大型 Board 也能流畅渲染。连线图层现在按图层缓存细分后的几何，只重绘与正在操作的节点相连的连线；新增 `cullRect` 输入用于按区域裁剪连线（导出时传入导出区域），虚线也按该区域裁剪；缩放到看不清时，虚线、箭头和标签会降级为实线或不绘制。单帧虚线段数超过固定预算时，所有虚线统一改画实线，导出同样适用。绝不修改文档数据。可见变化：虚线端点改为平头，连线按样式分组描边、不再严格按文档顺序叠放。新增导出：`createConnectionGeometryCache`（连线几何缓存）、`connectionHitRadius`，以及 `stableCullRect`（在小幅平移时保持不变的视口裁剪区域）。
+- c276360: Local Runtime native sessions, rebuilt around the harnesses' own files and control interfaces. Pi and Codex session files are now the only durable record: the Runtime watches them (the bound folder and its subdirectories, unless one is bound to a Space of its own), sends new Turns over its WebSocket, and after a restart asks the server which Turns it already has instead of keeping local delivery receipts. Codex's internal threads and spawned sub-agents are skipped. Pi is driven through a self-contained extension (`cohub runtime attach --harness pi`, or on `runtime up`), so the web streams, stops and continues terminal Pi sessions; Codex 0.156+ uses its shared app-server on consent, so web and terminal drive the same live thread, falling back to a private app-server with read-only terminal sync. Codex hooks and the Pi capture extension are removed. `runtime import` keeps its options but now runs inside the Runtime: newest first, four at a time (`--concurrency` up to 8), Ctrl-C pauses and running it again resumes. Persistence is event-driven and separate from the live preview: a transcript is parsed only when a Turn begins or ends, previews send only changed messages, stops are pushed to the Runtime instead of polled, and a connected Pi's tools see the current Turn in `COHUB_TURN_ID`. The SDK exports the new `ingest` / `known` / `status` native event schemas and the `runtime.native.stop` frame in place of `start` / `complete` / `heartbeat`. 本地 Runtime 原生会话改为以 Pi / Codex 自身的会话文件为唯一记录，服务端为唯一账本，不再有本地回执；Pi 通过扩展、Codex 通过官方共享 app-server 接入，Web 可实时查看、停止并继续终端会话；`runtime import` 在 Runtime 内执行，最近优先、可暂停与续传。
+
+### Patch Changes
+
+- 589c62c: Remove the standalone App URL field from App responses. `AppDetailResponse` no longer carries `standaloneUrl`, and `create`, `update`, and `publishVersion` return only the App record.
+
+## 8.21.1
+
+### Patch Changes
+
+- 886f6b1: Expose the optional billing conversion URL on `BillingConversionIntent.primaryAction.href`, allowing clients without an in-app billing action to open the correct conversion page directly.
+  
+  在 `BillingConversionIntent.primaryAction.href` 中公开可选的账单转化链接，让不支持应用内账单操作的客户端也能直接打开正确的转化页面。
+
 ## 8.21.0
 
 ### Minor Changes

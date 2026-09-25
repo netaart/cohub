@@ -32,11 +32,28 @@ mock.module("@cohub/core/labels/session-user", { exports: { assignSessionPartici
 mock.module("../src/lib/middleware.js", { exports: { useAuth: (c) => ({ uuid: c.req.header("x-user") ?? "owner" }), requireValidId: (id) => /^[a-f0-9-]{36}$/.test(id), authzDenied: (c) => c.json({ message: "forbidden" }, 403) } });
 mock.module("../src/permissions.js", { exports: { hasPermission: async (user, _permission, context) => user.uuid !== "denied" && !(user.uuid === "no-session-access" && context?.sessionId) } });
 mock.module("../src/space-sessions.js", { exports: { getSpaceSessionById: async (id) => (await database.select().from(spaceSessions).where(eq(spaceSessions.id, id)))[0] } });
-mock.module("../src/realtime-events.js", { exports: { dispatchSessionCreated: async () => {}, dispatchSessionUpdated: async () => {}, dispatchTurnCreated: async () => {}, dispatchLabelAssignmentsUpdated: async () => {}, messageRecordFromRow: (row) => row } });
-mock.module("../src/session-output.js", { exports: { dispatchTurnUpdated: async () => {}, dispatchTurnFinalized: async () => {}, dispatchSessionOutput: async () => {} } });
+const published = [];
+mock.module("../src/realtime-events.js", { exports: {
+  dispatchSessionCreated: async (session) => { published.push(["session.created", session.id]); },
+  dispatchSessionUpdated: async ({ session }) => { published.push(["session.updated", session.id]); },
+  dispatchTurnCreated: async ({ turn }) => { published.push(["turn.created", turn.id]); },
+  dispatchLabelAssignmentsUpdated: async () => {}, messageRecordFromRow: (row) => row,
+} });
+mock.module("../src/session-output.js", { exports: {
+  dispatchTurnUpdated: async ({ turn }) => { published.push(["turn.updated", turn.id]); },
+  dispatchTurnFinalized: async ({ turn }) => { published.push(["turn.finalized", turn.id]); },
+  dispatchSessionOutput: async ({ message }) => { published.push([`message.${message.role}`, message.turnId]); },
+} });
 mock.module("../src/space-activity.js", { exports: { touchSpaceActivity: async () => {} } });
 mock.module("../src/agent-turn-queue.js", { exports: { enqueueAgentTurnJob: async () => {} } });
-mock.module("../src/session-message-postprocess-queue.js", { exports: { enqueueSessionMessagePostprocess: async () => {} } });
+mock.module("../src/session-message-postprocess-queue.js", { exports: { enqueueSessionMessagePostprocess: async ({ messageId }) => { published.push(["postprocess", messageId]); } } });
+const progress = [];
+mock.module("../src/native-turn-progress.js", { exports: {
+  cacheNativeTurnBinding: async (binding) => { progress.push(["cache", binding.turnId]); },
+  clearNativeTurnBinding: async (turnId) => { progress.push(["clear", turnId]); },
+  adoptNativeStreamSnapshot: async (_space, _session, turnId) => { progress.push(["adopt", turnId]); },
+  releaseNativeStreamSnapshot: async (_space, _session, turnId) => { progress.push(["release", turnId]); },
+} });
 let failArtifacts = false;
 mock.module("../src/session-turns.js", { exports: {
   getSessionTurnById: async (sessionId, id) => (await database.select().from(sessionTurns).where(and(eq(sessionTurns.id, id), eq(sessionTurns.sessionId, sessionId))))[0],
@@ -47,7 +64,8 @@ mock.module("../src/session-turns.js", { exports: {
     return { index: null, summary: { messageCount: rows.length - 1, toolCallCount: 0, usage: null, durationMs: null, lastMessageText: null, hasError: false } };
   },
 } });
-const { startNativeTurn, completeNativeTurn, getOwnedNativeTurn } = await import("../src/native-turns.js");
+const { startNativeTurn, completeNativeTurn, getOwnedNativeTurn, ingestNativeTurns, knownNativeTurns } = await import("../src/native-turns.js");
+const { publishNativeIngest } = await import("../src/native-ingest-events.js");
 after(() => engine.close());
 const at = "2026-09-21T00:00:00.000Z";
 const content = (text) => [{ type: "text", text }];
@@ -167,4 +185,79 @@ test("session prompt permission gates native turns even with a space-level Runti
   // Root sessions and fork targets remain open to any space Runtime owner: they are created by that owner.
   const fresh = await startNativeTurn(spaceId, "no-session-access", start());
   assert.equal(fresh.binding.forked, false);
+});
+
+const ingestTurn = (overrides = {}) => ({ turnId: crypto.randomUUID(), parentTurnId: null, userContent: content("hello"), startedAt: at, result, ...overrides });
+
+test("ingest places a transcript's Turns in one Session by parent, and a replay changes nothing", async () => {
+  const spaceId = crypto.randomUUID();
+  const first = ingestTurn(), second = ingestTurn({ parentTurnId: first.turnId }), third = ingestTurn({ parentTurnId: second.turnId, origin: "local_import" });
+  const batch = { harness: "codex", nativeSessionId: "thread", turns: [first, second, third] };
+  const outcome = await ingestNativeTurns(spaceId, "owner", batch);
+  assert.equal(new Set(outcome.turns.map((turn) => turn.sessionId)).size, 1);
+  assert.deepEqual(outcome.turns.map((turn) => [turn.created, turn.settled, turn.forked]), [[true, true, false], [true, true, false], [true, true, false]]);
+  const replay = await ingestNativeTurns(spaceId, "owner", batch);
+  assert.deepEqual(replay.turns.map((turn) => [turn.turnId, turn.sessionId]), outcome.turns.map((turn) => [turn.turnId, turn.sessionId]));
+  assert(replay.turns.every((turn) => !turn.created && !turn.changed));
+  const rows = await database.select().from(sessionTurns).where(eq(sessionTurns.sessionId, outcome.turns[0].sessionId));
+  assert.deepEqual(rows.map((row) => row.sequence).sort(), [1, 2, 3]);
+  assert.equal(rows.find((row) => row.id === third.turnId)?.meta.nativeSync.origin, "local_import");
+  // A later batch continues from a parent recorded earlier.
+  const fourth = ingestTurn({ parentTurnId: third.turnId });
+  assert.equal((await ingestNativeTurns(spaceId, "owner", { ...batch, turns: [fourth] })).turns[0].sessionId, outcome.turns[0].sessionId);
+});
+
+test("a running Turn is taken over for live progress, then settles in place", async () => {
+  const spaceId = crypto.randomUUID();
+  const running = ingestTurn({ result: null });
+  const started = await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "s", turns: [running] });
+  assert.equal(started.turns[0].settled, false);
+  assert.deepEqual(progress.filter(([, id]) => id === running.turnId).map(([kind]) => kind), ["cache", "adopt"]);
+  assert.deepEqual((await knownNativeTurns(spaceId, [running.turnId])).turns.map((turn) => turn.settled), [false]);
+  const settled = await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "s", turns: [{ ...running, result }] });
+  assert.equal(settled.turns[0].changed, true);
+  assert.deepEqual(progress.filter(([, id]) => id === running.turnId).map(([kind]) => kind), ["cache", "adopt", "clear", "release"]);
+  assert.deepEqual((await knownNativeTurns(spaceId, [running.turnId, crypto.randomUUID()])).turns.map((turn) => [turn.turnId, turn.settled]), [[running.turnId, true]]);
+  assert.deepEqual((await knownNativeTurns(crypto.randomUUID(), [running.turnId])).turns, [], "another Space never learns of the Turn");
+});
+
+test("a native result for a Turn the server already settled does not stall the transcript", async () => {
+  const spaceId = crypto.randomUUID();
+  const first = ingestTurn();
+  await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "s", turns: [first] });
+  const next = ingestTurn({ parentTurnId: first.turnId });
+  const outcome = await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "s", turns: [{ ...first, result: { ...result, messages: [{ content: content("rewritten") }] } }, next] });
+  assert.deepEqual(outcome.turns.map((turn) => [turn.settled, turn.changed]), [[true, false], [true, true]]);
+  const messages = await database.select().from(sessionMessages).where(eq(sessionMessages.turnId, first.turnId));
+  assert(!messages.some((message) => JSON.stringify(message.content).includes("rewritten")), "the recorded result stands");
+});
+
+test("two transcripts continuing one Turn fork the later one into its own Session", async () => {
+  const spaceId = crypto.randomUUID();
+  const root = ingestTurn();
+  const [base] = (await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "a", turns: [root] })).turns;
+  await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "a", turns: [ingestTurn({ parentTurnId: root.turnId })] });
+  const branch = ingestTurn({ parentTurnId: root.turnId }), after = ingestTurn({ parentTurnId: branch.turnId });
+  const forked = await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "b", turns: [branch, after] });
+  assert.equal(forked.turns[0].forked, true);
+  assert.notEqual(forked.turns[0].sessionId, base.sessionId);
+  assert.equal(forked.turns[1].sessionId, forked.turns[0].sessionId, "later Turns follow their parent into the fork");
+});
+
+test("ingest reports what it created and settled, so live Turns are announced and imported ones are not", async () => {
+  const spaceId = crypto.randomUUID();
+  const live = ingestTurn(), imported = ingestTurn({ parentTurnId: live.turnId, origin: "local_import" });
+  const { effects } = await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "e", turns: [live, imported] });
+  assert.equal(effects.createdSessions.length, 1, "one new Session");
+  assert.deepEqual(effects.turns.map((turn) => [turn.turnId, turn.created, turn.changed, turn.imported]), [[live.turnId, true, true, false], [imported.turnId, true, true, true]]);
+  published.length = 0;
+  await publishNativeIngest(spaceId, effects);
+  const sessionId = effects.turns[0].sessionId;
+  assert.deepEqual(published.filter(([, id]) => id === sessionId).map(([kind]) => kind), ["session.created", "session.updated"], "the Session is announced once");
+  assert.deepEqual(published.filter(([, id]) => id === live.turnId).map(([kind]) => kind),
+    ["turn.created", "message.user", "turn.updated", "turn.finalized", "message.assistant"], "an open chat sees the live Turn begin and settle");
+  assert(!published.some(([kind, id]) => kind !== "postprocess" && id === imported.turnId), "imported history is not announced Turn by Turn");
+  assert.equal(published.filter(([kind]) => kind === "postprocess").length, 2, "every settled message is post-processed, imported ones included");
+  const replay = await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "e", turns: [live, imported] });
+  assert.deepEqual(replay.effects, { createdSessions: [], turns: [] }, "a replay announces nothing");
 });

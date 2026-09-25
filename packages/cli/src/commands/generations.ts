@@ -1,3 +1,4 @@
+import { openAsBlob } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import type { Command } from "commander";
@@ -7,6 +8,7 @@ import {
   parseGenerationPolicyFromEnv,
   type GenerationContentBlock,
 } from "@neta-art/cohub";
+import { probeMediaInfo, type MediaInfo } from "@neta-art/cohub/media";
 import { createClient } from "../client.js";
 import { resolveSpace } from "../space.js";
 import { json as outJson, jsonRequested, ok, error, handleHttp, spinner } from "../output.js";
@@ -71,39 +73,59 @@ async function pathExists(path: string): Promise<boolean> {
   return Boolean(await stat(path).catch(() => null));
 }
 
-async function parseMediaInput(type: MediaInputType, rawValue: string): Promise<{ value: string; role?: string }> {
+type MediaInput = { type: MediaInputType; value: string; role?: string };
+
+async function parseMediaInput(type: MediaInputType, rawValue: string): Promise<MediaInput> {
   const separator = rawValue.indexOf("=");
-  if (separator <= 0) return { value: rawValue };
+  if (separator <= 0) return { type, value: rawValue };
 
   const role = rawValue.slice(0, separator).trim();
-  if (!mediaRoles.has(role)) return { value: rawValue };
-  if (await pathExists(rawValue)) return { value: rawValue };
+  if (!mediaRoles.has(role)) return { type, value: rawValue };
+  if (await pathExists(rawValue)) return { type, value: rawValue };
   if (!rolesByMediaType[type].has(role)) {
     return error("Invalid media role", `${role} cannot be used with --${type}`);
   }
 
   const value = rawValue.slice(separator + 1).trim();
   if (!value) return error("Invalid media input", `--${type} ${role}= requires a path or URL`);
-  return { value, role };
+  return { type, value, role };
 }
 
-async function contentFromPathOrUrl(type: MediaInputType, rawValue: string): Promise<GenerationContentBlock> {
-  const { value, role } = await parseMediaInput(type, rawValue);
-  const meta = role ? { role } : undefined;
-  if (/^https?:\/\//.test(value)) {
-    return { type, source: { type: "url", url: value }, ...(meta ? { meta } : {}) } as GenerationContentBlock;
+/** Uploads a local input and returns its durable URL; `null` keeps it inline. */
+type InputUploader = ((path: string, mediaType: string) => Promise<string>) | null;
+
+/**
+ * Local inputs upload to an unlisted public URL so tasks store a reference, not
+ * megabytes of base64. Inline data remains for `--inline`, types the upload
+ * does not accept, and failed uploads.
+ */
+async function mediaContent(
+  { type, value, role }: MediaInput,
+  upload: InputUploader,
+): Promise<GenerationContentBlock> {
+  const block = (source: GenerationSource) =>
+    ({ type, source, ...(role ? { meta: { role } } : {}) }) as GenerationContentBlock;
+  if (/^https?:\/\//.test(value)) return block({ type: "url", url: value });
+
+  const mediaType = mimeByExt[extname(value).toLowerCase()];
+  if (mediaType && upload) {
+    try {
+      return block({ type: "url", url: await upload(value, mediaType) });
+    } catch (uploadError) {
+      const reason = uploadError instanceof Error ? uploadError.message : String(uploadError);
+      process.stderr.write(`  Could not upload ${value} (${reason}); sending it inline.\n`);
+    }
   }
   const data = await readFile(value);
-  const mediaType = mimeByExt[extname(value).toLowerCase()] ?? "application/octet-stream";
-  return {
-    type,
-    source: { type: "base64", mediaType, data: data.toString("base64") },
-    ...(meta ? { meta } : {}),
-  } as GenerationContentBlock;
+  return block({
+    type: "base64",
+    mediaType: mediaType ?? "application/octet-stream",
+    data: data.toString("base64"),
+  });
 }
 
-function validateMediaRoleModes(content: GenerationContentBlock[]): void {
-  const roles = content.map(metaRole).filter((role): role is string => Boolean(role));
+function validateMediaRoleModes(inputs: MediaInput[]): void {
+  const roles = inputs.flatMap(({ role }) => (role ? [role] : []));
   const hasFrameRole = roles.some((role) => frameMediaRoles.has(role));
   const hasReferenceRole = roles.some((role) => referenceMediaRoles.has(role));
   if (hasFrameRole && hasReferenceRole) {
@@ -198,12 +220,39 @@ function slugOutputLabel(block: GenerationContentBlock): string {
   return slugify(metaRole(block) ?? block.type);
 }
 
-function printGeneration(output: GenerationContentBlock[]): void {
-  for (const block of output) {
+const PROBE_TIMEOUT_MS = 3_000;
+
+type OutputMedia = MediaInfo & { index: number };
+
+/** Size, duration, and frames of URL outputs, probed in parallel; best effort. */
+async function probeOutputs(output: GenerationContentBlock[]): Promise<OutputMedia[]> {
+  const signal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
+  const probed = await Promise.all(output.map(async (block, index) => {
+    if (block.type === "text" || block.source.type !== "url") return null;
+    const info = await probeMediaInfo(block.source.url, { type: block.type, signal });
+    return Object.keys(info).length > 0 ? { index, ...info } : null;
+  }));
+  return probed.filter((media): media is OutputMedia => media !== null);
+}
+
+function mediaSummary(info: MediaInfo | undefined): string {
+  const parts = [
+    info?.width && info.height ? `${info.width}×${info.height}` : null,
+    info?.durationMs ? `${(info.durationMs / 1000).toFixed(1)}s` : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? ` ${parts.join(" · ")}` : "";
+}
+
+function printGeneration(output: GenerationContentBlock[], media: OutputMedia[]): void {
+  const byIndex = new Map(media.map((info) => [info.index, info]));
+  for (const [index, block] of output.entries()) {
     if (block.type === "text") {
       console.log(block.text);
     } else if (block.source.type === "url") {
-      console.log(`${formatOutputLabel(block)}: ${block.source.url}`);
+      const info = byIndex.get(index);
+      console.log(`${formatOutputLabel(block)}${mediaSummary(info)}: ${block.source.url}`);
+      // The last frame chains into the next clip as its first_frame.
+      if (info?.lastFrameUrl) console.log(`  last frame: ${info.lastFrameUrl}`);
     } else {
       console.log(`${formatOutputLabel(block)}: base64 ${block.source.mediaType} (${block.source.data.length} chars)`);
     }
@@ -278,10 +327,14 @@ export function registerGenerations(program: Command): void {
     .option("--parameters <json>", "Generation parameters as a JSON object")
     .option("--meta <json>", "Meta as a JSON object")
     .option("-o, --output <path>", "Save generated output to a file or directory")
+    .option("--inline", "Send local input files inline instead of uploading them to an unlisted public URL")
     .option("--async", "Queue the generation task and return immediately")
     .option("--timeout-ms <ms>", "Maximum time to wait in synchronous mode")
     .option("--json", "Output as JSON")
     .addHelpText("after", `
+
+Local input files upload to an unlisted public URL before the task is created;
+pass --inline to keep them inside the task instead.
 
 Examples:
   cohub models ls --model-type multimodal
@@ -302,16 +355,24 @@ Examples:
       meta?: string;
       output?: string;
       async?: boolean;
+      inline?: boolean;
       timeoutMs?: string;
       json?: boolean;
     }) => {
       try {
         const spaceId = await resolveSpace(program);
-        const content: GenerationContentBlock[] = [{ type: "text", text: prompt }];
-        content.push(...await Promise.all(opts.image.map((value) => contentFromPathOrUrl("image", value))));
-        content.push(...await Promise.all(opts.video.map((value) => contentFromPathOrUrl("video", value))));
-        content.push(...await Promise.all(opts.audio.map((value) => contentFromPathOrUrl("audio", value))));
-        validateMediaRoleModes(content);
+        const sessionId = envValue("COHUB_SESSION_ID");
+        const inputs = await Promise.all([
+          ...opts.image.map((value) => parseMediaInput("image", value)),
+          ...opts.video.map((value) => parseMediaInput("video", value)),
+          ...opts.audio.map((value) => parseMediaInput("audio", value)),
+        ]);
+        validateMediaRoleModes(inputs);
+        for (const { value } of inputs) {
+          if (!/^https?:\/\//.test(value) && !(await pathExists(value))) {
+            return error("Input not found", value);
+          }
+        }
 
         const parameters = parseParams(opts.param, opts.parameters);
         try {
@@ -327,9 +388,25 @@ Examples:
 
         const meta = parseMeta(opts.meta);
         const client = createClient();
+        // Validate everything first, so rejected requests never upload files.
+        const upload: InputUploader = opts.inline ? null : async (path, mimeType) => {
+          const asset = await client.publicAssets.uploadGenerationInput({
+            spaceId,
+            sessionId,
+            file: await openAsBlob(path, { type: mimeType }),
+            mimeType,
+            filename: basename(path),
+          });
+          process.stderr.write(`  Uploaded ${path} to an unlisted public URL; use --inline to keep inputs private.\n`);
+          return asset.publicUrl;
+        };
+        const content: GenerationContentBlock[] = [
+          { type: "text", text: prompt },
+          ...await Promise.all(inputs.map((input) => mediaContent(input, upload))),
+        ];
         const created = await client.generations.create({
           spaceId,
-          sessionId: envValue("COHUB_SESSION_ID"),
+          sessionId,
           turnId: envValue("COHUB_TURN_ID"),
           model: opts.model,
           content,
@@ -359,9 +436,19 @@ Examples:
         });
         if (!jsonRequested(opts)) spin.stop(`Generation completed — task ID: ${created.taskRunId}, ${formatElapsed(Date.now() - waitStartedAt)}, ${pollCount} polls`);
 
-        const savedPaths = opts.output ? await saveOutputs(result.output, opts.output) : [];
-        if (jsonRequested(opts)) return outJson(savedPaths.length > 0 ? { ...result, taskRunId: created.taskRunId, savedPaths } : { ...result, taskRunId: created.taskRunId });
-        printGeneration(result.output);
+        const [savedPaths, outputMedia] = await Promise.all([
+          opts.output ? saveOutputs(result.output, opts.output) : Promise.resolve([]),
+          probeOutputs(result.output),
+        ]);
+        if (jsonRequested(opts)) {
+          return outJson({
+            ...result,
+            taskRunId: created.taskRunId,
+            ...(outputMedia.length > 0 ? { outputMedia } : {}),
+            ...(savedPaths.length > 0 ? { savedPaths } : {}),
+          });
+        }
+        printGeneration(result.output, outputMedia);
         if (result.requestId || result.cost !== undefined || result.billing) {
           const details = [
             result.requestId ? `request ID: ${result.requestId}` : null,

@@ -2,148 +2,23 @@ import {
 	BOARD_TASK_ARTIFACT_LIMIT,
 	type BoardTaskArtifact,
 	type BoardTaskSnapshot,
-	normalizeBoardRemoteUrl,
 } from "@cohub/protocol/board-document";
+import {
+	blockDurationMs,
+	blockIdentity,
+	blockMimeType,
+	blockNaturalSize,
+	blockPreviewUrl,
+	blockText,
+	blockTitle,
+	blockUrl,
+	cleanExcerpt,
+	generationCovers,
+	generationOutput,
+	generationPrompt,
+	taskData,
+} from "../generation-blocks.js";
 import type { TaskRunRecord } from "../types.js";
-
-const EXCERPT_LIMIT = 240;
-
-function record(value: unknown): Record<string, unknown> | null {
-	return value && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function cleanExcerpt(
-	value: unknown,
-	limit = EXCERPT_LIMIT,
-): string | undefined {
-	if (typeof value !== "string") return undefined;
-	const clean = value.replace(/\s+/g, " ").trim();
-	if (!clean) return undefined;
-	return clean.length > limit
-		? `${clean.slice(0, limit - 3).trimEnd()}...`
-		: clean;
-}
-
-function blockText(block: Record<string, unknown>): string | undefined {
-	return cleanExcerpt(block.text ?? block.content ?? block.value);
-}
-
-function blockUrl(block: Record<string, unknown>): string | undefined {
-	const source = record(block.source);
-	return normalizeBoardRemoteUrl(
-		source?.url ?? source?.src ?? block.url ?? block.src,
-	);
-}
-
-function blockMimeType(block: Record<string, unknown>): string | undefined {
-	const source = record(block.source);
-	const value =
-		source?.mediaType ??
-		source?.media_type ??
-		source?.mimeType ??
-		block.mediaType ??
-		block.media_type ??
-		block.mimeType;
-	return typeof value === "string" ? value : undefined;
-}
-
-function positiveNumber(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value > 0
-		? value
-		: undefined;
-}
-
-function blockNaturalSize(block: Record<string, unknown>): {
-	naturalWidth?: number;
-	naturalHeight?: number;
-} {
-	const source = record(block.source);
-	const naturalWidth = positiveNumber(
-		source?.width ?? source?.naturalWidth ?? block.width ?? block.naturalWidth,
-	);
-	const naturalHeight = positiveNumber(
-		source?.height ??
-			source?.naturalHeight ??
-			block.height ??
-			block.naturalHeight,
-	);
-	return {
-		...(naturalWidth ? { naturalWidth } : {}),
-		...(naturalHeight ? { naturalHeight } : {}),
-	};
-}
-
-function contentBlocks(value: unknown): Record<string, unknown>[] {
-	return Array.isArray(value)
-		? (value.filter((item) => record(item)) as Record<string, unknown>[])
-		: [];
-}
-
-function taskData(run: TaskRunRecord): Record<string, unknown> | null {
-	const payload = record(run.payload);
-	return record(payload?.data) ?? payload;
-}
-
-function generationOutput(run: TaskRunRecord): Record<string, unknown>[] {
-	return contentBlocks(record(run.result)?.output);
-}
-
-function generationPrompt(run: TaskRunRecord): string | undefined {
-	for (const block of contentBlocks(taskData(run)?.content)) {
-		const text = blockText(block);
-		if (text) return text;
-	}
-	return undefined;
-}
-
-function blockMeta(block: Record<string, unknown>) {
-	return record(block.meta);
-}
-
-function blockIdentity(block: Record<string, unknown>): string | undefined {
-	const meta = blockMeta(block);
-	const value =
-		meta?.id ??
-		meta?.clip_id ??
-		meta?.clipId ??
-		block.id ??
-		block.clip_id ??
-		block.clipId;
-	if (typeof value !== "string" && typeof value !== "number") return undefined;
-	return cleanExcerpt(String(value), 220);
-}
-
-function blockTitle(block: Record<string, unknown>): string | undefined {
-	const meta = blockMeta(block);
-	return cleanExcerpt(meta?.title ?? block.title ?? block.name, 240);
-}
-
-function blockDurationMs(block: Record<string, unknown>): number | undefined {
-	const source = record(block.source);
-	const meta = blockMeta(block);
-	const milliseconds = positiveNumber(
-		source?.durationMs ?? meta?.durationMs ?? block.durationMs,
-	);
-	if (milliseconds) return Math.round(milliseconds);
-	const seconds = positiveNumber(
-		source?.duration ?? meta?.duration ?? block.duration,
-	);
-	return seconds ? Math.round(seconds * 1000) : undefined;
-}
-
-function blockPreviewUrl(block: Record<string, unknown>): string | undefined {
-	const source = record(block.source);
-	return normalizeBoardRemoteUrl(
-		source?.poster ??
-			source?.thumbnail ??
-			source?.previewUrl ??
-			block.poster ??
-			block.thumbnail ??
-			block.previewUrl,
-	);
-}
 
 function artifactId(
 	base: string,
@@ -162,44 +37,52 @@ function artifactId(
 }
 
 /**
- * Group provider blocks into user-facing works. A cover/poster sharing a stable
- * provider id with playable media belongs to that work instead of becoming a
- * competing image result.
+ * Group provider blocks into user-facing works. A cover belongs to the media
+ * it depicts (see `generationCovers`) instead of becoming a competing image.
  */
 export function taskArtifacts(
 	blocks: Record<string, unknown>[],
 ): BoardTaskArtifact[] {
-	const groups = new Map<string, Record<string, unknown>[]>();
+	// Board keeps remote media only, so a cover of inline media stays an image.
+	const covers = new Map(
+		[...generationCovers(blocks)].filter(([media]) =>
+			Boolean(blockUrl(blocks[media] ?? {})),
+		),
+	);
+	const coverIndexes = new Set(covers.values());
+	const coverUrl = (index: number) => {
+		const cover = covers.get(index);
+		return cover === undefined ? undefined : blockUrl(blocks[cover] ?? {});
+	};
+	type Entry = { block: Record<string, unknown>; index: number; url?: string };
+	const groups = new Map<string, Entry[]>();
 	blocks.forEach((block, index) => {
+		if (coverIndexes.has(index)) return;
 		const key = blockIdentity(block) ?? `output-${index + 1}`;
+		const entry = { block, index, url: blockUrl(block) };
 		const group = groups.get(key);
-		if (group) group.push(block);
-		else groups.set(key, [block]);
+		if (group) group.push(entry);
+		else groups.set(key, [entry]);
 	});
+	const withUrl = (entry: Entry): entry is Entry & { url: string } =>
+		Boolean(entry.url);
 
 	const artifacts: BoardTaskArtifact[] = [];
 	const usedIds = new Set<string>();
 	for (const [groupId, blocksInGroup] of groups) {
 		const images = blocksInGroup
-			.filter((block) => block.type === "image")
-			.map((block) => ({ block, url: blockUrl(block) }))
-			.filter(
-				(entry): entry is typeof entry & { url: string } => Boolean(entry.url),
-			);
+			.filter(({ block }) => block.type === "image")
+			.filter(withUrl);
 		const media = blocksInGroup
-			.filter((block) => block.type === "video" || block.type === "audio")
-			.map((block) => ({ block, url: blockUrl(block) }))
-			.filter(
-				(entry): entry is typeof entry & { url: string } => Boolean(entry.url),
-			);
-		const pairedPreview = images[0];
+			.filter(({ block }) => block.type === "video" || block.type === "audio")
+			.filter(withUrl);
 
-		media.forEach(({ block, url }, mediaIndex) => {
+		media.forEach(({ block, index, url }, mediaIndex) => {
 			const type = block.type as "video" | "audio";
 			const mimeType = blockMimeType(block);
 			const title = blockTitle(block);
 			const durationMs = blockDurationMs(block);
-			const previewUrl = blockPreviewUrl(block) ?? pairedPreview?.url;
+			const previewUrl = blockPreviewUrl(block) ?? coverUrl(index);
 			const id = artifactId(
 				groupId,
 				usedIds,
@@ -229,15 +112,14 @@ export function taskArtifacts(
 			});
 		});
 
-		const firstUnpairedImage = media.length > 0 ? 1 : 0;
-		images.slice(firstUnpairedImage).forEach(({ block, url }, imageIndex) => {
+		images.forEach(({ block, url }, imageIndex) => {
 			const mimeType = blockMimeType(block);
 			const title = blockTitle(block);
 			artifacts.push({
 				id: artifactId(
 					groupId,
 					usedIds,
-					images.length - firstUnpairedImage > 1
+					images.length > 1
 						? `image-${imageIndex + 1}`
 						: undefined,
 				),
@@ -250,8 +132,8 @@ export function taskArtifacts(
 		});
 
 		blocksInGroup
-			.filter((block) => block.type === "text")
-			.forEach((block, textIndex, texts) => {
+			.filter(({ block }) => block.type === "text")
+			.forEach(({ block }, textIndex, texts) => {
 				const textExcerpt = blockText(block);
 				if (!textExcerpt) return;
 				const title = blockTitle(block);

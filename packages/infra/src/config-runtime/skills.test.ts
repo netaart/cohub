@@ -3,8 +3,14 @@ import { test } from "node:test";
 import {
   bindModSkillsConfig,
   bindSpaceModSkillsConfig,
+  createSkillLoader,
+  formatSkillExpansion,
   mergeSkillsConfigs,
+  nativeHarnessSkillLocation,
+  reachableSkillScopes,
+  resolveSkillExecutionTarget,
   toSkillCatalog,
+  unreachableSkillMessage,
   type Skill,
 } from "./skills.js";
 
@@ -142,5 +148,148 @@ test("bindModSkillsConfig rejects paths outside the cached mod directory", () =>
       binding,
     ),
     /outside its source directory/,
+  );
+});
+
+test("reachableSkillScopes grades scopes by execution target", () => {
+  assert.deepEqual(reachableSkillScopes("cloud_sandbox"), ["platform", "mod", "user", "project"]);
+  assert.deepEqual(reachableSkillScopes("local_sandbox"), ["project"]);
+  assert.deepEqual(reachableSkillScopes("native_harness"), ["project"]);
+});
+
+test("formatSkillExpansion honors a workspace-relative location override", () => {
+  const withOverride = formatSkillExpansion({
+    name: "example",
+    sandboxFilePath: "/workspace/.agents/skills/example/SKILL.md",
+    sandboxBaseDir: "/workspace/.agents/skills/example",
+    content: "Example body",
+    location: nativeHarnessSkillLocation({
+      sandboxFilePath: "/workspace/.agents/skills/example/SKILL.md",
+      sandboxBaseDir: "/workspace/.agents/skills/example",
+    }),
+  });
+  assert.match(withOverride, /location="\.agents\/skills\/example\/SKILL\.md"/);
+  assert.match(withOverride, /References are relative to \.agents\/skills\/example\./);
+
+  const withoutOverride = formatSkillExpansion({
+    name: "example",
+    sandboxFilePath: "/workspace/.agents/skills/example/SKILL.md",
+    sandboxBaseDir: "/workspace/.agents/skills/example",
+    content: "Example body",
+  });
+  assert.match(withoutOverride, /location="\/workspace\/\.agents\/skills\/example\/SKILL\.md"/);
+});
+
+test("nativeHarnessSkillLocation keeps non-workspace paths absolute", () => {
+  const location = nativeHarnessSkillLocation({
+    sandboxFilePath: "/configs/user/.agents/skills/other/SKILL.md",
+    sandboxBaseDir: "/configs/user/.agents/skills/other",
+  });
+  assert.equal(location.filePath, "/configs/user/.agents/skills/other/SKILL.md");
+});
+
+test("resolveSkillExecutionTarget maps harness, provider, and lookup failure", async () => {
+  assert.equal(await resolveSkillExecutionTarget({ harness: "pi" }), "native_harness");
+  assert.equal(await resolveSkillExecutionTarget({ harness: "codex", spaceId: "s1" }), "native_harness");
+  assert.equal(await resolveSkillExecutionTarget({}), "cloud_sandbox");
+  assert.equal(await resolveSkillExecutionTarget({ harness: "cohub", spaceId: "s1", getSandboxProvider: async () => "local" }), "local_sandbox");
+  assert.equal(await resolveSkillExecutionTarget({ harness: "cohub", spaceId: "s1", getSandboxProvider: async () => "cloud" }), "cloud_sandbox");
+  // A missing sandbox record is the cloud default: cloud spaces register
+  // their sandbox lazily, so no record must not lock out platform/user/Mod skills.
+  assert.equal(await resolveSkillExecutionTarget({ spaceId: "s1", getSandboxProvider: async () => null }), "cloud_sandbox");
+  // A failed provider lookup fails closed to workspace-only scopes.
+  assert.equal(
+    await resolveSkillExecutionTarget({ spaceId: "s1", getSandboxProvider: async () => { throw new Error("db down"); } }),
+    "unverified_sandbox",
+  );
+  assert.equal(await resolveSkillExecutionTarget({ spaceId: "s1" }), "unverified_sandbox");
+  assert.deepEqual(reachableSkillScopes("unverified_sandbox"), ["project"]);
+});
+
+test("createSkillLoader fetches only reachable scopes and ignores reachability for findScope", async () => {
+  const loaded: string[] = [];
+  const scopeLoader = (scope: string) => async () => {
+    loaded.push(scope);
+    return { skills: [createSkill({ name: `${scope}-skill`, scope: scope as Skill["scope"] })] };
+  };
+  const loader = createSkillLoader({
+    scopes: {
+      platform: scopeLoader("platform"),
+      mod: scopeLoader("mod"),
+      user: scopeLoader("user"),
+      project: scopeLoader("project"),
+    },
+    getSandboxProvider: async () => "local",
+  });
+
+  const reachable = await loader.fetch({ userId: "u1", spaceId: "s1", harness: "cohub" });
+  assert.deepEqual(loaded, ["project"]);
+  assert.deepEqual(reachable.map((skill) => skill.name), ["project-skill"]);
+
+  loaded.length = 0;
+  const scope = await loader.findScope("user-skill", { userId: "u1", spaceId: "s1" });
+  assert.equal(scope, "user");
+  assert.deepEqual(loaded.sort(), ["mod", "platform", "project", "user"]);
+});
+
+test("unreachableSkillMessage names the skill and its scope", () => {
+  assert.equal(
+    unreachableSkillMessage("deploy", "user"),
+    "Skill deploy (user scope) is not available in this execution environment",
+  );
+});
+
+test("skillLoader.expand resolves one target for filtering, diagnosis, and location", async () => {
+  const platformSkill = createSkill({ name: "deploy", scope: "platform", sandboxFilePath: "/configs/platform/.agents/skills/deploy/SKILL.md", sandboxBaseDir: "/configs/platform/.agents/skills/deploy", content: "Deploy body" });
+  const projectSkill = createSkill({ name: "review", scope: "project", sandboxFilePath: "/workspace/.agents/skills/review/SKILL.md", sandboxBaseDir: "/workspace/.agents/skills/review", content: "Review body" });
+  const byScope = new Map([["platform", [platformSkill]], ["project", [projectSkill]]]);
+  const providerCalls: string[] = [];
+  const loader = createSkillLoader({
+    scopes: {
+      platform: async () => ({ skills: byScope.get("platform") ?? [] }),
+      mod: async () => null,
+      user: async () => null,
+      project: async (spaceId) => (spaceId ? { skills: byScope.get("project") ?? [] } : null),
+    },
+    getSandboxProvider: async (spaceId) => {
+      providerCalls.push(spaceId);
+      return "cloud";
+    },
+  });
+
+  // Native harness: project skill expands with a workspace-relative location,
+  // and a platform-only skill passes through as null (single DB resolution).
+  providerCalls.length = 0;
+  const expanded = await loader.expand("/skill:review args", { userId: "u1", spaceId: "s1", harness: "pi" });
+  assert.equal(expanded?.skill.name, "review");
+  assert.match(expanded?.renderedText ?? "", /location="\.agents\/skills\/review\/SKILL\.md"/);
+  assert.equal(expanded?.argsText, "args");
+  assert.equal(await loader.expand("/skill:deploy", { userId: "u1", spaceId: "s1", harness: "pi" }), null);
+  assert.deepEqual(providerCalls, []); // native never queries the provider
+
+  // Cohub on a cloud sandbox: platform skill expands with its absolute location.
+  const cloud = await loader.expand("/skill:deploy", { userId: "u1", spaceId: "s1", harness: "cohub" });
+  assert.equal(cloud?.skill.name, "deploy");
+  assert.match(cloud?.renderedText ?? "", /location="\/configs\/platform\/\.agents\/skills\/deploy\/SKILL\.md"/);
+
+  // Cohub on a local sandbox: a platform-only skill reports its unreachable scope.
+  const localLoader = createSkillLoader({
+    scopes: {
+      platform: async () => ({ skills: [platformSkill] }),
+      mod: async () => null,
+      user: async () => null,
+      project: async () => null,
+    },
+    getSandboxProvider: async () => "local",
+  });
+  await assert.rejects(
+    localLoader.expand("/skill:deploy", { userId: "u1", spaceId: "s1", harness: "cohub" }),
+    /Skill deploy \(platform scope\) is not available in this execution environment/,
+  );
+
+  // Unknown names keep failing explicitly on Cohub turns.
+  await assert.rejects(
+    localLoader.expand("/skill:ghost", { userId: "u1", spaceId: "s1", harness: "cohub" }),
+    /Unknown skill: ghost/,
   );
 });

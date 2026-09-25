@@ -16,8 +16,10 @@ import {
 	Activity,
 	ArrowLeft,
 	BarChart3,
+	BookOpen,
 	Check,
 	ChevronDown,
+	CircleHelp,
 	Clock,
 	CreditCard,
 	Download,
@@ -38,6 +40,7 @@ import {
 	Save,
 	Search,
 	Settings,
+	Sparkles,
 	Tags,
 	Trash2,
 	X,
@@ -46,6 +49,8 @@ import { onMount, tick, untrack } from "svelte";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
 import { floatNear } from "$lib/actions/portal";
+import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
+import { sortAppsByRecentUpdate } from "$lib/app-sort";
 import { logtoClient } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
@@ -55,6 +60,7 @@ import ChannelProviderIcon from "$lib/components/ChannelProviderIcon.svelte";
 import NewLabelPopover from "$lib/components/NewLabelPopover.svelte";
 import SidebarFlyout from "$lib/components/SidebarFlyout.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import SidebarAppRow from "$lib/components/sidebar/SidebarAppRow.svelte";
 import SidebarCheckpointRow from "$lib/components/sidebar/SidebarCheckpointRow.svelte";
 import SidebarFallbackResourceRow from "$lib/components/sidebar/SidebarFallbackResourceRow.svelte";
 import SidebarFileRow from "$lib/components/sidebar/SidebarFileRow.svelte";
@@ -70,7 +76,6 @@ import {
 	type LabelAssignableCohubResource,
 	setCohubResourceDragData,
 } from "$lib/drag/cohub-resource-drag";
-import { pointerDragSource } from "$lib/drag/pointer-drag.svelte";
 import {
 	APPS_CHANGED_EVENT,
 	type AppsChangedDetail,
@@ -221,7 +226,9 @@ const TASK_PAGE_SIZE = 10;
 let sidebarRootEl: HTMLElement | null = $state(null);
 let userMenuAnchorEl: HTMLDivElement | null = $state(null);
 let expandedUserMenuAnchorEl: HTMLDivElement | null = $state(null);
+let helpMenuAnchorEl: HTMLDivElement | null = $state(null);
 let showUserMenu = $state(false);
+let showHelpMenu = $state(false);
 // Hydrate synchronously from the local cache so a freshly mounted sidebar
 // (e.g. the mobile drawer, which unmounts on close) can resolve the current
 // space on first paint instead of flashing the empty "Select a space" state
@@ -744,6 +751,7 @@ function getTaskRunMeta(run: TaskRunRecord) {
 
 function handleAppDragStart(event: DragEvent, app: AppRecord) {
 	const href = currentSpaceId ? buildSpaceAppRoute(currentSpaceId, app.id) : "";
+	const icon = appIconUrl(app.meta);
 	setCohubResourceDragData(event.dataTransfer, {
 		version: 1,
 		resources: [
@@ -751,8 +759,9 @@ function handleAppDragStart(event: DragEvent, app: AppRecord) {
 				type: "app",
 				ref: app.slug,
 				appId: app.id,
-				title: app.slug,
+				title: appDisplayTitle(app.meta, app.slug),
 				href,
+				...(icon ? { icon } : {}),
 			},
 		],
 		origin: { kind: "sidebar-session-list" },
@@ -760,18 +769,20 @@ function handleAppDragStart(event: DragEvent, app: AppRecord) {
 }
 
 function appPointerDragPayload(app: AppRecord) {
+	const icon = appIconUrl(app.meta);
 	return {
 		origin: "apps-sidebar" as const,
 		items: [
 			{
 				type: "app" as const,
 				path: "",
-				name: app.slug,
+				name: appDisplayTitle(app.meta, app.slug),
 				appId: app.id,
 				appRef: app.slug,
 				appUrl: currentSpaceId
 					? buildSpaceAppRoute(currentSpaceId, app.id)
 					: "",
+				...(icon ? { icon } : {}),
 			},
 		],
 	};
@@ -2385,7 +2396,9 @@ async function loadAppsForSpace(spaceId: string, force = false) {
 	try {
 		const result = await sdk.apps.listBySpace(spaceId);
 		if (spaceId === currentSpaceId) {
-			apps = appsBuffer.apply(result.apps ?? []);
+			// The API serves newest-updated-first; sorting again keeps a realtime
+			// snapshot replayed mid-request in its right place.
+			apps = sortAppsByRecentUpdate(appsBuffer.apply(result.apps ?? []));
 		}
 	} catch (error) {
 		console.warn("[sidebar] Failed to load apps", { spaceId, error });
@@ -2467,6 +2480,7 @@ function returnFromSettings() {
 
 function openHelpPanel() {
 	showUserMenu = false;
+	showHelpMenu = false;
 	onClose?.();
 	window.dispatchEvent(new CustomEvent("cohub:open-help-panel"));
 }
@@ -3213,6 +3227,9 @@ onMount(() => {
 		if (!target.closest("[data-user-menu]")) {
 			showUserMenu = false;
 		}
+		if (!target.closest("[data-help-menu]")) {
+			showHelpMenu = false;
+		}
 		if (
 			renamingSessionId &&
 			!renameSaving &&
@@ -3859,11 +3876,15 @@ $effect(() => {
 	{:else}
 		<div class="space-y-[2px]">
 			{#each apps.slice(0, sidebarFlyoutPreviewLimit) as app (app.id)}
-				{@const manageHref = currentSpaceId ? buildSpaceAppRoute(currentSpaceId, app.id) : "#"}
-				{@const isActive = activeApp?.id === app.id}
-				<a href={manageHref} draggable={!isMobile} use:pointerDragSource={{ enabled: isMobile, getPayload: () => appPointerDragPayload(app) }} ondragstart={(event) => handleAppDragStart(event, app)} class="sidebar-flyout-item flex items-center gap-2 rounded-[var(--sidebar-item-radius)] px-1.5 py-1.5 text-[13px] {isActive ? 'bg-[var(--sidebar-item-active-bg)] font-medium text-[var(--sidebar-item-active-fg)]' : 'text-text-tertiary hover:bg-[var(--sidebar-item-hover-bg)] hover:text-text-secondary'}" onclick={(e) => { e.preventDefault(); void handleNavigateToApp(app.id); }}>
-					<div class="min-w-0 flex-1"><div class="truncate font-mono leading-tight">{app.slug}</div></div>
-				</a>
+				<SidebarAppRow
+					{app}
+					href={currentSpaceId ? buildSpaceAppRoute(currentSpaceId, app.id) : "#"}
+					active={activeApp?.id === app.id}
+					{isMobile}
+					getPayload={() => appPointerDragPayload(app)}
+					onDragStart={handleAppDragStart}
+					onNavigate={(id) => void handleNavigateToApp(id)}
+				/>
 			{/each}
 		</div>
 	{/if}
@@ -4283,34 +4304,30 @@ $effect(() => {
               {:else}
                 <div class="space-y-[2px] mt-1">
                   {#each apps as app (app.id)}
-                    {@const manageHref = currentSpaceId ? buildSpaceAppRoute(currentSpaceId, app.id) : "#"}
-                    {@const isActive = activeApp?.id === app.id}
-                    <a
-                      href={manageHref}
-                      draggable={!isMobile}
-                      use:pointerDragSource={{ enabled: isMobile, getPayload: () => appPointerDragPayload(app) }}
-                      ondragstart={(event) => handleAppDragStart(event, app)}
-                      class="flex items-center gap-2 rounded-[var(--sidebar-item-radius)] px-1.5 py-1.5 text-[13px] transition-colors duration-100 {isActive ? 'bg-[var(--sidebar-item-active-bg)] font-medium text-[var(--sidebar-item-active-fg)]' : 'text-text-tertiary hover:bg-[var(--sidebar-item-hover-bg)] hover:text-text-secondary'}"
-                      onclick={(e) => { e.preventDefault(); void handleNavigateToApp(app.id); }}
-                    >
-                      <div class="min-w-0 flex-1">
-                        <div class="truncate font-mono leading-tight">{app.slug}</div>
-                      </div>
-                    </a>
+                    <SidebarAppRow
+                      {app}
+                      href={currentSpaceId ? buildSpaceAppRoute(currentSpaceId, app.id) : "#"}
+                      active={activeApp?.id === app.id}
+                      {isMobile}
+                      getPayload={() => appPointerDragPayload(app)}
+                      onDragStart={handleAppDragStart}
+                      onNavigate={(id) => void handleNavigateToApp(id)}
+                    />
                   {/each}
                 </div>
               {/if}
             {:else if activeApp}
-              {@const manageHref = currentSpaceId ? buildSpaceAppRoute(currentSpaceId, activeApp.id) : "#"}
-              <a
-                href={manageHref}
-                class="mt-1 flex items-center gap-2 rounded-[var(--sidebar-item-radius)] bg-[var(--sidebar-item-active-bg)] px-1.5 py-1.5 text-[13px] font-medium text-[var(--sidebar-item-active-fg)] transition-colors duration-100"
-                onclick={(e) => { e.preventDefault(); void handleNavigateToApp(activeApp.id); }}
-              >
-                <div class="min-w-0 flex-1">
-                  <div class="truncate font-mono leading-tight">{activeApp.slug}</div>
-                </div>
-              </a>
+              <div class="mt-1">
+                <SidebarAppRow
+                  app={activeApp}
+                  href={currentSpaceId ? buildSpaceAppRoute(currentSpaceId, activeApp.id) : "#"}
+                  active
+                  {isMobile}
+                  getPayload={() => appPointerDragPayload(activeApp)}
+                  onDragStart={handleAppDragStart}
+                  onNavigate={(id) => void handleNavigateToApp(id)}
+                />
+              </div>
             {/if}
           </div>
 
@@ -4629,23 +4646,6 @@ $effect(() => {
 	        <button
 	          type="button"
 	          class="flex items-center gap-2 w-full px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
-	          onclick={openHelpPanel}
-        >
-          <Keyboard class="w-3.5 h-3.5" />
-	          <span>{m.sidebar_help({}, { locale })}</span>
-	          <span class="ml-auto rounded-[4px] border border-border-subtle bg-bg-surface px-1.5 py-px font-mono text-[10px] leading-4 text-text-placeholder">?</span>
-	        </button>
-        <a
-          href="/changelog"
-          class="flex items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
-          onclick={(e) => { e.preventDefault(); showUserMenu = false; handleNavigate('/changelog'); }}
-        >
-          <History class="w-3.5 h-3.5" />
-          <span>{m.sidebar_changelog({}, { locale })}</span>
-        </a>
-	        <button
-	          type="button"
-	          class="flex items-center gap-2 w-full px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
 	          onclick={saveDebugLog}
 	        >
 	          <Download class="w-3.5 h-3.5" />
@@ -4662,18 +4662,71 @@ $effect(() => {
       </div>
     {/if}
 
-    <button
-      type="button"
-      data-user-menu
-      class="flex items-center gap-2 w-full px-1.5 py-[6px] rounded-[5px] hover:bg-bg-hover transition-colors duration-100 cursor-pointer"
-      onclick={() => { showUserMenu = !showUserMenu; }}
-    >
-      <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="xs" class="h-[22px] w-[22px] border-0" />
-      <div class="flex-1 min-w-0 text-left">
-        <p class="text-[12px] text-text-secondary truncate">{userDisplayName}</p>
+    <div class="flex items-center gap-1">
+      <button
+        type="button"
+        data-user-menu
+        class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-[6px] rounded-[5px] hover:bg-bg-hover transition-colors duration-100 cursor-pointer"
+        onclick={() => { showHelpMenu = false; showUserMenu = !showUserMenu; }}
+      >
+        <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="xs" class="h-[22px] w-[22px] border-0" />
+        <div class="flex-1 min-w-0 text-left">
+          <p class="text-[12px] text-text-secondary truncate">{userDisplayName}</p>
+        </div>
+        <ChevronDown class={'w-3 h-3 text-text-tertiary shrink-0 transition-transform duration-150 ' + (showUserMenu ? 'rotate-180' : '')} />
+      </button>
+      <div class="relative shrink-0" bind:this={helpMenuAnchorEl} data-help-menu>
+        {#if showHelpMenu}
+          <div
+            class="w-64 overflow-hidden rounded-md border border-border-subtle bg-bg-primary py-1 shadow-lg"
+            data-help-menu
+            use:floatNear={{
+              getAnchor: () => helpMenuAnchorEl,
+              placement: "top-start",
+              gap: 4,
+              width: 256,
+              zIndex: 90,
+            }}
+          >
+            <a
+              href="/changelog"
+              class="flex items-center gap-2.5 px-3 py-2 text-[13px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              onclick={(e) => { e.preventDefault(); showHelpMenu = false; void handleNavigate('/changelog'); }}
+            >
+              <Sparkles class="h-4 w-4 shrink-0 text-text-tertiary" />
+              <span>{m.sidebar_whats_new({}, { locale })}</span>
+            </a>
+            <div class="mx-3 my-1 h-px bg-border-subtle"></div>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              onclick={openHelpPanel}
+            >
+              <Keyboard class="h-4 w-4 shrink-0 text-text-tertiary" />
+              <span>{m.sidebar_help({}, { locale })}</span>
+            </button>
+            <a
+              href={locale === "zh-CN" ? "/zh/docs" : "/docs"}
+              class="flex items-center gap-2.5 px-3 py-2 text-[13px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              onclick={(e) => { e.preventDefault(); showHelpMenu = false; void handleNavigate(locale === "zh-CN" ? "/zh/docs" : "/docs"); }}
+            >
+              <BookOpen class="h-4 w-4 shrink-0 text-text-tertiary" />
+              <span>{m.sidebar_docs({}, { locale })}</span>
+            </a>
+          </div>
+        {/if}
+        <button
+          type="button"
+          class="flex h-8 w-8 items-center justify-center rounded-[5px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          aria-label={m.sidebar_open_help_menu({}, { locale })}
+          title={m.sidebar_open_help_menu({}, { locale })}
+          aria-expanded={showHelpMenu}
+          onclick={() => { showUserMenu = false; showHelpMenu = !showHelpMenu; }}
+        >
+          <CircleHelp class="h-[18px] w-[18px]" />
+        </button>
       </div>
-      <ChevronDown class={'w-3 h-3 text-text-tertiary shrink-0 transition-transform duration-150 ' + (showUserMenu ? 'rotate-180' : '')} />
-    </button>
+    </div>
   </div>
 </aside>
 {/if}

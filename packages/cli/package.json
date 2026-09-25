@@ -1,6 +1,6 @@
 {
   "name": "@neta-art/cohub-cli",
-  "version": "8.0.0",
+  "version": "8.4.0",
   "description": "CLI for Cohub — spaces, sessions, and agent collaboration.",
   "type": "module",
   "engines": {
@@ -24,7 +24,6 @@
     "test": "node ../../scripts/test/run.mjs 'tests/**/*.test.ts'",
     "test:runtime": "node --import tsx --test tests/runtime-*.integration.ts",
     "test:runtime:native": "node --import tsx tests/runtime-native.smoke.ts",
-    "test:runtime:plugins": "node scripts/test-native-plugins.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -32,7 +31,8 @@
     "@neta-art/generation": "^0.1.30",
     "commander": "^15.0.0",
     "pixi.js": "^8.20.1",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.4",
+    "ws": "^8.21.3"
   },
   "publishConfig": {
     "access": "public"
@@ -40,8 +40,7 @@
   "devDependencies": {
     "@types/node": "^26.4.0",
     "@types/ws": "^8.18.1",
-    "typescript": "^7.0.2",
-    "ws": "^8.21.3"
+    "typescript": "^7.0.2"
   },
   "optionalDependencies": {
     "@napi-rs/canvas": "^1.0.8"

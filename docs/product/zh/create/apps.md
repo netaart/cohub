@@ -80,14 +80,10 @@ App 是所选目标的版本化快照。
 
 ## 权限
 
-App 在某个 Space 上的有效权限是两类授权的并集 — 任一来源即可：
+App 的有效权限是发布者授予的 app scopes 与访客授权的并集。完整模型、scope 清单和 API → scope 对照表见
+[App 开发](/zh/docs/developers/apps#权限)——在那儿决定 scope，在这里发布时设置。
 
-1. **App scopes** — 发布时直接授予的八个有界 scope（`space.view`、`session.view`、`file.view`、`file.edit`、`taskrun.view`、`session.prompt.readonly`、`session.prompt.fullaccess`、`command.execute`），仅作用于 App 自己的 Space。
-2. **访客授权（viewer grants）** — 访客在运行时通过授权对话框授予的、其自身持有的任意权限，可作用于其选择的任意 Space。授权按 Space 独立保存，有效期 14 天，且永远不会超出访客自己的访问范围。访客可随时查看与撤销（`cohub apps grants`、`cohub apps revoke`）。
-
-当 App 在发布运行时中使用 Cohub SDK 读取上下文、prompt、生成，或访问被批准资源时，这很重要。
-
-如果 App 只是静态 HTML，可能几乎不需要运行时 scope。
+如果 App 只是静态 HTML，几乎不需要 scope。
 
 ## Runtime 说明
 

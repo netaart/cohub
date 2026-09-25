@@ -3,9 +3,15 @@
 	"private": true,
 	"version": "0.1.44",
 	"type": "module",
+	"imports": {
+		"#worker-entry-deps": {
+			"types": "./src/entry.worker-deps.d.ts",
+			"default": "./.svelte-kit/cloudflare/worker-entry-deps.js"
+		}
+	},
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build && node ./scripts/ensure-i18n.mjs --stamp",
+		"build": "vite build && node ./scripts/generate-worker-entry-env.mjs && node ./scripts/ensure-i18n.mjs --stamp",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --strategy globalVariable baseLocale --emit-ts-declarations --silent",
 		"lint": "biome lint .",
 		"lint:fix": "biome lint --write .",

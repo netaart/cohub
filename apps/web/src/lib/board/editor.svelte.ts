@@ -11,8 +11,10 @@ import {
 	boardDocumentToSemanticCommands,
 	cameraForRect,
 	clampZoom,
+	connectionHitRadius,
 	connectionHitTest,
 	createBoardConnection,
+	createConnectionGeometryCache,
 	createConnectionIndex,
 	type FrameLookup,
 	featuredTaskArtifact,
@@ -28,10 +30,10 @@ import {
 	type Rect,
 	type ResizeHandle,
 	rectCenter,
+	rectContainsPoint,
 	rectsIntersect,
 	resizeFrame,
 	resizeFrameToSize,
-	resolveConnection,
 	rotateFrames,
 	type ScreenPoint,
 	scaleFrames,
@@ -335,7 +337,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	// Synced content and the local camera are held separately so the viewport
 	// is never mistaken for persisted state. `document` composes them for
 	// consumers that expect a full BoardDocument.
-	let synced = $state<SyncedContent>(toContent(options.document));
+	// Raw: content is immutable and replaced wholesale.
+	let synced = $state.raw<SyncedContent>(toContent(options.document));
 	let camera = $state<BoardViewport>(
 		normalizeViewport(options.document.viewport),
 	);
@@ -357,8 +360,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		undo: BoardSemanticCommand[];
 		redo: BoardSemanticCommand[];
 	};
-	let undoStack = $state<UndoEntry[]>([]);
-	let redoStack = $state<UndoEntry[]>([]);
+	let undoStack = $state.raw<UndoEntry[]>([]);
+	let redoStack = $state.raw<UndoEntry[]>([]);
 	let localRev = $state(0);
 	let committedRev = $state(0);
 	let draftId = $state<string | null>(null);
@@ -449,11 +452,14 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	 */
 	let connectionIndex = createConnectionIndex([]);
 	let indexedConnections: BoardConnection[] | null = null;
+	/** Separate from the renderer's cache, which resolves against display frames. */
+	const connectionGeometry = createConnectionGeometryCache();
 
 	function ensureConnectionIndex() {
 		const connections = synced.connections;
 		if (indexedConnections === connections) return;
 		connectionIndex = createConnectionIndex(connections);
+		connectionGeometry.retain(connections);
 		indexedConnections = connections;
 	}
 
@@ -600,6 +606,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				)
 			: null,
 	);
+	const hoveredConnectionId = $derived.by<string | null>(() => {
+		if (hoverPointerType === "touch" || hoverId || !hoverPoint) return null;
+		return connectionAt(hoverPoint)?.id ?? null;
+	});
 	const marquee = $derived.by<Rect | null>(() => {
 		if (interaction.type !== "brushing") return null;
 		const start = interaction.start;
@@ -1956,7 +1966,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 	/** Resolve a connection's world geometry against the live node frames. */
 	function resolveConnectionGeometry(connection: BoardConnection) {
-		return resolveConnection(connection, frameLookup());
+		return connectionGeometry.get(connection, frameLookup())?.resolved ?? null;
 	}
 
 	/**
@@ -1973,9 +1983,11 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		for (let index = synced.connections.length - 1; index >= 0; index -= 1) {
 			const connection = synced.connections[index];
 			if (!connection) continue;
-			const resolved = resolveConnection(connection, lookup);
-			if (!resolved) continue;
-			if (connectionHitTest(resolved, point, connection.style.size))
+			const geometry = connectionGeometry.get(connection, lookup);
+			const radius = connectionHitRadius(connection.style.size);
+			if (!geometry || !rectContainsPoint(geometry.bounds, point, radius))
+				continue;
+			if (connectionHitTest(geometry.resolved, point, connection.style.size))
 				return connection;
 		}
 		return null;
@@ -3117,11 +3129,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			}
 			return null;
 		},
-		get hoveredConnectionId(): string | null {
-			if (hoverPointerType === "touch") return null;
-			if (hoverId) return null;
-			const c = connectionAt(hoverPoint ?? worldPoint(-1e9, -1e9));
-			return c?.id ?? null;
+		get hoveredConnectionId() {
+			return hoveredConnectionId;
 		},
 		get editingId() {
 			return editingId;

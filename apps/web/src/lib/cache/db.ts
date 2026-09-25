@@ -1,9 +1,11 @@
 import type { BoardSemanticMutation } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type {
+	SessionFileRecord,
 	SessionForkRecord,
 	SessionTurnRecord,
 } from "@cohub/protocol/model";
+import { sanitizeTaskRunForList } from "@cohub/protocol/task";
 import type {
 	LabelAssignmentListItem,
 	LabelAssignmentPageInfo,
@@ -18,7 +20,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 16;
+export const DB_VERSION = 18;
 
 export type SessionListForkRecord = Partial<SessionForkRecord> & {
 	childSessionId: string;
@@ -252,6 +254,16 @@ export type BoardPendingTransactionCacheRecord = {
 	lastAttemptAt: number | null;
 };
 
+export type SessionFilesCacheRecord = {
+	key: string;
+	userKey: string;
+	spaceId: string;
+	sessionId: string;
+	files: SessionFileRecord[];
+	updatedAt: number;
+	lastAccessedAt: number;
+};
+
 export type TaskRunDetailCacheRecord = {
 	key: string;
 	userKey: string;
@@ -283,7 +295,8 @@ export type StoreName =
 	| "file_pending_drafts"
 	| "board_pending_txs"
 	| "task_run_summaries"
-	| "task_run_details";
+	| "task_run_details"
+	| "session_files";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 /** Resolved connection for O(1) reuse after open; cleared on versionchange/reset. */
@@ -561,6 +574,31 @@ function createStore(
 	for (const index of indexes) store.createIndex(index.name, index.keyPath);
 }
 
+/**
+ * Summaries cached before list views dropped inline generation media can hold
+ * megabytes each. Slim them in place so the first screen keeps its cache.
+ */
+function slimTaskRunSummaries(transaction: IDBTransaction | null) {
+	const cursorRequest = transaction
+		?.objectStore("task_run_summaries")
+		.openCursor();
+	if (!cursorRequest) return;
+	cursorRequest.onsuccess = () => {
+		const cursor = cursorRequest.result;
+		if (!cursor) return;
+		// One malformed record must not abort the upgrade transaction.
+		try {
+			const record = cursor.value as TaskRunSummaryCacheRecord | undefined;
+			const run = record?.run && sanitizeTaskRunForList(record.run);
+			if (record && run && run !== record.run)
+				cursor.update({ ...record, run });
+		} catch (error) {
+			console.warn("[cache] skipped a task run summary while slimming", error);
+		}
+		cursor.continue();
+	};
+}
+
 export async function openCacheDb(): Promise<IDBDatabase | null> {
 	if (!isBrowser()) return null;
 	// Hot path: already open. Avoid re-entering timeout races on every idb op.
@@ -610,8 +648,15 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 		};
 		request.onupgradeneeded = (event) => {
 			const db = request.result;
+			const { oldVersion } = event as IDBVersionChangeEvent;
 			if (
-				(event as IDBVersionChangeEvent).oldVersion < 15 &&
+				oldVersion < 18 &&
+				db.objectStoreNames.contains("task_run_summaries")
+			) {
+				slimTaskRunSummaries(request.transaction);
+			}
+			if (
+				oldVersion < 15 &&
 				db.objectStoreNames.contains("board_pending_txs")
 			) {
 				// Pending records used the removed raw operation shape. With no live
@@ -732,6 +777,10 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				},
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
+			]);
+			createStore(db, "session_files", [
+				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			createStore(db, "task_run_details", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },

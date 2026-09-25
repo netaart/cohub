@@ -234,8 +234,8 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 			type="button"
 			class="header-action-btn"
 			onclick={() => runAction(actions.toggleRightSidebar)}
-			title={context.rightSidebarCollapsed ? "Show files (Ctrl+Alt+→ / ⌃⌥→)" : "Hide files (Ctrl+Alt+→ / ⌃⌥→)"}
-			aria-label={context.rightSidebarCollapsed ? "Show files" : "Hide files"}
+			title={`${context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })} (Ctrl+Alt+→ / ⌃⌥→)`}
+			aria-label={context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })}
 		>
 			{#if context.rightSidebarCollapsed}
 				<PanelRightOpen class="h-4 w-4 shrink-0" />

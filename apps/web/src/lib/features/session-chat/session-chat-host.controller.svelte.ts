@@ -3935,6 +3935,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			) {
 				return;
 			}
+			// The workspace side panel owns task envelopes.
+			if (payload.type === "task.created" || payload.type === "task.updated")
+				return;
 			if (
 				payload.type === "session.created" ||
 				payload.type === "session.updated"

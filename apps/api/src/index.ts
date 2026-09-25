@@ -23,6 +23,8 @@ import { verifyAppSessionToken, type AppSessionPrincipal } from "./app-sessions.
 import { assertRequiredConfig, config } from "./config.js";
 
 import router from "./routes/index.js";
+import { resolveRequestSourceTurn } from "./lib/request-source.js";
+import type { RequestSource } from "@cohub/protocol/provenance";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 // ── Hono app ─────────────────────────────────────────────────────────────────
@@ -37,6 +39,8 @@ const app = new Hono<{
     principal: { type: "user"; user: AuthUserProfile } | { type: "execution"; execution: ExecutionAuthPrincipal } | { type: "preview_session"; previewSession: PreviewSessionPrincipal } | { type: "app_session"; appSession: AppSessionPrincipal } | null;
     requestId: string;
     traceId: string | null;
+    /** Request provenance with the Turn a local harness could not name filled in. */
+    requestSource: RequestSource | null;
   };
 }>();
 
@@ -201,6 +205,8 @@ app.use(async (c, next) => {
 
   await next();
 });
+
+app.use(resolveRequestSourceTurn);
 
 app.route("/", router);
 

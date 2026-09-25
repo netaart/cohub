@@ -46,11 +46,11 @@ cohub auth login
 
 ## Docs
 
-产品文档：[cohub.live/docs/zh](https://cohub.live/docs/zh) · [English](https://cohub.live/docs)
+产品文档：[cohub.live/zh/docs](https://cohub.live/zh/docs) · [English](https://cohub.live/docs)
 
 内容源：`docs/product/zh/` · `docs/product/en/`
 
-工程文档：[self-hosting](docs/self-hosting.md) · [agent-sandbox-runtime](docs/agent-sandbox-runtime.md) · [app-authorization](docs/app-authorization.md) · [app-commerce](docs/app-commerce-guide.md) · [generations](docs/generations.md) · [space-hooks](docs/space-hooks.md)
+工程文档：[self-hosting](docs/self-hosting.md) · [agent-sandbox-runtime](docs/agent-sandbox-runtime.md) · [generations](docs/generations.md) · [space-hooks](docs/space-hooks.md)
 
 Changelog：[CHANGELOG.md](CHANGELOG.md)
 

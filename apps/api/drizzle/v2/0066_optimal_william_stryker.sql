@@ -1,0 +1,1 @@
+CREATE INDEX "v2_idx_apps_space_updated" ON "v2"."apps" USING btree ("space_id","updated_at" DESC NULLS LAST,"created_at" DESC NULLS LAST);

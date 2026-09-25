@@ -392,6 +392,11 @@ func openDataChannel(ctx context.Context, opts Options, channel string) {
 	cancel()
 	if err != nil {
 		attrs := []any{slog.String("channel", channel), slog.String("error", err.Error()), slog.Duration("duration", time.Since(dialStarted))}
+		// Distinguish an unreachable relay (deadline) from an explicit rejection (status);
+		// the former points at networking, the latter at authorization or pairing.
+		if errors.Is(err, context.DeadlineExceeded) {
+			attrs = append(attrs, slog.String("reason", "dial timeout"))
+		}
 		if response != nil {
 			attrs = append(attrs, slog.Int("status", response.StatusCode))
 		}

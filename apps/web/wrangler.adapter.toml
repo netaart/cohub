@@ -1,0 +1,18 @@
+# Wrangler configuration used by @sveltejs/adapter-cloudflare at build time.
+#
+# Two adapter behaviours make this file necessary:
+#
+# 1. It writes the generated Worker to the `main` path of the config it reads,
+#    so it must not read the deployment configs — those point `main` at
+#    `entry.worker.ts`, the hand-written wrapper around the generated Worker.
+# 2. `assets.directory` is also resolved from the config it reads, and defaults
+#    to the build root instead of `assets/`. Declaring it here keeps the layout
+#    the deployment configs expect (`.svelte-kit/cloudflare/assets`).
+#
+# Keep these paths in sync with `wrangler.toml` / `wrangler.prod.toml`.
+name = "cohub-web-adapter"
+main = ".svelte-kit/cloudflare/_worker.js"
+
+[assets]
+directory = ".svelte-kit/cloudflare/assets"
+binding = "ASSETS"

@@ -186,18 +186,9 @@ export type ExpandedPromptTemplate = {
   rawInput: string;
 };
 
-export type ExpandedSkillCommand = {
-  renderedText: string;
-  skill: {
-    name: string;
-    description: string;
-    scope: "platform" | "mod" | "user" | "project";
-    sandboxFilePath: string;
-    sandboxBaseDir: string;
-  };
-  argsText: string;
-  rawInput: string;
-};
+import type { ExpandedSkillCommand } from "@cohub/infra/config-runtime/skills";
+
+export type { ExpandedSkillCommand };
 
 export type SessionPromptDependencies = {
   randomUUID(): string;
@@ -211,6 +202,7 @@ export type SessionPromptDependencies = {
     text: string;
     userId: string;
     spaceId: string;
+    harness?: PromptHarness | null;
   }): Promise<ExpandedSkillCommand | null>;
   sandboxRecovery?: {
     maybeRecoverForPrompt(input: {
@@ -258,7 +250,7 @@ export class SubmitSessionPromptError extends Error {
 
 export class HarnessUnavailableError extends Error {
   readonly code = "harness_unavailable";
-  constructor(message = "Local Harness is unavailable / 本地 Harness 不可用") { super(message); this.name = "HarnessUnavailableError"; }
+  constructor(message = "Local Harness is unavailable") { super(message); this.name = "HarnessUnavailableError"; }
 }
 
 export class ModelUnavailableError extends Error {
@@ -293,6 +285,15 @@ function normalizePromptModelProvider(input: Pick<SubmitSessionPromptInput, "mod
   };
 }
 
+/**
+ * Expand one-shot composer shortcuts in a single-block text prompt.
+ *
+ * Prompt templates are pure platform text and expand everywhere. Skills are
+ * sandbox-anchored, so `expandSkillCommand` receives the executing Harness and
+ * serves only reachable scopes. Direct `!` shell commands run through the
+ * Cohub sandbox only: Local Harnesses (Pi/Codex) keep their native shell and
+ * receive them verbatim (`sandboxSemantics: false`).
+ */
 export const expandPromptContent = async (
   deps: Pick<SessionPromptDependencies, "expandPromptTemplate" | "expandSkillCommand">,
   input: {
@@ -300,6 +301,8 @@ export const expandPromptContent = async (
     userId: string;
     spaceId: string;
     sessionId?: string | null;
+    harness?: PromptHarness | null;
+    sandboxSemantics?: boolean;
   },
 ) => {
   let content = input.content;
@@ -309,11 +312,13 @@ export const expandPromptContent = async (
   if (content.length === 1 && content[0]?.type === "text") {
     const originalText = typeof content[0].text === "string" ? content[0].text : "";
     const rawText = originalText.trim();
-    if (rawText.startsWith("/skill:") && deps.expandSkillCommand) {
+    const isSkillCommand = rawText.startsWith("/skill:");
+    if (isSkillCommand && deps.expandSkillCommand) {
       const expanded = await deps.expandSkillCommand({
         text: rawText,
         userId: input.userId,
         spaceId: input.spaceId,
+        harness: input.harness,
       });
       if (expanded) {
         content = [{ type: "text", text: expanded.renderedText } satisfies ContentBlock];
@@ -327,7 +332,7 @@ export const expandPromptContent = async (
           argsText: expanded.argsText,
         };
       }
-    } else if (rawText.startsWith("/")) {
+    } else if (!isSkillCommand && rawText.startsWith("/")) {
       const expanded = await deps.expandPromptTemplate({
         text: rawText,
         userId: input.userId,
@@ -348,7 +353,9 @@ export const expandPromptContent = async (
       }
     }
 
-    content = normalizeDirectShellCommandContent(content);
+    if (input.sandboxSemantics !== false) {
+      content = normalizeDirectShellCommandContent(content);
+    }
   }
 
   return { content, promptTemplate, skillUsage };
@@ -404,13 +411,15 @@ export const submitSessionPrompt = async (
     });
   }
 
-  const { content: expandedContent, promptTemplate, skillUsage } = localHarness
-    ? { content: input.content, promptTemplate: null, skillUsage: null }
-    : await expandPromptContent(deps, {
+  const { content: expandedContent, promptTemplate, skillUsage } = await expandPromptContent(deps, {
     content: input.content,
     userId,
     spaceId: input.spaceId,
     sessionId: input.sessionId,
+    harness: input.harness ?? null,
+    // Direct `!` shell commands run through the Cohub sandbox only; Local
+    // Harnesses keep their native shell and receive them verbatim.
+    sandboxSemantics: !localHarness,
   });
   const content = normalizeContentBlocks(expandedContent);
   const accessMode = input.accessMode ?? "full_access";

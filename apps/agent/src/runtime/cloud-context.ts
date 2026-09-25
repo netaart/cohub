@@ -31,7 +31,7 @@ const compactionTokensBeforeOf = (message: RuntimeContextMessage): number => {
 const projectRow = (row: RuntimeContextMessage, options: ContextProjectionOptions): AgentMessage[] => {
   if (row.meta?.messageKind === "generation_result" && !["completed", "failed"].includes(String(row.meta.generationStatus))) {
     // Do not advance the resume marker over a mutable placeholder.
-    throw new Error("Generation result is not settled / 生成结果尚未确认");
+    throw new Error("Generation result is not settled");
   }
   return row.meta?.generationTaskId
     ? [projectGenerationSessionMessage({ ...row, meta: row.meta ?? {}, provider: row.provider ?? null, model: row.model ?? null, createdAt: new Date(String(row.meta?.createdAt ?? 0)) })]

@@ -53,14 +53,12 @@ test("parseAppVersionPublished validates the app relationship", () => {
 		payload: {
 			app: app(2, "2026-07-20T00:00:00.000Z"),
 			version: version(2),
-			standaloneUrl: "https://app.example",
 			previousVersionId: "version-1",
 		},
 	} as ChannelEnvelope;
 	assert.deepEqual(parseAppVersionPublished(event), {
 		app: event.payload.app,
 		version: event.payload.version,
-		standaloneUrl: "https://app.example",
 		previousVersionId: "version-1",
 	});
 
@@ -69,19 +67,6 @@ test("parseAppVersionPublished validates the app relationship", () => {
 		payload: { ...event.payload, version: { ...version(2), appId: "other" } },
 	};
 	assert.equal(parseAppVersionPublished(invalid), null);
-	const legacy = {
-		...event,
-		payload: { ...event.payload, standaloneUrl: undefined },
-	} as ChannelEnvelope;
-	assert.equal(
-		"standaloneUrl" in (parseAppVersionPublished(legacy) ?? {}),
-		false,
-	);
-	const cleared = {
-		...event,
-		payload: { ...event.payload, standaloneUrl: null },
-	} as ChannelEnvelope;
-	assert.equal(parseAppVersionPublished(cleared)?.standaloneUrl, null);
 });
 
 test("upsertAppSnapshot ignores older and stale same-version snapshots", () => {
@@ -98,6 +83,25 @@ test("upsertAppSnapshot ignores older and stale same-version snapshots", () => {
 		upsertAppSnapshot([current], app(4, "2026-07-20T01:00:00.000Z"))[0]
 			?.latestVersion,
 		4,
+	);
+});
+
+test("upsertAppSnapshot floats an updated app back to the top", () => {
+	const older = { ...app(1, "2026-07-20T01:00:00.000Z"), id: "work-2" };
+	const current = app(2, "2026-07-20T02:00:00.000Z");
+	// The touched app sits at the bottom before the update arrives.
+	assert.deepEqual(
+		upsertAppSnapshot([older, current], app(3, "2026-07-20T03:00:00.000Z")).map(
+			(item) => item.id,
+		),
+		["work-1", "work-2"],
+	);
+
+	// A brand-new app is the most recently updated, so it leads the list.
+	const fresh = { ...app(1, "2026-07-20T09:00:00.000Z"), id: "work-3" };
+	assert.deepEqual(
+		upsertAppSnapshot([older, current], fresh).map((item) => item.id),
+		["work-3", "work-1", "work-2"],
 	);
 });
 

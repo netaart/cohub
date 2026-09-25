@@ -33,20 +33,17 @@ import {
   beginSpaceUploadComplete,
   buildSpaceUploadObjectKey,
   cancelSpaceUploadComplete,
-  consumeSpaceUploadQuota,
   createPresignedGetUrl,
   createPresignedPutUrl,
   createSpaceUploadId,
   deleteSpaceUploadManifest,
   getSpaceUploadManifest,
-  MAX_SPACE_UPLOAD_FILE_BYTES,
-  MAX_SPACE_UPLOAD_FILES,
-  MAX_SPACE_UPLOAD_TOTAL_BYTES,
   saveSpaceUploadManifest,
-  SpaceUploadRateLimitError,
   type SpaceUploadDestination,
   type SpaceUploadManifestEntry,
 } from "../../space-upload-storage.js";
+import { consumeUploadQuota, UploadRateLimitError } from "../../upload-quota.js";
+import { redisCommandClient } from "../../redis.js";
 import {
   enqueueSandboxUploadFilesJob,
   SandboxUploadConflictError,
@@ -54,6 +51,12 @@ import {
   SandboxUploadUnsupportedError,
 } from "../../sandbox-bash-queue.js";
 import { isAllowedPublicAssetDownloadUrl } from "../../public-asset-storage.js";
+import {
+  INLINE_WRITE_MAX_BYTES,
+  UPLOAD_MAX_BATCH_BYTES,
+  UPLOAD_MAX_BATCH_FILES,
+  UPLOAD_MAX_FILE_BYTES,
+} from "@cohub/protocol";
 import type {
   SpaceFsCreateUploadInput,
   SpaceFsCompleteUploadInput,
@@ -63,9 +66,7 @@ import type {
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
 
-/** Inline text writes are capped at the same limit as inline reads. */
-const MAX_INLINE_WRITE_BYTES = 10 * 1024 * 1024;
-const MAX_INLINE_WRITE_REQUEST_BYTES = Math.ceil(MAX_INLINE_WRITE_BYTES * 4 / 3) + 256 * 1024;
+const MAX_INLINE_WRITE_REQUEST_BYTES = Math.ceil(INLINE_WRITE_MAX_BYTES * 4 / 3) + 256 * 1024;
 const UPLOAD_TARGET_STAT_CONCURRENCY = 8;
 
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>) {
@@ -253,14 +254,14 @@ router.put("/file", bodyLimit({
   // ignores whitespace, so a huge whitespace-only string would otherwise
   // bypass the decoded-size check and reach Redis in full.
   const rawBytes = Buffer.byteLength(body.content, "utf8");
-  if (rawBytes > MAX_INLINE_WRITE_BYTES * 2) {
+  if (rawBytes > INLINE_WRITE_MAX_BYTES * 2) {
     return c.json({ message: "file exceeds 10MB limit" }, 413);
   }
   const writeBytes =
     body.encoding === "base64"
       ? Buffer.from(body.content, "base64").length
       : rawBytes;
-  if (writeBytes > MAX_INLINE_WRITE_BYTES) {
+  if (writeBytes > INLINE_WRITE_MAX_BYTES) {
     return c.json({ message: "file exceeds 10MB limit" }, 413);
   }
   if (
@@ -432,7 +433,7 @@ router.post("/uploads", async (c) => {
 
   const body = await c.req.json<SpaceFsCreateUploadInput>().catch(() => null);
   if (!body?.entries?.length) return c.json({ message: "entries are required" }, 400);
-  if (body.entries.length > MAX_SPACE_UPLOAD_FILES) return c.json({ message: "too many files" }, 413);
+  if (body.entries.length > UPLOAD_MAX_BATCH_FILES) return c.json({ message: "too many files" }, 413);
 
   const uploadId = createSpaceUploadId();
   const seenIds = new Set<string>();
@@ -453,7 +454,7 @@ router.post("/uploads", async (c) => {
       if (typeof entry.relativePath !== "string" || entry.relativePath.length === 0 || entry.relativePath.length > 4096) {
         return c.json({ message: "invalid upload path" }, 400);
       }
-      if (!Number.isSafeInteger(entry.size) || entry.size < 0 || entry.size > MAX_SPACE_UPLOAD_FILE_BYTES) {
+      if (!Number.isSafeInteger(entry.size) || entry.size < 0 || entry.size > UPLOAD_MAX_FILE_BYTES) {
         return c.json({ message: "file too large" }, 413);
       }
       if (entry.mimeType != null && (typeof entry.mimeType !== "string" || entry.mimeType.length > 255)) {
@@ -467,7 +468,7 @@ router.post("/uploads", async (c) => {
         return c.json({ message: "invalid download url" }, 400);
       }
       totalBytes += entry.size;
-      if (totalBytes > MAX_SPACE_UPLOAD_TOTAL_BYTES) return c.json({ message: "upload too large" }, 413);
+      if (totalBytes > UPLOAD_MAX_BATCH_BYTES) return c.json({ message: "upload too large" }, 413);
       const relativePath = normalizeUploadRelativePath(entry.relativePath || entry.name);
       if (seenPaths.has(relativePath)) return c.json({ message: "duplicate upload path" }, 400);
       seenPaths.add(relativePath);
@@ -497,8 +498,8 @@ router.post("/uploads", async (c) => {
       }
     }
 
-    // Charge quota only after full validation so bad requests cannot consume tokens.
-    await consumeSpaceUploadQuota(user.uuid, entries.length);
+    // Charge quota only after full validation so bad requests cannot consume the window.
+    await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: entries.length, totalBytes });
 
     const planned = entries.map((entry) => {
       if (entry.downloadUrl) {
@@ -519,7 +520,7 @@ router.post("/uploads", async (c) => {
     });
     return c.json({ uploadId, expiresAt, entries: planned });
   } catch (error) {
-    if (error instanceof SpaceUploadRateLimitError) {
+    if (error instanceof UploadRateLimitError) {
       c.header("Retry-After", String(error.retryAfterSeconds));
       return c.json({ message: error.message, retryAfterSeconds: error.retryAfterSeconds }, 429);
     }

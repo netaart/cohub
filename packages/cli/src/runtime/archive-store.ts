@@ -14,6 +14,11 @@ export type ArchiveTransport = {
   getRuntimeArchive(sessionId: string, turnId: string, options?: { signal?: AbortSignal }): Promise<RuntimeArchivePage>;
 };
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
+
+/** Raised when local capture bytes fail integrity checks (checksum, truncation, boundary); retryable via cache rebuild. */
+export class ArchiveCaptureIntegrityError extends Error {
+  constructor(message: string) { super(message); this.name = "ArchiveCaptureIntegrityError"; }
+}
 const hash = (bytes: Uint8Array, algorithm = "sha256") => createHash(algorithm).update(bytes).digest("hex");
 export async function checksumNativeFile(path: string) {
   const digest = createHash("sha256");
@@ -40,7 +45,9 @@ export class RuntimeArchiveStore {
   private flushing: Promise<void> | null = null;
   private readonly capturing = new Map<string, Promise<HarnessArchive>>();
   private errorReporter: ((error: unknown, index?: HarnessArchiveIndex) => void) | null = null;
-  constructor(readonly root: string, private readonly transport?: ArchiveTransport) {}
+  constructor(readonly root: string, private readonly transport?: ArchiveTransport | null) {}
+  /** Distinguishes "no transport configured" from transient upload failures. */
+  get hasTransport(): boolean { return this.transport != null; }
   setErrorReporter(reporter: ((error: unknown, index?: HarnessArchiveIndex) => void) | null): void {
     this.errorReporter = reporter;
   }
@@ -85,7 +92,7 @@ export class RuntimeArchiveStore {
     const saved = await this.readIndex(this.version(turnId));
     if (saved) {
       if (saved.sessionId !== state.sessionId || saved.harness !== state.harness) throw new Error("Archive identity mismatch");
-      if (state.expectedChecksum && state.expectedChecksum !== saved.sha256) throw new Error("Native Turn bytes changed; original archive retained");
+      if (state.expectedChecksum && state.expectedChecksum !== saved.sha256) throw new ArchiveCaptureIntegrityError("Native Turn bytes changed; original archive retained");
       const committed = await stat(join(this.root, "ready", `${turnId}.json`)).catch((error) => { if (missing(error)) return null; throw error; });
       if (!committed) await atomicRuntimeJson(join(this.root, "pending", `${turnId}.json`), saved);
       if (!await this.readIndex(headPath)) await atomicRuntimeJson(headPath, saved);
@@ -96,9 +103,9 @@ export class RuntimeArchiveStore {
     let index: HarnessArchiveIndex;
     try {
       const before = await file.stat();
-      if (!before.isFile() || !before.size) throw new Error("Native archive is empty");
+      if (!before.isFile() || !before.size) throw new ArchiveCaptureIntegrityError("Native archive is empty");
       const sizeBytes = state.sizeBytes ?? before.size;
-      if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > before.size) throw new Error("Native archive boundary is unavailable");
+      if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > before.size) throw new ArchiveCaptureIntegrityError("Native archive boundary is unavailable");
       const buffer = Buffer.alloc(RUNTIME_ARCHIVE_SEGMENT_BYTES);
       let offset = 0;
       let digest = createHash("sha256");
@@ -125,12 +132,12 @@ export class RuntimeArchiveStore {
         segments.push(segment); offset += bytesRead;
       }
       const after = await stat(state.path);
-      if (before.ino !== after.ino || after.size < sizeBytes || state.sizeBytes === undefined && (before.size !== after.size || before.mtimeMs !== after.mtimeMs)) throw new Error("Native file changed during capture");
+      if (before.ino !== after.ino || after.size < sizeBytes || state.sizeBytes === undefined && (before.size !== after.size || before.mtimeMs !== after.mtimeMs)) throw new ArchiveCaptureIntegrityError("Native file changed during capture");
       if (state.sizeBytes !== undefined) {
         // Native clients may append while an earlier Turn is captured. Validate the exact prefix twice.
         const verified = createHash("sha256");
         for await (const bytes of createReadStream(state.path, { end: sizeBytes - 1 })) verified.update(bytes);
-        if (verified.digest("hex") !== digest.copy().digest("hex")) throw new Error("Native prefix changed during capture");
+        if (verified.digest("hex") !== digest.copy().digest("hex")) throw new ArchiveCaptureIntegrityError("Native prefix changed during capture");
       }
       if (process.platform !== "win32") {
         const directory = await open(join(this.root, "objects"), "r");
@@ -140,7 +147,7 @@ export class RuntimeArchiveStore {
         nativeFormat: state.harness === "pi" ? "pi.jsonl" : "codex.rollout", parentTurnId: parent?.turnId ?? null,
         sizeBytes, sha256: digest.digest("hex"), segments });
       validateArchiveBoundary(index, parent);
-      if (state.expectedChecksum && index.sha256 !== state.expectedChecksum) throw new Error("Native Turn bytes changed during capture; original retained");
+      if (state.expectedChecksum && index.sha256 !== state.expectedChecksum) throw new ArchiveCaptureIntegrityError("Native Turn bytes changed during capture; original retained");
     } finally { await file.close(); }
     // Publish the outbox before advancing the local head. Neither points at mutable files.
     await atomicRuntimeJson(join(this.root, "pending", `${turnId}.json`), index);

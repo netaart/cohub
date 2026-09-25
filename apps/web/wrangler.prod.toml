@@ -1,5 +1,5 @@
 name = "cohub-web"
-main = ".svelte-kit/cloudflare/_worker.js"
+main = "entry.worker.ts"
 compatibility_date = "2025-03-05"
 compatibility_flags = ["nodejs_compat"]
 

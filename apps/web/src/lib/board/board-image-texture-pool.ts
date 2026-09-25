@@ -1,4 +1,6 @@
+import { variantSource } from "@neta-art/cohub/media";
 import { Assets, Texture } from "pixi.js";
+import { loadVideoThumbnailTexture } from "$lib/board/board-video-thumbnail";
 
 export type BoardImageTexturePool = {
 	acquire: (url: string) => Promise<Texture | null>;
@@ -31,21 +33,51 @@ function loadImageElementTexture(url: string): Promise<Texture> {
 }
 
 /**
- * Keep Pixi's worker/ImageBitmap fast path, but recover through an anonymous
- * image element when that browser context rejects a cross-origin cover.
+ * Bypass the HTTP cache: an `<img>` that fetched this URL without CORS leaves
+ * an entry lacking CORS headers, and every CORS load of it then fails.
  */
+async function loadUncachedTexture(url: string): Promise<Texture> {
+	const response = await fetch(url, { cache: "no-store" });
+	if (!response.ok) throw new Error(`HTTP ${response.status}`);
+	return Texture.from(await createImageBitmap(await response.blob()));
+}
+
+/**
+ * Keep Pixi's worker/ImageBitmap fast path, but recover through an anonymous
+ * image element when that browser context rejects a cross-origin cover, then
+ * through an uncached fetch when the cached copy is not CORS-readable.
+ */
+async function loadImageTexture(url: string): Promise<Texture> {
+	try {
+		// CDN stills keep their source's extension (`clip.mp4?x-oss-process=…`),
+		// which would pick Pixi's video parser; they are always images.
+		const asset = /[?&]x-oss-process=/.test(url)
+			? { src: url, parser: "texture" }
+			: url;
+		return await Assets.load<Texture>(asset);
+	} catch (workerError) {
+		const errors: unknown[] = [workerError];
+		for (const load of [loadImageElementTexture, loadUncachedTexture]) {
+			try {
+				return await load(url);
+			} catch (error) {
+				errors.push(error);
+			}
+		}
+		throw new AggregateError(errors, `Failed to load board image: ${url}`);
+	}
+}
+
+/** A CDN variant that fails to process falls back to the media it came from. */
 export async function loadBoardImageTexture(url: string): Promise<Texture> {
 	try {
-		return await Assets.load<Texture>(url);
-	} catch (workerError) {
-		try {
-			return await loadImageElementTexture(url);
-		} catch (imageError) {
-			throw new AggregateError(
-				[workerError, imageError],
-				`Failed to load board image: ${url}`,
-			);
-		}
+		return await loadImageTexture(url);
+	} catch (error) {
+		const source = variantSource(url);
+		if (!source) throw error;
+		return source.type === "video"
+			? loadVideoThumbnailTexture(source.url)
+			: loadImageTexture(source.url);
 	}
 }
 

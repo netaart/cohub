@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import {
   readRuntimeDiagnosticEvents,
+  redactDiagnosticString,
   RuntimeDiagnosticReader,
   RuntimeDiagnostics,
   serializeDiagnosticError,
@@ -100,4 +101,18 @@ test("Diagnostic errors retain useful network fields", () => {
     syscall: "getaddrinfo",
     hostname: "gateway.example.test",
   });
+});
+
+test("URL redaction keeps healthy URLs byte-identical and strips log-line quotes", () => {
+  // Go wraps failing request URLs in quotes; the trailing quote is not part of
+  // the URL and must neither be eaten by the matcher nor re-encoded to %22.
+  const quoted = `Get "https://gateway.example.test/sandbox/relay/data?channel=5df2112e-d5c9-417b-a64a-cf9f5c22e4a0": context deadline exceeded`;
+  assert.equal(
+    redactDiagnosticString(quoted),
+    quoted,
+  );
+  // A URL without sensitive query keys is returned untouched.
+  assert.equal(redactDiagnosticString("see https://example.test/a?b=1 for details"), "see https://example.test/a?b=1 for details");
+  // Sensitive keys are still redacted.
+  assert.equal(redactDiagnosticString("https://example.test/a?token=secret"), "https://example.test/a?token=[REDACTED]");
 });

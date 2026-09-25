@@ -3,8 +3,9 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { GATEWAY_ATTACHMENT_MAX_BYTES, type FeishuChannelConfig, type GatewayInboundEvent, type GatewayMediaItem } from "@cohub/protocol/gateway";
+import type { FeishuChannelConfig, GatewayInboundEvent, GatewayMediaItem } from "@cohub/protocol/gateway";
 import type { PlannedGatewayOutboundCommand } from "@cohub/protocol/gateway";
+import { UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 import type { GatewayProvider } from "../base.js";
 import { resolveChannelCommand } from "../../channel-commands.js";
 import { publishInboundEvent, } from "../../bus.js";
@@ -37,7 +38,7 @@ import {
 } from "../../channel-health.js";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
-const FEISHU_OUTBOUND_FILE_MAX_BYTES = GATEWAY_ATTACHMENT_MAX_BYTES;
+const FEISHU_OUTBOUND_FILE_MAX_BYTES = UPLOAD_MAX_FILE_BYTES;
 const LARGE_MEDIA_TIMEOUT_MS = 10 * 60 * 1000;
 // Detect image MIME type from magic bytes (first 4 bytes)
 function detectMimeType(buffer: Buffer): string | null {

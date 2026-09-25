@@ -8,6 +8,7 @@ import {
 	connectionArrowheads,
 	connectionBounds,
 	connectionHitTest,
+	createConnectionGeometryCache,
 	createConnectionIndex,
 	distanceToConnection,
 	resolveConnection,
@@ -181,4 +182,21 @@ test("a rotated node's connection leaves along the rotated edge", () => {
 	assert.ok(upright && rotated);
 	assert.ok(Math.abs(upright.source.normal.x - 1) < 1e-6);
 	assert.ok(Math.abs(rotated.source.normal.y - 1) < 1e-6);
+});
+
+test("the geometry cache reuses a resolve until the relation or an endpoint changes", () => {
+	const cache = createConnectionGeometryCache();
+	const frames = { a: frame(0, 0), b: frame(400, 0) };
+	const first = cache.get(connection, lookup(frames));
+	assert.ok(first);
+	// Same records, same object: renderers detect "nothing moved" by identity.
+	assert.equal(cache.get(connection, lookup(frames)), first);
+
+	const moved = { ...frames, b: frame(400, 300) };
+	const afterMove = cache.get(connection, lookup(moved));
+	assert.ok(afterMove && afterMove !== first);
+	assert.ok((afterMove.resolved.target.point.y ?? 0) > 0);
+
+	const restyled = { ...connection, style: { ...connection.style, size: 4 } };
+	assert.notEqual(cache.get(restyled, lookup(moved)), afterMove);
 });

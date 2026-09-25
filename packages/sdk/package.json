@@ -1,6 +1,6 @@
 {
   "name": "@neta-art/cohub",
-  "version": "8.21.0",
+  "version": "8.23.0",
   "description": "Cohub SDK for spaces, sessions, boards, and realtime agent collaboration.",
   "license": "Apache-2.0",
   "private": false,
@@ -48,6 +48,10 @@
         "types": "./dist/space-picker.d.ts",
         "import": "./dist/space-picker.js"
       },
+      "./media": {
+        "types": "./dist/media.d.ts",
+        "import": "./dist/media.js"
+      },
       "./board": {
         "types": "./dist/board/index.d.ts",
         "import": "./dist/board/index.js"
@@ -92,6 +96,10 @@
       "types": "./src/space-picker.ts",
       "import": "./src/space-picker.ts"
     },
+    "./media": {
+      "types": "./src/media.ts",
+      "import": "./src/media.ts"
+    },
     "./board": {
       "types": "./src/board/index.ts",
       "import": "./src/board/index.ts"
@@ -113,7 +121,6 @@
   "files": [
     "dist",
     "README.md",
-    "docs",
     "LICENSE",
     "NOTICE"
   ],

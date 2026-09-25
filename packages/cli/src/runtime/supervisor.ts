@@ -13,10 +13,10 @@ import { discoverHarnesses, type HarnessOptions } from "./harness.js";
 import { RuntimeDiagnostics, serializeDiagnosticError, type RuntimeDiagnostic, type RuntimeDiagnosticLevel } from "./diagnostics.js";
 import { ownRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
 import { createDiagnosticConsole, type RuntimeSummary } from "./presentation.js";
-import { RuntimeSessionStore } from "./session-store.js";
-import { captureNativeSession, flushNativeSessions, nativeWebSocketTransport } from "./native-sync.js";
-import type { NativeRuntimeEvent } from "@neta-art/cohub";
-import { serveNativeDaemon } from "./native-ipc.js";
+import { join } from "node:path";
+import { RuntimeArchiveStore } from "./archive-store.js";
+import { readNativeConfig, runtimeStateRoot } from "./native/config.js";
+import { NativeRuntime } from "./native/daemon.js";
 
 export type RuntimeLaunch = {
   spaceId: string;
@@ -27,6 +27,8 @@ export type RuntimeLaunch = {
   capabilities?: RuntimeCapabilities;
   background: boolean;
   verbose?: boolean;
+  /** Start importing earlier conversations as soon as the Runtime is connected. */
+  importHistory?: boolean;
 };
 
 export function sandboxOutputLevel(value: unknown, stream: "stdout" | "stderr"): RuntimeDiagnosticLevel {
@@ -42,20 +44,28 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   const client = createClient();
   const space = client.space(config.spaceId);
-  const store = new RuntimeSessionStore(config.spaceId, { projectionSource: space });
+  const stateRoot = runtimeStateRoot(config.spaceId);
+  const archives = new RuntimeArchiveStore(join(stateRoot, "archives"), space);
   const consoleSink = config.background ? undefined : createDiagnosticConsole(config.verbose);
   const diagnostics = new RuntimeDiagnostics({
-    root: store.root, spaceId: config.spaceId, runtimeId: randomUUID(),
+    root: stateRoot, spaceId: config.spaceId, runtimeId: randomUUID(),
     onEvent: (event) => { consoleSink?.(event); onDiagnostic?.(event); },
   });
-  store.setDiagnostics(diagnostics);
+  archives.setErrorReporter((error, index) => diagnostics.log("warn", "archive.upload_pending", { error: serializeDiagnosticError(error) }, {
+    component: "archive", sessionId: index?.sessionId, turnId: index?.turnId, harness: index?.harness,
+  }));
+  const native = new NativeRuntime({
+    spaceId: config.spaceId, root: config.root, stateRoot, harnesses: config.harnesses, executables: config.executables,
+    identity: config.identity, config: await readNativeConfig(stateRoot, config.identity).catch(() => null),
+    archives, projectionSource: space, diagnostics,
+  });
   let status: RuntimeSummary = {
     spaceId: config.spaceId, root: config.root, runtimeId: diagnostics.runtimeId,
     pid: process.pid, harnesses: config.harnesses, background: config.background,
     state: "starting", harnessConnected: false, workspaceConnected: false,
     diagnosticsPath: diagnostics.directory,
-    nativeSync: true,
   };
+  const summary = (): RuntimeSummary => ({ ...status, native: native.status() });
   let hasBeenReady = false;
   const update = (patch: Partial<RuntimeSummary>) => {
     const next = { ...status, ...patch };
@@ -68,28 +78,26 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   };
   let closeInstance: (() => Promise<void>) | undefined;
   let bridgeTask: Promise<void> | undefined;
-  let nativeSyncTask: Promise<void> | undefined;
-  let closeNativeDaemon: (() => Promise<void>) | undefined;
-  let nativeSend: ((event: NativeRuntimeEvent) => Promise<unknown>) | null = null;
+  let nativeStarted = false;
   let tokenInFlight: Promise<string> | null = null;
   const token = (forceRefresh = false) => {
     tokenInFlight ??= (async () => {
-      if (currentIdentityKey() !== config.identity) throw new AuthRequiredError("Runtime account changed; sign in to the original account / Runtime 账号已变化，请登录原账号");
+      if (currentIdentityKey() !== config.identity) throw new AuthRequiredError("Runtime account changed; sign in to the original account");
       const value = await resolveAccessToken({ forceRefresh });
       if (!value) throw new AuthRequiredError();
-      if (currentIdentityKey() !== config.identity) throw new AuthRequiredError("Runtime account changed / Runtime 账号已变化");
+      if (currentIdentityKey() !== config.identity) throw new AuthRequiredError("Runtime account changed");
       return value;
     })().finally(() => { tokenInFlight = null; });
     return tokenInFlight;
   };
   try {
-    closeInstance = await ownRuntimeInstance(runtimeInstanceDirectory(config.identity, config.spaceId), () => status, async (force) => {
-      if (!force) for await (const batch of store.pendingExecutionBatches()) {
-        if (batch.length) throw new Error("Unconfirmed executions remain. Use down --yes to stop; results and files are retained / 尚有未确认执行，使用 down --yes 停止；结果和文件会保留");
+    closeInstance = await ownRuntimeInstance(runtimeInstanceDirectory(config.identity, config.spaceId), summary, async (force) => {
+      if (!force) for await (const batch of native.executor.results.pendingBatches()) {
+        if (batch.length) throw new Error("Unconfirmed executions remain. Use down --yes to stop; results and files are retained");
       }
       update({ state: "stopping" });
       setTimeout(stop, 30);
-    });
+    }, (action, message) => native.control(action, message));
     onState({ ...status });
     diagnostics.log("info", "runtime.cli_started", { platform: process.platform, node: process.versions.node, harnesses: config.harnesses });
     const [binary, capabilities] = await Promise.all([
@@ -197,25 +205,21 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
       }
     };
     bridgeTask = runBridge();
-    closeNativeDaemon = await serveNativeDaemon({ runtimeRoot: store.root, handle: async (request) => ({
-      store: await captureNativeSession(request),
-    }) });
-    nativeSyncTask = (async () => {
-      const report = (error: unknown) => diagnostics.log("warn", "native.sync_pending", { error: serializeDiagnosticError(error) });
-      while (!signal.aborted) {
-        try {
-          if (nativeSend) await flushNativeSessions(config.spaceId, config.identity, signal, report, nativeWebSocketTransport(config.spaceId, config.identity, nativeSend));
-        }
-        catch (error) { if (!signal.aborted) report(error); }
-        await delay(5000, undefined, { signal }).catch(() => undefined);
-      }
-    })();
+    await native.start(signal);
+    nativeStarted = true;
+    let importRequested = Boolean(config.importHistory);
     await serveRuntime({
       spaceId: config.spaceId, cwd: config.root, url: url.toString(), capabilities,
-      harnesses: config.executables, runtimeId: status.runtimeId, diagnostics, token, signal, store,
+      runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor,
       onReady: () => update({ harnessConnected: true }),
-      onDisconnected: () => { nativeSend = null; update({ harnessConnected: false }); },
-      onNativeChannel: (send) => { nativeSend = send; },
+      onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); },
+      onNativeStop: (stop) => { native.stop(stop.sessionId, stop.turnId); },
+      onNativeChannel: (send) => {
+        native.connect(send);
+        if (!importRequested) return;
+        importRequested = false;
+        void native.control("import", { command: "start" }).catch((error: unknown) => diagnostics.log("warn", "native.import_failed", { error: serializeDiagnosticError(error) }));
+      },
     });
   } catch (error) {
     if (!signal.aborted) {
@@ -226,8 +230,8 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   } finally {
     controller.abort();
     try {
-      await Promise.all([bridgeTask, nativeSyncTask]);
-      await closeNativeDaemon?.();
+      await bridgeTask;
+      if (nativeStarted) await native.close(AbortSignal.timeout(5_000));
     } finally {
       try {
         await diagnostics.close();

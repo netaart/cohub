@@ -13,7 +13,10 @@ const config = {
 		sourcemap: true,
 	},
 	kit: {
-		adapter: adapter(),
+		// The adapter writes its generated Worker to the `main` path of the config
+		// it reads, so point it at a build-only config; the deployment configs
+		// declare `main = "entry.worker.ts"` to wrap the generated Worker.
+		adapter: adapter({ config: "./wrangler.adapter.toml" }),
 		output: {
 			bundleStrategy: "split",
 		},
@@ -40,6 +43,7 @@ const config = {
 			// sdk subpaths
 			"@neta-art/cohub/debugger": `${sdkDir}/debugger.ts`,
 			"@neta-art/cohub/http": `${sdkDir}/http.ts`,
+			"@neta-art/cohub/media": `${sdkDir}/media.ts`,
 			"@neta-art/cohub/websocket": `${sdkDir}/websocket.ts`,
 			// Board subpaths must precede the SDK wildcard alias.
 			"@neta-art/cohub/board/render": `${sdkDir}/board/render/index.ts`,

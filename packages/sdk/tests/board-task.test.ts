@@ -153,6 +153,34 @@ test("keeps unpaired multimodal results and prioritizes video", () => {
 	assert.equal(featuredTaskArtifact(artifacts)?.type, "video");
 });
 
+test("pairs a video with its first frame and keeps covers of inline media", () => {
+	const artifacts = taskArtifacts([
+		{ type: "video", source: { url: "https://cdn.example.com/clip.mp4" } },
+		{
+			type: "image",
+			meta: { role: "first_frame" },
+			source: { url: "https://cdn.example.com/clip.webp" },
+		},
+		{ type: "audio", meta: { id: "t1" }, source: { data: "AAAA" } },
+		{
+			type: "image",
+			meta: { id: "t1" },
+			source: { url: "https://cdn.example.com/t1.jpg" },
+		},
+	]);
+
+	assert.deepEqual(
+		artifacts.map((artifact) => [
+			artifact.type,
+			artifact.type === "video" ? artifact.previewUrl : artifact.url,
+		]),
+		[
+			["video", "https://cdn.example.com/clip.webp"],
+			["image", "https://cdn.example.com/t1.jpg"],
+		],
+	);
+});
+
 test("bounds snapshots while retaining the complete artifact count", () => {
 	const output = Array.from({ length: BOARD_TASK_ARTIFACT_LIMIT + 4 }, (_, index) => ({
 		type: "image",

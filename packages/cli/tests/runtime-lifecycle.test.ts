@@ -63,7 +63,7 @@ test("terminal diagnostics are redacted and throttled, while disk retains every 
     diagnostics.log("info", "runtime.available");
     await diagnostics.close();
     assert.equal(lines.length, 2);
-    assert(lines.some((line) => line.includes("已就绪")));
+    assert(lines.some((line) => line.includes("Runtime ready")));
     assert(!lines.join("").includes("credential-secret"));
     assert.equal((await readRuntimeDiagnosticEvents(root, { limit: 10 })).length, 4);
   } finally { await diagnostics.close(); await rm(root, { recursive: true, force: true }); }

@@ -119,6 +119,14 @@ export function taskRunKey(
 	return [userKey, spaceId, taskRunId].map(encodeKeyPart).join(":");
 }
 
+export function sessionFilesKey(
+	userKey: string,
+	spaceId: string,
+	sessionId: string,
+) {
+	return [userKey, spaceId, sessionId, "files"].map(encodeKeyPart).join(":");
+}
+
 export function sessionTurnsKey(
 	userKey: string,
 	spaceId: string,

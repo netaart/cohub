@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -134,7 +135,13 @@ func (s *Server) writeLoop(session *connectionSession) {
 			return
 		case payload := <-session.sendCh:
 			if err := session.conn.Write(session.ctx, websocket.MessageText, payload); err != nil {
-				s.logger.Warn("failed to write websocket message", slog.String("connectionId", session.id), slog.String("identity", session.identity), slog.String("error", err.Error()))
+				// A peer that vanished mid-handshake or a normal teardown is routine, not a fault.
+				var closeErr websocket.CloseError
+				if session.ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.As(err, &closeErr) {
+					s.logger.Debug("websocket write after teardown", slog.String("connectionId", session.id), slog.String("identity", session.identity), slog.String("error", err.Error()))
+				} else {
+					s.logger.Warn("failed to write websocket message", slog.String("connectionId", session.id), slog.String("identity", session.identity), slog.String("error", err.Error()))
+				}
 				session.cancel()
 				return
 			}

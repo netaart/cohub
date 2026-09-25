@@ -22,7 +22,14 @@ import { Readable } from "node:stream";
 // carries the optional workspace-search runner download. v2.53.1 already has
 // the native FSEvents backends and the `runtimeId` control frame, and older
 // releases stay usable through the compatibility readiness/restart path.
-export const SANDBOXD_VERSION = "v2.54.0";
+//
+// v2.54.1 keeps the same wire protocol and adds relay diagnostics: data-channel
+// pairing outlives the runner's dial timeout, dial failures distinguish a
+// timeout from an explicit rejection, and teardown-time websocket write
+// failures log at debug instead of warn. v2.55.0 republishes that compatible
+// runner alongside the matching platform release; no new runner capability is
+// required.
+export const SANDBOXD_VERSION = "v2.55.0";
 
 const BINARY_NAME = "cohub-sandboxd";
 

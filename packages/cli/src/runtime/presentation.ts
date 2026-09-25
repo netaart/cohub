@@ -1,4 +1,6 @@
 import { resolveCohubEnvironment } from "@neta-art/cohub";
+import type { NativeConfig } from "./native/config.js";
+import type { NativeStatus } from "./native/daemon.js";
 import type { RuntimeDiagnostic, RuntimeDiagnosticLevel } from "./diagnostics.js";
 
 export const diagnosticLevels: RuntimeDiagnosticLevel[] = ["debug", "info", "warn", "error"];
@@ -8,26 +10,31 @@ export const runtimeWebUrl = (spaceId: string) =>
   `https://${resolveCohubEnvironment() === "prod" ? "" : "dev."}cohub.live/spaces/${spaceId}`;
 
 const messages: Record<string, string> = {
-  "runtime.ready": "Harness connected / Harness 已连接",
-  "runtime.available": "Runtime ready / Runtime 已就绪",
-  "runtime.websocket.closed": "Connection lost; reconnecting / 连接中断，正在重连",
-  "runtime.heartbeat_timeout": "Connection timed out; reconnecting / 连接超时，正在重连",
-  "runtime.auth_token_failed": "Cannot obtain credentials; retrying / 暂时无法获取凭证，正在重试",
-  "runtime.auth_required": "Sign in with cohub auth login / 请运行 cohub auth login 登录",
-  "runtime.stopped": "Runtime stopped / Runtime 已停止",
-  "runtime.failed": "Runtime needs attention / Runtime 需要处理",
-  "runtime.turn_failed": "Turn failed; local files retained / 执行失败，本地文件已保留",
-  "runtime.connection_failed": "Connection attempt failed; retrying / 连接失败，将继续重试",
-  "runtime.execution_transport_lost": "Execution disconnected; outcome needs reconciliation / 执行连接中断，结果待确认",
-  "archive.upload_pending": "Archive upload pending; local data retained / 归档待上传，本地数据已保留",
-  "native.sync_pending": "Native sync pending; local records retained / 原生同步待处理，本地记录已保留",
-  "archive.capture_pending": "Archive capture pending / 归档待处理",
-  "archive.capture_unavailable": "Archive unavailable; original receipt retained / 归档不可用，原始回执已保留",
-  "archive.restore_failed": "Native restore unavailable; using saved history / 原生恢复不可用，使用已保存历史",
-  "sandboxd.process_exit": "File bridge stopped; restarting / 文件桥接已退出，正在重启",
-  "sandboxd.download": "Preparing file bridge / 正在准备文件桥接",
-  "sandboxd.connected": "File bridge connected / 文件桥接已连接",
-  "sandboxd.disconnected": "File bridge disconnected; reconnecting / 文件桥接已断开，正在重连",
+  "runtime.ready": "Harness connected",
+  "runtime.available": "Runtime ready",
+  "runtime.websocket.closed": "Connection lost; reconnecting",
+  "runtime.websocket.rejected": "Connection rejected; not reconnecting",
+  "runtime.heartbeat_timeout": "Connection timed out; reconnecting",
+  "runtime.auth_token_failed": "Cannot obtain credentials; retrying",
+  "runtime.auth_required": "Sign in with cohub auth login",
+  "runtime.stopped": "Runtime stopped",
+  "runtime.failed": "Runtime needs attention",
+  "runtime.turn_failed": "Turn failed; local files retained",
+  "runtime.turn_cleanup_pending": "Turn result saved; tool cleanup still unconfirmed",
+  "runtime.connection_failed": "Connection attempt failed; retrying",
+  "runtime.execution_transport_detached": "Execution continues locally; result replays after reconnect",
+  "runtime.execution_transport_invalidated": "Execution interrupted; outcome needs reconciliation",
+  "archive.upload_pending": "Archive upload pending; local data retained",
+  "native.sync_pending": "Native sync pending; the native file is the record and is retried",
+  "native.stop_failed": "Could not stop the native Turn; stop it in the terminal",
+  "native.import_failed": "Import did not start; run cohub runtime import",
+  "archive.capture_pending": "Archive capture pending",
+  "archive.capture_unavailable": "Archive unavailable; original receipt retained",
+  "archive.restore_failed": "Native restore unavailable; using saved history",
+  "sandboxd.process_exit": "File bridge stopped; restarting",
+  "sandboxd.download": "Preparing file bridge",
+  "sandboxd.connected": "File bridge connected",
+  "sandboxd.disconnected": "File bridge disconnected; reconnecting",
 };
 
 export function formatDiagnostic(event: RuntimeDiagnostic, verbose = false): string {
@@ -51,7 +58,7 @@ export function createDiagnosticConsole(verbose = false, write = (line: string) 
     }
     if (last.size >= 256) last.delete(last.keys().next().value ?? "");
     last.set(key, { at: now, suppressed: 0 });
-    const repeated = previous?.suppressed ? ` (+${previous.suppressed} repeated / 重复)` : "";
+    const repeated = previous?.suppressed ? ` (+${previous.suppressed} repeated)` : "";
     write(`${formatDiagnostic(event, verbose).trimEnd()}${repeated}\n`);
   };
 }
@@ -67,25 +74,60 @@ export type RuntimeSummary = {
   workspaceConnected: boolean;
   diagnosticsPath: string;
   background: boolean;
-  nativeSync?: boolean;
+  native?: NativeStatus;
 };
 
 export function printRuntimeSummary(summary: RuntimeSummary, json = false, reused = false) {
   const value = { ...summary, url: runtimeWebUrl(summary.spaceId), reused };
   if (json) { process.stdout.write(`${JSON.stringify(value, null, 2)}\n`); return; }
-  const label = summary.state === "ready" ? "Runtime ready / Runtime 已就绪" : `Runtime ${summary.state} / Runtime 尚未就绪`;
-  process.stdout.write(`\n${label}${reused ? " · reused / 已复用" : ""}\n\n`);
+  const label = summary.state === "ready" ? "Runtime ready" : `Runtime ${summary.state}`;
+  process.stdout.write(`\n${label}${reused ? " · reused" : ""}\n\n`);
   const rows = [
-    ["Space / 空间", summary.spaceId],
-    ["URL / 链接", value.url],
-    ["Directory / 目录", summary.root],
+    ["Space", summary.spaceId],
+    ["URL", value.url],
+    ["Directory", summary.root],
     ["Harness", summary.harnesses.join(" · ")],
-    ["Mode / 模式", summary.background ? "Background / 后台" : "Foreground / 前台"],
+    ["Mode", summary.background ? "Background" : "Foreground"],
     ["PID", String(summary.pid)],
-    ["Logs / 日志", summary.diagnosticsPath],
+    ["Logs", summary.diagnosticsPath],
   ];
   for (const [name, text] of rows) process.stdout.write(`  ${name}  ${text}\n`);
   process.stdout.write(`\n  cohub runtime logs --space ${summary.spaceId} --follow\n  cohub runtime down --space ${summary.spaceId}\n`);
-  if (!summary.background && !reused) process.stdout.write("  Ctrl+C to stop / 按 Ctrl+C 停止\n");
+  if (!summary.background && !reused) process.stdout.write("  Ctrl+C to stop\n");
   process.stdout.write("\n");
+}
+
+const plural = (count: number, word: string) => `${count.toLocaleString("en-US")} ${word}${count === 1 ? "" : "s"}`;
+const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+
+/** One line of import progress: files and bytes, with an estimate once enough is known. */
+export function formatImportProgress(job: NativeStatus["import"], now = Date.now()): string {
+  const parts = [`${job.done.toLocaleString("en-US")}/${plural(job.files, "conversation")}`, plural(job.turns, "Turn"), `${megabytes(job.bytes)}/${megabytes(job.totalBytes)}`];
+  const elapsed = job.startedAt ? now - Date.parse(job.startedAt) : 0;
+  if (job.state === "running" && job.bytes > 0 && elapsed > 2_000 && job.totalBytes > job.bytes) {
+    const seconds = Math.round((job.totalBytes - job.bytes) / (job.bytes / elapsed) / 1_000);
+    parts.push(`about ${seconds < 90 ? `${seconds}s` : `${Math.round(seconds / 60)}m`} left`);
+  }
+  return parts.join(" · ");
+}
+
+/** `runtime status` native block: what syncs, what can be driven, and backfill progress. */
+export function formatNativeSync(config: NativeConfig | null, native: NativeStatus | undefined, error: string | null = null): string {
+  if (error) return `Native sync  unknown — ${error} · fix or remove the config, then runtime up\n`;
+  if (!config?.harnesses.length) return "Native sync  off · run cohub runtime up to enable\n";
+  const lines = [`Native sync  ${config.harnesses.map((harness) => harness === "pi" ? "Pi" : "Codex").join(" · ")}`];
+  if (!native) return `${lines[0]} · Runtime not running\n`;
+  if (native.pi) {
+    lines.push(native.pi.unavailable ? `  Pi     read-only · ${native.pi.unavailable}`
+      : native.pi.extension === "installed"
+      ? `  Pi     ${plural(native.pi.connected, "session")} connected`
+      : "  Pi     read-only · install the extension with cohub runtime attach --harness pi, then /reload");
+  }
+  if (native.codex) lines.push(native.codex.control === "shared" ? "  Codex  shared app-server" : "  Codex  read-only in the terminal · Cohub Turns use a private app-server");
+  lines.push(`  Files  ${plural(native.transcripts, "transcript")}${native.running ? ` · ${plural(native.running, "Turn")} running` : ""}`);
+  const job = native.import;
+  if (job.state === "running") lines.push(`  Import ${formatImportProgress(job)}`);
+  else if (job.state === "paused") lines.push(`  Import paused at ${job.done}/${job.files} · run cohub runtime import to continue`);
+  if (job.failed.length) lines.push(`  ${plural(job.failed.length, "conversation")} failed to import · cohub runtime logs`);
+  return `${lines.join("\n")}\n`;
 }

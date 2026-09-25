@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { spaces, apps, appPromotions, appPromotionStatsHourly, appVersions, appViewerGrants, appViewStatsHourly, userProfiles } from "@cohub/db";
 import { createAppAssetPublicUrl, deleteAppAssetsByObjectKey, isConfiguredAppAssetPublicUrl } from "../app-asset-storage.js";
 import { publishAppAssetInWorker, type AppPublishAssetJobResult } from "../app-publish-asset-queue.js";
-import { resolveAppGrantScopes } from "../app-grant-scopes.js";
+import { hostConsentRefused, parseAppAuthorizeRequest, resolveAppGrantScopes } from "../app-grant-scopes.js";
 import { ALL_PERMISSIONS, APP_PUBLISHER_SCOPES, isUserLevelPermission, normalizePermissionScopes, scopeListHasPermission, type Permission } from "@cohub/core/permissions";
 import {
   APP_ACTION_INPUT_MAX_BYTES,
@@ -29,7 +29,7 @@ import {
 import { hasPermission, resolveUserSpacePermissions } from "../permissions.js";
 import { createAppSessionToken, APP_SESSION_TTL_SECONDS, APP_VIEWER_GRANT_TTL_SECONDS } from "../app-sessions.js";
 import { getSandboxPublicEndpoints } from "../sandbox-public-network.js";
-import { resolveCohubAppOrigin, type AppArtifactDescriptor, type AppVersionSource } from "@cohub/protocol";
+import { MAX_APP_FILE_HANDLERS, parseAppFileHandlers, resolveCohubAppOrigin, type AppArtifactDescriptor, type AppVersionSource } from "@cohub/protocol";
 import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 import { SANDBOX_PUBLIC_PORTS } from "@cohub/protocol/ports";
 import { config, isHostAllowedBySuffix } from "../config.js";
@@ -46,7 +46,7 @@ import {
 import { createLogger } from "@cohub/infra/logging";
 import { billingOperations, COHUB_BILLING_FEATURES } from "@cohub/billing";
 import { featureGateResponse } from "../lib/feature-gate.js";
-import { createAppPublicUrl, createAppStandaloneUrl } from "../lib/app-public-url.js";
+import { createAppPublicUrl } from "../lib/app-public-url.js";
 import { applyRequestSourceToMeta, getRequestSource } from "../lib/request-source.js";
 import { dispatchAppVersionPublished } from "../app-events.js";
 import { resolveAppVersionSources } from "../app-version-source.js";
@@ -103,7 +103,15 @@ type AppMeta = Record<string, unknown>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
-const getAppMeta = (value: unknown): AppMeta | null => isRecord(value) ? value : null;
+/** Meta as stored: a valid file handler list is normalized (`BOARD` → `.board`). */
+const getAppMeta = (value: unknown): AppMeta | null => {
+  if (!isRecord(value)) return null;
+  const handlers = value.fileHandlers;
+  if (!Array.isArray(handlers)) return value;
+  const normalized = parseAppFileHandlers(handlers);
+  // An invalid list stays as sent, for ensureAppPresentationAllowed to reject.
+  return normalized.length === handlers.length ? { ...value, fileHandlers: normalized } : value;
+};
 
 function getAppSource(meta: AppMeta | null): { type: "upload"; ref: string } | null {
   const runtime = isRecord(meta?.runtime) ? meta.runtime : null;
@@ -135,6 +143,10 @@ async function ensureAppPresentationAllowed(c: Context, input: { userId: string;
   const presentation = isRecord(input.meta?.presentation) ? input.meta.presentation : null;
   if (presentation?.surface !== undefined && presentation.surface !== "window" && presentation.surface !== "overlay") {
     return c.json({ message: "meta.presentation.surface must be one of: window, overlay" }, 400);
+  }
+  const fileHandlers = input.meta?.fileHandlers;
+  if (fileHandlers !== undefined && (!Array.isArray(fileHandlers) || parseAppFileHandlers(fileHandlers).length !== fileHandlers.length)) {
+    return c.json({ message: `meta.fileHandlers must list up to ${MAX_APP_FILE_HANDLERS} unique extensions like ".board"` }, 400);
   }
   if (!getHideCohubBar(input.meta)) return null;
   if (await canHideCohubBar(input.userId)) return null;
@@ -284,6 +296,7 @@ async function renewViewerGrant(input: {
  * the current three-column unique index — code and migration can roll out in
  * either order. Returns null on a write failure, or "migration_pending" when
  * the legacy index still reserves the (app, viewer) slot for another space.
+ * Host consent never revives a revoked grant (checked under the row lock).
  */
 async function upsertViewerGrant(input: {
   appId: string;
@@ -292,7 +305,8 @@ async function upsertViewerGrant(input: {
   scopes: Permission[];
   expiresAt: Date;
   scopeMode?: "extend";
-}): Promise<typeof appViewerGrants.$inferSelect | null | "migration_pending"> {
+  consent?: "host";
+}): Promise<typeof appViewerGrants.$inferSelect | null | "migration_pending" | "consent_required"> {
   return db.transaction(async (tx) => {
     const key = and(
       eq(appViewerGrants.appId, input.appId),
@@ -307,8 +321,10 @@ async function upsertViewerGrant(input: {
         updatedAt: new Date(),
       }).where(eq(appViewerGrants.id, existing.id)).returning();
 
+    const refused = (grant: typeof appViewerGrants.$inferSelect) => hostConsentRefused(input.consent === "host", grant);
+
     const [existing] = await tx.select().from(appViewerGrants).where(key).limit(1).for("update");
-    if (existing) return (await write(existing))[0] ?? null;
+    if (existing) return refused(existing) ? "consent_required" : (await write(existing))[0] ?? null;
 
     const inserted = await tx.insert(appViewerGrants).values({
       appId: input.appId,
@@ -316,6 +332,8 @@ async function upsertViewerGrant(input: {
       viewerUserUuid: input.viewerUserUuid,
       scopes: input.scopes,
       expiresAt: input.expiresAt,
+      // Provenance only; the row stays the single source of truth for consent.
+      ...(input.consent ? { meta: { consent: input.consent } } : {}),
     }).onConflictDoNothing().returning();
     if (inserted.length > 0) return inserted[0] ?? null;
 
@@ -323,7 +341,7 @@ async function upsertViewerGrant(input: {
     // still in place. Distinguish by re-reading the three-column key.
     const [raced] = await tx.select().from(appViewerGrants).where(key).limit(1).for("update");
     if (!raced) return "migration_pending";
-    return (await write(raced))[0] ?? null;
+    return refused(raced) ? "consent_required" : (await write(raced))[0] ?? null;
   });
 }
 
@@ -395,6 +413,7 @@ async function writeAppAsset(input: {
               lang: result.extracted.lang ?? null,
           themeColor: result.extracted.themeColor ?? null,
           surface: result.extracted.surface ?? null,
+          fileHandlers: result.extracted.fileHandlers ?? [],
           sourcePath: result.extracted.sourcePath,
         },
         result.assetKey,
@@ -556,7 +575,6 @@ async function getStandaloneAppDetail(app: typeof apps.$inferSelect) {
   return {
     ...wrapAppRecord(wire, serializeApp(app)),
     space: { id: app.spaceId },
-    standaloneUrl: createAppStandaloneUrl({ appId: app.id, status: app.status, visibility: app.visibility, targetType: content?.targetType ?? app.targetType, contentKind: content?.kind }),
     content,
   };
 }
@@ -573,7 +591,6 @@ async function getPublicAppDetail(app: typeof apps.$inferSelect) {
     ...identity,
     publisher,
     publicUrl: createAppPublicUrl({ ownerUsername: identity.owner.username, spaceSlug: identity.space.slug, appSlug: app.slug, status: app.status }),
-    standaloneUrl: createAppStandaloneUrl({ appId: app.id, status: app.status, visibility: app.visibility, targetType: content?.targetType ?? app.targetType, contentKind: content?.kind }),
     content,
     totalViews,
   };
@@ -670,7 +687,6 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
     owner: { ...row.owner, username: row.owner.username },
     publisher: await resolveAppPublisher(row.app.userUuid),
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: row.app.slug, status: row.app.status }),
-    standaloneUrl: createAppStandaloneUrl({ appId: row.app.id, status: row.app.status, visibility: row.app.visibility, targetType: content?.targetType ?? row.app.targetType, contentKind: content?.kind }),
     content,
     version: version ? publicVersionSummary(version, null) : null,
     totalViews,
@@ -727,7 +743,13 @@ router.get("/space/:spaceId", async (c) => {
   const spaceId = c.req.param("spaceId");
   if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
   if (!(await hasPermission(user, "space.view", { spaceId }))) return authzDenied(c);
-  const rows = await db.select().from(apps).where(eq(apps.spaceId, spaceId));
+  const rows = await db
+    .select()
+    .from(apps)
+    .where(eq(apps.spaceId, spaceId))
+    // Matches `v2_idx_apps_space_updated` exactly; see space-sessions.ts for
+    // the same `desc nulls last` spelling that lets btree serve the order.
+    .orderBy(sql`${apps.updatedAt} desc nulls last`, desc(apps.createdAt));
   return c.json(wrapAppRecords(wire, rows.map(serializeApp)));
 });
 
@@ -791,7 +813,6 @@ router.get("/:id", async (c) => {
     owner: { ...row.owner, username: row.owner.username },
     publisher: await resolveAppPublisher(app.userUuid),
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: app.slug, status: app.status }),
-    standaloneUrl: createAppStandaloneUrl({ appId: app.id, status: app.status, visibility: app.visibility, targetType: content?.targetType ?? app.targetType, contentKind: content?.kind }),
     content,
     totalViews,
   });
@@ -888,15 +909,6 @@ router.post("/", async (c) => {
       await cleanupAppAssets(assetKey, { appId: "new", spaceId, reason: "create_slug_conflict" });
       return c.json({ message: "slug already exists" }, 409);
     }
-    const standaloneUrl = result.version
-      ? createAppStandaloneUrl({
-          appId: result.app.id,
-          status: result.app.status,
-          visibility: result.app.visibility,
-          targetType: result.version.targetType,
-          contentKind: result.version.contentKind,
-        })
-      : null;
     if (result.version) {
       const source = (
         await resolveAppVersionSources({ versions: [result.version], spaceId, user })
@@ -904,7 +916,6 @@ router.post("/", async (c) => {
       await dispatchAppVersionPublished({
         app: serializeAppRecord(result.app, "canonical"),
         version: serializeAppVersionRecord(result.version, "canonical", source),
-        standaloneUrl,
         previousVersionId: null,
         actorUserId: user.uuid,
         source: getRequestSource(c),
@@ -918,7 +929,6 @@ router.post("/", async (c) => {
     }
     return c.json({
       ...wrapAppRecord(wire, serializeApp(result.app)),
-      standaloneUrl,
     }, 201);
   } catch (error) {
     await cleanupAppAssets(assetKey, { appId: "new", spaceId, reason: "create_failed" });
@@ -1001,16 +1011,8 @@ async function updateApp(
     throw error;
   });
   if (!app) return c.json({ message: "slug already exists" }, 409);
-  const currentVersion = await getAppCurrentVersion(app);
   return c.json({
     ...wrapAppRecord(wire, serializeApp(app)),
-    standaloneUrl: createAppStandaloneUrl({
-      appId: app.id,
-      status: app.status,
-      visibility: app.visibility,
-      targetType: currentVersion?.targetType ?? app.targetType,
-      contentKind: currentVersion?.contentKind,
-    }),
   });
 }
 
@@ -1084,17 +1086,9 @@ async function publishAppVersion(
     const source = (
       await resolveAppVersionSources({ versions: [result.version], spaceId: current.spaceId, user: options.actor })
     ).get(result.version.id) ?? null;
-    const standaloneUrl = createAppStandaloneUrl({
-      appId: result.app.id,
-      status: result.app.status,
-      visibility: result.app.visibility,
-      targetType: result.version.targetType,
-      contentKind: result.version.contentKind,
-    });
     await dispatchAppVersionPublished({
       app: serializeAppRecord(result.app, "canonical"),
       version: serializeAppVersionRecord(result.version, "canonical", source),
-      standaloneUrl,
       previousVersionId: result.previousVersionId,
       actorUserId: options.actor.uuid,
       source: getRequestSource(c),
@@ -1107,7 +1101,6 @@ async function publishAppVersion(
     });
     return c.json({
       ...wrapAppRecord(wire, serializeApp(result.app)),
-      standaloneUrl,
       version: serializeAppVersion(result.version, source),
     });
   } catch (error) {
@@ -1369,11 +1362,11 @@ router.post("/:id/authorize", async (c) => {
   if (requiresSpaceAppAccess(app) && !(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) {
     return c.json({ message: "app is not accessible in this space", code: "app_not_accessible" }, 403);
   }
-  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown } | null;
-  if (body?.scopeMode !== undefined && body.scopeMode !== "extend") return c.json({ code: "invalid_request", message: "invalid scope mode" }, 400);
-  if (body?.scopeMode === "extend" && (!Array.isArray(body.scopes) || body.scopes.some((scope) => typeof scope !== "string" || !ALLOWED_VIEWER_SCOPES.has(scope as Permission)))) return c.json({ code: "invalid_scope", message: "unknown permission scope" }, 400);
-  const requested = normalizeScopes(body?.scopes, ALLOWED_VIEWER_SCOPES);
-  if (requested.length === 0) return c.json({ message: "no valid scopes requested" }, 400);
+  const body = await c.req.json().catch(() => null) as { scopes?: unknown; spaceId?: unknown; silent?: unknown; scopeMode?: unknown; consent?: unknown } | null;
+  // Hosts send `consent` with `silent`, so an older API falls back to renew-only.
+  const parsed = parseAppAuthorizeRequest(body, ALLOWED_VIEWER_SCOPES);
+  if ("message" in parsed) return c.json(parsed, 400);
+  const { requested, extend, hostConsent } = parsed;
   const targetSpaceId = typeof body?.spaceId === "string" && body.spaceId.trim() ? body.spaceId.trim() : app.spaceId;
   if (!requireValidId(targetSpaceId)) return c.json({ message: "space not found", code: "space_not_found" }, 404);
   // A caller-supplied target must exist — the per-scope permission gate skips
@@ -1390,7 +1383,7 @@ router.post("/:id/authorize", async (c) => {
   // their own app (the publisher auto-authorization path), but a revoked grant
   // never comes back silently for anyone: the owner falls through to the
   // explicit upsert only when no revoked row exists.
-  if (body?.silent === true) {
+  if (body?.silent === true && !hostConsent) {
     const [existing] = await db
       .select()
       .from(appViewerGrants)
@@ -1431,8 +1424,13 @@ router.post("/:id/authorize", async (c) => {
     viewerUserUuid: user.uuid,
     scopes: requested,
     expiresAt,
-    ...(body?.scopeMode === "extend" ? { scopeMode: "extend" as const } : {}),
+    // Host consent only adds to a live grant; it never narrows what the viewer granted.
+    ...(extend ? { scopeMode: "extend" as const } : {}),
+    ...(hostConsent ? { consent: "host" as const } : {}),
   });
+  if (grant === "consent_required") {
+    return c.json({ message: "grant was revoked; viewer consent is required again", code: "consent_required" }, 403);
+  }
   if (grant === "migration_pending") {
     return c.json({ message: "space-scoped grants are not enabled yet; run the pending database migration", code: "migration_pending" }, 409);
   }

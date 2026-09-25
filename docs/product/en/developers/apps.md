@@ -1,84 +1,213 @@
 ---
 title: App development
-description: Cohub App capabilities — runtime context, permissions, prompts, generation, files, realtime, surface, and commerce.
+description: Build a Cohub App — runtime context, permissions, prompts, generation, files, actions, surfaces, and commerce.
 ---
 
-Cohub Apps are published web pages that run inside a Cohub runtime. From app
-code you can talk to Agents, generate media, read and write Space files, share
-realtime state between viewers, expose methods to Agents, and sell products.
+Cohub Apps are published web pages that run inside a Cohub runtime. From App
+code you can talk to Agents, generate media, read and write Space files, run
+server-side actions, share realtime state between viewers, and sell products.
 
-This page is a capability map: what each scenario can do, which SDK surface to
-call, and what authorization it needs. For the full runtime reference, see the
-[App Runtime Guide](https://github.com/talesofai/cohub/blob/main/packages/sdk/docs/app-runtime-guide.md).
+This page is the single deep reference for App development. For publishing,
+see [Apps](/docs/create/apps).
 
 ## Runtime in one minute
 
 `createCohubClient()` needs no token inside an App — the host provides
-short-lived auth. Runtime APIs only work inside a **published** App.
+short-lived auth. Runtime APIs only work inside a **published** App; local
+`file://` pages and bare static URLs get `null` from `context()`.
 
-- **Bridge mode** — the App runs in a Cohub iframe.
-- **Broker mode** — the App is opened from its registered standalone URL and
-  uses a popup broker. The SDK discovers both modes automatically from the same
-  `createCohubClient({ env })` initialization.
+- **Bridge mode** — the App runs in a Cohub iframe. The normal case.
+- **Broker mode** — the App is opened at its standalone origin
+  (`<app-id>.apps.example.com`, opt-in per deployment) and uses a popup
+  broker.
+
+The SDK discovers both modes from the same initialization:
 
 ```ts
 import { createCohubClient } from "@neta-art/cohub";
 
-const client = createCohubClient({ env: isDevApp ? "dev" : "prod" });
+// Browsers don't inject ENV — pass it explicitly, or a dev-hosted App
+// silently calls the production API.
+const isDev = location.pathname.startsWith("/dev/") || location.hostname.includes("dev");
+const client = createCohubClient({ env: isDev ? "dev" : "prod" });
+
 const ctx = await client.context();
 if (!ctx?.app?.id) throw new Error("Not inside a published app");
 ```
 
-`env` matters in the browser: an app served from a dev host must pass
-`env: "dev"`, or it will silently call production. Published public `file` and
-`directory` Apps may also be opened directly at their standalone origin, which
-substitutes the App id into the deployment's standalone host template (for
-example `<app-id>.apps.example.com`). Standalone origins are opt-in deployment
-configuration; without a template, Apps have no direct URL.
+Import without a bundler from an ESM CDN:
 
-## Authorization
+```ts
+import { createCohubClient } from "https://esm.sh/@neta-art/cohub?bundle&target=es2022";
+```
 
-New Apps use `client.auth.authorize({ target, scopes })` with an account, explicit Space, or Space-picker target. Success includes the actual target, resolution and authoritative grant. Use the returned Space ID for subsequent operations. Unavailable Spaces may fall back to a viewer-controlled Space; `fallback: "none"` disables this.
+## Decide first: three questions
 
-Logged-out viewers sign in before consent. Reinitialize context after a full-page redirect. Legacy `auth.request()` / `requestSpace()` keep working but cannot report the actual target; `requestCreateSpace()` remains the create-Space entry. See the [authorization contract](https://github.com/talesofai/cohub/blob/main/docs/app-authorization.md).
+**1. Do you need Cohub capabilities at all?**
 
-## Context
+Presenting something — a page, a report, a game? Publish with empty scopes and
+no runtime code. Nothing to authorize, nothing to pay.
+
+**2. Who pays for AI?**
+
+| Answer | How | Viewer sees |
+| --- | --- | --- |
+| **The viewer** | Call prompts, completions, and generation from the App's browser code. Usage bills the viewer. | A consent dialog (`auth.authorize`) on first use |
+| **You, the owner** | Put the work in an [App Action](#app-actions) under `.cohub/actions/`, call it with `app.actions.run()`. The Action runs as the App owner in the home Space sandbox; usage bills you. | Nothing — no viewer grant |
+| Hybrid | Free reads in the browser; expensive generation behind an Action metered with commerce credits. | Both, once each |
+
+**3. Where does data live?**
+
+| Answer | How | Viewer sees |
+| --- | --- | --- |
+| **The viewer's Space** | `auth.authorize({ target: { kind: "space" \| "pick-space" } })`, then write files there | One consent, revocable, expires in 14 days |
+| **Your home Space** | The Action writes files with your owner permissions | Nothing |
+| **Ephemeral, multi-viewer** | `app.realtime` rooms | Nothing |
+
+## Environment awareness
+
+The context tells the App who it is, where it was opened from, and what the
+host is showing now. It is routing information, never authorization.
 
 ```ts
 const ctx = await client.context();
 
-ctx.app.id;                        // App id
-ctx.app.slug;                      // public slug
-ctx.app.homeSpace;                 // the Space that owns the App
-ctx.viewer;                        // current viewer, may be null
-ctx.invocation;                    // where the App was opened from
-ctx.shell;                         // current Cohub workspace location
-ctx.permissions;                   // appScopes + viewerGrants, for rendering state
+ctx.app.homeSpace;        // the Space that owns the App (static)
+ctx.viewer;               // current viewer, null when logged out
+ctx.invocation;           // snapshot of where this open came from:
+                          //   surface, source, spaceId, sessionId, turnId,
+                          //   toolCallId, embedder, file, id
+ctx.shell;                // live location the host is showing now:
+                          //   space, session, turn
+ctx.locale;               // the viewer's language, e.g. "zh-CN"
+ctx.appearance;           // colorScheme, theme, tokens, reducedMotion
+ctx.window;               // { visible } — false while the tab is hidden
+ctx.permissions;          // appScopes + viewerGrants, for rendering state
+
+// Fresh context on shell / sign-in / grant / theme / visibility changes —
+// keep in memory, don't poll
+client.app.onContextChanged((next) => render(next));
 ```
 
-`invocation` carries `surface`, `source`, `spaceId`, `sessionId`, `turnId`,
-and `toolCallId` when available. It describes where an open came from — it is
-context, not authorization.
+The three identity fields differ by design:
 
-`ctx.shell` contains the current `space`, `session`, and `turn` ids.
-Its `turn` is the Turn currently in view, not necessarily the Turn being
-generated. These values can differ from `app.homeSpace` and `invocation`.
-They are null when the shell has no matching location. A workspace App has
-`shell.surface: "workspace"`. A new chat background has
-`shell.surface: "background"`, with `shell.space` set to the hosting Space.
+| Field | What it is | Changes |
+| --- | --- | --- |
+| `ctx.app.homeSpace` | The Space that owns the App | Never |
+| `ctx.invocation` | Where this open came from | On each open |
+| `ctx.shell` | What the host is showing | As the viewer navigates |
 
-`client.app.onContextChanged(cb)` pushes fresh context when the shell location,
-sign-in state, or grants change. Keep the latest context in memory for frequent
-reads instead of polling `client.context()`. Context is informational, not an
-authorization source.
+### Match the host
 
-## Capability scenarios
+`navigator.language` and `prefers-color-scheme` only match Cohub while the
+viewer follows the system. Read `ctx.locale` and `ctx.appearance` instead: the
+tokens are resolved values for the theme the viewer sees, including a Space's
+custom theme. One call keeps `<html>` in sync:
 
-Every scenario below assumes `client` is initialized and `spaceId` is known
-(`ctx.shell.space.id`, `ctx.app.homeSpace.id`, or `ctx.invocation.spaceId`).
-Scope lines show the
-minimum authorization; app scopes cover only the App's own Space, and viewer
-grants via `client.auth.authorize()` are needed elsewhere.
+```ts
+client.app.appearance.sync(); // sets --cohub-* variables, color-scheme, and lang
+```
+
+```css
+body {
+  background: var(--cohub-bg-primary, #fff);
+  color: var(--cohub-text-primary, #111);
+  font-family: var(--cohub-font-sans, system-ui);
+}
+```
+
+The public tokens are `bg-primary`, `bg-content`, `bg-surface`, `bg-elevated`,
+`bg-input`, `bg-hover`, `bg-active`, `text-primary`, `text-secondary`,
+`text-tertiary`, `text-placeholder`, `text-disabled`, `border-primary`,
+`border-subtle`, `brand`, `brand-hover`, `brand-soft`, `brand-muted`,
+`brand-border`, `brand-ring`, `brand-contrast-fg`, `error-fg`, `selection-bg`,
+`overlay-scrim`, `shadow-subtle`, `shadow-medium`, `shadow-strong`,
+`font-sans`, and `font-mono`. Always keep a fallback: outside a Cohub host they
+are absent.
+
+Pause heavy rendering while `ctx.window.visible` is false; background tabs stay
+mounted so they can resume instantly.
+
+## Permissions
+
+An App's effective permission on one Space is the union of **two sources** —
+either is enough:
+
+| Source | Granted by | Covers | Lifetime |
+| --- | --- | --- | --- |
+| **App scopes** | Publisher at publish time | Only the App's own Space; eight bounded scopes | While published |
+| **Viewer grants** | Viewer via consent dialog | Any permission the viewer holds, on any Space | 14 days, revocable |
+
+The eight app scopes: `space.view`, `session.view`, `file.view`, `file.edit`,
+`taskrun.view`, `session.prompt.readonly`, `session.prompt.fullaccess`,
+`command.execute`.
+
+The golden rule:
+
+```text
+Reads on the App's own Space → app scopes
+Actions, other Spaces, generation, account data → viewer grants
+```
+
+Request viewer grants from a user gesture, state a clear reason, and let
+silent reuse cover return visits — `auth.authorize()` only opens a dialog when
+something new is needed. Always act on the returned `target`, which may
+resolve to a different Space than you asked for.
+
+```ts
+const result = await client.auth.authorize({
+  target: { kind: "space", spaceId },
+  scopes: ["file.view"],
+  reason: "Read the Space you opened this App from.",
+});
+if (result.status !== "granted" || result.target.kind !== "space") return;
+const space = client.space(result.target.spaceId);
+```
+
+- Targets: `{ kind: "account" }`, `{ kind: "space", spaceId }`, or
+  `{ kind: "pick-space" }`. Account targets accept only account-level scopes.
+- Success returns `status`, `requestedTarget`, the actual `target`,
+  `resolution`, and the `grant`. Cancellation (`cancelled`) is not an error.
+- Targeting exactly `ctx.shell.space.id` — the Space the viewer is already
+  looking at — is silent when that Space published the App or has it
+  installed, for read-only scopes (`space.view`, `file.view`,
+  `file.view.filtered`, `session.view`, `taskrun.view`, `checkpoint.view`) and
+  `file.edit`. Any other App asks once, then renews read-only grants silently.
+  A grant the viewer revoked always asks again.
+- Unavailable Spaces may fall back to a viewer-controlled Space;
+  `fallback: "none"` disables this.
+- `alwaysAsk: true` skips silent reuse — for re-confirming or switching Space.
+- Grants are read without extending expiry; incremental consent
+  (`scopeMode: "extend"`) adds scopes to a still-valid grant.
+- Viewers manage grants via `cohub apps grants <app>` / `revoke`; an App
+  session cannot manage its own grants.
+- `auth.requestCreateSpace({ scopes, space })` creates a viewer-owned Space in
+  one consent. `granted: false` with a `space` means the Space exists but
+  bootstrap did not finish — resume against it; never auto-create a second or
+  delete the first.
+
+### API → scope map
+
+| Operation | Scope | Source |
+| --- | --- | --- |
+| Read space config | `space.view` | app or viewer |
+| List models | *(none — just authenticated)* | — |
+| Send prompt (full access) | `session.prompt.fullaccess` | app or viewer |
+| Send prompt (read-only) | `session.prompt.readonly` | app or viewer |
+| LLM completion | `session.prompt.readonly` | app or viewer |
+| Read / stream replies, file tree, file content | `session.view`, `file.view` | app or viewer |
+| Write files | `file.edit` | app or viewer |
+| Run sandbox commands | `command.execute` | app or viewer |
+| Create generation task | `generation.create` | **viewer only** |
+| Poll tasks, read task runs | `taskrun.view` | app or viewer |
+| List viewer's spaces / sessions / activity / all tasks | `user.space.list` / `user.session.list` / `user.usage.read` / `user.taskrun.list` | **viewer only** |
+| Create a Space for the viewer | requested scopes on the new Space | **viewer consent** |
+| Commerce, realtime, surface, composer, actions, navigation | *(runtime only, no scope)* | — |
+
+"app or viewer" means either source suffices; the app scope covers only the
+App's own Space, any other Space needs a viewer grant on it.
+
+## AI
 
 ### Prompt an Agent
 
@@ -87,43 +216,44 @@ Send a prompt into a Space Chat and stream the reply.
 ```ts
 // session.prompt.fullaccess + session.view
 const result = await space.prompt({
-  accessMode: "full_access",
+  accessMode: "full_access", // must match the scope you hold
   content: [{ type: "text", text: "Describe a shiba inu on Mars." }],
   sessionId: null, // null creates a session; pass an id to continue
 });
 
-const stop = space.session(result.session.id).subscribeGeneration({
+space.session(result.session.id).subscribeGeneration({
   state: (e) => renderPartial(e.state),
   finalized: (e) => render(e.turn.assistantText),
-  error: (e) => showError(e),
 });
 ```
 
-Key points:
+- `space.prompt()` returns immediately; the reply arrives via
+  `subscribeGeneration` (or polling `turns.get()`).
+- `accessMode` must match the scope you hold. It defaults to `full_access`, so
+  holding `session.prompt.readonly` and omitting `accessMode` is the most
+  common 403.
+- `session.prompt.fullaccess` does **not** include `session.view` — sending
+  succeeds while reading the reply 403s without it.
 
-- `space.prompt()` returns immediately with a turn whose reply arrives via
-  `subscribeGeneration` (or by polling `turns.get()`).
-- `accessMode` must match the scope you hold: `full_access` needs
-  `session.prompt.fullaccess`, `read_only` needs `session.prompt.readonly`.
-  This mismatch is the most common 403.
+### LLM completion
 
-### LLM completion (read-only)
-
-One-shot completion with no persisted session or turn — ideal for inline
-suggestions, summaries, or classification.
+One-shot completion with no persisted session or turn — for inline
+suggestions, summaries, classification. Accepts full conversation history and
+an optional space-relative `systemPromptPath`. Needs only
+`session.prompt.readonly`.
 
 ```ts
-// session.prompt.readonly + session.view
-const result = await space.prompt({
-  accessMode: "read_only", // must be explicit; omitted → full_access → 403
-  sessionId: null, // read-only prompts use a throwaway session
-  content: [{ type: "text", text: prompt }],
+const result = await space.completion({
+  messages: [{ role: "user", content: [{ type: "text", text: "Summarize in one line." }] }],
 });
+result.message.content; // assistant ContentBlock[]
+
+for await (const event of space.streamCompletion({ messages, maxTokens: 160 })) {
+  if (event.type === "delta") render(event.text); // SSE deltas + final result
+}
 ```
 
 ### Generation (image / video / audio)
-
-Create a multimodal generation task and wait for outputs.
 
 ```ts
 // viewer grant generation.create + taskrun.view
@@ -136,29 +266,14 @@ const result = await client.generations.createAndWait(
   },
   { onPoll: (d) => updateProgress(d.run.status) },
 );
-
-const imageUrl = result.output?.find((b) => b.type === "image")?.source?.url;
+const url = result.output?.find((b) => b.type === "image")?.source?.url;
 ```
 
-Key points:
+`generation.create` is **viewer-grant-only** — request it from a user gesture.
+Polling needs `taskrun.view`; without it, the classic "task created but never
+completes" bug.
 
-- `generation.create` can only come from a **viewer grant** — request it from
-  a user gesture:
-
-  ```ts
-  await client.auth.authorize({
-    target: { kind: "space", spaceId },
-    scopes: ["generation.create"],
-    reason: "Generate images in this app",
-  });
-  ```
-
-- Polling the result needs `taskrun.view`. `generation.create` without
-  `taskrun.view` is the classic "task created but never completes" bug.
-
-### Space files
-
-Read the file tree and file contents, and write files back.
+## Files and sandbox
 
 ```ts
 const space = client.space(spaceId);
@@ -169,176 +284,107 @@ const file = await space.files.read("data.json");
 
 // file.edit
 await space.files.write("output/result.json", JSON.stringify(data));
-```
 
-### Sandbox commands
-
-Run a shell command in the Space sandbox.
-
-```ts
-// command.execute
+// command.execute — run a shell command in the Space sandbox
 const run = await space.runCommand({ command: ["node", "scripts/build.mjs"] });
 ```
 
-### Session realtime
+Viewer-funded writes into their own Space: request `file.edit` via
+`auth.authorize`. Owner-funded persistence: write from an Action — it runs
+with your permissions in the home Space.
 
-Subscribe to Chat events while an Agent works.
+## Open files
 
-```ts
-// session.view
-const stop = session.subscribe({
-  progress: (e) => renderProgress(e.payload),
-  finalized: (e) => render(e.payload),
-});
-```
-
-### Realtime rooms
-
-Multiplayer state, presence, and generic JSON events between viewers of the
-same App. Runtime-native — no scope or consent needed.
-
-```ts
-const room = await client.app.realtime.createRoom({ code: "TEAM-ALPHA" });
-
-const stop = room.subscribe("shared.state.updated", ({ data }) => {
-  render(data);
-});
-
-await room.publish("shared.state.updated", { value: 42 });
-```
-
-Key points:
-
-- Events are ordered while connected but **not replayed**. Re-fetch
-  authoritative state after reconnecting.
-- Use `room.send()` for high-rate traffic, `publish()` for meaningful updates.
-
-### Expose methods to Agents (App Surface)
-
-Register named methods that the Cohub host — including an Agent via
-`cohub desktop open <app> --call <method>` — can call on your running App.
-
-```ts
-client.app.surface.handle("image.open", async (input, { commandId }) => {
-  const result = await openImageStudio(input);
-  await client.desktop.reportResult(commandId, {
-    status: "applied",
-    result,
-    error: null,
-  });
-});
-```
-
-Key points:
-
-- Only registered methods are reachable. No DOM access, no script execution.
-- Calls are delivered at-least-once; handlers should be safe to repeat.
-- A Surface response only acknowledges delivery; report the final result via
-  `client.desktop.reportResult()`.
-
-### Composer context
-
-Attach one compact context chip to the Cohub composer while the App is active.
-
-```ts
-client.app.composer.setChip({
-  key: "selection",
-  label: "3 selected",
-  content: "Selected records:\n- customer_123\n- customer_456",
-});
-
-client.app.composer.clearChip("selection");
-```
-
-### Commerce
-
-Sell one-time products and consume credits, bound to the App's runtime
-identity. Requires commerce enabled on the Space.
-
-```ts
-const { entitlements, credits } = await client.app.commerce.getEntitlements();
-
-// Feature unlock
-const unlocked = entitlements.some((e) => e.benefitKey === "pro" && e.enabled);
-if (!unlocked) await client.app.commerce.purchase({ productKey: "pro_unlock" });
-
-// Metered action
-const result = await client.app.commerce.consumeCredits({
-  amount: 10,
-  operationId: crypto.randomUUID(), // stable id per logical action
-  reason: "Export high-resolution image",
-});
-if (result.status === "insufficient") {
-  await client.app.commerce.purchase({ productKey: "credit_pack" });
-}
-
-// After checkout returns, re-query authoritative order state
-const state = await client.app.commerce.getCheckoutState();
-if (state.orderId) {
-  const { order } = await client.app.commerce.getOrder(state.orderId);
-}
-```
-
-Key points:
-
-- Use a stable, unique `operationId` per logical action — retries stay
-  idempotent.
-- Checkout return is not proof of payment. Re-query
-  `getCheckoutState()` / `getOrder()` after redirect.
-- See the [App Commerce Guide](https://github.com/talesofai/cohub/blob/main/docs/app-commerce-guide.md)
-  for product setup.
-
-### Models
-
-Listing models needs no scope — just authentication.
-
-```ts
-const models = await client.models.list();
-const multimodal = await client.models.listMultimodal();
-```
-
-### Run App Actions
-
-Directory Apps can expose server-side entrypoints under `.cohub/actions/`. The
-frontend invokes one by file stem; the host downloads the immutable App version
-and runs it in the App home Space Sandbox with the existing execution token, so
-the App owner is the platform cost owner while the signed-in viewer's
-entitlements apply.
-
-```ts
-const task = await cohub.app.actions.run({
-  action: "summarize",
-  input: { text: "Long document..." },
-});
-const result = await cohub.tasks.get(task.taskRunId);
-```
-
-- `.ts` / `.js` entrypoints use the Sandbox Node.js runtime with native type
-  stripping (no enums, namespaces, or parameter properties). Other files run
-  through their executable bit, shebang, or binary format.
-- Input arrives as JSON on stdin. It is stored with the Task Run and is visible
-  to the App owner and Space members who can inspect the Task — never treat it
-  as a secret channel.
-- Action keys are `[a-z0-9-_]+`, exactly one matching entrypoint may exist, and
-  Actions cannot invoke `cohub.app.actions.run()` recursively.
-
-### Overlay surface
-
-Besides a preview tab, an App can open as an **overlay**: a transparent,
-chrome-free layer above the workspace that always stays below Cohub's own UI.
-Declare it at publish time, or request it per open:
+An App can be the editor or viewer for a file type — a Board editor, a
+Markdown studio. Declare the extensions it opens in the page head:
 
 ```html
-<meta name="cohub:surface" content="overlay" />
+<meta name="cohub:file-handlers" content=".board" />
+```
+
+Installing the App registers it for those extensions in `.cohub/apps.json`,
+unless another installed App already opens them — installing never replaces a
+default. The viewer can change the default under **Open with…** in the file
+menu, with **Always open .board files this way**; that is also how a Space
+makes one of its own Apps the default. Only one App opens an extension, and it
+must still declare it.
+
+Clicking such a file, following a link to it, or `cohub desktop open
+file://plans/roadmap.board` opens it in its own window, with the App. Read-only
+views, such as a save, stay built in.
+
+```ts
+client.app.onLaunch(async ({ file }) => {
+  await openDocument(file.spaceId, file.path);
+});
+```
+
+Each window holds one file. `onLaunch` fires when it opens, when the viewer
+opens the same file again (bring it to the front), and when the file is renamed
+or moved — save to the new path from then on.
+
+An App the Space published or installed gets `file.view` and `file.edit` on
+that Space without a dialog, so opening a file just works. Other Apps ask the
+viewer first. Installing is therefore a trust decision for the whole Space:
+anyone who can edit `.cohub/apps.json` can install an App, and it can then edit
+the Space's files for every member who opens it.
+
+## App Actions
+
+Directory Apps expose server-side entrypoints under `.cohub/actions/`. The
+host downloads the immutable App version and runs the entrypoint in the home
+Space sandbox **as the App owner** — you pay for the execution — while
+entitlement and credit metering apply to the signed-in viewer.
+
+```ts
+const task = await client.app.actions.run({
+  action: "summarize",
+  input: { text: "Long document..." }, // JSON on stdin, ≤ 16 KB
+});
+const detail = await client.tasks.get(task.taskRunId); // poll to completion
+```
+
+`.ts` / `.js` entrypoints run under Node with native type stripping (no
+enums, namespaces, parameter properties); other files run via executable bit
+or shebang. Inside an Action, the SDK resolves identity from the execution
+token — no credentials to manage:
+
+```ts
+import { getCohubContext } from "@neta-art/cohub";
+
+const { execution } = getCohubContext();
+execution.viewerUserId; // who clicked — meter credits against them
+execution.spaceId;      // the home Space
+```
+
+- Action keys are `[a-z0-9-_]+`; exactly one matching entrypoint may exist.
+- Input is stored with the Task Run and visible to the App owner and Space
+  members — never a secret channel.
+- Actions cannot invoke `app.actions.run()` recursively.
+- Space Hooks can run an Action with `uses: user/space/app/action` — see
+  [Space Hooks](https://github.com/talesofai/cohub/blob/main/docs/space-hooks.md).
+
+## Surfaces and forms
+
+### Preview tab / window
+
+The default: the App opens as a workspace preview tab, deep-linkable as
+`?window=app:<appId>`.
+
+### Overlay
+
+A transparent, chrome-free layer above the workspace, below Cohub's own UI.
+
+```html
+<meta name="cohub:surface" content="overlay" />   <!-- declare at publish time -->
 ```
 
 ```bash
-cohub desktop open <app> --as overlay
-cohub desktop open <app> --as window   # one-off override
+cohub desktop open <app> --as overlay   # or --as window, per open
 ```
 
-An overlay starts fully click-through. The App claims the interactive parts and
-optionally its own geometry:
+An overlay starts fully click-through. Claim interactive parts and optionally
+a geometry:
 
 ```ts
 cohub.app.requestConfigure({
@@ -346,20 +392,27 @@ cohub.app.requestConfigure({
 });
 ```
 
-`inputRegion` is `"none"` (default), `"all"`, or a list of rects; it only routes
-pointer events and never clips what is painted. `geometry` (`anchor`, `x`, `y`,
-`width`, `height`) shrinks the overlay and is clamped on-screen; an omitted axis
-fills the window, and an invalid axis ignores the whole shape. Paint your own
-transparency (`html, body { background: transparent }`) and set
-`<meta name="color-scheme" content="light dark">` so Chromium does not paint an
-opaque backdrop. The App closes itself with `cohub.app.requestClose()`; the
-viewer can always press `Escape`.
+- `inputRegion` — `"none"` (default), `"all"`, or rects. Routes pointer
+  events; never clips painting.
+- `geometry` (`anchor`, `x`, `y`, `width`, `height`) shrinks the overlay,
+  clamped on-screen; an omitted axis fills the window.
+- Paint your own transparency (`html, body { background: transparent }`) and
+  set `<meta name="color-scheme" content="light dark">` — otherwise Chromium
+  paints an opaque backdrop.
+- Close yourself with `cohub.app.requestClose()`; the viewer can always press
+  `Escape`.
+
+### Background (New Chat)
+
+A workspace App can serve as the New Chat background: `shell.surface` is
+`"background"` with `shell.space` set to the hosting Space. It can attach
+composer chips but is not callable through UI commands.
 
 ### Embed other Apps
 
-A published App can host other Apps in iframes. The public page keeps owning the
-embedded runtime — its bridge, consent dialogs, commerce, and Cohub bar behave
-exactly as standalone, and the embedder never sees its tokens.
+A published App can host other Apps in iframes. The embedded runtime keeps
+its own bridge, consent dialogs, commerce, and Cohub bar — the embedder never
+sees its tokens.
 
 ```html
 <iframe src="https://cohub.live/alice/studio/w/notes"
@@ -377,100 +430,201 @@ cohub.app.onContextChanged((next) => embed.setShell(next.shell ?? null));
 embed.dispose();
 ```
 
-The embedded App sees the forwarded location as `context.shell` with
-`surface: "embed"` and learns its host from `context.invocation.embedder`. Those
-ids are navigation hints, never authorization inputs — reading anything still
-requires the embedded App's own grants.
+The embedded App sees the forwarded location as `shell` with
+`surface: "embed"` and its host in `invocation.embedder` — navigation hints,
+never authorization.
 
-### Account-level data
+### App Surface (callable methods)
 
-Beyond the App's own Space, viewer grants unlock the viewer's account data.
-
-```ts
-// user.space.list
-await client.auth.authorize({ target: { kind: "account" }, scopes: ["user.space.list"], reason: "Show your spaces" });
-const { spaces } = await client.spaces.list();
-
-// user.session.list
-await client.auth.authorize({ target: { kind: "account" }, scopes: ["user.session.list"], reason: "List your sessions" });
-const { sessions } = await client.user.listSessions({ limit: 20 });
-
-// user.usage.read
-await client.auth.authorize({ target: { kind: "account" }, scopes: ["user.usage.read"], reason: "Show your activity" });
-const activity = await client.user.getActivity({ days: 30 });
-```
-
-### Create a Space for the viewer
-
-One consent creates a viewer-owned Space and grants the requested scopes on
-it. `space` is the same `CreateSpaceInput` as `client.spaces.create()`.
-Never silent — each confirm mints a new Space. The host creates with the
-viewer's account token. An App holding a `space.create` viewer grant can also
-call `client.spaces.create()` directly.
+Register named methods the Cohub host — including an Agent via
+`cohub desktop open <app> --call <method>` — can call on your running App.
 
 ```ts
-const { granted, space } = await client.auth.requestCreateSpace({
-  scopes: ["file.view", "session.view", "session.prompt.fullaccess"],
-  space: {
-    name: "Whale Shrine",
-    bootstrapSource: { type: "checkpoint", checkpointId },
-  },
-  reason: "Create a workspace from this template.",
+client.app.surface.handle("image.open", async (input, { commandId }) => {
+  const result = await openImageStudio(input);
+  await client.desktop.reportResult(commandId, { status: "applied", result, error: null });
 });
-if (granted && space) {
-  const created = client.space(space.id);
+```
+
+- Only registered methods are reachable; no DOM access, no script execution.
+- Calls are at-least-once — handlers should be idempotent.
+- A response only acknowledges delivery; report the final result via
+  `reportResult()`, persisting `commandId` so a reload can resume.
+- Calls are accepted only from explicit Cohub app origins:
+  `client.app.surface.allowHostOrigins(["https://cohub.internal"])`.
+
+### Window state and closing
+
+Tell the host what the tab should show, and whether work is still unsaved:
+
+```ts
+client.app.window.setState({ title: "Roadmap.board", status: "saving", dirty: true });
+client.app.window.onBeforeClose(async () => {
+  await flushPendingWrites(); // return false or throw to keep the window open
+});
+```
+
+While `dirty` is true the host never unmounts the App to save memory. Closing
+its tab, reloading it, or leaving the workspace first calls `onBeforeClose`,
+and only asks the viewer if that fails or takes longer than 10 seconds. A new
+App version waits for the next reload instead of replacing a dirty document.
+Still keep drafts durable yourself: a closed browser tab cannot wait.
+
+### Shortcuts
+
+Cohub shortcuts such as the command palette keep working while the App has
+focus. Once the App has called `context()`, the SDK forwards Ctrl / Cmd
+chords the App did not handle; plain typing and the editing chords (copy,
+paste, cut, select all, undo, redo) always stay in the App. Call
+`event.preventDefault()` to keep a chord for yourself.
+
+### Drops
+
+The viewer can drag files, Tasks, and Apps from Cohub onto the App:
+
+```ts
+client.app.onDrop({
+  accept: ["file", "task"],
+  over: ({ x, y }) => showDropMarker(x, y),
+  leave: () => hideDropMarker(),
+  drop: ({ x, y, resources }) => placeResources(resources, x, y),
+});
+```
+
+Coordinates are frame-local CSS pixels. While hovering, the App only learns
+which kinds are being dragged; the resources arrive on `drop`, when the viewer
+hands them over. Each resource has a `type` and a `ref` (the path, for files)
+plus optional metadata such as `title`, `mimeType`, and `size`. Treat drops as
+untrusted input, like a paste: validate each `ref` and read the resource through
+your own authorized API instead of trusting the metadata.
+
+### Composer context
+
+One compact context chip on the Cohub composer while the App is active.
+Label ≤ 120 chars, content ≤ 32 KB, plain text.
+
+```ts
+client.app.composer.setChip({ key: "selection", label: "3 selected", content: "..." });
+client.app.composer.clearChip("selection");
+```
+
+### Navigation
+
+Open any Cohub resource — App, file, session, task, checkpoint, cronjob —
+inside the host workspace.
+
+```ts
+await client.navigation.open({ kind: "session", spaceId, sessionId });
+await client.navigation.open({ kind: "app", ref: "username/space/app" }, { method: "focus", input: {} });
+```
+
+Returns `{ handled }` — `false` when the host can't (e.g. broker mode);
+degrade gracefully.
+
+### Diagnostics
+
+`client.app.onDiagnostic(cb)` forwards host diagnostics (code + message) for
+debugging runtime integration.
+
+## Realtime rooms
+
+Multiplayer state, presence, and generic JSON events between viewers of the
+same App. Runtime-native — no scope or consent needed.
+
+```ts
+const room = await client.app.realtime.createRoom({ code: "TEAM-ALPHA" });
+const stop = room.subscribe("shared.state.updated", ({ data }) => render(data));
+await room.publish("shared.state.updated", { value: 42 });
+```
+
+- Events are ordered while connected but **not replayed** — re-fetch
+  authoritative state after reconnecting.
+- `room.send()` for high-rate traffic (no ACK); `publish()` when delivery
+  must be confirmed. `seatPerUser: true` gives each viewer one seat.
+- Rooms live minutes to 24 h, are scoped to one App, and cannot be created
+  outside the App runtime.
+
+## Commerce
+
+Sell one-time products bound to the App's runtime identity. Products carry
+**feature benefits** (access gates) and **credit benefits** (consumable,
+Space-scoped credits). Requires commerce enabled on the Space.
+
+```ts
+const { entitlements, credits } = await client.app.commerce.getEntitlements();
+
+// Feature unlock
+const unlocked = entitlements.some((e) => e.benefitKey === "pro" && e.enabled);
+if (!unlocked) await client.app.commerce.purchase({ productKey: "pro_unlock" });
+
+// Metered action — operationId is the idempotency key per logical action
+const result = await client.app.commerce.consumeCredits({
+  amount: 10,
+  operationId: crypto.randomUUID(),
+  reason: "Export high-resolution image",
+});
+if (result.status === "insufficient") {
+  await client.app.commerce.purchase({ productKey: "credit_pack" });
 }
-// `granted: false` with a `space` means the Space exists but bootstrap or
-// authorization did not finish. Keep the id and resume; never create a second
-// Space or delete the first one automatically.
+
+// After checkout returns, re-query authoritative order state
+const state = await client.app.commerce.getCheckoutState();
+if (state.orderId) await client.app.commerce.getOrder(state.orderId);
 ```
 
-Checkpoint access still uses `checkpoint.view` on the source Space. A public
-template Space with signed-in guest access is enough for anyone to clone.
+Key rules:
 
-## Permissions in one page
-
-App authorization is the union of two sources — either is enough:
-
-| Source | Granted by | Covers | Lifetime |
-| --- | --- | --- | --- |
-| **App scopes** | Publisher at publish time | Only the App's own Space; eight bounded scopes | While published |
-| **Viewer grants** | Viewer via consent dialog | Any permission the viewer holds, on any Space they pick | 14 days, revocable |
-
-The golden rule:
-
-```text
-Reads on the App's own Space → app scopes
-Actions, other Spaces, generation, account data → viewer grants
-```
-
-Request viewer grants from a user gesture (button click), state a clear
-reason, and let silent reuse cover return visits — `auth.authorize()` only
-opens a dialog when something new is needed. Always act on the returned
-`target`, which may resolve to a different Space than you asked for.
+- `purchase()` redirects to checkout; call it from the user's purchase action,
+  never during initialization. Checkout return is not proof of payment —
+  re-query `getCheckoutState()` / `getOrder()`.
+- Space credits meter actions inside the Space's Apps; Cohub Balance is a
+  separate global platform-managed product component (`cohubBalanceUsd`,
+  whole dollars, immutable).
+- Product prices are immutable. Change them by creating a versioned product
+  key (`image_credit_pack_050`), rebinding the benefit, and archiving the old
+  product.
+- Pair commerce with Actions: the Action runs at your cost and reports the
+  viewer's entitlements; `consumeCredits` recovers the cost. This is the
+  standard pattern for owner-funded generation — see
+  [whale-shrine](https://github.com/talesofai/cohub/blob/main/cohub-apps/whale-shrine/README.md).
+- Setup is CLI-side: `cohub spaces commerce setup`, `benefits create`,
+  `products create`. See the
+  [sample Apps index](https://github.com/talesofai/cohub/blob/main/cohub-apps/README.md)
+  for the minimal commerce loop.
 
 ## Publishing and verifying
 
-Publish targets, versions, and management details live in
-[Apps](/docs/create/apps).
+Publishing and management live in [Apps](/docs/create/apps). One rule during
+development: runtime APIs only work in a **published** App — test against the
+real runtime, publish a new version after changes.
 
-The one rule that matters during development: runtime APIs (`context()`,
-`auth.authorize`, realtime, commerce) only work inside a **published** App.
-Local `file://` pages and bare static URLs cannot exercise them — publish and
-test against the real runtime, and publish a new version (`cohub apps
-publish-version`) after changes.
+## Pitfalls checklist
 
-## Best practices
-
-- Least privilege: request the smallest scope set that works
-- Call `auth.authorize` from user gestures with a clear reason
-- Treat invocation context as routing info, not authorization
-- Keep server data authoritative; realtime is a transport, resync after reconnect
-- Make Surface handlers and credit consumption idempotent
-- Never put tokens or secrets in URLs or shipped assets
+- [ ] `env: "dev"` / `"prod"` passed explicitly — the SDK defaults to prod.
+- [ ] App scopes cover every read on the App's own Space: `session.view`,
+      `taskrun.view`, `file.view`. Least privilege beyond that.
+- [ ] `generation.create` and `user.*` are viewer-grant-only — request at
+      runtime from a gesture, never at publish time.
+- [ ] `accessMode` matches the scope held; omitting it means full access.
+- [ ] `session.prompt.fullaccess` ⊅ `session.view`; `generation.create` ⊅
+      `taskrun.view`. Pair them.
+- [ ] `auth.authorize()` from a user gesture with a reason; safe to repeat.
+- [ ] Act on the returned `target`, not the request; invocation context is
+      routing info, not authorization.
+- [ ] Broker mode: `authorize()` before other API calls — the popup exchange
+      consumes the user-activation budget.
+- [ ] Space has a slug and owner has a username before publishing.
+- [ ] Model ids come from `models.listMultimodal()`, not hardcoded.
+- [ ] Surface handlers and `consumeCredits` are idempotent (stable
+      `operationId`); server data stays authoritative, realtime resyncs after
+      reconnect.
+- [ ] Editors report `dirty` through `window.setState()` and flush in
+      `onBeforeClose()`; drafts also survive a closed browser tab.
+- [ ] No tokens or secrets in URLs or shipped assets.
 
 ## Related
 
 - [Apps](/docs/create/apps) — publishing and management
-- [SDK](/docs/developers/sdk) — full client surface
+- [SDK](/docs/developers/sdk) — the client surface
 - [CLI](/docs/developers/cli) — terminal workflows
+- [Sample Apps](https://github.com/talesofai/cohub/blob/main/cohub-apps/README.md) — runnable examples per scenario

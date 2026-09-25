@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
-import { TestRuntimeSessionStore } from "./fixtures/runtime-projection-source.js";
+import { testNativeRuntime } from "./fixtures/runtime-native.js";
 import { test } from "node:test";
-import { mkdtemp, chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { serveRuntime } from "../src/runtime/connection.js";
 
 test("Runtime starts and reports more than 64 pending Sessions in bounded recovery frames", { timeout: 20_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "cohub-runtime-recovery-batches-"));
   const spaceId = crypto.randomUUID();
-  const store = new TestRuntimeSessionStore(spaceId, join(root, "state"));
-  const stateDirectory = join(store.root, "pi");
+  const runtime = await testNativeRuntime({ spaceId, root, harnesses: ["pi"] });
+  const stateDirectory = join(runtime.stateRoot, "executions");
   await mkdir(stateDirectory, { recursive: true });
   const expected = Array.from({ length: 65 }, () => ({ sessionId: crypto.randomUUID(), turnId: crypto.randomUUID(), harness: "pi" as const }));
   await Promise.all(expected.map((execution) => writeFile(join(stateDirectory, `${execution.sessionId}.json`), JSON.stringify({
-    version: 1, sessionId: execution.sessionId, harness: execution.harness, pendingTurnId: execution.turnId,
+    version: 2, requestId: null, sessionId: execution.sessionId, turnId: execution.turnId,
+    session: { harness: execution.harness, nativeSessionId: crypto.randomUUID(), path: join(root, "missing.jsonl"), cwd: root },
   }))));
 
   const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
@@ -38,14 +38,76 @@ test("Runtime starts and reports more than 64 pending Sessions in bounded recove
       } catch (error) { reject(error); }
     }));
   });
-  const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${address.port}`, capabilities: { harnesses: ["pi"], models: [] }, harnesses: {}, token: async () => "fixture-token", signal: controller.signal, store, onReady: () => {} });
+  const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${address.port}`, capabilities: { harnesses: ["pi"], models: [] }, token: async () => "fixture-token", signal: controller.signal, executor: runtime.native.executor, onReady: () => {} });
   try {
     await received;
     assert.deepEqual(frames.map((frame) => frame.length), [64, 1]);
     const bySession = (value: typeof expected) => [...value].sort((left, right) => left.sessionId.localeCompare(right.sessionId));
     assert.deepEqual(bySession(frames.flat()), bySession(expected));
   } finally {
-    controller.abort(); await running;
+    controller.abort(); await running; await runtime.close();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime finishes local work after its transport disconnects and replays the durable result", { timeout: 20_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "cohub-runtime-detached-"));
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address(); assert(address && typeof address !== "string");
+  const controller = new AbortController();
+  const spaceId = crypto.randomUUID(), sessionId = crypto.randomUUID(), turnId = crypto.randomUUID(), recoverRequestId = crypto.randomUUID();
+  const runtime = await testNativeRuntime({ spaceId, root, harnesses: ["pi"] });
+  let connections = 0;
+  let rejectFailure: (error: unknown) => void = () => {};
+  const completed = new Promise<void>((resolve, reject) => {
+    rejectFailure = reject;
+    server.on("connection", (socket) => {
+      const connection = ++connections;
+      const send = (value: unknown) => socket.send(JSON.stringify(value));
+      socket.on("message", (raw) => {
+        try {
+          const frame = JSON.parse(raw.toString());
+          if (frame.type === "runtime.hello") {
+            send({ type: "runtime.ready", connectionId: crypto.randomUUID() });
+            if (connection === 1) send({ type: "turn.start", requestId: turnId, input: {
+              spaceId, sessionId, turnId, userMessageId: turnId, harness: "pi", accessMode: "full_access",
+              messages: [{ turnId, userMessageId: turnId, userId: "author", content: [{ type: "text", text: "slow transport test" }] }],
+              context: { complete: true, revision: "initial", throughTurnId: null, messages: [] },
+            } });
+            return;
+          }
+          if (connection === 1 && frame.type === "runtime.event" && frame.event?.type === "text.delta") {
+            socket.terminate();
+            return;
+          }
+          if (connection > 1 && frame.type === "runtime.recovery") {
+            assert.deepEqual(frame.executions, [{ sessionId, turnId, harness: "pi" }]);
+            send({ type: "turn.recover", requestId: recoverRequestId, execution: { spaceId, sessionId, turnId, harness: "pi" } });
+            return;
+          }
+          if (connection > 1 && frame.type === "runtime.event" && frame.requestId === recoverRequestId) {
+            if (frame.event.type === "turn.error") throw new Error(frame.event.message);
+            if (frame.event.type === "turn.end") {
+              assert.equal(frame.event.message.stopReason, "stop", "transport loss must not abort local execution");
+              assert(frame.event.message.content.some((block: { type: string; text?: string }) => block.type === "text" && block.text?.includes("new session")));
+              send({ type: "turn.ack", requestId: frame.requestId, revision: "completed", turnId });
+            }
+            if (frame.event.type === "turn.acknowledged") resolve();
+          }
+        } catch (error) { reject(error); controller.abort(); }
+      });
+    });
+  });
+  const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${address.port}`, capabilities: { harnesses: ["pi"], models: [] }, token: async () => "fixture-token", signal: controller.signal, executor: runtime.native.executor, onReady: () => {} });
+  void running.catch(rejectFailure);
+  try {
+    await completed;
+    assert(connections >= 2);
+  } finally {
+    controller.abort(); await running; await runtime.close();
     for (const socket of server.clients) socket.terminate();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
@@ -55,8 +117,6 @@ test("Runtime starts and reports more than 64 pending Sessions in bounded recove
 for (const harness of ["pi", "codex"] as const) for (const resolved of [false, true]) {
   test(`${harness} WebSocket execution ${resolved ? "retires a confirmed execution" : "acknowledges native resume"}`,  { timeout: 20_000 }, async () => {
     const root = await mkdtemp(join(tmpdir(), "cohub-runtime-ws-"));
-    const binary = fileURLToPath(new URL(`./fixtures/runtime-${harness}.mjs`, import.meta.url));
-    await chmod(binary, 0o755);
     const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
     await new Promise<void>((resolve) => server.once("listening", resolve));
     const address = server.address();
@@ -67,8 +127,8 @@ for (const harness of ["pi", "codex"] as const) for (const resolved of [false, t
     const previousId = crypto.randomUUID();
     const ids = [crypto.randomUUID(), crypto.randomUUID()];
     const turns = [crypto.randomUUID(), crypto.randomUUID()];
-    const store = new TestRuntimeSessionStore(spaceId, join(root, "state"));
-    store.projectionSource.addTurn(sessionId, previousId, { userContent: [{ type: "text", text: "historical fact" }] });
+    const runtime = await testNativeRuntime({ spaceId, root, harnesses: [harness] });
+    runtime.source.addTurn(sessionId, previousId, { userContent: [{ type: "text", text: "historical fact" }] });
     let round = 0;
     let contextRequests = 0;
     let deltas = 0;
@@ -105,7 +165,7 @@ for (const harness of ["pi", "codex"] as const) for (const resolved of [false, t
               }
               resumes.push(event.resume);
               if (resolved && round === 0) {
-                store.projectionSource.addTurn(sessionId, turns[0], { assistantContent: [{ type: "text", text: "completed" }] });
+                runtime.source.addTurn(sessionId, turns[0], { assistantContent: [{ type: "text", text: "completed" }] });
                 round++;
                 start();
                 return;
@@ -120,7 +180,7 @@ for (const harness of ["pi", "codex"] as const) for (const resolved of [false, t
         });
       });
     });
-    const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${address.port}`, capabilities: { harnesses: [harness], models: [] }, harnesses: { [harness]: binary }, token: async () => "fixture-token", signal: controller.signal, store, onReady: () => {} });
+    const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${address.port}`, capabilities: { harnesses: [harness], models: [] }, token: async () => "fixture-token", signal: controller.signal, executor: runtime.native.executor, onReady: () => {} });
     void running.catch(rejectFailure);
     try {
       await completed;
@@ -129,6 +189,7 @@ for (const harness of ["pi", "codex"] as const) for (const resolved of [false, t
     } finally {
       controller.abort();
       await running;
+      await runtime.close();
       for (const socket of server.clients) socket.terminate();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await rm(root, { recursive: true, force: true });

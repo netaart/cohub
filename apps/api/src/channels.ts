@@ -1,4 +1,5 @@
 import { createLogger } from "@cohub/infra/logging";
+import { BillingAccessBlockedError } from "@cohub/billing";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import type { ContentBlock } from "@cohub/protocol/core";
@@ -21,6 +22,7 @@ import { buildSessionSourceChannel } from "./lib/session-source-channel.js";
 import { assignSessionChannelSystemLabel } from "@cohub/core/labels/session-channel";
 import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
 import { dispatchLabelAssignmentsUpdated } from "./realtime-events.js";
+import { formatChannelBillingBlockedMessage, serializeChannelBillingBlocked } from "./lib/billing-blocked.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -329,6 +331,8 @@ export async function dispatchOutboundMessage(input: {
   sessionMessageId?: string;
   provider?: string;
   externalChatId?: string | null;
+  /** Stable for terminal user-facing messages that may be retried. */
+  commandId?: string;
   content: ContentBlock[];
   replyToExternalMessageId?: string;
   meta?: Record<string, unknown> | null;
@@ -345,7 +349,7 @@ export async function dispatchOutboundMessage(input: {
   if (!externalChatId) return;
 
   const command: GatewayOutboundCommand = {
-    commandId: randomUUID(),
+    commandId: input.commandId ?? randomUUID(),
     timestamp: Date.now(),
     channelId: spaceChannel.id,
     provider: (input.provider ?? userChannel.provider) as ChannelProvider,
@@ -712,28 +716,62 @@ async function handleMessageCreateInboundEvent(event: GatewayInboundEvent) {
   });
   if (!canChannelOwnerWrite) return;
 
-  await executeSessionInteraction({
-    spaceId: resolved.spaceId,
-    sessionId: resolved.sessionId,
-    inputText: extractInboundText(event),
-    content: event.content,
-    source: event.provider,
-    userId: resolved.userId,
-    clientMessageId: event.externalMessageId,
-    model: resolved.model?.id,
-    provider: resolved.model?.provider,
-    thinkingLevel: resolved.model?.thinkingLevel,
-    inboundRef: {
-      provider: event.provider,
+  try {
+    await executeSessionInteraction({
+      spaceId: resolved.spaceId,
+      sessionId: resolved.sessionId,
+      inputText: extractInboundText(event),
+      content: event.content,
+      source: event.provider,
+      userId: resolved.userId,
+      clientMessageId: event.externalMessageId,
+      model: resolved.model?.id,
+      provider: resolved.model?.provider,
+      thinkingLevel: resolved.model?.thinkingLevel,
+      inboundRef: {
+        provider: event.provider,
+        spaceChannelId: resolved.spaceChannelId,
+        externalConversationId: resolved.conversationId,
+        externalMessageId: event.externalMessageId,
+        externalAuthorId: event.sender.id,
+        externalAuthorName: event.sender.name ?? null,
+        meta: { bindingKey: resolved.bindingKey },
+        providerEvent: event.providerEvent,
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof BillingAccessBlockedError)) throw error;
+
+    // A billing block is a terminal user-facing result, not an inbound
+    // transport failure. Enqueue the notice before acknowledging the event.
+    const billing = serializeChannelBillingBlocked(error);
+    const billingCommandId = `billing-blocked:${createHash("sha256")
+      .update(`${event.provider}:${resolved.conversationId}:${event.externalMessageId}`)
+      .digest("hex")}`;
+    await dispatchOutboundMessage({
+      commandId: billingCommandId,
       spaceChannelId: resolved.spaceChannelId,
+      spaceId: resolved.spaceId,
+      spaceSessionId: resolved.sessionId,
+      provider: event.provider,
+      externalChatId: event.externalChatId,
+      replyToExternalMessageId: event.externalMessageId,
+      content: [{ type: "text", text: formatChannelBillingBlockedMessage(billing) }],
+      meta: { billing, messageKind: "billing_blocked" },
+    });
+    await createProviderMessageRef({
+      provider: event.provider,
+      spaceId: resolved.spaceId,
+      spaceSessionId: resolved.sessionId,
+      spaceChannelId: resolved.spaceChannelId,
+      direction: "inbound",
       externalConversationId: resolved.conversationId,
       externalMessageId: event.externalMessageId,
       externalAuthorId: event.sender.id,
       externalAuthorName: event.sender.name ?? null,
-      meta: { bindingKey: resolved.bindingKey },
-      providerEvent: event.providerEvent,
-    },
-  });
+      meta: { bindingKey: resolved.bindingKey, outcome: "billing_blocked" },
+    });
+  }
 }
 
 export async function resolveChannelInboundForEventWithLock(event: GatewayInboundEvent) {

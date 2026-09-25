@@ -22,7 +22,9 @@ import { dispatchLabelAssignmentsUpdated } from "../realtime-events.js";
 import { buildSessionTurnResponse } from "../session-turn-response.js";
 import { parseSessionTitleInput } from "../session-title-input.js";
 import { isNativeClientTurn } from "@cohub/protocol";
+import type { SessionFilesResponse } from "@cohub/protocol/model";
 import { getSessionRuntimeTurn } from "../runtime.js";
+import { listSessionFiles } from "../session-files.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -295,6 +297,31 @@ router.post("/:id/turns/:turnId/signed-urls", async (c) => {
   return c.json({ urls });
 });
 
+const SESSION_FILES_DEFAULT_LIMIT = 200;
+const SESSION_FILES_MAX_LIMIT = 500;
+
+router.get("/:id/files", async (c) => {
+  const user = getOptionalAuth(c);
+  const sessionId = c.req.param("id");
+  if (!sessionId || !requireValidId(sessionId)) return c.json({ message: "session not found" }, 404);
+
+  const session = await getSpaceSessionById(sessionId);
+  if (!session) return c.json({ message: "session not found" }, 404);
+  const scope = { spaceId: session.spaceId, sessionId: session.id };
+  const [canViewSession, canViewFiles] = await Promise.all([
+    hasPermission(user, "session.view", scope),
+    hasPermission(user, "file.view", { spaceId: session.spaceId }),
+  ]);
+  if (!canViewSession || !canViewFiles) return authzDenied(c);
+
+  const requested = Number.parseInt(c.req.query("limit") ?? "", 10);
+  const limit = Number.isFinite(requested) && requested > 0
+    ? Math.min(requested, SESSION_FILES_MAX_LIMIT)
+    : SESSION_FILES_DEFAULT_LIMIT;
+  const files = await listSessionFiles({ spaceId: session.spaceId, sessionId: session.id, limit });
+  return c.json({ sessionId: session.id, files } satisfies SessionFilesResponse);
+});
+
 router.get("/:id/messages", async (c) => {
   const user = getOptionalAuth(c);
   const sessionId = c.req.param("id");
@@ -384,8 +411,9 @@ router.post("/:id/abort", async (c) => {
   const turnId = body?.turnId?.trim() || null;
   if (turnId && !requireValidId(turnId)) return c.json({ message: "invalid turn id" }, 400);
   const target = turnId ? await getSessionTurnById(session.id, turnId) : await getSessionRuntimeTurn(session.spaceId, session.id);
-  if (target && isNativeClientTurn(target.meta) && (target.meta as { harness?: string }).harness === "codex" && ["running", "abort_requested"].includes(target.status)) {
-    return c.json({ message: "Stop this native Codex run in its terminal / 请在终端中停止此原生 Codex 任务" }, 409);
+  // A terminal client without Cohub's link cannot be stopped from here; say so instead of waiting.
+  if (target && isNativeClientTurn(target.meta) && (target.meta as { nativeSync?: { controllable?: boolean } }).nativeSync?.controllable === false && ["running", "abort_requested"].includes(target.status)) {
+    return c.json({ message: "Stop this native run in its terminal" }, 409);
   }
 
   await enqueueSessionAbort({

@@ -17,6 +17,7 @@ import {
   sanitizeTaskRunPricingForViewer,
   sanitizeTaskRunProgressForViewer,
 } from "../task-run-privacy.js";
+import { sanitizeTaskRunForList } from "@cohub/protocol/task";
 
 const router = new Hono();
 
@@ -55,52 +56,6 @@ function applyTaskFilters(input: {
       : lt(taskRuns.createdAt, input.cursor.createdAt);
     if (cursorCondition) input.conditions.push(cursorCondition);
   }
-}
-
-function sanitizeGenerationResultForList(result: unknown) {
-  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
-  const root = result as Record<string, unknown>;
-  const output = root.output;
-  if (!Array.isArray(output)) return result;
-  let changed = false;
-  const nextOutput = output.map((block) => {
-    if (!block || typeof block !== "object" || Array.isArray(block)) return block;
-    const current = block as Record<string, unknown>;
-    if (current.type !== "image" && current.type !== "video") return block;
-    const nextBlock = { ...current };
-    let blockChanged = false;
-    for (const key of ["data", "base64", "contentBase64"]) {
-      if (typeof nextBlock[key] === "string" && nextBlock[key]) {
-        delete nextBlock[key];
-        nextBlock.deferredBase64 = true;
-        blockChanged = true;
-      }
-    }
-    if (nextBlock.source && typeof nextBlock.source === "object" && !Array.isArray(nextBlock.source)) {
-      const nextSource = { ...(nextBlock.source as Record<string, unknown>) };
-      let sourceChanged = false;
-      for (const key of ["data", "base64", "contentBase64"]) {
-        if (typeof nextSource[key] === "string" && nextSource[key]) {
-          delete nextSource[key];
-          nextSource.deferredBase64 = true;
-          sourceChanged = true;
-        }
-      }
-      if (sourceChanged) {
-        nextBlock.source = nextSource;
-        blockChanged = true;
-      }
-    }
-    if (blockChanged) changed = true;
-    return blockChanged ? nextBlock : block;
-  });
-  return changed ? { ...root, output: nextOutput } : result;
-}
-
-function sanitizeTaskRunForList<T extends { taskType: string; result: unknown }>(run: T): T {
-  if (run.taskType !== "generation") return run;
-  const result = sanitizeGenerationResultForList(run.result);
-  return result === run.result ? run : { ...run, result };
 }
 
 function hydrateTaskRunUserProfiles<T extends {

@@ -223,7 +223,7 @@ export async function loadClaimedTurnBatch(owner: TurnRow): Promise<ClaimedTurnB
   if (ids !== undefined) {
     if (!Array.isArray(ids) || !ids.length || ids.some((id) => typeof id !== "string")
       || new Set(ids).size !== ids.length || ids.at(-1) !== owner.id || recorded.ownerTurnId !== owner.id) {
-      throw new Error("Invalid execution batch / 执行批次无效");
+      throw new Error("Invalid execution batch");
     }
     if (ids.length > 1) {
       const rows = await db.select().from(sessionTurns)
@@ -231,7 +231,7 @@ export async function loadClaimedTurnBatch(owner: TurnRow): Promise<ClaimedTurnB
         .orderBy(asc(sessionTurns.sequence));
       if (rows.length !== ids.length || rows.some((row, index) => row.id !== ids[index])
         || rows.slice(0, -1).some((row) => row.status !== "merged" || asRecord(row.meta).mergedIntoTurnId !== owner.id)) {
-        throw new Error("Execution batch history mismatch / 执行批次历史不匹配");
+        throw new Error("Execution batch history mismatch");
       }
       turns = [...rows.slice(0, -1).map((row) => ({ ...row, intent: row.intent ?? "followup" })), owner];
     }

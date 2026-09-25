@@ -16,7 +16,7 @@ for await (const line of lines) {
   else if (input.method === "thread/start") {
     const id = randomUUID();
     thread = { id, path: join(process.cwd(), `native-${id}.jsonl`) };
-    writeFileSync(thread.path, `${JSON.stringify({ type: "session_meta", payload: { id, session_id: id, history_mode: "paginated" } })}\n`);
+    writeFileSync(thread.path, `${JSON.stringify({ type: "session_meta", payload: { id, session_id: id, cwd: process.cwd(), history_mode: "paginated" } })}\n`);
     respond(input, { thread, model: "test", modelProvider: "fixture" });
   } else if (input.method === "thread/fork") {
     const data = readFileSync(input.params.path, "utf8").trimEnd().split("\n");
@@ -36,7 +36,13 @@ for await (const line of lines) {
   } else if (input.method === "turn/start") {
     const id = randomUUID();
     const answer = JSON.stringify(input.params.input).includes("historical") ? "history retained" : "native resumed";
-    appendFileSync(thread.path, `${JSON.stringify({ type: "response_item", payload: input.params.input })}\n`);
+    const timestamp = new Date().toISOString();
+    const record = (type, payload) => appendFileSync(thread.path, `${JSON.stringify({ timestamp, type, payload })}\n`);
+    // The rollout records the Turn the way Codex does, including the client's id for the prompt.
+    record("event_msg", { type: "turn_started", turn_id: id });
+    record("event_msg", { type: "item_completed", item: { type: "UserMessage", client_id: input.params.clientUserMessageId ?? null, content: input.params.input.map((block) => block.type === "text" ? { type: "input_text", text: block.text } : block) } });
+    record("response_item", { type: "message", role: "assistant", content: [{ type: "output_text", text: answer }] });
+    record("event_msg", { type: "turn_complete", turn_id: id, last_agent_message: answer });
     respond(input, { turn: { id } });
     send({ method: "turn/started", params: { threadId: thread.id, turn: { id } } });
     send({ method: "thread/tokenUsage/updated", params: { threadId: thread.id, turnId: id, tokenUsage: { total: { inputTokens: 1100, outputTokens: 505, cachedInputTokens: 110, totalTokens: 1605 }, last: { inputTokens: 100, outputTokens: 5, cachedInputTokens: 10, totalTokens: 105 } } } });

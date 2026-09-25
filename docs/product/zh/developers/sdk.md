@@ -89,87 +89,9 @@ stop();
 
 ## App runtime
 
-已发布 Apps 可使用 Cohub shell 提供的短时 runtime 鉴权运行。
+已发布的 App 由 Cohub shell 提供短期运行时鉴权 —— App 代码里无需 API key。`client.context()`、`client.auth.authorize()`、realtime 房间、可调用 surface、composer 上下文、商业化和 App Actions 都只在运行时可用。
 
-```ts
-const client = createCohubClient(); // token 来自 App runtime
-
-const context = await client.context();
-// App 身份、Space 身份、viewer 状态
-
-await client.auth.authorize({
-  target: { kind: "space", spaceId },
-  scopes: ["session.prompt.readonly"],
-  reason: "Continue the demo chat",
-});
-```
-
-重要：
-
-- Runtime API 在已发布 App 内工作
-- 它们不会在任意静态托管或本地直接打开文件时工作
-- App scopes 与按 Space 的访客授权（viewer grants）会被强制执行
-
-启用 commerce 且 App 已发布时，commerce helpers 在 `client.app.commerce.*`。
-
-### Realtime rooms
-
-在已发布 App 内，`client.app.realtime` 提供临时房间，用于多人状态、
-presence 与通用 JSON 事件。它使用 App runtime 身份，无需额外 scope 或
-授权弹窗。
-
-```ts
-const room = await client.app.realtime.createRoom({
-  code: "TEAM-ALPHA", // 可选
-  expiresInSeconds: 2 * 60 * 60,
-});
-
-const stop = room.subscribe("shared.state.updated", ({ data }) => {
-  console.log(data);
-});
-
-await room.publish("shared.state.updated", { value: 42 });
-stop();
-await room.leave();
-```
-
-事件在连接期间保持有序，但不会重放。高频数据使用 `room.send()`，重连后
-应重新同步权威状态。Realtime rooms 仅适用于 App runtime；普通服务端鉴权
-与 CLI 无法创建或加入房间。
-
-生命周期、presence、成员、席位与限制详见
-[App Runtime Guide](https://github.com/talesofai/cohub/blob/main/packages/sdk/docs/app-runtime-guide.md#realtime-rooms-apprealtime)。
-
-### 可调用方法
-
-App 可以向嵌入它的 Cohub 宿主暴露具名方法，Agent 便能通过
-`cohub desktop open <app> --call <method>` 调用正在运行的 App。
-
-```ts
-client.app.surface.handle("image.open", async (input, { commandId }) => {
-  openImageStudio(input, commandId);
-});
-
-await client.desktop.reportResult(commandId, {
-  status: "applied",
-  result: selectedImage,
-  error: null,
-});
-```
-
-只有注册过的方法可以被调用。不提供 DOM 访问，也不提供脚本执行。Surface 响应只确认指令已送达；
-App 通过同一个 UI command 调用 `client.desktop.reportResult()` 上报最终结果。
-
-调用语义是 at-least-once，因此建议让可调用方法可重复执行。
-
-由于已发布的 App 可以被任意站点嵌入，调用只接受来自明确列出的 Cohub 应用 origin（或 App
-自身 origin）的请求，回复也只发往该 origin，不做广播。被其他站点嵌入时，App 仍会注册方法，
-但不会作出任何响应。该列表刻意不采用 `*.cohub.live` 后缀匹配——App 本身就托管在 Cohub 子域
-上。自建部署与本地开发需显式放开：
-
-```ts
-client.app.surface.allowHostOrigins(["https://cohub.internal"]);
-```
+完整模型 —— 权限、API → scope 对照表、能力配方与陷阱 —— 见 [App 开发](/zh/docs/developers/apps)。
 
 ## 主要 client 表面
 

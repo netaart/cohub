@@ -280,6 +280,12 @@ export const apps = v2.table(
   },
   (table) => ({
     spaceIdx: index("v2_idx_apps_space_id").on(table.spaceId),
+    // Sidebar list: a Space's apps newest-first, with created_at breaking ties.
+    spaceUpdatedIdx: index("v2_idx_apps_space_updated").on(
+      table.spaceId,
+      table.updatedAt.desc().nullsLast(),
+      table.createdAt.desc(),
+    ),
     userUuidIdx: index("v2_idx_apps_user_uuid").on(table.userUuid),
     statusIdx: index("v2_idx_apps_status").on(table.status),
     visibilityIdx: index("v2_idx_apps_visibility").on(table.visibility),

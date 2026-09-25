@@ -56,7 +56,6 @@ let spaceSlugDraft = $state("");
 let publishing = $state(false);
 let error = $state<string | null>(null);
 let published = $state<AppRecord | null>(null);
-let standaloneUrl = $state<string | null>(null);
 let copied = $state(false);
 let initializedTargetRef = $state("");
 let visibility = $state<"public" | "space">("public");
@@ -100,7 +99,7 @@ const appUrl = $derived.by(() => {
 	if (!currentUsername || !currentSpaceSlug || !published) return "";
 	return `${window.location.origin}/${currentUsername}/${currentSpaceSlug}/w/${published.slug}`;
 });
-const publishedUrl = $derived(standaloneUrl || appUrl);
+const publishedUrl = $derived(appUrl);
 
 $effect(() => {
 	if (!open) {
@@ -110,7 +109,6 @@ $effect(() => {
 		publishing = false;
 		error = null;
 		published = null;
-		standaloneUrl = null;
 		copied = false;
 		initializedTargetRef = "";
 		visibility = "public";
@@ -128,7 +126,6 @@ $effect(() => {
 				?.replace(/\.[^.]+$/, "") || "app";
 		slug = normalizePublicSlugInput(base) || "app";
 		published = null;
-		standaloneUrl = null;
 		error = null;
 		copied = false;
 		visibility = "public";
@@ -220,7 +217,6 @@ async function publish() {
 				meta: buildAppMeta(),
 			});
 			published = result.app;
-			standaloneUrl = result.standaloneUrl ?? null;
 		} catch (cause) {
 			if (!(cause instanceof HttpError) || cause.status !== 409) throw cause;
 			const { apps } = await sdk.apps.listBySpace(spaceId);
@@ -236,10 +232,8 @@ async function publish() {
 			});
 			const result = await sdk.apps.publishVersion(app.id);
 			published = result.app;
-			standaloneUrl = result.standaloneUrl ?? null;
 		}
-		if (published)
-			dispatchAppsChanged({ spaceId, app: published, standaloneUrl });
+		if (published) dispatchAppsChanged({ spaceId, app: published });
 	} catch (err) {
 		error = err instanceof Error ? err.message : "Publish failed.";
 	} finally {
@@ -266,7 +260,6 @@ async function copyUrl() {
 				<div class="success-icon"><Check class="h-4 w-4" /></div>
 				<div class="min-w-0 flex-1">
 					<div class="text-[13px] font-medium text-text-primary">Published</div>
-					{#if standaloneUrl}<div class="mt-1 text-[10px] font-medium uppercase text-text-placeholder">{m.app_view_standalone_url({}, { locale })}</div>{/if}
 					<div class="mt-1 truncate font-mono text-[12px] text-text-tertiary">{publishedUrl}</div>
 				</div>
 			</div>

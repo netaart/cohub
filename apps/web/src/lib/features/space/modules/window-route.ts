@@ -1,5 +1,5 @@
-import { isUuid } from "@cohub/protocol/identifiers";
 import { buildSpaceRootRoute } from "$lib/space-routes";
+import { parseAppWindowKey } from "./app-window-key";
 
 export type WindowKind = "file" | "board" | "port" | "app";
 
@@ -12,8 +12,9 @@ export type WindowRef = {
 export const WINDOW_QUERY_KEY = "window";
 const LEGACY_WINDOW_QUERY_KEY = "preview";
 
+/** An App id, or an App id bound to a workspace file. */
 export function isValidAppKey(key: string): boolean {
-	return isUuid(key);
+	return parseAppWindowKey(key) !== null;
 }
 
 /** Accept only integer ports in 1..65535. Reject host-injection forms. */

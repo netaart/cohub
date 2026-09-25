@@ -1,8 +1,9 @@
 # 課金殿 — The Whale Shrine
 
-A Cohub App that turns $5 payments into gacha-style echo summons. Pay-to-win,
-pay-to-shout, pay-to-feel-important. The more you spend, the higher your whale
-rank — from Passerby NPC all the way to 👑 Whale King.
+A Cohub App that turns $5 payments into gacha-style echo summons — pay-to-win,
+pay-to-shout. The more you spend, the higher your whale rank, from Passerby
+NPC to 👑 Whale King. **The canonical example of owner-funded generation with
+commerce**: credits fund an App Action that writes to your home Space.
 
 ## Concept
 
@@ -25,21 +26,21 @@ Hall of Whales leaderboard with escalating gacha rarities:
 ```
 Viewer clicks "Burn $5 to Summon"
   │
-  ├─ getEntitlements()          check credit balance
-  ├─ purchase()                 $5 credit pack if balance is 0 → checkout redirect
-  ├─ consumeCredits(1)          burn 1 credit (idempotent via shout id)
-  ├─ auth.authorize(fullaccess) viewer consents to shell execution (incremental grant)
-  ├─ space.prompt("!node …")    direct shell command — no LLM, deterministic
-  │     └─ post-shout.mjs       validates + appends to shouts.jsonl (idempotent)
-  ├─ poll files.read()          wait until the new echo appears
-  └─ summon animation           gacha card flip + rarity reveal
+  ├─ getEntitlements()      check credit balance
+  ├─ purchase()             $5 credit pack if balance is 0 → checkout redirect
+  ├─ consumeCredits(1)      burn 1 credit (idempotent via shout id)
+  ├─ app.actions.run()      owner-funded App Action — no viewer grant needed
+  │     └─ .cohub/actions/post-shout.mjs
+  │           validates + appends to shouts.jsonl (idempotent)
+  ├─ poll tasks.get()       wait for the Task Run to complete
+  └─ summon animation       gacha card flip + rarity reveal
 ```
 
-The `!` prefix makes Cohub run the prompt text as a **direct shell command** —
-no LLM interpretation, fully deterministic. The script is idempotent (duplicate
-shout IDs are silently skipped), so retries are safe. The viewer's identity
-comes from `context.viewer.userUuid`, so each echo is attributed correctly
-without decoding the session token manually.
+The write runs as an **App Action**: the App owner funds the execution in the
+home Space sandbox, so the viewer grants nothing beyond the purchase. The
+action is idempotent (duplicate shout IDs are silently skipped), so retries
+are safe. The viewer's identity comes from `context.viewer.userUuid`, so each
+echo is attributed correctly without decoding the session token manually.
 
 ## File structure
 
@@ -47,8 +48,10 @@ without decoding the session token manually.
 cohub-apps/whale-shrine/
 ├─ index.html              App entry point (no-build)
 ├─ styles.css              Shrine gacha theme
-├─ app.js                  Commerce + prompt + polling + animations
-├─ post-shout.mjs          Shell script (!-called) — committed
+├─ app.js                  Commerce + Action + polling + animations
+├─ .cohub/
+│  └─ actions/
+│     └─ post-shout.mjs    App Action (owner-funded write)
 ├─ data/
 │  └─ shouts.jsonl         Append-only shout data — gitignored
 ├─ README.md
@@ -70,21 +73,18 @@ calls only function inside a published Cohub App iframe.
 ## Publish as a Cohub App
 
 1. Upload these files to your Space (root or a subdirectory).
-2. If using a subdirectory, update `CONFIG.DATA_PATH` and `CONFIG.SCRIPT_PATH`
-   in `app.js` to match (e.g. `cohub-apps/whale-shrine/data/shouts.jsonl`).
-3. Open the directory preview and click **Publish**. (Or publish from the CLI: `cohub -s <space-id> apps publish whale-shrine --dir cohub-apps/whale-shrine --app-scope file.view` — `--dir` takes the path inside the Space workspace, so upload the folder first with `cohub -s <space-id> spaces files upload <dir>`.)
-4. Under **App can**, select `file.view` — the direct read access the app needs for its own Space.
+2. If using a subdirectory, update `CONFIG.DATA_PATH` in `app.js` to match
+   (e.g. `cohub-apps/whale-shrine/data/shouts.jsonl`).
+3. Open the directory preview and click **Publish**. (Or publish from the CLI:
+   `cohub -s <space-id> apps publish whale-shrine --dir cohub-apps/whale-shrine --app-scope file.view` —
+   `--dir` takes the path inside the Space workspace, so upload the folder
+   first with `cohub -s <space-id> spaces files upload <dir>`.)
+4. Under **App can**, select `file.view` — the read access the App needs for
+   its own Space. No prompt scope is needed: the write runs as an App Action.
 5. Run the commerce setup (below) to create the $5 credit product.
 
-Prompt access (`session.prompt.fullaccess`) is not configured at publish time: the
-viewer grants it per Space through the consent dialog the first time they summon
-(`auth.authorize()` inside `app.js`, targeting the Space the App runs in). Grants
-last 14 days and can be revoked any time:
-
-```bash
-cohub -s <space-id> apps grants whale-shrine
-cohub -s <space-id> apps revoke whale-shrine <grantId>
-```
+The viewer never grants anything beyond the purchase. `app.actions.run()` is
+runtime-only and needs no scope; the Action executes as the App owner.
 
 ## Commerce setup
 

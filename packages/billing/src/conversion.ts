@@ -24,6 +24,8 @@ export type BillingConversionIntent = {
   primaryAction: {
     label: string;
     action: "open_billing_conversion";
+    /** Optional direct URL for clients without an in-app conversion action. */
+    href?: string;
   };
   source: string;
 };

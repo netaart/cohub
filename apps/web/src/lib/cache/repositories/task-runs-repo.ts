@@ -1,5 +1,7 @@
+import { sanitizeTaskRunForList } from "@cohub/protocol/task";
 import type { TaskRunRecord } from "@neta-art/cohub";
 import {
+	idbDelete,
 	idbDeleteWhere,
 	idbGet,
 	idbGetAllByIndex,
@@ -46,7 +48,8 @@ function toSummaryRecord(
 		taskRunId: run.id,
 		taskType: run.taskType,
 		status: run.status,
-		run,
+		// Summaries back list views, which never carry inline media.
+		run: sanitizeTaskRunForList(run),
 		updatedAt: Date.parse(run.updatedAt ?? "") || timestamp,
 		lastAccessedAt: timestamp,
 	};
@@ -173,6 +176,19 @@ export async function writeTaskRunSummaries(
 		SUMMARY_LIMIT_PER_SPACE,
 		SUMMARY_TTL_MS,
 	).catch(() => undefined);
+}
+
+export async function deleteTaskRunSummaries(
+	spaceId: string,
+	taskRunIds: readonly string[],
+) {
+	const userKey = await resolveUserKey();
+	if (!userKey) return;
+	await Promise.all(
+		taskRunIds.map((taskRunId) =>
+			idbDelete("task_run_summaries", taskRunKey(userKey, spaceId, taskRunId)),
+		),
+	);
 }
 
 export async function writeTaskRunDetail(

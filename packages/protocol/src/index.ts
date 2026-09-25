@@ -1,5 +1,6 @@
 export * from "./app-authorization.js";
 export * from "./attachments.js";
+export * from "./upload.js";
 export * from "./billing.js";
 export * from "./board.js";
 export * from "./board-authoring.js";
@@ -46,6 +47,7 @@ export * from "./app-runtime.js";
 export * from "./app-navigation.js";
 export * from "./app-embed.js";
 export * from "./app-catalog.js";
+export * from "./app-file-handlers.js";
 export * from "./navigation.js";
 export * from "./app-view-stats.js";
 export * from "./app-promotion-stats.js";

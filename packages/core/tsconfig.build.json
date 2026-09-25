@@ -9,6 +9,8 @@
       "@cohub/db": ["../db/dist/index.d.ts"],
       "@cohub/db/schema": ["../db/dist/index.d.ts"],
       "@cohub/db/schema-v2": ["../db/dist/schema-v2.d.ts"],
+      "@cohub/infra": ["../infra/dist/index.d.ts"],
+      "@cohub/infra/config-runtime/skills": ["../infra/dist/config-runtime/skills.d.ts"],
       "@cohub/protocol": ["../protocol/dist/index.d.ts"],
       "@cohub/protocol/core": ["../protocol/dist/core/index.d.ts"],
       "@cohub/protocol/provenance": ["../protocol/dist/provenance.d.ts"],

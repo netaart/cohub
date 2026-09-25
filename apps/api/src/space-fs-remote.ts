@@ -12,6 +12,7 @@ import {
   type SpaceFsWriteFileInput,
 } from "@cohub/protocol/fs";
 import type { RpcEventPayload } from "@cohub/protocol/sandbox";
+import { INLINE_UPLOAD_MAX_FILES, LOCAL_SANDBOX_UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 import { assertSafeRelativePath, getMimeType, isTextMime, resolveReadMimeType, sanitizeFileName, SpaceFsError } from "./space-fs.js";
 import type { SpaceFsVisibility } from "./space-fs-ignore.js";
 import { callSandboxRpc, getSandboxCapabilities, SandboxOfflineError } from "./space-sandbox-rpc.js";
@@ -26,9 +27,6 @@ const MAX_BATCH_READ_FILES = 50;
 const MAX_BATCH_READ_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_BATCH_READ_CONCURRENCY = 8;
 const MAX_TREE_ENTRIES = 1000;
-// base64 inflates ~4/3; keep the encoded frame well under the 50MB ws limit.
-const MAX_UPLOAD_FILE_BYTES = 30 * 1024 * 1024;
-const MAX_UPLOAD_COUNT = 20;
 
 // Local spaces are owner-only (M1), so the owner always gets full visibility.
 // Filtered visibility has no meaningful server-side enforcement here yet.
@@ -486,14 +484,14 @@ function prepareUploadCandidates(
 ): { candidates: UploadCandidate[]; errors: SpaceFsUploadResponse["errors"] } {
   const candidates: UploadCandidate[] = [];
   const errors: SpaceFsUploadResponse["errors"] = [];
-  for (const file of files.slice(0, MAX_UPLOAD_COUNT)) {
+  for (const file of files.slice(0, INLINE_UPLOAD_MAX_FILES)) {
     const safeName = sanitizeFileName(file.name);
     if (!safeName) {
       errors.push({ name: file.name, code: "name_invalid", message: "invalid file name" });
       continue;
     }
-    if (file.size > MAX_UPLOAD_FILE_BYTES) {
-      errors.push({ name: safeName, code: "file_too_large", message: "file exceeds 30MB limit for local sandboxes" });
+    if (file.size > LOCAL_SANDBOX_UPLOAD_MAX_FILE_BYTES) {
+      errors.push({ name: safeName, code: "file_too_large", message: `file exceeds ${LOCAL_SANDBOX_UPLOAD_MAX_FILE_BYTES / (1024 * 1024)}MB limit for local sandboxes` });
       continue;
     }
     try {

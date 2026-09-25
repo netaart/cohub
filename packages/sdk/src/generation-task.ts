@@ -1,0 +1,144 @@
+import {
+	blockDurationMs,
+	blockMimeType,
+	blockNaturalSize,
+	blockPreviewUrl,
+	blockTitle,
+	blockUrl,
+	contentBlocks,
+	generationCovers,
+	generationOutput,
+	generationPrompt,
+	record,
+	taskData,
+} from "./generation-blocks.js";
+import type { TaskRunRecord } from "./types.js";
+
+/** Media a generation delivers; text blocks (revised prompts, refusals) are not outputs. */
+export type GenerationOutputType = "image" | "video" | "audio";
+
+export type GenerationTaskOutput = {
+	index: number;
+	type: GenerationOutputType;
+	/** Null for inline payloads; resolve with {@link generationOutputSource}. */
+	url: string | null;
+	previewUrl: string | null;
+	title: string | null;
+	mimeType: string | null;
+	width: number | null;
+	height: number | null;
+	durationMs: number | null;
+	/** The list response stripped the inline payload; fetch the run detail. */
+	deferred: boolean;
+};
+
+export type GenerationTaskView = {
+	id: string;
+	status: TaskRunRecord["status"];
+	spaceId: string | null;
+	sessionId: string | null;
+	turnId: string | null;
+	model: string | null;
+	prompt: string | null;
+	errorMessage: string | null;
+	outputs: GenerationTaskOutput[];
+	createdAt: string;
+	startedAt: string | null;
+	finishedAt: string | null;
+	updatedAt: string;
+};
+
+const INLINE_KEYS = ["data", "base64", "contentBase64"] as const;
+
+function isDeferred(block: Record<string, unknown>) {
+	return block.deferredBase64 === true || record(block.source)?.deferredBase64 === true;
+}
+
+const MEDIA_TYPE_PATTERN = /^(image|video|audio)\/[\w.+-]+$/;
+const DEFAULT_MEDIA_TYPES: Record<string, string> = {
+	image: "image/png",
+	video: "video/mp4",
+	audio: "audio/mpeg",
+};
+
+function outputType(value: unknown): GenerationOutputType | null {
+	return value === "image" || value === "video" || value === "audio" ? value : null;
+}
+
+/**
+ * Only media blocks become outputs; text such as a revised prompt or a refusal
+ * stays in the raw result. Covers fold into the media they depict.
+ */
+function projectOutputs(run: TaskRunRecord): GenerationTaskOutput[] {
+	const blocks = generationOutput(run);
+	const covers = generationCovers(blocks);
+	const coverIndexes = new Set(covers.values());
+	const coverUrl = (index: number) => {
+		const cover = covers.get(index);
+		return cover === undefined ? undefined : blockUrl(blocks[cover] ?? {});
+	};
+
+	return blocks.flatMap((block, index): GenerationTaskOutput[] => {
+		const type = outputType(block.type);
+		if (!type || coverIndexes.has(index)) return [];
+		const size = blockNaturalSize(block);
+		return [
+			{
+				index,
+				type,
+				url: blockUrl(block) ?? null,
+				previewUrl: blockPreviewUrl(block) ?? coverUrl(index) ?? null,
+				title: blockTitle(block) ?? null,
+				mimeType: blockMimeType(block) ?? null,
+				width: size.naturalWidth ?? null,
+				height: size.naturalHeight ?? null,
+				durationMs: blockDurationMs(block) ?? null,
+				deferred: isDeferred(block),
+			},
+		];
+	});
+}
+
+export function toGenerationTaskView(run: TaskRunRecord): GenerationTaskView {
+	const data = taskData(run);
+	const result = record(run.result);
+	const model = data?.model ?? result?.model;
+	return {
+		id: run.id,
+		status: run.status,
+		spaceId: run.spaceId,
+		sessionId: run.sessionId,
+		turnId: run.turnId,
+		model: typeof model === "string" && model ? model : null,
+		prompt: generationPrompt(run) ?? null,
+		errorMessage: run.errorMessage,
+		outputs: run.status === "completed" ? projectOutputs(run) : [],
+		createdAt: run.createdAt,
+		startedAt: run.startedAt,
+		finishedAt: run.finishedAt,
+		updatedAt: run.updatedAt,
+	};
+}
+
+export function isActiveGenerationTask(task: Pick<GenerationTaskView, "status">) {
+	return task.status === "pending" || task.status === "running";
+}
+
+/** Playable source of an output: its URL, or a data URL for inline payloads. */
+export function generationOutputSource(result: unknown, outputIndex: number): string | null {
+	const block = contentBlocks(record(result)?.output)[outputIndex];
+	if (!block) return null;
+	const url = blockUrl(block);
+	if (url) return url;
+	const source = record(block.source);
+	const data = INLINE_KEYS.map((key) => source?.[key] ?? block[key]).find(
+		(value): value is string => typeof value === "string" && value !== "",
+	);
+	if (!data) return null;
+	const declared = blockMimeType(block);
+	const mediaType =
+		declared && MEDIA_TYPE_PATTERN.test(declared)
+			? declared
+			: (DEFAULT_MEDIA_TYPES[String(block.type)] ?? "application/octet-stream");
+	return `data:${mediaType};base64,${data}`;
+}

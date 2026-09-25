@@ -1,5 +1,99 @@
 # @neta-art/cohub-cli
 
+## 8.4.0
+
+### Minor Changes
+
+- 574bfe8: Lighter media delivery for generation results.
+  
+  - SDK: `mediaPreviewCandidates()`, `imageVariantUrl()`, and `videoFrameUrl()` derive CDN image variants and video stills for OSS-backed hosts, in priority order with the original as fallback. `probeMediaInfo()` reads dimensions, duration, frame count, and first/last frames from OSS meta headers, then `image/info`. `publicAssets.uploadGenerationInput()` uploads a local generation input to an unlisted public URL.
+  - CLI: `cohub generate` uploads local `--image`/`--video`/`--audio` files instead of inlining base64 (inline stays the fallback), and prints each output's size, duration, and last frame; `--json` adds them as `outputMedia`.
+  - Task list views (`tasks.list`, `tasks.getMany`) no longer carry inline generation inputs; such blocks are marked `deferredBase64` and the full run stays available from `tasks.get`.
+- 414397b: Add generation task views and session file listings.
+  
+  - SDK: `toGenerationTaskView()` projects a generation Task Run into display-ready outputs (prompt, model, cover-folded media), with `generationOutputSource()` for inline payloads. `space(id).session(id).files()` lists Space files a session's Agent wrote or edited.
+  - CLI: `cohub spaces sessions files <sessionId>` lists Space files a session's Agent wrote or edited.
+
+### Patch Changes
+
+- Updated dependencies [d23129c]
+- Updated dependencies [d23129c]
+- Updated dependencies [574bfe8]
+- Updated dependencies [574bfe8]
+- Updated dependencies [d23129c]
+- Updated dependencies [414397b]
+  - @neta-art/cohub@8.23.0
+
+## 8.3.1
+
+### Patch Changes
+
+- 58d2262: Fix `cohub runtime up` failing with `Cannot find module …/native-pi-extension.js` after upgrading from CLI 8.0–8.2: before any harness starts, the legacy Pi extension is replaced and legacy Codex hooks are removed. 修复从 CLI 8.0–8.2 升级后 `cohub runtime up` 因旧版 Pi 扩展启动失败的问题：启动任何 Harness 前自动替换旧 Pi 扩展并移除旧 Codex Hooks。
+
+## 8.3.0
+
+### Minor Changes
+
+- c276360: Local Runtime native sessions, rebuilt around the harnesses' own files and control interfaces. Pi and Codex session files are now the only durable record: the Runtime watches them (the bound folder and its subdirectories, unless one is bound to a Space of its own), sends new Turns over its WebSocket, and after a restart asks the server which Turns it already has instead of keeping local delivery receipts. Codex's internal threads and spawned sub-agents are skipped. Pi is driven through a self-contained extension (`cohub runtime attach --harness pi`, or on `runtime up`), so the web streams, stops and continues terminal Pi sessions; Codex 0.156+ uses its shared app-server on consent, so web and terminal drive the same live thread, falling back to a private app-server with read-only terminal sync. Codex hooks and the Pi capture extension are removed. `runtime import` keeps its options but now runs inside the Runtime: newest first, four at a time (`--concurrency` up to 8), Ctrl-C pauses and running it again resumes. Persistence is event-driven and separate from the live preview: a transcript is parsed only when a Turn begins or ends, previews send only changed messages, stops are pushed to the Runtime instead of polled, and a connected Pi's tools see the current Turn in `COHUB_TURN_ID`. The SDK exports the new `ingest` / `known` / `status` native event schemas and the `runtime.native.stop` frame in place of `start` / `complete` / `heartbeat`. 本地 Runtime 原生会话改为以 Pi / Codex 自身的会话文件为唯一记录，服务端为唯一账本，不再有本地回执；Pi 通过扩展、Codex 通过官方共享 app-server 接入，Web 可实时查看、停止并继续终端会话；`runtime import` 在 Runtime 内执行，最近优先、可暂停与续传。
+
+### Patch Changes
+
+- Updated dependencies [58ec12e]
+- Updated dependencies [c276360]
+- Updated dependencies [589c62c]
+  - @neta-art/cohub@8.22.0
+
+## 8.2.0
+
+### Minor Changes
+
+- 1ee9519: Follow Codex paginated rollout lineage during native sync and import
+  
+  Codex keeps one logical conversation across several rollout files: each rollover or fork writes a fresh rollout that references an immutable prefix of its parent through `session_meta.history_base`. Cohub previously rejected those files and bound sync to a single file, so imported history stopped following the conversation once Codex rolled over.
+  
+  - Native Codex transcripts now resolve the full `history_base` chain (active or archived, plain or `.zst`) and parse it as one conversation with exact `end_ordinal_exclusive` / `end_byte_offset` boundaries.
+  - Turn receipts record their source rollout file and merged order, so archives are captured from the file that actually holds each Turn's bytes; the leaf binding follows the newest rollout while the ancestor stays untouched.
+  - `cohub runtime import` skips ancestor rollouts and imports each stitched conversation once from its leaf file.
+  
+  Managed Runtime sessions that rolled over keep their settled cloud Turns as a continuation boundary, and a leaf archive whose ancestor it does not carry refuses to restore (rebuilding from durable Session history instead). Missing ancestors, cyclic references, cross-project lineages, and boundaries that are not at a completed Turn fail explicitly without touching original files.
+
+## 8.1.1
+
+### Patch Changes
+
+- 40db2c9: Stop warning about `Cohub sync pending: ENOENT … realpath` before a native transcript exists. Pi and Codex create their session files lazily, so a capture request for a not-yet-written transcript (or for a workspace that was removed) is now treated as nothing-to-capture instead of a sync failure, and the daemon reports it as a skip rather than an error. Runtime import records that race as skipped instead of failed. Remove the fixed-interval native sync scans: Pi now relies on lifecycle events, while Runtime reconciliation is event-driven with bounded retries after failures or reconnects. Bilingual summary: 修复原生会话文件尚未写入时误报 `Cohub sync pending: ENOENT … realpath` 的问题——Pi 与 Codex 都是延迟创建会话文件，因此对尚未生成的 transcript（或已被删除的工作区）的采集请求现在视为「暂无可同步内容」而非同步失败，daemon 也会以 skip 而非 error 返回；Runtime import 遇到该竞态时会记录为 skipped 而不是 failed。同时移除固定间隔的 native sync 扫描：Pi 改用生命周期事件触发，Runtime reconciliation 改为事件驱动，仅在失败或重连后进行有上限的重试。
+
+## 8.1.0
+
+### Minor Changes
+
+- d84afb3: Merge `cohub runtime attach` into `runtime up`: native chat sync is now installed by default after one explicit consent (default yes), with all interactive prompts defaulting to yes. `up` is idempotent — an already-enabled configuration is skipped silently, and after `detach` the next `up` asks again — while declining or a capability failure keeps the Runtime running without native sync. `runtime status` now reports native sync enablement (`nativeSync`) and per-Harness pending Turns/archives. The standalone `attach` command is removed. Add `cohub runtime import` to safely discover and import existing Pi/Codex conversations for the bound project while preserving original timestamps and local transcripts.
+  
+  `cohub runtime attach` 并入 `runtime up`：原生对话同步默认在单独确认一次（默认 yes）后安装，所有交互询问默认 yes。`up` 幂等——已启用则静默跳过，`detach` 后下次再询问；拒绝或能力不满足时 Runtime 照常运行。`runtime status` 新增原生同步开关（`nativeSync`）与各 Harness 的待同步 Turn / 归档明细，并移除独立的 `attach` 命令。新增 `cohub runtime import`，可安全发现并导入当前绑定项目已有的 Pi/Codex 对话，同时保留原始时间与本地 transcript。
+
+### Patch Changes
+
+- 9c3ce38: Bundle `sandboxd` `v2.55.0`, keeping the same compatible runner protocol while aligning the CLI download with the `v2.55` platform release.
+  
+  内置 `sandboxd` 升级至 `v2.55.0`，保持兼容的 runner 协议不变，并让 CLI 下载版本与 `v2.55` 平台版本对齐。
+- 979e172: Fix diagnostics URL redaction: healthy URLs stay byte-identical instead of being re-encoded (the trailing `"` from wrapped log lines no longer becomes `%22`), and the matcher no longer swallows quotes or angle brackets. Bilingual summary: 修复诊断日志的 URL 脱敏——无敏感参数的 URL 保持原样（不再把日志换行携带的 `"` 重编码成 `%22`），匹配也不再吞掉引号与尖括号。
+- Updated dependencies [886f6b1]
+  - @neta-art/cohub@8.21.1
+
+## 8.0.1
+
+### Patch Changes
+
+- eecee2b: Process-group cleanup treats EPERM on an emptied group as the normal end state on every platform, probes Windows trees through leader liveness, backs off snapshot polling, and never lets a cleanup failure mask a finished native result. A completed native Turn whose receipt was lost is rebuilt from native bytes on recovery, and serve-path archive uploads resume through the Space transport again.
+  
+  进程组清理在所有平台将空组的 EPERM 视为正常终态，Windows 通过组长存活性确认进程树，轮询快照退避，且清理失败不再掩盖已完成的原生结果；回执丢失但原生侧已完成的 Turn 会从原生字节重建结果，serve 路径的归档上传恢复经由 Space 传输层落地。
+- 1aa68f2: Runtime reconnects retake their own lease deterministically (same runtimeId replaces the stale entry instead of waiting out the TTL) and control-plane heartbeats are decoupled from lease I/O, so a slow authorize or Redis renew can never starve the client into a timeout.
+  
+  Runtime 重连可确定性接管自己的租约（同一 runtimeId 直接替换过期条目而非等待 TTL），控制面心跳与租约 I/O 解耦，慢速 authorize 或 Redis 续租不会再让客户端活活饿到超时。
+- 3e0fe28: Bundle `sandboxd` `v2.54.1`, a diagnostics-only follow-up that keeps the same wire protocol: relay data-channel pairing now outlives the runner's dial timeout, sandbox dial failures distinguish a timeout from an explicit rejection, and teardown-time websocket write failures log at debug instead of warn. No new capability is required, so older binaries stay usable through the compatibility readiness/restart path.
+  
+  内置 `sandboxd` 升级至 `v2.54.1`——保持同一线协议的纯诊断增强：中继数据通道配对不再受运行器拨号超时限制，sandbox 拨号失败可区分超时与显式拒绝，拆除阶段的 websocket 写失败由 warn 降为 debug。不引入新能力，较旧二进制仍走兼容的就绪检查／重启路径。
+
 ## 8.0.0
 
 ### Major Changes

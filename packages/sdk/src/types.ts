@@ -1,6 +1,9 @@
 import type {
   SessionBindingRecord as ProtocolSessionBindingRecord,
   SessionRecord as ProtocolSessionRecord,
+  SessionFileChangeKind,
+  SessionFileRecord,
+  SessionFilesResponse,
   SessionForkRecord,
   SessionTurnIndexItem,
   SessionTurnRecord,
@@ -539,6 +542,7 @@ export type BillingConversionIntent = {
   primaryAction: {
     label: string;
     action: "open_billing_conversion";
+    href?: string;
   };
   source: string;
 };
@@ -606,6 +610,9 @@ export type {
   StoredIntermediateMessage,
   StoredToolCall,
   TurnIntermediateMessagesFile,
+  SessionFileChangeKind,
+  SessionFileRecord,
+  SessionFilesResponse,
   SessionForkRecord,
   SessionTurnSegmentRecord,
   CreateGenerationTaskRequest,

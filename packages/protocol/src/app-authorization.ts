@@ -7,10 +7,8 @@ export const appAuthorizationTargetSchema = z.discriminatedUnion("kind", [
 ]);
 
 /**
- * Read-only permissions the trusted Shell may grant without opening consent.
- * This is a Host-side rule: the Shell compares the request against the Space
- * it is actually showing, and the API still checks the viewer's real Space
- * permissions because it never learns whether consent was interactive.
+ * Read-only scopes the Shell may renew without a dialog for any App on the
+ * Space it shows. The API still checks the viewer's own permissions.
  */
 export const APP_SILENT_SHELL_SCOPES = [
   "space.view",
@@ -25,6 +23,18 @@ const APP_SILENT_SHELL_SCOPE_SET = new Set<string>(APP_SILENT_SHELL_SCOPES);
 
 export const isAppSilentShellScope = (scope: string): boolean =>
   APP_SILENT_SHELL_SCOPE_SET.has(scope);
+
+/**
+ * The API-enforced ceiling for Host consent (`consent: "host"`), given to Apps
+ * the Shell Space published or installed. Trust is decided by the Shell, the
+ * only holder of the viewer's token.
+ */
+export const APP_HOST_CONSENT_SCOPES = [...APP_SILENT_SHELL_SCOPES, "file.edit"] as const;
+
+const APP_HOST_CONSENT_SCOPE_SET = new Set<string>(APP_HOST_CONSENT_SCOPES);
+
+export const isAppHostConsentScope = (scope: string): boolean =>
+  APP_HOST_CONSENT_SCOPE_SET.has(scope);
 
 export const appAuthorizationRequestSchema = z.object({
   target: appAuthorizationTargetSchema,

@@ -22,7 +22,7 @@
     "@fontsource/geist": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.8",
     "@lucide/svelte": "^1.33.0",
-    "@neta-art/cohub": "^8.18.0",
+    "@neta-art/cohub": "^8.21.0",
     "svelte": "^5.56.9"
   },
   "devDependencies": {

@@ -1,8 +1,8 @@
-import { GATEWAY_ATTACHMENT_MAX_BYTES } from "@cohub/protocol/gateway";
+import { UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 import { WeChatMessageItemType, type WeChatCdnMedia, type WeChatMessageItem } from "../types.js";
 import { downloadWeChatCdnFile } from "./cdn.js";
 
-export const WECHAT_INBOUND_FILE_MAX_BYTES = GATEWAY_ATTACHMENT_MAX_BYTES;
+export const WECHAT_INBOUND_FILE_MAX_BYTES = UPLOAD_MAX_FILE_BYTES;
 export const WECHAT_INBOUND_FILE_MAX_COUNT = 8;
 
 const extensionMimeTypes: Record<string, string> = {

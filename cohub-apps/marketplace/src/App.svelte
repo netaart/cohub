@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { AppRuntimeInvocationContext, Permission, SpaceFsFileResponse } from "@neta-art/cohub";
-import { APPS_PATH, emptyManifest, isPermissionError, parseCatalog, parseManifest, toInstalledApp, type FileState, type InstalledApp, type MarketplaceEntry } from "./catalog";
+import { APPS_PATH, emptyManifest, isPermissionError, parseCatalog, parseManifest, toInstalledApp, unclaimedFileHandlers, type FileState, type InstalledApp, type MarketplaceEntry } from "./catalog";
 import { createCohubClient } from "@neta-art/cohub";
 import { AlertCircle, Check, LoaderCircle, PackageOpen, Search } from "@lucide/svelte";
 import { onMount } from "svelte";
@@ -129,7 +129,10 @@ async function install(app: MarketplaceEntry) {
     space = { id: result.target.spaceId, name: result.target.name };
     const current = await readInstalled();
     if (current.document.apps.some((item) => item.id === app.id)) { installed = current.document.apps; return; }
-    const next = { ...current.document, apps: [...current.document.apps, toInstalledApp(app)] };
+    // Declared file types come from the App's published page; a lookup failure only skips them.
+    const declared = await client.apps.getPublicById(app.id).then((detail) => detail.app.meta?.fileHandlers, () => undefined);
+    const opens = unclaimedFileHandlers(current.document, declared);
+    const next = { ...current.document, apps: [...current.document.apps, toInstalledApp(app, undefined, opens)] };
     const writeResult = await client.space(space.id).files.write({ path: APPS_PATH, content: `${JSON.stringify(next, null, 2)}\n`, encoding: "utf-8", ...(current.revision ? { expected: current.revision } : {}), mutationId: crypto.randomUUID() });
     installed = next.apps;
     void writeResult;

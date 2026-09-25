@@ -5,14 +5,16 @@ import {
   RUNTIME_PROTOCOL_VERSION,
   runtimeCommandSchema,
   runtimeReadySchema,
+  runtimeNativeStopSchema,
+  type RuntimeNativeStop,
   type RuntimeCapabilities,
   type RuntimeContext,
   type RuntimeExecutionEvent,
   type NativeRuntimeEvent,
 } from "@neta-art/cohub";
-import { executeCodex, executePi, type HarnessOptions, type HarnessResult } from "./harness.js";
+import { executeTurn, type Executor, type HarnessResult } from "./native/execution.js";
+import { ContextRequiredError } from "./native/results.js";
 import { ProcessCleanupUncertainError } from "./process-group.js";
-import { ContextRequiredError, type RuntimeSessionStore } from "./session-store.js";
 import {
   serializeDiagnosticError,
   type RuntimeDiagnosticContext,
@@ -35,16 +37,17 @@ export type RuntimeConnectionOptions = {
   cwd: string;
   url: string;
   capabilities: RuntimeCapabilities;
-  harnesses: HarnessOptions;
   token: (forceRefresh?: boolean) => Promise<string>;
   signal: AbortSignal;
-  store: RuntimeSessionStore;
+  executor: Executor;
   onReady: () => void;
   onDisconnected?: () => void;
   runtimeId?: string;
   diagnostics?: RuntimeDiagnostics;
   leaseConflictTimeoutMs?: number;
   onNativeChannel?: (send: (event: NativeRuntimeEvent) => Promise<unknown>) => void;
+  /** The web asked to stop a Turn; one running in a native client is stopped there. */
+  onNativeStop?: (stop: RuntimeNativeStop) => void;
 };
 
 export async function serveRuntime(options: RuntimeConnectionOptions) {
@@ -60,7 +63,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
     data?: Record<string, unknown>,
     context?: RuntimeDiagnosticContext,
   ) => options.diagnostics?.log(level, event, data, context);
-  const flush = () => options.store.flushArchives(uploadSignal).catch((error) => {
+  const flush = () => options.executor.archives.flush(uploadSignal).catch((error) => {
     if (!uploadSignal.aborted) {
       log("warn", "archive.flush_failed", { error: serializeDiagnosticError(error) });
       // The diagnostic sink handles terminal presentation and throttling.
@@ -80,7 +83,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
     while (!options.signal.aborted) {
       attempt += 1;
       let readyAt = 0;
-      let outcome: "retry" | "fatal" | "conflict";
+      let outcome: ConnectOutcome;
       try {
         outcome = await connect({
           ...options,
@@ -96,13 +99,13 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
       } catch (error) {
         if (options.signal.aborted) return;
         log("warn", "runtime.connection_failed", { error: serializeDiagnosticError(error) });
-        outcome = "retry";
+        outcome = { kind: "retry" };
       }
       options.onDisconnected?.();
       if (options.signal.aborted) return;
-      if (outcome === "fatal") throw new Error("Runtime connection rejected / Runtime 连接被拒绝，请检查权限或升级 CLI");
+      if (outcome.kind === "fatal") throw new Error(`Runtime connection rejected (${[outcome.code, outcome.reason].filter(Boolean).join(" ")}); ${outcome.code === 4403 ? "check Space permissions" : "upgrade the CLI"}`);
       if (readyAt && Date.now() - readyAt >= 60_000) { backoff = 500; attempt = 0; }
-      if (outcome === "conflict") {
+      if (outcome.kind === "conflict") {
         conflictSince ??= Date.now();
         if (Date.now() - conflictSince >= (options.leaseConflictTimeoutMs ?? 90_000)) {
           throw new Error("Space is already connected to another Runtime");
@@ -111,7 +114,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
       log("debug", "runtime.reconnect_scheduled", {
         attempt: attempt || 1,
         delayMs: backoff,
-        outcome,
+        outcome: outcome.kind,
       });
       await delay(backoff / 2 + Math.random() * backoff / 2, undefined, { signal: options.signal }).catch(() => undefined);
       backoff = Math.min(30_000, backoff * 2);
@@ -128,6 +131,11 @@ type ConnectOptions = RuntimeConnectionOptions & {
   runtimeId: string;
   attempt: number;
 };
+
+type ConnectOutcome =
+  | { kind: "retry" }
+  | { kind: "fatal"; code: number; reason: string }
+  | { kind: "conflict" };
 
 function executionContext(
   connectionId: string | null,
@@ -149,7 +157,7 @@ function executionContext(
   };
 }
 
-async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "conflict"> {
+async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
   const log = (
     level: "debug" | "info" | "warn" | "error",
     event: string,
@@ -180,6 +188,8 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
   let lastHeartbeat = Date.now();
   let connectionId: string | null = null;
   let fatal = false;
+  let fatalCode = 0;
+  let fatalReason = "";
   let conflict = false;
   let unauthorized = false;
   let readyTimer: ReturnType<typeof setTimeout>;
@@ -202,19 +212,21 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
     }
     socket.send(data);
   };
-  const stop = () => {
+  const closeTransport = () => socket.close();
+  const shutdown = () => {
     for (const execution of active.values()) execution.controller.abort();
-    socket.close();
+    closeTransport();
   };
   const sendNative = (event: NativeRuntimeEvent) => new Promise<unknown>((resolve, reject) => {
     if (!nativeChannelReady || !connectionId) { reject(new Error("Runtime native channel is unavailable")); return; }
     const requestId = randomUUID();
-    const timer = setTimeout(() => { nativePending.delete(requestId); reject(new Error("Native Runtime event timed out")); }, 30_000);
+    // An ingest batch writes each of its Turns durably; everything else answers from memory or one row.
+    const timer = setTimeout(() => { nativePending.delete(requestId); reject(new Error("Native Runtime event timed out")); }, event.type === "ingest" ? 120_000 : 30_000);
     nativePending.set(requestId, { resolve, reject, timer });
     try { send({ type: "runtime.native", requestId, event }); }
     catch (error) { clearTimeout(timer); nativePending.delete(requestId); reject(error instanceof Error ? error : new Error(String(error))); }
   });
-  options.signal.addEventListener("abort", stop, { once: true });
+  options.signal.addEventListener("abort", shutdown, { once: true });
 
   const heartbeat = setInterval(() => {
     const heartbeatAgeMs = Date.now() - lastHeartbeat;
@@ -223,12 +235,7 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
         ageMs: heartbeatAgeMs,
         activeExecutions: active.size,
       }, { connectionId });
-      for (const execution of active.values()) {
-        log("error", "runtime.execution_heartbeat_timeout", {
-          ageMs: heartbeatAgeMs,
-        }, executionContext(connectionId, execution));
-      }
-      stop();
+      closeTransport();
     } else if (connectionId) {
       try {
         send({ type: "runtime.heartbeat" });
@@ -236,7 +243,7 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
         log("warn", "runtime.heartbeat_send_failed", {
           error: serializeDiagnosticError(error),
         }, { connectionId });
-        stop();
+        closeTransport();
       }
       void options.token().then((next) => {
         if (next !== currentToken) {
@@ -248,12 +255,12 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
             log("warn", "runtime.auth_refresh_send_failed", {
               error: serializeDiagnosticError(error),
             }, { connectionId });
-            stop();
+            closeTransport();
           }
         }
       }).catch((error) => {
         log("warn", "runtime.auth_refresh_failed", { error: serializeDiagnosticError(error) }, { connectionId });
-        stop();
+        closeTransport();
       });
     }
   }, 10_000);
@@ -262,9 +269,10 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
     socket.addEventListener("close", (event) => {
       unauthorized = event.code === 4401;
       fatal = [4400, 4403].includes(event.code);
+      if (fatal) { fatalCode = event.code; fatalReason = event.reason; }
       conflict = event.code === 4409;
       disconnected.abort();
-      log(options.signal.aborted ? "debug" : fatal || conflict ? "error" : "warn", "runtime.websocket.closed", {
+      log(options.signal.aborted ? "debug" : fatal || conflict ? "error" : "warn", fatal ? "runtime.websocket.rejected" : "runtime.websocket.closed", {
         code: event.code,
         reason: event.reason,
         durationMs: Date.now() - connectedAt,
@@ -276,12 +284,13 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
       for (const pending of nativePending.values()) { clearTimeout(pending.timer); pending.reject(new Error("Runtime native channel disconnected")); }
       nativePending.clear();
       options.onDisconnected?.();
+      const executionMustStop = options.signal.aborted || fatal || conflict;
       for (const execution of active.values()) {
-        log("error", "runtime.execution_transport_lost", {
+        log(executionMustStop ? "error" : "warn", executionMustStop ? "runtime.execution_transport_invalidated" : "runtime.execution_transport_detached", {
           code: event.code,
           reason: event.reason,
         }, executionContext(connectionId, execution));
-        execution.controller.abort();
+        if (executionMustStop) execution.controller.abort();
       }
       resolve();
     }, { once: true });
@@ -310,7 +319,7 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
       });
     } catch (error) {
       log("error", "runtime.hello_failed", { error: serializeDiagnosticError(error) });
-      stop();
+      closeTransport();
     }
   });
   socket.addEventListener("message", (event) => {
@@ -322,6 +331,9 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
         log("error", "runtime.protocol.invalid_json", { error: serializeDiagnosticError(error) }, { connectionId });
         throw error;
       }
+      // Any inbound frame proves the transport is live; heartbeat frames are one case.
+      lastHeartbeat = Date.now();
+
 
       if (raw.type === "runtime.ready") {
         const frame = runtimeReadySchema.parse(raw);
@@ -337,7 +349,7 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
         options.onNativeChannel?.(sendNative);
         options.onReady();
         let recoveryBatch = 0;
-        for await (const executions of options.store.pendingExecutionBatches()) {
+        for await (const executions of options.executor.results.pendingBatches()) {
           recoveryBatch += 1;
           log("info", "runtime.recovery_batch_sent", {
             batch: recoveryBatch,
@@ -349,7 +361,12 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
       }
       if (!connectionId) throw new Error("Runtime handshake is incomplete");
       if (raw.type === "runtime.heartbeat") {
-        lastHeartbeat = Date.now();
+        return;
+      }
+      if (raw.type === "runtime.native.stop") {
+        const stop = runtimeNativeStopSchema.safeParse(raw);
+        if (!stop.success) { log("warn", "runtime.protocol.invalid_native_stop", { error: stop.error.message }, { connectionId }); return; }
+        if (stop.data.spaceId === options.spaceId) options.onNativeStop?.(stop.data);
         return;
       }
       if (raw.type === "runtime.native.result") {
@@ -382,7 +399,7 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
         try {
           await execution.promise;
           if (!execution.result) throw new Error("Runtime result is not available");
-          await options.store.acknowledge(execution.result.state, frame.turnId, frame.revision);
+          await options.executor.results.acknowledge(execution.sessionId, frame.turnId);
         } catch (error) {
           log("error", "runtime.turn_ack_failed", {
             revision: frame.revision,
@@ -411,7 +428,7 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
         if (previous) {
           if (previous.sessionId !== identity.sessionId || previous.turnId !== identity.turnId || previous.harness !== identity.harness) throw new Error("Runtime recovery identity changed");
           await previous.promise;
-          const saved = await options.store.recoverResult(identity);
+          const saved = await options.executor.results.recover(identity);
           if (saved) for (const event of saved.events) send({ type: "runtime.event", requestId: frame.requestId, event });
           return;
         }
@@ -431,11 +448,11 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
               await running[1].promise;
               active.delete(running[0]);
             }
-            const saved = await options.store.recoverResult(identity);
+            const saved = await options.executor.results.recover(identity);
             recovery.controller.signal.throwIfAborted();
             const last = saved?.events.at(-1);
             if (!saved || last?.type !== "turn.end") throw new Error("No confirmed result");
-            recovery.result = { state: saved.state, event: last };
+            recovery.result = { session: saved.session, event: last };
             for (const event of saved.events) send({ type: "runtime.event", requestId: frame.requestId, event });
           } catch (error) {
             if (!recovery.controller.signal.aborted) {
@@ -463,14 +480,14 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
       if (previous) {
         if (previous.sessionId !== frame.input.sessionId || previous.turnId !== frame.input.turnId || previous.harness !== frame.input.harness) throw new Error("Runtime execution identity changed");
         await previous.promise;
-        const saved = await options.store.recoverResult(frame.input, frame.requestId);
+        const saved = await options.executor.results.recover(frame.input, frame.requestId);
         if (saved) for (const event of saved.events) send({ type: "runtime.event", requestId: frame.requestId, event });
         return;
       }
       const requestContext = async (executionSignal: AbortSignal) => {
         const signal = AbortSignal.any([executionSignal, disconnected.signal]);
         signal.throwIfAborted();
-        const pendingTurnIds = await options.store.pendingTurnIds(frame.input.sessionId);
+        const pendingTurnIds = await options.executor.results.pendingTurnIds(frame.input.sessionId);
         log("debug", "runtime.context_requested", { pendingTurnCount: pendingTurnIds.length }, context);
         return new Promise<RuntimeContext>((resolve, reject) => {
           const abort = () => {
@@ -529,15 +546,22 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
       const durableEvents: RuntimeExecutionEvent[] = [];
       const emit = (value: RuntimeExecutionEvent) => {
         if (value.type === "message.commit") durableEvents.push(value);
-        send({ type: "runtime.event", requestId: frame.requestId, event: value });
+        // Streaming is best-effort. A detached transport must not cancel local model or tool work;
+        // durable commits and the final result are replayed after reconnect.
+        if (disconnected.signal.aborted || socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > RUNTIME_MAX_FRAME_BYTES) return;
+        try {
+          send({ type: "runtime.event", requestId: frame.requestId, event: value });
+        } catch (error) {
+          if (!disconnected.signal.aborted && socket.readyState === WebSocket.OPEN) throw error;
+        }
       };
       execution.promise = (async () => {
         try {
-          const saved = await options.store.recoverResult(frame.input, frame.requestId);
+          const saved = await options.executor.results.recover(frame.input, frame.requestId);
           if (saved) {
             const last = saved.events.at(-1);
             if (last?.type !== "turn.end") throw new Error("Incomplete saved Runtime result");
-            execution.result = { state: saved.state, event: last };
+            execution.result = { session: saved.session, event: last };
             for (const event of saved.events) emit(event);
             return;
           }
@@ -546,7 +570,7 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
             active.delete(frame.requestId);
             return;
           }
-          const run = () => (frame.input.harness === "pi" ? executePi : executeCodex)(frame.input, options.harnesses, options.cwd, options.store, emit, controller.signal, options.diagnostics, context);
+          const run = () => executeTurn(options.executor, frame.input, emit, controller.signal, frame.requestId, context);
           // Preparation can request context, then fall back once from native archive to DB.
           // These retries precede started(), so they never replay model or tool work.
           for (let retry = 0; ; retry += 1) {
@@ -558,7 +582,10 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
               frame.input.context = await requestContext(controller.signal);
             }
           }
-          await options.store.recordResult(execution.result.state, frame.requestId, [...durableEvents, execution.result.event]);
+          await options.executor.results.record(execution.result.session, frame.input, frame.requestId, [...durableEvents, execution.result.event], execution.result.uncertainCleanup);
+          if (execution.result.uncertainCleanup) {
+            log("warn", "runtime.turn_cleanup_pending", { cleanup: execution.result.uncertainCleanup.error }, context);
+          }
           emit(execution.result.event);
         } catch (error) {
           log("error", "runtime.turn_failed", {
@@ -575,7 +602,7 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
       })();
     })().catch((error) => {
       log("error", "runtime.protocol_error", { error: serializeDiagnosticError(error) }, { connectionId });
-      stop();
+      closeTransport();
     });
   });
 
@@ -583,15 +610,15 @@ async function connect(options: ConnectOptions): Promise<"retry" | "fatal" | "co
     log("error", "runtime.handshake_timeout", { timeoutMs: 15_000 }, { connectionId });
     socket.close(4408, "Runtime handshake timed out");
   }, 15_000);
-  if (options.signal.aborted) stop();
+  if (options.signal.aborted) shutdown();
   try {
     await closed;
     await Promise.allSettled([...active.values()].map((entry) => entry.promise));
   } finally {
     clearTimeout(readyTimer);
     clearInterval(heartbeat);
-    options.signal.removeEventListener("abort", stop);
+    options.signal.removeEventListener("abort", shutdown);
   }
   if (unauthorized && !options.signal.aborted) await options.token(true);
-  return fatal ? "fatal" : conflict ? "conflict" : "retry";
+  return fatal ? { kind: "fatal", code: fatalCode, reason: fatalReason } : conflict ? { kind: "conflict" } : { kind: "retry" };
 }
