@@ -31,7 +31,7 @@ import {
   createLocalCrossSpaceLsTool,
   createLocalCrossSpaceReadTool,
 } from "../runtime/tools/local-cross-space-query-tools.js";
-import { formatRgJsonGrepResult } from "../runtime/tools/grep-json-format.js";
+import { createRgJsonGrepCollector, formatRgJsonGrepResult } from "../runtime/tools/grep-json-format.js";
 
 
 import { encodeGenerationPolicy, GENERATION_POLICY_ENV_KEY } from "@cohub/protocol/generation";
@@ -985,8 +985,7 @@ function buildRgGrepArgv(input: GrepToolInput, searchPath: string) {
     "!.git/**",
   ];
   // Match the legacy fs.grep request: maxCount is only sent when the user
-  // explicitly provides limit, while limit itself is applied to returned JSON
-  // lines for compatibility during rollout.
+  // explicitly provides limit. The total limit counts matches when formatting.
   if (input.limit && input.limit > 0) argv.push("--max-count", String(input.limit));
   if (input.context && input.context > 0) argv.push("--context", String(input.context));
   if (input.ignoreCase) argv.push("--ignore-case");
@@ -996,7 +995,7 @@ function buildRgGrepArgv(input: GrepToolInput, searchPath: string) {
   return argv;
 }
 
-function isRgNoMatchOutput(lines: string[]) {
+function isRgNoMatchOutput(lines: readonly string[]) {
   if (lines.length === 0) return true;
   return lines.every((line) => {
     try {
@@ -1080,31 +1079,17 @@ function createRemoteGrepTool() {
       }
       try {
         if (connection.capabilities?.processStartArgv) {
-          const lines: string[] = [];
+          const collector = createRgJsonGrepCollector({ searchPath: grepInput.path, limit: effectiveLimit });
           const stderrChunks: string[] = [];
           const updates = createThrottledTextToolUpdate(onUpdate, { maxChars: DEFAULT_MAX_BYTES });
-          let lineBuffer = "";
           let stdoutBytes = 0;
           let stderrBytes = 0;
           let stdoutLimitReached = false;
           const argv = buildRgGrepArgv(grepInput, searchPath);
           const emitPartial = () => {
-            const partial = formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
+            const partial = collector.format();
             const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
             if (partialText && partialText !== "No matches found") updates.push(partialText);
-          };
-          const consumeStdout = (chunk: string) => {
-            lineBuffer += chunk;
-            const completeLines = lineBuffer.split("\n");
-            lineBuffer = completeLines.pop() ?? "";
-            let changed = false;
-            for (const line of completeLines) {
-              const trimmed = line.trim();
-              if (!trimmed) continue;
-              lines.push(trimmed);
-              changed = true;
-            }
-            if (changed) emitPartial();
           };
 
           const result = await tracedRpc(
@@ -1140,7 +1125,7 @@ function createRemoteGrepTool() {
                     abortProcess(activeProcessId);
                     return;
                   }
-                  consumeStdout(event.chunk);
+                  if (collector.push(event.chunk)) emitPartial();
                   return;
                 }
 
@@ -1152,15 +1137,11 @@ function createRemoteGrepTool() {
             },
           );
 
-          if (lineBuffer.trim()) {
-            lines.push(lineBuffer.trim());
-            lineBuffer = "";
-            emitPartial();
-          }
+          if (collector.end()) emitPartial();
           updates.flush();
 
           if (aborted) {
-            const partial = formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
+            const partial = collector.format();
             const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
             return {
               content: [{ type: "text" as const, text: partialText && partialText !== "No matches found" ? `${partialText}\n\n[Operation aborted.]` : "[Operation aborted.]" }],
@@ -1169,7 +1150,7 @@ function createRemoteGrepTool() {
           }
 
           if (stdoutLimitReached) {
-            const partial = formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
+            const partial = collector.format();
             const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
             return {
               content: [{ type: "text" as const, text: partialText && partialText !== "No matches found" ? `${partialText}\n\n[${RG_GREP_OUTPUT_LIMIT_MESSAGE}]` : RG_GREP_OUTPUT_LIMIT_MESSAGE }],
@@ -1180,14 +1161,14 @@ function createRemoteGrepTool() {
           const exitCode = result.exitCode ?? 0;
           const stderr = stderrChunks.join("").trim();
           const ignorableRgError = stderr.includes("No files were searched");
-          if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(lines)) && !ignorableRgError) {
+          if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(collector.lines)) && !ignorableRgError) {
             return {
               content: [{ type: "text" as const, text: stderr || `rg exited with code ${exitCode}` }],
               details: createToolFailure(stderr || `rg exited with code ${exitCode}`),
             };
           }
 
-          return formatRgJsonGrepResult({ lines: lines.slice(0, effectiveLimit), searchPath: grepInput.path, limit: effectiveLimit });
+          return collector.format();
         }
 
         const result = await tracedRpc(
