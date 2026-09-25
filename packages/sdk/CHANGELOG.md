@@ -1,5 +1,11 @@
 # @neta-art/cohub
 
+## 8.23.1
+
+### Patch Changes
+
+- 73211f9: `toGenerationTaskView()` outputs are media only. Text blocks, such as a revised prompt next to an image or a text-only refusal, stay in the raw result instead of listing as outputs; `GenerationOutputType` drops `"text"` and `GenerationTaskOutput` drops `text`.
+
 ## 8.23.0
 
 ### Minor Changes
