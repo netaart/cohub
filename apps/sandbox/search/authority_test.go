@@ -47,11 +47,12 @@ func (w *fakeWatch) set(settled bool, syncErr error) {
 }
 
 type fakeSearch struct {
-	apiVersion   int
-	failUpdates  atomic.Bool
-	blockUpdates chan struct{}
-	queries      atomic.Int32
-	reconciles   atomic.Int32
+	apiVersion     int
+	failUpdates    atomic.Bool
+	failReconciles atomic.Bool
+	blockUpdates   chan struct{}
+	queries        atomic.Int32
+	reconciles     atomic.Int32
 }
 
 func startFakeSearch(t *testing.T, search *fakeSearch) string {
@@ -72,6 +73,10 @@ func startFakeSearch(t *testing.T, search *fakeSearch) string {
 	})
 	mux.HandleFunc("/index/reconcile", func(w http.ResponseWriter, _ *http.Request) {
 		search.reconciles.Add(1)
+		if search.failReconciles.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusAccepted)
 	})
 	mux.HandleFunc("/index/update", func(w http.ResponseWriter, _ *http.Request) {
@@ -194,6 +199,30 @@ func TestLostBatchesKeepPlansOffTheIndexUntilAReconcile(t *testing.T) {
 	}
 	waitFor(t, func() bool {
 		return search.reconciles.Load() > reconciles && manager.processReady.Load() && manager.inflight.Load() == 0
+	})
+	if got := planFallback(t, manager); got != "" {
+		t.Fatalf("fallback after the covering reconcile = %q", got)
+	}
+}
+
+func TestInvalidatedIndexWaitsForAReconcileAcceptedAfterwards(t *testing.T) {
+	search := &fakeSearch{apiVersion: APIVersion}
+	watch := &fakeWatch{settled: true}
+	manager := startActivatedManager(t, startFakeSearch(t, search), watch)
+	reconciles := search.reconciles.Load()
+
+	search.failReconciles.Store(true)
+	manager.Invalidate()
+	if got := planFallback(t, manager); got == "" {
+		t.Fatal("invalidated index answered a plan")
+	}
+	waitFor(t, func() bool { return search.reconciles.Load() > reconciles })
+	if got := planFallback(t, manager); got == "" {
+		t.Fatal("index answered although no reconcile was accepted")
+	}
+	search.failReconciles.Store(false)
+	waitFor(t, func() bool {
+		return manager.coveredGen.Load() >= manager.lostGen.Load() && manager.processReady.Load() && manager.inflight.Load() == 0
 	})
 	if got := planFallback(t, manager); got != "" {
 		t.Fatalf("fallback after the covering reconcile = %q", got)

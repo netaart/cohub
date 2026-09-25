@@ -25,6 +25,7 @@ export const RPC_METHODS = [
   "fs.grep",
   "fs.search",
   "fs.pathSearch",
+  "fs.reconcile",
   "process.start",
   "process.abort",
 ] as const;
@@ -131,7 +132,10 @@ export type SandboxCapabilities = {
   fsTree?: boolean;
   fsFind: boolean;
   fsGrep: boolean;
-  /** fs.search and fs.pathSearch answer with exact rg/fd plans or a fallback. */
+  /**
+   * fs.search and fs.pathSearch answer with exact rg/fd plans or a fallback,
+   * and fs.reconcile invalidates them after writes the sandbox did not see.
+   */
   fsSearchIndex?: boolean;
   processStart: boolean;
   /** process.start supports argv exec mode (no shell). */
@@ -443,6 +447,11 @@ export type FsPathSearchResult =
       dirs: string[];
     };
 
+export type FsReconcileParams = Record<string, never>;
+
+/** `invalidated` is false when the sandbox has no workspace index. */
+export type FsReconcileResult = { invalidated: boolean };
+
 export type ProcessStartParams = {
   /** Shell command mode. Preserves existing `bash -c` semantics. */
   command?: string;
@@ -522,6 +531,10 @@ export type RpcRequestMap = {
   "fs.pathSearch": {
     params: FsPathSearchParams;
     result: FsPathSearchResult;
+  };
+  "fs.reconcile": {
+    params: FsReconcileParams;
+    result: FsReconcileResult;
   };
   "process.start": {
     params: ProcessStartParams;

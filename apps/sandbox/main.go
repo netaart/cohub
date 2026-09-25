@@ -277,7 +277,6 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 				}
 			}
 
-			searchManager.Activate()
 			logger.Info("workspace mount ready",
 				slog.String("workspaceDir", summary.WorkspaceDir),
 				slog.String("platformAgentsDir", summary.PlatformAgentsDir),
@@ -299,7 +298,13 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 					"wsEndpoint":        sandboxWSEndpoint(cfg.PodIP),
 				},
 			}); reportErr != nil {
-				logger.Warn("failed to report sandbox ready", slog.String("error", reportErr.Error()))
+				logger.Warn("failed to report sandbox ready; workspace search stays inactive", slog.String("error", reportErr.Error()))
+			} else {
+				// Until the API sees this report it writes to the workspace volume
+				// directly, unseen by the watcher. Indexing only afterwards means
+				// every such write finished before the activation reconcile, or
+				// finished once the API saw this sandbox and sent fs.reconcile.
+				searchManager.Activate()
 			}
 		}
 	}()

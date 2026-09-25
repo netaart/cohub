@@ -175,14 +175,26 @@ func (m *Manager) Enabled() bool {
 	return m.enabled.Load()
 }
 
-// Activate opens or reconciles the persistent index after workspace.Prepare
-// has succeeded. A full build is only selected by the search process when no
-// usable index exists.
+// Activate opens or reconciles the persistent index once workspace.Prepare
+// has succeeded and the API has seen the sandbox as ready. A full build is
+// only selected by the search process when no usable index exists.
 func (m *Manager) Activate() {
 	if !m.Enabled() || m.closed.Load() {
 		return
 	}
 	m.enqueueControl(command{activate: true})
+}
+
+// Invalidate records a workspace change the watcher cannot see, such as an
+// API write to the shared volume that raced this sandbox becoming dialable.
+// Like a lost batch, it keeps queries on the fallback until a reconcile
+// accepted after this call has run.
+func (m *Manager) Invalidate() {
+	if !m.Enabled() || m.closed.Load() {
+		return
+	}
+	m.lostGen.Add(1)
+	m.enqueueControl(command{reconcile: true})
 }
 
 // Apply forwards an already debounced filewatch batch. The Rust process owns

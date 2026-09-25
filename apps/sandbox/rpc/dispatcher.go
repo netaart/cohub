@@ -156,6 +156,8 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.complete(request, accepted.OpID, d.handleFSSearch(request))
 	case "fs.pathSearch":
 		return accepted, d.complete(request, accepted.OpID, d.handleFSPathSearch(request))
+	case "fs.reconcile":
+		return accepted, d.complete(request, accepted.OpID, d.handleFSReconcile())
 	case "process.start":
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
@@ -992,6 +994,19 @@ func (d *Dispatcher) handleFSSearch(request protocol.RPCRequest) interface{} {
 		"walkFiles": relativeToRoot(root, plan.WalkFiles),
 		"dirs":      relativeToRoot(root, plan.Dirs),
 	}
+}
+
+// handleFSReconcile is called after a workspace write this sandbox did not
+// perform, so the index stops answering until it has rescanned.
+func (d *Dispatcher) handleFSReconcile() interface{} {
+	d.mu.Lock()
+	manager := d.searchManager
+	d.mu.Unlock()
+	if manager == nil || !manager.Enabled() {
+		return map[string]interface{}{"invalidated": false}
+	}
+	manager.Invalidate()
+	return map[string]interface{}{"invalidated": true}
 }
 
 // handleFSPathSearch returns what fd reports for a glob below the requested
