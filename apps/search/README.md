@@ -50,11 +50,11 @@ curl --unix-socket /tmp/cohub-search/search.sock http://localhost/status
 curl --unix-socket /tmp/cohub-search/search.sock -X POST http://localhost/index/full
 curl --unix-socket /tmp/cohub-search/search.sock \
   -H 'content-type: application/json' \
-  -d '{"literals":["workspace"],"limit":20}' \
+  -d '{"pattern":"handle(Search|Grep)","limit":512}' \
   http://localhost/query
 curl --unix-socket /tmp/cohub-search/search.sock \
   -H 'content-type: application/json' \
-  -d '{"pattern":"**/*.ts","fullPath":true,"limit":20}' \
+  -d '{"pattern":"/workspace/**/*.ts","fullPath":true,"limit":20}' \
   http://localhost/paths/query
 ```
 
@@ -62,43 +62,76 @@ Repeat `--ignore` on `serve`, `full`, `update`, `query`, and `status` to exclude
 directory names or workspace-relative directory prefixes. The sandbox passes its
 normalized filewatch ignore rules as `--ignore=pattern`.
 
-The content index stores workspace-relative paths and lower-cased 3-gram
-content. It produces candidate paths; `rg` remains responsible for exact
-matching, line numbers, context, and regular-expression semantics. The path
-snapshot separately stores visible files and directories for glob queries.
+## Contract
+
+The index never answers a search by itself. `/query` returns rg targets that
+together search exactly what one `rg` walk of `pathPrefix` would search, and
+`/paths/query` returns what one `fd --glob` walk would list. The agent runs rg
+and fd on those targets, so rg and fd stay responsible for matching, line
+numbers, context, regular-expression semantics, and errors.
+
+The walk domain mirrors the agent's invocations: hidden files included,
+`.gitignore` and `.ignore` applied outside git repositories, symlinks not
+followed, `.git` excluded at any depth, and only files, directories and
+symlinks listed. Directories and files matching `--ignore` are outside the
+watched domain; the index reports them as `dirs` and `walkFiles` for rg and fd
+to walk. A plan has three lists:
+
+- `files`: text files whose trigrams can satisfy the pattern, searched as
+  explicit rg arguments. The index has already applied ignore rules and the
+  glob.
+- `walkFiles`: files rg must search through a directory walk. Files are
+  indexed up to their first NUL byte, where rg's walk stops; files over
+  4 MiB without an early NUL and unreadable files are not indexed at all.
+  With a whitelist `--glob`, rg also searches files ignore rules hide, so those
+  are listed here too.
+- `dirs`: directories outside the watched domain.
+
+Content is normalized the way rg reads it: BOM-marked UTF-16 is transcoded,
+invalid UTF-8 is replaced without disturbing valid text, and characters are
+folded per character to the Unicode simple case-folding orbit rg uses for
+`--ignore-case`. Patterns are parsed with rg's regex parser; literal runs,
+small classes and alternations become AND/OR trigram queries. Patterns that
+cannot be narrowed, fail to parse, or yield too many targets get a `fallback`
+reason instead of a plan.
 
 ## API
 
-- `GET /healthz`
-- `GET /status` (family, generation, schema, analyzer, coverage)
+- `GET /healthz` returns `{ "ok": true, "apiVersion": 2 }`
+- `GET /status` (family, generation, schema, analyzer, state, coverage)
 - `POST /index/full` (manual or recovery fallback)
-- `POST /index/reconcile` (compare the persistent file snapshot with the workspace)
-- `POST /index/update` with `{ "changes": [...] }`
-- `POST /query` with `{ "literals": [...], "pathPrefix": "", "glob": "...", "limit": 1000 }`
-- `POST /paths/query` with `{ "pattern": "**/*.ts", "pathPrefix": "", "fullPath": true, "ignore": [], "limit": 1000 }`
+- `POST /index/reconcile` (compare the index with the workspace)
+- `POST /index/update` with `{ "changes": [{ "path", "oldPath?", "kind" }] }`
+- `POST /query` with `{ "pattern", "fixedStrings", "caseInsensitive", "pathPrefix", "glob", "limit" }`
+  returns `{ "files", "walkFiles", "dirs" }` or `{ "fallback" }`
+- `POST /paths/query` with `{ "pattern", "pathPrefix", "fullPath", "limit" }`
+  returns `{ "matches", "truncated", "dirs" }` or `{ "fallback" }`
 
-Search literals must contain at least 3 non-whitespace characters. The
-service default socket directory is private (`0700`) and the socket is
+Fallback reasons: `stale` (not verified by this process yet), `partial`
+(accepted work not applied, or a failed job awaiting a rescan), `rules`
+(`.rgignore`, `.fdignore`, `.git/info/exclude` or a global git excludes file
+present), `scope` (root is not an indexed directory), `pattern`, `glob` (a
+whitelist glob names a directory ignore rules hide), and `targets`.
+
+The service default socket directory is private (`0700`) and the socket is
 `0600`.
 
-Incremental updates are coalesced for three seconds before a Tantivy commit.
-While changes are accepted but not yet committed, `/status`, `/query`, and
-`/paths/query` report `coverage: "partial"` so callers fall back to an exact
-scan. Coverage
-is `"complete"` once the in-process file snapshot has been produced or
-verified by this process, and `"stale"` after a restart until reconcile
-confirms the snapshot loaded from disk.
-The index directory contains a manifest with the family, generation, schema,
-analyzer version, a persistent file snapshot, and a separate path snapshot for
-`workspace.paths`. The path snapshot contains workspace-relative files and
-directories in the same ignored workspace domain as the watcher/search index,
-and is queried in memory for `fs.find`-style glob lookups. Restart
-reconciliation uses file metadata first, so a valid index is reused without
-rereading every file.
-Full builds remain available for first creation and recovery. The sandbox
-runtime treats this binary as an optional workspace-search feature: new cloud
-sandboxes resolve `latest.json`, verify the immutable release checksum, and
-start the indexer when available.
+## Coverage
 
-The indexer skips binary files, files larger than 4 MiB, VCS metadata, common
-package-manager directories, and build/cache output.
+Every accepted job gets a sequence number and jobs run in order; coverage is
+`complete` only when the newest accepted job has run, no failed job awaits a
+rescan, and this process has verified the index with a full reconcile.
+Incremental updates are coalesced for 500 ms before a Tantivy commit. The
+sandbox adds its own checks before it asks: its file watcher must be healthy
+and settled, and every batch it received must have been accepted here.
+
+Each file's document stores its path, size, mtime, ctime and content kind, so
+a reconcile compares the workspace with the committed index itself and reads
+only files whose fingerprint changed. Directories, excluded entries and
+rule-hidden entries are kept in memory and rebuilt by each reconcile. An index
+written by another schema or analyzer version is rebuilt from scratch; a
+corrupt one is moved aside for inspection. The sandbox runtime treats this
+binary as an optional workspace-search feature: new cloud sandboxes resolve
+`latest.json`, verify the immutable release checksum, start the indexer when
+available, and only query it when `/healthz` reports the API version they
+speak.
