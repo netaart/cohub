@@ -1,6 +1,7 @@
 import type { ContentBlock, MessageRecord, SessionRecord, SpaceRecord } from "@neta-art/cohub";
 import * as Crypto from "expo-crypto";
 import { translate, getActiveLocale } from "@/src/i18n/core";
+import { mentionDisplayText } from "@/src/data/space-mentions";
 
 export function newId() {
   return Crypto.randomUUID();
@@ -11,7 +12,8 @@ export function displaySpaceName(space: Partial<Pick<SpaceRecord, "name" | "titl
 }
 
 export function displaySessionTitle(session: Pick<SessionRecord, "title" | "latestMessageText">) {
-  return session.title?.trim() || session.latestMessageText?.trim().split("\n")[0]?.slice(0, 64) || translate("session.untitled");
+  // Titles and previews can carry mention markup from any client; show it as `@Label`.
+  return mentionDisplayText(session.title ?? "").trim() || mentionDisplayText(session.latestMessageText ?? "").trim().split("\n")[0]?.slice(0, 64) || translate("session.untitled");
 }
 
 export function initials(value: string) {
@@ -87,7 +89,7 @@ export function messageText(message: Pick<MessageRecord, "text" | "content">) {
 }
 
 export function shortPreview(value: string | null | undefined, limit = 110) {
-  const normalized = value?.replace(/\s+/g, " ").trim() || translate("session.noMessages");
+  const normalized = mentionDisplayText(value ?? "").replace(/\s+/g, " ").trim() || translate("session.noMessages");
   return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
 }
 

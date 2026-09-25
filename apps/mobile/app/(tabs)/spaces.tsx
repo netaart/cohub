@@ -10,7 +10,7 @@ import { SpaceSearchRow } from "@/src/components/SearchResultRow";
 import { SpaceRow } from "@/src/components/SpaceRow";
 import { normalizeSearchQuery, useRemoteSearch, type RemoteSpaceSearchHit } from "@/src/data/session-search";
 import { useSpaceSessionCounts } from "@/src/data/space-session-counts";
-import { selectSpaceList, type SpaceListSpace, type SpaceFilter } from "@/src/data/space-list";
+import { personalSpaceActivity, selectSpaceList, type SpaceListSpace, type SpaceFilter } from "@/src/data/space-list";
 import { useApp } from "@/src/data/context";
 import { useSyncScope } from "@/src/data/use-sync-scope";
 import { useAppTheme, typography } from "@/src/theme";
@@ -67,14 +67,7 @@ export default function SpacesScreen() {
   const trimmedQuery = normalizeSearchQuery(query);
   const spaces = useMemo(() => {
     const needle = trimmedQuery.toLowerCase();
-    const personalActivity = new Map<string, number>();
-    for (const view of Object.values(state.sessionViews)) {
-      if (!view.session) continue;
-      for (const turn of view.turns) {
-        if (turn.userUuid !== userUuid) continue;
-        personalActivity.set(view.session.spaceId, Math.max(personalActivity.get(view.session.spaceId) ?? 0, Date.parse(turn.createdAt)));
-      }
-    }
+    const personalActivity = personalSpaceActivity(Object.values(state.sessionViews), userUuid);
     const candidates = selectSpaceList({ spaces: state.spaces, sessions: state.sessions, overview: spaceList.overview, visits: spaceList.visits, personalActivity, filter: filter === "recent" && trimmedQuery ? "all" : filter, now });
     return candidates.filter((space) => !needle || [displaySpaceName(space), space.description].some((value) => value ? normalizeSearchQuery(value).toLowerCase().includes(needle) : false));
   }, [filter, now, state.spaces, state.sessions, state.sessionViews, spaceList.overview, spaceList.visits, trimmedQuery, userUuid]);

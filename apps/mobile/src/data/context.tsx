@@ -58,6 +58,7 @@ import type {
 import { hasFinalAssistantForTurn, isActiveTurnStatus, isTerminalTurnStatus, liveStreamStatusFromPatch, pendingStreamForTurn, streamRecoveryFromTail } from "@/src/data/chat-stream";
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, turnSequenceForMessage, withFallbackUserContent } from "@/src/data/session-history";
 import { forkSessionTurn } from "@/src/data/session-fork";
+import { extractSpaceMentions, mentionDisplayText } from "@/src/data/space-mentions";
 import { isOptimisticFollowup, shouldQueueFollowup } from "@/src/data/followup-queue";
 import { createSessionLifecycle } from "@/src/data/session-lifecycle";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
@@ -95,6 +96,12 @@ function errorMessage(error: unknown, fallback: string) {
     if (status === 403) return translate("data.noAccess");
   }
   return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+/** Mirrors the web composer: Space mentions ride along as structured `_meta` on the text block. */
+function mentionTextBlock(blockText: string, draft: string): ContentBlock {
+  const mentions = extractSpaceMentions(draft);
+  return { type: "text", text: blockText, ...(mentions.length > 0 ? { _meta: { mentions } } : {}) };
 }
 
 async function buildPromptContent(
@@ -162,7 +169,7 @@ async function buildPromptContent(
       ].filter(Boolean).join("\n\n");
     }
   }
-  if (promptText) content.push({ type: "text", text: promptText });
+  if (promptText) content.push(mentionTextBlock(promptText, text));
   content.push(...imageBlocks);
   return content;
 }
@@ -1851,7 +1858,7 @@ export function AppProvider({
         sessionId,
         role: "user",
         content: [
-          ...(text ? [{ type: "text" as const, text }] : []),
+          ...(text ? [mentionTextBlock(text, text)] : []),
           ...attachments.filter((item) => item.mimeType.startsWith("image/")).map((item) => ({
             type: "image" as const,
             source: { type: "url" as const, url: item.uri },
@@ -2174,7 +2181,7 @@ export function AppProvider({
         spaceId: session.spaceId,
         title: displaySessionTitle(session),
         spaceName: session.space?.name?.trim() || "Space",
-        preview: session.latestMessageText?.trim() || "No messages yet",
+        preview: mentionDisplayText(session.latestMessageText ?? "").trim() || "No messages yet",
         status,
         updatedAt: session.lastMessageAt ?? session.updatedAt,
       };

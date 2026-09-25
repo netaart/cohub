@@ -15,6 +15,19 @@ export function recentSpaceVisits(visits: readonly SpaceVisit[], now: number): S
   return [...byId.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, 10);
 }
 
+/** Latest turn the viewer authored per Space, from the Chats already loaded on this device. */
+export function personalSpaceActivity(views: Iterable<{ session: { spaceId: string } | null; turns: readonly { userUuid: string | null; createdAt: string }[] }>, userUuid: string): Map<string, number> {
+  const activity = new Map<string, number>();
+  for (const view of views) {
+    if (!view.session) continue;
+    for (const turn of view.turns) {
+      if (turn.userUuid !== userUuid) continue;
+      activity.set(view.session.spaceId, Math.max(activity.get(view.session.spaceId) ?? 0, Date.parse(turn.createdAt)));
+    }
+  }
+  return activity;
+}
+
 function time(value: string | null | undefined): number {
   const parsed = Date.parse(value ?? "");
   return Number.isFinite(parsed) ? parsed : 0;

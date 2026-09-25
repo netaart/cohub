@@ -42,7 +42,8 @@ import { getSpaceSessionCount, loadSpaceSessionCounts, publishSpaceSessionCount 
 import { cacheRetentionCutoff, DEFAULT_CACHE_RETENTION } from "../src/data/cache-retention.ts";
 import { formatToolCallCaption, toolCallPreview } from "../src/data/tool-call.ts";
 import { forkSessionTurn } from "../src/data/session-fork.ts";
-import { resolveMessageLink } from "../src/data/message-links.ts";
+import { COHUB_WEB_ORIGIN_SOURCE as MESSAGE_LINK_ORIGIN_SOURCE, resolveMessageLink } from "../src/data/message-links.ts";
+import { applyComposerDisplayEdit, COHUB_WEB_ORIGIN_SOURCE, draftMentions, extractSpaceMentions, mentionDisplayText, detectSpaceMentionTrigger, findCohubLinks, restoreDraftMentions, insertSpaceMention, replaceCohubLinks, selectSpaceMentionSuggestions, textMatchScore } from "../src/data/space-mentions.ts";
 import { androidUpdateApkUrl, selectYaotaAndroidUpdate, validateAndroidUpdateAsset, verifyAndroidUpdateIntegrity } from "../src/data/update-assets.ts";
 import { isSettingsSection, settingsMenu } from "../src/data/settings-navigation.ts";
 import { parseBrowserPreference } from "../src/data/browser-preference.ts";
@@ -577,7 +578,7 @@ for (const [tab, component, expectedRequests] of [
     useSessionFilterPreference: () => ({ loaded: true, minutes: 30 }), loadSessionFilterMinutes: async () => 30,
     useSessionSourcePreference: () => ({ filter: "all", loaded: true, error: null }), saveSessionSourcePreference: async () => {}, loadSessionSourcePreference: async () => "all",
     useToast: () => () => {},
-    sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [], emptyRunningSessions, runningSessionCandidates, sessionListStatus,
+    sessionFilterCutoff, normalizeSearchQuery, selectSpaceList: () => [], personalSpaceActivity: () => new Map(), emptyRunningSessions, runningSessionCandidates, sessionListStatus,
     CHAT_SEARCH_TYPES: ["session", "turn", "space"], SPACE_SEARCH_TYPES: ["space"],
     Screen: "Screen", ScrollView: "ScrollView", LegendList: "LegendList", RefreshControl: "RefreshControl",
     AccountAvatar: "AccountAvatar", TokenHeatmap: "TokenHeatmap", ActivityHeatmap: "ActivityHeatmap", PressableScale: "PressableScale",
@@ -3223,6 +3224,7 @@ for (const busy of [false, true]) {
       optimisticMessageSequenceRef: { current: new Map() }, userUuid: "user", userKey: "user",
       shouldQueueFollowup, recordDebugEvent: () => {}, dispatch: (action) => actions.push(action), saveMessages: async () => {},
       buildPromptContent: () => uploads.promise, withFallbackUserContent: (turn) => turn, sync: { invalidate: () => {} },
+      mentionTextBlock: (blockText) => ({ type: "text", text: blockText }),
     };
     const send = new Function(...Object.keys(sendScope), ts.transpileModule(`return (${sessionCallbacks.sendMessage});`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(...Object.values(sendScope));
     const request = send("fixture", text, attachments, { onOptimistic: (message) => { optimistic = message; } });
@@ -3308,6 +3310,91 @@ assert.deepEqual(resolveMessageLink("/workspace/avatars/out/contact-sheet.png"),
 assert.deepEqual(resolveMessageLink("https://example.com/x"), { kind: "external", url: "https://example.com/x" });
 assert.equal(resolveMessageLink("javascript:alert(1)"), null);
 assert.equal(resolveMessageLink(""), null);
+assert.equal(MESSAGE_LINK_ORIGIN_SOURCE, COHUB_WEB_ORIGIN_SOURCE, "message links and composer link conversion accept the same Cohub origins");
+for (const origin of ["https://cohub.run", "https://dev.cohub.live", "https://www.cohub.live", "http://localhost:5173"]) {
+  assert.deepEqual(resolveMessageLink(`${origin}/spaces/241ec263-bd4f-47d6-b459-35b4219e0c23`), { kind: "space", spaceId: "241ec263-bd4f-47d6-b459-35b4219e0c23" }, origin);
+}
+assert.deepEqual(resolveMessageLink("https://cohub.live.evil.example/spaces/241ec263-bd4f-47d6-b459-35b4219e0c23"), { kind: "external", url: "https://cohub.live.evil.example/spaces/241ec263-bd4f-47d6-b459-35b4219e0c23" }, "lookalike hosts stay external");
+assert.deepEqual(resolveMessageLink("cohub://apps/alice/studio/pulsewall?view=board"), { kind: "external", url: "https://cohub.live/alice/studio/w/pulsewall?view=board" });
+
+// Composer @Space mentions: drafts keep server-parsed markup while the input shows `@Label`.
+{
+  const spaceId = "f7000115-55d8-4d97-a0e4-d2a55b6ffa41";
+  const sessionId = "3b1e6a2c-9d4f-4a7b-8c5d-2e1f0a9b8c7d";
+  const mention = `@[Design Studio](cohub://spaces/${spaceId})`;
+  const draft = `hi ${mention} there`;
+  const edit = (display) => applyComposerDisplayEdit(draft, display).markup;
+  assert.equal(mentionDisplayText(draft), "hi @Design Studio there");
+  assert.equal(mentionDisplayText(`x${mention}`), `x${mention}`, "mentions need a leading boundary, like the server parser");
+  assert.equal(edit("hi @Design Studio there!"), `${draft}!`, "typing outside a mention keeps it");
+  assert.equal(edit("hi @Design Studi there"), "hi @Design Studi there", "cutting into a mention degrades it to its plain label");
+  assert.equal(edit("hi x@Design Studio there"), "hi x@Design Studio there", "detaching a mention from its boundary degrades it");
+  assert.equal(edit("hi@Design Studio there"), "hi@Design Studio there");
+  assert.equal(applyComposerDisplayEdit(`${mention} ${mention}`, "@Design Studio@Design Studio").markup, `${mention}@Design Studio`);
+  for (const display of ["hi @Design Studio there!", "hi @Design Studi there", "hi x@Design Studio there", "@Design Studio there", ""]) {
+    assert.equal(mentionDisplayText(edit(display)), display, "mapped markup always renders what the native input shows");
+  }
+
+  assert.deepEqual(detectSpaceMentionTrigger("ask @des", { start: 8, end: 8 }), { start: 4, end: 8, query: "des" });
+  assert.deepEqual(detectSpaceMentionTrigger("ask @", { start: 5, end: 5 }), { start: 4, end: 5, query: "" });
+  assert.equal(detectSpaceMentionTrigger("mail a@b", { start: 8, end: 8 }), null, "@ inside a word is not a trigger");
+  assert.equal(detectSpaceMentionTrigger("ask @des", { start: 5, end: 8 }), null);
+  assert.equal(detectSpaceMentionTrigger(`hi @[Design](cohub://spaces/${spaceId})`, { start: 10, end: 10 }), null, "an inserted mention is not re-triggered");
+  const inserted = insertSpaceMention("ask @des now", { start: 4, end: 8, query: "des" }, { spaceId, label: "Design [x]  Studio" });
+  assert.equal(inserted.markup, `ask @[Design x Studio](cohub://spaces/${spaceId}) now`, "labels are sanitized and existing whitespace is reused");
+  assert.equal(inserted.caret, "ask @Design x Studio ".length);
+  assert.equal(insertSpaceMention("@", { start: 0, end: 1, query: "" }, { spaceId, label: "" }).markup, `@[space:f7000115](cohub://spaces/${spaceId}) `);
+
+  const pasted = `see https://cohub.live/spaces/${spaceId}, https://www.cohub.live/spaces/${spaceId}/sessions/${sessionId}?turn=2 https://cohub.run/alice/studio/w/pulsewall?x=1 /spaces/${spaceId} https://cohub.live.evil.example/spaces/${spaceId} https://example.com/spaces/${spaceId}`;
+  const links = findCohubLinks(pasted, { start: 0, end: pasted.length });
+  assert.deepEqual(links.map((match) => match.link), [
+    { kind: "space", spaceId },
+    { kind: "space", spaceId, sessionId },
+    { kind: "app", username: "alice", spaceSlug: "studio", appSlug: "pulsewall", launchSuffix: "?x=1" },
+    { kind: "space", spaceId },
+  ], "cohub.live, legacy cohub.run, and root-relative links convert; lookalike hosts do not");
+  assert.equal(
+    replaceCohubLinks(pasted, links, (link) => link.kind === "app" ? "Pulse Wall" : link.sessionId ? null : "Studio"),
+    `see @[Studio](cohub://spaces/${spaceId}), https://www.cohub.live/spaces/${spaceId}/sessions/${sessionId}?turn=2 @[Pulse Wall](cohub://apps/alice/studio/pulsewall?x=1) @[Studio](cohub://spaces/${spaceId}) https://cohub.live.evil.example/spaces/${spaceId} https://example.com/spaces/${spaceId}`,
+    "unresolved links stay as pasted text",
+  );
+  assert.deepEqual(findCohubLinks(draft, { start: 0, end: draft.length }), [], "existing mentions are not re-parsed as links");
+  assert.deepEqual(findCohubLinks(`https://cohub.live/spaces/${spaceId} tail`, { start: 63, end: 67 }), [], "only links touching the inserted range convert");
+  const staleLinks = findCohubLinks(`x https://cohub.live/spaces/${spaceId}`, { start: 0, end: 70 });
+  assert.equal(replaceCohubLinks(`xy https://cohub.live/spaces/${spaceId}`, staleLinks, () => "Studio"), `xy https://cohub.live/spaces/${spaceId}`, "late labels skip text that moved");
+
+  assert.deepEqual(extractSpaceMentions(`${mention} ${mention} @[Fork](cohub://spaces/${spaceId}/sessions/${sessionId}) @[Pulse](cohub://apps/alice/studio/pulsewall)`), [
+    { type: "space", spaceId, label: "Design Studio", uri: `cohub://spaces/${spaceId}`, href: `/spaces/${spaceId}` },
+    { type: "space", spaceId, sessionId, label: "Fork", uri: `cohub://spaces/${spaceId}/sessions/${sessionId}`, href: `/spaces/${spaceId}/sessions/${sessionId}` },
+  ], "_meta.mentions matches the web shape: unique Space and Chat mentions, Works stay text-only");
+  assert.deepEqual(extractSpaceMentions("plain"), []);
+
+  // Native copy only carries `@Label`; pasting it back restores the mention it came from.
+  const known = draftMentions(`${mention} @[Design](cohub://spaces/${sessionId})`);
+  const restore = (text, range = { start: 0, end: text.length }) => restoreDraftMentions(text, range, known);
+  assert.equal(restore("see @Design Studio."), `see ${mention}.`, "the longest known label wins");
+  assert.equal(restore("see @Designer"), "see @Designer", "a label must end at a word boundary");
+  assert.equal(restore("see @Design Studios"), `see @[Design](cohub://spaces/${sessionId}) Studios`, "a longer label that does not fit falls back to a shorter one");
+  assert.equal(restore("x@Design Studio"), "x@Design Studio", "a label must start at a boundary");
+  assert.equal(restore(`${mention}@Design Studio`), `${mention}@Design Studio`, "a mention's closing paren is not a boundary");
+  assert.equal(restore("keep @Design Studio, paste @Design Studio", { start: 20, end: 41 }), `keep @Design Studio, paste ${mention}`, "only pasted text is restored");
+  assert.equal(mentionDisplayText(restore("see @Design Studio.")), "see @Design Studio.", "restoring never changes what the input shows");
+
+  assert.ok(textMatchScore("test", "tt") > 0, "subsequence matches like the web palette");
+  assert.ok(textMatchScore("test", "te") > textMatchScore("sandbox test", "te"));
+  const space = (id, name) => ({ id, name, description: null, isPinned: false });
+  const remoteHit = (id, title) => ({ spaceId: id, title, description: null, avatarUrl: null, updatedAt: null, score: 1 });
+  const mentionIds = (query) => selectSpaceMentionSuggestions({
+    recent: [space("beta", "Beta test"), space("current", "Current test")],
+    spaces: [space("alpha", "Alpha"), space("beta", "Beta test"), space("tt", "test")],
+    remote: [remoteHit("public", "test-public"), remoteHit("tt", "test")],
+    query,
+    currentSpaceId: "current",
+  }).map((item) => item.spaceId);
+  assert.deepEqual(mentionIds(""), ["beta", "alpha", "tt"], "empty @ keeps Recent order, then the rest, without the current Space");
+  assert.deepEqual(mentionIds("test"), ["tt", "beta", "public"], "typed @ ranks by match quality, then appends server-only Spaces");
+  assert.deepEqual(mentionIds("zz"), ["public"], "local Spaces must match the query; server hits are already matched");
+}
 
 assert.equal(detectCodeLanguage("src/components/App.tsx"), "tsx");
 assert.equal(detectCodeLanguage("docs/readme.md"), "markdown");

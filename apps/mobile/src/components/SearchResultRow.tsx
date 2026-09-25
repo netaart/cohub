@@ -4,6 +4,7 @@ import { PressableScale } from "@/src/ui/PressableScale";
 import type { RemoteSessionSearchHit, RemoteSpaceSearchHit, SessionNavigationTarget } from "@/src/data/session-search";
 import { useAppTheme, typography } from "@/src/theme";
 import { useTranslation } from "@/src/i18n";
+import { mentionDisplayText } from "@/src/data/space-mentions";
 import { formatRelativeTime, shortPreview } from "@/src/utils";
 
 type SessionSearchRowProps = {
@@ -17,12 +18,13 @@ export function SessionSearchRow({ hit, onPress, onPressIn, showSpace = true }: 
   const theme = useAppTheme();
   const { t } = useTranslation();
   const spaceName = hit.spaceName?.trim() || t("space.fallbackName");
+  const title = mentionDisplayText(hit.title);
   const target = hit.turnSequence == null && !hit.turnId ? undefined : { ...(hit.turnSequence != null ? { turn: hit.turnSequence } : {}), ...(hit.turnId ? { turnId: hit.turnId } : {}) };
   const content = <>
     {showSpace ? <Avatar name={spaceName} uri={hit.spaceAvatarUrl} size={48} /> : null}
     <View style={{ flex: 1, minWidth: 0, alignSelf: "stretch", justifyContent: "center" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{hit.title}</Text>
+        <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text, flex: 1 }]}>{title}</Text>
         <Text style={[typography.micro, { color: theme.colors.textFaint }]}>{formatRelativeTime(hit.updatedAt)}</Text>
       </View>
       <Text numberOfLines={2} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 4 }]}>
@@ -33,7 +35,7 @@ export function SessionSearchRow({ hit, onPress, onPressIn, showSpace = true }: 
   </>;
   const rowStyle = { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, minHeight: 78, paddingHorizontal: 16, paddingVertical: 11, backgroundColor: "transparent" };
   const rowPressedStyle = { backgroundColor: theme.colors.surfacePressed };
-  return <PressableScale accessibilityRole="button" accessibilityLabel={t("ui.openNamed", { name: hit.title })} onPress={() => onPress(target)} onPressIn={onPressIn} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
+  return <PressableScale accessibilityRole="button" accessibilityLabel={t("ui.openNamed", { name: title })} onPress={() => onPress(target)} onPressIn={onPressIn} haptic style={rowStyle} pressedStyle={rowPressedStyle}>{content}</PressableScale>;
 }
 
 export function SpaceSearchRow({ hit, onPress }: { hit: RemoteSpaceSearchHit; onPress: () => void }) {
