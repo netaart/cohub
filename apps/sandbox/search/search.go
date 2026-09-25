@@ -21,56 +21,76 @@ import (
 )
 
 const (
+	// APIVersion is the cohub-search HTTP contract this sandbox speaks.
+	APIVersion               = 2
 	readyTimeout             = 15 * time.Second
 	requestTimeout           = 10 * time.Second
 	restartDelay             = 2 * time.Second
 	downloadRetryDelay       = time.Minute
 	maxResponseBytes         = 2 * 1024 * 1024
 	commandBufferSize        = 128
+	syncTimeout              = 2 * time.Second
 	activationRetryBaseDelay = 500 * time.Millisecond
 	activationRetryMaxDelay  = 10 * time.Second
 	reconcileRetryBaseDelay  = 500 * time.Millisecond
 	reconcileRetryMaxDelay   = 10 * time.Second
 )
 
-type QueryInput struct {
-	Literals   []string
-	PathPrefix string
-	Glob       string
-	Limit      int
+// Reasons the sandbox answers without consulting the index. cohub-search adds
+// its own reasons for queries it declines.
+const (
+	FallbackUnavailable = "unavailable"
+	FallbackWatcher     = "watcher"
+	FallbackPartial     = "partial"
+)
+
+// Watch is the file watcher state the index relies on to be authoritative.
+type Watch interface {
+	// Sync waits until every event queued before the call is visible to
+	// Settled.
+	Sync(ctx context.Context) error
+	// Settled reports a healthy watcher with no event waiting for consumers.
+	Settled() bool
 }
 
-type PathQueryInput struct {
+type PlanInput struct {
+	Pattern      string
+	FixedStrings bool
+	IgnoreCase   bool
+	PathPrefix   string
+	Glob         string
+	Limit        int
+}
+
+// Plan lists rg targets, relative to the workspace, whose search equals an rg
+// walk of the requested root.
+type Plan struct {
+	Fallback  string   `json:"fallback,omitempty"`
+	Files     []string `json:"files"`
+	WalkFiles []string `json:"walkFiles"`
+	Dirs      []string `json:"dirs"`
+}
+
+type PathInput struct {
 	Pattern    string
 	PathPrefix string
 	FullPath   bool
-	Ignore     []string
 	Limit      int
 }
 
-type QueryResult struct {
-	Matches       []string `json:"matches"`
-	Truncated     bool     `json:"truncated"`
-	State         string   `json:"state"`
-	IndexFamily   string   `json:"indexFamily"`
-	SchemaVersion int      `json:"schemaVersion"`
-	Coverage      string   `json:"coverage"`
-}
-
-type PathQueryResult struct {
-	Matches       []string `json:"matches"`
-	Truncated     bool     `json:"truncated"`
-	State         string   `json:"state"`
-	IndexFamily   string   `json:"indexFamily"`
-	SchemaVersion int      `json:"schemaVersion"`
-	Coverage      string   `json:"coverage"`
+// PathMatches lists workspace-relative fd matches below the requested root,
+// plus directories fd must still walk.
+type PathMatches struct {
+	Fallback  string   `json:"fallback,omitempty"`
+	Matches   []string `json:"matches"`
+	Truncated bool     `json:"truncated"`
+	Dirs      []string `json:"dirs"`
 }
 
 type indexChange struct {
-	Path     string `json:"path"`
-	OldPath  string `json:"oldPath,omitempty"`
-	Kind     string `json:"kind"`
-	NodeType string `json:"nodeType,omitempty"`
+	Path    string `json:"path"`
+	OldPath string `json:"oldPath,omitempty"`
+	Kind    string `json:"kind"`
 }
 
 type command struct {
@@ -85,16 +105,21 @@ type Manager struct {
 	client     *client
 	downloader *downloader
 	binary     string
+	watch      func() Watch
 
 	enabled               atomic.Bool
 	processReady          atomic.Bool
+	compatible            atomic.Bool
 	started               atomic.Bool
 	closed                atomic.Bool
 	reconcileRetryPending atomic.Bool
 	reconcileRetryAttempt atomic.Int32
-	commandQueueDepth     atomic.Int32
-
-	filewatchHasPending func() bool
+	// inflight counts batches and reconcile requests cohub-search has not
+	// accepted yet. lostGen advances when a batch is lost; a reconcile
+	// accepted afterwards covers it and advances coveredGen.
+	inflight   atomic.Int64
+	lostGen    atomic.Uint64
+	coveredGen atomic.Uint64
 
 	commands    chan command
 	control     chan command
@@ -107,19 +132,20 @@ type Manager struct {
 // NewManager enables optional workspace search for cloud sandboxes. A local or
 // explicitly configured binary wins; otherwise the supervisor downloads the
 // latest checksum-verified release without blocking the main sandbox runtime.
-func NewManager(cfg env.Config, logger *slog.Logger, filewatchHasPending func() bool) *Manager {
+// watch resolves the file watcher, which may start after the manager.
+func NewManager(cfg env.Config, logger *slog.Logger, watch func() Watch) *Manager {
 	binary := resolveBinary(cfg.SearchBinaryPath)
 	manager := &Manager{
-		cfg:                 cfg,
-		logger:              logger,
-		binary:              binary,
-		client:              newClient(cfg.SearchSocketPath),
-		downloader:          newDownloader(),
-		filewatchHasPending: filewatchHasPending,
-		commands:            make(chan command, commandBufferSize),
-		control:             make(chan command, 8),
-		commandDone:         make(chan struct{}),
-		processDone:         make(chan struct{}),
+		cfg:         cfg,
+		logger:      logger,
+		binary:      binary,
+		client:      newClient(cfg.SearchSocketPath),
+		downloader:  newDownloader(),
+		watch:       watch,
+		commands:    make(chan command, commandBufferSize),
+		control:     make(chan command, 8),
+		commandDone: make(chan struct{}),
+		processDone: make(chan struct{}),
 	}
 	if cfg.SearchEnabled && !cfg.IsLocal() {
 		manager.enabled.Store(true)
@@ -149,15 +175,9 @@ func (m *Manager) Enabled() bool {
 	return m.enabled.Load()
 }
 
-// ProcessReady reports whether the search process is reachable. Index
-// completeness is reported separately by QueryResult.State and Coverage.
-func (m *Manager) ProcessReady() bool {
-	return m.processReady.Load()
-}
-
 // Activate opens or reconciles the persistent index after workspace.Prepare
 // has succeeded. A full build is only selected by the search process when no
-// usable snapshot exists.
+// usable index exists.
 func (m *Manager) Activate() {
 	if !m.Enabled() || m.closed.Load() {
 		return
@@ -174,54 +194,60 @@ func (m *Manager) Apply(batch filewatch.Batch) {
 	m.enqueue(command{batch: &batch})
 }
 
-func (m *Manager) Query(ctx context.Context, input QueryInput) (QueryResult, error) {
-	if !m.Enabled() {
-		return QueryResult{}, fmt.Errorf("search index is unavailable")
+// Plan asks the index which files an rg search must read.
+func (m *Manager) Plan(ctx context.Context, input PlanInput) (Plan, error) {
+	if reason := m.authority(ctx); reason != "" {
+		return Plan{Fallback: reason}, nil
 	}
-	payload := queryRequest{
-		Literals:   input.Literals,
-		PathPrefix: input.PathPrefix,
-		Glob:       input.Glob,
-		Limit:      input.Limit,
-	}
-	var result QueryResult
-	if err := m.client.doJSON(ctx, http.MethodPost, "/query", payload, &result); err != nil {
-		return QueryResult{}, err
-	}
-	m.adjustCoverage(&result.Coverage)
-	return result, nil
+	var plan Plan
+	err := m.client.doJSON(ctx, http.MethodPost, "/query", queryRequest{
+		Pattern:         input.Pattern,
+		FixedStrings:    input.FixedStrings,
+		CaseInsensitive: input.IgnoreCase,
+		PathPrefix:      input.PathPrefix,
+		Glob:            input.Glob,
+		Limit:           input.Limit,
+	}, &plan)
+	return plan, err
 }
 
-func (m *Manager) PathQuery(ctx context.Context, input PathQueryInput) (PathQueryResult, error) {
-	if !m.Enabled() {
-		return PathQueryResult{}, fmt.Errorf("search index is unavailable")
+// Paths asks the index for the entries an fd glob search reports.
+func (m *Manager) Paths(ctx context.Context, input PathInput) (PathMatches, error) {
+	if reason := m.authority(ctx); reason != "" {
+		return PathMatches{Fallback: reason}, nil
 	}
-	payload := pathQueryRequest{
+	var matches PathMatches
+	err := m.client.doJSON(ctx, http.MethodPost, "/paths/query", pathQueryRequest{
 		Pattern:    input.Pattern,
 		PathPrefix: input.PathPrefix,
 		FullPath:   input.FullPath,
-		Ignore:     input.Ignore,
 		Limit:      input.Limit,
-	}
-	var result PathQueryResult
-	if err := m.client.doJSON(ctx, http.MethodPost, "/paths/query", payload, &result); err != nil {
-		return PathQueryResult{}, err
-	}
-	m.adjustCoverage(&result.Coverage)
-	return result, nil
+	}, &matches)
+	return matches, err
 }
 
-func (m *Manager) adjustCoverage(coverage *string) {
-	// Degrade coverage to partial when the filewatch or command queue has
-	// changes that the Rust process has not yet indexed. An agent that writes
-	// a file and immediately searches must see that its change is not covered.
-	if *coverage == "complete" {
-		if m.filewatchHasPending != nil && m.filewatchHasPending() {
-			*coverage = "partial"
-		} else if m.commandQueueDepth.Load() > 0 {
-			*coverage = "partial"
-		}
+// authority returns a fallback reason unless every change that completed
+// before the call has reached cohub-search, which then reports whether it
+// has applied them.
+func (m *Manager) authority(ctx context.Context) string {
+	if !m.Enabled() || !m.processReady.Load() || !m.compatible.Load() {
+		return FallbackUnavailable
 	}
+	watch := m.watch()
+	if watch == nil {
+		return FallbackWatcher
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+	defer cancel()
+	if err := watch.Sync(syncCtx); err != nil || !watch.Settled() {
+		return FallbackWatcher
+	}
+	// A settled watcher has handed every batch to Apply, which counts it in
+	// inflight before the handler returns.
+	if m.inflight.Load() > 0 || m.lostGen.Load() > m.coveredGen.Load() {
+		return FallbackPartial
+	}
+	return ""
 }
 
 func (m *Manager) Close() {
@@ -238,22 +264,30 @@ func (m *Manager) Close() {
 }
 
 func (m *Manager) enqueue(value command) {
-	m.commandQueueDepth.Add(1)
+	m.inflight.Add(1)
 	select {
 	case m.commands <- value:
 	default:
 		// A dropped incremental batch is repaired by a metadata reconcile. The
-		// reconcile compares the persistent snapshot with the current workspace.
+		// reconcile compares the index with the current workspace.
 		m.logger.Warn("search command queue full; requesting reconcile")
-		m.commandQueueDepth.Add(-1)
+		m.lostGen.Add(1)
+		m.inflight.Add(-1)
 		m.enqueueControl(command{reconcile: true})
 	}
 }
 
 func (m *Manager) enqueueControl(value command) {
+	if value.reconcile {
+		m.inflight.Add(1)
+	}
 	select {
 	case m.control <- value:
 	default:
+		// A queued reconcile scans after this request, so it covers it.
+		if value.reconcile {
+			m.inflight.Add(-1)
+		}
 		m.logger.Warn("search control queue full; dropping duplicate control command")
 	}
 }
@@ -274,14 +308,13 @@ func (m *Manager) commandLoop(ctx context.Context) {
 				return
 			case value = <-m.control:
 			case value = <-m.commands:
-				m.commandQueueDepth.Add(-1)
 			}
 		}
 		if value.activate {
 			if activated {
 				continue
 			}
-			if err := m.activate(ctx); err != nil {
+			if err := m.requestReconcile(ctx); err != nil {
 				m.logger.Warn("search reconcile was not accepted",
 					slog.String("error", err.Error()),
 					slog.Int("attempt", activationAttempt+1),
@@ -295,29 +328,31 @@ func (m *Manager) commandLoop(ctx context.Context) {
 			continue
 		}
 		if value.reconcile {
-			if !activated {
-				continue
+			// Before activation the search process has not verified the index,
+			// so it declines queries and the activation reconcile covers this.
+			if activated {
+				if err := m.requestReconcile(ctx); err != nil {
+					m.processReady.Store(false)
+					m.logger.Warn("search reconcile failed", slog.String("error", err.Error()))
+					m.scheduleReconcileRetry(ctx)
+				}
 			}
-			if err := m.requestReconcile(ctx); err != nil {
+			m.inflight.Add(-1)
+			continue
+		}
+		if value.batch == nil {
+			continue
+		}
+		if activated {
+			if err := m.sendBatch(ctx, *value.batch); err != nil {
+				m.lostGen.Add(1)
 				m.processReady.Store(false)
-				m.logger.Warn("search reconcile failed", slog.String("error", err.Error()))
+				m.logger.Warn("search incremental update failed", slog.String("error", err.Error()))
 				m.scheduleReconcileRetry(ctx)
 			}
-			continue
 		}
-		if value.batch == nil || !activated {
-			continue
-		}
-		if err := m.sendBatch(ctx, *value.batch); err != nil {
-			m.processReady.Store(false)
-			m.logger.Warn("search incremental update failed", slog.String("error", err.Error()))
-			m.scheduleReconcileRetry(ctx)
-		}
+		m.inflight.Add(-1)
 	}
-}
-
-func (m *Manager) activate(ctx context.Context) error {
-	return m.requestReconcile(ctx)
 }
 
 func (m *Manager) scheduleActivationRetry(ctx context.Context, attempt int) {
@@ -368,13 +403,10 @@ func (m *Manager) scheduleReconcileRetry(ctx context.Context) {
 func (m *Manager) requestReconcile(ctx context.Context) error {
 	deadline := time.Now().Add(readyTimeout)
 	for time.Now().Before(deadline) {
-		if err := m.client.health(ctx); err == nil {
+		if version, err := m.client.health(ctx); err == nil {
+			m.observeVersion(version)
 			m.processReady.Store(true)
-			if err := m.client.reconcile(ctx); err != nil {
-				return err
-			}
-			m.reconcileRetryAttempt.Store(0)
-			return nil
+			return m.reconcile(ctx)
 		}
 		select {
 		case <-ctx.Done():
@@ -385,17 +417,42 @@ func (m *Manager) requestReconcile(ctx context.Context) error {
 	return fmt.Errorf("search process did not become ready within %s", readyTimeout)
 }
 
+func (m *Manager) observeVersion(version int) {
+	compatible := version == APIVersion
+	if m.compatible.Swap(compatible) != compatible && !compatible {
+		m.logger.Warn("search binary speaks another API version; queries stay on rg and fd",
+			slog.Int("apiVersion", version),
+			slog.Int("want", APIVersion),
+		)
+	}
+}
+
+// reconcile covers every batch lost before the request was accepted.
+func (m *Manager) reconcile(ctx context.Context) error {
+	lost := m.lostGen.Load()
+	if err := m.client.reconcile(ctx); err != nil {
+		return err
+	}
+	for {
+		covered := m.coveredGen.Load()
+		if covered >= lost || m.coveredGen.CompareAndSwap(covered, lost) {
+			break
+		}
+	}
+	m.reconcileRetryAttempt.Store(0)
+	return nil
+}
+
 func (m *Manager) sendBatch(ctx context.Context, batch filewatch.Batch) error {
 	if batch.Resync {
-		return m.client.reconcile(ctx)
+		return m.reconcile(ctx)
 	}
 	changes := make([]indexChange, 0, len(batch.Changes))
 	for _, change := range batch.Changes {
 		changes = append(changes, indexChange{
-			Path:     change.Path,
-			OldPath:  change.OldPath,
-			Kind:     change.Kind,
-			NodeType: change.NodeType,
+			Path:    change.Path,
+			OldPath: change.OldPath,
+			Kind:    change.Kind,
 		})
 	}
 	return m.client.update(ctx, changes)
@@ -430,9 +487,8 @@ func (m *Manager) supervise(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		// A restarted process may have opened a recovered or incomplete index.
-		// Reconcile restores the startup guarantee and only falls back to a full
-		// build when the persistent snapshot is unavailable.
+		// A restarted process opens the index unverified and declines queries
+		// until this reconcile has run.
 		m.enqueueControl(command{reconcile: true})
 		select {
 		case <-ctx.Done():
@@ -474,18 +530,19 @@ func (m *Manager) runProcess(ctx context.Context) error {
 }
 
 type queryRequest struct {
-	Literals   []string `json:"literals"`
-	PathPrefix string   `json:"pathPrefix,omitempty"`
-	Glob       string   `json:"glob,omitempty"`
-	Limit      int      `json:"limit,omitempty"`
+	Pattern         string `json:"pattern"`
+	FixedStrings    bool   `json:"fixedStrings,omitempty"`
+	CaseInsensitive bool   `json:"caseInsensitive,omitempty"`
+	PathPrefix      string `json:"pathPrefix,omitempty"`
+	Glob            string `json:"glob,omitempty"`
+	Limit           int    `json:"limit,omitempty"`
 }
 
 type pathQueryRequest struct {
-	Pattern    string   `json:"pattern"`
-	PathPrefix string   `json:"pathPrefix,omitempty"`
-	FullPath   bool     `json:"fullPath,omitempty"`
-	Ignore     []string `json:"ignore,omitempty"`
-	Limit      int      `json:"limit,omitempty"`
+	Pattern    string `json:"pattern"`
+	PathPrefix string `json:"pathPrefix,omitempty"`
+	FullPath   bool   `json:"fullPath,omitempty"`
+	Limit      int    `json:"limit,omitempty"`
 }
 
 type client struct {
@@ -505,8 +562,13 @@ func newClient(socket string) *client {
 	}
 }
 
-func (c *client) health(ctx context.Context) error {
-	return c.doJSON(ctx, http.MethodGet, "/healthz", nil, nil)
+// health returns the API version the search process reports.
+func (c *client) health(ctx context.Context) (int, error) {
+	var result struct {
+		APIVersion int `json:"apiVersion"`
+	}
+	err := c.doJSON(ctx, http.MethodGet, "/healthz", nil, &result)
+	return result.APIVersion, err
 }
 
 func (c *client) reconcile(ctx context.Context) error {

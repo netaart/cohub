@@ -111,7 +111,7 @@ func TestCrashingBinaryDoesNotBlockManagerShutdown(t *testing.T) {
 	}
 	manager.Start()
 	time.Sleep(50 * time.Millisecond)
-	if manager.ProcessReady() {
+	if manager.processReady.Load() {
 		t.Fatal("crashed process must not be reported as ready")
 	}
 

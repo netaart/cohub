@@ -31,13 +31,13 @@ func (w *Watcher) Status() Status {
 	return Status{Backend: backend, State: state, Reason: reason}
 }
 
-// HasPending reports whether there are file events waiting to flush. The
-// caller uses this to degrade coverage during the debounce window so an
-// agent's rapid edit-grep sequence sees a correct partial signal.
+// HasPending reports whether a change the watcher knows about has not been
+// handed to consumers yet: queued events, a batch still in the handler, or a
+// registration walk that has not queued what it found.
 func (w *Watcher) HasPending() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return len(w.pending) > 0 || w.resync
+	return len(w.pending) > 0 || w.resync || w.flushing > 0 || w.discovering > 0
 }
 
 func (w *Watcher) markFailure(reason string) {
