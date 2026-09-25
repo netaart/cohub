@@ -1,7 +1,0 @@
----
-"@neta-art/cohub": minor
----
-
-Apps can now match the host, own their window, and open files. The context carries `locale`, `appearance` (color scheme, theme, and resolved design tokens), `window.visible`, and the opened `invocation.file`; `client.app.appearance.sync()` applies them as `--cohub-*` variables. `client.app.window.setState()` reports the tab title, save status, and unsaved work, and `onBeforeClose()` flushes before the host closes, reloads, or leaves a dirty App. `client.app.onDrop()` receives Cohub files, Tasks, and Apps dragged onto the App, and unhandled Ctrl / Cmd chords reach host shortcuts. Apps declare the file types they open with `<meta name="cohub:file-handlers">`; installing registers them in `.cohub/apps.json` unless another App already opens them. Each file opens in its own window, and `client.app.onLaunch()` receives it when it opens, opens again, or moves.
-
-App 现在可以跟随 host 外观、管理自己的窗口并打开文件。context 新增 `locale`、`appearance`（配色方案、主题和解析后的设计 token）、`window.visible` 以及打开的 `invocation.file`；`client.app.appearance.sync()` 会把它们写成 `--cohub-*` 变量。`client.app.window.setState()` 上报标签标题、保存状态和未保存的工作，`onBeforeClose()` 会在 host 关闭、重新加载或离开未保存的 App 之前写完数据。`client.app.onDrop()` 接收拖到 App 上的 Cohub 文件、Task 和 App，App 没有处理的 Ctrl / Cmd 组合键会交给 host 快捷键。App 通过 `<meta name="cohub:file-handlers">` 声明能打开的文件类型；安装时会在 `.cohub/apps.json` 中注册这些类型，除非已有其他 App 打开它们。每个文件在单独的窗口中打开，`client.app.onLaunch()` 会在文件打开、再次打开或移动时收到它。

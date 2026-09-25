@@ -1,5 +1,32 @@
 # @neta-art/cohub
 
+## 8.23.0
+
+### Minor Changes
+
+- d23129c: Apps can now match the host, own their window, and open files. The context carries `locale`, `appearance` (color scheme, theme, and resolved design tokens), `window.visible`, and the opened `invocation.file`; `client.app.appearance.sync()` applies them as `--cohub-*` variables. `client.app.window.setState()` reports the tab title, save status, and unsaved work, and `onBeforeClose()` flushes before the host closes, reloads, or leaves a dirty App. `client.app.onDrop()` receives Cohub files, Tasks, and Apps dragged onto the App, and unhandled Ctrl / Cmd chords reach host shortcuts. Apps declare the file types they open with `<meta name="cohub:file-handlers">`; installing registers them in `.cohub/apps.json` unless another App already opens them. Each file opens in its own window, and `client.app.onLaunch()` receives it when it opens, opens again, or moves.
+  
+  App 现在可以跟随 host 外观、管理自己的窗口并打开文件。context 新增 `locale`、`appearance`（配色方案、主题和解析后的设计 token）、`window.visible` 以及打开的 `invocation.file`；`client.app.appearance.sync()` 会把它们写成 `--cohub-*` 变量。`client.app.window.setState()` 上报标签标题、保存状态和未保存的工作，`onBeforeClose()` 会在 host 关闭、重新加载或离开未保存的 App 之前写完数据。`client.app.onDrop()` 接收拖到 App 上的 Cohub 文件、Task 和 App，App 没有处理的 Ctrl / Cmd 组合键会交给 host 快捷键。App 通过 `<meta name="cohub:file-handlers">` 声明能打开的文件类型；安装时会在 `.cohub/apps.json` 中注册这些类型，除非已有其他 App 打开它们。每个文件在单独的窗口中打开，`client.app.onLaunch()` 会在文件打开、再次打开或移动时收到它。
+- 574bfe8: Lighter media delivery for generation results.
+  
+  - SDK: `mediaPreviewCandidates()`, `imageVariantUrl()`, and `videoFrameUrl()` derive CDN image variants and video stills for OSS-backed hosts, in priority order with the original as fallback. `probeMediaInfo()` reads dimensions, duration, frame count, and first/last frames from OSS meta headers, then `image/info`. `publicAssets.uploadGenerationInput()` uploads a local generation input to an unlisted public URL.
+  - CLI: `cohub generate` uploads local `--image`/`--video`/`--audio` files instead of inlining base64 (inline stays the fallback), and prints each output's size, duration, and last frame; `--json` adds them as `outputMedia`.
+  - Task list views (`tasks.list`, `tasks.getMany`) no longer carry inline generation inputs; such blocks are marked `deferredBase64` and the full run stays available from `tasks.get`.
+- d23129c: Apps the Shell Space published or installed are now authorized without a dialog, including on a first visit and for `file.edit`. The Shell sends Host consent (`consent: "host"`), so the API can create the grant instead of only renewing one, while a grant the viewer revoked still asks again. Other Apps keep the renew-only path, so opening an unknown App never hands it the Space. Hosts report installation through the new `isInstalledIn` option of `createAppBridgeCore`. The API caps Host consent at the read-only Shell scopes plus `file.edit`.
+  
+  当前 Space 发布或安装的 App 现在可以免弹窗授权，首次访问和 `file.edit` 也不例外。Shell 以 Host 同意（`consent: "host"`）发起请求，API 可以新建授权而不只是续期；访客撤销过的授权仍会重新询问。其他 App 仍然只能续期已有授权，打开一个陌生 App 不会让它拿到这个 Space。Host 通过 `createAppBridgeCore` 新增的 `isInstalledIn` 选项告知安装状态。API 将 Host 同意的范围限定为只读 Shell 权限加 `file.edit`。
+- 414397b: Add generation task views and session file listings.
+  
+  - SDK: `toGenerationTaskView()` projects a generation Task Run into display-ready outputs (prompt, model, cover-folded media), with `generationOutputSource()` for inline payloads. `space(id).session(id).files()` lists Space files a session's Agent wrote or edited.
+  - CLI: `cohub spaces sessions files <sessionId>` lists Space files a session's Agent wrote or edited.
+
+### Patch Changes
+
+- d23129c: Surface methods, composer chips, and the runtime handshake an App announces during startup no longer get lost. The host clears what a document announced when its frame loads, which can come after the App's scripts ran, so it now asks the App to announce again; the SDK repeats its runtime `ready`, surface methods, composer chip, reported window state, and drop types. This also covers pages an App navigates to inside its frame.
+  
+  App 启动时宣告的 surface 方法、composer chip 和运行时握手不会再丢失。host 会在 frame 加载完成时清掉页面宣告过的状态，而这可能晚于 App 脚本的执行，所以 host 现在会请 App 再宣告一次；SDK 会重新发送运行时 `ready`、surface 方法、composer chip、已上报的窗口状态和可接受的拖放类型。App 在 frame 内跳转到其他页面时同样生效。
+- 574bfe8: Fold cover-role images into the media they depict. `toGenerationTaskView()` and Board task snapshots now share one pairing rule: an image sharing the provider id (music art), else a `first_frame` / `cover` / `poster` / `thumbnail` image in order (a video's first frame). `last_frame` images stay separate results.
+
 ## 8.22.0
 
 ### Minor Changes
