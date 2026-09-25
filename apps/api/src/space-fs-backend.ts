@@ -4,8 +4,10 @@ import * as remote from "./space-fs-remote.js";
 import { getSpaceSandboxBySpaceId } from "./space-sandboxes.js";
 import { isSandboxDialable } from "@cohub/sandbox-controller";
 import type { AgentSandboxFsMutationOperation } from "@cohub/infra/agent-queue";
+import type { SpaceFsUploadResponse } from "@cohub/protocol/fs";
 import { enqueueSandboxFsMutationJob, SandboxFsMutationTimeoutError } from "./sandbox-fs-mutation-queue.js";
 import { SpaceFsError, assertSafeRelativePath } from "./space-fs.js";
+import { writeUploadsThroughSandbox } from "./space-fs-upload.js";
 
 // Provider-aware facade over the space filesystem. Cloud spaces read/write the
 // shared PVC directly (the existing implementation); local spaces are served
@@ -218,10 +220,22 @@ export async function moveSpaceNode(
   return asApiEventOutcome(await direct.moveSpaceNode(spaceId, move));
 }
 
-export async function uploadSpaceFiles(spaceId: string, files: File[], targetDir: string) {
-  return (await isLocal(spaceId))
-    ? remote.uploadSpaceFiles(spaceId, files, targetDir)
-    : direct.uploadSpaceFiles(spaceId, files, targetDir);
+export async function uploadSpaceFiles(
+  spaceId: string,
+  files: File[],
+  targetDir: string,
+): Promise<ApiEventOutcome<SpaceFsUploadResponse> | SandboxEventOutcome<SpaceFsUploadResponse>> {
+  if (await isLocal(spaceId)) {
+    return asApiEventOutcome(await remote.uploadSpaceFiles(spaceId, files, targetDir));
+  }
+  if (await isCloudSandboxDialable(spaceId)) {
+    // A direct PVC write, and any directory it creates, is invisible to the
+    // running sandbox's watcher and workspace index.
+    const safeTargetDir = assertSafeRelativePath(targetDir, { allowEmpty: true });
+    return asSandboxOutcome(await writeUploadsThroughSandbox(files, safeTargetDir, (write) =>
+      runCloudSandboxMutation(spaceId, { operation: "write", path: write.path, content: write.content, encoding: "base64" })));
+  }
+  return asApiEventOutcome(await direct.uploadSpaceFiles(spaceId, files, targetDir));
 }
 
 /**
