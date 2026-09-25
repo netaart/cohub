@@ -47,6 +47,7 @@ const {
 	onUpload,
 	onInsertReference,
 	onPublishDirectory,
+	onOpenWith,
 	onOpenPort,
 	activePort = null,
 	draggable = true,
@@ -74,6 +75,7 @@ const {
 	onUpload?: (files: File[] | LocalUploadEntry[], targetDir: string) => void;
 	onInsertReference?: (path: string) => void;
 	onPublishDirectory?: (path: string) => void;
+	onOpenWith?: (node: SpaceFsNode) => void;
 	onOpenPort?: (port: string, url: string) => void;
 	activePort?: string | null;
 	draggable?: boolean;
@@ -480,6 +482,7 @@ $effect(() => {
             {onUpload}
             {onInsertReference}
             {onPublishDirectory}
+            {onOpenWith}
             {draggable}
             {touchDraggable}
             {showItemActions}

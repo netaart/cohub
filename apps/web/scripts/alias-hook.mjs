@@ -39,6 +39,7 @@ const PACKAGE_SOURCES = [
 		`${packagesRoot}/sdk/src/board/export/index.ts`,
 	],
 	["@neta-art/cohub/board", `${packagesRoot}/sdk/src/board/index.ts`],
+	["@neta-art/cohub/app-ref", `${packagesRoot}/sdk/src/app-ref.ts`],
 	[
 		"@cohub/protocol/public-identifiers",
 		`${packagesRoot}/protocol/src/public-identifiers.ts`,

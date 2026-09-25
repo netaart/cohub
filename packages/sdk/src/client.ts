@@ -25,6 +25,7 @@ import { createWebsocketClient, type WebsocketEventPayload } from "./websocket.j
 import { VoiceApi } from "./voice-input.js";
 import { AppSurfaceApi } from "./app-surface.js";
 import { attachAppEmbed } from "./app-embed.js";
+import { AppWindowApi, applyAppAppearance, type AppDropHandler, type AppLaunch, type AppWindowState } from "./app-window.js";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import {
   resolveApiBaseUrl,
@@ -92,6 +93,7 @@ export class CohubClient {
   private readonly transport: HttpTransport;
   private readonly websocketClient: ReturnType<typeof createWebsocketClient>;
   private readonly appRuntime: AppRuntimeApi;
+  private readonly appWindow: AppWindowApi;
 
   constructor(options: CohubClientOptions = {}) {
     const apiBaseUrl = resolveApiBaseUrl(options);
@@ -124,6 +126,10 @@ export class CohubClient {
       resolveWebBaseUrl({ env: options.env }),
     );
     this.appRuntime = createAppRuntime(appTransport, appRuntime?.appId, appIdResolver);
+    this.appWindow = new AppWindowApi(appTransport, {
+      context: () => this.appRuntime.context(),
+      onContextChanged: (listener) => this.appRuntime.onContextChanged(listener),
+    });
     const executionToken = resolveExecutionToken();
     const getAccessToken = options.getAccessToken
       ?? (executionToken
@@ -193,6 +199,7 @@ export class CohubClient {
   /** Releases listeners this client registered. Safe to call more than once. */
   dispose() {
     this.appRuntime.dispose();
+    this.appWindow.dispose();
   }
 
   readonly auth = {
@@ -216,6 +223,27 @@ export class CohubClient {
     /** Expose callable methods from inside a published app. */
     surface: new AppSurfaceApi(),
     onContextChanged: (listener: AppContextChangedListener) => this.appRuntime.onContextChanged(listener),
+    /** Files the host opens with this App — the first one and every later open. */
+    onLaunch: (listener: (launch: AppLaunch) => void) => this.appWindow.onLaunch(listener),
+    /** Accept Cohub resources the viewer drags from the host onto this App. */
+    onDrop: (handler: AppDropHandler) => this.appWindow.onDrop(handler),
+    window: {
+      /** Report the tab title, save status, and whether work is still unsaved. */
+      setState: (patch: Partial<AppWindowState>) => this.appWindow.setState(patch),
+      /** Persist pending work before the host closes a `dirty` window. */
+      onBeforeClose: (handler: () => unknown) => this.appWindow.onBeforeClose(handler),
+    },
+    appearance: {
+      /** Keep `root` (default `<html>`) in sync with the host theme and locale. */
+      sync: (root?: HTMLElement) => {
+        const target = root ?? (typeof document === "undefined" ? null : document.documentElement);
+        if (!target) return () => {};
+        const apply = (context: Parameters<typeof applyAppAppearance>[1]) => applyAppAppearance(target, context);
+        const stop = this.appRuntime.onContextChanged(apply);
+        void this.appRuntime.context().then(apply, () => {});
+        return stop;
+      },
+    },
     /** Ask the host to close this App's surface. */
     requestClose: () => this.appRuntime.requestClose(),
     /**

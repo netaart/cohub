@@ -1,7 +1,7 @@
-import { buildAppRuntimeCloseRequest, buildAppRuntimeReady, buildAppRuntimeConfigureRequest, buildAppRuntimePointer, type AppRuntimeConfigureRequest, type AppRuntimeAnchor, type AppRuntimeRect } from "@cohub/protocol/app-runtime";
+import { buildAppRuntimeCloseRequest, buildAppRuntimeReady, parseAppRuntimeAnnounce, buildAppRuntimeConfigureRequest, buildAppRuntimePointer, type AppAppearance, type AppRuntimeConfigureRequest, type AppRuntimeAnchor, type AppRuntimeRect } from "@cohub/protocol/app-runtime";
 
 // Re-export configure types so tsdown can emit them in the DTS bundle.
-export type { AppRuntimeConfigureRequest, AppRuntimeAnchor, AppRuntimeRect };
+export type { AppAppearance, AppRuntimeConfigureRequest, AppRuntimeAnchor, AppRuntimeRect };
 import {
   buildAppNavigationOpenMessage,
   type AppNavigationOpenResponse,
@@ -35,6 +35,10 @@ export type AppRuntimeInvocationContext = {
    * when that App's published content is served from the embedding frame.
    */
   embedder?: { appId: string; slug: string };
+  /** The file this open hands to the App, when the App opens files. */
+  file?: { path: string };
+  /** Unique per open: a new id means the host opened the App again. */
+  id?: string;
 };
 
 /** Current navigation context supplied by the embedding Cohub shell. */
@@ -67,6 +71,12 @@ export type AppRuntimeContext = {
   viewer?: { userUuid: string } | null;
   invocation?: AppRuntimeInvocationContext;
   shell?: AppRuntimeShellContext;
+  /** BCP 47 locale the viewer reads the host in, e.g. `zh-CN`. */
+  locale?: string;
+  /** Theme and design tokens the viewer currently sees. */
+  appearance?: AppAppearance;
+  /** Whether the host is showing this App's surface right now. */
+  window?: { visible: boolean };
   permissions?: {
     scopes: Permission[];
     appScopes: Permission[];
@@ -134,6 +144,10 @@ export interface AppRuntimeTransport {
   supportsNavigation?: boolean;
   /** Posts a one-way message to the host; no reply is expected. */
   notify?: (message: Record<string, unknown>) => void;
+  /** Subscribes to unsolicited runtime messages from the host (drags, close requests). */
+  subscribeHostMessages?: (listener: (data: unknown) => void) => () => void;
+  /** Whether a Cohub host has answered this runtime, proving it speaks the protocol. */
+  isHostConnected?: () => boolean;
 }
 
 const isBrowser = () => typeof window !== "undefined" && typeof window.parent !== "undefined";
@@ -166,6 +180,39 @@ export class ParentBridgeTransport implements AppRuntimeTransport {
   private contextListener: ((event: MessageEvent) => void) | null = null;
   private diagnosticListeners = new Set<AppDiagnosticListener>();
   private diagnosticListener: ((event: MessageEvent) => void) | null = null;
+  private hostListeners = new Set<(data: unknown) => void>();
+  private hostListener: ((event: MessageEvent) => void) | null = null;
+  private announceListener: ((event: MessageEvent) => void) | null = null;
+
+  isHostConnected() {
+    return this.trustedParentOrigin !== null;
+  }
+
+  private isFromParent(event: MessageEvent) {
+    if (event.source !== window.parent) return false;
+    const parentOrigin = this.trustedParentOrigin ?? getParentOrigin();
+    return !parentOrigin || event.origin === parentOrigin;
+  }
+
+  subscribeHostMessages(listener: (data: unknown) => void) {
+    if (!hasParent() || typeof window.addEventListener !== "function") return () => {};
+    this.hostListeners.add(listener);
+    this.announceReady();
+    if (!this.hostListener) {
+      this.hostListener = (event) => {
+        if (!this.isFromParent(event)) return;
+        for (const current of this.hostListeners) current(event.data);
+      };
+      window.addEventListener("message", this.hostListener);
+    }
+    return () => {
+      this.hostListeners.delete(listener);
+      if (this.hostListeners.size === 0 && this.hostListener) {
+        window.removeEventListener("message", this.hostListener);
+        this.hostListener = null;
+      }
+    };
+  }
 
   /**
    * Tells the host the runtime is ready once, before any subscription. Hosts
@@ -180,9 +227,21 @@ export class ParentBridgeTransport implements AppRuntimeTransport {
     try {
       window.parent.postMessage(buildAppRuntimeReady(), parentOrigin);
       this.readyAnnounced = true;
+      this.answerAnnounceRequests();
     } catch {
       // The host may have been disposed during app startup.
     }
+  }
+
+  /** Says ready again when a reloaded host asks. */
+  private answerAnnounceRequests() {
+    if (this.announceListener || typeof window.addEventListener !== "function") return;
+    this.announceListener = (event) => {
+      if (!this.isFromParent(event) || !parseAppRuntimeAnnounce(event.data)) return;
+      this.readyAnnounced = false;
+      this.announceReady();
+    };
+    window.addEventListener("message", this.announceListener);
   }
 
   subscribeDiagnostics(listener: AppDiagnosticListener) {

@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
+import type { AppWindowState } from "@cohub/protocol/app-runtime";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import type {
 	SpacePublicEndpoint,
@@ -38,8 +39,7 @@ import type { FileWorkspaceInlineFile } from "./file-workspace-controller.svelte
 import InlineFilePanel from "./InlineFilePanel.svelte";
 import PortWindow from "./PortWindow.svelte";
 import type { PreviewChrome } from "./preview-header";
-import type { Window } from "./windows";
-import { workspaceFilePreviewKind } from "./windows";
+import { appWindowSyncStatus, type Window } from "./windows";
 
 type PublishTarget = {
 	targetType: "file" | "directory" | "port";
@@ -89,9 +89,9 @@ export type SpaceFileDomainProps = {
 	activeInlinePort: string | null;
 	inlineAppTabs: InlineAppPreview[];
 	/** App tabs whose background surfaces are kept mounted (MRU window). */
-	retainedAppIds: ReadonlySet<string>;
+	retainedAppKeys: ReadonlySet<string>;
 	appShell: AppRuntimeShellContext;
-	activeInlineAppId: string | null;
+	activeInlineAppKey: string | null;
 	activeWindowKind: "file" | "board" | "port" | "app" | null;
 	inlinePortEndpoint: SpacePublicEndpoint | null;
 	previewEndpoints: SpacePublicEndpoints;
@@ -139,12 +139,15 @@ export type SpaceFileDomainProps = {
 		targetDir: string,
 	) => void;
 	onInsertPathReference: (path: string) => void;
+	/** Opens a file the way the viewer asked for it: its handler App, or built in. */
+	onOpenWorkspaceFile: (path: string) => void | Promise<void>;
+	/** Lets the viewer pick which App opens this file, just this once. */
+	onOpenFileWith: (path: string) => void;
 	onOpenInlineFile: (path: string) => void | Promise<void>;
 	onOpenLinkedInlineFile: (
 		target: string | WorkspaceFileLinkTarget,
 	) => void | Promise<void>;
 	resolveWorkspaceAsset: ResolveWorkspaceAsset;
-	onOpenInlineBoard: (path: string) => void | Promise<void>;
 	onOpenTask: (taskRunId: string) => void | Promise<void>;
 	onRevealPath: (path: string) => void | Promise<void>;
 	onJumpToTurn?: (sequence: number) => void | Promise<void>;
@@ -155,11 +158,13 @@ export type SpaceFileDomainProps = {
 	onCloseInlineBoardTab: (path: string) => void;
 	onActivateInlinePort: (port: string) => void;
 	onCloseInlinePortTab: (port: string) => void;
-	onActivateInlineApp: (appId: string) => void;
-	onCloseInlineAppTab: (appId: string) => void;
-	onRetryInlineApp: (appId: string) => void;
-	onRegisterAppSurface: (appId: string, host: AppSurfaceHost | null) => void;
-	onAppComposerChip: (appId: string, chip: AppComposerChip | null) => void;
+	/** App windows are addressed by window key; see `app-window-key`. */
+	onActivateInlineApp: (key: string) => void;
+	onCloseInlineAppTab: (key: string) => void;
+	onRetryInlineApp: (key: string) => void;
+	onRegisterAppSurface: (key: string, host: AppSurfaceHost | null) => void;
+	onAppComposerChip: (key: string, chip: AppComposerChip | null) => void;
+	onAppWindowState: (key: string, state: AppWindowState) => void;
 	onNavigationOpen?: (message: AppNavigationOpenMessage) => Promise<{
 		handled: boolean;
 		reason?: "unsupported" | "invalid_target" | "inaccessible" | "timeout";
@@ -256,9 +261,9 @@ let {
 	inlinePortTabs,
 	activeInlinePort,
 	inlineAppTabs,
-	retainedAppIds,
+	retainedAppKeys,
 	appShell,
-	activeInlineAppId,
+	activeInlineAppKey,
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,
@@ -300,13 +305,14 @@ let {
 	onRenameNode,
 	onMoveNode,
 	onDeleteNode,
+	onOpenWorkspaceFile,
+	onOpenFileWith,
 	onDownloadNode,
 	onUploadFiles,
 	onInsertPathReference,
 	onOpenInlineFile,
 	onOpenLinkedInlineFile,
 	resolveWorkspaceAsset,
-	onOpenInlineBoard,
 	onOpenTask,
 	onRevealPath,
 	onJumpToTurn,
@@ -322,6 +328,7 @@ let {
 	onRetryInlineApp,
 	onRegisterAppSurface,
 	onAppComposerChip,
+	onAppWindowState,
 	onNavigationOpen = undefined,
 	onBackInlineFile,
 	onDownloadInlineFile,
@@ -357,9 +364,7 @@ function closeMobileDrawerIfNeeded(mobile: boolean) {
 }
 
 function openSpacePath(path: string) {
-	if (workspaceFilePreviewKind(path, activeFsReadonly) === "board")
-		void onOpenInlineBoard(path);
-	else void onOpenInlineFile(path);
+	void onOpenWorkspaceFile(path);
 }
 
 function publishInlineFile() {
@@ -373,6 +378,8 @@ function handleSpaceUpdated(nextSpace: SpaceRecord) {
 		items.map((item) => (item.id === spaceId ? nextSpace : item)),
 	);
 }
+const fileName = (path: string | undefined) => path?.split("/").pop();
+
 const windows = $derived([
 	...inlineFileTabs.map((tab) => ({
 		kind: "file" as const,
@@ -404,17 +411,23 @@ const windows = $derived([
 	})),
 	...inlineAppTabs.map((tab) => ({
 		kind: "app" as const,
-		key: tab.appId,
-		label: tab.label,
-		title: tab.detail?.publicUrl ?? tab.label,
-		syncStatus: tab.error ? ("error" as const) : ("idle" as const),
-		active: activeWindowKind === "app" && tab.appId === activeInlineAppId,
+		key: tab.key,
+		// A file window is the file; the App behind it is an implementation detail.
+		label:
+			tab.windowState.title ?? fileName(tab.invocation.file?.path) ?? tab.label,
+		title: tab.invocation.file?.path ?? tab.detail?.publicUrl ?? tab.label,
+		syncStatus: tab.error
+			? ("error" as const)
+			: tab.flushing
+				? ("saving" as const)
+				: appWindowSyncStatus(tab.windowState),
+		active: activeWindowKind === "app" && tab.key === activeInlineAppKey,
 	})),
 ]);
 
 /** App tabs whose surfaces stay mounted while inactive (MRU keep-alive). */
 const retainedAppTabs = $derived(
-	inlineAppTabs.filter((tab) => retainedAppIds.has(tab.appId)),
+	inlineAppTabs.filter((tab) => retainedAppKeys.has(tab.key)),
 );
 
 /** Universal preview chrome shared by every panel's header. */
@@ -582,9 +595,9 @@ function previewContentOut(node: Element) {
 	</div>
 {/if}
 
-{#each retainedAppTabs as tab (tab.appId)}
+{#each retainedAppTabs as tab (tab.id)}
 	{@const isActiveApp =
-		activeWindowKind === "app" && tab.appId === activeInlineAppId}
+		activeWindowKind === "app" && tab.key === activeInlineAppKey}
 	<div
 		class="h-full min-h-0"
 		hidden={!isActiveApp}
@@ -603,6 +616,7 @@ function previewContentOut(node: Element) {
 			onRetry={onRetryInlineApp}
 			onRegisterSurface={onRegisterAppSurface}
 			onComposerChip={onAppComposerChip}
+			onWindowState={onAppWindowState}
 			onNavigationOpen={onNavigationOpen}
 		/>
 	</div>
@@ -644,6 +658,10 @@ function previewContentOut(node: Element) {
 	onToggle={onToggleDirectory}
 	onOpenPath={(path, options) => {
 		openSpacePath(path);
+		closeMobileDrawerIfNeeded(options.mobile);
+	}}
+	onOpenWith={(node, options) => {
+		onOpenFileWith(node.path);
 		closeMobileDrawerIfNeeded(options.mobile);
 	}}
 	onRevealPath={async (path, options) => {

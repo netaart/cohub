@@ -1,5 +1,6 @@
 <script lang="ts">
 import {
+	AppWindow,
 	ChevronDown,
 	Download,
 	File as FileIcon,
@@ -51,6 +52,7 @@ const {
 	onUpload,
 	onInsertReference,
 	onPublishDirectory,
+	onOpenWith,
 	draggable = true,
 	touchDraggable = false,
 	showItemActions = true,
@@ -71,6 +73,7 @@ const {
 	onUpload?: (files: File[] | LocalUploadEntry[], targetDir: string) => void;
 	onInsertReference?: (path: string) => void;
 	onPublishDirectory?: (path: string) => void;
+	onOpenWith?: (node: SpaceFsNode) => void;
 	draggable?: boolean;
 	/** Enable the long-press drag gesture for touch and pen. */
 	touchDraggable?: boolean;
@@ -400,7 +403,7 @@ $effect(() => {
     <Loader2 class="h-3 w-3 shrink-0 animate-spin text-text-placeholder" aria-label={m.file_loading({}, { locale })} />
   {/if}
 
-  {#if showItemActions && (canWrite || (!isDir && onDownload))}
+  {#if showItemActions && (canWrite || (!isDir && (onDownload || onOpenWith)))}
     <span class="actions">
       {#if canWrite && onInsertReference}
         <button type="button" class="action" title={m.file_insert({}, { locale })} onclick={stop(() => onInsertReference(node.path))}><TextCursorInput class="w-3.5 h-3.5" /></button>
@@ -443,6 +446,10 @@ $effect(() => {
           </button>
           {#if menuOpen}
             <div class="dropdown" bind:this={menuEl}>
+              {#if onOpenWith}
+                <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onOpenWith(node))}><AppWindow class="w-3.5 h-3.5" /> {m.file_open_with({}, { locale })}</button>
+                <div class="dropdown-sep"></div>
+              {/if}
               {#if onDownload}
                 <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onDownload(node))}><Download class="w-3.5 h-3.5" /> {m.file_download({}, { locale })}</button>
                 {#if canWrite}
@@ -478,6 +485,7 @@ $effect(() => {
       {onUpload}
       {onInsertReference}
       {onPublishDirectory}
+      {onOpenWith}
       {draggable}
       {touchDraggable}
       {showItemActions}

@@ -16,6 +16,7 @@ import type {
 	UserProfile,
 } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
+import type { Navigation } from "@sveltejs/kit";
 import { Check, Copy, X } from "lucide-svelte";
 import { onDestroy, onMount, tick, untrack } from "svelte";
 import {
@@ -50,7 +51,12 @@ import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import ResourceLabelPicker from "$lib/components/ResourceLabelPicker.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
-import { invalidateInstalledApps } from "$lib/features/app/app-center";
+import {
+	cacheInstalledApps,
+	invalidateInstalledApps,
+	readInstalledApps,
+	writeInstalledApps,
+} from "$lib/features/app/app-center";
 import {
 	loadAppPreview,
 	resolveAppNavigation,
@@ -63,6 +69,11 @@ import {
 	parseAppVersionPublished,
 	upsertAppSnapshot,
 } from "$lib/features/app/app-realtime";
+import {
+	createFileHandlerResolver,
+	type FileHandlerApp,
+	saveDefaultFileHandler,
+} from "$lib/features/app/file-handlers";
 import type { AppSurfaceHost } from "$lib/features/app/surface-host";
 import {
 	type AppSurfaceCallOutcome,
@@ -78,6 +89,7 @@ import {
 	subscribeSpaceChannel,
 } from "$lib/features/session-chat";
 import SessionChatPanel from "$lib/features/session-chat/SessionChatPanel.svelte";
+import { getLocale } from "$lib/i18n/locale.svelte";
 // SettingsOverlay removed — settings merged inline into detail page
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import {
@@ -87,6 +99,7 @@ import {
 import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { DURATION_PANEL } from "$lib/motion.svelte";
+import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import {
 	activateSpaceConfig,
@@ -129,6 +142,7 @@ import {
 import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
 import { resolveWorkspaceSpaceId } from "$lib/workspace-route";
 import { createAppPreviewController } from "./modules/app-window-controller.svelte";
+import { appWindowKey } from "./modules/app-window-key";
 import { createBoardWindowController } from "./modules/board-window-controller.svelte";
 import DesktopLayerHost from "./modules/DesktopLayerHost.svelte";
 import { createDesktopLayerManager } from "./modules/desktop-layer-manager.svelte";
@@ -141,6 +155,9 @@ import {
 	floatPanelsFit,
 } from "./modules/float-layout";
 import NewChatSpaceProfile from "./modules/NewChatSpaceProfile.svelte";
+import OpenWithDialog, {
+	type OpenWithChoice,
+} from "./modules/OpenWithDialog.svelte";
 import PortReadyToastView from "./modules/PortReadyToast.svelte";
 import { createPortPreviewController } from "./modules/port-window-controller.svelte";
 import { extractPublicEndpoints } from "./modules/port-window-utils";
@@ -463,17 +480,154 @@ async function handleAppNavigationOpen(message: AppNavigationOpenMessage) {
 	}
 }
 
-async function openWorkspaceNavigation(target: AppNavigationTarget) {
+const fileHandlers = createFileHandlerResolver({
+	loader: sdk.apps,
+	listSpaceApps: async (id) => (await sdk.apps.listBySpace(id)).apps,
+	readInstalled: async (id) => (await readInstalledApps(id)).document,
+});
+
+type WorkspaceFileOpen = {
+	position?: unknown;
+	/** Links and navigation keep the file back-stack; a tree click starts fresh. */
+	preserveHistory?: boolean;
+	source?: WorkspaceAppOpenContext["source"];
+	/** Skip the Space's default App, or open with a specific one. */
+	using?: { kind: "builtin" } | { kind: "app"; appId: string; label?: string };
+};
+
+/** Opens a file with its default App, or built in (always for checkpoints). */
+async function openWorkspaceFile(
+	path: string,
+	options: WorkspaceFileOpen = {},
+) {
+	if (!activeFsReadonly && options.using?.kind !== "builtin") {
+		const app =
+			options.using?.kind === "app"
+				? options.using
+				: await resolveDefaultFileApp(path);
+		if (app) {
+			await openWorkspaceApp({
+				appId: app.appId,
+				label: app.label,
+				launch: null,
+				openContext: { source: options.source ?? "user", file: { path } },
+				surface: "window",
+			});
+			return;
+		}
+	}
+	if (workspaceFilePreviewKind(path, activeFsReadonly) === "board") {
+		await openInlineBoard(path);
+		return;
+	}
+	if (options.preserveHistory === false) {
+		await openInlineFile(path);
+		return;
+	}
+	await windowManager.openFile(path, {
+		preserveHistory: true,
+		position: options.position ?? null,
+	});
+}
+
+/** Past this, a file opens built in rather than wait on the network. */
+const FILE_HANDLER_WAIT_MS = 1_500;
+
+async function resolveDefaultFileApp(path: string) {
+	// An unreadable or unreachable `.cohub/apps.json` must never keep a file
+	// from opening. Normally the warm cache answers at once.
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const resolved = await Promise.race([
+		fileHandlers.resolveDefault(spaceId, path).catch(() => null),
+		new Promise<null>((resolve) => {
+			timer = setTimeout(() => resolve(null), FILE_HANDLER_WAIT_MS);
+		}),
+	]).finally(() => clearTimeout(timer));
+	if (!resolved) return null;
+	if (!resolved.app) {
+		showWorkspaceNotice(
+			m.open_with_unavailable({ app: resolved.ref }, { locale: getLocale() }),
+		);
+		return null;
+	}
+	return {
+		appId: resolved.app.appId,
+		label: appDisplayTitle(resolved.app.meta, resolved.app.slug),
+	};
+}
+
+// File opens consult the installed Apps; warm the cache so the first stays instant.
+$effect(() => {
+	if (spaceId) void readInstalledApps(spaceId).catch(() => {});
+});
+
+let openWith = $state<{
+	path: string;
+	candidates: FileHandlerApp[] | null;
+	defaultAppId: string | null;
+} | null>(null);
+
+async function openFileWith(path: string) {
+	openWith = { path, candidates: null, defaultAppId: null };
+	const [candidates, defaultAppId] = await Promise.all([
+		fileHandlers.listCandidates(spaceId, path).catch(() => []),
+		fileHandlers.resolveDefault(spaceId, path).then(
+			(resolved) => resolved?.app?.appId ?? null,
+			() => null,
+		),
+	]);
+	if (openWith?.path !== path) return;
+	openWith = { path, candidates, defaultAppId };
+}
+
+async function pickOpenWith(choice: OpenWithChoice, always: boolean) {
+	const current = openWith;
+	openWith = null;
+	if (!current) return;
+	if (always) {
+		try {
+			const saved = await saveDefaultFileHandler(
+				{
+					read: (id) => readInstalledApps(id, { refresh: true }),
+					write: writeInstalledApps,
+					loadApp: fileHandlers.loadApp,
+				},
+				{
+					spaceId,
+					path: current.path,
+					appId: choice.kind === "app" ? choice.appId : null,
+				},
+			);
+			if (saved) cacheInstalledApps(spaceId, saved);
+		} catch {
+			showWorkspaceNotice(m.open_with_save_failed({}, { locale: getLocale() }));
+		}
+	}
+	const picked =
+		choice.kind === "app"
+			? current.candidates?.find((app) => app.appId === choice.appId)
+			: null;
+	void openWorkspaceFile(current.path, {
+		using: picked
+			? {
+					kind: "app",
+					appId: picked.appId,
+					label: appDisplayTitle(picked.meta, picked.slug),
+				}
+			: choice,
+	});
+}
+
+async function openWorkspaceNavigation(
+	target: AppNavigationTarget,
+	source: WorkspaceAppOpenContext["source"] = "user",
+) {
 	if (target.kind === "file") {
 		if (target.spaceId !== spaceId)
 			return { handled: false as const, reason: "unsupported" as const };
-		if (workspaceFilePreviewKind(target.path, activeFsReadonly) === "board") {
-			await openInlineBoard(target.path);
-			return { handled: true as const };
-		}
-		await windowManager.openFile(target.path, {
-			preserveHistory: true,
+		await openWorkspaceFile(target.path, {
 			position: target.view ?? null,
+			source,
 		});
 		return { handled: true as const };
 	}
@@ -557,7 +711,7 @@ async function callOpenedApp(
 	await tick();
 	return surface === "overlay"
 		? desktopLayers.callSurface({ appId, ...call })
-		: appPreview.callSurface({ appId, ...call });
+		: appPreview.callSurface({ key: appWindowKey(appId), ...call });
 }
 
 async function openResolvedAppNavigation(
@@ -625,11 +779,15 @@ function desktopCallOutcome(
 	};
 }
 
-/** Mounted App iframes across every host (tabs and overlays), keyed by app id. */
+/** Mounted App iframes across every host: tabs by window key, overlays by App id. */
 const appSurfaces = createAppSurfaceRegistry();
+/** Surface hosts of mounted App tabs, for the close handshake. */
+const appSurfaceHosts = new Map<string, AppSurfaceHost>();
 const appPreview = createAppPreviewController({
 	getSpaceId: () => spaceId,
 	surfaces: appSurfaces,
+	prepareClose: (key) =>
+		appSurfaceHosts.get(key)?.prepareClose() ?? Promise.resolve(false),
 	onOpenPanel: () => {
 		if (uiState.filesColumnHidden) uiState.setFilesColumnHidden(false);
 		ensurePreviewPanelFits();
@@ -639,14 +797,14 @@ const appPreview = createAppPreviewController({
 			if (!activeWindowKind) closePreviewFocusMode();
 		});
 	},
-	onAppClosed: (appId) => windowManager.tabClosed("app", appId),
+	onAppClosed: (key) => windowManager.tabClosed("app", key),
 });
 
 // Desktop overlay layer — manages App surfaces that float above the workspace.
 const desktopLayers = createDesktopLayerManager({ surfaces: appSurfaces });
 const inlineAppPreview = $derived(appPreview.preview);
 const inlineAppTabs = $derived(appPreview.previews);
-const activeInlineAppId = $derived(appPreview.activeAppId);
+const activeInlineAppKey = $derived(appPreview.activeKey);
 const previewEndpoints = $derived(portPreview.endpoints);
 const inlinePortPreview = $derived(portPreview.preview);
 const inlinePortTabs = $derived(portPreview.previews);
@@ -724,8 +882,10 @@ const fileWorkspace = createFileWorkspaceController({
 	onOpenInlineFile: (path) => openInlineFile(path),
 	onOpenInlineBoard: (path) => openInlineBoard(path),
 	onCloseInlineBoard: () => closeInlineBoard(),
-	onRenameInlineBoard: (fromPath, toPath) =>
-		boardPreview.renamePath(fromPath, toPath),
+	onRenamePath: (fromPath, toPath) => {
+		boardPreview.renamePath(fromPath, toPath);
+		renameAppWindows(fromPath, toPath);
+	},
 	onOpenInlinePort: (port, url, optionsArg) =>
 		openInlinePort(port, url, optionsArg),
 	onCloseInlinePort: () => closeInlinePort(),
@@ -785,7 +945,7 @@ const windowManager = createWindowManager({
 	getPortTabs: () => portPreview.previews,
 	getActivePort: () => portPreview.activePort,
 	getAppTabs: () => appPreview.previews,
-	getActiveAppId: () => appPreview.activeAppId,
+	getActiveAppKey: () => appPreview.activeKey,
 	openFile: (path, optionsArg) =>
 		fileWorkspace.openInlineFile(path, optionsArg as never),
 	activateFile: (path) => fileWorkspace.activateInlineFile(path),
@@ -800,8 +960,8 @@ const windowManager = createWindowManager({
 	activatePort: (port) => portPreview.activatePort(port),
 	closePort: (port) => portPreview.closePort(port ?? undefined),
 	openApp: (input) => appPreview.openApp(input),
-	activateApp: (appId) => appPreview.activateApp(appId),
-	closeApp: (appId) => appPreview.closeApp(appId ?? undefined),
+	activateApp: (key) => appPreview.activateApp(key),
+	closeApp: (key) => appPreview.closeApp(key ?? undefined),
 	getPortEndpointUrl: (port) => previewEndpoints[port]?.url,
 	syncUrl: (ref, replace = true) => syncPreviewQuery(ref, replace),
 	onBudgetCleanup: () => {
@@ -809,7 +969,7 @@ const windowManager = createWindowManager({
 	},
 });
 /** App tabs whose surfaces stay mounted while inactive (MRU window). */
-const retainedAppIds = $derived(windowManager.retainedAppIds());
+const retainedAppKeys = $derived(windowManager.retainedAppKeys());
 const inlineFileCopied = $derived(fileWorkspace.inlineFileCopied);
 const openAppPublish = (
 	targetType: "file" | "directory" | "port",
@@ -895,6 +1055,7 @@ const selectedFilePath = $derived(
 		activeWindowKind,
 		activeInlineFilePath,
 		activeInlineBoardPath,
+		activeInlineAppKey,
 	),
 );
 let newChatBackgroundAppContext = $state<{
@@ -1579,6 +1740,9 @@ function enqueueSpaceFsChanged(payload: ChannelEnvelope) {
 	if (installedAppsChanged) {
 		invalidateInstalledApps(eventSpaceId);
 		dispatchInstalledAppsChanged(eventSpaceId);
+		// Re-warm, so the next file open reads the new defaults from memory.
+		if (eventSpaceId === spaceId)
+			void readInstalledApps(eventSpaceId).catch(() => {});
 	}
 
 	const generation = spaceFsEventGeneration;
@@ -1675,8 +1839,10 @@ function scheduleSpaceFsRefresh(input: {
 		if (change.kind === "rename" && change.oldPath && change.path) {
 			boardPreview.renamePath(change.oldPath, change.path);
 			fileWorkspace.renamePath(change.oldPath, change.path);
+			renameAppWindows(change.oldPath, change.path);
 		} else if (change.kind === "delete" && change.path) {
 			boardPreview.closeBoardsAtPath(change.path, change.nodeType === "dir");
+			appPreview.closeFilesAtPath(change.path, change.nodeType === "dir");
 		}
 		if (
 			change.path &&
@@ -1871,14 +2037,54 @@ onDestroy(() => {
 	sessionChat.dispose();
 	if (workspaceNoticeTimer) clearTimeout(workspaceNoticeTimer);
 	spaceBootstrap.resetLoaded();
+	// A flush still running must not navigate away from wherever we went.
+	heldNavigation = null;
 });
 
+/** The navigation held while dirty Apps flush; any later navigation supersedes it. */
+let heldNavigation: Navigation | null = null;
+let flushingApps = false;
+/** The one resumed navigation the guard lets through, by destination. */
+let releasedHref: string | null = null;
+
+async function resumeHeldNavigation() {
+	flushingApps = true;
+	let clean = false;
+	try {
+		clean = await appPreview.flushAll();
+	} catch {
+		// A failed flush counts as unsaved work; the viewer decides.
+	} finally {
+		flushingApps = false;
+	}
+	const target = heldNavigation;
+	heldNavigation = null;
+	if (!target?.to) return;
+	if (!clean || fileWorkspace.hasDirtyInlineFiles()) {
+		if (!confirm(m.workspace_leave_unsaved({}, { locale: getLocale() })))
+			return;
+	}
+	releasedHref = target.to.url.href;
+	// Back and forward stay history moves instead of new entries.
+	if (target.type === "popstate") history.go(target.delta);
+	else void goto(target.to.url);
+}
+
+// One guard for everything leaving the workspace would lose: file drafts that
+// are still syncing and App documents with unsaved work. Asks at most once.
 beforeNavigate((navigation) => {
 	if (activeSessionId) sessionChat.captureCurrentScrollAnchor(activeSessionId);
 	sessionChat.flushComposerDraft();
 	void fileWorkspace.persistInlineFileDrafts();
 	void fileWorkspace.flushInlineFiles();
-	if (!fileWorkspace.hasDirtyInlineFiles()) return;
+	// Only the resumed navigation passes; any other one clears the release.
+	const released = releasedHref === navigation.to?.url.href;
+	releasedHref = null;
+	heldNavigation = null;
+	if (released) return;
+	const appsDirty = appPreview.hasDirty();
+	if (!appsDirty && !fileWorkspace.hasDirtyInlineFiles()) return;
+	// Cancelling an unload makes the browser ask the viewer itself.
 	if (navigation.willUnload) {
 		navigation.cancel();
 		return;
@@ -1886,20 +2092,25 @@ beforeNavigate((navigation) => {
 	const fromUrl = navigation.from?.url;
 	const toUrl = navigation.to?.url;
 	if (!fromUrl || !toUrl) return;
-	// Query-only changes (preview open/close) keep drafts.
+	// Query-only changes (preview open/close) keep drafts and App windows.
 	if (fromUrl.pathname === toUrl.pathname) return;
-	const fromPath = fromUrl.pathname;
-	const toPath = toUrl.pathname;
-	const fromCheckpoint = fromPath.includes("/checkpoints/");
-	const toCheckpoint = toPath.includes("/checkpoints/");
-	const fsSourceChanging = fromCheckpoint !== toCheckpoint;
+	const fsSourceChanging =
+		fromUrl.pathname.includes("/checkpoints/") !==
+		toUrl.pathname.includes("/checkpoints/");
 	const sameSpace =
 		Boolean(spaceId) &&
-		resolveWorkspaceSpaceId({ pathname: toPath }) === spaceId;
-	// Only prompt when drafts cannot survive the transition.
+		resolveWorkspaceSpaceId({ pathname: toUrl.pathname }) === spaceId;
+	// Only prompt when unsaved work cannot survive the transition.
 	if (!fsSourceChanging && sameSpace) return;
-	const ok = confirm("File changes are still syncing. Leave anyway?");
-	if (!ok) navigation.cancel();
+	if (!appsDirty) {
+		if (!confirm(m.workspace_leave_unsaved({}, { locale: getLocale() })))
+			navigation.cancel();
+		return;
+	}
+	// Apps flush asynchronously: hold the navigation, then resume it.
+	navigation.cancel();
+	heldNavigation = navigation;
+	if (!flushingApps) void resumeHeldNavigation();
 });
 
 onNavigate(() => {
@@ -2105,6 +2316,7 @@ async function handleDeleteNode(node: SpaceFsNode) {
 	const deleted = await fileWorkspace.handleDeleteNode(node);
 	if (!deleted) return;
 	boardPreview.closeBoardsAtPath(node.path, node.type === "dir");
+	appPreview.closeFilesAtPath(node.path, node.type === "dir");
 }
 async function openInlineFile(
 	path: string,
@@ -2114,17 +2326,8 @@ async function openInlineFile(
 	await windowManager.openFile(path, options);
 }
 async function openLinkedInlineFile(target: string | WorkspaceFileLinkTarget) {
-	const path = typeof target === "string" ? target : target.path;
-	if (workspaceFilePreviewKind(path, activeFsReadonly) === "board") {
-		await openInlineBoard(path);
-		return;
-	}
-	const position =
-		typeof target === "string" ? null : (target.position ?? null);
-	await windowManager.openFile(path, {
-		preserveHistory: true,
-		position,
-	});
+	if (typeof target === "string") await openWorkspaceFile(target);
+	else await openWorkspaceFile(target.path, { position: target.position });
 }
 const resolveWorkspaceAsset: ResolveWorkspaceAsset = (path, { signal }) =>
 	resolveWorkspaceFileAsset(fileWorkspace.readActiveFsFile, path, { signal });
@@ -2200,14 +2403,20 @@ function closeInlineBoardTab(path?: string) {
 function closeInlinePortTab(port?: string) {
 	windowManager.close("port", port ?? activeInlinePort);
 }
-function activateInlineAppTab(appId: string) {
-	windowManager.activate("app", appId);
+/** File windows follow a moved file without remounting their App. */
+function renameAppWindows(fromPath: string, toPath: string) {
+	for (const [from, to] of appPreview.renamePath(fromPath, toPath)) {
+		windowManager.renameTab("app", from, to);
+	}
 }
-function closeInlineAppTab(appId?: string) {
-	windowManager.close("app", appId ?? activeInlineAppId);
+function activateInlineAppTab(key: string) {
+	windowManager.activate("app", key);
 }
-function retryInlineApp(appId: string) {
-	appPreview.retry(appId);
+function closeInlineAppTab(key?: string) {
+	windowManager.close("app", key ?? activeInlineAppKey);
+}
+function retryInlineApp(key: string) {
+	void appPreview.retry(key);
 }
 /**
  * The panel owns the iframe, so it hands its surface host up on mount and clears
@@ -2215,8 +2424,8 @@ function retryInlineApp(appId: string) {
  * invoker pointing at a detached frame.
  */
 const appSurfaceDisposers = new Map<string, () => void>();
-function handleAppComposerChip(appId: string, chip: AppComposerChip | null) {
-	appPreview.setComposerChip(appId, chip);
+function handleAppComposerChip(key: string, chip: AppComposerChip | null) {
+	appPreview.setComposerChip(key, chip);
 }
 function handleNewChatBackgroundComposerChip(
 	appId: string,
@@ -2230,13 +2439,17 @@ function handleNewChatBackgroundComposerChip(
 		newChatBackgroundAppContext = null;
 	}
 }
-function registerAppSurface(appId: string, host: AppSurfaceHost | null) {
-	appSurfaceDisposers.get(appId)?.();
-	appSurfaceDisposers.delete(appId);
-	if (!host) return;
+function registerAppSurface(key: string, host: AppSurfaceHost | null) {
+	appSurfaceDisposers.get(key)?.();
+	appSurfaceDisposers.delete(key);
+	if (!host) {
+		appSurfaceHosts.delete(key);
+		return;
+	}
+	appSurfaceHosts.set(key, host);
 	appSurfaceDisposers.set(
-		appId,
-		appSurfaces.register({ appId, surface: "app" }, (input) =>
+		key,
+		appSurfaces.register({ id: key, surface: "app" }, (input) =>
 			host.call(input),
 		),
 	);
@@ -2465,6 +2678,8 @@ onMount(() => {
 		).detail;
 		if (detail?.spaceId !== spaceId || typeof detail.app?.id !== "string")
 			return;
+		// A republished App may declare different file handlers.
+		fileHandlers.clear();
 		appPreview.refreshIfOpen(detail.app.id);
 	};
 	window.addEventListener(APPS_CHANGED_EVENT, handleAppsChanged);
@@ -2562,11 +2777,10 @@ onMount(() => {
 			}
 
 			if (command.target.kind === "file") {
-				await openWorkspaceNavigation({
-					kind: "file",
-					spaceId,
-					path: command.target.path,
-				});
+				await openWorkspaceNavigation(
+					{ kind: "file", spaceId, path: command.target.path },
+					"desktop_command",
+				);
 				return { status: "applied" };
 			}
 
@@ -2925,8 +3139,8 @@ const spaceFileDomainProps = $derived.by<
 	inlinePortTabs,
 	activeInlinePort,
 	inlineAppTabs,
-	retainedAppIds,
-	activeInlineAppId,
+	retainedAppKeys,
+	activeInlineAppKey,
 	appShell,
 	activeWindowKind,
 	inlinePortEndpoint,
@@ -2974,9 +3188,11 @@ const spaceFileDomainProps = $derived.by<
 	onUploadFiles: handleUploadFiles,
 	onInsertPathReference: insertPathReference,
 	onOpenInlineFile: openInlineFile,
+	onOpenWorkspaceFile: (path) =>
+		openWorkspaceFile(path, { preserveHistory: false }),
+	onOpenFileWith: (path) => void openFileWith(path),
 	onOpenLinkedInlineFile: openLinkedInlineFile,
 	resolveWorkspaceAsset,
-	onOpenInlineBoard: openInlineBoard,
 	onOpenTask: openTask,
 	onRevealPath: (path) => fileWorkspace.revealPath(path),
 	onJumpToTurn: (sequence) => sessionChat.jumpToTurnAndUpdateUrl(sequence),
@@ -2990,6 +3206,7 @@ const spaceFileDomainProps = $derived.by<
 	onRetryInlineApp: retryInlineApp,
 	onRegisterAppSurface: registerAppSurface,
 	onAppComposerChip: handleAppComposerChip,
+	onAppWindowState: (key, state) => appPreview.setWindowState(key, state),
 	onNavigationOpen: handleAppNavigationOpen,
 	onActivateInlineFile: activateInlineFileTab,
 	onCloseInlineFileTab: closeInlineFileTab,
@@ -3291,6 +3508,15 @@ const headerActions = {
     </div>
   </div>
   {/if}
+  <OpenWithDialog
+    open={Boolean(openWith)}
+    path={openWith?.path ?? ""}
+    candidates={openWith?.candidates ?? null}
+    defaultAppId={openWith?.defaultAppId ?? null}
+    canSetDefault={canEditFiles && !activeFsReadonly}
+    onPick={(choice, always) => void pickOpenWith(choice, always)}
+    onClose={() => (openWith = null)}
+  />
   <SessionShareDialog
     open={sessionChat.share.open && !!sessionChat.share.sessionId}
     shareUrl={sessionChat.share.shareUrl}

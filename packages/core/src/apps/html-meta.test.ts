@@ -78,3 +78,9 @@ const fromOgLocale = extractHtmlPageMeta(
   `<html><head><meta property="og:locale" content="ja_JP"><title>Hi</title></head></html>`,
 );
 assert.equal(fromOgLocale.lang, "ja-JP");
+
+assert.deepEqual(
+  extractHtmlPageMeta('<head><meta name="cohub:file-handlers" content="board, .MD nope!"></head>').fileHandlers,
+  [".board", ".md"],
+);
+assert.deepEqual(extractHtmlPageMeta("<head><title>x</title></head>").fileHandlers, []);

@@ -165,6 +165,27 @@ test("ParentBridgeTransport announces runtime readiness when context changes are
 	});
 });
 
+test("ParentBridgeTransport says ready again when a reloaded host asks", () => {
+	const types: string[] = [];
+	const listeners = new Set<(event: MessageEvent) => void>();
+	const parent = { postMessage: (message: Record<string, unknown>) => types.push(String(message.type)) };
+	globalThis.window = {
+		parent,
+		location: { ancestorOrigins: ["https://dev.cohub.live"] },
+		addEventListener: (_type: "message", next: (event: MessageEvent) => void) => listeners.add(next),
+		removeEventListener: (_type: "message", next: (event: MessageEvent) => void) => listeners.delete(next),
+	} as unknown as Window & typeof globalThis;
+	globalThis.document = { referrer: "" } as Document;
+
+	new ParentBridgeTransport().subscribeContextChanged(() => {});
+	const announce = { protocol: "cohub.app.runtime", version: 1, type: "announce" };
+	for (const listener of listeners) listener({ source: {}, origin: "https://dev.cohub.live", data: announce } as MessageEvent);
+	for (const listener of listeners) listener({ source: parent, origin: "https://evil.example", data: announce } as MessageEvent);
+	assert.deepEqual(types, ["ready"], "only the parent at the trusted origin may ask");
+	for (const listener of listeners) listener({ source: parent, origin: "https://dev.cohub.live", data: announce } as MessageEvent);
+	assert.deepEqual(types, ["ready", "ready"]);
+});
+
 test("ParentBridgeTransport does not announce readiness without a trusted parent origin", () => {
 	let posts = 0;
 	const parent = { postMessage: () => { posts += 1; } };

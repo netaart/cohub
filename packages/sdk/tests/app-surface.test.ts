@@ -53,7 +53,13 @@ function mountWork(embedder: string, self = "https://work.example") {
 		} as MessageEvent);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 	};
-	return { surface, posted, parent, send };
+	const announce = () =>
+		handler?.({
+			data: { protocol: "cohub.app.runtime", version: 1, type: "announce" },
+			origin: embedder,
+			source: parent,
+		} as MessageEvent);
+	return { surface, posted, parent, send, announce };
 }
 
 test("a Work receives the originating command id as handler context", async () => {
@@ -200,4 +206,22 @@ test("only explicit app origins are trusted, not the whole subdomain space", () 
 	]) {
 		assert.equal(isCohubHostOrigin(origin), false, origin);
 	}
+});
+
+test("a reloaded host hears the methods and chip again", () => {
+	const { surface, posted, announce } = mountWork(COHUB);
+	surface.handle("open", () => {});
+	surface.setComposerChip({ key: "selection", label: "1 selected", content: "a" });
+	posted.length = 0;
+
+	announce();
+	assert.deepEqual(
+		posted.map(({ message }) => message.type),
+		["ready", "composer.chip.set"],
+	);
+
+	surface.clearComposerChip("selection");
+	posted.length = 0;
+	announce();
+	assert.deepEqual(posted.map(({ message }) => message.type), ["ready"]);
 });

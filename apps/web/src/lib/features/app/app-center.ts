@@ -109,6 +109,8 @@ export function cacheInstalledApps(spaceId: string, value: InstalledAppsFile) {
 
 export function invalidateInstalledApps(spaceId: string) {
 	installedCache.delete(spaceId);
+	// A read already in flight may predate the change; never cache its result.
+	installedRequests.delete(spaceId);
 }
 
 export async function writeInstalledApps(

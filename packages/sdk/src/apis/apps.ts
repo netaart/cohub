@@ -22,6 +22,7 @@ export type AppExtractedPageMeta = {
   lang?: string | null;
   themeColor?: string | null;
   surface?: "window" | "overlay" | null;
+  fileHandlers?: string[];
   sourcePath?: string | null;
   extractedAt?: string | null;
 };
@@ -43,6 +44,8 @@ export type AppMeta = Record<string, unknown> & {
   /** CSS color from meta theme-color. */
   themeColor?: string;
   presentation?: AppPresentationMeta;
+  /** File extensions the App opens (`[".board"]`), from `<meta name="cohub:file-handlers">`. */
+  fileHandlers?: string[];
   extracted?: AppExtractedPageMeta;
   source?: RequestSource;
 };

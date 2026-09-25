@@ -68,6 +68,7 @@ type Props = {
 	onUpload: (files: File[] | LocalUploadEntry[], targetDir: string) => void;
 	onInsertReference: (path: string) => void;
 	onPublishDirectory: (path: string, options: { mobile: boolean }) => void;
+	onOpenWith: (node: SpaceFsNode, options: { mobile: boolean }) => void;
 	onOpenPort: (port: string, url: string, options: { mobile: boolean }) => void;
 	onUploadPaneClose: () => void;
 	onUploadComplete: () => void | Promise<void>;
@@ -118,6 +119,7 @@ let {
 	onUpload,
 	onInsertReference,
 	onPublishDirectory,
+	onOpenWith,
 	onOpenPort,
 	onUploadPaneClose,
 	onUploadComplete,
@@ -277,6 +279,7 @@ $effect(() => {
 			{onUpload}
 			{onInsertReference}
 			onPublishDirectory={(path) => onPublishDirectory(path, { mobile })}
+			onOpenWith={(node) => onOpenWith(node, { mobile })}
 			onOpenPort={(port, url) => onOpenPort(port, url, { mobile })}
 			{activePort}
 			draggable={draggable && !mobile}

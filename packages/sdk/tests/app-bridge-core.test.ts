@@ -145,6 +145,26 @@ test("context message replies with app, viewer, and invocation metadata", async 
 	});
 });
 
+test("context carries the host locale, appearance, window visibility, and opened file", async () => {
+	const tokens = { "bg-primary": "#101213" };
+	const config = makeConfig({
+		invocation: { surface: "app", source: "user", spaceId: "space_1", file: { path: "boards/a.board" }, id: "open-1" },
+		getLocale: () => "zh-CN",
+		getAppearance: () => ({ colorScheme: "dark", theme: "dark", tokens, reducedMotion: false }),
+		getWindow: () => ({ visible: false }),
+	});
+	const core = createAppBridgeCore(config);
+	await core.handleMessage(messageEvent({ type: "cohub.app.context", requestId: "r1" }));
+
+	const context = config.replies[0]?.payload.context as Record<string, unknown>;
+	assert.equal(context.locale, "zh-CN");
+	assert.deepEqual(context.appearance, { colorScheme: "dark", theme: "dark", tokens, reducedMotion: false });
+	assert.notEqual((context.appearance as { tokens: unknown }).tokens, tokens);
+	assert.deepEqual(context.window, { visible: false });
+	assert.deepEqual((context.invocation as Record<string, unknown>).file, { path: "boards/a.board" });
+	assert.equal((context.invocation as Record<string, unknown>).id, "open-1");
+});
+
 test("legacy work context replies with the projected work context", async () => {
 	const config = makeConfig();
 	const core = createAppBridgeCore(config);
@@ -493,7 +513,7 @@ test("authorize opens consent dialog for non-owner without prior grant", async (
 	assert.equal(state.pendingAuth?.reason, "need to read prompts");
 });
 
-test("Shell Space read-only scopes are authorized without opening the dialog", async () => {
+test("Shell Space read-only scopes renew without opening the dialog for any App", async () => {
 	const originalFetch = globalThis.fetch;
 	const requests: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = [];
 	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
@@ -535,12 +555,10 @@ test("Shell Space read-only scopes are authorized without opening the dialog", a
 		assert.equal(config.replies.length, 1);
 		assert.equal(config.replies[0]?.payload.token, "shell-token");
 		assert.deepEqual(config.replies[0]?.payload.space, { id: "shell-space", name: "Shell Space" });
-		// Deciding to skip the dialog is Host-side; the request itself stays an
-		// ordinary authorize call. `silent` tells the server it may only renew a
-		// live grant, so a revoked consent can never come back without the dialog.
 		assert.equal(requests.length, 1);
 		assert.match(requests[0]?.url ?? "", /\/api\/apps\/work_123\/authorize$/);
 		assert.equal(requests[0]?.body.silent, true);
+		assert.equal(requests[0]?.body.consent, undefined);
 		assert.equal(requests[0]?.body.spaceId, "shell-space");
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -652,6 +670,114 @@ test("Shell auto-authorization does not cover other targets or side-effect scope
 
 const jsonResponse = (body: unknown) =>
 	new Response(JSON.stringify(body), { status: 200 });
+
+const workspaceShell = (spaceId: string) => ({
+	surface: "workspace" as const,
+	space: { id: spaceId, name: "Shell Space" },
+	session: null,
+	turn: null,
+});
+
+/** Records `/authorize` bodies and grants whatever was requested. */
+function mockHostConsent() {
+	const bodies: Array<Record<string, unknown>> = [];
+	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+		if (!String(url).endsWith("/authorize")) return jsonResponse([]);
+		const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+		bodies.push(body);
+		return jsonResponse({
+			token: "host-token",
+			grant: { id: "grant-host", spaceId: body.spaceId, scopes: body.scopes, expiresAt: null },
+		});
+	}) as typeof fetch;
+	return bodies;
+}
+
+const editRequest = (requestId: string) =>
+	messageEvent({ type: "cohub.app.authorize", requestId, scopes: ["file.view", "file.edit"] });
+
+test("Shell grants file.edit without a dialog to an App its Space installed", async () => {
+	const bodies = mockHostConsent();
+	const checked: string[] = [];
+	const config = makeConfig({
+		shell: workspaceShell("shell-space"),
+		isInstalledIn: (spaceId) => {
+			checked.push(spaceId);
+			return true;
+		},
+	});
+	const core = createAppBridgeCore(config);
+
+	await core.handleMessage(editRequest("installed-edit"));
+
+	assert.equal(core.getState().authOpen, false);
+	assert.deepEqual(checked, ["shell-space"]);
+	assert.equal(bodies[0]?.consent, "host");
+	assert.equal(bodies[0]?.spaceId, "shell-space");
+});
+
+test("Shell asks before granting file.edit to an App its Space does not trust", async () => {
+	for (const isInstalledIn of [undefined, () => false, () => Promise.reject(new Error("offline"))]) {
+		const bodies = mockHostConsent();
+		const config = makeConfig({ shell: workspaceShell("shell-space"), isInstalledIn });
+		const core = createAppBridgeCore(config);
+
+		await core.handleMessage(editRequest("untrusted-edit"));
+
+		assert.equal(core.getState().authOpen, true);
+		assert.equal(bodies.length, 0);
+	}
+});
+
+test("a trusted App gets Host consent for read-only scopes on a first visit", async () => {
+	const bodies = mockHostConsent();
+	const config = makeConfig({ shell: workspaceShell("shell-space"), isInstalledIn: () => true });
+	const core = createAppBridgeCore(config);
+
+	await core.handleMessage(
+		messageEvent({ type: "cohub.app.authorize", requestId: "trusted-read", scopes: ["file.view"] }),
+	);
+
+	assert.equal(core.getState().authOpen, false);
+	assert.deepEqual(bodies, [{ scopes: ["file.view"], spaceId: "shell-space", silent: true, consent: "host" }]);
+});
+
+test("an untrusted App's first visit falls back to the dialog", async () => {
+	const originalFetch = globalThis.fetch;
+	const bodies: Array<Record<string, unknown>> = [];
+	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+		if (!String(url).endsWith("/authorize")) return jsonResponse([]);
+		bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+		return new Response(JSON.stringify({ message: "grant is no longer active; viewer consent is required again", code: "consent_required" }), { status: 403 });
+	}) as typeof fetch;
+	try {
+		const config = makeConfig({ shell: workspaceShell("shell-space"), isInstalledIn: () => false });
+		const core = createAppBridgeCore(config);
+
+		await core.handleMessage(
+			messageEvent({ type: "cohub.app.authorize", requestId: "untrusted-read", scopes: ["file.view"] }),
+		);
+
+		assert.deepEqual(bodies, [{ scopes: ["file.view"], spaceId: "shell-space", silent: true }]);
+		assert.equal(core.getState().authOpen, true);
+		assert.equal(config.replies.length, 0);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("Shell never consents to scopes beyond its ceiling, even for a trusted App", async () => {
+	const bodies = mockHostConsent();
+	const config = makeConfig({ shell: workspaceShell("shell-space"), isInstalledIn: () => true });
+	const core = createAppBridgeCore(config);
+
+	await core.handleMessage(
+		messageEvent({ type: "cohub.app.authorize", requestId: "prompt", scopes: ["file.edit", "session.prompt.fullaccess"] }),
+	);
+
+	assert.equal(core.getState().authOpen, true);
+	assert.equal(bodies.length, 0);
+});
 
 test("selectSpace opens the picker with the viewer's spaces loaded by the host", async () => {
 	const originalFetch = globalThis.fetch;

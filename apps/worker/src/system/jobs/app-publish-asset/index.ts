@@ -698,6 +698,7 @@ function extractPageMetaFromHtml(
     lang: page.lang,
     themeColor: page.themeColor,
     surface: page.surface,
+    fileHandlers: page.fileHandlers,
     sourcePath,
   };
 }

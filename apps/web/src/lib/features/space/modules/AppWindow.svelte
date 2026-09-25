@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
+import type { AppWindowState } from "@cohub/protocol/app-runtime";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import type { AppRuntimeShellContext } from "@neta-art/cohub";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-svelte";
@@ -24,9 +25,10 @@ type Props = {
 	active?: boolean;
 	onActivateWindow: (kind: Window["kind"], key: string) => void;
 	onCloseWindow: (kind: Window["kind"], key: string) => void;
-	onRetry: (appId: string) => void;
-	onRegisterSurface: (appId: string, host: AppSurfaceHost | null) => void;
-	onComposerChip: (appId: string, chip: AppComposerChip | null) => void;
+	onRetry: (key: string) => void;
+	onRegisterSurface: (key: string, host: AppSurfaceHost | null) => void;
+	onComposerChip: (key: string, chip: AppComposerChip | null) => void;
+	onWindowState: (key: string, state: AppWindowState) => void;
 	onNavigationOpen?: (message: AppNavigationOpenMessage) => Promise<{
 		handled: boolean;
 		reason?: "unsupported" | "invalid_target" | "inaccessible" | "timeout";
@@ -48,6 +50,7 @@ const {
 	onRetry,
 	onRegisterSurface,
 	onComposerChip,
+	onWindowState,
 	onNavigationOpen = undefined,
 }: Props = $props();
 
@@ -57,27 +60,39 @@ const detail = $derived(preview.detail);
 const publicUrl = $derived(detail?.publicUrl ?? null);
 const immersive = $derived(chrome.immersive);
 
-/**
- * The app id of the surface that last registered.
- *
- * The surface reports `null` from its unmount cleanup, and that cleanup runs
- * while this panel is itself being destroyed: closing the last app tab clears
- * `preview` in the same update. Reading the prop there faults on a gone preview
- * and aborts the teardown half-done, which is what left the next open with a
- * blank stage. Keep the id in a plain local so unregistering never reaches back
- * into reactive state. It is deliberately not cleared on unregister — a remount
- * may mount the replacement before the outgoing surface reports, and the id is
- * the same app either way.
- */
-let surfaceAppId: string | null = null;
+/** The surface host of the mounted App frame. */
+let surfaceHost = $state.raw<AppSurfaceHost | null>(null);
 
-function handleSurfaceHost(host: AppSurfaceHost | null) {
-	if (host) surfaceAppId = preview.appId;
-	if (surfaceAppId) onRegisterSurface(surfaceAppId, host);
+/**
+ * The window key the surface is registered under, in a plain local so the
+ * frame's callbacks never read a preview that is already gone.
+ */
+let surfaceKey: string | null = null;
+
+/** Releases only its own host, so a replacement mounted first survives. */
+function handleSurfaceHost(host: AppSurfaceHost) {
+	surfaceHost = host;
+	return () => {
+		if (surfaceHost === host) surfaceHost = null;
+	};
 }
 
+// A renamed file moves its window to a new key; the surface follows it.
+$effect(() => {
+	const host = surfaceHost;
+	const key = preview.key;
+	if (!host) return;
+	surfaceKey = key;
+	onRegisterSurface(key, host);
+	return () => onRegisterSurface(key, null);
+});
+
 function handleComposerChip(chip: AppComposerChip | null) {
-	if (surfaceAppId) onComposerChip(surfaceAppId, chip);
+	if (surfaceKey) onComposerChip(surfaceKey, chip);
+}
+
+function handleWindowState(state: AppWindowState) {
+	if (surfaceKey) onWindowState(surfaceKey, state);
 }
 const launchState = $derived({
 	search: preview.launch?.search ?? "",
@@ -92,7 +107,7 @@ const headerActions = $derived.by((): PreviewHeaderAction[] => {
 			label: m.window_reload_app({}, { locale }),
 			icon: RefreshCw,
 			primary: true,
-			run: () => onRetry(preview.appId),
+			run: () => onRetry(preview.key),
 		},
 	];
 	if (publicUrl) {
@@ -131,7 +146,7 @@ const headerActions = $derived.by((): PreviewHeaderAction[] => {
 					<button
 						type="button"
 						class="inline-flex min-h-8 items-center rounded-[5px] bg-bg-elevated px-3 text-[12px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
-						onclick={() => onRetry(preview.appId)}
+						onclick={() => onRetry(preview.key)}
 					>
 						{m.app_try_again({}, { locale })}
 					</button>
@@ -156,10 +171,12 @@ const headerActions = $derived.by((): PreviewHeaderAction[] => {
 					{launchState}
 					invocation={preview.invocation}
 					{shell}
+					visible={active}
+					onWindowState={handleWindowState}
 					onSurfaceHost={handleSurfaceHost}
 					onComposerChip={handleComposerChip}
 					onNavigationOpen={onNavigationOpen}
-					onCloseRequest={() => onCloseWindow("app", preview.appId)}
+					onCloseRequest={() => onCloseWindow("app", preview.key)}
 				/>
 			{/key}
 		{/if}
@@ -175,7 +192,7 @@ const headerActions = $derived.by((): PreviewHeaderAction[] => {
 				<button
 					type="button"
 					class="shrink-0 text-text-secondary underline underline-offset-2 hover:text-text-primary"
-					onclick={() => onRetry(preview.appId)}
+					onclick={() => onRetry(preview.key)}
 				>
 					Retry
 				</button>

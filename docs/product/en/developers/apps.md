@@ -76,12 +76,16 @@ ctx.app.homeSpace;        // the Space that owns the App (static)
 ctx.viewer;               // current viewer, null when logged out
 ctx.invocation;           // snapshot of where this open came from:
                           //   surface, source, spaceId, sessionId, turnId,
-                          //   toolCallId, embedder
+                          //   toolCallId, embedder, file, id
 ctx.shell;                // live location the host is showing now:
                           //   space, session, turn
+ctx.locale;               // the viewer's language, e.g. "zh-CN"
+ctx.appearance;           // colorScheme, theme, tokens, reducedMotion
+ctx.window;               // { visible } — false while the tab is hidden
 ctx.permissions;          // appScopes + viewerGrants, for rendering state
 
-// Fresh context on shell / sign-in / grant changes — keep in memory, don't poll
+// Fresh context on shell / sign-in / grant / theme / visibility changes —
+// keep in memory, don't poll
 client.app.onContextChanged((next) => render(next));
 ```
 
@@ -92,6 +96,37 @@ The three identity fields differ by design:
 | `ctx.app.homeSpace` | The Space that owns the App | Never |
 | `ctx.invocation` | Where this open came from | On each open |
 | `ctx.shell` | What the host is showing | As the viewer navigates |
+
+### Match the host
+
+`navigator.language` and `prefers-color-scheme` only match Cohub while the
+viewer follows the system. Read `ctx.locale` and `ctx.appearance` instead: the
+tokens are resolved values for the theme the viewer sees, including a Space's
+custom theme. One call keeps `<html>` in sync:
+
+```ts
+client.app.appearance.sync(); // sets --cohub-* variables, color-scheme, and lang
+```
+
+```css
+body {
+  background: var(--cohub-bg-primary, #fff);
+  color: var(--cohub-text-primary, #111);
+  font-family: var(--cohub-font-sans, system-ui);
+}
+```
+
+The public tokens are `bg-primary`, `bg-content`, `bg-surface`, `bg-elevated`,
+`bg-input`, `bg-hover`, `bg-active`, `text-primary`, `text-secondary`,
+`text-tertiary`, `text-placeholder`, `text-disabled`, `border-primary`,
+`border-subtle`, `brand`, `brand-hover`, `brand-soft`, `brand-muted`,
+`brand-border`, `brand-ring`, `brand-contrast-fg`, `error-fg`, `selection-bg`,
+`overlay-scrim`, `shadow-subtle`, `shadow-medium`, `shadow-strong`,
+`font-sans`, and `font-mono`. Always keep a fallback: outside a Cohub host they
+are absent.
+
+Pause heavy rendering while `ctx.window.visible` is false; background tabs stay
+mounted so they can resume instantly.
 
 ## Permissions
 
@@ -133,10 +168,12 @@ const space = client.space(result.target.spaceId);
   `{ kind: "pick-space" }`. Account targets accept only account-level scopes.
 - Success returns `status`, `requestedTarget`, the actual `target`,
   `resolution`, and the `grant`. Cancellation (`cancelled`) is not an error.
-- Targeting exactly `ctx.shell.space.id` with only read-only scopes
-  (`space.view`, `file.view`, `file.view.filtered`, `session.view`,
-  `taskrun.view`, `checkpoint.view`) is silent — it is the Space the viewer is
-  already looking at.
+- Targeting exactly `ctx.shell.space.id` — the Space the viewer is already
+  looking at — is silent when that Space published the App or has it
+  installed, for read-only scopes (`space.view`, `file.view`,
+  `file.view.filtered`, `session.view`, `taskrun.view`, `checkpoint.view`) and
+  `file.edit`. Any other App asks once, then renews read-only grants silently.
+  A grant the viewer revoked always asks again.
 - Unavailable Spaces may fall back to a viewer-controlled Space;
   `fallback: "none"` disables this.
 - `alwaysAsk: true` skips silent reuse — for re-confirming or switching Space.
@@ -255,6 +292,42 @@ const run = await space.runCommand({ command: ["node", "scripts/build.mjs"] });
 Viewer-funded writes into their own Space: request `file.edit` via
 `auth.authorize`. Owner-funded persistence: write from an Action — it runs
 with your permissions in the home Space.
+
+## Open files
+
+An App can be the editor or viewer for a file type — a Board editor, a
+Markdown studio. Declare the extensions it opens in the page head:
+
+```html
+<meta name="cohub:file-handlers" content=".board" />
+```
+
+Installing the App registers it for those extensions in `.cohub/apps.json`,
+unless another installed App already opens them — installing never replaces a
+default. The viewer can change the default under **Open with…** in the file
+menu, with **Always open .board files this way**; that is also how a Space
+makes one of its own Apps the default. Only one App opens an extension, and it
+must still declare it.
+
+Clicking such a file, following a link to it, or `cohub desktop open
+file://plans/roadmap.board` opens it in its own window, with the App. Read-only
+views, such as a save, stay built in.
+
+```ts
+client.app.onLaunch(async ({ file }) => {
+  await openDocument(file.spaceId, file.path);
+});
+```
+
+Each window holds one file. `onLaunch` fires when it opens, when the viewer
+opens the same file again (bring it to the front), and when the file is renamed
+or moved — save to the new path from then on.
+
+An App the Space published or installed gets `file.view` and `file.edit` on
+that Space without a dialog, so opening a file just works. Other Apps ask the
+viewer first. Installing is therefore a trust decision for the whole Space:
+anyone who can edit `.cohub/apps.json` can install an App, and it can then edit
+the Space's files for every member who opens it.
 
 ## App Actions
 
@@ -380,6 +453,51 @@ client.app.surface.handle("image.open", async (input, { commandId }) => {
 - Calls are accepted only from explicit Cohub app origins:
   `client.app.surface.allowHostOrigins(["https://cohub.internal"])`.
 
+### Window state and closing
+
+Tell the host what the tab should show, and whether work is still unsaved:
+
+```ts
+client.app.window.setState({ title: "Roadmap.board", status: "saving", dirty: true });
+client.app.window.onBeforeClose(async () => {
+  await flushPendingWrites(); // return false or throw to keep the window open
+});
+```
+
+While `dirty` is true the host never unmounts the App to save memory. Closing
+its tab, reloading it, or leaving the workspace first calls `onBeforeClose`,
+and only asks the viewer if that fails or takes longer than 10 seconds. A new
+App version waits for the next reload instead of replacing a dirty document.
+Still keep drafts durable yourself: a closed browser tab cannot wait.
+
+### Shortcuts
+
+Cohub shortcuts such as the command palette keep working while the App has
+focus. Once the App has called `context()`, the SDK forwards Ctrl / Cmd
+chords the App did not handle; plain typing and the editing chords (copy,
+paste, cut, select all, undo, redo) always stay in the App. Call
+`event.preventDefault()` to keep a chord for yourself.
+
+### Drops
+
+The viewer can drag files, Tasks, and Apps from Cohub onto the App:
+
+```ts
+client.app.onDrop({
+  accept: ["file", "task"],
+  over: ({ x, y }) => showDropMarker(x, y),
+  leave: () => hideDropMarker(),
+  drop: ({ x, y, resources }) => placeResources(resources, x, y),
+});
+```
+
+Coordinates are frame-local CSS pixels. While hovering, the App only learns
+which kinds are being dragged; the resources arrive on `drop`, when the viewer
+hands them over. Each resource has a `type` and a `ref` (the path, for files)
+plus optional metadata such as `title`, `mimeType`, and `size`. Treat drops as
+untrusted input, like a paste: validate each `ref` and read the resource through
+your own authorized API instead of trusting the metadata.
+
 ### Composer context
 
 One compact context chip on the Cohub composer while the App is active.
@@ -500,6 +618,8 @@ real runtime, publish a new version after changes.
 - [ ] Surface handlers and `consumeCredits` are idempotent (stable
       `operationId`); server data stays authoritative, realtime resyncs after
       reconnect.
+- [ ] Editors report `dirty` through `window.setState()` and flush in
+      `onBeforeClose()`; drafts also survive a closed browser tab.
 - [ ] No tokens or secrets in URLs or shipped assets.
 
 ## Related

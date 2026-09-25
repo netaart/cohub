@@ -47,6 +47,7 @@ export * from "./app-runtime.js";
 export * from "./app-navigation.js";
 export * from "./app-embed.js";
 export * from "./app-catalog.js";
+export * from "./app-file-handlers.js";
 export * from "./navigation.js";
 export * from "./app-view-stats.js";
 export * from "./app-promotion-stats.js";

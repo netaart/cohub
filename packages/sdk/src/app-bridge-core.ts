@@ -1,6 +1,7 @@
 import {
 	appAuthorizationRequestSchema,
 	appAuthorizationGrantSchema,
+	isAppHostConsentScope,
 	isAppSilentShellScope,
 	type AppAuthorizationRequest,
 	type AppAuthorizationGrant,
@@ -179,6 +180,14 @@ export type AppBridgeCoreConfig = {
 	shell?: AppRuntimeShellContext;
 	/** Reads the latest shell context without recreating the app surface. */
 	getShell?: () => AppRuntimeShellContext | undefined;
+	/** Whether the Space has this App installed, which lets the Shell skip the dialog. */
+	isInstalledIn?: (spaceId: string) => boolean | Promise<boolean>;
+	/** Reads the viewer's current locale. */
+	getLocale?: () => string | undefined;
+	/** Reads the theme and design tokens the viewer currently sees. */
+	getAppearance?: () => AppRuntimeContext["appearance"];
+	/** Reads whether the host is showing this surface. */
+	getWindow?: () => AppRuntimeContext["window"];
 	/** Sends an unsolicited event to the app runtime. */
 	notify?: (payload: Record<string, unknown>) => void;
 	/** @deprecated Use authorizationContext with a background surface. */
@@ -253,6 +262,19 @@ function cloneInvocation(
 					},
 				}
 			: {}),
+		...(invocation.file ? { file: { path: invocation.file.path } } : {}),
+	};
+}
+
+/** Host appearance can be reactive state too; copy it into plain data. */
+function cloneAppearance(
+	appearance: NonNullable<AppRuntimeContext["appearance"]>,
+): NonNullable<AppRuntimeContext["appearance"]> {
+	return {
+		colorScheme: appearance.colorScheme,
+		theme: appearance.theme,
+		tokens: { ...appearance.tokens },
+		reducedMotion: appearance.reducedMotion,
 	};
 }
 
@@ -301,6 +323,9 @@ class AppAuthorizationError extends Error {
 		this.name = "AppAuthorizationError";
 	}
 }
+
+/** How the Shell skips the dialog: Host consent, or renewing a live grant. */
+type ShellConsent = "host" | "renew";
 
 const isDefinitiveAuthorizationFailure = (error: unknown) =>
 	error instanceof AppAuthorizationError && [401, 403, 404].includes(error.status) && error.code !== "host_unavailable";
@@ -532,6 +557,9 @@ export function createAppBridgeCore(
 				? activeInvocation
 				: config.getInvocation?.() ?? config.invocation;
 		const shell = config.getShell?.() ?? config.shell;
+		const locale = config.getLocale?.();
+		const appearance = config.getAppearance?.();
+		const windowState = config.getWindow?.();
 		const appScopes = clonePermissionScopes(app.appScopes);
 		const viewerUuid = await getViewerUuid();
 		synchronizeViewer(viewerUuid);
@@ -565,6 +593,9 @@ export function createAppBridgeCore(
 						},
 					}
 				: {}),
+			...(locale ? { locale } : {}),
+			...(appearance ? { appearance: cloneAppearance(appearance) } : {}),
+			...(windowState ? { window: { visible: windowState.visible } } : {}),
 			permissions: {
 				scopes: normalizePermissionScopes([
 					...appScopes,
@@ -776,13 +807,12 @@ export function createAppBridgeCore(
 	/**
 	 * Calls the authorize endpoint. `silent` marks a background refresh of a
 	 * previous consent: the server then only renews a live grant and never
-	 * creates or revives one, so a revoked grant cannot come back without a
-	 * fresh dialog.
+	 * creates or revives one. `consent: "host"` may also create or widen one.
 	 */
 	async function authorize(
 		scopes: Permission[],
 		spaceId?: string,
-		options?: { silent?: boolean; forceRefreshToken?: boolean },
+		options?: { silent?: boolean; consent?: "host"; forceRefreshToken?: boolean },
 	) {
 		const incremental = Boolean(state.pendingAuth && authorizationRequests.has(state.pendingAuth.requestId));
 		const userToken = await getAccessToken(
@@ -809,6 +839,7 @@ export function createAppBridgeCore(
 					scopes,
 					...(spaceId ? { spaceId } : {}),
 					...(options?.silent ? { silent: true } : {}),
+					...(options?.consent ? { consent: options.consent } : {}),
 					...(incremental ? { scopeMode: "extend" } : {}),
 				}),
 				},
@@ -870,18 +901,16 @@ export function createAppBridgeCore(
 	}
 
 	/**
-	 * Silently renews the approved read-only scopes on the current Shell Space.
+	 * Grants scopes on the current Shell Space without opening the dialog.
 	 *
 	 * Deciding that a request needs no dialog is the Host's job: it compares the
-	 * target against the Space it is actually showing. That check only decides
-	 * *whether to ask*; the server still decides *what may be granted* through
-	 * the silent path, so a revoked consent can never come back on its own.
+	 * target and trust; the server still caps what may be granted.
 	 */
 	const shellAuthorizationInFlight = new Map<string, Promise<{ token: string; spaceId: string; scopes: Permission[] }>>();
 	const shellAuthorizationCache = new Map<string, { result: { token: string; spaceId: string; scopes: Permission[] }; expiresAt: number }>();
 	const SHELL_AUTH_CACHE_MS = 30_000;
 
-	async function authorizeShellSilently(scopes: Permission[], spaceId: string) {
+	async function authorizeShellSilently(scopes: Permission[], spaceId: string, consent: ShellConsent) {
 		const shellContext = config.getShell?.() ?? config.shell;
 		const shell = shellContext?.space ?? null;
 		if (!shellContext || authorizationContext.surface === "broker" || !shell || shell.id !== spaceId) {
@@ -892,17 +921,14 @@ export function createAppBridgeCore(
 			await startSignIn();
 			throw new AppLoginRedirect();
 		}
-		const cacheKey = `${viewerUuid}:${app.id}:${spaceId}:${[...scopes].sort().join(",")}`;
+		const cacheKey = `${viewerUuid}:${app.id}:${spaceId}:${consent}:${[...scopes].sort().join(",")}`;
 		const cached = shellAuthorizationCache.get(cacheKey);
 		if (cached && cached.expiresAt > Date.now()) return cached.result;
 		if (cached) shellAuthorizationCache.delete(cacheKey);
 		const pending = shellAuthorizationInFlight.get(cacheKey);
 		if (pending) return pending;
-		// `silent` keeps the server in charge of consent state: it renews a live
-		// grant that still covers these scopes and never creates, widens, or
-		// revives one. A revoked or expired grant therefore stays revoked until
-		// the viewer consents again in the dialog.
-		const request = authorize(scopes, spaceId, { silent: true });
+		// `silent` rides along so an API without Host consent only renews.
+		const request = authorize(scopes, spaceId, consent === "host" ? { silent: true, consent: "host" } : { silent: true });
 		shellAuthorizationInFlight.set(cacheKey, request);
 		try {
 			const result = await request;
@@ -910,6 +936,22 @@ export function createAppBridgeCore(
 			return result;
 		} finally {
 			shellAuthorizationInFlight.delete(cacheKey);
+		}
+	}
+
+	/** Trusted Apps get Host consent; others may only renew read-only grants. */
+	async function shellConsentFor(scopes: Permission[], spaceId: string): Promise<ShellConsent | null> {
+		if (!scopes.every(isAppHostConsentScope)) return null;
+		if (await isTrustedIn(spaceId)) return "host";
+		return scopes.every(isAppSilentShellScope) ? "renew" : null;
+	}
+
+	async function isTrustedIn(spaceId: string) {
+		if (app.spaceId === spaceId) return true;
+		try {
+			return (await config.isInstalledIn?.(spaceId)) === true;
+		} catch {
+			return false;
 		}
 	}
 
@@ -1513,16 +1555,17 @@ export function createAppBridgeCore(
 					return;
 				}
 
+				// Only a request for the Space the Shell is showing may skip the dialog.
 				const shellSpace = resolveShellSpace();
-				const shellTargetId = spaceId ?? shellSpace?.id;
-				const shellAutoAuthorization =
-					!alwaysAsk &&
-					!selectSpace &&
-					Boolean(shellTargetId && (!spaceId || shellSpace?.id === spaceId)) &&
-					scopes.every(isAppSilentShellScope);
-				if (shellAutoAuthorization && shellTargetId) {
+				const shellTargetId =
+					!alwaysAsk && !selectSpace && shellSpace && (!spaceId || spaceId === shellSpace.id)
+						? shellSpace.id
+						: null;
+				const shellConsent = shellTargetId ? await shellConsentFor(scopes, shellTargetId) : null;
+				if (state.pendingAuth !== reserved) return;
+				if (shellConsent && shellTargetId) {
 					try {
-						const result = await authorizeShellSilently(scopes, shellTargetId);
+						const result = await authorizeShellSilently(scopes, shellTargetId, shellConsent);
 						if (state.pendingAuth !== reserved) return;
 						const viewer = await getViewerUuid();
 						setGrantedAppScopes(viewer, app.id, result.scopes, result.spaceId);

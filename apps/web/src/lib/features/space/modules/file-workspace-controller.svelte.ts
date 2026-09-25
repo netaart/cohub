@@ -87,7 +87,8 @@ type FileWorkspaceControllerOptions = {
 	onOpenInlineFile: (path: string) => Promise<void>;
 	onOpenInlineBoard: (path: string) => Promise<void>;
 	onCloseInlineBoard: () => void;
-	onRenameInlineBoard?: (fromPath: string, toPath: string) => void;
+	/** A path moved; windows other than inline files follow it. */
+	onRenamePath?: (fromPath: string, toPath: string) => void;
 	onOpenInlinePort: (
 		port: string,
 		url: string,
@@ -1592,7 +1593,7 @@ export function createFileWorkspaceController(
 		}
 
 		renameOpenPaths(fromPath, toPath);
-		options.onRenameInlineBoard?.(fromPath, toPath);
+		options.onRenamePath?.(fromPath, toPath);
 	}
 
 	async function moveNodeToPath(node: SpaceFsNode, toPath: string) {

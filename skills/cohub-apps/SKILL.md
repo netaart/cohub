@@ -95,6 +95,19 @@ For an existing App that only needs a fresh version from its current target:
 cohub apps publish-version "$app_id" --json
 ```
 
+## File-Opening Apps
+
+An App that edits or views a file type declares the extensions in its page head:
+
+```html
+<meta name="cohub:file-handlers" content=".board" />
+```
+
+Installing it registers those extensions in `.cohub/apps.json` (`"opens": [".board"]`
+on its entry) unless another installed App already opens them. Each file opens
+in its own window and reaches the App through `client.app.onLaunch()`. Confirm
+before changing which App opens a file type in a Space.
+
 ## App Ref
 
 Refer to an App by id, public URL, `cohub://apps` URI, or `username/space/app`:

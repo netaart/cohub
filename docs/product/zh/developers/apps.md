@@ -67,12 +67,16 @@ ctx.app.homeSpace;        // 拥有这个 App 的 Space（静态）
 ctx.viewer;               // 当前访客，未登录为 null
 ctx.invocation;           // 这次打开来自哪（快照）：
                           //   surface、source、spaceId、sessionId、turnId、
-                          //   toolCallId、embedder
+                          //   toolCallId、embedder、file、id
 ctx.shell;                // host 当前在展示什么（实时）：
                           //   space、session、turn
+ctx.locale;               // 访客使用的语言，如 "zh-CN"
+ctx.appearance;           // colorScheme、theme、tokens、reducedMotion
+ctx.window;               // { visible } —— 标签页隐藏时为 false
 ctx.permissions;          // appScopes + viewerGrants，用于渲染状态
 
-// shell / 登录态 / 授权变化时推送新 context —— 留在内存里，不要轮询
+// shell / 登录态 / 授权 / 主题 / 可见性变化时推送新 context ——
+// 留在内存里，不要轮询
 client.app.onContextChanged((next) => render(next));
 ```
 
@@ -83,6 +87,26 @@ client.app.onContextChanged((next) => render(next));
 | `ctx.app.homeSpace` | 拥有 App 的 Space | 不变 |
 | `ctx.invocation` | 这次打开来自哪 | 每次打开 |
 | `ctx.shell` | host 当前在展示什么 | 随访客导航 |
+
+### 跟随 host 外观
+
+只有访客跟随系统设置时，`navigator.language` 和 `prefers-color-scheme` 才与 Cohub 一致。请改读 `ctx.locale` 和 `ctx.appearance`：tokens 是访客当前所见主题的解析值，已包含 Space 的自定义主题。一行代码即可让 `<html>` 保持同步：
+
+```ts
+client.app.appearance.sync(); // 写入 --cohub-* 变量、color-scheme 和 lang
+```
+
+```css
+body {
+  background: var(--cohub-bg-primary, #fff);
+  color: var(--cohub-text-primary, #111);
+  font-family: var(--cohub-font-sans, system-ui);
+}
+```
+
+公开的 token 有 `bg-primary`、`bg-content`、`bg-surface`、`bg-elevated`、`bg-input`、`bg-hover`、`bg-active`、`text-primary`、`text-secondary`、`text-tertiary`、`text-placeholder`、`text-disabled`、`border-primary`、`border-subtle`、`brand`、`brand-hover`、`brand-soft`、`brand-muted`、`brand-border`、`brand-ring`、`brand-contrast-fg`、`error-fg`、`selection-bg`、`overlay-scrim`、`shadow-subtle`、`shadow-medium`、`shadow-strong`、`font-sans` 和 `font-mono`。务必保留回退值：在 Cohub host 之外它们不存在。
+
+`ctx.window.visible` 为 false 时暂停高开销的渲染；后台标签页保持挂载，切回时可立即恢复。
 
 ## 权限
 
@@ -116,7 +140,7 @@ const space = client.space(result.target.spaceId);
 
 - 目标：`{ kind: "account" }`、`{ kind: "space", spaceId }` 或 `{ kind: "pick-space" }`。账户目标只接受账户级 scope。
 - 成功返回 `status`、`requestedTarget`、实际 `target`、`resolution` 和 `grant`。取消（`cancelled`）不是错误。
-- 目标正好是 `ctx.shell.space.id` 且只含只读 scope（`space.view`、`file.view`、`file.view.filtered`、`session.view`、`taskrun.view`、`checkpoint.view`）时静默完成 —— 即访客正在看的那个 Space。
+- 目标正好是 `ctx.shell.space.id`（即访客正在看的那个 Space），且该 Space 发布或安装了这个 App 时，只读 scope（`space.view`、`file.view`、`file.view.filtered`、`session.view`、`taskrun.view`、`checkpoint.view`）和 `file.edit` 都静默完成。其他 App 首次会询问一次，之后只读授权静默续期。访客撤销过的授权总会重新询问。
 - 不可用的 Space 可回退到访客可用的 Space；`fallback: "none"` 禁止回退。
 - `alwaysAsk: true` 跳过静默复用 —— 用于重新确认或切换 Space。
 - grant 只读取，不延长有效期；增量授权（`scopeMode: "extend"`）向仍有效的 grant 追加 scope。
@@ -217,6 +241,28 @@ const run = await space.runCommand({ command: ["node", "scripts/build.mjs"] });
 ```
 
 往访客自己的 Space 写数据：经 `auth.authorize` 请求 `file.edit`。owner 承担的持久化：改用 Action —— 它以你的权限在 home Space 里运行。
+
+## 打开文件
+
+App 可以作为某类文件的编辑器或查看器 —— 比如 Board 编辑器、Markdown 工作室。在页面 head 中声明它能打开的扩展名：
+
+```html
+<meta name="cohub:file-handlers" content=".board" />
+```
+
+安装 App 时，它会在 `.cohub/apps.json` 中注册这些扩展名；如果已有其他已安装的 App 打开这类文件，则不注册 —— 安装永远不会替换默认设置。访客可以在文件菜单的**打开方式…**中勾选**始终以这种方式打开 .board 文件**来更改默认 App，Space 也是这样把自己发布的 App 设为默认。一个扩展名只由一个 App 打开，并且该 App 仍须声明这个扩展名。
+
+点击这类文件、打开指向它的链接，或执行 `cohub desktop open file://plans/roadmap.board`，都会用该 App 在单独的窗口中打开文件。只读视图（比如存档）始终使用内置查看器。
+
+```ts
+client.app.onLaunch(async ({ file }) => {
+  await openDocument(file.spaceId, file.path);
+});
+```
+
+每个窗口承载一个文件。`onLaunch` 会在窗口打开时触发，在访客再次打开同一个文件时触发（把它切到前台即可），也会在文件改名或移动时触发 —— 此后保存到新路径。
+
+Space 发布或安装的 App 在该 Space 上无需对话框即可获得 `file.view` 和 `file.edit`，打开文件开箱即用。其他 App 会先征得访客同意。因此安装是整个 Space 的信任决定：能编辑 `.cohub/apps.json` 的人都能安装 App，装好后，任何成员打开它，它都能编辑这个 Space 的文件。
 
 ## App Actions
 
@@ -319,6 +365,38 @@ client.app.surface.handle("image.open", async (input, { commandId }) => {
 - 响应只确认投递；最终结果经 `reportResult()` 上报，持久化 `commandId` 以便重载后恢复。
 - 只接受显式 Cohub app origin：`client.app.surface.allowHostOrigins(["https://cohub.internal"])`。
 
+### 窗口状态与关闭
+
+告诉 host 标签页该显示什么，以及是否还有未保存的工作：
+
+```ts
+client.app.window.setState({ title: "Roadmap.board", status: "saving", dirty: true });
+client.app.window.onBeforeClose(async () => {
+  await flushPendingWrites(); // 返回 false 或抛错则保持窗口打开
+});
+```
+
+`dirty` 为 true 时，host 不会为了节省内存卸载这个 App。关闭标签页、重新加载或离开工作区之前，会先调用 `onBeforeClose`，只有它失败或超过 10 秒时才询问访客。新的 App 版本会等到下次重新加载，而不会替换一个未保存的文档。草稿仍需自行持久化：关闭浏览器标签页时无法等待。
+
+### 快捷键
+
+App 获得焦点时，命令面板等 Cohub 快捷键照常可用。App 调用过 `context()` 之后，SDK 会转发 App 没有处理的 Ctrl / Cmd 组合键；普通输入和编辑组合键（复制、粘贴、剪切、全选、撤销、重做）始终留在 App 内。调用 `event.preventDefault()` 即可自己保留某个组合键。
+
+### 拖放
+
+访客可以把 Cohub 中的文件、Task 和 App 拖到 App 上：
+
+```ts
+client.app.onDrop({
+  accept: ["file", "task"],
+  over: ({ x, y }) => showDropMarker(x, y),
+  leave: () => hideDropMarker(),
+  drop: ({ x, y, resources }) => placeResources(resources, x, y),
+});
+```
+
+坐标是 frame 内的 CSS 像素。悬停期间 App 只知道被拖动的是哪几类资源；资源本身在 `drop` 时、访客决定交给 App 时才送达。每个资源都有 `type` 和 `ref`（文件为路径），以及 `title`、`mimeType`、`size` 等可选元数据。像对待粘贴内容一样把拖放视为不可信输入：校验每个 `ref`，并通过自己已授权的 API 读取资源，而不是直接相信这些元数据。
+
 ### Composer 上下文
 
 App 激活期间向 Cohub composer 挂一个紧凑的上下文 chip。label ≤ 120 字符，content ≤ 32 KB，纯文本。
@@ -410,6 +488,7 @@ if (state.orderId) await client.app.commerce.getOrder(state.orderId);
 - [ ] 发布前 Space 有 slug、owner 有 username。
 - [ ] 模型 id 从 `models.listMultimodal()` 拉取，不硬编码。
 - [ ] Surface handler 和 `consumeCredits` 幂等（稳定的 `operationId`）；服务端数据为权威，realtime 重连后重新同步。
+- [ ] 编辑器通过 `window.setState()` 上报 `dirty`，并在 `onBeforeClose()` 中写完数据；关闭浏览器标签页后草稿也不能丢。
 - [ ] 不把 token 或密钥放进 URL 或随包资产。
 
 ## 相关

@@ -1,4 +1,8 @@
 import {
+	buildAppRuntimeClosePrepare,
+	parseAppRuntimeClosePrepared,
+} from "@cohub/protocol/app-runtime";
+import {
 	APP_SURFACE_READY_TIMEOUT_MS,
 	APP_SURFACE_REQUEST_TIMEOUT_MS,
 	type AppComposerChip,
@@ -9,6 +13,9 @@ import {
 	parseAppSurfaceResponse,
 } from "@cohub/protocol/app-surface";
 import type { AppRuntimeInvocationContext } from "@neta-art/cohub";
+
+/** How long an App may take to persist its work before the host gives up. */
+export const APP_CLOSE_PREPARE_TIMEOUT_MS = 10_000;
 
 export type AppSurfaceCallResult =
 	| { ok: true }
@@ -35,6 +42,8 @@ export type AppSurfaceHost = {
 	}) => Promise<AppSurfaceCallResult>;
 	reset: () => void;
 	syncContext: (invocation?: AppRuntimeInvocationContext) => Promise<void>;
+	/** Ask the App to persist pending work; resolves whether it may close. */
+	prepareClose: (timeoutMs?: number) => Promise<boolean>;
 	dispose: () => void;
 };
 
@@ -45,6 +54,7 @@ export function createAppSurfaceHost(
 	let methods: string[] = [];
 	let composerChip: AppComposerChip | null = null;
 	const pending = new Map<string, (result: AppSurfaceCallResult) => void>();
+	const closePending = new Map<string, (ok: boolean) => void>();
 	let readyWaiters: Array<(becameReady: boolean) => void> = [];
 	let epoch = 0;
 	let operationQueue: Promise<unknown> = Promise.resolve();
@@ -90,6 +100,12 @@ export function createAppSurfaceHost(
 				composerChip = null;
 				config.onComposerChip?.(null);
 			}
+			return true;
+		}
+
+		const prepared = parseAppRuntimeClosePrepared(event.data);
+		if (prepared) {
+			closePending.get(prepared.requestId)?.(prepared.ok);
 			return true;
 		}
 
@@ -237,8 +253,35 @@ export function createAppSurfaceHost(
 		return enqueue(() => performCall(input));
 	}
 
+	function prepareClose(timeoutMs = APP_CLOSE_PREPARE_TIMEOUT_MS) {
+		const frame = config.getFrame();
+		const origin = config.getFrameOrigin();
+		if (!frame?.contentWindow || !origin) return Promise.resolve(false);
+		const requestId =
+			globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+		return new Promise<boolean>((resolve) => {
+			const settle = (ok: boolean) => {
+				clearTimeout(timer);
+				closePending.delete(requestId);
+				resolve(ok);
+			};
+			const timer = setTimeout(() => settle(false), timeoutMs);
+			closePending.set(requestId, settle);
+			try {
+				frame.contentWindow?.postMessage(
+					buildAppRuntimeClosePrepare(requestId),
+					origin,
+				);
+			} catch {
+				settle(false);
+			}
+		});
+	}
+
 	function reset() {
 		epoch += 1;
+		// A reloaded document cannot answer; it never saw the request.
+		for (const settle of [...closePending.values()]) settle(false);
 		ready = false;
 		methods = [];
 		if (composerChip) {
@@ -265,6 +308,7 @@ export function createAppSurfaceHost(
 		},
 		handleMessage,
 		call,
+		prepareClose,
 		reset,
 		syncContext: (invocation) =>
 			enqueue(async () => {

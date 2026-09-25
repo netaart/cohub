@@ -44,6 +44,10 @@ export type { AppAuthorizationResult, AppAuthorizationTarget, AppAuthorizationGr
 export { ParentBridgeTransport, PopupBrokerTransport, OriginBrokerTransport, AppRuntimeError, AppRuntimeApi, createOriginAppResolver, createSlugAppIdResolver, createAppRuntime, resolveAppTransport } from "./app-runtime.js";
 export type { AppContextChangedListener, AppDiagnostic, AppDiagnosticListener, AppIdResolver, AppRuntimeAppResolver, AppRuntimeResolvedApp, AppRuntimeInvocationContext, AppRuntimeModeConfig, AppRuntimeRequestOptions, AppRuntimeShellContext, AppRuntimeTransport, AppRuntimeConfigureRequest, AppRuntimeAnchor, AppRuntimeRect } from "./app-runtime.js";
 export { attachAppEmbed } from "./app-embed.js";
+export { AppWindowApi, applyAppAppearance } from "./app-window.js";
+export type { AppDropEvent, AppDropHandler, AppDropPoint, AppDropResource, AppDropResourceType, AppLaunch, AppWindowState } from "./app-window.js";
+export { APP_APPEARANCE_TOKENS, appAppearanceVar } from "@cohub/protocol/app-runtime";
+export type { AppAppearance, AppAppearanceToken, AppWindowStatus } from "@cohub/protocol/app-runtime";
 export type { AppEmbedAttachOptions, AppEmbedHandle, AppEmbedShell } from "./app-embed.js";
 export type { AppNavigationCall, AppNavigationLaunch, AppNavigationOpenMessage, AppNavigationOpenResponse, AppNavigationTarget } from "@cohub/protocol/app-navigation";
 export { createAppBridgeCore } from "./app-bridge-core.js";
