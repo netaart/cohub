@@ -724,13 +724,12 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
     throw new Error("No model available. Check platform models.json");
   }
 
-  const initialThinkingLevel = resolveThinkingLevelForModel(
-    model,
-    sessionContext.messages.length > 0 ? sessionContext.thinkingLevel : undefined,
-  );
+  const initialThinkingLevel = resolveThinkingLevelForModel(model, sessionContext.thinkingLevel);
 
   if (sessionContext.messages.length === 0) {
     options.sessionManager.appendModelChange(model.provider, model.id);
+    options.sessionManager.appendThinkingLevelChange(initialThinkingLevel);
+  } else if (sessionContext.thinkingLevel == null) {
     options.sessionManager.appendThinkingLevelChange(initialThinkingLevel);
   }
 

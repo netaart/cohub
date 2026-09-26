@@ -88,9 +88,26 @@ export type FileEntry = SessionHeader | SessionEntry;
 
 export type SessionContext = {
   messages: AgentMessage[];
-  thinkingLevel: string;
+  /** Latest recorded thinking level, or null when the file has no thinking_level_change. */
+  thinkingLevel: string | null;
   model: { provider: string; modelId: string } | null;
 };
+
+const SESSION_SETTING_ENTRY_TYPES = ["model_change", "thinking_level_change"] as const;
+
+/** Settings that live before firstKeptEntryId must be copied into the rewritten file. */
+function settingsToCarryForward(branch: SessionEntry[], keptIds: Set<string>): SessionEntry[] {
+  const latest = new Map<string, SessionEntry>();
+  for (const entry of branch) {
+    if (entry.type === "model_change" || entry.type === "thinking_level_change") latest.set(entry.type, entry);
+  }
+  const carried: SessionEntry[] = [];
+  for (const type of SESSION_SETTING_ENTRY_TYPES) {
+    const entry = latest.get(type);
+    if (entry && !keptIds.has(entry.id)) carried.push(entry);
+  }
+  return carried;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -434,7 +451,7 @@ export class SessionManager {
     const branch = this.getBranch();
 
     // Scan all entries for the latest settings (model/thinking persist across compaction boundaries).
-    let thinkingLevel = "off";
+    let thinkingLevel: string | null = null;
     let model: { provider: string; modelId: string } | null = null;
     let compaction: CompactionEntry | null = null;
     for (const entry of branch) {
@@ -638,32 +655,35 @@ export class SessionManager {
     await copyFile(this.sessionFile, archivePath);
 
     // Rewrite: compaction entry becomes the new root (parentId: null),
-    // followed by kept entries from firstKeptEntryId onward, then any
-    // entries that were appended after the compaction entry.
+    // followed by carried model/thinking settings, kept entries from
+    // firstKeptEntryId onward, then any entries appended after compaction.
     // Fix the parentId chain so getBranch() can walk leaf → root uninterrupted.
     const compactionEntry = branch[compactionIdx];
     if (compactionEntry?.type !== "compaction") return undefined;
     const keptBefore = branch.slice(firstKeptIdx, compactionIdx);
     const keptAfter = branch.slice(compactionIdx + 1);
+    const keptIds = new Set([...keptBefore, ...keptAfter].map((entry) => entry.id));
+    const carried = settingsToCarryForward(branch, keptIds);
+    const middle = [...carried, ...keptBefore];
 
-    // Rebuild chain: compaction → firstKept → ... → leaf
+    // Rebuild chain: compaction → carried settings → firstKept → ... → leaf
     const rewrittenCompaction: CompactionEntry = { ...compactionEntry, parentId: null };
-    const rewrittenKept: SessionEntry[] = keptBefore.map((entry, i) => ({
+    const rewrittenMiddle: SessionEntry[] = middle.map((entry, i) => ({
       ...entry,
-      parentId: i === 0 ? compactionEntry.id : (keptBefore[i - 1]?.id ?? null),
+      parentId: i === 0 ? compactionEntry.id : (middle[i - 1]?.id ?? compactionEntry.id),
     }));
     // keptAfter entries already chain to each other; fix the first one's parent
-    // to point to the last entry in keptBefore (or compaction if keptBefore is empty).
+    // to point to the last entry in the middle chain (or compaction if empty).
     const rewrittenAfter: SessionEntry[] = keptAfter.length > 0
       ? keptAfter.map((entry, i) => ({
           ...entry,
           parentId: i === 0
-            ? (rewrittenKept.at(-1)?.id ?? compactionEntry.id)
+            ? (rewrittenMiddle.at(-1)?.id ?? compactionEntry.id)
             : (keptAfter[i - 1]?.id ?? null),
         }))
       : [];
 
-    const keptEntries = [rewrittenCompaction, ...rewrittenKept, ...rewrittenAfter];
+    const keptEntries = [rewrittenCompaction, ...rewrittenMiddle, ...rewrittenAfter];
 
     // Snapshot state so we can roll back if the file rewrite fails.
     const savedHeader = this.header;
