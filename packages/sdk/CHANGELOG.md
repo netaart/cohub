@@ -1,5 +1,20 @@
 # @neta-art/cohub
 
+## 8.24.0
+
+### Minor Changes
+
+- 329b5df: `cohub desktop open` fails fast when the desktop that started the chat is gone. The target tab now accepts a command before running it; one nobody accepts within 10 seconds (closed, asleep, or offline) settles as `no_active_client` instead of waiting out the timeout, and a tab that wakes up later never opens it. A plain open waits up to 30 seconds by default, an App `--call` still waits up to 10 minutes. SDK: `desktop.accept()`, `defaultDesktopCommandTimeoutMs()`, `DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS`, and `DESKTOP_COMMAND_OPEN_TIMEOUT_MS`; `desktop.run()` and `desktop.wait()` pick the default from the command.
+  
+  发起 Chat 的桌面不在时，`cohub desktop open` 会很快失败。目标标签页先接收命令再执行；10 秒内没有标签页接收（已关闭、睡眠或离线）就结算为 `no_active_client`，不再等满超时，之后才醒来的标签页也不会再打开它。普通打开默认最多等 30 秒，App 的 `--call` 仍最多等 10 分钟。SDK 新增 `desktop.accept()`、`defaultDesktopCommandTimeoutMs()`、`DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS` 和 `DESKTOP_COMMAND_OPEN_TIMEOUT_MS`；`desktop.run()` 和 `desktop.wait()` 按命令选择默认等待时长。
+
+### Patch Changes
+
+- 780e81a: A lighter, faster CLI. The Board renderer and PixiJS are bundled into `boards export` and load only when exporting, and sharp loads only for image uploads, so the install shrinks from about 156 MB to 70 MB and every command starts about 0.2 s faster. Self-update now checks the registry first and reinstalls only for a newer release, instead of reinstalling every 6 hours, which briefly removed the `cohub` bin while other commands ran; the last check is recorded in `~/.cache/cohub-cli/self-update.json`. `boards export` now renders with Geist like the web app: the font files ship with the CLI (about 100 KB) instead of being looked up in a package it never installed, and symbols Geist lacks, such as subscripts and superscripts, fall back to a host sans instead of drawing as boxes.
+  
+  CLI 更轻更快。Board 渲染器和 PixiJS 打包进 `boards export`，只在导出时加载；sharp 只在上传图片时加载。安装体积从约 156 MB 降到 70 MB，每条命令启动快约 0.2 秒。自更新先查询 registry，只有新版本才重装，不再每 6 小时无条件重装（重装期间 `cohub` 命令会短暂消失，影响同时运行的命令）；最近一次检查记录在 `~/.cache/cohub-cli/self-update.json`。`boards export` 现在和网页一样用 Geist 渲染：字体文件随 CLI 一起发布（约 100 KB），不再去一个从未安装的包里查找；Geist 没有的符号（如上下标）会回退到系统无衬线字体，不再显示成方框。
+- 73211f9: `toGenerationTaskView()` outputs are media only. Text blocks, such as a revised prompt next to an image or a text-only refusal, stay in the raw result instead of listing as outputs; `GenerationOutputType` drops `"text"` and `GenerationTaskOutput` drops `text`.
+
 ## 8.23.0
 
 ### Minor Changes
