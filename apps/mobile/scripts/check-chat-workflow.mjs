@@ -51,6 +51,7 @@ import { channelHealthState, createSettingsChannel, createWeChatLoginPoller, isC
 
 import { activityContributorName, activityRange, localDateKey, tokenDays } from "../src/data/activity.ts";
 import { installSpaceMod } from "../src/data/space-mods.ts";
+import { detectSlashCommandTrigger, insertSlashCommand, selectSlashCommandItems, slashCommandLabel, slashCommandText } from "../src/data/slash-commands.ts";
 
 const flushSync = async () => { for (let tick = 0; tick < 20; tick++) await Promise.resolve(); };
 mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
@@ -3344,6 +3345,30 @@ assert.deepEqual(resolveMessageLink("cohub://apps/alice/studio/pulsewall?view=bo
   assert.equal(inserted.markup, `ask @[Design x Studio](cohub://spaces/${spaceId}) now`, "labels are sanitized and existing whitespace is reused");
   assert.equal(inserted.caret, "ask @Design x Studio ".length);
   assert.equal(insertSpaceMention("@", { start: 0, end: 1, query: "" }, { spaceId, label: "" }).markup, `@[space:f7000115](cohub://spaces/${spaceId}) `);
+
+  // Slash commands are plain text: the server expands `/name` and `/skill:name` at turn start.
+  assert.deepEqual(detectSlashCommandTrigger("/mod"), { start: 0, end: 4, query: "mod" });
+  assert.deepEqual(detectSlashCommandTrigger("/"), { start: 0, end: 1, query: "" });
+  assert.deepEqual(detectSlashCommandTrigger("  /skill:gp"), { start: 2, end: 11, query: "skill:gp" });
+  assert.equal(detectSlashCommandTrigger("/mod arg"), null, "a typed argument closes the token, like the web composer");
+  assert.equal(detectSlashCommandTrigger("ask /mod"), null, "the slash only counts at the start of the draft");
+  assert.equal(detectSlashCommandTrigger(`/${'a'.repeat(81)}`), null, "queries over the length limit are ignored");
+
+  const prompts = [{ name: "mod", description: "Run a mod", scope: "project", argumentHint: "<slug>" }, { name: "review", description: "Review the diff", scope: "user", category: "Code" }];
+  const skills = [{ name: "git-guardrails", description: "Block destructive git", scope: "mod", source: { type: "mod", modSpaceId: spaceId, mountSlug: "toolbox" } }];
+  assert.deepEqual(selectSlashCommandItems({ prompts, skills, query: "" }).map((item) => slashCommandLabel(item)), ["review", "mod", "skill:git-guardrails"], "an empty query keeps prompts before skills");
+  assert.deepEqual(selectSlashCommandItems({ prompts, skills, query: "rev" }).map((item) => item.name), ["review"]);
+  assert.deepEqual(selectSlashCommandItems({ prompts, skills, query: "skill:git" }).map((item) => item.kind), ["skill"], "skills match on their `/skill:` label");
+  assert.deepEqual(selectSlashCommandItems({ prompts, skills, query: "toolbox" }).map((item) => item.name), ["git-guardrails"], "a mod mount slug matches its skill");
+  assert.deepEqual(selectSlashCommandItems({ prompts, skills, query: "code" }).map((item) => item.name), ["review"], "categories match");
+  assert.deepEqual(selectSlashCommandItems({ prompts, skills, query: "nope" }), []);
+  assert.equal(slashCommandText({ kind: "skill", name: "git-guardrails" }), "/skill:git-guardrails");
+
+  const picked = insertSlashCommand("/rev", { start: 0, end: 4, query: "rev" }, { kind: "prompt", name: "review" });
+  assert.equal(picked.markup, "/review ", "the caret leaves room for arguments");
+  assert.equal(picked.caret, "/review ".length);
+  assert.equal(insertSlashCommand("/rev now", { start: 0, end: 5, query: "rev" }, { kind: "prompt", name: "review" }).markup, "/review now", "existing spacing after the token is reused");
+  assert.equal(insertSlashCommand("  /skill:git", { start: 2, end: 12, query: "skill:git" }, { kind: "skill", name: "git-guardrails" }).markup, "  /skill:git-guardrails ", "leading whitespace survives");
 
   const pasted = `see https://cohub.live/spaces/${spaceId}, https://www.cohub.live/spaces/${spaceId}/sessions/${sessionId}?turn=2 https://cohub.run/alice/studio/w/pulsewall?x=1 /spaces/${spaceId} https://cohub.live.evil.example/spaces/${spaceId} https://example.com/spaces/${spaceId}`;
   const links = findCohubLinks(pasted, { start: 0, end: pasted.length });

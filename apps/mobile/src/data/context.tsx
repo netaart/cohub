@@ -59,6 +59,7 @@ import { hasFinalAssistantForTurn, isActiveTurnStatus, isTerminalTurnStatus, liv
 import { mergeDisplayMessages, mergeTurns, messagesFromTurns, nextTurnSequence, turnSequenceForMessage, withFallbackUserContent } from "@/src/data/session-history";
 import { forkSessionTurn } from "@/src/data/session-fork";
 import { extractSpaceMentions, mentionDisplayText } from "@/src/data/space-mentions";
+import { clearSlashCommandCache } from "@/src/data/use-composer-slash";
 import { isOptimisticFollowup, shouldQueueFollowup } from "@/src/data/followup-queue";
 import { createSessionLifecycle } from "@/src/data/session-lifecycle";
 import { getResourcePinState, invalidateResourcePinReads, isResourcePinned, loadResourcePinStates, toggleResourcePin } from "@/src/data/resource-pins";
@@ -2152,6 +2153,7 @@ export function AppProvider({
     for (const controller of runningDiscoveryControllers.current) controller.abort();
     statusSessionsRef.current.clear();
     resetSpaceList();
+    clearSlashCommandCache();
     await clearUserCache(userKey);
     setModels([]);
     setModelsError(null);
