@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 	ignore "github.com/sabhiram/go-gitignore"
@@ -155,6 +154,10 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.complete(request, accepted.OpID, d.handleFSGrep(request))
 	case "fs.search":
 		return accepted, d.complete(request, accepted.OpID, d.handleFSSearch(request))
+	case "fs.pathSearch":
+		return accepted, d.complete(request, accepted.OpID, d.handleFSPathSearch(request))
+	case "fs.reconcile":
+		return accepted, d.complete(request, accepted.OpID, d.handleFSReconcile())
 	case "process.start":
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
@@ -233,23 +236,21 @@ type fsFindParams struct {
 }
 
 type fsSearchParams struct {
-	Literals []string `json:"literals"`
-	Path     string   `json:"path"`
-	CWD      string   `json:"cwd"`
-	Glob     string   `json:"glob"`
-	Limit    int      `json:"limit"`
+	Pattern      string `json:"pattern"`
+	Path         string `json:"path"`
+	CWD          string `json:"cwd"`
+	FixedStrings bool   `json:"fixedStrings"`
+	IgnoreCase   bool   `json:"ignoreCase"`
+	Glob         string `json:"glob"`
+	Limit        int    `json:"limit"`
 }
 
-func validateSearchLiterals(literals []string) error {
-	if len(literals) == 0 {
-		return fmt.Errorf("literals must contain at least one search literal")
-	}
-	for _, literal := range literals {
-		if utf8.RuneCountInString(strings.TrimSpace(literal)) < 3 {
-			return fmt.Errorf("search literals must contain at least 3 non-whitespace characters")
-		}
-	}
-	return nil
+type fsPathSearchParams struct {
+	Pattern  string `json:"pattern"`
+	Path     string `json:"path"`
+	CWD      string `json:"cwd"`
+	Limit    int    `json:"limit"`
+	FullPath bool   `json:"fullPath"`
 }
 
 type fsGrepParams struct {
@@ -955,75 +956,122 @@ func (d *Dispatcher) handleFSFind(request protocol.RPCRequest) interface{} {
 	}
 }
 
+// handleFSSearch returns the rg targets that search exactly what an rg walk of
+// the requested path would, or a fallback reason when the index cannot tell.
+// Paths are relative to the requested path; root is its workspace-relative
+// form.
 func (d *Dispatcher) handleFSSearch(request protocol.RPCRequest) interface{} {
 	var params fsSearchParams
 	if err := json.Unmarshal(request.Params, &params); err != nil {
 		return d.failed(request, "", "BAD_REQUEST", err.Error())
 	}
-	if err := validateSearchLiterals(params.Literals); err != nil {
-		return d.failed(request, "", "BAD_REQUEST", err.Error())
-	}
-
 	resolved, errResponse, ok := d.resolvePathForRequest(request, params.Path, params.CWD)
 	if !ok {
 		return errResponse
 	}
-
-	d.mu.Lock()
-	manager := d.searchManager
-	d.mu.Unlock()
-	if manager == nil || !manager.Enabled() {
-		return d.failed(request, "", "INTERNAL_ERROR", "search index is unavailable")
+	manager, root, fallback := d.searchScope(resolved.path)
+	if fallback != "" {
+		return map[string]interface{}{"path": resolved.path, "fallback": fallback}
 	}
-	if !manager.ProcessReady() {
-		failed := d.failed(request, "", "SEARCH_UNAVAILABLE", "search index is not ready; retry later")
-		failed.Error.Retryable = true
-		return failed
-	}
-
-	pathPrefix, err := filepath.Rel(d.cfg.WorkspaceDir, resolved.path)
-	if err != nil {
-		return d.failed(request, "", "IO_ERROR", err.Error())
-	}
-	if pathPrefix == "." {
-		pathPrefix = ""
-	} else {
-		pathPrefix = filepath.ToSlash(pathPrefix)
-	}
-
-	limit := params.Limit
-	if limit <= 0 {
-		limit = 1000
-	}
-
-	result, err := manager.Query(context.Background(), search.QueryInput{
-		Literals:   params.Literals,
-		PathPrefix: pathPrefix,
-		Glob:       params.Glob,
-		Limit:      limit,
+	plan, err := manager.Plan(context.Background(), search.PlanInput{
+		Pattern:      params.Pattern,
+		FixedStrings: params.FixedStrings,
+		IgnoreCase:   params.IgnoreCase,
+		PathPrefix:   root,
+		Glob:         params.Glob,
+		Limit:        params.Limit,
 	})
 	if err != nil {
 		return d.failed(request, "", "INTERNAL_ERROR", err.Error())
 	}
-
-	matches := make([]string, 0, len(result.Matches))
-	for _, match := range result.Matches {
-		absolute := filepath.Join(d.cfg.WorkspaceDir, filepath.FromSlash(match))
-		relative, relErr := filepath.Rel(resolved.path, absolute)
-		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			continue
-		}
-		matches = append(matches, filepath.ToSlash(relative))
+	if plan.Fallback != "" {
+		return map[string]interface{}{"path": resolved.path, "fallback": plan.Fallback}
 	}
 	return map[string]interface{}{
-		"path":          resolved.path,
-		"matches":       matches,
-		"indexFamily":   result.IndexFamily,
-		"schemaVersion": result.SchemaVersion,
-		"coverage":      result.Coverage,
-		"truncated":     result.Truncated,
-		"state":         result.State,
+		"path":      resolved.path,
+		"root":      root,
+		"files":     relativeToRoot(root, plan.Files),
+		"walkFiles": relativeToRoot(root, plan.WalkFiles),
+		"dirs":      relativeToRoot(root, plan.Dirs),
 	}
+}
+
+// handleFSReconcile is called after a workspace write this sandbox did not
+// perform, so the index stops answering until it has rescanned.
+func (d *Dispatcher) handleFSReconcile() interface{} {
+	d.mu.Lock()
+	manager := d.searchManager
+	d.mu.Unlock()
+	if manager == nil || !manager.Enabled() {
+		return map[string]interface{}{"invalidated": false}
+	}
+	manager.Invalidate()
+	return map[string]interface{}{"invalidated": true}
+}
+
+// handleFSPathSearch returns what fd reports for a glob below the requested
+// path, plus directories fd must still walk, or a fallback reason.
+func (d *Dispatcher) handleFSPathSearch(request protocol.RPCRequest) interface{} {
+	var params fsPathSearchParams
+	if err := json.Unmarshal(request.Params, &params); err != nil {
+		return d.failed(request, "", "BAD_REQUEST", err.Error())
+	}
+	resolved, errResponse, ok := d.resolvePathForRequest(request, params.Path, params.CWD)
+	if !ok {
+		return errResponse
+	}
+	manager, root, fallback := d.searchScope(resolved.path)
+	if fallback != "" {
+		return map[string]interface{}{"path": resolved.path, "fallback": fallback}
+	}
+	result, err := manager.Paths(context.Background(), search.PathInput{
+		Pattern:    params.Pattern,
+		PathPrefix: root,
+		FullPath:   params.FullPath,
+		Limit:      params.Limit,
+	})
+	if err != nil {
+		return d.failed(request, "", "INTERNAL_ERROR", err.Error())
+	}
+	if result.Fallback != "" {
+		return map[string]interface{}{"path": resolved.path, "fallback": result.Fallback}
+	}
+	return map[string]interface{}{
+		"path":      resolved.path,
+		"root":      root,
+		"matches":   relativeToRoot(root, result.Matches),
+		"truncated": result.Truncated,
+		"dirs":      relativeToRoot(root, result.Dirs),
+	}
+}
+
+// searchScope maps a resolved path to its workspace-relative index root.
+func (d *Dispatcher) searchScope(path string) (*search.Manager, string, string) {
+	d.mu.Lock()
+	manager := d.searchManager
+	d.mu.Unlock()
+	if manager == nil || !manager.Enabled() {
+		return nil, "", search.FallbackUnavailable
+	}
+	root, err := filepath.Rel(d.cfg.WorkspaceDir, path)
+	if err != nil || root == ".." || strings.HasPrefix(root, ".."+string(filepath.Separator)) {
+		return nil, "", "scope"
+	}
+	if root == "." {
+		return manager, "", ""
+	}
+	return manager, filepath.ToSlash(root), ""
+}
+
+func relativeToRoot(root string, paths []string) []string {
+	relative := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if root != "" {
+			path = strings.TrimPrefix(path, root+"/")
+		}
+		relative = append(relative, path)
+	}
+	return relative
 }
 
 func (d *Dispatcher) handleFSGrep(request protocol.RPCRequest) interface{} {
