@@ -244,6 +244,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      jose:
+        specifier: ^6.2.10
+        version: 6.2.10
       postgres:
         specifier: ^3.4.9
         version: 3.4.9

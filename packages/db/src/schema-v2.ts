@@ -130,6 +130,30 @@ export const userChannels = v2.table(
   }),
 );
 
+export type PushTargetEnvironment = "sandbox" | "production";
+
+/** APNs device tokens that receive notifications for their owner's turns. */
+export const userPushTargets = v2.table(
+  "user_push_targets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userUuid: varchar("user_uuid", { length: 255 }).notNull(),
+    token: varchar("token", { length: 200 }).notNull(),
+    environment: varchar("environment", { length: 20 }).$type<PushTargetEnvironment>().notNull(),
+    topic: varchar("topic", { length: 255 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tokenUniqueIdx: uniqueIndex("v2_uq_user_push_targets_token").on(table.token),
+    userUuidIdx: index("v2_idx_user_push_targets_user_uuid").on(table.userUuid),
+    environmentCheck: check(
+      "v2_chk_user_push_targets_environment",
+      sql`${table.environment} in ('sandbox', 'production')`,
+    ),
+  }),
+);
+
 export const spaces = v2.table(
   "spaces",
   {

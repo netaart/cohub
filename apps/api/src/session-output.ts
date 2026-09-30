@@ -16,6 +16,7 @@ import { spaceChannels } from "@cohub/db";
 import { clearSessionStreamSnapshot } from "./session-stream-snapshot.js";
 import { listResourceLabelRefs } from "@cohub/core/labels";
 import { toRealtimeMessageRecord, toRealtimeTurnRecord } from "./realtime-events.js";
+import { sendTurnPush } from "./push/turn-push.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -198,6 +199,16 @@ export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId:
   });
 
   if (!input.turn.userUuid) return;
+  const userPreview = truncateTurnPreview(input.turn.userText);
+  // Suspended mobile clients miss the realtime notify; APNs must never hold up finalization.
+  void sendTurnPush({ spaceId: input.spaceId, sessionId: input.sessionId, turn: input.turn, userPreview }).catch((error) => {
+    logger.warn("[SessionTurn] failed to send turn push", {
+      spaceId: input.spaceId,
+      sessionId: input.sessionId,
+      turnId: input.turn.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
   await dispatchRealtimeEvent({
     id: randomUUID(),
     timestamp: Date.now(),
@@ -212,7 +223,7 @@ export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId:
       turnId: input.turn.id,
       status: input.turn.status,
       finishReason: input.turn.summary?.finishReason ?? null,
-      userPreview: truncateTurnPreview(input.turn.userText),
+      userPreview,
       durationMs: input.turn.durationMs,
       stepCount: input.turn.intermediateSummary?.messageCount ?? null,
       sequence: input.turn.sequence ?? null,

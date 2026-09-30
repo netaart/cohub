@@ -1,8 +1,20 @@
+import { createPrivateKey } from "node:crypto";
 import { resolveLogtoEndpoint } from "@cohub/identity";
+import { createLogger } from "@cohub/infra/logging";
 import {
   parseCohubAppHostTemplate,
   type CohubAppHostTemplate,
 } from "@cohub/protocol";
+
+/** APNs token-based provider credentials; null in AppConfig when push is disabled. */
+export type ApnsConfig = {
+  keyId: string;
+  teamId: string;
+  /** PKCS#8 PEM of the .p8 signing key. */
+  privateKey: string;
+  /** Bundle ids a device may register as its push topic. */
+  topics: string[];
+};
 
 export type AppConfig = {
   logtoEndpoint: string;
@@ -88,6 +100,8 @@ export type AppConfig = {
   metaPromotionClientIpHeader?: string;
   /** Optional Meta Events Manager test code; omit in normal production traffic. */
   metaPromotionTestEventCode?: string;
+  /** APNs push for finished turns; null disables push targets and delivery. */
+  apns: ApnsConfig | null;
 };
 
 export type SandboxToleration = {
@@ -179,6 +193,40 @@ const parseSandboxTolerations = (value: string | undefined): SandboxToleration[]
   });
 };
 
+const APNS_ENV_KEYS = ["APNS_KEY_ID", "APNS_TEAM_ID", "APNS_PRIVATE_KEY", "APNS_TOPICS"] as const;
+
+/**
+ * All APNS_* unset disables push silently. A partial or invalid set also
+ * disables it, with a warning, so a bad deploy value never blocks startup.
+ */
+export const parseApnsConfig = (
+  source: Partial<Record<(typeof APNS_ENV_KEYS)[number], string | undefined>>,
+): { apns: ApnsConfig | null; warning?: string } => {
+  const keyId = source.APNS_KEY_ID?.trim() ?? "";
+  const teamId = source.APNS_TEAM_ID?.trim() ?? "";
+  // Single-line env values carry the PEM with literal "\n" escapes.
+  const privateKey = (source.APNS_PRIVATE_KEY ?? "").replace(/\\n/g, "\n").trim();
+  const topics = parseCommaList(source.APNS_TOPICS);
+  const present = { APNS_KEY_ID: keyId, APNS_TEAM_ID: teamId, APNS_PRIVATE_KEY: privateKey, APNS_TOPICS: topics.join(",") };
+  const missing = APNS_ENV_KEYS.filter((key) => !present[key]);
+  if (missing.length === APNS_ENV_KEYS.length) return { apns: null };
+  if (missing.length > 0) {
+    return { apns: null, warning: `APNs push disabled: missing ${missing.join(", ")}` };
+  }
+  try {
+    createPrivateKey(privateKey);
+  } catch {
+    return { apns: null, warning: "APNs push disabled: APNS_PRIVATE_KEY is not a valid PEM private key" };
+  }
+  return { apns: { keyId, teamId, privateKey, topics } };
+};
+
+const resolveApnsConfig = () => {
+  const { apns, warning } = parseApnsConfig(process.env);
+  if (warning) createLogger({ serviceName: "cohub-api" }).warn(`[Config] ${warning}`);
+  return apns;
+};
+
 export const config: AppConfig = {
   workerSecret: process.env.WORKER_SECRET ?? "",
   logtoEndpoint: resolveLogtoEndpoint({ endpoint: process.env.LOGTO_ENDPOINT, env }),
@@ -268,6 +316,7 @@ export const config: AppConfig = {
   metaPromotionApiVersion: process.env.COHUB_META_API_VERSION?.trim() || "v21.0",
   metaPromotionClientIpHeader: process.env.COHUB_META_CLIENT_IP_HEADER?.trim().toLowerCase() || undefined,
   metaPromotionTestEventCode: process.env.COHUB_META_TEST_EVENT_CODE?.trim() || undefined,
+  apns: resolveApnsConfig(),
 };
 
 export const sessionsNamespace = getSessionsNamespace(config.env);

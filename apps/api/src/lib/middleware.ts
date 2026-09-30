@@ -85,6 +85,16 @@ export const useAccountPrincipal = (c: Context): AuthUser | Response => {
 };
 
 /**
+ * Returns the signed-in user only for the user's own access token; execution,
+ * app, and preview credentials acting for the user get 403.
+ */
+export const useUserPrincipal = (c: Context): AuthUser | Response => {
+  const principal = c.get("principal") as RequestPrincipal | null | undefined;
+  if (principal?.type === "user") return principal.user;
+  return principal ? c.json({ message: "forbidden" }, 403) : c.json({ message: "unauthorized" }, 401);
+};
+
+/**
  * Returns the authenticated user when present, otherwise null.
  * Use this for routes whose authorization is fully determined by RBAC
  * policies, including signed-in and anonymous access policies.
