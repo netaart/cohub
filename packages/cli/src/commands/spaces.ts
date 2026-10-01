@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import { resolveCohubEnvironment } from "@neta-art/cohub";
+import { readSessionTurnOrigin, resolveCohubEnvironment } from "@neta-art/cohub";
 import type {
   CohubHttpClient,
   ContentBlock,
@@ -1622,6 +1622,8 @@ function registerTurns(sessionsCmd: Command): void {
           { key: "stopReason", label: "Stop" },
           { key: "errorMessage", label: "Error" },
         ]);
+        const origin = readSessionTurnOrigin(result.turn.meta, spaceId);
+        if (origin) console.log(`\nOrigin (${origin.kind}): space=${origin.spaceId} session=${origin.sessionId} turn=${origin.turnId}${origin.toolCallId ? ` toolCall=${origin.toolCallId}` : ""}`);
         if (result.turn.userText) console.log(`\nUser:\n${result.turn.userText}`);
         if (result.turn.assistantText) console.log(`\nAssistant:\n${result.turn.assistantText}`);
       } catch (e: unknown) {

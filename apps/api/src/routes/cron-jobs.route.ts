@@ -10,7 +10,7 @@ import { hasPermission } from "../permissions.js";
 import { disableCronJob, enableCronJob, removeCronJob, updateCronJob } from "../tasks.js";
 import { fallbackPublicUserProfile, getProfilesByUuids } from "../user-profiles.js";
 import { sanitizeTaskRunPricingForViewer } from "../task-run-privacy.js";
-import { preserveCronPayloadAuth } from "./cron-jobs-payload.js";
+import { preserveCronPayloadServerFields } from "./cron-jobs-payload.js";
 
 const router = new Hono();
 const { CronExpressionParser } = cronParser;
@@ -269,7 +269,7 @@ router.patch("/:id", async (c) => {
     // payload.auth is server-generated provenance: whatever a client sends
     // under it is dropped and the original is preserved verbatim, so no
     // account can inject or swap an app authorization reference.
-    patch.payload = preserveCronPayloadAuth(
+    patch.payload = preserveCronPayloadServerFields(
       sanitizePostgresJsonValue(body.payload) as Record<string, unknown>,
       job.payload,
     );

@@ -7,7 +7,7 @@ import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { sessionForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "./reference-index-queue.js";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
-import { normalizeSessionTitle, readSessionParticipantUserUuids, setSessionParticipantsMeta, setSessionTitleMeta } from "@cohub/core/sessions";
+import { inheritSessionMetaForFork, normalizeSessionTitle, readSessionParticipantUserUuids, setSessionParticipantsMeta, setSessionTitleMeta } from "@cohub/core/sessions";
 
 type SegmentRow = typeof sessionTurnSegments.$inferSelect;
 export const MAX_SESSION_TURN_SEGMENTS = 128;
@@ -250,7 +250,7 @@ export async function createSessionForkInTransaction(tx: Transaction, input: Ses
   const requestedTitle = normalizeSessionTitle(input.title);
   const childMeta = setSessionParticipantsMeta(
     {
-      ...(parent.meta && typeof parent.meta === "object" && !Array.isArray(parent.meta) ? (parent.meta as Record<string, unknown>) : {}),
+      ...inheritSessionMetaForFork(parent.meta),
       fork: {
         version: 1,
         kind: "turn",

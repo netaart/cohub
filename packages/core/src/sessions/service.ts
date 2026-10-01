@@ -3,10 +3,14 @@ import { randomUUID as defaultRandomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ContentBlock } from "@cohub/protocol/core";
-import type { SessionTurnIntent, SessionTurnRecord } from "@cohub/protocol/model";
+import type { SessionTurnIntent, SessionTurnRecord, SessionTurnOrigin } from "@cohub/protocol/model";
 import { AGENT_TURN_ABORT_CHANNEL, type ModelThinkingLevel } from "@cohub/protocol";
 import { sessionTurnSegments, sessionTurns, spaceSessions, spaces } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
+import { resolveSessionTurnOrigin } from "./turn-origin.js";
+import { turnTriggerReference } from "../references/turn-trigger.js";
+import type { ReferenceInput } from "../references/types.js";
+import { normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
 import {
   addSessionParticipantMeta,
   initializeSessionParticipantsMeta,
@@ -149,6 +153,7 @@ export function createSessionServices(input: {
   injectTrace?: () => Record<string, unknown>;
   getRequestId?: () => string | null | undefined;
   logger?: Pick<Console, "warn">;
+  enqueueReferences?: (references: readonly ReferenceInput[]) => void;
   onSessionTurnCreated?: (input: { spaceId: string; turn: SessionTurnRecord }) => void | Promise<void>;
   onSessionTurnUpdated?: (input: { spaceId: string; turn: SessionTurnRecord }) => void | Promise<void>;
   onSessionActivityUpdated?: (input: { sessionId: string; changed: string[] }) => void | Promise<void>;
@@ -172,7 +177,7 @@ export function createSessionServices(input: {
     });
   }
 
-  async function registerCronjobSession(spaceId: string, options: { source: string; title?: string | null; userUuid: string }) {
+  async function registerCronjobSession(spaceId: string, options: { source: string; title?: string | null; userUuid: string; origin?: SessionTurnOrigin | null; requestSource?: RequestSource | null }) {
     const userUuid = options.userUuid.trim();
     if (!userUuid) throw new Error("userUuid is required");
     const [space] = await input.db.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).limit(1);
@@ -180,7 +185,12 @@ export function createSessionServices(input: {
 
     const sessionId = randomUUID();
     const title = normalizeSessionTitle(options.title);
-    const participantMeta = initializeSessionParticipantsMeta({ createdBy: "cronjob" }, userUuid);
+    const requestSource = normalizeRequestSource(options.requestSource);
+    const participantMeta = initializeSessionParticipantsMeta({
+      createdBy: "cronjob",
+      ...(options.origin ? { origin: options.origin } : {}),
+      ...(requestSource ? { requestSource } : {}),
+    }, userUuid);
     const [session] = await input.db.insert(spaceSessions).values({
       id: sessionId,
       spaceId,
@@ -252,6 +262,14 @@ export function createSessionServices(input: {
       return { row, spaceId: sessionRow.spaceId };
     });
     if (!row) throw new Error("failed to create session turn");
+    const reference = turnTriggerReference({ ...row, spaceId });
+    if (reference) {
+      try {
+        input.enqueueReferences?.([reference]);
+      } catch (error) {
+        logger.warn("[Session] failed to index turn origin", error);
+      }
+    }
     await Promise.resolve(input.onSessionTurnCreated?.({ spaceId, turn: toSessionTurnRecord(row) }))
       .catch((error) => logger.warn("[Session] failed to publish created turn", error));
     await Promise.resolve(input.onSessionActivityUpdated?.({
@@ -377,6 +395,7 @@ export function createSessionServices(input: {
     options: SubmitSessionPromptOptions = {},
   ) {
     return submitSessionPrompt({
+      resolveOrigin: (source, kind) => resolveSessionTurnOrigin(input.db, source, kind),
       randomUUID,
       expandPromptTemplate: ({ text, userId, spaceId, sessionId }) => input.promptTemplateService.expand(text, { userId, spaceId, sessionId }),
       expandSkillCommand: skillService

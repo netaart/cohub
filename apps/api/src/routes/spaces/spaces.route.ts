@@ -75,7 +75,7 @@ import type { AuthUser } from "../../lib/middleware.js";
 import { submitSessionPrompt } from "../../session-prompts.js";
 import { getRuntimeRegistration, getSessionRuntimeRecovery, confirmRuntimeStopped } from "../../runtime.js";
 import runtimeArchivesRouter from "./runtime-archives.route.js";
-import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError } from "@cohub/core/sessions";
+import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError, resolveSessionTurnOrigin } from "@cohub/core/sessions";
 import { delegatedPromptAuthFromAppSession, promptAuthContextFromAppSession } from "../../prompt-auth-context.js";
 import { buildSessionTurnResponse } from "../../session-turn-response.js";
 import { getSessionTurnById, hydrateTurnAuthorProfiles } from "../../session-turns.js";
@@ -1989,9 +1989,14 @@ router.post("/:id/prompt", async (c) => {
   const content = body.content;
   const clientMessageId = body.clientMessageId?.trim() || crypto.randomUUID();
   const source = resolveSessionSourceFromRequest(c, typeof body.source === "string" ? body.source : null);
+  const requestSource = getRequestSource(c);
+  const origin = await resolveSessionTurnOrigin(db, requestSource, mode === "immediate" ? "prompt" : "scheduled_prompt",
+    (scope) => hasPermission(user, "session.view", scope));
+  const provenance = { ...(requestSource ? { requestSource } : {}), ...(origin ? { origin } : {}) };
 
   const scheduledAuth = await getScheduledPromptAuthContext(c, spaceId, user.uuid);
   const taskData = {
+    ...provenance,
     content,
     clientMessageId,
     ...(generationPolicy ? { generationPolicy } : {}),
@@ -2017,7 +2022,7 @@ router.post("/:id/prompt", async (c) => {
         title: body.title ?? null,
         source,
         externalSessionId: null,
-        meta: { createdBy: "api_space_prompt" },
+        meta: { createdBy: "api_space_prompt", ...provenance },
       });
       createdPromptSession = promptSession;
       sessionId = promptSession.id;
@@ -2042,7 +2047,9 @@ router.post("/:id/prompt", async (c) => {
         clientMessageId,
         content,
         source,
-        sourceClientId: getRequestSource(c)?.clientId ?? null,
+        requestSource,
+        origin,
+        sourceClientId: requestSource?.clientId ?? null,
         model: requestedModel,
         provider: requestedProvider,
         harness: body.harness ?? null,
@@ -2233,6 +2240,9 @@ router.post("/:id/sessions", async (c) => {
   }
 
   const source = resolveSessionSourceFromRequest(c, body.source);
+  const requestSource = getRequestSource(c);
+  const origin = await resolveSessionTurnOrigin(db, requestSource, "prompt",
+    (scope) => hasPermission(user, "session.view", scope));
   const session = await createInitialSpaceSession({
     spaceId: space.id,
     sessionId: crypto.randomUUID(),
@@ -2240,7 +2250,7 @@ router.post("/:id/sessions", async (c) => {
     title: body.title ?? null,
     source,
     externalSessionId: null,
-    meta: { createdBy: "api_space_session_create" },
+    meta: { createdBy: "api_space_session_create", ...(requestSource ? { requestSource } : {}), ...(origin ? { origin } : {}) },
   });
 
   if (userLabelIds.length > 0) {

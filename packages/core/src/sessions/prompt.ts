@@ -1,8 +1,8 @@
 import { BillingAccessBlockedError, type BillingAccessDecision, type BillingUsageGate } from "@cohub/billing";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
-import type { SessionTurnIntent } from "@cohub/protocol/model";
-import { isRequestSourceClientId } from "@cohub/protocol/provenance";
+import { normalizeSessionTurnOrigin, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind } from "@cohub/protocol/model";
+import { isRequestSourceClientId, normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
 import { harnessSchema, isLocalHarness } from "@cohub/protocol/runtime";
 import { normalizeContentBlocks } from "../content/normalize.js";
 import type { PromptEnv } from "./prompt-env.js";
@@ -142,6 +142,9 @@ export type SubmitSessionPromptInput = {
   content: ContentBlock[];
   source: PromptSource;
   sourceClientId?: string | null;
+  requestSource?: RequestSource | null;
+  /** Server-resolved provenance, including snapshots retained by scheduled tasks. */
+  origin?: SessionTurnOrigin | null;
   model?: string | null;
   provider?: string | null;
   /** Agent implementation for this turn. Cloud/local runtime is resolved by the Space. */
@@ -191,6 +194,7 @@ import type { ExpandedSkillCommand } from "@cohub/infra/config-runtime/skills";
 export type { ExpandedSkillCommand };
 
 export type SessionPromptDependencies = {
+  resolveOrigin?(source: RequestSource, kind: SessionTurnOriginKind): Promise<SessionTurnOrigin | null>;
   randomUUID(): string;
   expandPromptTemplate(input: {
     text: string;
@@ -450,8 +454,21 @@ export const submitSessionPrompt = async (
   if (billingDecision?.status === "blocked") {
     throw new BillingAccessBlockedError(billingDecision);
   }
+  const requestSource = normalizeRequestSource(input.requestSource ?? (
+    input.context?.kind === "background_bash_task" && input.context.origin
+      ? { ...input.context.origin, spaceId: input.spaceId }
+      : null
+  ));
+  const originKind: SessionTurnOriginKind = input.context?.kind === "scheduled_task" ? "scheduled_prompt"
+    : input.context?.kind === "background_bash_task" ? "background_task"
+    : input.context?.kind === "space_hook" ? "hook" : "prompt";
+  const origin = input.origin !== undefined
+    ? normalizeSessionTurnOrigin(input.origin)
+    : requestSource?.turnId ? await deps.resolveOrigin?.(requestSource, originKind) ?? null : null;
   const baseMeta = {
     source: input.source,
+    ...(requestSource ? { requestSource } : {}),
+    ...(origin ? { origin } : {}),
     ...(sourceClientId ? { sourceClientId } : {}),
     userId,
     clientMessageId,

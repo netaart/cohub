@@ -19,6 +19,7 @@ import { dispatchTurnUpdated } from "./session-output.js";
 import { hydrateTurnAuthorProfiles } from "./session-turns.js";
 import { createLogger } from "@cohub/infra/logging";
 import { validatePromptModel } from "./llm/models.js";
+import { enqueueReferences } from "./reference-index-queue.js";
 import { getRuntimeRegistration } from "./runtime.js";
 
 
@@ -72,6 +73,7 @@ export function getSessionDomainServices(input?: {
 
   const services = createSessionServices({
     db,
+    enqueueReferences,
     redis: redisCommandClient,
     promptTemplateService: input?.promptTemplateService ?? defaultPromptTemplateService,
     skillService: input?.skillService ?? defaultSkillService,
