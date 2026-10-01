@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { sessionTurnSegments, sessionTurns, spaceSessions, taskRuns } from "@cohub/db";
 import { emptyExecutionStats, mergeExecutionStats, metricsRecord, readSessionStats, readStatsUsage, readTurnStats, sumStatsUsage, type SessionStats } from "@cohub/protocol/model";
 import type { SessionUpdatedEvent } from "@cohub/protocol/realtime";
+import type { Usage } from "@cohub/protocol/core";
 
 type Database = PostgresJsDatabase<Record<string, unknown>>;
 
@@ -19,41 +20,37 @@ export async function refreshSessionStats(db: Database, sessionId: string) {
       gte(sessionTurns.sequence, segment.fromSequence),
       segment.toSequence == null ? undefined : lte(sessionTurns.sequence, segment.toSequence),
     ))) : eq(sessionTurns.sessionId, sessionId);
+    const sourceSessionIds = [...new Set([sessionId, ...segments.map((segment) => segment.sourceSessionId)])];
     const rows = await tx.select({
       sessionId: sessionTurns.sessionId, status: sessionTurns.status, intent: sessionTurns.intent,
-      executionKind: sessionTurns.executionKind, totalUsage: sessionTurns.totalUsage, finalUsage: sessionTurns.finalUsage,
+      executionKind: sessionTurns.executionKind,
+      totalUsage: sql<Usage | null>`case when ${sessionTurns.executionKind} = 'direct_generation' then null else ${sessionTurns.totalUsage} end`,
+      finalUsage: sql<Usage | null>`case when ${sessionTurns.executionKind} = 'direct_generation' then null else ${sessionTurns.finalUsage} end`,
       durationMs: sessionTurns.durationMs, createdAt: sessionTurns.createdAt, completedAt: sessionTurns.completedAt,
       intermediateSummary: sessionTurns.intermediateSummary,
-      meta: sql<Record<string, unknown>>`jsonb_build_object('llm', ${sessionTurns.meta}->'llm', 'metrics', ${sessionTurns.meta}->'metrics', 'generation', ${sessionTurns.meta}->'generation', 'generationTaskId', ${sessionTurns.meta}->'generationTaskId', 'imageToText', ${sessionTurns.meta}->'imageToText')`,
+      meta: sql<Record<string, unknown>>`jsonb_build_object('llm', ${sessionTurns.meta}->'llm', 'metrics', ${sessionTurns.meta}->'metrics', 'generation', jsonb_build_object('officialCostUsd', ${sessionTurns.meta}->'generation'->'officialCostUsd'), 'generationTaskId', ${sessionTurns.meta}->'generationTaskId', 'imageToText', ${sessionTurns.meta}->'imageToText')`,
     }).from(sessionTurns).where(visible);
     const stats: SessionStats = { version: 1, revision: (readSessionStats(session.meta)?.revision ?? 0) + 1, updatedAt: new Date().toISOString(), own: emptyExecutionStats(), inherited: emptyExecutionStats(), auxiliaryUsage: null };
     // Tool/CLI generation tasks need not have their own Turn. Count each task once;
     // a direct-generation Turn already represents its task's costs and duration.
     const representedTasks = new Set(rows.filter((turn) => turn.executionKind === "direct_generation").map((turn) => metricsRecord(turn.meta).generationTaskId));
     const generations = await tx.select({ id: taskRuns.id, sessionId: taskRuns.sessionId, status: taskRuns.status,
-      cost: sql<unknown>`${taskRuns.result}->'cost'`, billing: sql<unknown>`${taskRuns.result}->'billing'`,
-    }).from(taskRuns).leftJoin(sessionTurns, and(eq(taskRuns.turnId, sessionTurns.id), eq(taskRuns.sessionId, sessionTurns.sessionId)))
-      .where(and(eq(taskRuns.taskType, "generation"), inArray(taskRuns.status, ["completed", "failed"]), or(eq(taskRuns.sessionId, sessionId), visible)));
-    const billingReceipts = await tx.select({ result: taskRuns.result }).from(taskRuns)
-      .where(and(eq(taskRuns.taskType, "generation.billing_retry"), eq(taskRuns.status, "completed"),
-        inArray(taskRuns.sessionId, [...new Set([sessionId, ...segments.map((segment) => segment.sourceSessionId)])])))
-      .orderBy(asc(taskRuns.updatedAt), asc(taskRuns.id));
-    const latestBilling = new Map(billingReceipts.map(({ result }) => {
-      const receipt = metricsRecord(result);
-      return [receipt.taskRunId, receipt] as const;
-    }));
+      cost: sql<unknown>`${taskRuns.result}->'cost'`,
+    }).from(taskRuns).leftJoin(sessionTurns, and(
+      eq(taskRuns.turnId, sessionTurns.id), eq(taskRuns.sessionId, sessionTurns.sessionId),
+      inArray(sessionTurns.sessionId, sourceSessionIds),
+    )).where(and(
+      inArray(taskRuns.sessionId, sourceSessionIds),
+      eq(taskRuns.taskType, "generation"), inArray(taskRuns.status, ["completed", "failed"]),
+      or(eq(taskRuns.sessionId, sessionId), visible),
+    ));
     for (const turn of rows) {
       const key = turn.sessionId === sessionId ? "own" : "inherited";
-      const meta = metricsRecord(turn.meta);
-      const billing = latestBilling.get(meta.generationTaskId);
-      const source = billing && turn.executionKind === "direct_generation"
-        ? { ...turn, meta: { ...meta, generation: { ...metricsRecord(meta.generation), billing } } }
-        : turn;
-      stats[key] = mergeExecutionStats(stats[key], readTurnStats(source));
+      stats[key] = mergeExecutionStats(stats[key], readTurnStats(turn));
     }
     for (const task of generations) {
       if (representedTasks.has(task.id)) continue;
-      const contribution = readTurnStats({ status: task.status, executionKind: "direct_generation", meta: { generation: { officialCostUsd: task.cost, billing: latestBilling.get(task.id) ?? task.billing } } });
+      const contribution = readTurnStats({ status: task.status, executionKind: "direct_generation", meta: { generation: { officialCostUsd: task.cost } } });
       // Nested/background tasks are not extra user turns or extra wall-clock time.
       contribution.turns = 0;
       const key = task.sessionId === sessionId ? "own" : "inherited";
@@ -76,9 +73,12 @@ export async function refreshSessionStats(db: Database, sessionId: string) {
 
 /** Also refresh descendants whose timeline inherits this Session. Call after commit,
  * not from inside a Turn transaction. Duplicate notifications simply rebuild facts. */
-export async function refreshSessionStatsAndPublish(db: Database, sessionId: string, publish: (event: SessionUpdatedEvent) => Promise<unknown>) {
+export async function refreshSessionStatsAndPublish(db: Database, sessionId: string, publish: (event: SessionUpdatedEvent) => Promise<unknown>, fromSequence?: number) {
   const descendants = await db.selectDistinct({ id: sessionTurnSegments.sessionId }).from(sessionTurnSegments)
-    .where(eq(sessionTurnSegments.sourceSessionId, sessionId));
+    .where(and(
+      eq(sessionTurnSegments.sourceSessionId, sessionId),
+      fromSequence == null ? undefined : or(isNull(sessionTurnSegments.toSequence), gte(sessionTurnSegments.toSequence, fromSequence)),
+    ));
   for (const id of new Set([sessionId, ...descendants.map((row) => row.id)])) {
     const result = await refreshSessionStats(db, id);
     if (!result) continue;

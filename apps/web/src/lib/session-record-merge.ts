@@ -1,4 +1,7 @@
-import { readSessionStats } from "@cohub/protocol/model";
+import {
+	readSessionStats,
+	sanitizeSessionStatsMeta,
+} from "@cohub/protocol/model";
 import type { SessionRecord } from "@neta-art/cohub";
 
 function hasOwn<T extends object, K extends PropertyKey>(
@@ -55,6 +58,7 @@ export function mergeSessionRecord(
 				};
 	// The wire-only field must not survive in canonical/cache records: they can
 	// pass through another merge before being stored or applied to the workspace.
+	result.meta = sanitizeSessionStatsMeta(result.meta);
 	delete result.stats;
 	return result;
 }

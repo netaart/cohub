@@ -55,7 +55,10 @@ export const executionStatsSchema = z.object({
   compactions: count, compactionMs: optionalCount, compactionUsage: usageSchema.nullable(),
   imageToTextCalls: count, imageToTextMs: optionalCount,
   usage: usageSchema.nullable(),
-  estimatedCostUsd: optionalCount, chargedCostUsd: optionalCount, providerCostUsd: optionalCount,
+  modelCostUsd: optionalCount,
+  generationCostUsd: optionalCount,
+  /** Shared statistics never expose actual charges. */
+  chargedCostUsd: z.null().default(null),
   partial: z.boolean(),
 });
 export type ExecutionStats = z.infer<typeof executionStatsSchema>;
@@ -65,9 +68,68 @@ export const sessionStatsSchema = z.object({
   auxiliaryUsage: usageSchema.nullable(),
 });
 export type SessionStats = z.infer<typeof sessionStatsSchema>;
+// Explicit null/zero takes precedence over legacy aliases.
+const normalizeExecutionStatsAliases = (value: unknown): unknown => {
+  const record = metricsRecord(value);
+  const modelAlias = !Object.hasOwn(record, "modelCostUsd") && Object.hasOwn(record, "estimatedCostUsd");
+  const generationAlias = !Object.hasOwn(record, "generationCostUsd") && Object.hasOwn(record, "providerCostUsd");
+  if (!modelAlias && !generationAlias) return value;
+  return {
+    ...record,
+    ...(modelAlias ? { modelCostUsd: record.estimatedCostUsd } : {}),
+    ...(generationAlias ? { generationCostUsd: record.providerCostUsd } : {}),
+  };
+};
+
+export function sanitizeSessionStatsMeta<T>(meta: T): T {
+  const source = metricsRecord(meta);
+  if (!source.stats || typeof source.stats !== "object" || Array.isArray(source.stats)) return meta;
+  const stats = metricsRecord(source.stats);
+  const stripCharge = (value: unknown) => {
+    const record = metricsRecord(value);
+    return Object.hasOwn(record, "chargedCostUsd") && record.chargedCostUsd !== null
+      ? { ...record, chargedCostUsd: null } : value;
+  };
+  const own = stripCharge(stats.own);
+  const inherited = stripCharge(stats.inherited);
+  if (own === stats.own && inherited === stats.inherited) return meta;
+  return { ...source, stats: { ...stats, own, inherited } } as T;
+}
+
+export function sanitizeSessionRecordStats<T extends { meta?: unknown }>(session: T): T {
+  const meta = sanitizeSessionStatsMeta(session.meta);
+  return meta === session.meta ? session : { ...session, meta };
+}
+
+export function sanitizeSessionStatsEvent<T extends { type: string; payload: Record<string, unknown> }>(event: T): T {
+  if (event.type !== "session.updated" && event.type !== "session.created") return event;
+  const session = metricsRecord(event.payload.session);
+  const meta = sanitizeSessionStatsMeta(session.meta);
+  const stats = sanitizeSessionStatsMeta({ stats: session.stats }).stats;
+  if (meta === session.meta && stats === session.stats) return event;
+  return { ...event, payload: { ...event.payload, session: {
+    ...session,
+    ...(meta !== session.meta ? { meta } : {}),
+    ...(stats !== session.stats ? { stats } : {}),
+  } } };
+}
+
 export function readSessionStats(meta: unknown): SessionStats | null {
-  const result = sessionStatsSchema.safeParse(metricsRecord(meta).stats);
+  const raw = metricsRecord(sanitizeSessionStatsMeta(meta)).stats;
+  const record = metricsRecord(raw);
+  const own = normalizeExecutionStatsAliases(record.own);
+  const inherited = normalizeExecutionStatsAliases(record.inherited);
+  const normalized = own === record.own && inherited === record.inherited ? raw : { ...record, own, inherited };
+  const result = sessionStatsSchema.safeParse(normalized);
   return result.success ? result.data : null;
+}
+
+const SESSION_STATS_CACHE_MAX_AGE_MS = 30_000;
+export function readFreshSessionStats(meta: unknown, now = Date.now()): SessionStats | null {
+  const stats = readSessionStats(meta);
+  if (!stats) return null;
+  const age = now - Date.parse(stats.updatedAt);
+  return age >= 0 && age < SESSION_STATS_CACHE_MAX_AGE_MS ? stats : null;
 }
 
 export function emptyExecutionStats(): ExecutionStats {
@@ -76,7 +138,7 @@ export function emptyExecutionStats(): ExecutionStats {
     toolCalls: null, toolErrors: null, elapsedMs: null, queueMs: null, modelMs: null, toolMs: null,
     retryCount: null, retryWaitMs: null, ttftMs: 0, ttftSamples: 0, outputMs: 0, timedOutputTokens: 0,
     compactions: 0, compactionMs: null, compactionUsage: null, imageToTextCalls: 0, imageToTextMs: null,
-    usage: null, estimatedCostUsd: null, chargedCostUsd: null, providerCostUsd: null, partial: false,
+    usage: null, modelCostUsd: null, generationCostUsd: null, chargedCostUsd: null, partial: false,
   };
 }
 
@@ -109,7 +171,7 @@ export function mergeExecutionStats(a: ExecutionStats, b: ExecutionStats): Execu
   for (const key of Object.keys(result) as (keyof ExecutionStats)[]) {
     if (key === "usage" || key === "compactionUsage") result[key] = sumStatsUsage(a[key], b[key]);
     else if (key === "partial") result.partial = a.partial || b.partial;
-    else Object.assign(result, { [key]: sum(a[key], b[key]) });
+    else if (key !== "chargedCostUsd") Object.assign(result, { [key]: sum(a[key], b[key]) });
   }
   return result;
 }
@@ -158,7 +220,9 @@ export function readTurnStats(turn: StatsTurn): ExecutionStats {
   if (requests.length) {
     result.calls = requests.length;
     result.failedCalls = requests.filter((request) => request.status === "failed" || request.status === "interrupted").length;
+    let knownRequestTokens = 0;
     for (const request of requests) {
+      knownRequestTokens += request.usage?.totalTokens ?? 0;
       result.modelMs = sum(result.modelMs, request.durationMs);
       if (request.status === "running" || request.durationMs == null) result.partial = true;
       if (!request.usage) result.unknownUsageCalls += 1;
@@ -195,20 +259,18 @@ export function readTurnStats(turn: StatsTurn): ExecutionStats {
       } else result.usage = sumStatsUsage(result.usage, readStatsUsage(imageSummary.usage ?? turn.intermediateSummary?.imageToText?.usage));
       result.partial = true;
     }
+    if (result.usage?.totalTokens != null && knownRequestTokens > result.usage.totalTokens) result.partial = true;
   } else if (!compact && !generation && meta.llm !== false) result.partial = true;
   else if (meta.llm === false) result.calls = 0;
   if (result.unknownUsageCalls > 0) result.partial = true;
   if (generation) {
     const source = metricsRecord(meta.generation);
-    const billing = metricsRecord(source.billing);
-    result.providerCostUsd = finite(source.officialCostUsd);
-    const confirmedFree = billing.status === "skipped" && billing.amountUsd === 0 && ["zero_amount", "discounted_free", "discounted_below_minimum"].includes(String(billing.reason));
-    result.chargedCostUsd = confirmedFree ? 0 : ["recorded", "overage"].includes(String(billing.status)) ? finite(billing.amountUsd) : null;
-    result.partial ||= result.chargedCostUsd == null;
+    result.generationCostUsd = finite(source.officialCostUsd);
+    result.partial ||= result.generationCostUsd == null;
     // Generation costs have a different basis; never mix them into LLM token usage.
     result.usage = null;
   } else {
-    result.estimatedCostUsd = finite(result.usage?.cost?.total);
+    result.modelCostUsd = finite(result.usage?.cost?.total);
     result.partial ||= result.usage == null && meta.llm !== false;
   }
   return result;

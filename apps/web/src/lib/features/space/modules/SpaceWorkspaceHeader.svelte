@@ -103,8 +103,9 @@ const locale = $derived(getLocale());
 let sessionRenameInputEl: HTMLInputElement | null = $state(null);
 let resourceActionsRootEl: HTMLElement | null = $state(null);
 let statsOpen = $state(false);
+const statsSessionId = $derived(context.activeSessionId);
 $effect(() => {
-	context.activeSessionId;
+	statsSessionId;
 	statsOpen = false;
 });
 let sessionRenameFocused = $state(false);

@@ -115,19 +115,19 @@ const rows = $derived([
 	...(stats.generations
 		? [[m.stats_generations({}, { locale }), number(stats.generations)]]
 		: []),
-	...(stats.estimatedCostUsd != null
+	...(stats.modelCostUsd != null
 		? [
 				[
-					m.stats_estimated_cost({}, { locale }),
-					formatCurrency(stats.estimatedCostUsd, "USD", { locale }),
+					m.stats_model_cost({}, { locale }),
+					formatCurrency(stats.modelCostUsd, "USD", { locale }),
 				],
 			]
 		: []),
-	...(stats.chargedCostUsd != null
+	...(stats.generationCostUsd != null
 		? [
 				[
-					m.stats_charged_cost({}, { locale }),
-					formatCurrency(stats.chargedCostUsd, "USD", { locale }),
+					m.stats_generation_cost({}, { locale }),
+					formatCurrency(stats.generationCostUsd, "USD", { locale }),
 				],
 			]
 		: []),
@@ -142,6 +142,9 @@ const rows = $derived([
     </div>
   {/each}
 </dl>
+{#if stats.modelCostUsd != null || stats.generationCostUsd != null}
+  <p class="mt-3 text-[11px] leading-relaxed text-text-tertiary">{m.stats_cost_note({}, { locale })}</p>
+{/if}
 {#if stats.compactions || stats.imageToTextCalls}
   <p class="mt-3 text-[11px] leading-relaxed text-text-tertiary">{m.stats_aux_included({}, { locale })}</p>
 {/if}

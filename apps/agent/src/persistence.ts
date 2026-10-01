@@ -20,7 +20,8 @@ import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { sessionMessages, sessionTurns, spaceChannels, spaceSessionBindings, spaceSessions, providerMessageRefs, userChannels, userProfiles } from "@cohub/db";
 import { listResourceLabelRefs } from "@cohub/core/labels";
 import { collectImageToTextTiming, collectToolMetrics } from "@cohub/protocol/model";
-import { refreshSessionStatsAndPublish, runtimeResolutionOpen } from "@cohub/core/sessions";
+import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen } from "@cohub/core/sessions";
+import { scheduleSessionStatsRefresh } from "./session-stats.js";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { addImageToTextCallsToSummary, claimSessionFallbackTitle, countToolCallsInContent, createImageToTextUsageSummaryAccumulator, deriveMessagePreviewText, deriveSessionFallbackTitle, finalizeImageToTextUsageSummary, readImageToTextCalls, readSessionTitleSource, resolveMessageTurnId, shouldGenerateSessionTitle, summarizeSessionTurnCompactions, sumImageToTextUsage } from "@cohub/core/sessions";
 import { buildTraceHeaders, getCurrentRequestId } from "@cohub/infra/tracing";
@@ -252,7 +253,7 @@ export async function publishSessionTurnsUpdated(input: {
 }
 
 async function publishTurnFinalized(spaceId: string, turn: SessionTurnRecord) {
-  await refreshSessionStatsAndPublish(db, turn.sessionId, publishRealtimeEnvelope).catch((error) => logger.warn("[Metrics] failed to refresh session stats", error));
+  void scheduleSessionStatsRefresh(turn.sessionId, turn.sequence);
   await clearPersistedSessionStreamSnapshot(spaceId, turn.sessionId, turn.id);
   const sessionLabelRefs = await listResourceLabelRefs({
     db,
@@ -888,37 +889,78 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
 
 async function finalizeInterruptedTurn(input: { spaceId: string; sessionId: string; turnId: string; stopReason: "interrupted" | "aborted"; summary: Record<string, unknown> }) {
   const [existing] = await db.select().from(sessionTurns).where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId))).limit(1);
-  if (!existing) return { turn: null, messages: [] };
-  if (!["running", "abort_requested", "interrupted"].includes(existing.status)) return { turn: toTurnRecord(existing), messages: [] };
-  const [last] = await db.select().from(sessionMessages).where(and(
-    eq(sessionMessages.sessionId, input.sessionId),
-    eq(sessionMessages.turnId, input.turnId),
-    eq(sessionMessages.role, "assistant"),
-  )).orderBy(desc(sessionMessages.sequence)).limit(1);
+  if (!existing) return { turn: null, messages: [], changed: false, finalized: false };
+  if (!["running", "abort_requested", "interrupted"].includes(existing.status)) return { turn: toTurnRecord(existing), messages: [], changed: false, finalized: false };
+  if (existing.status === "interrupted" && existing.assistantContent != null) {
+    const summary = interruptedSummaryPatch(existing.summary, input.summary);
+    if (!summary) return { turn: toTurnRecord(existing), messages: [], changed: false, finalized: false };
+    const [updated] = await db.update(sessionTurns).set({ summary: sql`coalesce(${sessionTurns.summary}, '{}'::jsonb) || ${JSON.stringify(summary)}::jsonb`, stopReason: input.stopReason, updatedAt: new Date() })
+      .where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.status, "interrupted"), sql`${sessionTurns.summary}->>'reason' is distinct from 'steer'`)).returning();
+    return { turn: updated ? toTurnRecord(updated) : null, messages: [], changed: Boolean(updated), finalized: false };
+  }
   const intermediate = await buildIntermediateObjectsForTurn(input);
-  const imageToTextSummary = intermediate?.summary.imageToText;
-  const completedAt = new Date();
+  let last: typeof sessionMessages.$inferSelect | null = null;
+  for (let index = intermediate.rows.length - 1; index >= 0; index--) {
+    const message = intermediate.rows[index];
+    if (message?.role === "assistant") { last = message; break; }
+  }
+  if (isFinalAssistantMessageMeta(last?.meta)) {
+    addImageToTextCallsToSummary(intermediate.imageToTextAccumulator, readImageToTextCalls(last?.meta));
+  }
+  const imageToTextSummary = finalizeImageToTextUsageSummary(intermediate.imageToTextAccumulator);
+  const completedAt = existing.status === "interrupted" && existing.completedAt ? existing.completedAt : new Date();
   const completedAtIso = completedAt.toISOString();
-  const [row] = await db.update(sessionTurns).set({ status: "interrupted", assistantContent: last?.content ?? null, assistantText: last?.text ?? null, provider: last?.provider ?? null, model: last?.model ?? null, stopReason: input.stopReason, errorMessage: null, finalUsage: last?.usage as Usage | null ?? null, totalUsage: intermediate?.summary.usage ?? null, summary: input.summary, intermediateIndex: intermediate?.index ?? null, intermediateSummary: intermediate?.summary ?? null, meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(imageToTextSummary && imageToTextSummary.callCount > 0 ? { imageToText: { schemaVersion: 1, summary: imageToTextSummary } } : {})}::jsonb || jsonb_build_object('metrics', coalesce(${sessionTurns.meta}->'metrics', '{}'::jsonb) || ${JSON.stringify({ version: 1, tools: collectToolMetrics(intermediate.rows.map((message) => message.content)), imageToText: collectImageToTextTiming(intermediate.rows.map((message) => message.meta)) })}::jsonb)`, completedAt, durationMs: sql<number>`greatest(0, floor(extract(epoch from (${completedAtIso}::timestamptz - ${sessionTurns.startedAt})) * 1000)::int)`, updatedAt: completedAt }).where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId), inArray(sessionTurns.status, ["running", "abort_requested", "interrupted"]))).returning();
-  return { turn: row ? toTurnRecord(row) : null, messages: intermediate.rows };
+  const metrics = {
+    version: 1,
+    tools: collectToolMetrics(intermediate.rows.map((message) => message.content)),
+    imageToText: collectImageToTextTiming(intermediate.rows.map((message) => message.meta)),
+  };
+  const metaPatch = imageToTextSummary.callCount > 0 ? { imageToText: { schemaVersion: 1, summary: imageToTextSummary } } : {};
+  const [row] = await db.update(sessionTurns).set({
+    status: "interrupted",
+    assistantContent: last?.content ?? null,
+    assistantText: last?.text ?? null,
+    provider: last?.provider ?? null,
+    model: last?.model ?? null,
+    stopReason: input.stopReason,
+    errorMessage: null,
+    finalUsage: last?.usage ?? null,
+    totalUsage: interruptedTurnUsage(intermediate.summary.usage, last),
+    summary: input.summary,
+    intermediateIndex: intermediate.index ?? null,
+    intermediateSummary: intermediate.summary,
+    meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(metaPatch)}::jsonb || jsonb_build_object('metrics', coalesce(${sessionTurns.meta}->'metrics', '{}'::jsonb) || ${JSON.stringify(metrics)}::jsonb)`,
+    completedAt,
+    durationMs: sql<number>`greatest(0, floor(extract(epoch from (${completedAtIso}::timestamptz - ${sessionTurns.startedAt})) * 1000)::int)`,
+    updatedAt: completedAt,
+  }).where(and(
+    eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId),
+    inArray(sessionTurns.status, existing.status === "interrupted" ? ["interrupted"] : ["running", "abort_requested"]),
+  )).returning();
+  return { turn: row ? toTurnRecord(row) : null, messages: intermediate.rows, changed: Boolean(row), finalized: existing.status !== "interrupted" };
+}
+
+async function publishInterruptedResult(spaceId: string, result: Awaited<ReturnType<typeof finalizeInterruptedTurn>>) {
+  const { turn, messages, changed, finalized } = result;
+  if (!turn || !changed) return;
+  if (messages.length) indexTurnReferences({ spaceId, sessionId: turn.sessionId, turnId: turn.id, messages });
+  if (finalized) await publishTurnFinalized(spaceId, turn);
+  else {
+    void scheduleSessionStatsRefresh(turn.sessionId, turn.sequence);
+    await publishRealtimeEnvelope({ domain: "session", type: "session.turn.updated", spaceId, sessionId: turn.sessionId, payload: { turn } });
+  }
 }
 
 export async function interruptSessionTurn(input: { spaceId: string; sessionId: string; turnId: string; continuedByTurnId: string }) {
-  const { turn, messages } = await finalizeInterruptedTurn({ ...input, stopReason: "interrupted", summary: { finishReason: "interrupted", reason: "steer", continuedByTurnId: input.continuedByTurnId } });
-  if (turn) {
-    indexTurnReferences({ spaceId: input.spaceId, sessionId: turn.sessionId, turnId: turn.id, messages });
-    await publishTurnFinalized(input.spaceId, turn);
-  }
-  return turn;
+  const result = await finalizeInterruptedTurn({ ...input, stopReason: "interrupted", summary: { finishReason: "interrupted", reason: "steer", continuedByTurnId: input.continuedByTurnId } });
+  await publishInterruptedResult(input.spaceId, result);
+  return result.turn;
 }
 
 export async function abortSessionTurn(input: { spaceId: string; sessionId: string; turnId: string; actorUserId?: string | null }) {
-  const { turn, messages } = await finalizeInterruptedTurn({ ...input, stopReason: "aborted", summary: { finishReason: "interrupted", reason: "abort" } });
-  if (turn) {
-    indexTurnReferences({ spaceId: input.spaceId, sessionId: turn.sessionId, turnId: turn.id, messages });
-    await publishTurnFinalized(input.spaceId, turn);
-  }
-  return turn;
+  const result = await finalizeInterruptedTurn({ ...input, stopReason: "aborted", summary: { finishReason: "interrupted", reason: "abort" } });
+  await publishInterruptedResult(input.spaceId, result);
+  return result.turn;
 }
 
 export async function failSessionTurn(input: { spaceId: string; sessionId: string; turnId: string; errorMessage: string }) {
@@ -1189,7 +1231,7 @@ export async function persistCompactionEvent(
     });
   } else if (state.ownerTurnRow) {
     if (!["queued", "running", "abort_requested"].includes(state.ownerTurnRow.status)) {
-      await refreshSessionStatsAndPublish(db, input.sessionId, publishRealtimeEnvelope).catch((error) => logger.warn("[Metrics] failed to refresh compaction stats", error));
+      void scheduleSessionStatsRefresh(input.sessionId, state.ownerTurnRow.sequence);
     }
     const turn = toTurnRecord(state.ownerTurnRow);
     await publishRealtimeEnvelope({

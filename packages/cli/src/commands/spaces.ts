@@ -1478,8 +1478,8 @@ function registerSessions(spacesCmd: Command): void {
           { metric: "Tokens", value: own.usage?.totalTokens },
           { metric: "Execution time (ms)", value: own.elapsedMs },
           { metric: "Model time (ms)", value: own.modelMs == null ? null : Math.round(own.modelMs) },
-          { metric: "Estimated LLM cost (USD)", value: own.estimatedCostUsd },
-          { metric: "Charged generation cost (USD)", value: own.chargedCostUsd },
+          { metric: "Model cost (USD)", value: own.modelCostUsd },
+          { metric: "Content generation cost (USD)", value: own.generationCostUsd },
           { metric: "Inherited turns", value: stats.inherited.turns },
         ].filter((row) => row.value != null);
         table(rows, [{ key: "metric", label: "Metric" }, { key: "value", label: "Value" }]);

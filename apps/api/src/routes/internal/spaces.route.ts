@@ -17,7 +17,7 @@ import {
 } from "../../space-sessions.js";
 import { abortSessionTurn, failSessionTurn, interruptSessionTurn } from "../../session-turns.js";
 import { hasPermission } from "../../permissions.js";
-import { dispatchTurnFinalized } from "../../session-output.js";
+import { dispatchTurnFinalized, dispatchTurnUpdated } from "../../session-output.js";
 import { submitSessionPrompt, type PromptAccessMode, type SubmitSessionPromptContext } from "../../session-prompts.js";
 import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError } from "@cohub/core/sessions";
 import { verifyAppSessionToken } from "../../app-sessions.js";
@@ -318,9 +318,12 @@ router.post("/:spaceId/sessions/:sessionId/turns/:turnId/interrupt", async (c) =
   const continuedByTurnId = body?.continuedByTurnId?.trim() || body?.interruptedByTurnId?.trim();
   if (!continuedByTurnId || !requireValidId(continuedByTurnId)) return c.json({ message: "continuedByTurnId is required" }, 400);
 
-  const turn = await interruptSessionTurn({ spaceId, sessionId, turnId, continuedByTurnId });
-  if (turn) await dispatchTurnFinalized({ spaceId, sessionId, turn }).catch((error) => logger.warn("[SessionTurn] failed to dispatch interrupted turn", error));
-  return c.json({ ok: true, turn });
+  const result = await interruptSessionTurn({ spaceId, sessionId, turnId, continuedByTurnId });
+  if (result.turn?.id && result.changed) {
+    if (result.finalized) await dispatchTurnFinalized({ spaceId, sessionId, turn: result.turn }).catch((error) => logger.warn("[SessionTurn] failed to dispatch interrupted turn", error));
+    else await dispatchTurnUpdated({ spaceId, sessionId, turn: result.turn }).catch((error) => logger.warn("[SessionTurn] failed to dispatch updated interrupted turn", error));
+  }
+  return c.json({ ok: true, turn: result.turn });
 });
 
 // POST /internal/spaces/:spaceId/sessions/:sessionId/turns/:turnId/abort
@@ -337,14 +340,17 @@ router.post("/:spaceId/sessions/:sessionId/turns/:turnId/abort", async (c) => {
   if (!session || session.spaceId !== spaceId) return c.json({ message: "session not found" }, 404);
 
   const body = await c.req.json<{ actorUserId?: string | null }>().catch(() => null);
-  const turn = await abortSessionTurn({
+  const result = await abortSessionTurn({
     spaceId,
     sessionId,
     turnId,
     actorUserId: body?.actorUserId ?? null,
   });
-  if (turn) await dispatchTurnFinalized({ spaceId, sessionId, turn }).catch((error) => logger.warn("[SessionTurn] failed to dispatch aborted turn", error));
-  return c.json({ ok: true, turn });
+  if (result.turn?.id && result.changed) {
+    if (result.finalized) await dispatchTurnFinalized({ spaceId, sessionId, turn: result.turn }).catch((error) => logger.warn("[SessionTurn] failed to dispatch aborted turn", error));
+    else await dispatchTurnUpdated({ spaceId, sessionId, turn: result.turn }).catch((error) => logger.warn("[SessionTurn] failed to dispatch updated aborted turn", error));
+  }
+  return c.json({ ok: true, turn: result.turn });
 });
 
 // POST /internal/spaces/:spaceId/sessions/:sessionId/turns/:turnId/fail

@@ -15,7 +15,7 @@ import type {
 import type { ModelThinkingLevel } from "@cohub/protocol";
 import { db } from "./db/index.js";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
-import { addSessionParticipantMeta, summarizeSessionTurnCompactions } from "@cohub/core/sessions";
+import { addSessionParticipantMeta, interruptedSummaryPatch, interruptedTurnUsage, summarizeSessionTurnCompactions } from "@cohub/core/sessions";
 import { sanitizePostgresJsonValue, sanitizeContentBlocksForPostgresJson } from "@cohub/core/content/sanitize";
 import { ensureSessionTurnSegments, findSegmentForTurn, MAX_SESSION_TURN_SEGMENTS } from "./session-forks.js";
 import { fallbackPublicUserProfile, getProfilesByUuids } from "./user-profiles.js";
@@ -665,12 +665,15 @@ const finalizeInterruptedTurn = async (input: {
   summary: Record<string, unknown>;
 }) => {
   const [existing] = await db.select().from(sessionTurns).where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId))).limit(1);
-  if (!existing) return null;
-  if (!["running", "abort_requested", "interrupted"].includes(existing.status)) return toTurnRecord(existing);
-  const existingSummary = normalizeRecord(existing.summary);
-  const shouldPromoteSteerSummary = existing.status === "interrupted" && input.summary.reason === "steer" && existingSummary?.reason !== "steer";
-  const shouldFillInterruptedContent = existing.status === "interrupted" && !existing.assistantContent;
-  if (existing.status === "interrupted" && !shouldPromoteSteerSummary && !shouldFillInterruptedContent) return toTurnRecord(existing);
+  if (!existing) return { turn: null, changed: false, finalized: false };
+  if (!["running", "abort_requested", "interrupted"].includes(existing.status)) return { turn: toTurnRecord(existing), changed: false, finalized: false };
+  if (existing.status === "interrupted" && existing.assistantContent != null) {
+    const summary = interruptedSummaryPatch(existing.summary, input.summary);
+    if (!summary) return { turn: toTurnRecord(existing), changed: false, finalized: false };
+    const [updated] = await db.update(sessionTurns).set({ summary: sql`coalesce(${sessionTurns.summary}, '{}'::jsonb) || ${JSON.stringify(summary)}::jsonb`, stopReason: input.stopReason, updatedAt: new Date() })
+      .where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.status, "interrupted"), sql`${sessionTurns.summary}->>'reason' is distinct from 'steer'`)).returning();
+    return { turn: updated ? toTurnRecord(updated) : null, changed: Boolean(updated), finalized: false };
+  }
   const rows = await db.select().from(sessionMessages).where(and(
     eq(sessionMessages.sessionId, input.sessionId),
     eq(sessionMessages.turnId, input.turnId),
@@ -681,7 +684,7 @@ const finalizeInterruptedTurn = async (input: {
     logger.warn("[SessionTurn] failed to build interrupted intermediate objects", error);
     return null;
   });
-  const completedAt = new Date();
+  const completedAt = existing.status === "interrupted" && existing.completedAt ? existing.completedAt : new Date();
   const completedAtIso = completedAt.toISOString();
   const [row] = await db.update(sessionTurns).set({
     status: "interrupted",
@@ -692,15 +695,15 @@ const finalizeInterruptedTurn = async (input: {
     stopReason: input.stopReason,
     errorMessage: null,
     finalUsage: (last?.usage as Usage | null | undefined) ?? null,
-    totalUsage: intermediate?.summary.usage ?? null,
-    summary: shouldPromoteSteerSummary || existing.status !== "interrupted" ? input.summary : existing.summary,
+    totalUsage: intermediate ? interruptedTurnUsage(intermediate.summary.usage, last) : existing.totalUsage,
+    summary: existing.status === "interrupted" ? interruptedSummaryPatch(existing.summary, input.summary) ?? existing.summary : input.summary,
     intermediateIndex: intermediate?.index ?? null,
     intermediateSummary: intermediate?.summary ?? null,
     completedAt,
     durationMs: sql<number>`greatest(0, floor(extract(epoch from (${completedAtIso}::timestamptz - ${sessionTurns.startedAt})) * 1000)::int)`,
     updatedAt: completedAt,
-  }).where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId), inArray(sessionTurns.status, ["running", "abort_requested", "interrupted"]))).returning();
-  return row ? toTurnRecord(row) : null;
+  }).where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId), inArray(sessionTurns.status, existing.status === "interrupted" ? ["interrupted"] : ["running", "abort_requested"]))).returning();
+  return { turn: row ? toTurnRecord(row) : null, changed: Boolean(row), finalized: existing.status !== "interrupted" };
 };
 
 export const interruptSessionTurn = async (input: { spaceId: string; sessionId: string; turnId: string; continuedByTurnId: string }) => {

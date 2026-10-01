@@ -99,7 +99,7 @@ test("concurrent rebuilds serialize revisions and never multiply consumption", a
   assert(results.every((result) => result.stats.own.usage.totalTokens === 15));
 });
 
-test("generation tasks are counted once and late billing receipts reconcile without touching billing", async () => {
+test("generation tasks are counted once without exposing private billing", async () => {
   const original = await session();
   const directId = crypto.randomUUID();
   const toolId = crypto.randomUUID();
@@ -113,8 +113,8 @@ test("generation tasks are counted once and late billing receipts reconcile with
   const { stats } = await refreshSessionStats(db, original.id);
   assert.equal(stats.own.turns, 1);
   assert.equal(stats.own.generations, 2);
-  assert.equal(stats.own.chargedCostUsd, 6);
-  assert.equal(stats.own.providerCostUsd, 8);
+  assert.equal(stats.own.chargedCostUsd, null);
+  assert.equal(stats.own.generationCostUsd, 8);
 });
 
 test("deleted sessions return no projection", async () => {

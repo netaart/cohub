@@ -1,3 +1,4 @@
+import { readFreshSessionStats } from "@cohub/protocol/model";
 import { refreshSessionStats } from "@cohub/core/sessions";
 import { db } from "../db/index.js";
 import { createLogger } from "@cohub/infra/logging";
@@ -32,7 +33,6 @@ import { listSessionFiles } from "../session-files.js";
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
 
-// On-demand rebuild also repairs missing/legacy projections without loading transcripts.
 router.get("/:id/stats", async (c) => {
   const user = getOptionalAuth(c);
   const sessionId = c.req.param("id");
@@ -40,6 +40,8 @@ router.get("/:id/stats", async (c) => {
   const session = await getSpaceSessionById(sessionId);
   if (!session) return c.json({ message: "Session not found" }, 404);
   if (!(await hasPermission(user, "session.view", { spaceId: session.spaceId, sessionId }))) return authzDenied(c);
+  const cached = readFreshSessionStats(session.meta);
+  if (cached) return c.json({ stats: cached });
   const result = await refreshSessionStats(db, sessionId);
   if (!result) return c.json({ message: "Session not found" }, 404);
   return c.json({ stats: result.stats });

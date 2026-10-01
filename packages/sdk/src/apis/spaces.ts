@@ -1,4 +1,4 @@
-import type { SessionStats } from "@cohub/protocol/model";
+import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
@@ -952,9 +952,11 @@ export class SessionClient {
     );
   }
 
-  /** Persisted Session summary, rebuilt server-side from settled execution records. */
-  stats(options: { signal?: AbortSignal } = {}) {
-    return this.transport.request<{ stats: SessionStats }>(`/api/sessions/${this.id}/stats`, options);
+  async stats(options: { signal?: AbortSignal } = {}): Promise<{ stats: SessionStats }> {
+    const response = await this.transport.request<{ stats: unknown }>(`/api/sessions/${this.id}/stats`, options);
+    const stats = readSessionStats({ stats: response.stats });
+    if (!stats) throw new Error("Invalid session statistics");
+    return { stats };
   }
 
   /** Space files changed by this session's agent write/edit tool calls. */

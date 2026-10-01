@@ -1,3 +1,4 @@
+import { sanitizeSessionRecordStats } from "@cohub/protocol/model";
 import type { SessionRecord } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
@@ -41,7 +42,7 @@ function toSnapshot(
 	source: CacheSource,
 ): SessionDetailSnapshot {
 	return {
-		session: record.session,
+		session: sanitizeSessionRecordStats(record.session),
 		updatedAt: record.updatedAt,
 		stale: Date.now() - record.updatedAt >= SESSION_DETAIL_TTL_MS,
 		source,
@@ -55,7 +56,11 @@ async function readRecord(spaceId: string, sessionId: string) {
 	if (cached) return { record: cached, source: "memory" as CacheSource };
 	const record = await idbGet<SessionDetailCacheRecord>("session_details", key);
 	if (!record) return null;
-	const touched = { ...record, lastAccessedAt: Date.now() };
+	const touched = {
+		...record,
+		session: sanitizeSessionRecordStats(record.session),
+		lastAccessedAt: Date.now(),
+	};
 	memory.set(key, touched);
 	void idbPut("session_details", touched).catch(() => undefined);
 	return { record: touched, source: "indexeddb" as CacheSource };
@@ -66,6 +71,7 @@ async function writeRecord(
 	session: SessionRecord,
 	options?: { broadcast?: boolean; source?: CacheSource; updatedAt?: number },
 ) {
+	session = sanitizeSessionRecordStats(session);
 	const userKey = getCacheUserKey();
 	const key = sessionDetailKey(userKey, spaceId, session.id);
 	const now = Date.now();

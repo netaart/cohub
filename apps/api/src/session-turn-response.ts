@@ -1,4 +1,4 @@
-import type { SessionRecord } from "@cohub/protocol/model";
+import { sanitizeSessionStatsMeta, type SessionRecord } from "@cohub/protocol/model";
 import type { BillingResponsePayload } from "@cohub/billing";
 import { getSessionTurnById, hydrateTurnAuthorProfiles } from "./session-turns.js";
 
@@ -23,7 +23,7 @@ const normalizeRecord = (value: unknown): Record<string, unknown> | null =>
 function toSessionRecord(session: SessionRow): SessionRecord {
   return {
     ...session,
-    meta: normalizeRecord(session.meta),
+    meta: normalizeRecord(sanitizeSessionStatsMeta(session.meta)),
     lastMessageAt: toIsoOrNull(session.lastMessageAt),
     createdAt: toIso(session.createdAt, "createdAt"),
     updatedAt: toIso(session.updatedAt, "updatedAt"),

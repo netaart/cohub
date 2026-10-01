@@ -1,6 +1,6 @@
 import { createLogger } from "@cohub/infra/logging";
 import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
-import type { SessionForkRecord, SessionTurnSegmentRecord } from "@cohub/protocol/model";
+import { sanitizeSessionRecordStats, type SessionForkRecord, type SessionTurnSegmentRecord } from "@cohub/protocol/model";
 import { db } from "./db/index.js";
 import { labelAssignments, sessionForks, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
@@ -369,7 +369,7 @@ export async function publishSessionFork(result: Awaited<ReturnType<typeof creat
     logger.warn("[Metrics] failed to initialize fork stats", error);
     return null;
   });
-  return { session: refreshed?.session ?? result.session, fork: toForkRecord(result.fork) };
+  return { session: sanitizeSessionRecordStats(refreshed?.session ?? result.session), fork: toForkRecord(result.fork) };
 }
 
 export async function createSessionFork(input: SessionForkInput) {

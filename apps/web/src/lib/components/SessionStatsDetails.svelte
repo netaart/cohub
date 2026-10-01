@@ -38,13 +38,11 @@ async function refresh() {
 			(!stats || localStats.revision > stats.revision)
 		)
 			fresh = localStats;
-		const result = await sdk
+		const { stats: received } = await sdk
 			.space(current.spaceId)
 			.session(current.id)
 			.stats({ signal: controller.signal });
 		if (controller.signal.aborted || session.id !== current.id) return;
-		const received = readSessionStats({ stats: result.stats });
-		if (!received) throw new Error("Unsupported session statistics");
 		fresh = received;
 		const existing =
 			(

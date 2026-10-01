@@ -1,6 +1,7 @@
 import { createLogger } from "@cohub/infra/logging";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Usage } from "@cohub/protocol/core";
+import { sanitizeSessionRecordStats } from "@cohub/protocol/model";
 import type { PersistMessageInput, RegisterSessionInput, SessionTurnRecord, UpdateSessionInfoInput } from "@cohub/protocol/model";
 import type { ModelThinkingLevel } from "@cohub/protocol";
 import { getOrCreateRequestId } from "@cohub/infra/tracing";
@@ -182,7 +183,7 @@ export const getSpaceById = async (spaceId: string) => {
 
 export const getSpaceSessionById = async (spaceSessionId: string) => {
   const [session] = await db.select().from(spaceSessions).where(eq(spaceSessions.id, spaceSessionId)).limit(1);
-  return session ?? null;
+  return session ? sanitizeSessionRecordStats(session) : null;
 };
 
 export const getSessionMessageById = async (spaceSessionId: string, messageId: string) => {
@@ -287,7 +288,7 @@ export const registerSpaceSession = async (input: RegisterSessionInput) => {
       const [existing] = await db.select().from(spaceSessions).where(eq(spaceSessions.id, input.sessionId)).limit(1);
       if (existing) {
         await ensureRootSessionTurnSegment(existing.id);
-        return existing;
+        return sanitizeSessionRecordStats(existing);
       }
     }
     throw error;
@@ -303,10 +304,11 @@ export const hydrateSessionParticipantProfiles = async <T extends typeof spaceSe
 
   const profiles = await getProfilesByUuids([...allUserUuids]);
   return sessions.map((session) => {
-    const participantUserUuids = readSessionParticipantUserUuids(session.meta);
-    const userUuid = session.userUuid?.trim() || null;
+    const safeSession = sanitizeSessionRecordStats(session);
+    const participantUserUuids = readSessionParticipantUserUuids(safeSession.meta);
+    const userUuid = safeSession.userUuid?.trim() || null;
     return {
-      ...session,
+      ...safeSession,
       userUuid,
       userProfile: userUuid ? profiles.get(userUuid) ?? fallbackPublicUserProfile(userUuid) : null,
       participantUserUuids,
@@ -352,7 +354,8 @@ const sessionListOrderBy = [
 
 const ACTIVE_TURN_STATUSES = ["queued", "running", "abort_requested"] as const;
 
-export async function attachActiveTurns<T extends { id: string }>(sessions: T[]) {
+export async function attachActiveTurns<T extends { id: string; meta?: unknown }>(sessions: T[]) {
+  sessions = sessions.map(sanitizeSessionRecordStats);
   if (sessions.length === 0) return pickActiveTurns(sessions, []);
 
   const rows = await db

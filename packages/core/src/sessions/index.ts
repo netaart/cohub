@@ -1,4 +1,6 @@
 export * from "./stats.js";
+export * from "./stats-refresh.js";
+export * from "./interrupted-turn.js";
 export * from "./compaction.js";
 export * from "./content.js";
 export * from "./image-to-text.js";

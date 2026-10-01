@@ -50,7 +50,7 @@ test("omitted retry consumption is included exactly once, without changing sourc
   const original = structuredClone(usage);
   const result = readTurnStats(turn({ meta: { metrics: { version: 1, requests: { a: request({ id: "a", status: "failed", omitted: true }), b: request({ id: "b" }) }, retryCount: 1, retryWaitMs: 1200 } } }));
   assert.equal(result.usage?.totalTokens, 320);
-  assert.equal(result.estimatedCostUsd, 0.02);
+  assert.equal(result.modelCostUsd, 0.02);
   assert.equal(result.failedCalls, 1);
   assert.equal(result.retryWaitMs, 1200);
   assert.deepEqual(usage, original);
@@ -111,19 +111,20 @@ test("new execution timestamps split pre-execution waiting without changing hist
   assert.equal(readTurnStats(turn({ meta: {} })).elapsedMs, 5000);
 });
 
-test("generation official price and confirmed charges never mix with estimated LLM usage", () => {
+test("shared generation statistics expose only provider price, never private billing", () => {
   const result = readTurnStats(turn({ executionKind: "direct_generation", totalUsage: { cost: { total: 2 } }, meta: { generation: { officialCostUsd: 3, billing: { status: "recorded", amountUsd: 2 } } } }));
-  assert.equal(result.chargedCostUsd, 2);
-  assert.equal(result.providerCostUsd, 3);
+  assert.equal(result.chargedCostUsd, null);
+  assert.equal(result.generationCostUsd, 3);
   assert.equal(result.usage, null);
-  assert.equal(result.estimatedCostUsd, null);
+  assert.equal(result.modelCostUsd, null);
   assert.equal(result.generations, 1);
   const pending = readTurnStats(turn({ executionKind: "direct_generation", meta: { generation: { billing: { status: "pending" } } } }));
   assert.equal(pending.chargedCostUsd, null);
   assert.equal(pending.partial, true);
   const free = readTurnStats(turn({ executionKind: "direct_generation", meta: { generation: { officialCostUsd: 3, billing: { status: "skipped", reason: "discounted_free", amountUsd: 0 } } } }));
-  assert.equal(free.chargedCostUsd, 0);
-  assert.equal(free.providerCostUsd, 3);
+  assert.equal(free.chargedCostUsd, null);
+  assert.deepEqual(free, result, "private billing must not influence any shared statistic");
+  assert.equal(free.generationCostUsd, 3);
   assert.equal(free.partial, false);
 });
 
