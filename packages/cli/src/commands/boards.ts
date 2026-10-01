@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -124,6 +125,7 @@ type ExportOptions = JsonOptions & {
   format?: string;
   quality?: string;
   images?: boolean;
+  fps?: string;
   force?: boolean;
 };
 
@@ -142,6 +144,21 @@ function parseExportRegion(options: ExportOptions): BoardExportRegion {
 }
 
 const BOARD_EXPORT_FORMATS: BoardHeadlessExportFormat[] = ["png", "jpeg", "webp"];
+const BOARD_VIDEO_FORMATS = ["mp4", "webm"] as const;
+
+type BoardVideoExportFormat = (typeof BOARD_VIDEO_FORMATS)[number];
+
+function videoFormatFromPath(path: string): BoardVideoExportFormat | null {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".webm") ? "webm" : lower.endsWith(".mp4") ? "mp4" : null;
+}
+
+function parseVideoFormat(options: ExportOptions, outPath: string): BoardVideoExportFormat {
+  const value = options.format?.toLowerCase() ?? videoFormatFromPath(outPath);
+  if (!value || !BOARD_VIDEO_FORMATS.includes(value as BoardVideoExportFormat)) throw new Error("Video output must be .mp4 or .webm.");
+  return value as BoardVideoExportFormat;
+}
+
 
 function formatFromPath(path: string): BoardHeadlessExportFormat {
   const lower = path.toLowerCase();
@@ -181,8 +198,9 @@ function registerExportCommand(boards: Command): void {
     .option("--padding <units>", "Padding around the content in board units")
     .option("--theme <mode>", "dark or light", "dark")
     .option("--background <mode>", "paper or transparent", "paper")
-    .option("--format <format>", `Override the format (${BOARD_EXPORT_FORMATS.join(", ")})`)
+    .option("--format <format>", `Override the format (${BOARD_EXPORT_FORMATS.join(", ")}, ${BOARD_VIDEO_FORMATS.join(", ")})`)
     .option("--quality <q>", "JPEG/WebP quality from 0 to 1", "0.92")
+    .option("--fps <rate>", "Video frame rate; defaults to the --at step")
     .option("--no-images", "Draw placeholders instead of downloading images")
     .option("--force", "Replace existing output files"))
     .addHelpText("after", `
@@ -195,8 +213,37 @@ Examples:
       try {
         const out = options.out as string;
         const times = options.at ? parseBoardTimes(options.at) : undefined;
+        const videoFormat = videoFormatFromPath(out) ?? (options.format && BOARD_VIDEO_FORMATS.includes(options.format.toLowerCase() as BoardVideoExportFormat) ? parseVideoFormat(options, out) : null);
         const sequence = (times?.length ?? 0) > 1;
-        if (sequence && !/%0?\d*d/.test(out)) throw new Error("A range needs %d in --out, e.g. frames/%04d.png.");
+        if (sequence && !videoFormat && !/%0?\d*d/.test(out)) throw new Error("A range needs %d in --out, e.g. frames/%04d.png.");
+        if (videoFormat) {
+          if (!times || times.length < 2) throw new Error("Video export needs an --at range.");
+          const step = (times[1] as number) - (times[0] as number);
+          const fps = options.fps ? parseNumber(options.fps, "--fps", { min: 0.01, max: 240 }) : 1000 / step;
+          if (existsSync(out) && !options.force) throw new Error(`${out} already exists; use --force to replace it.`);
+          await mkdir(dirname(out), { recursive: true });
+          const { runBoardVideoExport } = await import("../board-export.js");
+          const result = await runBoardVideoExport({
+            spaceId: await resolveSpace(boards),
+            target,
+            region: parseExportRegion(options),
+            times,
+            ...(options.animation ? { animation: options.animation } : {}),
+            scale: parseNumber(options.scale ?? "2", "--scale", { min: 0.01, max: 16 }),
+            ...(options.padding === undefined ? {} : { padding: parseNumber(options.padding, "--padding", { min: 0 }) }),
+            colorScheme: parseChoice(options.theme, "--theme", ["dark", "light"] as const),
+            background: parseChoice(options.background, "--background", ["paper", "transparent"] as const),
+            format: videoFormat,
+            fps,
+            output: out,
+            quality: parseNumber(options.quality ?? "0.92", "--quality", { min: 0, max: 1 }),
+            withImages: options.images !== false,
+          });
+          if (jsonRequested(options)) return outJson({ file: out, ...result });
+          ok(`Exported ${result.width}×${result.height} ${videoFormat.toUpperCase()} to ${out}`);
+          for (const warning of result.warnings) console.log(`  ! ${warning}`);
+          return;
+        }
         const { runBoardExport } = await import("../board-export.js");
         const result = await runBoardExport({
           spaceId: await resolveSpace(boards),

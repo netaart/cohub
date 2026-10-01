@@ -17,6 +17,7 @@ import {
   defaultBoardPalette,
 } from "../render/index.js";
 import { ensureBoardTextMeasurement } from "../render/text-measurement.js";
+import type { BoardSketchHost } from "../render/renderers/board-renderer-registry.js";
 import { createBoardExportScene } from "./scene.js";
 
 export type {
@@ -39,6 +40,7 @@ export type BoardExportOptions = {
   palette?: Partial<BoardRenderPalette>;
   colors?: BoardShapeColors;
   textures?: Map<string, Texture>;
+  sketches?: BoardSketchHost;
   assetKey?: (item: BoardSceneItem) => string | null;
   backgroundImage?: {
     texture: Texture;
@@ -106,6 +108,7 @@ export function renderBoardExport(
     palette,
     colors: options.colors,
     textures: options.textures,
+    sketches: options.sketches,
     assetKey: options.assetKey,
     background: resolveBackground(options.background, palette, document, colorScheme),
     backgroundImage: options.backgroundImage,

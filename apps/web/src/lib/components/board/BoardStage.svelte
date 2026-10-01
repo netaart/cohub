@@ -174,6 +174,7 @@ const player = createBoardPlayer({
 });
 let tickFrame = 0;
 let playbackFocusKey: string | null = null;
+let playbackJitter = { x: 0, y: 0 };
 const viewCamera = $derived(editor.camera);
 const renderZoom = $derived(editor.camera.zoom);
 
@@ -509,6 +510,7 @@ function syncStage() {
 	const previews = pushMovingItems(frame);
 	const renderScene = editor.scene;
 	const jitter = applyPlaybackCamera(frame, renderScene);
+	playbackJitter = jitter;
 	world.x = editor.camera.x + jitter.x;
 	world.y = editor.camera.y + jitter.y;
 	world.scale.set(editor.camera.zoom);
@@ -826,12 +828,15 @@ function toScreenPoint(
 	return screenPoint(event.clientX - rect.left, event.clientY - rect.top);
 }
 
+function inputCamera() {
+	return { ...editor.camera, x: editor.camera.x + playbackJitter.x, y: editor.camera.y + playbackJitter.y };
+}
 function toPointerEvent(event: PointerEvent) {
 	const screen = toScreenPoint(event);
 	return {
 		pointerId: event.pointerId,
 		screen,
-		world: pointToWorld(screen, editor.camera),
+		world: pointToWorld(screen, inputCamera()),
 		shiftKey: event.shiftKey,
 		metaKey: event.metaKey,
 		ctrlKey: event.ctrlKey,
@@ -1228,6 +1233,7 @@ onMount(async () => {
 		farLayer,
 		overlay,
 		getRenderer: getBoardCardRenderer,
+		onFarLayerFrame: scheduleRender,
 	});
 	sketches = createBoardSketchHost({
 		readModule: async (src) => {

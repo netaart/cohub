@@ -71,6 +71,7 @@ function sync(
 		hovered,
 		failed,
 		title,
+		item.props.time ?? 0,
 		parts.label.height,
 		context.palette.surface,
 		context.palette.brand,

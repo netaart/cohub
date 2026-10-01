@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { BoardPlaybackCommand, BoardPlaybackSnapshot } from "@cohub/protocol";
-import { Circle, Diamond, Pause, Play, Plus, X } from "lucide-svelte";
+import { Circle, Diamond, FastForward, Pause, Play, Plus, X } from "lucide-svelte";
 import { onDestroy } from "svelte";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import { playbackTimeAt } from "$lib/board/runtime/board-player";
@@ -45,6 +45,7 @@ $effect(() => {
 onDestroy(() => cancelAnimationFrame(frame));
 
 const time = $derived(playing ? clock : (editor.playhead?.time ?? (playback?.animationId === animationId ? playback.position : 0)));
+const nextMarker = $derived(animation?.markers.find((marker) => marker.pause && marker.at > time + 1) ?? null);
 const keyframe = $derived(editor.keyframeState("position"));
 
 type CommandInput = BoardPlaybackCommand extends infer C ? (C extends BoardPlaybackCommand ? Omit<C, "commandId"> : never) : never;
@@ -69,6 +70,12 @@ function togglePlay() {
 	const from = animation && time >= animation.duration ? 0 : time;
 	editor.setPlayhead(null);
 	command({ type: "play", animationId, position: from });
+}
+
+function nextMarkerCommand() {
+	if (!animationId || !nextMarker) return;
+	if (playing) command({ type: "next" });
+	else editor.setPlayhead({ animationId, time: nextMarker.at });
 }
 
 function choose(id: string) {
@@ -121,6 +128,11 @@ function format(ms: number) {
 		<span class="timeline-time">{format(time)} / {format(animation.duration)}</span>
 	{/if}
 
+	{#if animation}
+		<button type="button" class="timeline-btn" title={m.board_next_marker({}, { locale })} aria-label={m.board_next_marker({}, { locale })} disabled={!nextMarker} onclick={nextMarkerCommand}>
+			<FastForward class="h-3.5 w-3.5" />
+		</button>
+	{/if}
 	{#if !readonly && animation}
 		<button
 			type="button"

@@ -24,6 +24,7 @@ import {
   type BoardExportResult,
   renderBoardExport,
 } from "../export/index.js";
+import type { BoardSketchHost } from "../render/renderers/board-renderer-registry.js";
 
 export type HeadlessCanvasModule = {
   createCanvas: (width: number, height: number) => unknown;
@@ -222,6 +223,7 @@ export type BoardHeadlessExportOptions = Omit<BoardExportOptions, "textures" | "
     position: "center" | "top" | "bottom" | "left" | "right";
     opacity: number;
   };
+  sketches?: BoardSketchHost;
   format?: BoardHeadlessExportFormat;
   quality?: number;
 };
@@ -237,6 +239,8 @@ const MIME: Record<BoardHeadlessExportFormat, string> = {
   webp: "image/webp",
 };
 
+export { createBoardHeadlessSketchHost } from "./sketch.js";
+
 export function boardHeadlessMimeType(format: BoardHeadlessExportFormat): string {
   return MIME[format];
 }
@@ -246,9 +250,10 @@ export function exportBoardImageBytes(
   document: BoardDocument,
   options: BoardHeadlessExportOptions = {},
 ): BoardHeadlessExportResult | null {
-  const { format = "png", quality = 0.92, textures, backgroundImage, ...rest } = options;
+  const { format = "png", quality = 0.92, textures, sketches, backgroundImage, ...rest } = options;
   const result = renderBoardExport(headless.renderer, document, {
     ...rest,
+    ...(sketches ? { sketches } : {}),
     ...(textures ? { textures: textures as unknown as Map<string, Texture> } : {}),
     ...(backgroundImage
       ? {

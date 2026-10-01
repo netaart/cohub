@@ -150,6 +150,7 @@ export function createBoardScene(options: {
 	farLayer: Graphics;
 	overlay: Graphics;
 	getRenderer: typeof getBoardCardRenderer;
+	onFarLayerFrame?: () => void;
 }): BoardScene {
 	const { world, farLayer, overlay, getRenderer } = options;
 	world.sortableChildren = true;
@@ -164,6 +165,8 @@ export function createBoardScene(options: {
 	let farSig: string | null = null;
 	let farActive = false;
 	let lastStructureVersion = -1;
+	let farBuildToken = 0;
+	let farBuildFrame = 0;
 
 	function setHeldKey(
 		context: BoardRenderContext,
@@ -266,15 +269,29 @@ export function createBoardScene(options: {
 		return entry;
 	}
 
-	function rebuildFarLayer(input: SceneSyncInput) {
+	function rebuildFarLayer(input: SceneSyncInput, signature: string) {
 		const { context, getItem, pinnedIds } = input;
+		const ids = visibleFacts(input).orderedIds;
+		const token = ++farBuildToken;
+		farSig = signature;
+		cancelAnimationFrame(farBuildFrame);
 		farLayer.clear();
-		for (const id of visibleFacts(input).orderedIds) {
-			const item = pinnedIds.has(id) ? null : getItem(id);
-			if (!item) continue;
-			const renderer = getRenderer(item, context);
-			renderer.renderFar?.(farLayer, item, context);
-		}
+		let index = 0;
+		const step = () => {
+			if (token !== farBuildToken) return;
+			const end = Math.min(ids.length, index + 240);
+			for (; index < end; index += 1) {
+				const id = ids[index] as string;
+				if (pinnedIds.has(id)) continue;
+				const item = getItem(id);
+				if (!item) continue;
+				getRenderer(item, context).renderFar?.(farLayer, item, context);
+			}
+			options.onFarLayerFrame?.();
+			if (index < ids.length) farBuildFrame = requestAnimationFrame(step);
+			else farBuildFrame = 0;
+		};
+		step();
 	}
 
 	let visibleMemo: {
@@ -353,10 +370,12 @@ export function createBoardScene(options: {
 				visibleIds === null ? "all" : visibleFacts(input).signature,
 			].join("|");
 			if (farSig === null || (nextFarSig !== farSig && !gestureActive)) {
-				rebuildFarLayer(input);
-				farSig = nextFarSig;
+				rebuildFarLayer(input, nextFarSig);
 			}
 		} else if (farModeChanged) {
+			farBuildToken += 1;
+			cancelAnimationFrame(farBuildFrame);
+			farBuildFrame = 0;
 			farLayer.clear();
 			farSig = null;
 		}
@@ -570,6 +589,9 @@ export function createBoardScene(options: {
 		farLayer.clear();
 		farSig = null;
 		farActive = false;
+		farBuildToken += 1;
+		cancelAnimationFrame(farBuildFrame);
+		farBuildFrame = 0;
 		visibleMemo = null;
 		lastStructureVersion = -1;
 	}

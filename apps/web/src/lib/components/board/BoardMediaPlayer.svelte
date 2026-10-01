@@ -136,6 +136,12 @@ $effect(() => {
 	};
 });
 
+$effect(() => {
+	const element = mediaEl;
+	const time = item?.type === "video" || item?.type === "audio" ? item.props.time : undefined;
+	if (!element || time === undefined || !Number.isFinite(time) || Math.abs(element.currentTime - time / 1000) < 0.05) return;
+	if (element.readyState >= 1) element.currentTime = Math.max(0, time / 1000);
+});
 onMount(() => {
 	const pauseWhenHidden = () => {
 		if (document.hidden) mediaEl?.pause();

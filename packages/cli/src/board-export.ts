@@ -1,8 +1,14 @@
 
 import { existsSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+
+const execFile = promisify(execFileCallback);
 import type { BoardDocument, BoardExportRegion, BoardSceneItem } from "@neta-art/cohub/board";
 import type {
   BoardHeadlessExportFormat,
@@ -15,6 +21,7 @@ import {
   boardImageKeySource,
   buildBoardScene,
   createBoardHeadlessRenderer,
+  createBoardHeadlessSketchHost,
   exportBoardImageBytes,
   imageAssetKey,
   parseBoardDocument,
@@ -149,6 +156,65 @@ export type BoardExportRunResult = {
   warnings: string[];
 };
 
+export type BoardVideoExportFormat = "mp4" | "webm";
+
+export type BoardVideoExportOptions = Omit<BoardExportRunOptions, "format"> & {
+  format: BoardVideoExportFormat;
+  fps: number;
+  output: string;
+};
+
+export async function runBoardVideoExport(options: BoardVideoExportOptions): Promise<{ width: number; height: number; frames: number; warnings: string[] }> {
+  if (!options.animation) throw new Error("Video export needs --animation.");
+  if (!options.times || options.times.length < 2) throw new Error("Video export needs an --at range with at least two frames.");
+  const times = options.times;
+  const step = (times[1] as number) - (times[0] as number);
+  if (!Number.isFinite(step) || step <= 0) throw new Error("Video export needs an increasing --at range.");
+  const derivedFps = 1000 / step;
+  if (Math.abs(options.fps - derivedFps) > 0.01) throw new Error(`--fps must match the --at step (${derivedFps.toFixed(3)} fps).`);
+  const result = await runBoardExport({ ...options, format: "png" });
+  if (!result) throw new Error("Nothing to export: the region contains no items.");
+  const tempDir = await mkdtemp(join(tmpdir(), "cohub-board-export-"));
+  try {
+    for (const [index, frame] of result.frames.entries()) await writeFile(join(tempDir, `${String(index + 1).padStart(6, "0")}.png`), frame.bytes);
+    const document = (await loadBoardDocument(options.spaceId, options.target)).document;
+    const audio = Object.values(document.items).filter((item) => item.type === "audio");
+    const audioInputs: Array<{ path: string; offset: number }> = [];
+    for (const [index, item] of audio.entries()) {
+      const { bytes } = await readSpaceFileBytes(createClient(), options.spaceId, item.props.src);
+      const path = join(tempDir, `audio-${index}-${item.props.src.split("/").pop() ?? "track"}`);
+      await writeFile(path, bytes);
+      audioInputs.push({ path, offset: Math.max(0, item.props.time ?? 0) / 1000 });
+    }
+    const duration = Math.max(0.001, (result.frames.length - 1) / options.fps);
+    const args = ["-y", "-f", "image2", "-framerate", String(options.fps), "-i", join(tempDir, "%06d.png")];
+    for (const input of audioInputs) {
+      if (input.offset > 0) args.push("-ss", input.offset.toFixed(3));
+      args.push("-i", input.path);
+    }
+    if (audioInputs.length > 1) {
+      const inputs = audioInputs.map((_, index) => `[${index + 1}:a]`).join("");
+      args.push("-filter_complex", `${inputs}amix=inputs=${audioInputs.length}:duration=longest:dropout_transition=0[aout]`, "-map", "0:v:0", "-map", "[aout]");
+    } else {
+      args.push("-map", "0:v:0");
+      if (audioInputs.length === 1) args.push("-map", "1:a:0");
+    }
+    if (options.format === "mp4") args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart");
+    else args.push("-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-c:a", "libopus");
+    args.push("-t", duration.toFixed(3), options.output);
+    try {
+      await execFile("ffmpeg", args, { encoding: "utf8", maxBuffer: 2 * 1024 * 1024 });
+    } catch (error) {
+      const cause = error as { code?: string; stderr?: string; message?: string };
+      if (cause.code === "ENOENT") throw new Error("Video export needs ffmpeg. Install ffmpeg and try again.");
+      throw new Error(`ffmpeg could not encode the video: ${(cause.stderr ?? cause.message ?? "unknown error").trim().split("\\n").slice(-6).join("\\n")}`);
+    }
+    return { width: result.frames[0]?.width ?? 0, height: result.frames[0]?.height ?? 0, frames: result.frames.length, warnings: result.warnings };
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
 export async function runBoardExport(
   options: BoardExportRunOptions,
 ): Promise<BoardExportRunResult | null> {
@@ -169,6 +235,7 @@ export async function runBoardExport(
   if (!plan) return null;
 
   const headless = await createBoardHeadlessRenderer({ fonts: resolveBundledFonts() });
+  let sketchHost: ReturnType<typeof createBoardHeadlessSketchHost> | null = null;
   try {
     const warnings: string[] = [];
     let textures: Map<string, BoardHeadlessTexture> | undefined;
@@ -208,6 +275,17 @@ export async function runBoardExport(
     }
 
     const videoCount = plan.items.filter((item) => item.type === "video").length;
+    sketchHost = createBoardHeadlessSketchHost(headless, {
+      readModule: async (src) => {
+        const { bytes } = await readSpaceFileBytes(createClient(), options.spaceId, src);
+        return new TextDecoder().decode(bytes);
+      },
+    });
+    await sketchHost.prepare(
+      [...new Map(times.flatMap((time) => buildBoardScene(documentAt(time)).items.filter((item) => item.type === "sketch").map((item) => [`${item.id}:${item.frame.width}:${item.frame.height}:${item.props.src}`, item] as const))).values()],
+      times.map((time) => time ?? 0),
+      plan.scale,
+    );
     if (videoCount > 0) {
       warnings.push(
         `${videoCount} video preview${videoCount === 1 ? " was" : "s were"} drawn as placeholders; headless video decoding is unavailable.`,
@@ -235,6 +313,7 @@ export async function runBoardExport(
         colorScheme: options.colorScheme,
         background: options.background,
         textures,
+        sketches: sketchHost ?? undefined,
         backgroundImage,
         ...(assetKey ? { assetKey } : {}),
         format: options.format,
@@ -259,6 +338,7 @@ export async function runBoardExport(
     }
     return frames.length ? { frames, warnings } : null;
   } finally {
+    sketchHost?.destroy();
     headless.destroy();
   }
 }

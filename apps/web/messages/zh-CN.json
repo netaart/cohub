@@ -1479,6 +1479,7 @@
 	"board_media_load_failed": "无法加载媒体",
 	"board_media_not_ready": "媒体尚未就绪",
 	"board_next_output": "下一个输出",
+	"board_next_marker": "下一个标记",
 	"board_prev_output": "上一个输出",
 	"board_sync_paused": "同步已暂停",
 	"board_align_bottom": "底部对齐",

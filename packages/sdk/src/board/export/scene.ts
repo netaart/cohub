@@ -25,6 +25,7 @@ export type BoardExportSceneInput = {
   palette?: Partial<BoardRenderPalette>;
   colors?: BoardShapeColors;
   textures?: Map<string, Texture>;
+  sketches?: BoardRenderContext["sketches"];
   assetKey?: (item: BoardSceneItem) => string | null;
   background?: number | null;
   backgroundImage?: {
@@ -59,6 +60,7 @@ function buildContext(input: BoardExportSceneInput): {
     colorScheme: input.colorScheme,
     rendererType: "canvas",
     zoom: input.scale,
+    sketches: input.sketches,
     assetKey: input.assetKey ?? imageAssetKey,
     getTexture: (key) => textures.get(key) ?? null,
     hasError: (key) => {

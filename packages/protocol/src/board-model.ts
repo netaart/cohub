@@ -159,6 +159,7 @@ export const BoardTextItemSchema = z
 				lineHeight: finite.min(0.5).max(4).default(4 / 3),
 				width: finite.positive().optional(),
 				reveal: ratio.default(1),
+			caret: z.boolean().default(false),
 			})
 			.strict()
 			.prefault({}),
@@ -270,6 +271,10 @@ const fileProps = {
 	src: srcSchema,
 	snapshot: BoardMediaSnapshotSchema.optional(),
 };
+const timedFileProps = {
+	...fileProps,
+	time: nonNegative.optional(),
+};
 
 export const BoardCropSchema = z
 	.object({ x: ratio, y: ratio, w: ratio, h: ratio })
@@ -283,10 +288,10 @@ export const BoardImageItemSchema = z
 	})
 	.strict();
 export const BoardVideoItemSchema = z
-	.object({ ...boxed(640, 360), type: z.literal("video"), props: z.object(fileProps).strict() })
+	.object({ ...boxed(640, 360), type: z.literal("video"), props: z.object(timedFileProps).strict() })
 	.strict();
 export const BoardAudioItemSchema = z
-	.object({ ...boxed(480, 96), type: z.literal("audio"), props: z.object(fileProps).strict() })
+	.object({ ...boxed(480, 96), type: z.literal("audio"), props: z.object(timedFileProps).strict() })
 	.strict();
 export const BoardFileItemSchema = z
 	.object({ ...boxed(360, 220), type: z.literal("file"), props: z.object(fileProps).strict() })

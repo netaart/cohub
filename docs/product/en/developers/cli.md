@@ -202,6 +202,25 @@ A batch file has a `commands` array. It can combine item, connection, effect, co
 
 Playback commands are grouped under `boards playback`; image rendering remains available through `boards export`.
 
+Board media and effects use the same item model as every other Board element. `video` and `audio` items accept `props.time` in milliseconds, so an animation track can target `props.time` directly. For example:
+
+```json
+{
+  "target": "music",
+  "property": "time",
+  "keyframes": [{ "at": 0, "value": 0 }, { "at": 6000, "value": 6000 }]
+}
+```
+
+An `effect` item uses a typed `props` object: `kind`, `rate`, `life`, `particleSize`, `speed`, `direction`, `spread`, `gravity`, `intensity`, optional `follow`, and optional `seed`. A `sketch` item points to a `.js` or `.mjs` Space file exporting `draw(ctx, frame)`; the headless exporter runs the same frame contract when creating PNG sequences or videos.
+
+Video export consumes a frame range and uses the range step as its default frame rate:
+
+```bash
+cohub boards export demo.board --animation intro --at 0:6s:40ms -o intro.mp4
+```
+
+
 ### Search and models
 
 ```bash

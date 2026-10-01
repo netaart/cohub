@@ -1479,6 +1479,7 @@
 	"board_media_load_failed": "Could not load media",
 	"board_media_not_ready": "Media is not ready",
 	"board_next_output": "Next output",
+	"board_next_marker": "Next marker",
 	"board_prev_output": "Previous output",
 	"board_sync_paused": "Sync paused",
 	"board_align_bottom": "Align bottom",
