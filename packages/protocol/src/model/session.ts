@@ -1,5 +1,7 @@
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
+export { normalizeSessionTurnOrigin, readSessionTurnOrigin, turnEventRequestSource } from "../turn-origin.js";
+export type { SessionTurnOrigin, SessionTurnOriginKind } from "../turn-origin.js";
 
 export type SessionForkRecord = {
   id: string;

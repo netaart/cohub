@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  inheritSessionMetaForFork,
   canClaimSessionFallbackTitle,
   normalizeSessionTitle,
   readSessionTitleSource,
   setSessionTitleMeta,
 } from "./session-meta.js";
+
+test("forks inherit settings but not their parent's creation provenance", () => {
+  const parent = { origin: { turnId: "creator" }, requestSource: { turnId: "creator" }, setting: "keep" };
+  assert.deepEqual(inheritSessionMetaForFork(parent), { setting: "keep" });
+  assert.deepEqual(parent.origin, { turnId: "creator" });
+  assert.deepEqual(inheritSessionMetaForFork(null), {});
+});
 
 test("normalizes session titles to the database limit", () => {
   assert.equal(normalizeSessionTitle("  Build   a title  "), "Build a title");

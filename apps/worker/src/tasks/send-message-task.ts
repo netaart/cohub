@@ -8,7 +8,8 @@ import { parsePromptEnv, type PromptAccessMode, type PromptAuthContext, type Pro
 import { resolveDelegatedAppScopesAtUseTime } from "@cohub/core/apps";
 import type { Permission } from "@cohub/core/permissions";
 import { sanitizeTaskPromptAuth } from "./send-message-auth.js";
-import type { SessionTurnIntent } from "@cohub/protocol/model";
+import { normalizeSessionTurnOrigin, type SessionTurnIntent } from "@cohub/protocol/model";
+import { normalizeRequestSource } from "@cohub/protocol/provenance";
 import { getPromptTemplateService } from "../prompt-templates.js";
 import { getSkillService } from "../skills.js";
 import { getSessionDomainServices } from "../session-services.js";
@@ -36,6 +37,8 @@ const sessionPromptService = getSessionDomainServices({
 
 const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRunId: string }) => {
   const payload = job.data as TaskPayload;
+  const requestSource = normalizeRequestSource(payload.data?.requestSource);
+  const origin = normalizeSessionTurnOrigin(payload.data?.origin);
   const spaceId = payload.spaceId;
   const { content, sessionId, title, source: payloadSource, model, provider, thinkingLevel, clientMessageId, generationPolicy, accessMode: payloadAccessMode, intent, labelIds, auth, env } = (payload.data ?? {}) as {
     content?: ContentBlock[];
@@ -80,7 +83,7 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
     { spaceId, userId, promptPermission },
     (reference) => resolveDelegatedAppScopesAtUseTime({ db, ...reference }),
   );
-  const createdSession = targetSessionId ? null : await sessionPromptService.registerCronjobSession(spaceId, { source, title: title ?? null, userUuid: userId });
+  const createdSession = targetSessionId ? null : await sessionPromptService.registerCronjobSession(spaceId, { source, title: title ?? null, userUuid: userId, origin, requestSource });
   const promptSessionId = targetSessionId ?? createdSession?.id;
   if (!promptSessionId) throw new Error("sessionId is required for send_message task");
   const promptClientMessageId = payload.cronJobId?.trim()
@@ -105,6 +108,9 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
     clientMessageId: promptClientMessageId,
     content,
     source,
+    origin,
+    requestSource,
+    sourceClientId: requestSource?.clientId,
     model: model ?? null,
     provider: provider ?? null,
     thinkingLevel: thinkingLevel ?? null,
