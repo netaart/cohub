@@ -2,7 +2,7 @@ import {
 	BOARD_TASK_ARTIFACT_LIMIT,
 	type BoardTaskArtifact,
 	type BoardTaskSnapshot,
-} from "@cohub/protocol/board-document";
+} from "@cohub/protocol";
 import {
 	blockDurationMs,
 	blockIdentity,
@@ -36,14 +36,9 @@ function artifactId(
 	return candidate;
 }
 
-/**
- * Group provider blocks into user-facing works. A cover belongs to the media
- * it depicts (see `generationCovers`) instead of becoming a competing image.
- */
 export function taskArtifacts(
 	blocks: Record<string, unknown>[],
 ): BoardTaskArtifact[] {
-	// Board keeps remote media only, so a cover of inline media stays an image.
 	const covers = new Map(
 		[...generationCovers(blocks)].filter(([media]) =>
 			Boolean(blockUrl(blocks[media] ?? {})),
@@ -176,7 +171,6 @@ function compareArtifacts(a: BoardTaskArtifact, b: BoardTaskArtifact): number {
 	return 0;
 }
 
-/** Highest-value artifact first, with provider order as the stable final tie. */
 export function rankedTaskArtifacts(
 	artifacts: readonly BoardTaskArtifact[],
 ): BoardTaskArtifact[] {
@@ -216,10 +210,6 @@ function taskTypeTitle(taskType: string): string {
 		.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-/**
- * Project an authoritative TaskRun into a small, replaceable Board display cache.
- * Raw payloads, complete results and inline media are never copied into the Board.
- */
 export function taskRunToBoardTaskSnapshot(
 	run: TaskRunRecord,
 ): BoardTaskSnapshot {

@@ -1,13 +1,8 @@
-/**
- * Palette defaults for renderers that have no CSS to read.
- *
- * The browser resolves these from theme tokens at render time (a space's
- * `theme.css` can remap every one of them). A headless export has no
- * stylesheet, so it starts from this table — the same values the web stage uses
- * as its own fallbacks — and callers may still override any entry.
- */
 
-import type { BoardRenderPalette } from "./renderers/board-renderer-registry.js";
+import type { BoardColor } from "@cohub/protocol";
+import { type BoardColorId, resolveItemColor } from "../core/palette.js";
+import { parseBoardCssColor } from "./css-color.js";
+import type { BoardRenderContext, BoardRenderPalette } from "./renderers/board-renderer-registry.js";
 
 const DARK: BoardRenderPalette = {
   bg: 0x141414,
@@ -37,4 +32,15 @@ const LIGHT: BoardRenderPalette = {
 
 export function defaultBoardPalette(mode: "dark" | "light"): BoardRenderPalette {
   return { ...(mode === "light" ? LIGHT : DARK) };
+}
+
+export function itemColor(
+  context: Pick<BoardRenderContext, "colors" | "colorScheme" | "palette">,
+  color: BoardColor | undefined,
+  fallback: BoardColorId,
+  part: "stroke" | "fill" | "label" = "stroke",
+): number {
+  const value = typeof color === "object" && color ? color[context.colorScheme] : color;
+  if ((value ?? fallback) === "neutral" && part !== "fill") return context.palette.text;
+  return resolveItemColor(color, fallback, context.colors, context.colorScheme, parseBoardCssColor, part);
 }

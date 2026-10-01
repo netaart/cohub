@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createBoardConnection } from "@cohub/protocol/board-connection";
-import type { BoardDocument, BoardItem } from "@cohub/protocol/board-document";
 import {
   BOARD_EXPORT_DEFAULT_PADDING,
   BOARD_EXPORT_MAX_EDGE,
   BOARD_EXPORT_MAX_PIXELS,
   planBoardExport,
 } from "../../src/board/core/export-plan.js";
+import { boardScene } from "./fixtures.js";
 
 /**
  * Export planning is where "what do I get, and how big is it" is decided, so
@@ -17,42 +16,21 @@ import {
  */
 
 function frame(x: number, y: number, width: number, height: number) {
-  return { x, y, width, height, rotation: 0 };
+  return { x, y, width, height };
 }
 
-function doc(items: BoardItem[]): BoardDocument {
-  return {
-    kind: "cohub.board",
-    version: 1,
-    appearance: {
-      theme: "clean",
-      background: { kind: "solid" },
-      grid: { visible: false, size: 24, opacity: 0.12 },
-      mood: "clean",
-    },
-    viewport: { x: 0, y: 0, zoom: 1 },
-    items,
-  } as BoardDocument;
-}
+const box = (x: number, y: number) => ({ type: "shape", position: { x, y }, size: { width: 100, height: 80 } });
 
-const box = (id: string, x: number, y: number): BoardItem =>
-  ({
-    id,
-    type: "geo",
-    geo: "rectangle",
-    text: id,
-    color: "brand",
-    fillOpacity: 0,
-    frame: frame(x, y, 100, 80),
-  }) as BoardItem;
+function planFor(items: Record<string, unknown>, input: Omit<Parameters<typeof planBoardExport>[0], "scene">) {
+  return planBoardExport({ scene: boardScene(items), ...input });
+}
 
 test("planBoardExport returns null for an empty document", () => {
-  assert.equal(planBoardExport({ document: doc([]), region: { kind: "all" } }), null);
+  assert.equal(planFor({}, { region: { kind: "all" } }), null);
 });
 
 test("all region unions every item and applies default padding", () => {
-  const plan = planBoardExport({
-    document: doc([box("a", 0, 0), box("b", 300, 200)]),
+  const plan = planFor({ a: box(0, 0), b: box(300, 200) }, {
     region: { kind: "all" },
     scale: 1,
   });
@@ -67,8 +45,7 @@ test("all region unions every item and applies default padding", () => {
 });
 
 test("items region keeps only the requested ids", () => {
-  const plan = planBoardExport({
-    document: doc([box("a", 0, 0), box("b", 300, 0), box("c", 600, 0)]),
+  const plan = planFor({ a: box(0, 0), b: box(300, 0), c: box(600, 0) }, {
     region: { kind: "items", ids: ["a", "c"] },
     scale: 1,
   });
@@ -80,32 +57,29 @@ test("items region keeps only the requested ids", () => {
 });
 
 test("frame region excludes the frame itself but keeps what it contains", () => {
-  const document = doc([
-    { id: "f", type: "frame", label: "Page", color: "neutral", frame: frame(0, 0, 500, 400) } as BoardItem,
-    box("inside", 50, 50),
-    box("outside", 900, 900),
-  ]);
-  const plan = planBoardExport({ document, region: { kind: "frame", id: "f" }, scale: 1 });
-  assert.ok(plan);
-  assert.deepEqual(
-    plan.items.map((item) => item.id),
-    ["inside"],
+  const result = planFor(
+    {
+      f: { type: "frame", size: { width: 500, height: 400 }, props: { label: "Page" } },
+      inside: { ...box(50, 50), parent: "f" },
+      outside: box(900, 900),
+    },
+    { region: { kind: "frame", id: "f" }, scale: 1 },
   );
+  assert.ok(result);
+  assert.deepEqual(result.items.map((item) => item.id), ["inside"]);
   // A frame is a page: it gets no padding, so the image is exactly the frame.
-  assert.deepEqual(plan.world, { x: 0, y: 0, width: 500, height: 400 });
+  assert.deepEqual(result.world, { x: 0, y: 0, width: 500, height: 400 });
 });
 
 test("frame region returns null for an unknown id", () => {
-  const plan = planBoardExport({
-    document: doc([box("a", 0, 0)]),
+  const plan = planFor({ a: box(0, 0) }, {
     region: { kind: "frame", id: "missing" },
   });
   assert.equal(plan, null);
 });
 
 test("rect region selects intersecting items and is not padded", () => {
-  const plan = planBoardExport({
-    document: doc([box("a", 0, 0), box("b", 800, 0)]),
+  const plan = planFor({ a: box(0, 0), b: box(800, 0) }, {
     region: { kind: "rect", rect: frame(0, 0, 200, 200) },
     scale: 1,
   });
@@ -118,8 +92,7 @@ test("rect region selects intersecting items and is not padded", () => {
 });
 
 test("explicit padding overrides the per-region default", () => {
-  const plan = planBoardExport({
-    document: doc([box("a", 0, 0)]),
+  const plan = planFor({ a: box(0, 0) }, {
     region: { kind: "rect", rect: frame(0, 0, 100, 100) },
     padding: 10,
     scale: 1,
@@ -129,8 +102,7 @@ test("explicit padding overrides the per-region default", () => {
 });
 
 test("scale is clamped to the edge budget and reported as clamped", () => {
-  const plan = planBoardExport({
-    document: doc([box("a", 0, 0)]),
+  const plan = planFor({ a: box(0, 0) }, {
     region: { kind: "rect", rect: frame(0, 0, 4000, 100) },
     scale: 8,
     maxEdge: 8192,
@@ -143,8 +115,7 @@ test("scale is clamped to the edge budget and reported as clamped", () => {
 });
 
 test("scale is clamped to the pixel budget even when each edge fits", () => {
-  const plan = planBoardExport({
-    document: doc([box("a", 0, 0)]),
+  const plan = planFor({ a: box(0, 0) }, {
     region: { kind: "rect", rect: frame(0, 0, 4000, 4000) },
     scale: 2,
     maxEdge: 8192,
@@ -166,8 +137,7 @@ for (const [width, height] of [
   [4_000_000, 100],
 ] as const) {
   test(`a ${width}x${height} region still respects both budgets`, () => {
-    const plan = planBoardExport({
-      document: doc([box("a", 0, 0)]),
+    const plan = planFor({ a: box(0, 0) }, {
       region: { kind: "rect", rect: frame(0, 0, width, height) },
       scale: 2,
     });
@@ -187,8 +157,7 @@ for (const [width, height] of [
 
 test("a non-finite or non-positive scale falls back to a usable one", () => {
   for (const scale of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-    const plan = planBoardExport({
-      document: doc([box("a", 0, 0)]),
+    const plan = planFor({ a: box(0, 0) }, {
       region: { kind: "rect", rect: frame(0, 0, 100, 100) },
       scale,
     });
@@ -199,8 +168,7 @@ test("a non-finite or non-positive scale falls back to a usable one", () => {
 });
 
 test("a requested scale that fits is preserved exactly", () => {
-  const plan = planBoardExport({
-    document: doc([box("a", 0, 0)]),
+  const plan = planFor({ a: box(0, 0) }, {
     region: { kind: "rect", rect: frame(0, 0, 100, 100) },
     scale: 3,
   });
@@ -211,45 +179,16 @@ test("a requested scale that fits is preserved exactly", () => {
   assert.equal(plan.height, 300);
 });
 
-test("a connection's span is included so a relation is never clipped", () => {
-  // A connection has no frame of its own; its extent comes from the nodes it
-  // joins. Exporting just the two nodes must still leave room for the line
-  // between them, or the relation would be cut off at the edge of the image.
-  const document = doc([box("a", 0, 0), box("b", 400, 300)]);
-  const withConnection = {
-    ...document,
-    connections: [
-      createBoardConnection({ id: "c1", sourceItemId: "a", targetItemId: "b" }),
-    ],
-  } as BoardDocument;
-  const plan = planBoardExport({
-    document: withConnection,
-    region: { kind: "items", ids: ["a", "b"] },
-    padding: 0,
-    scale: 1,
-  });
-  assert.ok(plan);
-  assert.equal(plan.connections.length, 1);
-  assert.ok(plan.world.width >= 400, `expected a resolved span, got ${plan.world.width}`);
-  assert.ok(plan.world.height >= 300, `expected a resolved span, got ${plan.world.height}`);
-});
-
-test("a connection to an excluded node is left out of the plan", () => {
-  // Half a relation is worse than none: it would draw a line into empty space,
-  // which reads as a rendering defect rather than as a clipped edge.
-  const document = doc([box("a", 0, 0), box("b", 400, 300)]);
-  const withConnection = {
-    ...document,
-    connections: [
-      createBoardConnection({ id: "c1", sourceItemId: "a", targetItemId: "b" }),
-    ],
-  } as BoardDocument;
-  const plan = planBoardExport({
-    document: withConnection,
-    region: { kind: "items", ids: ["a"] },
-    padding: 0,
-    scale: 1,
-  });
-  assert.ok(plan);
-  assert.deepEqual(plan.connections, []);
+test("an arrow between exported items comes along, and its route is not clipped", () => {
+  const items = {
+    a: box(0, 0),
+    b: box(400, 300),
+    link: { type: "arrow", props: { start: { item: "a" }, end: { item: "b" }, route: "curve", bend: 0.5 } },
+  };
+  const both = planFor(items, { region: { kind: "items", ids: ["a", "b"] }, padding: 0, scale: 1 });
+  assert.ok(both);
+  assert.deepEqual(both.items.map((item) => item.id), ["a", "b", "link"]);
+  const one = planFor(items, { region: { kind: "items", ids: ["a"] }, padding: 0, scale: 1 });
+  assert.ok(one);
+  assert.deepEqual(one.items.map((item) => item.id), ["a"]);
 });

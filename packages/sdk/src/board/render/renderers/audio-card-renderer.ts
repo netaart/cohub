@@ -1,5 +1,6 @@
+import type { SceneItem } from "../../core/scene.js";
 import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
-import type { BoardAudioItem } from "@cohub/protocol/board-document";
+import type { BoardAudioItem } from "@cohub/protocol";
 import { Container, Graphics, Text } from "pixi.js";
 import { drawAudioWaveform } from "../audio-waveform.js";
 import {
@@ -32,7 +33,7 @@ const partsByContainer = new WeakMap<Container, AudioParts>();
 
 function sync(
 	container: Container,
-	item: BoardAudioItem,
+	item: SceneItem<BoardAudioItem>,
 	context: BoardRenderContext,
 ) {
 	const parts = partsByContainer.get(container);
@@ -41,7 +42,7 @@ function sync(
 	const { width, height } = item.frame;
 	const selected = context.selectedIds.has(item.id);
 	const hovered = context.hoveredId === item.id;
-	const title = item.snapshot?.title ?? item.ref.path.split("/").pop() ?? "Audio";
+	const title = item.props.snapshot?.title ?? item.props.src.split("/").pop() ?? "Audio";
 
 	syncTextResolution(parts.label, parts, context.zoom);
 	if (parts.label.text !== title) parts.label.text = title;
@@ -84,7 +85,7 @@ function sync(
 	parts.waveform.clear();
 	drawAudioWaveform(
 		parts.waveform,
-		`${item.ref.path}:${item.snapshot?.mtimeMs ?? "unknown"}`,
+		`${item.props.src}:${item.props.snapshot?.mtimeMs ?? "unknown"}`,
 		{
 			x: waveformInset,
 			y: 10,

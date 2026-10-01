@@ -1,8 +1,9 @@
 <script lang="ts">
 import {
-	type BoardAppearance,
+	BOARD_ENTER_PRESETS,
+	type BoardEnterPreset,
+	type BoardSettings,
 	normalizeBoardRemoteUrl,
-	patchBoardAppearance,
 } from "@neta-art/cohub/board";
 import { Image, Palette, RotateCcw, X } from "lucide-svelte";
 import { untrack } from "svelte";
@@ -23,45 +24,38 @@ const {
 
 const locale = $derived(getLocale());
 
-const initialBackground = untrack(() => editor.appearance.background);
-const presetColors = [
-	"#141414",
-	"#f5f2ea",
-	"#17212b",
-	"#24332f",
-	"#352b3f",
-	"#e8dfd1",
-];
-let mode = $state<"color" | "image">(
-	initialBackground.kind === "image" ? "image" : "color",
-);
+type Background = BoardSettings["background"];
+const background = $derived(editor.settings.background);
+const initialBackground = untrack(() => editor.settings.background);
+const presetColors = ["#141414", "#f5f2ea", "#17212b", "#24332f", "#352b3f", "#e8dfd1"];
+let mode = $state<"color" | "image">(initialBackground.kind === "image" ? "image" : "color");
 let imageUrl = $state(initialBackground.imageUrl ?? "");
 let validationError = $state<string | null>(null);
 const imageStatus = $derived.by(() => {
-	const current = editor.appearance.background;
-	if (current.kind !== "image" || !current.imageUrl) return null;
-	return loadState?.url === current.imageUrl ? loadState.status : null;
+	if (background.kind !== "image" || !background.imageUrl) return null;
+	return loadState?.url === background.imageUrl ? loadState.status : null;
 });
-const imageError = $derived(
-	validationError ??
-		(imageStatus === "error"
-			? m.board_image_load_failed({}, { locale })
-			: null),
-);
+const imageError = $derived(validationError ?? (imageStatus === "error" ? m.board_image_load_failed({}, { locale }) : null));
+const solidColor = $derived(background.kind === "solid" && typeof background.color === "string" ? background.color : null);
 
-function patchBackground(
-	background: BoardAppearance["background"],
-	commit = true,
-) {
-	const appearance = patchBoardAppearance(editor.appearance, { background });
-	if (commit) editor.setAppearance(appearance);
-	else editor.previewAppearance(appearance);
+const ENTER_LABELS: Record<BoardEnterPreset, () => string> = {
+	"fade-in": () => m.board_motion_fade({}, { locale }),
+	rise: () => m.board_motion_rise({}, { locale }),
+	drop: () => m.board_motion_drop({}, { locale }),
+	pop: () => m.board_motion_pop({}, { locale }),
+	deal: () => m.board_motion_deal({}, { locale }),
+};
+
+function update(patch: Partial<BoardSettings>, commit = true) {
+	const next = { ...editor.settings, ...patch };
+	if (commit) editor.setSettings(next);
+	else editor.previewSettings(next);
 }
 
 function setColor(color: string, commit = true) {
 	mode = "color";
 	validationError = null;
-	patchBackground({ kind: "solid", color }, commit);
+	update({ background: { kind: "solid", color } }, commit);
 }
 
 function useImage() {
@@ -73,43 +67,24 @@ function useImage() {
 	imageUrl = url;
 	mode = "image";
 	validationError = null;
-	patchBackground({
-		kind: "image",
-		imageUrl: url,
-		color: editor.appearance.background.color,
-		fit: editor.appearance.background.fit ?? "cover",
-		position: editor.appearance.background.position ?? "center",
-		opacity: editor.appearance.background.opacity ?? 1,
-	});
+	update({ background: { ...background, kind: "image", imageUrl: url, fit: background.fit ?? "cover", opacity: background.opacity ?? 1 } });
 }
 
-function patchImageOptions(
-	patch: Partial<
-		Pick<BoardAppearance["background"], "fit" | "position" | "opacity">
-	>,
-	commit = true,
-) {
-	const current = editor.appearance.background;
-	if (current.kind !== "image" || !current.imageUrl) return;
-	patchBackground({ ...current, ...patch }, commit);
+function patchImageOptions(patch: Partial<Pick<Background, "fit" | "opacity">>, commit = true) {
+	if (background.kind !== "image" || !background.imageUrl) return;
+	update({ background: { ...background, ...patch } }, commit);
 }
 
-function setEnterMotion(kind: "effects.deal" | "", commit = true) {
-	const appearance = patchBoardAppearance(editor.appearance, {
-		motion: kind ? { enter: { kind, kindVersion: 1, params: {} } } : undefined,
-	});
-	if (commit) editor.setAppearance(appearance);
-	else editor.previewAppearance(appearance);
+function setEnterMotion(preset: BoardEnterPreset | "") {
+	const { enter: _enter, ...rest } = editor.settings;
+	editor.setSettings(preset ? { ...rest, enter: { preset } } : rest);
 }
 
 function reset() {
 	imageUrl = "";
 	validationError = null;
-	const appearance = patchBoardAppearance(editor.appearance, {
-		background: { kind: "solid" },
-		motion: undefined,
-	});
-	editor.setAppearance(appearance);
+	const { enter: _enter, ...rest } = editor.settings;
+	editor.setSettings({ ...rest, background: { kind: "dots" } });
 }
 </script>
 
@@ -134,12 +109,12 @@ function reset() {
 		<div class="color-section">
 			<div class="swatches" role="group" aria-label={m.board_bg_presets({}, { locale })}>
 				{#each presetColors as color (color)}
-					<button type="button" class="swatch" class:selected={editor.appearance.background.kind === "solid" && editor.appearance.background.color === color} style:background={color} title={color} aria-label={m.board_use_color_aria({ color }, { locale })} onclick={() => setColor(color)}></button>
+					<button type="button" class="swatch" class:selected={solidColor === color} style:background={color} title={color} aria-label={m.board_use_color_aria({ color }, { locale })} onclick={() => setColor(color)}></button>
 				{/each}
 			</div>
 			<label class="color-input">
 				<span>{m.board_custom_color({}, { locale })}</span>
-				<input type="color" value={editor.appearance.background.kind === "solid" ? editor.appearance.background.color ?? "#141414" : "#141414"} oninput={(event) => setColor(event.currentTarget.value, false)} onchange={(event) => setColor(event.currentTarget.value)} />
+				<input type="color" value={solidColor ?? "#141414"} oninput={(event) => setColor(event.currentTarget.value, false)} onchange={(event) => setColor(event.currentTarget.value)} />
 			</label>
 		</div>
 	{:else}
@@ -154,19 +129,15 @@ function reset() {
 			{:else if imageStatus === "loading"}
 				<p class="loading" role="status">{m.board_loading_image({}, { locale })}</p>
 			{/if}
-			{#if editor.appearance.background.kind === "image" && editor.appearance.background.imageUrl}
+			{#if background.kind === "image" && background.imageUrl}
 				<div class="image-options">
 					<div class="option-row">
 						<label for="board-image-fit">{m.board_fit({}, { locale })}</label>
-						<select id="board-image-fit" value={editor.appearance.background.fit ?? "cover"} onchange={(event) => patchImageOptions({ fit: event.currentTarget.value as "cover" | "contain" | "repeat" })}><option value="cover">{m.board_cover({}, { locale })}</option><option value="contain">{m.board_contain({}, { locale })}</option><option value="repeat">{m.board_repeat({}, { locale })}</option></select>
-					</div>
-					<div class="option-row">
-						<label for="board-image-position">{m.board_position({}, { locale })}</label>
-						<select id="board-image-position" value={editor.appearance.background.position ?? "center"} onchange={(event) => patchImageOptions({ position: event.currentTarget.value as "center" | "top" | "bottom" | "left" | "right" })}><option value="center">{m.board_pos_center({}, { locale })}</option><option value="top">{m.board_pos_top({}, { locale })}</option><option value="bottom">{m.board_pos_bottom({}, { locale })}</option><option value="left">{m.board_pos_left({}, { locale })}</option><option value="right">{m.board_pos_right({}, { locale })}</option></select>
+						<select id="board-image-fit" value={background.fit ?? "cover"} onchange={(event) => patchImageOptions({ fit: event.currentTarget.value as "cover" | "contain" | "repeat" })}><option value="cover">{m.board_cover({}, { locale })}</option><option value="contain">{m.board_contain({}, { locale })}</option><option value="repeat">{m.board_repeat({}, { locale })}</option></select>
 					</div>
 					<div class="option-row">
 						<label for="board-image-opacity">{m.board_opacity({}, { locale })}</label>
-						<input id="board-image-opacity" type="range" min="0.1" max="1" step="0.05" value={editor.appearance.background.opacity ?? 1} oninput={(event) => patchImageOptions({ opacity: Number(event.currentTarget.value) }, false)} onchange={(event) => patchImageOptions({ opacity: Number(event.currentTarget.value) })} />
+						<input id="board-image-opacity" type="range" min="0.1" max="1" step="0.05" value={background.opacity ?? 1} oninput={(event) => patchImageOptions({ opacity: Number(event.currentTarget.value) }, false)} onchange={(event) => patchImageOptions({ opacity: Number(event.currentTarget.value) })} />
 					</div>
 				</div>
 			{/if}
@@ -177,11 +148,13 @@ function reset() {
 		<label class="field-label" for="board-enter-motion">{m.board_motion_enter({}, { locale })}</label>
 		<select
 			id="board-enter-motion"
-			value={editor.appearance.motion?.enter?.kind ?? ""}
-			onchange={(event) => setEnterMotion(event.currentTarget.value as "effects.deal" | "")}
+			value={editor.settings.enter?.preset ?? ""}
+			onchange={(event) => setEnterMotion(event.currentTarget.value as BoardEnterPreset | "")}
 		>
 			<option value="">{m.board_motion_none({}, { locale })}</option>
-			<option value="effects.deal">{m.board_motion_deal({}, { locale })}</option>
+			{#each BOARD_ENTER_PRESETS as preset (preset)}
+				<option value={preset}>{ENTER_LABELS[preset]()}</option>
+			{/each}
 		</select>
 		<p class="section-hint">{m.board_motion_hint({}, { locale })}</p>
 	</div>

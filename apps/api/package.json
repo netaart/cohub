@@ -16,6 +16,7 @@
     "lint:fix": "biome lint --write .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --import ./dist/register-otel-esm-hook.js dist/index.js",
+    "db:check-drift": "node ../../scripts/db/check-drift.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:migrate:data:v2": "tsx src/db/migrate-v2-data.ts",

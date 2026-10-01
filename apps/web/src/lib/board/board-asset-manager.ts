@@ -1,5 +1,5 @@
 import {
-	type BoardItem,
+	type BoardSceneItem,
 	type BoardTaskArtifact,
 	boardImageKeySource,
 	featuredTaskArtifact,
@@ -31,15 +31,8 @@ type BoardAssetSource = {
 	value: string;
 };
 
-/** Long edge of task textures: 3× the default 480 card, and bounded GPU memory. */
 const TASK_TEXTURE_SIZE = 1536;
 
-/**
- * A task card renders a bounded still: its cover or a CDN variant/snapshot.
- * Decoding the video itself is the last resort for hosts without processing.
- * This deliberately differs from the SDK's `taskArtifactPreviewUrl`, which
- * names the original for renderers without a texture budget (export, headless).
- */
 function taskPreviewKey(artifact: BoardTaskArtifact | undefined) {
 	if (!artifact || artifact.type === "text") return null;
 	const [still] = mediaPreviewCandidates(artifact, { size: TASK_TEXTURE_SIZE });
@@ -49,15 +42,9 @@ function taskPreviewKey(artifact: BoardTaskArtifact | undefined) {
 		: null;
 }
 
-/** Stable preview key shared by cards that reference the same file version. */
-export function boardAssetKey(item: BoardItem): string | null {
-	if (item.type === "task") {
-		return taskPreviewKey(featuredTaskArtifact(item.snapshot.artifacts));
-	}
-	if (item.type === "video") {
-		const path = encodeURIComponent(item.ref.path);
-		return `video:${path}:${item.snapshot?.mtimeMs ?? "unknown"}`;
-	}
+export function boardAssetKey(item: BoardSceneItem): string | null {
+	if (item.type === "task") return taskPreviewKey(featuredTaskArtifact(item.props.snapshot.artifacts));
+	if (item.type === "video") return `video:${encodeURIComponent(item.props.src)}:${item.props.snapshot?.mtimeMs ?? "unknown"}`;
 	return imageAssetKey(item);
 }
 
@@ -105,34 +92,20 @@ type Entry = {
 	attempts: number;
 	retryAt: number;
 	retryTimer: ReturnType<typeof setTimeout> | null;
-	/** Last time this preview was wanted (acquired or requested); drives LRU. */
 	lastUsedAt: number;
 };
 
 export type BoardAssetManager = {
-	assetKey: (item: BoardItem) => string | null;
+	assetKey: (item: BoardSceneItem) => string | null;
 	invalidatePath: (path: string) => void;
-	requestItem: (item: BoardItem) => void;
+	requestItem: (item: BoardSceneItem) => void;
 	getTexture: (key: string) => Texture | null;
 	getNaturalSize: (key: string) => { width: number; height: number } | null;
 	hasError: (key: string) => boolean;
 	acquire: (key: string) => void;
 	release: (key: string) => void;
-	/**
-	 * Load every preview for `items`, then run `use` while the references are still
-	 * held, releasing them only once it settles.
-	 *
-	 * Scoped as a callback rather than returning the map: releasing a reference can
-	 * evict immediately when the cooling pool is over budget, so a returned map
-	 * could hand the caller an already-destroyed texture. Holding the refs across
-	 * the callback makes that impossible to get wrong.
-	 *
-	 * Export needs this: the editor only loads what is near the viewport, so
-	 * without it an exported board would show placeholders for everything
-	 * off-screen.
-	 */
 	withTextures: <T>(
-		items: BoardItem[],
+		items: BoardSceneItem[],
 		use: (textures: Map<string, Texture>) => T | Promise<T>,
 		options?: { timeoutMs?: number },
 	) => Promise<T>;
@@ -142,7 +115,6 @@ export type BoardAssetManager = {
 
 const MAX_RETRY_DELAY = 30_000;
 
-/** Approximate GPU footprint of a texture (RGBA8). Unknown sizes count as 0. */
 function footprintOf(texture: Texture | null): number {
 	if (!texture) return 0;
 	const width = texture.width || 0;
@@ -150,11 +122,6 @@ function footprintOf(texture: Texture | null): number {
 	return width * height * 4;
 }
 
-/**
- * Default space-file URL resolver. The SDK-backed resolver is imported lazily so
- * this module has no static dependency on the SDK / SvelteKit runtime — keeping
- * it importable in plain node tests (remote URLs never trigger this path).
- */
 async function defaultResolveSpaceFileUrl(
 	spaceId: string,
 	path: string,
@@ -169,71 +136,25 @@ export type BoardAssetManagerOptions = {
 	spaceId: string;
 	concurrency?: number;
 	videoConcurrency?: number;
-	/** Disable client-side video-frame decoding on data-saving connections. */
 	loadVideoPreviews?: boolean;
-	/** Cooling-pool ceiling for unreferenced textures kept on the GPU. */
 	lruBudget?: LruBudget;
-	/**
-	 * Shared pool for the default image loader. Custom load/unload functions
-	 * bypass the pool, keeping specialized ownership explicit.
-	 */
 	imageTexturePool?: BoardImageTexturePool;
-	/** Injectable preview loader. Images use the shared Pixi pool; videos decode one frame. */
 	loadTexture?: (
 		url: string,
 		media: BoardAssetMedia,
 	) => Promise<Texture | null>;
-	/**
-	 * Frees a texture. Must resolve once the texture is truly gone, so a pending
-	 * unload of a URL can be awaited before that URL is loaded again (otherwise a
-	 * quick pan-back could re-acquire a texture that is still being unloaded and
-	 * is about to be destroyed). Defaults to releasing the shared image pool or
-	 * disposing the generated video texture.
-	 */
 	unloadTexture?: (
 		url: string,
 		texture: Texture | null,
 		media: BoardAssetMedia,
 	) => Promise<void>;
-	/**
-	 * Resolves a displayable URL for a space-file media asset. Injected so the manager
-	 * has no static dependency on the SDK (and thus SvelteKit runtime), keeping
-	 * it unit-testable. Defaults to the CDN/base64 resolver.
-	 */
 	resolveSpaceFileUrl?: (
 		spaceId: string,
 		path: string,
 	) => Promise<string | null>;
-	/** Injectable clock for tests. */
 	now?: () => number;
 };
 
-/**
- * Single owner of board previews: URL resolution, image loading, video-frame
- * decoding, reference counting, bounded concurrency, retry backoff, and an LRU
- * cooling pool for off-screen textures.
- *
- * Reference model: `refs` counts how many visible cards display a preview.
- * When the last reference is released the texture is not freed immediately —
- * it stays on the GPU in a cooling pool so a quick pan back is instant. The
- * pool is bounded (count + bytes); the least recently used entries are evicted
- * first when a budget is exceeded. This balances GPU retention against the
- * churn of re-fetching textures while panning.
- *
- * Lifecycle invariants:
- * - An entry is never deleted while its request is in flight; `release` only
- *   drops `refs` to zero and the settle step cools or reclaims it. This
- *   prevents a detached-entry race where a late load writes into an orphaned
- *   entry while a fresh entry for the same key stays blank.
- * - On settle we verify the entry is still the one in the map; an orphaned
- *   result is unloaded rather than leaked.
- * - On failure with live references a timer re-enqueues the load after the
- *   backoff elapses, so a failed preview recovers even on a static board.
- *
- * Ownership scope: Board references are local to this manager, while default
- * images are leased from the application-level image pool. Generated video
- * previews remain owned directly by this manager.
- */
 export function createBoardAssetManager(
 	options: BoardAssetManagerOptions,
 ): BoardAssetManager {
@@ -254,9 +175,6 @@ export function createBoardAssetManager(
 				: useSharedImagePool
 					? imagePool.acquire(url)
 					: loadBoardImageTexture(url));
-	// In-flight unloads keyed by URL. A load of the same URL awaits any pending
-	// unload first, closing the race where a re-requested texture is created while
-	// the previous texture for the same URL is still being destroyed.
 	const pendingUnloads = new Map<string, Promise<void>>();
 	const unloadTexture =
 		options.unloadTexture ??
@@ -271,7 +189,6 @@ export function createBoardAssetManager(
 			}
 			await unloadBoardImageTexture(url, texture);
 		});
-	/** Release a texture and serialize a reload against its asynchronous unload. */
 	function releaseTexture(key: string, url: string, texture: Texture | null) {
 		const media = keySource(key)?.media ?? "image";
 		const pendingKey = `${media}:${url}`;
@@ -301,7 +218,7 @@ export function createBoardAssetManager(
 		for (const listener of listeners) listener();
 	}
 
-	function managedAssetKey(item: BoardItem): string | null {
+	function managedAssetKey(item: BoardSceneItem): string | null {
 		const key = boardAssetKey(item);
 		if (!key) return null;
 		const source = keySource(key);
@@ -338,7 +255,6 @@ export function createBoardAssetManager(
 		return entry;
 	}
 
-	/** Re-enqueue a failed entry once its backoff has elapsed. */
 	function scheduleRetry(key: string, entry: Entry) {
 		clearRetry(entry);
 		const delay = Math.max(0, entry.retryAt - now());
@@ -364,10 +280,6 @@ export function createBoardAssetManager(
 		entries.delete(key);
 	}
 
-	/**
-	 * Drop unreferenced, loaded textures that exceed the cooling budget. Entries
-	 * still in flight are untouched (the settle step cools them once they land).
-	 */
 	function trim() {
 		const cooling: LruEntry[] = [];
 		for (const [key, entry] of entries) {
@@ -395,7 +307,6 @@ export function createBoardAssetManager(
 		inflight.delete(key);
 		active -= 1;
 		if (keySource(key)?.media === "video") activeVideos -= 1;
-		// Orphaned: the entry was replaced while loading. Discard the result.
 		if (entries.get(key) !== entry) {
 			if (texture) releaseTexture(key, entry.url ?? "", texture);
 			if (!disposed) pump();
@@ -406,8 +317,6 @@ export function createBoardAssetManager(
 			entry.attempts = 0;
 			entry.texture = texture;
 			entry.lastUsedAt = now();
-			// No live reference: keep it in the cooling pool (bounded by trim)
-			// rather than freeing immediately, so a quick pan back is instant.
 			if (entry.refs <= 0) trim();
 			else notify();
 		} else {
@@ -446,8 +355,6 @@ export function createBoardAssetManager(
 				.then(async (url) => {
 					if (!url || disposed) return null;
 					entry.url = url;
-					// Wait for any in-flight unload of this URL so we never load a
-					// texture the shared cache is about to destroy.
 					const pendingKey = `${source.media}:${url}`;
 					const pending = pendingUnloads.get(pendingKey);
 					if (pending) await pending;
@@ -482,13 +389,10 @@ export function createBoardAssetManager(
 			const entry = ensureEntry(key);
 			entry.lastUsedAt = now();
 			if (entry.texture || entry.loading) return;
-			// Honour backoff after a failure.
 			if (entry.error && now() < entry.retryAt) return;
 			entry.error = false;
 			clearRetry(entry);
 			if (queue.some((queued) => queued.key === key)) return;
-			// A remote cover is already a displayable URL; a space file has to be
-			// resolved to one first.
 			const getUrl =
 				source.kind === "url"
 					? () => Promise.resolve(source.value)
@@ -527,13 +431,8 @@ export function createBoardAssetManager(
 			entry.refs -= 1;
 			if (entry.refs > 0) return;
 			entry.lastUsedAt = now();
-			// Nothing references this preview any more: stop any pending retry.
 			clearRetry(entry);
-			// Keep an in-flight entry alive until it settles; the settle step
-			// cools or reclaims it. This avoids the detached-entry race.
 			if (entry.loading) return;
-			// A failed entry with no texture and no references is reclaimed now;
-			// a loaded one stays in the cooling pool until the budget says evict.
 			if (!entry.texture) evict(key, entry);
 			else trim();
 		},
@@ -557,8 +456,6 @@ export function createBoardAssetManager(
 						return Boolean(entry?.texture) || Boolean(entry?.error);
 					});
 				if (!settled()) {
-					// A cap keeps a wedged preview from hanging the export; whatever has
-					// arrived by then is used and the rest draw as placeholders.
 					const timeoutMs = loadOptions?.timeoutMs ?? 15_000;
 					await new Promise<void>((resolve) => {
 						const timer = setTimeout(finish, timeoutMs);

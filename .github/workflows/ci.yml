@@ -58,6 +58,11 @@ jobs:
       - name: Test search release promotion
         run: node --test scripts/search/promote-latest.test.mjs
 
+      # Board v3 ships handwritten DDL beside the Drizzle snapshots, so the two
+      # can drift silently. This runs the generator and fails on any diff.
+      - name: Check database schema drift
+        run: pnpm --filter @cohub/api db:check-drift
+
       - name: Lint
         run: pnpm lint
 

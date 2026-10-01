@@ -1,6 +1,6 @@
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { BoardAuthoringItemSchema, SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
+import { SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
 import type {
   PublicFileCreateUploadInput,
   PublicFileCreateUploadResponse,
@@ -96,17 +96,16 @@ import type {
   SpaceConfigInput,
   SpaceConfigResponse,
   SpaceConfigUpdateResponse,
-  BoardAuthoringReadInput,
-  BoardAuthoringSnapshot,
-  BoardCapabilities,
+  BoardApplyInput,
+  BoardApplyResult,
   BoardCreateInput,
-  BoardMutationReceipt,
+  BoardHistoryInput,
+  BoardHistoryPage,
+  BoardPatch,
   BoardPlaybackCommand,
   BoardPlaybackSnapshot,
-  BoardSemanticMutation,
-  BoardSummary,
-  BoardTransactionsPage,
-  BoardTransactionsReadInput,
+  BoardReadInput,
+  BoardReadResult,
   ChannelConfig,
   ChannelHealth,
 } from "../types.js";
@@ -1833,72 +1832,100 @@ class BoardRealtimeClient {
 
 export class BoardClient {
   readonly realtime: BoardRealtimeClient;
-  private readonly boards: SpaceBoardsApi;
 
   constructor(
     readonly spaceId: string,
     readonly id: string,
-    transport: HttpTransport,
+    private readonly transport: HttpTransport,
     private readonly websocketClient: WebsocketClient | null,
   ) {
-    this.boards = new SpaceBoardsApi(transport, spaceId, websocketClient);
     this.realtime = new BoardRealtimeClient(websocketClient, spaceId, id);
   }
 
-  capabilities(customFetch?: Fetch) {
-    return this.boards.capabilities(this.id, customFetch);
+  private get path() {
+    return `/api/spaces/${this.spaceId}/boards/${this.id}`;
   }
 
-  summary(customFetch?: Fetch) {
-    return this.boards.summary(this.id, customFetch);
+  /** Read the Board, or part of it. Every value is complete, defaults included. */
+  get(input: BoardReadInput = {}, customFetch?: Fetch) {
+    const params = new URLSearchParams();
+    if (input.only?.length) params.set("only", input.only.join(","));
+    if (input.rect) params.set("rect", [input.rect.x, input.rect.y, input.rect.width, input.rect.height].join(","));
+    if (input.within) params.set("within", input.within);
+    if (input.items?.length) params.set("items", input.items.join(","));
+    if (input.animations?.length) params.set("animations", input.animations.join(","));
+    if (input.limit !== undefined) params.set("limit", String(input.limit));
+    if (input.cursor) params.set("cursor", input.cursor);
+    const query = params.toString();
+    return this.transport.request<BoardReadResult>(`${this.path}${query ? `?${query}` : ""}`, { fetch: customFetch });
   }
 
-  authoring(input: BoardAuthoringReadInput = {}, customFetch?: Fetch) {
-    return this.boards.authoring(this.id, input, customFetch);
-  }
-
-  /** Read-only transaction log, newest first; the first page carries the current rows. */
-  transactions(input: BoardTransactionsReadInput = {}, customFetch?: Fetch) {
-    return this.boards.transactions(this.id, input, customFetch);
-  }
-
-  mutateSemantic(
-    input: Omit<BoardSemanticMutation, "mutationId" | "dryRun"> & {
-      mutationId?: string;
-      dryRun?: boolean;
-    },
-  ) {
-    return this.boards.mutateSemantic(this.id, {
-      ...input,
-      mutationId: input.mutationId ?? randomBoardId(),
-      dryRun: input.dryRun ?? false,
+  /** Merge a patch into the Board: fields merge, `null` deletes. */
+  apply(patch: BoardPatch, options: Omit<BoardApplyInput, "patch"> = {}) {
+    return this.transport.request<BoardApplyResult>(`${this.path}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...options, patch, mutationId: options.mutationId ?? randomBoardId() }),
     });
+  }
+
+  /** Transactions newest first, each with the before/after state of what it changed. */
+  history(input: BoardHistoryInput = {}, customFetch?: Fetch) {
+    const params = new URLSearchParams();
+    if (input.before !== undefined) params.set("before", String(input.before));
+    if (input.limit !== undefined) params.set("limit", String(input.limit));
+    const query = params.toString();
+    return this.transport.request<BoardHistoryPage>(`${this.path}/history${query ? `?${query}` : ""}`, { fetch: customFetch });
+  }
+
+  /** Return the Board to an earlier version as a new write. */
+  restore(version: number) {
+    return this.transport.request<BoardApplyResult>(`${this.path}/restore`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version }),
+    });
+  }
+
+  private playback(command: BoardPlaybackCommand) {
+    return this.transport
+      .request<{ playback: BoardPlaybackSnapshot | null }>(`${this.path}/playback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(command),
+      })
+      .then((response) => response.playback);
+  }
+
+  /** Shared playback: every viewer follows the same clock. */
+  play(animationId: string, options: { position?: number; timeScale?: number; seed?: string } = {}) {
+    return this.playback({ commandId: randomBoardId(), type: "play", animationId, ...options });
+  }
+
+  pause() {
+    return this.playback({ commandId: randomBoardId(), type: "pause" });
+  }
+
+  resume() {
+    return this.playback({ commandId: randomBoardId(), type: "resume" });
+  }
+
+  seek(position: number) {
+    return this.playback({ commandId: randomBoardId(), type: "seek", position });
+  }
+
+  /** Continue past the marker a presentation is holding at. */
+  next() {
+    return this.playback({ commandId: randomBoardId(), type: "next" });
+  }
+
+  stop() {
+    return this.playback({ commandId: randomBoardId(), type: "stop" });
   }
 
   updateAwareness(seq: number, update: BoardAwarenessUpdate) {
     if (!this.websocketClient) return Promise.resolve();
-    return this.websocketClient.updateBoardAwareness({
-      spaceId: this.spaceId,
-      boardId: this.id,
-      seq,
-      update,
-    });
-  }
-
-  play(command: Omit<Extract<BoardPlaybackCommand, { type: "play" }>, "shared"> & { shared?: true }) {
-    return this.boards.play(this.id, command);
-  }
-
-  pause(command: Extract<BoardPlaybackCommand, { type: "pause" }>) {
-    return this.boards.pause(this.id, command);
-  }
-
-  seek(command: Extract<BoardPlaybackCommand, { type: "seek" }>) {
-    return this.boards.seek(this.id, command);
-  }
-
-  stop(command: Extract<BoardPlaybackCommand, { type: "stop" }>) {
-    return this.boards.stop(this.id, command);
+    return this.websocketClient.updateBoardAwareness({ spaceId: this.spaceId, boardId: this.id, seq, update });
   }
 
   subscribe(handlers: BoardSubscriptionHandlers) {
@@ -1915,12 +1942,8 @@ export class BoardClient {
       | ((event: BoardAwarenessUpdatedEvent) => void)
       | ((event: BoardPlaybackChangedEvent) => void),
   ) {
-    if (type === "changed") {
-      return this.realtime.on("changed", handler as (event: BoardChangedEvent) => void);
-    }
-    if (type === "awareness") {
-      return this.realtime.on("awareness", handler as (event: BoardAwarenessUpdatedEvent) => void);
-    }
+    if (type === "changed") return this.realtime.on("changed", handler as (event: BoardChangedEvent) => void);
+    if (type === "awareness") return this.realtime.on("awareness", handler as (event: BoardAwarenessUpdatedEvent) => void);
     return this.realtime.on("playback", handler as (event: BoardPlaybackChangedEvent) => void);
   }
 }
@@ -1936,101 +1959,14 @@ export class SpaceBoardsApi {
     return new BoardClient(this.spaceId, boardId, this.transport, this.websocketClient);
   }
 
-  async create(input: BoardCreateInput) {
-    for (const item of input.items ?? []) BoardAuthoringItemSchema.parse(item);
-    return this.transport.request<BoardAuthoringSnapshot>(
-      `/api/spaces/${this.spaceId}/boards`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      },
-    );
+  /** Create a `.board` file and its Board, optionally with an initial document. */
+  create(input: BoardCreateInput) {
+    return this.transport.request<BoardReadResult>(`/api/spaces/${this.spaceId}/boards`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
   }
-
-  authoring(boardId: string, input: BoardAuthoringReadInput = {}, customFetch?: Fetch) {
-    if (input.include?.length === 0) throw new Error("Board authoring include must not be empty.");
-    const params = new URLSearchParams();
-    for (const section of input.include ?? []) params.append("include", section);
-    if (input.itemIds?.length) params.set("itemIds", input.itemIds.join(","));
-    if (input.connectionIds?.length) params.set("connectionIds", input.connectionIds.join(","));
-    if (input.effectIds?.length) params.set("effectIds", input.effectIds.join(","));
-    if (input.compositionIds?.length) params.set("compositionIds", input.compositionIds.join(","));
-    if (input.viewport) params.set("viewport", JSON.stringify(input.viewport));
-    const query = params.toString();
-    return this.transport.request<BoardAuthoringSnapshot>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/authoring${query ? `?${query}` : ""}`,
-      { fetch: customFetch },
-    );
-  }
-
-  mutateSemantic(boardId: string, mutation: BoardSemanticMutation) {
-    return this.transport.request<BoardMutationReceipt>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/mutations`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mutation),
-      },
-    );
-  }
-
-  summary(boardId: string, customFetch?: Fetch) {
-    return this.transport.request<BoardSummary>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/summary`,
-      { fetch: customFetch },
-    );
-  }
-
-  capabilities(boardId: string, customFetch?: Fetch) {
-    return this.transport.request<BoardCapabilities>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/capabilities`,
-      { fetch: customFetch },
-    );
-  }
-
-  transactions(boardId: string, input: BoardTransactionsReadInput = {}, customFetch?: Fetch) {
-    const params = new URLSearchParams();
-    if (input.before !== undefined) params.set("before", String(input.before));
-    if (input.limit !== undefined) params.set("limit", String(input.limit));
-    if (input.snapshot !== undefined) params.set("snapshot", String(input.snapshot));
-    const query = params.toString();
-    return this.transport.request<BoardTransactionsPage>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/transactions${query ? `?${query}` : ""}`,
-      { fetch: customFetch },
-    );
-  }
-
-  private playback(boardId: string, command: BoardPlaybackCommand) {
-    return this.transport.request<BoardPlaybackSnapshot>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/playback`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(command),
-      },
-    );
-  }
-
-  play(
-    boardId: string,
-    command: Omit<Extract<BoardPlaybackCommand, { type: "play" }>, "shared"> & { shared?: true },
-  ) {
-    return this.playback(boardId, command);
-  }
-
-  pause(boardId: string, command: Extract<BoardPlaybackCommand, { type: "pause" }>) {
-    return this.playback(boardId, command);
-  }
-
-  seek(boardId: string, command: Extract<BoardPlaybackCommand, { type: "seek" }>) {
-    return this.playback(boardId, command);
-  }
-
-  stop(boardId: string, command: Extract<BoardPlaybackCommand, { type: "stop" }>) {
-    return this.playback(boardId, command);
-  }
-
 }
 
 export class SpaceCheckpointFilesApi {

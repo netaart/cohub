@@ -1,4 +1,4 @@
-import type { BoardSemanticMutation } from "@cohub/protocol";
+import type { BoardDocument, BoardPatch } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type {
 	SessionFileRecord,
@@ -20,7 +20,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 18;
+export const DB_VERSION = 20;
 
 export type SessionListForkRecord = Partial<SessionForkRecord> & {
 	childSessionId: string;
@@ -245,13 +245,25 @@ export type BoardPendingTransactionCacheRecord = {
 	userKey: string;
 	spaceId: string;
 	boardId: string;
-	txId: string;
-	baseVersion: number;
-	mutation: BoardSemanticMutation;
+	/** Idempotency key: the server applies a mutation id at most once. */
+	mutationId: string;
+	patch: BoardPatch;
 	attemptCount: number;
 	createdAt: number;
 	updatedAt: number;
 	lastAttemptAt: number | null;
+};
+
+/** The last server document of a Board, for an instant first paint. */
+export type BoardDocumentCacheRecord = {
+	key: string;
+	userKey: string;
+	spaceId: string;
+	boardId: string;
+	version: number;
+	/** The document as read from the server, complete. */
+	document: BoardDocument;
+	updatedAt: number;
 };
 
 export type SessionFilesCacheRecord = {
@@ -294,6 +306,7 @@ export type StoreName =
 	| "user_profiles"
 	| "file_pending_drafts"
 	| "board_pending_txs"
+	| "board_documents"
 	| "task_run_summaries"
 	| "task_run_details"
 	| "session_files";
@@ -656,13 +669,18 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				slimTaskRunSummaries(request.transaction);
 			}
 			if (
-				oldVersion < 15 &&
+				oldVersion < 19 && request.transaction &&
 				db.objectStoreNames.contains("board_pending_txs")
 			) {
-				// Pending records used the removed raw operation shape. With no live
-				// Board data to migrate, rebuild this queue rather than allowing stale
-				// records to block every future semantic commit.
-				db.deleteObjectStore("board_pending_txs");
+				// Preserve unsent v2 commands verbatim for recovery. They must never
+				// be replayed as v3 merge patches or silently deleted during upgrade.
+				request.transaction.objectStore("board_pending_txs").name = "board_legacy_pending_txs";
+			}
+			// Cached documents used to be compact (every value that matched its
+			// schema default was omitted). They are stored complete now, and a
+			// value from the old shape would read as an explicit default.
+			if (oldVersion < 20 && db.objectStoreNames.contains("board_documents")) {
+				db.deleteObjectStore("board_documents");
 			}
 			createStore(db, "space_records", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
@@ -764,6 +782,10 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 					keyPath: ["userKey", "spaceId", "boardId"],
 				},
 				{ name: "by_created_at", keyPath: "createdAt" },
+			]);
+			createStore(db, "board_documents", [
+				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
 			createStore(db, "task_run_summaries", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
@@ -1007,6 +1029,24 @@ export async function idbGet<T>(storeName: StoreName, key: string) {
 				resolve((request.result as T | undefined) ?? null);
 			request.onerror = () => reject(request.error);
 		});
+	});
+}
+
+/**
+ * Put unless `guard` rejects what is already there: read and write share one
+ * transaction, so two writers cannot both accept the older of the two values.
+ */
+export async function idbPutGuarded<T>(storeName: StoreName, key: string, guard: (current: T | null) => boolean, value: T) {
+	return withObjectStore(storeName, "readwrite", async (store, tx) => {
+		const current = await new Promise<T | null>((resolve, reject) => {
+			const request = store.get(key);
+			request.onsuccess = () => resolve((request.result as T | undefined) ?? null);
+			request.onerror = () => reject(request.error);
+		});
+		if (!guard(current)) return false;
+		store.put(sanitizeForIndexedDb(value));
+		await awaitTransaction(tx);
+		return true;
 	});
 }
 

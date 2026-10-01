@@ -1,4 +1,4 @@
-import type { DrawPoint } from "@neta-art/cohub/board";
+import type { BoardDrawPoint as DrawPoint } from "@neta-art/cohub/board";
 
 export type BoardDrawInputSample = {
 	pointerId: number;
@@ -6,7 +6,6 @@ export type BoardDrawInputSample = {
 	pressure: number;
 };
 
-/** Append one sample when it belongs to the active stroke and adds detail. */
 export function appendBoardDrawSample(
 	points: DrawPoint[],
 	ownerPointerId: number,

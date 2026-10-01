@@ -6,9 +6,8 @@ import type { SessionTurnSummary } from "../model/turn.js";
 import type { TaskRunStatus } from "../task/index.js";
 import type { SpaceFsChangedPayload } from "../fs/index.js";
 import type { SpacePortsChangedPayload } from "../ports/index.js";
-import type { BoardMutationReceipt, BoardPlaybackSnapshot } from "../board.js";
-import type { BoardComposition } from "../board-composition.js";
-import type { BoardEffect } from "../board-effect.js";
+import type { BoardChangeSummary, BoardPlaybackSnapshot } from "../board.js";
+import type { BoardDelta } from "../board-model.js";
 import type { RequestSource } from "../provenance.js";
 import type { DesktopCommandDispatchedPayload } from "../desktop-command.js";
 import type { AppArtifactDescriptor, AppContentKind, AppVersionSource } from "../app.js";
@@ -683,14 +682,12 @@ export type BoardChangedEvent = {
     boardId: string;
     actorId: string;
     mutationId: string;
+    /** Version before this write; a client at exactly this version can apply `after`. */
+    baseVersion: number;
     version: number;
-    changed: BoardMutationReceipt["changed"];
-    /** Server-authored animation rows for a small, pure animation mutation. */
-    animationPatch?: {
-      effects: BoardEffect[];
-      compositions: BoardComposition[];
-      playback?: BoardPlaybackSnapshot | null;
-    };
+    changed: BoardChangeSummary;
+    /** Compact state of every changed entity, omitted when too large to inline. */
+    after?: BoardDelta;
     source?: RequestSource;
   };
 };
@@ -722,7 +719,7 @@ export type BoardPlaybackChangedEvent = {
   requestId?: string | null;
   spaceId: string;
   sessionId?: string | null;
-  payload: BoardPlaybackSnapshot;
+  payload: { boardId: string; playback: BoardPlaybackSnapshot | null };
 };
 
 export type RealtimeAppStatus = "published" | "disabled";

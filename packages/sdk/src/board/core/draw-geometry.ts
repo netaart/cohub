@@ -1,31 +1,12 @@
-/**
- * Freehand stroke geometry — pure functions over raw draw points.
- *
- * We persist raw samples (see DrawPoint) and derive everything else here:
- * bounds, simplified paths for low zoom (LOD), a variable-width outline polygon
- * for rendering, and a hit test. Keeping this renderer-independent means the
- * stroke can be re-rendered at any detail level and tested without a GPU.
- */
 
 import type { WorldPoint } from "../geometry.js";
-import {
-	boardDrawBounds,
-	boardDrawSampleRadius,
-} from "@cohub/protocol";
-import type { DrawPoint } from "@cohub/protocol/board-document";
+import { type BoardDrawPoint as DrawPoint, drawPointsBounds, drawSampleRadius } from "@cohub/protocol";
 import { getStroke } from "perfect-freehand";
 
-/** Radius of a sample in world units given the stroke size and pressure. */
-export const sampleRadius = boardDrawSampleRadius;
+export const sampleRadius = drawSampleRadius;
 
-/** Axis-aligned bounds of a stroke in its local space, padded by stroke width. */
-export const computeDrawBounds = boardDrawBounds;
+export const computeDrawBounds = drawPointsBounds;
 
-/**
- * Ramer–Douglas–Peucker simplification. Reduces point count for low-zoom
- * rendering without touching the persisted raw samples. Returns indices into
- * the input so callers can keep pressure alongside the simplified path.
- */
 export function simplifyDrawIndices(
 	points: DrawPoint[],
 	tolerance: number,
@@ -79,11 +60,6 @@ function perpendicularDistance(
 	return Math.hypot(point.x - projX, point.y - projY);
 }
 
-/**
- * Build a closed outline for callers that need a path representation.
- * Interactive rendering uses `buildStrokeRibbonGeometry` below because a single
- * outline is unsafe when a freehand path folds back over itself.
- */
 export function buildStrokeOutline(
 	points: DrawPoint[],
 	size: number,
@@ -124,7 +100,6 @@ export function buildStrokeOutline(
 
 const RIBBON_CIRCLE_SIDES = 8;
 
-/** Whether a sample needs a round join rather than the neighboring segment caps. */
 export function isStrokeCorner(
 	points: readonly DrawPoint[],
 	index: number,
@@ -148,17 +123,9 @@ export type StrokeRibbonGeometry = {
 	positions: Float32Array;
 	indices: Uint32Array;
 	uvs: Float32Array;
-	/** Normalized distance along the centerline for reveal animations. */
 	progress: Float32Array;
 };
 
-/**
- * Tessellate a freehand stroke as independent, convex primitives.
- *
- * A whole-path polygon is deliberately avoided: a path that folds back can make
- * its outline self-intersect, and GPU polygon triangulation then creates a large
- * accidental fill. Segment quads plus round point joins overlap safely instead.
- */
 export function buildStrokeRibbonGeometry(
 	points: readonly DrawPoint[],
 	size: number,
@@ -241,11 +208,6 @@ export function buildStrokeRibbonGeometry(
 	};
 }
 
-/**
- * Distance from a world point to the stroke's polyline, in the shape's local
- * space. Used for hit testing: a hit registers within half the stroke width plus
- * a small tolerance. `local` is the point expressed in the draw item's frame.
- */
 export function distanceToStroke(
 	points: DrawPoint[],
 	local: WorldPoint,

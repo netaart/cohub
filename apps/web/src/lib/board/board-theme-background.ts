@@ -1,4 +1,4 @@
-import type { BoardAppearance } from "@neta-art/cohub/board";
+import type { BoardSettings } from "@neta-art/cohub/board";
 
 export type BoardBackgroundLoadState = {
 	url: string;
@@ -15,22 +15,19 @@ export type BoardThemeBackground = {
 };
 
 export function resolveBoardBackground(
-	appearance: BoardAppearance,
+	settings: BoardSettings,
 	themeBackground: BoardThemeBackground | null,
 ): BoardThemeBackground | null {
-	const declared = appearance.background;
+	const declared = settings.background;
 	if (declared.kind === "image" && declared.imageUrl) {
 		return {
 			url: declared.imageUrl,
 			tileWidth: null,
 			tileHeight: null,
 			...(declared.fit ? { fit: declared.fit } : {}),
-			...(declared.position ? { position: declared.position } : {}),
 			...(declared.opacity !== undefined ? { opacity: declared.opacity } : {}),
 		};
 	}
-	// Theme imagery only fills the untouched clean background. Explicit Board
-	// appearance always wins and is never rewritten.
-	if (declared.kind !== "solid" || declared.color) return null;
+	if ((declared.kind !== "solid" && declared.kind !== "dots") || declared.color) return null;
 	return themeBackground;
 }

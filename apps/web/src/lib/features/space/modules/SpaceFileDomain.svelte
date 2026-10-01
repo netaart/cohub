@@ -181,13 +181,11 @@ export type SpaceFileDomainProps = {
 	onOverwriteInlineFile: () => void | Promise<void>;
 	onReloadInlineFile: () => void | Promise<void>;
 	onOpenInlinePort: (port: string, url: string) => void;
-	onCommitInlineBoard: (
+	onCommitInlineBoard: (boardId: string, patch: import("@cohub/protocol").BoardPatch) => void | Promise<void>;
+	onPlayInlineBoard: (
 		boardId: string,
-		path: string,
-		document: BoardDocument,
-		before: BoardDocument,
-		commands: import("@neta-art/cohub").BoardSemanticCommand[],
-	) => void | Promise<void>;
+		command: import("@cohub/protocol").BoardPlaybackCommand,
+	) => Promise<import("@cohub/protocol").BoardPlaybackSnapshot | null>;
 	onRetryInlineBoardSave: (boardId: string) => void | Promise<void>;
 	onBeginPreviewPanelResize: (event: PointerEvent) => void;
 	onTogglePreviewFocusMode: () => void | Promise<void>;
@@ -340,6 +338,7 @@ let {
 	onReloadInlineFile,
 	onOpenInlinePort,
 	onCommitInlineBoard,
+	onPlayInlineBoard,
 	onRetryInlineBoardSave,
 	onBeginPreviewPanelResize,
 	onTogglePreviewFocusMode,
@@ -565,6 +564,7 @@ function previewContentOut(node: Element) {
 		activities={boardActivities}
 		onOpenActivity={onOpenBoardActivity}
 		onCommit={onCommitInlineBoard}
+		onPlayback={onPlayInlineBoard}
 		onRetrySave={onRetryInlineBoardSave}
 		onViewStateChange={onBoardViewStateChange}
 		onOpenFile={onOpenInlineFile}

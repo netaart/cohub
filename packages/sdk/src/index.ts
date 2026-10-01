@@ -162,7 +162,7 @@ export {
 } from "./generation-task.js";
 export type {
   BoardAwarenessGesture,
-  BoardAwarenessNodePreview,
+  BoardAwarenessItemPreview,
   BoardAwarenessStateUpdate,
   BoardAwarenessUpdate,
   ChannelEnvelope,
@@ -207,30 +207,14 @@ export {
 } from "./apis/spaces.js";
 export type { SpaceWebhookListItem, SpaceWebhookTriggerResponse } from "@cohub/protocol";
 export {
-  BOARD_COLOR_IDS,
-  BOARD_GEO_KINDS,
+  BOARD_COLOR_TOKENS,
+  BOARD_ITEM_TYPES,
+  BoardPatchSchema,
+  BoardTrackSchema,
+  BoardAnimationSchema,
+  parseBoardDocument,
+  parseBoardItem,
 } from "@cohub/protocol";
-export type {
-  BoardColorId,
-  BoardGeoKind,
-} from "@cohub/protocol";
-export {
-  BOARD_ANIMATION_CHANNEL_CAPABILITIES,
-  BoardAnimationSpecSchema,
-  BoardAuthoringItemSchema,
-  BoardCompositionInputSchema,
-  BoardCompositionSchema,
-  BoardDealParamsSchema,
-  BoardEffectInputSchema,
-  BoardEffectSchema,
-  BoardItemPatchSchema,
-  BoardSemanticCommandSchema,
-  parseBoardEffectInput,
-  BoardPlaybackPolicySchema,
-  parseBoardCompositionInput,
-  parseBoardPlaybackPolicy,
-} from "@cohub/protocol";
-export * from "./board/animation.js";
 export type { CreatePublicAssetUploadInput, CreatePublicAssetUploadResponse, PublicAssetMimeType, PublicAssetPurpose, PublicAssetUploadProgress, PublicAssetUploadProtocol, UploadAppSourceInput, UploadChatAttachmentInput, UploadChatImageAttachmentInput, UploadGenerationInputInput, UploadPublicAssetInput } from "./apis/public-assets.js";
 export type { AppActionRunResponse, AppAuthorizeResponse, AppContent, AppContentDownload, AppCreateInput, AppDetailResponse, AppExtractedPageMeta, AppGetResponse, AppMeta, AppPresentationMeta, AppPromotionCreateInput, AppPromotionEventResponse, AppPromotionProvider, AppPromotionProviderStatus, AppPromotionRecord, AppPromotionStatsResponse, AppPublicOwnerRecord, AppPublicSpaceRecord, AppRecord, AppResolveResponse, AppSessionResponse, AppStatus, AppTargetType, AppUpdateInput, AppVersionRecord, AppViewerGrantRecord, AppViewSource, AppViewStatsResponse, AppVisibility, PublicAppVersionSummary } from "./apis/apps.js";
 export type {
