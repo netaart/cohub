@@ -178,7 +178,8 @@ export async function runBoardVideoExport(options: BoardVideoExportOptions): Pro
   try {
     for (const [index, frame] of result.frames.entries()) await writeFile(join(tempDir, `${String(index + 1).padStart(6, "0")}.png`), frame.bytes);
     const document = (await loadBoardDocument(options.spaceId, options.target)).document;
-    const audio = Object.values(document.items).filter((item) => item.type === "audio");
+    const audioDocument = boardDocumentAt(document, options.animation, times[0] as number).document;
+    const audio = Object.values(audioDocument.items).filter((item) => item.type === "audio");
     const audioInputs: Array<{ path: string; offset: number }> = [];
     for (const [index, item] of audio.entries()) {
       const { bytes } = await readSpaceFileBytes(createClient(), options.spaceId, item.props.src);
@@ -186,7 +187,7 @@ export async function runBoardVideoExport(options: BoardVideoExportOptions): Pro
       await writeFile(path, bytes);
       audioInputs.push({ path, offset: Math.max(0, item.props.time ?? 0) / 1000 });
     }
-    const duration = Math.max(0.001, (result.frames.length - 1) / options.fps);
+    const duration = Math.max(0.001, result.frames.length / options.fps);
     const args = ["-y", "-f", "image2", "-framerate", String(options.fps), "-i", join(tempDir, "%06d.png")];
     for (const input of audioInputs) {
       if (input.offset > 0) args.push("-ss", input.offset.toFixed(3));
@@ -199,15 +200,15 @@ export async function runBoardVideoExport(options: BoardVideoExportOptions): Pro
       args.push("-map", "0:v:0");
       if (audioInputs.length === 1) args.push("-map", "1:a:0");
     }
-    if (options.format === "mp4") args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart");
-    else args.push("-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-c:a", "libopus");
+    if (options.format === "mp4") args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-f", "mp4");
+    else args.push("-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-c:a", "libopus", "-f", "webm");
     args.push("-t", duration.toFixed(3), options.output);
     try {
       await execFile("ffmpeg", args, { encoding: "utf8", maxBuffer: 2 * 1024 * 1024 });
     } catch (error) {
       const cause = error as { code?: string; stderr?: string; message?: string };
       if (cause.code === "ENOENT") throw new Error("Video export needs ffmpeg. Install ffmpeg and try again.");
-      throw new Error(`ffmpeg could not encode the video: ${(cause.stderr ?? cause.message ?? "unknown error").trim().split("\\n").slice(-6).join("\\n")}`);
+      throw new Error(`ffmpeg could not encode the video: ${(cause.stderr ?? cause.message ?? "unknown error").trim().split("\n").slice(-6).join("\n")}`);
     }
     return { width: result.frames[0]?.width ?? 0, height: result.frames[0]?.height ?? 0, frames: result.frames.length, warnings: result.warnings };
   } finally {
@@ -281,11 +282,25 @@ export async function runBoardExport(
         return new TextDecoder().decode(bytes);
       },
     });
-    await sketchHost.prepare(
-      [...new Map(times.flatMap((time) => buildBoardScene(documentAt(time)).items.filter((item) => item.type === "sketch").map((item) => [`${item.id}:${item.frame.width}:${item.frame.height}:${item.props.src}`, item] as const))).values()],
-      times.map((time) => time ?? 0),
-      plan.scale,
-    );
+    const region: BoardExportRegion = times.length > 1 ? { kind: "rect", rect: plan.world } : options.region;
+    const host = sketchHost;
+    if (!host) throw new Error("Headless sketch host could not be created.");
+    const sketchVariants = new Map<string, { item: Extract<BoardSceneItem, { type: "sketch" }>; times: number[] }>();
+    for (const time of times) {
+      const sketchPlan = planBoardExport({
+        scene: buildBoardScene(documentAt(time)),
+        region,
+        scale: options.scale,
+        ...(times.length > 1 ? { padding: 0 } : options.padding === undefined ? {} : { padding: options.padding }),
+      });
+      for (const item of sketchPlan?.items.filter((entry): entry is Extract<BoardSceneItem, { type: "sketch" }> => entry.type === "sketch") ?? []) {
+        const key = `${item.id}:${item.frame.width}:${item.frame.height}:${item.props.src}:${item.props.seed ?? ""}:${JSON.stringify(item.props.params)}`;
+        const variant = sketchVariants.get(key) ?? { item, times: [] };
+        variant.times.push(time ?? 0);
+        sketchVariants.set(key, variant);
+      }
+    }
+    await Promise.all([...sketchVariants.values()].map((variant) => host.prepare([variant.item], variant.times, plan.scale)));
     if (videoCount > 0) {
       warnings.push(
         `${videoCount} video preview${videoCount === 1 ? " was" : "s were"} drawn as placeholders; headless video decoding is unavailable.`,
@@ -301,7 +316,6 @@ export async function runBoardExport(
           return key && omittedKeys.has(key) ? null : key;
         }
       : undefined;
-    const region: BoardExportRegion = times.length > 1 ? { kind: "rect", rect: plan.world } : options.region;
     const frames: BoardExportFrame[] = [];
     const reported = new Set<string>();
     for (const time of times) {

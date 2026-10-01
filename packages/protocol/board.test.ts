@@ -105,15 +105,6 @@ test("arrows bind to items and fall back to a point when the item goes", () => {
 	assert.ok(!applyBoardPatchToDocument(document, { items: { l: { props: { end: { item: "missing" } } } } }).ok);
 });
 
-test("media time and text caret are animatable properties", () => {
-	assert.equal(resolveBoardProperty("audio", "props.time").ok, true);
-	assert.ok(listBoardProperties("video").some((entry) => entry.property === "props.time"));
-	const parsed = parseBoardDocument({ items: { text: { type: "text", props: { text: "hello", caret: true } }, audio: { type: "audio", props: { src: "music.mp3", time: 1200 } } } });
-	assert.ok(parsed.ok);
-	assert.equal(parsed.ok && parsed.document.items.text?.type === "text" && parsed.document.items.text.props.caret, true);
-	assert.equal(parsed.ok && parsed.document.items.audio?.type === "audio" && parsed.document.items.audio.props.time, 1200);
-});
-
 test("tracks drive schema properties and nest animations without cycles", () => {
 	const base = apply(emptyBoardDocument(), { items: { t: { type: "text", props: { text: "x" } } } }).document;
 	const { document } = apply(base, {

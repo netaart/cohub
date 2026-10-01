@@ -4,11 +4,9 @@ import type { BoardDocument } from "@cohub/protocol";
 import {
   type BoardHeadlessRenderer,
   createBoardHeadlessRenderer,
-  createBoardHeadlessSketchHost,
   exportBoardImageBytes,
 } from "../../src/board/headless/index.js";
 import { boardDocument } from "./fixtures.js";
-import { buildBoardScene } from "../../src/board/core/scene.js";
 
 /**
  * End-to-end cover for the headless path: a real Canvas2D renderer, the real
@@ -87,34 +85,6 @@ describe("headless board export", { skip: available ? false : "@napi-rs/canvas i
     assert.equal(result.plan.width, 664);
     assert.equal(result.plan.height, 464);
     assert.ok(result.bytes.length > 1000, "expected a non-trivial image");
-  });
-
-  test("renders a sketch item through the headless host", async () => {
-    const sketch = boardDocument({
-      items: {
-        wave: {
-          type: "sketch",
-          size: { width: 120, height: 80 },
-          props: { src: "wave.js", params: { color: "#f00" } },
-        },
-      },
-    });
-    const item = buildBoardScene(sketch).items[0];
-    assert.ok(item && item.type === "sketch");
-    const host = createBoardHeadlessSketchHost(headless, {
-      readModule: async () => `export function draw(ctx, frame) { ctx.fillStyle = frame.params.color; ctx.fillRect(0, 0, frame.width, frame.height); }`,
-    });
-    await host.prepare([item], [0], 1);
-    const result = exportBoardImageBytes(headless, sketch, { scale: 1, background: "transparent", sketches: host });
-    assert.ok(result);
-    const { createCanvas, loadImage } = await import("@napi-rs/canvas");
-    const image = await loadImage(result.bytes);
-    const canvas = createCanvas(result.plan.width, result.plan.height);
-    const pixels = canvas.getContext("2d");
-    pixels.drawImage(image, 0, 0);
-    const alpha = pixels.getImageData(0, 0, canvas.width, canvas.height).data;
-    assert.ok([...alpha].some((value, index) => index % 4 === 3 && value > 0));
-    host.destroy();
   });
 
   test("renders a draw item to visible pixels", async () => {

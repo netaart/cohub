@@ -126,8 +126,7 @@ $effect(() => {
 	if (!element || !url || !active) return;
 	queueMicrotask(() => {
 		element.focus({ preventScroll: true });
-		void element.play().catch(() => {
-		});
+		void element.play().catch(() => {});
 	});
 	return () => {
 		element.pause();
@@ -138,10 +137,20 @@ $effect(() => {
 
 $effect(() => {
 	const element = mediaEl;
-	const time = item?.type === "video" || item?.type === "audio" ? item.props.time : undefined;
-	if (!element || time === undefined || !Number.isFinite(time) || Math.abs(element.currentTime - time / 1000) < 0.05) return;
-	if (element.readyState >= 1) element.currentTime = Math.max(0, time / 1000);
+	const time =
+		item?.type === "video" || item?.type === "audio"
+			? item.props.time
+			: undefined;
+	if (!element || time === undefined || !Number.isFinite(time)) return;
+	const seek = () => {
+		if (Math.abs(element.currentTime - time / 1000) < 0.05) return;
+		if (element.readyState >= 1) element.currentTime = Math.max(0, time / 1000);
+	};
+	seek();
+	element.addEventListener("loadedmetadata", seek);
+	return () => element.removeEventListener("loadedmetadata", seek);
 });
+
 onMount(() => {
 	const pauseWhenHidden = () => {
 		if (document.hidden) mediaEl?.pause();

@@ -153,12 +153,6 @@ function videoFormatFromPath(path: string): BoardVideoExportFormat | null {
   return lower.endsWith(".webm") ? "webm" : lower.endsWith(".mp4") ? "mp4" : null;
 }
 
-function parseVideoFormat(options: ExportOptions, outPath: string): BoardVideoExportFormat {
-  const value = options.format?.toLowerCase() ?? videoFormatFromPath(outPath);
-  if (!value || !BOARD_VIDEO_FORMATS.includes(value as BoardVideoExportFormat)) throw new Error("Video output must be .mp4 or .webm.");
-  return value as BoardVideoExportFormat;
-}
-
 
 function formatFromPath(path: string): BoardHeadlessExportFormat {
   const lower = path.toLowerCase();
@@ -213,7 +207,12 @@ Examples:
       try {
         const out = options.out as string;
         const times = options.at ? parseBoardTimes(options.at) : undefined;
-        const videoFormat = videoFormatFromPath(out) ?? (options.format && BOARD_VIDEO_FORMATS.includes(options.format.toLowerCase() as BoardVideoExportFormat) ? parseVideoFormat(options, out) : null);
+        const pathVideoFormat = videoFormatFromPath(out);
+        const requestedFormat = options.format?.toLowerCase();
+        if (requestedFormat && ![...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].includes(requestedFormat as BoardHeadlessExportFormat | BoardVideoExportFormat)) throw new Error(`--format must be one of ${[...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].join(", ")}.`);
+        const videoFormat = requestedFormat
+          ? BOARD_VIDEO_FORMATS.includes(requestedFormat as BoardVideoExportFormat) ? requestedFormat as BoardVideoExportFormat : null
+          : pathVideoFormat;
         const sequence = (times?.length ?? 0) > 1;
         if (sequence && !videoFormat && !/%0?\d*d/.test(out)) throw new Error("A range needs %d in --out, e.g. frames/%04d.png.");
         if (videoFormat) {
