@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test, mock, after } from "node:test";
 import { and, eq, SQL } from "drizzle-orm";
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
-import { sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments } from "@cohub/db";
+import { sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments, taskRuns } from "@cohub/db";
 
 const home = process.env.RUNTIME_TEST_DB_HOME;
 if (!home) throw new Error("RUNTIME_TEST_DB_HOME must point to an isolated PGlite installation");
@@ -13,7 +13,7 @@ const engine = new PGlite();
 const database = drizzle(engine);
 const dialect = new PgDialect();
 await engine.exec("create schema v2");
-for (const table of [sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments]) {
+for (const table of [sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments, taskRuns]) {
   const config = getTableConfig(table);
   const columns = config.columns.map((column) => {
     const value = column.default;

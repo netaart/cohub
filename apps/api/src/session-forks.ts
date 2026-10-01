@@ -7,7 +7,7 @@ import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { sessionForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "./reference-index-queue.js";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
-import { inheritSessionMetaForFork, normalizeSessionTitle, readSessionParticipantUserUuids, setSessionParticipantsMeta, setSessionTitleMeta } from "@cohub/core/sessions";
+import { inheritSessionMetaForFork, normalizeSessionTitle, readSessionParticipantUserUuids, refreshSessionStats, setSessionParticipantsMeta, setSessionTitleMeta } from "@cohub/core/sessions";
 
 type SegmentRow = typeof sessionTurnSegments.$inferSelect;
 export const MAX_SESSION_TURN_SEGMENTS = 128;
@@ -262,6 +262,8 @@ export async function createSessionForkInTransaction(tx: Transaction, input: Ses
     now,
   );
 
+  // The parent's projection includes turns beyond the fork anchor. Never copy it.
+  delete childMeta.stats;
   const [child] = await tx
     .insert(spaceSessions)
     .values({
@@ -363,7 +365,11 @@ export async function publishSessionFork(result: Awaited<ReturnType<typeof creat
       createdBy: result.fork.createdBy,
     }),
   ]);
-  return { session: result.session, fork: toForkRecord(result.fork) };
+  const refreshed = await refreshSessionStats(db, result.session.id).catch((error) => {
+    logger.warn("[Metrics] failed to initialize fork stats", error);
+    return null;
+  });
+  return { session: refreshed?.session ?? result.session, fork: toForkRecord(result.fork) };
 }
 
 export async function createSessionFork(input: SessionForkInput) {

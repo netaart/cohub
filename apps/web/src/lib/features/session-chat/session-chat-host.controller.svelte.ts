@@ -25,6 +25,7 @@ import { tick, untrack } from "svelte";
 import { classifyAccessError } from "$lib/access/access-state";
 import type { SessionListForkRecord } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
+import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
 import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
 import { shouldRefreshAgentCatalogs } from "$lib/cache/space-fs-invalidation";
 import { noteViewerActivity } from "$lib/command-palette/palette-overview";
@@ -60,6 +61,7 @@ import {
 	uploadChatAttachmentImage,
 } from "$lib/public-asset-images";
 import { sdk } from "$lib/sdk";
+import { mergeSessionRecord } from "$lib/session-record-merge";
 import { sortSessionsByRecentActivity } from "$lib/session-sort";
 import type { TimelineItem } from "$lib/session-tree";
 import { buildTurnTimelineItems } from "$lib/session-turn-render";
@@ -1625,7 +1627,19 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	}
 
 	function applySessionRealtimeRecord(session: SessionRecord) {
-		upsertSessionRecord(session);
+		const current = workspace.spaceSessions.find(
+			(item) => item.id === session.id,
+		);
+		upsertSessionRecord(mergeSessionRecord(current, session));
+		const merged = workspace.spaceSessions.find(
+			(item) => item.id === session.id,
+		);
+		if (merged)
+			void sessionDetailRepo
+				.set(spaceId, merged, { source: "network" })
+				.catch((error) =>
+					console.warn("[session-chat] failed to cache session update", error),
+				);
 	}
 
 	function applySessionsSnapshot(

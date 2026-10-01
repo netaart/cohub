@@ -23,7 +23,7 @@ import { db } from "../../../db.js";
 import { restoreRemoteImageUrls } from "@cohub/model-runtime/image-content";
 import { createModelsFromRegistry } from "@cohub/model-runtime/pi-models-adapter";
 import { loadModelTasksConfig } from "../../../model-tasks.js";
-import { dispatchSessionUpdated } from "../../../realtime-events.js";
+import { dispatchSessionUpdated, refreshWorkerSessionStats } from "../../../realtime-events.js";
 import { buildSessionTitleContent } from "../../../session-title-content.js";
 import { registerSystemJob } from "../../registry.js";
 
@@ -178,6 +178,7 @@ export async function runSessionTitleGenerateJob(data: SessionTitleGenerateJobDa
   await dispatchSessionUpdated({ session: updated, changed: ["title", "updatedAt"] }).catch((error) => {
     logger.warn("[SessionTitle] failed to dispatch session.updated", error);
   });
+  await refreshWorkerSessionStats(data.sessionId);
   return { ok: true, title: generated.title };
 }
 

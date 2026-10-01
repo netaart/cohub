@@ -766,6 +766,7 @@ export const persistMessageNode = async (input: PersistMessageInput & { message:
 };
 
 export const updateSpaceSessionInfo = async (input: UpdateSessionInfoInput) => {
+  if (input.meta && Object.hasOwn(input.meta, "stats")) throw new Error("Session stats are server-managed");
   const changed: string[] = [];
   const refreshed = await db.transaction(async (tx) => {
     const [session] = await tx.select().from(spaceSessions)

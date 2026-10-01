@@ -34,6 +34,7 @@ export type ChatMessage = {
 		durationMs?: number | null;
 		stopReason?: string | null;
 		errorMessage?: string | null;
+		llmTiming?: unknown;
 	};
 	toolCallsLoader?: (() => Promise<MessageToolCallsFile | null>) | null;
 };

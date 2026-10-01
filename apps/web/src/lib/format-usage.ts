@@ -33,10 +33,10 @@ export function formatUsageCostFromUsage(
 	return total == null ? "" : formatUsageCost(total, locale);
 }
 
-/** Display input tokens include cache-read (same rule as ChatMessageBubble). */
+/** Normalized input excludes both cache reads and cache writes; display their total. */
 export function getDisplayInputTokens(usage: Usage | null | undefined): number {
 	if (!usage) return 0;
-	return (usage.input ?? 0) + (usage.cacheRead ?? 0);
+	return (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 }
 
 export function getUsageTotalTokens(usage: Usage | null | undefined): number {

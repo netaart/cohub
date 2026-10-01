@@ -1,3 +1,6 @@
+import { refreshSessionStatsAndPublish } from "@cohub/core/sessions";
+import { isSettledStatsTurn } from "@cohub/protocol/model";
+import { db } from "./db.js";
 import { randomUUID } from "node:crypto";
 import { REALTIME_OUTBOUND_CHANNEL, type RealtimeSessionRecord, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
 import type { spaceSessions } from "@cohub/db";
@@ -101,10 +104,15 @@ async function publishTaskEvent(input: {
 export const dispatchTaskCreated = (task: Parameters<typeof toRealtimeTaskRecord>[0]) =>
   publishTaskEvent({ type: "task.created", task });
 
-export const dispatchTaskUpdated = (input: {
+export const dispatchTaskUpdated = async (input: {
   task: Parameters<typeof toRealtimeTaskRecord>[0];
   changed: string[];
-}) => publishTaskEvent({ type: "task.updated", task: input.task, changed: input.changed });
+}) => {
+  if (input.task.sessionId && ["generation", "generation.billing_retry"].includes(input.task.taskType) && ["completed", "failed"].includes(input.task.status)) {
+    await refreshWorkerSessionStats(input.task.sessionId);
+  }
+  await publishTaskEvent({ type: "task.updated", task: input.task, changed: input.changed });
+};
 
 export async function dispatchSessionUpdated(input: { session: typeof spaceSessions.$inferSelect; changed: string[] }) {
   const session: RealtimeSessionRecord = {
@@ -150,5 +158,12 @@ async function dispatchTurnEvent(input: {
 export const dispatchTurnCreated = (input: { spaceId: string; turn: SessionTurnRecord }) =>
   dispatchTurnEvent({ type: "session.turn.created", ...input });
 
-export const dispatchTurnUpdated = (input: { spaceId: string; turn: SessionTurnRecord }) =>
-  dispatchTurnEvent({ type: "session.turn.updated", ...input });
+export async function refreshWorkerSessionStats(sessionId: string) {
+  await refreshSessionStatsAndPublish(db, sessionId, (event) => redisCommandClient.publish(REALTIME_OUTBOUND_CHANNEL, JSON.stringify(event)))
+    .catch((error) => console.warn("[Metrics] failed to refresh session stats", error));
+}
+
+export async function dispatchTurnUpdated(input: { spaceId: string; turn: SessionTurnRecord }) {
+  if (isSettledStatsTurn(input.turn)) await refreshWorkerSessionStats(input.turn.sessionId);
+  await dispatchTurnEvent({ type: "session.turn.updated", ...input });
+}

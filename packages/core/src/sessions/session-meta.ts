@@ -96,7 +96,12 @@ export const initializeSessionParticipantsMeta = (
   meta: unknown,
   userUuid: string,
   now = new Date(),
-): Record<string, unknown> => setSessionParticipantsMeta(meta, [userUuid], now);
+): Record<string, unknown> => {
+  const initial = normalizeRecord(meta);
+  // A new Session cannot inherit or accept a caller-supplied statistics projection.
+  delete initial.stats;
+  return setSessionParticipantsMeta(initial, [userUuid], now);
+};
 
 export const addSessionParticipantMeta = (
   meta: unknown,

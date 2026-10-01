@@ -1461,6 +1461,33 @@ function registerSessions(spacesCmd: Command): void {
     });
 
   sessionsCmd
+    .command("stats <id>")
+    .description("Session statistics for settled turns (including separate inherited history)")
+    .option("--json", "Output as JSON")
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const spaceId = await resolveSpace(spacesCmd);
+      try {
+        const { stats } = await createClient().space(spaceId).session(id).stats();
+        if (jsonRequested(opts)) return outJson({ stats });
+        const own = stats.own;
+        const rows = [
+          { metric: "Turns", value: own.turns },
+          { metric: "Model calls", value: own.calls },
+          { metric: "Tool calls", value: own.toolCalls },
+          { metric: "Compactions", value: own.compactions },
+          { metric: "Tokens", value: own.usage?.totalTokens },
+          { metric: "Execution time (ms)", value: own.elapsedMs },
+          { metric: "Model time (ms)", value: own.modelMs == null ? null : Math.round(own.modelMs) },
+          { metric: "Estimated LLM cost (USD)", value: own.estimatedCostUsd },
+          { metric: "Charged generation cost (USD)", value: own.chargedCostUsd },
+          { metric: "Inherited turns", value: stats.inherited.turns },
+        ].filter((row) => row.value != null);
+        table(rows, [{ key: "metric", label: "Metric" }, { key: "value", label: "Value" }]);
+        if (own.partial) console.log("Some execution details were not recorded.");
+      } catch (e: unknown) { handleHttp(e); }
+    });
+
+  sessionsCmd
     .command("files <id>")
     .description("List Space files changed by a session")
     .option("--limit <n>", "Maximum files to list; the server caps it", "200")

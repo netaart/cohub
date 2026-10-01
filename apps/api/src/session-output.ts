@@ -1,3 +1,5 @@
+import { refreshSessionStatsAndPublish } from "@cohub/core/sessions";
+import { isSettledStatsTurn } from "@cohub/protocol/model";
 import { createLogger } from "@cohub/infra/logging";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -150,6 +152,7 @@ export const dispatchSessionOutput = async (output: GatewaySessionOutput) => {
 };
 
 export const dispatchTurnUpdated = async (input: { spaceId: string; sessionId: string; turn: SessionTurnRecord }) => {
+  if (isSettledStatsTurn(input.turn)) await refreshSessionStatsAndPublish(db, input.sessionId, dispatchRealtimeEvent).catch((error) => logger.warn("[Metrics] failed to refresh session stats", error));
   await dispatchRealtimeEvent({
     id: randomUUID(),
     timestamp: Date.now(),
@@ -170,6 +173,7 @@ const truncateTurnPreview = (text: string | null | undefined) => {
 };
 
 export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId: string; turn: SessionTurnRecord }) => {
+  await refreshSessionStatsAndPublish(db, input.sessionId, dispatchRealtimeEvent).catch((error) => logger.warn("[Metrics] failed to refresh session stats", error));
   await clearSessionStreamSnapshot({ spaceId: input.spaceId, sessionId: input.sessionId, turnId: input.turn.id });
   const sessionLabelRefs = await listResourceLabelRefs({
     db,

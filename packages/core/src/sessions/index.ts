@@ -1,3 +1,4 @@
+export * from "./stats.js";
 export * from "./compaction.js";
 export * from "./content.js";
 export * from "./image-to-text.js";

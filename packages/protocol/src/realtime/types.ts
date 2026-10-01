@@ -342,7 +342,7 @@ export type RealtimeSessionRecord = Pick<
   | "lastMessageId"
   | "createdAt"
   | "updatedAt"
->;
+> & { stats?: import("../model/metrics.js").SessionStats };
 
 export type SessionCreatedEvent = {
   id: string;

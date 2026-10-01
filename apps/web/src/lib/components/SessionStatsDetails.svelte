@@ -1,0 +1,95 @@
+<script lang="ts">
+import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
+import type { SessionRecord } from "@neta-art/cohub";
+import { onMount } from "svelte";
+import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
+import ExecutionStatsDetails from "$lib/components/ExecutionStatsDetails.svelte";
+import { formatTokenCount } from "$lib/format-usage";
+import { getLocale } from "$lib/i18n/locale.svelte";
+import { m } from "$lib/paraglide/messages.js";
+import { sdk } from "$lib/sdk";
+
+let { session }: { session: SessionRecord } = $props();
+const locale = $derived(getLocale());
+let fresh = $state<SessionStats | null>(null);
+let loading = $state(false);
+let failed = $state(false);
+const cached = $derived(readSessionStats(session.meta));
+const stats = $derived(
+	fresh && (!cached || fresh.revision > cached.revision) ? fresh : cached,
+);
+let request: AbortController | undefined;
+async function refresh() {
+	request?.abort();
+	const controller = new AbortController();
+	request = controller;
+	const current = session;
+	loading = true;
+	failed = false;
+	try {
+		const local = await sessionDetailRepo
+			.get(current.spaceId, current.id)
+			.catch(() => null);
+		const localStats = readSessionStats(local?.session.meta);
+		if (
+			!controller.signal.aborted &&
+			session.id === current.id &&
+			localStats &&
+			(!stats || localStats.revision > stats.revision)
+		)
+			fresh = localStats;
+		const result = await sdk
+			.space(current.spaceId)
+			.session(current.id)
+			.stats({ signal: controller.signal });
+		if (controller.signal.aborted || session.id !== current.id) return;
+		const received = readSessionStats({ stats: result.stats });
+		if (!received) throw new Error("Unsupported session statistics");
+		fresh = received;
+		const existing =
+			(
+				await sessionDetailRepo
+					.get(current.spaceId, current.id)
+					.catch(() => null)
+			)?.session ?? current;
+		const previous = readSessionStats(existing.meta);
+		if (!previous || previous.revision <= received.revision) {
+			await sessionDetailRepo.set(
+				current.spaceId,
+				{ ...existing, meta: { ...existing.meta, stats: received } },
+				{ source: "network" },
+			);
+		}
+	} catch {
+		if (!controller.signal.aborted) failed = true;
+	} finally {
+		if (!controller.signal.aborted) loading = false;
+	}
+}
+onMount(() => {
+	void refresh();
+	return () => request?.abort();
+});
+</script>
+
+{#if stats}
+  <p class="mb-3 text-[11px] text-text-tertiary">{m.stats_settled({}, { locale })}</p>
+  <ExecutionStatsDetails stats={stats.own} showTurns />
+  {#if stats.auxiliaryUsage?.totalTokens != null}
+    <p class="mt-3 text-[11px] text-text-tertiary">{m.stats_session_auxiliary({ count: formatTokenCount(stats.auxiliaryUsage.totalTokens) }, { locale })}</p>
+  {/if}
+  {#if stats.inherited.turns || stats.inherited.compactions}
+    <details class="mt-3 border-t border-border-subtle pt-3">
+      <summary class="cursor-pointer text-text-secondary">{m.stats_inherited({}, { locale })}</summary>
+      <div class="mt-3"><ExecutionStatsDetails stats={stats.inherited} showTurns /></div>
+    </details>
+  {/if}
+{:else if loading}
+  <p class="py-3 text-text-tertiary" role="status">{m.stats_loading({}, { locale })}</p>
+{/if}
+{#if failed}
+  <div class="mt-3 flex items-center justify-between gap-2 text-[11px] text-text-tertiary">
+    <span>{m.stats_unavailable({}, { locale })}</span>
+    <button type="button" class="min-h-9 rounded px-2 text-text-secondary hover:bg-bg-hover disabled:opacity-50" disabled={loading} onclick={() => void refresh()}>{m.common_retry({}, { locale })}</button>
+  </div>
+{/if}

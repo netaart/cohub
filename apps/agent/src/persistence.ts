@@ -19,7 +19,8 @@ import type { ChannelProvider, GatewayOutboundCommand } from "@cohub/protocol/ga
 import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { sessionMessages, sessionTurns, spaceChannels, spaceSessionBindings, spaceSessions, providerMessageRefs, userChannels, userProfiles } from "@cohub/db";
 import { listResourceLabelRefs } from "@cohub/core/labels";
-import { runtimeResolutionOpen } from "@cohub/core/sessions";
+import { collectImageToTextTiming, collectToolMetrics } from "@cohub/protocol/model";
+import { refreshSessionStatsAndPublish, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { addImageToTextCallsToSummary, claimSessionFallbackTitle, countToolCallsInContent, createImageToTextUsageSummaryAccumulator, deriveMessagePreviewText, deriveSessionFallbackTitle, finalizeImageToTextUsageSummary, readImageToTextCalls, readSessionTitleSource, resolveMessageTurnId, shouldGenerateSessionTitle, summarizeSessionTurnCompactions, sumImageToTextUsage } from "@cohub/core/sessions";
 import { buildTraceHeaders, getCurrentRequestId } from "@cohub/infra/tracing";
@@ -251,6 +252,7 @@ export async function publishSessionTurnsUpdated(input: {
 }
 
 async function publishTurnFinalized(spaceId: string, turn: SessionTurnRecord) {
+  await refreshSessionStatsAndPublish(db, turn.sessionId, publishRealtimeEnvelope).catch((error) => logger.warn("[Metrics] failed to refresh session stats", error));
   await clearPersistedSessionStreamSnapshot(spaceId, turn.sessionId, turn.id);
   const sessionLabelRefs = await listResourceLabelRefs({
     db,
@@ -684,7 +686,7 @@ async function finalizeSessionTurnFromMessage(input: { spaceId: string; sessionI
     errorMessage: input.errorMessage,
     finalUsage: input.usage,
     totalUsage: addUsage(addUsage(intermediate?.summary.usage, input.usage), sumImageToTextUsage(input.metaPatch)),
-    ...(Object.keys(turnMetaPatch).length > 0 ? { meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(turnMetaPatch)}::jsonb` } : {}),
+    meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(turnMetaPatch)}::jsonb || jsonb_build_object('metrics', coalesce(${sessionTurns.meta}->'metrics', '{}'::jsonb) || ${JSON.stringify({ version: 1, tools: collectToolMetrics([...intermediate.rows.map((message) => message.content), input.assistantContent]), imageToText: collectImageToTextTiming(intermediate.rows.map((message) => message.meta)) })}::jsonb)`,
     summary: { text: input.assistantText, finishReason: input.status === "interrupted" ? "interrupted" : input.status === "failed" ? "failed" : "completed" },
     intermediateIndex: intermediate?.index ?? null,
     intermediateSummary: intermediate?.summary ?? null,
@@ -897,7 +899,7 @@ async function finalizeInterruptedTurn(input: { spaceId: string; sessionId: stri
   const imageToTextSummary = intermediate?.summary.imageToText;
   const completedAt = new Date();
   const completedAtIso = completedAt.toISOString();
-  const [row] = await db.update(sessionTurns).set({ status: "interrupted", assistantContent: last?.content ?? null, assistantText: last?.text ?? null, provider: last?.provider ?? null, model: last?.model ?? null, stopReason: input.stopReason, errorMessage: null, finalUsage: last?.usage as Usage | null ?? null, totalUsage: intermediate?.summary.usage ?? null, summary: input.summary, intermediateIndex: intermediate?.index ?? null, intermediateSummary: intermediate?.summary ?? null, ...(imageToTextSummary && imageToTextSummary.callCount > 0 ? { meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify({ imageToText: { schemaVersion: 1, summary: imageToTextSummary } })}::jsonb` } : {}), completedAt, durationMs: sql<number>`greatest(0, floor(extract(epoch from (${completedAtIso}::timestamptz - ${sessionTurns.startedAt})) * 1000)::int)`, updatedAt: completedAt }).where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId), inArray(sessionTurns.status, ["running", "abort_requested", "interrupted"]))).returning();
+  const [row] = await db.update(sessionTurns).set({ status: "interrupted", assistantContent: last?.content ?? null, assistantText: last?.text ?? null, provider: last?.provider ?? null, model: last?.model ?? null, stopReason: input.stopReason, errorMessage: null, finalUsage: last?.usage as Usage | null ?? null, totalUsage: intermediate?.summary.usage ?? null, summary: input.summary, intermediateIndex: intermediate?.index ?? null, intermediateSummary: intermediate?.summary ?? null, meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(imageToTextSummary && imageToTextSummary.callCount > 0 ? { imageToText: { schemaVersion: 1, summary: imageToTextSummary } } : {})}::jsonb || jsonb_build_object('metrics', coalesce(${sessionTurns.meta}->'metrics', '{}'::jsonb) || ${JSON.stringify({ version: 1, tools: collectToolMetrics(intermediate.rows.map((message) => message.content)), imageToText: collectImageToTextTiming(intermediate.rows.map((message) => message.meta)) })}::jsonb)`, completedAt, durationMs: sql<number>`greatest(0, floor(extract(epoch from (${completedAtIso}::timestamptz - ${sessionTurns.startedAt})) * 1000)::int)`, updatedAt: completedAt }).where(and(eq(sessionTurns.id, input.turnId), eq(sessionTurns.sessionId, input.sessionId), inArray(sessionTurns.status, ["running", "abort_requested", "interrupted"]))).returning();
   return { turn: row ? toTurnRecord(row) : null, messages: intermediate.rows };
 }
 
@@ -1186,6 +1188,9 @@ export async function persistCompactionEvent(
       logger.warn("[Compaction] failed to publish turn finalized", error);
     });
   } else if (state.ownerTurnRow) {
+    if (!["queued", "running", "abort_requested"].includes(state.ownerTurnRow.status)) {
+      await refreshSessionStatsAndPublish(db, input.sessionId, publishRealtimeEnvelope).catch((error) => logger.warn("[Metrics] failed to refresh compaction stats", error));
+    }
     const turn = toTurnRecord(state.ownerTurnRow);
     await publishRealtimeEnvelope({
       domain: "session",

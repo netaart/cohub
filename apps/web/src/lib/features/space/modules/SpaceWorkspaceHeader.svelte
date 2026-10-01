@@ -6,6 +6,7 @@ import type {
 } from "@neta-art/cohub";
 import {
 	Check,
+	Gauge,
 	Globe,
 	ListTree,
 	Loader2,
@@ -19,7 +20,9 @@ import {
 } from "lucide-svelte";
 import { floatNear } from "$lib/actions/portal";
 import ColumnHeader from "$lib/components/ColumnHeader.svelte";
+import SessionStatsDetails from "$lib/components/SessionStatsDetails.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import StatsPopover from "$lib/components/StatsPopover.svelte";
 import { getSessionTitle } from "$lib/features/session-chat";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -99,6 +102,11 @@ let { context, sessionRename, resourceActions, actions }: Props = $props();
 const locale = $derived(getLocale());
 let sessionRenameInputEl: HTMLInputElement | null = $state(null);
 let resourceActionsRootEl: HTMLElement | null = $state(null);
+let statsOpen = $state(false);
+$effect(() => {
+	context.activeSessionId;
+	statsOpen = false;
+});
 let sessionRenameFocused = $state(false);
 
 const spaceTitle = $derived(
@@ -218,8 +226,14 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 						role="menuitem"
 					>
 						<ListTree class="h-3.5 w-3.5" />
-						<span>Label as…</span>
+						<span>{m.inline_label_as({}, { locale })}</span>
 					</button>
+					{#if context.routeView === "session" && context.activeSession}
+						<button type="button" class="menu-item" role="menuitem" onclick={() => { actions.closeResourceActionMenu(); statsOpen = true; }}>
+							<Gauge class="h-3.5 w-3.5" />
+							<span>{m.stats_session({}, { locale })}</span>
+						</button>
+					{/if}
 					<button type="button" class="menu-item" onclick={actions.insertHeaderReference} role="menuitem">
 						<TextCursorInput class="h-3.5 w-3.5" />
 						<span>{m.space_header_insert_reference({}, { locale })}</span>
@@ -227,6 +241,12 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 				</div>
 			{/if}
 		</div>
+	{/if}
+
+	{#if context.activeSession && statsOpen}
+		<StatsPopover title={m.stats_session({}, { locale })} bind:open={statsOpen} anchor={resourceActionsRootEl}>
+			{#key context.activeSession.id}<SessionStatsDetails session={context.activeSession} />{/key}
+		</StatsPopover>
 	{/if}
 
 	{#if context.rightSidebarAvailable}

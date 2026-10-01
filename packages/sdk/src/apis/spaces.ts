@@ -1,3 +1,4 @@
+import type { SessionStats } from "@cohub/protocol/model";
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { BoardAuthoringItemSchema, SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
@@ -950,6 +951,11 @@ export class SessionClient {
         fetch: customFetch,
       },
     );
+  }
+
+  /** Persisted Session summary, rebuilt server-side from settled execution records. */
+  stats(options: { signal?: AbortSignal } = {}) {
+    return this.transport.request<{ stats: SessionStats }>(`/api/sessions/${this.id}/stats`, options);
   }
 
   /** Space files changed by this session's agent write/edit tool calls. */
