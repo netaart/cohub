@@ -1,25 +1,20 @@
-import type {
-	BoardCameraFocus,
-	BoardCameraFocusParams,
-	BoardCameraState,
-} from "@cohub/protocol";
-import type { BoardFrame, BoardViewport } from "@cohub/protocol/board-document";
+import type { BoardFrame } from "@cohub/protocol";
+
+export type BoardViewport = { x: number; y: number; zoom: number };
+export type BoardCameraState = { centerX: number; centerY: number; zoom: number };
+export type BoardCameraFocus = string | { x: number; y: number; width: number; height: number };
+export type BoardCameraFit = { fit?: "contain" | "cover"; padding?: number; minZoom?: number; maxZoom?: number };
 
 export type Point = { x: number; y: number };
 export type Rect = { x: number; y: number; width: number; height: number };
 export type Size = { width: number; height: number };
 
-// Branded point types. The brand is phantom (no runtime cost) but makes
-// screen and world coordinates incompatible at compile time, so a screen
-// point can never be fed into world-space hit testing (or vice versa).
 declare const coordBrand: unique symbol;
-/** Surface-relative screen coordinate, in CSS pixels. */
 export type ScreenPoint = {
 	x: number;
 	y: number;
 	readonly [coordBrand]: "screen";
 };
-/** Board world coordinate, in board units. */
 export type WorldPoint = {
 	x: number;
 	y: number;
@@ -75,18 +70,10 @@ export function worldRect(
 export const MIN_BOARD_ZOOM = 0.05;
 export const MAX_BOARD_ZOOM = 8;
 const DEFAULT_BOARD_VIEWPORT: BoardViewport = { x: 0, y: 0, zoom: 1 };
-/** Smallest an item can be resized to, in world units. */
 export const MIN_ITEM_SIZE = 24;
-/** Extra world-space padding applied when fitting content into view. */
 export const FIT_PADDING = 64;
-/**
- * Fraction of the viewport's larger dimension used as an off-screen margin for
- * both card culling and texture preloading. Keeping them equal means a card's
- * texture is already requested before the card scrolls into view.
- */
 export const VIEWPORT_MARGIN_RATIO = 0.5;
 
-/** Viewport plus margin, snapped to a grid so small pans return the same rect. */
 export function stableCullRect(view: Rect): Rect {
 	const margin = Math.max(view.width, view.height, 1) * VIEWPORT_MARGIN_RATIO;
 	const step = 2 ** Math.floor(Math.log2(margin / 2));
@@ -102,7 +89,6 @@ export function clampZoom(zoom: number) {
 	return Math.min(MAX_BOARD_ZOOM, Math.max(MIN_BOARD_ZOOM, value));
 }
 
-/** Keep transient camera state finite without discarding its last valid axes. */
 export function normalizeViewport(
 	viewport: BoardViewport,
 	fallback: BoardViewport = DEFAULT_BOARD_VIEWPORT,
@@ -137,7 +123,6 @@ export function radToDeg(radians: number) {
 	return (radians * 180) / Math.PI;
 }
 
-// ─── Basic rect / point helpers ─────────────────────────────────────
 
 export function frameRect(frame: BoardFrame): Rect {
 	return {
@@ -233,9 +218,7 @@ export function rotatePointAround<P extends Point>(
 	} as P;
 }
 
-// ─── Item bounds (rotation aware) ───────────────────────────────────
 
-/** Axis-aligned bounding box of a (possibly rotated) frame. */
 export function itemBounds(frame: BoardFrame): Rect {
 	const rotation = frame.rotation || 0;
 	if (rotation === 0) return frameRect(frame);
@@ -259,7 +242,6 @@ export function selectionBounds(frames: BoardFrame[]): Rect | null {
 	return unionRects(frames.map(itemBounds));
 }
 
-/** Exact point-in-frame test, accounting for rotation. */
 export function frameContainsPoint(
 	frame: BoardFrame,
 	point: WorldPoint,
@@ -273,7 +255,6 @@ export function frameContainsPoint(
 	return rectContainsPoint(rect, local);
 }
 
-/** World position of a resize handle on a single (possibly rotated) frame. */
 export function frameHandlePosition(
 	frame: BoardFrame,
 	handle: ResizeHandle,
@@ -285,18 +266,14 @@ export function frameHandlePosition(
 	return rotatePointAround(position, rectCenter(rect), degToRad(rotation));
 }
 
-/** Corners in clockwise order, following the frame's rotation. */
 export function frameCorners(frame: BoardFrame): readonly WorldPoint[] {
 	return ["nw", "ne", "se", "sw"].map((handle) =>
 		frameHandlePosition(frame, handle as ResizeHandle),
 	);
 }
 
-// ─── Selection handles ──────────────────────────────────────────────
 
-/** Screen-space radius (px) within which a pointer grabs a handle. */
 export const HANDLE_HIT_RADIUS = 8;
-/** Screen-space offset (px) from the selection's lower-facing edge. */
 export const ROTATION_HANDLE_OFFSET = 28;
 
 export function frameRayIntersection(
@@ -345,7 +322,6 @@ export function rotationHandlePosition(
 	return worldPoint(center.x, anchor.y + offset);
 }
 
-// ─── Resize ─────────────────────────────────────────────────────────
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
@@ -353,7 +329,6 @@ export const CORNER_RESIZE_HANDLES = ["nw", "ne", "se", "sw"] as const;
 export const EDGE_RESIZE_HANDLES = ["n", "e", "s", "w"] as const;
 export type CornerResizeHandle = (typeof CORNER_RESIZE_HANDLES)[number];
 
-/** Screen-space depth of the rotation zone outside each resize corner. */
 export const CORNER_ROTATION_ZONE_WIDTH = 16;
 
 export const RESIZE_HANDLES: ResizeHandle[] = [
@@ -367,10 +342,6 @@ export const RESIZE_HANDLES: ResizeHandle[] = [
 	"w",
 ];
 
-/**
- * Hit-test the outward quadrant around each corner, outside its resize target.
- * This gives fine pointers Figma-style corner rotation without adding chrome.
- */
 export function frameCornerRotationHandleAt(
 	frame: BoardFrame,
 	point: WorldPoint,
@@ -400,10 +371,6 @@ export function frameCornerRotationHandleAt(
 	return null;
 }
 
-/**
- * Hit-test the continuous edge zones of a rotated frame. Corners are inset so
- * their resize handles retain priority even on small nodes.
- */
 export function frameEdgeHandleAt(
 	frame: BoardFrame,
 	point: WorldPoint,
@@ -453,7 +420,6 @@ export function frameEdgeHandleAt(
 	return closest;
 }
 
-/** Direction of a handle from the rect center: -1, 0, or 1 per axis. */
 export const HANDLE_DIRECTION: Record<ResizeHandle, Point> = {
 	nw: { x: -1, y: -1 },
 	n: { x: 0, y: -1 },
@@ -465,7 +431,6 @@ export const HANDLE_DIRECTION: Record<ResizeHandle, Point> = {
 	w: { x: -1, y: 0 },
 };
 
-/** Position of a handle on an unrotated rect. */
 export function handlePosition(rect: Rect, handle: ResizeHandle): WorldPoint {
 	const direction = HANDLE_DIRECTION[handle];
 	return worldPoint(
@@ -474,7 +439,6 @@ export function handlePosition(rect: Rect, handle: ResizeHandle): WorldPoint {
 	);
 }
 
-/** Resize a frame to exact dimensions while keeping the opposite handle fixed. */
 export function resizeFrameToSize(
 	frame: BoardFrame,
 	handle: ResizeHandle,
@@ -512,17 +476,11 @@ export function resizeFrameToSize(
 	};
 }
 
-/**
- * Resize a frame by dragging a handle to a world-space pointer position.
- * The edge/corner opposite the handle stays anchored. Works correctly for
- * rotated frames by performing the resize in the frame's local space.
- */
 export function resizeFrame(
 	frame: BoardFrame,
 	handle: ResizeHandle,
 	pointer: WorldPoint,
 	minSize = MIN_ITEM_SIZE,
-	/** Keep the original aspect ratio (Shift). */
 	keepAspect = false,
 ): BoardFrame {
 	const direction = HANDLE_DIRECTION[handle];
@@ -531,7 +489,6 @@ export function resizeFrame(
 	const rad = degToRad(frame.rotation || 0);
 	const aspect = rect.width / Math.max(rect.height, 0.0001);
 
-	// Anchor = opposite edge/corner, held fixed during the resize.
 	const anchorLocal = {
 		x: (-direction.x * rect.width) / 2,
 		y: (-direction.y * rect.height) / 2,
@@ -542,7 +499,6 @@ export function resizeFrame(
 		rad,
 	);
 
-	// Express the pointer in the frame's unrotated local space, origin at anchor.
 	const toLocal = rotatePointAround(pointer, anchor, -rad);
 	const local = { x: toLocal.x - anchor.x, y: toLocal.y - anchor.y };
 
@@ -557,7 +513,6 @@ export function resizeFrame(
 
 	if (keepAspect) {
 		if (direction.x !== 0 && direction.y !== 0) {
-			// Corner: pick the dominant axis and derive the other.
 			if (Math.abs(width / aspect) > height) height = width / aspect;
 			else width = height * aspect;
 		} else if (direction.x !== 0) {
@@ -572,10 +527,6 @@ export function resizeFrame(
 	return resizeFrameToSize(frame, handle, width, height);
 }
 
-/**
- * Proportionally scale a group of frames by dragging a corner handle of their
- * combined bounds. Individual rotations are preserved.
- */
 export function scaleFrames(
 	frames: BoardFrame[],
 	bounds: Rect,
@@ -626,9 +577,7 @@ export function scaleFrames(
 	});
 }
 
-// ─── Rotation ───────────────────────────────────────────────────────
 
-/** Angle (degrees) from a center to a world-space pointer. */
 export function angleFromCenter(
 	center: WorldPoint,
 	pointer: WorldPoint,
@@ -636,10 +585,6 @@ export function angleFromCenter(
 	return radToDeg(Math.atan2(pointer.y - center.y, pointer.x - center.x));
 }
 
-/**
- * Rotate a set of frames around a pivot by a delta (degrees). Each frame's
- * center orbits the pivot and its own rotation increases by the delta.
- */
 export function rotateFrames(
 	frames: BoardFrame[],
 	pivot: WorldPoint,
@@ -659,7 +604,6 @@ export function rotateFrames(
 	});
 }
 
-/** Normalize a rotation into the [-180, 180] range for tidy persistence. */
 export function normalizeRotation(degrees: number): number {
 	let value = degrees % 360;
 	if (value > 180) value -= 360;
@@ -667,9 +611,7 @@ export function normalizeRotation(degrees: number): number {
 	return Math.abs(value) < 0.01 ? 0 : value;
 }
 
-// ─── Camera ─────────────────────────────────────────────────────────
 
-/** Convert a surface-relative screen point into world space. */
 export function pointToWorld(
 	point: ScreenPoint,
 	viewport: BoardViewport,
@@ -702,7 +644,6 @@ export function screenToWorld(
 	);
 }
 
-/** Zoom while keeping a surface-relative screen point fixed under the cursor. */
 export function zoomAround(
 	viewport: BoardViewport,
 	anchor: ScreenPoint,
@@ -738,15 +679,8 @@ export function cameraForState(
 	});
 }
 
-export function cameraForRect(
-	content: Rect,
-	surface: Size,
-	options: Pick<BoardCameraFocusParams, "fit" | "padding" | "minZoom" | "maxZoom"> = {
-		fit: "contain",
-		padding: 32,
-	},
-): BoardViewport {
-	const padding = Math.max(0, Number.isFinite(options.padding) ? options.padding : 32);
+export function cameraForRect(content: Rect, surface: Size, options: BoardCameraFit = {}): BoardViewport {
+	const padding = Math.max(0, Number.isFinite(options.padding) ? (options.padding as number) : 32);
 	const availableW = Math.max(1, surface.width - padding * 2);
 	const availableH = Math.max(1, surface.height - padding * 2);
 	const fitZoom = options.fit === "cover"
@@ -763,32 +697,21 @@ export function rectForCameraFocus(
 	focus: BoardCameraFocus,
 	getFrame: (id: string) => BoardFrame | null | undefined,
 ): Rect | null {
-	if (focus.type === "rect") return focus.rect;
-	if (focus.type === "item") {
-		const frame = getFrame(focus.itemId);
-		return frame ? itemBounds(frame) : null;
-	}
-	if (focus.type === "frame") {
-		const frame = getFrame(focus.frameId);
-		return frame ? itemBounds(frame) : null;
-	}
-	const frames = focus.itemIds.flatMap((id) => {
-		const frame = getFrame(id);
-		return frame ? [frame] : [];
-	});
-	return frames.length === focus.itemIds.length ? selectionBounds(frames) : null;
+	if (typeof focus !== "string") return focus;
+	const frame = getFrame(focus);
+	return frame ? itemBounds(frame) : null;
 }
 
 export function cameraForFocus(
-	params: BoardCameraFocusParams,
+	focus: BoardCameraFocus,
 	getFrame: (id: string) => BoardFrame | null | undefined,
 	surface: Size,
+	options: BoardCameraFit = {},
 ): BoardViewport | null {
-	const rect = rectForCameraFocus(params.focus, getFrame);
-	return rect ? cameraForRect(rect, surface, params) : null;
+	const rect = rectForCameraFocus(focus, getFrame);
+	return rect ? cameraForRect(rect, surface, options) : null;
 }
 
-/** Compute a viewport that frames the given world rect within the surface. */
 export function fitToContent(
 	content: Rect,
 	surface: Size,
@@ -806,7 +729,6 @@ export function fitToContent(
 	};
 }
 
-/** World-space rectangle currently visible in the board stage. */
 export function visibleWorldRect(
 	viewport: BoardViewport,
 	surfaceWidth: number,

@@ -2360,14 +2360,11 @@ function closeInlineBoard() {
 	if (path) windowManager.close("board", path);
 	else windowManager.closeActive();
 }
-async function commitInlineBoard(
-	boardId: string,
-	path: string,
-	document: BoardDocument,
-	before: BoardDocument,
-	commands: import("@neta-art/cohub").BoardSemanticCommand[],
-) {
-	await boardPreview.commitBoard(boardId, path, document, before, commands);
+async function commitInlineBoard(boardId: string, patch: import("@cohub/protocol").BoardPatch) {
+	await boardPreview.commitBoard(boardId, patch);
+}
+function playInlineBoard(boardId: string, command: import("@cohub/protocol").BoardPlaybackCommand) {
+	return boardPreview.playBoard(boardId, command);
 }
 async function retryInlineBoardSave(boardId: string) {
 	await boardPreview.retryBoardSave(boardId);
@@ -3220,6 +3217,7 @@ const spaceFileDomainProps = $derived.by<
 	onReloadInlineFile: reloadInlineFile,
 	onOpenInlinePort: openInlinePort,
 	onCommitInlineBoard: commitInlineBoard,
+	onPlayInlineBoard: playInlineBoard,
 	onRetryInlineBoardSave: retryInlineBoardSave,
 	onBeginPreviewPanelResize: beginPreviewPanelResize,
 	onTogglePreviewFocusMode: togglePreviewFocusMode,

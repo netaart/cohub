@@ -1,13 +1,8 @@
 import { z } from "zod";
-import {
-	BOARD_ARROW_STROKE_SIZE,
-	BOARD_CONNECTION_STROKE_SIZE,
-} from "../board-constants.js";
+import { BOARD_ARROW_STROKE_SIZE } from "../board-constants.js";
 
 const idSchema = z.string().min(1).max(160);
 const finiteSchema = z.number().finite();
-// Awareness is transient UI data. These generous bounds keep arithmetic and CSS
-// transforms safe without constraining any practical Board workspace.
 export const BOARD_AWARENESS_WORLD_COORDINATE_LIMIT = 1_000_000_000;
 export const BOARD_AWARENESS_WORLD_EXTENT_LIMIT = 100_000_000;
 export const BOARD_AWARENESS_MIN_VIEWPORT_ZOOM = 0.05;
@@ -48,17 +43,9 @@ export const BoardAwarenessViewportSchema = z.object({
 	zoom: viewportZoomSchema,
 });
 
-export const BoardAwarenessNodePreviewSchema = z.object({
-	nodeId: idSchema,
+export const BoardAwarenessItemPreviewSchema = z.object({
+	itemId: idSchema,
 	frame: BoardAwarenessFrameSchema,
-	/** Live endpoints of a free arrow being dragged. */
-	arrow: z
-		.object({
-			start: BoardAwarenessPointSchema,
-			end: BoardAwarenessPointSchema,
-			bend: finiteSchema,
-		})
-		.optional(),
 });
 
 export const BoardAwarenessStateUpdateSchema = z.object({
@@ -72,7 +59,6 @@ export const BoardAwarenessStateUpdateSchema = z.object({
 		pointerType: z.enum(["mouse", "pen", "touch"]),
 	})
 		.nullable(),
-	/** Visible world-space area. Optional so older clients remain compatible. */
 	viewport: BoardAwarenessViewportSchema.nullable().optional(),
 	tool: z.string().min(1).max(40),
 	selection: z.object({
@@ -87,7 +73,7 @@ export const BoardAwarenessGestureSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("draw"),
 		id: idSchema,
-		nodeId: idSchema,
+		itemId: idSchema,
 		color: z.string().min(1).max(64),
 		size: finiteSchema.positive().max(256),
 		from: z.number().int().nonnegative().max(100_000),
@@ -96,9 +82,11 @@ export const BoardAwarenessGestureSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("arrow"),
 		id: idSchema,
-		nodeId: idSchema,
+		itemId: idSchema,
 		start: BoardAwarenessPointSchema,
 		current: BoardAwarenessPointSchema,
+		startItemId: idSchema.nullable().default(null),
+		endItemId: idSchema.nullable().default(null),
 		color: z.string().min(1).max(64),
 		size: finiteSchema
 			.positive()
@@ -108,36 +96,18 @@ export const BoardAwarenessGestureSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("box"),
 		id: idSchema,
-		nodeId: idSchema,
-		shape: z.enum(["geo", "frame"]),
+		itemId: idSchema,
+		shape: z.enum(["shape", "frame"]),
 		start: BoardAwarenessPointSchema,
 		current: BoardAwarenessPointSchema,
 		color: z.string().min(1).max(64),
-		geo: z.string().min(1).max(40),
-	}),
-	/**
-	 * A relation being drawn.
-	 *
-	 * Carries the anchor node and the live pointer rather than a partial
-	 * connection: until the gesture lands on a target there is no relation to
-	 * describe, and sending a half-built one would put an invalid connection on the
-	 * wire. `targetNodeId` is set once the pointer is over a candidate, which is
-	 * what lets peers see the same snap the author sees.
-	 */
-	z.object({
-		kind: z.literal("connection"),
-		id: idSchema,
-		sourceNodeId: idSchema,
-		targetNodeId: idSchema.nullable(),
-		current: BoardAwarenessPointSchema,
-		color: z.string().min(1).max(64),
-		size: finiteSchema.positive().max(256).default(BOARD_CONNECTION_STROKE_SIZE),
+		geometry: z.string().min(1).max(40).default("rectangle"),
 	}),
 	z.object({
 		kind: z.literal("transform"),
 		id: idSchema,
-		mode: z.enum(["translate", "resize", "rotate", "arrow", "connection"]),
-		nodes: z.array(BoardAwarenessNodePreviewSchema).max(64),
+		mode: z.enum(["translate", "resize", "rotate", "arrow"]),
+		items: z.array(BoardAwarenessItemPreviewSchema).max(64),
 		bounds: BoardAwarenessFrameSchema.nullable(),
 	}),
 ]);
@@ -151,7 +121,7 @@ export const BoardAwarenessUpdateSchema = z.discriminatedUnion("type", [
 	z.object({
 		type: z.literal("gesture.end"),
 		gestureId: idSchema,
-		resultingNodeIds: z.array(idSchema).max(64),
+		resultingItemIds: z.array(idSchema).max(64),
 	}),
 	z.object({
 		type: z.literal("gesture.cancel"),
@@ -174,8 +144,8 @@ export type BoardAwarenessFrame = z.infer<typeof BoardAwarenessFrameSchema>;
 export type BoardAwarenessViewport = z.infer<
 	typeof BoardAwarenessViewportSchema
 >;
-export type BoardAwarenessNodePreview = z.infer<
-	typeof BoardAwarenessNodePreviewSchema
+export type BoardAwarenessItemPreview = z.infer<
+	typeof BoardAwarenessItemPreviewSchema
 >;
 export type BoardAwarenessStateUpdate = z.infer<
 	typeof BoardAwarenessStateUpdateSchema

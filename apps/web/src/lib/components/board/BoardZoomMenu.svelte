@@ -1,5 +1,5 @@
 <script lang="ts">
-import { LocateFixed, Minus, Plus } from "lucide-svelte";
+import { GanttChart, LocateFixed, Minus, Plus } from "lucide-svelte";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -7,7 +7,9 @@ import { m } from "$lib/paraglide/messages.js";
 const {
 	editor,
 	immersive = false,
-}: { editor: BoardEditor; immersive?: boolean } = $props();
+	timelineOpen = false,
+	onToggleTimeline,
+}: { editor: BoardEditor; immersive?: boolean; timelineOpen?: boolean; onToggleTimeline?: () => void } = $props();
 
 const locale = $derived(getLocale());
 
@@ -26,6 +28,12 @@ function focusContent() {
 </script>
 
 <div class="board-zoom-menu" class:board-zoom-menu--immersive={immersive}>
+	{#if onToggleTimeline}
+		<button type="button" class="zoom-btn" title={m.board_timeline({}, { locale })} aria-label={m.board_timeline({}, { locale })} aria-expanded={timelineOpen} onclick={onToggleTimeline}>
+			<GanttChart class="h-3.5 w-3.5" />
+		</button>
+		<div class="divider"></div>
+	{/if}
 	<button type="button" class="zoom-btn" title={m.board_zoom_out({}, { locale })} aria-label={m.board_zoom_out({}, { locale })} onclick={() => editor.zoomOut()}>
 		<Minus class="h-3.5 w-3.5" />
 	</button>
@@ -68,7 +76,6 @@ function focusContent() {
 		right: var(--preview-safe-right, 10px);
 	}
 
-	/* Touch: park zoom top-right so it never collides with the tool dock. */
 	@media (pointer: coarse) {
 		.board-zoom-menu {
 			top: calc(12px + env(safe-area-inset-top, 0px));
@@ -82,7 +89,6 @@ function focusContent() {
 
 	@media (pointer: coarse) and (max-width: 480px) {
 		.board-zoom-menu {
-			/* Compact: hide "fit" on the narrowest phones via order if needed later */
 			max-width: calc(100vw - 20px);
 		}
 	}

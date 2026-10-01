@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { createBoardConnection } from "@cohub/protocol/board-connection";
-import type { BoardDocument, BoardItem } from "@cohub/protocol/board-document";
+import type { BoardDocument } from "@cohub/protocol";
 import {
   type BoardHeadlessRenderer,
   createBoardHeadlessRenderer,
   exportBoardImageBytes,
 } from "../../src/board/headless/index.js";
+import { boardDocument } from "./fixtures.js";
 
 /**
  * End-to-end cover for the headless path: a real Canvas2D renderer, the real
@@ -18,103 +18,42 @@ import {
  * not installed.
  */
 
-function frame(x: number, y: number, width: number, height: number) {
-  return { x, y, width, height, rotation: 0 };
-}
-
-const items: BoardItem[] = [
-  { id: "f1", type: "frame", label: "Page", color: "neutral", frame: frame(0, 0, 600, 400) },
-  {
-    id: "t1",
-    type: "text",
-    text: "Export 你好",
-    fontSize: 24,
-    color: "brand",
-    frame: frame(24, 24, 300, 40),
-  },
-  {
-    id: "g0",
-    type: "geo",
-    geo: "rectangle",
-    text: "box",
-    color: "amber",
-    fillOpacity: 0.2,
-    frame: frame(24, 90, 160, 100),
-  },
-  {
-    id: "g1",
-    type: "geo",
-    geo: "ellipse",
-    text: "geo",
-    color: "blue",
-    fillOpacity: 0.2,
-    frame: frame(220, 90, 150, 100),
-  },
-  {
-    id: "task1",
+const items = {
+  f1: { type: "frame", size: { width: 600, height: 400 }, props: { label: "Page" } },
+  t1: { type: "text", parent: "f1", position: { x: 24, y: 24 }, style: { fill: "brand" }, props: { text: "Export 你好" } },
+  g0: { type: "shape", parent: "f1", position: { x: 24, y: 90 }, size: { width: 160, height: 100 }, style: { stroke: "amber", fillOpacity: 0.2 }, props: { text: "box" } },
+  g1: { type: "shape", parent: "f1", position: { x: 220, y: 90 }, size: { width: 150, height: 100 }, style: { stroke: "blue", fillOpacity: 0.2, dash: "dashed" }, props: { geometry: "ellipse", text: "geo" } },
+  task1: {
     type: "task",
-    taskRunId: "task_1",
-    snapshot: {
-      taskType: "generation",
-      status: "completed",
-      title: "Product sketch",
-      model: "image-model",
-      artifactCount: 1,
-      artifacts: [
-        {
-          id: "result",
-          type: "text",
-          textExcerpt: "A concise generated result",
-        },
-      ],
-      updatedAt: "2026-08-14T10:00:00.000Z",
+    parent: "f1",
+    position: { x: 390, y: 90 },
+    size: { width: 180, height: 120 },
+    props: {
+      taskRunId: "task_1",
+      snapshot: {
+        taskType: "generation",
+        status: "completed",
+        title: "Product sketch",
+        model: "image-model",
+        artifactCount: 1,
+        artifacts: [{ id: "result", type: "text", textExcerpt: "A concise generated result" }],
+        updatedAt: "2026-08-14T10:00:00.000Z",
+      },
     },
-    frame: frame(390, 90, 180, 120),
   },
-  {
-    id: "d1",
+  d1: {
     type: "draw",
-    points: [
-      { x: 0, y: 0, p: 0.5 },
-      { x: 40, y: 30, p: 0.6 },
-      { x: 90, y: 10, p: 0.4 },
-    ],
-    color: "rose",
-    size: 5,
-    frame: frame(24, 230, 120, 60),
+    parent: "f1",
+    position: { x: 24, y: 230 },
+    style: { stroke: "rose", strokeWidth: 5 },
+    props: { points: [{ x: 0, y: 0, p: 0.5 }, { x: 40, y: 30, p: 0.6 }, { x: 90, y: 10, p: 0.4 }] },
   },
-  {
-    id: "a1",
-    type: "arrow",
-    start: { x: 150, y: 90 },
-    end: { x: 320, y: 150 },
-    bend: 0.2,
-    color: "violet",
-    size: 3,
-    arrowStart: false,
-    arrowEnd: true,
-    label: "to",
-    frame: frame(0, 0, 1, 1),
-  },
-] as BoardItem[];
+  a1: { type: "arrow", parent: "f1", style: { stroke: "violet", strokeWidth: 3 }, props: { start: { x: 150, y: 300 }, end: { x: 320, y: 350 }, route: "curve", bend: 0.2, label: "to" } },
+  // A relation between two shapes, so export covers bound arrows as well as free ones.
+  link: { type: "arrow", parent: "f1", props: { start: { item: "g0" }, end: { item: "g1" }, label: "relates" } },
+};
 
-const document: BoardDocument = {
-  kind: "cohub.board",
-  version: 1,
-  appearance: {
-    theme: "clean",
-    background: { kind: "solid" },
-    grid: { visible: false, size: 24, opacity: 0.12 },
-    mood: "clean",
-  },
-  viewport: { x: 0, y: 0, zoom: 1 },
-  items,
-  // A relation between two of the nodes, so the export path covers connection
-  // drawing rather than only shapes.
-  connections: [
-    createBoardConnection({ id: "c1", sourceItemId: "g0", targetItemId: "g1", label: "to" }),
-  ],
-} as BoardDocument;
+const document = boardDocument({ items });
 
 /** PNG magic number, so "did it encode" is checked rather than assumed. */
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -149,23 +88,16 @@ describe("headless board export", { skip: available ? false : "@napi-rs/canvas i
   });
 
   test("renders a draw item to visible pixels", async () => {
-    const draw: BoardItem = {
-      id: "draw-only",
-      type: "draw",
-      points: [
-        { x: 12, y: 12, p: 0.5 },
-        { x: 50, y: 80, p: 0.8 },
-        { x: 88, y: 20, p: 0.4 },
-      ],
-      color: "brand",
-      size: 6,
-      frame: frame(0, 0, 100, 100),
-    };
-    const result = exportBoardImageBytes(
-      headless,
-      { ...document, items: [draw], connections: [] },
-      { scale: 1, background: "transparent" },
-    );
+    const draw = boardDocument({
+      items: {
+        "draw-only": {
+          type: "draw",
+          style: { strokeWidth: 6 },
+          props: { points: [{ x: 12, y: 12, p: 0.5 }, { x: 50, y: 80, p: 0.8 }, { x: 88, y: 20, p: 0.4 }] },
+        },
+      },
+    });
+    const result = exportBoardImageBytes(headless, draw, { scale: 1, background: "transparent" });
     assert.ok(result);
     const { loadImage, createCanvas } = await import("@napi-rs/canvas");
     const image = await loadImage(result.bytes);
@@ -181,13 +113,8 @@ describe("headless board export", { skip: available ? false : "@napi-rs/canvas i
   });
 
   test("renders a task-only document to non-transparent pixels", async () => {
-    const task = items.find((item) => item.type === "task");
-    assert.ok(task);
-    const result = exportBoardImageBytes(
-      headless,
-      { ...document, items: [task], connections: [] },
-      { scale: 1, background: null },
-    );
+    const { parent: _parent, ...task } = items.task1;
+    const result = exportBoardImageBytes(headless, boardDocument({ items: { task1: task } }), { scale: 1, background: "transparent" });
     assert.ok(result);
 
     const { createCanvas, loadImage } = await import("@napi-rs/canvas");
@@ -242,7 +169,7 @@ describe("headless board export", { skip: available ? false : "@napi-rs/canvas i
   });
 
   test("an empty region yields null rather than a blank image", () => {
-    const result = exportBoardImageBytes(headless, { ...document, items: [] }, {});
+    const result = exportBoardImageBytes(headless, { ...document, items: {} }, {});
     assert.equal(result, null);
   });
 
@@ -261,29 +188,31 @@ describe("headless board export", { skip: available ? false : "@napi-rs/canvas i
     assert.notDeepEqual([...dark.bytes], [...light.bytes]);
   });
 
-  test("an unnormalised document is parsed rather than crashing a renderer", () => {
-    // `geo` items read `text`; a document built by hand may omit schema defaults.
-    const raw = {
-      ...document,
-      items: [{ id: "g", type: "geo", geo: "rectangle", frame: frame(0, 0, 100, 100) }],
-    } as unknown as BoardDocument;
+  test("a sparse document is parsed rather than crashing a renderer", () => {
+    // Hand-written documents omit defaults; the exporter fills them in.
+    const raw = { board: {}, items: { g: { type: "shape" } }, animations: {} } as unknown as BoardDocument;
     const result = exportBoardImageBytes(headless, raw, { scale: 1 });
     assert.ok(result, "expected the export to survive a sparse document");
   });
 
+  test("an export at a moment renders the animated state", () => {
+    const animated = boardDocument({
+      items: { dot: { type: "shape", size: { width: 100, height: 100 }, style: { fill: "#ff0000" } } },
+      animations: {
+        slide: { duration: 1000, tracks: { move: { target: "dot", property: "position.x", keyframes: [{ at: 0, value: 0 }, { at: 1000, value: 400 }] } } },
+      },
+    });
+    const start = exportBoardImageBytes(headless, animated, { scale: 1, at: { animation: "slide", time: 0 } });
+    const end = exportBoardImageBytes(headless, animated, { scale: 1, at: { animation: "slide", time: 1000 } });
+    assert.ok(start && end);
+    assert.equal(start.plan.world.x, -32);
+    assert.equal(end.plan.world.x, 400 - 32);
+  });
+
   test("missing images are reported as a warning, not a failure", () => {
-    const withImage = {
-      ...document,
-      items: [
-        ...items,
-        {
-          id: "i1",
-          type: "image",
-          ref: { kind: "space-file", path: "absent.png" },
-          frame: frame(400, 230, 120, 90),
-        } as BoardItem,
-      ],
-    } as BoardDocument;
+    const withImage = boardDocument({
+      items: { ...items, i1: { type: "image", parent: "f1", position: { x: 400, y: 230 }, size: { width: 120, height: 90 }, props: { src: "absent.png" } } },
+    });
     const result = exportBoardImageBytes(headless, withImage, { scale: 1 });
     assert.ok(result);
     const missing = result.warnings.find((warning) => warning.kind === "images-missing");

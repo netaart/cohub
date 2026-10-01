@@ -15,10 +15,6 @@ const groups = [
 		"tests/*.test.ts",
 		"tests/board/!(text-measurement).test.ts",
 	],
-	[
-		"--test-concurrency=1",
-		"tests/board/text-measurement.test.ts",
-	],
 ];
 
 function runGroup(arguments_) {

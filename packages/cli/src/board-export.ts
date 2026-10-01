@@ -1,18 +1,9 @@
-/**
- * Board image export for the CLI.
- *
- * The CLI and web editor share canonical Board geometry and card semantics. Each
- * host selects the renderer primitive suited to its backend; this path uses
- * Canvas2D. Everything platform-specific
- * lives here: fetching the document over HTTP, pulling image bytes out of the
- * space, and locating fonts on disk.
- */
 
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BoardDocument, BoardExportRegion, BoardItem } from "@neta-art/cohub/board";
+import type { BoardDocument, BoardExportRegion, BoardSceneItem } from "@neta-art/cohub/board";
 import type {
   BoardHeadlessExportFormat,
   BoardHeadlessFont,
@@ -20,11 +11,13 @@ import type {
   BoardHeadlessTexture,
 } from "@neta-art/cohub/board/headless";
 import {
-  boardAuthoringSnapshotToDocument,
+  boardDocumentAt,
   boardImageKeySource,
+  buildBoardScene,
   createBoardHeadlessRenderer,
   exportBoardImageBytes,
   imageAssetKey,
+  parseBoardDocument,
   planBoardExport,
   selectBoardExportAssets,
 } from "./board-kernel.js";
@@ -33,14 +26,6 @@ import { BOARD_EXPORT_FONTS, type BoardExportFont } from "./board-fonts.js";
 import { createClient } from "./client.js";
 import { downloadPublicImage } from "./safe-remote-image.js";
 
-/**
- * Geist, as shipped to the browser.
- *
- * The board asks for the "Geist" family; registering the exact same font files
- * the web app loads is what makes CLI output match the editor rather than
- * substituting whatever sans-serif the host happens to have. A source checkout
- * falls back to the dev packages.
- */
 export function resolveBundledFonts(): BoardHeadlessFont[] {
   const require = createRequire(import.meta.url);
   const bundled = fileURLToPath(new URL("./fonts/", import.meta.url));
@@ -66,46 +51,33 @@ export type BoardExportSource = {
   title: string | null;
 };
 
-/**
- * Load a board document by board id or by the path of its `.board` file.
- *
- * A `.board` file is a manifest holding a board id, so both forms converge on
- * the same inspect call — which is also what the web client does.
- */
 export async function loadBoardDocument(
   spaceId: string,
   target: string,
 ): Promise<BoardExportSource> {
-  const client = createClient();
-  const boardId = await resolveBoardId(spaceId, target);
-  const snapshot = await client.space(spaceId).board(boardId).authoring({ include: ["items", "connections"] });
-  return {
-    document: boardAuthoringSnapshotToDocument(snapshot),
-    boardId: snapshot.board.id,
-    title: snapshot.board.title ?? null,
-  };
+  const board = createClient().space(spaceId).board(await resolveBoardId(spaceId, target));
+  let result = await board.get();
+  const items = { ...result.items };
+  while (result.next) {
+    result = await board.get({ only: ["items"], cursor: result.next });
+    Object.assign(items, result.items);
+  }
+  const parsed = parseBoardDocument({ board: result.board, items, animations: result.animations ?? {} });
+  if (!parsed.ok) throw new Error(`Board ${result.id} could not be read: ${parsed.diagnostics[0]?.path}: ${parsed.diagnostics[0]?.message}`);
+  return { document: parsed.document, boardId: result.id, title: result.title };
 }
 
-/**
- * Fetch every image in `items`, keyed the way the renderers ask for it.
- *
- * Takes the planned items rather than the whole document so a partial export
- * does not download the rest of the board. Failures are collected rather than
- * thrown: one unreadable image should cost a placeholder and a warning, not the
- * whole export. Downloads run concurrently but bounded, so a board with hundreds
- * of images does not open hundreds of sockets.
- */
 export async function loadBoardTextures(
   headless: BoardHeadlessRenderer,
   spaceId: string,
-  items: BoardItem[],
+  items: readonly BoardSceneItem[],
   options: { concurrency?: number } = {},
 ): Promise<{
   textures: Map<string, BoardHeadlessTexture>;
   failed: string[];
   omitted: string[];
 }> {
-  const selection = selectBoardExportAssets(items, imageAssetKey);
+  const selection = selectBoardExportAssets([...items], imageAssetKey);
   const textures = new Map<string, BoardHeadlessTexture>();
   const failed: string[] = [];
   const pending = [...selection.keys];
@@ -151,6 +123,8 @@ export type BoardExportRunOptions = {
   spaceId: string;
   target: string;
   region: BoardExportRegion;
+  times?: number[];
+  animation?: string;
   scale: number;
   padding?: number;
   colorScheme: "dark" | "light";
@@ -160,26 +134,34 @@ export type BoardExportRunOptions = {
   withImages: boolean;
 };
 
-export type BoardExportRunResult = {
+export type BoardExportFrame = {
+  time: number | null;
   bytes: Uint8Array;
   width: number;
   height: number;
   scale: number;
   itemCount: number;
   format: BoardHeadlessExportFormat;
+};
+
+export type BoardExportRunResult = {
+  frames: BoardExportFrame[];
   warnings: string[];
 };
 
-/** Render a board to image bytes. Returns null when the region is empty. */
 export async function runBoardExport(
   options: BoardExportRunOptions,
 ): Promise<BoardExportRunResult | null> {
   const { document } = await loadBoardDocument(options.spaceId, options.target);
+  if (options.animation && !document.animations[options.animation]) {
+    throw new Error(`Animation ${options.animation} does not exist.`);
+  }
+  const times: Array<number | null> = options.times?.length ? options.times : [null];
+  const documentAt = (time: number | null) =>
+    time === null ? document : boardDocumentAt(document, options.animation ?? null, time).document;
 
-  // Plan before fetching: a --frame / --items / --rect export should only pull
-  // the images it will actually draw, and an empty region should pull none.
   const plan = planBoardExport({
-    document,
+    scene: buildBoardScene(documentAt(times[0] ?? null)),
     region: options.region,
     scale: options.scale,
     ...(options.padding === undefined ? {} : { padding: options.padding }),
@@ -208,7 +190,7 @@ export async function runBoardExport(
       }
     }
 
-    const declaredBackground = document.appearance.background;
+    const declaredBackground = document.board.background;
     if (
       options.withImages &&
       options.background === "paper" &&
@@ -232,48 +214,50 @@ export async function runBoardExport(
       );
     }
 
-    const result = exportBoardImageBytes(headless, document, {
-      region: options.region,
-      scale: options.scale,
-      padding: options.padding,
-      colorScheme: options.colorScheme,
-      background: options.background,
-      textures,
-      backgroundImage: backgroundTexture
-        ? {
-            texture: backgroundTexture,
-            fit: declaredBackground.fit ?? "cover",
-            position: declaredBackground.position ?? "center",
-            opacity: declaredBackground.opacity ?? 1,
-          }
-        : undefined,
-      ...(options.withImages
-        ? {
-            assetKey: (item: BoardItem) => {
-              const key = imageAssetKey(item);
-              return key && omittedKeys.has(key) ? null : key;
-            },
-          }
-        : {}),
-      format: options.format,
-      quality: options.quality,
-    });
-    if (!result) return null;
-
-    for (const warning of result.warnings) {
-      // Missing-image warnings are already reported above with their paths.
-      if (warning.kind === "images-missing" && options.withImages) continue;
-      warnings.push(describeWarning(warning));
+    const backgroundImage = backgroundTexture
+      ? { texture: backgroundTexture, fit: declaredBackground.fit ?? "cover", position: "center" as const, opacity: declaredBackground.opacity ?? 1 }
+      : undefined;
+    const assetKey = options.withImages
+      ? (item: BoardSceneItem) => {
+          const key = imageAssetKey(item);
+          return key && omittedKeys.has(key) ? null : key;
+        }
+      : undefined;
+    const region: BoardExportRegion = times.length > 1 ? { kind: "rect", rect: plan.world } : options.region;
+    const frames: BoardExportFrame[] = [];
+    const reported = new Set<string>();
+    for (const time of times) {
+      const result = exportBoardImageBytes(headless, document, {
+        ...(time === null ? {} : { at: { ...(options.animation ? { animation: options.animation } : {}), time } }),
+        region,
+        scale: options.scale,
+        padding: times.length > 1 ? 0 : options.padding,
+        colorScheme: options.colorScheme,
+        background: options.background,
+        textures,
+        backgroundImage,
+        ...(assetKey ? { assetKey } : {}),
+        format: options.format,
+        quality: options.quality,
+      });
+      if (!result) continue;
+      for (const warning of result.warnings) {
+        if (warning.kind === "images-missing" && options.withImages) continue;
+        const text = describeWarning(warning);
+        if (!reported.has(text)) warnings.push(text);
+        reported.add(text);
+      }
+      frames.push({
+        time,
+        bytes: result.bytes,
+        width: result.plan.width,
+        height: result.plan.height,
+        scale: result.plan.scale,
+        itemCount: result.plan.items.length,
+        format: result.format,
+      });
     }
-    return {
-      bytes: result.bytes,
-      width: result.plan.width,
-      height: result.plan.height,
-      scale: result.plan.scale,
-      itemCount: result.plan.items.length,
-      format: result.format,
-      warnings,
-    };
+    return frames.length ? { frames, warnings } : null;
   } finally {
     headless.destroy();
   }

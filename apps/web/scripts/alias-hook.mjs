@@ -41,10 +41,9 @@ const PACKAGE_SOURCES = [
 		"@cohub/protocol/public-identifiers",
 		`${packagesRoot}/protocol/src/public-identifiers.ts`,
 	],
-	[
-		"@cohub/protocol/board-document",
-		`${packagesRoot}/protocol/src/board-document.ts`,
-	],
+	["@cohub/protocol/board-model", `${packagesRoot}/protocol/src/board-model.ts`],
+	["@cohub/protocol/board-layout", `${packagesRoot}/protocol/src/board-layout.ts`],
+	["@cohub/protocol/board-patch", `${packagesRoot}/protocol/src/board-patch.ts`],
 	[
 		"@cohub/protocol/board-constants",
 		`${packagesRoot}/protocol/src/board-constants.ts`,

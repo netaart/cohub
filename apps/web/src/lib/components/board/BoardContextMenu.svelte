@@ -5,6 +5,7 @@ import {
 	BoxSelect,
 	Copy,
 	ExternalLink,
+	Clapperboard,
 	History,
 	ImageDown,
 	LayoutDashboard,
@@ -28,28 +29,27 @@ const {
 	onOpenTask,
 	onRegenerateTask,
 	onAddToGeneration,
-	regeneratingNodeId = null,
+	regeneratingItemId = null,
 	onExport,
 	onReplay,
+	onAnimate,
 }: {
 	editor: BoardEditor;
 	position: { x: number; y: number };
 	onClose: () => void;
 	onOpenFile?: (path: string) => void | Promise<void>;
 	onOpenTask?: (taskRunId: string) => void;
-	onRegenerateTask?: (nodeId: string) => void;
+	onRegenerateTask?: (itemId: string) => void;
 	onAddToGeneration?: () => void;
-	regeneratingNodeId?: string | null;
-	/** Opens the export dialog; absent until the stage can render one. */
+	regeneratingItemId?: string | null;
 	onExport?: () => void;
-	/** Opens the replay view; absent in view mode. */
 	onReplay?: () => void;
+	onAnimate?: () => void;
 } = $props();
 
 const locale = $derived(getLocale());
 
 let menu: HTMLDivElement | null = $state(null);
-// The menu is recreated each time it opens, so capture the opening position once.
 let left = $state(untrack(() => position.x));
 let top = $state(untrack(() => position.y));
 
@@ -63,18 +63,18 @@ const canGenerate = $derived(
 const singleText = $derived(
 	editor.selectedItems.length === 1 && editor.selectedItems[0]?.type === "text",
 );
-/** The single selected file card, if that is what the selection is. */
 const singleFile = $derived.by(() => {
 	if (editor.selectedItems.length !== 1) return null;
 	const item = editor.selectedItems[0];
-	return item?.type === "file" ? item : null;
+	return item?.type === "file" ? (item.props as { src: string }) : null;
 });
 
-/** The single selected task node, if that is what the selection is. */
 const singleTask = $derived.by(() => {
 	if (editor.selectedItems.length !== 1) return null;
 	const item = editor.selectedItems[0];
-	return item?.type === "task" ? item : null;
+	if (item?.type !== "task") return null;
+	const props = item.props as { taskRunId: string; snapshot: { taskType: string } };
+	return { id: item.id, taskRunId: props.taskRunId, taskType: props.snapshot.taskType };
 });
 
 type MenuAction = {
@@ -101,14 +101,14 @@ const actions = $derived.by<MenuAction[]>(() => {
 			icon: LayoutDashboard,
 			run: () => onOpenTask(task.taskRunId),
 		});
-	if (task?.snapshot.taskType === "generation" && onRegenerateTask)
+	if (task?.taskType === "generation" && onRegenerateTask)
 		list.push({
 			label:
-				regeneratingNodeId === task.id
+				regeneratingItemId === task.id
 					? m.board_regenerating_ellipsis({}, { locale })
 					: m.board_regenerate({}, { locale }),
 			icon: RefreshCw,
-			disabled: regeneratingNodeId !== null,
+			disabled: regeneratingItemId !== null,
 			run: () => onRegenerateTask(task.id),
 		});
 	if (file && onOpenFile)
@@ -116,7 +116,7 @@ const actions = $derived.by<MenuAction[]>(() => {
 			label: m.board_open_file({}, { locale }),
 			icon: ExternalLink,
 			run: () => {
-				void onOpenFile(file.ref.path);
+				void onOpenFile(file.src);
 			},
 		});
 	if (singleText)
@@ -169,6 +169,12 @@ const actions = $derived.by<MenuAction[]>(() => {
 			label: hasSelection ? "Export selection…" : "Export image…",
 			icon: ImageDown,
 			run: onExport,
+		});
+	if (onAnimate)
+		list.push({
+			label: m.board_animate({}, { locale }),
+			icon: Clapperboard,
+			run: onAnimate,
 		});
 	if (onReplay)
 		list.push({

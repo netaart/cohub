@@ -1,8 +1,6 @@
-import type {
-	BoardTransactionsPage,
-	BoardTransactionsReadInput,
-} from "@neta-art/cohub";
+import type { BoardHistoryInput, BoardHistoryPage } from "@neta-art/cohub";
 import {
+	type BoardDocument,
 	type BoardReplayEntry,
 	type BoardReplayPlayer,
 	createBoardReplayPlayer,
@@ -11,19 +9,11 @@ import {
 export type BoardReplaySpeed = 1 | 2 | 4;
 export const BOARD_REPLAY_SPEEDS: readonly BoardReplaySpeed[] = [1, 2, 4];
 
-/**
- * Fixed cadence per step at 1×. Real gaps between edits are seconds to days;
- * a steady beat reads as a story rather than a stutter.
- */
 export const BOARD_REPLAY_STEP_MS = 640;
-/** Page size for the transaction log; a few hundred versions per round trip. */
 export const BOARD_REPLAY_PAGE_SIZE = 200;
 
-export type BoardReplayFetch = (
-	input: BoardTransactionsReadInput,
-) => Promise<BoardTransactionsPage>;
+export type BoardReplayFetch = (input: BoardHistoryInput) => Promise<BoardHistoryPage>;
 
-/** Index of the first entry with `version >= target`; `entries.length` if none. */
 function lowerBound(
 	entries: readonly BoardReplayEntry[],
 	target: number,
@@ -38,11 +28,6 @@ function lowerBound(
 	return low;
 }
 
-/**
- * Timeline position for a version: entries are laid out evenly, not by time,
- * so a burst of 40 nudges does not collapse into one pixel. Returns the 1-based
- * step index (0 at the floor) so both the scrubber and the "n of m" label read it.
- */
 export function replayStep(
 	entries: readonly BoardReplayEntry[],
 	floor: number,
@@ -63,7 +48,6 @@ export function replayFraction(
 		: replayStep(entries, floor, version) / entries.length;
 }
 
-/** Inverse of `replayFraction`: the version under a scrubber fraction. */
 export function replayVersionAt(
 	entries: readonly BoardReplayEntry[],
 	floor: number,
@@ -76,7 +60,6 @@ export function replayVersionAt(
 	return entries[Math.min(position, entries.length) - 1]?.version ?? floor;
 }
 
-/** The entry that produced `version`, if it is loaded. */
 export function replayEntryAt(
 	entries: readonly BoardReplayEntry[],
 	version: number,
@@ -85,7 +68,6 @@ export function replayEntryAt(
 	return entry?.version === version ? entry : null;
 }
 
-/** Loaded version strictly before `version`, or the floor. */
 export function replayPreviousVersion(
 	entries: readonly BoardReplayEntry[],
 	floor: number,
@@ -94,7 +76,6 @@ export function replayPreviousVersion(
 	return entries[lowerBound(entries, version) - 1]?.version ?? floor;
 }
 
-/** Loaded version strictly after `version`, or `version` at the head. */
 export function replayNextVersion(
 	entries: readonly BoardReplayEntry[],
 	version: number,
@@ -102,13 +83,15 @@ export function replayNextVersion(
 	return entries[lowerBound(entries, version + 1)]?.version ?? version;
 }
 
-/**
- * Load the first page and build a player. Kept apart from the component so the
- * fetch shape (and the "first page must carry a snapshot" invariant) is testable.
- */
+export type BoardReplayDocumentFetch = () => Promise<{ version: number; document: BoardDocument }>;
+
 export async function loadBoardReplay(
-	fetch: BoardReplayFetch,
+	fetchHistory: BoardReplayFetch,
+	fetchDocument: BoardReplayDocumentFetch,
 ): Promise<{ player: BoardReplayPlayer; nextBefore: number | null }> {
-	const page = await fetch({ limit: BOARD_REPLAY_PAGE_SIZE });
-	return { player: createBoardReplayPlayer(page), nextBefore: page.nextBefore };
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const [page, live] = await Promise.all([fetchHistory({ limit: BOARD_REPLAY_PAGE_SIZE }), fetchDocument()]);
+		if (page.version === live.version) return { player: createBoardReplayPlayer(live.document, page), nextBefore: page.nextBefore };
+	}
+	throw new Error("The Board kept changing while its history loaded.");
 }

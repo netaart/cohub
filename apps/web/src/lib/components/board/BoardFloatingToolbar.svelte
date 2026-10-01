@@ -5,8 +5,8 @@ import {
 	BOARD_STROKE_MIN_SIZE,
 	boardColorCssVar,
 	DEFAULT_BOARD_TOOL_STYLES,
-	GEO_KINDS,
-	type GeoKind,
+	SHAPE_KINDS,
+	type ShapeKind,
 } from "@neta-art/cohub/board";
 import {
 	ArrowUpRight,
@@ -14,6 +14,7 @@ import {
 	Circle,
 	Diamond,
 	Frame,
+	GanttChart,
 	Hand,
 	MousePointer2,
 	Pencil,
@@ -37,6 +38,8 @@ const {
 	onToggleGeneration,
 	appearanceOpen = false,
 	onToggleAppearance,
+	timelineOpen = false,
+	onToggleTimeline,
 }: {
 	editor: BoardEditor;
 	immersive?: boolean;
@@ -44,6 +47,8 @@ const {
 	onToggleGeneration?: () => void;
 	appearanceOpen?: boolean;
 	onToggleAppearance?: () => void;
+	timelineOpen?: boolean;
+	onToggleTimeline?: () => void;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -56,7 +61,6 @@ type ToolDef = {
 	label: string;
 	shortcut: string;
 	icon: typeof MousePointer2;
-	/** Creation tools that expose their contextual style row. */
 	hasStyle: boolean;
 };
 
@@ -97,7 +101,7 @@ const TOOLS = $derived<ToolDef[]>([
 		hasStyle: true,
 	},
 	{
-		id: "geo",
+		id: "shape",
 		label: m.board_shape({}, { locale }),
 		shortcut: "G",
 		icon: Square,
@@ -127,7 +131,7 @@ $effect(() => {
 });
 
 const GEO_OPTIONS = $derived<
-	Record<GeoKind, { label: string; icon: typeof Square }>
+	Record<ShapeKind, { label: string; icon: typeof Square }>
 >({
 	rectangle: { label: m.board_rectangle({}, { locale }), icon: Square },
 	rounded: {
@@ -191,17 +195,17 @@ function toolTitle(tool: ToolDef) {
 				{/each}
 			</div>
 
-			{#if editor.tool === "geo"}
+			{#if editor.tool === "shape"}
 				<div class="style-divider"></div>
-				{#each GEO_KINDS as geo (geo)}
+				{#each SHAPE_KINDS as geo (geo)}
 					{@const option = GEO_OPTIONS[geo]}
 					<button
 						type="button"
 						class="geo-btn"
-						class:geo-btn--active={editor.activeGeo === geo}
+						class:geo-btn--active={editor.activeShape === geo}
 						title={option.label}
 						aria-label="Use {option.label}"
-						onclick={() => { editor.activeGeo = geo; }}
+						onclick={() => { editor.activeShape = geo; }}
 					>
 						<option.icon class="h-3.5 w-3.5" />
 					</button>
@@ -252,6 +256,19 @@ function toolTitle(tool: ToolDef) {
 		>
 			<SlidersHorizontal class="h-4 w-4" />
 		</button>
+		{#if onToggleTimeline}
+			<button
+				type="button"
+				class="tool-btn"
+				class:tool-btn--active={timelineOpen}
+				title={m.board_timeline({}, { locale })}
+				aria-label={m.board_timeline({}, { locale })}
+				aria-pressed={timelineOpen}
+				onclick={onToggleTimeline}
+			>
+				<GanttChart class="h-4 w-4" />
+			</button>
+		{/if}
 
 		<div class="divider history-divider"></div>
 
@@ -413,9 +430,6 @@ function toolTitle(tool: ToolDef) {
 		background: var(--border-subtle);
 	}
 
-	/* Mobile: larger targets, safe-area, room for top zoom.
-	   Visual sizes stay compact; `::after` grows the hit box to the 44px
-	   recommendation without pushing the row wider. */
 	@media (pointer: coarse) {
 		.board-toolbar-wrap {
 			bottom: calc(10px + env(safe-area-inset-bottom, 0px));
@@ -466,8 +480,6 @@ function toolTitle(tool: ToolDef) {
 		.board-toolbar-wrap {
 			bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 		}
-		/* The row scrolls horizontally, so history stays reachable instead of being
-		   dropped — a phone has no keyboard shortcut to fall back on. */
 		.tool-btn { width: 38px; height: 38px; }
 	}
 </style>

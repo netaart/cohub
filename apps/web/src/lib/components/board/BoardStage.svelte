@@ -1,9 +1,14 @@
 <script lang="ts">
+import type { BoardPlaybackSnapshot } from "@cohub/protocol";
 import type {
-	BoardFileSnapshot,
+	BoardArrowItem,
+	BoardDrawPoint,
+	BoardFileSnapshotFacts,
 	BoardItem,
+	BoardScene as BoardModelScene,
+	BoardSceneItem,
 	BoardTaskSnapshot,
-	DrawPoint,
+	SceneItem,
 } from "@neta-art/cohub/board";
 import {
 	type BoardShapeColors,
@@ -13,9 +18,12 @@ import {
 	pickBoardColor,
 	pointToWorld,
 	type Rect,
-	resolveArrow,
+	rectForCameraFocus,
+	resolveItemColor,
+	resolveSceneArrow,
 	type ScreenPoint,
 	sampleRadius,
+	sceneItemToItem,
 	screenPoint,
 	screenToWorld,
 	shapeCapabilities,
@@ -27,9 +35,12 @@ import {
 import {
 	type BoardRenderContext,
 	type BoardRenderPalette,
+	type BrowserBoardSketchHost,
 	createBoardBackground,
+	createBoardSketchHost,
 	getBoardCardRenderer,
 	getBoardResolution,
+	parseBoardCssColor,
 	textZoomBucket,
 	updateBoardBackground,
 } from "@neta-art/cohub/board/render";
@@ -71,11 +82,7 @@ import {
 } from "$lib/board/board-theme";
 import { resizeCursorForHandle } from "$lib/board/core/selection-transform";
 import type { BoardEditor } from "$lib/board/editor.svelte";
-import type { BoardRuntimeData } from "$lib/board/runtime/board-runtime";
-import {
-	type BoardPlaybackView,
-	createBoardAnimationRuntime,
-} from "$lib/board/runtime/pixi-animation";
+import { type BoardPlayerFrame, createBoardPlayer } from "$lib/board/runtime/board-player";
 import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
 import {
 	type BoardDropItem,
@@ -97,7 +104,7 @@ import { getResolvedTheme } from "$lib/theme.svelte";
 
 const {
 	editor,
-	runtime,
+	playback = null,
 	assets,
 	spaceId,
 	assetSource,
@@ -113,25 +120,10 @@ const {
 	onBackgroundLoadStateChange,
 }: {
 	editor: BoardEditor;
-	runtime: BoardRuntimeData;
-	/**
-	 * Preview texture owner. Shared by every stage showing the same board (the
-	 * live editor and its replay overlay) so a texture one stage releases is not
-	 * torn out from under another — Pixi's `Assets` cache hands back the same
-	 * texture instance per URL.
-	 */
+	playback?: BoardPlaybackSnapshot | null;
 	assets: BoardAssetManager;
-	/**
-	 * Cache scope for previews. Still required in view mode: it namespaces asset
-	 * keys so identical paths from different Spaces never collide.
-	 */
 	spaceId: string;
-	/** Where referenced media is resolved from (live Space or published artifact). */
 	assetSource: BoardAssetSource;
-	/**
-	 * View-only stage: no drops, no shape editing, and no workspace reads. A
-	 * published Board is rendered from its snapshot alone.
-	 */
 	readonly?: boolean;
 	active?: boolean;
 	awareness: BoardAwarenessController;
@@ -144,15 +136,8 @@ const {
 		} | null,
 	) => void;
 	onSurfaceChange?: (size: { width: number; height: number }) => void;
-	/** Open a workspace file in the preview panel (same target as the file tree). */
 	onOpenFile?: (path: string) => void | Promise<void>;
-	/** Start the single local media player for a playable node. */
-	onPlayMedia?: (nodeId: string) => void;
-	/**
-	 * Hands the parent a way to export using this stage's live renderer and
-	 * already-resolved theme. Passing a getter (rather than the renderer itself)
-	 * keeps the caller from holding a reference past the stage's lifetime.
-	 */
+	onPlayMedia?: (itemId: string) => void;
 	onExportReady?: (bridge: BoardStageExportBridge | null) => void;
 	onBackgroundLoadStateChange?: (
 		state: BoardBackgroundLoadState | null,
@@ -164,10 +149,7 @@ const locale = $derived(getLocale());
 let host: HTMLDivElement | null = $state(null);
 let app: Application | null = null;
 let world: Container | null = null;
-let effectsBehind: Container | null = null;
 let nodeLayer: Container | null = null;
-let effectsFront: Container | null = null;
-let screenEffects: Container | null = null;
 let background: Container | null = null;
 let boardBackdrop: BoardThemeBackground | null = $state(null);
 let backdropUrl: string | null = $state(null);
@@ -175,31 +157,26 @@ let backdropLoadState: BoardBackgroundLoadState | null = $state(null);
 let farLayer: Graphics | null = null;
 let overlay: Graphics | null = null;
 let scene: ReturnType<typeof createBoardScene> | null = null;
-let animationRuntime: ReturnType<typeof createBoardAnimationRuntime> | null =
-	null;
+let sketches: BrowserBoardSketchHost | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let resizeFrame = 0;
-// Render-on-demand: Pixi's ticker is disabled (autoStart: false) so an idle
-// board draws nothing. Each scene sync schedules exactly one render for the
-// next animation frame, coalescing bursts of updates into a single draw.
 let renderFrame = 0;
 let dropActive = $state(false);
 let surface = $state<{ width: number; height: number }>({
 	width: 0,
 	height: 0,
 });
-let playbackView = $state.raw<BoardPlaybackView | null>(null);
-const NO_VIEWPORTS: readonly BoardViewport[] = [];
-const viewCamera = $derived(playbackView?.camera ?? editor.camera);
-// Snap playback zoom to half-octaves so cards re-sync per step, not per frame.
-const renderZoom = $derived(
-	playbackView
-		? 2 ** (Math.round(Math.log2(playbackView.camera.zoom) * 2) / 2)
-		: editor.camera.zoom,
-);
-const playbackAhead = $derived(playbackView?.ahead ?? NO_VIEWPORTS);
+const player = createBoardPlayer({
+	resolveColor: (color) => {
+		const theme = resolveTheme();
+		return resolveItemColor(color, "brand", theme.colors, theme.colorScheme, parseBoardCssColor);
+	},
+});
+let tickFrame = 0;
+let playbackFocusKey: string | null = null;
+const viewCamera = $derived(editor.camera);
+const renderZoom = $derived(editor.camera.zoom);
 
-// Keep the previous rect object while the snapped rect is unchanged.
 let lastCullRect: Rect | null = null;
 const cullRect = $derived.by<Rect | null>(() => {
 	if (surface.width === 0 || surface.height === 0) return null;
@@ -224,8 +201,6 @@ const visibleIds = $derived.by<Set<string> | null>(() => {
 	editor.geometryVersion;
 	return cullRect ? new Set(editor.idsInRect(cullRect)) : null;
 });
-// Bumped whenever the asset manager resolves a new thumbnail URL, so cards
-// re-sync and images pop in.
 let assetVersion = $state(0);
 let spaceStyleVersion = $state(0);
 
@@ -236,16 +211,12 @@ function handleSpaceStyleChanged(event: Event) {
 	themeCache = null;
 }
 
-// The manager is owned by the parent (BoardPanel) and may be shared with the
-// replay stage, so this component never destroys it.
 $effect(() =>
 	assets.subscribe(() => {
 		assetVersion += 1;
 	}),
 );
 
-// Bumped when a workspace file change invalidates a cached preview, so visible
-// file cards can refresh their snapshot.
 let previewVersion = $state(filePreviewVersion());
 const taskDetailRefreshes = new Map<string, string>();
 const unsubscribeTaskRuns = onTaskRunsCacheUpdated((event) => {
@@ -255,9 +226,7 @@ const unsubscribeTaskRuns = onTaskRunsCacheUpdated((event) => {
 
 function applyTaskRuns(runs: ReturnType<typeof getCachedTaskRuns>) {
 	const wanted = new Set(
-		editor.items
-			.filter((item) => item.type === "task")
-			.map((item) => item.taskRunId),
+		editor.items.flatMap((item) => (item.type === "task" ? [(item.props as { taskRunId: string }).taskRunId] : [])),
 	);
 	if (wanted.size === 0) return;
 	const snapshots = new Map<string, BoardTaskSnapshot>();
@@ -292,10 +261,6 @@ const unsubscribePreviews = subscribeFilePreviews((event) => {
 	editor.applyMediaFileChange(event.path, event.meta);
 });
 
-/**
- * Resolved theme colors, cached per theme identity. The snapshot is shared by
- * live rendering and export so the two paths cannot drift.
- */
 let themeCache: BoardThemeSnapshot | null = null;
 
 function resolveTheme(): BoardThemeSnapshot {
@@ -310,27 +275,9 @@ function getPalette(): BoardRenderPalette {
 	return resolveTheme().palette;
 }
 
-// Request image and video previews only for cards near the viewport. The margin
-// preloads a band just off-screen so panning feels
-// instant, and matches the culling margin so a texture is requested before its
-// card scrolls into view. Tracks only items/camera/surface: loaded textures
-// notify via `assetVersion`, which the render effect (not this one) consumes.
-//
-// The candidate set comes from the spatial index, not from scanning every item,
-// so this stays proportional to what is near the viewport rather than to the
-// document size.
 $effect(() => {
 	previewVersion;
 	requestPreviews(visibleIds ?? []);
-});
-
-// Preload where playback's camera is heading.
-$effect(() => {
-	if (surface.width === 0 || surface.height === 0) return;
-	for (const view of playbackAhead) {
-		const rect = visibleWorldRect(view, surface.width, surface.height);
-		requestPreviews(editor.idsInRect(stableCullRect(rect)));
-	}
 });
 
 function requestPreviews(ids: Iterable<string>) {
@@ -340,19 +287,13 @@ function requestPreviews(ids: Iterable<string>) {
 	}
 }
 
-// Adopt intrinsic image sizes once their textures resolve, so a frame created
-// without dimension metadata stops letterboxing. The editor records the size on
-// media files and task outputs, so each node is corrected once and never fights a
-// later user resize. Only nearby nodes can have a resolved texture, which bounds
-// this work to the same spatial candidate set.
 $effect(() => {
-	// Re-run when a texture lands.
 	assetVersion;
 	const pending: Array<{ id: string; width: number; height: number }> = [];
 	for (const item of itemsNearViewport()) {
 		const taskArtifact =
 			item.type === "task"
-				? featuredTaskArtifact(item.snapshot.artifacts)
+				? featuredTaskArtifact(item.props.snapshot.artifacts)
 				: null;
 		const visualArtifact =
 			taskArtifact?.type === "image" || taskArtifact?.type === "video"
@@ -361,7 +302,7 @@ $effect(() => {
 		const recorded = visualArtifact
 			? visualArtifact
 			: item.type === "image" || item.type === "video"
-				? item.snapshot
+				? item.props.snapshot
 				: null;
 		if (!recorded) continue;
 		if (recorded.naturalWidth && recorded.naturalHeight) continue;
@@ -374,10 +315,10 @@ $effect(() => {
 	if (pending.length > 0) editor.adoptMediaNaturalSizes(pending);
 });
 
-function itemsNearViewport(): BoardItem[] {
+function itemsNearViewport(): BoardSceneItem[] {
 	const ids = visibleIds;
 	if (!ids) return [];
-	const result: BoardItem[] = [];
+	const result: BoardSceneItem[] = [];
 	for (const id of ids) {
 		const item = editor.itemById(id);
 		if (item) result.push(item);
@@ -385,30 +326,16 @@ function itemsNearViewport(): BoardItem[] {
 	return result;
 }
 
-// Fill in (and refresh) file-card previews for cards near the viewport.
-//
-// Two cases are handled here: a card whose snapshot was never enriched (created
-// by another client, or by the CLI, which only writes the file ref), and a card
-// whose file changed while the board was open. Both are bounded to what is near
-// the viewport, so a board with thousands of file cards reads only the handful
-// the user can actually see.
-//
-// Skipped entirely in view mode: a published Board has no live workspace behind
-// it, so cards render from the snapshot captured at publish time.
 $effect(() => {
 	if (readonly) return;
-	// Re-run when a file change invalidates a cached preview.
 	previewVersion;
 	const targets: Array<{ id: string; path: string }> = [];
 	for (const item of itemsNearViewport()) {
 		if (item.type !== "file") continue;
-		const path = item.ref.path;
+		const path = item.props.src;
 		const stale = isFilePreviewStale(spaceId, path);
-		// An unenriched card has no mtime recorded yet.
-		const unenriched = item.snapshot?.mtimeMs === undefined;
+		const unenriched = item.props.snapshot?.mtimeMs === undefined;
 		if (!stale && !unenriched) continue;
-		// The stale mark is consumed by the read itself, which carries the change
-		// event's metadata with it.
 		targets.push({ id: item.id, path });
 	}
 	if (targets.length > 0) void enrichFileCards(targets);
@@ -416,7 +343,8 @@ $effect(() => {
 
 function buildContext(
 	palette: BoardRenderPalette,
-	getDisplayItem: (id: string) => BoardItem | null,
+	renderScene: BoardModelScene,
+	time: number,
 ): BoardRenderContext {
 	const colorScheme = resolveTheme().colorScheme;
 	const resizingIds =
@@ -424,8 +352,10 @@ function buildContext(
 			? new Set(editor.interaction.origin.keys())
 			: new Set<string>();
 	return {
-		document: editor.document,
-		getItem: getDisplayItem,
+		settings: editor.settings,
+		scene: renderScene,
+		time,
+		...(sketches ? { sketches } : {}),
 		selectedIds: new Set(editor.selection),
 		hoveredId: editor.hoverId,
 		resizingIds,
@@ -471,22 +401,22 @@ function backdropPosition(value: BoardThemeBackground): string {
 }
 
 function backgroundCssColor(): string | undefined {
-	return editor.document.appearance.background.color;
+	const color = editor.settings.background.color;
+	if (typeof color === "object") return color[resolveTheme().colorScheme];
+	return color && !color.startsWith("#") && !color.includes("(") ? `var(--board-${color}, ${color})` : color;
 }
 
 function syncBackground(theme: BoardThemeSnapshot) {
 	if (!app) return;
-	const nextBackdrop = resolveBoardBackground(
-		editor.document.appearance,
-		theme.background,
-	);
+	const nextBackdrop = resolveBoardBackground(editor.settings, theme.background);
 	if (!sameBackdrop(boardBackdrop, nextBackdrop)) boardBackdrop = nextBackdrop;
 	const nextUrl = nextBackdrop?.url ?? null;
 	if (backdropUrl !== nextUrl) backdropUrl = nextUrl;
 	const context = {
 		app,
-		document: editor.document,
+		settings: editor.settings,
 		viewport: editor.camera,
+		colorScheme: theme.colorScheme,
 		palette: theme.palette,
 		hasImageBackground: Boolean(
 			nextBackdrop &&
@@ -510,6 +440,14 @@ function scheduleRender() {
 	});
 }
 
+function scheduleTick() {
+	if (tickFrame || !active) return;
+	tickFrame = requestAnimationFrame(() => {
+		tickFrame = 0;
+		syncStage();
+	});
+}
+
 function localGestureItemIds(): Set<string> {
 	const interaction = editor.interaction;
 	switch (interaction.type) {
@@ -527,29 +465,37 @@ function localGestureItemIds(): Set<string> {
 function remotePreviewItems(): Map<string, BoardItem> {
 	const previews = new Map<string, BoardItem>();
 	const localIds = localGestureItemIds();
-	const peers = [...awareness.peers].sort(
-		(a, b) => a.lastSeenAt - b.lastSeenAt,
-	);
+	const peers = [...awareness.peers].sort((a, b) => a.lastSeenAt - b.lastSeenAt);
 	for (const peer of peers) {
 		if (peer.gesture?.kind !== "transform") continue;
-		for (const preview of peer.gesture.nodes) {
-			if (localIds.has(preview.nodeId)) continue;
-			const item = editor.itemById(preview.nodeId);
-			if (!item) continue;
-			previews.set(preview.nodeId, {
-				...item,
-				frame: preview.frame,
-				...(item.type === "arrow" && preview.arrow
-					? {
-							start: preview.arrow.start,
-							end: preview.arrow.end,
-							bend: preview.arrow.bend,
-						}
-					: {}),
-			} as BoardItem);
+		for (const preview of peer.gesture.items) {
+			if (localIds.has(preview.itemId)) continue;
+			const item = editor.itemById(preview.itemId);
+			if (item) previews.set(preview.itemId, sceneItemToItem({ ...item, frame: preview.frame }, editor.scene.layout));
 		}
 	}
 	return previews;
+}
+
+function pushMovingItems(frame: BoardPlayerFrame): Map<string, BoardItem> {
+	const previews = remotePreviewItems();
+	const moving = new Map<string, BoardItem>(previews);
+	for (const [id, item] of frame.items) moving.set(id, item);
+	editor.setPlayedItems(moving);
+	return previews;
+}
+
+function applyPlaybackCamera(frame: BoardPlayerFrame, renderScene: BoardModelScene): { x: number; y: number } {
+	const { focus, shake } = frame.camera;
+	const key = focus === undefined ? null : JSON.stringify(focus);
+	if (key !== playbackFocusKey) {
+		playbackFocusKey = key;
+		const rect = focus === undefined ? null : rectForCameraFocus(focus, (id) => renderScene.get(id)?.frame);
+		if (rect) editor.focusRect(rect, { padding: 48 });
+	}
+	if (!shake) return { x: 0, y: 0 };
+	const t = frame.time / 1000;
+	return { x: Math.sin(t * 91.3) * shake, y: Math.cos(t * 77.9) * shake };
 }
 
 function syncStage() {
@@ -557,64 +503,47 @@ function syncStage() {
 	const theme = resolveTheme();
 	const palette = theme.palette;
 	syncBackground(theme);
-	world.x = editor.camera.x;
-	world.y = editor.camera.y;
+
+	player.enter(editor.consumeRecentlyAdded(), editor.document);
+	const frame = player.frame(editor.document, playback, performance.now(), Date.now(), editor.playhead?.animationId ?? null);
+	const previews = pushMovingItems(frame);
+	const renderScene = editor.scene;
+	const jitter = applyPlaybackCamera(frame, renderScene);
+	world.x = editor.camera.x + jitter.x;
+	world.y = editor.camera.y + jitter.y;
 	world.scale.set(editor.camera.zoom);
 	if (world.parent !== app.stage) app.stage.addChild(world);
-	if (screenEffects && screenEffects.parent !== app.stage)
-		app.stage.addChild(screenEffects);
 
-	const previewItems = remotePreviewItems();
-	const getDisplayItem = (id: string) =>
-		previewItems.get(id) ?? editor.itemById(id);
-	const context = buildContext(palette, getDisplayItem);
-	animationRuntime?.setEnteringItems(editor.consumeRecentlyAdded());
-	const animationIds =
-		animationRuntime?.nodeIdsToMaterialize() ?? new Set<string>();
+	const context = buildContext(palette, renderScene, frame.time);
 	const pinnedIds = new Set(editor.selection);
-	for (const id of previewItems.keys()) pinnedIds.add(id);
+	for (const id of previews.keys()) pinnedIds.add(id);
 	if (editor.editingId) pinnedIds.add(editor.editingId);
-	for (const id of animationIds) pinnedIds.add(id);
+	for (const id of frame.items.keys()) {
+		pinnedIds.add(id);
+		for (const child of renderScene.descendants(id)) pinnedIds.add(child);
+		for (const binder of renderScene.binders(id)) pinnedIds.add(binder);
+	}
 
-	// Global render signals that affect every card equally (asset readiness,
-	// theme, text zoom-bucket, file availability). Selection and hover are tracked
-	// per card by the scene. Use the quantised zoom bucket — not raw zoom — so tiny
-	// zooms do not thrash text re-rasterisation.
-	const globalSig = [
-		assetVersion,
-		previewVersion,
-		resolveTheme().key,
-		textZoomBucket(renderZoom),
-	].join("|");
+	const globalSig = [assetVersion, previewVersion, resolveTheme().key, textZoomBucket(renderZoom)].join("|");
 
-	animationRuntime?.prepareSceneSync();
 	scene.sync({
-		items: editor.items,
-		connections: editor.connections,
-		selectedConnectionIds: new Set(editor.selection),
-		hoveredConnectionId: editor.hoveredConnectionId,
+		items: renderScene.items,
+		scene: renderScene,
 		context,
-		getItem: getDisplayItem,
+		getItem: (id) => renderScene.get(id) ?? null,
 		visibleIds,
-		cullRect,
 		pinnedIds,
 		globalSig,
 		structureVersion: editor.structureVersion,
 		geometryVersion: editor.geometryVersion,
-		gestureActive:
-			editor.gestureActive && editor.interaction.type !== "panning",
+		gestureActive: editor.gestureActive && editor.interaction.type !== "panning",
 	});
 
-	animationRuntime?.invalidatePoses();
-	// Composition time zero must be applied before Pixi's first draw. The same
-	// evaluator drives later frames, so scene sync and playback cannot diverge.
-	animationRuntime?.applyCurrentState();
-
-	const single = editor.selection.length === 1 ? editor.selectedItems[0] : null;
+	const single = editor.selection.length === 1 ? renderScene.get(editor.selection[0] as string) : null;
 	let arrowEndpoints: Array<{ x: number; y: number }> | undefined;
 	if (single?.type === "arrow" && !single.locked) {
-		const resolved = resolveArrow(single);
-		arrowEndpoints = [resolved.start, resolved.control, resolved.end];
+		const resolved = resolveSceneArrow(single as SceneItem<BoardArrowItem>, renderScene);
+		arrowEndpoints = [resolved.start.point, resolved.mid, resolved.end.point];
 	}
 	scene.drawOverlay(
 		{
@@ -625,14 +554,12 @@ function syncStage() {
 			transform: editor.selectionTransform,
 			controls: editor.tool === "select",
 			hoveredControl: editor.hoveredTransformControl,
-			rotationPointer:
-				editor.interaction.type === "rotating"
-					? editor.interaction.current
-					: null,
+			rotationPointer: editor.interaction.type === "rotating" ? editor.interaction.current : null,
 			arrowEndpoints,
 			ports: editor.connectionPorts,
 			hoveredPort: editor.hoveredConnectionPort,
-			connectionDraft: editor.connectionDraft,
+			arrowDraft: null,
+			bindTarget: editor.bindTargetFrame ?? editor.arrowDraft?.targetFrame ?? null,
 		},
 		palette,
 	);
@@ -641,11 +568,12 @@ function syncStage() {
 	drawTransient(palette, context.colors, context.colorScheme);
 
 	scheduleRender();
+	if (frame.running || scene.animated) scheduleTick();
 }
 
 function drawFreehandStroke(
 	graphics: Graphics,
-	points: readonly DrawPoint[],
+	points: readonly BoardDrawPoint[],
 	style: { color: number; size: number; alpha: number },
 ) {
 	if (points.length === 0) return;
@@ -765,38 +693,6 @@ function drawRemoteAwareness(colors: BoardShapeColors, mode: "dark" | "light") {
 				.stroke({ color: color.stroke, width: 1.5 * inv, alpha: 0.82 });
 			continue;
 		}
-		if (gesture.kind === "connection") {
-			// A peer's in-progress relation: anchor node to live pointer. Drawn dashed
-			// so it reads as provisional rather than as a committed edge.
-			const source = editor.itemById(gesture.sourceNodeId);
-			if (!source) continue;
-			const color = pickBoardColor(colors, gesture.color, mode);
-			const from = {
-				x: source.frame.x + source.frame.width / 2,
-				y: source.frame.y + source.frame.height / 2,
-			};
-			overlay
-				.moveTo(from.x, from.y)
-				.lineTo(gesture.current.x, gesture.current.y)
-				.stroke({
-					color: color.stroke,
-					width: Math.max(gesture.size, 1) * inv,
-					alpha: 0.8,
-				});
-			const target = gesture.targetNodeId
-				? editor.itemById(gesture.targetNodeId)
-				: null;
-			if (target)
-				overlay
-					.rect(
-						target.frame.x,
-						target.frame.y,
-						target.frame.width,
-						target.frame.height,
-					)
-					.stroke({ color: collaboration, width: 2 * inv, alpha: 0.9 });
-			continue;
-		}
 		if (gesture.kind === "transform" && gesture.bounds) {
 			overlay
 				.rect(
@@ -814,11 +710,6 @@ function drawRemoteAwareness(colors: BoardShapeColors, mode: "dark" | "light") {
 	}
 }
 
-/**
- * Draw in-progress gesture previews (freehand stroke, arrow being drawn) and
- * alignment guides onto the overlay, in world space. These are ephemeral — they
- * exist only while a gesture is active and never touch the document.
- */
 function drawTransient(
 	palette: BoardRenderPalette,
 	colors: BoardShapeColors,
@@ -829,7 +720,6 @@ function drawTransient(
 	const inv = 1 / Math.max(zoom, 0.0001);
 	const interaction = editor.interaction;
 
-	// Alignment guides.
 	for (const guide of editor.snapGuides) {
 		overlay
 			.moveTo(
@@ -854,7 +744,9 @@ function drawTransient(
 
 	if (interaction.type === "creatingArrow") {
 		const color = pickBoardColor(colors, interaction.color, mode);
-		const { start, current } = interaction;
+		const start = interaction.start;
+		const target = interaction.targetItemId ? editor.itemById(interaction.targetItemId) : null;
+		const current = target ? worldPoint(target.frame.x + target.frame.width / 2, target.frame.y + target.frame.height / 2) : interaction.current;
 		overlay
 			.moveTo(start.x, start.y)
 			.lineTo(current.x, current.y)
@@ -926,8 +818,6 @@ function resizeStage() {
 	});
 }
 
-// Convert a DOM event to a surface-relative screen point (the single place
-// screen coordinates enter the editor).
 function toScreenPoint(
 	event: PointerEvent | WheelEvent | MouseEvent,
 ): ScreenPoint {
@@ -951,8 +841,6 @@ function toPointerEvent(event: PointerEvent) {
 		pointerType: event.pointerType,
 		cancelled:
 			event.type === "pointercancel" || event.type === "lostpointercapture",
-		// Pens report real pressure; mouse/touch default to a mid value so strokes
-		// have a sensible, consistent width.
 		pressure:
 			event.pointerType === "pen" && event.pressure > 0 ? event.pressure : 0.5,
 	};
@@ -1052,50 +940,39 @@ function handleDoubleClick(event: MouseEvent) {
 		onPlayMedia?.(item.id);
 		return;
 	}
-	// A file card is an entry point, not an editable surface: activating it opens
-	// the file in the workspace preview, the same destination as the file tree.
 	if (item?.type === "file") {
-		void onOpenFile?.(item.ref.path);
+		void onOpenFile?.((item.props as { src: string }).src);
 		return;
 	}
 	if (item?.type === "task") {
 		if (!readonly)
 			void goto(
-				withCurrentWindow(buildSpaceTaskRoute(spaceId, item.taskRunId)),
+				withCurrentWindow(buildSpaceTaskRoute(spaceId, (item.props as { taskRunId: string }).taskRunId)),
 			);
 		return;
 	}
-	// View mode stops here: text editing and the blank-canvas text draft are both
-	// authoring actions.
 	if (readonly) return;
 	if (item && !item.locked && shapeCapabilities(item).canEdit) {
 		editor.editingId = item.id;
-	} else if (!item) {
-		editor.beginTextDraft(worldPointAtCursor);
+	} else if (!item || item.type === "frame" || item.type === "arrow") {
+		const label = editor.labelItemAt(worldPointAtCursor);
+		if (label) editor.editingId = label.id;
+		else if (!item) editor.beginTextDraft(worldPointAtCursor);
 	}
 }
 
-/**
- * Read previews for file cards and fold the results into their snapshots.
- *
- * Cards are already on the board before this runs, so a slow or failed read only
- * means less detail, never a missing card.
- */
 async function enrichFileCards(targets: Array<{ id: string; path: string }>) {
 	const resolved = await Promise.all(
 		targets.map(async ({ id, path }) => {
 			const item = editor.itemById(id);
 			if (item?.type !== "file") return null;
+			const snapshot = (item.props as { snapshot?: BoardFileSnapshotFacts }).snapshot;
 			const result = await loadFilePreview(spaceId, {
 				path,
-				mimeType: item.snapshot?.mimeType,
-				size: item.snapshot?.size,
-				mtimeMs: item.snapshot?.mtimeMs,
+				mimeType: snapshot?.mimeType,
+				size: snapshot?.size,
+				mtimeMs: snapshot?.mtimeMs,
 			});
-			// `replace` carries the distinction the editor needs: a complete read
-			// describes the file as it is now, so fields it omits are fields the file
-			// no longer has. An incomplete one is only merged, so a failed read never
-			// blanks a card.
 			return { id, snapshot: result.facts, replace: result.complete };
 		}),
 	);
@@ -1104,7 +981,7 @@ async function enrichFileCards(targets: Array<{ id: string; path: string }>) {
 			entry,
 		): entry is {
 			id: string;
-			snapshot: BoardFileSnapshot;
+			snapshot: BoardFileSnapshotFacts;
 			replace: boolean;
 		} => entry !== null,
 	);
@@ -1194,7 +1071,6 @@ function handleDrop(event: DragEvent) {
 				});
 			}
 		} catch {
-			/* ignore malformed payload */
 		}
 	}
 
@@ -1211,12 +1087,6 @@ function handleDrop(event: DragEvent) {
 	if (appItems.length > 0) dropAppItems(event.clientX, event.clientY, appItems);
 }
 
-/**
- * Place dropped workspace files on the board at a screen point.
- *
- * Shared by the native drag-and-drop path (desktop) and the touch/pen pointer
- * drag path (mobile), so both produce identical cards and enrichment.
- */
 function dropBoardItems(
 	clientX: number,
 	clientY: number,
@@ -1226,9 +1096,6 @@ function dropBoardItems(
 	const rect = host.getBoundingClientRect();
 	const origin = screenToWorld(clientX, clientY, rect, editor.camera);
 
-	// Tile dropped files to the right so a multi-drop stays readable. Every file is
-	// accepted — non-media becomes a file card — so the created ids are collected
-	// and handed to the preview enrichment below.
 	let offsetX = 0;
 	const created: Array<{ id: string; path: string }> = [];
 	for (const entry of items) {
@@ -1240,12 +1107,8 @@ function dropBoardItems(
 		created.push({ id, path: entry.path });
 		offsetX += 36;
 	}
-	// Surface the result of the drop: the new cards are the selection, which also
-	// puts them under the selection toolbar for an immediate follow-up action.
 	if (created.length > 0) {
 		editor.setSelection(created.map((entry) => entry.id));
-		// Read previews in the background; the cards are already on the board and
-		// simply gain detail when this lands.
 		void enrichFileCards(created);
 	}
 }
@@ -1309,7 +1172,7 @@ const cursor = $derived.by(() => {
 	switch (editor.tool) {
 		case "draw":
 		case "arrow":
-		case "geo":
+		case "shape":
 		case "frame":
 		case "text":
 			return "crosshair";
@@ -1340,9 +1203,6 @@ onMount(async () => {
 			backgroundAlpha: 0,
 			resizeTo: host,
 			resolution: getBoardResolution(),
-			// Render on demand (see scheduleRender) instead of every tick, so an
-			// idle board does not keep the GPU/CPU busy redrawing an unchanged
-			// scene ~60 times a second.
 			autoStart: false,
 		});
 	} catch (error) {
@@ -1350,7 +1210,6 @@ onMount(async () => {
 		instance.destroy({ removeView: true });
 		return;
 	}
-	// The component may have been torn down while init was awaiting.
 	if (disposed) {
 		instance.destroy({ removeView: true });
 		return;
@@ -1359,54 +1218,28 @@ onMount(async () => {
 	instance.canvas.classList.add("board-stage-canvas");
 	host.appendChild(instance.canvas);
 	world = new Container({ isRenderGroup: true, label: "board-world" });
-	effectsBehind = new Container({ label: "board-effects-behind" });
 	nodeLayer = new Container({ label: "board-nodes" });
-	effectsFront = new Container({ label: "board-effects-front" });
-	screenEffects = new Container({
-		isRenderGroup: true,
-		label: "board-screen-effects",
-	});
 	overlay = new Graphics({ label: "board-interaction-overlay" });
-	// Batched far-LOD geometry. Lives at the bottom of the node layer so live
-	// cards (selection, editing) always draw above the plates.
 	farLayer = new Graphics({ label: "board-far-layer" });
 	nodeLayer.addChild(farLayer);
-	world.addChild(effectsBehind, nodeLayer, effectsFront, overlay);
+	world.addChild(nodeLayer, overlay);
 	scene = createBoardScene({
 		world: nodeLayer,
 		farLayer,
 		overlay,
 		getRenderer: getBoardCardRenderer,
 	});
-	animationRuntime = createBoardAnimationRuntime({
-		getNode: (nodeId) => scene?.getNode(nodeId) ?? null,
-		getItem: (nodeId) => editor.itemById(nodeId),
-		getGeometryVersion: () => editor.geometryVersion,
-		getWorld: () => world,
-		getLayers: () =>
-			effectsBehind && effectsFront && screenEffects
-				? { behind: effectsBehind, front: effectsFront, screen: screenEffects }
-				: null,
-		getScreen: () => ({
-			width: app?.screen.width ?? 0,
-			height: app?.screen.height ?? 0,
-		}),
-		getAccentColor: () => getPalette().brand,
-		getInkColor: (item) => {
-			const theme = resolveTheme();
-			return pickBoardColor(theme.colors, item.color, theme.colorScheme).stroke;
+	sketches = createBoardSketchHost({
+		readModule: async (src) => {
+			const url = await assetSource.resolveFileUrl(src);
+			if (!url) throw new Error(`${src} is not available.`);
+			const response = await fetch(url);
+			if (!response.ok) throw new Error(`${src} could not be read.`);
+			return response.text();
 		},
-		onView: (view) => {
-			playbackView = view;
-		},
-		render: () => {
-			if (active) app?.render();
-		},
+		onFrame: () => syncStage(),
 	});
-	animationRuntime.setActive(active);
-	animationRuntime.setData(runtime);
 
-	// The export path deliberately reuses this renderer and this theme snapshot:
 	onExportReady?.({
 		renderer: () => (app ? (app.renderer as unknown as Renderer) : null),
 		theme: () => {
@@ -1434,17 +1267,6 @@ onMount(async () => {
 	resizeObserver.observe(host);
 	resizeStage();
 	window.addEventListener(SPACE_STYLE_CHANGED_EVENT, handleSpaceStyleChanged);
-});
-
-$effect(() => {
-	// The entrance preset lives in the document appearance, while effects and
-	// compositions arrive through the runtime snapshot. Keep the renderer's
-	// animation model coherent for both local edits and remote refreshes.
-	editor.appearance;
-	animationRuntime?.setData({
-		...runtime,
-		enter: editor.appearance.motion?.enter ?? null,
-	});
 });
 
 function setBackdropLoadState(state: BoardBackgroundLoadState | null) {
@@ -1479,14 +1301,18 @@ $effect(() => {
 });
 
 $effect(() => {
-	animationRuntime?.setActive(active);
 	if (!active) {
 		cancelAnimationFrame(renderFrame);
+		cancelAnimationFrame(tickFrame);
 		renderFrame = 0;
+		tickFrame = 0;
 		return;
 	}
-	resizeStage();
-	syncStage();
+	untrack(() => {
+		player.reset();
+		resizeStage();
+		syncStage();
+	});
 });
 
 $effect(() => {
@@ -1500,16 +1326,18 @@ $effect(() => {
 	editor.snapGuides;
 	editor.structureVersion;
 	editor.geometryVersion;
+	editor.scene;
+	playback;
 	awarenessVersion;
 	assetVersion;
-	// Re-render when the user theme or active Space style changes.
 	getResolvedTheme();
 	spaceStyleVersion;
-	syncStage();
+	untrack(scheduleTick);
 });
 
 onDestroy(() => {
 	disposed = true;
+	editor.setPlayedItems(new Map());
 	window.removeEventListener(
 		SPACE_STYLE_CHANGED_EVENT,
 		handleSpaceStyleChanged,
@@ -1517,6 +1345,7 @@ onDestroy(() => {
 	resizeObserver?.disconnect();
 	cancelAnimationFrame(resizeFrame);
 	cancelAnimationFrame(renderFrame);
+	cancelAnimationFrame(tickFrame);
 	unsubscribeTaskRuns();
 	unsubscribePreviews();
 	if (host) {
@@ -1529,23 +1358,17 @@ onDestroy(() => {
 		host.removeEventListener("wheel", handleWheel);
 		host.removeEventListener("dblclick", handleDoubleClick);
 	}
-	// Stop animation and restore transient poses before releasing scene resources.
-	animationRuntime?.destroy();
-	animationRuntime = null;
-	const context = buildContext(getPalette(), (id) => editor.itemById(id));
+	const context = buildContext(getPalette(), editor.scene, 0);
 	scene?.destroy(context);
 	scene = null;
+	sketches?.destroy();
+	sketches = null;
 	background?.destroy({ children: true });
 	background = null;
-	effectsBehind = null;
 	nodeLayer = null;
-	effectsFront = null;
-	screenEffects = null;
 	world = null;
 	overlay = null;
 	farLayer = null;
-	// `destroy(true)` would release Pixi's global pools and the shared Assets
-	// cache, breaking any other live renderer. Remove only this canvas.
 	app?.destroy({ removeView: true });
 	app = null;
 	onExportReady?.(null);
@@ -1586,8 +1409,6 @@ onDestroy(() => {
 		if (readonly) return;
 		const types = event.dataTransfer?.types;
 		if (!types) return;
-		// Accept both the rich resource payload and the bare path, so a drag from
-		// anywhere in the workspace (file tree, task tray) lands.
 		if (types.includes("text/cohub-path") || types.includes("application/x-cohub-resource")) {
 			event.preventDefault();
 			dropActive = true;

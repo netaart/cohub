@@ -1,22 +1,13 @@
-import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
 import { Container, Text } from "pixi.js";
-import {
-	syncTextResolution,
-	textResolutionForZoom,
-} from "../text-resolution.js";
-import type { BoardItem, BoardTextItem } from "@cohub/protocol/board-document";
-import { pickBoardColor } from "../../core/palette.js";
-import {
-	boardTextLineHeight,
-	clampBoardTextFontSize,
-	measureBoardText,
-	TEXT_FONT_SIZE,
-} from "../../core/text-metrics.js";
+import type { BoardTextItem } from "@cohub/protocol";
+import { layoutBoardText } from "@cohub/protocol";
+import { boardFontFamily } from "../../core/text-metrics.js";
+import type { SceneItem } from "../../core/scene.js";
+import { itemColor } from "../palette.js";
+import { BOARD_FONT_STACKS } from "../text-measurement.js";
+import { syncTextResolution, textResolutionForZoom } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
-import type {
-	BoardCardRenderer,
-	BoardRenderContext,
-} from "./board-renderer-registry.js";
+import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
 import { drawFarPlate } from "./far-plate.js";
 
 type TextParts = {
@@ -28,59 +19,42 @@ type TextParts = {
 
 const partsByContainer = new WeakMap<Container, TextParts>();
 
-function sync(
-	container: Container,
-	item: BoardTextItem,
-	context: BoardRenderContext,
-) {
+function revealed(text: string, reveal: number): string {
+	if (reveal >= 1) return text;
+	const characters = [...text];
+	return characters.slice(0, Math.round(characters.length * Math.max(0, reveal))).join("");
+}
+
+function sync(container: Container, item: SceneItem<BoardTextItem>, context: BoardRenderContext) {
 	const parts = partsByContainer.get(container);
 	if (!parts) return;
 	positionShell(parts.root, item);
-
-	const fontSize = clampBoardTextFontSize(item.fontSize);
-	const measured = measureBoardText(item.text, fontSize);
-	// During a resize the frame changes continuously while fontSize stays stable.
-	// Scale the existing texture for the live preview, then rasterise once at the
-	// final font size on pointer-up. Text is anchored at its visual center because
-	// the frame geometry uses center-based rotation.
-	const previewScale = Math.max(
-		0.0001,
-		item.frame.width / Math.max(0.0001, measured.width),
-	);
+	const { props } = item;
+	const layout = layoutBoardText(props);
+	const previewScale = Math.max(0.0001, item.frame.width / Math.max(0.0001, layout.width));
 	parts.body.scale.set(previewScale);
-	parts.body.position.set(item.frame.width / 2, item.frame.height / 2);
+	const anchorX = props.align === "center" ? 0.5 : props.align === "right" ? 1 : 0;
+	parts.body.anchor.set(anchorX, 0);
+	parts.body.position.set(item.frame.width * anchorX, 0);
+	syncTextResolution(parts.body, parts, context.zoom * Math.max(1, previewScale));
 
-	syncTextResolution(
-		parts.body,
-		parts,
-		context.zoom * Math.max(1, previewScale),
-	);
-
-	const color = pickBoardColor(
-		context.colors,
-		item.color || "neutral",
-		context.colorScheme,
-	);
-	// On open paper, stroke reads as ink; label is for filled chips/notes.
-	const ink =
-		item.color === "neutral" || !item.color
-			? context.palette.text
-			: color.stroke;
-	const contentSig = [
-		item.text,
-		item.color,
-		fontSize,
-		context.colorScheme,
-		context.colors.brand.stroke,
-		context.palette.text,
-	].join("|");
+	const ink = itemColor(context, item.style.fill, "neutral");
+	const text = revealed(props.text, props.reveal);
+	const contentSig = [text, ink, props.fontSize, props.fontWeight, props.font, props.align, props.lineHeight, props.width ?? ""].join("|");
 	if (contentSig === parts.contentSig) return;
 	parts.contentSig = contentSig;
-
-	if (parts.body.text !== item.text) parts.body.text = item.text || "";
-	parts.body.style.fill = ink;
-	parts.body.style.fontSize = fontSize;
-	parts.body.style.lineHeight = boardTextLineHeight(fontSize);
+	parts.body.text = text;
+	Object.assign(parts.body.style, {
+		fill: ink,
+		fontSize: props.fontSize,
+		fontWeight: String(Math.round(props.fontWeight / 100) * 100),
+		fontFamily: boardFontFamily(props.font, BOARD_FONT_STACKS),
+		align: props.align,
+		lineHeight: layout.lineHeight,
+		wordWrap: Boolean(props.width),
+		wordWrapWidth: props.width ?? 0,
+		breakWords: true,
+	});
 }
 
 export const textCardRenderer: BoardCardRenderer = {
@@ -89,66 +63,21 @@ export const textCardRenderer: BoardCardRenderer = {
 	create: (item, context) => {
 		const root = new Container();
 		const resolution = textResolutionForZoom(context.zoom);
-		const color = pickBoardColor(
-			context.colors,
-			item.type === "text" ? item.color || "neutral" : "neutral",
-			context.colorScheme,
-		);
-		const ink =
-			item.type === "text" && (item.color === "neutral" || !item.color)
-				? context.palette.text
-				: color.stroke;
-		const body = new Text({
-			text: "",
-			style: {
-				fill: ink,
-				fontFamily: BOARD_FONT_STACK,
-				fontSize: TEXT_FONT_SIZE,
-				fontWeight: "500",
-				lineHeight: boardTextLineHeight(TEXT_FONT_SIZE),
-				wordWrap: false,
-			},
-			resolution,
-			roundPixels: true,
-		});
-		body.anchor.set(0.5);
+		const body = new Text({ text: "", style: { fontFamily: BOARD_FONT_STACKS.sans }, resolution, roundPixels: true });
 		root.addChild(body);
-		partsByContainer.set(root, {
-			root,
-			body,
-			resolution,
-			contentSig: "",
-		});
-		if (item.type === "text") sync(root, item, context);
+		partsByContainer.set(root, { root, body, resolution, contentSig: "" });
+		if (item.type === "text") sync(root, item as SceneItem<BoardTextItem>, context);
 		return root;
 	},
 	update: (container, item, context) => {
-		if (item.type === "text") sync(container, item, context);
+		if (item.type === "text") sync(container, item as SceneItem<BoardTextItem>, context);
 	},
-	/**
-	 * Far LOD: a low-alpha ink bar. Body text is well under a pixel tall at these
-	 * zooms, so a rasterised glyph texture would only ever resolve to a smudge —
-	 * this approximates that smudge for free and skips the texture entirely.
-	 */
 	renderFar: (graphics, item, context) => {
 		if (item.type !== "text") return;
-		const color = pickBoardColor(
-			context.colors,
-			item.color || "neutral",
-			context.colorScheme,
-		);
-		const ink =
-			item.color === "neutral" || !item.color
-				? context.palette.text
-				: color.stroke;
-		drawFarPlate(graphics, item.frame, { fill: ink, fillAlpha: 0.35 });
+		drawFarPlate(graphics, item.frame, { fill: itemColor(context, item.style.fill, "neutral"), fillAlpha: 0.35 });
 	},
 	destroy: (container) => {
 		partsByContainer.get(container)?.root.destroy({ children: true });
 		partsByContainer.delete(container);
 	},
 };
-
-export function isTextItem(item: BoardItem): item is BoardTextItem {
-	return item.type === "text";
-}

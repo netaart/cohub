@@ -19,7 +19,9 @@
       "@cohub/protocol/generation": ["../protocol/src/generation/index.ts"],
       "@cohub/protocol/ports": ["../protocol/src/ports/index.ts"],
       "@cohub/protocol/provenance": ["../protocol/src/provenance.ts"],
-      "@cohub/protocol/board-document": ["../protocol/src/board-document.ts"],
+      "@cohub/protocol/board-model": ["../protocol/src/board-model.ts"],
+      "@cohub/protocol/board-layout": ["../protocol/src/board-layout.ts"],
+      "@cohub/protocol/board-patch": ["../protocol/src/board-patch.ts"],
       "@cohub/protocol/board-constants": ["../protocol/src/board-constants.ts"]
     }
   },

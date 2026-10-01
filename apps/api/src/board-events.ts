@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type {
-  BoardComposition,
-  BoardEffect,
-  BoardMutationReceipt,
+  BoardChangeSummary,
   BoardPlaybackSnapshot,
+  BoardDelta,
   RequestSource,
 } from "@cohub/protocol";
+import { BOARD_REALTIME_DELTA_MAX_BYTES } from "@cohub/protocol";
 import { dispatchRealtimeEvent } from "./channels.js";
 
 export async function dispatchBoardChanged(input: {
@@ -13,15 +13,13 @@ export async function dispatchBoardChanged(input: {
   boardId: string;
   actorId: string;
   mutationId: string;
+  baseVersion: number;
   version: number;
-  changed: BoardMutationReceipt["changed"];
+  changed: BoardChangeSummary;
+  after: BoardDelta;
   source?: RequestSource | null;
-  animationPatch?: {
-    effects: BoardEffect[];
-    compositions: BoardComposition[];
-    playback?: BoardPlaybackSnapshot | null;
-  };
 }) {
+  const inline = Buffer.byteLength(JSON.stringify(input.after), "utf8") <= BOARD_REALTIME_DELTA_MAX_BYTES;
   await dispatchRealtimeEvent({
     id: randomUUID(),
     timestamp: Date.now(),
@@ -33,9 +31,10 @@ export async function dispatchBoardChanged(input: {
       boardId: input.boardId,
       actorId: input.actorId,
       mutationId: input.mutationId,
+      baseVersion: input.baseVersion,
       version: input.version,
       changed: input.changed,
-      ...(input.animationPatch ? { animationPatch: input.animationPatch } : {}),
+      ...(inline ? { after: input.after } : {}),
       ...(input.source ? { source: input.source } : {}),
     },
   });
@@ -43,7 +42,8 @@ export async function dispatchBoardChanged(input: {
 
 export async function dispatchBoardPlaybackChanged(input: {
   spaceId: string;
-  snapshot: BoardPlaybackSnapshot;
+  boardId: string;
+  playback: BoardPlaybackSnapshot | null;
 }) {
   await dispatchRealtimeEvent({
     id: randomUUID(),
@@ -52,6 +52,6 @@ export async function dispatchBoardPlaybackChanged(input: {
     type: "board.playback.changed",
     spaceId: input.spaceId,
     sessionId: null,
-    payload: input.snapshot,
+    payload: { boardId: input.boardId, playback: input.playback },
   });
 }

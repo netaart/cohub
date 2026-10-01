@@ -1,9 +1,10 @@
-/** The Board renderer for `boards export`, bundled with PixiJS by `tsdown.config.ts`. */
 
 export {
-  boardAuthoringSnapshotToDocument,
+  boardDocumentAt,
   boardImageKeySource,
+  buildBoardScene,
   imageAssetKey,
+  parseBoardDocument,
   planBoardExport,
   selectBoardExportAssets,
 } from "@neta-art/cohub/board";

@@ -2,7 +2,7 @@ export type BoardToolId =
 	| "select"
 	| "hand"
 	| "text"
-	| "geo"
+	| "shape"
 	| "draw"
 	| "arrow"
 	| "frame";

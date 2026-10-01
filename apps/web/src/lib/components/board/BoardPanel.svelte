@@ -1,5 +1,6 @@
 <script lang="ts">
 import {
+	parseBoardDocument,
 	screenToWorld,
 	shapeCapabilities,
 	taskRunToBoardTaskSnapshot as taskBoardSnapshot,
@@ -31,12 +32,14 @@ import {
 	writeBoardViewPreference,
 } from "$lib/board/board-view-preferences";
 import { createBoardEditor } from "$lib/board/editor.svelte";
+import type { BoardPlaybackCommand, BoardPlaybackSnapshot } from "@cohub/protocol";
+import { nextLocalPlayback } from "$lib/board/runtime/board-player";
 import type { BoardRuntimeProps } from "$lib/board/runtime/board-runtime";
 import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
 import BoardAppearancePopover from "$lib/components/board/BoardAppearancePopover.svelte";
 import BoardAppOverlay from "$lib/components/board/BoardAppOverlay.svelte";
 import BoardCollaboratorOverlay from "$lib/components/board/BoardCollaboratorOverlay.svelte";
-import BoardConnectionToolbar from "$lib/components/board/BoardConnectionToolbar.svelte";
+import BoardArrowToolbar from "$lib/components/board/BoardArrowToolbar.svelte";
 import BoardContextMenu from "$lib/components/board/BoardContextMenu.svelte";
 import BoardEmptyState from "$lib/components/board/BoardEmptyState.svelte";
 import BoardExportDialog from "$lib/components/board/BoardExportDialog.svelte";
@@ -46,6 +49,7 @@ import BoardMediaPlayer from "$lib/components/board/BoardMediaPlayer.svelte";
 import BoardSelectionToolbar from "$lib/components/board/BoardSelectionToolbar.svelte";
 import BoardStage from "$lib/components/board/BoardStage.svelte";
 import BoardTextEditor from "$lib/components/board/BoardTextEditor.svelte";
+import BoardTimeline from "$lib/components/board/BoardTimeline.svelte";
 import BoardZoomMenu from "$lib/components/board/BoardZoomMenu.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -60,7 +64,7 @@ const {
 	path,
 	boardId,
 	document: initialDocument,
-	runtime,
+	playback = null,
 	spaceId,
 	shell,
 	onNavigationOpen,
@@ -74,6 +78,7 @@ const {
 	activities = [],
 	onOpenActivity,
 	onCommit,
+	onPlayback,
 	onRetrySync,
 	onViewStateChange,
 	onOpenFile,
@@ -85,16 +90,10 @@ const {
 const locale = $derived(getLocale());
 
 const readonly = $derived(mode === "view");
-/** Live Space by default; a published Board supplies an artifact-backed source. */
 const resolvedAssetSource = $derived(
 	assetSource ?? createSpaceBoardAssetSource(spaceId),
 );
 
-/**
- * One preview-texture owner for the whole panel. The live stage and the replay
- * overlay share it: Pixi's `Assets` cache returns the same texture per URL, so
- * two independent owners would tear down each other's textures on release.
- */
 const assets = createBoardAssetManager({
 	spaceId: untrack(() => spaceId),
 	loadVideoPreviews:
@@ -107,21 +106,24 @@ const assets = createBoardAssetManager({
 
 let stageWrap: HTMLDivElement | null = $state(null);
 let contextMenu = $state<{ x: number; y: number } | null>(null);
-/**
- * Export runs on the stage's live renderer, so the dialog only opens once the
- * stage has handed over its bridge.
- */
 let exportBridge = $state<BoardStageExportBridge | null>(null);
 let exportOpen = $state(false);
 let generationOpen = $state(false);
 let appearanceOpen = $state(false);
 let replayOpen = $state(false);
-/** Latest version seen over realtime; the replay view appends when it grows. */
+let timelineOpen = $state(false);
+let localPlayback = $state<BoardPlaybackSnapshot | null>(null);
+const activePlayback = $derived(onPlayback ? playback : localPlayback);
+
+function sendPlayback(command: BoardPlaybackCommand) {
+	if (onPlayback) return onPlayback(command);
+	localPlayback = nextLocalPlayback(localPlayback, command, editor.document);
+}
 let liveVersion = $state(0);
 let backgroundLoadState = $state<BoardBackgroundLoadState | null>(null);
 let generationSelectionRequest = $state(0);
 let playingId = $state<string | null>(null);
-let regeneratingNodeId = $state<string | null>(null);
+let regeneratingItemId = $state<string | null>(null);
 let regenerationError = $state<string | null>(null);
 let regenerationErrorTimer: ReturnType<typeof setTimeout> | null = null;
 let awarenessVersion = $state(0);
@@ -148,10 +150,10 @@ function addSelectionToGeneration() {
 	generationSelectionRequest += 1;
 }
 
-function playMedia(nodeId: string) {
-	const item = editor.itemById(nodeId);
+function playMedia(itemId: string) {
+	const item = editor.itemById(itemId);
 	if (!playableBoardMedia(item, resolvedAssetSource)) return;
-	playingId = nodeId;
+	playingId = itemId;
 }
 
 function closeMedia() {
@@ -173,18 +175,18 @@ function showRegenerationError(message: string) {
 	}, 6000);
 }
 
-async function regenerateTask(nodeId: string) {
-	if (regeneratingNodeId) return;
-	const source = editor.itemById(nodeId);
-	if (source?.type !== "task" || source.snapshot.taskType !== "generation")
+async function regenerateTask(itemId: string) {
+	if (regeneratingItemId) return;
+	const source = editor.itemById(itemId);
+	if (source?.type !== "task" || source.props.snapshot.taskType !== "generation")
 		return;
 	const sourceFrame = { ...source.frame };
 	const submittingUserKey = getCacheUserKey();
 	let createdTaskRunId: string | null = null;
-	regeneratingNodeId = nodeId;
+	regeneratingItemId = itemId;
 	regenerationError = null;
 	try {
-		const detail = await sdk.tasks.get(source.taskRunId);
+		const detail = await sdk.tasks.get(source.props.taskRunId);
 		const request = regenerationRequestFromTaskRun(detail.run, spaceId);
 		const created = await sdk.generations.create(request);
 		createdTaskRunId = created.taskRunId;
@@ -203,10 +205,10 @@ async function regenerateTask(nodeId: string) {
 			created.taskRunId,
 			snapshot,
 			worldPoint(position.x, position.y),
-			[{ nodeId: source.id, sourcePortId: "artifacts", targetPortId: "input" }],
+			[{ itemId: source.id, sourcePortId: "artifacts", targetPortId: "input" }],
 			{
 				regeneration: {
-					sourceTaskRunId: source.taskRunId,
+					sourceTaskRunId: source.props.taskRunId,
 					sourceItemId: source.id,
 				},
 			},
@@ -220,15 +222,20 @@ async function regenerateTask(nodeId: string) {
 					: m.board_generation_start_failed({}, { locale }),
 		);
 	} finally {
-		regeneratingNodeId = null;
+		regeneratingItemId = null;
 	}
 }
 
 const boardClient = sdk
 	.space(untrack(() => spaceId))
 	.board(untrack(() => boardId));
-/** Stable reference: the replay view loads once per mount and must not see a new function per render. */
-const fetchTransactions = boardClient.transactions.bind(boardClient);
+const fetchHistory = boardClient.history.bind(boardClient);
+async function fetchDocument() {
+	const result = await boardClient.get();
+	const parsed = parseBoardDocument({ board: result.board, items: result.items ?? {}, animations: result.animations ?? {} });
+	if (!parsed.ok) throw new Error(m.board_replay_failed({}, { locale }));
+	return { version: result.version, document: parsed.document };
+}
 const awareness: BoardAwarenessController = createBoardAwarenessController({
 	send: (seq, update) => boardClient.updateAwareness(seq, update),
 	onChange: () => {
@@ -238,14 +245,12 @@ const awareness: BoardAwarenessController = createBoardAwarenessController({
 
 const editor = createBoardEditor({
 	document: untrack(() => initialDocument),
-	// A view-only Board opens in Hand: the gesture set is pan, zoom and select.
 	initialTool: untrack(() =>
 		mode === "view" ? "hand" : defaultBoardTool(isMobile),
 	),
 	key: untrack(() => path),
 	readonly: untrack(() => mode === "view"),
-	onCommit: (document, before, commands) =>
-		onCommit?.(document, before, commands),
+	onCommit: (patch) => onCommit?.(patch),
 	onViewStateChange: (state) => {
 		onViewStateChange?.({ path, ...state });
 	},
@@ -275,9 +280,9 @@ function handleSurfaceChange(size: { width: number; height: number }) {
 	surfaceSize = size;
 	if (viewPreferenceRestored || size.width <= 0 || size.height <= 0) return;
 	viewPreferenceRestored = true;
-	if (!restoredViewPreference) return;
-	const camera = cameraFromBoardViewPreference(restoredViewPreference, size);
+	const camera = restoredViewPreference ? cameraFromBoardViewPreference(restoredViewPreference, size) : null;
 	if (camera) editor.setCamera(camera);
+	else editor.fitView({ animate: false, maxZoom: 1 });
 }
 
 $effect(() => {
@@ -291,8 +296,6 @@ $effect(() => {
 $effect(() => {
 	const doc = initialDocument;
 	const k = path;
-	// untrack: only re-run when the document/path prop changes, not when
-	// loadDocument reads interaction/editing state for its deferral decision.
 	untrack(() => editor.loadDocument(doc, k));
 });
 
@@ -308,9 +311,6 @@ $effect(() => {
 	const selection = editor.selection;
 	const bounds = editor.bounds;
 	const editingId = editor.editingId;
-	// Form factor is published, not inferred by peers: a touch contact from a
-	// phone and one from a touchscreen laptop are the same pointer type but not
-	// the same situation.
 	const formFactor = isMobile ? ("mobile" as const) : ("desktop" as const);
 	untrack(() =>
 		awareness.updateLocalState({
@@ -337,14 +337,10 @@ $effect(() => {
 	untrack(() => awareness.reconcile(items));
 });
 
-// Activity state is space-wide, so scope it to this board: switching boards must
-// not carry a marker from the previous one onto unrelated content.
 const boardActivities = $derived(
 	activities.filter((activity) => activity.boardId === boardId),
 );
 
-// awarenessVersion is the change signal for the peer map, which is mutated in
-// place by the controller.
 const peers = $derived.by(() => {
 	awarenessVersion;
 	return awareness.peers;
@@ -369,7 +365,6 @@ async function writeClipboard(payload: unknown) {
 		if (navigator.clipboard?.writeText)
 			await navigator.clipboard.writeText(text);
 	} catch {
-		// Internal clipboard on the editor is enough as a fallback.
 	}
 }
 
@@ -378,17 +373,10 @@ async function readClipboardText(): Promise<string | null> {
 		if (navigator.clipboard?.readText)
 			return await navigator.clipboard.readText();
 	} catch {
-		/* permission denied / insecure context */
 	}
 	return null;
 }
 
-/**
- * Keyboard set for a view-only Board: navigate, select, copy, export.
- *
- * Written as its own handler rather than as guards sprinkled through the editing
- * one, so a new editing shortcut can never leak into view mode by omission.
- */
 function handleReadonlyKeydown(
 	event: KeyboardEvent,
 	input: { mod: boolean; key: string },
@@ -429,7 +417,7 @@ function handleReadonlyKeydown(
 			}
 			if (single.type !== "file") return;
 			event.preventDefault();
-			void onOpenFile?.(single.ref.path);
+			void onOpenFile?.((single.props as { src: string }).src);
 			return;
 		}
 		case "Escape":
@@ -457,7 +445,6 @@ function handleKeydown(event: KeyboardEvent) {
 	const mod = event.metaKey || event.ctrlKey;
 	const key = event.key.toLowerCase();
 
-	// Space temporary hand — ignore auto-repeat.
 	if (event.code === "Space" && !event.repeat) {
 		event.preventDefault();
 		editor.spaceHeld = true;
@@ -511,7 +498,6 @@ function handleKeydown(event: KeyboardEvent) {
 		void (async () => {
 			const text = await readClipboardText();
 			if (text) {
-				// pasteClipboard re-validates; invalid JSON / payload is ignored.
 				editor.pasteClipboard(text);
 				return;
 			}
@@ -529,8 +515,6 @@ function handleKeydown(event: KeyboardEvent) {
 		editor.toggleSelectionLock();
 		return;
 	}
-	// Shift+Cmd/Ctrl+E — export image. Plain Cmd+E is the browser's own in some
-	// builds, and the shift form matches the "export" convention in design tools.
 	if (mod && event.shiftKey && key === "e") {
 		event.preventDefault();
 		openExport();
@@ -539,9 +523,6 @@ function handleKeydown(event: KeyboardEvent) {
 
 	switch (event.key) {
 		case "Enter": {
-			// Keyboard equivalent of double-clicking a card: open a file card in the
-			// preview panel, open a task node in the detail view, or start editing an
-			// editable shape.
 			const single =
 				editor.selectedItems.length === 1 ? editor.selectedItems[0] : null;
 			if (!single) return;
@@ -551,11 +532,11 @@ function handleKeydown(event: KeyboardEvent) {
 				return;
 			}
 			if (single.type === "file") {
-				void onOpenFile?.(single.ref.path);
+				void onOpenFile?.((single.props as { src: string }).src);
 				return;
 			}
 			if (single.type === "task") {
-				void onOpenTask?.(single.taskRunId);
+				void onOpenTask?.((single.props as { taskRunId: string }).taskRunId);
 				return;
 			}
 			if (!single.locked && shapeCapabilities(single).canEdit)
@@ -571,7 +552,6 @@ function handleKeydown(event: KeyboardEvent) {
 			if (contextMenu) contextMenu = null;
 			else {
 				editor.clearSelection();
-				// Escape leaves any creation tool and returns to Select.
 				if (editor.tool !== "select" && editor.tool !== "hand")
 					editor.tool = "select";
 			}
@@ -604,9 +584,9 @@ function handleKeydown(event: KeyboardEvent) {
 		case "T":
 			editor.tool = "text";
 			return;
-		case "g":
-		case "G":
-			editor.tool = "geo";
+		case "s":
+		case "S":
+			editor.tool = "shape";
 			return;
 		case "d":
 		case "D":
@@ -671,8 +651,6 @@ function handleContextMenu(event: MouseEvent) {
 }
 
 onMount(() => {
-	// View mode publishes and receives no presence: a published Board is read by
-	// viewers who are not collaborators, and often have no access to the Space.
 	if (!readonly) {
 		unsubscribeAwareness = boardClient.subscribe({
 			awareness: (event) => awareness.receive(event),
@@ -681,13 +659,10 @@ onMount(() => {
 			},
 		});
 	}
-	// Live task snapshot updates: when a task node's run completes or fails, its
-	// card updates without waiting for a manual refresh.
 	const unsubscribeTaskCache = onTaskRunsCacheUpdated((event) => {
 		if (event.spaceId !== spaceId) return;
-		const taskItems = editor.items.filter((item) => item.type === "task");
-		if (taskItems.length === 0) return;
-		const taskRunIds = new Set(taskItems.map((item) => item.taskRunId));
+		const taskRunIds = new Set(editor.items.flatMap((item) => (item.type === "task" ? [(item.props as { taskRunId: string }).taskRunId] : [])));
+		if (taskRunIds.size === 0) return;
 		const updatedRuns = event.runs.filter((run) => taskRunIds.has(run.id));
 		if (updatedRuns.length === 0) return;
 		const snapshots = new Map(
@@ -697,7 +672,6 @@ onMount(() => {
 	});
 	window.addEventListener("keydown", handleKeydown);
 	window.addEventListener("keyup", handleKeyup);
-	// Space hand can stick if the window blurs mid-hold (tab switch / alt-tab).
 	window.addEventListener("blur", clearSpaceHeld);
 	window.addEventListener("pagehide", flushViewPreference);
 	document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -756,10 +730,10 @@ onDestroy(() => {
 		</div>
 	{/if}
 
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		bind:this={stageWrap}
 		class="relative min-h-0 flex-1 bg-bg-primary"
+		role="application"
 		oncontextmenu={handleContextMenu}
 	>
 		{#if regenerationError}
@@ -770,7 +744,7 @@ onDestroy(() => {
 
 		<BoardStage
 			{editor}
-			{runtime}
+			playback={activePlayback}
 			{assets}
 			{active}
 			{awareness}
@@ -808,7 +782,10 @@ onDestroy(() => {
 		{/if}
 
 		{#if !editor.hasContent && !readonly}
-			<BoardEmptyState />
+			<BoardEmptyState
+				onAddText={() => editor.beginTextDraft(editor.viewCenter())}
+				onAddShape={() => editor.addShape(editor.viewCenter())}
+			/>
 		{/if}
 
 		{#if !readonly}
@@ -827,9 +804,9 @@ onDestroy(() => {
 				{editor}
 				onRegenerateTask={regenerateTask}
 				onAddToGeneration={addSelectionToGeneration}
-				{regeneratingNodeId}
+				{regeneratingItemId}
 			/>
-			<BoardConnectionToolbar {editor} />
+			<BoardArrowToolbar {editor} />
 			{#if generationOpen}
 				<BoardGenerationComposer
 					{editor}
@@ -846,8 +823,13 @@ onDestroy(() => {
 				{immersive}
 				{generationOpen}
 				{appearanceOpen}
+				{timelineOpen}
 				onToggleGeneration={() => { generationOpen = !generationOpen; appearanceOpen = false; }}
 				onToggleAppearance={() => { appearanceOpen = !appearanceOpen; generationOpen = false; }}
+				onToggleTimeline={() => {
+					timelineOpen = !timelineOpen;
+					if (!timelineOpen) editor.setPlayhead(null);
+				}}
 			/>
 			{#if appearanceOpen}
 				<div class="board-appearance-anchor">
@@ -859,7 +841,22 @@ onDestroy(() => {
 				</div>
 			{/if}
 		{/if}
-		<BoardZoomMenu {editor} {immersive} />
+		<BoardZoomMenu
+			{editor} {immersive} {timelineOpen}
+			onToggleTimeline={readonly && Object.keys(editor.animations).length ? () => {
+				timelineOpen = !timelineOpen;
+				if (!timelineOpen) editor.setPlayhead(null);
+			} : undefined}
+		/>
+		{#if timelineOpen}
+			<BoardTimeline
+				{editor}
+				playback={activePlayback}
+				{readonly}
+				onPlayback={sendPlayback}
+				onClose={() => { timelineOpen = false; editor.setPlayhead(null); }}
+			/>
+		{/if}
 
 		{#if replayOpen}
 			{#await import("$lib/components/board/BoardReplayView.svelte") then { default: BoardReplayView }}
@@ -867,14 +864,14 @@ onDestroy(() => {
 					{boardId}
 					{path}
 					{spaceId}
-					{runtime}
 					{assets}
 					assetSource={resolvedAssetSource}
 					initialDocument={editor.document}
 					initialCamera={editor.camera}
 					profiles={collaborators}
 					{isMobile}
-					{fetchTransactions}
+					{fetchHistory}
+					{fetchDocument}
 					{liveVersion}
 					onClose={() => { replayOpen = false; }}
 				/>
@@ -887,11 +884,12 @@ onDestroy(() => {
 				{onOpenFile}
 				{onOpenTask}
 				onRegenerateTask={regenerateTask}
-				{regeneratingNodeId}
+				{regeneratingItemId}
 				onAddToGeneration={addSelectionToGeneration}
 				position={contextMenu}
 				onExport={exportBridge ? openExport : undefined}
 				onReplay={!readonly ? () => { contextMenu = null; replayOpen = true; } : undefined}
+				onAnimate={!readonly ? () => { contextMenu = null; timelineOpen = true; } : undefined}
 				onClose={() => { contextMenu = null; }}
 			/>
 		{/if}

@@ -1,3 +1,4 @@
+import type { BoardSceneItem, SceneItem } from "../../core/scene.js";
 import {
 	BOARD_FONT_STACK,
 	BOARD_MONO_FONT_STACK,
@@ -11,7 +12,7 @@ import {
 	Texture,
 } from "pixi.js";
 import { syncTextResolution } from "../text-resolution.js";
-import type { BoardFileItem, BoardItem } from "@cohub/protocol/board-document";
+import type { BoardFileItem, } from "@cohub/protocol";
 import {
 	fileCategory,
 	fileCategoryAccent,
@@ -26,27 +27,10 @@ import type {
 } from "./board-renderer-registry.js";
 import { drawFarPlate } from "./far-plate.js";
 
-/**
- * File card renderer.
- *
- * The card is an *entry point* to a workspace file, so it shows only what helps
- * you recognise and pick it: an optional cover, the name, a couple of lines of
- * excerpt. Everything else belongs to the file preview that opens
- * when the card is activated.
- *
- * Cost is managed through three levels of detail keyed on zoom, because a board
- * is expected to hold thousands of these. Pixi `Text` is a rasterised texture,
- * so below roughly one CSS pixel per glyph it can only ever resolve to a smudge;
- * the tiers below simply stop paying for what cannot be read anyway.
- *
- * Absolute floor: content never paints outside the node frame. A rounded clip
- * mask is the hard boundary; line-clamped title/excerpt keep the interior tidy.
- */
 
 const RADIUS = 4;
 const PADDING = 10;
 const COVER_RATIO = 0.56;
-/** Minimum body height reserved under a cover so the title stays readable. */
 const MIN_BODY_FOR_COVER = PADDING * 2 + 18;
 const TITLE_SIZE = 13;
 const TITLE_LINE = TITLE_SIZE * 1.35;
@@ -58,18 +42,14 @@ const TYPE_MARK_SIZE = 28;
 const GAP = 4;
 const STRIPE = 2;
 
-/** Zoom below which the title is dropped (glyphs are sub-pixel). */
 const LOD_TITLE_ZOOM = 0.35;
-/** Zoom below which the excerpt is dropped. */
 const LOD_BODY_ZOOM = 0.6;
 
-/** Upper bound on dashes in the unavailable-state edge, regardless of width. */
 const MAX_DASHES = 40;
 
 type FileParts = {
 	root: Container;
 	plate: Graphics;
-	/** Masked region holding cover + text; hard clip against the card frame. */
 	body: Container;
 	clip: Graphics;
 	cover: Sprite;
@@ -79,7 +59,6 @@ type FileParts = {
 	excerpt: Text;
 	visualSig: string;
 	textSig: string;
-	/** Per-text resolution state: each Text owns its own rasterisation bucket. */
 	titleRes: { resolution: number };
 	excerptRes: { resolution: number };
 	typeMarkRes: { resolution: number };
@@ -87,26 +66,18 @@ type FileParts = {
 
 const partsByContainer = new WeakMap<Container, FileParts>();
 
-/** Detail tier for a zoom level. */
 function detailFor(zoom: number): "plate" | "title" | "full" {
 	if (zoom < LOD_TITLE_ZOOM) return "plate";
 	if (zoom < LOD_BODY_ZOOM) return "title";
 	return "full";
 }
 
-/** Cover band height for a card, or 0 when it has no cover. */
-function coverHeight(item: BoardFileItem, height: number): number {
-	if (filePreviewKind(item.snapshot) !== "cover") return 0;
+function coverHeight(item: SceneItem<BoardFileItem>, height: number): number {
+	if (filePreviewKind(item.props.snapshot) !== "cover") return 0;
 	const ideal = Math.round(height * COVER_RATIO);
-	// Never let the cover swallow the body: a short, resized card still needs
-	// room for the title, otherwise the node becomes an anonymous image plate.
 	return Math.max(0, Math.min(ideal, height - MIN_BODY_FOR_COVER));
 }
 
-/**
- * Join already-wrapped lines and append an ellipsis to the last one.
- * Pure helper so the clamp can be unit-tested without a Pixi canvas.
- */
 export function ellipsizeWrappedLines(
 	lines: string[],
 	maxLines: number,
@@ -120,12 +91,6 @@ export function ellipsizeWrappedLines(
 	return kept.join("\n");
 }
 
-/**
- * Shorten `line` so `line + "…"` fits in `wrapWidth`.
- *
- * Binary search over the prefix: O(log n) single-line measures. Callers pass a
- * measure callback so this stays free of Pixi types and easy to unit-test.
- */
 export function fitLineWithEllipsis(
 	line: string,
 	wrapWidth: number,
@@ -152,17 +117,6 @@ export function fitLineWithEllipsis(
 	return best;
 }
 
-/**
- * Fit a Pixi text node into a fixed line budget.
- *
- * Pixi Text has no built-in max-lines / ellipsis, so we measure with the same
- * style the node will render, keep the leading wrapped lines, and mark a cut
- * with an ellipsis. Returning early when everything fits avoids an extra
- * texture rebuild on the common path.
- *
- * Cost is one wrap of a length-capped sample, plus at most a binary search on
- * the last kept line. No character-by-character multi-line remeasure.
- */
 export function fitTextToLines(
 	text: Text,
 	value: string,
@@ -176,9 +130,6 @@ export function fitTextToLines(
 		return;
 	}
 
-	// Even at 1px glyphs a line cannot hold more than `width` characters.
-	// Cap before measuring so a 480-char excerpt does not pay for lines that
-	// will be discarded (cards only ever show a handful).
 	const charCap = Math.max(maxLines * Math.ceil(width), maxLines * 4);
 	const sample = value.length > charCap ? value.slice(0, charCap) : value;
 	const metrics = CanvasTextMetrics.measureText(sample, text.style);
@@ -191,8 +142,6 @@ export function fitTextToLines(
 	const keptCount = Math.min(maxLines, metrics.lines.length);
 	const kept = metrics.lines.slice(0, keptCount);
 	const lastIndex = kept.length - 1;
-	// One cloned style for all single-line probes — avoids dirtying the live
-	// node and avoids re-cloning inside the binary search.
 	const probe = text.style.clone();
 	probe.wordWrap = false;
 	kept[lastIndex] = fitLineWithEllipsis(
@@ -204,13 +153,11 @@ export function fitTextToLines(
 	if (text.text !== fitted) text.text = fitted;
 }
 
-/** How many full lines of `lineHeight` fit in `room`, capped at `max`. */
 function linesInRoom(room: number, lineHeight: number, max: number): number {
 	if (room < lineHeight * 0.85) return 0;
 	return Math.max(0, Math.min(max, Math.floor((room + 0.5) / lineHeight)));
 }
 
-/** Scale an image into a fixed cover band without cropping or distortion. */
 export function containCoverRect(
 	width: number,
 	height: number,
@@ -252,7 +199,7 @@ function syncClip(parts: FileParts, width: number, height: number) {
 
 function sync(
 	container: Container,
-	item: BoardFileItem,
+	item: SceneItem<BoardFileItem>,
 	context: BoardRenderContext,
 ) {
 	const parts = partsByContainer.get(container);
@@ -266,18 +213,16 @@ function sync(
 	const key = context.assetKey(item);
 	const texture = key ? context.getTexture(key) : null;
 	const coverFailed = Boolean(key && !texture && context.hasError(key));
-	const fileState = context.fileState(item.ref.path);
+	const fileState = context.fileState(item.props.src);
 	const band = coverHeight(item, height);
-	const kind = filePreviewKind(item.snapshot);
-	const category = fileCategory(item.ref.path, item.snapshot?.mimeType);
+	const kind = filePreviewKind(item.props.snapshot);
+	const category = fileCategory(item.props.src, item.props.snapshot?.mimeType);
 	const accent = fileCategoryAccent(category, context.palette);
 
 	syncTextResolution(parts.title, parts.titleRes, context.zoom);
 	syncTextResolution(parts.excerpt, parts.excerptRes, context.zoom);
 	syncTextResolution(parts.typeMark, parts.typeMarkRes, context.zoom);
 
-	// The cache key is part of the signature so a pooled container adopted by a
-	// different file always re-renders, even at an identical frame size.
 	const visualSig = [
 		key ?? "",
 		width,
@@ -299,7 +244,6 @@ function sync(
 	if (visualSig !== parts.visualSig) {
 		parts.visualSig = visualSig;
 
-		// Hard clip first: every later paint is bounded by the node frame.
 		syncClip(parts, width, height);
 
 		parts.plate.clear();
@@ -317,12 +261,7 @@ function sync(
 				alpha: selected ? 0.95 : 0.85,
 			});
 
-		// A file that cannot be read keeps its cached facts (so the card is still
-		// recognisable) and is marked with a dashed edge rather than being blanked:
-		// the reference is still meaningful, and the file may well come back.
 		if (fileState !== "ok") {
-			// Dash length adapts to the card so a very wide plate does not emit
-			// hundreds of segments for a hairline.
 			const dash = Math.max(6, width / MAX_DASHES / 2);
 			for (let x = 0; x < width; x += dash * 2) {
 				parts.plate.moveTo(x, 0.5).lineTo(Math.min(x + dash, width), 0.5);
@@ -336,8 +275,6 @@ function sync(
 
 		const showCover = band > 0 && Boolean(texture);
 		if (band > 0) {
-			// The quiet backing makes letterboxing intentional while the image keeps
-			// its full aspect ratio, and doubles as the loading/error placeholder.
 			parts.plate.rect(1, 1, width - 2, band - 1).fill({
 				color: context.palette.hover,
 				alpha: coverFailed ? 0.35 : 0.6,
@@ -350,7 +287,6 @@ function sync(
 				.clear()
 				.roundRect(0, 0, width, band, RADIUS)
 				.fill({ color: 0xffffff });
-			// Square off the mask's lower corners so the band meets the body flush.
 			parts.coverMask
 				.rect(0, band - RADIUS, width, RADIUS)
 				.fill({ color: 0xffffff });
@@ -358,8 +294,6 @@ function sync(
 		parts.cover.visible = showCover;
 		parts.coverMask.visible = showCover;
 
-		// Type stripe on the left edge of the body — a quiet, always-present hint
-		// that survives even when the text tiers are dropped.
 		if (!band) {
 			parts.plate
 				.rect(1, 1, STRIPE, height - 2)
@@ -376,9 +310,9 @@ function sync(
 		return;
 	}
 
-	const title = item.snapshot?.title || fileStem(item.ref.path);
-	const excerpt = item.snapshot?.excerpt ?? "";
-	const mark = fileTypeLabel(item.ref.path);
+	const title = item.props.snapshot?.title || fileStem(item.props.src);
+	const excerpt = item.props.snapshot?.excerpt ?? "";
+	const mark = fileTypeLabel(item.props.src);
 	const innerWidth = Math.max(1, width - PADDING * 2);
 	const showTypeMark = kind === "blank";
 	const textSig = [
@@ -495,7 +429,6 @@ export const fileCardRenderer: BoardCardRenderer = {
 			resolution,
 			roundPixels: true,
 		});
-		// Clip applies to body only so the plate stroke is not half-cut by the mask.
 		body.mask = clip;
 		body.addChild(cover, coverMask, typeMark, title, excerpt);
 		root.addChild(plate, body, clip);
@@ -521,14 +454,10 @@ export const fileCardRenderer: BoardCardRenderer = {
 	update: (container, item, context) => {
 		if (item.type === "file") sync(container, item, context);
 	},
-	/**
-	 * Far LOD: a plate with a muted accent band. Sampling the real cover here
-	 * would mean one draw call per distinct image and defeat the batch.
-	 */
 	renderFar: (graphics, item, context) => {
 		const category = fileCategory(
-			item.type === "file" ? item.ref.path : "",
-			item.type === "file" ? item.snapshot?.mimeType : undefined,
+			item.type === "file" ? item.props.src : "",
+			item.type === "file" ? item.props.snapshot?.mimeType : undefined,
 		);
 		drawFarPlate(graphics, item.frame, {
 			fill: context.palette.surface,
@@ -543,7 +472,6 @@ export const fileCardRenderer: BoardCardRenderer = {
 	},
 };
 
-/** Helper kept for type narrowing in tests. */
-export function isFileItem(item: BoardItem): item is BoardFileItem {
+export function isFileItem(item: BoardSceneItem): item is SceneItem<BoardFileItem> {
 	return item.type === "file";
 }

@@ -1,8 +1,9 @@
+import type { SceneItem } from "../../core/scene.js";
 import {
 	BOARD_FONT_STACK,
 	BOARD_MONO_FONT_STACK,
 } from "@cohub/protocol/board-constants";
-import type { BoardTaskItem } from "@cohub/protocol/board-document";
+import type { BoardTaskItem } from "@cohub/protocol";
 import { Container, Graphics, Sprite, Text } from "pixi.js";
 import { drawAudioWaveform } from "../audio-waveform.js";
 import { featuredTaskArtifact } from "../../task.js";
@@ -64,19 +65,19 @@ function previewKindFor(
 }
 
 function stateSurfaceFor(
-	item: BoardTaskItem,
+	item: SceneItem<BoardTaskItem>,
 	kind: PreviewKind,
 	hasTexture: boolean,
 	previewFailed: boolean,
 ): StateSurface {
 	if (kind === "texture" && !hasTexture) {
-		if (item.snapshot.status === "failed") return "failed";
+		if (item.props.snapshot.status === "failed") return "failed";
 		return previewFailed ? "unavailable" : "media-loading";
 	}
 	if (kind !== "empty") return null;
-	if (item.snapshot.status === "failed") return "failed";
-	if (item.snapshot.status === "running") return "generating";
-	if (item.snapshot.status === "pending") return "queued";
+	if (item.props.snapshot.status === "failed") return "failed";
+	if (item.props.snapshot.status === "running") return "generating";
+	if (item.props.snapshot.status === "pending") return "queued";
 	return "empty";
 }
 
@@ -97,24 +98,23 @@ function stateLabel(surface: StateSurface): string {
 	}
 }
 
-function statusColor(item: BoardTaskItem, context: BoardRenderContext) {
-	if (item.snapshot.status === "failed") return context.colors.rose.stroke;
-	if (item.snapshot.status === "running") return context.colors.brand.stroke;
+function statusColor(item: SceneItem<BoardTaskItem>, context: BoardRenderContext) {
+	if (item.props.snapshot.status === "failed") return context.colors.rose.stroke;
+	if (item.props.snapshot.status === "running") return context.colors.brand.stroke;
 	return context.colors.neutral.stroke;
 }
 
-function metadata(item: BoardTaskItem): string {
-	const { artifactCount, artifacts } = item.snapshot;
+function metadata(item: SceneItem<BoardTaskItem>): string {
+	const { artifactCount, artifacts } = item.props.snapshot;
 	const extra =
 		artifactCount > artifacts.length
 			? `${artifacts.length}/${artifactCount}`
 			: artifactCount > 1
 				? `+${artifactCount - 1}`
 				: null;
-	return [item.snapshot.model, extra].filter(Boolean).join(" · ");
+	return [item.props.snapshot.model, extra].filter(Boolean).join(" · ");
 }
 
-/** Scale a texture into a frame without cropping or distortion. */
 export function containTaskPreviewRect(
 	width: number,
 	height: number,
@@ -157,7 +157,6 @@ function drawPlayBadge(
 		.fill({ color: context.palette.text, alpha: 0.94 });
 }
 
-/** Static state marks avoid implying measurable progress or keeping Pixi awake. */
 function drawStateMark(
 	graphics: Graphics,
 	surface: StateSurface,
@@ -219,7 +218,7 @@ function drawFailedBadge(
 
 function sync(
 	container: Container,
-	item: BoardTaskItem,
+	item: SceneItem<BoardTaskItem>,
 	context: BoardRenderContext,
 ) {
 	const parts = partsByContainer.get(container);
@@ -239,7 +238,7 @@ function sync(
 	}
 	const texture = key ? context.getTexture(key) : null;
 	const previewFailed = Boolean(key && !texture && context.hasError(key));
-	const artifact = featuredTaskArtifact(item.snapshot.artifacts);
+	const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);
 	const kind = previewKindFor(artifact);
 	const surface = stateSurfaceFor(
 		item,
@@ -256,7 +255,7 @@ function sync(
 	const metaText = artifact ? metadata(item) : "";
 	const showMeta = full && Boolean(metaText);
 	const failedWithOutput =
-		item.snapshot.status === "failed" && kind !== "empty";
+		item.props.snapshot.status === "failed" && kind !== "empty";
 
 	syncTextResolution(parts.body, parts, context.zoom);
 	syncTextResolution(parts.meta, parts, context.zoom);
@@ -274,7 +273,7 @@ function sync(
 		failedWithOutput,
 		artifact?.type ?? "none",
 		artifact?.id ?? "none",
-		item.taskRunId,
+		item.props.taskRunId,
 		texture ? `${texture.width}x${texture.height}` : "none",
 		context.palette.surface,
 		context.palette.hover,
@@ -316,7 +315,7 @@ function sync(
 			const bottomInset = showMeta ? META_HEIGHT : 0;
 			drawAudioWaveform(
 				parts.previewArt,
-				item.taskRunId,
+				item.props.taskRunId,
 				{
 					x: frame.x + PADDING,
 					y: frame.y + PADDING,
@@ -482,9 +481,9 @@ export const taskCardRenderer: BoardCardRenderer = {
 	renderFar: (graphics, item, context) => {
 		if (item.type !== "task") return;
 		const active =
-			item.snapshot.status === "failed" ||
-			item.snapshot.status === "running" ||
-			item.snapshot.status === "pending";
+			item.props.snapshot.status === "failed" ||
+			item.props.snapshot.status === "running" ||
+			item.props.snapshot.status === "pending";
 		drawFarPlate(graphics, item.frame, {
 			fill: context.palette.surface,
 			fillAlpha: 0.82,

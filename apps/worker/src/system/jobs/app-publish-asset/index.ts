@@ -23,7 +23,8 @@ import {
   type AppBoardAsset,
 } from "@cohub/protocol";
 import type { Job } from "bullmq";
-import { captureBoardSnapshots } from "../../../checkpoint/board-snapshot.js";
+import { captureBoardSnapshots } from "@cohub/core/board";
+import { db } from "../../../db.js";
 import { config } from "../../../config.js";
 import { registerSystemJob } from "../../registry.js";
 import {
@@ -869,22 +870,10 @@ async function writeWorkFileAsset(input: {
 
 function collectBoardDependencyPaths(snapshot: BoardSnapshot): string[] {
   const paths = new Set<string>();
-  for (const item of snapshot.items) {
-    if (item.type !== "image" && item.type !== "video" && item.type !== "audio" && item.type !== "file") continue;
-    const source = "source" in item
-      ? item.source as { kind?: string; path?: string; snapshot?: Record<string, unknown> } | undefined
-      : undefined;
-    if (!source?.path) continue;
-    paths.add(source.path);
-    if (item.type === "file" && typeof source.snapshot?.coverPath === "string") {
-      paths.add(source.snapshot.coverPath);
-    }
-  }
-  const clips = snapshot.compositions.flatMap((composition) => composition.timeline.clips);
-  for (const owner of [...snapshot.effects, ...clips]) {
-    for (const ref of owner.assetRefs) {
-      if (ref.type === "space-file") paths.add(ref.ref);
-    }
+  for (const item of Object.values(snapshot.items)) {
+    const props = item.props as { src?: unknown; snapshot?: { coverPath?: unknown } } | undefined;
+    if (typeof props?.src === "string") paths.add(props.src);
+    if (item.type === "file" && typeof props?.snapshot?.coverPath === "string") paths.add(props.snapshot.coverPath);
   }
   return [...paths].sort((left, right) => left.localeCompare(right));
 }
@@ -985,7 +974,7 @@ async function writeAppBoardAsset(input: {
       );
     }
   })();
-  const [snapshot] = await captureBoardSnapshots({
+  const [snapshot] = await captureBoardSnapshots(db, {
     spaceId: input.spaceId,
     boardIds: [sourceManifest.boardId],
   });
@@ -1047,11 +1036,21 @@ async function writeAppBoardAsset(input: {
     assetKey: objectKey,
     sizeBytes,
     fileCount,
-    extracted: null,
+    // The Board title names the App until the publisher sets one.
+    extracted: {
+      title: snapshot.title,
+      description: null,
+      icon: null,
+      image: null,
+      lang: null,
+      themeColor: null,
+      surface: null,
+      sourcePath: input.sourcePath,
+    },
     artifact: {
       kind: "board" as const,
-      boardId: snapshot.board.id,
-      boardVersion: snapshot.board.version,
+      boardId: snapshot.id,
+      boardVersion: snapshot.boardVersion,
       sizeBytes,
       fileCount,
     },

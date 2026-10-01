@@ -1,6 +1,6 @@
 import type { RequestSource } from "@cohub/protocol";
 import type { BoardDocument, BoardFrame } from "@neta-art/cohub/board";
-import { selectionBounds } from "@neta-art/cohub/board";
+import { createDocumentLayout, unionRects } from "@neta-art/cohub/board";
 
 export const BOARD_AUTOMATION_ACTIVE_MS = 1_800;
 export const BOARD_AGENT_ACTIVITY_MS = 8_000;
@@ -47,12 +47,8 @@ export function boardAutomationFocus(
 	document: BoardDocument,
 	itemIds: string[] = [],
 ): BoardFrame | null {
-	const wanted = new Set(itemIds);
-	const focus = selectionBounds(
-		document.items
-			.filter((item) => wanted.has(item.id))
-			.map((item) => item.frame),
-	);
+	const layout = createDocumentLayout(document.items);
+	const focus = unionRects(itemIds.filter((id) => document.items[id]).map((id) => layout.bounds(id)));
 	return focus ? { ...focus, rotation: 0 } : null;
 }
 
