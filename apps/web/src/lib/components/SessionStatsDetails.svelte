@@ -3,7 +3,7 @@ import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
 import type { SessionRecord } from "@neta-art/cohub";
 import { onMount } from "svelte";
 import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
-import ExecutionStatsDetails from "$lib/components/ExecutionStatsDetails.svelte";
+import StatsContent from "$lib/components/StatsContent.svelte";
 import { formatTokenCount } from "$lib/format-usage";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -72,14 +72,14 @@ onMount(() => {
 
 {#if stats}
   <p class="mb-3 text-[11px] text-text-tertiary">{m.stats_settled({}, { locale })}</p>
-  <ExecutionStatsDetails stats={stats.own} showTurns />
+  <StatsContent stats={stats.own} scope="session" />
   {#if stats.auxiliaryUsage?.totalTokens != null}
     <p class="mt-3 text-[11px] text-text-tertiary">{m.stats_session_auxiliary({ count: formatTokenCount(stats.auxiliaryUsage.totalTokens) }, { locale })}</p>
   {/if}
   {#if stats.inherited.turns || stats.inherited.compactions}
     <details class="mt-3 border-t border-border-subtle pt-3">
       <summary class="cursor-pointer text-text-secondary">{m.stats_inherited({}, { locale })}</summary>
-      <div class="mt-3"><ExecutionStatsDetails stats={stats.inherited} showTurns /></div>
+      <div class="mt-3"><StatsContent stats={stats.inherited} scope="session" /></div>
     </details>
   {/if}
 {:else if loading}

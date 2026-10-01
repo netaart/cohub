@@ -2,6 +2,7 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import {
 	collectToolMetrics,
+	readTurnMetrics,
 	readTurnStats,
 	requestMetricSchema,
 } from "@cohub/protocol/model";
@@ -15,8 +16,8 @@ import {
 	Loader2,
 	TriangleAlert,
 } from "lucide-svelte";
-import ExecutionStatsDetails from "$lib/components/ExecutionStatsDetails.svelte";
 import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
+import StatsContent from "$lib/components/StatsContent.svelte";
 import StatsPopover from "$lib/components/StatsPopover.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import {
@@ -346,6 +347,14 @@ const footerStats = $derived.by(() => {
 		},
 	});
 	return { ...stats, turns: 0 };
+});
+const footerRequests = $derived.by(() => {
+	if (message.meta?.turn) {
+		const metrics = readTurnMetrics(message.meta.turn.meta);
+		return metrics ? Object.values(metrics.requests ?? {}) : [];
+	}
+	const receipt = requestMetricSchema.safeParse(message.meta?.llmTiming);
+	return receipt.success ? [receipt.data] : [];
 });
 const footerUsage = $derived(
 	message.meta?.turn
@@ -677,7 +686,7 @@ function handleCopy() {
                 {#if hasDuration}<span class="shrink-0 whitespace-nowrap tabular-nums">{durationDisplay}</span>{/if}
                 {#if !tokenDisplay && !hasDuration}<span>{m.stats_turn({}, { locale })}</span>{/if}
               {/snippet}
-              <ExecutionStatsDetails stats={footerStats} />
+              <StatsContent stats={footerStats} scope="turn" requests={footerRequests} />
             </StatsPopover>
           {:else}
             {#if hasUsage && tokenDisplay}<span class={getTokenDisplayClass(inputContextPercent)} title={tokenDetailText}>{tokenDisplay}</span>{/if}
