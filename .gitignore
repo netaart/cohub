@@ -6,6 +6,9 @@ configs/
 .idea/
 output/
 
+# Git worktrees (local checkouts, do not commit)
+/worktrees/
+
 # Local rendered manifests (do not commit)
 rendered/
 
