@@ -145,7 +145,7 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 <div class="group/tool rounded-md">
 	<button
 		type="button"
-		class={`relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 pl-0 pr-1 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35 ${isRunning ? 'tool-call-running' : ''}`}
+		class={`relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 px-0 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35 ${isRunning ? 'tool-call-running' : ''}`}
 		onclick={toggle}
 	>
 		<span class="h-1.5 w-1.5 shrink-0 rounded-full transition-[background-color,box-shadow,opacity,transform] duration-200 {statusDotMap[tool.status]} {isRunning ? 'tool-call-dot' : ''}"></span>

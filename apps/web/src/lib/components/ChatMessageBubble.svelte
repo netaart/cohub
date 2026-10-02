@@ -182,12 +182,12 @@ const backgroundTaskDetail = $derived(
 
 const messageContainerClass = $derived(
 	message.role === "user"
-		? "ml-auto max-w-[var(--chat-user-message-max-width)]"
-		: "",
+		? "ml-auto w-fit max-w-[var(--chat-user-message-max-width)]"
+		: "w-full",
 );
 
 const messageBubbleClass = $derived.by(() => {
-	const base = "px-2 py-2 text-[14px] leading-[1.7]";
+	const base = "px-[var(--chat-msg-inset)] py-2 text-[14px] leading-[1.7]";
 	if (message.role === "user") {
 		if (isCancelledBeforeDispatch)
 			return `${base} rounded-xl rounded-br-md bg-bg-hover/60 text-text-tertiary`;
@@ -571,9 +571,8 @@ function handleCopy() {
     {onOpenUrl}
   />
 {:else}
-  <div class={`w-full ${messageContainerClass}`}>
+  <div class={`min-w-0 ${messageContainerClass}`}>
     <div class={messageBubbleClass}>
-
       <MessageContentFlow
         content={message.content?.length ? message.content : [{ type: 'text', text: message.text }]}
         {isUserMessage}
@@ -595,12 +594,11 @@ function handleCopy() {
           <div class="mt-1">{assistantErrorMessage}</div>
         </div>
       {/if}
-
     </div>
 
     {#if (message.role === 'assistant' && (message.meta?.model || hasUsage || hasDuration || timeDisplay || harnessLabel)) || (message.role === 'user' && timeDisplay)}
       <!-- Meta bar: copy | identity/model | tokens | time -->
-      <div class="mt-1 flex items-center gap-1 px-2 text-[11px] text-text-placeholder/50 select-none">
+      <div class="mt-1 flex flex-wrap items-center gap-1 px-[var(--chat-msg-inset)] text-[11px] text-text-placeholder/50 select-none">
         <!-- Copy button -->
         <button
           type="button"
