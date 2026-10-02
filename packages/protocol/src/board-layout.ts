@@ -213,15 +213,17 @@ export type BoardLayout = {
 	bounds(id: string): BoardRect;
 	frame(id: string): BoardFrame;
 	arrowEnd(id: string, which: "start" | "end"): BoardVec2;
+	setLookup(lookup: BoardItemLookup): void;
 	invalidate(ids?: Iterable<string>): void;
 };
 
 const MAX_DEPTH = 64;
 
 export function createBoardLayout(
-	lookup: BoardItemLookup,
+	initialLookup: BoardItemLookup,
 	dependents?: (id: string) => Iterable<string>,
 ): BoardLayout {
+	let lookup = initialLookup;
 	const boxes = new Map<string, BoardRect>();
 	const matrices = new Map<string, BoardMatrix>();
 	const bounds = new Map<string, BoardRect>();
@@ -329,6 +331,10 @@ export function createBoardLayout(
 		return rect;
 	}
 
+	function setLookup(nextLookup: BoardItemLookup): void {
+		lookup = nextLookup;
+	}
+
 	function invalidate(ids?: Iterable<string>) {
 		if (!ids) {
 			boxes.clear();
@@ -368,6 +374,7 @@ export function createBoardLayout(
 			return isArrowBinding(end) ? resolveBoundEnd(arrow, end, other, 0) : applyMatrix(matrixOf(id), end);
 		},
 		invalidate,
+		setLookup,
 	};
 }
 

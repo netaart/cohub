@@ -143,10 +143,14 @@ function cumulativeOpacity(lookup: BoardItemLookup, id: string): number {
 }
 
 export function refreshBoardScene(previous: BoardScene, lookup: BoardItemLookup, ids: Iterable<string>): BoardScene {
+	const changedIds = [...ids];
+	if (changedIds.length === 0) return previous;
 	const dependents = (id: string) => [...previous.children(id), ...previous.binders(id)];
-	const layout = createBoardLayout(lookup, dependents);
+	const layout = previous.layout;
+	layout.setLookup(lookup);
+	layout.invalidate(changedIds);
 	const affected = new Set<string>();
-	const stack = [...ids];
+	const stack = [...changedIds];
 	while (stack.length) {
 		const id = stack.pop() as string;
 		if (affected.has(id) || !lookup(id)) continue;
