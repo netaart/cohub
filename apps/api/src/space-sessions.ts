@@ -41,7 +41,7 @@ import { fallbackPublicUserProfile, getProfilesByUuids } from "./user-profiles.j
 import { enqueueSessionMessagePostprocess } from "./session-message-postprocess-queue.js";
 import { enqueueSessionTitleGeneration } from "./session-title-queue.js";
 import { touchSpaceActivity } from "./space-activity.js";
-import { pickActiveTurns } from "./session-active-turns.js";
+import { ACTIVE_TURN_STATUSES, pickActiveTurns } from "./session-active-turns.js";
 import { sessionListSourceCondition } from "./session-source-filter.js";
 import {
   decodeSessionListCursor,
@@ -352,8 +352,6 @@ const sessionListOrderBy = [
   desc(spaceSessions.id),
 ] as const;
 
-const ACTIVE_TURN_STATUSES = ["queued", "running", "abort_requested"] as const;
-
 export async function attachActiveTurns<T extends { id: string; meta?: unknown }>(sessions: T[]) {
   sessions = sessions.map(sanitizeSessionRecordStats);
   if (sessions.length === 0) return pickActiveTurns(sessions, []);
@@ -362,6 +360,7 @@ export async function attachActiveTurns<T extends { id: string; meta?: unknown }
     .select({
       sessionId: sessionTurns.sessionId,
       id: sessionTurns.id,
+      sequence: sessionTurns.sequence,
       status: sessionTurns.status,
       provider: sessionTurns.provider,
       model: sessionTurns.model,

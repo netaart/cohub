@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { sessionMessages } from "@cohub/db";
+import { sessionTurns } from "@cohub/db";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { RealtimeMessageRecord, RealtimeSessionRecord, RealtimeTaskRecord, RealtimeTurnRecord, SpacePresenceSnapshot } from "@cohub/protocol/realtime";
+import { getRealtimeSpaceRoom, getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { dispatchRealtimeEvent } from "./channels.js";
 import { buildResourceLabelSnapshot, type LabelResourceType } from "@cohub/core/labels/resource-events";
 import { db } from "./db/index.js";
+import { activeTurnFromRow, activeTurnFromTurn, ACTIVE_TURN_STATUSES, isActiveTurnStatus } from "./session-active-turns.js";
 
 const toIsoOrNull = (value: Date | string | null | undefined) => {
   if (!value) return null;
@@ -52,6 +56,7 @@ export const toRealtimeSessionRecord = (session: SessionRecord | {
   createdAt: Date | string | null;
   updatedAt: Date | string | null;
   activeTurn?: SessionActiveTurn | null;
+  activeTurnSequence?: number;
 }): RealtimeSessionRecord => ({
   id: session.id,
   spaceId: session.spaceId,
@@ -61,6 +66,9 @@ export const toRealtimeSessionRecord = (session: SessionRecord | {
   status: session.status,
   ...(session.activeTurn !== undefined
     ? { activeTurn: session.activeTurn }
+    : {}),
+  ...(session.activeTurnSequence !== undefined
+    ? { activeTurnSequence: session.activeTurnSequence }
     : {}),
   externalSessionId: session.externalSessionId,
   latestMessageText: session.latestMessageText ?? null,
@@ -196,6 +204,83 @@ export async function dispatchSessionUpdated(input: {
   });
 }
 
+const activeTurnDispatches = new Map<string, Promise<void>>();
+
+async function dispatchSessionActiveTurnNow(input: {
+  spaceId: string;
+  sessionId: string;
+  userUuid?: string | null;
+  activeTurn: SessionActiveTurn | null;
+  activeTurnSequence: number;
+}) {
+  const rooms = [getRealtimeSpaceRoom(input.spaceId)];
+  if (input.userUuid) rooms.push(getRealtimeUserRoom(input.userUuid));
+  await dispatchRealtimeEvent({
+    id: randomUUID(),
+    timestamp: Date.now(),
+    domain: "session",
+    type: "session.updated",
+    spaceId: input.spaceId,
+    sessionId: input.sessionId,
+    rooms,
+    payload: {
+      session: {
+        id: input.sessionId,
+        spaceId: input.spaceId,
+        activeTurn: input.activeTurn,
+        activeTurnSequence: input.activeTurnSequence,
+      },
+      changed: ["activeTurn", "activeTurnSequence"],
+    },
+  });
+}
+
+export async function dispatchSessionActiveTurn(input: {
+  spaceId: string;
+  sessionId: string;
+  turn: SessionTurnRecord;
+}) {
+  const previous = activeTurnDispatches.get(input.sessionId) ?? Promise.resolve();
+  const current = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const activeTurn = isActiveTurnStatus(input.turn.status)
+        ? activeTurnFromTurn(input.turn)
+        : await (async () => {
+            const [active] = await db
+              .select({
+                sessionId: sessionTurns.sessionId,
+                id: sessionTurns.id,
+                sequence: sessionTurns.sequence,
+                status: sessionTurns.status,
+                provider: sessionTurns.provider,
+                model: sessionTurns.model,
+                startedAt: sessionTurns.startedAt,
+                meta: sessionTurns.meta,
+              })
+              .from(sessionTurns)
+              .where(and(
+                eq(sessionTurns.sessionId, input.sessionId),
+                inArray(sessionTurns.status, [...ACTIVE_TURN_STATUSES]),
+              ))
+              .orderBy(desc(sessionTurns.sequence))
+              .limit(1);
+            return activeTurnFromRow(active ?? null);
+          })();
+      await dispatchSessionActiveTurnNow({
+        spaceId: input.spaceId,
+        sessionId: input.sessionId,
+        userUuid: input.turn.userUuid,
+        activeTurn,
+        activeTurnSequence: activeTurn?.sequence ?? input.turn.sequence,
+      });
+    });
+  activeTurnDispatches.set(input.sessionId, current);
+  await current.finally(() => {
+    if (activeTurnDispatches.get(input.sessionId) === current) activeTurnDispatches.delete(input.sessionId);
+  });
+}
+
 export async function dispatchTurnCreated(input: {
   spaceId: string;
   sessionId: string;
@@ -213,6 +298,11 @@ export async function dispatchTurnCreated(input: {
     payload: {
       turn: toRealtimeTurnRecord(input.turn),
     },
+  });
+  await dispatchSessionActiveTurn({
+    spaceId: input.spaceId,
+    sessionId: input.sessionId,
+    turn: input.turn,
   });
 }
 

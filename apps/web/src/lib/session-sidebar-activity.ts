@@ -1,6 +1,9 @@
 import type { ContentBlock } from "@cohub/protocol/core";
+import type { SessionRecord } from "@neta-art/cohub";
 import { getModelDisplayName, type ModelCatalogItem } from "$lib/model-catalog";
 import type { SessionGenerationState } from "$lib/stores/session-generation.svelte";
+
+type SessionActiveTurn = NonNullable<SessionRecord["activeTurn"]>;
 
 export type SessionSidebarActivityPhase =
 	| "idle"
@@ -10,6 +13,7 @@ export type SessionSidebarActivityPhase =
 	| "thinking"
 	| "tool"
 	| "result"
+	| "queued"
 	| "failed"
 	| "interrupted";
 
@@ -176,19 +180,46 @@ function findLatestSignal(blocks: ContentBlock[]) {
 	return null;
 }
 
+const idleActivity: SessionSidebarActivity = {
+	active: false,
+	phase: "idle",
+	label: "idle",
+	text: null,
+	progressKey: "idle",
+};
+
+function activeTurnActivity(
+	activeTurn: SessionActiveTurn,
+): SessionSidebarActivity {
+	const label =
+		activeTurn.status === "queued"
+			? "queued"
+			: activeTurn.status === "abort_requested"
+				? "stopping"
+				: "running";
+	return {
+		active: true,
+		phase: activeTurn.status === "queued" ? "queued" : "pending",
+		label,
+		text: null,
+		progressKey: `${activeTurn.status}:${activeTurn.id}`,
+	};
+}
+
 export function getSessionSidebarActivity(
 	state: SessionGenerationState | null | undefined,
 	modelsCatalog?: ModelCatalogItem[] | null,
+	activeTurn?: SessionActiveTurn | null,
 ): SessionSidebarActivity {
-	if (!state) {
-		return {
-			active: false,
-			phase: "idle",
-			label: "idle",
-			text: null,
-			progressKey: "idle",
-		};
-	}
+	if (activeTurn) return activeTurnActivity(activeTurn);
+	if (activeTurn === null) return idleActivity;
+	return state ? detailFor(state, modelsCatalog) : idleActivity;
+}
+
+function detailFor(
+	state: SessionGenerationState,
+	modelsCatalog?: ModelCatalogItem[] | null,
+): SessionSidebarActivity {
 	if (state.status === "failed") {
 		return {
 			active: false,
@@ -248,11 +279,5 @@ export function getSessionSidebarActivity(
 			progressKey: state.turnId ?? "streaming",
 		};
 	}
-	return {
-		active: false,
-		phase: "idle",
-		label: "idle",
-		text: null,
-		progressKey: "idle",
-	};
+	return idleActivity;
 }

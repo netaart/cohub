@@ -17,7 +17,7 @@ import { db } from "./db/index.js";
 import { spaceChannels } from "@cohub/db";
 import { clearSessionStreamSnapshot } from "./session-stream-snapshot.js";
 import { listResourceLabelRefs } from "@cohub/core/labels";
-import { toRealtimeMessageRecord, toRealtimeTurnRecord } from "./realtime-events.js";
+import { toRealtimeMessageRecord, toRealtimeTurnRecord, dispatchSessionActiveTurn } from "./realtime-events.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -168,6 +168,7 @@ export const dispatchTurnUpdated = async (input: { spaceId: string; sessionId: s
       turn: toRealtimeTurnRecord(input.turn),
     },
   });
+  await dispatchSessionActiveTurn({ spaceId: input.spaceId, sessionId: input.sessionId, turn: input.turn });
 };
 
 const truncateTurnPreview = (text: string | null | undefined) => {
@@ -204,6 +205,7 @@ export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId:
       sessionLabelRefs,
     },
   });
+  await dispatchSessionActiveTurn({ spaceId: input.spaceId, sessionId: input.sessionId, turn: input.turn });
 
   if (!input.turn.userUuid) return;
   await dispatchRealtimeEvent({

@@ -31,6 +31,7 @@ const activity = $derived(
 	getSessionSidebarActivity(
 		sessionGenerationStore.get(session.id),
 		modelsCatalog,
+		session.activeTurn,
 	),
 );
 const badge = $derived(

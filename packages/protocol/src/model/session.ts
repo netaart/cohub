@@ -140,6 +140,7 @@ export type SessionUserProfile = {
 
 export type SessionActiveTurn = {
   id: string;
+  sequence: number;
   status: "queued" | "running" | "abort_requested";
   provider: string | null;
   model: string | null;
@@ -158,6 +159,7 @@ export type SessionRecord = {
   source: string | null;
   status: string | null;
   activeTurn?: SessionActiveTurn | null;
+  activeTurnSequence?: number;
   externalSessionId: string | null;
   meta: Record<string, unknown> | null;
   latestMessageText: string | null;

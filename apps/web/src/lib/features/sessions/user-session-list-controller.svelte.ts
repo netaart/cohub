@@ -36,6 +36,38 @@ function isTurnNotifyEvent(
 	);
 }
 
+function sessionActiveTurnFromEvent(event: ChannelEnvelope): {
+	sessionId: string;
+	spaceId: string;
+	activeTurn: UserSessionListItem["activeTurn"];
+	activeTurnSequence: number;
+} | null {
+	if (event.type !== "session.updated") return null;
+	const payload = event.payload;
+	if (!payload || typeof payload !== "object" || Array.isArray(payload))
+		return null;
+	const session = (payload as { session?: unknown }).session;
+	if (!session || typeof session !== "object" || Array.isArray(session))
+		return null;
+	const record = session as Record<string, unknown>;
+	const sessionId = typeof record.id === "string" ? record.id : null;
+	const spaceId = typeof record.spaceId === "string" ? record.spaceId : null;
+	if (
+		!sessionId ||
+		!spaceId ||
+		typeof record.activeTurnSequence !== "number" ||
+		!Number.isSafeInteger(record.activeTurnSequence) ||
+		record.activeTurnSequence < 0
+	)
+		return null;
+	return {
+		sessionId,
+		spaceId,
+		activeTurn: record.activeTurn as UserSessionListItem["activeTurn"],
+		activeTurnSequence: record.activeTurnSequence,
+	};
+}
+
 export function createUserSessionListController(input?: {
 	source?: readonly UserSessionSourceKey[];
 }) {
@@ -224,6 +256,20 @@ export function createUserSessionListController(input?: {
 	 * Reuse it to keep the cross-space chats list warm without extra channels.
 	 */
 	function handleRealtimeEvent(event: ChannelEnvelope) {
+		const sessionUpdate = sessionActiveTurnFromEvent(event);
+		if (sessionUpdate) {
+			const existing = findById(sessionUpdate.sessionId);
+			if (existing) {
+				upsertSession({
+					...existing,
+					activeTurn: sessionUpdate.activeTurn,
+					activeTurnSequence: sessionUpdate.activeTurnSequence,
+				});
+				return;
+			}
+			scheduleRealtimeRefresh();
+			return;
+		}
 		if (!isTurnNotifyEvent(event)) return;
 		const sessionId = event.payload.sessionId as string;
 		const spaceId = event.payload.spaceId as string;

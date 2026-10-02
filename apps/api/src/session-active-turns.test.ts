@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { pickActiveTurns, type ActiveTurnRow } from "./session-active-turns.js";
 
 const row = (overrides: Partial<ActiveTurnRow> & Pick<ActiveTurnRow, "sessionId" | "id">): ActiveTurnRow => ({
+  sequence: 1,
   status: "running",
   provider: "cohub",
   model: "deepseek-flash",
@@ -20,6 +21,7 @@ describe("pickActiveTurns", () => {
     assert.equal(picked[0]?.activeTurn, null);
     assert.deepEqual(picked[1]?.activeTurn, {
       id: "turn-b",
+      sequence: 1,
       status: "running",
       provider: "cohub",
       model: "deepseek-flash",
@@ -58,6 +60,7 @@ describe("pickActiveTurns", () => {
     );
     assert.deepEqual(picked[0]?.activeTurn, {
       id: "t",
+      sequence: 1,
       status: "running",
       provider: null,
       model: null,
