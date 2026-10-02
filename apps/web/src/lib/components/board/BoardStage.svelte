@@ -84,7 +84,7 @@ import {
 	resolveBoardTheme,
 } from "$lib/board/board-theme";
 import { resizeCursorForHandle } from "$lib/board/core/selection-transform";
-import type { BoardEditor } from "$lib/board/editor.svelte";
+import type { BoardEditor, BoardPointerEvent } from "$lib/board/editor.svelte";
 import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
 import {
 	type BoardDropItem,
@@ -120,6 +120,8 @@ const {
 	onPlayMedia,
 	onExportReady,
 	onBackgroundLoadStateChange,
+	onLongPress,
+	highlightedIds,
 }: {
 	editor: BoardEditor;
 	playback?: BoardPlaybackSnapshot | null;
@@ -144,6 +146,8 @@ const {
 	onBackgroundLoadStateChange?: (
 		state: BoardBackgroundLoadState | null,
 	) => void;
+	onLongPress?: (point: { x: number; y: number }) => void;
+	highlightedIds?: readonly string[];
 } = $props();
 
 const locale = $derived(getLocale());
@@ -564,10 +568,13 @@ function syncStage() {
 	const previews = pushMovingItems(frame);
 	const renderScene = editor.scene;
 	const camera = applyPlaybackCamera(frame, renderScene);
-	playbackCamera = Object.keys(frame.camera).length > 0 ? camera : null;
-	world.x = camera.x;
-	world.y = camera.y;
-	world.scale.set(camera.zoom);
+	const followsCamera =
+		editor.cameraPolicy === "follow" && Object.keys(frame.camera).length > 0;
+	const renderCamera = followsCamera ? camera : editor.camera;
+	playbackCamera = followsCamera ? camera : null;
+	world.x = renderCamera.x;
+	world.y = renderCamera.y;
+	world.scale.set(renderCamera.zoom);
 	if (world.parent !== app.stage) app.stage.addChild(world);
 
 	const context = buildContext(palette, renderScene, frame.time);
@@ -615,7 +622,7 @@ function syncStage() {
 	}
 	scene.drawOverlay(
 		{
-			zoom: viewCamera.zoom,
+			zoom: renderCamera.zoom,
 			pointerType: editor.pointerType,
 			marquee: editor.marquee,
 			selection: editor.selection,
@@ -638,6 +645,7 @@ function syncStage() {
 
 	drawRemoteAwareness(context.colors, context.colorScheme);
 	drawTransient(palette, context.colors, context.colorScheme);
+	drawChangedHighlights(palette, renderScene);
 
 	scheduleRender();
 	if (frame.running || scene.animated) scheduleTick();
@@ -876,6 +884,28 @@ function drawTransient(
 	}
 }
 
+function drawChangedHighlights(
+	palette: BoardRenderPalette,
+	renderScene: BoardModelScene,
+) {
+	if (!overlay || !highlightedIds?.length) return;
+	const inv = 1 / Math.max(viewCamera.zoom, 0.0001);
+	const seen = new Set<string>();
+	for (const id of highlightedIds) {
+		if (!renderScene.get(id)) continue;
+		for (const nodeId of [id, ...renderScene.descendants(id)]) {
+			if (seen.has(nodeId)) continue;
+			seen.add(nodeId);
+			const item = renderScene.get(nodeId);
+			if (!item) continue;
+			const frame = item.frame;
+			overlay
+				.roundRect(frame.x, frame.y, frame.width, frame.height, 4 * inv)
+				.stroke({ color: palette.brand, width: 1.5 * inv, alpha: 0.75 });
+		}
+	}
+}
+
 function reportSurfaceSize() {
 	if (!app) {
 		surface = { width: 0, height: 0 };
@@ -943,8 +973,43 @@ function publishPointerPresence(event: PointerEvent) {
 	});
 }
 
+function vibrate(pattern: number) {
+	try {
+		navigator.vibrate?.(pattern);
+	} catch {}
+}
+
+const LONG_PRESS_MS = 480;
+const LONG_PRESS_SLOP = 10;
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let longPressOrigin: { x: number; y: number } | null = null;
+
+function cancelLongPress() {
+	if (longPressTimer) clearTimeout(longPressTimer);
+	longPressTimer = null;
+	longPressOrigin = null;
+}
+
+function scheduleLongPress(event: PointerEvent, input: BoardPointerEvent) {
+	cancelLongPress();
+	if (!onLongPress || readonly || event.pointerType === "mouse") return;
+	if (event.button !== 0 || !editor.itemAt(input.world)) return;
+	longPressOrigin = { x: event.clientX, y: event.clientY };
+	longPressTimer = setTimeout(() => {
+		longPressTimer = null;
+		longPressOrigin = null;
+		editor.cancelPointerInteraction();
+		try {
+			host?.releasePointerCapture(event.pointerId);
+		} catch {}
+		vibrate(12);
+		onLongPress?.({ x: event.clientX, y: event.clientY });
+	}, LONG_PRESS_MS);
+}
+
 function handlePointerDown(event: PointerEvent) {
 	if (!host) return;
+	editor.takeCameraControl();
 	const input = toPointerEvent(event);
 	if (event.button === 0) {
 		const item = editor.itemAt(input.world);
@@ -965,6 +1030,7 @@ function handlePointerDown(event: PointerEvent) {
 	}
 	host.setPointerCapture(event.pointerId);
 	editor.pointerDown(input);
+	scheduleLongPress(event, input);
 	onPointerPresence?.({
 		x: input.world.x,
 		y: input.world.y,
@@ -974,6 +1040,11 @@ function handlePointerDown(event: PointerEvent) {
 
 function handlePointerMove(event: PointerEvent) {
 	const input = toPointerEvent(event);
+	if (longPressOrigin) {
+		const dx = event.clientX - longPressOrigin.x;
+		const dy = event.clientY - longPressOrigin.y;
+		if (Math.hypot(dx, dy) > LONG_PRESS_SLOP) cancelLongPress();
+	}
 	editor.pointerMove(input);
 	onPointerPresence?.({
 		x: input.world.x,
@@ -983,6 +1054,7 @@ function handlePointerMove(event: PointerEvent) {
 }
 
 function handlePointerUp(event: PointerEvent) {
+	cancelLongPress();
 	editor.pointerUp(toPointerEvent(event));
 	if (event.type === "pointercancel" || event.pointerType !== "mouse") {
 		editor.pointerLeave();
@@ -994,12 +1066,14 @@ function handlePointerUp(event: PointerEvent) {
 
 function handlePointerLeave(event: PointerEvent) {
 	if (event.buttons !== 0) return;
+	cancelLongPress();
 	editor.pointerLeave();
 	onPointerPresence?.(null);
 }
 
 function handleWheel(event: WheelEvent) {
 	event.preventDefault();
+	editor.takeCameraControl();
 	editor.wheel(
 		toScreenPoint(event),
 		event.deltaX,
@@ -1415,6 +1489,7 @@ $effect(() => {
 	editor.structureVersion;
 	editor.geometryVersion;
 	editor.scene;
+	highlightedIds;
 	playback;
 	awarenessVersion;
 	assetVersion;
@@ -1425,6 +1500,7 @@ $effect(() => {
 
 onDestroy(() => {
 	disposed = true;
+	cancelLongPress();
 	editor.setPlayedItems(new Map());
 	window.removeEventListener(
 		SPACE_STYLE_CHANGED_EVENT,
