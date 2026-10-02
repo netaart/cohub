@@ -3,7 +3,7 @@ import type {
 	BoardPlaybackCommand,
 	BoardPlaybackSnapshot,
 } from "@cohub/protocol";
-import { playbackTimeAt } from "@neta-art/cohub/board/player";
+import { playbackTimeAt } from "@neta-art/cohub/board";
 import {
 	Circle,
 	Diamond,

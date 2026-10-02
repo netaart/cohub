@@ -11,10 +11,12 @@ import type {
 	SceneItem,
 } from "@neta-art/cohub/board";
 import {
+	type BoardPlayerFrame,
 	type BoardShapeColors,
 	type BoardViewport,
 	cameraForFocus,
 	cameraForState,
+	createBoardPlayer,
 	featuredTaskArtifact,
 	isStrokeCorner,
 	pickBoardColor,
@@ -33,10 +35,6 @@ import {
 	visibleWorldRect,
 	worldPoint,
 } from "@neta-art/cohub/board";
-import {
-	type BoardPlayerFrame,
-	createBoardPlayer,
-} from "@neta-art/cohub/board/player";
 import {
 	type BoardRenderContext,
 	type BoardRenderPalette,

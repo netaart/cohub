@@ -4,13 +4,13 @@ import type {
 	BoardPlaybackSnapshot,
 } from "@cohub/protocol";
 import {
+	nextLocalPlayback,
 	parseBoardDocument,
 	screenToWorld,
 	shapeCapabilities,
 	taskRunToBoardTaskSnapshot as taskBoardSnapshot,
 	worldPoint,
 } from "@neta-art/cohub/board";
-import { nextLocalPlayback } from "@neta-art/cohub/board/player";
 import { onDestroy, onMount, untrack } from "svelte";
 import { createBoardAssetManager } from "$lib/board/board-asset-manager";
 import { createSpaceBoardAssetSource } from "$lib/board/board-asset-source";
