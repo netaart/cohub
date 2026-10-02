@@ -182,8 +182,8 @@ const backgroundTaskDetail = $derived(
 
 const messageContainerClass = $derived(
 	message.role === "user"
-		? "ml-auto w-fit max-w-[var(--chat-user-message-max-width)]"
-		: "w-full",
+		? "ml-auto max-w-[var(--chat-user-message-max-width)]"
+		: "",
 );
 
 const messageBubbleClass = $derived.by(() => {
@@ -571,7 +571,7 @@ function handleCopy() {
     {onOpenUrl}
   />
 {:else}
-  <div class={`min-w-0 ${messageContainerClass}`}>
+  <div class={`w-full ${messageContainerClass}`}>
     <div class={messageBubbleClass}>
       <MessageContentFlow
         content={message.content?.length ? message.content : [{ type: 'text', text: message.text }]}
@@ -598,7 +598,7 @@ function handleCopy() {
 
     {#if (message.role === 'assistant' && (message.meta?.model || hasUsage || hasDuration || timeDisplay || harnessLabel)) || (message.role === 'user' && timeDisplay)}
       <!-- Meta bar: copy | identity/model | tokens | time -->
-      <div class="mt-1 flex flex-wrap items-center gap-1 px-[var(--chat-msg-inset)] text-[11px] text-text-placeholder/50 select-none">
+      <div class="mt-1 flex items-center gap-1 px-[var(--chat-msg-inset)] text-[11px] text-text-placeholder/50 select-none">
         <!-- Copy button -->
         <button
           type="button"
