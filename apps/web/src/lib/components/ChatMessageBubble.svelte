@@ -182,8 +182,8 @@ const backgroundTaskDetail = $derived(
 
 const messageContainerClass = $derived(
 	message.role === "user"
-		? "ml-auto max-w-[var(--chat-user-message-max-width)]"
-		: "",
+		? "ml-auto w-fit max-w-[var(--chat-user-message-max-width)]"
+		: "w-full",
 );
 
 const messageBubbleClass = $derived.by(() => {
@@ -571,7 +571,7 @@ function handleCopy() {
     {onOpenUrl}
   />
 {:else}
-  <div class={`w-full ${messageContainerClass}`}>
+  <div class={`min-w-0 ${messageContainerClass}`}>
     <div class={messageBubbleClass}>
       <MessageContentFlow
         content={message.content?.length ? message.content : [{ type: 'text', text: message.text }]}
