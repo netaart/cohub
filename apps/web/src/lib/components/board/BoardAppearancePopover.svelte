@@ -27,16 +27,38 @@ const locale = $derived(getLocale());
 type Background = BoardSettings["background"];
 const background = $derived(editor.settings.background);
 const initialBackground = untrack(() => editor.settings.background);
-const presetColors = ["#141414", "#f5f2ea", "#17212b", "#24332f", "#352b3f", "#e8dfd1"];
-let mode = $state<"color" | "image">(initialBackground.kind === "image" ? "image" : "color");
+const presetColors = [
+	"#141414",
+	"#f5f2ea",
+	"#17212b",
+	"#24332f",
+	"#352b3f",
+	"#e8dfd1",
+];
+let mode = $state<"color" | "pattern" | "image">(
+	initialBackground.kind === "image"
+		? "image"
+		: initialBackground.kind === "dots" || initialBackground.kind === "grid"
+			? "pattern"
+			: "color",
+);
 let imageUrl = $state(initialBackground.imageUrl ?? "");
 let validationError = $state<string | null>(null);
 const imageStatus = $derived.by(() => {
 	if (background.kind !== "image" || !background.imageUrl) return null;
 	return loadState?.url === background.imageUrl ? loadState.status : null;
 });
-const imageError = $derived(validationError ?? (imageStatus === "error" ? m.board_image_load_failed({}, { locale }) : null));
-const solidColor = $derived(background.kind === "solid" && typeof background.color === "string" ? background.color : null);
+const imageError = $derived(
+	validationError ??
+		(imageStatus === "error"
+			? m.board_image_load_failed({}, { locale })
+			: null),
+);
+const solidColor = $derived(
+	background.kind === "solid" && typeof background.color === "string"
+		? background.color
+		: null,
+);
 
 const ENTER_LABELS: Record<BoardEnterPreset, () => string> = {
 	"fade-in": () => m.board_motion_fade({}, { locale }),
@@ -55,7 +77,47 @@ function update(patch: Partial<BoardSettings>, commit = true) {
 function setColor(color: string, commit = true) {
 	mode = "color";
 	validationError = null;
-	update({ background: { kind: "solid", color } }, commit);
+	update(
+		{
+			background: { kind: "solid", color },
+			grid: {
+				...editor.settings.grid,
+				visible: false,
+				size: editor.settings.grid?.size ?? 24,
+			},
+		},
+		commit,
+	);
+}
+
+function setPattern(kind: "dots" | "grid") {
+	mode = "pattern";
+	update({
+		background: {
+			kind,
+			...(background.color ? { color: background.color } : {}),
+		},
+		grid: {
+			...editor.settings.grid,
+			visible: true,
+			size: editor.settings.grid?.size ?? 24,
+		},
+	});
+}
+
+function setGridVisible(visible: boolean) {
+	update({
+		grid: {
+			...editor.settings.grid,
+			visible,
+			size: editor.settings.grid?.size ?? 24,
+		},
+	});
+}
+
+function setGridSize(size: number) {
+	if (!Number.isFinite(size) || size < 4) return;
+	update({ grid: { ...editor.settings.grid, visible: true, size } });
 }
 
 function useImage() {
@@ -67,10 +129,26 @@ function useImage() {
 	imageUrl = url;
 	mode = "image";
 	validationError = null;
-	update({ background: { ...background, kind: "image", imageUrl: url, fit: background.fit ?? "cover", opacity: background.opacity ?? 1 } });
+	update({
+		background: {
+			...background,
+			kind: "image",
+			imageUrl: url,
+			fit: background.fit ?? "cover",
+			opacity: background.opacity ?? 1,
+		},
+		grid: {
+			...editor.settings.grid,
+			visible: false,
+			size: editor.settings.grid?.size ?? 24,
+		},
+	});
 }
 
-function patchImageOptions(patch: Partial<Pick<Background, "fit" | "opacity">>, commit = true) {
+function patchImageOptions(
+	patch: Partial<Pick<Background, "fit" | "opacity">>,
+	commit = true,
+) {
 	if (background.kind !== "image" || !background.imageUrl) return;
 	update({ background: { ...background, ...patch } }, commit);
 }
@@ -83,8 +161,13 @@ function setEnterMotion(preset: BoardEnterPreset | "") {
 function reset() {
 	imageUrl = "";
 	validationError = null;
+	mode = "pattern";
 	const { enter: _enter, ...rest } = editor.settings;
-	editor.setSettings({ ...rest, background: { kind: "dots" } });
+	editor.setSettings({
+		...rest,
+		background: { kind: "dots" },
+		grid: { visible: true, size: 24 },
+	});
 }
 </script>
 
@@ -99,6 +182,9 @@ function reset() {
 	<div class="mode-tabs" role="tablist" aria-label={m.board_bg_type({}, { locale })}>
 		<button type="button" class:active={mode === "color"} role="tab" aria-selected={mode === "color"} onclick={() => { mode = "color"; }}>
 			<Palette class="h-3.5 w-3.5" /> {m.board_color({}, { locale })}
+		</button>
+		<button type="button" class:active={mode === "pattern"} role="tab" aria-selected={mode === "pattern"} onclick={() => setPattern(background.kind === "grid" ? "grid" : "dots")}>
+			{m.board_pattern({}, { locale })}
 		</button>
 		<button type="button" class:active={mode === "image"} role="tab" aria-selected={mode === "image"} onclick={() => { mode = "image"; }}>
 			<Image class="h-3.5 w-3.5" /> {m.board_image_mode({}, { locale })}
@@ -116,6 +202,23 @@ function reset() {
 				<span>{m.board_custom_color({}, { locale })}</span>
 				<input type="color" value={solidColor ?? "#141414"} oninput={(event) => setColor(event.currentTarget.value, false)} onchange={(event) => setColor(event.currentTarget.value)} />
 			</label>
+		</div>
+	{:else if mode === "pattern"}
+		<div class="pattern-section">
+			<div class="pattern-options" role="group" aria-label={m.board_pattern({}, { locale })}>
+				<button type="button" class:active={background.kind === "dots"} aria-pressed={background.kind === "dots"} onclick={() => setPattern("dots")}>
+					{m.board_pattern_dots({}, { locale })}
+				</button>
+				<button type="button" class:active={background.kind === "grid"} aria-pressed={background.kind === "grid"} onclick={() => setPattern("grid")}>
+					{m.board_pattern_grid({}, { locale })}
+				</button>
+			</div>
+			<label class="pattern-toggle">
+				<input type="checkbox" checked={editor.settings.grid?.visible ?? false} onchange={(event) => setGridVisible(event.currentTarget.checked)} />
+				<span>{m.board_pattern_visible({}, { locale })}</span>
+			</label>
+			<label class="field-label" for="board-pattern-spacing">{m.board_pattern_spacing({}, { locale })}</label>
+			<input id="board-pattern-spacing" class="spacing-input" type="number" min="4" step="4" value={editor.settings.grid?.size ?? 24} onchange={(event) => setGridSize(Number(event.currentTarget.value))} />
 		</div>
 	{:else}
 		<div class="image-section">
@@ -195,6 +298,12 @@ function reset() {
 	.motion-section { display: grid; gap: 5px; margin: 12px 2px 4px; padding-top: 10px; border-top: 1px solid var(--border-subtle); }
 	.motion-section select { height: 30px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-input); padding: 0 7px; color: var(--text-primary); font-size: 12px; }
 	.section-hint { margin: 0; color: var(--text-tertiary); font-size: 10px; line-height: 1.35; }
+	.pattern-section { display: grid; gap: 10px; padding: 12px 2px; }
+	.pattern-options { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+	.pattern-options button { min-height: 32px; border-radius: 6px; color: var(--text-secondary); font-size: 11px; }
+	.pattern-options button.active { background: var(--brand-bg); color: var(--brand-muted-fg); }
+	.pattern-toggle { display: flex; align-items: center; gap: 8px; min-height: 28px; color: var(--text-secondary); font-size: 11px; }
+	.spacing-input { width: 100%; height: 32px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-input); padding: 0 8px; color: var(--text-primary); font-size: 12px; }
 	.image-options { display: grid; gap: 8px; margin-top: 12px; }
 	.option-row { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 8px; }
 	.option-row label { color: var(--text-tertiary); font-size: 11px; }

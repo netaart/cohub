@@ -6,7 +6,7 @@ drives by its JSON path inside the item.
 
 ```json
 {
-  "board": { "background": { "kind": "dots" }, "enter": { "preset": "deal" } },
+  "board": { "background": { "kind": "dots" }, "grid": { "visible": true, "size": 24 }, "enter": { "preset": "deal" } },
   "items": {
     "s3":   { "type": "frame", "position": { "x": 1700, "y": 1000 }, "size": { "width": 1600, "height": 900 }, "props": { "label": "Length contraction" } },
     "ship": { "type": "shape", "parent": "s3", "position": { "x": 200, "y": 400 }, "size": { "width": 320, "height": 80 }, "props": { "geometry": "rounded" }, "style": { "fill": "blue" } },
@@ -51,6 +51,8 @@ Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
 | `task` | `taskRunId`, `snapshot` |
 | `effect` | `kind` (`particles` `trail` `impact` `flash` `glow`) and its parameters |
 | `sketch` | `src` (a JS module in the Space), `params` |
+
+Background pattern lives in `board.background.kind` (`dots` or `grid`); `board.grid.visible` toggles its overlay and `board.grid.size` sets spacing in board units. The Appearance panel edits all three. Use `cohub boards schema effect` to see which parameters apply to each effect kind.
 
 Deleting an item that is still referenced fails and lists the references; `cascade`
 also deletes children and the tracks that target it. Arrows bound to a deleted item

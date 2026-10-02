@@ -340,6 +340,60 @@ export const BoardTaskItemSchema = z
 export const BOARD_EFFECT_KINDS = ["particles", "trail", "impact", "flash", "glow"] as const;
 export type BoardEffectKind = (typeof BOARD_EFFECT_KINDS)[number];
 
+export const BOARD_EFFECT_KIND_INFO = {
+	particles: {
+		description: "Continuous particles emitted inside the effect frame.",
+		parameters: {
+			rate: "Particles per second.",
+			life: "Particle lifetime in milliseconds.",
+			particleSize: "Particle size in board units.",
+			speed: "Particle speed in board units per second.",
+			direction: "Emission direction in degrees.",
+			spread: "Emission spread in degrees.",
+			gravity: "Acceleration in board units per second squared.",
+			intensity: "Opacity and size multiplier.",
+			seed: "Stable seed for repeatable particle motion.",
+		},
+	},
+	trail: {
+		description: "A fading trail following another item.",
+		parameters: {
+			follow: "ID of the item to follow.",
+			life: "Trail lifetime in milliseconds.",
+			particleSize: "Trail width in board units.",
+			intensity: "Opacity multiplier.",
+		},
+	},
+	impact: {
+		description: "A repeating radial burst centered in the effect frame.",
+		parameters: {
+			rate: "Particles per burst.",
+			life: "Time between bursts in milliseconds.",
+			particleSize: "Particle and ring size in board units.",
+			speed: "Particle speed in board units per second.",
+			direction: "Burst direction in degrees.",
+			spread: "Burst spread in degrees.",
+			gravity: "Acceleration in board units per second squared.",
+			intensity: "Opacity multiplier.",
+			seed: "Stable seed for repeatable bursts.",
+		},
+	},
+	flash: {
+		description: "A repeating full-frame flash.",
+		parameters: {
+			life: "Time between flashes in milliseconds.",
+			intensity: "Flash opacity multiplier.",
+		},
+	},
+	glow: {
+		description: "A pulsing set of concentric rings.",
+		parameters: {
+			life: "Pulse period in milliseconds.",
+			intensity: "Glow opacity multiplier.",
+		},
+	},
+} satisfies Record<BoardEffectKind, { description: string; parameters: Record<string, string> }>;
+
 export const BoardEffectItemSchema = z
 	.object({
 		...boxed(240, 240),
