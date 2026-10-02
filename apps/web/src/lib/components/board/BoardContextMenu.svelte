@@ -3,9 +3,9 @@ import {
 	ArrowDownToLine,
 	ArrowUpToLine,
 	BoxSelect,
+	Clapperboard,
 	Copy,
 	ExternalLink,
-	Clapperboard,
 	History,
 	ImageDown,
 	LayoutDashboard,
@@ -33,6 +33,7 @@ const {
 	onExport,
 	onReplay,
 	onAnimate,
+	sheet = false,
 }: {
 	editor: BoardEditor;
 	position: { x: number; y: number };
@@ -45,6 +46,7 @@ const {
 	onExport?: () => void;
 	onReplay?: () => void;
 	onAnimate?: () => void;
+	sheet?: boolean;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -73,8 +75,15 @@ const singleTask = $derived.by(() => {
 	if (editor.selectedItems.length !== 1) return null;
 	const item = editor.selectedItems[0];
 	if (item?.type !== "task") return null;
-	const props = item.props as { taskRunId: string; snapshot: { taskType: string } };
-	return { id: item.id, taskRunId: props.taskRunId, taskType: props.snapshot.taskType };
+	const props = item.props as {
+		taskRunId: string;
+		snapshot: { taskType: string };
+	};
+	return {
+		id: item.id,
+		taskRunId: props.taskRunId,
+		taskType: props.snapshot.taskType,
+	};
 });
 
 type MenuAction = {
@@ -202,7 +211,7 @@ function handleKeydown(event: KeyboardEvent) {
 onMount(() => {
 	document.addEventListener("pointerdown", handlePointerDown, true);
 	document.addEventListener("keydown", handleKeydown);
-	if (menu) {
+	if (!sheet && menu) {
 		const rect = menu.getBoundingClientRect();
 		left = Math.min(position.x, window.innerWidth - rect.width - 8);
 		top = Math.min(position.y, window.innerHeight - rect.height - 8);
@@ -215,12 +224,17 @@ onDestroy(() => {
 });
 </script>
 
+{#if sheet}
+	<div class="ctx-scrim" role="presentation" onclick={onClose}></div>
+{/if}
+
 <div
 	bind:this={menu}
 	use:portal
 	class="board-context-menu"
-	style:left="{left}px"
-	style:top="{top}px"
+	class:board-context-menu--sheet={sheet}
+	style:left={sheet ? undefined : `${left}px`}
+	style:top={sheet ? undefined : `${top}px`}
 	role="menu"
 	tabindex="-1"
 	oncontextmenu={(event) => event.preventDefault()}
@@ -250,6 +264,32 @@ onDestroy(() => {
 		background: var(--bg-elevated);
 		padding: 4px;
 		box-shadow: 0 12px 28px color-mix(in srgb, var(--overlay-scrim-strong) 18%, transparent);
+	}
+
+	.ctx-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 129;
+		background: color-mix(in srgb, var(--overlay-scrim-strong) 32%, transparent);
+	}
+
+	.board-context-menu--sheet {
+		right: 8px;
+		bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+		left: 8px;
+		min-width: 0;
+		border-radius: 14px;
+		padding: 6px;
+	}
+	.board-context-menu--sheet .ctx-item {
+		min-height: 46px;
+		border-radius: 10px;
+		padding: 10px 12px;
+		font-size: 14px;
+	}
+	.board-context-menu--sheet .ctx-item :global(svg) {
+		width: 16px;
+		height: 16px;
 	}
 
 	.ctx-item {

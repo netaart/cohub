@@ -1,5 +1,6 @@
 import {
 	applyBoardPatchToDocument,
+	applyMatrix,
 	arrowBindings,
 	arrowHitRadius,
 	arrowPathBounds,
@@ -27,12 +28,11 @@ import {
 	compileBoardAnimations,
 	distanceToArrow,
 	evaluateBoardAnimations,
-	featuredTaskArtifact,
 	FIT_PADDING,
+	featuredTaskArtifact,
 	HANDLE_HIT_RADIUS,
 	IDENTITY_MATRIX,
 	invertMatrix,
-	applyMatrix,
 	isArrowBinding,
 	isBoardColorId,
 	isShapeKind,
@@ -54,6 +54,7 @@ import {
 	rotateFrames,
 	type SceneItem,
 	type ScreenPoint,
+	type ShapeKind,
 	scaleFrames,
 	sceneItemToItem,
 	screenPoint,
@@ -68,6 +69,11 @@ import {
 } from "@neta-art/cohub/board";
 import { ensureBoardTextMeasurement } from "@neta-art/cohub/board/render";
 import { untrack } from "svelte";
+import {
+	type BoardCameraPolicy,
+	readBoardCameraPolicy,
+	writeBoardCameraPolicy,
+} from "$lib/board/board-camera-policy";
 import { appendBoardDrawSample } from "$lib/board/board-draw-input";
 import { createBoardItemId } from "$lib/board/board-id";
 import {
@@ -119,11 +125,17 @@ import {
 	connectionPortAt as portAt,
 } from "$lib/board/core/connection-ports";
 import {
+	diffBoardEdits,
+	isEmptyBoardPatch,
+	readPath,
+	routeBoardEdits,
+	sameJson,
+} from "$lib/board/core/document-edits";
+import {
 	resolveSelectionTransform,
 	selectionTransformControlAt,
 } from "$lib/board/core/selection-transform";
 import { computeSnap, type SnapGuide } from "$lib/board/core/snapping";
-import { diffBoardEdits, isEmptyBoardPatch, readPath, routeBoardEdits, sameJson } from "$lib/board/core/document-edits";
 import "$lib/board/core/shapes";
 
 export type { BoardToolId } from "$lib/board/board-tool";
@@ -258,9 +270,15 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	let evaluated: ReadonlyMap<string, BoardItem> = new Map();
 	const draftOrigins = new Map<string, BoardItem>();
 	let played: ReadonlyMap<string, BoardItem> = new Map();
-	let compiled: { animations: BoardDocument["animations"]; items: BoardDocument["items"]; value: ReturnType<typeof compileBoardAnimations> } | null = null;
+	let compiled: {
+		animations: BoardDocument["animations"];
+		items: BoardDocument["items"];
+		value: ReturnType<typeof compileBoardAnimations>;
+	} | null = null;
 
-	let camera = $state<BoardViewport>(normalizeViewport(options.viewport ?? { x: 0, y: 0, zoom: 1 }));
+	let camera = $state<BoardViewport>(
+		normalizeViewport(options.viewport ?? { x: 0, y: 0, zoom: 1 }),
+	);
 	let selection = $state<string[]>([]);
 	let tool = $state<BoardToolId>(options.initialTool ?? "select");
 	let interaction = $state<BoardInteraction>({ type: "idle" });
@@ -270,7 +288,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	let editingId = $state<string | null>(null);
 	let saveError = $state<string | null>(null);
 	let pendingCommits = $state(0);
-	let surfaceSize = $state<{ width: number; height: number }>({ width: 0, height: 0 });
+	let surfaceSize = $state<{ width: number; height: number }>({
+		width: 0,
+		height: 0,
+	});
 	let playhead = $state<BoardPlayhead | null>(null);
 	let recording = $state(false);
 	type UndoEntry = { undo: BoardPatch; redo: BoardPatch };
@@ -285,11 +306,16 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	let spaceHeld = $state(false);
 	let internalClipboard: BoardClipboardPayload | null = null;
 	let pasteCount = 0;
+	let cameraPolicy = $state<BoardCameraPolicy>(readBoardCameraPolicy());
 	let cameraAnimation = 0;
-	let pinch: { distance: number; midpoint: ScreenPoint; zoom: number } | null = null;
+	let pinch: { distance: number; midpoint: ScreenPoint; zoom: number } | null =
+		null;
 	const activePointers = new Map<number, ScreenPoint>();
 	let currentKey: string | undefined = options.key;
-	let pendingRemote: { document: BoardDocument; key: string | undefined } | null = null;
+	let pendingRemote: {
+		document: BoardDocument;
+		key: string | undefined;
+	} | null = null;
 
 	const spatial = createSpatialIndex();
 	let indexedScene: BoardScene | null = null;
@@ -309,7 +335,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	}
 
 	function displayDocument(): BoardDocument {
-		if (draft.size === 0 && evaluated.size === 0 && played.size === 0) return base;
+		if (draft.size === 0 && evaluated.size === 0 && played.size === 0)
+			return base;
 		const items = { ...base.items };
 		for (const [id, item] of played) items[id] = item;
 		for (const [id, item] of evaluated) items[id] = item;
@@ -325,10 +352,20 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			evaluated = new Map();
 			return;
 		}
-		if (!compiled || compiled.animations !== base.animations || compiled.items !== base.items) {
-			compiled = { animations: base.animations, items: base.items, value: compileBoardAnimations(base) };
+		if (
+			!compiled ||
+			compiled.animations !== base.animations ||
+			compiled.items !== base.items
+		) {
+			compiled = {
+				animations: base.animations,
+				items: base.items,
+				value: compileBoardAnimations(base),
+			};
 		}
-		evaluated = evaluateBoardAnimations(compiled.value, { [playhead.animationId]: playhead.time }).items;
+		evaluated = evaluateBoardAnimations(compiled.value, {
+			[playhead.animationId]: playhead.time,
+		}).items;
 	}
 
 	function setPlayedItems(items: ReadonlyMap<string, BoardItem>) {
@@ -336,7 +373,12 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		played = new Map([...items].filter(([id]) => base.items[id]));
 		const changed = new Set([...previous.keys(), ...played.keys()]);
 		for (const id of changed) {
-			if (draft.has(id) || evaluated.has(id) || sameJson(previous.get(id), played.get(id))) changed.delete(id);
+			if (
+				draft.has(id) ||
+				evaluated.has(id) ||
+				sameJson(previous.get(id), played.get(id))
+			)
+				changed.delete(id);
 		}
 		if (changed.size) rescene(changed);
 	}
@@ -373,13 +415,22 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		draft.set(id, item);
 	}
 
-	function writeDraft(changes: ReadonlyMap<string, BoardItem | null>, structural = false) {
+	function writeDraft(
+		changes: ReadonlyMap<string, BoardItem | null>,
+		structural = false,
+	) {
 		if (changes.size === 0) return;
 		for (const [id, item] of changes) setDraftItem(id, item);
 		if (!structural) {
 			for (const [id, item] of changes) {
 				const before = scene.get(id);
-				if (!item || !before || before.parent !== item.parent || before.z !== item.z || !sameJson(arrowBindings(before), arrowBindings(item))) {
+				if (
+					!item ||
+					!before ||
+					before.parent !== item.parent ||
+					before.z !== item.z ||
+					!sameJson(arrowBindings(before), arrowBindings(item))
+				) {
 					structural = true;
 					break;
 				}
@@ -394,20 +445,31 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		indexedScene = scene;
 		spatialDirty = new Set();
 		if (dirty === null) {
-			const entries: SpatialEntry[] = scene.items.map((item, order) => ({ id: item.id, order, rect: boundsOf(item) }));
+			const entries: SpatialEntry[] = scene.items.map((item, order) => ({
+				id: item.id,
+				order,
+				rect: boundsOf(item),
+			}));
 			spatial.rebuild(entries);
 			return;
 		}
 		const upserts = new Map<string, SpatialEntry | null>();
 		for (const id of dirty) {
 			const item = scene.get(id);
-			upserts.set(id, item ? { id, order: scene.indexOf(id), rect: boundsOf(item) } : null);
+			upserts.set(
+				id,
+				item ? { id, order: scene.indexOf(id), rect: boundsOf(item) } : null,
+			);
 		}
 		spatial.upsert(upserts);
 	}
 
 	function boundsOf(item: BoardSceneItem): Rect {
-		if (item.type === "arrow") return arrowPathBounds(resolveSceneArrow(item as SceneItem<BoardArrowItem>, scene), item.style.strokeWidth);
+		if (item.type === "arrow")
+			return arrowPathBounds(
+				resolveSceneArrow(item as SceneItem<BoardArrowItem>, scene),
+				item.style.strokeWidth,
+			);
 		return shapeBounds(item);
 	}
 
@@ -444,7 +506,12 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		if (!mediaIdsByPath) {
 			mediaIdsByPath = new Map();
 			for (const item of scene.items) {
-				if (item.type !== "image" && item.type !== "video" && item.type !== "audio") continue;
+				if (
+					item.type !== "image" &&
+					item.type !== "video" &&
+					item.type !== "audio"
+				)
+					continue;
 				const src = (item.props as { src: string }).src;
 				const ids = mediaIdsByPath.get(src) ?? new Set<string>();
 				ids.add(item.id);
@@ -466,20 +533,39 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	});
 	const selectedFrames = $derived(selectedItems.map((item) => item.frame));
 	const bounds = $derived(selectionBounds(selectedFrames));
-	const selectionTransform = $derived(resolveSelectionTransform(selectedItems, bounds));
+	const selectionTransform = $derived(
+		resolveSelectionTransform(selectedItems, bounds),
+	);
 	const hoveredTransformControl = $derived.by(() =>
 		interaction.type === "idle" && !pinch && tool === "select" && hoverPoint
-			? selectionTransformControlAt(selectionTransform, hoverPoint, camera.zoom, hoverPointerType)
+			? selectionTransformControlAt(
+					selectionTransform,
+					hoverPoint,
+					camera.zoom,
+					hoverPointerType,
+				)
 			: null,
 	);
 	const marquee = $derived.by<Rect | null>(() => {
 		if (interaction.type !== "brushing") return null;
 		const { start, current } = interaction;
-		return { x: Math.min(start.x, current.x), y: Math.min(start.y, current.y), width: Math.abs(current.x - start.x), height: Math.abs(current.y - start.y) };
+		return {
+			x: Math.min(start.x, current.x),
+			y: Math.min(start.y, current.y),
+			width: Math.abs(current.x - start.x),
+			height: Math.abs(current.y - start.y),
+		};
 	});
 
 	function routeDraft(): BoardDocument {
-		return routeBoardEdits({ base, evaluated, draft, playhead, recording, displayed: draftOrigins });
+		return routeBoardEdits({
+			base,
+			evaluated,
+			draft,
+			playhead,
+			recording,
+			displayed: draftOrigins,
+		});
 	}
 
 	function send(patch: BoardPatch) {
@@ -490,7 +576,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				saveError = null;
 			})
 			.catch((error: unknown) => {
-				saveError = error instanceof Error ? error.message : "Failed to sync board";
+				saveError =
+					error instanceof Error ? error.message : "Failed to sync board";
 			})
 			.finally(() => {
 				pendingCommits -= 1;
@@ -498,7 +585,11 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	}
 
 	function adopt(next: BoardDocument, changedIds?: Iterable<string>) {
-		const structural = played.size > 0 || !changedIds || next.animations !== base.animations || next.board !== base.board;
+		const structural =
+			played.size > 0 ||
+			!changedIds ||
+			next.animations !== base.animations ||
+			next.board !== base.board;
 		base = next;
 		played = new Map();
 		draft.clear();
@@ -510,13 +601,25 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			const hierarchy = ids.some((id) => {
 				const before = scene.get(id);
 				const after = next.items[id];
-				return !before || !after || before.parent !== after.parent || before.z !== after.z || !sameJson(arrowBindings(before), arrowBindings(after));
+				return (
+					!before ||
+					!after ||
+					before.parent !== after.parent ||
+					before.z !== after.z ||
+					!sameJson(arrowBindings(before), arrowBindings(after))
+				);
 			});
 			rescene(hierarchy ? undefined : ids);
 		}
 	}
 
-	function commit(extra: { board?: BoardSettings; animations?: Record<string, BoardAnimation> } = {}, record = true) {
+	function commit(
+		extra: {
+			board?: BoardSettings;
+			animations?: Record<string, BoardAnimation>;
+		} = {},
+		record = true,
+	) {
 		const ids = [...draft.keys()];
 		let target = routeDraft();
 		if (extra.board) target = { ...target, board: extra.board };
@@ -535,7 +638,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		send(redo);
 	}
 
-	function commitItems(changes: ReadonlyMap<string, BoardItem | null>, record = true) {
+	function commitItems(
+		changes: ReadonlyMap<string, BoardItem | null>,
+		record = true,
+	) {
 		if (changes.size === 0) return;
 		for (const [id, item] of changes) setDraftItem(id, item);
 		commit({}, record);
@@ -544,7 +650,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	function applyPatch(patch: BoardPatch) {
 		const result = applyBoardPatchToDocument(base, patch, { cascade: true });
 		if (!result.ok) {
-			saveError = result.diagnostics[0]?.message ?? "Could not apply the change";
+			saveError =
+				result.diagnostics[0]?.message ?? "Could not apply the change";
 			return;
 		}
 		adopt(result.document, Object.keys(patch.items ?? {}));
@@ -588,6 +695,16 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		hoverId = null;
 	}
 
+	function setCameraPolicy(policy: BoardCameraPolicy) {
+		if (cameraPolicy === policy) return;
+		cameraPolicy = policy;
+		writeBoardCameraPolicy(policy);
+	}
+
+	function takeCameraControl() {
+		setCameraPolicy("free");
+	}
+
 	function cancelCameraAnimation() {
 		if (cameraAnimation) cancelAnimationFrame(cameraAnimation);
 		cameraAnimation = 0;
@@ -601,7 +718,11 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		const step = (now: number) => {
 			const t = Math.min(1, (now - started) / CAMERA_ANIMATION_MS);
 			const eased = easeOutCubic(t);
-			setCamera({ x: from.x + (to.x - from.x) * eased, y: from.y + (to.y - from.y) * eased, zoom: from.zoom + (to.zoom - from.zoom) * eased });
+			setCamera({
+				x: from.x + (to.x - from.x) * eased,
+				y: from.y + (to.y - from.y) * eased,
+				zoom: from.zoom + (to.zoom - from.zoom) * eased,
+			});
 			cameraAnimation = t < 1 ? requestAnimationFrame(step) : 0;
 		};
 		cameraAnimation = requestAnimationFrame(step);
@@ -634,28 +755,47 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	}
 
 	function contentBounds(ids?: Iterable<string>): Rect | null {
-		const list = ids ? [...ids].flatMap((id) => (scene.get(id) ? [scene.get(id) as BoardSceneItem] : [])) : scene.items;
+		const list = ids
+			? [...ids].flatMap((id) =>
+					scene.get(id) ? [scene.get(id) as BoardSceneItem] : [],
+				)
+			: scene.items;
 		return unionRects(list.map(boundsOf));
 	}
 
 	function fitView(focus: Parameters<typeof focusRect>[1] = {}) {
 		const content = contentBounds();
-		if (content && surfaceSize.width > 0) focusRect(content, { padding: FIT_PADDING, ...focus });
+		if (content && surfaceSize.width > 0)
+			focusRect(content, { padding: FIT_PADDING, ...focus });
 		else if (focus.animate === false) setCamera({ x: 0, y: 0, zoom: 1 });
 		else animateCamera({ x: 0, y: 0, zoom: 1 });
 	}
 
 	function focusRect(
 		rect: Rect,
-		focus: { fit?: "contain" | "cover"; padding?: number; minZoom?: number; maxZoom?: number; animate?: boolean } = {},
+		focus: {
+			fit?: "contain" | "cover";
+			padding?: number;
+			minZoom?: number;
+			maxZoom?: number;
+			animate?: boolean;
+		} = {},
 	) {
 		if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return;
-		const target = cameraForRect(rect, surfaceSize, { fit: focus.fit ?? "contain", padding: focus.padding ?? 32, minZoom: focus.minZoom, maxZoom: focus.maxZoom });
+		const target = cameraForRect(rect, surfaceSize, {
+			fit: focus.fit ?? "contain",
+			padding: focus.padding ?? 32,
+			minZoom: focus.minZoom,
+			maxZoom: focus.maxZoom,
+		});
 		if (focus.animate === false) setCamera(target);
 		else animateCamera(target);
 	}
 
-	function focusItems(ids: Iterable<string>, focus?: Parameters<typeof focusRect>[1]) {
+	function focusItems(
+		ids: Iterable<string>,
+		focus?: Parameters<typeof focusRect>[1],
+	) {
 		const rect = contentBounds(ids);
 		if (rect) focusRect(rect, focus);
 	}
@@ -699,7 +839,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		}
 	}
 
-	function frameAt(point: WorldPoint, exclude?: ReadonlySet<string>): BoardSceneItem | null {
+	function frameAt(
+		point: WorldPoint,
+		exclude?: ReadonlySet<string>,
+	): BoardSceneItem | null {
 		ensureSpatial();
 		for (const id of spatial.idsAtPoint(point)) {
 			const item = scene.get(id);
@@ -709,7 +852,12 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		return null;
 	}
 
-	function reparent(item: BoardItem, frame: BoardFrame, parent: string | undefined, box: Rect): BoardItem {
+	function reparent(
+		item: BoardItem,
+		frame: BoardFrame,
+		parent: string | undefined,
+		box: Rect,
+	): BoardItem {
 		const { parent: _previous, ...root } = item;
 		const orphan = root as BoardItem;
 		const next = parent ? ({ ...orphan, parent } as BoardItem) : orphan;
@@ -719,13 +867,19 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 	function topZ(parent: string | undefined): number {
 		let z = 0;
-		for (const id of scene.children(parent)) z = Math.max(z, displayItem(id)?.z ?? 0);
+		for (const id of scene.children(parent))
+			z = Math.max(z, displayItem(id)?.z ?? 0);
 		return z + 1;
 	}
 
-	function placeNew(entries: readonly BoardItemEntry[]): Map<string, BoardItem> {
+	function placeNew(
+		entries: readonly BoardItemEntry[],
+	): Map<string, BoardItem> {
 		const created = new Set(entries.map((entry) => entry.id));
-		const probe = buildBoardScene({ ...base, items: Object.fromEntries(entries.map((entry) => [entry.id, entry.item])) });
+		const probe = buildBoardScene({
+			...base,
+			items: Object.fromEntries(entries.map((entry) => [entry.id, entry.item])),
+		});
 		const nextZ = new Map<string | undefined, number>();
 		const changes = new Map<string, BoardItem>();
 		for (const { id, item } of entries) {
@@ -734,8 +888,14 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				continue;
 			}
 			const shown = probe.get(id);
-			const container = shown && item.type !== "frame" && item.type !== "arrow" ? frameAt(rectCenter(shown.frame), created) : null;
-			const value = container && shown ? reparent(item, shown.frame, container.id, probe.layout.box(id)) : item;
+			const container =
+				shown && item.type !== "frame" && item.type !== "arrow"
+					? frameAt(rectCenter(shown.frame), created)
+					: null;
+			const value =
+				container && shown
+					? reparent(item, shown.frame, container.id, probe.layout.box(id))
+					: item;
 			const z = nextZ.get(container?.id) ?? topZ(container?.id);
 			nextZ.set(container?.id, z + 1);
 			changes.set(id, { ...value, z });
@@ -743,7 +903,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		return changes;
 	}
 
-	function addEntries(entries: BoardItemEntry[], select = !isContinuousBoardTool(tool)) {
+	function addEntries(
+		entries: BoardItemEntry[],
+		select = !isContinuousBoardTool(tool),
+	) {
 		if (options.readonly || entries.length === 0) return;
 		const changes = placeNew(entries);
 		markAdded([...changes.keys()]);
@@ -752,20 +915,44 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		maybeReturnToSelect();
 	}
 
-	function addApp(app: { appId: string; ref: string; url: string; name: string; icon?: string }, at: WorldPoint) {
+	function addApp(
+		app: {
+			appId: string;
+			ref: string;
+			url: string;
+			name: string;
+			icon?: string;
+		},
+		at: WorldPoint,
+	) {
 		const entry = createAppBoardItem(app, at.x, at.y);
 		addEntries([entry]);
 		return entry.id;
 	}
 
-	function addFile(path: string, at: WorldPoint, snapshot?: BoardMediaSnapshot & BoardFileSnapshotFacts) {
+	function addFile(
+		path: string,
+		at: WorldPoint,
+		snapshot?: BoardMediaSnapshot & BoardFileSnapshotFacts,
+	) {
 		const entry = createFileNodeForPath(path, at.x, at.y, snapshot);
 		addEntries([entry]);
 		return entry.id;
 	}
 
-	function addTask(taskRunId: string, snapshot: BoardTaskSnapshot, at: WorldPoint, metadata?: Record<string, unknown>) {
-		const entry = createTaskBoardItem(taskRunId, snapshot, at.x, at.y, metadata);
+	function addTask(
+		taskRunId: string,
+		snapshot: BoardTaskSnapshot,
+		at: WorldPoint,
+		metadata?: Record<string, unknown>,
+	) {
+		const entry = createTaskBoardItem(
+			taskRunId,
+			snapshot,
+			at.x,
+			at.y,
+			metadata,
+		);
 		addEntries([entry]);
 		return entry.id;
 	}
@@ -774,7 +961,11 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		taskRunId: string,
 		snapshot: BoardTaskSnapshot,
 		at: WorldPoint,
-		sources: Array<{ itemId: string; sourcePortId: string; targetPortId: string }>,
+		sources: Array<{
+			itemId: string;
+			sourcePortId: string;
+			targetPortId: string;
+		}>,
 		metadata?: Record<string, unknown>,
 	) {
 		if (options.readonly) return null;
@@ -782,17 +973,39 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		const arrows = sources
 			.filter((source) => source.itemId !== task.id && scene.get(source.itemId))
 			.map((source) => {
-				const entry = createArrowBoardItem({ x: 0, y: 0 }, { item: task.id }, toolStyles.arrow.color, createBoardItemId(), toolStyles.arrow.size, { item: source.itemId });
+				const entry = createArrowBoardItem(
+					{ x: 0, y: 0 },
+					{ item: task.id },
+					toolStyles.arrow.color,
+					createBoardItemId(),
+					toolStyles.arrow.size,
+					{ item: source.itemId },
+				);
 				const props = (entry.item as BoardArrowItem).props;
 				return {
 					id: entry.id,
 					item: {
 						...entry.item,
-						metadata: { boardFlow: { version: 1, kind: "content", sourcePortId: source.sourcePortId, targetPortId: source.targetPortId } },
+						metadata: {
+							boardFlow: {
+								version: 1,
+								kind: "content",
+								sourcePortId: source.sourcePortId,
+								targetPortId: source.targetPortId,
+							},
+						},
 						props: {
 							...props,
-							start: { item: source.itemId, anchor: "auto" as const, port: source.sourcePortId },
-							end: { item: task.id, anchor: "auto" as const, port: source.targetPortId },
+							start: {
+								item: source.itemId,
+								anchor: "auto" as const,
+								port: source.sourcePortId,
+							},
+							end: {
+								item: task.id,
+								anchor: "auto" as const,
+								port: source.targetPortId,
+							},
 							relation: "input",
 						},
 					} as BoardItem,
@@ -807,16 +1020,20 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		addEntries([createTextBoardItem(text, at.x, at.y, toolStyles.text.color)]);
 	}
 
-	function addShape(at: WorldPoint) {
+	function addShape(at: WorldPoint, geometry?: ShapeKind) {
 		const style = toolStyles.shape;
-		addEntries([createShapeBoardItem(style.geometry, at.x, at.y, style.color)]);
+		addEntries([
+			createShapeBoardItem(geometry ?? style.geometry, at.x, at.y, style.color),
+		]);
 	}
 
 	function addFrame(at: WorldPoint) {
 		addEntries([createFrameBoardItem(at.x, at.y, toolStyles.frame.color)]);
 	}
 
-	function commitBoxCreate(state: Extract<BoardInteraction, { type: "creatingBox" }>) {
+	function commitBoxCreate(
+		state: Extract<BoardInteraction, { type: "creatingBox" }>,
+	) {
 		const dx = state.current.x - state.start.x;
 		const dy = state.current.y - state.start.y;
 		const click = Math.hypot(dx, dy) <= 6 / Math.max(camera.zoom, 0.0001);
@@ -832,12 +1049,31 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		const geometry = isShapeKind(state.geometry) ? state.geometry : "rectangle";
 		addEntries([
 			state.kind === "shape"
-				? createShapeBoardItem(geometry, state.start.x, state.start.y, state.color, state.id, box)
-				: createFrameBoardItem(state.start.x, state.start.y, state.color, "Frame", state.id, box),
+				? createShapeBoardItem(
+						geometry,
+						state.start.x,
+						state.start.y,
+						state.color,
+						state.id,
+						box,
+					)
+				: createFrameBoardItem(
+						state.start.x,
+						state.start.y,
+						state.color,
+						"Frame",
+						state.id,
+						box,
+					),
 		]);
 	}
 
-	function commitDraw(id: string, points: BoardDrawPoint[], color: string, size: number) {
+	function commitDraw(
+		id: string,
+		points: BoardDrawPoint[],
+		color: string,
+		size: number,
+	) {
 		if (points.length === 0) return;
 		addEntries([createDrawBoardItem(points, color, size, id)]);
 	}
@@ -866,7 +1102,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		flushPendingRemote();
 	}
 
-	function deletionChanges(ids: Iterable<string>): { items: Map<string, BoardItem | null>; animations?: Record<string, BoardAnimation> } {
+	function deletionChanges(ids: Iterable<string>): {
+		items: Map<string, BoardItem | null>;
+		animations?: Record<string, BoardAnimation>;
+	} {
 		const doomed = new Set<string>();
 		for (const id of ids) {
 			if (!scene.get(id)) continue;
@@ -878,7 +1117,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		for (const id of doomed) {
 			for (const arrowId of scene.binders(id)) {
 				if (doomed.has(arrowId) || changes.has(arrowId)) continue;
-				const arrow = scene.get(arrowId) as SceneItem<BoardArrowItem> | undefined;
+				const arrow = scene.get(arrowId) as
+					| SceneItem<BoardArrowItem>
+					| undefined;
 				if (!arrow) continue;
 				const resolved = resolveSceneArrow(arrow, scene);
 				const toLocal = invertMatrix(scene.layout.matrix(arrowId));
@@ -888,7 +1129,14 @@ export function createBoardEditor(options: BoardEditorOptions) {
 					return { x: local.x, y: local.y };
 				};
 				const { id: _id, frame: _frame, ...stored } = arrow;
-				changes.set(arrowId, { ...stored, props: { ...arrow.props, start: free(arrow.props.start, resolved.start.point), end: free(arrow.props.end, resolved.end.point) } } as BoardItem);
+				changes.set(arrowId, {
+					...stored,
+					props: {
+						...arrow.props,
+						start: free(arrow.props.start, resolved.start.point),
+						end: free(arrow.props.end, resolved.end.point),
+					},
+				} as BoardItem);
 			}
 		}
 		let animations: Record<string, BoardAnimation> | undefined;
@@ -914,7 +1162,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		if (changes.size === 0) return;
 		for (const [id, item] of changes) setDraftItem(id, item);
 		commit(animations ? { animations } : {});
-		selection = selection.filter((id) => !changes.has(id) || changes.get(id) !== null);
+		selection = selection.filter(
+			(id) => !changes.has(id) || changes.get(id) !== null,
+		);
 		if (editingId && changes.get(editingId) === null) editingId = null;
 	}
 
@@ -932,14 +1182,22 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		deleteIds([id]);
 	}
 
-	function detachedSubtrees(ids: Iterable<string>): { items: Record<string, BoardItem>; roots: string[] } {
+	function detachedSubtrees(ids: Iterable<string>): {
+		items: Record<string, BoardItem>;
+		roots: string[];
+	} {
 		const roots = rootsOf(ids);
 		const items: Record<string, BoardItem> = {};
 		for (const root of roots) {
 			const item = scene.get(root);
 			if (!item) continue;
 			const { id: _id, frame, ...stored } = item;
-			items[root] = reparent(stored as BoardItem, frame, undefined, scene.layout.box(root));
+			items[root] = reparent(
+				stored as BoardItem,
+				frame,
+				undefined,
+				scene.layout.box(root),
+			);
 			for (const child of scene.descendants(root)) {
 				const value = displayItem(child);
 				if (value) items[child] = value;
@@ -952,7 +1210,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		const arrow = scene.get(id) as SceneItem<BoardArrowItem> | undefined;
 		if (arrow?.type !== "arrow") return null;
 		const resolved = resolveSceneArrow(arrow, scene);
-		return applyMatrix(invertMatrix(scene.layout.matrix(id)), (which === "start" ? resolved.start : resolved.end).point);
+		return applyMatrix(
+			invertMatrix(scene.layout.matrix(id)),
+			(which === "start" ? resolved.start : resolved.end).point,
+		);
 	}
 
 	function duplicates(ids: string[], offset: number): Map<string, BoardItem> {
@@ -961,26 +1222,55 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			for (const arrowId of scene.binders(id)) {
 				const arrow = displayItem(arrowId);
 				const shown = scene.get(arrowId);
-				if (copied[arrowId] || !arrow || !shown || !arrowBindings(arrow).every((bound) => copied[bound])) continue;
-				copied[arrowId] = reparent(arrow, shown.frame, undefined, scene.layout.box(arrowId));
+				if (
+					copied[arrowId] ||
+					!arrow ||
+					!shown ||
+					!arrowBindings(arrow).every((bound) => copied[bound])
+				)
+					continue;
+				copied[arrowId] = reparent(
+					arrow,
+					shown.frame,
+					undefined,
+					scene.layout.box(arrowId),
+				);
 			}
 		}
-		const idMap = new Map(Object.keys(copied).map((id) => [id, createBoardItemId()]));
+		const idMap = new Map(
+			Object.keys(copied).map((id) => [id, createBoardItemId()]),
+		);
 		const moved = remapItems(
 			copied,
 			idMap,
-			(item) => (item.parent && copied[item.parent] ? item : { ...item, position: { x: item.position.x + offset, y: item.position.y + offset } }),
+			(item) =>
+				item.parent && copied[item.parent]
+					? item
+					: {
+							...item,
+							position: {
+								x: item.position.x + offset,
+								y: item.position.y + offset,
+							},
+						},
 			arrowEndPoint,
 		);
 		let z = topZ(undefined);
-		return new Map(Object.entries(moved).map(([id, item]) => [id, item.parent ? item : { ...item, z: z++ }]));
+		return new Map(
+			Object.entries(moved).map(([id, item]) => [
+				id,
+				item.parent ? item : { ...item, z: z++ },
+			]),
+		);
 	}
 
 	function duplicateSelection() {
 		if (options.readonly || selection.length === 0) return;
 		const copies = duplicates(selection, DUPLICATE_OFFSET);
 		if (copies.size === 0) return;
-		const roots = [...copies].filter(([, item]) => !item.parent || !copies.has(item.parent)).map(([id]) => id);
+		const roots = [...copies]
+			.filter(([, item]) => !item.parent || !copies.has(item.parent))
+			.map(([id]) => id);
 		markAdded(roots);
 		selection = roots;
 		commitItems(copies);
@@ -990,7 +1280,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		if (selection.length === 0) return null;
 		const { items: copied } = detachedSubtrees(selection);
 		const origin = contentBounds(rootsOf(selection));
-		const payload = origin ? encodeClipboard(copied, { x: origin.x, y: origin.y }) : null;
+		const payload = origin
+			? encodeClipboard(copied, { x: origin.x, y: origin.y })
+			: null;
 		if (payload) {
 			internalClipboard = payload;
 			pasteCount = 0;
@@ -1006,24 +1298,34 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 	function pasteClipboard(raw?: unknown, at?: WorldPoint) {
 		if (options.readonly) return;
-		const parsed = parseClipboard(raw) ?? (raw == null ? parseClipboard(internalClipboard) : null);
+		const parsed =
+			parseClipboard(raw) ??
+			(raw == null ? parseClipboard(internalClipboard) : null);
 		if (!parsed) return;
 		pasteCount += 1;
-		const offset = at ?? { x: parsed.origin.x + defaultPasteOffset(pasteCount).x, y: parsed.origin.y + defaultPasteOffset(pasteCount).y };
+		const offset = at ?? {
+			x: parsed.origin.x + defaultPasteOffset(pasteCount).x,
+			y: parsed.origin.y + defaultPasteOffset(pasteCount).y,
+		};
 		const pasted = materializeClipboard(parsed, offset);
 		const entries = Object.entries(pasted).map(([id, item]) => ({ id, item }));
-		const roots = entries.filter(({ item }) => !item.parent).map(({ id }) => id);
+		const roots = entries
+			.filter(({ item }) => !item.parent)
+			.map(({ id }) => id);
 		const changes = placeNew(entries);
 		markAdded(roots);
 		selection = roots;
 		commitItems(changes);
 	}
 
-	function placed(frames: ReadonlyMap<string, BoardFrame>): Map<string, BoardItem> {
+	function placed(
+		frames: ReadonlyMap<string, BoardFrame>,
+	): Map<string, BoardItem> {
 		const changes = new Map<string, BoardItem>();
 		for (const [id, frame] of frames) {
 			const item = scene.get(id);
-			if (item) changes.set(id, sceneItemToItem({ ...item, frame }, scene.layout));
+			if (item)
+				changes.set(id, sceneItemToItem({ ...item, frame }, scene.layout));
 		}
 		return changes;
 	}
@@ -1035,7 +1337,12 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		const frames = new Map<string, BoardFrame>();
 		for (const id of ids) {
 			const frame = scene.get(id)?.frame;
-			if (frame) frames.set(id, { ...frame, x: frame.x + dx * step, y: frame.y + dy * step });
+			if (frame)
+				frames.set(id, {
+					...frame,
+					x: frame.x + dx * step,
+					y: frame.y + dy * step,
+				});
 		}
 		commitItems(placed(frames));
 	}
@@ -1061,7 +1368,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		commitItems(placed(distributeFrames(framesFor(ids), axis)));
 	}
 
-	function editSelection(update: (item: BoardItem) => BoardItem | null, ids = unlockedIds(selection)) {
+	function editSelection(
+		update: (item: BoardItem) => BoardItem | null,
+		ids = unlockedIds(selection),
+	) {
 		const changes = new Map<string, BoardItem>();
 		for (const id of ids) {
 			const item = displayItem(id);
@@ -1088,7 +1398,14 @@ export function createBoardEditor(options: BoardEditorOptions) {
 					return { ...item, style: { ...item.style, fill: color } };
 				case "shape":
 				case "frame":
-					return { ...item, style: { ...item.style, stroke: color, ...(item.style.fill ? { fill: color } : {}) } };
+					return {
+						...item,
+						style: {
+							...item.style,
+							stroke: color,
+							...(item.style.fill ? { fill: color } : {}),
+						},
+					};
 				case "draw":
 				case "arrow":
 					return { ...item, style: { ...item.style, stroke: color } };
@@ -1101,11 +1418,20 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	}
 
 	function setSelectionStyle(style: Partial<BoardItem["style"]>) {
-		editSelection((item) => ({ ...item, style: { ...item.style, ...style } }) as BoardItem);
+		editSelection(
+			(item) => ({ ...item, style: { ...item.style, ...style } }) as BoardItem,
+		);
 	}
 
 	function setSelectionProps(type: string, props: Record<string, unknown>) {
-		editSelection((item) => (item.type === type ? ({ ...item, props: { ...(item.props as object), ...props } } as BoardItem) : null));
+		editSelection((item) =>
+			item.type === type
+				? ({
+						...item,
+						props: { ...(item.props as object), ...props },
+					} as BoardItem)
+				: null,
+		);
 	}
 
 	function restack(front: boolean) {
@@ -1118,9 +1444,15 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			byParent.set(parent, [...(byParent.get(parent) ?? []), id]);
 		}
 		for (const [parent, members] of byParent) {
-			const siblings = scene.children(parent).map((id) => displayItem(id)?.z ?? 0);
-			let z = front ? Math.max(0, ...siblings) + 1 : Math.min(0, ...siblings) - members.length;
-			const ordered = members.sort((a, b) => scene.indexOf(a) - scene.indexOf(b));
+			const siblings = scene
+				.children(parent)
+				.map((id) => displayItem(id)?.z ?? 0);
+			let z = front
+				? Math.max(0, ...siblings) + 1
+				: Math.min(0, ...siblings) - members.length;
+			const ordered = members.sort(
+				(a, b) => scene.indexOf(a) - scene.indexOf(b),
+			);
 			for (const id of ordered) {
 				const item = displayItem(id);
 				if (item) changes.set(id, { ...item, z: z++ });
@@ -1145,10 +1477,18 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 	function updateText(id: string, text: string, created = false) {
 		const item = displayItem(id);
-		if (!item || (item.type !== "text" && item.type !== "shape" && item.type !== "arrow" && item.type !== "frame")) return;
-		const next = item.type === "arrow" || item.type === "frame"
-			? { ...item, props: { ...item.props, label: text } }
-			: { ...item, props: { ...item.props, text } };
+		if (
+			!item ||
+			(item.type !== "text" &&
+				item.type !== "shape" &&
+				item.type !== "arrow" &&
+				item.type !== "frame")
+		)
+			return;
+		const next =
+			item.type === "arrow" || item.type === "frame"
+				? { ...item, props: { ...item.props, label: text } }
+				: { ...item, props: { ...item.props, text } };
 		if (!created && sameJson(next, base.items[id])) {
 			draft.delete(id);
 			rescene([id]);
@@ -1158,79 +1498,140 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		commitItems(new Map([[id, next as BoardItem]]));
 	}
 
-	function applyMediaFileChange(path: string, change: { size?: number; mtimeMs?: number; removed?: boolean }) {
+	function applyMediaFileChange(
+		path: string,
+		change: { size?: number; mtimeMs?: number; removed?: boolean },
+	) {
 		if (change.removed) return;
 		const changes = new Map<string, BoardItem>();
 		for (const id of mediaIdsForPath(path)) {
 			const item = base.items[id];
-			if (!item || (item.type !== "image" && item.type !== "video" && item.type !== "audio")) continue;
+			if (
+				!item ||
+				(item.type !== "image" &&
+					item.type !== "video" &&
+					item.type !== "audio")
+			)
+				continue;
 			const snapshot: BoardMediaSnapshot = { ...item.props.snapshot };
 			if (change.size !== undefined) snapshot.size = change.size;
 			if (change.mtimeMs !== undefined) snapshot.mtimeMs = change.mtimeMs;
 			delete snapshot.naturalWidth;
 			delete snapshot.naturalHeight;
 			if (item.type === "audio") delete snapshot.durationMs;
-			if (!sameJson(snapshot, item.props.snapshot ?? {})) changes.set(id, { ...item, props: { ...item.props, snapshot } } as BoardItem);
+			if (!sameJson(snapshot, item.props.snapshot ?? {}))
+				changes.set(id, {
+					...item,
+					props: { ...item.props, snapshot },
+				} as BoardItem);
 		}
 		commitItems(changes, false);
 	}
 
-	function adoptMediaNaturalSizes(sizes: Array<{ id: string; width: number; height: number }>) {
+	function adoptMediaNaturalSizes(
+		sizes: Array<{ id: string; width: number; height: number }>,
+	) {
 		const changes = new Map<string, BoardItem>();
 		for (const natural of sizes) {
 			const item = base.items[natural.id];
 			if (!item || natural.width <= 0 || natural.height <= 0) continue;
 			if (item.type === "task") {
 				const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);
-				if ((artifact?.type !== "image" && artifact?.type !== "video") || (artifact.naturalWidth && artifact.naturalHeight)) continue;
+				if (
+					(artifact?.type !== "image" && artifact?.type !== "video") ||
+					(artifact.naturalWidth && artifact.naturalHeight)
+				)
+					continue;
 				const height = (item.size.width * natural.height) / natural.width;
 				if (!Number.isFinite(height) || height <= 0) continue;
 				changes.set(natural.id, {
 					...item,
-					position: { x: item.position.x, y: item.position.y + (item.size.height - height) / 2 },
+					position: {
+						x: item.position.x,
+						y: item.position.y + (item.size.height - height) / 2,
+					},
 					size: { ...item.size, height },
 					props: {
 						...item.props,
 						snapshot: {
 							...item.props.snapshot,
-							artifacts: item.props.snapshot.artifacts.map((entry) => (entry.id === artifact.id ? { ...entry, naturalWidth: natural.width, naturalHeight: natural.height } : entry)),
+							artifacts: item.props.snapshot.artifacts.map((entry) =>
+								entry.id === artifact.id
+									? {
+											...entry,
+											naturalWidth: natural.width,
+											naturalHeight: natural.height,
+										}
+									: entry,
+							),
 						},
 					},
 				});
 				continue;
 			}
 			if (item.type !== "image" && item.type !== "video") continue;
-			if (item.props.snapshot?.naturalWidth && item.props.snapshot.naturalHeight) continue;
+			if (
+				item.props.snapshot?.naturalWidth &&
+				item.props.snapshot.naturalHeight
+			)
+				continue;
 			const height = (item.size.width * natural.height) / natural.width;
 			if (!Number.isFinite(height) || height <= 0) continue;
 			changes.set(natural.id, {
 				...item,
-				position: { x: item.position.x, y: item.position.y + (item.size.height - height) / 2 },
+				position: {
+					x: item.position.x,
+					y: item.position.y + (item.size.height - height) / 2,
+				},
 				size: { ...item.size, height },
-				props: { ...item.props, snapshot: { ...item.props.snapshot, naturalWidth: natural.width, naturalHeight: natural.height } },
+				props: {
+					...item.props,
+					snapshot: {
+						...item.props.snapshot,
+						naturalWidth: natural.width,
+						naturalHeight: natural.height,
+					},
+				},
 			} as BoardItem);
 		}
 		commitItems(changes, false);
 	}
 
-	function applyFileSnapshots(snapshots: Array<{ id: string; snapshot: BoardFileSnapshotFacts; replace?: boolean }>) {
+	function applyFileSnapshots(
+		snapshots: Array<{
+			id: string;
+			snapshot: BoardFileSnapshotFacts;
+			replace?: boolean;
+		}>,
+	) {
 		const changes = new Map<string, BoardItem>();
 		for (const entry of snapshots) {
 			const item = base.items[entry.id];
 			if (item?.type !== "file") continue;
-			const merged = mergeFileSnapshot(item.props.snapshot, entry.snapshot, entry.replace === true);
-			if (!sameJson(merged, item.props.snapshot ?? {})) changes.set(entry.id, { ...item, props: { ...item.props, snapshot: merged } });
+			const merged = mergeFileSnapshot(
+				item.props.snapshot,
+				entry.snapshot,
+				entry.replace === true,
+			);
+			if (!sameJson(merged, item.props.snapshot ?? {}))
+				changes.set(entry.id, {
+					...item,
+					props: { ...item.props, snapshot: merged },
+				});
 		}
 		commitItems(changes, false);
 	}
 
-	function applyTaskSnapshots(snapshots: ReadonlyMap<string, BoardTaskSnapshot>) {
+	function applyTaskSnapshots(
+		snapshots: ReadonlyMap<string, BoardTaskSnapshot>,
+	) {
 		if (snapshots.size === 0) return;
 		const changes = new Map<string, BoardItem>();
 		for (const [id, item] of Object.entries(base.items)) {
 			if (item.type !== "task") continue;
 			const snapshot = snapshots.get(item.props.taskRunId);
-			if (snapshot && !sameJson(snapshot, item.props.snapshot)) changes.set(id, { ...item, props: { ...item.props, snapshot } });
+			if (snapshot && !sameJson(snapshot, item.props.snapshot))
+				changes.set(id, { ...item, props: { ...item.props, snapshot } });
 		}
 		commitItems(changes, false);
 	}
@@ -1238,15 +1639,37 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	function labelItemAt(point: WorldPoint): BoardSceneItem | null {
 		ensureSpatial();
 		const nearby = spatial.idsAtPoint(point);
-		const candidates = selection.length === 1 ? [...selection, ...nearby] : nearby;
+		const candidates =
+			selection.length === 1 ? [...selection, ...nearby] : nearby;
 		for (const id of new Set(candidates)) {
 			const item = scene.get(id);
 			if (!item || isLocked(item)) continue;
-			if (item.type === "frame" && rectContainsPoint({ x: item.frame.x, y: item.frame.y - 22, width: Math.max(48, item.frame.width * 0.5), height: 24 }, point)) return item;
+			if (
+				item.type === "frame" &&
+				rectContainsPoint(
+					{
+						x: item.frame.x,
+						y: item.frame.y - 22,
+						width: Math.max(48, item.frame.width * 0.5),
+						height: 24,
+					},
+					point,
+				)
+			)
+				return item;
 			if (item.type === "arrow") {
-				const resolved = resolveSceneArrow(item as SceneItem<BoardArrowItem>, scene);
-				const radius = Math.max(10, (item.props.fontSize ?? 14) * 0.9) / Math.min(1, camera.zoom);
-				if (Math.hypot(resolved.mid.x - point.x, resolved.mid.y - point.y) <= radius) return item;
+				const resolved = resolveSceneArrow(
+					item as SceneItem<BoardArrowItem>,
+					scene,
+				);
+				const radius =
+					Math.max(10, (item.props.fontSize ?? 14) * 0.9) /
+					Math.min(1, camera.zoom);
+				if (
+					Math.hypot(resolved.mid.x - point.x, resolved.mid.y - point.y) <=
+					radius
+				)
+					return item;
 			}
 		}
 		return null;
@@ -1254,13 +1677,22 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 	function hitsItem(item: BoardSceneItem, point: WorldPoint): boolean {
 		if (item.type === "arrow") {
-			const resolved = resolveSceneArrow(item as SceneItem<BoardArrowItem>, scene);
-			return distanceToArrow(resolved, point) <= arrowHitRadius(item.style.strokeWidth) / Math.min(1, camera.zoom);
+			const resolved = resolveSceneArrow(
+				item as SceneItem<BoardArrowItem>,
+				scene,
+			);
+			return (
+				distanceToArrow(resolved, point) <=
+				arrowHitRadius(item.style.strokeWidth) / Math.min(1, camera.zoom)
+			);
 		}
 		return shapeHitTest(item, point);
 	}
 
-	function topItemAt(point: WorldPoint, exclude?: ReadonlySet<string>): BoardSceneItem | null {
+	function topItemAt(
+		point: WorldPoint,
+		exclude?: ReadonlySet<string>,
+	): BoardSceneItem | null {
 		ensureSpatial();
 		for (const id of spatial.idsAtPoint(point)) {
 			const item = scene.get(id);
@@ -1278,9 +1710,13 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		if (selection.length !== 1) return null;
 		const item = selectedItems[0];
 		if (item?.type !== "arrow" || isLocked(item)) return null;
-		const resolved = resolveSceneArrow(item as SceneItem<BoardArrowItem>, scene);
+		const resolved = resolveSceneArrow(
+			item as SceneItem<BoardArrowItem>,
+			scene,
+		);
 		const radius = (HANDLE_HIT_RADIUS + 2) / camera.zoom;
-		const distance = (target: WorldPoint) => Math.hypot(target.x - point.x, target.y - point.y);
+		const distance = (target: WorldPoint) =>
+			Math.hypot(target.x - point.x, target.y - point.y);
 		const start = distance(resolved.start.point);
 		const end = distance(resolved.end.point);
 		const mid = distance(resolved.mid);
@@ -1290,23 +1726,43 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		return null;
 	}
 
-	function connectTargetAt(point: WorldPoint, exclude: ReadonlySet<string>): string | null {
+	function connectTargetAt(
+		point: WorldPoint,
+		exclude: ReadonlySet<string>,
+	): string | null {
 		const item = topItemAt(point, exclude);
 		if (!item || isLocked(item) || item.type === "arrow") return null;
 		return shapeCapabilities(item).canConnect ? item.id : null;
 	}
 
-	function computeTranslationSnap(moved: Map<string, BoardFrame>, skip: ReadonlySet<string>) {
+	function computeTranslationSnap(
+		moved: Map<string, BoardFrame>,
+		skip: ReadonlySet<string>,
+	) {
 		const movingBounds = selectionBounds([...moved.values()]);
 		if (!movingBounds) return { dx: 0, dy: 0, guides: [] as SnapGuide[] };
-		const view = surfaceSize.width > 0 ? { x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, width: surfaceSize.width / camera.zoom, height: surfaceSize.height / camera.zoom } : null;
+		const view =
+			surfaceSize.width > 0
+				? {
+						x: -camera.x / camera.zoom,
+						y: -camera.y / camera.zoom,
+						width: surfaceSize.width / camera.zoom,
+						height: surfaceSize.height / camera.zoom,
+					}
+				: null;
 		const targets: Rect[] = [];
-		for (const id of view ? idsInRect(view) : scene.items.map((item) => item.id)) {
+		for (const id of view
+			? idsInRect(view)
+			: scene.items.map((item) => item.id)) {
 			if (skip.has(id)) continue;
 			const item = scene.get(id);
-			if (item && shapeCapabilities(item).canSnap) targets.push(shapeBounds(item));
+			if (item && shapeCapabilities(item).canSnap)
+				targets.push(shapeBounds(item));
 		}
-		return computeSnap(movingBounds, targets, { threshold: SNAP_THRESHOLD / Math.max(camera.zoom, 0.0001), gridSize: gridSnapSize() });
+		return computeSnap(movingBounds, targets, {
+			threshold: SNAP_THRESHOLD / Math.max(camera.zoom, 0.0001),
+			gridSize: gridSnapSize(),
+		});
 	}
 
 	function gridSnapSize(): number {
@@ -1334,16 +1790,21 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			if (parent === item.parent) continue;
 			const stored = displayItem(id);
 			if (!stored) continue;
-			changes.set(id, { ...reparent(stored, item.frame, parent, scene.layout.box(id)), z: topZ(parent) + changes.size });
+			changes.set(id, {
+				...reparent(stored, item.frame, parent, scene.layout.box(id)),
+				z: topZ(parent) + changes.size,
+			});
 		}
 		return changes;
 	}
 
 	function portItemId(): string | null {
 		if (options.readonly || tool !== "select" || editingId) return null;
-		if (interaction.type !== "idle" && interaction.type !== "creatingArrow") return null;
+		if (interaction.type !== "idle" && interaction.type !== "creatingArrow")
+			return null;
 		const hoverReveals = !canTapSelectWithHand(hoverPointerType);
-		const candidateId = selection.length === 1 ? selection[0] : hoverReveals ? hoverId : null;
+		const candidateId =
+			selection.length === 1 ? selection[0] : hoverReveals ? hoverId : null;
 		if (!candidateId) return null;
 		const item = scene.get(candidateId);
 		if (!item || isLocked(item) || item.type === "arrow") return null;
@@ -1354,10 +1815,16 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		const itemId = portItemId();
 		const item = itemId ? scene.get(itemId) : null;
 		if (!itemId || !item) return [];
-		return connectionPorts(item.frame, camera.zoom).map((port) => ({ ...port, itemId }));
+		return connectionPorts(item.frame, camera.zoom).map((port) => ({
+			...port,
+			itemId,
+		}));
 	}
 
-	function connectionPortAt(point: WorldPoint, pointerType: string): (ConnectionPort & { itemId: string }) | null {
+	function connectionPortAt(
+		point: WorldPoint,
+		pointerType: string,
+	): (ConnectionPort & { itemId: string }) | null {
 		const itemId = portItemId();
 		const item = itemId ? scene.get(itemId) : null;
 		if (!itemId || !item) return null;
@@ -1365,48 +1832,87 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		return port ? { ...port, itemId } : null;
 	}
 
-	function arrowEnd(point: WorldPoint, targetItemId: string | null, arrowMatrix = IDENTITY_MATRIX): BoardArrowEnd {
+	function arrowEnd(
+		point: WorldPoint,
+		targetItemId: string | null,
+		arrowMatrix = IDENTITY_MATRIX,
+	): BoardArrowEnd {
 		if (targetItemId) return { item: targetItemId, anchor: "auto" };
 		const local = applyMatrix(invertMatrix(arrowMatrix), point);
 		return { x: local.x, y: local.y };
 	}
 
-	function commitArrow(gesture: Extract<BoardInteraction, { type: "creatingArrow" }>, cancelled: boolean) {
+	function commitArrow(
+		gesture: Extract<BoardInteraction, { type: "creatingArrow" }>,
+		cancelled: boolean,
+	) {
 		const { start, current, startItemId, targetItemId } = gesture;
-		const bound = !cancelled && targetItemId && targetItemId !== startItemId ? targetItemId : null;
-		if (!bound && Math.hypot(current.x - start.x, current.y - start.y) < 2 / camera.zoom) return;
+		const bound =
+			!cancelled && targetItemId && targetItemId !== startItemId
+				? targetItemId
+				: null;
+		if (
+			!bound &&
+			Math.hypot(current.x - start.x, current.y - start.y) < 2 / camera.zoom
+		)
+			return;
 		const entry = createArrowBoardItem(
 			start,
 			bound ? { item: bound } : current,
 			gesture.color,
 			gesture.id,
 			gesture.size,
-			startItemId ? { item: startItemId, ...(gesture.startSide ? { anchor: { side: gesture.startSide, offset: 0.5 } } : {}) } : undefined,
+			startItemId
+				? {
+						item: startItemId,
+						...(gesture.startSide
+							? { anchor: { side: gesture.startSide, offset: 0.5 } }
+							: {}),
+					}
+				: undefined,
 		);
 		addEntries([entry]);
 	}
 
-	function appendDrawSample(gesture: Extract<BoardInteraction, { type: "drawing" }>, event: BoardPointerEvent) {
-		const points = appendBoardDrawSample(gesture.points, gesture.pointerId, event, camera.zoom);
+	function appendDrawSample(
+		gesture: Extract<BoardInteraction, { type: "drawing" }>,
+		event: BoardPointerEvent,
+	) {
+		const points = appendBoardDrawSample(
+			gesture.points,
+			gesture.pointerId,
+			event,
+			camera.zoom,
+		);
 		return points === gesture.points ? gesture : { ...gesture, points };
 	}
 
 	function beginPinch() {
 		const [a, b] = [...activePointers.values()];
 		if (!a || !b) return;
-		pinch = { distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), midpoint: screenPoint((a.x + b.x) / 2, (a.y + b.y) / 2), zoom: camera.zoom };
+		pinch = {
+			distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+			midpoint: screenPoint((a.x + b.x) / 2, (a.y + b.y) / 2),
+			zoom: camera.zoom,
+		};
 		interaction = { type: "idle" };
 	}
 
 	function toggleInSelection(id: string) {
-		selection = selection.includes(id) ? selection.filter((selected) => selected !== id) : [...selection, id];
+		selection = selection.includes(id)
+			? selection.filter((selected) => selected !== id)
+			: [...selection, id];
 	}
 
 	function pointerDown(event: BoardPointerEvent) {
 		cancelCameraAnimation();
 		hoverPoint = event.world;
 		hoverPointerType = event.pointerType;
-		if (interaction.type === "drawing" && interaction.pointerId !== event.pointerId) return;
+		if (
+			interaction.type === "drawing" &&
+			interaction.pointerId !== event.pointerId
+		)
+			return;
 		activePointers.set(event.pointerId, event.screen);
 		if (activePointers.size === 2) {
 			beginPinch();
@@ -1416,10 +1922,20 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 		const additive = event.shiftKey || event.metaKey || event.ctrlKey;
 		if (tool === "hand" || spaceHeld || event.button === 1) {
-			const tapSelection = tool === "hand" && !spaceHeld && event.button !== 1 && canTapSelectWithHand(event.pointerType)
-				? { targetId: topItemAt(event.world)?.id ?? null }
-				: null;
-			interaction = { type: "panning", start: event.screen, origin: { ...camera }, moved: false, tapSelection };
+			const tapSelection =
+				tool === "hand" &&
+				!spaceHeld &&
+				event.button !== 1 &&
+				canTapSelectWithHand(event.pointerType)
+					? { targetId: topItemAt(event.world)?.id ?? null }
+					: null;
+			interaction = {
+				type: "panning",
+				start: event.screen,
+				origin: { ...camera },
+				moved: false,
+				tapSelection,
+			};
 			return;
 		}
 
@@ -1431,19 +1947,42 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				interaction = { type: "idle" };
 				return;
 			}
-			interaction = { type: "brushing", start: event.world, current: event.world, additive, baseSelection: selection };
+			interaction = {
+				type: "brushing",
+				start: event.world,
+				current: event.world,
+				additive,
+				baseSelection: selection,
+			};
 			return;
 		}
 
 		if (tool === "draw") {
 			const style = toolStyles.draw;
-			interaction = { type: "drawing", id: createBoardItemId(), pointerId: event.pointerId, points: [{ x: event.world.x, y: event.world.y, p: event.pressure }], color: style.color, size: style.size };
+			interaction = {
+				type: "drawing",
+				id: createBoardItemId(),
+				pointerId: event.pointerId,
+				points: [{ x: event.world.x, y: event.world.y, p: event.pressure }],
+				color: style.color,
+				size: style.size,
+			};
 			return;
 		}
 		if (tool === "arrow") {
 			const style = toolStyles.arrow;
 			const startItemId = connectTargetAt(event.world, emptyIds);
-			interaction = { type: "creatingArrow", id: createBoardItemId(), start: event.world, current: event.world, startItemId, startSide: null, targetItemId: null, color: style.color, size: style.size };
+			interaction = {
+				type: "creatingArrow",
+				id: createBoardItemId(),
+				start: event.world,
+				current: event.world,
+				startItemId,
+				startSide: null,
+				targetItemId: null,
+				color: style.color,
+				size: style.size,
+			};
 			return;
 		}
 		if (tool === "shape" || tool === "frame") {
@@ -1453,7 +1992,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				kind: tool,
 				start: event.world,
 				current: event.world,
-				color: tool === "shape" ? toolStyles.shape.color : toolStyles.frame.color,
+				color:
+					tool === "shape" ? toolStyles.shape.color : toolStyles.frame.color,
 				geometry: toolStyles.shape.geometry,
 			};
 			return;
@@ -1466,7 +2006,17 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		const port = connectionPortAt(event.world, event.pointerType);
 		if (port) {
 			const style = toolStyles.arrow;
-			interaction = { type: "creatingArrow", id: createBoardItemId(), start: port.point, current: event.world, startItemId: port.itemId, startSide: port.side, targetItemId: null, color: style.color, size: style.size };
+			interaction = {
+				type: "creatingArrow",
+				id: createBoardItemId(),
+				start: port.point,
+				current: event.world,
+				startItemId: port.itemId,
+				startSide: port.side,
+				targetItemId: null,
+				color: style.color,
+				size: style.size,
+			};
 			return;
 		}
 
@@ -1474,20 +2024,49 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		const arrow = selectedItems[0];
 		if (arrowHandle && arrow?.type === "arrow") {
 			const { id: _id, frame: _frame, ...origin } = arrow;
-			interaction = { type: "draggingArrowHandle", arrowId: arrow.id, which: arrowHandle, origin: origin as BoardArrowItem, targetItemId: null, moved: false };
+			interaction = {
+				type: "draggingArrowHandle",
+				arrowId: arrow.id,
+				which: arrowHandle,
+				origin: origin as BoardArrowItem,
+				targetItemId: null,
+				moved: false,
+			};
 			return;
 		}
 
-		const transformControl = selectionTransformControlAt(selectionTransform, event.world, camera.zoom, event.pointerType);
+		const transformControl = selectionTransformControlAt(
+			selectionTransform,
+			event.world,
+			camera.zoom,
+			event.pointerType,
+		);
 		if (transformControl?.kind === "rotate" && bounds) {
 			const pivot = rectCenter(bounds);
-			interaction = { type: "rotating", pivot, startAngle: angleFrom(pivot, event.world), current: event.world, origin: framesFor(rootsOf(unlockedIds(selection))), moved: false };
+			interaction = {
+				type: "rotating",
+				pivot,
+				startAngle: angleFrom(pivot, event.world),
+				current: event.world,
+				origin: framesFor(rootsOf(unlockedIds(selection))),
+				moved: false,
+			};
 			return;
 		}
 		if (transformControl?.kind === "resize" && bounds) {
 			const origin = framesFor(rootsOf(unlockedIds(selection)));
-			const single = origin.size === 1 ? { ...([...origin.values()][0] as BoardFrame) } : null;
-			interaction = { type: "resizing", handle: transformControl.handle, single, bounds, origin, moved: false };
+			const single =
+				origin.size === 1
+					? { ...([...origin.values()][0] as BoardFrame) }
+					: null;
+			interaction = {
+				type: "resizing",
+				handle: transformControl.handle,
+				single,
+				bounds,
+				origin,
+				moved: false,
+			};
 			return;
 		}
 
@@ -1496,13 +2075,26 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			if (additive) toggleInSelection(item.id);
 			else if (!selection.includes(item.id)) selection = [item.id];
 			const movable = rootsOf(unlockedIds(selection));
-			interaction = movable.length === 0
-				? { type: "idle" }
-				: { type: "translating", start: event.world, origin: framesFor(movable), moved: false, duplicate: event.altKey };
+			interaction =
+				movable.length === 0
+					? { type: "idle" }
+					: {
+							type: "translating",
+							start: event.world,
+							origin: framesFor(movable),
+							moved: false,
+							duplicate: event.altKey,
+						};
 			return;
 		}
 
-		interaction = { type: "brushing", start: event.world, current: event.world, additive, baseSelection: selection };
+		interaction = {
+			type: "brushing",
+			start: event.world,
+			current: event.world,
+			additive,
+			baseSelection: selection,
+		};
 	}
 
 	function angleFrom(center: WorldPoint, point: WorldPoint) {
@@ -1512,15 +2104,26 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	function pointerMove(event: BoardPointerEvent) {
 		hoverPoint = event.world;
 		hoverPointerType = event.pointerType;
-		if (activePointers.has(event.pointerId)) activePointers.set(event.pointerId, event.screen);
+		if (activePointers.has(event.pointerId))
+			activePointers.set(event.pointerId, event.screen);
 
 		if (pinch && activePointers.size >= 2) {
 			const [a, b] = [...activePointers.values()];
 			if (a && b) {
 				const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
 				const midpoint = screenPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
-				const zoomed = zoomAround(camera, midpoint, clampZoom(pinch.zoom * (distance / pinch.distance)));
-				setCamera(panBy(zoomed, midpoint.x - pinch.midpoint.x, midpoint.y - pinch.midpoint.y));
+				const zoomed = zoomAround(
+					camera,
+					midpoint,
+					clampZoom(pinch.zoom * (distance / pinch.distance)),
+				);
+				setCamera(
+					panBy(
+						zoomed,
+						midpoint.x - pinch.midpoint.x,
+						midpoint.y - pinch.midpoint.y,
+					),
+				);
 				pinch = { ...pinch, midpoint };
 			}
 			return;
@@ -1528,12 +2131,19 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 		switch (interaction.type) {
 			case "idle":
-				hoverId = hoveredTransformControl ? null : (topItemAt(event.world)?.id ?? null);
+				hoverId = hoveredTransformControl
+					? null
+					: (topItemAt(event.world)?.id ?? null);
 				return;
 			case "panning": {
 				const dx = event.screen.x - interaction.start.x;
 				const dy = event.screen.y - interaction.start.y;
-				if (interaction.tapSelection && !interaction.moved && isWithinHandTapSlop(dx, dy)) return;
+				if (
+					interaction.tapSelection &&
+					!interaction.moved &&
+					isWithinHandTapSlop(dx, dy)
+				)
+					return;
 				if (!interaction.moved) interaction = { ...interaction, moved: true };
 				setCamera(panBy(interaction.origin, dx, dy));
 				return;
@@ -1547,9 +2157,16 @@ export function createBoardEditor(options: BoardEditorOptions) {
 						const clones = duplicates([...interaction.origin.keys()], 0);
 						if (clones.size > 0) {
 							writeDraft(clones, true);
-							const roots = [...clones].filter(([, item]) => !item.parent || !clones.has(item.parent)).map(([id]) => id);
+							const roots = [...clones]
+								.filter(([, item]) => !item.parent || !clones.has(item.parent))
+								.map(([id]) => id);
 							selection = roots;
-							interaction = { ...interaction, origin: framesFor(roots), duplicate: false, moved: true };
+							interaction = {
+								...interaction,
+								origin: framesFor(roots),
+								duplicate: false,
+								moved: true,
+							};
 						} else interaction.moved = true;
 					} else interaction.moved = true;
 				}
@@ -1559,13 +2176,19 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				}
 				const shift = (tx: number, ty: number) => {
 					const frames = new Map<string, BoardFrame>();
-					for (const [id, frame] of interaction.type === "translating" ? interaction.origin : []) frames.set(id, { ...frame, x: frame.x + tx, y: frame.y + ty });
+					for (const [id, frame] of interaction.type === "translating"
+						? interaction.origin
+						: [])
+						frames.set(id, { ...frame, x: frame.x + tx, y: frame.y + ty });
 					return frames;
 				};
 				let tx = dx;
 				let ty = dy;
 				if (!event.metaKey && !event.ctrlKey) {
-					const snap = computeTranslationSnap(shift(dx, dy), withSubtrees(interaction.origin.keys()));
+					const snap = computeTranslationSnap(
+						shift(dx, dy),
+						withSubtrees(interaction.origin.keys()),
+					);
 					tx += snap.dx;
 					ty += snap.dy;
 					snapGuides = snap.guides;
@@ -1579,10 +2202,26 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				if (interaction.single) {
 					const id = [...interaction.origin.keys()][0] as string;
 					const item = scene.get(id);
-					const keepAspect = item ? shapeCapabilities(item).aspectLocked || event.shiftKey : event.shiftKey;
-					frames.set(id, resizeFrame(interaction.single, interaction.handle, event.world, undefined, keepAspect));
+					const keepAspect = item
+						? shapeCapabilities(item).aspectLocked || event.shiftKey
+						: event.shiftKey;
+					frames.set(
+						id,
+						resizeFrame(
+							interaction.single,
+							interaction.handle,
+							event.world,
+							undefined,
+							keepAspect,
+						),
+					);
 				} else {
-					const scaled = scaleFrames([...interaction.origin.values()], interaction.bounds, interaction.handle, event.world);
+					const scaled = scaleFrames(
+						[...interaction.origin.values()],
+						interaction.bounds,
+						interaction.handle,
+						event.world,
+					);
 					[...interaction.origin.keys()].forEach((id, index) => {
 						const frame = scaled[index];
 						if (frame) frames.set(id, frame);
@@ -1594,13 +2233,22 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			case "rotating": {
 				interaction.moved = true;
 				interaction.current = event.world;
-				let delta = angleFrom(interaction.pivot, event.world) - interaction.startAngle;
+				let delta =
+					angleFrom(interaction.pivot, event.world) - interaction.startAngle;
 				if (event.shiftKey) delta = Math.round(delta / 15) * 15;
-				const rotated = rotateFrames([...interaction.origin.values()], interaction.pivot, delta);
+				const rotated = rotateFrames(
+					[...interaction.origin.values()],
+					interaction.pivot,
+					delta,
+				);
 				const frames = new Map<string, BoardFrame>();
 				[...interaction.origin.keys()].forEach((id, index) => {
 					const frame = rotated[index];
-					if (frame) frames.set(id, { ...frame, rotation: normalizeRotation(frame.rotation) });
+					if (frame)
+						frames.set(id, {
+							...frame,
+							rotation: normalizeRotation(frame.rotation),
+						});
 				});
 				writeDraft(placed(frames));
 				return;
@@ -1608,33 +2256,76 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			case "draggingArrowHandle": {
 				interaction.moved = true;
 				const { arrowId, which, origin } = interaction;
-				const arrow = scene.get(arrowId) as SceneItem<BoardArrowItem> | undefined;
+				const arrow = scene.get(arrowId) as
+					| SceneItem<BoardArrowItem>
+					| undefined;
 				if (!arrow) return;
 				if (which === "mid") {
-					const resolved = resolveSceneArrow({ ...arrow, props: origin.props }, scene);
+					const resolved = resolveSceneArrow(
+						{ ...arrow, props: origin.props },
+						scene,
+					);
 					const start = resolved.start.point;
 					const end = resolved.end.point;
 					const length = Math.hypot(end.x - start.x, end.y - start.y) || 1;
 					const mid = worldPoint((start.x + end.x) / 2, (start.y + end.y) / 2);
-					const bend = ((event.world.x - mid.x) * -(end.y - start.y) + (event.world.y - mid.y) * (end.x - start.x)) / (length * length);
-					const route = origin.props.route === "straight" ? "curve" : origin.props.route;
-					writeDraft(new Map([[arrowId, { ...origin, props: { ...origin.props, route, bend: Math.max(-0.85, Math.min(0.85, bend)) } } as BoardItem]]));
+					const bend =
+						((event.world.x - mid.x) * -(end.y - start.y) +
+							(event.world.y - mid.y) * (end.x - start.x)) /
+						(length * length);
+					const route =
+						origin.props.route === "straight" ? "curve" : origin.props.route;
+					writeDraft(
+						new Map([
+							[
+								arrowId,
+								{
+									...origin,
+									props: {
+										...origin.props,
+										route,
+										bend: Math.max(-0.85, Math.min(0.85, bend)),
+									},
+								} as BoardItem,
+							],
+						]),
+					);
 					snapGuides = [];
 					return;
 				}
 				const targetItemId = connectTargetAt(event.world, new Set([arrowId]));
 				let point = event.world;
 				if (!targetItemId && !event.metaKey && !event.ctrlKey) {
-					const snap = computeSnap({ x: point.x, y: point.y, width: 0, height: 0 }, scene.items.filter((item) => item.id !== arrowId && shapeCapabilities(item).canSnap).map((item) => shapeBounds(item)), {
-						threshold: SNAP_THRESHOLD / Math.max(camera.zoom, 0.0001),
-						gridSize: gridSnapSize(),
-					});
+					const snap = computeSnap(
+						{ x: point.x, y: point.y, width: 0, height: 0 },
+						scene.items
+							.filter(
+								(item) =>
+									item.id !== arrowId && shapeCapabilities(item).canSnap,
+							)
+							.map((item) => shapeBounds(item)),
+						{
+							threshold: SNAP_THRESHOLD / Math.max(camera.zoom, 0.0001),
+							gridSize: gridSnapSize(),
+						},
+					);
 					point = worldPoint(point.x + snap.dx, point.y + snap.dy);
 					snapGuides = snap.guides;
 				} else snapGuides = [];
 				interaction = { ...interaction, targetItemId };
 				const end = arrowEnd(point, targetItemId, scene.layout.matrix(arrowId));
-				writeDraft(new Map([[arrowId, { ...origin, props: { ...origin.props, [which]: end } } as BoardItem]]), true);
+				writeDraft(
+					new Map([
+						[
+							arrowId,
+							{
+								...origin,
+								props: { ...origin.props, [which]: end },
+							} as BoardItem,
+						],
+					]),
+					true,
+				);
 				return;
 			}
 			case "brushing": {
@@ -1645,7 +2336,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 					const item = scene.get(id);
 					return item && !item.parent && rectsIntersect(boundsOf(item), rect);
 				});
-				selection = interaction.additive ? [...new Set([...interaction.baseSelection, ...hits])] : hits;
+				selection = interaction.additive
+					? [...new Set([...interaction.baseSelection, ...hits])]
+					: hits;
 				return;
 			}
 			case "drawing":
@@ -1653,8 +2346,14 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				interaction = appendDrawSample(interaction, event);
 				return;
 			case "creatingArrow": {
-				const exclude = interaction.startItemId ? new Set([interaction.startItemId]) : emptyIds;
-				interaction = { ...interaction, current: event.world, targetItemId: connectTargetAt(event.world, exclude) };
+				const exclude = interaction.startItemId
+					? new Set([interaction.startItemId])
+					: emptyIds;
+				interaction = {
+					...interaction,
+					current: event.world,
+					targetItemId: connectTargetAt(event.world, exclude),
+				};
 				return;
 			}
 			case "creatingBox":
@@ -1669,7 +2368,11 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		activePointers.delete(event.pointerId);
 		if (activePointers.size < 2) pinch = null;
 		if (activePointers.size > 0) return;
-		if (interaction.type === "drawing" && interaction.pointerId !== event.pointerId) return;
+		if (
+			interaction.type === "drawing" &&
+			interaction.pointerId !== event.pointerId
+		)
+			return;
 
 		const gesture = interaction;
 		snapGuides = [];
@@ -1684,7 +2387,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				break;
 			case "translating":
 				if (gesture.moved) {
-					for (const [id, item] of reparentDropped(rootsOf(selection))) setDraftItem(id, item);
+					for (const [id, item] of reparentDropped(rootsOf(selection)))
+						setDraftItem(id, item);
 					commit();
 				}
 				break;
@@ -1694,7 +2398,15 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				if (gesture.moved) commit();
 				break;
 			case "brushing":
-				if (!gesture.additive && Math.hypot(gesture.current.x - gesture.start.x, gesture.current.y - gesture.start.y) <= 1 / camera.zoom) selection = [];
+				if (
+					!gesture.additive &&
+					Math.hypot(
+						gesture.current.x - gesture.start.x,
+						gesture.current.y - gesture.start.y,
+					) <=
+						1 / camera.zoom
+				)
+					selection = [];
 				break;
 			case "drawing": {
 				const finished = appendDrawSample(gesture, event);
@@ -1717,13 +2429,43 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		hoverId = null;
 	}
 
-	function wheel(point: ScreenPoint, deltaX: number, deltaY: number, zoomKey: boolean, deltaMode = 0) {
+	function cancelPointerInteraction() {
+		activePointers.clear();
+		pinch = null;
+		snapGuides = [];
+		interaction = { type: "idle" };
+		draft.clear();
+		draftOrigins.clear();
+		reevaluate();
+		rescene();
+		flushPendingRemote();
+	}
+
+	function wheel(
+		point: ScreenPoint,
+		deltaX: number,
+		deltaY: number,
+		zoomKey: boolean,
+		deltaMode = 0,
+	) {
 		cancelCameraAnimation();
 		if (zoomKey) {
-			setCamera(zoomAround(camera, point, camera.zoom * wheelZoomFactor(deltaY, deltaMode)));
+			setCamera(
+				zoomAround(
+					camera,
+					point,
+					camera.zoom * wheelZoomFactor(deltaY, deltaMode),
+				),
+			);
 			return;
 		}
-		setCamera(panBy(camera, -normalizeWheelDelta(deltaX, deltaMode) * 1.15, -normalizeWheelDelta(deltaY, deltaMode) * 1.15));
+		setCamera(
+			panBy(
+				camera,
+				-normalizeWheelDelta(deltaX, deltaMode) * 1.15,
+				-normalizeWheelDelta(deltaY, deltaMode) * 1.15,
+			),
+		);
 	}
 
 	function setPlayhead(next: BoardPlayhead | null) {
@@ -1743,9 +2485,12 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 	function tracksFor(itemId: string): Map<string, [string, BoardTrack]> {
 		const result = new Map<string, [string, BoardTrack]>();
-		const animation = playhead ? base.animations[playhead.animationId] : undefined;
+		const animation = playhead
+			? base.animations[playhead.animationId]
+			: undefined;
 		if (!animation) return result;
-		for (const [trackId, track] of Object.entries(animation.tracks)) if (track.target === itemId) result.set(track.property, [trackId, track]);
+		for (const [trackId, track] of Object.entries(animation.tracks))
+			if (track.target === itemId) result.set(track.property, [trackId, track]);
 		return result;
 	}
 
@@ -1757,7 +2502,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		for (const item of selectedItems) {
 			const track = tracksFor(item.id).get(property)?.[1];
 			if (!track) animated = false;
-			if (!track?.keyframes.some((keyframe) => keyframe.at === time)) keyed = false;
+			if (!track?.keyframes.some((keyframe) => keyframe.at === time))
+				keyed = false;
 		}
 		return keyed ? "keyframe" : animated ? "animated" : "none";
 	}
@@ -1773,30 +2519,127 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			const existing = tracksFor(item.id).get(property);
 			const shown = readPath(displayItem(item.id), property.split("."));
 			if (remove && existing) {
-				const keyframes = existing[1].keyframes.filter((keyframe) => keyframe.at !== time);
-				if (keyframes.length) tracks[existing[0]] = { ...existing[1], keyframes };
+				const keyframes = existing[1].keyframes.filter(
+					(keyframe) => keyframe.at !== time,
+				);
+				if (keyframes.length)
+					tracks[existing[0]] = { ...existing[1], keyframes };
 				else delete tracks[existing[0]];
 			} else if (!remove) {
-				const [trackId, track]: [string, BoardTrack] = existing ?? [`${item.id}-${property.replaceAll(".", "-")}`, { target: item.id, property, keyframes: [], composite: "replace", interpolation: "auto" }];
-				const keyframes = [...track.keyframes.filter((keyframe) => keyframe.at !== time), { at: time, value: shown }].sort((a, b) => a.at - b.at);
+				const [trackId, track]: [string, BoardTrack] = existing ?? [
+					`${item.id}-${property.replaceAll(".", "-")}`,
+					{
+						target: item.id,
+						property,
+						keyframes: [],
+						composite: "replace",
+						interpolation: "auto",
+					},
+				];
+				const keyframes = [
+					...track.keyframes.filter((keyframe) => keyframe.at !== time),
+					{ at: time, value: shown },
+				].sort((a, b) => a.at - b.at);
 				tracks[trackId] = { ...track, keyframes };
 			}
 		}
-		commit({ animations: { ...base.animations, [playhead.animationId]: { ...animation, duration: Math.max(animation.duration, time), tracks } } });
+		commit({
+			animations: {
+				...base.animations,
+				[playhead.animationId]: {
+					...animation,
+					duration: Math.max(animation.duration, time),
+					tracks,
+				},
+			},
+		});
+	}
+
+	function animationTrack(trackId: string) {
+		const animation = playhead
+			? base.animations[playhead.animationId]
+			: undefined;
+		return animation ? { animation, track: animation.tracks[trackId] } : null;
+	}
+
+	function removeKeyframe(trackId: string, at: number) {
+		if (options.readonly || !playhead) return;
+		const found = animationTrack(trackId);
+		if (!found?.track) return;
+		const animation = found.animation;
+		const time = Math.round(at);
+		const keyframes = found.track.keyframes.filter(
+			(keyframe) => keyframe.at !== time,
+		);
+		const tracks = { ...animation.tracks };
+		if (keyframes.length) tracks[trackId] = { ...found.track, keyframes };
+		else delete tracks[trackId];
+		commit({
+			animations: {
+				...base.animations,
+				[playhead.animationId]: { ...animation, tracks },
+			},
+		});
+	}
+
+	function setKeyframeEase(trackId: string, at: number, ease: string | null) {
+		if (options.readonly || !playhead) return;
+		const found = animationTrack(trackId);
+		if (!found?.track) return;
+		const animation = found.animation;
+		const time = Math.round(at);
+		const keyframes = found.track.keyframes.map((keyframe) => {
+			if (keyframe.at !== time) return keyframe;
+			if (!ease || ease === "linear") {
+				const { ease: _removed, ...rest } = keyframe;
+				return rest;
+			}
+			return { ...keyframe, ease };
+		});
+		const tracks = {
+			...animation.tracks,
+			[trackId]: { ...found.track, keyframes },
+		};
+		commit({
+			animations: {
+				...base.animations,
+				[playhead.animationId]: { ...animation, tracks },
+			},
+		});
 	}
 
 	function createAnimation(name: string, duration = 5000): string {
 		const id = createBoardItemId();
-		commit({ animations: { ...base.animations, [id]: { name, duration, play: "manual", delay: 0, loop: false, end: "hold", markers: [], tracks: {} } } });
+		commit({
+			animations: {
+				...base.animations,
+				[id]: {
+					name,
+					duration,
+					play: "manual",
+					delay: 0,
+					loop: false,
+					end: "hold",
+					markers: [],
+					tracks: {},
+				},
+			},
+		});
 		setPlayhead({ animationId: id, time: 0 });
 		return id;
 	}
 
 	function emitViewState() {
 		if (!options.onViewStateChange) return;
-		const visibleRect = surfaceSize.width > 0 && surfaceSize.height > 0
-			? { x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, width: surfaceSize.width / camera.zoom, height: surfaceSize.height / camera.zoom }
-			: null;
+		const visibleRect =
+			surfaceSize.width > 0 && surfaceSize.height > 0
+				? {
+						x: -camera.x / camera.zoom,
+						y: -camera.y / camera.zoom,
+						width: surfaceSize.width / camera.zoom,
+						height: surfaceSize.height / camera.zoom,
+					}
+				: null;
 		const selectedNodes = selectedItems.map((item) => {
 			const title = titleForBoardItem(item).trim();
 			return { id: item.id, type: item.type, ...(title ? { title } : {}) };
@@ -1814,20 +2657,32 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	function loadDocument(next: BoardDocument, key?: string) {
 		if (untrack(() => next === base)) return;
 		const sameDocument = key !== undefined && key === currentKey;
-		if (sameDocument && (untrack(() => interaction.type !== "idle") || untrack(() => editingId))) {
+		if (
+			sameDocument &&
+			(untrack(() => interaction.type !== "idle") || untrack(() => editingId))
+		) {
 			pendingRemote = { document: next, key };
 			return;
 		}
 		applyRemote(next, key, sameDocument);
 	}
 
-	function applyRemote(next: BoardDocument, key: string | undefined, sameDocument: boolean) {
+	function applyRemote(
+		next: BoardDocument,
+		key: string | undefined,
+		sameDocument: boolean,
+	) {
 		currentKey = key;
 		pendingRemote = null;
 		if (sameDocument) {
 			const added = Object.keys(next.items).filter((id) => !base.items[id]);
 			markAdded(added);
-			const changed = new Set<string>([...added, ...Object.keys(base.items).filter((id) => next.items[id] !== base.items[id])]);
+			const changed = new Set<string>([
+				...added,
+				...Object.keys(base.items).filter(
+					(id) => next.items[id] !== base.items[id],
+				),
+			]);
 			const keep = draftTextId ? draft.get(draftTextId) : undefined;
 			adopt(next, changed);
 			if (draftTextId && keep) writeDraft(new Map([[draftTextId, keep]]), true);
@@ -1859,7 +2714,11 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		if (!pendingRemote) return;
 		const pending = pendingRemote;
 		pendingRemote = null;
-		applyRemote(pending.document, pending.key, pending.key !== undefined && pending.key === currentKey);
+		applyRemote(
+			pending.document,
+			pending.key,
+			pending.key !== undefined && pending.key === currentKey,
+		);
 	}
 
 	function destroy() {
@@ -1891,6 +2750,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		},
 		get camera() {
 			return camera;
+		},
+		get cameraPolicy() {
+			return cameraPolicy;
 		},
 		get selection() {
 			return selection;
@@ -1925,8 +2787,18 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		get hoverId() {
 			return hoverId;
 		},
-		get connectionPorts(): Array<{ itemId: string; x: number; y: number; radius: number }> {
-			return visiblePorts().map((port) => ({ itemId: port.itemId, x: port.point.x, y: port.point.y, radius: CONNECTION_PORT_RADIUS }));
+		get connectionPorts(): Array<{
+			itemId: string;
+			x: number;
+			y: number;
+			radius: number;
+		}> {
+			return visiblePorts().map((port) => ({
+				itemId: port.itemId,
+				x: port.point.x,
+				y: port.point.y,
+				radius: CONNECTION_PORT_RADIUS,
+			}));
 		},
 		get hoveredConnectionPort(): { x: number; y: number } | null {
 			if (!hoverPoint) return null;
@@ -1935,7 +2807,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		},
 		get arrowDraft() {
 			if (interaction.type !== "creatingArrow") return null;
-			const target = interaction.targetItemId ? scene.get(interaction.targetItemId) : null;
+			const target = interaction.targetItemId
+				? scene.get(interaction.targetItemId)
+				: null;
 			return {
 				from: interaction.start,
 				to: interaction.current,
@@ -1945,7 +2819,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			};
 		},
 		get bindTargetFrame(): BoardFrame | null {
-			const id = interaction.type === "draggingArrowHandle" ? interaction.targetItemId : null;
+			const id =
+				interaction.type === "draggingArrowHandle"
+					? interaction.targetItemId
+					: null;
 			return id ? (scene.get(id)?.frame ?? null) : null;
 		},
 		get editingId() {
@@ -1997,7 +2874,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			return spaceHeld;
 		},
 		get selectionLocked() {
-			return selectedItems.length > 0 && selectedItems.every((item) => item.locked);
+			return (
+				selectedItems.length > 0 && selectedItems.every((item) => item.locked)
+			);
 		},
 		set tool(value: BoardToolId) {
 			if (options.readonly && value !== "hand" && value !== "select") {
@@ -2045,6 +2924,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		setRecording,
 		keyframeState,
 		toggleKeyframe,
+		removeKeyframe,
+		setKeyframeEase,
 		createAnimation,
 		zoomIn,
 		zoomOut,
@@ -2056,6 +2937,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		focusSelection,
 		zoomAt,
 		setCamera,
+		setCameraPolicy,
+		takeCameraControl,
 		viewCenter,
 		itemAt: topItemAt,
 		labelItemAt,
@@ -2100,6 +2983,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		pointerDown,
 		pointerMove,
 		pointerUp,
+		cancelPointerInteraction,
 		pointerLeave,
 		wheel,
 		loadDocument,

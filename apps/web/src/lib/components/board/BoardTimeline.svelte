@@ -2,19 +2,28 @@
 import type {
 	BoardPlaybackCommand,
 	BoardPlaybackSnapshot,
+	BoardTrack,
 } from "@cohub/protocol";
 import { playbackTimeAt } from "@neta-art/cohub/board";
 import {
 	Circle,
+	Crosshair,
 	Diamond,
 	FastForward,
+	Layers,
 	Pause,
 	Play,
 	Plus,
 	X,
 } from "lucide-svelte";
 import { onDestroy } from "svelte";
+import {
+	BOARD_EASE_PRESETS,
+	type BoardTrackRow,
+	boardTrackRows,
+} from "$lib/board/animation-tracks";
 import type { BoardEditor } from "$lib/board/editor.svelte";
+import BoardAnimationTracks from "$lib/components/board/BoardAnimationTracks.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
@@ -77,6 +86,48 @@ const nextMarker = $derived(
 );
 const keyframe = $derived(editor.keyframeState("position"));
 
+const trackRows = $derived<BoardTrackRow[]>(
+	animation ? boardTrackRows(editor.document.items, animation.tracks) : [],
+);
+const hasCameraMotion = $derived(
+	trackRows.some((row) => row.kind === "camera"),
+);
+
+let tracksOpen = $state(false);
+let selectedKey = $state<string | null>(null);
+
+$effect(() => {
+	if (!tracksOpen) selectedKey = null;
+});
+$effect(() => {
+	animationId;
+	selectedKey = null;
+});
+
+const selectedKeyframe = $derived.by(() => {
+	if (!selectedKey) return null;
+	const separator = selectedKey.lastIndexOf(":");
+	const trackId = selectedKey.slice(0, separator);
+	const at = Number(selectedKey.slice(separator + 1));
+	const track: BoardTrack | undefined = animation?.tracks[trackId];
+	const entry = track?.keyframes.find((candidate) => candidate.at === at);
+	return track && entry ? { trackId, at, entry } : null;
+});
+
+const selectedEase = $derived(
+	selectedKeyframe?.entry.ease && selectedKeyframe.entry.ease.length > 0
+		? selectedKeyframe.entry.ease
+		: "linear",
+);
+
+const EASE_LABELS = $derived<Record<string, string>>({
+	linear: m.board_ease_linear({}, { locale }),
+	ease: m.board_ease_ease({}, { locale }),
+	"ease-in": m.board_ease_in({}, { locale }),
+	"ease-out": m.board_ease_out({}, { locale }),
+	"ease-in-out": m.board_ease_in_out({}, { locale }),
+});
+
 type CommandInput = BoardPlaybackCommand extends infer C
 	? C extends BoardPlaybackCommand
 		? Omit<C, "commandId">
@@ -126,6 +177,32 @@ function create() {
 	);
 }
 
+function selectKeyframe(row: BoardTrackRow, at: number) {
+	if (!animationId) return;
+	selectedKey = `${row.id}:${at}`;
+	editor.setPlayhead({ animationId, time: at });
+}
+
+function removeKeyframe(row: BoardTrackRow, at: number) {
+	editor.removeKeyframe(row.id, at);
+	selectedKey = null;
+}
+
+function toggleKeyframe() {
+	if (!animationId) return;
+	editor.setPlayhead({ animationId, time });
+	editor.toggleKeyframe("position");
+}
+
+function setEase(value: string) {
+	if (!selectedKeyframe) return;
+	editor.setKeyframeEase(selectedKeyframe.trackId, selectedKeyframe.at, value);
+}
+
+function toggleCameraPolicy() {
+	editor.setCameraPolicy(editor.cameraPolicy === "follow" ? "free" : "follow");
+}
+
 function format(ms: number) {
 	const seconds = ms / 1000;
 	return seconds < 60
@@ -173,6 +250,32 @@ function format(ms: number) {
 			<FastForward class="h-3.5 w-3.5" />
 		</button>
 	{/if}
+	{#if hasCameraMotion}
+		<button
+			type="button"
+			class="timeline-btn"
+			class:timeline-btn--on={editor.cameraPolicy === "follow"}
+			title={editor.cameraPolicy === "follow" ? m.board_camera_follow({}, { locale }) : m.board_camera_free({}, { locale })}
+			aria-label={editor.cameraPolicy === "follow" ? m.board_camera_follow({}, { locale }) : m.board_camera_free({}, { locale })}
+			aria-pressed={editor.cameraPolicy === "follow"}
+			onclick={toggleCameraPolicy}
+		>
+			<Crosshair class="h-3.5 w-3.5" />
+		</button>
+	{/if}
+	{#if animation && trackRows.length > 0}
+		<button
+			type="button"
+			class="timeline-btn"
+			class:timeline-btn--on={tracksOpen}
+			title={m.board_tracks({}, { locale })}
+			aria-label={m.board_tracks({}, { locale })}
+			aria-expanded={tracksOpen}
+			onclick={() => { tracksOpen = !tracksOpen; }}
+		>
+			<Layers class="h-3.5 w-3.5" />
+		</button>
+	{/if}
 	{#if !readonly && animation}
 		<button
 			type="button"
@@ -194,7 +297,7 @@ function format(ms: number) {
 			aria-label={m.board_keyframe_toggle({}, { locale })}
 			aria-pressed={keyframe === "keyframe"}
 			disabled={!editor.playhead || editor.selectedItems.length === 0}
-			onclick={() => editor.toggleKeyframe("position")}
+			onclick={toggleKeyframe}
 		>
 			<Diamond class="h-3.5 w-3.5" fill={keyframe === "keyframe" ? "currentColor" : "none"} />
 		</button>
@@ -204,6 +307,38 @@ function format(ms: number) {
 		<X class="h-3.5 w-3.5" />
 	</button>
 </div>
+
+{#if animation && tracksOpen}
+	<div class="board-tracks-panel" role="region" aria-label={m.board_tracks({}, { locale })}>
+		<BoardAnimationTracks
+			rows={trackRows}
+			duration={animation.duration}
+			time={time}
+			{readonly}
+			{selectedKey}
+			onSelectKeyframe={selectKeyframe}
+			onRemoveKeyframe={removeKeyframe}
+		/>
+		{#if !readonly && selectedKeyframe}
+			<div class="tracks-edit">
+				<label class="tracks-edit-label" for="board-keyframe-ease">{m.board_ease({}, { locale })}</label>
+				<select
+					id="board-keyframe-ease"
+					class="tracks-edit-select"
+					value={selectedEase}
+					onchange={(event) => setEase(event.currentTarget.value)}
+				>
+					{#each BOARD_EASE_PRESETS as preset (preset)}
+						<option value={preset}>{EASE_LABELS[preset] ?? preset}</option>
+					{/each}
+				</select>
+				<span class="tracks-edit-time">
+					{(selectedKeyframe.at / 1000).toFixed(2)}s
+				</span>
+			</div>
+		{/if}
+	</div>
+{/if}
 
 <style>
 	.board-timeline {
@@ -238,6 +373,7 @@ function format(ms: number) {
 	.timeline-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
 	.timeline-btn:disabled { opacity: 0.4; }
 	.timeline-btn--active { color: var(--brand-muted-fg); }
+	.timeline-btn--on { color: var(--brand-muted-fg); background: var(--brand-bg); }
 	.timeline-btn--record { color: var(--error-500); }
 
 	.timeline-select {
@@ -278,7 +414,51 @@ function format(ms: number) {
 		font-variant-numeric: tabular-nums;
 	}
 
+	.board-tracks-panel {
+		position: absolute;
+		left: 50%;
+		bottom: calc(64px + 38px);
+		z-index: 26;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		width: min(640px, calc(100% - 24px));
+		transform: translateX(-50%);
+		border-radius: 10px;
+		border: 1px solid var(--border-subtle);
+		background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+		padding: 6px 8px;
+		box-shadow: 0 8px 20px color-mix(in srgb, var(--overlay-scrim-strong) 14%, transparent);
+		backdrop-filter: blur(12px);
+	}
+
+	.tracks-edit {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		border-top: 1px solid var(--border-subtle);
+		padding-top: 6px;
+	}
+	.tracks-edit-label {
+		color: var(--text-tertiary);
+		font-size: 11px;
+	}
+	.tracks-edit-select {
+		flex: 1;
+		border-radius: 6px;
+		background: var(--bg-secondary);
+		padding: 3px 6px;
+		color: var(--text-primary);
+		font-size: 11px;
+	}
+	.tracks-edit-time {
+		color: var(--text-tertiary);
+		font-size: 11px;
+		font-variant-numeric: tabular-nums;
+	}
+
 	@media (pointer: coarse) {
 		.timeline-btn { width: 36px; height: 36px; }
+		.board-tracks-panel { bottom: calc(64px + 46px); }
 	}
 </style>
