@@ -11,6 +11,7 @@ import DragGhostLayer from "$lib/components/DragGhostLayer.svelte";
 import HelpPanel from "$lib/components/HelpPanel.svelte";
 import MediaLightbox from "$lib/components/MediaLightbox.svelte";
 import MobileSidebarDrawer from "$lib/components/MobileSidebarDrawer.svelte";
+import MobileTabBar from "$lib/components/MobileTabBar.svelte";
 import { mediaLightbox } from "$lib/components/media-lightbox";
 import Sidebar from "$lib/components/Sidebar.svelte";
 import TurnNotificationStack from "$lib/components/TurnNotificationStack.svelte";
@@ -36,6 +37,7 @@ import {
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
+import { shouldHideMobileTabBar } from "$lib/mobile-nav";
 import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion.svelte";
 import {
 	beginMobileSessionViewTransition,
@@ -70,6 +72,7 @@ onNavigate((navigation) => {
 });
 
 const currentPath = $derived(page.url.pathname);
+const showMobileTabBar = $derived(!shouldHideMobileTabBar(currentPath));
 const sidebarMode = $derived(
 	currentPath.startsWith("/settings") ? "settings" : "space",
 );
@@ -649,6 +652,10 @@ onMount(() => {
         {@render children?.()}
       </div>
     </main>
+
+    {#if showMobileTabBar}
+      <MobileTabBar />
+    {/if}
   </div>
 
   <!-- Mobile left drawer — outside flex container to avoid stacking context issues -->
