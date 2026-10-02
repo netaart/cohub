@@ -35,9 +35,22 @@ self.onmessage = async (event) => {
 
 const FRAME_SOURCE = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:">
 <script>
-const worker = new Worker(URL.createObjectURL(new Blob([${JSON.stringify(WORKER_SOURCE)}], { type: "text/javascript" })), { type: "module" });
-worker.onmessage = (event) => parent.postMessage(event.data, "*", event.data.bitmap ? [event.data.bitmap] : []);
-addEventListener("message", (event) => { if (event.source === parent) worker.postMessage(event.data); });
+const workerUrl = URL.createObjectURL(new Blob([${JSON.stringify(WORKER_SOURCE)}], { type: "text/javascript" }));
+const makeWorker = () => {
+  const next = new Worker(workerUrl, { type: "module" });
+  next.onmessage = (event) => parent.postMessage(event.data, "*", event.data.bitmap ? [event.data.bitmap] : []);
+  return next;
+};
+let worker = makeWorker();
+addEventListener("message", (event) => {
+  if (event.source !== parent) return;
+  if (event.data?.reset) {
+    worker.terminate();
+    worker = makeWorker();
+    return;
+  }
+  worker.postMessage(event.data);
+});
 parent.postMessage({ ready: true }, "*");
 </script>`;
 
@@ -49,11 +62,14 @@ type Entry = {
 	request: number;
 	code: string | null;
 	loading: boolean;
+	timeout: ReturnType<typeof setTimeout> | null;
+	sourceError: string | null;
 };
 
 export type BoardSketchHostOptions = {
 	readModule: (src: string) => Promise<string>;
 	onFrame?: () => void;
+	timeoutMs?: number;
 };
 
 export type BrowserBoardSketchHost = BoardSketchHost & {
@@ -66,6 +82,7 @@ function frameKey(item: SceneItem<BoardSketchItem>, time: number, width: number,
 }
 
 export function createBoardSketchHost(options: BoardSketchHostOptions): BrowserBoardSketchHost {
+	const timeoutMs = options.timeoutMs ?? 2_000;
 	const entries = new Map<string, Entry>();
 	const sources = new Map<string, Promise<string>>();
 	const iframe = document.createElement("iframe");
@@ -78,6 +95,18 @@ export function createBoardSketchHost(options: BoardSketchHostOptions): BrowserB
 	const post = (message: unknown) => {
 		if (ready) iframe.contentWindow?.postMessage(message, "*");
 		else queue.push(message);
+	};
+
+	const resetWorker = () => {
+		for (const entry of entries.values()) {
+			if (entry.pending === null) continue;
+			if (entry.timeout) clearTimeout(entry.timeout);
+			entry.timeout = null;
+			entry.pending = null;
+			entry.shown = "";
+			entry.request += 1;
+		}
+		post({ reset: true });
 	};
 
 	const onMessage = (event: MessageEvent) => {
@@ -94,10 +123,16 @@ export function createBoardSketchHost(options: BoardSketchHostOptions): BrowserB
 			return;
 		}
 		if (data.bitmap) {
+			if (entry.timeout) clearTimeout(entry.timeout);
+			entry.timeout = null;
 			entry.texture?.destroy(true);
 			entry.texture = Texture.from(data.bitmap);
 			entry.error = null;
-		} else entry.error = data.error ?? "Sketch failed.";
+		} else {
+			if (entry.timeout) clearTimeout(entry.timeout);
+			entry.timeout = null;
+			entry.error = data.error ?? "Sketch failed.";
+		}
 		entry.shown = entry.pending ?? entry.shown;
 		entry.pending = null;
 		options.onFrame?.();
@@ -119,7 +154,7 @@ export function createBoardSketchHost(options: BoardSketchHostOptions): BrowserB
 		frame(item, time, resolution) {
 			let entry = entries.get(item.id);
 			if (!entry) {
-				entry = { texture: null, error: null, shown: "", pending: null, request: 0, code: null, loading: false };
+				entry = { texture: null, error: null, shown: "", pending: null, request: 0, code: null, loading: false, timeout: null, sourceError: null };
 				entries.set(item.id, entry);
 			}
 			const { width, height } = item.frame;
@@ -128,17 +163,19 @@ export function createBoardSketchHost(options: BoardSketchHostOptions): BrowserB
 			if (key !== entry.shown && entry.pending === null) {
 				const current = entry;
 				if (current.code === null) {
-					if (!current.loading) {
+					if (!current.sourceError && !current.loading) {
 						current.loading = true;
 						source(item.props.src).then(
 							(code) => {
 								current.code = code;
+								current.sourceError = null;
 								current.loading = false;
 								options.onFrame?.();
 							},
 							(error: unknown) => {
 								current.loading = false;
-								current.error = error instanceof Error ? error.message : String(error);
+								current.sourceError = error instanceof Error ? error.message : String(error);
+								current.error = current.sourceError;
 								options.onFrame?.();
 							},
 						);
@@ -146,6 +183,16 @@ export function createBoardSketchHost(options: BoardSketchHostOptions): BrowserB
 				} else {
 					current.pending = key;
 					current.request += 1;
+					const request = current.request;
+					current.timeout = setTimeout(() => {
+						if (current.request !== request || current.pending !== key) return;
+						resetWorker();
+						current.shown = key;
+						current.pending = null;
+						current.timeout = null;
+						current.error = `${item.props.src} exceeded the ${timeoutMs}ms sketch timeout.`;
+						options.onFrame?.();
+					}, timeoutMs);
 					post({ id: item.id, src: item.props.src, code: current.code, t: time, width, height, scale, seed: item.props.seed ?? item.id, params: item.props.params, request: current.request });
 				}
 			}
@@ -153,21 +200,31 @@ export function createBoardSketchHost(options: BoardSketchHostOptions): BrowserB
 		},
 		error: (id) => entries.get(id)?.error ?? null,
 		release(id) {
-			entries.get(id)?.texture?.destroy(true);
+			const entry = entries.get(id);
+			if (entry?.timeout) clearTimeout(entry.timeout);
+			entry?.texture?.destroy(true);
 			entries.delete(id);
 		},
 		invalidate(src) {
 			if (src) sources.delete(src);
 			else sources.clear();
 			for (const entry of entries.values()) {
-				entry.code = null;
-				entry.shown = "";
+					entry.code = null;
+					entry.sourceError = null;
+					entry.pending = null;
+					entry.request += 1;
+					if (entry.timeout) clearTimeout(entry.timeout);
+					entry.timeout = null;
+					entry.shown = "";
 			}
 			options.onFrame?.();
 		},
 		destroy() {
 			window.removeEventListener("message", onMessage);
-			for (const entry of entries.values()) entry.texture?.destroy(true);
+			for (const entry of entries.values()) {
+				if (entry.timeout) clearTimeout(entry.timeout);
+				entry.texture?.destroy(true);
+			}
 			entries.clear();
 			iframe.remove();
 		},

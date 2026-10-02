@@ -13,12 +13,13 @@ import type {
 import {
 	type BoardShapeColors,
 	type BoardViewport,
+	cameraForFocus,
+	cameraForState,
 	featuredTaskArtifact,
 	isStrokeCorner,
 	pickBoardColor,
 	pointToWorld,
 	type Rect,
-	rectForCameraFocus,
 	resolveItemColor,
 	resolveSceneArrow,
 	type ScreenPoint,
@@ -32,6 +33,10 @@ import {
 	visibleWorldRect,
 	worldPoint,
 } from "@neta-art/cohub/board";
+import {
+	type BoardPlayerFrame,
+	createBoardPlayer,
+} from "@neta-art/cohub/board/player";
 import {
 	type BoardRenderContext,
 	type BoardRenderPalette,
@@ -82,7 +87,6 @@ import {
 } from "$lib/board/board-theme";
 import { resizeCursorForHandle } from "$lib/board/core/selection-transform";
 import type { BoardEditor } from "$lib/board/editor.svelte";
-import { type BoardPlayerFrame, createBoardPlayer } from "$lib/board/runtime/board-player";
 import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
 import {
 	type BoardDropItem,
@@ -169,14 +173,19 @@ let surface = $state<{ width: number; height: number }>({
 const player = createBoardPlayer({
 	resolveColor: (color) => {
 		const theme = resolveTheme();
-		return resolveItemColor(color, "brand", theme.colors, theme.colorScheme, parseBoardCssColor);
+		return resolveItemColor(
+			color,
+			"brand",
+			theme.colors,
+			theme.colorScheme,
+			parseBoardCssColor,
+		);
 	},
 });
 let tickFrame = 0;
-let playbackFocusKey: string | null = null;
-let playbackJitter = { x: 0, y: 0 };
-const viewCamera = $derived(editor.camera);
-const renderZoom = $derived(editor.camera.zoom);
+let playbackCamera = $state<BoardViewport | null>(null);
+const viewCamera = $derived(playbackCamera ?? editor.camera);
+const renderZoom = $derived(viewCamera.zoom);
 
 let lastCullRect: Rect | null = null;
 const cullRect = $derived.by<Rect | null>(() => {
@@ -227,7 +236,11 @@ const unsubscribeTaskRuns = onTaskRunsCacheUpdated((event) => {
 
 function applyTaskRuns(runs: ReturnType<typeof getCachedTaskRuns>) {
 	const wanted = new Set(
-		editor.items.flatMap((item) => (item.type === "task" ? [(item.props as { taskRunId: string }).taskRunId] : [])),
+		editor.items.flatMap((item) =>
+			item.type === "task"
+				? [(item.props as { taskRunId: string }).taskRunId]
+				: [],
+		),
 	);
 	if (wanted.size === 0) return;
 	const snapshots = new Map<string, BoardTaskSnapshot>();
@@ -404,12 +417,17 @@ function backdropPosition(value: BoardThemeBackground): string {
 function backgroundCssColor(): string | undefined {
 	const color = editor.settings.background.color;
 	if (typeof color === "object") return color[resolveTheme().colorScheme];
-	return color && !color.startsWith("#") && !color.includes("(") ? `var(--board-${color}, ${color})` : color;
+	return color && !color.startsWith("#") && !color.includes("(")
+		? `var(--board-${color}, ${color})`
+		: color;
 }
 
 function syncBackground(theme: BoardThemeSnapshot) {
 	if (!app) return;
-	const nextBackdrop = resolveBoardBackground(editor.settings, theme.background);
+	const nextBackdrop = resolveBoardBackground(
+		editor.settings,
+		theme.background,
+	);
 	if (!sameBackdrop(boardBackdrop, nextBackdrop)) boardBackdrop = nextBackdrop;
 	const nextUrl = nextBackdrop?.url ?? null;
 	if (backdropUrl !== nextUrl) backdropUrl = nextUrl;
@@ -466,13 +484,22 @@ function localGestureItemIds(): Set<string> {
 function remotePreviewItems(): Map<string, BoardItem> {
 	const previews = new Map<string, BoardItem>();
 	const localIds = localGestureItemIds();
-	const peers = [...awareness.peers].sort((a, b) => a.lastSeenAt - b.lastSeenAt);
+	const peers = [...awareness.peers].sort(
+		(a, b) => a.lastSeenAt - b.lastSeenAt,
+	);
 	for (const peer of peers) {
 		if (peer.gesture?.kind !== "transform") continue;
 		for (const preview of peer.gesture.items) {
 			if (localIds.has(preview.itemId)) continue;
 			const item = editor.itemById(preview.itemId);
-			if (item) previews.set(preview.itemId, sceneItemToItem({ ...item, frame: preview.frame }, editor.scene.layout));
+			if (item)
+				previews.set(
+					preview.itemId,
+					sceneItemToItem(
+						{ ...item, frame: preview.frame },
+						editor.scene.layout,
+					),
+				);
 		}
 	}
 	return previews;
@@ -486,17 +513,40 @@ function pushMovingItems(frame: BoardPlayerFrame): Map<string, BoardItem> {
 	return previews;
 }
 
-function applyPlaybackCamera(frame: BoardPlayerFrame, renderScene: BoardModelScene): { x: number; y: number } {
-	const { focus, shake } = frame.camera;
-	const key = focus === undefined ? null : JSON.stringify(focus);
-	if (key !== playbackFocusKey) {
-		playbackFocusKey = key;
-		const rect = focus === undefined ? null : rectForCameraFocus(focus, (id) => renderScene.get(id)?.frame);
-		if (rect) editor.focusRect(rect, { padding: 48 });
+function applyPlaybackCamera(
+	frame: BoardPlayerFrame,
+	renderScene: BoardModelScene,
+): BoardViewport {
+	let camera: BoardViewport = { ...editor.camera };
+	const focus = frame.camera.focus;
+	if (focus !== undefined && surface.width > 0 && surface.height > 0) {
+		camera =
+			cameraForFocus(focus, (id) => renderScene.get(id)?.frame, surface, {
+				padding: 48,
+			}) ?? camera;
 	}
-	if (!shake) return { x: 0, y: 0 };
-	const t = frame.time / 1000;
-	return { x: Math.sin(t * 91.3) * shake, y: Math.cos(t * 77.9) * shake };
+	if (frame.camera.zoom !== undefined) {
+		camera = { ...camera, zoom: frame.camera.zoom };
+	}
+	if (frame.camera.center) {
+		camera = cameraForState(
+			{
+				centerX: frame.camera.center.x,
+				centerY: frame.camera.center.y,
+				zoom: camera.zoom,
+			},
+			surface,
+		);
+	}
+	if (frame.camera.shake) {
+		const t = frame.time / 1000;
+		camera = {
+			...camera,
+			x: camera.x + Math.sin(t * 91.3) * frame.camera.shake,
+			y: camera.y + Math.cos(t * 77.9) * frame.camera.shake,
+		};
+	}
+	return camera;
 }
 
 function syncStage() {
@@ -506,14 +556,20 @@ function syncStage() {
 	syncBackground(theme);
 
 	player.enter(editor.consumeRecentlyAdded(), editor.document);
-	const frame = player.frame(editor.document, playback, performance.now(), Date.now(), editor.playhead?.animationId ?? null);
+	const frame = player.frame(
+		editor.document,
+		playback,
+		performance.now(),
+		Date.now(),
+		editor.playhead?.animationId ?? null,
+	);
 	const previews = pushMovingItems(frame);
 	const renderScene = editor.scene;
-	const jitter = applyPlaybackCamera(frame, renderScene);
-	playbackJitter = jitter;
-	world.x = editor.camera.x + jitter.x;
-	world.y = editor.camera.y + jitter.y;
-	world.scale.set(editor.camera.zoom);
+	const camera = applyPlaybackCamera(frame, renderScene);
+	playbackCamera = Object.keys(frame.camera).length > 0 ? camera : null;
+	world.x = camera.x;
+	world.y = camera.y;
+	world.scale.set(camera.zoom);
 	if (world.parent !== app.stage) app.stage.addChild(world);
 
 	const context = buildContext(palette, renderScene, frame.time);
@@ -526,7 +582,12 @@ function syncStage() {
 		for (const binder of renderScene.binders(id)) pinnedIds.add(binder);
 	}
 
-	const globalSig = [assetVersion, previewVersion, resolveTheme().key, textZoomBucket(renderZoom)].join("|");
+	const globalSig = [
+		assetVersion,
+		previewVersion,
+		resolveTheme().key,
+		textZoomBucket(renderZoom),
+	].join("|");
 
 	scene.sync({
 		items: renderScene.items,
@@ -538,30 +599,41 @@ function syncStage() {
 		globalSig,
 		structureVersion: editor.structureVersion,
 		geometryVersion: editor.geometryVersion,
-		gestureActive: editor.gestureActive && editor.interaction.type !== "panning",
+		gestureActive:
+			editor.gestureActive && editor.interaction.type !== "panning",
 	});
 
-	const single = editor.selection.length === 1 ? renderScene.get(editor.selection[0] as string) : null;
+	const single =
+		editor.selection.length === 1
+			? renderScene.get(editor.selection[0] as string)
+			: null;
 	let arrowEndpoints: Array<{ x: number; y: number }> | undefined;
 	if (single?.type === "arrow" && !single.locked) {
-		const resolved = resolveSceneArrow(single as SceneItem<BoardArrowItem>, renderScene);
+		const resolved = resolveSceneArrow(
+			single as SceneItem<BoardArrowItem>,
+			renderScene,
+		);
 		arrowEndpoints = [resolved.start.point, resolved.mid, resolved.end.point];
 	}
 	scene.drawOverlay(
 		{
-			zoom: editor.camera.zoom,
+			zoom: viewCamera.zoom,
 			pointerType: editor.pointerType,
 			marquee: editor.marquee,
 			selection: editor.selection,
 			transform: editor.selectionTransform,
 			controls: editor.tool === "select",
 			hoveredControl: editor.hoveredTransformControl,
-			rotationPointer: editor.interaction.type === "rotating" ? editor.interaction.current : null,
+			rotationPointer:
+				editor.interaction.type === "rotating"
+					? editor.interaction.current
+					: null,
 			arrowEndpoints,
 			ports: editor.connectionPorts,
 			hoveredPort: editor.hoveredConnectionPort,
 			arrowDraft: null,
-			bindTarget: editor.bindTargetFrame ?? editor.arrowDraft?.targetFrame ?? null,
+			bindTarget:
+				editor.bindTargetFrame ?? editor.arrowDraft?.targetFrame ?? null,
 		},
 		palette,
 	);
@@ -747,8 +819,15 @@ function drawTransient(
 	if (interaction.type === "creatingArrow") {
 		const color = pickBoardColor(colors, interaction.color, mode);
 		const start = interaction.start;
-		const target = interaction.targetItemId ? editor.itemById(interaction.targetItemId) : null;
-		const current = target ? worldPoint(target.frame.x + target.frame.width / 2, target.frame.y + target.frame.height / 2) : interaction.current;
+		const target = interaction.targetItemId
+			? editor.itemById(interaction.targetItemId)
+			: null;
+		const current = target
+			? worldPoint(
+					target.frame.x + target.frame.width / 2,
+					target.frame.y + target.frame.height / 2,
+				)
+			: interaction.current;
 		overlay
 			.moveTo(start.x, start.y)
 			.lineTo(current.x, current.y)
@@ -829,7 +908,7 @@ function toScreenPoint(
 }
 
 function inputCamera() {
-	return { ...editor.camera, x: editor.camera.x + playbackJitter.x, y: editor.camera.y + playbackJitter.y };
+	return playbackCamera ?? editor.camera;
 }
 function toPointerEvent(event: PointerEvent) {
 	const screen = toScreenPoint(event);
@@ -875,7 +954,7 @@ function handlePointerDown(event: PointerEvent) {
 		if (
 			item &&
 			playableBoardMedia(item, assetSource) &&
-			boardMediaActionAt(item, input.world, editor.camera.zoom, {
+			boardMediaActionAt(item, input.world, inputCamera().zoom, {
 				materialized: Boolean(scene?.getNode(item.id)),
 				hasVideoPreview: Boolean(key && assets.getTexture(key)),
 			})
@@ -938,7 +1017,7 @@ function handleDoubleClick(event: MouseEvent) {
 		event.clientX,
 		event.clientY,
 		rect,
-		editor.camera,
+		inputCamera(),
 	);
 	const item = editor.itemAt(worldPointAtCursor);
 	if (item && (item.type === "video" || item.type === "audio")) {
@@ -952,7 +1031,12 @@ function handleDoubleClick(event: MouseEvent) {
 	if (item?.type === "task") {
 		if (!readonly)
 			void goto(
-				withCurrentWindow(buildSpaceTaskRoute(spaceId, (item.props as { taskRunId: string }).taskRunId)),
+				withCurrentWindow(
+					buildSpaceTaskRoute(
+						spaceId,
+						(item.props as { taskRunId: string }).taskRunId,
+					),
+				),
 			);
 		return;
 	}
@@ -971,7 +1055,8 @@ async function enrichFileCards(targets: Array<{ id: string; path: string }>) {
 		targets.map(async ({ id, path }) => {
 			const item = editor.itemById(id);
 			if (item?.type !== "file") return null;
-			const snapshot = (item.props as { snapshot?: BoardFileSnapshotFacts }).snapshot;
+			const snapshot = (item.props as { snapshot?: BoardFileSnapshotFacts })
+				.snapshot;
 			const result = await loadFilePreview(spaceId, {
 				path,
 				mimeType: snapshot?.mimeType,
@@ -1075,8 +1160,7 @@ function handleDrop(event: DragEvent) {
 					},
 				});
 			}
-		} catch {
-		}
+		} catch {}
 	}
 
 	if (items.length === 0 && taskItems.length === 0) {

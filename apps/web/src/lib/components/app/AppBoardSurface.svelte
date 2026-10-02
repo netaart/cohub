@@ -1,7 +1,7 @@
 <script lang="ts">
+import { boardSnapshotPatch } from "@cohub/protocol";
 import type { AppBoardArtifactManifest, WorkContent } from "@neta-art/cohub";
 import { parseBoardDocument } from "@neta-art/cohub/board";
-import { BOARD_PROTOCOL_VERSION, upgradeBoardSnapshotV2 } from "@cohub/protocol";
 import { createAppBoardAssetSource } from "$lib/board/board-asset-source";
 import { cohubPixiRuntime } from "$lib/board/runtime/board-runtime";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
@@ -28,10 +28,8 @@ const manifest = $derived(loaded?.url === content.url ? loaded.manifest : null);
 const locale = $derived(getLocale());
 const parsed = $derived.by(() => {
 	if (!manifest) return null;
-	const version = Number(manifest.snapshot.version);
-	if (version !== 2 && version !== BOARD_PROTOCOL_VERSION) return { ok: false as const };
 	try {
-		return parseBoardDocument(version === 2 ? upgradeBoardSnapshotV2(manifest.snapshot) : manifest.snapshot);
+		return parseBoardDocument(boardSnapshotPatch(manifest.snapshot));
 	} catch {
 		return { ok: false as const };
 	}

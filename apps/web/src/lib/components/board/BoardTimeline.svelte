@@ -1,9 +1,20 @@
 <script lang="ts">
-import type { BoardPlaybackCommand, BoardPlaybackSnapshot } from "@cohub/protocol";
-import { Circle, Diamond, FastForward, Pause, Play, Plus, X } from "lucide-svelte";
+import type {
+	BoardPlaybackCommand,
+	BoardPlaybackSnapshot,
+} from "@cohub/protocol";
+import { playbackTimeAt } from "@neta-art/cohub/board/player";
+import {
+	Circle,
+	Diamond,
+	FastForward,
+	Pause,
+	Play,
+	Plus,
+	X,
+} from "lucide-svelte";
 import { onDestroy } from "svelte";
 import type { BoardEditor } from "$lib/board/editor.svelte";
-import { playbackTimeAt } from "$lib/board/runtime/board-player";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
@@ -26,10 +37,20 @@ const locale = $derived(getLocale());
 const animationIds = $derived(Object.keys(editor.animations));
 let chosen = $state<string | null>(null);
 const animationId = $derived(
-	editor.playhead?.animationId ?? (playback && editor.animations[playback.animationId] ? playback.animationId : null) ?? (chosen && editor.animations[chosen] ? chosen : null) ?? animationIds[0] ?? null,
+	editor.playhead?.animationId ??
+		(playback && editor.animations[playback.animationId]
+			? playback.animationId
+			: null) ??
+		(chosen && editor.animations[chosen] ? chosen : null) ??
+		animationIds[0] ??
+		null,
 );
-const animation = $derived(animationId ? editor.animations[animationId] : undefined);
-const playing = $derived(playback?.status === "playing" && playback.animationId === animationId);
+const animation = $derived(
+	animationId ? editor.animations[animationId] : undefined,
+);
+const playing = $derived(
+	playback?.status === "playing" && playback.animationId === animationId,
+);
 
 let clock = $state(0);
 let frame = 0;
@@ -44,14 +65,29 @@ $effect(() => {
 });
 onDestroy(() => cancelAnimationFrame(frame));
 
-const time = $derived(playing ? clock : (editor.playhead?.time ?? (playback?.animationId === animationId ? playback.position : 0)));
-const nextMarker = $derived(animation?.markers.find((marker) => marker.pause && marker.at > time + 1) ?? null);
+const time = $derived(
+	playing
+		? clock
+		: (editor.playhead?.time ??
+				(playback?.animationId === animationId ? playback.position : 0)),
+);
+const nextMarker = $derived(
+	animation?.markers.find((marker) => marker.pause && marker.at > time + 1) ??
+		null,
+);
 const keyframe = $derived(editor.keyframeState("position"));
 
-type CommandInput = BoardPlaybackCommand extends infer C ? (C extends BoardPlaybackCommand ? Omit<C, "commandId"> : never) : never;
+type CommandInput = BoardPlaybackCommand extends infer C
+	? C extends BoardPlaybackCommand
+		? Omit<C, "commandId">
+		: never
+	: never;
 
 function command(value: CommandInput) {
-	void onPlayback({ ...value, commandId: crypto.randomUUID() } as BoardPlaybackCommand);
+	void onPlayback({
+		...value,
+		commandId: crypto.randomUUID(),
+	} as BoardPlaybackCommand);
 }
 
 function seek(value: number) {
@@ -85,12 +121,16 @@ function choose(id: string) {
 }
 
 function create() {
-	chosen = editor.createAnimation(m.board_animation_default_name({}, { locale }));
+	chosen = editor.createAnimation(
+		m.board_animation_default_name({}, { locale }),
+	);
 }
 
 function format(ms: number) {
 	const seconds = ms / 1000;
-	return seconds < 60 ? `${seconds.toFixed(1)}s` : `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
+	return seconds < 60
+		? `${seconds.toFixed(1)}s`
+		: `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
 }
 </script>
 

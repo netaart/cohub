@@ -56,6 +56,10 @@
         "types": "./dist/board/index.d.ts",
         "import": "./dist/board/index.js"
       },
+      "./board/player": {
+        "types": "./dist/board/runtime/board-player.d.ts",
+        "import": "./dist/board/runtime/board-player.js"
+      },
       "./board/render": {
         "types": "./dist/board/render/index.d.ts",
         "import": "./dist/board/render/index.js"
@@ -103,6 +107,10 @@
     "./board": {
       "types": "./src/board/index.ts",
       "import": "./src/board/index.ts"
+    },
+    "./board/player": {
+      "types": "./src/board/runtime/board-player.ts",
+      "import": "./src/board/runtime/board-player.ts"
     },
     "./board/render": {
       "types": "./src/board/render/index.ts",

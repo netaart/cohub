@@ -1,4 +1,8 @@
 <script lang="ts">
+import type {
+	BoardPlaybackCommand,
+	BoardPlaybackSnapshot,
+} from "@cohub/protocol";
 import {
 	parseBoardDocument,
 	screenToWorld,
@@ -6,6 +10,7 @@ import {
 	taskRunToBoardTaskSnapshot as taskBoardSnapshot,
 	worldPoint,
 } from "@neta-art/cohub/board";
+import { nextLocalPlayback } from "@neta-art/cohub/board/player";
 import { onDestroy, onMount, untrack } from "svelte";
 import { createBoardAssetManager } from "$lib/board/board-asset-manager";
 import { createSpaceBoardAssetSource } from "$lib/board/board-asset-source";
@@ -32,14 +37,12 @@ import {
 	writeBoardViewPreference,
 } from "$lib/board/board-view-preferences";
 import { createBoardEditor } from "$lib/board/editor.svelte";
-import type { BoardPlaybackCommand, BoardPlaybackSnapshot } from "@cohub/protocol";
-import { nextLocalPlayback } from "$lib/board/runtime/board-player";
 import type { BoardRuntimeProps } from "$lib/board/runtime/board-runtime";
 import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
 import BoardAppearancePopover from "$lib/components/board/BoardAppearancePopover.svelte";
 import BoardAppOverlay from "$lib/components/board/BoardAppOverlay.svelte";
-import BoardCollaboratorOverlay from "$lib/components/board/BoardCollaboratorOverlay.svelte";
 import BoardArrowToolbar from "$lib/components/board/BoardArrowToolbar.svelte";
+import BoardCollaboratorOverlay from "$lib/components/board/BoardCollaboratorOverlay.svelte";
 import BoardContextMenu from "$lib/components/board/BoardContextMenu.svelte";
 import BoardEmptyState from "$lib/components/board/BoardEmptyState.svelte";
 import BoardExportDialog from "$lib/components/board/BoardExportDialog.svelte";
@@ -178,7 +181,10 @@ function showRegenerationError(message: string) {
 async function regenerateTask(itemId: string) {
 	if (regeneratingItemId) return;
 	const source = editor.itemById(itemId);
-	if (source?.type !== "task" || source.props.snapshot.taskType !== "generation")
+	if (
+		source?.type !== "task" ||
+		source.props.snapshot.taskType !== "generation"
+	)
 		return;
 	const sourceFrame = { ...source.frame };
 	const submittingUserKey = getCacheUserKey();
@@ -232,7 +238,11 @@ const boardClient = sdk
 const fetchHistory = boardClient.history.bind(boardClient);
 async function fetchDocument() {
 	const result = await boardClient.get();
-	const parsed = parseBoardDocument({ board: result.board, items: result.items ?? {}, animations: result.animations ?? {} });
+	const parsed = parseBoardDocument({
+		board: result.board,
+		items: result.items ?? {},
+		animations: result.animations ?? {},
+	});
 	if (!parsed.ok) throw new Error(m.board_replay_failed({}, { locale }));
 	return { version: result.version, document: parsed.document };
 }
@@ -280,7 +290,9 @@ function handleSurfaceChange(size: { width: number; height: number }) {
 	surfaceSize = size;
 	if (viewPreferenceRestored || size.width <= 0 || size.height <= 0) return;
 	viewPreferenceRestored = true;
-	const camera = restoredViewPreference ? cameraFromBoardViewPreference(restoredViewPreference, size) : null;
+	const camera = restoredViewPreference
+		? cameraFromBoardViewPreference(restoredViewPreference, size)
+		: null;
 	if (camera) editor.setCamera(camera);
 	else editor.fitView({ animate: false, maxZoom: 1 });
 }
@@ -364,16 +376,14 @@ async function writeClipboard(payload: unknown) {
 	try {
 		if (navigator.clipboard?.writeText)
 			await navigator.clipboard.writeText(text);
-	} catch {
-	}
+	} catch {}
 }
 
 async function readClipboardText(): Promise<string | null> {
 	try {
 		if (navigator.clipboard?.readText)
 			return await navigator.clipboard.readText();
-	} catch {
-	}
+	} catch {}
 	return null;
 }
 
@@ -661,7 +671,13 @@ onMount(() => {
 	}
 	const unsubscribeTaskCache = onTaskRunsCacheUpdated((event) => {
 		if (event.spaceId !== spaceId) return;
-		const taskRunIds = new Set(editor.items.flatMap((item) => (item.type === "task" ? [(item.props as { taskRunId: string }).taskRunId] : [])));
+		const taskRunIds = new Set(
+			editor.items.flatMap((item) =>
+				item.type === "task"
+					? [(item.props as { taskRunId: string }).taskRunId]
+					: [],
+			),
+		);
 		if (taskRunIds.size === 0) return;
 		const updatedRuns = event.runs.filter((run) => taskRunIds.has(run.id));
 		if (updatedRuns.length === 0) return;

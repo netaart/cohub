@@ -103,6 +103,42 @@ export type BoardPresetOptions = {
 	ease?: string;
 };
 
+export type BoardNestedAnimationOptions = {
+	parent: string;
+	child: string;
+	at?: number;
+	duration: number;
+	offset?: number;
+	timeScale?: number;
+};
+
+export function boardNestedAnimationTrack(options: BoardNestedAnimationOptions): BoardTrack {
+	const at = Math.max(0, options.at ?? 0);
+	const timeScale = options.timeScale ?? 1;
+	if (!Number.isFinite(timeScale) || timeScale <= 0) throw new RangeError("timeScale must be positive");
+	const duration = options.duration ?? 0;
+	if (!Number.isFinite(duration) || duration <= 0) throw new RangeError("duration must be positive");
+	const offset = options.offset ?? 0;
+	return {
+		target: options.child,
+		property: "time",
+		keyframes: [
+			{ at, value: offset },
+			{ at: at + duration, value: offset + duration * timeScale },
+		],
+		composite: "replace",
+		interpolation: "auto",
+	};
+}
+
+export function boardNestedAnimation(
+	options: BoardNestedAnimationOptions,
+): Record<string, BoardTrack> {
+	return { [`${options.parent}-play-${options.child}`]: boardNestedAnimationTrack(options) };
+}
+
+
+
 export function boardPresetTracks(name: BoardPresetName, options: BoardPresetOptions): Record<string, BoardTrack> {
 	const preset: PresetDefinition = PRESETS[name];
 	const duration = options.duration ?? preset.duration;

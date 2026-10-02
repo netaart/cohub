@@ -1,17 +1,17 @@
 
+import type { BoardDocument, BoardItem } from "@cohub/protocol/board-model";
 import type { BoardPlaybackCommand, BoardPlaybackSnapshot } from "@cohub/protocol";
+import type {
+	BoardCameraOverride,
+	BoardColorResolver,
+	CompiledBoardAnimations,
+} from "../animation.js";
 import {
 	boardAnimationTime,
-	type BoardCameraOverride,
-	type BoardDocument,
-	type BoardItem,
-	boardPresetTracks,
-	type CompiledBoardAnimations,
 	compileBoardAnimations,
 	evaluateBoardAnimations,
-	isBoardPresetName,
-	type BoardColorResolver,
-} from "@neta-art/cohub/board";
+} from "../animation.js";
+import { boardPresetTracks, isBoardPresetName } from "../presets.js";
 
 const ENTER_ANIMATION = "\u0000enter";
 const ENTER_STAGGER_MS = 45;
@@ -101,7 +101,7 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 			}
 			let playbackTime: number | null = null;
 			if (playback && playback.animationId !== exclude) {
-				playbackTime = playbackTimeAt(playback, current, Date.now());
+				playbackTime = playbackTimeAt(playback, current, wallNow);
 				if (playbackTime !== null) {
 					times.set(playback.animationId, playbackTime);
 					if (playback.status === "playing") running = true;
