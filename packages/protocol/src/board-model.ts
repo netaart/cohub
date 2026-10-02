@@ -667,12 +667,19 @@ export const BoardBackgroundSchema = z
 	})
 	.strict();
 
+export const BOARD_GRID_MIN_SIZE = 4;
+export const BOARD_GRID_MAX_SIZE = 512;
+export const BOARD_GRID_DEFAULT_SIZE = 24;
+
 export const BoardSettingsSchema = z
 	.object({
 		title: z.string().min(1).max(255).optional(),
 		background: BoardBackgroundSchema.default({ kind: "dots" }),
 		grid: z
-			.object({ visible: z.boolean().default(false), size: finite.min(4).default(24) })
+			.object({
+				visible: z.boolean().default(false),
+				size: finite.min(BOARD_GRID_MIN_SIZE).max(BOARD_GRID_MAX_SIZE).default(BOARD_GRID_DEFAULT_SIZE),
+			})
 			.strict()
 			.optional(),
 		enter: z

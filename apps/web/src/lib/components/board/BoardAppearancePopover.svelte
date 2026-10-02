@@ -1,6 +1,9 @@
 <script lang="ts">
 import {
 	BOARD_ENTER_PRESETS,
+	BOARD_GRID_DEFAULT_SIZE,
+	BOARD_GRID_MAX_SIZE,
+	BOARD_GRID_MIN_SIZE,
 	type BoardEnterPreset,
 	type BoardSettings,
 	normalizeBoardRemoteUrl,
@@ -83,7 +86,7 @@ function setColor(color: string, commit = true) {
 			grid: {
 				...editor.settings.grid,
 				visible: false,
-				size: editor.settings.grid?.size ?? 24,
+				size: editor.settings.grid?.size ?? BOARD_GRID_DEFAULT_SIZE,
 			},
 		},
 		commit,
@@ -100,7 +103,7 @@ function setPattern(kind: "dots" | "grid") {
 		grid: {
 			...editor.settings.grid,
 			visible: true,
-			size: editor.settings.grid?.size ?? 24,
+			size: editor.settings.grid?.size ?? BOARD_GRID_DEFAULT_SIZE,
 		},
 	});
 }
@@ -110,14 +113,19 @@ function setGridVisible(visible: boolean) {
 		grid: {
 			...editor.settings.grid,
 			visible,
-			size: editor.settings.grid?.size ?? 24,
+			size: editor.settings.grid?.size ?? BOARD_GRID_DEFAULT_SIZE,
 		},
 	});
 }
 
 function setGridSize(size: number) {
-	if (!Number.isFinite(size) || size < 4) return;
-	update({ grid: { ...editor.settings.grid, visible: true, size } });
+	if (!Number.isFinite(size)) return;
+	const next = Math.min(
+		BOARD_GRID_MAX_SIZE,
+		Math.max(BOARD_GRID_MIN_SIZE, Math.round(size)),
+	);
+	update({ grid: { ...editor.settings.grid, visible: true, size: next } });
+	return next;
 }
 
 function useImage() {
@@ -140,7 +148,7 @@ function useImage() {
 		grid: {
 			...editor.settings.grid,
 			visible: false,
-			size: editor.settings.grid?.size ?? 24,
+			size: editor.settings.grid?.size ?? BOARD_GRID_DEFAULT_SIZE,
 		},
 	});
 }
@@ -166,7 +174,7 @@ function reset() {
 	editor.setSettings({
 		...rest,
 		background: { kind: "dots" },
-		grid: { visible: true, size: 24 },
+		grid: { visible: true, size: BOARD_GRID_DEFAULT_SIZE },
 	});
 }
 </script>
@@ -183,7 +191,7 @@ function reset() {
 		<button type="button" class:active={mode === "color"} role="tab" aria-selected={mode === "color"} onclick={() => { mode = "color"; }}>
 			<Palette class="h-3.5 w-3.5" /> {m.board_color({}, { locale })}
 		</button>
-		<button type="button" class:active={mode === "pattern"} role="tab" aria-selected={mode === "pattern"} onclick={() => setPattern(background.kind === "grid" ? "grid" : "dots")}>
+		<button type="button" class:active={mode === "pattern"} role="tab" aria-selected={mode === "pattern"} onclick={() => { mode = "pattern"; }}>
 			{m.board_pattern({}, { locale })}
 		</button>
 		<button type="button" class:active={mode === "image"} role="tab" aria-selected={mode === "image"} onclick={() => { mode = "image"; }}>
@@ -218,7 +226,10 @@ function reset() {
 				<span>{m.board_pattern_visible({}, { locale })}</span>
 			</label>
 			<label class="field-label" for="board-pattern-spacing">{m.board_pattern_spacing({}, { locale })}</label>
-			<input id="board-pattern-spacing" class="spacing-input" type="number" min="4" step="4" value={editor.settings.grid?.size ?? 24} onchange={(event) => setGridSize(Number(event.currentTarget.value))} />
+			<input id="board-pattern-spacing" class="spacing-input" type="number" min={BOARD_GRID_MIN_SIZE} max={BOARD_GRID_MAX_SIZE} step="4" value={editor.settings.grid?.size ?? BOARD_GRID_DEFAULT_SIZE} onchange={(event) => {
+				const next = setGridSize(Number(event.currentTarget.value));
+				event.currentTarget.value = String(next ?? editor.settings.grid?.size ?? BOARD_GRID_DEFAULT_SIZE);
+			}} />
 		</div>
 	{:else}
 		<div class="image-section">

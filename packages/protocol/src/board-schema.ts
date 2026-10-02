@@ -41,6 +41,7 @@ export function boardJsonSchema(target: string): BoardJsonSchemaResult | null {
 	if (target === "effect") {
 		return {
 			schema: toJsonSchema(BOARD_ITEM_SCHEMAS.effect as unknown as z.ZodType),
+			properties: listBoardProperties("effect"),
 			kinds: Object.fromEntries(BOARD_EFFECT_KINDS.map((kind) => [kind, BOARD_EFFECT_KIND_INFO[kind]])),
 		};
 	}
