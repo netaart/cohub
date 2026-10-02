@@ -31,3 +31,4 @@ export * from "./media.js";
 export * from "./media-playback.js";
 export * from "./replay.js";
 export * from "./task.js";
+export * from "./runtime/board-player.js";

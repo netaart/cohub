@@ -1,4 +1,5 @@
 
+import { BOARD_PROTOCOL_VERSION, BOARD_SNAPSHOT_KIND } from "./board.js";
 import type { BoardPatch } from "./board-model.js";
 
 type Json = Record<string, unknown>;
@@ -262,6 +263,14 @@ function upgradeSettings(metadata: Json): Json {
 		...(grid && grid.visible === true ? { grid: { visible: true, size: num(grid.size, 24) } } : {}),
 		...(enter ? { enter } : {}),
 	};
+}
+
+export function boardSnapshotPatch(snapshot: unknown): BoardPatch {
+	const value = isRecord(snapshot) ? snapshot : {};
+	if (value.kind !== BOARD_SNAPSHOT_KIND) throw new Error("Not a Board snapshot");
+	if (value.version === 2) return upgradeBoardSnapshotV2(value);
+	if (value.version !== BOARD_PROTOCOL_VERSION) throw new Error(`Unsupported Board snapshot version: ${String(value.version)}`);
+	return { board: value.board, items: value.items, animations: value.animations } as BoardPatch;
 }
 
 export function upgradeBoardSnapshotV2(snapshot: unknown): BoardPatch {

@@ -3,13 +3,11 @@ import { join, relative, resolve } from "node:path";
 import { eq } from "drizzle-orm";
 import { boardCheckpoints } from "@cohub/db";
 import {
-  BOARD_PROTOCOL_VERSION,
-  BOARD_SNAPSHOT_KIND,
+  boardSnapshotPatch,
   type BoardPatch,
   isBoardPath,
   parseBoardManifest,
   serializeBoardManifest,
-  upgradeBoardSnapshotV2,
 } from "@cohub/protocol";
 import { captureBoardSnapshots, createBoard, deleteBoard } from "@cohub/core/board";
 import { db } from "../db.js";
@@ -41,16 +39,9 @@ export async function saveBoardCheckpointSnapshots(input: { checkpointId: string
 }
 
 export function boardSnapshotDocument(snapshot: Record<string, unknown>): { title?: string; document: BoardPatch } {
-  if (snapshot.kind !== BOARD_SNAPSHOT_KIND) throw new Error("Not a Board snapshot");
-  if (snapshot.version === 2) {
-    const board = snapshot.board as { title?: string } | undefined;
-    return { title: board?.title, document: upgradeBoardSnapshotV2(snapshot) };
-  }
-  if (snapshot.version !== BOARD_PROTOCOL_VERSION) throw new Error(`Unsupported Board snapshot version: ${String(snapshot.version)}`);
-  return {
-    title: typeof snapshot.title === "string" ? snapshot.title : undefined,
-    document: { board: snapshot.board, items: snapshot.items, animations: snapshot.animations } as BoardPatch,
-  };
+  const document = boardSnapshotPatch(snapshot);
+  const board = snapshot.board as { title?: string } | undefined;
+  return { title: typeof snapshot.title === "string" ? snapshot.title : board?.title, document };
 }
 
 export async function restoreBoardCheckpointSnapshots(input: {
