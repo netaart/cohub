@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Cohub</string>
+    <string name="sign_in_failed">Couldn\'t complete sign-in. Please try again.</string>
+    <string name="no_app_for_link">No app can open this link.</string>
+    <string name="bridge_unavailable">This device\'s WebView is out of date; native features are unavailable.</string>
+    <string name="web_view_recovering">The page crashed and is reloading.</string>
+</resources>

@@ -5,6 +5,7 @@ import {
 	type ClearBrokenSessionOptions,
 	createAuthRefreshCoordinator,
 } from "$lib/auth-refresh-coordinator";
+import { callHost, hostOwnsCredentials, readyHost } from "$lib/host-bridge";
 
 const IS_DEV =
 	(typeof location !== "undefined" && location.hostname.startsWith("dev")) ||
@@ -394,6 +395,9 @@ const authRefreshCoordinator = createAuthRefreshCoordinator({
 	isReusable: isReusableAuthSnapshot,
 	resolveToken: resolveLogtoAccessToken,
 	clearSession: async () => {
+		// The host owns the credential store; clearing Logto here would be a
+		// no-op that leaves the real session intact.
+		if ((await readyHost()) && hostOwnsCredentials()) return;
 		try {
 			await getLogtoClient().clearAllTokens();
 		} catch {
@@ -436,6 +440,23 @@ export const getAuthToken = async (
 	options?: AuthTokenRequestOptions,
 ): Promise<string | null> => {
 	if (typeof window === "undefined") return null;
+	// Inside a native host the credential lives in the host's encrypted store and
+	// is shared by every surface; the web side only asks for it. Refreshing here
+	// would race the host's own refresher, so delegate and stop.
+	if ((await readyHost()) && hostOwnsCredentials()) {
+		try {
+			const token = await callHost("auth.getAccessToken", {
+				forceRefresh: Boolean(options?.forceRefresh),
+			});
+			return typeof token === "string" && token.trim() ? token : null;
+		} catch (error) {
+			console.warn(
+				"[auth] Native host failed to resolve an access token:",
+				error,
+			);
+			return null;
+		}
+	}
 	try {
 		const token = await authRefreshCoordinator.resolveToken(options);
 		if (token) lastLoggedEmptyResolutionGeneration = null;
@@ -451,6 +472,10 @@ export const getAuthToken = async (
 export const getCurrentIdTokenClaims =
 	async (): Promise<IdTokenClaims | null> => {
 		if (typeof window === "undefined") return null;
+		// The host owns credentials; ID token claims are not exposed. Callers that
+		// need an identity key must use the host session instead (see
+		// `getHostSessionIdentity`), which also feeds the cache partition key.
+		if ((await readyHost()) && hostOwnsCredentials()) return null;
 		try {
 			return await getLogtoClient().getIdTokenClaims();
 		} catch {
@@ -458,8 +483,39 @@ export const getCurrentIdTokenClaims =
 		}
 	};
 
+/**
+ * Signed-in identity reported by the native host, or `null` in a browser.
+ * Exists because the host does not expose ID token claims, yet the cache
+ * partition key still needs a stable, user-scoped value.
+ */
+export const getHostSessionIdentity = async (): Promise<{
+	userUuid: string | null;
+	subject: string | null;
+	subjectKey: string | null;
+} | null> => {
+	if (typeof window === "undefined") return null;
+	if (!(await readyHost()) || !hostOwnsCredentials()) return null;
+	try {
+		const session = await callHost("auth.getSession");
+		return {
+			userUuid: session.userUuid,
+			subject: session.subject,
+			subjectKey: session.subject ? `sub:${session.subject}` : null,
+		};
+	} catch (error) {
+		console.warn("[auth] Native host failed to report its session:", error);
+		return null;
+	}
+};
+
 export const hasRecoverableAuthSession = async (): Promise<boolean> => {
 	if (typeof window === "undefined") return false;
+	// A hosted surface has a session exactly when the host says so; probing
+	// Logto here would construct a browser client the host never authenticated.
+	if ((await readyHost()) && hostOwnsCredentials()) {
+		const identity = await getHostSessionIdentity();
+		return Boolean(identity && (identity.userUuid || identity.subject));
+	}
 	const client = getLogtoClient();
 	const [hasIdToken, refreshToken] = await Promise.all([
 		client.isAuthenticated().catch(() => false),
@@ -550,10 +606,22 @@ const createRedirectState = (redirectPath?: string) => {
  * auth check can re-enter Logto with a still-valid SSO cookie and loop.
  */
 export const signInWithRedirectPath = async (redirectPath?: string) => {
-	const client = getLogtoClient();
-	const originalGenerateState = client.adapter.generateState;
 	const safePath =
 		redirectPath === undefined ? undefined : sanitizeRedirectPath(redirectPath);
+
+	// The host owns the credential and the sign-in round trip (system browser +
+	// PKCE), so the web side only asks for it. Logto's browser client would keep
+	// a second session the host could not see.
+	if ((await readyHost()) && hostOwnsCredentials()) {
+		await callHost(
+			"auth.signIn",
+			safePath === undefined ? {} : { redirectPath: safePath },
+		);
+		return;
+	}
+
+	const client = getLogtoClient();
+	const originalGenerateState = client.adapter.generateState;
 
 	client.adapter.generateState = () => createRedirectState(safePath);
 	try {
@@ -587,4 +655,28 @@ export const ensureAuth = async (options?: { redirectPath?: string }) => {
 		return false;
 	}
 	return true;
+};
+
+/**
+ * Sign out of the active session, wherever the credential lives.
+ *
+ * A hosted surface must delegate: the host owns the encrypted store and every
+ * other surface in the app shares it. Signing out in the web view alone would
+ * leave the app still signed in.
+ */
+export const signOut = async (): Promise<void> => {
+	if (typeof window === "undefined") return;
+	if ((await readyHost()) && hostOwnsCredentials()) {
+		try {
+			await callHost("auth.signOut");
+		} catch (error) {
+			console.error("[auth] Native host failed to sign out", error);
+		}
+		return;
+	}
+	try {
+		await getLogtoClient().signOut(`${window.location.origin}/`);
+	} catch (error) {
+		console.error("[auth] Failed to sign out", error);
+	}
 };

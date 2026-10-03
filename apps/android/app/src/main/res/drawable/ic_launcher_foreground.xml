@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Brand mark: a white "C" ring, matching the PWA icon. Drawn as a stroked arc
+  rather than text so it does not depend on a system font, and sized inside the
+  adaptive-icon safe zone (the outer third of the canvas may be masked).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="9"
+        android:strokeLineCap="butt"
+        android:pathData="M73,38 A21,21 0 1 0 73,70" />
+</vector>

@@ -50,7 +50,7 @@ cohub auth login
 
 内容源：`docs/product/zh/` · `docs/product/en/`
 
-工程文档：[self-hosting](docs/self-hosting.md) · [agent-sandbox-runtime](docs/agent-sandbox-runtime.md) · [generations](docs/generations.md) · [space-hooks](docs/space-hooks.md)
+工程文档：[self-hosting](docs/self-hosting.md) · [agent-sandbox-runtime](docs/agent-sandbox-runtime.md) · [generations](docs/generations.md) · [space-hooks](docs/space-hooks.md) · [native-host-bridge](docs/native-host-bridge.md)
 
 Changelog：[CHANGELOG.md](CHANGELOG.md)
 

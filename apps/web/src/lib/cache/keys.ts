@@ -17,6 +17,11 @@ export function getCacheUserKey() {
 			? authStore.claims.sub.trim()
 			: "";
 	if (subject) return `sub:${subject}`;
+	// A hosted surface never reads ID token claims, so the host-reported subject
+	// stands in for them here. Without this an authenticated native session would
+	// silently fall back to the shared `guest` partition.
+	const hostSubject = authStore.hostSubjectKey;
+	if (hostSubject) return hostSubject;
 	return "guest";
 }
 

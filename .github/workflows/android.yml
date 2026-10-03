@@ -1,0 +1,49 @@
+name: Android
+
+# The Android shell is a separate toolchain (Gradle) that no JS job touches, so
+# it runs only when its own tree changes. This keeps the main CI fast while
+# still gating the shell on every change to it or to the protocol contract it
+# implements.
+on:
+  pull_request:
+    paths:
+      - 'apps/android/**'
+      - 'packages/protocol/src/host-bridge.ts'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Lint, test, assemble
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Assemble debug
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Lint
+        run: ./gradlew :app:lintDebug --no-daemon

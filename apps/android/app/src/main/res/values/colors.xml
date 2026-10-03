@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icon background: the brand orange, sampled from the PWA icon. -->
+<resources>
+    <color name="ic_launcher_background">#FF3D00</color>
+</resources>
