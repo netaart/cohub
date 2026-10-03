@@ -1,5 +1,6 @@
 <script lang="ts">
-import type { SpaceRecord } from "@neta-art/cohub";
+import { CONFIG_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
+import { HttpError, type SpaceRecord } from "@neta-art/cohub";
 import {
 	ArrowUpRight,
 	CheckCircle2,
@@ -19,7 +20,6 @@ import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { buildSpaceLandingRoute } from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 
@@ -28,7 +28,6 @@ const currentSearch = $derived(page.url.search);
 
 const locale = $derived(getLocale());
 
-let userUuid = $state("");
 let rulesContent = $state("");
 let updatedAt = $state<string | null>(null);
 let configSpace = $state<SpaceRecord | null>(null);
@@ -51,6 +50,15 @@ function formatUpdatedAt(value: string | null) {
 	});
 }
 
+async function findConfigSpace() {
+	try {
+		return await sdk.spaces.getOwnedBySlug(CONFIG_SPACE_SLUG);
+	} catch (error) {
+		if (error instanceof HttpError && error.status === 404) return null;
+		throw error;
+	}
+}
+
 async function loadRulesPage() {
 	if (!(await ensureAuth({ redirectPath: `${currentPath}${currentSearch}` })))
 		return;
@@ -59,17 +67,13 @@ async function loadRulesPage() {
 	actionMessage = "";
 	actionError = false;
 	try {
-		await authStore.ensureLoaded();
-		userUuid = authStore.userUuid ?? "";
-		const [rules, spacesPage] = await Promise.all([
+		const [rules, space] = await Promise.all([
 			sdk.user.getRules(),
-			sdk.spaces.list({ filter: "mine", name: "config", limit: 1 }),
+			findConfigSpace(),
 		]);
 		rulesContent = rules.content;
 		updatedAt = rules.updatedAt;
-		configSpace = userUuid
-			? (spacesPage.items.find((space) => space.userUuid === userUuid) ?? null)
-			: null;
+		configSpace = space;
 		cacheSpaceRecordSoon(configSpace);
 	} catch (error) {
 		if (
@@ -94,6 +98,7 @@ async function createConfigSpace() {
 	try {
 		const result = await sdk.spaces.create({
 			name: "config",
+			slug: CONFIG_SPACE_SLUG,
 			description:
 				"Personal Cohub configuration. Edit AGENTS.md here, then create a Save to publish user rules.",
 		});

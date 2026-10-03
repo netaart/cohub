@@ -477,6 +477,13 @@
       "when": 1790757573563,
       "tag": "0067_board_v3",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1791031690129,
+      "tag": "0068_config_space_slug",
+      "breakpoints": true
     }
   ]
 }

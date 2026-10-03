@@ -298,6 +298,13 @@ export class SpacesApi {
     );
   }
 
+  getOwnedBySlug(slug: string, customFetch?: Fetch) {
+    return this.transport.request<SpaceRecord>(
+      `/api/me/spaces/by-slug/${encodeURIComponent(slug)}`,
+      { fetch: customFetch },
+    );
+  }
+
   create(
     input: CreateSpaceInput,
     headers?: Record<string, string>,

@@ -6,6 +6,9 @@ export type PublicIdentifierValidationResult =
   | { value: string; reason: null }
   | { value: null; reason: PublicIdentifierValidationReason };
 
+export const HOME_SPACE_SLUG = "home";
+export const CONFIG_SPACE_SLUG = "config";
+
 const USERNAME_PATTERN = /^(?!-)(?!.*--)[a-z0-9-]{1,39}(?<!-)$/;
 const SPACE_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,78}[a-z0-9])?$/;
 

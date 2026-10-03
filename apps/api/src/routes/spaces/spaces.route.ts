@@ -6,6 +6,7 @@ import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { fileWatcherStatusSchema, getDefaultSpaceModsForEnv, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
+  HOME_SPACE_SLUG,
   parseSpaceSlug,
   validatePublicIdentifierAssignment,
 } from "@cohub/protocol/public-identifiers";
@@ -362,7 +363,6 @@ const DEFAULT_SPACE_SANDBOX_AUTO_DESTROY: SpaceSandboxAutoDestroyPolicy = {
 const MIN_SPACE_SANDBOX_AUTO_DESTROY_TTL_SECONDS = 60;
 const MAX_SPACE_SANDBOX_AUTO_DESTROY_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SPACE_DESCRIPTION_LENGTH = 10_000;
-const HOME_SPACE_SLUG = "home";
 const HOME_SPACE_NAME = "Home";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1277,6 +1277,29 @@ router.get("/by-slug/:username/:slug", async (c) => {
   });
 });
 
+// ── GET /api/me/spaces/by-slug/:slug ───────────────────────────────────────
+
+export const meSpacesRouter = new Hono();
+
+meSpacesRouter.get("/spaces/by-slug/:slug", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  if (!(await hasPermission(user, "user.space.list", { spaceId: "" }))) return authzDenied(c);
+  const identity = asAccountIdentity(user);
+  if (!identity) return authzDenied(c);
+
+  const slug = parseSpaceSlug(c.req.param("slug"));
+  if (!slug) return c.json({ message: "space not found" }, 404);
+
+  const [space] = await db
+    .select()
+    .from(spaces)
+    .where(and(eq(spaces.userUuid, identity.uuid), eq(spaces.slug, slug)))
+    .limit(1);
+  if (!space) return c.json({ message: "space not found" }, 404);
+  return c.json(await buildSpaceResponse(c, space, user));
+});
+
 // ── PATCH /api/spaces/:id (rename / slug) ───────────────────────────────────
 
 router.patch("/:id", async (c) => {
@@ -1416,17 +1439,6 @@ router.post("/:id/checkpoints", async (c) => {
 
   const body = await c.req.json<{ description?: string }>().catch(() => null);
   const description = body?.description?.trim() || null;
-
-  if (space.name === "config") {
-    const duplicateConfigSpaces = await db
-      .select({ id: spaces.id })
-      .from(spaces)
-      .where(and(eq(spaces.userUuid, space.userUuid), eq(spaces.name, "config")))
-      .limit(2);
-    if (duplicateConfigSpaces.length > 1) {
-      return c.json({ message: "multiple config spaces found for this user" }, 409);
-    }
-  }
 
   const existingSave = await db
     .select({ id: taskRuns.id })
