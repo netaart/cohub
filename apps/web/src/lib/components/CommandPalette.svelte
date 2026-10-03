@@ -9,6 +9,7 @@ import {
 	Pin,
 	Plus,
 	Search,
+	Settings2,
 	Tag,
 	TerminalSquare,
 } from "lucide-svelte";
@@ -973,6 +974,7 @@ onMount(() => {
 			</div>
 
 			{#if isSpacePickerMode && !runMode}
+				<div class="space-filter-row">
 				<div class="space-filter-bar" role="tablist" aria-orientation="horizontal" aria-label={m.command_filter_spaces({}, { locale })}>
 					{#each [{ key: "recent", label: m.command_recent({}, { locale }) }, { key: "all", label: m.command_all({}, { locale }) }, { key: "mine", label: m.command_mine({}, { locale }) }, { key: "pinned", label: m.command_pinned({}, { locale }) }] as filter}
 						<button
@@ -988,6 +990,11 @@ onMount(() => {
 							onkeydown={(event) => handleSpaceFilterKeydown(event, filter.key as SpaceFilter)}
 						>{filter.label}</button>
 					{/each}
+				</div>
+				<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={closePalette}>
+					<Settings2 class="h-3.5 w-3.5" />
+					<span>{m.spaces_manage({}, { locale })}</span>
+				</a>
 				</div>
 			{/if}
 
@@ -1429,11 +1436,36 @@ onMount(() => {
 		font-size: 10px;
 	}
 
-	.space-filter-bar {
+	.space-filter-row {
 		display: flex;
-		gap: 2px;
+		align-items: center;
+		gap: 8px;
 		padding: 6px 8px;
 		border-bottom: 1px solid var(--border-subtle);
+	}
+
+	.space-filter-bar {
+		display: flex;
+		min-width: 0;
+		gap: 2px;
+	}
+
+	.space-manage-link {
+		display: inline-flex;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 4px;
+		margin-left: auto;
+		border-radius: 6px;
+		padding: 4px 8px;
+		color: var(--text-placeholder);
+		font-size: 11px;
+		transition: background-color 90ms, color 90ms;
+	}
+
+	.space-manage-link:hover {
+		background: var(--bg-hover);
+		color: var(--text-secondary);
 	}
 
 	.space-filter-btn {
@@ -1525,6 +1557,16 @@ onMount(() => {
 
 		.space-filter-btn {
 			min-height: 44px;
+		}
+
+		.space-manage-link {
+			min-width: 44px;
+			min-height: 44px;
+			justify-content: center;
+		}
+
+		.space-manage-link span {
+			display: none;
 		}
 
 		.command-type-mark {

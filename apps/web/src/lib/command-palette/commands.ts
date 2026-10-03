@@ -121,15 +121,8 @@ export function resolveLocalCommandItems(
 
 	// Space lens still surfaces New Space as a local action.
 	if (!isSpaceOnlyDefault(plan)) return [];
-	const commands = COMMANDS.filter(
-		(command) => command.id === "new-space" || command.id === "manage-spaces",
-	);
-	return commands.map((item) => ({
-		...item,
-		score: 1,
-		textScore: 1,
-		source: "default",
-	}));
+	const item = COMMANDS.find((command) => command.id === "new-space");
+	return item ? [{ ...item, score: 1, textScore: 1, source: "default" }] : [];
 }
 
 export function searchCommandItems(plan: CommandPaletteSearchPlan) {
@@ -137,9 +130,9 @@ export function searchCommandItems(plan: CommandPaletteSearchPlan) {
 	const query = plan.query.trim();
 	if (!query) {
 		// Keep the empty palette lean: only primary actions, not browse links.
-		return COMMANDS.filter((item) => item.id !== "open-changelog").map(
-			(item) => ({ ...item, source: "default" as const }),
-		);
+		return COMMANDS.filter(
+			(item) => item.id !== "open-changelog" && item.id !== "manage-spaces",
+		).map((item) => ({ ...item, source: "default" as const }));
 	}
 	const items: CommandPaletteItem[] = [];
 	for (const item of COMMANDS) {
