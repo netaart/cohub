@@ -1,5 +1,25 @@
 # @neta-art/cohub
 
+## 9.0.0
+
+### Major Changes
+
+- 9d2bc61: `spaces.list()` now returns a paginated page. `GET /api/spaces` returns `{ items, pageInfo }` instead of a bare array, and `spaces.list()` accepts `{ limit, cursor, filter, query, name, recentSpaces }` with `filter` one of `recent`, `all`, `mine`, `pinned`, or `archived`. The previous `list(fetch)` call shape still works, but the resolved value is now `SpaceListPage`, so callers that expected `SpaceRecord[]` must read `page.items`. Listing a very large account no longer ships every Space in one response.
+  
+  `spaces.list()` 现在返回分页结果。`GET /api/spaces` 返回 `{ items, pageInfo }`，不再是数组；`spaces.list()` 接受 `{ limit, cursor, filter, query, name, recentSpaces }`，`filter` 可取 `recent`、`all`、`mine`、`pinned`、`archived`。旧的 `list(fetch)` 调用形式仍可用，但返回值变为 `SpaceListPage`，原先期望 `SpaceRecord[]` 的调用方需要读取 `page.items`。Space 数量很大的账号不再在一次响应里返回全部数据。
+
+### Minor Changes
+
+- d94a259: Add `spaces.getOwnedBySlug(slug)` to resolve a Space owned by the current account by its slug, backed by `GET /api/me/spaces/by-slug/:slug`. It returns the `SpaceRecord` and rejects with a 404 `HttpError` when no owned Space has that slug.
+  
+  新增 `spaces.getOwnedBySlug(slug)`，按 slug 查询当前账号名下的 Space，对应接口为 `GET /api/me/spaces/by-slug/:slug`。查到时返回 `SpaceRecord`，查不到时抛出 404 `HttpError`。
+
+### Patch Changes
+
+- 67c8336: Expose `readSentTurns` and `SentTurnRef` so callers can read which Sessions a Turn prompted.
+  
+  新增 `readSentTurns` 与 `SentTurnRef` 导出，用于读取一个 Turn 派发过哪些会话。
+
 ## 8.24.0
 
 ### Minor Changes
