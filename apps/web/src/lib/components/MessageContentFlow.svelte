@@ -19,6 +19,7 @@ import {
 	tokenizeResourceMentionText,
 } from "$lib/mentions/resource";
 import { m } from "$lib/paraglide/messages.js";
+import type { SentTurnIndex } from "$lib/sent-turns";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type TextBlock = Extract<ContentBlock, { type: "text" }>;
@@ -40,6 +41,8 @@ type Props = {
 	onLoadToolCalls?: () => Promise<MessageToolCallsFile | null>;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 	onOpenUrl?: (href: string, event: MouseEvent) => void | Promise<void>;
+	sentTurns?: SentTurnIndex | null;
+	spaceId?: string | null;
 };
 
 type Segment =
@@ -61,6 +64,8 @@ const {
 	onLoadToolCalls,
 	onOpenFile,
 	onOpenUrl,
+	sentTurns = null,
+	spaceId = null,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -285,7 +290,7 @@ const segments = $derived.by(() => {
 			{:else if segment.type === 'image'}
 				<AttachmentBlocks blocks={segment.blocks} />
 			{:else if segment.type === 'tool' && showToolCalls}
-				<ToolCallList content={segment.blocks} streaming={isStreaming} defaultExpanded={defaultExpandToolCalls} {onLoadToolCalls} flush {onOpenFile} />
+				<ToolCallList content={segment.blocks} streaming={isStreaming} defaultExpanded={defaultExpandToolCalls} {onLoadToolCalls} flush {onOpenFile} {sentTurns} {spaceId} />
 			{/if}
 		</div>
 	{/each}

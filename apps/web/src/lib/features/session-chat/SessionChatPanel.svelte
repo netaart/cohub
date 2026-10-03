@@ -363,6 +363,8 @@ async function handleDraftDrop(event: DragEvent) {
 					}}
 					onOpenUrl={onOpenUrl}
 					modelsCatalog={host.modelsCatalog ?? undefined}
+					sentTurns={host.sentTurns}
+					spaceId={host.spaceId}
 				/>
 			{/key}
 		{/if}

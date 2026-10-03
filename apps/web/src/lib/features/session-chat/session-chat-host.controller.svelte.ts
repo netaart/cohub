@@ -25,6 +25,7 @@ import { tick, untrack } from "svelte";
 import { classifyAccessError } from "$lib/access/access-state";
 import type { SessionListForkRecord } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
+import type { SessionDetailSnapshot } from "$lib/cache/repositories/session-detail-repo";
 import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
 import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
 import { shouldRefreshAgentCatalogs } from "$lib/cache/space-fs-invalidation";
@@ -61,6 +62,11 @@ import {
 	uploadChatAttachmentImage,
 } from "$lib/public-asset-images";
 import { sdk } from "$lib/sdk";
+import {
+	applySentTurnTitles,
+	buildSentTurnIndex,
+	type SentTurnIndex,
+} from "$lib/sent-turns";
 import { mergeSessionRecord } from "$lib/session-record-merge";
 import { sortSessionsByRecentActivity } from "$lib/session-sort";
 import type { TimelineItem } from "$lib/session-tree";
@@ -87,6 +93,7 @@ import {
 	sessionComposerDraftKey,
 	writeSessionComposerDraftText,
 } from "$lib/stores/session-composer-drafts";
+import { getCachedSessionDetails } from "$lib/stores/session-detail-cache";
 import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
 import {
 	buildStreamingStoredIntermediateMessages,
@@ -300,6 +307,30 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		oldestCursor: undefined,
 	};
 	const EMPTY_TIMELINE: TimelineItem[] = [];
+	const EMPTY_TURNS: SessionTurnRecord[] = [];
+
+	/** One cache read for the whole fan-out; a miss stays an id, never a fetch. */
+	async function resolveSentTurnTitles(
+		index: SentTurnIndex,
+		space: string,
+	): Promise<SentTurnIndex> {
+		if (index.links.length === 0) return index;
+		const sessionIds = [...new Set(index.links.map((link) => link.sessionId))];
+		const cached: Record<string, SessionDetailSnapshot | undefined> =
+			await getCachedSessionDetails(space, sessionIds).catch(() => ({}));
+		if (Object.keys(cached).length === 0) return index;
+		const titles = new Map<string, string | null>();
+		for (const sessionId of sessionIds) {
+			const session = cached[sessionId]?.session;
+			titles.set(
+				sessionId,
+				session
+					? (session.title ?? session.latestMessageText)?.trim() || null
+					: null,
+			);
+		}
+		return applySentTurnTitles(index, titles);
+	}
 
 	const draftSessionState = $derived<SessionViewState | null>(
 		isDraftNewSessionRoute ? EMPTY_DRAFT_SESSION_STATE : null,
@@ -569,6 +600,43 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			? (turnIndexBySessionId[activeSessionId] ?? EMPTY_TURN_INDEX)
 			: EMPTY_TURN_INDEX,
 	);
+
+	const sentTurnsBase = $derived(
+		buildSentTurnIndex(activeSessionState?.turns ?? EMPTY_TURNS, spaceId),
+	);
+	/** Tagged with its Session so a late resolution cannot land on a newer one. */
+	let sentTurnsResolved = $state<{
+		sessionId: string;
+		spaceId: string;
+		index: SentTurnIndex;
+	} | null>(null);
+	const sentTurns = $derived(
+		sentTurnsResolved?.sessionId === activeSessionId &&
+			sentTurnsResolved.spaceId === spaceId
+			? sentTurnsResolved.index
+			: sentTurnsBase,
+	);
+	$effect(() => {
+		const base = sentTurnsBase;
+		const session = activeSessionId;
+		const space = spaceId;
+		if (!session || !space || base.links.length === 0) {
+			if (sentTurnsResolved !== null) sentTurnsResolved = null;
+			return;
+		}
+		let cancelled = false;
+		void resolveSentTurnTitles(base, space).then((resolved) => {
+			if (cancelled || resolved === base) return;
+			sentTurnsResolved = {
+				sessionId: session,
+				spaceId: space,
+				index: resolved,
+			};
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
 	const activeSessionLastTurnModel = $derived.by(() =>
 		resolveLastAgentTurnModel(
 			mergeComposerTurnSources(
@@ -4525,6 +4593,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		get timeline() {
 			return timeline;
+		},
+		get sentTurns() {
+			return sentTurns;
 		},
 		get activeSessionIsRunning() {
 			return activeSessionIsRunning;
