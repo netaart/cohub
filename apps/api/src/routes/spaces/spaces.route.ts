@@ -792,12 +792,15 @@ router.get("/", async (c) => {
   const recentSpaceAt = c.req.queries("recentSpaceAt") ?? [];
   const decoded = decodeSpacePageCursor(c.req.query("cursor"));
   if (decoded === false) return c.json({ message: "invalid cursor" }, 400);
-  const visits = recentSpaceIds.flatMap((id, index) => {
+  const visitedAt = new Map<string, number>();
+  recentSpaceIds.forEach((id, index) => {
     const timestamp = Date.parse(recentSpaceAt[index] ?? "");
-    return requireValidId(id) && Number.isFinite(timestamp)
-      ? [sql`(${id}::uuid, ${new Date(timestamp).toISOString()}::timestamptz)`]
-      : [];
-  }).slice(0, 10);
+    if (!requireValidId(id) || !Number.isFinite(timestamp)) return;
+    visitedAt.set(id, Math.max(visitedAt.get(id) ?? 0, timestamp));
+  });
+  const visits = [...visitedAt].slice(0, 10).map(([id, timestamp]) =>
+    sql`(${id}::uuid, ${new Date(timestamp).toISOString()}::timestamptz)`,
+  );
   const visitRows = visits.length ? sql`values ${sql.join(visits, sql`, `)}` : sql`select null::uuid, null::timestamptz where false`;
   const cursorPredicate = decoded ? sql`and (
     personal_activity_at < ${decoded.activityAt}::timestamptz
@@ -818,35 +821,37 @@ router.get("/", async (c) => {
     space_activity_at: Date | string; relation_rank: number; relation_owner: boolean;
   }>(sql`
     with visits(space_id, visited_at) as (${visitRows}),
+    turn_activity as (
+      select sess.space_id, max(t.created_at) personal_activity_at
+      from v2.session_turns t
+      join v2.space_sessions sess on sess.id = t.session_id
+      where t.user_uuid = ${identity.uuid}
+      group by sess.space_id
+    ),
     visible as materialized (
       select s.id, s.user_uuid, s.name, s.slug,
         nullif(left(regexp_replace(coalesce(s.description, ''), '\\s+', ' ', 'g'), 220), '') description,
         s.created_at, s.updated_at, s.last_activity_at,
         nullif(trim(coalesce(s.meta #>> '{publicProfile,avatarUrl}', '')), '') avatar_url,
-        greatest(coalesce(max(t.created_at), 'epoch'::timestamptz), coalesce(max(visits.visited_at), 'epoch'::timestamptz)) personal_activity_at,
+        greatest(coalesce(ta.personal_activity_at, 'epoch'::timestamptz), coalesce(visits.visited_at, 'epoch'::timestamptz)) personal_activity_at,
         coalesce(s.last_activity_at, s.updated_at, s.created_at) space_activity_at,
-        case when s.user_uuid = ${identity.uuid} then 0 when sm.user_id is not null then 1 else 2 end relation_rank,
+        case when s.user_uuid = ${identity.uuid} then 0 else 1 end relation_rank,
         (s.user_uuid = ${identity.uuid}) relation_owner,
         pin_assignment.id is not null is_pinned,
         archive_assignment.id is not null is_archived
       from v2.spaces s
       left join v2.space_members sm on sm.space_id = s.id and sm.user_id = ${identity.uuid}
       left join v2.user_profiles search_owner on search_owner.user_uuid = s.user_uuid
-      left join v2.space_sessions sess on sess.space_id = s.id
-      left join v2.session_turns t on t.session_id = sess.id and t.user_uuid = ${identity.uuid}
+      left join turn_activity ta on ta.space_id = s.id
       left join visits on visits.space_id = s.id
       left join v2.labels pin_label on pin_label.scope_type='user' and pin_label.scope_id=${identity.uuid} and pin_label.system_key='user:pinned'
       left join v2.label_assignments pin_assignment on pin_assignment.label_id=pin_label.id and pin_assignment.scope_type='user' and pin_assignment.scope_id=${identity.uuid} and pin_assignment.resource_type='space' and pin_assignment.resource_ref=s.id::text
       left join v2.labels archive_label on archive_label.scope_type='user' and archive_label.scope_id=${identity.uuid} and archive_label.system_key='user:archived'
       left join v2.label_assignments archive_assignment on archive_assignment.label_id=archive_label.id and archive_assignment.scope_type='user' and archive_assignment.scope_id=${identity.uuid} and archive_assignment.resource_type='space' and archive_assignment.resource_ref=s.id::text
-      where (s.user_uuid=${identity.uuid} or sm.user_id=${identity.uuid} or exists (
-        select 1 from v2.access_policies ap where ap.resource_type='space' and ap.resource_id=s.id
-          and (ap.signed_in_user_role is not null or ap.anonymous_user_role is not null)
-      ))
+      where (s.user_uuid=${identity.uuid} or sm.user_id is not null)
         and (archive_assignment.id is null or ${filter === "archived"})
         and (${exactName} = '' or s.name = ${exactName})
         and (${query} = '' or s.name ilike '%' || ${query} || '%' or coalesce(s.description,'') ilike '%' || ${query} || '%' or coalesce(s.slug,'') ilike '%' || ${query} || '%' or coalesce(search_owner.display_name,'') ilike '%' || ${query} || '%' or coalesce(search_owner.username,'') ilike '%' || ${query} || '%')
-      group by s.id, pin_assignment.id, archive_assignment.id
     )
     select visible.*, up.display_name owner_display_name, up.username owner_username, up.avatar_url owner_avatar_url
     from visible left join v2.user_profiles up on up.user_uuid=visible.user_uuid
@@ -868,7 +873,7 @@ router.get("/", async (c) => {
     publicProfile: { avatarUrl: normalizePublicAvatarUrl(row.avatar_url) },
     ownerProfile: { userUuid: row.user_uuid, username: row.owner_username, displayName: row.owner_display_name, avatarUrl: normalizePublicAvatarUrl(row.owner_avatar_url) },
     sandboxStatus: sandboxBySpace.get(row.id) ?? null, isPinned: row.is_pinned, isArchived: row.is_archived,
-    relation: row.relation_owner ? "owner" : row.relation_rank === 1 ? "member" : "public",
+    relation: row.relation_owner ? "owner" : "member",
   }));
   return c.json({ items, pageInfo: { hasMore, nextCursor } });
 });
