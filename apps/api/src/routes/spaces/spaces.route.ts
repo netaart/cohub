@@ -42,6 +42,7 @@ import {
 } from "../../space-bootstrap-source.js";
 import { getSpaceSandboxBySpaceId, markSandboxSpecPendingRestart, recoverSpaceSandbox, resizeSpaceSandboxToSpec } from "../../space-sandboxes.js";
 import { createGenerationSessionExecution, GenerationSessionExecutionError } from "../../generation-session-execution.js";
+import { recordSentTurn } from "../../sent-turns.js";
 import {
   createInitialSpaceSession,
   getSpaceById,
@@ -76,6 +77,7 @@ import { submitSessionPrompt } from "../../session-prompts.js";
 import { getRuntimeRegistration, getSessionRuntimeRecovery, confirmRuntimeStopped } from "../../runtime.js";
 import runtimeArchivesRouter from "./runtime-archives.route.js";
 import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError, resolveSessionTurnOrigin } from "@cohub/core/sessions";
+import type { SessionTurnOrigin } from "@cohub/protocol/model";
 import { delegatedPromptAuthFromAppSession, promptAuthContextFromAppSession } from "../../prompt-auth-context.js";
 import { buildSessionTurnResponse } from "../../session-turn-response.js";
 import { getSessionTurnById, hydrateTurnAuthorProfiles } from "../../session-turns.js";
@@ -117,6 +119,30 @@ function getScheduledPromptAuthContext(c: Context, spaceId: string, actorUserId:
 async function buildSpacePromptTurnResponse(session: SpaceRouteSessionRecord | null, turnId: string) {
   const response = session ? await buildSessionTurnResponse(session, turnId) : null;
   return response ? { mode: "immediate" as const, ...response } : null;
+}
+
+/**
+ * Mirrors a cross-Session prompt onto the caller Turn. Scheduled prompts are
+ * skipped: their caller Turn is a long-finished scheduling request, re-prompted
+ * on every run.
+ */
+async function recordSentTurnFromOrigin(
+  origin: SessionTurnOrigin | null,
+  childSessionId: string,
+  childTurnId: string,
+) {
+  if (origin?.kind !== "prompt") return;
+  await recordSentTurn({
+    callerSessionId: origin.sessionId,
+    callerTurnId: origin.turnId,
+    ref: { sessionId: childSessionId, turnId: childTurnId, kind: origin.kind },
+  }).catch((error) => {
+    logger.warn("[SentTurns] failed to record fan-out on caller turn", {
+      callerTurnId: origin.turnId,
+      childTurnId,
+      error,
+    });
+  });
 }
 
 type SpacePromptSchedule =
@@ -2064,6 +2090,7 @@ router.post("/:id/prompt", async (c) => {
         : {});
       const response = await buildSpacePromptTurnResponse(await getSpaceSessionById(sessionId), turnId);
       if (!response) return c.json({ message: "turn not found" }, 500);
+      await recordSentTurnFromOrigin(origin, sessionId, turnId);
       return c.json(response);
     } catch (error) {
       // If we created the session for this request, surface its id so clients can retry

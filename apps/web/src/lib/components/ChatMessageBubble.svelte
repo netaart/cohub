@@ -2,6 +2,7 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import {
 	collectToolMetrics,
+	readSessionTurnOrigin,
 	readTurnMetrics,
 	readTurnStats,
 	requestMetricSchema,
@@ -41,6 +42,7 @@ import {
 	type ModelCatalogItem,
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import type { SentTurnIndex } from "$lib/sent-turns";
 import type { ChatMessage } from "$lib/session-tree";
 import {
 	formatCompactAbsoluteTime,
@@ -59,6 +61,8 @@ type Props = {
 	onForkTurn?: () => void;
 	forkDisabled?: boolean;
 	forking?: boolean;
+	sentTurns?: SentTurnIndex | null;
+	spaceId?: string | null;
 };
 
 const {
@@ -72,6 +76,8 @@ const {
 	onForkTurn,
 	forkDisabled = false,
 	forking = false,
+	sentTurns = null,
+	spaceId = null,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -178,6 +184,11 @@ const backgroundTaskDetail = $derived(
 	backgroundTaskRunId
 		? m.chat_bg_bash_task_id({ id: backgroundTaskRunId }, { locale })
 		: m.chat_bg_bash_task({}, { locale }),
+);
+
+/** Set when another Session prompted this one; the caller's name is not stored. */
+const sentBy = $derived(
+	message.role === "user" ? readSessionTurnOrigin(turnMeta) : null,
 );
 
 const messageContainerClass = $derived(
@@ -586,6 +597,8 @@ function handleCopy() {
         onLoadToolCalls={message.toolCallsLoader ?? undefined}
         {onOpenFile}
         {onOpenUrl}
+        {sentTurns}
+        {spaceId}
       />
 
       {#if assistantErrorMessage}
@@ -630,6 +643,18 @@ function handleCopy() {
         {/if}
 
         {#if message.role === 'user'}
+          {#if sentBy}
+            <span
+              class="inline-flex min-w-0 shrink items-center gap-1 text-text-placeholder/70"
+              title={m.sent_by_tool({}, { locale })}
+            >
+              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/50"
+              ></span>
+              <span class="min-w-0 truncate font-medium"
+                >{m.sent_by_unknown({}, { locale })}</span
+              >
+            </span>
+          {/if}
           {#if isBackgroundTaskUserMessage}
             <span class="inline-flex min-w-0 items-center gap-1.5 cursor-default text-text-placeholder/70" title={backgroundTaskDetail}>
               <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-text-placeholder/55"></span>
