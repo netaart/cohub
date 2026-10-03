@@ -88,6 +88,8 @@ export {
 } from "@cohub/protocol/provenance";
 export { normalizeSessionTurnOrigin, readSessionTurnOrigin } from "@cohub/protocol/model";
 export type { SessionTurnOrigin, SessionTurnOriginKind } from "@cohub/protocol/model";
+export { readSentTurns } from "@cohub/protocol/model";
+export type { SentTurnRef } from "@cohub/protocol/model";
 export type { RequestSource, RequestSourceVia } from "@cohub/protocol/provenance";
 export {
   GenerationPolicyError,

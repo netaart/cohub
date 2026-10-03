@@ -2,6 +2,7 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import {
 	collectToolMetrics,
+	readSessionTurnOrigin,
 	readTurnMetrics,
 	readTurnStats,
 	requestMetricSchema,
@@ -41,6 +42,7 @@ import {
 	type ModelCatalogItem,
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import type { SentTurnIndex } from "$lib/sent-turns";
 import type { ChatMessage } from "$lib/session-tree";
 import {
 	formatCompactAbsoluteTime,
@@ -59,6 +61,8 @@ type Props = {
 	onForkTurn?: () => void;
 	forkDisabled?: boolean;
 	forking?: boolean;
+	sentTurns?: SentTurnIndex | null;
+	spaceId?: string | null;
 };
 
 const {
@@ -72,6 +76,8 @@ const {
 	onForkTurn,
 	forkDisabled = false,
 	forking = false,
+	sentTurns = null,
+	spaceId = null,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -180,14 +186,19 @@ const backgroundTaskDetail = $derived(
 		: m.chat_bg_bash_task({}, { locale }),
 );
 
+/** Set when another Session prompted this one; the caller's name is not stored. */
+const sentBy = $derived(
+	message.role === "user" ? readSessionTurnOrigin(turnMeta) : null,
+);
+
 const messageContainerClass = $derived(
 	message.role === "user"
-		? "ml-auto max-w-[var(--chat-user-message-max-width)]"
-		: "",
+		? "ml-auto w-fit max-w-[var(--chat-user-message-max-width)]"
+		: "w-full",
 );
 
 const messageBubbleClass = $derived.by(() => {
-	const base = "px-2 py-2 text-[14px] leading-[1.7]";
+	const base = "px-[var(--chat-msg-inset)] py-2 text-[14px] leading-[1.7]";
 	if (message.role === "user") {
 		if (isCancelledBeforeDispatch)
 			return `${base} rounded-xl rounded-br-md bg-bg-hover/60 text-text-tertiary`;
@@ -571,9 +582,8 @@ function handleCopy() {
     {onOpenUrl}
   />
 {:else}
-  <div class={`w-full ${messageContainerClass}`}>
+  <div class={`min-w-0 ${messageContainerClass}`}>
     <div class={messageBubbleClass}>
-
       <MessageContentFlow
         content={message.content?.length ? message.content : [{ type: 'text', text: message.text }]}
         {isUserMessage}
@@ -587,6 +597,8 @@ function handleCopy() {
         onLoadToolCalls={message.toolCallsLoader ?? undefined}
         {onOpenFile}
         {onOpenUrl}
+        {sentTurns}
+        {spaceId}
       />
 
       {#if assistantErrorMessage}
@@ -595,12 +607,11 @@ function handleCopy() {
           <div class="mt-1">{assistantErrorMessage}</div>
         </div>
       {/if}
-
     </div>
 
     {#if (message.role === 'assistant' && (message.meta?.model || hasUsage || hasDuration || timeDisplay || harnessLabel)) || (message.role === 'user' && timeDisplay)}
       <!-- Meta bar: copy | identity/model | tokens | time -->
-      <div class="mt-1 flex items-center gap-1 px-2 text-[11px] text-text-placeholder/50 select-none">
+      <div class="mt-1 flex items-center gap-1 px-[var(--chat-msg-inset)] text-[11px] text-text-placeholder/50 select-none">
         <!-- Copy button -->
         <button
           type="button"
@@ -632,6 +643,18 @@ function handleCopy() {
         {/if}
 
         {#if message.role === 'user'}
+          {#if sentBy}
+            <span
+              class="inline-flex min-w-0 shrink items-center gap-1 text-text-placeholder/70"
+              title={m.sent_by_tool({}, { locale })}
+            >
+              <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/50"
+              ></span>
+              <span class="min-w-0 truncate font-medium"
+                >{m.sent_by_unknown({}, { locale })}</span
+              >
+            </span>
+          {/if}
           {#if isBackgroundTaskUserMessage}
             <span class="inline-flex min-w-0 items-center gap-1.5 cursor-default text-text-placeholder/70" title={backgroundTaskDetail}>
               <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-text-placeholder/55"></span>

@@ -9,6 +9,7 @@ import {
 	getAuthSessionSnapshot,
 	getAuthToken,
 	getCurrentIdTokenClaims,
+	getHostSessionIdentity,
 	hasRecoverableAuthSession,
 	setSessionHint,
 } from "$lib/auth";
@@ -150,6 +151,11 @@ class AuthStore {
 	_userUuid = $state<string | null>(null);
 	profile = $state<UserProfile | null>(null);
 	email = $state<string | null>(null);
+	/**
+	 * Cache-partition subject reported by a native host, used only when ID token
+	 * claims are unavailable. Null in a browser, where `claims.sub` covers it.
+	 */
+	hostSubjectKey = $state<string | null>(null);
 
 	// Shared promise for in-flight ensureLoaded calls so concurrent callers all wait
 	private _loadPromise: Promise<void> | null = null;
@@ -165,6 +171,11 @@ class AuthStore {
 		this.loading = true;
 		this._loadPromise = (async () => {
 			try {
+				// Resolve the host identity before any session restore: the cache
+				// partition key is read synchronously during restore, and a hosted
+				// surface has no ID token claims to fall back on.
+				this.hostSubjectKey =
+					(await getHostSessionIdentity())?.subjectKey ?? null;
 				const applySession = (restored: RestoredAuthSession) => {
 					this.isAuthenticated = restored.isAuthenticated;
 					this.claims = restored.claims;
@@ -208,6 +219,7 @@ class AuthStore {
 		clearCachedMeProfile(this.claims?.sub);
 		setSessionHint(false);
 		this.claims = null;
+		this.hostSubjectKey = null;
 		this.isAuthenticated = false;
 		this.loaded = false;
 		this.loading = false;

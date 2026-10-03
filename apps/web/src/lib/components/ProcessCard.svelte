@@ -7,6 +7,8 @@ import type {
 } from "@cohub/protocol/model";
 import { ChevronDown, ChevronRight, Loader2, RotateCw } from "lucide-svelte";
 import IntermediateMessageBubble from "$lib/components/IntermediateMessageBubble.svelte";
+import SentTurnsChip from "$lib/components/SentTurnsChip.svelte";
+import SentTurnsList from "$lib/components/SentTurnsList.svelte";
 import {
 	formatDurationDetail,
 	formatDurationMs,
@@ -23,6 +25,11 @@ import {
 import { getLocale } from "$lib/i18n/locale.svelte";
 import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import {
+	EMPTY_SENT_TURNS,
+	type SentTurnIndex,
+	sentTurnsForTurn,
+} from "$lib/sent-turns";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type IntermediateLoadState =
@@ -38,6 +45,8 @@ type Props = {
 	intermediateMessages?: StoredIntermediateMessage[] | null;
 	streaming?: boolean;
 	modelsCatalog?: ModelCatalogItem[];
+	sentTurns?: SentTurnIndex | null;
+	spaceId?: string | null;
 	onLoadIntermediate?: (
 		turn: SessionTurnRecord,
 	) => Promise<StoredIntermediateMessage[]>;
@@ -58,6 +67,8 @@ const {
 	intermediateMessages: liveIntermediateMessages = null,
 	streaming = false,
 	modelsCatalog,
+	sentTurns = null,
+	spaceId = null,
 	onLoadIntermediate,
 	onRequestIntermediateSync,
 	onLoadToolCalls,
@@ -368,35 +379,48 @@ const summaryLabel = $derived(
 			? m.process_running({}, { locale })
 			: m.process_title({}, { locale })),
 );
+
+const sentLinks = $derived(
+	sentTurnsForTurn(sentTurns ?? EMPTY_SENT_TURNS, turn),
+);
 </script>
 
 {#if !expanded}
-	<button type="button" class="flex w-full items-center gap-2 px-2 py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md disabled:cursor-wait disabled:opacity-75" disabled={isLoading} onclick={() => void toggle()} title={usageTitle || undefined}>
+	<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md disabled:cursor-wait disabled:opacity-75" disabled={isLoading} onclick={() => void toggle()} title={usageTitle || undefined}>
 		{#if isLoading}<Loader2 class="w-3.5 h-3.5 text-text-tertiary shrink-0 animate-spin" />{:else}<ChevronRight class="w-3.5 h-3.5 text-text-tertiary shrink-0" />{/if}
 		<span class="text-[13px] text-text-tertiary tabular-nums">{summaryLabel}</span>
+		{#if sentLinks.length > 0}
+			<SentTurnsChip count={sentLinks.length} />
+		{/if}
 	</button>
 {:else}
 	<div class="flex flex-col gap-0">
-		<button type="button" class="flex w-full items-center gap-2 px-2 py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md" onclick={() => void toggle()} title={usageTitle || undefined}>
+		<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md" onclick={() => void toggle()} title={usageTitle || undefined}>
 			<ChevronDown class="w-3.5 h-3.5 text-text-tertiary shrink-0" />
 			<span class="text-[13px] text-text-tertiary tabular-nums">{summaryLabel}</span>
+			{#if sentLinks.length > 0}
+				<SentTurnsChip count={sentLinks.length} />
+			{/if}
 		</button>
+		{#if sentLinks.length > 0 && spaceId}
+			<SentTurnsList links={sentLinks} {spaceId} />
+		{/if}
 		<div class="flex flex-col gap-2">
 			{#if loadError}
-				<button type="button" class="mx-2 rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 text-left text-[12px] text-status-error hover:bg-status-error/10" onclick={() => void ensureLoaded()}>
+				<button type="button" class="mx-[var(--chat-msg-inset)] rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 text-left text-[12px] text-status-error hover:bg-status-error/10" onclick={() => void ensureLoaded()}>
 					{loadError} · {m.process_click_retry({}, { locale })}
 				</button>
 			{:else if isSyncing && expandedMessages.length === 0}
-				<button type="button" class="mx-2 flex items-center gap-2 rounded-md border border-border-subtle/80 bg-bg-surface px-3 py-2 text-left text-[12px] text-text-tertiary hover:bg-bg-hover/60" onclick={() => void requestIntermediateSync(true)}>
+				<button type="button" class="mx-[var(--chat-msg-inset)] flex items-center gap-2 rounded-md border border-border-subtle/80 bg-bg-surface px-3 py-2 text-left text-[12px] text-text-tertiary hover:bg-bg-hover/60" onclick={() => void requestIntermediateSync(true)}>
 					<RotateCw class="h-3.5 w-3.5 shrink-0" />
 					<span>{m.process_syncing_steps({}, { locale })}</span>
 				</button>
 			{/if}
 			{#each expandedMessages as msg (msg.id)}
-				<IntermediateMessageBubble message={msg} streaming={streaming} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: msg }) : undefined} {onOpenFile} {onOpenUrl} />
+				<IntermediateMessageBubble message={msg} streaming={streaming} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: msg }) : undefined} {onOpenFile} {onOpenUrl} {sentTurns} {spaceId} />
 			{/each}
 		</div>
-		<button type="button" class="flex items-center gap-1.5 px-2 py-1.5 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer text-text-placeholder hover:text-text-tertiary rounded-md self-start" onclick={() => void toggle()}>
+		<button type="button" class="flex items-center gap-1.5 px-[var(--chat-msg-inset)] py-1.5 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer text-text-placeholder hover:text-text-tertiary rounded-md self-start" onclick={() => void toggle()}>
 			<ChevronRight class="w-3 h-3" />
 			<span class="text-[11px]">{m.common_collapse({}, { locale })}</span>
 		</button>

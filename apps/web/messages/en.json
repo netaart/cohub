@@ -2097,5 +2097,11 @@
 	"stats_inherited": "Inherited history",
 	"stats_session_auxiliary": "Session assistance (title): {count} tokens, separate from turns.",
 	"stats_loading": "Loading statistics…",
-	"stats_unavailable": "Could not refresh statistics."
+	"stats_unavailable": "Could not refresh statistics.",
+	"sent_by_unknown": "Sent by another chat",
+	"sent_count_one": "{count} chat sent",
+	"sent_count_many": "{count} chats sent",
+	"sent_open_session": "Open chat",
+	"tool_to": "to",
+	"sent_by_tool": "Sent by a tool call in another chat"
 }

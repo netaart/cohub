@@ -51,7 +51,7 @@ import { page } from "$app/state";
 import { floatNear } from "$lib/actions/portal";
 import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
 import { sortAppsByRecentUpdate } from "$lib/app-sort";
-import { logtoClient } from "$lib/auth";
+import { signOut } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
 import { getCacheUserKey } from "$lib/cache/keys";
@@ -2980,11 +2980,7 @@ async function handleLogout() {
 	if (userUuid) clearRecentSpace(userUuid);
 	if (userUuid) clearGrantedAppScopes(userUuid);
 	authStore.reset();
-	try {
-		await logtoClient.signOut(`${window.location.origin}/`);
-	} catch (error) {
-		console.error("[sidebar] Failed to sign out", error);
-	}
+	await signOut();
 }
 
 function saveDebugLog() {

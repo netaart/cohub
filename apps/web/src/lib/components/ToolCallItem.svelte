@@ -15,6 +15,8 @@ import {
 } from "$lib/format-duration";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import type { SentTurnLink } from "$lib/sent-turns";
+import { buildSpaceSessionRoute } from "$lib/space-routes";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type Props = {
@@ -26,6 +28,9 @@ type Props = {
 	showDuration?: boolean;
 	onExpand?: () => void | Promise<void>;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
+	/** The Session this call prompted, when it is inside the loaded window. */
+	sentTurn?: SentTurnLink | null;
+	spaceId?: string | null;
 };
 
 const {
@@ -37,6 +42,8 @@ const {
 	showDuration = true,
 	onExpand,
 	onOpenFile,
+	sentTurn = null,
+	spaceId = null,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -117,6 +124,14 @@ const statusLabel = $derived(
 );
 const inputSummary = $derived(summarizeToolInput(tool.name, tool.input));
 const detailIdPrefix = $derived(`tool-call-${sanitizeToolDomId(tool.id)}`);
+const sentTurnHref = $derived(
+	sentTurn && spaceId
+		? buildSpaceSessionRoute(spaceId, sentTurn.sessionId)
+		: null,
+);
+const sentTurnLabel = $derived(
+	sentTurn ? (sentTurn.title ?? sentTurn.sessionId.slice(0, 8)) : "",
+);
 
 $effect(() => {
 	if (
@@ -145,7 +160,7 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 <div class="group/tool rounded-md">
 	<button
 		type="button"
-		class={`relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 pl-0 pr-1 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35 ${isRunning ? 'tool-call-running' : ''}`}
+		class={`relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 px-0 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35 ${isRunning ? 'tool-call-running' : ''}`}
 		onclick={toggle}
 	>
 		<span class="h-1.5 w-1.5 shrink-0 rounded-full transition-[background-color,box-shadow,opacity,transform] duration-200 {statusDotMap[tool.status]} {isRunning ? 'tool-call-dot' : ''}"></span>
@@ -207,6 +222,12 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2">
 							<div class="pt-[3px] font-mono text-[10px] uppercase leading-none tracking-wide text-text-placeholder select-none">{m.tool_out({}, { locale })}</div>
 							<div class="text-[12px] leading-snug text-text-placeholder">{runningPhase === 'drafting' ? m.tool_receiving_call({}, { locale }) : m.tool_running_verb({ verb: runningVerb }, { locale })}</div>
+						</div>
+					{/if}
+					{#if sentTurnHref}
+						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2 max-sm:grid-cols-[1.25rem_minmax(0,1fr)] max-sm:gap-1.5">
+							<div class="pt-[3px] font-mono text-[10px] uppercase leading-none tracking-wide text-text-placeholder select-none">{m.tool_to({}, { locale })}</div>
+							<a href={sentTurnHref} class="min-w-0 truncate text-[12px] leading-snug text-text-secondary underline-offset-2 transition-colors hover:text-text-primary hover:underline hover:decoration-brand/35" title={m.sent_open_session({}, { locale })}>{sentTurnLabel}</a>
 						</div>
 					{/if}
 				</div>

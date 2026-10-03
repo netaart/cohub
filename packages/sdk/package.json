@@ -48,6 +48,10 @@
         "types": "./dist/space-picker.d.ts",
         "import": "./dist/space-picker.js"
       },
+      "./host-bridge": {
+        "types": "./dist/host-bridge.d.ts",
+        "import": "./dist/host-bridge.js"
+      },
       "./media": {
         "types": "./dist/media.d.ts",
         "import": "./dist/media.js"
@@ -99,6 +103,10 @@
     "./space-picker": {
       "types": "./src/space-picker.ts",
       "import": "./src/space-picker.ts"
+    },
+    "./host-bridge": {
+      "types": "./src/host-bridge.ts",
+      "import": "./src/host-bridge.ts"
     },
     "./media": {
       "types": "./src/media.ts",

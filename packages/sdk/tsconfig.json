@@ -19,6 +19,8 @@
       "@cohub/protocol/generation": ["../protocol/src/generation/index.ts"],
       "@cohub/protocol/ports": ["../protocol/src/ports/index.ts"],
       "@cohub/protocol/provenance": ["../protocol/src/provenance.ts"],
+      "@cohub/protocol/navigation": ["../protocol/src/navigation.ts"],
+      "@cohub/protocol/host-bridge": ["../protocol/src/host-bridge.ts"],
       "@cohub/protocol/board-model": ["../protocol/src/board-model.ts"],
       "@cohub/protocol/board-layout": ["../protocol/src/board-layout.ts"],
       "@cohub/protocol/board-patch": ["../protocol/src/board-patch.ts"],

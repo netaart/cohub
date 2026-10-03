@@ -131,6 +131,10 @@
       "types": "./dist/navigation.d.ts",
       "default": "./dist/navigation.js"
     },
+    "./host-bridge": {
+      "types": "./dist/host-bridge.d.ts",
+      "default": "./dist/host-bridge.js"
+    },
     "./public-identifiers": {
       "types": "./dist/public-identifiers.d.ts",
       "default": "./dist/public-identifiers.js"

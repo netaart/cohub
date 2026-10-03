@@ -13,6 +13,7 @@ import ToolExecutionCard from "$lib/components/ToolExecutionCard.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { getModelDisplayName, type ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import type { SentTurnIndex } from "$lib/sent-turns";
 import type { ChatMessage, TimelineItem } from "$lib/session-tree";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
@@ -28,6 +29,9 @@ type Props = {
 	/** Whether older turns are currently being loaded (scroll-up pagination) */
 	loadingOlder?: boolean;
 	modelsCatalog?: ModelCatalogItem[];
+	/** Caller-side fan-out, shared by the process card and tool-call rows. */
+	sentTurns?: SentTurnIndex | null;
+	spaceId?: string | null;
 	onMarkdownRenderStart?: (message: ChatMessage) => void;
 	onMarkdownRendered?: (message: ChatMessage) => void;
 	onLoadIntermediate?: (
@@ -55,6 +59,8 @@ let {
 	loading = false,
 	loadingOlder = false,
 	modelsCatalog,
+	sentTurns = null,
+	spaceId = null,
 	onMarkdownRenderStart,
 	onMarkdownRendered,
 	onLoadIntermediate,
@@ -189,7 +195,7 @@ $effect(() => {
 	data-session-id={sessionId ?? undefined}
 	class="chat-timeline-scroll relative flex-1 min-h-0 overflow-y-auto bg-bg-content px-4 sm:px-6"
 >
-	<div class={`mx-auto max-w-4xl flex flex-col [&>*]:mt-2 pt-6 pb-6`}>
+	<div class={`mx-auto max-w-[var(--chat-content-max-width)] flex flex-col [&>*]:mt-2 pt-6 pb-6`}>
 		{#if loading && timeline.length === 0}
 			<div class="flex min-h-[42vh] items-center justify-center gap-2 text-[12px] text-text-tertiary">
 				<Loader2 class="h-4 w-4 animate-spin" aria-label={m.chat_loading_turns({}, { locale })} />
@@ -229,7 +235,7 @@ $effect(() => {
 							forking={forkingTurnId === forkTurn?.id}
 					/>
 				{:else if item.kind === 'process' && item.turn}
-						<ProcessCard turn={item.turn} summary={item.summary} intermediateMessages={item.intermediateMessages} streaming={item.streaming} {modelsCatalog} {onLoadIntermediate} {onRequestIntermediateSync} {onLoadToolCalls} {onOpenFile} {onOpenUrl} />
+						<ProcessCard turn={item.turn} summary={item.summary} intermediateMessages={item.intermediateMessages} streaming={item.streaming} {modelsCatalog} {onLoadIntermediate} {onRequestIntermediateSync} {onLoadToolCalls} {onOpenFile} {onOpenUrl} {sentTurns} {spaceId} />
 				{:else if item.kind === 'turn_footer'}
 					{@const modelName = getModelDisplayName(modelsCatalog, {
 						provider: item.runtimeProvider,
@@ -243,11 +249,13 @@ $effect(() => {
 						: item.phase === 'starting_generation'
 							? m.chat_starting_generation({}, { locale })
 							: m.chat_starting_agent({}, { locale })}
-					<div class="px-2 py-1">
+					<div class="py-1">
 						<GenerationRuntimeStatusRow label={footerLabel} compact />
 					</div>
 				{:else if item.kind === 'tool'}
-					<ToolExecutionCard tool={item.tool} {onOpenFile} />
+					<div class="px-[var(--chat-msg-inset)]">
+						<ToolExecutionCard tool={item.tool} {onOpenFile} />
+					</div>
 				{:else if item.kind === 'compact'}
 					<CompactionDivider turn={item.turn} />
 				{/if}
