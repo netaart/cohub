@@ -11,6 +11,8 @@ import type { SessionManager } from "./local-session-manager.js";
 import type { CohubModel, CohubModelRegistry } from "./model-registry.js";
 import { normalizeThinkingLevel, resolveInitialThinkingLevel, resolveThinkingLevelForModel } from "./thinking-level.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "./pi-models-adapter.js";
+import { isUrlMarkerImage, restoreRemoteImageUrls, urlToPiImage } from "@cohub/model-runtime/image-content";
+import { clearRemoteImageCache, prepareRemoteImagesForModel } from "./image-transport.js";
 import { buildCohubSystemPrompt } from "./system-prompt-builder.js";
 import { recordLlmUsage, startLlmRoundSpan, getAgentTracer } from "@cohub/infra/tracing/agent";
 import { getCurrentToolExecutionContext, runWithToolExecutionContext, type ToolExecutionContext } from "../tool-context.js";
@@ -47,7 +49,7 @@ export type CohubAgentSession = {
   setModel(model: Model<Api>): Promise<void>;
   configureRuntimeIdentity(input: { userId?: string | null; spaceOwnerUserId?: string | null; modelRegistry: CohubModelRegistry; imageToTextConfig?: ImageToTextConfig | null; requestedModel?: { provider: string; id: string }; requestedThinkingLevel?: string | null }): Promise<void>;
   configureTools(tools: ToolLike[]): Promise<void>;
-  reload(): Promise<void>;
+  reload(messages?: AgentMessage[]): Promise<void>;
   abort(): Promise<void>;
   dispose(): void;
   subscribe(listener: (event: CohubAgentSessionEvent) => void | Promise<void>): () => void;
@@ -257,7 +259,8 @@ const SUPPORTED_LLM_IMAGE_MIME_TYPES = new Set([
 ]);
 
 function isSupportedLlmImageMimeType(mimeType: string | null | undefined): boolean {
-  return mimeType != null && SUPPORTED_LLM_IMAGE_MIME_TYPES.has(mimeType);
+  // Marker images carry a remote URL, not bytes; `onPayload` swaps them back before the request.
+  return mimeType != null && (SUPPORTED_LLM_IMAGE_MIME_TYPES.has(mimeType) || isUrlMarkerImage(mimeType));
 }
 
 function estimateLlmPayloadBytes(value: unknown): number {
@@ -350,6 +353,12 @@ function toLlmImageContent(block: Record<string, unknown>): ImageContent | null 
   const source = block.source && typeof block.source === "object" && !Array.isArray(block.source)
     ? block.source as Record<string, unknown>
     : null;
+
+  // A remote URL the normalizer cleared for passthrough: carry the URL itself rather than bytes.
+  // `onPayload` restores it to the provider-native remote form at the last hop.
+  if (source?.type === "url" && typeof source.url === "string" && source.url.trim()) {
+    return urlToPiImage(source.url);
+  }
 
   if (source?.type !== "base64" || typeof source.data !== "string" || !source.data.trim()) {
     return null;
@@ -616,12 +625,14 @@ function createStreamFn(getRuntime: () => StreamRuntime, shouldOmit: (message: A
           executionTurnId: toolCtx?.turnId,
           signal: options?.signal,
         }).catch((error) => {
+          options?.signal?.throwIfAborted();
           logger.warn("[ImageToText] context preparation failed; continuing with original images", error);
           return { context: ctx, calls: [] };
         });
+        const imageContext = await prepareRemoteImagesForModel(prepared.context, model, { cacheKey: runtime.sessionManager, signal: options?.signal, userId: runtime.userId });
         const requestContext: Context = {
-          ...prepared.context,
-          messages: applyLlmRequestSizeGuard(structuredClone(prepared.context.messages)) as Context["messages"],
+          ...imageContext,
+          messages: applyLlmRequestSizeGuard(structuredClone(imageContext.messages)) as Context["messages"],
         };
         const streamHeaders = mergeHeaders(
           runtime.modelRegistry.getHeaders(model.provider, model.id),
@@ -660,6 +671,9 @@ function createStreamFn(getRuntime: () => StreamRuntime, shouldOmit: (message: A
                 }),
               })
             : streamHeaders,
+          // pi-ai models images as base64 only. Rewrite URL markers back to remote URLs so the
+          // provider fetches them. Byte-only APIs were resolved before pi serialized the context.
+          onPayload: async (payload: unknown) => restoreRemoteImageUrls(await options?.onPayload?.(payload, model) ?? payload),
         };
         const receipt = createRequestMetric(model.provider, model.id);
         if (prepared.calls.length) receipt.imageToText = {
@@ -1104,8 +1118,9 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
     async configureTools(tools) {
       await configureToolsState(tools);
     },
-    async reload() {
+    async reload(messages) {
       await configureToolsState(options.tools, { force: true });
+      agent.state.messages = messages ?? options.sessionManager.buildSessionContext().messages;
     },
     async abort() {
       retryCancelled = true;
@@ -1122,6 +1137,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       retryAttempt = 0;
       retryInProgress = false;
       agent.abort();
+      clearRemoteImageCache(options.sessionManager);
     },
     subscribe(listener) {
       return agent.subscribe((event: AgentEvent) => {

@@ -14,6 +14,19 @@ const internalHeaders = () => ({
   ...buildTraceHeaders({ requestId: getCurrentRequestId() }),
 });
 
+export async function createImageUploadPlan(input: { userId: string; file: { size: number; mimeType: string } }, signal: AbortSignal) {
+  const response = await fetch(`${INTERNAL_API_BASE_URL}/internal/public-assets/image-upload`, {
+    method: "POST", headers: internalHeaders(), body: JSON.stringify(input), signal,
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Image upload plan failed ${response.status}`);
+  }
+  return response.json() as Promise<{
+    asset: { publicUrl: string; uploadUrl: string; uploadMethod: "PUT"; uploadHeaders?: Record<string, string> };
+  }>;
+}
+
 async function postJsonWithRetry(input: {
   url: string;
   body: unknown;

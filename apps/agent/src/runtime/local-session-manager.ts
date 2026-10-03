@@ -372,6 +372,38 @@ export class SessionManager {
     return [...this.entries];
   }
 
+  getRetainedMessageEntries(): SessionMessageEntry[] {
+    return resolveCompactedBranch(this.getBranch()).kept.filter(
+      (entry): entry is SessionMessageEntry => entry.type === "message",
+    );
+  }
+
+  /** Update the local projection while preserving entry IDs, branches and description references. */
+  async replaceMessages(messages: ReadonlyMap<string, AgentMessage>): Promise<void> {
+    if (!messages.size) return;
+    await this.flush();
+    for (const [id, message] of messages) {
+      const entry = this.byId.get(id);
+      if (entry?.type !== "message" || entry.message.role !== message.role) {
+        throw new Error("Session message replacement must preserve entry identity and role");
+      }
+    }
+    const previous = this.entries;
+    this.entries = this.entries.map((entry) => {
+      const message = messages.get(entry.id);
+      return entry.type === "message" && message ? { ...entry, message } : entry;
+    });
+    this.rebuildIndex();
+    this.rewriteFile();
+    try {
+      await this.flush();
+    } catch (error) {
+      this.entries = previous;
+      this.rebuildIndex();
+      throw error;
+    }
+  }
+
   serializeSnapshot(): string {
     if (!this.header) throw new Error("Session has not been initialized");
     return `${[this.header, ...this.entries].map(serializeJsonlEntry).join("\n")}\n`;
@@ -917,7 +949,15 @@ export class SessionManager {
       await this.ensureSessionDir();
       await this.closeAppendStream();
       const lines = [serializeJsonlEntry(this.header), ...this.entries.map((entry) => serializeJsonlEntry(entry))].join("\n");
-      await writeFile(this.sessionFile, `${lines}${lines ? "\n" : ""}`, "utf-8");
+      const tempPath = `${this.sessionFile}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(tempPath, `${lines}${lines ? "\n" : ""}`, "utf-8");
+        await syncFile(tempPath);
+        await rename(tempPath, this.sessionFile);
+        await syncFile(dirname(this.sessionFile));
+      } finally {
+        await rm(tempPath, { force: true }).catch(() => undefined);
+      }
       this.fileReady = true;
     });
   }

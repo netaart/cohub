@@ -30,7 +30,7 @@ import type { ContextProjectionOptions } from "@cohub/protocol";
 import { loadRequestedThinkingLevel, loadRuntimeContext } from "./runtime/context-store.js";
 import { appendTerminalGenerationMessages } from "./generation-session-sync.js";
 import { syncCloudContext } from "./runtime/cloud-context.js";
-import { hydrateContextImages } from "./runtime/context-images.js";
+import { hydrateSessionImages } from "./runtime/context-images.js";
 import { readPublicAssetImageUrl } from "./public-asset-storage.js";
 import type { createSandboxCodingTools } from "./sandbox/tools.js";
 import type { Permission } from "@cohub/core/permissions";
@@ -1107,25 +1107,35 @@ export async function loadOrCreateSessionHandle(input: {
   };
   const durableHead = await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined, headOnly: true });
   const cachedMarker = cachedHandle?.sessionManager.getCustomEntries("cohub.context").at(-1)?.data as { revision?: string } | undefined;
-  const durableContext = cachedMarker?.revision === durableHead.revision && fileSignature
-    && sameSessionFileSignature(cachedHandle?.sessionFileSignature ?? null, fileSignature)
-    ? durableHead
-    : await hydrateContextImages(await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined }), readPublicAssetImageUrl);
-
   const spaceInfo = await getSpace({ spaceId: input.spaceId }).catch((error: unknown) => {
     logger.warn(`[Agent] Failed to load space info for ${input.spaceId}; falling back to platform config`, error);
     return null;
   });
   const spaceOwnerUserId = spaceInfo?.space?.userUuid?.trim() || null;
+  const durableContext = cachedMarker?.revision === durableHead.revision && fileSignature
+    && sameSessionFileSignature(cachedHandle?.sessionFileSignature ?? null, fileSignature)
+    ? durableHead
+    : await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined });
+  const imageOptions = { userId: input.userId?.trim() || spaceOwnerUserId };
 
   const existing = input.sessionHandles.get(sessionKey);
   if (existing) {
     if (sameSessionFileSignature(existing.sessionFileSignature, fileSignature)) {
       existing.spaceOwnerUserId = spaceOwnerUserId;
-      if (!existing.currentUserMessageId && syncCloudContext(existing.sessionManager, durableContext, projectionOptions)) {
-        await existing.session.reload();
-        const appended = await syncGenerationMessagesToSessionFile(input.sessionId, existing.sessionManager, input.beforeTurnSequence);
-        if (appended.length > 0) existing.session.agent.state.messages.push(...appended);
+      if (!existing.currentUserMessageId) {
+        const contextChanged = syncCloudContext(existing.sessionManager, durableContext, projectionOptions);
+        const appended = contextChanged ? await syncGenerationMessagesToSessionFile(input.sessionId, existing.sessionManager, input.beforeTurnSequence) : [];
+        try {
+          const recovered = await hydrateSessionImages(existing.sessionManager, readPublicAssetImageUrl, imageOptions);
+          if (contextChanged || appended.length > 0 || recovered.changed) await existing.session.reload(recovered.messages);
+          else existing.session.agent.state.messages = recovered.messages;
+        } catch (error) {
+          existing.session.dispose();
+          await existing.sessionManager.close().catch(() => undefined);
+          clearCurrentSessionExecutionAuth(existing.sessionId);
+          input.sessionHandles.delete(sessionKey);
+          throw error;
+        }
       }
       logger.debug(`[Session] reuse sessionId=${input.sessionId} spaceId=${input.spaceId}`);
       return existing;
@@ -1159,6 +1169,11 @@ export async function loadOrCreateSessionHandle(input: {
     logger.warn(`[Session] failed to project generation messages sessionId=${input.sessionId}:`, error);
   });
 
+  const recovered = await hydrateSessionImages(sessionManager, readPublicAssetImageUrl, imageOptions).catch(async (error: unknown) => {
+    await sessionManager.close().catch(() => undefined);
+    throw error;
+  });
+
   const resolvedModel = input.model
     ? input.modelRegistry.find(input.model.provider, input.model.id)
     : undefined;
@@ -1179,7 +1194,7 @@ export async function loadOrCreateSessionHandle(input: {
     }),
   });
 
-  await session.reload();
+  await session.reload(recovered.messages);
 
   const handle: SessionHandle = {
     spaceId: input.spaceId,

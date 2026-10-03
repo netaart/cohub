@@ -2,6 +2,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { contextToPiMessages, type ContextProjectionOptions, type RuntimeContext, type RuntimeContextMessage } from "@cohub/protocol";
 import type { SessionManager } from "./local-session-manager.js";
 import { projectGenerationSessionMessage } from "../generation-message-projection.js";
+import { contentBlockToPiImage } from "@cohub/model-runtime/image-content";
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -35,7 +36,7 @@ const projectRow = (row: RuntimeContextMessage, options: ContextProjectionOption
   }
   return row.meta?.generationTaskId
     ? [projectGenerationSessionMessage({ ...row, meta: row.meta ?? {}, provider: row.provider ?? null, model: row.model ?? null, createdAt: new Date(String(row.meta?.createdAt ?? 0)) })]
-    : contextToPiMessages([row], options) as unknown as AgentMessage[];
+    : contextToPiMessages([row], { projectImage: contentBlockToPiImage, ...options }) as unknown as AgentMessage[];
 };
 
 /**
@@ -80,7 +81,7 @@ export function syncCloudContext(manager: SessionManager, context: RuntimeContex
   // Project and validate the whole missing tail before touching the live projection.
   const pending = region.slice(after + 1).map((row) => ({ row, messages: projectRow(row, options) }));
   // Anchor the boundary at the first kept row that has (or will have) a native entry. A first row
-  // without one (dropped URL image, system note) simply does not become the anchor, so a boundary can
+  // without one (system note or empty content) simply does not become the anchor, so a boundary can
   // never be missing, fail late, or leave a half-written tail behind.
   let anchor = region.slice(0, after + 1).map((row) => entryIdByMessageId.get(row.id)).find((id): id is string => Boolean(id)) ?? null;
   let changed = false;

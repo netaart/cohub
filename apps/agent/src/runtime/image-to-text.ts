@@ -10,6 +10,7 @@ import type {
   Model,
   ThinkingLevel,
 } from "@earendil-works/pi-ai";
+import { restoreRemoteImageUrls } from "@cohub/model-runtime/image-content";
 import {
   loadTurnImageDescriptions,
   persistTurnImageDescription,
@@ -18,6 +19,7 @@ import {
 import { logger } from "../logger.js";
 import type { SessionManager } from "./local-session-manager.js";
 import { createModelsFromRegistry } from "./pi-models-adapter.js";
+import { prepareRemoteImagesForModel } from "./image-transport.js";
 
 const CUSTOM_TYPE = "image_description.v1";
 const DESCRIPTION_CONCURRENCY = 2;
@@ -119,20 +121,26 @@ async function describeImage(input: {
   const reasoning = input.config.model.reasoning
     ? input.config.model.defaultThinkingLevel as ThinkingLevel | undefined
     : undefined;
-  const response = await models.completeSimple(model, {
+  const context = await prepareRemoteImagesForModel({
     systemPrompt: input.config.prompt,
     messages: [{
       role: "user",
       content: [{ type: "text", text: "Describe this image." }, input.image],
       timestamp: Date.now(),
     }],
-  }, {
+  }, model, { signal: input.signal });
+  const content = context.messages[0]?.content;
+  if (!Array.isArray(content) || !content.some((block) => block.type === "image")) {
+    throw new Error("Image could not be loaded for description");
+  }
+  const response = await models.completeSimple(model, context, {
     apiKey: registry.getApiKey(model.provider),
     headers: model.headers,
     maxTokens: 1_200,
     reasoning,
     timeoutMs: 30_000,
     signal: input.signal,
+    onPayload: restoreRemoteImageUrls,
   });
   if (response.stopReason === "error" || response.stopReason === "aborted") {
     throw new Error(response.errorMessage?.trim() || "Image description request failed");
@@ -284,6 +292,7 @@ export async function prepareAgentImagesForModel(input: {
   executionTurnId?: string | null;
   signal?: AbortSignal;
 }): Promise<{ context: Context; calls: AgentImageToTextCall[] }> {
+  input.signal?.throwIfAborted();
   if (!input.config || input.targetModel.input.includes("image")) {
     return { context: input.context, calls: [] };
   }
@@ -313,12 +322,15 @@ export async function prepareAgentImagesForModel(input: {
   attemptedByTurn.set(input.sessionManager, { turnId: executionTurnId, sourceKeys: attempted });
   const pending = images.filter((image) => !descriptions.has(image.sourceKey) && !attempted.has(image.sourceKey));
   await mapWithConcurrency(pending, DESCRIPTION_CONCURRENCY, async (image) => {
+    input.signal?.throwIfAborted();
     attempted.add(image.sourceKey);
     const startedAt = Date.now();
     let description: StoredImageDescription;
     try {
       description = await describeImage({ config: input.config as ImageToTextConfig, image: image.image, signal: input.signal });
+      input.signal?.throwIfAborted();
     } catch (error) {
+      input.signal?.throwIfAborted();
       calls.push({
         sourceKey: image.sourceKey,
         provider: input.config?.model.provider ?? "unknown",
@@ -365,5 +377,6 @@ export async function prepareAgentImagesForModel(input: {
     });
   });
 
+  input.signal?.throwIfAborted();
   return { context: projectDescribedImages(input.context, images, descriptions), calls };
 }

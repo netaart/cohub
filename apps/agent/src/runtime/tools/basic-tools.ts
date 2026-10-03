@@ -472,14 +472,14 @@ export function createReadTool(cwd: string, options: { operations: ReadOperation
     label: "read",
     description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
     parameters,
-    async execute(_toolCallId, rawParams): Promise<AgentToolResult<unknown>> {
+    async execute(_toolCallId, rawParams, signal): Promise<AgentToolResult<unknown>> {
       const params = rawParams as Static<typeof parameters>;
       const absolutePath = resolveToCwd(params.path, cwd);
       await options.operations.access(absolutePath);
       const mimeType = options.operations.detectImageMimeType ? await options.operations.detectImageMimeType(absolutePath) : null;
       if (mimeType) {
         const buffer = await options.operations.readFile(absolutePath);
-        const image = await normalizeAgentToolImageContent({ data: buffer, mimeType, label: params.path });
+        const image = await normalizeAgentToolImageContent({ data: buffer, mimeType, label: params.path }, { signal });
         return {
           content: [
             { type: "text", text: `Read image file [${mimeType}]` },

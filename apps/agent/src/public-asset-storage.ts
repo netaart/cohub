@@ -87,16 +87,18 @@ const bodyToBuffer = async (body: unknown, maxBytes: number) => {
   return null;
 };
 
-export async function readPublicAssetImageUrl(value: string) {
+export async function readPublicAssetImageUrl(value: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   if (!publicAssetObjectKeyFromUrl(value)) return null;
 
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), env.PUBLIC_ASSET_DOWNLOAD_TIMEOUT_MS);
+  let response: Response | undefined;
   try {
-    const response = await fetch(value, {
+    response = await fetch(value, {
       method: "GET",
       redirect: "manual",
-      signal: abortController.signal,
+      signal: signal ? AbortSignal.any([signal, abortController.signal]) : abortController.signal,
     });
     if (!response.ok || response.status !== 200) return null;
     const contentLength = Number(response.headers.get("content-length"));
@@ -108,5 +110,6 @@ export async function readPublicAssetImageUrl(value: string) {
     return data ? { data, mimeType } : null;
   } finally {
     clearTimeout(timeout);
+    await response?.body?.cancel().catch(() => undefined);
   }
 }

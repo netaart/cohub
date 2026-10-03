@@ -1,5 +1,6 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import { normalizeContentBlockSafe, normalizeContentBlocksSafe } from "@cohub/core/content/normalize";
+import { contentBlockToPiImage, getRemoteImageUrl } from "@cohub/model-runtime/image-content";
 import { logger } from "./logger.js";
 
 const extractThinkingFromContent = (content: unknown): string => {
@@ -60,15 +61,25 @@ const textFromBlocks = (blocks: ContentBlock[]) => {
   return text || null;
 };
 
+const durableImageBlocks = (blocks: ContentBlock[]): ContentBlock[] => blocks.map((block) => {
+  if (block.type === "image") {
+    const image = contentBlockToPiImage(block);
+    const url = image && getRemoteImageUrl(image);
+    return url ? { ...block, source: { type: "url", url } } : block;
+  }
+  if (block.type === "tool_result" && Array.isArray(block.content)) return { ...block, content: durableImageBlocks(block.content) };
+  return block;
+});
+
 const normalizeToolResultBlocks = (blocks: unknown[], context: string): NormalizedToolResultContent => {
   const issues: Array<{ message: string; block: unknown }> = [];
-  const content = normalizeContentBlocksSafe(blocks, {
+  const content = durableImageBlocks(normalizeContentBlocksSafe(blocks, {
     onInvalid: (issue) => {
       issues.push(issue);
       warnInvalidContentBlock(context)(issue);
     },
-  });
-  if (issues.length === 0) return { content: textFromBlocks(content) ?? content, isError: false };
+  }));
+  if (issues.length === 0) return { content: content.every((block) => block.type === "text") ? textFromBlocks(content) ?? content : content, isError: false };
   const message = `Tool result content error: ${issues.map((issue) => issue.message).join("; ")}`;
   return { content: message, isError: true, errorMessage: message };
 };
@@ -237,7 +248,7 @@ export function normalizeAssistantTurn(
     }
     if (block.type === "image") {
       const normalizedImage = normalizeContentBlockSafe(block, { onInvalid: warnInvalidContentBlock("assistant image block") });
-      if (normalizedImage?.type === "image") blocks.push(normalizedImage);
+      if (normalizedImage?.type === "image") blocks.push(...durableImageBlocks([normalizedImage]));
       continue;
     }
     if ((block.type === "toolCall" || block.type === "tool_use") && typeof block.id === "string") {

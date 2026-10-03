@@ -32,8 +32,8 @@ test("a non-projectable retained row never blocks or half-writes a compaction bo
     const context: RuntimeContext = {
       revision: "r1", throughTurnId: "turn-2", messages: [
         compactionMessage({ id: "compact-1", turnId: "turn-2", summary: "earlier work summarized", compactionId: "c1" }),
-        { id: "image", turnId: "turn-2", role: "user", content: [{ type: "image", source: { type: "url", url: "https://cdn.test/a.png" } }] },
-        { id: "user-3", turnId: "turn-2", role: "user", content: [{ type: "text", text: "after the image" }] },
+        { id: "note", turnId: "turn-2", role: "user", content: [{ type: "system_note", note_type: "info", text: "internal note" }] },
+        { id: "user-3", turnId: "turn-2", role: "user", content: [{ type: "text", text: "after the note" }] },
       ],
     };
     assert.equal(syncCloudContext(manager, context), true);
@@ -41,7 +41,7 @@ test("a non-projectable retained row never blocks or half-writes a compaction bo
     assert.deepEqual(messages.map((message) => message.role), ["compactionSummary", "user"]);
     const retained = (messages[1] as { content?: Array<{ type?: string; text?: string }> } | undefined)?.content?.[0];
     assert(retained && retained.type === "text");
-    assert.equal(retained.text, "after the image");
+    assert.equal(retained.text, "after the note");
     assert.equal(JSON.stringify(manager.getEntries()).includes("historical"), false, "nothing is written as invented text");
     // The dropped row must not make the boundary unstable on later syncs either.
     const next: RuntimeContext = { ...context, revision: "r2", throughTurnId: "turn-3",

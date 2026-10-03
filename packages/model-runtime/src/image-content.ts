@@ -1,9 +1,35 @@
 import type { ContentBlock } from "@cohub/protocol/core";
-import type { ImageContent } from "@earendil-works/pi-ai";
+import type { Api, ImageContent } from "@earendil-works/pi-ai";
 
 /** Marker mime used to carry remote image URLs through pi-ai's base64-only image shape. */
-const URL_IMAGE_MIME = "application/x-cohub-image-url";
+export const URL_IMAGE_MIME = "application/x-cohub-image-url";
 const URL_IMAGE_DATA_PREFIX = `data:${URL_IMAGE_MIME};base64,`;
+
+/** True when pi-ai's base64-only image shape is standing in for a remote URL rather than bytes. */
+export function isUrlMarkerImage(mimeType: string | null | undefined): boolean {
+  return mimeType === URL_IMAGE_MIME;
+}
+
+/** APIs whose image payloads can carry a remote HTTP URL. Others require real image bytes. */
+export function supportsRemoteImageUrls(api: Api): boolean {
+  return [
+    "anthropic-messages", "openai-completions", "openai-responses",
+    "openai-codex-responses", "azure-openai-responses", "mistral-conversations",
+  ].includes(api);
+}
+
+export function getRemoteImageUrl(image: ImageContent): string | null {
+  return isUrlMarkerImage(image.mimeType) ? decodeImageUrlData(image.data) : null;
+}
+
+/** Encode a remote image URL into pi-ai's base64-only image shape. */
+export function urlToPiImage(url: string): ImageContent {
+  return {
+    type: "image",
+    mimeType: URL_IMAGE_MIME,
+    data: Buffer.from(url, "utf8").toString("base64"),
+  };
+}
 
 export function contentBlockToPiImage(block: Extract<ContentBlock, { type: "image" }>): ImageContent | null {
   if (block.source.type === "base64") {
@@ -15,11 +41,7 @@ export function contentBlockToPiImage(block: Extract<ContentBlock, { type: "imag
   }
   const url = block.source.url.trim();
   if (!url) return null;
-  return {
-    type: "image",
-    mimeType: URL_IMAGE_MIME,
-    data: Buffer.from(url, "utf8").toString("base64"),
-  };
+  return urlToPiImage(url);
 }
 
 function decodeImageUrlData(data: string): string | null {
@@ -40,6 +62,10 @@ export function restoreRemoteImageUrls(payload: unknown): unknown {
   if (prototype !== Object.prototype && prototype !== null) return payload;
 
   const record = payload as Record<string, unknown>;
+  if (record.type === "input_image" && typeof record.image_url === "string" && record.image_url.startsWith(URL_IMAGE_DATA_PREFIX)) {
+    const url = decodeImageUrlData(record.image_url.slice(URL_IMAGE_DATA_PREFIX.length));
+    if (url) return { ...record, image_url: url };
+  }
   if (record.type === "image_url") {
     const imageUrl = record.image_url;
     if (typeof imageUrl === "string" && imageUrl.startsWith(URL_IMAGE_DATA_PREFIX)) {

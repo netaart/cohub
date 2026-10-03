@@ -8,16 +8,19 @@ export type ContextProjectionOptions = {
   fallbackProvider?: string | null;
   /** Resolve the wire api of a historical row from its own provider/model. */
   resolveApi?: (input: { provider: string | null; model: string | null }) => string | null;
+  /** Let the runtime provide its image transport without coupling the protocol to a provider SDK. */
+  projectImage?: (block: Extract<ContentBlock, { type: "image" }>) => { type: "image"; data: string; mimeType: string } | null;
 };
 
 /**
  * Project one block as itself, or drop it. Nothing is ever rewritten into prompt text.
- * URL images, system notes and unknown blocks have no native representation here; the
+ * Without a runtime image projector, URL images have no native representation here. The
  * durable copy stays in the database and is not faked into the model's input.
  */
-function projectBlock(block: ContentBlock): Record<string, unknown> | null {
+function projectBlock(block: ContentBlock, options: ContextProjectionOptions): Record<string, unknown> | null {
   if (block.type === "text") return { type: "text", text: block.text };
   if (block.type === "image") {
+    if (options.projectImage) return options.projectImage(block);
     return block.source.type === "base64"
       ? { type: "image", data: block.source.data, mimeType: block.source.media_type }
       : null;
@@ -28,8 +31,8 @@ function projectBlock(block: ContentBlock): Record<string, unknown> | null {
   return null;
 }
 
-const projectContent = (content: ContentBlock[]) =>
-  content.map(projectBlock).filter((block): block is Record<string, unknown> => block !== null);
+const projectContent = (content: ContentBlock[], options: ContextProjectionOptions) =>
+  content.map((block) => projectBlock(block, options)).filter((block): block is Record<string, unknown> => block !== null);
 
 const isCompaction = (message: RuntimeContextMessage) =>
   message.role === "system" && message.content.some((block) => block.type === "system_note" && block.note_type === "compacted");
@@ -74,7 +77,7 @@ export function contextToPiMessages(messages: RuntimeContextMessage[], options: 
       continue;
     }
     if (message.role !== "assistant") {
-      const projected = projectContent(message.content);
+      const projected = projectContent(message.content, options);
       if (projected.length) result.push({ role: "user", content: projected, timestamp, meta });
       continue;
     }
@@ -82,7 +85,7 @@ export function contextToPiMessages(messages: RuntimeContextMessage[], options: 
     const content = message.content.flatMap((block): Record<string, unknown>[] => {
       if (block.type === "tool_result") return [];
       if (block.type === "tool_use") return [{ type: "toolCall", id: block.id, name: block.name, arguments: block.input }];
-      const projected = projectBlock(block);
+      const projected = projectBlock(block, options);
       return projected ? [projected] : [];
     });
     if (content.length) result.push({
@@ -99,7 +102,7 @@ export function contextToPiMessages(messages: RuntimeContextMessage[], options: 
       if (!calls.has(block.tool_use_id)) continue;
       result.push({
         role: "toolResult", toolCallId: block.tool_use_id, toolName: calls.get(block.tool_use_id) ?? "tool",
-        content: typeof block.content === "string" ? [{ type: "text", text: block.content }] : projectContent(block.content),
+        content: typeof block.content === "string" ? [{ type: "text", text: block.content }] : projectContent(block.content, options),
         isError: block.is_error ?? false, timestamp, meta,
       });
       calls.delete(block.tool_use_id);

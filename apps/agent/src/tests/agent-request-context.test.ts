@@ -3,6 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import sharp from "sharp";
+import { getRemoteImageUrl } from "@cohub/model-runtime/image-content";
+import { hydrateSessionImages } from "../runtime/context-images.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type { ModelsConfig } from "@cohub/infra/config-runtime/models";
@@ -187,4 +190,29 @@ test("models without the claude-code profile keep their own identity, whatever t
   const texts = systemTexts(request);
   assert.equal(texts.length, 1);
   assert.notEqual(texts[0], CLAUDE_CODE_SYSTEM_IDENTITY);
+});
+
+
+test("reload applies recovered URLs to the live agent and the next provider request", async () => {
+  requests.length = 0;
+  const { session, sessionManager } = await createSession("claude-sonnet-5");
+  await session.setModel({ ...session.agent.state.model, input: ["text", "image"] });
+  const data = await sharp({ create: { width: 20, height: 20, channels: 3, background: "red" } }).png().toBuffer();
+  sessionManager.appendMessage({ role: "user", content: [{ type: "image", data: data.toString("base64"), mimeType: "image/png" }], timestamp: 0 });
+  await session.reload();
+  const url = "https://trusted.test/restored.png";
+  const recovered = await hydrateSessionImages(sessionManager, async () => null, { writeImage: async () => url });
+  assert.equal(recovered.changed, true);
+  await session.reload(recovered.messages);
+  const message = session.agent.state.messages[0];
+  assert(message?.role === "user" && Array.isArray(message.content));
+  const image = message.content[0];
+  assert(image?.type === "image" && "data" in image);
+  assert.equal(getRemoteImageUrl(image), url);
+  await session.prompt("Describe the recovered image");
+  assert.equal(requests.length, 1);
+  const payload = JSON.stringify(requests[0]?.body);
+  assert(payload.includes(`"source":{"type":"url","url":"${url}"}`));
+  assert(!payload.includes(data.toString("base64")));
+  session.dispose();
 });

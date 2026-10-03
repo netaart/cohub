@@ -4,7 +4,8 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import { ModelUnavailableError } from "@cohub/core/sessions";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { readPublicAssetImageUrl } from "./public-asset-storage.js";
-import { imageOmittedText, normalizeAgentImage, normalizeContentBlocksImages } from "./image-normalizer.js";
+import { imageOmittedText, normalizeContentBlocksImages } from "./image-normalizer.js";
+import { contentBlockToPiImage } from "@cohub/model-runtime/image-content";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { context, trace } from "@opentelemetry/api";
 import { getActiveTraceIdentifiers, getOrCreateRequestId, setRequestContextAttributes } from "@cohub/infra/tracing";
@@ -137,32 +138,8 @@ async function getModelRegistryForUser(userId: string | null | undefined) {
   return registry;
 }
 
-function contentBlockToBase64ImageContent(block: ContentBlock): ImageContent | null {
-  if (block.type !== "image" || block.source.type !== "base64") return null;
-  return {
-    type: "image",
-    data: block.source.data.replace(/^data:[^;,]+;base64,/, ""),
-    mimeType: block.source.media_type || "application/octet-stream",
-  };
-}
-
-async function fetchUrlImageContent(url: string): Promise<ImageContent | null> {
-  const publicAsset = await readPublicAssetImageUrl(url).catch(() => null);
-  if (!publicAsset) return null;
-  const normalized = await normalizeAgentImage({
-    data: publicAsset.data,
-    mimeType: publicAsset.mimeType,
-    sourceKind: "public_asset",
-    originalSource: "url",
-    originalUrl: url,
-  });
-  return normalized ? { type: "image", data: normalized.data, mimeType: normalized.mimeType } : null;
-}
-
 async function contentBlockToImageContent(block: ContentBlock): Promise<ImageContent | null> {
-  if (block.type !== "image") return null;
-  if (block.source.type === "base64") return contentBlockToBase64ImageContent(block);
-  return fetchUrlImageContent(block.source.url).catch(() => null);
+  return block.type === "image" ? contentBlockToPiImage(block) : null;
 }
 
 async function contentBlockToAgentContent(block: ContentBlock): Promise<{ type: "text"; text: string } | ImageContent | null> {
@@ -337,8 +314,9 @@ async function appendAndPersistUserMessage(input: {
   sessionId: string;
   user: TurnUserMessage;
   meta: Record<string, unknown>;
+  userId?: string | null;
 }) {
-  const content = await normalizeContentBlocksImages(input.user.content, { readUrlImage: readPublicAssetImageUrl });
+  const content = await normalizeContentBlocksImages(input.user.content, { readUrlImage: readPublicAssetImageUrl, userId: input.userId });
   const message = await contentToAgentMessage(content, input.meta);
   const startedAt = new Date().toISOString();
   input.handle.session.agent.state.messages.push(message);
@@ -415,6 +393,7 @@ async function runDirectShellCommandTurn(input: {
       sessionId: input.sessionId,
       user,
       meta: userMeta,
+      userId: input.actorUserId,
     });
 
     const toolUseId = `direct_shell_${randomUUID()}`;
@@ -958,7 +937,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
         }));
       const turnUserMessages = await Promise.all(rawTurnUserMessages.map(async (item) => ({
         ...item,
-        content: await normalizeContentBlocksImages(item.content, { readUrlImage: readPublicAssetImageUrl }),
+        content: await normalizeContentBlocksImages(item.content, { readUrlImage: readPublicAssetImageUrl, userId: actorUserId || spaceInfo?.space?.userUuid }),
       })));
       for (const item of turnUserMessages) {
         const meta = normalizeTurnUserMeta(item);
