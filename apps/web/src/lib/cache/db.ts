@@ -20,7 +20,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 20;
+export const DB_VERSION = 21;
 
 export type SessionListForkRecord = Partial<SessionForkRecord> & {
 	childSessionId: string;
@@ -299,6 +299,7 @@ export type StoreName =
 	| "space_fs_dirs"
 	| "space_fs_epochs"
 	| "space_records"
+	| "space_lists"
 	| "space_activity"
 	| "label_trees"
 	| "label_items"
@@ -669,12 +670,14 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				slimTaskRunSummaries(request.transaction);
 			}
 			if (
-				oldVersion < 19 && request.transaction &&
+				oldVersion < 19 &&
+				request.transaction &&
 				db.objectStoreNames.contains("board_pending_txs")
 			) {
 				// Preserve unsent v2 commands verbatim for recovery. They must never
 				// be replayed as v3 merge patches or silently deleted during upgrade.
-				request.transaction.objectStore("board_pending_txs").name = "board_legacy_pending_txs";
+				request.transaction.objectStore("board_pending_txs").name =
+					"board_legacy_pending_txs";
 			}
 			// Cached documents used to be compact (every value that matched its
 			// schema default was omitted). They are stored complete now, and a
@@ -682,6 +685,7 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 			if (oldVersion < 20 && db.objectStoreNames.contains("board_documents")) {
 				db.deleteObjectStore("board_documents");
 			}
+			createStore(db, "space_lists", []);
 			createStore(db, "space_records", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
@@ -1036,11 +1040,17 @@ export async function idbGet<T>(storeName: StoreName, key: string) {
  * Put unless `guard` rejects what is already there: read and write share one
  * transaction, so two writers cannot both accept the older of the two values.
  */
-export async function idbPutGuarded<T>(storeName: StoreName, key: string, guard: (current: T | null) => boolean, value: T) {
+export async function idbPutGuarded<T>(
+	storeName: StoreName,
+	key: string,
+	guard: (current: T | null) => boolean,
+	value: T,
+) {
 	return withObjectStore(storeName, "readwrite", async (store, tx) => {
 		const current = await new Promise<T | null>((resolve, reject) => {
 			const request = store.get(key);
-			request.onsuccess = () => resolve((request.result as T | undefined) ?? null);
+			request.onsuccess = () =>
+				resolve((request.result as T | undefined) ?? null);
 			request.onerror = () => reject(request.error);
 		});
 		if (!guard(current)) return false;

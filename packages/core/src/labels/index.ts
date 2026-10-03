@@ -54,12 +54,12 @@ export function slugifyLabelName(name: string) {
   return slug || "label";
 }
 
-async function findLabelByName(db: LabelsDb, spaceId: string, name: string, parentId: string | null) {
+async function findLabelByName(db: LabelsDb, spaceId: string, name: string, parentId: string | null, scopeType = SCOPE_TYPE) {
   const [row] = await db
     .select()
     .from(labels)
     .where(and(
-      eq(labels.scopeType, SCOPE_TYPE),
+      eq(labels.scopeType, scopeType),
       eq(labels.scopeId, spaceId),
       parentId ? eq(labels.parentId, parentId) : sql`${labels.parentId} is null`,
       sql`lower(${labels.name}) = lower(${name})`,
@@ -68,12 +68,12 @@ async function findLabelByName(db: LabelsDb, spaceId: string, name: string, pare
   return row ?? null;
 }
 
-async function nextLabelRank(db: LabelsDb, spaceId: string, parentId: string | null) {
+async function nextLabelRank(db: LabelsDb, spaceId: string, parentId: string | null, scopeType = SCOPE_TYPE) {
   const [{ value } = { value: 0 }] = await db
     .select({ value: max(labels.rank) })
     .from(labels)
     .where(and(
-      eq(labels.scopeType, SCOPE_TYPE),
+      eq(labels.scopeType, scopeType),
       eq(labels.scopeId, spaceId),
       parentId ? eq(labels.parentId, parentId) : sql`${labels.parentId} is null`,
     ));
@@ -87,33 +87,36 @@ async function getOrCreateLabel(db: LabelsDb, input: {
   depth: 0 | 1;
   userId: string | null;
   source: LabelSource;
+  scopeType?: string;
+  systemKey?: string;
 }) {
-  const existing = await findLabelByName(db, input.spaceId, input.name, input.parentId);
+  const existing = await findLabelByName(db, input.spaceId, input.name, input.parentId, input.scopeType);
   if (existing) return existing;
 
   const [created] = await db.insert(labels).values({
-    scopeType: SCOPE_TYPE,
+    scopeType: input.scopeType ?? SCOPE_TYPE,
     scopeId: input.spaceId,
+    systemKey: input.systemKey,
     name: input.name,
     slug: slugifyLabelName(input.name),
     parentId: input.parentId,
     depth: input.depth,
-    rank: await nextLabelRank(db, input.spaceId, input.parentId),
+    rank: await nextLabelRank(db, input.spaceId, input.parentId, input.scopeType),
     source: input.source,
     createdBy: input.userId,
   }).onConflictDoNothing().returning();
   if (created) return created;
 
-  const raced = await findLabelByName(db, input.spaceId, input.name, input.parentId);
+  const raced = await findLabelByName(db, input.spaceId, input.name, input.parentId, input.scopeType);
   if (!raced) throw new Error("failed to create label");
   return raced;
 }
 
-export async function resolveLabelPaths(input: { db: LabelsDb; spaceId: string; paths: LabelPath[] }) {
+export async function resolveLabelPaths(input: { db: LabelsDb; spaceId: string; paths: LabelPath[]; scopeType?: string }) {
   const labelIds: string[] = [];
   const missingPaths: LabelPath[] = [];
   for (const path of input.paths) {
-    const parent = await findLabelByName(input.db, input.spaceId, path[0], null);
+    const parent = await findLabelByName(input.db, input.spaceId, path[0], null, input.scopeType);
     if (!parent) {
       missingPaths.push(path);
       continue;
@@ -122,7 +125,7 @@ export async function resolveLabelPaths(input: { db: LabelsDb; spaceId: string; 
       labelIds.push(parent.id);
       continue;
     }
-    const child = await findLabelByName(input.db, input.spaceId, path[1], parent.id);
+    const child = await findLabelByName(input.db, input.spaceId, path[1], parent.id, input.scopeType);
     if (child) labelIds.push(child.id);
     else missingPaths.push(path);
   }
@@ -135,11 +138,15 @@ export async function resolveOrCreateLabelPaths(input: {
   paths: LabelPath[];
   userId: string | null;
   source?: LabelSource;
+  scopeType?: string;
+  systemKeys?: Readonly<Record<string, string>>;
 }) {
   const source = input.source ?? "user";
   const labelIds: string[] = [];
   for (const path of input.paths) {
-    if (source === "user" && RESERVED_SYSTEM_ROOT_LABELS.has(path[0].toLowerCase())) {
+    const systemKey = input.systemKeys?.[path[0].toLowerCase()];
+    if (systemKey && path.length > 1) throw new Error("system labels cannot have children");
+    if (source === "user" && (input.scopeType ?? SCOPE_TYPE) === SCOPE_TYPE && RESERVED_SYSTEM_ROOT_LABELS.has(path[0].toLowerCase())) {
       throw new Error(`label path "${path[0]}" is reserved`);
     }
     const parent = await getOrCreateLabel(input.db, {
@@ -148,7 +155,9 @@ export async function resolveOrCreateLabelPaths(input: {
       parentId: null,
       depth: 0,
       userId: input.userId,
-      source,
+      source: systemKey ? "system" : source,
+      scopeType: input.scopeType,
+      systemKey,
     });
     if (path.length === 1) {
       labelIds.push(parent.id);
@@ -161,6 +170,7 @@ export async function resolveOrCreateLabelPaths(input: {
       depth: 1,
       userId: input.userId,
       source,
+      scopeType: input.scopeType,
     });
     labelIds.push(child.id);
   }
@@ -226,9 +236,16 @@ export type { UserLabelAssignment } from "./user-labels.js";
 export {
   ensurePinnedLabel,
   getPinnedSpaceIds,
+  getArchivedSpaceIds,
   getUserResourceLabelAssignments,
+  listUserLabels,
   patchUserResourceLabels,
+  patchUserResourcesLabels,
+  resolveUserLabelRef,
+  resolveOrCreateUserLabelRefs,
   PINNED_LABEL_NAME,
   PINNED_LABEL_SYSTEM_KEY,
+  ARCHIVED_LABEL_SYSTEM_KEY,
+  USER_SYSTEM_LABELS,
   USER_LABEL_SCOPE_TYPE,
 } from "./user-labels.js";

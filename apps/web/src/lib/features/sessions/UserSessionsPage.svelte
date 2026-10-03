@@ -35,10 +35,8 @@ import {
 	setLastUserSessionId,
 } from "$lib/stores/last-user-session";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
-import {
-	fetchSpaceListWithCache,
-	getCachedSpaceList,
-} from "$lib/stores/space-list-cache";
+import { getCachedSpaceList } from "$lib/stores/space-list-cache";
+import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import {
 	type ResolveWorkspaceAsset,
 	WorkspaceAssetAccessError,
@@ -262,7 +260,6 @@ function openNewChatSpacePicker() {
 				title: "New chat in…",
 				query: "a: ",
 				placeholder: "Search spaces…",
-				refreshSpaces: true,
 				intent: "new-chat",
 			},
 		}),
@@ -291,13 +288,11 @@ async function ensureDraftSpace(spaceId: string): Promise<SpaceRecord | null> {
 	}
 	const seq = ++draftSpaceLookupSeq;
 	try {
-		const spaces = await fetchSpaceListWithCache(
-			async () => await sdk.spaces.list(),
-		);
+		const space = await sdk.space(spaceId).get();
 		if (seq !== draftSpaceLookupSeq) return null;
-		const found = spaces.find((space) => space.id === spaceId) ?? null;
-		draftSpace = found;
-		return found;
+		cacheSpaceRecordSoon(space);
+		draftSpace = space;
+		return space;
 	} catch (error) {
 		if (seq !== draftSpaceLookupSeq) return null;
 		console.warn("[sessions] failed to resolve draft space", error);

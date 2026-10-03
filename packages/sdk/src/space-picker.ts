@@ -11,6 +11,7 @@ export type SpacePickerItem = {
 	name: string | null;
 	ownerUserUuid?: string | null;
 	isPinned?: boolean;
+	isArchived?: boolean;
 };
 
 export type SpacePickerOptions = {
@@ -57,6 +58,7 @@ export function filterSpacePickerItems<T extends SpacePickerItem>(
 		if (effectiveFilter === "mine" && item.ownerUserUuid !== options.viewerUserUuid)
 			return false;
 		if (effectiveFilter === "pinned" && !item.isPinned) return false;
+		if (item.isArchived) return false;
 		if (effectiveFilter === "recent" && !recentIds.has(item.id)) return false;
 		if (!normalizedQuery) return true;
 		return normalizeSpacePickerQuery(item.name ?? item.id).includes(normalizedQuery);

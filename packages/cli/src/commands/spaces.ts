@@ -8,6 +8,8 @@ import type {
   CreateSpaceInput,
   LabelListItem,
   LabelResourceType,
+  SpaceListPage,
+  SpaceRecord,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset } from "../avatar.js";
@@ -520,9 +522,39 @@ export function registerSpaceCreate(
     });
 }
 
+function registerUserLabels(program: Command) {
+  const labels = program.command("labels").description("Manage personal labels");
+  labels.command("ls").description("List personal labels").option("--json", "Output as JSON").action(async (opts: { json?: boolean }) => {
+    const client = createClient();
+    try {
+      const result = await client.user.labels.list();
+      const flatten = (items: LabelListItem[], parent = ""): Array<Record<string, unknown>> => items.flatMap((item) => [
+        { id: item.id, ref: parent ? `${parent}/${item.name}` : item.name, source: item.source, rank: item.rank },
+        ...flatten(item.children ?? [], parent ? `${parent}/${item.name}` : item.name),
+      ]);
+      const rows = flatten(result.labels);
+      if (jsonRequested(opts)) return outJson(rows);
+      table(rows, [{ key: "ref", label: "Label" }, { key: "source", label: "Source" }, { key: "rank", label: "Rank" }]);
+    } catch (e: unknown) { handleHttp(e); }
+  });
+  labels.command("create <ref>").description("Create a personal label").action(async (ref: string) => {
+    try { await createClient().user.labels.create(ref); ok(`Created label: ${ref}`); } catch (e: unknown) { handleHttp(e); }
+  });
+  labels.command("rename <ref> <name>").description("Rename a personal label").action(async (ref: string, name: string) => {
+    try { await createClient().user.labels.update(ref, { name }); ok(`Renamed label: ${ref}`); } catch (e: unknown) { handleHttp(e); }
+  });
+  labels.command("rm <ref>").description("Delete a personal label").action(async (ref: string) => {
+    try { await createClient().user.labels.delete(ref); ok(`Deleted label: ${ref}`); } catch (e: unknown) { handleHttp(e); }
+  });
+  labels.command("reorder <refs...>").description("Set personal label order").action(async (refs: string[]) => {
+    try { await createClient().user.labels.reorder(refs); ok(`Reordered ${refs.length} label(s)`); } catch (e: unknown) { handleHttp(e); }
+  });
+}
+
 export function registerSpaces(program: Command): void {
   const spacesCmd = program.command("spaces").description("Space management");
   registerSpaceInvitations(spacesCmd);
+  registerUserLabels(program);
 
   // ── spaces ls ──
   spacesCmd
@@ -531,18 +563,25 @@ export function registerSpaces(program: Command): void {
     .description("List all spaces")
     .option("--mine", "Only spaces you own")
     .option("--pinned", "Only pinned spaces")
+    .option("--archived", "Only archived spaces")
     .option("--json", "Output as JSON")
-    .action(async (opts: { mine?: boolean; pinned?: boolean; json?: boolean }) => {
+    .action(async (opts: { mine?: boolean; pinned?: boolean; archived?: boolean; json?: boolean }) => {
       const client = createClient();
       try {
-        const [items, me] = await Promise.all([
-          client.spaces.list(),
-          opts.mine ? client.user.getMe() : Promise.resolve(null),
-        ]);
-        const myUuid = me?.uuid ?? null;
+        const items: SpaceRecord[] = [];
+        let cursor: string | null = null;
+        do {
+          const page: SpaceListPage = await client.spaces.list({
+            limit: 100,
+            cursor,
+            filter: opts.archived ? "archived" : opts.pinned ? "pinned" : opts.mine ? "mine" : "all",
+          });
+          items.push(...page.items);
+          cursor = page.pageInfo.nextCursor;
+        } while (cursor);
         const filtered = items.filter((item) => {
-          if (opts.mine && myUuid && item.userUuid !== myUuid) return false;
           if (opts.pinned && !item.isPinned) return false;
+          if (opts.archived && !item.isArchived) return false;
           return true;
         });
         if (jsonRequested(opts)) return outJson(filtered);
@@ -557,6 +596,24 @@ export function registerSpaces(program: Command): void {
         handleHttp(e);
       }
     });
+
+  for (const archive of [true, false]) {
+    spacesCmd
+      .command(archive ? "archive <ids...>" : "unarchive <ids...>")
+      .description(archive ? "Archive spaces in your personal view" : "Restore archived spaces")
+      .option("--json", "Output as JSON")
+      .action(async (ids: string[], opts: { json?: boolean }) => {
+        const client = createClient();
+        try {
+          const chunks = Array.from({ length: Math.ceil(ids.length / 200) }, (_, index) => ids.slice(index * 200, (index + 1) * 200));
+          for (const chunk of chunks) await client.user.labels.patchResources(chunk, archive
+            ? { addLabelRefs: ["Archived"], removeLabelRefs: ["Pinned"] }
+            : { removeLabelRefs: ["Archived"] });
+          if (jsonRequested(opts)) return outJson({ ids, archived: archive });
+          ok(`${archive ? "Archived" : "Unarchived"} ${ids.length} space(s)`);
+        } catch (e: unknown) { handleHttp(e); }
+      });
+  }
 
   // ── spaces get ──
   spacesCmd

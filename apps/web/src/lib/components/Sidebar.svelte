@@ -54,7 +54,7 @@ import { sortAppsByRecentUpdate } from "$lib/app-sort";
 import { logtoClient } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
-import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
+import { getCacheUserKey } from "$lib/cache/keys";
 import { clearCachedPaletteOverview } from "$lib/command-palette/palette-overview";
 import ChannelProviderIcon from "$lib/components/ChannelProviderIcon.svelte";
 import NewLabelPopover from "$lib/components/NewLabelPopover.svelte";
@@ -182,13 +182,7 @@ import {
 	onSpaceLabelsCacheUpdated,
 	onUserLabelProfilesUpdated,
 } from "$lib/stores/space-labels";
-import {
-	clearAllCachedSpaceLists,
-	fetchSpaceListWithCache,
-	getCachedSpaceList,
-	getCachedSpaceListMeta,
-	onSpaceListCacheUpdated,
-} from "$lib/stores/space-list-cache";
+import { clearAllCachedSpaceLists } from "$lib/stores/space-list-cache";
 import {
 	cacheSpaceRecordSoon,
 	getCachedSpaceRecord,
@@ -229,14 +223,7 @@ let expandedUserMenuAnchorEl: HTMLDivElement | null = $state(null);
 let helpMenuAnchorEl: HTMLDivElement | null = $state(null);
 let showUserMenu = $state(false);
 let showHelpMenu = $state(false);
-// Hydrate synchronously from the local cache so a freshly mounted sidebar
-// (e.g. the mobile drawer, which unmounts on close) can resolve the current
-// space on first paint instead of flashing the empty "Select a space" state
-// while loadSpaces() awaits auth + IndexedDB + network. Only use a non-guest
-// partition when identity is already known; otherwise start empty.
-let spaces = $state<SpaceRecord[]>(
-	canUseUserScopedCache() ? (getCachedSpaceList() ?? []) : [],
-);
+let spaces = $state<SpaceRecord[]>([]);
 let sessions = $state<SessionRecord[]>([]);
 type SessionForkSidebarRecord = Partial<SessionForkRecord> & {
 	childSessionId: string;
@@ -313,7 +300,6 @@ let checkpointsPageInfo = $state<{
 let billingCredit = $state<BillingCreditStatus | null>(null);
 let billingCreditLoading = $state(false);
 let billingCreditError = $state<string | null>(null);
-let refreshingSpaces = $state(false);
 let billingCreditUserId = $state<string | null>(null);
 let billingConfigured = $state<boolean | null>(null);
 let billingSubscriptionName = $state<string | null>(null);
@@ -835,20 +821,6 @@ function mergeSpaceIntoSidebarList(space: SpaceRecord) {
 	spaces = [merged, ...spaces.filter((item) => item.id !== space.id)];
 }
 
-function mergeSpaceListWithCurrent(nextSpaces: SpaceRecord[]) {
-	const current = currentSpaceId
-		? spaces.find((space) => space.id === currentSpaceId)
-		: null;
-	const merged = nextSpaces.map((space) =>
-		space.id === currentSpaceId
-			? mergeDefinedSpaceRecordFields(space, current)
-			: space,
-	);
-	if (!current || nextSpaces.some((space) => space.id === current.id))
-		return merged;
-	return [current, ...merged];
-}
-
 const currentSpaceRefreshes = new Map<string, Promise<void>>();
 
 async function loadCurrentSpaceFromUrl(
@@ -908,49 +880,6 @@ function mergeSessionSnapshotForDisplay(
 	return sortSessionsByRecentActivity(
 		mergeSessionRecords([...currentSessions, ...nextSessions]),
 	);
-}
-
-async function loadSpaces(force = false) {
-	await authStore.ensureLoaded();
-	const requestedSpaceId = currentSpaceId;
-
-	// The current URL is the source of truth for the selected space. Load it
-	// directly first so guest-access spaces still render even if the broader
-	// space list does not include them (or becomes paginated later).
-	await loadCurrentSpaceFromUrl(requestedSpaceId);
-
-	if (!authStore.isAuthenticated) {
-		return;
-	}
-
-	if (!force) {
-		const cached = getCachedSpaceList();
-		if (cached && cached.length > 0) {
-			spaces = mergeSpaceListWithCurrent(cached);
-		}
-	}
-
-	const cacheMeta = getCachedSpaceListMeta();
-	const shouldFetch = force || !cacheMeta || cacheMeta.isStale;
-	if (!shouldFetch) return;
-
-	refreshingSpaces = spaces.length > 0;
-	try {
-		const listedSpaces = await fetchSpaceListWithCache(
-			async () => await sdk.spaces.list(),
-			{ force },
-		);
-		spaces = mergeSpaceListWithCurrent(listedSpaces);
-	} catch (error) {
-		if (await handleUnauthorizedError(error)) {
-			return;
-		}
-		console.warn("[sidebar] Failed to load spaces", error);
-	} finally {
-		refreshingSpaces = false;
-	}
-
-	await loadCurrentSpaceFromUrl(requestedSpaceId);
 }
 
 function isSessionsNetworkEnabled(spaceId: string) {
@@ -2498,7 +2427,6 @@ function openSpacePalette() {
 				title: m.sidebar_switch_space_title({}, { locale }),
 				query: "a: ",
 				placeholder: m.sidebar_search_spaces({}, { locale }),
-				refreshSpaces: true,
 			},
 		}),
 	);
@@ -3095,19 +3023,12 @@ onMount(() => {
 	void modelsCatalogStore.load().catch((error) => {
 		console.error("Failed to load models catalog:", error);
 	});
-	let offSpaceListCacheUpdated = () => {};
 	let offSessionListCacheUpdated = () => {};
 	let offSpaceLabelsCacheUpdated = () => {};
 	let offUserLabelProfilesUpdated = () => {};
 	let offChannelLabelDisplayNamesUpdated = () => {};
 	let offTaskRunsCacheUpdated = () => {};
 	if (mode === "space") {
-		offSpaceListCacheUpdated = onSpaceListCacheUpdated(
-			({ spaces: nextSpaces }) => {
-				if (!authStore.isAuthenticated) return;
-				spaces = mergeSpaceListWithCurrent(nextSpaces);
-			},
-		);
 		offSessionListCacheUpdated = onSessionListCacheUpdated(
 			({ spaceId, sessions: nextSessions, forks, pageInfo }) => {
 				if (spaceId !== currentSpaceId) return;
@@ -3165,31 +3086,20 @@ onMount(() => {
 			APPS_CHANGED_EVENT,
 			handleWorksChanged as EventListener,
 		);
-		void (async () => {
-			await loadSpaces();
-			hydrateSystemLabelDisplays(labels);
+		void loadCurrentSpaceFromUrl();
 
-			window.addEventListener(
-				"cohub:space-created",
-				handleSpaceCreated as EventListener,
-			);
-			window.addEventListener(
-				"cohub:checkpoints-updated",
-				handleCheckpointsUpdated as EventListener,
-			);
-			window.addEventListener(
-				"cohub:cronjobs-updated",
-				handleCronjobsUpdated as EventListener,
-			);
-			window.addEventListener(
-				"cohub:label-assignments-updated",
-				handleLabelAssignmentsUpdated as EventListener,
-			);
-		})();
-	}
-
-	function handleSpaceCreated() {
-		void loadSpaces(true);
+		window.addEventListener(
+			"cohub:checkpoints-updated",
+			handleCheckpointsUpdated as EventListener,
+		);
+		window.addEventListener(
+			"cohub:cronjobs-updated",
+			handleCronjobsUpdated as EventListener,
+		);
+		window.addEventListener(
+			"cohub:label-assignments-updated",
+			handleLabelAssignmentsUpdated as EventListener,
+		);
 	}
 
 	function handleCheckpointsUpdated(e: Event) {
@@ -3241,7 +3151,6 @@ onMount(() => {
 	document.addEventListener("click", handleClickOutside);
 
 	return () => {
-		offSpaceListCacheUpdated();
 		offSessionListCacheUpdated();
 		offSpaceLabelsCacheUpdated();
 		offUserLabelProfilesUpdated();
@@ -3255,10 +3164,6 @@ onMount(() => {
 			window.removeEventListener(
 				APPS_CHANGED_EVENT,
 				handleWorksChanged as EventListener,
-			);
-			window.removeEventListener(
-				"cohub:space-created",
-				handleSpaceCreated as EventListener,
 			);
 			window.removeEventListener(
 				"cohub:checkpoints-updated",
@@ -3276,8 +3181,8 @@ onMount(() => {
 	};
 });
 
-// Always load the space addressed by the current URL directly. The global
-// space list is only a switcher data source and may omit guest-access spaces.
+// Load only the space addressed by the current URL. The global space list is
+// owned by the picker and management page, not the workspace sidebar.
 $effect(() => {
 	const userId = authStore.userUuid;
 	if (!authStore.isAuthenticated || !userId) {
@@ -4212,7 +4117,7 @@ $effect(() => {
         {#if currentSpace}
           <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} size="sm" />
           <span class="flex-1 text-[13px] font-medium text-text-primary truncate text-left">{currentSpace.name || currentSpace.title || currentSpace.id.slice(0, 12)}</span>
-          {@render syncSpinner(refreshingSpaces)}
+          {@render syncSpinner(false)}
         {:else}
           <span class="flex-1 text-[13px] text-text-placeholder truncate text-left">{m.sidebar_select_space({}, { locale })}</span>
         {/if}

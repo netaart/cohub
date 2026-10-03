@@ -46,6 +46,26 @@ const COMMANDS: CommandPaletteItem[] = [
 	},
 	{
 		type: "command",
+		id: "manage-spaces",
+		spaceId: "",
+		sessionId: null,
+		turnId: null,
+		sequence: null,
+		title: "Manage Spaces",
+		excerpt: "Browse, organize, and archive spaces",
+		spaceName: null,
+		sessionTitle: null,
+		matchedField: "command",
+		href: "/spaces",
+		score: 0.92,
+		textScore: 0.92,
+		recencyScore: 0.58,
+		typePriorityScore: 0.76,
+		updatedAt: null,
+		source: "default",
+	},
+	{
+		type: "command",
 		id: "open-changelog",
 		spaceId: "",
 		sessionId: null,
@@ -71,6 +91,8 @@ function commandAliases(item: CommandPaletteItem) {
 		return ["run command", "run bash", "shell", "terminal", "command"];
 	if (item.id === "new-space")
 		return ["new space", "create space", "space new"];
+	if (item.id === "manage-spaces")
+		return ["manage spaces", "space management", "organize spaces"];
 	if (item.id === "open-changelog")
 		return [
 			"changelog",
@@ -99,8 +121,15 @@ export function resolveLocalCommandItems(
 
 	// Space lens still surfaces New Space as a local action.
 	if (!isSpaceOnlyDefault(plan)) return [];
-	const item = COMMANDS.find((command) => command.id === "new-space");
-	return item ? [{ ...item, score: 1, textScore: 1, source: "default" }] : [];
+	const commands = COMMANDS.filter(
+		(command) => command.id === "new-space" || command.id === "manage-spaces",
+	);
+	return commands.map((item) => ({
+		...item,
+		score: 1,
+		textScore: 1,
+		source: "default",
+	}));
 }
 
 export function searchCommandItems(plan: CommandPaletteSearchPlan) {

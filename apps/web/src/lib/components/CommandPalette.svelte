@@ -15,6 +15,7 @@ import {
 import { onMount, tick } from "svelte";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
+import { setCachedSpacePage } from "$lib/cache/space-list-page-cache";
 import {
 	resolveLocalCommandItems,
 	withLocalCommands,
@@ -56,11 +57,7 @@ import { sdk } from "$lib/sdk";
 import { filterSpacePickerItems } from "$lib/space-picker-model";
 import { buildUserNewSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
-import {
-	fetchSpaceListWithCache,
-	getCachedSpaceListMeta,
-	onSpaceListCacheUpdated,
-} from "$lib/stores/space-list-cache";
+import { getRecentSpaces } from "$lib/stores/recent-space";
 import {
 	getCachedSpaceFilterPref,
 	type SpaceFilterPref,
@@ -85,7 +82,6 @@ const locale = $derived(getLocale());
 const RESULT_LIMIT = 30;
 const DEBOUNCE_MS = 180;
 const POINTER_HOVER_ARM_MS = 220;
-const SPACE_LIST_REFRESH_MIN_INTERVAL_MS = 15_000;
 
 /**
  * Land a rebuilt default list without a redundant render. The result list is
@@ -108,7 +104,6 @@ type OpenCommandPaletteDetail = {
 	query?: string;
 	placeholder?: string;
 	title?: string;
-	refreshSpaces?: boolean;
 	/** Controls where space items navigate. Default: open space landing. */
 	intent?: CommandPaletteIntent;
 };
@@ -133,16 +128,11 @@ let localDone = $state(true);
 let remoteDone = $state(true);
 let defaultDone = $state(true);
 let legacyDefaultDone = $state(true);
-let refreshingSpaces = $state(false);
 let remoteError = $state<string | null>(null);
 let debounceTimer: number | null = null;
 let localController: AbortController | null = null;
 let remoteController: AbortController | null = null;
 let searchToken = 0;
-let spaceListRefreshToken = 0;
-let activeSpaceListRefreshId = 0;
-let forceSpaceRefreshForNextSearch = false;
-let lastForcedSpaceListRefreshAt = 0;
 let runMode = $state(false);
 let runCommand = $state("");
 let runTaskId = $state<string | null>(null);
@@ -217,11 +207,24 @@ const recentItems = $derived.by(() => {
 	return items.filter((item) => searchPlan.resourceTypes?.includes(item.type));
 });
 // Local commands are always resolved synchronously — never blocked by network/IDB.
-const localCommands = $derived(resolveLocalCommandItems(searchPlan));
+const localCommands = $derived(
+	resolveLocalCommandItems(searchPlan).map((item) =>
+		item.id === "manage-spaces"
+			? {
+					...item,
+					title: m.spaces_manage({}, { locale }),
+					excerpt: m.spaces_search_placeholder({}, { locale }),
+				}
+			: item,
+	),
+);
 const myUserUuid = $derived(authStore.userUuid);
 const filteredSpaceItems = $derived.by(() => {
-	if (!isSpacePickerMode || spaceFilter === "all" || spaceFilter === "recent")
-		return null;
+	if (!isSpacePickerMode) return null;
+	if (spaceFilter === "all" || spaceFilter === "recent") {
+		return (items: CommandPaletteItem[]) =>
+			items.filter((item) => item.type !== "space" || !item.isArchived);
+	}
 	return (items: CommandPaletteItem[]) =>
 		items.filter(
 			(item) =>
@@ -233,6 +236,7 @@ const filteredSpaceItems = $derived.by(() => {
 							name: item.spaceName,
 							ownerUserUuid: item.ownerProfile?.userUuid,
 							isPinned: item.isPinned,
+							isArchived: item.isArchived,
 						},
 					],
 					spaceFilter,
@@ -301,18 +305,10 @@ const renderedItems = $derived(
 const showingSettledItems = $derived(
 	isSearching && mergedItems.length === 0 && settledItems.length > 0,
 );
-const showingSpaceRefreshStatus = $derived(
-	refreshingSpaces &&
-		Boolean(searchPlan.resourceTypes?.includes("space")) &&
-		trimmedQuery.length < MIN_QUERY_LENGTH &&
-		!hasLabelScope,
-);
 const runBlocks = $derived(runResult ?? runProgress ?? []);
 const statusText = $derived.by(() => {
 	const label = typeLabel ?? m.command_type_default({}, { locale });
 	if (trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope) {
-		if (showingSpaceRefreshStatus)
-			return m.command_status_syncing({ label }, { locale });
 		return renderedItems.length > 0
 			? m.command_status_filter({ label }, { locale })
 			: m.command_status_search_initial(
@@ -475,18 +471,42 @@ function resetRunState() {
 	runPollTimer = null;
 }
 
+const SPACE_WARM_TTL_MS = 60_000;
+let lastSpaceWarmAt = 0;
+
+function warmSpacePickerCache() {
+	const auth = authStore.userUuid;
+	if (!auth) return;
+	const now = Date.now();
+	if (now - lastSpaceWarmAt < SPACE_WARM_TTL_MS) return;
+	lastSpaceWarmAt = now;
+	void sdk.spaces
+		.list({
+			limit: 50,
+			filter: "all",
+			recentSpaces: getRecentSpaces(auth).map((entry) => ({
+				id: entry.spaceId,
+				timestamp: entry.timestamp,
+			})),
+		})
+		.then((page) => setCachedSpacePage("all", "", page))
+		.catch(() => {
+			lastSpaceWarmAt = 0;
+		});
+}
+
 function openPalette(detail?: OpenCommandPaletteDetail) {
 	title = detail?.title ?? m.command_title({}, { locale });
 	placeholder = detail?.placeholder ?? defaultPlaceholder();
 	query = detail?.query ?? "";
 	openIntent = detail?.intent ?? "navigate";
 	spaceFilter = getCachedSpaceFilterPref();
-	forceSpaceRefreshForNextSearch = Boolean(detail?.refreshSpaces);
 	activeIndex = 0;
 	armPointerHover();
 	resetRunState();
 	open = true;
 	void tick().then(() => inputEl?.focus());
+	warmSpacePickerCache();
 }
 
 function closePalette() {
@@ -498,7 +518,6 @@ function closePalette() {
 	spaceFilter = getCachedSpaceFilterPref();
 	activeIndex = 0;
 	settledItems = [];
-	refreshingSpaces = false;
 	searchToken += 1;
 	localController?.abort();
 	remoteController?.abort();
@@ -527,56 +546,12 @@ function resetSearch(options?: { clearDefaultLists?: boolean }) {
 	activeIndex = 0;
 }
 
-async function refreshSpaceListForDefaultItems(
-	token: number,
-	options?: { force?: boolean },
-) {
-	let force = Boolean(options?.force);
-	if (force) {
-		const now = Date.now();
-		if (
-			now - lastForcedSpaceListRefreshAt <
-			SPACE_LIST_REFRESH_MIN_INTERVAL_MS
-		) {
-			force = false;
-		} else {
-			lastForcedSpaceListRefreshAt = now;
-		}
-	}
-
-	if (!force) {
-		const cacheMeta = getCachedSpaceListMeta();
-		if (cacheMeta && !cacheMeta.isStale) return;
-	}
-
-	try {
-		const refreshId = ++activeSpaceListRefreshId;
-		refreshingSpaces = true;
-		try {
-			await fetchSpaceListWithCache(async () => await sdk.spaces.list(), {
-				force,
-			});
-		} finally {
-			if (activeSpaceListRefreshId === refreshId) refreshingSpaces = false;
-		}
-	} catch (error) {
-		console.warn("[command-palette] space list refresh failed", error);
-		return;
-	}
-
-	if (token !== searchToken || !open || runMode) return;
-	if (trimmedQuery.length >= MIN_QUERY_LENGTH) return;
-	spaceListRefreshToken += 1;
-}
-
 function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 	const q = plan.query.trim();
 	const isLabelScope = Boolean(
 		plan.labelRef && plan.resourceTypes?.includes("label"),
 	);
 	const token = ++searchToken;
-	const forceSpaceRefresh = forceSpaceRefreshForNextSearch;
-	forceSpaceRefreshForNextSearch = false;
 	if (q.length < MIN_QUERY_LENGTH && !isLabelScope) {
 		// Keep previous default/resource items while reloading so the list does not
 		// flash empty. Both tab lists survive the switch (see resetSearch): the
@@ -603,7 +578,6 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 		const useOverviewDefaults = isSpacePickerMode && spaceFilter === "recent";
 		// The space list cache feeds both paths; keep it fresh (the helper checks
 		// its own staleness unless forced).
-		void refreshSpaceListForDefaultItems(token, { force: forceSpaceRefresh });
 		if (useOverviewDefaults) {
 			// First frame = last server payload (the cached overview snapshot)
 			// folded with local caches: device visits and viewer-authored turns
@@ -923,7 +897,6 @@ function handleOpenPaletteEvent(event: Event) {
 
 $effect(() => {
 	if (!open || runMode) return;
-	spaceListRefreshToken;
 	spaceFilter;
 	scheduleSearch(searchPlan, currentSpaceId);
 });
@@ -946,11 +919,6 @@ $effect(() => {
 onMount(() => {
 	window.addEventListener("keydown", handleGlobalKeydown, { capture: true });
 	window.addEventListener("cohub:open-command-palette", handleOpenPaletteEvent);
-	// Refresh space items when the space list cache changes (e.g. pin toggle)
-	// so the palette reflects the new isPinned state immediately.
-	const offSpaceListCache = onSpaceListCacheUpdated(() => {
-		if (open && !runMode) spaceListRefreshToken += 1;
-	});
 	// Warm the overview when the app returns to the foreground, so the Recent
 	// tab opens from cache instead of fetching. Cross-device activity is the
 	// one signal the local caches cannot fold in at render time.
@@ -971,7 +939,6 @@ onMount(() => {
 			"cohub:open-command-palette",
 			handleOpenPaletteEvent,
 		);
-		offSpaceListCache();
 		localController?.abort();
 		remoteController?.abort();
 		if (debounceTimer != null) window.clearTimeout(debounceTimer);
@@ -1170,7 +1137,7 @@ onMount(() => {
 						{#if runStatus === "queued" || runStatus === "running"}<Loader2 class="h-3 w-3 animate-spin text-brand" />{/if}
 						<span>{runError || (runStatus === "done" ? m.command_done({ id: runTaskId ?? "" }, { locale }) : runStatus === "running" ? m.command_running({}, { locale }) : runStatus === "queued" ? m.command_queued({}, { locale }) : currentSpaceId ? m.command_press_run({}, { locale }) : m.command_open_space({}, { locale }))}</span>
 					{:else}
-						{#if isSearching || showingSpaceRefreshStatus}<Loader2 class="h-3 w-3 animate-spin text-brand" />{/if}
+						{#if isSearching}<Loader2 class="h-3 w-3 animate-spin text-brand" />{/if}
 						<span>{statusText}</span>
 					{/if}
 				</div>

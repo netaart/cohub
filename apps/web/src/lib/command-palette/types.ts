@@ -60,6 +60,7 @@ export type CommandPaletteItem = {
 	updatedAt: string | null;
 	source: CommandPaletteItemSource;
 	isPinned?: boolean;
+	isArchived?: boolean;
 	localScore?: number;
 	remoteScore?: number;
 };

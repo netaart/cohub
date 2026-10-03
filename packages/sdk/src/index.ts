@@ -189,6 +189,7 @@ export type {
   SpaceTurnListOptions,
   WebSocketConnectionState,
 } from "./apis/spaces.js";
+export type { SpaceListOptions, SpaceListPage } from "./types.js";
 export type {
   RealtimeRoomDescriptor,
   RealtimeRoomEvent,

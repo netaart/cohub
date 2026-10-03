@@ -2,9 +2,9 @@ import { invalidatePaletteOverview } from "$lib/command-palette/palette-overview
 import { sdk } from "$lib/sdk";
 import { authStore } from "$lib/stores/auth.svelte";
 import {
-	getCachedSpaceList,
-	patchCachedSpaceList,
-} from "$lib/stores/space-list-cache";
+	getCachedSpaceRecord,
+	patchCachedSpaceRecordSoon,
+} from "$lib/stores/space-record-cache";
 
 /**
  * Space pin store — manages optimistic pin/unpin and multi-client sync.
@@ -28,9 +28,33 @@ export function initSpacePinRealtime() {
 		const payload = event.payload as {
 			resourceType?: string;
 			resourceRef?: string;
+			resourceRefs?: string[];
+			resourceAssignments?: Array<{
+				resourceRef: string;
+				assignments: Array<{ labelSystemKey?: string | null }>;
+			}>;
 		};
-		if (payload.resourceType !== "space" || !payload.resourceRef) return;
-		void refreshPinnedState(payload.resourceRef);
+		if (payload.resourceType !== "space") return;
+		if (payload.resourceAssignments) {
+			for (const entry of payload.resourceAssignments) {
+				const keys = new Set(
+					entry.assignments.map((assignment) => assignment.labelSystemKey),
+				);
+				setViewerFlagsInCache(entry.resourceRef, {
+					isPinned: keys.has("user:pinned"),
+					isArchived: keys.has("user:archived"),
+				});
+			}
+			invalidatePaletteOverview();
+			return;
+		}
+		const resourceRefs = payload.resourceRefs?.length
+			? payload.resourceRefs
+			: payload.resourceRef
+				? [payload.resourceRef]
+				: [];
+		for (const resourceRef of resourceRefs)
+			void refreshPinnedState(resourceRef);
 	});
 }
 
@@ -40,27 +64,60 @@ async function refreshPinnedState(spaceId: string) {
 		const isPinned = result.assignments.some(
 			(a) => a.labelSystemKey === "user:pinned",
 		);
-		setPinnedInCache(spaceId, isPinned);
+		const isArchived = result.assignments.some(
+			(a) => a.labelSystemKey === "user:archived",
+		);
+		setViewerFlagsInCache(spaceId, { isPinned, isArchived });
 		invalidatePaletteOverview();
 	} catch {
 		// Non-critical: the next list refetch will reconcile.
 	}
 }
 
-function setPinnedInCache(spaceId: string, isPinned: boolean) {
-	patchCachedSpaceList((spaces) =>
-		spaces.map((s) => (s.id === spaceId ? { ...s, isPinned } : s)),
-	);
+function setViewerFlagsInCache(
+	spaceId: string,
+	flags: { isPinned?: boolean; isArchived?: boolean },
+) {
+	patchCachedSpaceRecordSoon({ id: spaceId, ...flags });
 }
 
+export async function toggleSpaceArchive(spaceIds: string[], archive: boolean) {
+	const previous = new Map<
+		string,
+		{ isArchived: boolean; isPinned: boolean }
+	>();
+	for (const id of spaceIds) {
+		const cached = await getCachedSpaceRecord(id);
+		previous.set(id, {
+			isArchived: cached?.space.isArchived ?? false,
+			isPinned: cached?.space.isPinned ?? false,
+		});
+		setViewerFlagsInCache(id, {
+			isArchived: archive,
+			...(archive ? { isPinned: false } : {}),
+		});
+	}
+	invalidatePaletteOverview();
+	try {
+		await sdk.user.labels.patchResources(
+			spaceIds,
+			archive
+				? { addLabelRefs: ["Archived"], removeLabelRefs: ["Pinned"] }
+				: { removeLabelRefs: ["Archived"] },
+		);
+	} catch (error) {
+		for (const [id, flags] of previous) setViewerFlagsInCache(id, flags);
+		invalidatePaletteOverview();
+		throw error;
+	}
+}
 export async function toggleSpacePin(spaceId: string): Promise<void> {
 	await authStore.ensureLoaded();
-	const current = getCachedSpaceList() ?? [];
-	const space = current.find((s) => s.id === spaceId);
-	const wasPinned = space?.isPinned ?? false;
+	const cached = await getCachedSpaceRecord(spaceId);
+	const wasPinned = cached?.space.isPinned ?? false;
 
 	// Optimistic update. The overview snapshot contains pin state too.
-	setPinnedInCache(spaceId, !wasPinned);
+	setViewerFlagsInCache(spaceId, { isPinned: !wasPinned });
 	invalidatePaletteOverview();
 
 	try {
@@ -74,7 +131,7 @@ export async function toggleSpacePin(spaceId: string): Promise<void> {
 	} catch (error) {
 		// Rollback on failure; keep the overview invalidated so the next read
 		// reconciles against the server.
-		setPinnedInCache(spaceId, wasPinned);
+		setViewerFlagsInCache(spaceId, { isPinned: wasPinned });
 		invalidatePaletteOverview();
 		throw error;
 	}

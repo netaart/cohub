@@ -225,6 +225,7 @@ function overviewSpaceToItem(
 		source: "default",
 		localScore: score.score,
 		isPinned: space.isPinned,
+		isArchived: space.isArchived,
 		typePriorityScore: 0.88,
 		...score,
 	};
@@ -286,6 +287,7 @@ function spaceToDefaultItem(
 		source: "default",
 		localScore: score.score,
 		isPinned: space.isPinned ?? false,
+		isArchived: space.isArchived ?? false,
 		typePriorityScore: currentSpaceId === space.id ? 0.93 : 0.88,
 		...score,
 	};

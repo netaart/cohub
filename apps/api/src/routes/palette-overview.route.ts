@@ -26,6 +26,7 @@ type PaletteOverviewSpaceRow = {
   avatarUrl: string | null;
   spaceRelation: PaletteSpaceRelation;
   isPinned: boolean;
+  isArchived: boolean;
   lastParticipatedAt: Date | string | null;
   updatedAt: Date | string | null;
 };
@@ -98,6 +99,7 @@ router.get("/", async (c) => {
             s.updated_at,
             s.created_at,
             pinned_assignment.id IS NOT NULL AS is_pinned,
+            archive_assignment.id IS NOT NULL AS is_archived,
             (${recentSpaceCondition}) AS is_local_recent,
             CASE
               WHEN s.user_uuid = ${identity.uuid} THEN 'owner'
@@ -117,8 +119,18 @@ router.get("/", async (c) => {
             AND pinned_assignment.scope_id = ${identity.uuid}
             AND pinned_assignment.resource_type = 'space'
             AND pinned_assignment.resource_ref = s.id::text
+          LEFT JOIN v2.labels archive_label
+            ON archive_label.scope_type = 'user'
+            AND archive_label.scope_id = ${identity.uuid}
+            AND archive_label.system_key = 'user:archived'
+          LEFT JOIN v2.label_assignments archive_assignment
+            ON archive_assignment.label_id = archive_label.id
+            AND archive_assignment.scope_type = 'user'
+            AND archive_assignment.scope_id = ${identity.uuid}
+            AND archive_assignment.resource_type = 'space'
+            AND archive_assignment.resource_ref = s.id::text
           WHERE
-            s.user_uuid = ${identity.uuid}
+            (s.user_uuid = ${identity.uuid}
             OR sm.user_id IS NOT NULL
             OR EXISTS (
               SELECT 1
@@ -126,7 +138,8 @@ router.get("/", async (c) => {
               WHERE ap.resource_type = 'space'
                 AND ap.resource_id = s.id
                 AND (ap.signed_in_user_role IS NOT NULL OR ap.anonymous_user_role IS NOT NULL)
-            )
+            ))
+            AND archive_assignment.id IS NULL
         ),
         user_turn_activity AS (
           SELECT
@@ -149,6 +162,7 @@ router.get("/", async (c) => {
           nullif(trim(coalesce(vs.meta #>> '{publicProfile,avatarUrl}', '')), '') AS "avatarUrl",
           vs.space_relation AS "spaceRelation",
           vs.is_pinned AS "isPinned",
+          vs.is_archived AS "isArchived",
           uta.last_participated_at AS "lastParticipatedAt",
           coalesce(vs.last_activity_at, vs.updated_at, vs.created_at) AS "updatedAt"
         FROM visible_spaces vs
@@ -227,6 +241,7 @@ router.get("/", async (c) => {
           : null,
         spaceProfile: { avatarUrl: normalizePublicAvatarUrl(row.avatarUrl) },
         isPinned: Boolean(row.isPinned),
+        isArchived: Boolean(row.isArchived),
         relation: row.spaceRelation,
         lastParticipatedAt: toIso(row.lastParticipatedAt),
         updatedAt: toIso(row.updatedAt),

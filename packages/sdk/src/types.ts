@@ -866,8 +866,26 @@ export type SpaceRecord = {
   access?: SpaceAccess;
   accessLevel?: "minimal";
   ownerProfile?: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
-  /** Whether the viewer has pinned this space (only present in list responses). */
+  /** User-private label state returned by paginated account listings. */
   isPinned?: boolean;
+  isArchived?: boolean;
+  relation?: "owner" | "member" | "public";
+};
+
+export type SpaceListFilter = "recent" | "all" | "mine" | "pinned" | "archived";
+
+export type SpaceListOptions = {
+  limit?: number;
+  cursor?: string | null;
+  filter?: SpaceListFilter;
+  query?: string;
+  name?: string;
+  recentSpaces?: readonly { id: string; timestamp: number }[];
+};
+
+export type SpaceListPage = {
+  items: SpaceRecord[];
+  pageInfo: { nextCursor: string | null; hasMore: boolean };
 };
 
 export type SpaceConfigInput = {
@@ -1134,6 +1152,7 @@ export type PaletteOverviewSpace = {
   ownerProfile: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
   spaceProfile: SpacePublicProfile | null;
   isPinned: boolean;
+  isArchived?: boolean;
   relation: PaletteOverviewSpaceRelation;
   lastParticipatedAt: string | null;
   updatedAt: string | null;

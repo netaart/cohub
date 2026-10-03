@@ -21,7 +21,6 @@ import { sdk } from "$lib/sdk";
 import { buildSpaceLandingRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
-import { setCachedSpaceList } from "$lib/stores/space-list-cache";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 
 const currentPath = $derived(page.url.pathname);
@@ -52,14 +51,6 @@ function formatUpdatedAt(value: string | null) {
 	});
 }
 
-function findConfigSpace(spaces: SpaceRecord[], currentUserUuid: string) {
-	return (
-		spaces.find(
-			(space) => space.name === "config" && space.userUuid === currentUserUuid,
-		) ?? null
-	);
-}
-
 async function loadRulesPage() {
 	if (!(await ensureAuth({ redirectPath: `${currentPath}${currentSearch}` })))
 		return;
@@ -70,14 +61,16 @@ async function loadRulesPage() {
 	try {
 		await authStore.ensureLoaded();
 		userUuid = authStore.userUuid ?? "";
-		const [rules, spacesResult] = await Promise.all([
+		const [rules, spacesPage] = await Promise.all([
 			sdk.user.getRules(),
-			sdk.spaces.list(),
+			sdk.spaces.list({ filter: "mine", name: "config", limit: 1 }),
 		]);
-		const spaces = setCachedSpaceList(spacesResult);
 		rulesContent = rules.content;
 		updatedAt = rules.updatedAt;
-		configSpace = userUuid ? findConfigSpace(spaces, userUuid) : null;
+		configSpace = userUuid
+			? (spacesPage.items.find((space) => space.userUuid === userUuid) ?? null)
+			: null;
+		cacheSpaceRecordSoon(configSpace);
 	} catch (error) {
 		if (
 			await handleUnauthorizedError(error, `${currentPath}${currentSearch}`)

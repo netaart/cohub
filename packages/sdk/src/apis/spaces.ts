@@ -88,6 +88,8 @@ import type {
   SpaceModListItem,
   SpaceMember,
   SpaceRecord,
+  SpaceListOptions,
+  SpaceListPage,
   SpaceRole,
   SpaceSessionsResponse,
   SpaceTurnAuthorFilter,
@@ -246,14 +248,29 @@ const getPersistedMessageTurnId = (event: WebsocketEventPayload) => {
   return typeof meta?.turnId === "string" ? meta.turnId : null;
 };
 
+export type SpaceListFilter = "recent" | "all" | "mine" | "pinned" | "archived";
+
 export class SpacesApi {
   constructor(private readonly transport: HttpTransport) {}
 
-  list(customFetch?: Fetch) {
-    return this.transport.request<SpaceRecord[]>("/api/spaces", {
-      method: "GET",
-      fetch: customFetch,
-    });
+  list(options?: SpaceListOptions, customFetch?: Fetch): Promise<SpaceListPage>;
+  list(customFetch: Fetch): Promise<SpaceListPage>;
+  list(optionsOrFetch: SpaceListOptions | Fetch = {}, customFetch?: Fetch): Promise<SpaceListPage> {
+    // The SDK is published, so keep the legacy `list(customFetch)` call shape working.
+    const options = typeof optionsOrFetch === "function" ? {} : optionsOrFetch;
+    const fetch = typeof optionsOrFetch === "function" ? optionsOrFetch : customFetch;
+    const params = new URLSearchParams();
+    if (options.limit) params.set("limit", String(options.limit));
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.filter) params.set("filter", options.filter);
+    if (options.query) params.set("q", options.query);
+    if (options.name) params.set("name", options.name);
+    for (const recent of options.recentSpaces ?? []) {
+      params.append("recentSpaceId", recent.id);
+      params.append("recentSpaceAt", new Date(recent.timestamp).toISOString());
+    }
+    const query = params.toString();
+    return this.transport.request<SpaceListPage>(`/api/spaces${query ? `?${query}` : ""}`, { fetch });
   }
 
   /**

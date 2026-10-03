@@ -660,6 +660,16 @@ export type SpacePresenceSnapshot = {
   updatedAt: string;
 };
 
+export type SpaceListChangedEvent = {
+  id: string;
+  timestamp: number;
+  domain: "space";
+  type: "space.list.changed";
+  spaceId: string;
+  sessionId?: string | null;
+  payload: { spaceId: string; revision: string };
+};
+
 export type SpacePresenceUpdatedEvent = {
   id: string;
   timestamp: number;
@@ -842,6 +852,8 @@ export type LabelAssignmentsUpdatedEvent = {
   payload: {
     resourceType: "session" | "checkpoint" | "file" | "space";
     resourceRef: string;
+    resourceRefs?: string[];
+    resourceAssignments?: Array<{ resourceRef: string; assignments: unknown[] }>;
     labels: unknown[];
     assignments: unknown[];
     items?: unknown[];
@@ -888,6 +900,7 @@ export type RealtimeServerEvent =
   | SessionMessagePersistedEvent
   | SpaceFsChangedEvent
   | SpacePortsChangedEvent
+  | SpaceListChangedEvent
   | SpacePresenceUpdatedEvent
   | BoardChangedEvent
   | BoardAwarenessUpdatedEvent
