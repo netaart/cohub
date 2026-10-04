@@ -30,8 +30,6 @@ import {
 	Loader2,
 	LogOut,
 	MessageSquare,
-	Network,
-	NotebookPen,
 	PanelLeftClose,
 	PanelLeftOpen,
 	Pencil,
@@ -55,11 +53,17 @@ import { signOut } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
 import { getCacheUserKey } from "$lib/cache/keys";
+import { openCommandPalette } from "$lib/command-palette/open";
 import { clearCachedPaletteOverview } from "$lib/command-palette/palette-overview";
+import { APP_AREA_ICONS, appAreaLabel } from "$lib/components/app-area";
 import ChannelProviderIcon from "$lib/components/ChannelProviderIcon.svelte";
 import NewLabelPopover from "$lib/components/NewLabelPopover.svelte";
 import SidebarFlyout from "$lib/components/SidebarFlyout.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import {
+	SETTINGS_SECTION_ICONS,
+	settingsSectionLabel,
+} from "$lib/components/settings-section";
 import SidebarAppRow from "$lib/components/sidebar/SidebarAppRow.svelte";
 import SidebarCheckpointRow from "$lib/components/sidebar/SidebarCheckpointRow.svelte";
 import SidebarFallbackResourceRow from "$lib/components/sidebar/SidebarFallbackResourceRow.svelte";
@@ -82,6 +86,8 @@ import {
 	createAppMutationBuffer,
 	upsertAppSnapshot,
 } from "$lib/features/app/app-realtime";
+import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
+import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
 import { appActionName } from "$lib/features/space/modules/task-run-utils";
 import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
 import { extractGenerationPromptPreview } from "$lib/generation-task-media";
@@ -94,7 +100,9 @@ import {
 	type ResourceLabelMutationResult,
 	removeResourceFromLabel,
 } from "$lib/labels/resource-label-actions";
+import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { formatResourceMentionTextForDisplay } from "$lib/mentions/resource";
+import { APP_AREAS, type AppArea, appAreaHref } from "$lib/mobile-nav";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import {
@@ -106,7 +114,11 @@ import {
 	sortSessionsByRecentActivity,
 } from "$lib/session-sort";
 import {
-	buildSessionsRoute,
+	resolveSettingsSection,
+	SETTINGS_SECTIONS,
+	settingsSectionHref,
+} from "$lib/settings-nav";
+import {
 	buildSpaceActivityRoute,
 	buildSpaceAppRoute,
 	buildSpaceCheckpointNewRoute,
@@ -202,12 +214,12 @@ import { resolveWorkspaceRouteContext } from "$lib/workspace-route";
 const {
 	isMobile = false,
 	onClose,
-	mode = "space",
+	area = "spaces",
 	collapsed = false,
 }: {
 	isMobile?: boolean;
 	onClose?: () => void;
-	mode?: "space" | "settings";
+	area?: AppArea;
 	collapsed?: boolean;
 } = $props();
 
@@ -368,8 +380,10 @@ let loadingAppsSpaceId = $state<string | null>(null);
 let refreshingApps = $state(false);
 
 const currentPath = $derived(page.url.pathname);
-const isSessionsRoute = $derived(
-	currentPath === "/sessions" || currentPath.startsWith("/sessions/"),
+const activeInboxSessionId = $derived(
+	area === "chats" && typeof page.data.sessionId === "string"
+		? page.data.sessionId
+		: null,
 );
 const workspaceRoute = $derived(
 	resolveWorkspaceRouteContext({
@@ -379,7 +393,17 @@ const workspaceRoute = $derived(
 		params: { id: page.params.id },
 	}),
 );
-const currentSpaceId = $derived(workspaceRoute.spaceId);
+const routeSpaceId = $derived(workspaceRoute.spaceId);
+const shown = $derived(isMobile || !useCompactShell());
+const fallbackSpaceId = $derived.by(() => {
+	if (area !== "spaces" || routeSpaceId || !shown) return null;
+	void currentPath;
+	const userUuid = authStore.userUuid;
+	return userUuid ? (getRecentSpace(userUuid)?.spaceId ?? null) : null;
+});
+const currentSpaceId = $derived(
+	area === "spaces" ? (routeSpaceId ?? fallbackSpaceId) : null,
+);
 const activeSessionId = $derived(workspaceRoute.sessionId);
 const activeAppId = $derived(workspaceRoute.appId);
 const activeCheckpointId = $derived(workspaceRoute.checkpointId);
@@ -555,44 +579,14 @@ async function refreshBillingPlan() {
 	return billingPlanRequest;
 }
 
-const baseSettingsTabs = $derived([
-	{
-		id: "general",
-		label: m.nav_general({}, { locale }),
-		icon: Settings,
-		href: "/settings/general",
-	},
-	{
-		id: "activity",
-		label: m.nav_activity({}, { locale }),
-		icon: Activity,
-		href: "/settings/activity",
-	},
-	{
-		id: "referrals",
-		label: m.nav_referrals({}, { locale }),
-		icon: Gift,
-		href: "/settings/referrals",
-	},
-	{
-		id: "billing",
-		label: m.nav_billing({}, { locale }),
-		icon: CreditCard,
-		href: "/settings/billing",
-	},
-	{
-		id: "rules",
-		label: m.nav_user_rules({}, { locale }),
-		icon: NotebookPen,
-		href: "/settings/rules",
-	},
-	{
-		id: "channels",
-		label: m.nav_channels({}, { locale }),
-		icon: Network,
-		href: "/settings/channels",
-	},
-]);
+const baseSettingsTabs = $derived(
+	SETTINGS_SECTIONS.map((id) => ({
+		id,
+		label: settingsSectionLabel(id, locale),
+		icon: SETTINGS_SECTION_ICONS[id],
+		href: settingsSectionHref(id),
+	})),
+);
 const settingsTabs = $derived(
 	baseSettingsTabs.filter(
 		(tab) => tab.id !== "billing" || billingConfigured !== false,
@@ -627,10 +621,7 @@ const settingsReturnTo = $derived.by(() => {
 	}
 });
 
-const activeSettingsTab = $derived.by(() => {
-	const tab = settingsTabs.find((tab) => currentPath.startsWith(tab.href));
-	return tab?.id ?? null;
-});
+const activeSettingsTab = $derived(resolveSettingsSection(currentPath));
 
 function getTaskRunBadge(status: TaskRunRecord["status"]) {
 	if (status === "completed") {
@@ -1836,7 +1827,7 @@ function scrollSidebarLabelIntoView(labelId: string, attempt = 0) {
 }
 
 function focusOwnSessionUserLabel() {
-	if (mode !== "space" || !currentSpaceId) return false;
+	if (area !== "spaces" || !currentSpaceId) return false;
 	const ownLabel = findOwnSessionUserLabel();
 	if (!ownLabel) return false;
 	const userRoot = findSessionUserRootLabel(labels);
@@ -2366,12 +2357,20 @@ async function handleNavigate(
 ) {
 	onClose?.();
 	const targetHref =
-		options?.keepSettingsReturn && mode === "settings"
+		options?.keepSettingsReturn && area === "account"
 			? withSettingsReturn(href)
 			: href;
 	await goto(targetHref, {
 		replaceState: options?.replaceState,
 	});
+}
+
+function openArea(event: MouseEvent, target: AppArea) {
+	if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
+		return;
+	event.preventDefault();
+	if (target === "account") openSettings();
+	else void handleNavigate(appAreaHref(target));
 }
 
 function openSettings() {
@@ -2383,14 +2382,14 @@ function openSettings() {
 function openBillingSettings() {
 	showUserMenu = false;
 	void handleNavigate(withSettingsReturn("/settings/billing"), {
-		replaceState: mode === "settings",
+		replaceState: area === "account",
 	});
 }
 
 function openReferralsSettings() {
 	showUserMenu = false;
 	void handleNavigate(withSettingsReturn("/settings/referrals"), {
-		replaceState: mode === "settings",
+		replaceState: area === "account",
 	});
 }
 
@@ -2414,22 +2413,18 @@ function openHelpPanel() {
 	window.dispatchEvent(new CustomEvent("cohub:open-help-panel"));
 }
 
-function openCommandPalette() {
+function openSearch() {
 	onClose?.();
-	window.dispatchEvent(new CustomEvent("cohub:open-command-palette"));
+	openCommandPalette();
 }
 
 function openSpacePalette() {
 	onClose?.();
-	window.dispatchEvent(
-		new CustomEvent("cohub:open-command-palette", {
-			detail: {
-				title: m.sidebar_switch_space_title({}, { locale }),
-				query: "a: ",
-				placeholder: m.sidebar_search_spaces({}, { locale }),
-			},
-		}),
-	);
+	openCommandPalette({
+		title: m.sidebar_switch_space_title({}, { locale }),
+		query: "a: ",
+		placeholder: m.sidebar_search_spaces({}, { locale }),
+	});
 }
 
 function mainRouteWithWindow(pathname: string) {
@@ -3000,8 +2995,10 @@ function handleGlobalSidebarKeydown(event: KeyboardEvent) {
 		!event.altKey &&
 		key === "o";
 	if (isNewChatShortcut) {
+		if (area === "account") return;
 		event.preventDefault();
-		void handleCreateNewSession();
+		if (area === "chats") void chatsInbox.newChat();
+		else void handleCreateNewSession();
 		return;
 	}
 	const isOwnChatsShortcut =
@@ -3010,7 +3007,7 @@ function handleGlobalSidebarKeydown(event: KeyboardEvent) {
 		!event.altKey &&
 		key === "u";
 	if (!isOwnChatsShortcut) return;
-	if (mode !== "space" || !currentSpaceId) return;
+	if (area !== "spaces" || !currentSpaceId) return;
 	event.preventDefault();
 	focusOwnSessionUserLabelOrFallback();
 }
@@ -3019,84 +3016,78 @@ onMount(() => {
 	void modelsCatalogStore.load().catch((error) => {
 		console.error("Failed to load models catalog:", error);
 	});
-	let offSessionListCacheUpdated = () => {};
-	let offSpaceLabelsCacheUpdated = () => {};
-	let offUserLabelProfilesUpdated = () => {};
-	let offChannelLabelDisplayNamesUpdated = () => {};
-	let offTaskRunsCacheUpdated = () => {};
-	if (mode === "space") {
-		offSessionListCacheUpdated = onSessionListCacheUpdated(
-			({ spaceId, sessions: nextSessions, forks, pageInfo }) => {
-				if (spaceId !== currentSpaceId) return;
-				const previousSessionsById = new Map(
-					sessions.map((session) => [session.id, session]),
-				);
-				const shouldPreserveLoadedPageInfo =
-					sessions.length > nextSessions.length;
-				let shouldRefreshActivityLabels = false;
-				sessions = mergeSessionSnapshotForDisplay(sessions, nextSessions);
-				for (const session of nextSessions) {
-					const previous = previousSessionsById.get(session.id);
-					if (!previous) {
-						optimisticPrependWebAppLabelSession(spaceId, session);
-						continue;
-					}
-					if (didSessionActivityChange(previous, session)) {
-						shouldRefreshActivityLabels = true;
-					}
+	const offSessionListCacheUpdated = onSessionListCacheUpdated(
+		({ spaceId, sessions: nextSessions, forks, pageInfo }) => {
+			if (spaceId !== currentSpaceId) return;
+			const previousSessionsById = new Map(
+				sessions.map((session) => [session.id, session]),
+			);
+			const shouldPreserveLoadedPageInfo =
+				sessions.length > nextSessions.length;
+			let shouldRefreshActivityLabels = false;
+			sessions = mergeSessionSnapshotForDisplay(sessions, nextSessions);
+			for (const session of nextSessions) {
+				const previous = previousSessionsById.get(session.id);
+				if (!previous) {
+					optimisticPrependWebAppLabelSession(spaceId, session);
+					continue;
 				}
-				if (shouldRefreshActivityLabels)
-					refreshExpandedSessionActivityLabels(spaceId);
-				applySessionForks(forks);
-				if (pageInfo && !shouldPreserveLoadedPageInfo)
-					sessionsPageInfo = pageInfo;
-				exhaustedFallbackSessionCursor = null;
-			},
-		);
-		offSpaceLabelsCacheUpdated = onSpaceLabelsCacheUpdated(
-			({ spaceId, labels: nextLabels }) => {
-				if (spaceId !== currentSpaceId) return;
-				labels = nextLabels;
-				pruneExpandedLabelIds(spaceId, nextLabels);
-				hydrateSystemLabelDisplays(nextLabels);
-			},
-		);
-		offUserLabelProfilesUpdated = onUserLabelProfilesUpdated(() => {
-			userLabelProfileVersion += 1;
-		});
-		offChannelLabelDisplayNamesUpdated = onChannelLabelDisplayNamesUpdated(
-			() => {
-				channelLabelDisplayVersion += 1;
-			},
-		);
-		hydrateSystemLabelDisplays(labels);
-		offTaskRunsCacheUpdated = onTaskRunsCacheUpdated(({ spaceId, runs }) => {
+				if (didSessionActivityChange(previous, session)) {
+					shouldRefreshActivityLabels = true;
+				}
+			}
+			if (shouldRefreshActivityLabels)
+				refreshExpandedSessionActivityLabels(spaceId);
+			applySessionForks(forks);
+			if (pageInfo && !shouldPreserveLoadedPageInfo)
+				sessionsPageInfo = pageInfo;
+			exhaustedFallbackSessionCursor = null;
+		},
+	);
+	const offSpaceLabelsCacheUpdated = onSpaceLabelsCacheUpdated(
+		({ spaceId, labels: nextLabels }) => {
+			if (spaceId !== currentSpaceId) return;
+			labels = nextLabels;
+			pruneExpandedLabelIds(spaceId, nextLabels);
+			hydrateSystemLabelDisplays(nextLabels);
+		},
+	);
+	const offUserLabelProfilesUpdated = onUserLabelProfilesUpdated(() => {
+		userLabelProfileVersion += 1;
+	});
+	const offChannelLabelDisplayNamesUpdated = onChannelLabelDisplayNamesUpdated(
+		() => {
+			channelLabelDisplayVersion += 1;
+		},
+	);
+	hydrateSystemLabelDisplays(labels);
+	const offTaskRunsCacheUpdated = onTaskRunsCacheUpdated(
+		({ spaceId, runs }) => {
 			if (spaceId !== currentSpaceId) return;
 			tasks = runs;
-		});
-		// Desktop sidebar owns space shortcuts (⌘O / ⌘⇧U). Mobile has no keyboard surface.
-		if (!isMobile) {
-			window.addEventListener("keydown", handleGlobalSidebarKeydown);
-		}
-		window.addEventListener(
-			APPS_CHANGED_EVENT,
-			handleWorksChanged as EventListener,
-		);
-		void loadCurrentSpaceFromUrl();
-
-		window.addEventListener(
-			"cohub:checkpoints-updated",
-			handleCheckpointsUpdated as EventListener,
-		);
-		window.addEventListener(
-			"cohub:cronjobs-updated",
-			handleCronjobsUpdated as EventListener,
-		);
-		window.addEventListener(
-			"cohub:label-assignments-updated",
-			handleLabelAssignmentsUpdated as EventListener,
-		);
+		},
+	);
+	if (!isMobile) {
+		window.addEventListener("keydown", handleGlobalSidebarKeydown);
 	}
+	window.addEventListener(
+		APPS_CHANGED_EVENT,
+		handleWorksChanged as EventListener,
+	);
+	void loadCurrentSpaceFromUrl();
+
+	window.addEventListener(
+		"cohub:checkpoints-updated",
+		handleCheckpointsUpdated as EventListener,
+	);
+	window.addEventListener(
+		"cohub:cronjobs-updated",
+		handleCronjobsUpdated as EventListener,
+	);
+	window.addEventListener(
+		"cohub:label-assignments-updated",
+		handleLabelAssignmentsUpdated as EventListener,
+	);
 
 	function handleCheckpointsUpdated(e: Event) {
 		const custom = e as CustomEvent;
@@ -3153,27 +3144,25 @@ onMount(() => {
 		offChannelLabelDisplayNamesUpdated();
 		offTaskRunsCacheUpdated();
 		document.removeEventListener("click", handleClickOutside);
-		if (mode === "space") {
-			if (!isMobile) {
-				window.removeEventListener("keydown", handleGlobalSidebarKeydown);
-			}
-			window.removeEventListener(
-				APPS_CHANGED_EVENT,
-				handleWorksChanged as EventListener,
-			);
-			window.removeEventListener(
-				"cohub:checkpoints-updated",
-				handleCheckpointsUpdated as EventListener,
-			);
-			window.removeEventListener(
-				"cohub:cronjobs-updated",
-				handleCronjobsUpdated as EventListener,
-			);
-			window.removeEventListener(
-				"cohub:label-assignments-updated",
-				handleLabelAssignmentsUpdated as EventListener,
-			);
+		if (!isMobile) {
+			window.removeEventListener("keydown", handleGlobalSidebarKeydown);
 		}
+		window.removeEventListener(
+			APPS_CHANGED_EVENT,
+			handleWorksChanged as EventListener,
+		);
+		window.removeEventListener(
+			"cohub:checkpoints-updated",
+			handleCheckpointsUpdated as EventListener,
+		);
+		window.removeEventListener(
+			"cohub:cronjobs-updated",
+			handleCronjobsUpdated as EventListener,
+		);
+		window.removeEventListener(
+			"cohub:label-assignments-updated",
+			handleLabelAssignmentsUpdated as EventListener,
+		);
 	};
 });
 
@@ -3196,7 +3185,7 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (mode !== "space") return;
+	if (area !== "spaces") return;
 	const id = currentSpaceId;
 	if (!id) return;
 
@@ -3206,7 +3195,7 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (mode !== "space") return;
+	if (area !== "spaces") return;
 	const id = currentSpaceId;
 	if (id) {
 		sessions = [];
@@ -3299,12 +3288,13 @@ $effect(() => {
 // refetch on the next palette open. Cross-device recency is picked up by the
 // freshness window and the focus/visibility revalidation instead.
 $effect(() => {
-	if (mode !== "space") return;
+	if (area !== "spaces") return;
 	const userUuid = authStore.userUuid;
-	if (!userUuid || !currentSpaceId) return;
+	const spaceId = routeSpaceId;
+	if (!userUuid || !spaceId) return;
 	untrack(() => {
 		const sessionId = activeSession?.id ?? null;
-		setRecentSpace(userUuid, currentSpaceId, sessionId);
+		setRecentSpace(userUuid, spaceId, sessionId);
 	});
 });
 </script>
@@ -3833,28 +3823,32 @@ $effect(() => {
       <button
         type="button"
         class="mt-1 flex h-8 w-8 items-center justify-center rounded-[6px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
-        onclick={openCommandPalette}
+        onclick={openSearch}
         aria-label={m.sidebar_search_everywhere({}, { locale })}
         title={m.sidebar_search_everywhere_shortcut({}, { locale })}
       >
         <Search class="h-4 w-4" />
       </button>
-      <a
-        href={buildSessionsRoute()}
-        class="mt-1 flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {isSessionsRoute ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
-        aria-label={m.sidebar_chats({}, { locale })}
-        title={m.sidebar_chats({}, { locale })}
-        onclick={(event) => {
-          event.preventDefault();
-          void handleNavigate(buildSessionsRoute());
-        }}
-      >
-        <MessageSquare class="h-4 w-4" />
-      </a>
+      <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
+      <nav class="mt-2 flex flex-col items-center gap-1" aria-label={m.nav_tabs_aria({}, { locale })}>
+        {#each APP_AREAS as item (item)}
+          {@const Icon = APP_AREA_ICONS[item]}
+          <a
+            href={appAreaHref(item)}
+            class="flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {area === item ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+            aria-label={appAreaLabel(item, locale)}
+            aria-current={area === item ? "page" : undefined}
+            title={appAreaLabel(item, locale)}
+            onclick={(event) => openArea(event, item)}
+          >
+            <Icon class="h-4 w-4" />
+          </a>
+        {/each}
+      </nav>
 
       <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
 
-      {#if mode === "space"}
+      {#if area === "spaces"}
         <div class="mt-2 flex w-full flex-col items-center gap-1">
           <button
             type="button"
@@ -3970,6 +3964,8 @@ $effect(() => {
         {:else}
           <div class="flex-1"></div>
         {/if}
+      {:else if area === "chats"}
+        <div class="flex-1"></div>
       {:else}
         <nav class="mt-3 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
           <button type="button" class="rail-button text-text-tertiary" onclick={returnFromSettings} aria-label={m.nav_back({}, { locale })} title={m.nav_back({}, { locale })}>
@@ -4028,7 +4024,7 @@ $effect(() => {
               </div>
             {/if}
             <a href="/settings/referrals" class="rail-menu-item" onclick={(e) => { e.preventDefault(); openReferralsSettings(); }}><Gift class="h-3.5 w-3.5" /><span>{m.nav_referrals({}, { locale })}</span></a>
-            {#if mode === "space"}
+            {#if area !== "account"}
               <a href="/settings" class="rail-menu-item" onclick={(e) => { e.preventDefault(); openSettings(); }}><Settings class="h-3.5 w-3.5" /><span>{m.nav_settings({}, { locale })}</span></a>
             {:else}
               <a href={settingsReturnTo} class="rail-menu-item" onclick={(e) => { e.preventDefault(); showUserMenu = false; returnFromSettings(); }}><FolderKanban class="h-3.5 w-3.5" /><span>{m.nav_spaces({}, { locale })}</span></a>
@@ -4058,36 +4054,42 @@ $effect(() => {
   class="{isMobile ? 'h-full w-full' : 'h-screen w-full'} flex flex-col bg-[var(--sidebar-bg)]"
 >
   <!-- Brand Header -->
-  <div class="flex h-[48px] shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3">
-    <a href="/" class="flex min-w-0 items-center gap-2 group" aria-label="Cohub">
-      <div class="w-7 h-7 bg-brand rounded-[6px] flex items-center justify-center font-bold text-[11px] text-brand-contrast-fg group-hover:bg-brand-hover transition-colors shrink-0">
+  <div class="flex h-[48px] shrink-0 items-center gap-2 border-b border-border-subtle px-3">
+    <a href="/" class="group flex shrink-0 items-center gap-2" aria-label={m.sidebar_cohub_home({}, { locale })} title={m.sidebar_home({}, { locale })}>
+      <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-brand text-[11px] font-bold text-brand-contrast-fg transition-colors group-hover:bg-brand-hover">
         C
       </div>
-      <span class="font-semibold text-[13px] text-text-primary tracking-tight truncate">Cohub</span>
+      {#if isMobile}
+        <span class="truncate text-[13px] font-semibold tracking-tight text-text-primary">Cohub</span>
+      {/if}
     </a>
-    <div class="flex shrink-0 items-center gap-1">
+    {#if !isMobile}
+      <nav class="flex min-w-0 items-center gap-0.5" aria-label={m.nav_tabs_aria({}, { locale })}>
+        {#each APP_AREAS as item (item)}
+          {@const Icon = APP_AREA_ICONS[item]}
+          <a
+            href={appAreaHref(item)}
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] transition-colors duration-100 {area === item ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+            aria-label={appAreaLabel(item, locale)}
+            aria-current={area === item ? "page" : undefined}
+            title={appAreaLabel(item, locale)}
+            onclick={(event) => openArea(event, item)}
+          >
+            <Icon class="h-3.5 w-3.5" />
+          </a>
+        {/each}
+      </nav>
+    {/if}
+    <div class="ml-auto flex shrink-0 items-center gap-1">
       <button
         type="button"
-        class="group/search flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] bg-bg-surface px-2 text-[11px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
-        onclick={openCommandPalette}
+        class="group/search flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
+        onclick={openSearch}
         title={m.sidebar_search_everywhere_shortcut({}, { locale })}
         aria-label={m.sidebar_search_everywhere({}, { locale })}
       >
-        <Search class="h-3.5 w-3.5 text-text-placeholder transition-colors group-hover/search:text-brand" />
-        <span class="hidden font-mono tracking-[0.02em] sm:inline">⌘K</span>
+        <Search class="h-3.5 w-3.5 transition-colors group-hover/search:text-brand" />
       </button>
-      <a
-        href={buildSessionsRoute()}
-        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] transition-colors duration-100 {isSessionsRoute ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
-        title={m.sidebar_chats({}, { locale })}
-        aria-label={m.sidebar_chats({}, { locale })}
-        onclick={(event) => {
-          event.preventDefault();
-          void handleNavigate(buildSessionsRoute());
-        }}
-      >
-        <MessageSquare class="h-3.5 w-3.5" />
-      </a>
       {#if !isMobile}
         <button
           type="button"
@@ -4102,7 +4104,7 @@ $effect(() => {
     </div>
   </div>
 
-  {#if mode === "space"}
+  {#if area === "spaces"}
     <!-- Space Switcher -->
     <div class="px-1.5 py-1 shrink-0 border-b border-border-subtle">
       <button
@@ -4436,6 +4438,12 @@ $effect(() => {
         </div>
       </div>
     {/if}
+  {:else if area === "chats"}
+    <div class="min-h-0 flex-1">
+      {#if shown}
+        <ChatsPane variant="sidebar" activeSessionId={activeInboxSessionId} />
+      {/if}
+    </div>
   {:else}
     <div class="px-1.5 pt-2 pb-1">
       <button
@@ -4517,7 +4525,7 @@ $effect(() => {
           <Gift class="w-3.5 h-3.5" />
           <span>{m.nav_referrals({}, { locale })}</span>
         </a>
-        {#if mode === "space"}
+        {#if area !== "account"}
           <a
             href="/settings"
             class="flex items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"

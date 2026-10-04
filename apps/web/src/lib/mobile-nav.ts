@@ -1,4 +1,6 @@
-export type MobileNavTab = "chats" | "spaces" | "account";
+export type AppArea = "chats" | "spaces" | "account";
+
+export const APP_AREAS: readonly AppArea[] = ["chats", "spaces", "account"];
 
 export function isSpaceCreatePath(pathname: string): boolean {
 	return pathname === "/spaces/new" || pathname.startsWith("/spaces/new/");
@@ -16,10 +18,21 @@ const SPACE_SURFACE_PATH =
 	/^\/spaces\/[^/]+\/(files|checkpoints|cronjobs|apps|tasks)(\/|$)/;
 const SESSION_DETAIL_PATH = /^\/spaces\/[^/]+\/sessions\/[^/]+(\/|$)/;
 
-export function resolveMobileNavTab(pathname: string): MobileNavTab {
+export function resolveAppArea(pathname: string): AppArea {
 	if (isSessionsPath(pathname)) return "chats";
 	if (isAccountPath(pathname)) return "account";
 	return "spaces";
+}
+
+export function appAreaHref(area: AppArea): string {
+	switch (area) {
+		case "chats":
+			return "/sessions";
+		case "spaces":
+			return "/spaces";
+		case "account":
+			return "/settings/general";
+	}
 }
 
 export function shouldHideMobileTabBar(pathname: string): boolean {

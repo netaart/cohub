@@ -1,56 +1,57 @@
 <script lang="ts">
-import { Menu } from "lucide-svelte";
+import { Search } from "lucide-svelte";
+import { goto } from "$app/navigation";
 import { page } from "$app/state";
+import { openAreaSearch } from "$lib/command-palette/open";
+import FilterBar from "$lib/components/list-page/FilterBar.svelte";
+import FilterChip from "$lib/components/list-page/FilterChip.svelte";
+import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
+import ListHeader from "$lib/components/list-page/ListHeader.svelte";
+import { settingsSectionLabel } from "$lib/components/settings-section";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
-import { uiState } from "$lib/stores/ui.svelte";
+import {
+	resolveSettingsSection,
+	SETTINGS_SECTIONS,
+	settingsSectionHref,
+} from "$lib/settings-nav";
 
 const locale = $derived(getLocale());
-
-function settingsTitle(section: string): string {
-	const options = { locale };
-	switch (section) {
-		case "general":
-			return m.nav_general({}, options);
-		case "activity":
-			return m.nav_activity({}, options);
-		case "referrals":
-			return m.nav_referrals({}, options);
-		case "billing":
-		case "balance":
-			return m.nav_billing({}, options);
-		case "rules":
-			return m.nav_user_rules({}, options);
-		case "channels":
-			return m.nav_channels({}, options);
-		default:
-			return m.nav_settings({}, options);
-	}
-}
-
-const currentSection = $derived(
-	page.url.pathname.split("/").filter(Boolean)[1] ?? "general",
-);
-const title = $derived(settingsTitle(currentSection));
+const activeSection = $derived(resolveSettingsSection(page.url.pathname));
 
 const { children } = $props();
+
+function openSection(event: MouseEvent, href: string) {
+	if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
+		return;
+	event.preventDefault();
+	void goto(href, { replaceState: true, keepFocus: true, noScroll: true });
+}
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-	<header class="flex h-11 shrink-0 items-center border-b border-border-subtle bg-bg-primary px-2 lg:hidden">
-		<button
-			type="button"
-			class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35"
-			aria-label={m.nav_open_settings({}, { locale })}
-			title={m.nav_open_settings({}, { locale })}
-			onclick={() => {
-				uiState.mobileDrawerOpen = true;
-			}}
-		>
-			<Menu class="h-[18px] w-[18px]" />
-		</button>
-		<div class="min-w-0 flex-1 truncate px-2 text-[13px] font-medium text-text-primary">{title}</div>
-	</header>
+	<div class="shrink-0 border-b border-border-subtle bg-bg-primary lg:hidden">
+		<ListHeader title={m.nav_tab_account({}, { locale })}>
+			{#snippet actions()}
+				<HeaderAction
+					label={m.list_search({}, { locale })}
+					icon={Search}
+					onclick={() => openAreaSearch("account")}
+				/>
+			{/snippet}
+		</ListHeader>
+		<FilterBar label={m.nav_settings({}, { locale })} role="navigation" activeKey={activeSection}>
+			{#each SETTINGS_SECTIONS as section (section)}
+				{@const href = settingsSectionHref(section)}
+				<FilterChip
+					label={settingsSectionLabel(section, locale)}
+					{href}
+					active={activeSection === section}
+					onclick={(event) => openSection(event, href)}
+				/>
+			{/each}
+		</FilterBar>
+	</div>
 
 	{@render children?.()}
 </div>

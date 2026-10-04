@@ -260,7 +260,7 @@ function overviewSessionToItem(
 	};
 }
 
-function spaceToDefaultItem(
+export function spaceRecordToCommandItem(
 	space: SpaceRecord,
 	rank: number,
 	currentSpaceId?: string | null,
@@ -531,7 +531,7 @@ export async function getCommandPaletteDefaultItems(
 				effectiveActivityTime(space),
 			);
 			items.push(
-				spaceToDefaultItem(
+				spaceRecordToCommandItem(
 					space,
 					rank,
 					plan.currentSpaceId,
