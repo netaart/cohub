@@ -32,6 +32,43 @@ export function formatCompactAbsoluteTime(
 	return `${year}-${month}-${day}`;
 }
 
+function startOfDay(date: Date) {
+	return new Date(
+		date.getFullYear(),
+		date.getMonth(),
+		date.getDate(),
+	).getTime();
+}
+
+const weekdayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function weekdayFormatter(locale: string) {
+	const cached = weekdayFormatters.get(locale);
+	if (cached) return cached;
+	const formatter = new Intl.DateTimeFormat(locale, { weekday: "short" });
+	weekdayFormatters.set(locale, formatter);
+	return formatter;
+}
+
+export function formatListTimestamp(
+	value: string | number | Date | null | undefined,
+	locale: string = "en",
+) {
+	const date = toDate(value);
+	if (!date) return "";
+	const now = new Date();
+	if (date.toDateString() === now.toDateString())
+		return `${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}`;
+	const daysApart = Math.round(
+		(startOfDay(now) - startOfDay(date)) / 86_400_000,
+	);
+	if (daysApart > 0 && daysApart < 7)
+		return weekdayFormatter(locale).format(date);
+	if (date.getFullYear() === now.getFullYear())
+		return `${padTimePart(date.getMonth() + 1)}-${padTimePart(date.getDate())}`;
+	return `${date.getFullYear()}-${padTimePart(date.getMonth() + 1)}-${padTimePart(date.getDate())}`;
+}
+
 export function formatFullAbsoluteTime(
 	value: string | number | Date | null | undefined,
 	options?: { seconds?: boolean },

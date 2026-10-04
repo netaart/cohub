@@ -20,6 +20,13 @@
 
 :root,
 [data-theme] {
+	--list-row-height: 56px;
+	--list-row-radius: var(--sidebar-item-radius);
+	--list-row-gap: 10px;
+	--list-row-pad-x: 10px;
+	--list-row-hover-bg: var(--sidebar-item-hover-bg);
+	--list-row-active-bg: var(--sidebar-item-active-bg);
+
 	--board-color-brand-stroke: var(--brand);
 	--board-color-brand-fill: var(--brand);
 	--board-color-brand-label: var(--text-primary);

@@ -19,6 +19,7 @@ import ChatsSourcePicker from "$lib/features/sessions/ChatsSourcePicker.svelte";
 import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import { getSessionPreview } from "$lib/session-preview";
 import {
 	buildSpaceSessionRoute,
 	buildUserSessionRoute,
@@ -55,6 +56,12 @@ function hrefFor(session: UserSessionListItem) {
 
 function spaceName(session: UserSessionListItem) {
 	return session.space?.name?.trim() || m.spaces_default_name({}, { locale });
+}
+
+function subtitleFor(session: UserSessionListItem) {
+	const preview = getSessionPreview(session);
+	if (scoped) return preview;
+	return preview ? `${spaceName(session)} · ${preview}` : spaceName(session);
 }
 
 function open(event: MouseEvent, session: UserSessionListItem) {
@@ -152,11 +159,11 @@ onMount(() => {
 		{#if inbox.loading && inbox.sessions.length === 0}
 			<div aria-busy="true" aria-label={m.common_loading({}, { locale })}>
 				{#each SKELETON_ROWS as index (index)}
-					<div class="flex items-start gap-2.5 px-2 {isPage ? 'py-2.5' : 'py-1.5'}">
-						{#if !scoped}<div class="mt-0.5 h-7 w-7 shrink-0 rounded-[8px] bg-bg-surface"></div>{/if}
-						<div class="min-w-0 flex-1 space-y-1.5 pt-0.5">
-							<div class="h-2.5 w-16 rounded-[3px] bg-bg-surface/70"></div>
+					<div class="flex items-center gap-[var(--list-row-gap)] px-[var(--list-row-pad-x)] py-2" style:min-height="var(--list-row-height)">
+						{#if !scoped}<div class="h-9 w-9 shrink-0 rounded-[10px] bg-bg-surface"></div>{/if}
+						<div class="min-w-0 flex-1 space-y-1.5">
 							<div class="h-3 rounded-[3px] bg-bg-surface" style:width={`${45 + ((index * 23) % 40)}%`}></div>
+							<div class="h-2.5 w-2/3 rounded-[3px] bg-bg-surface/70"></div>
 						</div>
 					</div>
 				{/each}
@@ -202,27 +209,22 @@ onMount(() => {
 					<li>
 						<a
 							href={hrefFor(session)}
-							class="relative flex items-start gap-2.5 overflow-hidden rounded-[var(--sidebar-item-radius)] px-2 pr-3 text-[13px] transition-colors duration-100 {isPage ? 'py-2.5' : 'py-1.5'} {active ? 'bg-[var(--sidebar-item-active-bg)] font-medium text-[var(--sidebar-item-active-fg)]' : 'text-text-tertiary hover:bg-[var(--sidebar-item-hover-bg)] hover:text-text-secondary'}"
+							class="relative flex items-center gap-[var(--list-row-gap)] overflow-hidden rounded-[var(--list-row-radius)] px-[var(--list-row-pad-x)] py-2 transition-colors duration-100 {isPage ? 'text-[15px]' : 'text-[14px]'} {active ? 'bg-[var(--list-row-active-bg)]' : 'hover:bg-[var(--list-row-hover-bg)]'}"
+							style:min-height="var(--list-row-height)"
 							aria-current={active ? "page" : undefined}
 							onclick={(event) => open(event, session)}
 						>
 							{#if !scoped}
-								<div class="mt-0.5 shrink-0">
-									<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} size="sm" />
-								</div>
+								<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} size="md" />
 							{/if}
-							<div class="min-w-0 flex-1">
-								{#if !scoped}
-									<div class="mb-0.5 truncate text-[10px] font-normal text-text-placeholder">{spaceName(session)}</div>
-								{/if}
-								<SessionSidebarRowContent
-									{session}
-									title={getSessionTitle(session)}
-									isMobile={isPage}
-									modelsCatalog={modelsCatalogStore.items ?? undefined}
-									showSourceBadge={!filter.source}
-								/>
-							</div>
+							<SessionSidebarRowContent
+								{session}
+								title={getSessionTitle(session)}
+								subtitle={subtitleFor(session)}
+								isMobile={isPage}
+								modelsCatalog={modelsCatalogStore.items ?? undefined}
+								showSourceBadge={!filter.source}
+							/>
 						</a>
 					</li>
 				{/each}

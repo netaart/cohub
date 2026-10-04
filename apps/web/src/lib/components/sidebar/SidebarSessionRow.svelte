@@ -98,7 +98,7 @@ const hoverPaddingClass = $derived.by(() => {
 </script>
 
 {#if renaming}
-	<div class="flex items-center gap-1 rounded-[var(--sidebar-item-radius)] bg-[var(--sidebar-item-active-bg)] px-1.5 py-1.5" data-session-rename>
+	<div class="flex items-center gap-1 rounded-[var(--list-row-radius)] bg-[var(--list-row-active-bg)] px-1.5 py-1.5" data-session-rename>
 		<input
 			bind:this={renameInputElement}
 			value={renameValue}
@@ -141,7 +141,7 @@ const hoverPaddingClass = $derived.by(() => {
 {:else}
 <a
 	{href}
-	class="sidebar-flyout-item group/session relative flex items-center gap-1.5 overflow-hidden rounded-[var(--sidebar-item-radius)] px-1.5 py-1.5 pr-4 text-[13px] transition-colors duration-100 {hoverPaddingClass} {rowState?.isFork ? 'session-fork-row' : ''} {rowState?.isLastVisibleChild ? 'session-fork-row--last' : ''} {active ? 'bg-[var(--sidebar-item-active-bg)] font-medium text-[var(--sidebar-item-active-fg)]' : 'text-text-tertiary hover:bg-[var(--sidebar-item-hover-bg)] hover:text-text-secondary'}"
+	class="sidebar-flyout-item group/session relative flex items-center gap-[var(--list-row-gap)] overflow-hidden rounded-[var(--list-row-radius)] px-[var(--list-row-pad-x)] py-2 pr-4 transition-colors duration-100 {isMobile ? 'text-[15px]' : 'text-[14px]'} {hoverPaddingClass} {rowState?.isFork ? 'session-fork-row' : ''} {rowState?.isLastVisibleChild ? 'session-fork-row--last' : ''} {active ? 'bg-[var(--list-row-active-bg)]' : 'hover:bg-[var(--list-row-hover-bg)]'}"
 	style={rowState?.style}
 	onclick={(event) => {
 		event.preventDefault();
@@ -178,13 +178,13 @@ const hoverPaddingClass = $derived.by(() => {
 			var(--color-brand) 34%,
 			var(--color-border-subtle)
 		);
-		padding-left: calc(0.375rem + var(--fork-indent, 0px));
+		padding-left: calc(var(--list-row-pad-x) + var(--fork-indent, 0px));
 	}
 
 	.session-fork-row::before {
 		content: "";
 		position: absolute;
-		left: calc(0.35rem + var(--fork-indent, 0px) - 7px);
+		left: calc(var(--list-row-pad-x) - 7px + var(--fork-indent, 0px));
 		top: 50%;
 		width: 8px;
 		height: 2px;
@@ -198,7 +198,7 @@ const hoverPaddingClass = $derived.by(() => {
 	.session-fork-row::after {
 		content: "";
 		position: absolute;
-		left: calc(0.35rem + var(--fork-indent, 0px) - 7px);
+		left: calc(var(--list-row-pad-x) - 7px + var(--fork-indent, 0px));
 		top: 0.35rem;
 		bottom: 0.35rem;
 		width: 2px;
@@ -231,12 +231,12 @@ const hoverPaddingClass = $derived.by(() => {
 
 	@media (max-width: 640px) {
 		.session-fork-row {
-			padding-left: calc(0.375rem + min(var(--fork-indent, 0px), 10px));
+			padding-left: calc(var(--list-row-pad-x) + min(var(--fork-indent, 0px), 10px));
 		}
 
 		.session-fork-row::before,
 		.session-fork-row::after {
-			left: calc(0.35rem + min(var(--fork-indent, 0px), 10px) - 7px);
+			left: calc(var(--list-row-pad-x) - 7px + min(var(--fork-indent, 0px), 10px));
 		}
 	}
 </style>

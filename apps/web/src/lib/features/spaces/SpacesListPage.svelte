@@ -38,6 +38,7 @@ import { buildSpaceRootRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
 import { getRecentSpaces } from "$lib/stores/recent-space";
 import { toggleSpaceArchive } from "$lib/stores/space-pins.svelte";
+import { formatListTimestamp } from "$lib/time-format";
 
 const FILTERS: readonly Filter[] = [
 	"recent",
@@ -417,8 +418,9 @@ onMount(() => {
 					{@const isSelected = selected.has(space.id)}
 					{@const name = nameOf(space)}
 					<li
-						class="space-row group absolute inset-x-0 flex h-14 items-center gap-3 px-3 transition-colors duration-100 {isSelected ? 'bg-brand-muted' : 'hover:bg-bg-hover'}"
+						class="space-row group absolute inset-x-0 flex items-center gap-[var(--list-row-gap)] px-[var(--list-row-pad-x)] transition-colors duration-100 {isSelected ? 'bg-brand-muted' : 'hover:bg-[var(--list-row-hover-bg)]'}"
 						style:top={`${(start + index) * ROW_HEIGHT}px`}
+						style:height={`${ROW_HEIGHT}px`}
 						use:longPress={{ onLongPress: () => toggle(space.id) }}
 					>
 						<button
@@ -438,21 +440,22 @@ onMount(() => {
 						</button>
 						<a
 							href={buildSpaceRootRoute(space.id)}
-							class="flex min-w-0 flex-1 items-center gap-2 self-stretch focus-visible:outline-none"
+							class="flex min-w-0 flex-1 flex-col justify-center gap-[3px] self-stretch text-[15px] leading-tight lg:text-[14px] focus-visible:outline-none"
 							onclick={(event) => handleRowClick(event, space.id)}
 							draggable="false"
 						>
-							<span class="min-w-0 flex-1">
-								<span class="flex min-w-0 items-center gap-1.5">
-									<span class="truncate text-[14px] font-medium text-text-primary lg:text-[13px]">{name}</span>
-									{#if space.isPinned && filter !== "pinned"}
-										<Pin class="h-3 w-3 shrink-0 text-text-placeholder" aria-label={m.spaces_section_pinned({}, { locale })} />
-									{/if}
-								</span>
-								{#if space.description?.trim()}
-									<span class="block truncate text-[12px] text-text-tertiary lg:text-[11px]">{space.description}</span>
+							<span class="flex min-w-0 items-baseline gap-1.5">
+								<span class="min-w-0 flex-1 truncate font-medium text-text-primary">{name}</span>
+								{#if space.isPinned && filter !== "pinned"}
+									<Pin class="h-3 w-3 shrink-0 self-center text-text-placeholder" aria-label={m.spaces_section_pinned({}, { locale })} />
+								{/if}
+								{#if space.lastActivityAt}
+									<span class="shrink-0 self-center tabular-nums text-[11px] text-text-placeholder">{formatListTimestamp(space.lastActivityAt, locale)}</span>
 								{/if}
 							</span>
+							{#if space.description?.trim()}
+								<span class="block truncate text-[12px] leading-4 text-text-tertiary">{space.description}</span>
+							{/if}
 						</a>
 					</li>
 				{/each}
