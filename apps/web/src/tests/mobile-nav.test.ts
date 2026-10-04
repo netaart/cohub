@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveMobileNavTab, shouldHideMobileTabBar } from "$lib/mobile-nav";
+import { resolveAppArea, shouldHideMobileTabBar } from "$lib/mobile-nav";
 
 test("mobile navigation follows global routes and yields immersive surfaces", () => {
-	assert.equal(resolveMobileNavTab("/sessions/abc"), "chats");
-	assert.equal(resolveMobileNavTab("/spaces"), "spaces");
+	assert.equal(resolveAppArea("/sessions/abc"), "chats");
+	assert.equal(resolveAppArea("/spaces"), "spaces");
 	assert.equal(
-		resolveMobileNavTab("/spaces/space-id/sessions/session-id"),
+		resolveAppArea("/spaces/space-id/sessions/session-id"),
 		"spaces",
 	);
-	assert.equal(resolveMobileNavTab("/settings/billing"), "account");
+	assert.equal(resolveAppArea("/settings/billing"), "account");
 
 	assert.equal(shouldHideMobileTabBar("/spaces/new"), true);
 	assert.equal(

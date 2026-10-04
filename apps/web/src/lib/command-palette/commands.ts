@@ -1,3 +1,8 @@
+import {
+	SETTINGS_SECTIONS,
+	type SettingsSection,
+	settingsSectionHref,
+} from "$lib/settings-nav";
 import { commandItemKey } from "./merge-results";
 import { allowsResourceType, type CommandPaletteSearchPlan } from "./scope";
 import { sortCommandItems, textMatchScore } from "./score";
@@ -86,7 +91,54 @@ const COMMANDS: CommandPaletteItem[] = [
 	},
 ];
 
+const SETTINGS_COMMAND_PREFIX = "settings:";
+
+const SETTINGS_ALIASES: Record<SettingsSection, string[]> = {
+	general: ["general", "preferences", "profile", "language", "theme"],
+	activity: ["activity", "usage"],
+	referrals: ["referrals", "invite", "referral"],
+	billing: ["billing", "plan", "subscription", "balance", "credits"],
+	rules: ["rules", "user rules", "instructions"],
+	channels: ["channels", "integrations", "feishu", "discord", "wechat", "qq"],
+};
+
+const SETTINGS_COMMANDS: CommandPaletteItem[] = SETTINGS_SECTIONS.map(
+	(section, index) => ({
+		type: "command",
+		id: `${SETTINGS_COMMAND_PREFIX}${section}`,
+		spaceId: "",
+		sessionId: null,
+		turnId: null,
+		sequence: null,
+		title: section,
+		excerpt: "Settings",
+		spaceName: null,
+		sessionTitle: null,
+		matchedField: "command",
+		href: settingsSectionHref(section),
+		score: 0.8 - index * 0.01,
+		textScore: 0.8 - index * 0.01,
+		recencyScore: 0.4,
+		typePriorityScore: 0.5,
+		updatedAt: null,
+		source: "default",
+	}),
+);
+
+export function settingsCommandSection(
+	item: Pick<CommandPaletteItem, "type" | "id">,
+): SettingsSection | null {
+	if (item.type !== "command" || !item.id.startsWith(SETTINGS_COMMAND_PREFIX))
+		return null;
+	const section = item.id.slice(SETTINGS_COMMAND_PREFIX.length);
+	return (SETTINGS_SECTIONS as readonly string[]).includes(section)
+		? (section as SettingsSection)
+		: null;
+}
+
 function commandAliases(item: CommandPaletteItem) {
+	const section = settingsCommandSection(item);
+	if (section) return [...SETTINGS_ALIASES[section], `${section} settings`];
 	if (item.id === "run-command")
 		return ["run command", "run bash", "shell", "terminal", "command"];
 	if (item.id === "new-space")
@@ -113,11 +165,15 @@ function isSpaceOnlyDefault(plan: CommandPaletteSearchPlan) {
 	);
 }
 
+export type CommandTitleLocalizer = (item: CommandPaletteItem) => string | null;
+
 /** Always synchronous — never waits on network or IndexedDB. */
 export function resolveLocalCommandItems(
 	plan: CommandPaletteSearchPlan,
+	localize?: CommandTitleLocalizer,
 ): CommandPaletteItem[] {
-	if (allowsResourceType(plan, "command")) return searchCommandItems(plan);
+	if (allowsResourceType(plan, "command"))
+		return searchCommandItems(plan, localize);
 
 	// Space lens still surfaces New Space as a local action.
 	if (!isSpaceOnlyDefault(plan)) return [];
@@ -125,19 +181,34 @@ export function resolveLocalCommandItems(
 	return item ? [{ ...item, score: 1, textScore: 1, source: "default" }] : [];
 }
 
-export function searchCommandItems(plan: CommandPaletteSearchPlan) {
+function isCommandOnly(plan: CommandPaletteSearchPlan) {
+	return (
+		plan.resourceTypes?.length === 1 && plan.resourceTypes[0] === "command"
+	);
+}
+
+export function searchCommandItems(
+	plan: CommandPaletteSearchPlan,
+	localize?: CommandTitleLocalizer,
+) {
 	if (!allowsResourceType(plan, "command")) return [];
 	const query = plan.query.trim();
 	if (!query) {
-		// Keep the empty palette lean: only primary actions, not browse links.
+		if (isCommandOnly(plan))
+			return [...COMMANDS, ...SETTINGS_COMMANDS].map((item) => ({
+				...item,
+				source: "default" as const,
+			}));
 		return COMMANDS.filter(
 			(item) => item.id !== "open-changelog" && item.id !== "manage-spaces",
 		).map((item) => ({ ...item, source: "default" as const }));
 	}
 	const items: CommandPaletteItem[] = [];
-	for (const item of COMMANDS) {
+	for (const item of [...COMMANDS, ...SETTINGS_COMMANDS]) {
+		const localizedTitle = localize?.(item);
 		const textScore = Math.max(
 			textMatchScore(item.title, query),
+			localizedTitle ? textMatchScore(localizedTitle, query) : 0,
 			...commandAliases(item).map((alias) => textMatchScore(alias, query)),
 		);
 		if (textScore <= 0) continue;

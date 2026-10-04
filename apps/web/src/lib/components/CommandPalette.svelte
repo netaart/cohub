@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
-import type { PaletteOverviewResponse } from "@neta-art/cohub";
+import type { PaletteOverviewResponse, SpaceRecord } from "@neta-art/cohub";
 import {
 	CornerDownRight,
 	FolderKanban,
@@ -16,20 +16,30 @@ import {
 import { onMount, tick } from "svelte";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
-import { setCachedSpacePage } from "$lib/cache/space-list-page-cache";
+import {
+	getCachedSpacePage,
+	setCachedSpacePage,
+} from "$lib/cache/space-list-page-cache";
 import {
 	resolveLocalCommandItems,
+	settingsCommandSection,
 	withLocalCommands,
 } from "$lib/command-palette/commands";
 import {
 	getCommandPaletteDefaultItems,
 	getLocalPaletteOverview,
+	spaceRecordToCommandItem,
 } from "$lib/command-palette/default-items";
 import { searchLocalCommandItems } from "$lib/command-palette/local-search";
 import {
 	mergeCommandResults,
 	sameCommandItemSequence,
 } from "$lib/command-palette/merge-results";
+import {
+	type CommandPaletteIntent,
+	OPEN_COMMAND_PALETTE_EVENT,
+	type OpenCommandPaletteDetail,
+} from "$lib/command-palette/open";
 import {
 	getPaletteOverviewSnapshot,
 	revalidatePaletteOverview,
@@ -49,6 +59,10 @@ import {
 } from "$lib/command-palette/scope";
 import type { CommandPaletteItem } from "$lib/command-palette/types";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import {
+	SETTINGS_SECTION_ICONS,
+	settingsSectionLabel,
+} from "$lib/components/settings-section";
 import ToolCallList from "$lib/components/ToolCallList.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -99,16 +113,6 @@ function defaultPlaceholder() {
 	return m.command_placeholder({}, { locale });
 }
 
-type CommandPaletteIntent = "navigate" | "new-chat";
-
-type OpenCommandPaletteDetail = {
-	query?: string;
-	placeholder?: string;
-	title?: string;
-	/** Controls where space items navigate. Default: open space landing. */
-	intent?: CommandPaletteIntent;
-};
-
 let open = $state(false);
 let query = $state("");
 let title = $state("");
@@ -130,6 +134,9 @@ let remoteDone = $state(true);
 let defaultDone = $state(true);
 let legacyDefaultDone = $state(true);
 let remoteError = $state<string | null>(null);
+let archivedItems = $state<CommandPaletteItem[]>([]);
+let archivedDone = $state(true);
+let archivedToken = 0;
 let debounceTimer: number | null = null;
 let localController: AbortController | null = null;
 let remoteController: AbortController | null = null;
@@ -145,9 +152,7 @@ let runStatus = $state<"idle" | "queued" | "running" | "done" | "failed">(
 let runError = $state("");
 let runPollTimer: number | null = null;
 
-// Space picker filter (All / Mine / Pinned) — shown when the palette operates
-// in space-selection mode (query starts with `a:` or intent is new-chat).
-type SpaceFilter = SpaceFilterPref;
+type SpaceFilter = SpaceFilterPref | "archived";
 let spaceFilter = $state<SpaceFilter>("all");
 
 // Pagination for Space Picker mode: load larger page sizes (e.g. 50 items per page)
@@ -208,21 +213,30 @@ const recentItems = $derived.by(() => {
 	return items.filter((item) => searchPlan.resourceTypes?.includes(item.type));
 });
 // Local commands are always resolved synchronously — never blocked by network/IDB.
+function localizedCommandTitle(item: CommandPaletteItem) {
+	if (item.id === "manage-spaces") return m.spaces_manage({}, { locale });
+	const section = settingsCommandSection(item);
+	return section ? settingsSectionLabel(section, locale) : null;
+}
+
+function localizedCommandExcerpt(item: CommandPaletteItem) {
+	if (item.id === "manage-spaces")
+		return m.spaces_search_placeholder({}, { locale });
+	return settingsCommandSection(item) ? m.nav_settings({}, { locale }) : null;
+}
+
 const localCommands = $derived(
-	resolveLocalCommandItems(searchPlan).map((item) =>
-		item.id === "manage-spaces"
-			? {
-					...item,
-					title: m.spaces_manage({}, { locale }),
-					excerpt: m.spaces_search_placeholder({}, { locale }),
-				}
-			: item,
-	),
+	resolveLocalCommandItems(searchPlan, localizedCommandTitle).map((item) => ({
+		...item,
+		title: localizedCommandTitle(item) ?? item.title,
+		excerpt: localizedCommandExcerpt(item) ?? item.excerpt,
+	})),
 );
 const myUserUuid = $derived(authStore.userUuid);
 const filteredSpaceItems = $derived.by(() => {
-	if (!isSpacePickerMode) return null;
-	if (spaceFilter === "all" || spaceFilter === "recent") {
+	if (!isSpacePickerMode || spaceFilter === "archived") return null;
+	const pickerFilter = spaceFilter;
+	if (pickerFilter === "all" || pickerFilter === "recent") {
 		return (items: CommandPaletteItem[]) =>
 			items.filter((item) => item.type !== "space" || !item.isArchived);
 	}
@@ -240,13 +254,14 @@ const filteredSpaceItems = $derived.by(() => {
 							isArchived: item.isArchived,
 						},
 					],
-					spaceFilter,
+					pickerFilter,
 					"",
 					myUserUuid,
 				).length > 0,
 		);
 });
 const mergedItemsRaw = $derived.by(() => {
+	if (isSpacePickerMode && spaceFilter === "archived") return archivedItems;
 	// Long, specific queries let strong matches bypass the personal-relevance tier.
 	const isLongQuery = trimmedQuery.length >= 12;
 	// Only the space picker "Recent" tab uses the overview-backed list. The
@@ -298,7 +313,11 @@ const mergedItems = $derived.by(() => {
 	return mergedItemsRaw;
 });
 const isSearching = $derived(
-	!localDone || !remoteDone || !defaultDone || !legacyDefaultDone,
+	!localDone ||
+		!remoteDone ||
+		!defaultDone ||
+		!legacyDefaultDone ||
+		!archivedDone,
 );
 const renderedItems = $derived(
 	mergedItems.length > 0 || !isSearching ? mergedItems : settledItems,
@@ -379,16 +398,76 @@ function handleCommandInput(event: Event) {
 	}
 	query = value;
 	// Searching should search the full Space set; Recent remains the empty-query
-	// default view and is still available as an explicit filter.
-	if (value.trim() && isSpacePickerMode) spaceFilter = "all";
+	if (value.trim() && isSpacePickerMode && spaceFilter !== "archived")
+		spaceFilter = "all";
 }
 
-const SPACE_FILTER_KEYS: SpaceFilter[] = ["recent", "all", "mine", "pinned"];
+const SPACE_FILTER_KEYS: SpaceFilter[] = [
+	"recent",
+	"all",
+	"mine",
+	"pinned",
+	"archived",
+];
 
 function selectSpaceFilter(next: SpaceFilter) {
 	spaceFilter = next;
-	setCachedSpaceFilterPref(next);
+	if (next !== "archived") setCachedSpaceFilterPref(next);
 	activeIndex = 0;
+}
+
+function spaceFilterLabel(key: SpaceFilter) {
+	switch (key) {
+		case "recent":
+			return m.command_recent({}, { locale });
+		case "all":
+			return m.command_all({}, { locale });
+		case "mine":
+			return m.command_mine({}, { locale });
+		case "pinned":
+			return m.command_pinned({}, { locale });
+		case "archived":
+			return m.spaces_archived({}, { locale });
+	}
+}
+
+function loadArchivedSpaces(searchQuery: string) {
+	const token = ++archivedToken;
+	archivedDone = false;
+	const q = searchQuery.trim();
+	const toItems = (spaces: SpaceRecord[]) =>
+		spaces
+			.filter((space) => space.isArchived)
+			.map((space, rank) =>
+				spaceRecordToCommandItem(space, rank, currentSpaceId),
+			);
+	void getCachedSpacePage("archived", q)
+		.then((cached) => {
+			if (token === archivedToken && cached)
+				archivedItems = toItems(cached.items);
+		})
+		.catch(() => undefined);
+	const timer = window.setTimeout(
+		() => {
+			if (token !== archivedToken) return;
+			void sdk.spaces
+				.list({ limit: SPACE_PAGE_SIZE, filter: "archived", query: q })
+				.then((page) => {
+					if (token !== archivedToken) return;
+					archivedItems = toItems(page.items);
+					void setCachedSpacePage("archived", q, page).catch(() => undefined);
+				})
+				.catch((error) => {
+					if (token === archivedToken)
+						console.warn("[command-palette] archived spaces failed", error);
+				})
+				.finally(() => {
+					if (token === archivedToken) archivedDone = true;
+				});
+		},
+		q ? DEBOUNCE_MS : 0,
+	);
+	return () => window.clearTimeout(timer);
 }
 
 function handleSpaceFilterKeydown(event: KeyboardEvent, current: SpaceFilter) {
@@ -519,6 +598,7 @@ function closePalette() {
 	spaceFilter = getCachedSpaceFilterPref();
 	activeIndex = 0;
 	settledItems = [];
+	archivedItems = [];
 	searchToken += 1;
 	localController?.abort();
 	remoteController?.abort();
@@ -898,8 +978,20 @@ function handleOpenPaletteEvent(event: Event) {
 
 $effect(() => {
 	if (!open || runMode) return;
-	spaceFilter;
+	if (isSpacePickerMode && spaceFilter === "archived") {
+		resetSearch({ clearDefaultLists: false });
+		return;
+	}
 	scheduleSearch(searchPlan, currentSpaceId);
+});
+
+$effect(() => {
+	if (!open || runMode || !isSpacePickerMode || spaceFilter !== "archived") {
+		archivedToken += 1;
+		archivedDone = true;
+		return;
+	}
+	return loadArchivedSpaces(searchPlan.query);
 });
 
 $effect(() => {
@@ -919,7 +1011,7 @@ $effect(() => {
 
 onMount(() => {
 	window.addEventListener("keydown", handleGlobalKeydown, { capture: true });
-	window.addEventListener("cohub:open-command-palette", handleOpenPaletteEvent);
+	window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, handleOpenPaletteEvent);
 	// Warm the overview when the app returns to the foreground, so the Recent
 	// tab opens from cache instead of fetching. Cross-device activity is the
 	// one signal the local caches cannot fold in at render time.
@@ -937,7 +1029,7 @@ onMount(() => {
 			capture: true,
 		});
 		window.removeEventListener(
-			"cohub:open-command-palette",
+			OPEN_COMMAND_PALETTE_EVENT,
 			handleOpenPaletteEvent,
 		);
 		localController?.abort();
@@ -976,19 +1068,19 @@ onMount(() => {
 			{#if isSpacePickerMode && !runMode}
 				<div class="space-filter-row">
 				<div class="space-filter-bar" role="tablist" aria-orientation="horizontal" aria-label={m.command_filter_spaces({}, { locale })}>
-					{#each [{ key: "recent", label: m.command_recent({}, { locale }) }, { key: "all", label: m.command_all({}, { locale }) }, { key: "mine", label: m.command_mine({}, { locale }) }, { key: "pinned", label: m.command_pinned({}, { locale }) }] as filter}
+					{#each SPACE_FILTER_KEYS as key (key)}
 						<button
-							id={`command-space-filter-${filter.key}`}
+							id={`command-space-filter-${key}`}
 							type="button"
 							class="space-filter-btn"
-							class:active={spaceFilter === filter.key}
+							class:active={spaceFilter === key}
 							role="tab"
-							aria-selected={spaceFilter === filter.key}
+							aria-selected={spaceFilter === key}
 							aria-controls="command-palette-results"
-							tabindex={spaceFilter === filter.key ? 0 : -1}
-							onclick={() => selectSpaceFilter(filter.key as SpaceFilter)}
-							onkeydown={(event) => handleSpaceFilterKeydown(event, filter.key as SpaceFilter)}
-						>{filter.label}</button>
+							tabindex={spaceFilter === key ? 0 : -1}
+							onclick={() => selectSpaceFilter(key)}
+							onkeydown={(event) => handleSpaceFilterKeydown(event, key)}
+						>{spaceFilterLabel(key)}</button>
 					{/each}
 				</div>
 				<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={closePalette}>
@@ -1041,6 +1133,8 @@ onMount(() => {
 										{m.command_no_pinned({}, { locale })}
 									{:else if isSpacePickerMode && spaceFilter === "mine"}
 										{m.command_no_owned({}, { locale })}
+									{:else if isSpacePickerMode && spaceFilter === "archived"}
+										{m.spaces_empty_archived({}, { locale })}
 									{:else if trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope}
 										{m.command_lens_ready({}, { locale })}
 									{:else}
@@ -1052,6 +1146,8 @@ onMount(() => {
 										{m.command_recent_hint({}, { locale })}
 									{:else if isSpacePickerMode && spaceFilter === "pinned"}
 										{m.command_pin_hint({}, { locale })}
+									{:else if isSpacePickerMode && spaceFilter === "archived"}
+										{m.spaces_empty_archived_hint({}, { locale })}
 									{:else if trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope}
 										{m.command_try_filters({}, { locale })}
 									{:else}
@@ -1063,7 +1159,8 @@ onMount(() => {
 					{:else}
 						{#each renderedItems as item, index (`${item.type}:${item.id || item.turnId || item.sessionId || item.spaceId}`)}
 							{@const meta = typeMeta(item.type)}
-							{@const Icon = meta.icon}
+							{@const section = settingsCommandSection(item)}
+							{@const Icon = section ? SETTINGS_SECTION_ICONS[section] : meta.icon}
 							{@const profile = profileFor(item)}
 							{@const timestamp = itemTimestamp(item)}
 							<div
@@ -1107,7 +1204,7 @@ onMount(() => {
 									</div>
 									<div class="command-enter">↵</div>
 								</button>
-								{#if isSpacePickerMode && item.type === "space"}
+								{#if isSpacePickerMode && item.type === "space" && !item.isArchived}
 									<button
 										type="button"
 										class="command-pin-btn"

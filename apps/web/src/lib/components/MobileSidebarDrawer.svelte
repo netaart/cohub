@@ -17,12 +17,10 @@ const {
 	dragOffsetPx = 0,
 	isDragging = false,
 	isDrawerVisible = false,
-	mode = "space",
 }: {
 	dragOffsetPx?: number;
 	isDragging?: boolean;
 	isDrawerVisible?: boolean;
-	mode?: "space" | "settings";
 } = $props();
 
 const TRANSITION_CSS = `transform ${DURATION_DRAWER_IN}ms ${EASE_OUT}`;
@@ -95,7 +93,7 @@ $effect(() => {
   >
     {#if renderContent}
       <div class="h-full border-r border-border-subtle bg-bg-primary" class:pointer-events-auto={interactive}>
-        <Sidebar isMobile mode={mode} onClose={closeDrawer} />
+        <Sidebar isMobile area="spaces" onClose={closeDrawer} />
       </div>
     {/if}
   </div>

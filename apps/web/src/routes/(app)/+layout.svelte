@@ -37,7 +37,7 @@ import {
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
-import { shouldHideMobileTabBar } from "$lib/mobile-nav";
+import { resolveAppArea, shouldHideMobileTabBar } from "$lib/mobile-nav";
 import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion.svelte";
 import {
 	beginMobileSessionViewTransition,
@@ -73,9 +73,7 @@ onNavigate((navigation) => {
 
 const currentPath = $derived(page.url.pathname);
 const showMobileTabBar = $derived(!shouldHideMobileTabBar(currentPath));
-const sidebarMode = $derived(
-	currentPath.startsWith("/settings") ? "settings" : "space",
-);
+const sidebarArea = $derived(resolveAppArea(currentPath));
 // Per-space layout prefs (sidebar width/collapsed). Workspace space only —
 // never sessions-inbox draft targets (those use newChatSpaceId, not spaceId).
 const currentLayoutSpaceId = $derived(
@@ -631,7 +629,7 @@ onMount(() => {
         class="panel-shell-inner relative {leftSidebarContentCollapsed ? 'overflow-visible' : 'overflow-hidden'} {!leftSidebarContentCollapsed ? 'border-r border-[color:var(--sidebar-border)]' : ''}"
         style={`width: ${leftSidebarInnerWidth}px`}
       >
-        <Sidebar mode={sidebarMode} collapsed={leftSidebarContentCollapsed} />
+        <Sidebar area={sidebarArea} collapsed={leftSidebarContentCollapsed} />
         {#if !leftSidebarContentCollapsed}
           <button
             type="button"
@@ -663,7 +661,6 @@ onMount(() => {
     dragOffsetPx={dragOffsetPx}
     {isDragging}
     {isDrawerVisible}
-    mode={sidebarMode}
   />
 
   <!-- Global media lightbox -->

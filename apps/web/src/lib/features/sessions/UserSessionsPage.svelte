@@ -3,23 +3,24 @@ import type {
 	SessionRecord,
 	SpaceRecord,
 	UserSessionListItem,
-	UserSessionSourceKey,
 } from "@neta-art/cohub";
 import { onDestroy, onMount, untrack } from "svelte";
 import { goto } from "$app/navigation";
-import { resolveAppEntryRoute } from "$lib/app-entry";
 import {
 	createSessionChatHost,
 	subscribeSpaceChannel,
 } from "$lib/features/session-chat";
+import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
+import {
+	chatsInbox,
+	openNewChatSpacePicker,
+} from "$lib/features/sessions/chats-inbox.svelte";
 import SessionConversationPanel from "$lib/features/sessions/SessionConversationPanel.svelte";
-import UserSessionsList from "$lib/features/sessions/UserSessionsList.svelte";
-import { createUserSessionListController } from "$lib/features/sessions/user-session-list-controller.svelte";
 import {
 	type WindowRef,
 	withWindowParam,
 } from "$lib/features/space/modules/window-route";
-import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
+import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { sdk } from "$lib/sdk";
 import {
 	buildSessionsRoute,
@@ -34,7 +35,6 @@ import {
 	getLastUserSessionId,
 	setLastUserSessionId,
 } from "$lib/stores/last-user-session";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 import { getCachedSpaceList } from "$lib/stores/space-list-cache";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import {
@@ -54,17 +54,8 @@ const {
 	};
 } = $props();
 
-// Scheduled prompts and channel bots flood the cross-space inbox; default to
-// human web chats so the list opens on real conversations.
-const DEFAULT_SOURCE_KEYS: readonly UserSessionSourceKey[] = ["web"];
-const list = createUserSessionListController({ source: DEFAULT_SOURCE_KEYS });
-
-let sourceFilter = $state<readonly UserSessionSourceKey[]>(DEFAULT_SOURCE_KEYS);
-
-function setSourceFilter(next: UserSessionSourceKey[]) {
-	sourceFilter = next;
-	void list.setSource(next);
-}
+const list = chatsInbox;
+const isDesktop = $derived(!useCompactShell());
 
 /** Mutable space identity for host environment ports (set before syncContext). */
 const spaceBox = { current: "" as string };
@@ -152,23 +143,18 @@ const sessionChat = createSessionChatHost({
 			});
 		},
 		toNewSession: async () => {
-			await handleNewChat();
+			await list.newChat();
 		},
 	},
 	getConnectionState: () => connectionBox.current,
 	hasSpace: () => Boolean(spaceBox.current),
 });
 
-let isDesktop = $state(true);
-let viewportReady = $state(false);
 /** Resolved space for the active /sessions/new draft (null off that route). */
 let draftSpace = $state<SpaceRecord | null>(null);
 let draftSpaceLookupSeq = 0;
 /** Skip one desktop auto-restore after bouncing from a bad /sessions/new URL. */
 let suppressNextAutoOpen = false;
-let openingNewChat = false;
-let unsubscribeCache: (() => void) | null = null;
-let unsubscribeRealtime: (() => void) | null = null;
 let openSeq = 0;
 /** Session ids that failed to open this page visit — skip on auto-select. */
 const failedOpenIds = new Set<string>();
@@ -187,10 +173,6 @@ const routeTurnSequence = $derived.by(() => {
 const activeSeed = $derived(
 	routeSessionId ? list.findById(routeSessionId) : null,
 );
-
-function updateViewport() {
-	isDesktop = window.innerWidth >= DESKTOP_SHELL_MIN_WIDTH_PX;
-}
 
 function isCurrentOpen(seq: number, sessionId: string | null) {
 	return seq === openSeq && (data.sessionId ?? null) === sessionId;
@@ -253,19 +235,6 @@ function clearChatSession() {
 	});
 }
 
-function openNewChatSpacePicker() {
-	window.dispatchEvent(
-		new CustomEvent("cohub:open-command-palette", {
-			detail: {
-				title: "New chat in…",
-				query: "a: ",
-				placeholder: "Search spaces…",
-				intent: "new-chat",
-			},
-		}),
-	);
-}
-
 function resolveSpaceFromCache(spaceId: string): SpaceRecord | null {
 	return getCachedSpaceList()?.find((space) => space.id === spaceId) ?? null;
 }
@@ -307,17 +276,6 @@ async function bounceNewChatToPicker() {
 	clearChatSession();
 	await goto(buildSessionsRoute(), { replaceState: true });
 	openNewChatSpacePicker();
-}
-
-async function selectSession(session: UserSessionListItem) {
-	if (!isDesktop) {
-		await goto(buildSpaceSessionRoute(session.spaceId, session.id));
-		return;
-	}
-	await goto(buildUserSessionRoute(session.id), {
-		keepFocus: true,
-		noScroll: true,
-	});
 }
 
 async function openRouteSession(sessionId: string | null) {
@@ -402,30 +360,6 @@ async function openRouteSession(sessionId: string | null) {
 			return;
 		}
 		await goto(buildSessionsRoute(), { replaceState: true });
-	}
-}
-
-async function handleNewChat() {
-	if (openingNewChat) return;
-	openingNewChat = true;
-	try {
-		// Prefer cached list so the picker opens instantly; refresh inside palette.
-		const cached = getCachedSpaceList();
-		if (cached?.length) {
-			openNewChatSpacePicker();
-			return;
-		}
-
-		// No local spaces: GET /default resolves (and ensures Home for empty accounts).
-		// Avoid an extra list() RTT on cold empty accounts.
-		const dest = await resolveAppEntryRoute();
-		if (dest) {
-			await goto(dest);
-			return;
-		}
-		openNewChatSpacePicker();
-	} finally {
-		openingNewChat = false;
 	}
 }
 
@@ -527,7 +461,7 @@ $effect(() => {
 // Never steal focus from an explicit new-chat draft.
 // Mobile keeps the list route; never redirect away from the inbox there.
 $effect(() => {
-	if (!viewportReady || !isDesktop) return;
+	if (!isDesktop) return;
 	if (routeIsNew || routeSessionId) return;
 	if (suppressNextAutoOpen) {
 		suppressNextAutoOpen = false;
@@ -562,13 +496,7 @@ $effect(() => {
 });
 
 onMount(() => {
-	updateViewport();
-	viewportReady = true;
-	window.addEventListener("resize", updateViewport);
-	unsubscribeCache = list.subscribeCache();
-	unsubscribeRealtime = list.subscribeRealtime();
-	void list.hydrateFromCache().then(() => list.refresh());
-	void modelsCatalogStore.load().catch(() => undefined);
+	const releaseInbox = list.retain();
 
 	// Real transport lifecycle (same signals Space uses via spaceRealtime).
 	const disposeConnection = sdk.onConnection((snapshot) => {
@@ -589,7 +517,7 @@ onMount(() => {
 
 	const onVisible = () => {
 		if (document.visibilityState === "visible") {
-			void list.refresh({ force: true });
+			void list.refresh();
 			sessionChat.onVisibilityChanged(true);
 		} else {
 			sessionChat.onVisibilityChanged(false);
@@ -597,15 +525,13 @@ onMount(() => {
 	};
 	document.addEventListener("visibilitychange", onVisible);
 	return () => {
-		window.removeEventListener("resize", updateViewport);
 		document.removeEventListener("visibilitychange", onVisible);
 		disposeConnection?.();
+		releaseInbox();
 	};
 });
 
 onDestroy(() => {
-	unsubscribeCache?.();
-	unsubscribeRealtime?.();
 	sessionChat.dispose();
 });
 </script>
@@ -615,35 +541,9 @@ onDestroy(() => {
 </svelte:head>
 
 <div class="flex h-full min-h-0 w-full overflow-hidden bg-bg-primary">
-	{#if isDesktop || !routeIsNew}
-		<div
-			class="min-h-0 shrink-0 overflow-hidden border-r border-border-subtle"
-			class:w-full={!isDesktop}
-			class:w-[320px]={isDesktop}
-			class:max-w-[360px]={isDesktop}
-		>
-			<UserSessionsList
-				sessions={list.sessions}
-				{sourceFilter}
-				onSourceFilterChange={setSourceFilter}
-				activeSessionId={isDesktop ? (routeIsNew ? null : routeSessionId) : null}
-				loading={list.loading}
-				loadingMore={list.loadingMore}
-				refreshing={list.refreshing}
-				error={list.error}
-				hasMore={list.pageInfo.hasMore}
-				{isDesktop}
-				modelsCatalog={modelsCatalogStore.items ?? null}
-				onSelect={(session) => {
-					void selectSession(session);
-				}}
-				onLoadMore={() => {
-					void list.loadMore();
-				}}
-				onNewChat={() => {
-					void handleNewChat();
-				}}
-			/>
+	{#if !isDesktop && !routeIsNew}
+		<div class="min-h-0 w-full overflow-hidden">
+			<ChatsPane variant="page" />
 		</div>
 	{/if}
 
