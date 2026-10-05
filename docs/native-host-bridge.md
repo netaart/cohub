@@ -59,6 +59,11 @@ application):
 - Redirect is an HTTPS App Link / Universal Link (`/mobile/auth/callback`),
   verified via `assetlinks.json` / `apple-app-site-association`. A custom scheme
   would be claimable by any app.
+- `prompt=consent` with `offline_access`, as the web SDK sends, so Logto issues
+  a refresh token.
+- Browsers may not hand a redirect the user did not trigger (a silent Logto
+  session) to the app. The web route then renders a no-JS "Open the app" page
+  whose link retries the same URL as a user navigation.
 
 ## Adding a method
 
