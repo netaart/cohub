@@ -121,6 +121,9 @@
       "@cohub/core/space-mods": [
         "../../packages/core/src/space-mods/index.ts"
       ],
+      "@cohub/core/space-fs": [
+        "../../packages/core/src/space-fs/index.ts"
+      ],
       "@cohub/core/sandbox-lifecycle": [
         "../../packages/core/src/sandbox-lifecycle/index.ts"
       ],

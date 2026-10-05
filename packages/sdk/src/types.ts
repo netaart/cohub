@@ -766,6 +766,16 @@ export type SpaceFsUploadProgress = {
   currentPath?: string;
   errors: SpaceFsUploadError[];
 };
+export type {
+  SpaceFsCopyError,
+  SpaceFsCopyInput,
+  SpaceFsCopyOptions,
+  SpaceFsCopyResponse,
+  SpaceFsCopyResult,
+  SpaceFsCopySource,
+  SpaceFsCopyStats,
+  SpaceFsCopyStatus,
+} from "@cohub/protocol/fs";
 
 
 export type SessionBindingRecord = ProtocolSessionBindingRecord;

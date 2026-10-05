@@ -94,10 +94,17 @@ cohub -s <spaceId> run -- git status
 ```bash
 cohub -s <spaceId> spaces files ls
 cohub -s <spaceId> spaces files cat README.md
+cohub -s <spaceId> spaces files cat logo.png > logo.png
 cohub -s <spaceId> spaces files write notes.md --stdin < notes.md
 cohub -s <spaceId> spaces files upload ./src
+cohub -s <spaceId> spaces files cp -r <otherSpaceId>:assets assets
 cohub -s <spaceId> spaces files diff
 ```
+
+`cp` 的用法和 `scp` 一致：最后一个路径是目标，`<space>:<path>` 指向某个 Space，`<space>` 可以是
+ID、`username/slug`，或你名下 Space 的 slug。用 `-s` 或 `COHUB_SPACE_ID` 声明了当前 Space 时，
+不带前缀的路径指当前 Space，否则指本地文件，所以同一个命令就能上传、下载或在 Space 之间拷贝。
+Space 之间的拷贝在服务端完成，文件内容不经过 CLI。
 
 `upload` 把文件直接落在 `--dir` 下；目录入参的内容会直接展开（不多一层目录名），例如
 `upload dist --dir apps/demo` 的结果是 `apps/demo/index.html`，而不是 `apps/demo/dist/index.html`。

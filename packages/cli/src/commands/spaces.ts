@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { readSessionTurnOrigin, resolveCohubEnvironment } from "@neta-art/cohub";
@@ -14,10 +13,11 @@ import type {
 import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset } from "../avatar.js";
 import { createClient } from "../client.js";
-import { putLocalFile } from "../http-put.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
 import { resolveSpace } from "../space.js";
+import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
+import { registerSpaceFileTransfer } from "./space-files.js";
 import { registerSpaceActivity } from "./space-activity.js";
 import { registerSpaceInvitations } from "./space-invitations.js";
 import { registerSpaceTurns } from "./space-turns.js";
@@ -74,15 +74,6 @@ type CompletionOptions = {
   maxTokens?: string;
   thinkingLevel?: string;
   json?: boolean;
-};
-
-type UploadFile = {
-  id: string;
-  localPath: string;
-  relativePath: string;
-  name: string;
-  size: number;
-  mimeType: string | null;
 };
 
 type UploadOptions = {
@@ -183,7 +174,7 @@ const formatAutoDestroy = (policy: { mode: "idle"; ttlSeconds: number } | { mode
 
 const slashPath = (value: string) => value.split(sep).join("/");
 
-const walkUploadPath = async (localPath: string, root: string): Promise<UploadFile[]> => {
+const walkUploadPath = async (localPath: string, root: string): Promise<LocalUploadEntry[]> => {
   const info = await stat(localPath);
   const name = basename(localPath);
   const relativePath = slashPath(relative(root, localPath) || name);
@@ -195,22 +186,13 @@ const walkUploadPath = async (localPath: string, root: string): Promise<UploadFi
   }
   if (!info.isFile()) return [];
 
-  return [{
-    id: randomUploadEntryId(),
-    localPath,
-    relativePath,
-    name,
-    size: info.size,
-    mimeType: null,
-  }];
+  return [{ localPath, relativePath, size: info.size }];
 };
-
-const randomUploadEntryId = () => randomUUID();
 
 // Upload semantics: a file keeps its name, and a directory contributes its
 // contents directly under the target dir — like `aws s3 cp dir remote:path`
 // or `rclone copy`.
-export const planUploadInput = async (input: string): Promise<UploadFile[]> => {
+export const planUploadInput = async (input: string): Promise<LocalUploadEntry[]> => {
   const localPath = resolve(input);
   const info = await stat(localPath);
   if (!info.isDirectory()) return walkUploadPath(localPath, dirname(localPath));
@@ -219,7 +201,7 @@ export const planUploadInput = async (input: string): Promise<UploadFile[]> => {
   return nested.flat();
 };
 
-export async function collectUploadFiles(paths: string[]): Promise<UploadFile[]> {
+export async function collectUploadFiles(paths: string[]): Promise<LocalUploadEntry[]> {
   if (paths.length === 0) return error("No files provided", "Pass one or more local files or directories.");
   const files = (await Promise.all(paths.map(planUploadInput))).flat();
   if (files.length === 0) return error("No regular files found");
@@ -232,43 +214,13 @@ export async function collectUploadFiles(paths: string[]): Promise<UploadFile[]>
   return files;
 }
 
-async function putUploadEntry(entry: UploadFile, uploadUrl: string, headers?: Record<string, string>): Promise<void> {
-  await putLocalFile({
-    url: uploadUrl,
-    filePath: entry.localPath,
-    size: entry.size,
-    headers,
-    label: entry.relativePath,
-  });
-}
-
 async function uploadFiles(command: Command, paths: string[], opts: UploadOptions): Promise<void> {
   const spaceId = await resolveSpace(command);
   const client = createClient();
   try {
     const files = await collectUploadFiles(paths);
-    const plan = await client.space(spaceId).files.createUpload({
-      destination: { kind: "workspace", targetDir: opts.dir },
-      entries: files.map((file) => ({
-        id: file.id,
-        name: file.name,
-        relativePath: file.relativePath,
-        size: file.size,
-        mimeType: file.mimeType,
-      })),
-    });
-    const byId = new Map(files.map((file) => [file.id, file]));
-    for (const entry of plan.entries) {
-      const file = byId.get(entry.id);
-      if (!file) throw new Error(`Missing upload entry: ${entry.id}`);
-      // Remote downloadUrl entries have no uploadUrl; complete pulls them server-side.
-      if (!entry.uploadUrl) continue;
-      await putUploadEntry(file, entry.uploadUrl, entry.headers);
-    }
-    const result = await client.space(spaceId).files.completeUpload(plan.uploadId, {
-      entries: plan.entries.map((entry) => ({ id: entry.id })),
-    });
-    if (jsonRequested(opts)) return outJson({ ...result, uploadId: plan.uploadId, files: files.length });
+    const { uploaded, uploadIds } = await uploadLocalFiles(client.space(spaceId).files, files, { targetDir: opts.dir });
+    if (jsonRequested(opts)) return outJson({ ok: true, uploaded, uploadId: uploadIds[0], uploadIds, files: files.length });
     ok(`Uploaded ${files.length} file${files.length === 1 ? "" : "s"}`);
   } catch (e: unknown) {
     handleHttp(e);
@@ -1305,23 +1257,7 @@ function registerFiles(spacesCmd: Command): void {
       }
     });
 
-  filesCmd
-    .command("cat <path>")
-    .description("Read file content")
-    .action(async (path: string) => {
-      const spaceId = await resolveSpace(spacesCmd);
-      const client = createClient();
-      try {
-        const file = await client.space(spaceId).files.read(path);
-        if (!("content" in file)) return error("File is being prepared. Please retry shortly.");
-        if (file.delivery === "url" && file.url) {
-          console.log(`[CDN] ${file.url}`);
-        }
-        console.log(file.content);
-      } catch (e: unknown) {
-        handleHttp(e);
-      }
-    });
+  registerSpaceFileTransfer(filesCmd, spacesCmd);
 
   filesCmd
     .command("write <path>")

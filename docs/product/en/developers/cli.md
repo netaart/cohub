@@ -95,10 +95,18 @@ cohub -s <spaceId> run -- git status
 ```bash
 cohub -s <spaceId> spaces files ls
 cohub -s <spaceId> spaces files cat README.md
+cohub -s <spaceId> spaces files cat logo.png > logo.png
 cohub -s <spaceId> spaces files write notes.md --stdin < notes.md
 cohub -s <spaceId> spaces files upload ./src
+cohub -s <spaceId> spaces files cp -r <otherSpaceId>:assets assets
 cohub -s <spaceId> spaces files diff
 ```
+
+`cp` works like `scp`: the last path is the destination, and `<space>:<path>` names a
+Space by id, `username/slug`, or the slug of a Space you own. Bare paths address the
+current Space when `-s` or `COHUB_SPACE_ID` declares one, and local files otherwise, so
+the same command uploads, downloads, or copies between Spaces. Copies between Spaces
+run server-side, so file content never passes through the CLI.
 
 `upload` places each file under `--dir`; a directory argument contributes its
 contents directly, so `upload dist --dir apps/demo` lands at `apps/demo/index.html`,

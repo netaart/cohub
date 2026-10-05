@@ -9,6 +9,7 @@ import {
   AGENT_SANDBOX_BASH_ATOMIC_JOB_NAME,
   AGENT_RUN_COMMAND_JOB_NAME,
   AGENT_SANDBOX_FS_MUTATION_JOB_NAME,
+  AGENT_SANDBOX_FS_INSTALL_JOB_NAME,
   buildAgentSandboxBashJobId,
   buildAgentRunCommandJobId,
   buildAgentSandboxFsMutationJobId,
@@ -18,6 +19,10 @@ import {
   type AgentSandboxFsMutationJobData,
   type AgentSandboxFsMutationJobResult,
   type AgentSandboxFsMutationOperation,
+  type AgentSandboxFsInstallEntry,
+  type AgentSandboxFsInstallEntryResult,
+  type AgentSandboxFsInstallJobData,
+  type AgentSandboxFsInstallJobResult,
 } from "@cohub/infra/agent-queue";
 import { env } from "./env.js";
 
@@ -29,6 +34,7 @@ export {
   AGENT_SANDBOX_BASH_ATOMIC_JOB_NAME,
   AGENT_RUN_COMMAND_JOB_NAME,
   AGENT_SANDBOX_FS_MUTATION_JOB_NAME,
+  AGENT_SANDBOX_FS_INSTALL_JOB_NAME,
 };
 export type {
   AgentSandboxBashUploadJobData,
@@ -37,6 +43,10 @@ export type {
   AgentSandboxFsMutationJobData,
   AgentSandboxFsMutationJobResult,
   AgentSandboxFsMutationOperation,
+  AgentSandboxFsInstallEntry,
+  AgentSandboxFsInstallEntryResult,
+  AgentSandboxFsInstallJobData,
+  AgentSandboxFsInstallJobResult,
 };
 
 export type AgentTurnJobData = {
@@ -58,7 +68,7 @@ export type AgentSessionForkJobData = {
   trace?: Record<string, unknown>;
 };
 
-export type AgentJobData = AgentRuntimeRecoveryJobData | AgentTurnJobData | AgentSessionForkJobData | AgentSandboxBashUploadJobData | AgentRunCommandJobData | AgentSandboxFsMutationJobData;
+export type AgentJobData = AgentRuntimeRecoveryJobData | AgentTurnJobData | AgentSessionForkJobData | AgentSandboxBashUploadJobData | AgentRunCommandJobData | AgentSandboxFsMutationJobData | AgentSandboxFsInstallJobData;
 
 export const agentTurnQueue = createAgentTurnsQueue<AgentJobData, unknown>(env.BULLMQ_REDIS_URL, "cohub-agent");
 export const buildSandboxBashJobId = buildAgentSandboxBashJobId;
