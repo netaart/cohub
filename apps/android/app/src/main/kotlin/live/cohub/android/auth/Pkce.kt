@@ -43,6 +43,9 @@ object Pkce {
 object AuthorizationRequest {
     private const val SCOPES = "openid offline_access profile email"
 
+    // Logto issues a refresh token only with consent.
+    private const val PROMPT = "consent"
+
     fun build(
         endpoint: String,
         appId: String,
@@ -55,6 +58,7 @@ object AuthorizationRequest {
         .appendQueryParameter("redirect_uri", redirectUri)
         .appendQueryParameter("response_type", "code")
         .appendQueryParameter("scope", SCOPES)
+        .appendQueryParameter("prompt", PROMPT)
         .appendQueryParameter("resource", resource)
         .appendQueryParameter("code_challenge", challenge.challenge)
         .appendQueryParameter("code_challenge_method", challenge.method)

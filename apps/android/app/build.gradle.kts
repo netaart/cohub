@@ -4,14 +4,46 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// Injected at build time so one binary can target dev or prod; defaults to prod.
-val cohubEnv: String = providers.gradleProperty("cohubEnv").getOrElse("prod")
-val apiOrigin: String = providers.gradleProperty("cohubApiOrigin").getOrElse("https://api.cohub.live")
-val webOrigin: String = providers.gradleProperty("cohubWebOrigin").getOrElse("https://cohub.live")
-val logtoEndpoint: String = providers.gradleProperty("cohubLogtoEndpoint").getOrElse("https://auth.neta.art/")
-val logtoAppId: String = providers.gradleProperty("cohubLogtoAppId").getOrElse("")
-val logtoApiResource: String = providers.gradleProperty("cohubLogtoApiResource").getOrElse("https://api.talesofai")
-val oauthRedirectPath: String = providers.gradleProperty("cohubOauthRedirectPath").getOrElse("/mobile/auth/callback")
+data class Deployment(
+    val webOrigin: String,
+    val apiOrigin: String,
+    val logtoEndpoint: String,
+    val logtoAppId: String,
+    val appName: String,
+    val applicationIdSuffix: String? = null,
+)
+
+val deployments = mapOf(
+    "prod" to Deployment(
+        webOrigin = "https://cohub.live",
+        apiOrigin = "https://api.cohub.live",
+        logtoEndpoint = "https://auth.neta.art/",
+        logtoAppId = "kpwepos08jz70jy20d3hg",
+        appName = "Cohub",
+    ),
+    "dev" to Deployment(
+        webOrigin = "https://dev.cohub.live",
+        apiOrigin = "https://api-dev.cohub.live",
+        logtoEndpoint = "https://dev-auth.neta.art/",
+        logtoAppId = "grxctv83gvvo2wcmcb8xp",
+        appName = "Cohub Dev",
+        applicationIdSuffix = ".dev",
+    ),
+)
+
+fun prop(name: String): String? = providers.gradleProperty(name).orNull
+
+val cohubEnv: String = prop("cohubEnv") ?: "prod"
+val deployment = deployments[cohubEnv] ?: error("Unknown cohubEnv '$cohubEnv'; expected one of ${deployments.keys}")
+val webOrigin: String = prop("cohubWebOrigin") ?: deployment.webOrigin
+val apiOrigin: String = prop("cohubApiOrigin") ?: deployment.apiOrigin
+val logtoEndpoint: String = prop("cohubLogtoEndpoint") ?: deployment.logtoEndpoint
+val logtoAppId: String = prop("cohubLogtoAppId") ?: deployment.logtoAppId
+val logtoApiResource: String = prop("cohubLogtoApiResource") ?: "https://api.talesofai"
+val oauthRedirectPath: String = prop("cohubOauthRedirectPath") ?: "/mobile/auth/callback"
+
+val signingKeystore: String? = providers.environmentVariable("COHUB_ANDROID_KEYSTORE").orNull
+val signingPassword: String? = providers.environmentVariable("COHUB_ANDROID_KEYSTORE_PASSWORD").orNull
 
 android {
     namespace = "live.cohub.android"
@@ -19,15 +51,16 @@ android {
 
     defaultConfig {
         applicationId = "live.cohub.android"
+        applicationIdSuffix = deployment.applicationIdSuffix
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = prop("cohubVersionCode")?.toInt() ?: 1
+        versionName = (prop("cohubVersionName") ?: "0.1.0") + (prop("cohubVersionSuffix") ?: "")
 
         // HTTPS App Link (verified via assetlinks.json), not a claimable custom scheme.
         manifestPlaceholders["oauthHost"] = webOrigin.removePrefix("https://").removePrefix("http://")
         manifestPlaceholders["oauthPathPrefix"] = oauthRedirectPath.trimEnd('/')
-        manifestPlaceholders["webOrigin"] = webOrigin
+        manifestPlaceholders["appName"] = deployment.appName
 
         buildConfigField("String", "COHUB_ENV", "\"$cohubEnv\"")
         buildConfigField("String", "API_ORIGIN", "\"$apiOrigin\"")
@@ -43,11 +76,28 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        if (signingKeystore != null) {
+            create("ci") {
+                storeFile = file(signingKeystore)
+                storeType = "pkcs12"
+                storePassword = signingPassword ?: error("COHUB_ANDROID_KEYSTORE_PASSWORD is required with COHUB_ANDROID_KEYSTORE")
+                keyAlias = "cohub"
+                keyPassword = storePassword
+            }
+        }
+    }
+
     buildTypes {
+        val ciSigning = signingConfigs.findByName("ci")
+        debug {
+            if (ciSigning != null) signingConfig = ciSigning
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = ciSigning
         }
     }
 

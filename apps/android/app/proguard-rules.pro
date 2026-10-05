@@ -12,3 +12,7 @@
 -keepclasseswithmembers class kotlinx.serialization.json.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# Compile-only annotations referenced by Tink.
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**

@@ -15,3 +15,6 @@ keystore.properties
 
 # Native build output
 .cxx/
+
+# CI output
+dist/
