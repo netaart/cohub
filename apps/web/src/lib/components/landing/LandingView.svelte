@@ -117,6 +117,7 @@ onMount(() => {
 	})();
 
 	return () => {
+		clearHomeRedirectAttr();
 		// Restore the visitor's own theme when leaving marketing.
 		document.documentElement.setAttribute("data-theme", getResolvedTheme());
 	};

@@ -633,6 +633,20 @@ export const signInWithRedirectPath = async (redirectPath?: string) => {
 	}
 };
 
+let hostSignIn: Promise<void> | null = null;
+
+/** The host drops its session when refresh fails; sign in once per page. */
+export const recoverHostSession = async (
+	redirectPath: string | undefined,
+): Promise<void> => {
+	if (hostSignIn) return hostSignIn;
+	if (await hasRecoverableAuthSession()) return;
+	hostSignIn ??= signInWithRedirectPath(redirectPath).catch((error) => {
+		console.warn("[auth] Native host failed to start sign-in:", error);
+	});
+	return hostSignIn;
+};
+
 /** Clear and restart only the session whose token was actually rejected. */
 export const signInAfterUnauthorized = async (
 	redirectPath: string | undefined,

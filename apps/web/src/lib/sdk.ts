@@ -3,12 +3,14 @@ import { PUBLIC_API_ORIGIN, PUBLIC_GATEWAY_ORIGIN } from "$env/static/public";
 import {
 	clearAuthToken,
 	getAuthSessionSnapshot,
+	recoverHostSession,
 	getAuthToken as resolveAccessToken,
 	setAuthToken,
 } from "$lib/auth";
 import { getCurrentRedirectPath, redirectToSignIn } from "$lib/auth-redirect";
 import { decideUnauthorizedRecovery } from "$lib/auth-unauthorized";
 import { getClientInstanceId } from "$lib/client-instance";
+import { hostOwnsCredentials } from "$lib/host-bridge";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 
 type UnauthorizedContext = Parameters<
@@ -17,6 +19,10 @@ type UnauthorizedContext = Parameters<
 
 const handleUnauthorized = async (context: UnauthorizedContext) => {
 	if (typeof window === "undefined") return;
+	if (hostOwnsCredentials()) {
+		await recoverHostSession(getCurrentRedirectPath());
+		return;
+	}
 	const rejectedSnapshot = getAuthSessionSnapshot();
 	const rejectedGeneration =
 		typeof context.authSessionVersion === "number"
