@@ -11,13 +11,13 @@ import live.cohub.android.BuildConfig
  * The WebView island, reused for the process lifetime: recreating it would
  * discard the web app's state and force a cold start on every tap.
  */
+@SuppressLint("SetJavaScriptEnabled")
 class WebSurface(
     private val webView: WebView,
-    private val onExternalLink: (Uri) -> Unit,
-    private val onRenderProcessGone: () -> Unit,
+    onExternalLink: (Uri) -> Unit,
+    onRenderProcessGone: () -> Unit,
 ) {
-    @SuppressLint("SetJavaScriptEnabled")
-    fun configure() {
+    init {
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -33,6 +33,7 @@ class WebSurface(
             onExternalLink = onExternalLink,
             onRenderProcessGone = onRenderProcessGone,
         )
+        webView.webChromeClient = CohubWebChromeClient()
     }
 
     fun load(path: String = "/") {

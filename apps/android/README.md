@@ -7,24 +7,25 @@ uses the versioned `cohub.host.v1` bridge — see `docs/native-host-bridge.md`.
 
 ```
 app/src/main/kotlin/live/cohub/android/
-  CohubApplication.kt      process-wide AuthSession and DeviceRuntime
-  MainActivity.kt          activity host, edge-to-edge, deep links
+  CohubApplication.kt        process-wide AuthSession and DeviceRuntime
+  MainActivity.kt            activity host, edge-to-edge, deep links
   host/
-    HostProtocol.kt        wire constants (mirrors packages/protocol)
-    HostCapabilities.kt    what this build advertises
-    HostBridge.kt          request dispatch, events, capability handshake
-    WebSurface.kt          the WebView island
-    CohubWebViewClient.kt  navigation policy, renderer-crash recovery
+    HostProtocol.kt          wire constants (mirrors packages/protocol)
+    HostCapabilities.kt      what this build advertises
+    HostBridge.kt            request dispatch, events, capability handshake
+    WebSurface.kt            the WebView island
+    CohubWebViewClient.kt    navigation policy, renderer-crash recovery
+    CohubWebChromeClient.kt  page console → logcat (debug builds)
   auth/
-    AuthSession.kt         tokens + identity, in memory only
-    CredentialStore.kt     EncryptedSharedPreferences persistence
-    Pkce.kt                PKCE + authorization URL
+    AuthSession.kt           tokens + identity, in memory only
+    CredentialStore.kt       EncryptedSharedPreferences persistence
+    Pkce.kt                  PKCE + authorization URL
   runtime/
-    DeviceRuntime.kt       folder → Space bindings, like `runtime up` per directory
-    RuntimeService.kt      foreground service running every enabled binding
-    RuntimeConnection.kt   /runtime/relay client (no local Harness)
-    SandboxBridge.kt       supervises sandboxd over one folder
-  ui/WebSurfaceHost.kt     Compose wrapper for the WebView
+    DeviceRuntime.kt         folder → Space bindings, like `runtime up` per directory
+    RuntimeService.kt        foreground service running every enabled binding
+    RuntimeConnection.kt     /runtime/relay client (no local Harness)
+    SandboxBridge.kt         supervises sandboxd over one folder
+  ui/WebSurfaceHost.kt       Compose wrapper for the WebView
 ```
 
 The device Runtime is described in `docs/local-runtime.md` ("Android device").
@@ -40,6 +41,9 @@ cd apps/android
 The APK embeds `apps/sandbox`, cross-compiled by `:app:buildSandboxd` with Go
 (on `PATH`) and the NDK pinned in `app/build.gradle.kts`
 (`sdkmanager "ndk;<version>"`).
+
+Debug builds (including CI dev APKs) are inspectable at `chrome://inspect` and
+mirror the page console, uncaught errors included, to `adb logcat -s CohubWeb`.
 
 `-PcohubEnv=dev|prod` (default prod) selects origins and the Logto native app;
 single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohubGatewayOrigin`,

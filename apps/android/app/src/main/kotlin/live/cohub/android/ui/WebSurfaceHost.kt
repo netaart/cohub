@@ -32,7 +32,7 @@ fun WebSurfaceHost(
             modifier = modifier.fillMaxSize(),
             factory = { context ->
                 WebView(context).also { webView ->
-                    surface = onCreate(webView, recreate).also { it.configure() }
+                    surface = onCreate(webView, recreate)
                 }
             },
             onRelease = { webView -> webView.destroy() },
