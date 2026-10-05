@@ -8,7 +8,7 @@ import { discoverHarnesses, installedHarnesses } from "./harness.js";
 import type { Command } from "commander";
 import { requireAccessToken } from "../auth.js";
 import { createClient } from "../client.js";
-import { currentIdentityKey, explicitSpace } from "../space.js";
+import { currentIdentityKey, explicitSpace, resolveSpaceRef } from "../space.js";
 import { canonicalRuntimeRoot, getRuntimeSpaceBinding, resolveRuntimeSpace } from "./space-binding.js";
 import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
 import { ensureNativeSync, repairIntegrations } from "./native/attach.js";
@@ -24,9 +24,15 @@ export function parseRuntimeHarnesses(values: string[]): ("pi" | "codex")[] {
   return [...new Set(names.length ? names : ["pi"])] as ("pi" | "codex")[];
 }
 
+async function requestedRuntimeSpace(program: Command, target?: string): Promise<string | null> {
+  const ref = target?.trim() || explicitSpace(program);
+  return ref ? resolveSpaceRef(ref) : null;
+}
+
 export async function resolveRuntimeTarget(program: Command, target?: string) {
-  const spaceId = target?.trim() || explicitSpace(program) || (await getRuntimeSpaceBinding(process.cwd(), currentIdentityKey()))?.spaceId;
-  if (!spaceId) throw new Error("No directory binding. Use --space <id> or runtime up");
+  const spaceId = await requestedRuntimeSpace(program, target)
+    ?? (await getRuntimeSpaceBinding(process.cwd(), currentIdentityKey()))?.spaceId;
+  if (!spaceId) throw new Error("No directory binding. Use --space <space> or runtime up");
   return spaceId;
 }
 
@@ -66,9 +72,10 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   const requestedRoot = resolve(dir ?? process.cwd());
   if (!(await stat(requestedRoot)).isDirectory()) throw new Error("Workspace is not a directory");
   const root = await canonicalRuntimeRoot(requestedRoot);
-  const requested = options.space?.trim() || explicitSpace(program);
-  if (options.new && requested) throw new Error("--new cannot be combined with --space or COHUB_SPACE_ID");
-  if (options.name && requested) throw new Error("--name only applies to a new Space");
+  const requestedRef = options.space?.trim() || explicitSpace(program);
+  if (options.new && requestedRef) throw new Error("--new cannot be combined with --space or COHUB_SPACE_ID");
+  if (options.name && requestedRef) throw new Error("--name only applies to a new Space");
+  const requested = await requestedRuntimeSpace(program, options.space);
   const identity = currentIdentityKey();
   if (!identity) { await requireAccessToken(); throw new Error("Cannot identify the signed-in account"); }
   const binding = await getRuntimeSpaceBinding(root, identity);

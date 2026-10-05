@@ -360,7 +360,7 @@ Examples:
       json?: boolean;
     }) => {
       try {
-        const spaceId = await resolveSpace(program);
+        const spaceId = await resolveSpace(program, { home: true });
         const sessionId = envValue("COHUB_SESSION_ID");
         const inputs = await Promise.all([
           ...opts.image.map((value) => parseMediaInput("image", value)),

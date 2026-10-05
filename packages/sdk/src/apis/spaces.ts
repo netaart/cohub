@@ -278,9 +278,8 @@ export class SpacesApi {
   }
 
   /**
-   * Resolve the user's default space (owned/member home, else most recent).
-   * When the account has no accessible space, the API creates a blank Home
-   * space (`slug=home`) and returns it.
+   * Where the user should land: their own Home, else their most recent
+   * Space. Use `ensureHome()` for a write target.
    */
   getDefault(customFetch?: Fetch) {
     return this.transport.request<SpaceDefaultResponse>("/api/spaces/default", {
@@ -307,6 +306,14 @@ export class SpacesApi {
       `/api/me/spaces/by-slug/${encodeURIComponent(slug)}`,
       { fetch: customFetch },
     );
+  }
+
+  /** The account's own Home Space, created on first use. */
+  ensureHome(customFetch?: Fetch) {
+    return this.transport.request<SpaceRecord>("/api/me/spaces/home", {
+      method: "POST",
+      fetch: customFetch,
+    });
   }
 
   create(

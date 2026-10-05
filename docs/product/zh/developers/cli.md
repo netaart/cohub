@@ -38,16 +38,19 @@ ENV=dev cohub spaces ls
 
 | Flag | 作用 |
 | --- | --- |
-| `-s, --space <id>` | 指定 space-scoped 命令的目标 Space |
+| `-s, --space <space>` | 指定 space-scoped 命令的目标 Space |
 | `--json` | 机器可读输出 |
 | `-h, --help` | 命令帮助 |
 
-很多工作流需要 Space。未显式指定时，CLI 会先使用当前目录已记住的 Space，再回退到 Home Space：
+很多工作流需要 Space。CLI 依次使用 `-s`、`COHUB_SPACE_ID`，以及 `cohub runtime up` 为当前目录记住的 Space。`<space>` 可以是 Space ID、自己 Space 的 slug（比如 `home`），或 `username/slug`：
 
 ```bash
 cohub -s <spaceId> spaces get
+cohub -s home spaces files ls
 COHUB_SPACE_ID=<spaceId> cohub spaces get
 ```
+
+`prompt`、`completion`、`generate`、`apps` 和 `public` 这类开启新工作的命令，在没有任何目标时会回退到你的 Home Space。其余 Space 命令会读取或修改 Space 里已有的内容，没有目标时直接报错，不会替你猜。
 
 ## 术语
 

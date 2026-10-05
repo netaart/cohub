@@ -43,7 +43,7 @@ export function registerRuntime(program: Command) {
   const runtime = program.command("runtime").description("Connect a local workspace");
   runtime.command("up [dir]")
     .description("Connect local Harnesses and files")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("-n, --new", "Create a new Space")
     .option("--name <name>", "New Space name")
     .option("-d, --detach", "Run in the background")
@@ -60,7 +60,7 @@ export function registerRuntime(program: Command) {
 
   runtime.command("attach")
     .description("Connect native harnesses to Cohub: install the Pi extension")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--harness <name>", "Pi; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { harness: string[] }) => {
@@ -80,7 +80,7 @@ export function registerRuntime(program: Command) {
 
   runtime.command("detach")
     .description("Pause native sync; keep all data")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { harness: string[] }) => {
@@ -104,7 +104,7 @@ export function registerRuntime(program: Command) {
 
   runtime.command("import [dir]")
     .description("Import earlier local conversations, newest first")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--harness <name>", "Filter by harness; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--session <id>", "Filter by native session ID")
     .option("--concurrency <count>", `Conversations read in parallel, 1 to ${MAX_IMPORT_CONCURRENCY}`, String(DEFAULT_IMPORT_CONCURRENCY))
@@ -175,7 +175,7 @@ export function registerRuntime(program: Command) {
     });
 
   runtime.command("status").description("Local and server status")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--json", "JSON output")
     .action(async (options: TargetOptions) => {
       try {
@@ -203,7 +203,7 @@ export function registerRuntime(program: Command) {
     });
 
   runtime.command("down").description("Stop this local Runtime; retain all data")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("-y, --yes", "Stop even with unconfirmed executions")
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { yes?: boolean }) => {
@@ -231,7 +231,7 @@ export function registerRuntime(program: Command) {
     });
 
   runtime.command("logs").description("Read local Runtime diagnostics")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("-l, --limit <count>", "Number of events", "100")
     .option("--level <level>", "Minimum level: debug, info, warn, error", "info")
     .option("-f, --follow", "Keep watching")

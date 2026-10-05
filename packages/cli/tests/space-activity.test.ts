@@ -153,9 +153,9 @@ test("spaces activity forwards days and json flag to the selected space", async 
 		}),
 	});
 
-	await program.parseAsync(["node", "cohub", "-s", "space-1", "spaces", "activity", "7"]);
+	await program.parseAsync(["node", "cohub", "-s", "7c9e6679-7425-40de-944b-e07fc1f90ae7", "spaces", "activity", "7"]);
 
-	assert.equal(calledSpaceId, "space-1");
+	assert.equal(calledSpaceId, "7c9e6679-7425-40de-944b-e07fc1f90ae7");
 	assert.equal(calledDays, 7);
 	assert.match(spaces.commands.at(-1)?.helpInformation() ?? "", /usage, contributors, rankings/);
 });

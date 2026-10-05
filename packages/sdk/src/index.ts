@@ -33,6 +33,7 @@ export {
 export type { ParsedAppRef, AppPublicRef } from "./app-ref.js";
 export { isUuid } from "@cohub/protocol/identifiers";
 export { parseSpaceRef } from "./space-ref.js";
+export { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 export { UPLOAD_MAX_BATCH_BYTES, UPLOAD_MAX_BATCH_FILES, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 export type { SpaceRef } from "./space-ref.js";
 export { AppCommerceApi } from "./apis/app-commerce.js";

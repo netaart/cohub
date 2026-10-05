@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { dirname, posix } from "node:path";
-import { parseSpaceRef, type CohubHttpClient, type SpaceFsCopyResult, type SpaceFsCopyStats } from "@neta-art/cohub";
+import type { SpaceFsCopyResult, SpaceFsCopyStats } from "@neta-art/cohub";
 import { Option, type Command } from "commander";
 import { createClient } from "../client.js";
-import { error, handleHttp, json as outJson, jsonRequested, ok } from "../output.js";
-import { explicitSpace, resolveSpace } from "../space.js";
+import { error, json as outJson, jsonRequested, ok } from "../output.js";
+import { explicitSpace, failSpaceTarget, resolveSpace, resolveSpaceRef } from "../space.js";
 import {
   InvalidFileOperandError,
   parseCopyOperand,
@@ -27,30 +27,11 @@ import {
 
 function fail(e: unknown): never {
   if (e instanceof InvalidFileOperandError || e instanceof CopyAbortError) return error(e.message);
-  return handleHttp(e);
+  return failSpaceTarget(e);
 }
 
-function createSpaceResolver(client: CohubHttpClient, current: () => Promise<string>) {
-  const cache = new Map<string, Promise<string>>();
-  return (space: string | null) => {
-    const key = space ?? "";
-    let resolved = cache.get(key);
-    if (!resolved) {
-      const ref = space ? parseSpaceRef(space) : null;
-      resolved = !ref
-        ? current()
-        : ref.kind === "id"
-          ? Promise.resolve(ref.id)
-          : (ref.kind === "public" ? client.spaces.getBySlug(ref.username, ref.slug) : client.spaces.getOwnedBySlug(ref.slug))
-            .then((record) => record.id, (e: unknown) => {
-              if ((e as { status?: number }).status === 404) throw new InvalidFileOperandError(`Space '${space}' not found`);
-              throw e;
-            });
-      cache.set(key, resolved);
-    }
-    return resolved;
-  };
-}
+const operandSpaceResolver = (spacesCmd: Command) => (space: string | null) =>
+  space ? resolveSpaceRef(space) : resolveSpace(spacesCmd);
 
 export function formatBytes(bytes: number) {
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -102,7 +83,7 @@ const spaceParent = (path: string) => (posix.dirname(path) === "." ? "" : posix.
 async function copyFiles(spacesCmd: Command, raw: string[], opts: CopyCliOptions) {
   if (raw.length < 2) return error("missing destination operand", "Usage: cohub spaces files cp [-r] <source>... <destination>");
   const client = createClient();
-  const resolveSpaceId = createSpaceResolver(client, () => resolveSpace(spacesCmd));
+  const resolveSpaceId = operandSpaceResolver(spacesCmd);
   const progress = createProgressLine();
   const options: CopyOptions = {
     recursive: Boolean(opts.recursive || opts.R),
@@ -196,7 +177,7 @@ async function catFiles(spacesCmd: Command, paths: string[], opts: { json?: bool
     error(e.message);
   });
   const client = createClient();
-  const resolveSpaceId = createSpaceResolver(client, () => resolveSpace(spacesCmd));
+  const resolveSpaceId = operandSpaceResolver(spacesCmd);
   try {
     const operands = paths.map(parseSpaceFileOperand);
     if (jsonRequested(opts)) {

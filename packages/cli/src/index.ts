@@ -39,7 +39,7 @@ program
   .summary("Work with Cohub from your terminal")
   .description("Send prompts, manage Space files, and publish public output.")
   .version(VERSION, "-v, --version", "Show version")
-  .option("-s, --space <id>", "Target Space ID")
+  .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
   .option("--json", "Print machine-readable JSON when supported")
   .helpOption("-h, --help", "Show help")
   .addHelpText("after", `
@@ -61,7 +61,7 @@ Common commands:
   cohub -s <space-id> boards inspect <board-id>
   cohub -s <space-id> spaces turns ls --author others
   cohub -s <space-id> spaces sessions turns ls <session-id>
-  cohub -s <space-id> spaces files ls
+  cohub -s home spaces files ls
   cohub -s <space-id> public upload ./dist demo
   cohub -s <space-id> apps publish demo --file dist/index.html
   cohub desktop open <app-id> --call selection.get
@@ -71,10 +71,13 @@ Common commands:
   cohub generate "A calm lake at sunrise" --model <model> --output lake.png
 
 Target space:
-  -s <space-id>, then COHUB_SPACE_ID, then the current directory Runtime binding, then Home
+  -s <space>, then COHUB_SPACE_ID, then the current directory Runtime binding.
+  <space> is an ID, a slug you own such as home, or username/slug.
+  prompt, completion, generate, apps, and public fall back to your Home Space;
+  other Space commands need a target.
 
 Environment:
-  COHUB_SPACE_ID         Target Space ID when -s is omitted
+  COHUB_SPACE_ID         Target Space when -s is omitted
   COHUB_EXECUTION_TOKEN  Use this token instead of the stored Logto session
   ENV=dev                Use the development Cohub environment
   HTTPS_PROXY            Honored for API and uploads (also HTTP_PROXY, NO_PROXY)

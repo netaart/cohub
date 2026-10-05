@@ -2,23 +2,35 @@ import type { Command } from "commander";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { resolveCohubEnvironment } from "@neta-art/cohub";
+import { HOME_SPACE_SLUG, parseSpaceRef, resolveCohubEnvironment } from "@neta-art/cohub";
 import { readAuthSession } from "./auth.js";
 import { createClient } from "./client.js";
 import { getRuntimeSpaceBinding } from "./runtime/space-binding.js";
 import { error, handleHttp } from "./output.js";
 
 const CONFIG_DIR = join(homedir(), ".config", "cohub");
-const CACHE_PATH = join(CONFIG_DIR, "default-space.json");
+const CACHE_PATH = join(CONFIG_DIR, "home-space.json");
+/** Legacy cache that may name another user's Home; never read. */
+const LEGACY_CACHE_PATH = join(CONFIG_DIR, "default-space.json");
 /** Home space is stable; a one-day TTL bounds how long a stale hit survives. */
 const CACHE_TTL_MS = 86_400_000;
 
-type DefaultSpaceCache = {
+const SPACE_REF_HINT = "Use a Space ID, a slug you own such as home, or username/slug.";
+
+type HomeSpaceCache = {
   /** Identity fingerprint the cached space belongs to (env + subject). */
   key: string;
   spaceId: string;
   cachedAt: number;
 };
+
+export class SpaceTargetError extends Error {
+  override name = "SpaceTargetError";
+
+  constructor(message: string, readonly detail?: string) {
+    super(message);
+  }
+}
 
 function jwtClaim(token: string | undefined | null, key: string): string | null {
   const payload = token?.split(".")[1];
@@ -62,9 +74,9 @@ export function currentIdentityKey(): string | null {
 }
 
 /** Exported for tests; production always uses `CACHE_PATH`. */
-export function readDefaultSpaceCache(path: string, key: string, now = Date.now()): string | null {
+export function readHomeSpaceCache(path: string, key: string, now = Date.now()): string | null {
   try {
-    const cache = JSON.parse(readFileSync(path, "utf-8")) as Partial<DefaultSpaceCache>;
+    const cache = JSON.parse(readFileSync(path, "utf-8")) as Partial<HomeSpaceCache>;
     if (cache.key !== key || typeof cache.spaceId !== "string" || typeof cache.cachedAt !== "number") return null;
     if (now - cache.cachedAt > CACHE_TTL_MS) return null;
     return cache.spaceId;
@@ -73,22 +85,26 @@ export function readDefaultSpaceCache(path: string, key: string, now = Date.now(
   }
 }
 
-function writeCachedDefaultSpace(key: string, spaceId: string): void {
+function writeHomeSpaceCache(key: string, spaceId: string): void {
   try {
     mkdirSync(CONFIG_DIR, { recursive: true });
-    const cache: DefaultSpaceCache = { key, spaceId, cachedAt: Date.now() };
+    const cache: HomeSpaceCache = { key, spaceId, cachedAt: Date.now() };
     writeFileSync(CACHE_PATH, `${JSON.stringify(cache, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+    rmSync(LEGACY_CACHE_PATH, { force: true });
   } catch {
     // Cache is best-effort; never fail the command over it.
   }
 }
 
-let defaultSpacePromise: Promise<string | null> | null = null;
+let homeSpacePromise: Promise<string> | null = null;
+const spaceRefs = new Map<string, Promise<string>>();
 
-export function clearDefaultSpaceCache(): void {
-  defaultSpacePromise = null;
+export function clearHomeSpaceCache(): void {
+  homeSpacePromise = null;
+  spaceRefs.clear();
   try {
     rmSync(CACHE_PATH, { force: true });
+    rmSync(LEGACY_CACHE_PATH, { force: true });
   } catch {
     // Best-effort, same as writes.
   }
@@ -105,37 +121,59 @@ export function explicitSpace(program: Command): string | null {
   return process.env.COHUB_SPACE_ID?.trim() || null;
 }
 
-/**
- * Resolve the user's home space when no target is given. Cached locally per
- * identity so repeated invocations skip the network entirely, and memoized
- * in-process so preAction hooks and actions share a single lookup.
- * Network and auth failures propagate so callers can report them faithfully.
- */
-export function resolveDefaultSpace(): Promise<string | null> {
-  defaultSpacePromise ??= (async () => {
+/** Cached per identity and memoized per process. */
+export function resolveHomeSpace(): Promise<string> {
+  homeSpacePromise ??= (async () => {
     const key = currentIdentityKey();
-    if (key) {
-      const cached = readDefaultSpaceCache(CACHE_PATH, key);
-      if (cached) return cached;
-    }
-
-    const space = (await createClient().spaces.getDefault()).space ?? null;
-    // Recent-space fallback from getDefault() is not stable enough to cache.
-    if (space?.id && space.slug === "home" && key) writeCachedDefaultSpace(key, space.id);
-    return space?.id ?? null;
+    const cached = key ? readHomeSpaceCache(CACHE_PATH, key) : null;
+    if (cached) return cached;
+    const space = await createClient().spaces.ensureHome();
+    if (key) writeHomeSpaceCache(key, space.id);
+    return space.id;
   })();
-  return defaultSpacePromise;
+  return homeSpacePromise;
+}
+
+async function lookupSpaceRef(value: string): Promise<string> {
+  const ref = parseSpaceRef(value);
+  if (!ref) throw new SpaceTargetError(`Invalid space '${value}'`, SPACE_REF_HINT);
+  if (ref.kind === "id") return ref.id;
+  if (ref.kind === "owned" && ref.slug === HOME_SPACE_SLUG) return resolveHomeSpace();
+  const spaces = createClient().spaces;
+  try {
+    const space = ref.kind === "owned"
+      ? await spaces.getOwnedBySlug(ref.slug)
+      : await spaces.getBySlug(ref.username, ref.slug);
+    return space.id;
+  } catch (e: unknown) {
+    if ((e as { status?: number }).status === 404) throw new SpaceTargetError(`Space '${value}' not found`, SPACE_REF_HINT);
+    throw e;
+  }
+}
+
+export function resolveSpaceRef(value: string): Promise<string> {
+  const key = value.trim();
+  let resolved = spaceRefs.get(key);
+  if (!resolved) {
+    resolved = lookupSpaceRef(key);
+    spaceRefs.set(key, resolved);
+  }
+  return resolved;
+}
+
+export function failSpaceTarget(e: unknown): never {
+  if (e instanceof SpaceTargetError) return error(e.message, e.detail);
+  return handleHttp(e);
 }
 
 /** Shared exit for commands that need a space but resolved none. */
 export function missingSpaceError(): never {
-  return error("No target space", "Add -s, --space <id> or set COHUB_SPACE_ID. Run `cohub auth login` to use your home space.");
+  return error(
+    "No target space",
+    "Pass -s <space> (an ID, home, or username/slug), set COHUB_SPACE_ID, or run in a directory bound with `cohub runtime up`.",
+  );
 }
 
-/**
- * Resolve a Space from an optional explicit target, the current directory
- * binding, and finally the user's Home Space.
- */
 export async function resolveBoundSpace(
   options: { cwd?: string; bindingsPath?: string } = {},
 ): Promise<string | null> {
@@ -147,18 +185,27 @@ export async function resolveBoundSpace(
   return bound?.spaceId ?? null;
 }
 
-export async function resolveSpaceTarget(
-  target?: string | null,
-  options: { cwd?: string; bindingsPath?: string } = {},
-): Promise<string> {
-  const explicit = target?.trim() || process.env.COHUB_SPACE_ID?.trim() || null;
-  if (explicit) return explicit;
+export type SpaceTargetOptions = {
+  /** Only for commands that start new work. */
+  home?: boolean;
+  cwd?: string;
+  bindingsPath?: string;
+};
 
-  return (await resolveBoundSpace(options))
-    ?? (await resolveDefaultSpace().catch(handleHttp))
-    ?? missingSpaceError();
+/** Explicit target or `COHUB_SPACE_ID`, then the directory binding, then Home when allowed. */
+export async function resolveSpaceTarget(target?: string | null, options: SpaceTargetOptions = {}): Promise<string> {
+  const explicit = target?.trim() || process.env.COHUB_SPACE_ID?.trim() || null;
+  try {
+    if (explicit) return await resolveSpaceRef(explicit);
+    const bound = await resolveBoundSpace(options);
+    if (bound) return bound;
+    if (options.home) return await resolveHomeSpace();
+  } catch (e: unknown) {
+    return failSpaceTarget(e);
+  }
+  return missingSpaceError();
 }
 
-export async function resolveSpace(program: Command): Promise<string> {
-  return resolveSpaceTarget(explicitSpace(program));
+export function resolveSpace(command: Command, options: Pick<SpaceTargetOptions, "home"> = {}): Promise<string> {
+  return resolveSpaceTarget(explicitSpace(command), options);
 }

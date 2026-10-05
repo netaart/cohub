@@ -7,6 +7,7 @@ import {
 	type AppAuthorizationGrant,
 	type AppAuthorizationResult,
 } from "@cohub/protocol";
+import { COHUB_SOURCE_HEADER } from "@cohub/protocol/provenance";
 import { PERMISSIONS, isUserLevelPermission, type CreateSpaceInput, type Permission, type SpaceBootstrapSource } from "./types.js";
 import type { AppRecord } from "./apis/apps.js";
 import type {
@@ -312,6 +313,8 @@ const timeoutSignal = (ms: number) =>
 		: undefined;
 
 const spaceListSignal = () => timeoutSignal(SPACE_LIST_TIMEOUT_MS);
+const SPACE_LIST_PAGE_SIZE = 100;
+const MAX_SPACE_LIST_PAGES = 10;
 
 class AppAuthorizationError extends Error {
 	constructor(
@@ -1028,48 +1031,64 @@ export function createAppBridgeCore(
 	 * the viewer picks, never the list.
 	 */
 	async function listViewerSpaces(): Promise<AppAuthorizeSpaceOption[] | null> {
-		const request = async (forceRefresh = false) => {
+		const signal = spaceListSignal();
+		const request = async (cursor: string | null, forceRefresh = false) => {
 			const userToken = await getAccessToken({ forceRefresh });
 			if (!userToken) {
 				await startSignIn();
 				throw new AppLoginRedirect();
 			}
-			return fetch(`${apiOrigin}/api/spaces`, {
+			const query = new URLSearchParams({ limit: String(SPACE_LIST_PAGE_SIZE) });
+			if (cursor) query.set("cursor", cursor);
+			return fetch(`${apiOrigin}/api/spaces?${query}`, {
 				headers: { Authorization: `Bearer ${userToken}` },
-				signal: spaceListSignal(),
+				signal,
 			});
 		};
 
 		try {
-			let response = await request();
-			// The consent dialog can outlive the access token's short lifetime. A
-			// single refresh keeps a stale cached token from looking like a missing
-			// Space list without retrying genuine authorization failures forever.
-			if (response?.status === 401) response = await request(true);
-			if (!response?.ok) return null;
-			const spaces = (await response.json()) as RawSpacePayload[];
-			if (!Array.isArray(spaces)) return null;
-			return spaces.flatMap((space): AppAuthorizeSpaceOption[] => {
-				const option = toSpaceOption(space);
-				return option ? [option] : [];
-			});
+			const options: AppAuthorizeSpaceOption[] = [];
+			let cursor: string | null = null;
+			for (let page = 0; page < MAX_SPACE_LIST_PAGES; page += 1) {
+				let response = await request(cursor);
+				// The consent dialog can outlive the access token's short lifetime. A
+				// single refresh keeps a stale cached token from looking like a missing
+				// Space list without retrying genuine authorization failures forever.
+				if (response?.status === 401) response = await request(cursor, true);
+				if (!response?.ok) return null;
+				const body = (await response.json()) as {
+					items?: unknown;
+					pageInfo?: { hasMore?: unknown; nextCursor?: unknown };
+				} | null;
+				if (!Array.isArray(body?.items)) return null;
+				for (const space of body.items as RawSpacePayload[]) {
+					const option = toSpaceOption(space);
+					if (option) options.push(option);
+				}
+				const next = body.pageInfo?.nextCursor;
+				if (body.pageInfo?.hasMore !== true || typeof next !== "string" || !next) break;
+				cursor = next;
+			}
+			return options;
 		} catch (error) {
 			if (error instanceof AppLoginRedirect) throw error;
 			return null;
 		}
 	}
 
-	/**
-	 * Ensures the viewer has a Space to target when their accessible list is
-	 * empty. `GET /api/spaces/default` returns their home Space, creating it on
-	 * first use — the same path taken when they first enter Cohub.
-	 */
-	async function ensureDefaultSpace(): Promise<AppAuthorizeSpaceOption | null> {
+	/** The viewer's own Home, created on first use when they have no Space. */
+	async function ensureHomeSpace(): Promise<AppAuthorizeSpaceOption | null> {
 		const request = async (forceRefresh = false) => {
 			const userToken = await getAccessToken({ forceRefresh });
 			if (!userToken) return null;
-			return fetch(`${apiOrigin}/api/spaces/default`, {
-				headers: { Authorization: `Bearer ${userToken}` },
+			return fetch(`${apiOrigin}/api/me/spaces/home`, {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${userToken}`,
+					"Content-Type": "application/json",
+					[COHUB_SOURCE_HEADER.via]: "app",
+				},
+				body: JSON.stringify({ appId: app.id }),
 				signal: spaceListSignal(),
 			});
 		};
@@ -1078,10 +1097,8 @@ export function createAppBridgeCore(
 			let response = await request();
 			if (response?.status === 401) response = await request(true);
 			if (!response?.ok) return null;
-			const payload = (await response.json()) as {
-				space?: RawSpacePayload | null;
-			};
-			return payload?.space ? toSpaceOption(payload.space) : null;
+			const space = (await response.json()) as RawSpacePayload | null;
+			return space ? toSpaceOption(space) : null;
 		} catch {
 			return null;
 		}
@@ -1630,10 +1647,8 @@ export function createAppBridgeCore(
 
 				let spaces = spaceLevel ? await listViewerSpaces() : undefined;
 				if (state.pendingAuth !== reserved) return;
-				// A viewer with no accessible Space still needs a target:
-				// /spaces/default ensures and returns their home Space.
 				if (spaces && spaces.length === 0) {
-					const fallback = await ensureDefaultSpace();
+					const fallback = await ensureHomeSpace();
 					if (state.pendingAuth !== reserved) return;
 					if (fallback) spaces = [fallback];
 				}

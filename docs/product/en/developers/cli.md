@@ -38,17 +38,24 @@ ENV=dev cohub spaces ls
 
 | Flag | Purpose |
 | --- | --- |
-| `-s, --space <id>` | Target Space for space-scoped commands |
+| `-s, --space <space>` | Target Space for space-scoped commands |
 | `--json` | Machine-readable output |
 | `-h, --help` | Command help |
 
-Many workflows need a Space. Without an explicit target, the CLI uses the Space
-remembered for the current directory before falling back to Home:
+Many workflows need a Space. The CLI uses `-s`, then `COHUB_SPACE_ID`, then the
+Space remembered for the current directory by `cohub runtime up`. `<space>` is a
+Space ID, a slug you own such as `home`, or `username/slug`:
 
 ```bash
 cohub -s <spaceId> spaces get
+cohub -s home spaces files ls
 COHUB_SPACE_ID=<spaceId> cohub spaces get
 ```
+
+Commands that start new work — `prompt`, `completion`, `generate`, `apps`, and
+`public` — fall back to your Home Space when nothing else names a target. Every
+other Space command reads or changes existing Space state, so it stops with an
+error instead of guessing.
 
 ## Terminology
 

@@ -15,7 +15,7 @@ import {
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok } from "../output.js";
-import { resolveBoundSpace } from "../space.js";
+import { explicitSpace, failSpaceTarget, resolveBoundSpace, resolveSpaceRef } from "../space.js";
 import { getAppByRef } from "../app-ref.js";
 
 export { resolveOpenSurface };
@@ -35,23 +35,13 @@ type OpenTarget =
       surface?: DesktopSurface;
     };
 
-/**
- * Optional disambiguation for file:// vs app://. Unlike ordinary
- * Space-scoped commands, an unbound directory must not fall back to Home:
- * the plain target should remain eligible for App resolution.
- */
+/** Never falls back to Home, so a plain target stays eligible for App resolution. */
 export async function resolveOptionalSpaceId(
   command: Command,
   options: { cwd?: string; bindingsPath?: string } = {},
 ): Promise<string | undefined> {
-  let current: Command | null = command;
-  while (current) {
-    const opts = current.opts() as Record<string, unknown>;
-    if (typeof opts.space === "string" && opts.space.trim()) return opts.space.trim();
-    current = current.parent ?? null;
-  }
-  const fromEnvironment = process.env.COHUB_SPACE_ID?.trim();
-  if (fromEnvironment) return fromEnvironment;
+  const explicit = explicitSpace(command);
+  if (explicit) return resolveSpaceRef(explicit).catch(failSpaceTarget);
   return (await resolveBoundSpace(options)) ?? undefined;
 }
 

@@ -265,7 +265,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
     return error("Invalid thinking level", "Use off|minimal|low|medium|high|xhigh|max");
   }
 
-  const spaceId = await resolveSpace(command);
+  const spaceId = await resolveSpace(command, { home: true });
   const client = createClient();
   try {
     const schedule = opts.delayMs
@@ -328,7 +328,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
 
 
 async function runCompletionCommand(command: Command, words: string[], opts: CompletionOptions) {
-  const spaceId = await resolveSpace(command);
+  const spaceId = await resolveSpace(command, { home: true });
   const content = words.join(" ").trim();
   if (!content && process.stdin.isTTY) {
     return error("Message required", "Pass content args or pipe via stdin");
