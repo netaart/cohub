@@ -14,8 +14,9 @@ object HostCapabilities {
     const val FILE_PICKER = "filePicker"
     const val NAVIGATION = "navigation"
     const val CACHE = "cache"
+    const val RUNTIME = "runtime"
 
-    val advertised: List<String> = listOf(
+    private val always: List<String> = listOf(
         AUTH_TOKEN,
         AUTH_SIGN_IN,
         AUTH_SESSION,
@@ -23,4 +24,6 @@ object HostCapabilities {
         NAVIGATION,
         CACHE,
     )
+
+    fun advertised(runtime: Boolean): List<String> = if (runtime) always + RUNTIME else always
 }

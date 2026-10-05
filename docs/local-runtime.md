@@ -165,6 +165,45 @@ but their native sync is refused with "upgrade the Cohub CLI". Native sync state
 not carried over; sync starts afresh.
 先部署 API，再更新 CLI；无需数据库迁移。旧版 CLI 仍可执行 Cohub Turn，但原生同步会被拒绝并提示升级；旧版原生同步状态不迁移，重新开始同步。
 
+## Android device / Android 设备
+
+The Android app serves folders of the phone the way `runtime up` serves directories: each folder is
+bound to one Space for the signed-in account, and every enabled binding runs at once. Any readable
+folder can be chosen, including a whole storage volume; only `Android/data` and `Android/obb`, which
+Android keeps private to other apps, are left out. Each binding runs the same pair the CLI supervises,
+with no special path through the server:
+
+- **Runtime connection** (`/runtime/relay`) declaring `harnesses: []`. With no local Harness the
+  server never routes a Turn to the device; Turns run on the Cohub Harness and their tools reach the
+  folder through the file bridge. The connection exists to hold the Space's Runtime lease.
+- **File bridge**: `sandboxd --local --root <folder>`, the same binary cross-compiled for Android
+  (`lib/<abi>/libcohub_sandboxd.so` in the APK, built with cgo so it resolves names through bionic).
+  It runs managed, like under the CLI, except that lifecycle events come back on stderr
+  (`COHUB_RUNTIME_CONTROL_FD=2`): a JVM child inherits only the standard streams.
+
+Bindings follow the CLI's directory rules. Creating a Space *on this device* asks for a folder and
+names the Space after it; a folder already linked to another Space can open that Space instead, or be
+rebound to the new one. The Runtime popover connects, disconnects or changes a Space's folder. A
+running folder or Space is never taken over: rebinding it is refused until it is disconnected. The app
+asks for **All files access** first; one foreground service keeps every enabled folder connected in the
+background and stops them all at sign-out. Folders the user never disconnected come back when the
+system restarts the service, or when the app is next opened after a reboot, update or force stop;
+until then they show as stopped. Like `runtime up`, nothing starts at boot.
+
+All agent tools keep their meaning. File tools are fenced to the folder; `bash` runs as the app, like
+the CLI runs as the OS user, and uses `sh` (Android's mksh with toybox) because the device has no bash;
+`find` and `grep` use the bridge's built-in walker because it has no `fd` or `rg` (see
+[Agent / Sandbox Runtime](agent-sandbox-runtime.md#optional-executables)). Each binding costs what one
+`runtime up` costs: a sandboxd process, its file watcher over the folder, and two long-lived
+connections, so a narrower folder is cheaper to watch.
+
+Android 应用像 `runtime up` 一样为手机上的文件夹提供本地 Runtime：每个文件夹为当前账号绑定一个 Space，所有已启用的绑定同时运行。
+可以选择任意可读文件夹（包括整个存储卷），只排除 Android 对其他应用私有的 `Android/data` 和 `Android/obb`。每个绑定运行与 CLI
+相同的两部分：声明 `harnesses: []` 的 Runtime 连接（只持有租约，Turn 由 Cohub Harness 执行），以及以该文件夹为根目录、为 Android
+交叉编译的 sandboxd 文件桥（受管模式，生命周期事件改走 stderr）。绑定规则与 CLI 一致：新建 Space 时选择文件夹并以其命名；已关联的
+文件夹可打开原 Space 或改绑；运行中的文件夹或 Space 不会被抢占。前台服务在后台保持所有绑定连接，退出登录时全部停止；未断开的绑定在服务被系统重启或下次打开应用时恢复，不随开机自启。
+文件工具限定在文件夹内，`bash` 以应用身份运行并使用 `sh`，`find` / `grep` 在缺少 `fd` / `rg` 时使用内置实现。
+
 ## Lifecycle / 生命周期
 
 Foreground and detached startup share one supervisor. Readiness requires both the
@@ -390,6 +429,15 @@ No production-bucket writes are performed by the automated tests.
 Deploy Worker, API, Gateway and every Agent instance
 before enabling the updated Web/CLI. Worker must understand local usage before local
 results arrive, so they cannot be charged as cloud executions.
+
+The Android smoke test runs host builds of sandboxd the way the app starts them (managed, control
+events on stderr), two folders side by side behind the real gateway relay, with no bash, rg or fd on
+PATH and folders laid out like shared storage, then drives `find`, `grep`, `read`, `bash`, file moves
+and the folder fence through the agent's sandbox client. It needs Go and touches only a temporary directory.
+
+```bash
+pnpm exec tsx scripts/android/runtime-smoke.mts
+```
 
 The native smoke test drives real Pi and Codex binaries with isolated homes and a deterministic
 loopback model: a Cohub Turn in a Pi Cohub starts; a terminal Pi syncing with live preview; a web

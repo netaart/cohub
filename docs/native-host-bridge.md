@@ -48,6 +48,14 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `share.text` | `share` | Native share sheet |
 | `navigation.openPath` | `navigation` | In-shell path navigation |
 | `cache.clear` | `cache` | Host state only; IndexedDB is the web app's |
+| `runtime.list` | `runtime` | This device's folders bound to Spaces, with live state |
+| `runtime.browse` | `runtime` | Asks for storage access, then lists a device folder |
+| `runtime.start` | `runtime` | Binds a folder to a Space and serves it; refuses taking over a running one |
+| `runtime.stop` | `runtime` | Disconnects a Space; its binding and files stay |
+
+`runtime.changed` pushes the whole `DeviceRuntime` on every change. Android advertises
+`runtime` only on Android 11+ builds that ship sandboxd; see
+[Local Runtime](local-runtime.md#android-device--android-设备).
 
 ## Sign-in
 

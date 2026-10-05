@@ -13,6 +13,7 @@ import (
 
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/protocol"
+	"github.com/cohub/apps/sandbox/rpc"
 )
 
 // connectionSession is one attached peer (agent or relay) talking the
@@ -228,6 +229,8 @@ func (s *Server) sendHeartbeat(session *connectionSession, includeSnapshot bool)
 			ProcessStart:       true,
 			ProcessStartArgv:   true,
 			ProcessAbort:       true,
+			ProcessRg:          rpc.HasRipgrep(),
+			ProcessFd:          rpc.HasFd(),
 		}
 		message.Filesystem = &protocol.SandboxFilesystem{
 			DefaultCwd: s.cfg.WorkspaceDir,

@@ -20,6 +20,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "filePicker",
   "navigation",
   "cache",
+  "runtime",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -84,6 +85,36 @@ const sessionIdentitySchema = z.object({
   email: z.string().max(320).nullable(),
 }).strict();
 
+export const DEVICE_RUNTIME_ERRORS = ["signed_out", "forbidden", "conflict"] as const;
+export const DEVICE_RUNTIME_REFUSALS = ["space_in_use", "folder_in_use", "folder_unavailable"] as const;
+
+const devicePath = z.string().min(1).max(4_096);
+const deviceLabel = z.string().min(1).max(4_096);
+
+export const deviceRuntimeInstanceSchema = z.object({
+  spaceId: z.uuid(),
+  root: devicePath,
+  label: deviceLabel,
+  state: z.enum(["stopped", "connecting", "ready", "error"]),
+  error: z.string().min(1).max(64).nullable(),
+}).strict();
+export type DeviceRuntimeInstance = z.infer<typeof deviceRuntimeInstanceSchema>;
+
+export const deviceRuntimeSchema = z.object({
+  instances: z.array(deviceRuntimeInstanceSchema).max(256),
+}).strict();
+export type DeviceRuntime = z.infer<typeof deviceRuntimeSchema>;
+
+export const deviceFolderListingSchema = z.object({
+  path: devicePath,
+  label: deviceLabel,
+  parent: devicePath.nullable(),
+  spaceId: z.uuid().nullable(),
+  folders: z.array(z.object({ name: z.string().min(1).max(255), path: devicePath }).strict()).max(10_000),
+  volumes: z.array(z.object({ path: devicePath, label: deviceLabel }).strict()).max(16),
+}).strict();
+export type DeviceFolderListing = z.infer<typeof deviceFolderListingSchema>;
+
 /**
  * Methods the web surface may call. Both ends validate with these schemas, so
  * a host cannot answer a shape the web side misreads.
@@ -100,10 +131,17 @@ export const HOST_BRIDGE_METHODS = {
   "share.text": { params: z.object({ text: z.string().max(100_000), title: z.string().max(512).optional() }).strict(), result: z.boolean() },
   "navigation.openPath": { params: z.object({ path: z.string().min(1).max(2_048) }).strict(), result: z.boolean() },
   "cache.clear": { params: z.object({ scope: z.enum(["all", "user"]) }).strict(), result: z.boolean() },
+  "runtime.list": { params: z.undefined(), result: deviceRuntimeSchema },
+  "runtime.browse": { params: z.object({ path: devicePath.optional() }).strict(), result: deviceFolderListingSchema },
+  "runtime.start": {
+    params: z.object({ spaceId: z.uuid(), root: devicePath }).strict(),
+    result: deviceRuntimeSchema.extend({ refused: z.enum(DEVICE_RUNTIME_REFUSALS).nullable() }).strict(),
+  },
+  "runtime.stop": { params: z.object({ spaceId: z.uuid() }).strict(), result: deviceRuntimeSchema },
 } as const;
 export type HostBridgeMethod = keyof typeof HOST_BRIDGE_METHODS;
 
-export const HOST_BRIDGE_EVENTS = ["auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background"] as const;
+export const HOST_BRIDGE_EVENTS = ["auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background", "runtime.changed"] as const;
 export type HostBridgeEventName = (typeof HOST_BRIDGE_EVENTS)[number];
 
 export const HOST_BRIDGE_ERROR = {
@@ -115,5 +153,6 @@ export const HOST_BRIDGE_ERROR = {
 export type HostBridgeErrorCode = (typeof HOST_BRIDGE_ERROR)[keyof typeof HOST_BRIDGE_ERROR];
 
 export const HOST_BRIDGE_REQUEST_TIMEOUT_MS = 30_000;
+export const HOST_BRIDGE_INTERACTIVE_TIMEOUT_MS = 5 * 60_000;
 /** Short on purpose: a missing host must not delay the first screen. */
 export const HOST_BRIDGE_HANDSHAKE_TIMEOUT_MS = 2_000;

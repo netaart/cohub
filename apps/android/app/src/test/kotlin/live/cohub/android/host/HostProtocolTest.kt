@@ -55,9 +55,9 @@ class HostProtocolTest {
     fun `every advertised capability is known to the web side`() {
         val known = setOf(
             "auth.token", "auth.signIn", "auth.session", "notifications",
-            "share", "filePicker", "navigation", "cache",
+            "share", "filePicker", "navigation", "cache", "runtime",
         )
-        HostCapabilities.advertised.forEach { capability ->
+        HostCapabilities.advertised(runtime = true).forEach { capability ->
             assertTrue("Unknown capability advertised: $capability", capability in known)
         }
     }
@@ -66,6 +66,6 @@ class HostProtocolTest {
     fun `notifications is not advertised until delivery exists`() {
         // The server has no FCM channel; claiming it would make the web side
         // wait for notifications that never arrive.
-        assertFalse(HostCapabilities.NOTIFICATIONS in HostCapabilities.advertised)
+        assertFalse(HostCapabilities.NOTIFICATIONS in HostCapabilities.advertised(runtime = true))
     }
 }

@@ -27,6 +27,7 @@ class AuthSession(
     private val store: CredentialStore,
     private val config: AuthConfig,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val onAccountChanged: (signedIn: Boolean) -> Unit = {},
 ) {
     private val refreshMutex = Mutex()
     private val generation = AtomicLong(0)
@@ -60,8 +61,7 @@ class AuthSession(
         val stored = store.read() ?: return@withLock null
         val token = runCatching { exchangeRefreshToken(stored.refreshToken) }
             .getOrElse { error ->
-                // A rejected refresh token means the session is over.
-                if (error is OAuthFailure) clear()
+                if (error is OAuthFailure && (error.status == 400 || error.status == 401)) clear()
                 return@withLock null
             }
         publish(token)
@@ -82,10 +82,15 @@ class AuthSession(
         publish(token)
         identity = Identity(authenticated = true, subject = token.subject, userUuid = null)
         generation.incrementAndGet()
+        onAccountChanged(true)
         return token.accessToken
     }
 
     fun status(): Identity = identity
+
+    fun hasCredentials(): Boolean = store.read() != null
+
+    fun accountKey(): String? = store.read()?.let { it.subject ?: it.userUuid ?: "" }
 
     fun sessionVersion(): Long = generation.get()
 
@@ -95,6 +100,7 @@ class AuthSession(
         accessTokenExpiresAt = 0
         identity = Identity.None
         generation.incrementAndGet()
+        onAccountChanged(false)
     }
 
     private fun publish(token: TokenResponse) {

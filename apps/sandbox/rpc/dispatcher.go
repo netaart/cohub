@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -890,6 +891,14 @@ func (d *Dispatcher) handleFSFind(request protocol.RPCRequest) interface{} {
 		limit = 1000
 	}
 
+	if !HasFd() {
+		matches, err := nativeFind(resolved.path, params, d.cfg.WorkspaceDir, limit)
+		if err != nil {
+			return d.failed(request, "", "IO_ERROR", err.Error())
+		}
+		return findResult(resolved.path, matches, limit)
+	}
+
 	args := []string{"--color=never"}
 	switch params.Mode {
 	case "glob":
@@ -943,13 +952,16 @@ func (d *Dispatcher) handleFSFind(request protocol.RPCRequest) interface{} {
 			matches = append(matches, filepath.ToSlash(relativePath))
 		}
 	}
+	return findResult(resolved.path, matches, limit)
+}
+
+func findResult(path string, matches []string, limit int) map[string]interface{} {
 	truncated := len(matches) > limit
 	if truncated {
 		matches = matches[:limit]
 	}
-
 	return map[string]interface{}{
-		"path":      resolved.path,
+		"path":      path,
 		"matches":   matches,
 		"truncated": truncated,
 	}
@@ -1040,6 +1052,18 @@ func (d *Dispatcher) handleFSGrep(request protocol.RPCRequest) interface{} {
 	limit := params.Limit
 	if limit <= 0 {
 		limit = 100
+	}
+
+	if !HasRipgrep() {
+		displayRoot := strings.TrimSpace(params.Path)
+		if displayRoot == "" {
+			displayRoot = "."
+		}
+		lines, err := nativeGrep(resolved.path, displayRoot, params, d.cfg.WorkspaceDir, limit)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return d.failed(request, "", "IO_ERROR", err.Error())
+		}
+		return grepResult(resolved.path, lines, limit)
 	}
 
 	args := []string{"--line-number", "--color=never"}
@@ -1134,13 +1158,19 @@ func (d *Dispatcher) handleFSGrep(request protocol.RPCRequest) interface{} {
 		}
 		lines = append(lines, line)
 	}
+	return grepResult(resolved.path, lines, limit)
+}
+
+func grepResult(path string, lines []string, limit int) map[string]interface{} {
+	if lines == nil {
+		lines = []string{}
+	}
 	truncated := len(lines) > limit
 	if truncated {
 		lines = lines[:limit]
 	}
-
 	return map[string]interface{}{
-		"path":      resolved.path,
+		"path":      path,
 		"lines":     lines,
 		"truncated": truncated,
 	}

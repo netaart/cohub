@@ -1,9 +1,13 @@
 package live.cohub.android
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -16,26 +20,37 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.core.content.edit
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
-import live.cohub.android.auth.AuthConfig
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.auth.AuthorizationRequest
-import live.cohub.android.auth.CredentialStore
 import live.cohub.android.auth.Pkce
 import live.cohub.android.host.CancellationSignal
 import live.cohub.android.host.HostActions
 import live.cohub.android.host.HostBridge
+import live.cohub.android.host.HostProtocol
 import live.cohub.android.host.WebSurface
+import live.cohub.android.runtime.DeviceRuntime
+import live.cohub.android.runtime.toJson
 import live.cohub.android.ui.WebSurfaceHost
 
 /** The shell: one WebView for product UI, one bridge for native capability. */
 class MainActivity : ComponentActivity(), HostActions {
 
     private lateinit var auth: AuthSession
+    private lateinit var runtime: DeviceRuntime
     private lateinit var bridge: HostBridge
     private lateinit var surface: WebSurface
     private lateinit var customTabs: ActivityResultLauncher<Intent>
+    private lateinit var allFilesAccess: ActivityResultLauncher<Intent>
+    private lateinit var notificationPermission: ActivityResultLauncher<String>
+    private var pendingResult: CompletableDeferred<Unit>? = null
+    private val preparing = Mutex()
 
     /**
      * One immutable snapshot in a single volatile field, so the redirect handler
@@ -54,20 +69,31 @@ class MainActivity : ComponentActivity(), HostActions {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        auth = AuthSession(
-            store = CredentialStore(applicationContext),
-            config = AuthConfig(
-                endpoint = BuildConfig.LOGTO_ENDPOINT,
-                appId = BuildConfig.LOGTO_APP_ID,
-                redirectUri = BuildConfig.OAUTH_REDIRECT_URI,
-                apiResource = BuildConfig.LOGTO_API_RESOURCE,
-            ),
+        val app = application as CohubApplication
+        auth = app.auth
+        runtime = app.runtime
+        bridge = HostBridge(
+            scope = lifecycleScope,
+            auth = auth,
+            actions = this,
+            runtime = runtime.takeIf { it.available },
         )
-        bridge = HostBridge(scope = lifecycleScope, auth = auth, actions = this)
 
         // The authorization result returns as a redirect intent, not an activity
         // result; this launcher only opens the browser.
         customTabs = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
+        allFilesAccess = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            pendingResult?.complete(Unit)
+        }
+        notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            pendingResult?.complete(Unit)
+        }
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                runtime.instances.collect { bridge.emit(HostProtocol.Events.RUNTIME_CHANGED, it.toJson()) }
+            }
+        }
 
         lifecycleScope.launch {
             auth.restore()
@@ -96,6 +122,11 @@ class MainActivity : ComponentActivity(), HostActions {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        runtime.resume()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -147,6 +178,31 @@ class MainActivity : ComponentActivity(), HostActions {
     override fun clearCache(scope: String) {
         // IndexedDB belongs to the web app; the host clears only what it owns.
         if (scope == "user" || scope == "all") auth.clear()
+    }
+
+    override suspend fun prepareRuntime(): Boolean = preparing.withLock {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            awaitResult(notificationPermission, Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (runtime.hasStorageAccess()) return@withLock true
+        try {
+            awaitResult(
+                allFilesAccess,
+                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, "package:$packageName".toUri()),
+            )
+        } catch (_: ActivityNotFoundException) {
+            awaitResult(allFilesAccess, Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+        }
+        runtime.hasStorageAccess()
+    }
+
+    private suspend fun <I> awaitResult(launcher: ActivityResultLauncher<I>, input: I) {
+        val result = CompletableDeferred<Unit>()
+        pendingResult = result
+        launcher.launch(input)
+        result.await()
     }
 
     private fun isSignInRedirect(data: Uri): Boolean =

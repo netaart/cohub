@@ -129,7 +129,7 @@ func (m *Manager) StartWithOptions(ownerIdentity string, options StartOptions) (
 	if len(options.Argv) > 0 {
 		cmd = exec.CommandContext(ctx, options.Argv[0], options.Argv[1:]...)
 	} else {
-		cmd = exec.CommandContext(ctx, "bash", "-c", options.Command)
+		cmd = exec.CommandContext(ctx, commandShell(), "-c", options.Command)
 	}
 	// Context cancellation is handled below by terminating the whole process
 	// group. Keep exec's cancellation hook from killing only the leader first.

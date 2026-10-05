@@ -3,6 +3,7 @@ import {
 	getDefaultSpaceModsForEnv,
 	normalizeCohubRuntimeEnv,
 } from "@cohub/protocol";
+import type { DeviceFolderListing } from "@cohub/protocol/host-bridge";
 import {
 	type Channel,
 	type ChannelConfig,
@@ -20,6 +21,14 @@ import { PUBLIC_COHUB_ENV } from "$env/static/public";
 import { ensureAuth } from "$lib/auth";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import ChannelModelPicker from "$lib/components/ChannelModelPicker.svelte";
+import DeviceFolderPicker from "$lib/components/DeviceFolderPicker.svelte";
+import {
+	deviceFolderName,
+	deviceRuntimeInstances,
+	deviceRuntimeSupported,
+	isDeviceRuntimeRunning,
+	startDeviceRuntime,
+} from "$lib/device-runtime.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
@@ -51,6 +60,32 @@ const initialCheckpointId =
 let selectedBootstrapType = $state<"blank" | "git_repo" | "checkpoint">(
 	initialCheckpointId ? "checkpoint" : "blank",
 );
+let deviceSupported = $state(false);
+let placement = $state<"cloud" | "device">("cloud");
+let folder = $state<DeviceFolderListing | null>(null);
+let pickingFolder = $state(false);
+const linkedSpaceId = $derived(folder?.spaceId ?? null);
+const linkedRunning = $derived(
+	isDeviceRuntimeRunning(
+		deviceRuntimeInstances()?.find((item) => item.spaceId === linkedSpaceId),
+	),
+);
+const deviceReady = $derived(
+	placement === "cloud" || (folder !== null && !linkedRunning),
+);
+
+function selectFolder(next: DeviceFolderListing) {
+	pickingFolder = false;
+	folder = next;
+	if (!name.trim()) name = deviceFolderName(next);
+}
+
+async function openLinkedSpace() {
+	if (!folder?.spaceId) return;
+	if (!linkedRunning)
+		await startDeviceRuntime(folder.spaceId, folder.path).catch(() => null);
+	await goto(buildSpaceLandingRoute(folder.spaceId));
+}
 let gitRepoUrl = $state("");
 let gitRepoRef = $state("");
 let gitToken = $state("");
@@ -80,7 +115,11 @@ async function loadPage() {
 	loadError = "";
 
 	try {
-		const channelsData = await sdk.channels.list();
+		const [channelsData, supported] = await Promise.all([
+			sdk.channels.list(),
+			deviceRuntimeSupported(),
+		]);
+		deviceSupported = supported;
 		channels = channelsData;
 		channelConfigById = Object.fromEntries(
 			channelsData.map((ch) => [ch.id, getDefaultChannelConfig(ch)]),
@@ -205,7 +244,7 @@ function removeMod(modSpaceId: string) {
 
 async function handleSubmit(event: SubmitEvent) {
 	event.preventDefault();
-	if (!name.trim() || isSubmitting) return;
+	if (!name.trim() || isSubmitting || !deviceReady) return;
 
 	submitError = "";
 	isSubmitting = true;
@@ -221,6 +260,7 @@ async function handleSubmit(event: SubmitEvent) {
 			.map((item) => ({ name: item.name.trim(), value: item.value }))
 			.filter((item) => item.name.length > 0);
 
+		const onDevice = placement === "device";
 		const bootstrapSource =
 			selectedBootstrapType === "git_repo"
 				? {
@@ -244,10 +284,17 @@ async function handleSubmit(event: SubmitEvent) {
 				extraEnv: normalizedExtraEnv,
 				channelBindings,
 				mods,
-				bootstrapSource,
+				...(onDevice
+					? { config: { sandbox: { provider: "local" as const } } }
+					: { bootstrapSource }),
 			},
-			gitToken.trim() ? { "X-Git-Token": gitToken.trim() } : undefined,
+			gitToken.trim() && !onDevice
+				? { "X-Git-Token": gitToken.trim() }
+				: undefined,
 		);
+
+		if (onDevice && folder)
+			await startDeviceRuntime(result.space.id, folder.path).catch(() => null);
 
 		cacheSpaceRecordSoon(result.space);
 		window.dispatchEvent(new CustomEvent("cohub:space-created"));
@@ -266,6 +313,10 @@ async function handleSubmit(event: SubmitEvent) {
 	}
 }
 </script>
+
+{#if deviceSupported}
+  <DeviceFolderPicker open={pickingFolder} onClose={() => (pickingFolder = false)} onSelect={selectFolder} />
+{/if}
 
 <svelte:head>
 	<title>New space — Cohub</title>
@@ -330,6 +381,40 @@ async function handleSubmit(event: SubmitEvent) {
               class="w-full px-3 py-[8px] rounded-[5px] bg-bg-input border border-border-subtle text-[13px] text-text-primary placeholder:text-text-placeholder focus:border-brand/40 focus:outline-none transition-colors resize-y"
             ></textarea>
           </div>
+          {#if deviceSupported}
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">{m.space_new_location({}, { locale })}</div>
+              <div class="grid gap-2 grid-cols-2">
+                <label class="flex items-center gap-2 rounded-[5px] border border-border-subtle bg-bg-input px-3 py-2 text-[12px] text-text-secondary">
+                  <input type="radio" bind:group={placement} value="cloud" />
+                  <span>{m.space_new_location_cloud({}, { locale })}</span>
+                </label>
+                <label class="flex items-center gap-2 rounded-[5px] border border-border-subtle bg-bg-input px-3 py-2 text-[12px] text-text-secondary">
+                  <input type="radio" bind:group={placement} value="device" />
+                  <span>{m.runtime_this_device({}, { locale })}</span>
+                </label>
+              </div>
+              {#if placement === "device"}
+                <p class="mt-1 text-[11px] text-text-placeholder">{m.space_new_location_device_hint({}, { locale })}</p>
+              {/if}
+            </div>
+            {#if placement === "device"}
+              <div>
+                <div class="text-[10px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">{m.space_new_folder({}, { locale })}</div>
+                <button type="button" class="flex w-full min-h-9 items-center justify-between gap-3 rounded-[5px] border border-border-subtle bg-bg-input px-3 py-2 text-left text-[13px] text-text-primary hover:border-border-primary transition-colors" onclick={() => (pickingFolder = true)}>
+                  <span class="min-w-0 break-all font-mono">{folder?.label ?? m.runtime_device_choose_folder({}, { locale })}</span>
+                  {#if folder}<span class="shrink-0 text-[12px] text-text-tertiary">{m.runtime_device_change_folder({}, { locale })}</span>{/if}
+                </button>
+                {#if linkedSpaceId}
+                  <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                    <span class={linkedRunning ? "text-error-soft" : "text-text-placeholder"}>{linkedRunning ? m.runtime_device_folder_in_use({}, { locale }) : m.space_new_folder_linked({}, { locale })}</span>
+                    <button type="button" class="text-brand hover:underline" onclick={() => void openLinkedSpace()}>{m.space_new_open_linked({}, { locale })}</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          {/if}
+          {#if placement === "cloud"}
           <div class="space-y-2">
             <div>
               <div class="text-[10px] uppercase tracking-wider text-text-tertiary font-medium mb-1.5">Bootstrap Source</div>
@@ -384,6 +469,7 @@ async function handleSubmit(event: SubmitEvent) {
               </div>
             {/if}
           </div>
+          {/if}
         </div>
 
         <div class="border border-border-subtle rounded-md bg-bg-surface p-4 space-y-3">
@@ -546,7 +632,7 @@ async function handleSubmit(event: SubmitEvent) {
           <button
             type="submit"
             class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[5px] bg-brand-muted border border-brand-border text-[13px] text-brand font-medium hover:bg-brand-muted-hover transition-colors disabled:opacity-60"
-            disabled={isSubmitting || !name.trim()}
+            disabled={isSubmitting || !name.trim() || !deviceReady}
           >
             {#if isSubmitting}
               <Loader2 class="w-3.5 h-3.5 animate-spin" />
