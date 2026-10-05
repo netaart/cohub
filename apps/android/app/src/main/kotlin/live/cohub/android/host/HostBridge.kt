@@ -20,6 +20,10 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import live.cohub.android.auth.AuthSession
+import live.cohub.android.runtime.DeviceRuntime
+import live.cohub.android.runtime.FolderUnavailable
+import live.cohub.android.runtime.toJson
+import java.util.UUID
 
 /**
  * Answers `cohub.host.v1` requests from the web surface.
@@ -36,7 +40,10 @@ class HostBridge(
     private val scope: CoroutineScope,
     private val auth: AuthSession,
     private val actions: HostActions,
+    private val runtime: DeviceRuntime? = null,
 ) {
+    private val supportedMethods = if (runtime == null) BASE_METHODS else BASE_METHODS + RUNTIME_METHODS
+
     @Volatile
     private var replyProxy: JavaScriptReplyProxy? = null
 
@@ -78,7 +85,7 @@ class HostBridge(
 
         // Unknown methods answer `unsupported` rather than staying silent, so the
         // web side falls back to its browser path instead of waiting.
-        if (method !in SUPPORTED_METHODS) {
+        if (method !in supportedMethods) {
             replyError(proxy, id, HostProtocol.Errors.UNSUPPORTED, "Unsupported method: $method")
             return
         }
@@ -104,7 +111,7 @@ class HostBridge(
             put("hostId", actions.hostId())
             put(
                 "capabilities",
-                buildJsonArray { HostCapabilities.advertised.forEach { add(JsonPrimitive(it)) } },
+                buildJsonArray { HostCapabilities.advertised(runtime != null).forEach { add(JsonPrimitive(it)) } },
             )
         }
 
@@ -157,8 +164,43 @@ class HostBridge(
             JsonPrimitive(true)
         }
 
+        HostProtocol.Methods.RUNTIME_LIST -> requireRuntime().instances.value.toJson()
+
+        HostProtocol.Methods.RUNTIME_BROWSE -> {
+            requireStorageAccess()
+            try {
+                requireRuntime().browse(params["path"]?.jsonPrimitive?.contentOrNull).toJson()
+            } catch (error: FolderUnavailable) {
+                throw IllegalArgumentException("Folder unavailable: ${error.message}")
+            }
+        }
+
+        HostProtocol.Methods.RUNTIME_START -> {
+            val spaceId = requireSpaceId(params)
+            val root = params["root"]?.jsonPrimitive?.contentOrNull
+                ?: throw IllegalArgumentException("runtime.start requires a folder")
+            requireStorageAccess()
+            val refused = requireRuntime().start(spaceId, root)
+            JsonObject(requireRuntime().instances.value.toJson() + ("refused" to JsonPrimitive(refused)))
+        }
+
+        HostProtocol.Methods.RUNTIME_STOP -> {
+            requireRuntime().stop(requireSpaceId(params))
+            requireRuntime().instances.value.toJson()
+        }
+
         else -> throw IllegalArgumentException("Unhandled method: $method")
     }
+
+    private fun requireRuntime(): DeviceRuntime = runtime ?: throw IllegalStateException("This device cannot serve a Space")
+
+    private suspend fun requireStorageAccess() {
+        if (!actions.prepareRuntime()) throw CancellationSignal("All files access was not granted")
+    }
+
+    private fun requireSpaceId(params: JsonObject): String =
+        params["spaceId"]?.jsonPrimitive?.contentOrNull?.takeIf { runCatching { UUID.fromString(it) }.isSuccess }
+            ?: throw IllegalArgumentException("A Space id is required")
 
     /** Push a host event; dropped when no page is attached. */
     fun emit(name: String, payload: JsonElement? = null) {
@@ -199,7 +241,13 @@ class HostBridge(
     }
 
     private companion object {
-        val SUPPORTED_METHODS = setOf(
+        val RUNTIME_METHODS = setOf(
+            HostProtocol.Methods.RUNTIME_LIST,
+            HostProtocol.Methods.RUNTIME_BROWSE,
+            HostProtocol.Methods.RUNTIME_START,
+            HostProtocol.Methods.RUNTIME_STOP,
+        )
+        val BASE_METHODS = setOf(
             HostProtocol.Methods.HOST_DESCRIBE,
             HostProtocol.Methods.AUTH_GET_ACCESS_TOKEN,
             HostProtocol.Methods.AUTH_GET_SESSION_VERSION,
@@ -223,4 +271,6 @@ interface HostActions {
     fun shareText(text: String, title: String?)
     fun openPath(path: String)
     fun clearCache(scope: String)
+
+    suspend fun prepareRuntime(): Boolean
 }

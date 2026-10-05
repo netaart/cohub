@@ -138,6 +138,8 @@ export type SandboxCapabilities = {
   /** process.start supports argv exec mode (no shell). */
   processStartArgv?: boolean;
   processAbort: boolean;
+  processRg?: boolean;
+  processFd?: boolean;
 };
 
 export type SandboxFilesystemRoot = {

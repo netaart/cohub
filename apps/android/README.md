@@ -7,6 +7,7 @@ uses the versioned `cohub.host.v1` bridge — see `docs/native-host-bridge.md`.
 
 ```
 app/src/main/kotlin/live/cohub/android/
+  CohubApplication.kt      process-wide AuthSession and DeviceRuntime
   MainActivity.kt          activity host, edge-to-edge, deep links
   host/
     HostProtocol.kt        wire constants (mirrors packages/protocol)
@@ -18,19 +19,30 @@ app/src/main/kotlin/live/cohub/android/
     AuthSession.kt         tokens + identity, in memory only
     CredentialStore.kt     EncryptedSharedPreferences persistence
     Pkce.kt                PKCE + authorization URL
+  runtime/
+    DeviceRuntime.kt       folder → Space bindings, like `runtime up` per directory
+    RuntimeService.kt      foreground service running every enabled binding
+    RuntimeConnection.kt   /runtime/relay client (no local Harness)
+    SandboxBridge.kt       supervises sandboxd over one folder
   ui/WebSurfaceHost.kt     Compose wrapper for the WebView
 ```
+
+The device Runtime is described in `docs/local-runtime.md` ("Android device").
 
 Not part of the pnpm workspace: Gradle is a separate toolchain.
 
 ```bash
 cd apps/android
-./gradlew :app:assembleDebug                  # prod; needs JDK 17+ and ANDROID_HOME
+./gradlew :app:assembleDebug                  # prod; needs JDK 17+, ANDROID_HOME, Go and the NDK
 ./gradlew :app:assembleDebug -PcohubEnv=dev   # live.cohub.android.dev, installs beside prod
 ```
 
+The APK embeds `apps/sandbox`, cross-compiled by `:app:buildSandboxd` with Go
+(on `PATH`) and the NDK pinned in `app/build.gradle.kts`
+(`sdkmanager "ndk;<version>"`).
+
 `-PcohubEnv=dev|prod` (default prod) selects origins and the Logto native app;
-single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`,
+single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohubGatewayOrigin`,
 `cohubLogtoEndpoint`, `cohubLogtoAppId`, …), as can `cohubVersionName`,
 `cohubVersionCode` and `cohubVersionSuffix`.
 

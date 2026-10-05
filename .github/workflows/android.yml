@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - 'apps/android/**'
+      - 'apps/sandbox/**'
       - 'packages/protocol/src/host-bridge.ts'
       - '.github/workflows/android.yml'
   push:
@@ -15,6 +16,7 @@ on:
       - 'v*.*.*'
     paths:
       - 'apps/android/**'
+      - 'apps/sandbox/**'
       - 'packages/protocol/src/host-bridge.ts'
       - '.github/workflows/android.yml'
   workflow_dispatch:
@@ -57,6 +59,18 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: apps/sandbox/go.sum
+
+      - name: Install NDK
+        run: |
+          set -euo pipefail
+          ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' app/build.gradle.kts)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
 
       - name: Resolve build
         id: build
@@ -255,6 +269,18 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: apps/sandbox/go.sum
+
+      - name: Install NDK
+        run: |
+          set -euo pipefail
+          ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' app/build.gradle.kts)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
 
       - name: Resolve version
         id: version

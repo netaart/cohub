@@ -90,7 +90,7 @@ export type RuntimeTraceContext = {
 };
 
 export const runtimeCapabilitiesSchema = z.object({
-  harnesses: z.array(z.enum(["pi", "codex"])).min(1).max(2),
+  harnesses: z.array(z.enum(["pi", "codex"])).max(2),
   models: z.array(z.object({
     harness: z.enum(["pi", "codex"]),
     provider: z.string().max(100),

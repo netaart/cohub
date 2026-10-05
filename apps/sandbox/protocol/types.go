@@ -58,6 +58,8 @@ type SandboxCapabilities struct {
 	ProcessStart       bool `json:"processStart"`
 	ProcessStartArgv   bool `json:"processStartArgv,omitempty"`
 	ProcessAbort       bool `json:"processAbort"`
+	ProcessRg          bool `json:"processRg"`
+	ProcessFd          bool `json:"processFd"`
 }
 
 type SandboxProcessStats struct {

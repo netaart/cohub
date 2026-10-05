@@ -20,6 +20,10 @@ object HostProtocol {
         const val SHARE_TEXT = "share.text"
         const val NAVIGATION_OPEN_PATH = "navigation.openPath"
         const val CACHE_CLEAR = "cache.clear"
+        const val RUNTIME_LIST = "runtime.list"
+        const val RUNTIME_BROWSE = "runtime.browse"
+        const val RUNTIME_START = "runtime.start"
+        const val RUNTIME_STOP = "runtime.stop"
     }
 
     object Errors {
@@ -35,5 +39,6 @@ object HostProtocol {
         const val NAVIGATION_BACK = "navigation.back"
         const val APP_FOREGROUND = "app.foreground"
         const val APP_BACKGROUND = "app.background"
+        const val RUNTIME_CHANGED = "runtime.changed"
     }
 }

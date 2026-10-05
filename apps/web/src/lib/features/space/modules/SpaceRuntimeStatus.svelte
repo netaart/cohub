@@ -1,8 +1,17 @@
 <script lang="ts">
+import type { DeviceRuntimeInstance } from "@cohub/protocol/host-bridge";
 import { Monitor, RefreshCw, Settings2, X } from "lucide-svelte";
 import { tick, untrack } from "svelte";
 import { goto } from "$app/navigation";
 import { floatNear, portal } from "$lib/actions/portal";
+import DeviceFolderPicker from "$lib/components/DeviceFolderPicker.svelte";
+import {
+	type DeviceRuntimeRefusal,
+	deviceRuntimeInstances,
+	isDeviceRuntimeRunning,
+	startDeviceRuntime,
+	stopDeviceRuntime,
+} from "$lib/device-runtime.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { formatTimeAgo } from "$lib/i18n/time-ago";
 import { m } from "$lib/paraglide/messages.js";
@@ -63,6 +72,65 @@ const bridgeLabel = $derived(
 			? m.runtime_offline({}, { locale })
 			: m.runtime_watcher_unknown({}, { locale }),
 );
+
+const deviceInstances = $derived(deviceRuntimeInstances());
+const device = $derived(
+	deviceInstances?.find((item) => item.spaceId === spaceId) ?? null,
+);
+const serving = $derived(isDeviceRuntimeRunning(device));
+let deviceBusy = $state(false);
+let deviceHint = $state<string | null>(null);
+let pickingFolder = $state(false);
+const deviceLabel = $derived(
+	device ? describeDevice(device) : m.runtime_not_connected({}, { locale }),
+);
+
+function describeDevice(current: DeviceRuntimeInstance) {
+	if (current.state === "ready") return m.runtime_online({}, { locale });
+	if (current.state === "connecting")
+		return m.runtime_device_connecting({}, { locale });
+	if (current.state === "error") return deviceErrorLabel(current.error);
+	return m.runtime_not_connected({}, { locale });
+}
+
+function deviceErrorLabel(code: string | null) {
+	if (code === "signed_out") return m.runtime_device_signed_out({}, { locale });
+	if (code === "forbidden") return m.runtime_device_forbidden({}, { locale });
+	if (code === "conflict") return m.runtime_device_conflict({}, { locale });
+	return m.runtime_device_failed({}, { locale });
+}
+
+function refusalLabel(refusal: DeviceRuntimeRefusal | "declined") {
+	if (refusal === "declined")
+		return m.runtime_device_access_required({}, { locale });
+	if (refusal === "folder_in_use")
+		return m.runtime_device_folder_in_use({}, { locale });
+	if (refusal === "space_in_use")
+		return m.runtime_device_space_in_use({}, { locale });
+	return m.runtime_device_folder_unavailable({}, { locale });
+}
+
+async function updateDevice(
+	action: () => Promise<DeviceRuntimeRefusal | "declined" | null>,
+) {
+	if (deviceBusy) return;
+	deviceBusy = true;
+	deviceHint = null;
+	try {
+		const refusal = await action();
+		if (refusal) deviceHint = refusalLabel(refusal);
+		void refresh();
+	} catch {
+		deviceHint = m.runtime_device_failed({}, { locale });
+	} finally {
+		deviceBusy = false;
+	}
+}
+
+function chooseFolder() {
+	close();
+	pickingFolder = true;
+}
 
 function ageLabel(at: number) {
 	return formatTimeAgo(at, now, locale);
@@ -160,12 +228,26 @@ $effect(() => {
 					<div class="runtime-row"><dt>{m.runtime_connection({}, { locale })}</dt><dd>{tone === "unknown" ? m.runtime_watcher_unknown({}, { locale }) : status.online ? m.runtime_online({}, { locale }) : m.runtime_offline({}, { locale })}</dd></div>
 					<div class="runtime-row"><dt>{m.runtime_workspace_bridge({}, { locale })}</dt><dd>{bridgeLabel}</dd></div>
 					<div class="runtime-row"><dt>{m.runtime_file_watcher({}, { locale })}</dt><dd>{watcherLabel}{#if watcher}<span class="runtime-meta block">{watcher.backend} · {ageLabel(Date.parse(watcher.observedAt))}</span>{/if}</dd></div>
+					{#if deviceInstances}<div class="runtime-row"><dt>{m.runtime_this_device({}, { locale })}</dt><dd class:is-failed={device?.state === "error"}>{deviceLabel}{#if device}<span class="runtime-meta block">{device.label}</span>{/if}</dd></div>{/if}
 				</dl>
 				{#if tone !== "online"}
 					<p class="runtime-hint">{tone === "attention" ? m.runtime_degraded_hint({}, { locale }) : tone === "unknown" ? m.runtime_unknown_hint({}, { locale }) : m.runtime_disconnected_hint({}, { locale })}</p>
 				{/if}
 				{#if status.runtimeId}<details class="runtime-details"><summary>{m.runtime_diagnostics({}, { locale })}</summary><dl><dt>{m.runtime_id({}, { locale })}</dt><dd><code>{status.runtimeId}</code></dd></dl><code>cohub runtime logs --follow</code></details>{/if}
-				{#if tone === "offline" && canManage}<div class="runtime-command"><span>{m.runtime_offline_hint({}, { locale })}</span><code>cohub runtime up --space {spaceId}</code></div>{/if}
+				{#if deviceInstances && canManage}
+					{#if deviceHint}<p class="runtime-hint">{deviceHint}</p>{/if}
+					<div class="runtime-device-actions">
+						{#if serving}
+							<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void updateDevice(async () => { await stopDeviceRuntime(spaceId); return null; })}>{m.runtime_device_disconnect({}, { locale })}</button>
+						{:else if device}
+							{@const root = device.root}
+							<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateDevice(() => startDeviceRuntime(spaceId, root))}>{m.runtime_device_connect({}, { locale })}</button>
+							<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={chooseFolder}>{m.runtime_device_change_folder({}, { locale })}</button>
+						{:else}
+							<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={chooseFolder}>{m.runtime_device_choose_folder({}, { locale })}</button>
+						{/if}
+					</div>
+				{:else if tone === "offline" && canManage}<div class="runtime-command"><span>{m.runtime_offline_hint({}, { locale })}</span><code>cohub runtime up --space {spaceId}</code></div>{/if}
 			</div>
 			<div class="runtime-footer">
 				<span class="runtime-meta" class:is-failed={failed}>{failed ? m.runtime_refresh_failed({}, { locale }) : fetchedAt ? m.runtime_last_updated({ time: ageLabel(fetchedAt) }, { locale }) : ""}</span>
@@ -176,6 +258,9 @@ $effect(() => {
 			</div>
 		</div>
 	{/if}
+{/if}
+{#if deviceInstances}
+	<DeviceFolderPicker open={pickingFolder} onClose={() => (pickingFolder = false)} onSelect={(folder) => { pickingFolder = false; void show(); void updateDevice(() => startDeviceRuntime(spaceId, folder.path)); }} />
 {/if}
 
 <style>
@@ -209,7 +294,13 @@ $effect(() => {
 .runtime-action { display: inline-flex; flex: 0 0 auto; height: 32px; width: 32px; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-tertiary); cursor: pointer; }
 .runtime-action:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .runtime-action:disabled { opacity: .5; cursor: default; }
-.runtime-chip:focus-visible, .runtime-action:focus-visible, summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.runtime-device-actions { display: flex; gap: 8px; margin-top: 10px; }
+.runtime-device-action { display: flex; flex: 1; min-height: 36px; align-items: center; justify-content: center; border-radius: 6px; background: var(--brand); color: var(--brand-contrast-fg); font-size: 13px; font-weight: 500; cursor: pointer; }
+.runtime-device-action:hover { background: var(--brand-hover); }
+.runtime-device-action[data-secondary="true"] { background: var(--bg-input); color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.runtime-device-action[data-secondary="true"]:hover { background: var(--bg-hover); color: var(--text-primary); }
+.runtime-device-action:disabled { opacity: .6; cursor: default; }
+.runtime-chip:focus-visible, .runtime-action:focus-visible, .runtime-device-action:focus-visible, summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .runtime-popover:focus { outline: none; }
 .is-failed { color: var(--color-error-soft); }
 @media (max-width: 640px) {
@@ -218,5 +309,6 @@ $effect(() => {
 	.runtime-popover { left: 8px !important; right: 8px !important; top: auto !important; bottom: max(8px, env(safe-area-inset-bottom)) !important; width: auto !important; max-height: calc(100dvh - 32px); }
 	.runtime-backdrop { background: var(--overlay-scrim); }
 	.runtime-action { width: 44px; height: 44px; }
+	.runtime-device-action { min-height: 44px; }
 }
 </style>

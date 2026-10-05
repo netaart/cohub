@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -300,6 +301,14 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 	}
 }
 
+// A JVM supervisor (Android) can only wire the standard streams, so it selects COHUB_RUNTIME_CONTROL_FD=2.
+func runtimeControlFD() uintptr {
+	if fd, err := strconv.Atoi(strings.TrimSpace(os.Getenv("COHUB_RUNTIME_CONTROL_FD"))); err == nil && fd >= 2 {
+		return uintptr(fd)
+	}
+	return 3
+}
+
 // runLocal connects the sandbox to the gateway relay in dial-out mode. There is
 // no reporter (the gateway owns status reporting for local sandboxes) and no
 // workspace bootstrap — the user's directory is already the workspace.
@@ -340,7 +349,7 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 	defer stop()
 	var managed *relay.ManagedControl
 	if os.Getenv("COHUB_RUNTIME_MANAGED") == "1" {
-		control := os.NewFile(3, "runtime-control")
+		control := os.NewFile(runtimeControlFD(), "runtime-control")
 		defer control.Close()
 		managed = relay.NewManagedControl(cfg.RelayToken, os.Stdin, control, stop)
 	}
