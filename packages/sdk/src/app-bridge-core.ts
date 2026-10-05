@@ -224,8 +224,8 @@ export type AppBridgeCore = {
 	notifyContextChanged: (
 		invocation?: AppRuntimeInvocationContext,
 	) => Promise<void>;
-	/** Selects the target Space in the open consent dialog. */
-	setSelectedSpace: (spaceId: string) => void;
+	/** Selects the target Space in the open consent dialog; pass an option for a searched Space. */
+	setSelectedSpace: (space: string | AppAuthorizeSpaceOption) => void;
 	/** Confirm/cancel handlers for the authorize dialog. `confirmAuth` receives the space picked in picker mode. */
 	confirmAuth: (pickedSpaceId?: string) => Promise<void>;
 	cancelAuth: () => void;
@@ -314,7 +314,6 @@ const timeoutSignal = (ms: number) =>
 
 const spaceListSignal = () => timeoutSignal(SPACE_LIST_TIMEOUT_MS);
 const SPACE_LIST_PAGE_SIZE = 100;
-const MAX_SPACE_LIST_PAGES = 10;
 
 class AppAuthorizationError extends Error {
 	constructor(
@@ -1025,51 +1024,57 @@ export function createAppBridgeCore(
 		};
 	}
 
-	/**
-	 * Lists the viewer's spaces for the consent dialog picker. Fetched by the
-	 * host with the viewer's own token — the app only ever learns the space
-	 * the viewer picks, never the list.
-	 */
-	async function listViewerSpaces(): Promise<AppAuthorizeSpaceOption[] | null> {
-		const signal = spaceListSignal();
-		const request = async (cursor: string | null, forceRefresh = false) => {
+	async function viewerFetch(
+		path: string,
+		init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+	): Promise<Response | null> {
+		const send = async (forceRefresh: boolean) => {
 			const userToken = await getAccessToken({ forceRefresh });
-			if (!userToken) {
+			if (!userToken) return null;
+			return fetch(`${apiOrigin}${path}`, {
+				...init,
+				headers: { ...init.headers, Authorization: `Bearer ${userToken}` },
+				signal: spaceListSignal(),
+			});
+		};
+		const response = await send(false);
+		return response?.status === 401 ? send(true) : response;
+	}
+
+	/** Owned or joined Spaces only; a public Space the viewer can merely view is not theirs to grant. */
+	async function lookupViewerSpace(spaceId: string): Promise<AppAuthorizeSpaceOption | null> {
+		const response = await viewerFetch(`/api/spaces/${encodeURIComponent(spaceId)}`);
+		if (response?.status === 403 || response?.status === 404) return null;
+		if (!response?.ok) throw new Error("Space lookup failed.");
+		const space = (await response.json()) as (RawSpacePayload & { relation?: unknown }) | null;
+		return space?.relation === "owner" || space?.relation === "member" ? toSpaceOption(space) : null;
+	}
+
+	/** The first page seeds the picker; named Spaces are looked up one by one. */
+	async function listViewerSpaces(
+		requested: string | undefined,
+		hints: Array<string | null | undefined>,
+	): Promise<AppAuthorizeSpaceOption[] | null> {
+		try {
+			const response = await viewerFetch(`/api/spaces?limit=${SPACE_LIST_PAGE_SIZE}`);
+			if (!response) {
 				await startSignIn();
 				throw new AppLoginRedirect();
 			}
-			const query = new URLSearchParams({ limit: String(SPACE_LIST_PAGE_SIZE) });
-			if (cursor) query.set("cursor", cursor);
-			return fetch(`${apiOrigin}/api/spaces?${query}`, {
-				headers: { Authorization: `Bearer ${userToken}` },
-				signal,
+			if (!response.ok) return null;
+			const body = (await response.json()) as { items?: unknown } | null;
+			if (!Array.isArray(body?.items)) return null;
+			const spaces = (body.items as RawSpacePayload[]).flatMap((space) => {
+				const option = toSpaceOption(space);
+				return option ? [option] : [];
 			});
-		};
-
-		try {
-			const options: AppAuthorizeSpaceOption[] = [];
-			let cursor: string | null = null;
-			for (let page = 0; page < MAX_SPACE_LIST_PAGES; page += 1) {
-				let response = await request(cursor);
-				// The consent dialog can outlive the access token's short lifetime. A
-				// single refresh keeps a stale cached token from looking like a missing
-				// Space list without retrying genuine authorization failures forever.
-				if (response?.status === 401) response = await request(cursor, true);
-				if (!response?.ok) return null;
-				const body = (await response.json()) as {
-					items?: unknown;
-					pageInfo?: { hasMore?: unknown; nextCursor?: unknown };
-				} | null;
-				if (!Array.isArray(body?.items)) return null;
-				for (const space of body.items as RawSpacePayload[]) {
-					const option = toSpaceOption(space);
-					if (option) options.push(option);
-				}
-				const next = body.pageInfo?.nextCursor;
-				if (body.pageInfo?.hasMore !== true || typeof next !== "string" || !next) break;
-				cursor = next;
-			}
-			return options;
+			const missing = [...new Set([requested, ...hints])].filter(
+				(id): id is string => Boolean(id) && !spaces.some((space) => space.id === id),
+			);
+			const found = await Promise.all(
+				missing.map((id) => (id === requested ? lookupViewerSpace(id) : lookupViewerSpace(id).catch(() => null))),
+			);
+			return [...spaces, ...found.filter((space) => space !== null)];
 		} catch (error) {
 			if (error instanceof AppLoginRedirect) throw error;
 			return null;
@@ -1078,24 +1083,12 @@ export function createAppBridgeCore(
 
 	/** The viewer's own Home, created on first use when they have no Space. */
 	async function ensureHomeSpace(): Promise<AppAuthorizeSpaceOption | null> {
-		const request = async (forceRefresh = false) => {
-			const userToken = await getAccessToken({ forceRefresh });
-			if (!userToken) return null;
-			return fetch(`${apiOrigin}/api/me/spaces/home`, {
-				method: "POST",
-				headers: {
-					Authorization: `Bearer ${userToken}`,
-					"Content-Type": "application/json",
-					[COHUB_SOURCE_HEADER.via]: "app",
-				},
-				body: JSON.stringify({ appId: app.id }),
-				signal: spaceListSignal(),
-			});
-		};
-
 		try {
-			let response = await request();
-			if (response?.status === 401) response = await request(true);
+			const response = await viewerFetch("/api/me/spaces/home", {
+				method: "POST",
+				headers: { "Content-Type": "application/json", [COHUB_SOURCE_HEADER.via]: "app" },
+				body: JSON.stringify({ appId: app.id }),
+			});
 			if (!response?.ok) return null;
 			const space = (await response.json()) as RawSpacePayload | null;
 			return space ? toSpaceOption(space) : null;
@@ -1122,6 +1115,15 @@ export function createAppBridgeCore(
 		}
 	}
 
+	function contextSpaceIds(): Array<string | undefined> {
+		const invocation =
+			activeInvocation !== undefined
+				? activeInvocation
+				: config.getInvocation?.() ?? config.invocation;
+		const shell = config.getShell?.() ?? config.shell;
+		return [invocation?.spaceId ?? undefined, shell?.space?.id ?? undefined];
+	}
+
 	/**
 	 * Resolves the default target for a Space-bound request to a Space the
 	 * viewer controls — preferring wherever the app was invoked, then the last
@@ -1131,18 +1133,10 @@ export function createAppBridgeCore(
 		candidates: AppAuthorizeSpaceOption[] | null,
 	): string | undefined {
 		if (!candidates?.length) return undefined;
-		const accessible = (id: string | null | undefined) =>
-			id && candidates.some((space) => space.id === id) ? id : undefined;
-		const invocation =
-			activeInvocation !== undefined
-				? activeInvocation
-				: config.getInvocation?.() ?? config.invocation;
-		const shell = config.getShell?.() ?? config.shell;
 		return (
-			accessible(invocation?.spaceId) ??
-			accessible(shell?.space?.id) ??
-			accessible(readLastPickedSpace()) ??
-			candidates[0]?.id
+			[...contextSpaceIds(), readLastPickedSpace()].find(
+				(id) => id && candidates.some((space) => space.id === id),
+			) ?? candidates[0]?.id
 		);
 	}
 
@@ -1151,12 +1145,7 @@ export function createAppBridgeCore(
 	 * network). Used to attempt silent renewal before loading the Space list.
 	 */
 	function resolveContextSpaceId(): string | undefined {
-		const invocation =
-			activeInvocation !== undefined
-				? activeInvocation
-				: config.getInvocation?.() ?? config.invocation;
-		const shell = config.getShell?.() ?? config.shell;
-		return invocation?.spaceId ?? shell?.space?.id ?? undefined;
+		return contextSpaceIds().find(Boolean);
 	}
 
 	/**
@@ -1645,7 +1634,9 @@ export function createAppBridgeCore(
 				}
 				if (state.pendingAuth !== reserved) return;
 
-				let spaces = spaceLevel ? await listViewerSpaces() : undefined;
+				let spaces = spaceLevel
+					? await listViewerSpaces(spaceId, [...contextSpaceIds(), lastPicked])
+					: undefined;
 				if (state.pendingAuth !== reserved) return;
 				if (spaces && spaces.length === 0) {
 					const fallback = await ensureHomeSpace();
@@ -1809,12 +1800,14 @@ export function createAppBridgeCore(
 	 * Only a Space the host actually loaded may become the target, so a UI bug
 	 * cannot mint a grant against an arbitrary id.
 	 */
-	function setSelectedSpace(spaceId: string) {
-		if (!state.pendingAuth || state.authSaving || !state.canChangeSpace) return;
-		// Only a candidate the host actually loaded may become the target, so a UI
-		// bug cannot mint a grant against an arbitrary id.
-		const spaces = state.pendingAuth.spaces;
-		if (!spaces?.some((space) => space.id === spaceId)) return;
+	function setSelectedSpace(space: string | AppAuthorizeSpaceOption) {
+		const pending = state.pendingAuth;
+		if (!pending || state.authSaving || !state.canChangeSpace || !pending.spaces) return;
+		const spaceId = typeof space === "string" ? space : space.id;
+		if (!pending.spaces.some((candidate) => candidate.id === spaceId)) {
+			if (typeof space === "string") return;
+			pending.spaces = [...pending.spaces, space];
+		}
 		if (state.selectedSpaceId === spaceId) return;
 		state.selectedSpaceId = spaceId;
 		notify();

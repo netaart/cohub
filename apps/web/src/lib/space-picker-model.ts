@@ -4,7 +4,6 @@ import {
 	orderSpacePickerItems as orderSpacePickerItemsCore,
 	type SpacePickerFilter,
 	type SpacePickerItem,
-	selectSpacePickerItems as selectSpacePickerItemsCore,
 } from "@neta-art/cohub/space-picker";
 import { getRecentSpaces } from "$lib/stores/recent-space";
 
@@ -34,20 +33,5 @@ export function filterSpacePickerItems<T extends SpacePickerItem>(
 		query,
 		viewerUserUuid,
 		recentSpaceIds: recentSpaceIds(viewerUserUuid),
-	});
-}
-
-export function selectSpacePickerItems<T extends SpacePickerItem>(
-	items: readonly T[],
-	options: {
-		filter: SpacePickerFilter;
-		query?: string;
-		viewerUserUuid?: string | null;
-		limit?: number;
-	},
-): T[] {
-	return selectSpacePickerItemsCore(items, {
-		...options,
-		recentSpaceIds: recentSpaceIds(options.viewerUserUuid),
 	});
 }

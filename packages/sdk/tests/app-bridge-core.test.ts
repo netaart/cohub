@@ -1777,6 +1777,28 @@ test("an empty Space list falls back to the viewer's own Home", async () => {
 	}
 });
 
+test("named Spaces are looked up and only owned or joined ones qualify", async () => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (async (url: unknown) => {
+		const target = String(url);
+		if (isSpaceList(target)) return spacePage([{ id: "space-1", name: "Recent" }], { hasMore: true, nextCursor: "next" });
+		if (target.endsWith("/space-member")) return jsonResponse({ id: "space-member", name: "Joined", relation: "member" });
+		if (target.endsWith("/space-public")) return jsonResponse({ id: "space-public", name: "Public", relation: "public" });
+		return jsonResponse({});
+	}) as typeof fetch;
+	try {
+		for (const [spaceId, selected] of [["space-member", "space-member"], ["space-public", "space-1"]]) {
+			const core = createAppBridgeCore(makeConfig({ viewerUuid: "some-other-viewer" }));
+			await core.handleMessage(
+				messageEvent({ type: "cohub.app.authorize", requestId: "r1", scopes: ["file.view"], spaceId }),
+			);
+			assert.equal(core.getState().selectedSpaceId, selected);
+		}
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
 test("an inaccessible explicit Space is replaced with a viewer-controlled one", async () => {
 	const originalFetch = globalThis.fetch;
 	const diagnostics: Record<string, unknown>[] = [];

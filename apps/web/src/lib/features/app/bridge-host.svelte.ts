@@ -1,6 +1,7 @@
 import {
 	type AppAuthorizeRequest,
 	type AppBridgeAuthorizationContext,
+	type AppBridgeCore,
 	type AppBridgeCoreApp,
 	type AppRuntimeCheckoutState,
 	type AppRuntimeInvocationContext,
@@ -79,7 +80,7 @@ export type AppBridgeHost = {
 		invocation?: AppRuntimeInvocationContext,
 	) => Promise<void>;
 	/** Selects the target Space in the consent dialog. */
-	setSelectedSpace: (spaceId: string) => void;
+	setSelectedSpace: AppBridgeCore["setSelectedSpace"];
 	/** Confirm/cancel handlers for the authorize dialog. */
 	confirmAuth: (pickedSpaceId?: string) => Promise<void>;
 	cancelAuth: () => void;

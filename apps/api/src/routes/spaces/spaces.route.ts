@@ -1141,10 +1141,17 @@ async function buildSpaceResponse(c: Context, space: SpaceRow, user: AuthUser | 
 
 // ── GET /api/spaces/:id ──────────────────────────────────────────────────────
 
+async function resolveSpaceRelation(space: SpaceRow, user: AuthUser | null): Promise<"owner" | "member" | "public"> {
+  if (!user?.uuid) return "public";
+  if (space.userUuid === user.uuid) return "owner";
+  return (await getSpaceMemberRole(space.id, user.uuid)) ? "member" : "public";
+}
+
 async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user: AuthUser | null) {
-  const [sandbox, access] = await Promise.all([
+  const [sandbox, access, relation] = await Promise.all([
     getSpaceSandboxBySpaceId(space.id),
     resolvePermissionAccess(user, { spaceId: space.id }),
+    resolveSpaceRelation(space, user),
   ]);
   const profileMap = await getProfilesByUuids([space.userUuid]);
   const ownerProfile = profileMap.get(space.userUuid) ?? fallbackPublicUserProfile(space.userUuid);
@@ -1156,6 +1163,7 @@ async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user
     sandboxStatus: sandbox?.status ?? null,
     sandbox: attachSandboxPublicEndpoints(sandbox),
     access,
+    relation,
     ownerProfile,
   };
 }
