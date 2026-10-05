@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -169,7 +170,10 @@ class MainActivity : ComponentActivity(), HostActions {
 
         lifecycleScope.launch {
             runCatching { auth.completeSignIn(code, pending.challenge.verifier) }
-                .onFailure { toast(R.string.sign_in_failed) }
+                .onFailure {
+                    Log.w(TAG, "Sign-in failed", it)
+                    toast(R.string.sign_in_failed)
+                }
             surface.load(pending.redirectPath ?: "/")
         }
     }
@@ -192,6 +196,7 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     private companion object {
+        const val TAG = "CohubShell"
         const val KEY_INSTALL_ID = "install_id"
     }
 }

@@ -177,9 +177,6 @@ jobs:
           put "$FILE" "$FILE" "$apk_type" "$immutable"
           qr="${FILE%.apk}.png"
           put "$qr" "$qr" image/png "$immutable"
-          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
-            put "$FILE" latest.apk "$apk_type" no-cache
-          fi
 
       - name: Summarize
         env:

@@ -1,8 +1,10 @@
 package live.cohub.android.auth
 
 import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -100,7 +102,7 @@ class AuthSession(
         accessTokenExpiresAt = clock() + token.expiresInSeconds * 1_000
     }
 
-    private fun exchangeAuthorizationCode(code: String, verifier: String): TokenResponse =
+    private suspend fun exchangeAuthorizationCode(code: String, verifier: String): TokenResponse =
         postToken(
             mapOf(
                 "grant_type" to "authorization_code",
@@ -108,10 +110,11 @@ class AuthSession(
                 "code_verifier" to verifier,
                 "redirect_uri" to config.redirectUri,
                 "client_id" to config.appId,
+                "resource" to config.apiResource,
             ),
         )
 
-    private fun exchangeRefreshToken(refreshToken: String): TokenResponse =
+    private suspend fun exchangeRefreshToken(refreshToken: String): TokenResponse =
         postToken(
             mapOf(
                 "grant_type" to "refresh_token",
@@ -121,7 +124,7 @@ class AuthSession(
             ),
         )
 
-    private fun postToken(fields: Map<String, String>): TokenResponse {
+    private suspend fun postToken(fields: Map<String, String>): TokenResponse = withContext(Dispatchers.IO) {
         val body = fields.entries.joinToString("&") { (key, value) ->
             "${URLEncoder.encode(key, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
         }
@@ -142,7 +145,7 @@ class AuthSession(
             if (status !in 200..299) throw OAuthFailure(status, payload)
             val json = Json.parseToJsonElement(payload) as? JsonObject
                 ?: throw OAuthFailure(status, "Malformed token response")
-            return TokenResponse(
+            TokenResponse(
                 accessToken = json["access_token"]?.jsonPrimitive?.content
                     ?: throw OAuthFailure(status, "Token response had no access_token"),
                 refreshToken = json["refresh_token"]?.jsonPrimitive?.content,

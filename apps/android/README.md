@@ -41,10 +41,11 @@ single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`,
 - **dev** — every PR and main push that touches the shell tests, lints and
   assembles a dev APK (and checks the R8 release build). Same-repo builds are
   signed with the dev key (repository secrets `ANDROID_DEV_KEYSTORE_BASE64` /
-  `ANDROID_DEV_KEYSTORE_PASSWORD`) and published to
-  `public.cohub.live/android/pr/<n>/` or `android/main/` (`latest.apk` follows
-  main); the PR comment links the APK with a QR code. Fork builds use a
-  throwaway debug key, so they install but cannot sign in.
+  `ANDROID_DEV_KEYSTORE_PASSWORD`) and published to the CDN as
+  `android/pr/<n>/cohub-dev-pr-<n>-<sha>.apk` or
+  `android/main/cohub-dev-main-<sha>.apk`; the PR comment and the run summary
+  link the APK with a QR code. Fork builds use a throwaway debug key, so they
+  install but cannot sign in.
 - **release** — every `vX.Y.Z` tag builds the prod APK (versionCode
   `X*1_000_000 + Y*1_000 + Z`), signed with the release key held by the
   `android-release` environment (`ANDROID_RELEASE_KEYSTORE_BASE64` /
