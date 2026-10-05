@@ -139,6 +139,52 @@ export type SpaceFsMoveInput = {
   mutationId?: string;
 };
 
+export type SpaceFsCopySource = {
+  spaceId: string;
+  path: string;
+};
+
+export type SpaceFsCopyOptions = {
+  recursive?: boolean;
+  noClobber?: boolean;
+  preserveTimestamps?: boolean;
+};
+
+export type SpaceFsCopyInput = SpaceFsCopyOptions & {
+  sources: SpaceFsCopySource[];
+  destination: string;
+  mutationId?: string;
+};
+
+export type SpaceFsCopyStats = {
+  files: number;
+  dirs: number;
+  symlinks: number;
+  bytes: number;
+};
+
+export type SpaceFsCopyError = {
+  path: string;
+  code: string;
+  message: string;
+};
+
+export type SpaceFsCopyResult = SpaceFsCopyStats & {
+  paths: string[];
+  overwritten: number;
+  skipped: number;
+  errors: SpaceFsCopyError[];
+};
+
+export type SpaceFsCopyStatus = "queued" | "running" | "completed";
+
+export type SpaceFsCopyResponse = {
+  copyId: string;
+  status: SpaceFsCopyStatus;
+  progress?: SpaceFsCopyStats;
+  result?: SpaceFsCopyResult;
+};
+
 export type SpaceFsCreateDirectoryInput = {
   path: string;
   /** Optional idempotency key used by backends that support retry dedupe. */

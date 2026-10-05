@@ -67,6 +67,10 @@ import type {
   SpaceEnvInput,
   SpaceFsCompleteUploadInput,
   SpaceFsCompleteUploadResponse,
+  SpaceFsCopyInput,
+  SpaceFsCopyResponse,
+  SpaceFsCopyResult,
+  SpaceFsCopyStats,
   SpaceFsCreateUploadInput,
   SpaceFsCreateUploadResponse,
   SpaceFsFileResponse,
@@ -331,6 +335,24 @@ export type ResolveSpaceFileUrlOptions = {
   fetch?: Fetch;
 };
 
+export type OpenSpaceFileOptions = {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  fetch?: Fetch;
+};
+
+export type SpaceFileStream = {
+  response: Response;
+  filename: string;
+  mimeType: string;
+};
+
+export type WaitForSpaceFsCopyOptions = {
+  pollMs?: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: SpaceFsCopyStats) => void;
+};
+
 function inlineFileDataUrl(file: SpaceFsFileResponse) {
   const mimeType = file.mimeType ?? "application/octet-stream";
   return file.encoding === "base64"
@@ -526,33 +548,34 @@ export class SpaceFilesApi {
     );
   }
 
-	async download(path: string, customFetch?: Fetch) {
-		const params = new URLSearchParams({ path });
-		const raw = await this.transport.raw(
-			`/api/spaces/${this.spaceId}/fs/download?${params.toString()}`,
-			{ fetch: customFetch },
-		);
-		if (raw.response.status === 202) {
-			throw new HttpError(
-				"File is being prepared. Please retry shortly.",
-				202,
-				await raw.json().catch(() => null),
-			);
-		}
-		const blob = await raw.blob();
-		const filename =
-			getFilenameFromContentDisposition(
-				raw.response.headers.get("content-disposition"),
-			) ??
-			path.split("/").pop() ??
-			"download";
-		const mimeType =
-			raw.response.headers.get("content-type") ??
-			blob.type ??
-			"application/octet-stream";
+  async open(path: string, options: OpenSpaceFileOptions = {}): Promise<SpaceFileStream> {
+    const params = new URLSearchParams({ path });
+    const deadlineAt = Date.now() + Math.max(0, options.timeoutMs ?? 60_000);
+    while (true) {
+      const raw = await this.transport.raw(
+        `/api/spaces/${this.spaceId}/fs/download?${params.toString()}`,
+        { fetch: options.fetch, signal: options.signal },
+      );
+      const { response } = raw;
+      if (response.status !== 202) {
+        return {
+          response,
+          filename: getFilenameFromContentDisposition(response.headers.get("content-disposition")) ?? path.split("/").pop() ?? "download",
+          mimeType: response.headers.get("content-type") ?? "application/octet-stream",
+        };
+      }
+      const body = await raw.json().catch(() => null) as { retryAfterMs?: unknown } | null;
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) throw new HttpError("File is being prepared. Please retry shortly.", 202, body);
+      const retryAfterMs = typeof body?.retryAfterMs === "number" ? body.retryAfterMs : 2_000;
+      await waitForSpaceFileRetry(Math.min(Math.max(250, Math.min(retryAfterMs, 2_000)), remainingMs), options.signal);
+    }
+  }
 
-		return { blob, filename, mimeType };
-	}
+  async download(path: string, customFetch?: Fetch) {
+    const { response, filename, mimeType } = await this.open(path, { fetch: customFetch });
+    return { blob: await response.blob(), filename, mimeType };
+  }
 
   write(input: SpaceFsWriteFileInput) {
     return this.transport.request<{ ok: true; path: string; size: number; mtimeMs: number }>(
@@ -563,6 +586,37 @@ export class SpaceFilesApi {
         body: JSON.stringify(input),
       },
     );
+  }
+
+  copy(input: SpaceFsCopyInput) {
+    return this.transport.request<SpaceFsCopyResponse>(
+      `/api/spaces/${this.spaceId}/fs/copy`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  getCopy(copyId: string, options: { waitMs?: number; signal?: AbortSignal } = {}) {
+    const params = new URLSearchParams();
+    if (options.waitMs) params.set("waitMs", String(options.waitMs));
+    const query = params.toString();
+    return this.transport.request<SpaceFsCopyResponse>(
+      `/api/spaces/${this.spaceId}/fs/copies/${encodeURIComponent(copyId)}${query ? `?${query}` : ""}`,
+      { signal: options.signal },
+    );
+  }
+
+  async waitForCopy(copy: SpaceFsCopyResponse, options: WaitForSpaceFsCopyOptions = {}): Promise<SpaceFsCopyResult> {
+    let current = copy;
+    while (current.status !== "completed" || !current.result) {
+      if (current.progress) options.onProgress?.(current.progress);
+      options.signal?.throwIfAborted();
+      current = await this.getCopy(current.copyId, { waitMs: options.pollMs ?? 5_000, signal: options.signal });
+    }
+    return current.result;
   }
 
   createDir(path: string, mutationId?: string) {

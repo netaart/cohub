@@ -349,11 +349,31 @@ Pass generation parameters with `--param key=value` or `--parameters '<json>'`.
 ```bash
 cohub -s <spaceId> spaces files ls [path] --json
 cohub -s <spaceId> spaces files cat <path>
+cohub -s <spaceId> spaces files cat <path> > <local-file>
 cohub -s <spaceId> spaces files write <path> -c "<content>"
 cohub -s <spaceId> spaces files upload <files...> --dir <dir>
+cohub spaces files cp [-r] [-n] [-p] <source>... <destination>
 cohub -s <spaceId> spaces files mv <from> <to>
 cohub -s <spaceId> spaces files rm <path>
 ```
+
+`cat` streams raw bytes, so redirecting it saves binary files intact.
+
+`cp` works like `scp` with `cp` semantics: the last path is the destination,
+directories need `-r`, existing files are overwritten and directories merged
+(`-n` keeps existing files, `-p` keeps modification times). `<space>:<path>`
+addresses a Space by id, `username/slug`, or the slug of a Space you own. Bare
+paths address the current Space when one is declared with `-s` or
+`COHUB_SPACE_ID` (as inside a Cohub sandbox) and local files otherwise;
+absolute paths outside `/workspace` are always local:
+
+```bash
+cohub spaces files cp -r alice/templates:starter ./starter    # download
+cohub spaces files cp report.pdf <spaceId>:inbox/             # upload
+cohub -s <spaceId> spaces files cp -r other:docs docs         # Space to Space
+```
+
+Copies between Spaces run server-side and never pass file content through the CLI.
 
 `upload` places each file under `--dir`; a directory argument contributes its
 contents directly (like `aws s3 cp dir remote:path`), so `upload dist --dir apps/demo`

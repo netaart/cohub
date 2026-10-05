@@ -14,7 +14,7 @@ import {
 import type { RpcEventPayload } from "@cohub/protocol/sandbox";
 import { INLINE_UPLOAD_MAX_FILES, LOCAL_SANDBOX_UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 import { assertSafeRelativePath, getMimeType, isTextMime, resolveReadMimeType, sanitizeFileName, SpaceFsError } from "./space-fs.js";
-import type { SpaceFsVisibility } from "./space-fs-ignore.js";
+import type { SpaceFsVisibility } from "@cohub/core/space-fs";
 import { callSandboxRpc, getSandboxCapabilities, SandboxOfflineError } from "./space-sandbox-rpc.js";
 
 // Local-sandbox filesystem backend. Mirrors the direct (PVC) backend's public

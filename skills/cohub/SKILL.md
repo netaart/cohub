@@ -133,13 +133,20 @@ cohub spaces sessions -h
 
 Prefer file tools for normal inspection and edits. For cross-space work, prefer file tools with `space_id` when supported; otherwise use CLI with `-s <spaceId>`.
 
-Use CLI file commands when tools are unavailable, or for platform-side upload, move, rename, delete, or diff.
+Use CLI file commands when tools are unavailable, or for platform-side upload, copy, move, rename, delete, or diff.
+
+To copy files, use `spaces files cp`; it works like `scp`. Inside a sandbox, bare paths are the current Space, `<space>:<path>` is another Space, and absolute paths outside `/workspace` (such as `/tmp`) are local. Copies between Spaces never leave Cohub storage. Never copy by reading content and writing it back.
 
 ```bash
 cohub spaces files ls [path]
 cohub -s <spaceId> spaces files ls [path]
 cohub spaces files cat <path>
+cohub spaces files cat <path> > <local-file>
 cohub spaces files write <path> -c "<content>"
+# cp: the last path is the destination; <space>:<path> names another Space (id, username/slug, or own slug).
+cohub spaces files cp <source>... <destination>
+cohub spaces files cp -r <spaceId>:<dir> <destination>
+cohub spaces files cp /tmp/chart.png assets/
 # Upload lands FILE(s) under --dir; a DIR contributes its contents (no extra level).
 cohub spaces files upload <files...> --dir <dir>
 cohub spaces files mkdir <path>
