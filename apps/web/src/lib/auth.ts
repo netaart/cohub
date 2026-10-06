@@ -683,6 +683,8 @@ export const signOut = async (): Promise<void> => {
 	if ((await readyHost()) && hostOwnsCredentials()) {
 		try {
 			await callHost("auth.signOut");
+			// Match the browser, whose Logto sign-out lands on the home.
+			window.location.replace("/");
 		} catch (error) {
 			console.error("[auth] Native host failed to sign out", error);
 		}
