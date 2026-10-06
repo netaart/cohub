@@ -26,7 +26,7 @@ let {
 } = $props();
 
 const className = $derived(
-	`inline-flex h-8 max-w-[200px] shrink-0 select-none items-center gap-1.5 rounded-[7px] px-2.5 text-[12px] font-medium transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 lg:h-7 lg:rounded-[6px] lg:px-2 ${
+	`inline-flex h-8 max-w-[200px] shrink-0 select-none items-center gap-1.5 rounded-[7px] px-[var(--list-row-pad-x)] text-[12px] font-medium transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 lg:h-7 lg:rounded-[6px] ${
 		kind === "menu"
 			? "bg-bg-surface text-text-secondary hover:bg-bg-hover hover:text-text-primary"
 			: active

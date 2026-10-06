@@ -2153,5 +2153,7 @@
 	"chats_empty_filtered": "No chats here",
 	"chats_empty_filtered_hint": "Nothing matches this source and Space yet.",
 	"chats_show_all": "Show all chats",
-	"chats_new_chat_in": "New chat in…"
+	"chats_new_chat_in": "New chat in…",
+	"chats_row_no_messages": "No messages yet",
+	"spaces_row_no_description": "No description"
 }

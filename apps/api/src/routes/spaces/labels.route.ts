@@ -7,7 +7,8 @@ import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/
 import { authzDenied, getOptionalAuth, requireValidId, useAuth } from "../../lib/middleware.js";
 import { filterSessionsByPermission, getSpaceMemberRole, hasPermission } from "../../permissions.js";
 import { dispatchLabelAssignmentsUpdated } from "../../realtime-events.js";
-import { listSessionForksForSessions, redactSessionForksForViewer } from "../../session-forks.js";
+import { listSessionForksForSessions } from "../../session-forks.js";
+import { redactSessionForksForViewer } from "../../session-fork-visibility.js";
 import { hydrateSessionParticipantProfiles } from "../../space-sessions.js";
 
 const router = new Hono();

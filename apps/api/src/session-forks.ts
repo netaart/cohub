@@ -6,6 +6,7 @@ import { labelAssignments, sessionForks, sessionTurnSegments, sessionTurns, spac
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { sessionForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "./reference-index-queue.js";
+import type { SessionForkListItem } from "./session-fork-visibility.js";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
 import { inheritSessionMetaForFork, normalizeSessionTitle, readSessionParticipantUserUuids, refreshSessionStats, setSessionParticipantsMeta, setSessionTitleMeta } from "@cohub/core/sessions";
 
@@ -74,43 +75,6 @@ export const listSessionForkTree = async (rootSessionId: string) => {
   return rows.map(toForkRecord);
 };
 
-export type SessionForkListItem = SessionForkRecord & {
-  firstUserTextAfterFork: string | null;
-  parentTitle: string | null;
-};
-
-/** Fork edge shaped for sidebar rendering. `parentSessionId`/`parentTitle` may be
- * redacted to null when the parent session is not visible to the current viewer. */
-export type SidebarSessionFork = Omit<SessionForkListItem, "parentSessionId"> & {
-  parentSessionId: string | null;
-};
-
-/**
- * Redact fork edges for a viewer. Members see everything; non-members lose the
- * parent linkage (and its title) whenever the parent session is not in their
- * visible set. Shared by session list and label item endpoints so both surfaces
- * enforce identical visibility.
- */
-export const redactSessionForksForViewer = (forks: SessionForkListItem[], input: { isMember: boolean; visibleSessionIds: Iterable<string> }): SidebarSessionFork[] => {
-  if (input.isMember) return forks;
-  const visible = new Set(input.visibleSessionIds);
-  return forks.map((fork) => {
-    const parentVisible = visible.has(fork.parentSessionId);
-    const rootVisible = visible.has(fork.rootSessionId);
-    const anchorVisible = visible.has(fork.anchorSourceSessionId);
-    return {
-      ...fork,
-      parentSessionId: parentVisible ? fork.parentSessionId : null,
-      parentTitle: parentVisible ? fork.parentTitle : null,
-      // Hide private ancestry graph for viewers who cannot see those sessions.
-      rootSessionId: rootVisible ? fork.rootSessionId : fork.childSessionId,
-      anchorSourceSessionId: anchorVisible ? fork.anchorSourceSessionId : fork.childSessionId,
-      ancestorSessionIds: fork.ancestorSessionIds.filter((id) => visible.has(id)),
-      sessionPath: fork.sessionPath.filter((id) => visible.has(id)),
-    };
-  });
-};
-
 export const listSessionForksForSessions = async (sessionIds: string[]) => {
   const ids = [...new Set(sessionIds.filter(Boolean))];
   if (ids.length === 0) return [] satisfies SessionForkListItem[];
@@ -129,21 +93,18 @@ export const listSessionForksForSessions = async (sessionIds: string[]) => {
   const turnRows =
     childIds.length > 0
       ? await db
-          .select({
+          .selectDistinctOn([sessionTurns.sessionId], {
             sessionId: sessionTurns.sessionId,
             userText: sessionTurns.userText,
-            sequence: sessionTurns.sequence,
           })
           .from(sessionTurns)
           .where(inArray(sessionTurns.sessionId, childIds))
           .orderBy(asc(sessionTurns.sessionId), asc(sessionTurns.sequence))
       : [];
 
-  const firstUserTextBySession = new Map<string, string | null>();
-  for (const turn of turnRows) {
-    if (firstUserTextBySession.has(turn.sessionId)) continue;
-    firstUserTextBySession.set(turn.sessionId, turn.userText ?? null);
-  }
+  const firstUserTextBySession = new Map(
+    turnRows.map((turn) => [turn.sessionId, turn.userText ?? null]),
+  );
 
   return rows.map(
     (row): SessionForkListItem => ({

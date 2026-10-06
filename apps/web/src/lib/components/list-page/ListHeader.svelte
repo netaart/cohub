@@ -22,7 +22,7 @@ const {
 const locale = $derived(getLocale());
 </script>
 
-<header class="flex h-11 shrink-0 items-center gap-1 pl-2 pr-1.5 lg:h-10 lg:pl-3 lg:pr-2">
+<header class="flex h-11 shrink-0 items-center gap-1 pl-[calc(var(--list-content-x)-4px)] pr-[calc(var(--list-content-x)-9px)] lg:h-10 lg:pl-[var(--list-content-x)] lg:pr-[calc(var(--list-content-x)-6px)]">
 	{#if brand}
 		<button
 			type="button"

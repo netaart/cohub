@@ -2,6 +2,8 @@ import type {
 	UserSessionSourceKey,
 	UserSessionSpaceSummary,
 } from "@neta-art/cohub";
+import type { Locale } from "$lib/i18n/locale";
+import { m } from "$lib/paraglide/messages.js";
 
 export type ChatsFilter = {
 	source: UserSessionSourceKey | null;
@@ -49,6 +51,32 @@ export function isChatsSourceKey(
 	value: unknown,
 ): value is UserSessionSourceKey {
 	return typeof value === "string" && SOURCE_KEYS.has(value);
+}
+
+export function chatsSourceName(
+	source: UserSessionSourceKey | null,
+	locale: Locale,
+): string {
+	if (!source) return m.chats_source_all({}, { locale });
+	if (source === "other") return m.chats_source_other({}, { locale });
+	return CHATS_SOURCE_NAMES[source];
+}
+
+/** Mirrors the server's `resolveSessionSourceKey`. */
+export function resolveSessionSourceKey(
+	source: string | null | undefined,
+): UserSessionSourceKey {
+	const raw =
+		source
+			?.trim()
+			.toLowerCase()
+			.replace(/[\s-]+/g, "_") || "web";
+	if (raw === "web_app") return "web";
+	if (isChatsSourceKey(raw)) return raw;
+	const channel = raw.match(/^channel[:_](.+)$/)?.[1] ?? raw.split(":")[0];
+	return channel && channel !== raw && isChatsSourceKey(channel)
+		? channel
+		: "other";
 }
 
 export function chatsFilterScope(filter: ChatsFilter): string {

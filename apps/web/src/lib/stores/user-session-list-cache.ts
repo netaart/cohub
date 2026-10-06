@@ -1,4 +1,5 @@
 import type { UserSessionListItem } from "@neta-art/cohub";
+import type { SessionListForkRecord } from "$lib/cache/db";
 import { idbGet, idbPut } from "$lib/cache/db";
 import {
 	canUseUserScopedCache,
@@ -21,6 +22,7 @@ type UserSessionListCacheRecord = {
 	spaceId: string;
 	kind: "recent";
 	sessions: UserSessionListItem[];
+	forks?: SessionListForkRecord[];
 	pageInfo: SessionListPageInfo;
 	updatedAt: number;
 	lastAccessedAt: number;
@@ -30,6 +32,7 @@ type UserSessionListCacheRecord = {
 
 export type UserSessionListSnapshot = {
 	sessions: UserSessionListItem[];
+	forks: SessionListForkRecord[];
 	pageInfo: SessionListPageInfo;
 	updatedAt: number;
 	stale: boolean;
@@ -57,6 +60,7 @@ function toSnapshot(
 ): UserSessionListSnapshot {
 	return {
 		sessions: record.sessions,
+		forks: record.forks ?? [],
 		pageInfo: record.pageInfo,
 		updatedAt: record.updatedAt,
 		stale: Date.now() - record.updatedAt > TTL_MS,
@@ -96,7 +100,10 @@ export async function setCachedUserSessionList(
 	scope: string,
 	sessions: UserSessionListItem[],
 	pageInfo?: SessionListPageInfo | null,
-	options?: { expectedUserKey?: string | null },
+	options?: {
+		expectedUserKey?: string | null;
+		forks?: SessionListForkRecord[];
+	},
 ): Promise<void> {
 	const resolved = await resolveKey(scope);
 	if (!resolved) return;
@@ -114,6 +121,7 @@ export async function setCachedUserSessionList(
 		spaceId: "__user__",
 		kind: "recent",
 		sessions: nextSessions,
+		forks: options?.forks ?? current?.forks ?? [],
 		pageInfo: normalizePageInfo(pageInfo ?? current?.pageInfo),
 		updatedAt: now,
 		lastAccessedAt: now,

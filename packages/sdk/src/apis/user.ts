@@ -38,13 +38,14 @@ export class UserApi {
     });
   }
 
-  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null } | Fetch, customFetch?: Fetch) {
+  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null; includeForks?: boolean } | Fetch, customFetch?: Fetch) {
     const options = typeof optionsOrFetch === "function" ? undefined : optionsOrFetch;
     const fetch = typeof optionsOrFetch === "function" ? optionsOrFetch : customFetch;
     const params = new URLSearchParams();
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     if (options?.cursor) params.set("cursor", options.cursor);
     if (options?.source?.length) params.set("source", options.source.join(","));
+    if (options?.includeForks) params.set("includeForks", "1");
     const query = params.toString();
     return this.transport.request<UserSessionsResponse>(
       `/api/me/sessions${query ? `?${query}` : ""}`,

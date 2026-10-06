@@ -117,7 +117,7 @@ $effect(() => {
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
-	class="flex h-11 shrink-0 items-center gap-1.5 px-2 lg:h-9"
+	class="flex h-11 shrink-0 items-center gap-1.5 px-[var(--list-gutter-x)] lg:h-9"
 	{role}
 	aria-label={label}
 	onkeydown={handleKeydown}

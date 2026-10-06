@@ -7,8 +7,8 @@ import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import {
 	CHATS_SOURCE_GROUPS,
-	CHATS_SOURCE_NAMES,
 	type ChatsSourceGroup,
+	chatsSourceName,
 } from "$lib/stores/chats-filter";
 
 const {
@@ -24,9 +24,7 @@ let open = $state(false);
 let anchor = $state<HTMLElement | null>(null);
 
 function sourceName(source: UserSessionSourceKey | null) {
-	if (!source) return m.chats_source_all({}, { locale });
-	if (source === "other") return m.chats_source_other({}, { locale });
-	return CHATS_SOURCE_NAMES[source];
+	return chatsSourceName(source, locale);
 }
 
 function groupName(group: ChatsSourceGroup) {

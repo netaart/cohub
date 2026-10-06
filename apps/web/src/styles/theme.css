@@ -20,12 +20,19 @@
 
 :root,
 [data-theme] {
-	--list-row-height: 56px;
+	/* Headers, chips and rows share one content edge: gutter + row padding. */
+	--list-gutter-x: 8px;
+	--list-row-pad-x: 8px;
+	--list-content-x: calc(var(--list-gutter-x) + var(--list-row-pad-x));
 	--list-row-radius: var(--sidebar-item-radius);
-	--list-row-gap: 10px;
-	--list-row-pad-x: 10px;
+	--list-row-gap: 12px;
 	--list-row-hover-bg: var(--sidebar-item-hover-bg);
 	--list-row-active-bg: var(--sidebar-item-active-bg);
+	--list-tree-guide: color-mix(
+		in oklab,
+		var(--color-brand) 34%,
+		var(--color-border-subtle)
+	);
 
 	--board-color-brand-stroke: var(--brand);
 	--board-color-brand-fill: var(--brand);
@@ -71,6 +78,23 @@
 	--board-collaboration-4: var(--error-400);
 	--board-collaboration-5: var(--warning-400);
 	--board-collaboration-6: var(--info-500);
+}
+
+@media (min-width: 960px) {
+	:root,
+	[data-theme] {
+		--list-gutter-x: 6px;
+		--list-row-pad-x: 6px;
+		--list-content-x: 12px;
+		--list-row-gap: 10px;
+	}
+}
+
+.list-compact {
+	--list-gutter-x: 6px;
+	--list-row-pad-x: 6px;
+	--list-content-x: 12px;
+	--list-row-gap: 10px;
 }
 
 /* ============================================================

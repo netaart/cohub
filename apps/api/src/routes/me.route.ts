@@ -13,6 +13,8 @@ import {
   hasPermission,
   asAccountIdentity,
 } from "../permissions.js";
+import { redactCrossSpaceSessionForks } from "../session-fork-visibility.js";
+import { listSessionForksForSessions } from "../session-forks.js";
 import { pickSessionsPreservingOrder } from "../session-list.js";
 import {
   attachSessionSpaceSummaries,
@@ -201,7 +203,7 @@ async function listVisibleUserSessions(
 ) {
   const identity = asAccountIdentity(user);
   if (!identity) {
-    return { sessions: [], pageInfo: { hasMore: false, nextCursor: null } };
+    return { sessions: [], fullViewSpaceIds: new Set<string>(), pageInfo: { hasMore: false, nextCursor: null } };
   }
 
   const limit = options.limit;
@@ -271,8 +273,13 @@ async function listVisibleUserSessions(
       ? encodeSessionListCursor(lastVisible)
       : null);
 
+  const fullViewSpaceIds = new Set(
+    [...memberViewBySpace].filter(([, allowed]) => allowed).map(([spaceId]) => spaceId),
+  );
+
   return {
     sessions,
+    fullViewSpaceIds,
     pageInfo: {
       hasMore: Boolean(nextCursor),
       nextCursor,
@@ -288,6 +295,7 @@ router.get("/sessions", async (c) => {
   const limitParam = Number(c.req.query("limit") ?? 20);
   const limit = Number.isFinite(limitParam) ? limitParam : 20;
   const cursor = c.req.query("cursor") ?? null;
+  const includeForks = c.req.query("includeForks") === "1" || c.req.query("includeForks") === "true";
   let source: SessionSourceFilter | null;
   try {
     source = parseSessionSourceKeys(c.req.query("source"));
@@ -298,10 +306,20 @@ router.get("/sessions", async (c) => {
     throw error;
   }
   try {
-    const { sessions, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source });
-    const hydratedSessions = await hydrateSessionParticipantProfiles(sessions);
-    const withSpaces = await attachSessionSpaceSummaries(hydratedSessions);
-    return c.json({ sessions: withSpaces, pageInfo });
+    const { sessions, fullViewSpaceIds, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source });
+    const visibleSessionIds = sessions.map((session) => session.id);
+    const [withSpaces, forks] = await Promise.all([
+      hydrateSessionParticipantProfiles(sessions).then(attachSessionSpaceSummaries),
+      includeForks
+        ? listSessionForksForSessions(visibleSessionIds)
+          .then((rows) => redactCrossSpaceSessionForks(rows, { fullViewSpaceIds, visibleSessionIds }))
+          .catch((error) => {
+            logger.warn("[me/sessions] fork lookup failed", { error });
+            return undefined;
+          })
+        : undefined,
+    ]);
+    return c.json({ sessions: withSpaces, ...(forks ? { forks } : {}), pageInfo });
   } catch (error) {
     if (error instanceof InvalidSessionListCursorError) {
       return c.json({ message: "invalid cursor" }, 400);

@@ -8,6 +8,7 @@ import type {
 } from "@neta-art/cohub";
 import { goto } from "$app/navigation";
 import { resolveAppEntryRoute } from "$lib/app-entry";
+import type { SessionListForkRecord } from "$lib/cache/db";
 import { getCacheUserKeyAsync } from "$lib/cache/keys";
 import {
 	getCachedSpacePage,
@@ -58,13 +59,26 @@ const SPACE_CHIPS_TTL_MS = 60_000;
 
 type Page = {
 	sessions: UserSessionListItem[];
+	forks: SessionListForkRecord[];
 	pageInfo: { hasMore: boolean; nextCursor: string | null };
 };
+
+const MEMO_LIMIT = 12;
 
 const EMPTY_PAGE_INFO = { hasMore: false, nextCursor: null };
 
 function sourceSystemKey(source: UserSessionSourceKey) {
 	return `session-source:${source}`;
+}
+
+function mergeForks(
+	current: readonly SessionListForkRecord[],
+	incoming: readonly SessionListForkRecord[],
+): SessionListForkRecord[] {
+	if (incoming.length === 0) return current as SessionListForkRecord[];
+	const byChild = new Map(current.map((fork) => [fork.childSessionId, fork]));
+	for (const fork of incoming) byChild.set(fork.childSessionId, fork);
+	return [...byChild.values()];
 }
 
 function withSpace(
@@ -126,6 +140,7 @@ function activeTurnFromEvent(event: ChannelEnvelope) {
 class ChatsInbox {
 	filter = $state<ChatsFilter>(DEFAULT_CHATS_FILTER);
 	sessions = $state<UserSessionListItem[]>([]);
+	forks = $state<SessionListForkRecord[]>([]);
 	pageInfo = $state(emptyUserSessionListPageInfo());
 	loading = $state(false);
 	loadingMore = $state(false);
@@ -144,6 +159,7 @@ class ChatsInbox {
 	#activation = 0;
 	#firstPageInfo = emptyUserSessionListPageInfo();
 	#extraPages = 0;
+	#memo = new Map<string, Page>();
 
 	get spaceChips(): UserSessionSpaceSummary[] {
 		const selected = this.filter.space;
@@ -174,6 +190,22 @@ class ChatsInbox {
 	toggleSpace(space: UserSessionSpaceSummary | null) {
 		const next = space && this.filter.space?.id !== space.id ? space : null;
 		this.#applyFilter({ ...this.filter, space: next });
+	}
+
+	setSpace(space: UserSessionSpaceSummary | null) {
+		this.#applyFilter({ ...this.filter, space });
+	}
+
+	async prewarm(filters: readonly ChatsFilter[]) {
+		const userKey = this.#userKey;
+		for (const filter of filters) {
+			const scope = chatsFilterScope(filter);
+			if (this.#memo.has(scope)) continue;
+			const cached = await this.#readCachedPage(filter).catch(() => null);
+			if (!cached || userKey !== this.#userKey || this.#memo.has(scope))
+				continue;
+			this.#remember(scope, cached);
+		}
 	}
 
 	showAll() {
@@ -212,15 +244,11 @@ class ChatsInbox {
 			if (seq !== this.#refreshSeq || generation !== this.#generation) return;
 			if ((await getCacheUserKeyAsync()) !== userKey) return;
 			this.#firstPageInfo = page.pageInfo;
-			if (this.#extraPages > 0) {
-				this.#setSessions(this.#mergeById(page.sessions), {
-					authoritative: true,
-					startedAt,
-				});
-			} else {
-				this.#setSessions(page.sessions, { authoritative: true, startedAt });
-				this.pageInfo = page.pageInfo;
-			}
+			if (this.#extraPages === 0) this.pageInfo = page.pageInfo;
+			this.#setSessions(
+				this.#extraPages > 0 ? this.#mergeById(page.sessions) : page.sessions,
+				{ forks: page.forks, authoritative: true, startedAt },
+			);
 			void this.#persistFirstPage(filter, userKey);
 		} catch (error) {
 			if (seq !== this.#refreshSeq || generation !== this.#generation) return;
@@ -246,12 +274,13 @@ class ChatsInbox {
 			const startedAt = Date.now();
 			const page = await this.#fetchPage(filter, this.pageInfo.nextCursor);
 			if (generation !== this.#generation) return;
+			this.pageInfo = page.pageInfo;
+			this.#extraPages += 1;
 			this.#setSessions(this.#mergeById(page.sessions), {
+				forks: page.forks,
 				authoritative: true,
 				startedAt,
 			});
-			this.pageInfo = page.pageInfo;
-			this.#extraPages += 1;
 		} catch (error) {
 			if (generation !== this.#generation) return;
 			console.warn("[chats] Failed to load more", error);
@@ -287,7 +316,9 @@ class ChatsInbox {
 		if (userKey !== this.#userKey) {
 			this.#userKey = userKey;
 			this.filter = readChatsFilter(userKey);
+			this.#memo.clear();
 			this.sessions = [];
+			this.forks = [];
 			this.pageInfo = emptyUserSessionListPageInfo();
 			this.#firstPageInfo = emptyUserSessionListPageInfo();
 			this.#extraPages = 0;
@@ -318,11 +349,13 @@ class ChatsInbox {
 		this.filter = next;
 		this.#generation += 1;
 		this.#refreshSeq += 1;
-		this.sessions = [];
-		this.pageInfo = emptyUserSessionListPageInfo();
-		this.#firstPageInfo = emptyUserSessionListPageInfo();
+		const memo = this.#memo.get(chatsFilterScope(next));
+		this.sessions = memo?.sessions ?? [];
+		this.forks = memo?.forks ?? [];
+		this.pageInfo = memo?.pageInfo ?? emptyUserSessionListPageInfo();
+		this.#firstPageInfo = this.pageInfo;
 		this.#extraPages = 0;
-		this.loading = true;
+		this.loading = !memo?.sessions.length;
 		this.loadingMore = false;
 		this.refreshing = false;
 		this.error = null;
@@ -336,9 +369,9 @@ class ChatsInbox {
 		const cached = await this.#readCachedPage(this.filter).catch(() => null);
 		if (generation !== this.#generation || !cached) return;
 		if (this.sessions.length > 0) return;
-		this.#setSessions(cached.sessions);
 		this.pageInfo = cached.pageInfo;
 		this.#firstPageInfo = cached.pageInfo;
+		this.#setSessions(cached.sessions, { forks: cached.forks });
 		if (cached.sessions.length > 0) this.loading = false;
 	}
 
@@ -357,15 +390,32 @@ class ChatsInbox {
 
 	#setSessions(
 		sessions: UserSessionListItem[],
-		options?: { authoritative?: boolean; startedAt?: number },
+		options?: {
+			forks?: SessionListForkRecord[];
+			authoritative?: boolean;
+			startedAt?: number;
+		},
 	) {
 		this.sessions = sortSessionsByRecentActivity(
 			sessions,
 		) as UserSessionListItem[];
+		if (options?.forks) this.forks = mergeForks(this.forks, options.forks);
+		this.#remember(chatsFilterScope(this.filter), {
+			sessions: this.sessions.slice(0, PAGE_SIZE),
+			forks: this.forks,
+			pageInfo: this.#firstPageInfo,
+		});
 		reconcileGenerationStateFromSessionList(this.sessions, {
 			authoritative: options?.authoritative,
 			requestStartedAt: options?.startedAt,
 		});
+	}
+
+	#remember(scope: string, page: Page) {
+		this.#memo.delete(scope);
+		this.#memo.set(scope, page);
+		if (this.#memo.size > MEMO_LIMIT)
+			this.#memo.delete(this.#memo.keys().next().value as string);
 	}
 
 	async #readCachedPage(filter: ChatsFilter): Promise<Page | null> {
@@ -375,7 +425,11 @@ class ChatsInbox {
 				chatsFilterScope(filter),
 			);
 			return cached
-				? { sessions: cached.sessions, pageInfo: cached.pageInfo }
+				? {
+						sessions: cached.sessions,
+						forks: cached.forks,
+						pageInfo: cached.pageInfo,
+					}
 				: null;
 		}
 		if (!source) {
@@ -383,6 +437,7 @@ class ChatsInbox {
 			return cached
 				? {
 						sessions: withSpace(cached.sessions, space),
+						forks: cached.forks,
 						pageInfo: cached.pageInfo,
 					}
 				: null;
@@ -398,6 +453,7 @@ class ChatsInbox {
 		return cached
 			? {
 					sessions: withSpace(cached.sessions, space),
+					forks: cached.forks ?? [],
 					pageInfo: cached.pageInfo,
 				}
 			: null;
@@ -410,30 +466,38 @@ class ChatsInbox {
 				limit: PAGE_SIZE,
 				cursor,
 				source: source ? [source] : null,
+				includeForks: true,
 			});
 			return {
 				sessions: result.sessions ?? [],
+				forks: result.forks ?? [],
 				pageInfo: result.pageInfo ?? EMPTY_PAGE_INFO,
 			};
 		}
 		if (!source) {
 			const result = await sdk
 				.space(space.id)
-				.sessions.list({ limit: PAGE_SIZE, cursor });
+				.sessions.list({ limit: PAGE_SIZE, cursor, includeForks: true });
 			const pageInfo = result.pageInfo ?? EMPTY_PAGE_INFO;
+			const forks = result.forks ?? [];
 			if (!cursor)
 				void setCachedSessionList(
 					space.id,
 					result.sessions ?? [],
 					pageInfo,
+					forks,
 				).catch(() => undefined);
-			return { sessions: withSpace(result.sessions ?? [], space), pageInfo };
+			return {
+				sessions: withSpace(result.sessions ?? [], space),
+				forks,
+				pageInfo,
+			};
 		}
 		const labels = await fetchSpaceLabels(space.id);
 		const label = flattenLabelsWithRefs(labels).find(
 			(item) => item.systemKey === sourceSystemKey(source),
 		);
-		if (!label) return { sessions: [], pageInfo: EMPTY_PAGE_INFO };
+		if (!label) return { sessions: [], forks: [], pageInfo: EMPTY_PAGE_INFO };
 		const result = cursor
 			? await sdk
 					.space(space.id)
@@ -441,6 +505,7 @@ class ChatsInbox {
 			: await fetchLabelItemsFirstPageFresh(space.id, label.id, label.ref);
 		return {
 			sessions: withSpace(result.sessions ?? [], space),
+			forks: result.forks ?? [],
 			pageInfo: result.pageInfo ?? EMPTY_PAGE_INFO,
 		};
 	}
@@ -451,7 +516,7 @@ class ChatsInbox {
 			chatsFilterScope(filter),
 			this.sessions.slice(0, PAGE_SIZE),
 			this.#firstPageInfo,
-			{ expectedUserKey: userKey ?? this.#userKey },
+			{ expectedUserKey: userKey ?? this.#userKey, forks: this.forks },
 		);
 	}
 

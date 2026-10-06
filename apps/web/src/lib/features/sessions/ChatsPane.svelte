@@ -3,7 +3,10 @@ const scrollOffsets = new Map<string, number>();
 </script>
 
 <script lang="ts">
-import type { UserSessionListItem } from "@neta-art/cohub";
+import type {
+	UserSessionListItem,
+	UserSessionSpaceSummary,
+} from "@neta-art/cohub";
 import { Plus, Search, X } from "lucide-svelte";
 import { onMount, tick } from "svelte";
 import { goto } from "$app/navigation";
@@ -12,13 +15,20 @@ import FilterBar from "$lib/components/list-page/FilterBar.svelte";
 import FilterChip from "$lib/components/list-page/FilterChip.svelte";
 import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
 import ListHeader from "$lib/components/list-page/ListHeader.svelte";
-import SessionSidebarRowContent from "$lib/components/SessionSidebarRowContent.svelte";
+import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
+import {
+	LIST_ROW_AVATAR,
+	type ListRowDensity,
+} from "$lib/components/list-page/list-row";
+import SessionRow from "$lib/components/SessionRow.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import { getSessionTitle } from "$lib/features/session-chat";
 import ChatsSourcePicker from "$lib/features/sessions/ChatsSourcePicker.svelte";
 import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
+import { swipePager } from "$lib/gestures/swipe-pager";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { onListScrollTop, scrollListToTop } from "$lib/layout/list-scroll-top";
 import { m } from "$lib/paraglide/messages.js";
+import { buildSessionForkTree, getSessionTreeTitle } from "$lib/session-fork-tree";
 import { getSessionPreview } from "$lib/session-preview";
 import {
 	buildSpaceSessionRoute,
@@ -38,14 +48,35 @@ const {
 } = $props();
 
 const LOAD_MORE_THRESHOLD_PX = 480;
-const SKELETON_ROWS = [0, 1, 2, 3, 4, 5, 6];
 
 const locale = $derived(getLocale());
 const inbox = chatsInbox;
 const filter = $derived(inbox.filter);
 const scoped = $derived(Boolean(filter.space));
 const isPage = $derived(variant === "page");
+const density = $derived<ListRowDensity>(isPage ? "comfortable" : "compact");
 const isDefaultFilter = $derived(filter.source === "web" && !filter.space);
+const pages = $derived<(UserSessionSpaceSummary | null)[]>([
+	null,
+	...inbox.spaceChips,
+]);
+const pageIndex = $derived(
+	Math.max(
+		0,
+		pages.findIndex((space) => (space?.id ?? null) === (filter.space?.id ?? null)),
+	),
+);
+const rows = $derived.by(() => {
+	const items = buildSessionForkTree(inbox.sessions, inbox.forks);
+	return items.map((item, index) => ({
+		...item,
+		tree: {
+			depth: Math.min(item.visualDepth, 1),
+			last: (items[index + 1]?.visualDepth ?? 0) === 0,
+			hasChildren: item.visualDepth === 0 && item.hasChildren,
+		},
+	}));
+});
 let scroller = $state<HTMLDivElement | null>(null);
 
 function hrefFor(session: UserSessionListItem) {
@@ -58,10 +89,18 @@ function spaceName(session: UserSessionListItem) {
 	return session.space?.name?.trim() || m.spaces_default_name({}, { locale });
 }
 
-function subtitleFor(session: UserSessionListItem) {
-	const preview = getSessionPreview(session);
-	if (scoped) return preview;
-	return preview ? `${spaceName(session)} · ${preview}` : spaceName(session);
+function subtitleFor(row: (typeof rows)[number], title: string) {
+	const preview = getSessionPreview(row.session, title);
+	if (scoped || row.fork) return preview;
+	const name = spaceName(row.session);
+	return preview ? `${name} · ${preview}` : name;
+}
+
+function forkTooltip(parentTitle: string | null | undefined) {
+	const title = parentTitle?.trim();
+	return title
+		? m.sidebar_forked_from({ title }, { locale })
+		: m.sidebar_forked_from_chat({}, { locale });
 }
 
 function open(event: MouseEvent, session: UserSessionListItem) {
@@ -97,9 +136,24 @@ $effect(() => {
 	});
 });
 
+$effect(() => {
+	if (!isPage) return;
+	const neighbours = [pages[pageIndex - 1], pages[pageIndex + 1]]
+		.filter((space) => space !== undefined)
+		.map((space) => ({ ...filter, space }));
+	void inbox.prewarm(neighbours);
+});
+
 onMount(() => {
 	void modelsCatalogStore.load().catch(() => undefined);
-	return inbox.retain();
+	const stopScrollTop = isPage
+		? onListScrollTop(() => scrollListToTop(scroller))
+		: undefined;
+	const release = inbox.retain();
+	return () => {
+		stopScrollTop?.();
+		release();
+	};
 });
 </script>
 
@@ -107,7 +161,7 @@ onMount(() => {
 	<ChatsSourcePicker value={filter.source} onChange={(source) => inbox.setSource(source)} />
 {/snippet}
 
-<section class="flex h-full min-h-0 flex-col {isPage ? 'bg-bg-primary' : ''}">
+<section class="flex h-full min-h-0 flex-col {isPage ? 'bg-bg-primary' : 'list-compact'}">
 	<div class="shrink-0 border-b border-border-subtle">
 		<ListHeader title={m.nav_tab_chats({}, { locale })} busy={inbox.refreshing} brand={isPage}>
 			{#snippet actions()}
@@ -155,19 +209,20 @@ onMount(() => {
 		</FilterBar>
 	</div>
 
-	<div bind:this={scroller} class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-1.5" onscroll={onScroll}>
+	<div
+		bind:this={scroller}
+		class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[var(--list-gutter-x)] py-1.5"
+		data-drawer-swipe-ignore={isPage ? "" : undefined}
+		onscroll={onScroll}
+		use:swipePager={{
+			index: pageIndex,
+			count: pages.length,
+			enabled: isPage,
+			onChange: (index) => inbox.setSpace(pages[index] ?? null),
+		}}
+	>
 		{#if inbox.loading && inbox.sessions.length === 0}
-			<div aria-busy="true" aria-label={m.common_loading({}, { locale })}>
-				{#each SKELETON_ROWS as index (index)}
-					<div class="flex items-center gap-[var(--list-row-gap)] px-[var(--list-row-pad-x)] py-2" style:min-height="var(--list-row-height)">
-						{#if !scoped}<div class="h-9 w-9 shrink-0 rounded-[10px] bg-bg-surface"></div>{/if}
-						<div class="min-w-0 flex-1 space-y-1.5">
-							<div class="h-3 rounded-[3px] bg-bg-surface" style:width={`${45 + ((index * 23) % 40)}%`}></div>
-							<div class="h-2.5 w-2/3 rounded-[3px] bg-bg-surface/70"></div>
-						</div>
-					</div>
-				{/each}
-			</div>
+			<ListRowSkeleton {density} label={m.common_loading({}, { locale })} />
 		{:else if inbox.error && inbox.sessions.length === 0}
 			<div class="px-3 py-8 text-center">
 				<p class="text-[12px] text-error-soft">{inbox.error}</p>
@@ -203,29 +258,31 @@ onMount(() => {
 				</div>
 			</div>
 		{:else}
-			<ul class="space-y-[2px]">
-				{#each inbox.sessions as session (session.id)}
-					{@const active = activeSessionId === session.id}
+			<ul>
+				{#each rows as row (row.session.id)}
+					{@const session = row.session}
+					{@const title = getSessionTreeTitle(row) ?? m.sidebar_new_chat({}, { locale })}
 					<li>
-						<a
+						<SessionRow
+							{session}
+							{title}
 							href={hrefFor(session)}
-							class="relative flex items-center gap-[var(--list-row-gap)] overflow-hidden rounded-[var(--list-row-radius)] px-[var(--list-row-pad-x)] py-2 transition-colors duration-100 {isPage ? 'text-[15px]' : 'text-[14px]'} {active ? 'bg-[var(--list-row-active-bg)]' : 'hover:bg-[var(--list-row-hover-bg)]'}"
-							style:min-height="var(--list-row-height)"
-							aria-current={active ? "page" : undefined}
-							onclick={(event) => open(event, session)}
+							{density}
+							subtitle={subtitleFor(row, title)}
+							active={activeSessionId === session.id}
+							isMobile={isPage}
+							modelsCatalog={modelsCatalogStore.items ?? undefined}
+							showSourceBadge={!filter.source}
+							tree={row.tree}
+							tooltip={row.fork ? forkTooltip(row.fork.parentTitle) : undefined}
+							showInsert={false}
+							showRename={false}
+							onNavigate={open}
 						>
-							{#if !scoped}
-								<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} size="md" />
-							{/if}
-							<SessionSidebarRowContent
-								{session}
-								title={getSessionTitle(session)}
-								subtitle={subtitleFor(session)}
-								isMobile={isPage}
-								modelsCatalog={modelsCatalogStore.items ?? undefined}
-								showSourceBadge={!filter.source}
-							/>
-						</a>
+							{#snippet avatar()}
+								<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} size={LIST_ROW_AVATAR[density]} />
+							{/snippet}
+						</SessionRow>
 					</li>
 				{/each}
 			</ul>

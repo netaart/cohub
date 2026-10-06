@@ -23,13 +23,15 @@ function normalize(value: string) {
 
 export function getSessionPreview(
 	session: SessionRecord,
+	shownTitle: string | null = session.title,
 	limit = 96,
 ): string | null {
-	const title = session.title?.trim();
+	const title = shownTitle?.trim();
 	const raw = session.latestMessageText;
 	if (!title || !raw) return null;
 	const text = stripPreviewMarkdown(raw.slice(0, limit * 4));
-	if (!text || normalize(text).startsWith(normalize(title))) return null;
+	const shown = normalize(stripPreviewMarkdown(title));
+	if (!text || normalize(text).startsWith(shown)) return null;
 	if (text.length <= limit) return text;
 	const head = text
 		.slice(0, Math.max(0, limit - 1))

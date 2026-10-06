@@ -6,7 +6,6 @@ import type {
 	CronJobRecord,
 	LabelAssignmentListItem,
 	LabelListItem,
-	SessionForkRecord,
 	SessionRecord,
 	SpaceRecord,
 	TaskRunRecord,
@@ -52,12 +51,16 @@ import { sortAppsByRecentUpdate } from "$lib/app-sort";
 import { signOut } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
+import type { SessionListForkRecord } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
 import { openCommandPalette } from "$lib/command-palette/open";
 import { clearCachedPaletteOverview } from "$lib/command-palette/palette-overview";
 import { APP_AREA_ICONS, appAreaLabel } from "$lib/components/app-area";
 import ChannelProviderIcon from "$lib/components/ChannelProviderIcon.svelte";
 import NewLabelPopover from "$lib/components/NewLabelPopover.svelte";
+import SessionRow, {
+	type SessionRowTree,
+} from "$lib/components/SessionRow.svelte";
 import SidebarFlyout from "$lib/components/SidebarFlyout.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import {
@@ -68,7 +71,6 @@ import SidebarAppRow from "$lib/components/sidebar/SidebarAppRow.svelte";
 import SidebarCheckpointRow from "$lib/components/sidebar/SidebarCheckpointRow.svelte";
 import SidebarFallbackResourceRow from "$lib/components/sidebar/SidebarFallbackResourceRow.svelte";
 import SidebarFileRow from "$lib/components/sidebar/SidebarFileRow.svelte";
-import SidebarSessionRow from "$lib/components/sidebar/SidebarSessionRow.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { downloadCohubDebugBundle } from "$lib/debugger";
 import {
@@ -101,18 +103,23 @@ import {
 	removeResourceFromLabel,
 } from "$lib/labels/resource-label-actions";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { formatResourceMentionTextForDisplay } from "$lib/mentions/resource";
 import { APP_AREAS, type AppArea, appAreaHref } from "$lib/mobile-nav";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import {
+	buildSessionForkTree,
+	getSessionListTitle,
+	getSessionTreeTitle,
+	normalizeSessionText,
+	type SessionForkEdge,
+	type SessionTreeItem,
+} from "$lib/session-fork-tree";
+import { getSessionPreview } from "$lib/session-preview";
+import {
 	mergeSessionRecord,
 	mergeSessionRecords,
 } from "$lib/session-record-merge";
-import {
-	getSessionSortTime,
-	sortSessionsByRecentActivity,
-} from "$lib/session-sort";
+import { sortSessionsByRecentActivity } from "$lib/session-sort";
 import {
 	resolveSettingsSection,
 	SETTINGS_SECTIONS,
@@ -237,28 +244,12 @@ let showUserMenu = $state(false);
 let showHelpMenu = $state(false);
 let spaces = $state<SpaceRecord[]>([]);
 let sessions = $state<SessionRecord[]>([]);
-type SessionForkSidebarRecord = Partial<SessionForkRecord> & {
-	childSessionId: string;
-	parentSessionId?: string | null;
-	depth: number;
-	anchorSequence?: number | null;
-	createdAt?: string;
-	firstUserTextAfterFork?: string | null;
-	parentTitle?: string | null;
+type SidebarSessionItem = SessionTreeItem & {
+	title: string;
+	tooltip: string | undefined;
+	tree: SessionRowTree;
 };
-type SidebarSessionItem = {
-	session: SessionRecord;
-	depth: number;
-	visualDepth: number;
-	isFork: boolean;
-	parentVisible: boolean;
-	isLastVisibleChild: boolean;
-	fork: SessionForkSidebarRecord | null;
-	displayTitle: string;
-	titleText: string | undefined;
-	ariaLabel: string;
-};
-let sessionForks = $state<SessionForkSidebarRecord[]>([]);
+let sessionForks = $state<SessionListForkRecord[]>([]);
 let checkpoints = $state<CheckpointRecord[]>([]);
 let labels = $state<LabelListItem[]>([]);
 let labelItemsBySpace = $state<
@@ -1376,7 +1367,7 @@ function patchLabelItems(
 	};
 }
 
-function sessionForkSignature(fork: SessionForkSidebarRecord) {
+function sessionForkSignature(fork: SessionListForkRecord) {
 	return [
 		fork.childSessionId,
 		fork.parentSessionId ?? "",
@@ -1388,8 +1379,8 @@ function sessionForkSignature(fork: SessionForkSidebarRecord) {
 }
 
 function mergeSessionForks(
-	current: SessionForkSidebarRecord[],
-	incoming: SessionForkSidebarRecord[] | null | undefined,
+	current: SessionListForkRecord[],
+	incoming: SessionListForkRecord[] | null | undefined,
 ) {
 	// Empty / missing incoming is "unknown", not "clear all". Partial cache and
 	// label-page pages must never wipe forks already absorbed from another source.
@@ -1413,16 +1404,14 @@ function mergeSessionForks(
 	return changed ? Array.from(byChild.values()) : current;
 }
 
-function applySessionForks(
-	forks: SessionForkSidebarRecord[] | null | undefined,
-) {
+function applySessionForks(forks: SessionListForkRecord[] | null | undefined) {
 	const next = mergeSessionForks(sessionForks, forks);
 	if (next === sessionForks) return;
 	sessionForks = next;
 }
 
 function absorbLabelItemForks(
-	forks: SessionForkSidebarRecord[] | null | undefined,
+	forks: SessionListForkRecord[] | null | undefined,
 ) {
 	applySessionForks(forks);
 }
@@ -1518,7 +1507,7 @@ function applyLabelItemsPage(
 		items?: LabelAssignmentListItem[] | null;
 		pageInfo: { hasMore: boolean; nextCursor: string | null };
 		sessions?: SessionRecord[] | null;
-		forks?: SessionForkSidebarRecord[] | null;
+		forks?: SessionListForkRecord[] | null;
 	},
 	options?: { append?: boolean },
 ) {
@@ -2541,7 +2530,7 @@ function insertPathReference(path: string) {
 
 function startRenameSession(session: SessionRecord) {
 	renamingSessionId = session.id;
-	renameTitleValue = session.title ?? getSessionTitle(session, 0);
+	renameTitleValue = session.title ?? sessionTitle(session);
 	void tick().then(() => {
 		renameInputElement?.focus();
 		renameInputElement?.select();
@@ -2581,7 +2570,7 @@ async function submitRenameSession(session: SessionRecord) {
 		cancelRenameSession();
 		return;
 	}
-	if (trimmed === (session.title ?? getSessionTitle(session, 0))) {
+	if (trimmed === (session.title ?? sessionTitle(session))) {
 		cancelRenameSession();
 		return;
 	}
@@ -2749,177 +2738,33 @@ function handleLabelRenameKeydown(event: KeyboardEvent, label: LabelListItem) {
 	}
 }
 
-function normalizeSessionDisplayText(value: string | null | undefined) {
-	return formatResourceMentionTextForDisplay(value ?? "")
-		.replace(/\s+/g, " ")
-		.replace(/^[:\-\s]+/, "")
-		.trim();
+function sessionTitle(session: SessionRecord) {
+	return getSessionListTitle(session) ?? m.sidebar_new_chat({}, { locale });
 }
 
-function getSessionTitle(session: SessionRecord, _index: number) {
-	const candidates = [session.title, session.latestMessageText];
-	for (const candidate of candidates) {
-		const normalized = normalizeSessionDisplayText(candidate);
-		if (normalized) return normalized.slice(0, 36);
-	}
-	return m.sidebar_new_chat({}, { locale });
-}
-
-function isLikelyDefaultForkTitle(
-	session: SessionRecord,
-	fork: SessionForkSidebarRecord | null,
-) {
-	if (!fork) return false;
-	const childTitle = normalizeSessionDisplayText(session.title);
-	if (!childTitle) return true;
-	const parentTitle = normalizeSessionDisplayText(fork.parentTitle);
-	return Boolean(parentTitle && childTitle === parentTitle);
-}
-
-function buildForkTitle(
-	session: SessionRecord,
-	fork: SessionForkSidebarRecord | null,
-) {
-	const forkText = normalizeSessionDisplayText(fork?.firstUserTextAfterFork);
-	if (forkText && isLikelyDefaultForkTitle(session, fork))
-		return forkText.slice(0, 48);
-	return getSessionTitle(session, 0);
-}
-
-function getSessionRowStyle(item: SidebarSessionItem) {
-	if (!item.isFork)
-		return isMobile
-			? "-webkit-touch-callout: none; user-select: none;"
-			: undefined;
-	const depth = isMobile ? Math.min(item.visualDepth, 1) : item.visualDepth;
-	const indent = Math.min(depth, 3) * (isMobile ? 10 : 12);
-	const base = `--fork-indent: ${indent}px;`;
-	return isMobile
-		? `${base} -webkit-touch-callout: none; user-select: none;`
-		: base;
-}
-
-function getSessionActiveTime(session: SessionRecord) {
-	return getSessionSortTime(session);
+function forkTooltip(fork: SessionForkEdge) {
+	const parent = normalizeSessionText(fork.parentTitle);
+	const source = parent
+		? m.sidebar_forked_from({ title: parent }, { locale })
+		: m.sidebar_forked_from_chat({}, { locale });
+	return fork.anchorSequence
+		? `${source} at turn #${fork.anchorSequence}`
+		: source;
 }
 
 function buildSidebarSessionItems(
 	sessionList: SessionRecord[],
 ): SidebarSessionItem[] {
-	const sessionById = new Map(
-		sessionList.map((session) => [session.id, session]),
-	);
-	const forkByChildId = new Map(
-		sessionForks.map((fork) => [fork.childSessionId, fork]),
-	);
-	const childrenByParentId = new Map<string, SessionRecord[]>();
-	const childIndexById = new Map<string, number>();
-	const childCountByParentId = new Map<string, number>();
-
-	for (const session of sessionList) {
-		const fork = forkByChildId.get(session.id);
-		if (!fork?.parentSessionId || !sessionById.has(fork.parentSessionId))
-			continue;
-		const siblings = childrenByParentId.get(fork.parentSessionId) ?? [];
-		siblings.push(session);
-		childrenByParentId.set(fork.parentSessionId, siblings);
-	}
-
-	const groupActiveTime = new Map<string, number>();
-	const getGroupActiveTime = (
-		session: SessionRecord,
-		seen = new Set<string>(),
-	) => {
-		const cachedActiveTime = groupActiveTime.get(session.id);
-		if (cachedActiveTime !== undefined) return cachedActiveTime;
-		if (seen.has(session.id)) return getSessionActiveTime(session);
-		seen.add(session.id);
-		let activeTime = getSessionActiveTime(session);
-		for (const child of childrenByParentId.get(session.id) ?? []) {
-			activeTime = Math.max(activeTime, getGroupActiveTime(child, seen));
-		}
-		seen.delete(session.id);
-		groupActiveTime.set(session.id, activeTime);
-		return activeTime;
-	};
-
-	const compareSessions = (a: SessionRecord, b: SessionRecord) => {
-		const activeDelta = getGroupActiveTime(b) - getGroupActiveTime(a);
-		if (activeDelta !== 0) return activeDelta;
-		return b.id.localeCompare(a.id);
-	};
-
-	for (const [parentId, children] of childrenByParentId) {
-		const sortedChildren = children.sort(compareSessions);
-		childCountByParentId.set(parentId, sortedChildren.length);
-		sortedChildren.forEach((child, index) => {
-			childIndexById.set(child.id, index);
-		});
-	}
-
-	const roots = sessionList
-		.filter((session) => {
-			const fork = forkByChildId.get(session.id);
-			return !fork?.parentSessionId || !sessionById.has(fork.parentSessionId);
-		})
-		.sort(compareSessions);
-
-	const items: SidebarSessionItem[] = [];
-	const appendSession = (
-		session: SessionRecord,
-		visualDepth: number,
-		seen = new Set<string>(),
-	) => {
-		if (seen.has(session.id)) return;
-		seen.add(session.id);
-		const fork = forkByChildId.get(session.id) ?? null;
-		const parentVisible = Boolean(
-			fork?.parentSessionId && sessionById.has(fork.parentSessionId),
-		);
-		const connectedFork = parentVisible ? fork : null;
-		const displayTitle = connectedFork
-			? buildForkTitle(session, connectedFork)
-			: getSessionTitle(session, 0);
-		const source = connectedFork?.parentTitle
-			? m.sidebar_forked_from(
-					{ title: normalizeSessionDisplayText(connectedFork.parentTitle) },
-					{ locale },
-				)
-			: m.sidebar_forked_from_chat({}, { locale });
-		const turn = connectedFork?.anchorSequence
-			? ` at turn #${connectedFork.anchorSequence}`
-			: "";
-		const tooltip = connectedFork ? `${source}${turn}` : undefined;
-		const childIndex = childIndexById.get(session.id);
-		const childCount = fork?.parentSessionId
-			? childCountByParentId.get(fork.parentSessionId)
-			: undefined;
-		const isLastVisibleChild = Boolean(
-			connectedFork &&
-				childIndex !== undefined &&
-				childCount !== undefined &&
-				childIndex === childCount - 1,
-		);
-		items.push({
-			session,
-			depth: connectedFork?.depth ?? 0,
-			visualDepth: connectedFork ? visualDepth : 0,
-			isFork: Boolean(connectedFork),
-			parentVisible,
-			isLastVisibleChild,
-			fork: connectedFork,
-			displayTitle,
-			titleText: tooltip,
-			ariaLabel: tooltip ? `${displayTitle}, ${tooltip}` : displayTitle,
-		});
-
-		const children = childrenByParentId.get(session.id) ?? [];
-		for (const child of children) appendSession(child, visualDepth + 1, seen);
-		seen.delete(session.id);
-	};
-
-	for (const root of roots) appendSession(root, 0);
-	return items;
+	return buildSessionForkTree(sessionList, sessionForks).map((item) => ({
+		...item,
+		title: getSessionTreeTitle(item) ?? m.sidebar_new_chat({}, { locale }),
+		tooltip: item.fork ? forkTooltip(item.fork) : undefined,
+		tree: {
+			depth: item.visualDepth,
+			last: item.isLastChild,
+			hasChildren: item.hasChildren,
+		},
+	}));
 }
 
 function buildLabelSessionItems(items: LabelAssignmentListItem[]) {
@@ -3332,7 +3177,7 @@ $effect(() => {
 				<div class="flex min-h-8 items-center rounded-[var(--sidebar-item-radius)] px-1.5 py-2 text-[12px] text-text-placeholder" style={itemIndentStyle}>{m.sidebar_no_items({}, { locale })}</div>
 			{/if}
 		{:else if orderedItems.length > 0}
-			<div class="space-y-[1px]" style={itemIndentStyle}>
+			<div style={itemIndentStyle}>
 				{#each orderedItems as item (item.id)}
 					{@const isActive = isLabelAssignmentActive(item)}
 					{@const itemDraggable = isDraggableLabelItem(item)}
@@ -3341,29 +3186,27 @@ $effect(() => {
 					{#if item.resourceType === "session" && labelSessionsById.get(item.resourceRef)}
 						{@const session = labelSessionsById.get(item.resourceRef)!}
 						{@const sessionItem = labelSessionItemById.get(session.id)}
-						<SidebarSessionRow
+						<SessionRow
 							{session}
-							title={sessionItem?.displayTitle ?? getSessionTitle(session, 0)}
+							title={sessionItem?.title ?? sessionTitle(session)}
 							href={buildPreferredSessionRoute(currentSpaceId!, session.id)}
+							density="compact"
+							subtitle={getSessionPreview(session, sessionItem?.title ?? sessionTitle(session))}
 							active={isActive}
 							{isMobile}
 							modelsCatalog={modelsCatalog ?? undefined}
 							renaming={renamingSessionId === session.id}
 							renameValue={renameTitleValue}
 							renameSaving={renameSaving}
-							rowState={sessionItem
-								? {
-										isFork: sessionItem.isFork,
-										isLastVisibleChild: sessionItem.isLastVisibleChild,
-										style: getSessionRowStyle(sessionItem),
-										titleText: sessionItem.titleText || undefined,
-										ariaLabel: sessionItem.ariaLabel,
-									}
-								: undefined}
+							tree={sessionItem?.tree}
+							tooltip={sessionItem?.tooltip}
 							draggable={itemDraggable}
 							removeLabelTitle={canRemoveItem ? labelRemoveTitle : undefined}
 							removeLabelDisabled={labelDropBusyId === label.id}
-							onNavigate={(target) => void handleNavigateToSession(target.id)}
+							onNavigate={(event, target) => {
+								event.preventDefault();
+								void handleNavigateToSession(target.id);
+							}}
 							onDoubleClick={handleSessionRowDoubleClick}
 							onInsert={insertPathReference}
 							onRename={startRenameSession}
@@ -3674,14 +3517,16 @@ $effect(() => {
 		{@render sidebarEmptyState(m.sidebar_no_chats({}, { locale }))}
 	{:else}
 		{@const chatItems = preview ? sidebarSessionItems.slice(0, sidebarFlyoutPreviewLimit) : sidebarSessionItems}
-		<div class="space-y-[2px]">
+		<div>
 			{#each chatItems as item (item.session.id)}
 				{@const session = item.session}
 				{@const isActive = activeSession?.id === session.id}
-				<SidebarSessionRow
+				<SessionRow
 					{session}
-					title={item.displayTitle}
+					title={item.title}
 					href={buildPreferredSessionRoute(currentSpaceId!, session.id)}
+					density="compact"
+					subtitle={getSessionPreview(session, item.title)}
 					active={isActive}
 					{isMobile}
 					modelsCatalog={modelsCatalog ?? undefined}
@@ -3689,15 +3534,13 @@ $effect(() => {
 					renaming={renamingSessionId === session.id}
 					renameValue={renameTitleValue}
 					renameSaving={renameSaving}
-					rowState={{
-						isFork: item.isFork,
-						isLastVisibleChild: item.isLastVisibleChild,
-						style: getSessionRowStyle(item),
-						titleText: item.titleText || undefined,
-						ariaLabel: item.ariaLabel,
-					}}
+					tree={item.tree}
+					tooltip={item.tooltip}
 					draggable={!isMobile}
-					onNavigate={(target) => scheduleSessionRowNavigate(target.id)}
+					onNavigate={(event, target) => {
+						event.preventDefault();
+						scheduleSessionRowNavigate(target.id);
+					}}
 					onDoubleClick={handleSessionRowDoubleClick}
 					onInsert={insertPathReference}
 					onRename={startRenameSession}
@@ -3801,7 +3644,7 @@ $effect(() => {
 {/snippet}
 
 {#if collapsed && !isMobile}
-  <aside class="h-screen w-[52px] shrink-0 overflow-visible bg-[var(--sidebar-bg)]">
+  <aside class="list-compact h-screen w-[52px] shrink-0 overflow-visible bg-[var(--sidebar-bg)]">
     <div class="flex h-full flex-col items-center overflow-visible border-r border-border-subtle/70 px-2 py-2">
       <a
         href="/"
@@ -4051,7 +3894,7 @@ $effect(() => {
 {:else}
 <aside
   bind:this={sidebarRootEl}
-  class="{isMobile ? 'h-full w-full' : 'h-screen w-full'} flex flex-col bg-[var(--sidebar-bg)]"
+  class="list-compact {isMobile ? 'h-full w-full' : 'h-screen w-full'} flex flex-col bg-[var(--sidebar-bg)]"
 >
   <!-- Brand Header -->
   <div class="flex h-[48px] shrink-0 items-center gap-2 border-b border-border-subtle px-3">

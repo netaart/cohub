@@ -1193,12 +1193,19 @@ export type CreateSpaceSessionInput = {
   labelRefs?: string[];
 };
 
+/**
+ * Fork edge returned alongside a session page. `parentSessionId` and
+ * `parentTitle` are null when the parent is not visible to the viewer.
+ */
+export type SessionListFork = Omit<SessionForkRecord, "parentSessionId"> & {
+  parentSessionId: string | null;
+  firstUserTextAfterFork?: string | null;
+  parentTitle?: string | null;
+};
+
 export type SpaceSessionsResponse = {
   sessions: SessionRecord[];
-  forks?: Array<SessionForkRecord & {
-    firstUserTextAfterFork?: string | null;
-    parentTitle?: string | null;
-  }>;
+  forks?: SessionListFork[];
   pageInfo?: {
     hasMore: boolean;
     nextCursor: string | null;
@@ -1237,6 +1244,8 @@ export type UserSessionSourceKey =
 
 export type UserSessionsResponse = {
   sessions: UserSessionListItem[];
+  /** Fork edges for page sessions; only present with `includeForks`. */
+  forks?: SessionListFork[];
   pageInfo?: {
     hasMore: boolean;
     nextCursor: string | null;
@@ -1548,10 +1557,7 @@ export type LabelAssignmentPageInfo = {
 };
 
 /** Optional hydrated session previews for label item pages (avoids N+1 session detail fetches). */
-export type LabelItemsSessionFork = SessionForkRecord & {
-  firstUserTextAfterFork?: string | null;
-  parentTitle?: string | null;
-};
+export type LabelItemsSessionFork = SessionListFork;
 
 export type LabelItemsResponse = {
   items: LabelAssignmentListItem[];

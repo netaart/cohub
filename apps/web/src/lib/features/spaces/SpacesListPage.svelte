@@ -1,11 +1,18 @@
 <script lang="ts" module>
+import type { SpaceRecord } from "@neta-art/cohub";
+
 type Filter = "recent" | "all" | "mine" | "pinned" | "archived";
+type MemoPage = {
+	items: SpaceRecord[];
+	cursor: string | null;
+	hasMore: boolean;
+};
 
 let lastFilter: Filter = "recent";
+const pageMemo = new Map<string, MemoPage>();
 </script>
 
 <script lang="ts">
-import type { SpaceRecord } from "@neta-art/cohub";
 import {
 	Archive,
 	ArchiveRestore,
@@ -18,6 +25,7 @@ import {
 	X,
 } from "lucide-svelte";
 import { onMount } from "svelte";
+import { getCacheUserKey } from "$lib/cache/keys";
 import {
 	getCachedSpacePage,
 	setCachedSpacePage,
@@ -27,10 +35,21 @@ import FilterBar from "$lib/components/list-page/FilterBar.svelte";
 import FilterChip from "$lib/components/list-page/FilterChip.svelte";
 import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
 import ListHeader from "$lib/components/list-page/ListHeader.svelte";
+import ListRow from "$lib/components/list-page/ListRow.svelte";
+import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
+import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import {
+	LIST_ROW_AVATAR,
+	LIST_ROW_HEIGHT,
+	type ListRowDensity,
+} from "$lib/components/list-page/list-row";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import SpaceLabelPicker from "$lib/features/spaces/SpaceLabelPicker.svelte";
 import { longPress } from "$lib/gestures/long-press";
+import { swipePager } from "$lib/gestures/swipe-pager";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { useCompactShell } from "$lib/layout/compact-shell.svelte";
+import { onListScrollTop, scrollListToTop } from "$lib/layout/list-scroll-top";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { pruneSelection, selectRange, toggleSelection } from "$lib/selection";
@@ -38,7 +57,7 @@ import { buildSpaceRootRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
 import { getRecentSpaces } from "$lib/stores/recent-space";
 import { toggleSpaceArchive } from "$lib/stores/space-pins.svelte";
-import { formatListTimestamp } from "$lib/time-format";
+import { formatCompactAbsoluteTime } from "$lib/time-format";
 
 const FILTERS: readonly Filter[] = [
 	"recent",
@@ -48,12 +67,14 @@ const FILTERS: readonly Filter[] = [
 	"archived",
 ];
 const PAGE_SIZE = 50;
-const ROW_HEIGHT = 56;
 const OVERSCAN_ROWS = 6;
-const SKELETON_ROWS = [0, 1, 2, 3, 4, 5];
 
 const locale = $derived(getLocale());
+const compact = $derived(useCompactShell());
+const density = $derived<ListRowDensity>(compact ? "comfortable" : "compact");
+const rowHeight = $derived(LIST_ROW_HEIGHT[density]);
 let filter = $state<Filter>(lastFilter);
+const filterIndex = $derived(FILTERS.indexOf(filter));
 let spaces = $state<SpaceRecord[]>([]);
 let cursor = $state<string | null>(null);
 let hasMore = $state(false);
@@ -76,12 +97,12 @@ const allSelectedPinned = $derived(
 	selecting && spaces.every((space) => !selected.has(space.id) || space.isPinned),
 );
 const start = $derived(
-	Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS),
+	Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS),
 );
 const end = $derived(
 	Math.min(
 		spaces.length,
-		Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN_ROWS,
+		Math.ceil((scrollTop + viewportHeight) / rowHeight) + OVERSCAN_ROWS,
 	),
 );
 const visible = $derived(spaces.slice(start, end));
@@ -114,6 +135,41 @@ function emptyCopy(value: Filter) {
 	}
 }
 
+function subtitleOf(space: SpaceRecord) {
+	const description = space.description?.trim();
+	if (description) return { text: description, quiet: false };
+	const owner = space.ownerProfile;
+	if (space.relation && space.relation !== "owner" && owner) {
+		const handle = owner.username?.trim();
+		return {
+			text: handle ? `@${handle}` : owner.displayName?.trim() || "",
+			quiet: true,
+		};
+	}
+	return { text: m.spaces_row_no_description({}, { locale }), quiet: true };
+}
+
+function memoKey(value: Filter) {
+	return `${getCacheUserKey()}:${value}`;
+}
+
+function remember(value: Filter, page: MemoPage) {
+	pageMemo.set(memoKey(value), page);
+}
+
+async function prewarm(values: Filter[]) {
+	for (const value of values) {
+		if (pageMemo.has(memoKey(value))) continue;
+		const cached = await getCachedSpacePage(value, "").catch(() => null);
+		if (!cached || pageMemo.has(memoKey(value))) continue;
+		remember(value, {
+			items: cached.items.filter((space) => matchesFilter(space, value)),
+			cursor: null,
+			hasMore: false,
+		});
+	}
+}
+
 function nameOf(space: SpaceRecord) {
 	return (
 		space.name?.trim() ||
@@ -138,14 +194,23 @@ async function load(options: { reset?: boolean } = {}) {
 	const requestFilter = filter;
 	loadingMore = false;
 	if (options.reset) {
-		cursor = null;
-		hasMore = false;
 		error = "";
-		const cached = await getCachedSpacePage(requestFilter, "").catch(() => null);
-		if (generation !== requestGeneration) return;
-		spaces = (cached?.items ?? []).filter((space) =>
-			matchesFilter(space, requestFilter),
-		);
+		const memo = pageMemo.get(memoKey(requestFilter));
+		if (memo) {
+			spaces = memo.items;
+			cursor = memo.cursor;
+			hasMore = memo.hasMore;
+		} else {
+			cursor = null;
+			hasMore = false;
+			const cached = await getCachedSpacePage(requestFilter, "").catch(
+				() => null,
+			);
+			if (generation !== requestGeneration) return;
+			spaces = (cached?.items ?? []).filter((space) =>
+				matchesFilter(space, requestFilter),
+			);
+		}
 		loading = spaces.length === 0;
 	}
 	refreshing = spaces.length > 0;
@@ -161,6 +226,7 @@ async function load(options: { reset?: boolean } = {}) {
 		spaces = page.items;
 		cursor = page.pageInfo.nextCursor;
 		hasMore = page.pageInfo.hasMore;
+		remember(requestFilter, { items: spaces, cursor, hasMore });
 		error = "";
 		selected = pruneSelection(selected, spaces.map((space) => space.id));
 		void setCachedSpacePage(requestFilter, "", page).catch(() => undefined);
@@ -244,7 +310,7 @@ function onScroll(event: Event) {
 	viewportHeight = element.clientHeight;
 	if (
 		element.scrollHeight - element.scrollTop - element.clientHeight <
-		ROW_HEIGHT * 8
+		rowHeight * 8
 	)
 		void loadMore();
 }
@@ -291,8 +357,15 @@ function applyLabel(labelRef: string) {
 	);
 }
 
+$effect(() => {
+	if (!compact) return;
+	const neighbours = [FILTERS[filterIndex - 1], FILTERS[filterIndex + 1]];
+	void prewarm(neighbours.filter((value) => value !== undefined));
+});
+
 onMount(() => {
 	void load({ reset: true });
+	const stopScrollTop = onListScrollTop(() => scrollListToTop(scroller));
 	const refreshOnReturn = () => {
 		if (document.visibilityState === "visible") void load();
 	};
@@ -314,6 +387,7 @@ onMount(() => {
 			void load();
 	});
 	return () => {
+		stopScrollTop();
 		unsubscribeRealtime();
 		window.removeEventListener("focus", refreshOnReturn);
 		window.removeEventListener("keydown", onKeydown);
@@ -325,7 +399,7 @@ onMount(() => {
 {#snippet selectionTitle()}
 	<button
 		type="button"
-		class="-ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary lg:h-7 lg:w-7 lg:rounded-[6px]"
+		class="-ml-[9px] flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary lg:-ml-1.5 lg:h-7 lg:w-7 lg:rounded-[6px]"
 		aria-label={m.common_cancel({}, { locale })}
 		title={m.common_cancel({}, { locale })}
 		onclick={clearSelection}
@@ -334,6 +408,16 @@ onMount(() => {
 	</button>
 	<span class="truncate text-[15px] font-semibold tabular-nums text-text-primary lg:text-[13px]" aria-live="polite">
 		{m.label_selected_count({ count: selected.size }, { locale })}
+	</span>
+{/snippet}
+
+{#snippet avatar(space: SpaceRecord, name: string, isSelected: boolean)}
+	<SpaceAvatar {name} profile={space.publicProfile} size={LIST_ROW_AVATAR[density]} />
+	<span
+		class="absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-bg-primary transition-[opacity,transform] duration-150 {isSelected ? 'bg-brand text-brand-contrast-fg' : 'bg-bg-elevated text-transparent ring-1 ring-inset ring-border-primary'} {isSelected || selecting ? 'opacity-100' : compact ? 'scale-90 opacity-0' : 'scale-90 opacity-0 group-hover/row:scale-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100'}"
+		aria-hidden="true"
+	>
+		<Check class="h-2.5 w-2.5" strokeWidth={3.5} />
 	</span>
 {/snippet}
 
@@ -382,24 +466,27 @@ onMount(() => {
 	</div>
 
 	{#if error}
-		<div class="flex shrink-0 items-center gap-3 border-b border-border-subtle px-3 py-2 text-[12px] text-error-fg" role="alert">
+		<div class="flex shrink-0 items-center gap-3 border-b border-border-subtle px-[var(--list-content-x)] py-2 text-[12px] text-error-fg" role="alert">
 			<span class="min-w-0 flex-1 truncate">{error}</span>
 			<button type="button" class="shrink-0 text-text-secondary underline underline-offset-2 hover:text-text-primary" onclick={() => void load()}>{m.spaces_retry({}, { locale })}</button>
 		</div>
 	{/if}
 
-	<div bind:this={scroller} class="min-h-0 flex-1 overflow-y-auto overscroll-contain" onscroll={onScroll}>
+	<div
+		bind:this={scroller}
+		class="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1.5"
+		data-drawer-swipe-ignore={compact ? "" : undefined}
+		onscroll={onScroll}
+		use:swipePager={{
+			index: filterIndex,
+			count: FILTERS.length,
+			enabled: compact && !selecting,
+			onChange: (index) => selectFilter(FILTERS[index] ?? filter),
+		}}
+	>
 		{#if loading && spaces.length === 0}
-			<div aria-busy="true" aria-label={m.common_loading({}, { locale })}>
-				{#each SKELETON_ROWS as index (index)}
-					<div class="flex h-14 items-center gap-3 px-3">
-						<div class="h-9 w-9 shrink-0 rounded-[10px] bg-bg-surface"></div>
-						<div class="min-w-0 flex-1 space-y-1.5">
-							<div class="h-3 rounded-[3px] bg-bg-surface" style:width={`${40 + ((index * 17) % 35)}%`}></div>
-							<div class="h-2.5 w-1/3 rounded-[3px] bg-bg-surface/70"></div>
-						</div>
-					</div>
-				{/each}
+			<div class="px-[var(--list-gutter-x)]">
+				<ListRowSkeleton {density} rows={6} label={m.common_loading({}, { locale })} />
 			</div>
 		{:else if spaces.length === 0 && !error}
 			{@const copy = emptyCopy(filter)}
@@ -413,50 +500,60 @@ onMount(() => {
 				{/if}
 			</div>
 		{:else}
-			<ul class="relative" style:height={`${spaces.length * ROW_HEIGHT}px`}>
+			<ul class="relative mx-[var(--list-gutter-x)]" style:height={`${spaces.length * rowHeight}px`}>
 				{#each visible as space, index (space.id)}
 					{@const isSelected = selected.has(space.id)}
 					{@const name = nameOf(space)}
+					{@const href = buildSpaceRootRoute(space.id)}
+					{@const second = subtitleOf(space)}
 					<li
-						class="space-row group absolute inset-x-0 flex items-center gap-[var(--list-row-gap)] px-[var(--list-row-pad-x)] transition-colors duration-100 {isSelected ? 'bg-brand-muted' : 'hover:bg-[var(--list-row-hover-bg)]'}"
-						style:top={`${(start + index) * ROW_HEIGHT}px`}
-						style:height={`${ROW_HEIGHT}px`}
+						class="space-row absolute inset-x-0"
+						style:top={`${(start + index) * rowHeight}px`}
 						use:longPress={{ onLongPress: () => toggle(space.id) }}
 					>
-						<button
-							type="button"
-							class="relative h-9 w-9 shrink-0 rounded-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35"
-							aria-label={m.spaces_selected_aria({ name }, { locale })}
-							aria-pressed={isSelected}
-							onclick={(event) => toggle(space.id, event)}
+						<ListRow
+							{density}
+							selected={isSelected}
+							class="has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-brand/35"
 						>
-							<SpaceAvatar {name} profile={space.publicProfile} size="md" />
-							<span
-								class="select-mark absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-bg-primary transition-[opacity,transform] duration-150 {isSelected ? 'bg-brand text-brand-contrast-fg' : 'bg-bg-elevated text-transparent ring-1 ring-inset ring-border-primary'} {isSelected || selecting ? 'opacity-100' : 'scale-90 opacity-0 group-hover:scale-100 group-hover:opacity-100 group-focus-within:opacity-100'}"
-								aria-hidden="true"
+							{#snippet leading()}
+								{#if compact}
+									<a {href} class="relative block focus-visible:outline-none" tabindex="-1" aria-hidden="true" draggable="false" onclick={(event) => handleRowClick(event, space.id)}>
+										{@render avatar(space, name, isSelected)}
+									</a>
+								{:else}
+									<button
+										type="button"
+										class="relative block rounded-[10px] focus-visible:outline-none"
+										aria-label={m.spaces_selected_aria({ name }, { locale })}
+										aria-pressed={isSelected}
+										onclick={(event) => toggle(space.id, event)}
+									>
+										{@render avatar(space, name, isSelected)}
+									</button>
+								{/if}
+							{/snippet}
+							<a
+								{href}
+								class="flex min-w-0 flex-1 self-stretch focus-visible:outline-none"
+								onclick={(event) => handleRowClick(event, space.id)}
+								draggable="false"
 							>
-								<Check class="h-2.5 w-2.5" strokeWidth={3.5} />
-							</span>
-						</button>
-						<a
-							href={buildSpaceRootRoute(space.id)}
-							class="flex min-w-0 flex-1 flex-col justify-center gap-[3px] self-stretch text-[15px] leading-tight lg:text-[14px] focus-visible:outline-none"
-							onclick={(event) => handleRowClick(event, space.id)}
-							draggable="false"
-						>
-							<span class="flex min-w-0 items-baseline gap-1.5">
-								<span class="min-w-0 flex-1 truncate font-medium text-text-primary">{name}</span>
-								{#if space.isPinned && filter !== "pinned"}
-									<Pin class="h-3 w-3 shrink-0 self-center text-text-placeholder" aria-label={m.spaces_section_pinned({}, { locale })} />
-								{/if}
-								{#if space.lastActivityAt}
-									<span class="shrink-0 self-center tabular-nums text-[11px] text-text-placeholder">{formatListTimestamp(space.lastActivityAt, locale)}</span>
-								{/if}
-							</span>
-							{#if space.description?.trim()}
-								<span class="block truncate text-[12px] leading-4 text-text-tertiary">{space.description}</span>
-							{/if}
-						</a>
+								<ListRowText title={name}>
+									{#snippet meta()}
+										{#if space.isPinned && filter !== "pinned"}
+											<Pin class="h-3 w-3" aria-label={m.spaces_section_pinned({}, { locale })} />
+										{/if}
+										{#if space.lastActivityAt}
+											<span>{formatCompactAbsoluteTime(space.lastActivityAt)}</span>
+										{/if}
+									{/snippet}
+									{#snippet subtitle()}
+										<span class={second.quiet ? "text-text-placeholder" : ""} title={second.quiet ? undefined : second.text}>{second.text}</span>
+									{/snippet}
+								</ListRowText>
+							</a>
+						</ListRow>
 					</li>
 				{/each}
 			</ul>

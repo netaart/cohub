@@ -22,7 +22,9 @@ import type { SessionListPageInfo } from "$lib/cache/types";
 export const DB_NAME = "cohub-web-cache";
 export const DB_VERSION = 21;
 
-export type SessionListForkRecord = Partial<SessionForkRecord> & {
+export type SessionListForkRecord = Partial<
+	Omit<SessionForkRecord, "parentSessionId">
+> & {
 	childSessionId: string;
 	parentSessionId?: string | null;
 	depth: number;

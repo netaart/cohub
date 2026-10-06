@@ -1,12 +1,15 @@
+import {
+	FLICK_VELOCITY_PX_PER_MS,
+	type GestureAxis,
+	resolveGestureAxis,
+} from "$lib/gestures/axis-lock";
 import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
 
 export const MOBILE_DRAWER_WIDTH_PX = 280;
 export const MOBILE_DRAWER_MAX_WIDTH_VW = 85;
-export const MOBILE_DRAWER_DIRECTION_LOCK_DISTANCE_PX = 8;
-export const MOBILE_DRAWER_DIRECTION_RATIO = 1.25;
 export const MOBILE_DRAWER_OPEN_THRESHOLD_RATIO = 0.26;
 export const MOBILE_DRAWER_CLOSE_THRESHOLD_RATIO = 0.74;
-export const MOBILE_DRAWER_FLICK_VELOCITY_PX_PER_MS = 0.35;
+export const MOBILE_DRAWER_FLICK_VELOCITY_PX_PER_MS = FLICK_VELOCITY_PX_PER_MS;
 export const EDGE_ZONE_RATIO = 1 / 3;
 
 const INTERACTIVE_SELECTORS = [
@@ -58,7 +61,7 @@ export type DrawerGesturePhase =
 	| "dragging-close"
 	| "settling";
 
-export type DrawerGestureDirection = "horizontal" | "vertical" | null;
+export type DrawerGestureDirection = GestureAxis;
 
 export function clamp(value: number, min: number, max: number) {
 	return Math.min(Math.max(value, min), max);
@@ -91,25 +94,7 @@ export function shouldStartDrawerGesture(options: {
 	return true;
 }
 
-export function resolveDrawerGestureDirection(options: {
-	absDx: number;
-	absDy: number;
-}) {
-	const { absDx, absDy } = options;
-	if (
-		absDx < MOBILE_DRAWER_DIRECTION_LOCK_DISTANCE_PX &&
-		absDy < MOBILE_DRAWER_DIRECTION_LOCK_DISTANCE_PX
-	) {
-		return null;
-	}
-	if (absDx > absDy * MOBILE_DRAWER_DIRECTION_RATIO) {
-		return "horizontal" satisfies DrawerGestureDirection;
-	}
-	if (absDy > absDx * MOBILE_DRAWER_DIRECTION_RATIO) {
-		return "vertical" satisfies DrawerGestureDirection;
-	}
-	return null;
-}
+export const resolveDrawerGestureDirection = resolveGestureAxis;
 
 export function getDrawerOffsetFromDrag(options: {
 	isOpen: boolean;
