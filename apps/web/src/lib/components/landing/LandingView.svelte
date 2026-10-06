@@ -5,13 +5,18 @@ import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
 import { resolveAppEntryRoute } from "$lib/app-entry";
-import { hasLocalSessionHint, signInWithRedirectPath } from "$lib/auth";
+import {
+	hasLocalSessionHint,
+	hasRecoverableAuthSession,
+	signInWithRedirectPath,
+} from "$lib/auth";
 import LandingMedia from "$lib/components/landing/LandingMedia.svelte";
 import LandingProof from "$lib/components/landing/LandingProof.svelte";
 import LandingSandboxSpec from "$lib/components/landing/LandingSandboxSpec.svelte";
 import LandingSection from "$lib/components/landing/LandingSection.svelte";
 import LandingTerminal from "$lib/components/landing/LandingTerminal.svelte";
 import PublicHeader from "$lib/components/PublicHeader.svelte";
+import { hostOwnsCredentials, readyHost } from "$lib/host-bridge";
 import {
 	type PublicLocale,
 	resolvePublicLocale,
@@ -84,7 +89,13 @@ onMount(() => {
 	document.documentElement.setAttribute("data-theme", "light");
 
 	void (async () => {
-		const maybeSession = redirecting || hasLocalSessionHint();
+		// A native host signs in outside the page, so it leaves no local hint.
+		const maybeSession =
+			redirecting ||
+			hasLocalSessionHint() ||
+			(Boolean(await readyHost()) &&
+				hostOwnsCredentials() &&
+				(await hasRecoverableAuthSession()));
 		if (!maybeSession) {
 			clearHomeRedirectAttr();
 			// Warm auth so Start is snappy; don't block marketing paint.
