@@ -2,7 +2,14 @@
 import { type Snippet, untrack } from "svelte";
 import { prefersReducedMotion } from "svelte/motion";
 import { POINTER_DRAG_CLICK_SUPPRESS_MS } from "$lib/drag/pointer-drag-core";
-import { FLICK_VELOCITY_PX_PER_MS } from "$lib/gestures/axis-lock";
+import { resolveGestureAxis } from "$lib/gestures/axis-lock";
+import {
+	addSample,
+	glideTiming,
+	type PagerGlide,
+	type PagerSample,
+	releasePage,
+} from "$lib/gestures/pager";
 import {
 	canScrollHorizontally,
 	isTextEditingTarget,
@@ -22,17 +29,11 @@ const {
 	enabled?: boolean;
 	locked?: boolean;
 	onChange: (index: number) => void;
-	onPosition?: (position: number) => void;
+	onPosition?: (position: number, glide: PagerGlide | null) => void;
 	page: Snippet<[index: number, active: boolean]>;
 } = $props();
 
-const AXIS_LOCK_PX = 10;
-const AXIS_RATIO = 1.5;
-const FLICK_MIN_PX = 24;
-const VELOCITY_WINDOW_MS = 100;
 const EDGE_RESISTANCE = 0.3;
-const GLIDE_MIN_MS = 140;
-const GLIDE_MAX_MS = 240;
 
 type Drag = {
 	id: number;
@@ -40,33 +41,38 @@ type Drag = {
 	x: number;
 	y: number;
 	from: number;
-	axis: "x" | "y" | null;
-	samples: { t: number; x: number }[];
+	axis: "x" | null;
+	samples: PagerSample[];
+	resume: number | null;
+	passive: boolean;
+	unfollow: AbortController;
 };
 
 let root = $state<HTMLDivElement | null>(null);
 let track = $state<HTMLDivElement | null>(null);
 let position = $state(untrack(() => index));
+let trail = $state(untrack(() => index));
+let warm = $state<number | null>(null);
 let animation: Animation | null = null;
+let heading: number | null = null;
 let drag: Drag | null = null;
 let suppressClickUntil = 0;
 let alignedKeys = "";
+let warmToken = 0;
 
-// Pages in view plus one beyond, so a follow-up flick never lands on a blank page.
-const start = $derived(Math.max(0, Math.min(index, Math.floor(position)) - 1));
-const end = $derived(
-	Math.min(keys.length - 1, Math.max(index, Math.ceil(position)) + 1),
-);
-const visible = $derived(Math.round(position));
+const low = $derived(Math.min(index, Math.floor(Math.min(position, trail))));
+const high = $derived(Math.max(index, Math.ceil(Math.max(position, trail))));
+const mounted = (i: number) =>
+	(i >= low && i <= high) || (warm !== null && Math.abs(i - warm) <= 1);
 
 const clamp = (value: number, min: number, max: number) =>
 	Math.min(Math.max(value, min), max);
 const translate = (value: number) => `translate3d(${-value * 100}%, 0, 0)`;
 
-function setPosition(next: number) {
+function setPosition(next: number, glide: PagerGlide | null = null) {
 	if (next === position) return;
 	position = next;
-	onPosition?.(next);
+	onPosition?.(next, glide);
 }
 
 function visualPosition() {
@@ -75,71 +81,121 @@ function visualPosition() {
 	return -x / root.clientWidth;
 }
 
-function stop() {
-	const current = visualPosition();
+function cancelGlide() {
 	animation?.cancel();
 	animation = null;
+	heading = null;
+}
+
+function warmSoon(page: number) {
+	const token = ++warmToken;
+	requestAnimationFrame(() =>
+		setTimeout(() => {
+			if (token === warmToken && drag?.axis !== "x") warm = page;
+		}),
+	);
+}
+
+function stop() {
+	if (!animation) return;
+	const current = visualPosition();
+	cancelGlide();
+	trail = current;
 	setPosition(current);
 }
 
-// A caught glide never lands, so rapid flicks commit once.
-function glide(target: number, speed = 0, landed?: () => void) {
-	const from = visualPosition();
-	animation?.cancel();
-	animation = null;
+function jump(target: number) {
+	cancelGlide();
+	trail = target;
 	setPosition(target);
+	warmSoon(target);
+}
+
+function land(target: number) {
+	warmSoon(target);
+	if (target !== index) onChange(target);
+}
+
+// A caught glide never lands, so rapid flicks commit once.
+function glide(target: number, speed = 0) {
+	const from = visualPosition();
+	cancelGlide();
 	const distance = Math.abs(target - from) * (root?.clientWidth ?? 0);
 	if (!track || distance < 1 || prefersReducedMotion.current) {
-		landed?.();
+		trail = target;
+		setPosition(target);
+		land(target);
 		return;
 	}
-	const duration = clamp(
-		(2 * distance) / Math.max(speed, 1),
-		GLIDE_MIN_MS,
-		GLIDE_MAX_MS,
-	);
-	const y1 = clamp(((speed * duration) / distance) * 0.25, 0.4, 1);
+	const timing = glideTiming(distance, speed);
+	trail = from;
+	setPosition(target, timing);
 	const current = track.animate(
 		[{ transform: translate(from) }, { transform: translate(target) }],
-		{ duration, easing: `cubic-bezier(0.25, ${y1}, 0.3, 1)` },
+		timing,
 	);
 	current.onfinish = () => {
 		if (animation !== current) return;
 		animation = null;
-		landed?.();
+		heading = null;
+		trail = target;
+		land(target);
 	};
 	animation = current;
-}
-
-function releaseTarget(drag: Drag, timeStamp: number) {
-	const first = drag.samples[0];
-	const last = drag.samples.at(-1);
-	const fresh = first && last && timeStamp - last.t < VELOCITY_WINDOW_MS / 2;
-	const velocity =
-		fresh && last.t > first.t ? (last.x - first.x) / (last.t - first.t) : 0;
-	const moved = (last?.x ?? drag.x) - drag.x;
-	const flick =
-		Math.abs(velocity) >= FLICK_VELOCITY_PX_PER_MS &&
-		Math.abs(moved) >= FLICK_MIN_PX;
-	const target = flick
-		? velocity < 0
-			? Math.floor(position) + 1
-			: Math.ceil(position) - 1
-		: Math.round(position);
-	return {
-		target: clamp(target, 0, keys.length - 1),
-		speed: Math.abs(velocity),
-	};
+	heading = target;
+	warmSoon(target);
 }
 
 function gestures(node: HTMLElement) {
 	const find = (touches: TouchList) =>
 		Array.from(touches).find((touch) => touch.identifier === drag?.id);
 
+	// Touch events keep going to a target removed mid-drag, but no longer bubble
+	// here, so the target relays them once it has left the pager.
+	const follow = (target: EventTarget | null) => {
+		const unfollow = new AbortController();
+		if (!(target instanceof Node)) return unfollow;
+		const relay = (handler: (event: TouchEvent) => void) => (event: Event) => {
+			if (!node.contains(target)) handler(event as TouchEvent);
+		};
+		const options = { passive: false, signal: unfollow.signal };
+		target.addEventListener("touchmove", relay(onMove), options);
+		target.addEventListener("touchend", relay(onEnd), options);
+		target.addEventListener("touchcancel", relay(onEnd), options);
+		return unfollow;
+	};
+
+	const finish = (timeStamp: number, release: boolean) => {
+		const current = drag;
+		drag = null;
+		if (!current) return;
+		current.unfollow.abort();
+		if (current.axis !== "x") {
+			if (current.resume === null) return;
+			suppressClickUntil = timeStamp + POINTER_DRAG_CLICK_SUPPRESS_MS;
+			glide(current.resume);
+			return;
+		}
+		suppressClickUntil = timeStamp + POINTER_DRAG_CLICK_SUPPRESS_MS;
+		const { target, speed } = release
+			? releasePage({
+					samples: current.samples,
+					originX: current.x,
+					releasedAt: timeStamp,
+					position,
+					count: keys.length,
+				})
+			: { target: clamp(Math.round(position), 0, keys.length - 1), speed: 0 };
+		glide(target, speed);
+	};
+
 	const onStart = (event: TouchEvent) => {
-		if (drag || locked || event.touches.length > 1) return;
+		if (locked || event.touches.length > 1) return;
+		if (drag) finish(event.timeStamp, false);
 		const touch = event.changedTouches[0];
 		if (!touch || isTextEditingTarget(event.target)) return;
+		const resume = heading;
+		stop();
 		drag = {
 			id: touch.identifier,
 			target: event.target,
@@ -148,6 +204,9 @@ function gestures(node: HTMLElement) {
 			from: position,
 			axis: null,
 			samples: [],
+			resume,
+			passive: !event.cancelable,
+			unfollow: follow(event.target),
 		};
 	};
 
@@ -158,16 +217,21 @@ function gestures(node: HTMLElement) {
 			finish(event.timeStamp, false);
 			return;
 		}
-		const dx = touch.clientX - drag.x;
 		if (!drag.axis) {
-			const dy = touch.clientY - drag.y;
-			if (Math.max(Math.abs(dx), Math.abs(dy)) < AXIS_LOCK_PX) return;
+			const dx = touch.clientX - drag.x;
+			const axis = resolveGestureAxis({
+				absDx: Math.abs(dx),
+				absDy: Math.abs(touch.clientY - drag.y),
+			});
+			if (!axis) return;
+			// An uncancellable move means a browser scroll owns the touch, unless it
+			// only stopped a fling: pan-y still keeps the browser off the x axis.
 			if (
-				Math.abs(dx) <= Math.abs(dy) * AXIS_RATIO ||
-				!event.cancelable ||
+				axis === "vertical" ||
+				(!event.cancelable && !drag.passive) ||
 				canScrollHorizontally(drag.target, node, dx)
 			) {
-				drag = null;
+				finish(event.timeStamp, false);
 				return;
 			}
 			stop();
@@ -175,28 +239,13 @@ function gestures(node: HTMLElement) {
 			drag.from = position;
 			drag.x = touch.clientX;
 		}
-		event.preventDefault();
+		if (event.cancelable) event.preventDefault();
 		const max = keys.length - 1;
 		let next = drag.from - (touch.clientX - drag.x) / node.clientWidth;
 		if (next < 0) next *= EDGE_RESISTANCE;
 		else if (next > max) next = max + (next - max) * EDGE_RESISTANCE;
 		setPosition(next);
-		drag.samples.push({ t: event.timeStamp, x: touch.clientX });
-		while (event.timeStamp - drag.samples[0].t > VELOCITY_WINDOW_MS)
-			drag.samples.shift();
-	};
-
-	const finish = (timeStamp: number, release: boolean) => {
-		const current = drag;
-		drag = null;
-		if (current?.axis !== "x") return;
-		suppressClickUntil = timeStamp + POINTER_DRAG_CLICK_SUPPRESS_MS;
-		const { target, speed } = release
-			? releaseTarget(current, timeStamp)
-			: { target: clamp(Math.round(position), 0, keys.length - 1), speed: 0 };
-		glide(target, speed, () => {
-			if (target !== index) onChange(target);
-		});
+		addSample(drag.samples, event.timeStamp, touch.clientX);
 	};
 
 	const onEnd = (event: TouchEvent) => {
@@ -210,7 +259,10 @@ function gestures(node: HTMLElement) {
 		event.stopPropagation();
 	};
 
-	untrack(() => onPosition?.(position));
+	untrack(() => {
+		onPosition?.(position, null);
+		warmSoon(index);
+	});
 	node.addEventListener("touchstart", onStart, { passive: true });
 	node.addEventListener("touchmove", onMove, { passive: false });
 	node.addEventListener("touchend", onEnd);
@@ -222,7 +274,10 @@ function gestures(node: HTMLElement) {
 		node.removeEventListener("touchend", onEnd);
 		node.removeEventListener("touchcancel", onEnd);
 		node.removeEventListener("click", onClick, true);
-		animation?.cancel();
+		cancelGlide();
+		drag?.unfollow.abort();
+		drag = null;
+		warmToken += 1;
 	};
 }
 
@@ -237,10 +292,7 @@ $effect(() => {
 		if (drag?.axis !== "x" && target !== position) {
 			const near = Math.abs(target - Math.round(position)) === 1;
 			if (signature === alignedKeys && near) glide(target);
-			else {
-				stop();
-				setPosition(target);
-			}
+			else jump(target);
 		}
 		alignedKeys = signature;
 	});
@@ -251,8 +303,8 @@ $effect(() => {
 	<div bind:this={root} class="pager min-h-0 flex-1" data-drawer-swipe-ignore {@attach gestures}>
 		<div bind:this={track} class="track" style:transform={translate(position)}>
 			{#each keys as key, i (key)}
-				<div class="pane" inert={i !== visible}>
-					{#if i >= start && i <= end}
+				<div class="pane" inert={i !== index}>
+					{#if mounted(i)}
 						{@render page(i, i === index)}
 					{/if}
 				</div>

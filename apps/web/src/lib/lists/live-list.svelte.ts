@@ -6,6 +6,8 @@ import {
 	type LiveFit,
 	mergeFirstPage,
 	placeItem,
+	sameData,
+	shareItems,
 } from "$lib/lists/live-list-core";
 import { syncStatus } from "$lib/sync/sync-status.svelte";
 
@@ -78,6 +80,7 @@ const PERSIST_DELAY_MS = 1_000;
 
 export class LiveList<F, T, E> {
 	readonly #source: LiveListSource<F, T, E>;
+	readonly #emptyView: LiveView<T, E>;
 	#entries = new SvelteMap<string, Entry<F, T, E>>();
 	#inflight = new Map<string, Flight<F, T, E>>();
 	#watchers = new Map<string, { filter: F; count: number }>();
@@ -89,6 +92,13 @@ export class LiveList<F, T, E> {
 
 	constructor(source: LiveListSource<F, T, E>) {
 		this.#source = source;
+		this.#emptyView = Object.freeze({
+			items: Object.freeze([]) as unknown as T[],
+			extra: source.emptyExtra(),
+			loading: true,
+			loadingMore: false,
+			error: null,
+		});
 	}
 
 	start() {
@@ -112,14 +122,7 @@ export class LiveList<F, T, E> {
 
 	view(filter: F): LiveView<T, E> {
 		const entry = this.#entries.get(this.#source.key(filter));
-		if (!entry)
-			return {
-				items: [],
-				extra: this.#source.emptyExtra(),
-				loading: true,
-				loadingMore: false,
-				error: null,
-			};
+		if (!entry) return this.#emptyView;
 		return {
 			items: entry.items,
 			extra: entry.extra,
@@ -206,13 +209,20 @@ export class LiveList<F, T, E> {
 			.then((page) => {
 				if (generation !== this.#generation) return;
 				const current = this.#entries.get(key) ?? this.#blank(filter);
-				let next: Entry<F, T, E> = {
-					...current,
-					items: mergeFirstPage(current.items, page.items, {
+				const items = shareItems(
+					current.items,
+					mergeFirstPage(current.items, page.items, {
 						id: this.#source.id,
 						paged: current.paged,
 					}),
-					extra: this.#source.mergeExtra(current.extra, page.extra),
+					this.#source.id,
+				);
+				const merged = this.#source.mergeExtra(current.extra, page.extra);
+				const extra = sameData(current.extra, merged) ? current.extra : merged;
+				let next: Entry<F, T, E> = {
+					...current,
+					items,
+					extra,
 					hasMore: current.paged ? current.hasMore : page.hasMore,
 					cursor: current.paged ? current.cursor : page.cursor,
 					syncedEpoch: epoch,
@@ -221,7 +231,13 @@ export class LiveList<F, T, E> {
 					error: null,
 				};
 				for (const change of flight.replay) next = change(next);
-				this.#set(key, next, { persist: true, fresh: true });
+				// The first sync also persists live changes applied to a cached snapshot.
+				const changed =
+					current.syncedEpoch === 0 ||
+					next.items !== current.items ||
+					next.extra !== current.extra ||
+					next.hasMore !== current.hasMore;
+				this.#set(key, next, { persist: changed, fresh: true });
 				this.#source.onRows?.(page.items, { authoritative: true, startedAt });
 			})
 			.catch((error: unknown) => {

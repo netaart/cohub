@@ -52,8 +52,10 @@ const isPage = $derived(variant === "page");
 const scoped = $derived(Boolean(filter.space));
 const density = $derived<ListRowDensity>(isPage ? "comfortable" : "compact");
 const isDefaultFilter = $derived(filter.source === "web" && !filter.space);
+const sessions = $derived(view.sessions);
+const forks = $derived(view.forks);
 const rows = $derived.by(() => {
-	const items = buildSessionForkTree(view.sessions, view.forks);
+	const items = buildSessionForkTree(sessions, forks);
 	return items.map((item, index) => ({
 		...item,
 		tree: {
@@ -121,16 +123,16 @@ function onScroll(event: Event) {
 	onscroll={onScroll}
 	use:scrollMemory={{ key: `chats:${variant}:${chatsFilterScope(filter)}`, ready: rows.length > 0 }}
 >
-	{#if view.loading && view.sessions.length === 0}
+	{#if view.loading && sessions.length === 0}
 		<ListRowSkeleton {density} label={m.common_loading({}, { locale })} />
-	{:else if view.error && view.sessions.length === 0}
+	{:else if view.error && sessions.length === 0}
 		<div class="px-3 py-8 text-center">
 			<p class="text-[12px] text-error-soft">{view.error}</p>
 			<button type="button" class="mt-3 text-[12px] text-text-secondary underline underline-offset-2 hover:text-text-primary" onclick={() => void chatsInbox.list.sync(filter)}>
 				{m.common_retry({}, { locale })}
 			</button>
 		</div>
-	{:else if view.sessions.length === 0}
+	{:else if sessions.length === 0}
 		<div class="flex flex-col items-center px-6 py-12 text-center">
 			<p class="text-[13px] font-medium text-text-secondary">
 				{isDefaultFilter ? m.sessions_no_chats({}, { locale }) : m.chats_empty_filtered({}, { locale })}

@@ -34,10 +34,10 @@ const locale = $derived(getLocale());
 const inbox = chatsInbox;
 const filter = $derived(inbox.filter);
 const isPage = $derived(variant === "page");
-const pages = $derived<(UserSessionSpaceSummary | null)[]>([
-	null,
-	...inbox.spaceChips,
-]);
+const chips = $derived(inbox.spaceChips);
+const source = $derived(filter.source);
+const pages = $derived<(UserSessionSpaceSummary | null)[]>([null, ...chips]);
+const pageFilters = $derived(pages.map((space) => ({ source, space })));
 const keys = $derived(pages.map((space) => space?.id ?? ALL_KEY));
 const pageIndex = $derived(
 	Math.max(0, keys.indexOf(filter.space?.id ?? ALL_KEY)),
@@ -54,9 +54,10 @@ function select(index: number) {
 
 $effect(() => {
 	if (!isPage) return;
-	const neighbours = [pages[pageIndex - 1], pages[pageIndex + 1]]
-		.filter((space) => space !== undefined)
-		.map((space) => ({ ...filter, space }));
+	const neighbours = [
+		pageFilters[pageIndex - 1],
+		pageFilters[pageIndex + 1],
+	].filter((neighbour) => neighbour !== undefined);
 	untrack(() => inbox.prewarm(neighbours));
 });
 
@@ -98,6 +99,7 @@ onMount(() => {
 			role="tablist"
 			activeKey={keys[tabs.shown] ?? null}
 			position={tabs.position}
+			glide={tabs.glide}
 		>
 			<FilterChip
 				label={m.chats_space_all({}, { locale })}
@@ -105,7 +107,7 @@ onMount(() => {
 				active={tabs.shown === 0}
 				onclick={() => select(0)}
 			/>
-			{#each inbox.spaceChips as space, index (space.id)}
+			{#each chips as space, index (space.id)}
 				{@const selected = pageIndex === index + 1}
 				<FilterChip
 					label={space.name}
@@ -132,7 +134,7 @@ onMount(() => {
 		onPosition={tabs.track}
 	>
 		{#snippet page(index, active)}
-			{@const pageFilter = { ...filter, space: pages[index] ?? null }}
+			{@const pageFilter = pageFilters[index] ?? filter}
 			<ChatsList
 				bind:this={() => tabs.panes[index], (pane) => (tabs.panes[index] = pane)}
 				view={inbox.viewOf(pageFilter)}

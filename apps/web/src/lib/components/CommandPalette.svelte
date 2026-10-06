@@ -1279,7 +1279,7 @@ onMount(() => {
 				</div>
 
 				{#if showLensBar}
-					<CommandPaletteLensBar lens={activeLens} position={lensPosition} onSelect={selectLens} />
+					<CommandPaletteLensBar lens={activeLens} position={lensPosition} glide={lensTabs.glide} onSelect={selectLens} />
 				{/if}
 
 				{#if !swipeable && isSpacePickerMode && !runMode}

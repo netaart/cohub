@@ -2,6 +2,7 @@
 import type { Snippet } from "svelte";
 import { prefersReducedMotion } from "svelte/motion";
 import { setFilterBarPill } from "$lib/components/list-page/filter-bar";
+import type { PagerGlide } from "$lib/gestures/pager";
 import { EASE_OUT } from "$lib/motion.svelte";
 
 const {
@@ -9,6 +10,7 @@ const {
 	role = "group",
 	activeKey = null,
 	position = null,
+	glide = null,
 	leading,
 	trailing,
 	children,
@@ -17,6 +19,7 @@ const {
 	role?: "group" | "tablist" | "navigation";
 	activeKey?: string | null;
 	position?: number | null;
+	glide?: PagerGlide | null;
 	leading?: Snippet;
 	trailing?: Snippet;
 	children: Snippet;
@@ -25,7 +28,7 @@ const {
 const EDGE_PX = 20;
 const KEEP_IN_VIEW_PX = 24;
 const PIN_LEADING_MIN_PX = 320;
-const PILL_MS = 240;
+const PILL_GLIDE: PagerGlide = { duration: 240, easing: EASE_OUT };
 
 let scroller = $state<HTMLDivElement | null>(null);
 let group = $state<HTMLDivElement | null>(null);
@@ -65,7 +68,11 @@ function revealActive(smooth: boolean) {
 	});
 }
 
-function placePill(value: number, animate: boolean) {
+function settleMotion(value: number) {
+	return Number.isInteger(value) ? PILL_GLIDE : null;
+}
+
+function placePill(value: number, motion: PagerGlide | null) {
 	const chips = group?.querySelectorAll<HTMLElement>("[data-filter-chip]");
 	if (!pill || !chips?.length) return;
 	const clamped = Math.min(Math.max(value, 0), chips.length - 1);
@@ -75,8 +82,8 @@ function placePill(value: number, animate: boolean) {
 	const x = from.offsetLeft + (to.offsetLeft - from.offsetLeft) * t;
 	const width = from.offsetWidth + (to.offsetWidth - from.offsetWidth) * t;
 	pill.style.transition =
-		animate && pillPlaced && !prefersReducedMotion.current
-			? `transform ${PILL_MS}ms ${EASE_OUT}, width ${PILL_MS}ms ${EASE_OUT}`
+		motion && pillPlaced && !prefersReducedMotion.current
+			? `transform ${motion.duration}ms ${motion.easing}, width ${motion.duration}ms ${motion.easing}`
 			: "none";
 	pill.style.top = `${from.offsetTop}px`;
 	pill.style.height = `${from.offsetHeight}px`;
@@ -128,7 +135,7 @@ $effect(() => {
 	const observer = new ResizeObserver(() => {
 		updateEdges();
 		if (!interacted) revealActive(false);
-		if (position !== null) placePill(position, Number.isInteger(position));
+		if (position !== null) placePill(position, settleMotion(position));
 	});
 	observer.observe(el);
 	if (el.firstElementChild) observer.observe(el.firstElementChild);
@@ -137,7 +144,7 @@ $effect(() => {
 
 $effect(() => {
 	if (position === null || !pill) return;
-	placePill(position, Number.isInteger(position));
+	placePill(position, glide ?? settleMotion(position));
 });
 
 $effect(() => {

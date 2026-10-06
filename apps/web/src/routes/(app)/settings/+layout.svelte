@@ -81,6 +81,7 @@ onMount(() => onListScrollTop(() => tabs.scrollToTop()));
 			role="navigation"
 			activeKey={SETTINGS_SECTIONS[tabs.shown] ?? null}
 			position={activeSection ? tabs.position : null}
+			glide={tabs.glide}
 		>
 			{#each SETTINGS_SECTIONS as section, index (section)}
 				<FilterChip
