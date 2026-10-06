@@ -104,7 +104,12 @@ import {
 	removeResourceFromLabel,
 } from "$lib/labels/resource-label-actions";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { APP_AREAS, type AppArea, appAreaHref } from "$lib/mobile-nav";
+import {
+	APP_AREAS,
+	type AppArea,
+	appAreaHref,
+	resolveAppArea,
+} from "$lib/mobile-nav";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import {
@@ -127,6 +132,7 @@ import {
 	settingsSectionHref,
 } from "$lib/settings-nav";
 import {
+	buildSessionsRoute,
 	buildSpaceActivityRoute,
 	buildSpaceAppRoute,
 	buildSpaceCheckpointNewRoute,
@@ -3931,6 +3937,20 @@ $effect(() => {
       >
         <Search class="h-3.5 w-3.5 transition-colors group-hover/search:text-brand" />
       </button>
+      {#if isMobile}
+        <a
+          href={buildSessionsRoute()}
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] transition-colors duration-100 {resolveAppArea(currentPath) === 'chats' ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+          aria-label={appAreaLabel('chats', locale)}
+          title={appAreaLabel('chats', locale)}
+          onclick={(event) => {
+            event.preventDefault();
+            void handleNavigate(buildSessionsRoute());
+          }}
+        >
+          <MessageSquare class="h-3.5 w-3.5" />
+        </a>
+      {/if}
       {#if !isMobile}
         <button
           type="button"
