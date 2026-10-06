@@ -277,10 +277,7 @@ export class SpacesApi {
     return this.transport.request<SpaceListPage>(`/api/spaces${query ? `?${query}` : ""}`, { fetch });
   }
 
-  /**
-   * Where the user should land: their own Home, else their most recent
-   * Space. Use `ensureHome()` for a write target.
-   */
+  /** Landing Space within the user's own Spaces; use `ensureHome()` for a write target. */
   getDefault(customFetch?: Fetch) {
     return this.transport.request<SpaceDefaultResponse>("/api/spaces/default", {
       method: "GET",

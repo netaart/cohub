@@ -14,7 +14,7 @@ import { normalizeGenerationPolicy, type GenerationContentBlock } from "@cohub/p
 import * as cronParser from "cron-parser";
 import { db } from "../../db/index.js";
 import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/postgres-error.js";
-import { spaces, spaceChannels, spaceMembers, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
+import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
 import { useAuth, getOptionalAuth, getAppSessionPrincipal, requireValidId, buildSpaceListItems, authzDenied, getSpacePublicProfile, normalizePublicAvatarUrl } from "../../lib/middleware.js";
 import { config } from "../../config.js";
@@ -393,20 +393,6 @@ const uniqueViolationConstraint = (error: unknown): string | null =>
 
 type SpaceRow = typeof spaces.$inferSelect;
 
-function compareSpaceActivityDesc(left: SpaceRow, right: SpaceRow): number {
-  const leftActivity = left.lastActivityAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  const rightActivity = right.lastActivityAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  if (leftActivity !== rightActivity) return rightActivity - leftActivity;
-
-  const leftCreated = left.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  const rightCreated = right.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  return rightCreated - leftCreated;
-}
-
-function selectMostRecentSpace(candidates: Array<SpaceRow | null | undefined>): SpaceRow | null {
-  return candidates.filter((space): space is SpaceRow => Boolean(space)).sort(compareSpaceActivityDesc)[0] ?? null;
-}
-
 const readSpaceConfig = (space: typeof spaces.$inferSelect) => {
   const meta = isRecord(space.meta) ? space.meta : {};
   const config = isRecord(meta.config) ? meta.config : {};
@@ -604,27 +590,18 @@ async function findOwnedHomeSpace(userUuid: string): Promise<SpaceRow | null> {
   return ownedHome ?? null;
 }
 
-async function findDefaultSpaceCandidate(userUuid: string): Promise<SpaceRow | null> {
-  // Hot path: most accounts already have a home space.
-  const ownedHome = await findOwnedHomeSpace(userUuid);
-  if (ownedHome) return ownedHome;
-
-  const [[ownedRecent], [memberRecent]] = await Promise.all([
-    db
-      .select()
-      .from(spaces)
-      .where(eq(spaces.userUuid, userUuid))
-      .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, desc(spaces.createdAt))
-      .limit(1),
-    db
-      .select({ space: spaces })
-      .from(spaceMembers)
-      .innerJoin(spaces, eq(spaces.id, spaceMembers.spaceId))
-      .where(eq(spaceMembers.userId, userUuid))
-      .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, desc(spaces.createdAt))
-      .limit(1),
-  ]);
-  return selectMostRecentSpace([ownedRecent, memberRecent?.space]);
+async function findLandingSpace(userUuid: string): Promise<SpaceRow | null> {
+  const [space] = await db
+    .select()
+    .from(spaces)
+    .where(eq(spaces.userUuid, userUuid))
+    .orderBy(
+      sql`(${spaces.slug} = ${HOME_SPACE_SLUG}) desc nulls last`,
+      sql`${spaces.lastActivityAt} desc nulls last`,
+      desc(spaces.createdAt),
+    )
+    .limit(1);
+  return space ?? null;
 }
 
 type PreparedHomeMods = Awaited<ReturnType<typeof prepareSpaceModInserts>>;
@@ -683,12 +660,14 @@ const isHomeUniqueConflict = (error: unknown) => {
   return Boolean(constraint?.includes("user_slug") || constraint?.includes("user_name"));
 };
 
+type EnsuredHome = { space: SpaceRow; created: boolean };
+
 /** Returns null when another owned Space already uses the Home name. */
-async function ensureHomeSpace(
+async function createHomeSpace(
   c: Context,
   user: AuthUser,
   provenance: HomeEnsureProvenance,
-): Promise<{ space: SpaceRow; created: boolean } | null> {
+): Promise<EnsuredHome | null> {
   const bootstrapSource = resolveHomeBootstrap();
   const meta = homeEnsureMeta(c, provenance);
   const createMods = getDefaultSpaceModsForEnv(config.env);
@@ -747,6 +726,25 @@ async function ensureHomeSpace(
   });
   await dispatchSpaceListChanged(provisioned.space.id);
   return { space: provisioned.space, created: true };
+}
+
+async function ensureHomeSpace(
+  c: Context,
+  user: AuthUser,
+  provenance: HomeEnsureProvenance,
+): Promise<EnsuredHome | Response> {
+  if (!(await hasPermission(user, "space.create", { spaceId: "" }))) return authzDenied(c);
+  let ensured: EnsuredHome | null;
+  try {
+    ensured = await createHomeSpace(c, user, provenance);
+  } catch (error) {
+    if (error instanceof LogtoUserRequiredError) return c.json({ message: error.message }, 403);
+    throw error;
+  }
+  return ensured ?? c.json({
+    code: "home_space_name_taken",
+    message: `Another Space is named ${HOME_SPACE_NAME}. Set its slug to ${HOME_SPACE_SLUG} to make it your Home Space.`,
+  }, 409);
 }
 
 router.get("/", async (c) => {
@@ -870,11 +868,12 @@ router.get("/default", async (c) => {
   const identity = asAccountIdentity(user);
   if (!identity) return authzDenied(c);
 
-  const space = (await findDefaultSpaceCandidate(identity.uuid))
-    ?? (await ensureHomeSpace(c, user, { source: "default_ensure" }))?.space
-    ?? null;
+  const landing = await findLandingSpace(identity.uuid);
+  if (landing) return c.json({ space: await buildSpaceResponse(c, landing, user) });
 
-  return c.json({ space: space ? await buildSpaceResponse(c, space, user) : null });
+  const ensured = await ensureHomeSpace(c, user, { source: "default_ensure" });
+  if (ensured instanceof Response) return ensured;
+  return c.json({ space: await buildSpaceResponse(c, ensured.space, user) });
 });
 
 // ── POST /api/spaces ─────────────────────────────────────────────────────────
@@ -1290,22 +1289,10 @@ meSpacesRouter.post("/spaces/home", async (c) => {
   const home = await findOwnedHomeSpace(identity.uuid);
   if (home) return c.json(await buildSpaceResponse(c, home, user));
 
-  if (!(await hasPermission(user, "space.create", { spaceId: "" }))) return authzDenied(c);
   const body = await c.req.json<{ appId?: unknown }>().catch(() => null);
   const appId = typeof body?.appId === "string" && requireValidId(body.appId) ? body.appId : null;
-  let ensured: Awaited<ReturnType<typeof ensureHomeSpace>>;
-  try {
-    ensured = await ensureHomeSpace(c, user, { source: "home_ensure", appId });
-  } catch (error) {
-    if (error instanceof LogtoUserRequiredError) return c.json({ message: error.message }, 403);
-    throw error;
-  }
-  if (!ensured) {
-    return c.json({
-      code: "home_space_name_taken",
-      message: `Another Space is named ${HOME_SPACE_NAME}. Set its slug to ${HOME_SPACE_SLUG} to make it your Home Space.`,
-    }, 409);
-  }
+  const ensured = await ensureHomeSpace(c, user, { source: "home_ensure", appId });
+  if (ensured instanceof Response) return ensured;
   return c.json(await buildSpaceResponse(c, ensured.space, user), ensured.created ? 201 : 200);
 });
 
