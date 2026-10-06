@@ -10,6 +10,10 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.view.HapticFeedbackConstants
+import android.webkit.URLUtil
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient.FileChooserParams
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -21,6 +25,7 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.edit
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.net.toUri
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -31,11 +36,14 @@ import kotlinx.coroutines.sync.withLock
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.auth.AuthorizationRequest
 import live.cohub.android.auth.Pkce
+import live.cohub.android.files.FileChooser
 import live.cohub.android.host.CancellationSignal
 import live.cohub.android.host.HostActions
 import live.cohub.android.host.HostBridge
 import live.cohub.android.host.HostProtocol
 import live.cohub.android.host.LastPage
+import live.cohub.android.host.LauncherShortcuts
+import live.cohub.android.host.SurfaceListener
 import live.cohub.android.host.WebOrigin
 import live.cohub.android.host.WebSurface
 import live.cohub.android.runtime.DeviceRuntime
@@ -51,17 +59,51 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var bridge: HostBridge
     private lateinit var lastPage: LastPage
     private lateinit var container: SurfaceContainer
-    private lateinit var surface: WebSurface
     private lateinit var appearance: ShellAppearance
+    private lateinit var fileChooser: FileChooser
     private lateinit var customTabs: ActivityResultLauncher<Intent>
     private lateinit var allFilesAccess: ActivityResultLauncher<Intent>
     private lateinit var notificationPermission: ActivityResultLauncher<String>
+    private val app get() = application as CohubApplication
     private val hostPrefs by lazy { getSharedPreferences("cohub-host", MODE_PRIVATE) }
     private var pendingResult: CompletableDeferred<Unit>? = null
     private val preparing = Mutex()
 
-    private val back = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() = surface.goBack()
+    private var surface: WebSurface? = null
+    private var startPath = "/"
+
+    private var launched = false
+    private var reportedDrawn = false
+
+    private val historyBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            surface?.goBack()
+        }
+    }
+
+    private val layerBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = bridge.emit(HostProtocol.Events.NAVIGATION_BACK)
+    }
+
+    private val surfaceListener = object : SurfaceListener {
+        override fun onExternalLink(url: Uri) = openExternally(url)
+
+        override fun onPageStarted() {
+            layerBack.isEnabled = false
+        }
+
+        override fun onNavigated(url: String) {
+            historyBack.isEnabled = surface?.canGoBack() == true
+            lastPage.remember(url)
+        }
+
+        override fun onRenderProcessGone() = remountSurface()
+
+        override fun onShowFileChooser(callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean =
+            fileChooser.show(callback, params)
+
+        override fun onDownload(url: String, contentDisposition: String?, mimeType: String?) =
+            download(url, contentDisposition, mimeType)
     }
 
     /**
@@ -78,11 +120,16 @@ class MainActivity : ComponentActivity(), HostActions {
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen().apply {
+            setKeepOnScreenCondition { !launched }
+            setOnExitAnimationListener { splash ->
+                splash.view.animate().alpha(0f).setDuration(SPLASH_FADE_MS).withEndAction(splash::remove).start()
+            }
+        }
         super.onCreate(savedInstanceState)
         appearance = ShellAppearance(this)
         applyAppearance()
 
-        val app = application as CohubApplication
         auth = app.auth
         runtime = app.runtime
         lastPage = app.lastPage
@@ -91,7 +138,9 @@ class MainActivity : ComponentActivity(), HostActions {
             auth = auth,
             actions = this,
             runtime = runtime.takeIf { it.available },
+            files = app.files,
         )
+        fileChooser = FileChooser(this)
 
         // The authorization result returns as a redirect intent, not an activity
         // result; this launcher only opens the browser.
@@ -109,62 +158,71 @@ class MainActivity : ComponentActivity(), HostActions {
             }
         }
 
-        onBackPressedDispatcher.addCallback(this, back)
+        onBackPressedDispatcher.addCallback(this, historyBack)
+        onBackPressedDispatcher.addCallback(this, layerBack)
         container = SurfaceContainer(this)
         setContentView(container)
+        container.postDelayed(::lift, LAUNCH_TIMEOUT_MS)
         // Recents replays the launching intent after a process death.
         val link = intent?.data?.takeIf {
             savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
         }
-        mountSurface(link?.takeUnless(::isSignInRedirect)?.let(WebOrigin::pathOf) ?: lastPage.read() ?: "/")
+        startPath = link?.takeUnless(::isSignInRedirect)?.let(WebOrigin::pathOf) ?: lastPage.read() ?: "/"
+        WebSurface.startUp(this) { if (!isDestroyed) mountSurface(startPath) }
         link?.takeIf(::isSignInRedirect)?.let(::handleSignInRedirect)
     }
 
     override fun onDestroy() {
         container.removeAllViews()
-        surface.destroy()
+        surface?.destroy()
         super.onDestroy()
     }
 
     private fun mountSurface(path: String) {
-        surface = WebSurface(
-            context = this,
-            onExternalLink = ::openExternally,
-            onNavigated = ::onNavigated,
-            onRenderProcessGone = ::remountSurface,
-        )
-        surface.setBackgroundColor(appearance.backgroundColor)
+        val next = WebSurface(this, surfaceListener)
+        next.setBackgroundColor(appearance.backgroundColor)
         // Without the bridge the surface still runs on its browser path; this
         // only explains missing features.
-        if (!bridge.attach(surface.view, WebOrigin.uri)) {
+        if (!bridge.attach(next.view, WebOrigin.uri)) {
             Toast.makeText(this, R.string.bridge_unavailable, Toast.LENGTH_LONG).show()
         }
-        container.show(surface.view)
-        surface.load(path)
+        container.show(next.view)
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) next.pause()
+        surface = next
+        next.load(path)
     }
 
     private fun remountSurface() {
-        val dead = surface
+        val dead = surface ?: return
+        surface = null
         container.removeView(dead.view)
         dead.destroy()
-        back.isEnabled = false
+        historyBack.isEnabled = false
+        layerBack.isEnabled = false
         mountSurface(lastPage.read() ?: "/")
     }
 
-    private fun onNavigated(url: String) {
-        back.isEnabled = surface.canGoBack()
-        lastPage.remember(url)
+    private fun navigate(path: String) {
+        surface?.load(path) ?: run { startPath = path }
     }
 
     override fun onStart() {
         super.onStart()
         runtime.resume()
+        surface?.resume()
+        bridge.emit(HostProtocol.Events.APP_FOREGROUND)
+    }
+
+    override fun onStop() {
+        surface?.pause()
+        bridge.emit(HostProtocol.Events.APP_BACKGROUND)
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val data = intent.data ?: return
-        if (isSignInRedirect(data)) handleSignInRedirect(data) else WebOrigin.pathOf(data)?.let(surface::load)
+        if (isSignInRedirect(data)) handleSignInRedirect(data) else WebOrigin.pathOf(data)?.let(::navigate)
     }
 
     override fun hostId(): String = installId()
@@ -208,7 +266,7 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun openPath(path: String) {
         if (path.startsWith("/")) {
-            surface.load(path)
+            navigate(path)
             return
         }
         openExternally(path.toUri())
@@ -222,7 +280,49 @@ class MainActivity : ComponentActivity(), HostActions {
     override fun setAppearance(backgroundColor: Int) {
         if (!appearance.update(backgroundColor)) return
         applyAppearance()
-        surface.setBackgroundColor(backgroundColor)
+        surface?.setBackgroundColor(backgroundColor)
+    }
+
+    override fun appReady() {
+        lift()
+        if (reportedDrawn) return
+        reportedDrawn = true
+        reportFullyDrawn()
+    }
+
+    private fun lift() {
+        launched = true
+    }
+
+    override fun performHaptic(kind: HostProtocol.Haptic): Boolean {
+        val view = surface?.view ?: return false
+        val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        val feedback = when (kind) {
+            HostProtocol.Haptic.TICK -> HapticFeedbackConstants.CLOCK_TICK
+            HostProtocol.Haptic.CONFIRM -> if (modern) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+            HostProtocol.Haptic.REJECT -> if (modern) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
+            HostProtocol.Haptic.LONG_PRESS -> HapticFeedbackConstants.LONG_PRESS
+        }
+        return view.performHapticFeedback(feedback)
+    }
+
+    override fun interceptBack(enabled: Boolean) {
+        layerBack.isEnabled = enabled
+    }
+
+    override fun pushShortcut(id: String, label: String, path: String) {
+        LauncherShortcuts.push(this, id, label, path)
+    }
+
+    private fun download(url: String, contentDisposition: String?, mimeType: String?) {
+        val uri = url.toUri()
+        val saver = app.files
+        when {
+            saver != null && uri.scheme == "https" ->
+                saver.saveUrl(url, URLUtil.guessFileName(url, contentDisposition, mimeType), mimeType)
+            uri.scheme == "https" || uri.scheme == "http" -> openExternally(uri)
+            else -> toast(R.string.file_save_failed)
+        }
     }
 
     private fun applyAppearance() {
@@ -286,7 +386,7 @@ class MainActivity : ComponentActivity(), HostActions {
                     Log.w(TAG, "Sign-in failed", it)
                     toast(R.string.sign_in_failed)
                 }
-            surface.load(pending.redirectPath ?: "/")
+            navigate(pending.redirectPath ?: "/")
         }
     }
 
@@ -309,5 +409,8 @@ class MainActivity : ComponentActivity(), HostActions {
         const val TAG = "CohubShell"
         const val KEY_INSTALL_ID = "install_id"
         const val KEY_FORCE_LOGIN = "force_login"
+
+        const val LAUNCH_TIMEOUT_MS = 2_500L
+        const val SPLASH_FADE_MS = 180L
     }
 }

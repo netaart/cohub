@@ -34,6 +34,8 @@ import {
 	shouldStartDrawerGesture,
 	shouldStartRightDrawerGesture,
 } from "$lib/gestures/drawer-swipe";
+import { markHostReady } from "$lib/host-bridge";
+import { installHostDownloads } from "$lib/host-files";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
@@ -571,8 +573,11 @@ onMount(() => {
 	let stopDesktopCommands: (() => void) | null = null;
 	const stopViewportOffsetGuard = installViewportOffsetGuard();
 
+	const stopHostDownloads = installHostDownloads();
+
 	void authStore.ensureLoaded().finally(() => {
 		authReady = true;
+		markHostReady();
 		scheduleCacheCleanup();
 		if (authStore.isAuthenticated) {
 			turnNotifications.start();
@@ -584,15 +589,16 @@ onMount(() => {
 
 	// Register PWA Service Worker (conservative update: closes all tabs to activate)
 	if ("serviceWorker" in navigator) {
-		window.addEventListener("load", () => {
-			void navigator.serviceWorker.register("/sw.js");
-		});
+		const register = () => void navigator.serviceWorker.register("/sw.js");
+		if (document.readyState === "complete") register();
+		else window.addEventListener("load", register, { once: true });
 	}
 
 	return () => {
 		delete window.cohubDisableVConsole;
 		delete window.cohubEnableVConsole;
 		stopDesktopCommands?.();
+		stopHostDownloads();
 		stopViewportOffsetGuard();
 		turnNotifications.stop();
 		vConsoleRequestId += 1;

@@ -9,17 +9,21 @@ above it costs frames. All cross-boundary traffic uses the versioned
 
 ```
 app/src/main/kotlin/live/cohub/android/
-  CohubApplication.kt        process-wide AuthSession and DeviceRuntime
-  MainActivity.kt            activity host, edge-to-edge, deep links, back
+  CohubApplication.kt        process-wide AuthSession, DeviceRuntime, HTTP client
+  MainActivity.kt            activity host, launch screen, deep links, back
   host/
     HostProtocol.kt          wire constants (mirrors packages/protocol)
     HostCapabilities.kt      what this build advertises
     HostBridge.kt            request dispatch, events, capability handshake
-    WebSurface.kt            the WebView island
+    WebSurface.kt            the WebView island, async start-up, preconnect
     WebOrigin.kt             the one origin that loads in-shell
     LastPage.kt              the page a cold start reopens
+    LauncherShortcuts.kt     long-press shortcuts into recent Spaces
     CohubWebViewClient.kt    navigation policy, history, renderer-crash recovery
-    CohubWebChromeClient.kt  page console → logcat (web debugging builds)
+    CohubWebChromeClient.kt  file inputs, page console → logcat (debug builds)
+  files/
+    FileChooser.kt           <input type="file"> → Photo Picker / documents
+    FileSaver.kt             downloads → MediaStore, no storage permission
   auth/
     AuthSession.kt           single-flight refresh, persists every rotation
     CredentialStore.kt       EncryptedSharedPreferences persistence
@@ -54,7 +58,11 @@ inspectable at `chrome://inspect` and mirror the page console, uncaught errors
 included, to `adb logcat -s CohubWeb`.
 
 A cold start opens a shared link if there is one, otherwise the last in-app page
-(`LastPage`, cleared on sign-out), otherwise `/`.
+(`LastPage`, cleared on sign-out), otherwise `/`. Start-up overlaps its slow
+parts: the WebView provider loads on a background thread
+(`WebViewCompat.startUpWebView`) while credentials decrypt on another, the API
+origin is preconnected, and the launch screen stays until the page reports its
+first screen (see the bridge doc's Launch section).
 
 `-PcohubEnv=dev|prod` (default prod) selects origins and the Logto native app;
 single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohubGatewayOrigin`,

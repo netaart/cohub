@@ -16,7 +16,11 @@ import LandingSandboxSpec from "$lib/components/landing/LandingSandboxSpec.svelt
 import LandingSection from "$lib/components/landing/LandingSection.svelte";
 import LandingTerminal from "$lib/components/landing/LandingTerminal.svelte";
 import PublicHeader from "$lib/components/PublicHeader.svelte";
-import { hostOwnsCredentials, readyHost } from "$lib/host-bridge";
+import {
+	hostOwnsCredentials,
+	markHostReady,
+	readyHost,
+} from "$lib/host-bridge";
 import {
 	type PublicLocale,
 	resolvePublicLocale,
@@ -57,6 +61,7 @@ const seoDescription = $derived(m.landing_seo_description({}, { locale }));
 function clearHomeRedirectAttr() {
 	if (!browser) return;
 	document.documentElement.removeAttribute("data-home-redirect");
+	markHostReady();
 }
 
 async function handlePrimaryCta() {
@@ -128,7 +133,7 @@ onMount(() => {
 	})();
 
 	return () => {
-		clearHomeRedirectAttr();
+		document.documentElement.removeAttribute("data-home-redirect");
 		// Restore the visitor's own theme when leaving marketing.
 		document.documentElement.setAttribute("data-theme", getResolvedTheme());
 	};

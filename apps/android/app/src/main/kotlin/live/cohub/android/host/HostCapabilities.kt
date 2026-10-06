@@ -16,6 +16,11 @@ object HostCapabilities {
     const val CACHE = "cache"
     const val RUNTIME = "runtime"
     const val APPEARANCE = "appearance"
+    const val LAUNCH = "launch"
+    const val HAPTICS = "haptics"
+    const val FILES = "files"
+    const val NAVIGATION_BACK = "navigation.back"
+    const val SHORTCUTS = "shortcuts"
 
     private val always: List<String> = listOf(
         AUTH_TOKEN,
@@ -25,7 +30,12 @@ object HostCapabilities {
         NAVIGATION,
         CACHE,
         APPEARANCE,
+        LAUNCH,
+        HAPTICS,
+        NAVIGATION_BACK,
+        SHORTCUTS,
     )
 
-    fun advertised(runtime: Boolean): List<String> = if (runtime) always + RUNTIME else always
+    fun advertised(runtime: Boolean, files: Boolean): List<String> =
+        always + listOfNotNull(RUNTIME.takeIf { runtime }, FILES.takeIf { files })
 }

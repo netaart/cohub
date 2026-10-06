@@ -1,4 +1,5 @@
 <script lang="ts">
+import { dismissOnBack } from "$lib/back-layers.svelte";
 import Sidebar from "$lib/components/Sidebar.svelte";
 import {
 	getDrawerOpenRatio,
@@ -56,6 +57,8 @@ const backdropStyle = $derived.by(() => {
 function closeDrawer() {
 	uiState.mobileDrawerOpen = false;
 }
+
+dismissOnBack(() => uiState.mobileDrawerOpen, closeDrawer);
 
 let renderContent = $state(false);
 

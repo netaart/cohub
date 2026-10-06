@@ -25,6 +25,23 @@ object HostProtocol {
         const val RUNTIME_START = "runtime.start"
         const val RUNTIME_STOP = "runtime.stop"
         const val APPEARANCE_SET = "appearance.set"
+        const val APP_READY = "app.ready"
+        const val HAPTICS_PERFORM = "haptics.perform"
+        const val FILES_SAVE = "files.save"
+        const val NAVIGATION_INTERCEPT_BACK = "navigation.interceptBack"
+        const val SHORTCUTS_PUSH = "shortcuts.push"
+    }
+
+    enum class Haptic(val wire: String) {
+        TICK("tick"),
+        CONFIRM("confirm"),
+        REJECT("reject"),
+        LONG_PRESS("longPress"),
+        ;
+
+        companion object {
+            fun of(wire: String?): Haptic? = entries.firstOrNull { it.wire == wire }
+        }
     }
 
     object Errors {

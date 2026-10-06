@@ -1,11 +1,20 @@
 package live.cohub.android.host
 
+import android.net.Uri
 import android.util.Log
 import android.webkit.ConsoleMessage
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebView
 import live.cohub.android.BuildConfig
 
-class CohubWebChromeClient : WebChromeClient() {
+class CohubWebChromeClient(private val listener: SurfaceListener) : WebChromeClient() {
+
+    override fun onShowFileChooser(
+        webView: WebView,
+        filePathCallback: ValueCallback<Array<Uri>>,
+        fileChooserParams: FileChooserParams,
+    ): Boolean = listener.onShowFileChooser(filePathCallback, fileChooserParams)
 
     override fun onConsoleMessage(message: ConsoleMessage): Boolean {
         if (!BuildConfig.WEB_DEBUGGING) return false

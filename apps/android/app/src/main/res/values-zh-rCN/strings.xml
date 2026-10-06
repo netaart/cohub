@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sign_in_failed">登录未完成，请重试。</string>
+    <string name="no_app_for_link">没有可以打开此链接的应用。</string>
+    <string name="bridge_unavailable">此设备的 WebView 版本过旧，原生功能不可用。</string>
+    <string name="web_view_recovering">页面崩溃了，正在重新加载。</string>
+    <string name="file_saved">已保存到 %1$s</string>
+    <string name="file_save_failed">文件保存失败。</string>
+    <string name="runtime_channel">本地 Runtime</string>
+    <string name="runtime_title">Cohub 已连接到此设备</string>
+    <plurals name="runtime_ready">
+        <item quantity="other">Agent 可以在 %d 个文件夹中工作。</item>
+    </plurals>
+    <string name="runtime_connecting">正在连接…</string>
+    <string name="runtime_disconnect">全部断开</string>
+</resources>

@@ -26,7 +26,6 @@ import live.cohub.android.BuildConfig
 import live.cohub.android.CohubApplication
 import live.cohub.android.MainActivity
 import live.cohub.android.R
-import okhttp3.OkHttpClient
 import java.io.File
 import java.util.UUID
 
@@ -114,7 +113,7 @@ class RuntimeService : Service() {
             }
         }
         val connection = RuntimeConnection(
-            client = http,
+            client = app.http,
             url = "${BuildConfig.GATEWAY_ORIGIN}/runtime/relay",
             spaceId = spaceId,
             runtimeId = runtimeId,
@@ -183,7 +182,6 @@ class RuntimeService : Service() {
     }
 
     private companion object {
-        val http by lazy { OkHttpClient() }
         const val CHANNEL_ID = "runtime"
         const val NOTIFICATION_ID = 1
         const val ACTION_STOP_ALL = "live.cohub.android.runtime.STOP_ALL"

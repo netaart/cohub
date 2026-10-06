@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { canShare, share } from "$lib/share";
 
 const locale = $derived(getLocale());
 
@@ -43,10 +44,6 @@ const inviterAmount = $derived(
 		: "",
 );
 
-const canShare = $derived(
-	typeof navigator !== "undefined" && typeof navigator.share === "function",
-);
-
 async function loadReferrals() {
 	loading = true;
 	loadError = "";
@@ -79,20 +76,18 @@ async function copyLink() {
 
 async function shareLink() {
 	if (!dashboard || !referralUrl) return;
-	if (!canShare) {
+	if (!canShare()) {
 		await copyLink();
 		return;
 	}
 	try {
-		await navigator.share({
+		await share({
 			title: m.referral_try_title({}, { locale }),
 			text: m.referral_share_text({ amount: inviteeAmount }, { locale }),
 			url: referralUrl,
 		});
-	} catch (error) {
-		if ((error as { name?: string }).name !== "AbortError") {
-			copyError = m.referral_share_error({}, { locale });
-		}
+	} catch {
+		copyError = m.referral_share_error({}, { locale });
 	}
 }
 

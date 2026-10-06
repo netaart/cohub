@@ -91,6 +91,7 @@ import {
 	toBoardDropItems,
 } from "$lib/drag/pointer-drag-core";
 import { withCurrentWindow } from "$lib/features/space/modules/window-route";
+import { haptic } from "$lib/haptics";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
@@ -973,12 +974,6 @@ function publishPointerPresence(event: PointerEvent) {
 	});
 }
 
-function vibrate(pattern: number) {
-	try {
-		navigator.vibrate?.(pattern);
-	} catch {}
-}
-
 const LONG_PRESS_MS = 480;
 const LONG_PRESS_SLOP = 10;
 let longPressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1002,7 +997,7 @@ function scheduleLongPress(event: PointerEvent, input: BoardPointerEvent) {
 		try {
 			host?.releasePointerCapture(event.pointerId);
 		} catch {}
-		vibrate(12);
+		haptic("longPress");
 		onLongPress?.({ x: event.clientX, y: event.clientY });
 	}, LONG_PRESS_MS);
 }

@@ -3,22 +3,40 @@ package live.cohub.android.host
 import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
+import android.util.Log
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient.FileChooserParams
 import android.webkit.WebSettings
 import android.webkit.WebView
+import androidx.annotation.OptIn
+import androidx.core.content.ContextCompat
+import androidx.webkit.Profile
+import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import androidx.webkit.WebViewOutcomeReceiver
+import androidx.webkit.WebViewStartUpConfig
+import androidx.webkit.WebViewStartUpResult
+import androidx.webkit.WebViewStartupException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
 import live.cohub.android.BuildConfig
+
+interface SurfaceListener {
+    fun onExternalLink(url: Uri)
+    fun onPageStarted()
+    fun onNavigated(url: String)
+    fun onRenderProcessGone()
+    fun onShowFileChooser(callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean
+    fun onDownload(url: String, contentDisposition: String?, mimeType: String?)
+}
 
 /**
  * The WebView island, reused for the activity's lifetime: recreating it would
  * discard the web app's state and force a cold start on every tap.
  */
 @SuppressLint("SetJavaScriptEnabled")
-class WebSurface(
-    context: Context,
-    onExternalLink: (Uri) -> Unit,
-    onNavigated: (url: String) -> Unit,
-    onRenderProcessGone: () -> Unit,
-) {
+class WebSurface(context: Context, listener: SurfaceListener) {
     val view = WebView(context)
 
     init {
@@ -32,8 +50,12 @@ class WebSurface(
             displayZoomControls = false
         }
         if (BuildConfig.WEB_DEBUGGING) WebView.setWebContentsDebuggingEnabled(true)
-        view.webViewClient = CohubWebViewClient(onExternalLink, onNavigated, onRenderProcessGone)
-        view.webChromeClient = CohubWebChromeClient()
+        view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+        view.webViewClient = CohubWebViewClient(listener)
+        view.webChromeClient = CohubWebChromeClient(listener)
+        view.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+            listener.onDownload(url, contentDisposition, mimeType)
+        }
     }
 
     fun load(path: String = "/") {
@@ -50,12 +72,22 @@ class WebSurface(
         view.goBack()
     }
 
+    fun pause() {
+        view.onPause()
+    }
+
+    fun resume() {
+        view.onResume()
+    }
+
     /** A dead renderer cannot be reused; callers must build a new surface. */
     fun destroy() {
         view.destroy()
     }
 
     companion object {
+        private const val TAG = "CohubShell"
+
         // Chromium misreports safe-area insets before M140.
         private const val SAFE_AREA_MIN_VERSION = 140
 
@@ -63,6 +95,34 @@ class WebSurface(
             val major = WebViewCompat.getCurrentWebViewPackage(context)
                 ?.versionName?.substringBefore('.')?.toIntOrNull() ?: return false
             return major >= SAFE_AREA_MIN_VERSION
+        }
+
+        @OptIn(markerClass = [WebViewCompat.ExperimentalAsyncStartUp::class])
+        fun startUp(context: Context, onReady: () -> Unit) {
+            val main = ContextCompat.getMainExecutor(context)
+            val config = WebViewStartUpConfig.Builder(Dispatchers.IO.asExecutor()).build()
+            WebViewCompat.startUpWebView(
+                context,
+                config,
+                object : WebViewOutcomeReceiver<WebViewStartUpResult, WebViewStartupException> {
+                    override fun onResult(result: WebViewStartUpResult) = main.execute {
+                        preconnect()
+                        onReady()
+                    }
+
+                    override fun onError(error: WebViewStartupException) = main.execute {
+                        Log.w(TAG, "Async WebView start-up failed", error)
+                        onReady()
+                    }
+                },
+            )
+        }
+
+        @OptIn(markerClass = [Profile.ExperimentalPreconnect::class])
+        private fun preconnect() {
+            if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return
+            val profile = ProfileStore.getInstance().getOrCreateProfile(Profile.DEFAULT_PROFILE_NAME)
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.PRECONNECT)) profile.preconnect(BuildConfig.API_ORIGIN)
         }
     }
 }

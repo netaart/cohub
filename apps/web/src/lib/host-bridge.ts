@@ -2,6 +2,7 @@ import type {
 	HostBridgeCapability,
 	HostBridgeEvent,
 	HostBridgeMethod,
+	HostShortcut,
 } from "@cohub/protocol/host-bridge";
 import {
 	createHostBridge,
@@ -97,6 +98,42 @@ export function syncHostAppearance(backgroundColor: string) {
 		appliedAppearance = backgroundColor;
 		callHost("appearance.set", { backgroundColor }).catch(() => {
 			if (appliedAppearance === backgroundColor) appliedAppearance = null;
+		});
+	});
+}
+
+let readyReported = false;
+
+/** Lets the host lift its launch screen once the first screen has painted. */
+export function markHostReady() {
+	if (readyReported || typeof window === "undefined") return;
+	readyReported = true;
+	requestAnimationFrame(() =>
+		requestAnimationFrame(() => {
+			void readyHost().then(() => {
+				if (!supportsHostCapability("launch")) return;
+				callHost("app.ready").catch(() => {});
+			});
+		}),
+	);
+}
+
+let lastShortcut: string | null = null;
+
+const SHORTCUT_LABEL_MAX = 64;
+
+export function pushHostShortcut({ label, ...rest }: HostShortcut) {
+	const cut = label
+		.slice(0, SHORTCUT_LABEL_MAX)
+		.replace(/[\uD800-\uDBFF]$/, "");
+	const shortcut = { ...rest, label: cut };
+	const key = JSON.stringify(shortcut);
+	if (key === lastShortcut) return;
+	lastShortcut = key;
+	void readyHost().then(() => {
+		if (!supportsHostCapability("shortcuts")) return;
+		callHost("shortcuts.push", shortcut).catch(() => {
+			if (lastShortcut === key) lastShortcut = null;
 		});
 	});
 }
