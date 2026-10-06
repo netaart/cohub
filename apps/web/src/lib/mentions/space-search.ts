@@ -42,7 +42,6 @@ function remoteSearchToSuggestion(
 		...item,
 		excerpt: item.excerpt ?? null,
 		spaceName: item.spaceName ?? null,
-		sessionTitle: item.sessionTitle ?? null,
 		viewerRelation: item.viewerRelation ?? null,
 		viewerTier: item.effectiveTier ?? undefined,
 		source: "remote",

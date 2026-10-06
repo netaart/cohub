@@ -1,12 +1,5 @@
 <script lang="ts">
-import {
-	FolderKanban,
-	MessageSquare,
-	Pin,
-	Plus,
-	Tag,
-	TerminalSquare,
-} from "lucide-svelte";
+import { FolderKanban, MessageSquare, Pin, Plus, Tag } from "lucide-svelte";
 import { settingsCommandSection } from "$lib/command-palette/commands";
 import type { CommandPaletteItem } from "$lib/command-palette/types";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
@@ -14,6 +7,7 @@ import { SETTINGS_SECTION_ICONS } from "$lib/components/settings-section";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import HighlightedText from "./HighlightedText.svelte";
 
 const {
 	item,
@@ -34,8 +28,7 @@ const {
 const locale = $derived(getLocale());
 
 const TYPE_META = {
-	turn: { className: "turn", icon: MessageSquare },
-	session: { className: "session", icon: TerminalSquare },
+	chat: { className: "chat", icon: MessageSquare },
 	label: { className: "label", icon: Tag },
 	command: { className: "command", icon: Plus },
 	space: { className: "space", icon: FolderKanban },
@@ -51,6 +44,14 @@ const profile = $derived(
 		? item.ownerProfile
 		: null,
 );
+const showsSpaceAvatar = $derived(
+	item.type === "space" || item.type === "chat",
+);
+const title = $derived(
+	item.type === "chat" && !item.title
+		? m.sidebar_new_chat({}, { locale })
+		: item.title,
+);
 const context = $derived.by(() => {
 	if (item.type === "command")
 		return item.excerpt ?? m.command_ctx_command({}, { locale });
@@ -58,10 +59,11 @@ const context = $derived.by(() => {
 		return item.excerpt ?? m.command_ctx_space({}, { locale });
 	if (item.type === "label")
 		return `${m.command_ctx_label({ label: item.labelRef ?? item.labelName ?? "Label" }, { locale })}${item.spaceName ? ` · ${item.spaceName}` : ""}`;
-	if (item.type === "session")
-		return item.spaceName ?? m.command_ctx_session({}, { locale });
-	return `${item.spaceName ?? "Space"}${item.sessionTitle ? ` / ${item.sessionTitle}` : ""} · ${m.command_ctx_turn({ n: item.sequence ?? "?" }, { locale })}`;
+	return item.spaceName ?? m.command_ctx_space({}, { locale });
 });
+const matchCount = $derived(
+	item.type === "chat" && (item.matchCount ?? 0) > 1 ? item.matchCount : null,
+);
 const timestamp = $derived.by(() => {
 	if (!item.updatedAt) return null;
 	const date = new Date(item.updatedAt);
@@ -97,8 +99,8 @@ const timestamp = $derived.by(() => {
 	tabindex="-1"
 >
 	<button type="button" class="command-result-main" onclick={onActivate}>
-		{#if item.type === "space"}
-			<SpaceAvatar name={item.title || item.spaceName || item.spaceId} profile={item.spaceProfile} size="sm" />
+		{#if showsSpaceAvatar}
+			<SpaceAvatar name={item.spaceName || item.title || item.spaceId} profile={item.spaceProfile} size="sm" />
 		{:else}
 			<div class={`command-type-mark ${meta.className}`} aria-label={item.type}>
 				<Icon class="h-3.5 w-3.5" />
@@ -106,7 +108,10 @@ const timestamp = $derived.by(() => {
 		{/if}
 		<div class="min-w-0 flex-1 text-left">
 			<div class="flex min-w-0 items-center gap-2">
-				<span class="truncate text-[13px] font-medium text-text-primary">{item.title}</span>
+				<span class="truncate text-[13px] font-medium text-text-primary" title={title}><HighlightedText text={title} ranges={item.titleHighlights} /></span>
+				{#if matchCount}
+					<span class="command-match-count">{m.command_match_count({ count: matchCount }, { locale })}</span>
+				{/if}
 			</div>
 			<div class="command-context-row">
 				{#if profile}
@@ -116,7 +121,15 @@ const timestamp = $derived.by(() => {
 					</span>
 					<span class="command-context-separator">·</span>
 				{/if}
-				<span class="command-context" title={context}>{context}</span>
+				{#if item.type === "chat" && item.hit}
+					{#if item.spaceName}
+						<span class="command-space-name" title={item.spaceName}>{item.spaceName}</span>
+						<span class="command-context-separator">·</span>
+					{/if}
+					<span class="command-context" title={item.hit.excerpt}><HighlightedText text={item.hit.excerpt} ranges={item.hit.highlights} /></span>
+				{:else}
+					<span class="command-context" title={context}>{context}</span>
+				{/if}
 				{#if timestamp}
 					<span class="command-context-separator">·</span>
 					<time class="command-time" datetime={item.updatedAt ?? undefined} title={timestamp.title}>{timestamp.label}</time>
@@ -250,16 +263,6 @@ const timestamp = $derived.by(() => {
 		background: color-mix(in oklch, var(--brand) 12%, var(--bg-primary) 88%);
 	}
 
-	.command-type-mark.session {
-		color: color-mix(in oklch, var(--text-secondary) 82%, var(--brand) 18%);
-		background: color-mix(in oklch, var(--text-secondary) 8%, var(--bg-primary) 92%);
-	}
-
-	.command-type-mark.turn {
-		color: color-mix(in oklch, var(--text-tertiary) 72%, var(--brand) 28%);
-		background: color-mix(in oklch, var(--text-tertiary) 7%, var(--bg-primary) 93%);
-	}
-
 	.command-type-mark.label {
 		color: color-mix(in oklch, var(--brand) 76%, var(--text-secondary) 24%);
 		background: color-mix(in oklch, var(--brand) 9%, var(--bg-primary) 91%);
@@ -289,6 +292,25 @@ const timestamp = $derived.by(() => {
 		align-items: center;
 		gap: 5px;
 		color: color-mix(in oklch, var(--text-secondary) 86%, var(--brand) 14%);
+	}
+
+	.command-space-name {
+		min-width: 0;
+		max-width: min(160px, 40%);
+		flex: 0 0 auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--text-secondary);
+	}
+
+	.command-match-count {
+		flex: 0 0 auto;
+		margin-left: auto;
+		color: var(--text-placeholder);
+		font-size: 11px;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 	}
 
 	.command-context {
@@ -336,6 +358,10 @@ const timestamp = $derived.by(() => {
 
 		.command-enter {
 			display: none;
+		}
+
+		.command-space-name {
+			max-width: 30%;
 		}
 
 		.command-type-mark {

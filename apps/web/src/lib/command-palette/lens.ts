@@ -11,8 +11,7 @@ export type CommandPaletteLens = "all" | CommandPaletteResourceType;
 export const COMMAND_PALETTE_LENSES = [
 	"all",
 	"space",
-	"session",
-	"turn",
+	"chat",
 	"label",
 	"command",
 ] as const satisfies readonly CommandPaletteLens[];

@@ -270,7 +270,7 @@ Use Cohub search for product-level discovery. Use file tools for workspace file 
 ```bash
 cohub search "query"
 cohub search "query" --space-id <spaceId>
-cohub search "query" --types turn,session,space
+cohub search "query" --types chat,space
 cohub search --types label --label-ref Bug
 ```
 

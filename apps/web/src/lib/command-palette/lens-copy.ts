@@ -9,10 +9,8 @@ export function commandLensLabel(lens: CommandPaletteLens, locale: Locale) {
 			return m.command_lens_all({}, options);
 		case "space":
 			return m.command_lens_space({}, options);
-		case "session":
-			return m.command_lens_session({}, options);
-		case "turn":
-			return m.command_lens_turn({}, options);
+		case "chat":
+			return m.command_lens_chat({}, options);
 		case "label":
 			return m.command_lens_label({}, options);
 		case "command":
@@ -30,10 +28,8 @@ export function commandLensPlaceholder(
 			return m.command_placeholder({}, options);
 		case "space":
 			return m.command_placeholder_space({}, options);
-		case "session":
-			return m.command_placeholder_session({}, options);
-		case "turn":
-			return m.command_placeholder_turn({}, options);
+		case "chat":
+			return m.command_placeholder_chat({}, options);
 		case "label":
 			return m.command_placeholder_label({}, options);
 		case "command":

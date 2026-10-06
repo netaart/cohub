@@ -41,6 +41,7 @@ import {
 } from "$lib/command-palette/lens-copy";
 import { searchLocalCommandItems } from "$lib/command-palette/local-search";
 import {
+	commandItemKey,
 	mergeCommandResults,
 	sameCommandItemSequence,
 } from "$lib/command-palette/merge-results";
@@ -882,17 +883,12 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 	}
 
 	debounceTimer = window.setTimeout(() => {
-		// Explicit `t:` lens keeps raw turn rows; otherwise the server groups
-		// turns per session (one best turn each).
-		const explicitTurnOnly =
-			plan.resourceTypes?.length === 1 && plan.resourceTypes[0] === "turn";
 		void searchRemoteCommandItems(q, {
 			signal: remoteController?.signal,
 			limit: RESULT_LIMIT,
 			types: remoteResourceTypes,
 			spaceId: remoteSearchSpaceId(spaceId, remoteResourceTypes),
 			labelRef: plan.labelRef,
-			groupTurns: !explicitTurnOnly,
 		})
 			.then((items) => {
 				if (token !== searchToken) return;
@@ -1002,7 +998,7 @@ async function activate(item: CommandPaletteItem | undefined) {
 			await leavePalette(() => openCommandItem(item));
 			return;
 		}
-		// Ignore sessions/labels/turns — keep palette open for a real space pick.
+		// Ignore chats and labels — keep the palette open for a real space pick.
 		return;
 	}
 	await leavePalette(() => openCommandItem(item));
@@ -1355,7 +1351,7 @@ onMount(() => {
 								{:else if items.length === 0}
 									{@render emptyState(active)}
 								{:else}
-									{#each items as item, itemIndex (`${item.type}:${item.id || item.turnId || item.sessionId || item.spaceId}`)}
+									{#each items as item, itemIndex (commandItemKey(item))}
 										<CommandPaletteResultRow
 											{item}
 											active={active && itemIndex === activeIndex}

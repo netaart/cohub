@@ -56,7 +56,7 @@ router.get("/", async (c) => {
           sess.id,
           sess.space_id AS "spaceId",
           s.name AS "spaceName",
-          coalesce(nullif(sess.title, ''), 'Untitled session') AS title,
+          nullif(sess.title, '') AS title,
           CASE WHEN sess.user_uuid = ${identity.uuid} THEN 'creator' ELSE 'participant' END AS "viewerRelation",
           sess.last_message_at AS "lastMessageAt",
           coalesce(sess.last_message_at, sess.updated_at, sess.created_at) AS "updatedAt"

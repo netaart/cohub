@@ -212,6 +212,8 @@ cohub models ls --model-type multimodal
 cohub generate "A calm lake at sunrise" --model <model> --output lake.png
 ```
 
+`search` 可搜索 Space、对话（按标题或对话中发送的消息）和标签条目。`--types chat,space,label` 用于限定结果类型，`--space-id` 可搜索某个 Space 中你有权查看的全部对话；对话行会显示命中的消息。
+
 `models ls` 会展示每个 LLM 的百万 token 成本（如 `$3 /M input · $15 /M output`），并隐藏标记为 `hidden` 的模型。`models ls --model-type multimodal` 会展示每个生成模型的单位价格（如 `$0.04 / image`、`$0.10–$0.50 / second`）；`--json` 返回原始 `pricing` 对象（`unit`、`amount` 或 `min`/`max`、可选 `note`）。
 
 ## 输出约定

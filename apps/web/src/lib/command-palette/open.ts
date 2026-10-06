@@ -23,7 +23,7 @@ export function openCommandPalette(detail?: OpenCommandPaletteDetail) {
 }
 
 const AREA_LENS: Record<AppArea, CommandPaletteLens> = {
-	chats: "session",
+	chats: "chat",
 	spaces: "space",
 	account: "command",
 };
