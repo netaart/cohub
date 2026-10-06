@@ -55,7 +55,7 @@ class HostProtocolTest {
     fun `every advertised capability is known to the web side`() {
         val known = setOf(
             "auth.token", "auth.signIn", "auth.session", "notifications",
-            "share", "filePicker", "navigation", "cache", "runtime",
+            "share", "filePicker", "navigation", "cache", "runtime", "appearance",
         )
         HostCapabilities.advertised(runtime = true).forEach { capability ->
             assertTrue("Unknown capability advertised: $capability", capability in known)

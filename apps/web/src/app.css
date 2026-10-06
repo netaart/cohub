@@ -220,17 +220,19 @@ body.sidebar-resizing .panel-shell-fade {
 	}
 }
 
-/* Safe area padding for notched devices and Android gesture navigation. */
-@supports (padding: max(0px)) {
-	.safe-top {
-		padding-top: max(0.75rem, env(safe-area-inset-top));
-	}
-	.safe-bottom {
-		padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
-	}
-	.pb-safe {
-		padding-bottom: max(1rem, env(safe-area-inset-bottom));
-	}
+/* `safe-area-top` consumes the inset for descendants; fixed overlays use env() directly. */
+:root {
+	--safe-area-top: env(safe-area-inset-top, 0px);
+	--public-header-height: calc(3rem + env(safe-area-inset-top, 0px));
+}
+
+@utility safe-area-top {
+	padding-top: env(safe-area-inset-top, 0px);
+	--safe-area-top: 0px;
+}
+
+.pb-safe {
+	padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
 
 /* Lock body scroll when drawer is open */

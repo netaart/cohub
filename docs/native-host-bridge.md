@@ -52,10 +52,23 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `runtime.browse` | `runtime` | Asks for storage access, then lists a device folder |
 | `runtime.start` | `runtime` | Binds a folder to a Space and serves it; refuses taking over a running one |
 | `runtime.stop` | `runtime` | Disconnects a Space; its binding and files stay |
+| `appearance.set` | `appearance` | Edge color (`#rrggbb`) for the window and system bars |
 
 `runtime.changed` pushes the whole `DeviceRuntime` on every change. Android advertises
 `runtime` only on Android 11+ builds that ship sandboxd; see
 [Local Runtime](local-runtime.md#android-device--android-设备).
+
+## Edge to edge
+
+The host draws the surface under transparent system bars. The page lays out
+around them with `env(safe-area-inset-*)`: the surface pinned to the viewport
+top pads itself with the `safe-area-top` utility and consumes the inset, so
+chrome nested inside offsets by `--safe-area-top` (0 once consumed), while fixed
+overlays read `env()` directly. Whenever the shell background changes (theme,
+system scheme, Space style) the page sends `appearance.set`; the host persists
+the color for the next cold start and derives icon contrast from it. WebViews
+older than Chromium 140 misreport the insets, so Android pads them natively
+instead and the page sees zero.
 
 ## Sign-in
 

@@ -1,10 +1,12 @@
 package live.cohub.android.host
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.net.Uri
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.core.net.toUri
+import androidx.webkit.WebViewCompat
 import live.cohub.android.BuildConfig
 
 /**
@@ -40,6 +42,10 @@ class WebSurface(
         webView.loadUrl(origin() + path)
     }
 
+    fun setBackgroundColor(color: Int) {
+        webView.setBackgroundColor(color)
+    }
+
     fun canGoBack(): Boolean = webView.canGoBack()
 
     fun goBack() {
@@ -53,7 +59,16 @@ class WebSurface(
 
     private fun origin() = BuildConfig.WEB_ORIGIN.trimEnd('/')
 
-    private companion object {
-        val WEB_ORIGIN: Uri = BuildConfig.WEB_ORIGIN.toUri()
+    companion object {
+        private val WEB_ORIGIN: Uri = BuildConfig.WEB_ORIGIN.toUri()
+
+        // Chromium misreports safe-area insets before M140.
+        private const val SAFE_AREA_MIN_VERSION = 140
+
+        fun reportsSafeArea(context: Context): Boolean {
+            val major = WebViewCompat.getCurrentWebViewPackage(context)
+                ?.versionName?.substringBefore('.')?.toIntOrNull() ?: return false
+            return major >= SAFE_AREA_MIN_VERSION
+        }
     }
 }

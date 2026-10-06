@@ -9,7 +9,12 @@ const {
 	immersive = false,
 	timelineOpen = false,
 	onToggleTimeline,
-}: { editor: BoardEditor; immersive?: boolean; timelineOpen?: boolean; onToggleTimeline?: () => void } = $props();
+}: {
+	editor: BoardEditor;
+	immersive?: boolean;
+	timelineOpen?: boolean;
+	onToggleTimeline?: () => void;
+} = $props();
 
 const locale = $derived(getLocale());
 
@@ -78,7 +83,7 @@ function focusContent() {
 
 	@media (pointer: coarse) {
 		.board-zoom-menu {
-			top: calc(12px + env(safe-area-inset-top, 0px));
+			top: calc(12px + var(--safe-area-top));
 			right: 10px;
 			bottom: auto;
 			padding: 5px;

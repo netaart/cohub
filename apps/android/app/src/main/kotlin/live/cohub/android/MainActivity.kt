@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -11,14 +12,14 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.core.content.edit
+import androidx.core.graphics.drawable.toDrawable
 import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -37,6 +38,7 @@ import live.cohub.android.host.HostProtocol
 import live.cohub.android.host.WebSurface
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.toJson
+import live.cohub.android.ui.ShellAppearance
 import live.cohub.android.ui.WebSurfaceHost
 
 /** The shell: one WebView for product UI, one bridge for native capability. */
@@ -46,6 +48,7 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var runtime: DeviceRuntime
     private lateinit var bridge: HostBridge
     private lateinit var surface: WebSurface
+    private lateinit var appearance: ShellAppearance
     private lateinit var customTabs: ActivityResultLauncher<Intent>
     private lateinit var allFilesAccess: ActivityResultLauncher<Intent>
     private lateinit var notificationPermission: ActivityResultLauncher<String>
@@ -67,7 +70,8 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        appearance = ShellAppearance(this)
+        applyAppearance()
 
         val app = application as CohubApplication
         auth = app.auth
@@ -101,26 +105,23 @@ class MainActivity : ComponentActivity(), HostActions {
         }
 
         setContent {
-            MaterialTheme {
-                Surface {
-                    WebSurfaceHost(
-                        onCreate = { webView, recreate ->
-                            surface = WebSurface(
-                                webView = webView,
-                                onExternalLink = ::openExternally,
-                                onRenderProcessGone = recreate,
-                            )
-                            // Without the bridge the surface still runs on its
-                            // browser path; this only explains missing features.
-                            if (!bridge.attach(webView, BuildConfig.WEB_ORIGIN.toUri())) {
-                                Toast.makeText(this@MainActivity, R.string.bridge_unavailable, Toast.LENGTH_LONG).show()
-                            }
-                            surface.load()
-                            surface
-                        },
+            WebSurfaceHost(
+                onCreate = { webView, recreate ->
+                    surface = WebSurface(
+                        webView = webView,
+                        onExternalLink = ::openExternally,
+                        onRenderProcessGone = recreate,
                     )
-                }
-            }
+                    surface.setBackgroundColor(appearance.backgroundColor)
+                    // Without the bridge the surface still runs on its
+                    // browser path; this only explains missing features.
+                    if (!bridge.attach(webView, BuildConfig.WEB_ORIGIN.toUri())) {
+                        Toast.makeText(this@MainActivity, R.string.bridge_unavailable, Toast.LENGTH_LONG).show()
+                    }
+                    surface.load()
+                    surface
+                },
+            )
         }
     }
 
@@ -178,6 +179,22 @@ class MainActivity : ComponentActivity(), HostActions {
     override fun clearCache(scope: String) {
         // IndexedDB belongs to the web app; the host clears only what it owns.
         if (scope == "user" || scope == "all") auth.clear()
+    }
+
+    override fun setAppearance(backgroundColor: Int) {
+        if (!appearance.update(backgroundColor)) return
+        applyAppearance()
+        surface.setBackgroundColor(backgroundColor)
+    }
+
+    private fun applyAppearance() {
+        val style = if (appearance.isDark) {
+            SystemBarStyle.dark(Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+        }
+        enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+        window.setBackgroundDrawable(appearance.backgroundColor.toDrawable())
     }
 
     override suspend fun prepareRuntime(): Boolean = preparing.withLock {

@@ -24,6 +24,7 @@ object HostProtocol {
         const val RUNTIME_BROWSE = "runtime.browse"
         const val RUNTIME_START = "runtime.start"
         const val RUNTIME_STOP = "runtime.stop"
+        const val APPEARANCE_SET = "appearance.set"
     }
 
     object Errors {
@@ -41,4 +42,9 @@ object HostProtocol {
         const val APP_BACKGROUND = "app.background"
         const val RUNTIME_CHANGED = "runtime.changed"
     }
+
+    private val COLOR = Regex("^#[0-9a-fA-F]{6}$")
+
+    fun parseColor(value: String): Int? =
+        if (COLOR.matches(value)) (0xFF000000 or value.substring(1).toLong(16)).toInt() else null
 }

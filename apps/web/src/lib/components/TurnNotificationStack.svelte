@@ -52,7 +52,7 @@ function handleCardKeydown(
 </script>
 
 {#if turnNotifications.visibleItems.length > 0}
-	<div class="turn-notification-region pointer-events-none fixed inset-x-3 top-3 z-[var(--z-workspace-toast)] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:top-auto sm:bottom-4 sm:w-[360px] sm:max-w-[calc(100vw-2rem)]">
+	<div class="turn-notification-region pointer-events-none fixed inset-x-3 top-[calc(0.75rem+env(safe-area-inset-top,0px))] z-[var(--z-workspace-toast)] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:top-auto sm:bottom-4 sm:w-[360px] sm:max-w-[calc(100vw-2rem)]">
 		{#each turnNotifications.visibleItems as notification (notification.id)}
 			{@const title = getTurnNotificationSpaceTitle(notification)}
 			<div

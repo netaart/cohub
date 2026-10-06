@@ -80,3 +80,23 @@ export function callHost<M extends HostBridgeMethod>(
 ): Promise<HostBridgeResult<M>> {
 	return ensureBridge().call(method, params, options);
 }
+
+let requestedAppearance: string | null = null;
+let appliedAppearance: string | null = null;
+
+export function syncHostAppearance(backgroundColor: string) {
+	requestedAppearance = backgroundColor;
+	void readyHost().then(() => {
+		if (
+			requestedAppearance !== backgroundColor ||
+			appliedAppearance === backgroundColor ||
+			!supportsHostCapability("appearance")
+		) {
+			return;
+		}
+		appliedAppearance = backgroundColor;
+		callHost("appearance.set", { backgroundColor }).catch(() => {
+			if (appliedAppearance === backgroundColor) appliedAppearance = null;
+		});
+	});
+}

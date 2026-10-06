@@ -15,6 +15,7 @@ object HostCapabilities {
     const val NAVIGATION = "navigation"
     const val CACHE = "cache"
     const val RUNTIME = "runtime"
+    const val APPEARANCE = "appearance"
 
     private val always: List<String> = listOf(
         AUTH_TOKEN,
@@ -23,6 +24,7 @@ object HostCapabilities {
         SHARE,
         NAVIGATION,
         CACHE,
+        APPEARANCE,
     )
 
     fun advertised(runtime: Boolean): List<String> = if (runtime) always + RUNTIME else always
