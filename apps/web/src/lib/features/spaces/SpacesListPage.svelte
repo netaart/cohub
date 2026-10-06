@@ -237,6 +237,7 @@ onMount(() => {
 			role="tablist"
 			activeKey={SPACES_FILTERS[tabs.shown] ?? null}
 			position={tabs.position}
+			glide={tabs.glide}
 		>
 			{#each SPACES_FILTERS as value, index (value)}
 				<FilterChip label={filterLabel(value)} active={tabs.shown === index} onclick={() => selectFilter(value)} />

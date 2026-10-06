@@ -6,16 +6,19 @@ import {
 import { commandLensLabel } from "$lib/command-palette/lens-copy";
 import FilterBar from "$lib/components/list-page/FilterBar.svelte";
 import FilterChip from "$lib/components/list-page/FilterChip.svelte";
+import type { PagerGlide } from "$lib/gestures/pager";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
 const {
 	lens,
 	position = null,
+	glide = null,
 	onSelect,
 }: {
 	lens: CommandPaletteLens | null;
 	position?: number | null;
+	glide?: PagerGlide | null;
 	onSelect: (lens: CommandPaletteLens) => void;
 } = $props();
 
@@ -27,7 +30,7 @@ const shown = $derived(
 );
 </script>
 
-<FilterBar label={m.command_lens_bar({}, { locale })} role="tablist" activeKey={shown} {position}>
+<FilterBar label={m.command_lens_bar({}, { locale })} role="tablist" activeKey={shown} {position} {glide}>
 	{#each COMMAND_PALETTE_LENSES as key (key)}
 		<FilterChip
 			kind="tab"

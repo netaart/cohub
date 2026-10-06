@@ -5,6 +5,7 @@ import {
 	type Compare,
 	mergeFirstPage,
 	placeItem,
+	shareItems,
 } from "$lib/lists/live-list-core";
 
 type Row = { id: string; at: number };
@@ -59,4 +60,20 @@ test("mergeFirstPage trusts the page for its range and keeps later pages", () =>
 test("appendPage skips rows that shifted into an earlier page", () => {
 	const items = rows(["a", 3], ["b", 2]);
 	assert.equal(ids(appendPage(items, rows(["b", 2], ["c", 1]), id)), "a,b,c");
+});
+
+test("shareItems keeps unchanged rows and the list itself", () => {
+	const previous = rows(["a", 30], ["b", 20]);
+	const same = shareItems(previous, rows(["a", 30], ["b", 20]), id);
+	assert.equal(same, previous, "an identical refresh keeps the list");
+
+	const next = shareItems(previous, rows(["c", 40], ["a", 30], ["b", 21]), id);
+	assert.notEqual(next, previous);
+	assert.equal(ids(next), "c,a,b");
+	assert.equal(next[1], previous[0], "an unchanged row keeps its object");
+	assert.deepEqual(next[2], { id: "b", at: 21 });
+
+	const reordered = shareItems(previous, rows(["b", 20], ["a", 30]), id);
+	assert.notEqual(reordered, previous, "a new order is a new list");
+	assert.equal(reordered[0], previous[1]);
 });

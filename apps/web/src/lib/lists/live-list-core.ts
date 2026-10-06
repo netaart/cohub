@@ -59,3 +59,42 @@ export function mergeFirstPage<T>(
 		.filter((item) => !pageIds.has(options.id(item)));
 	return [...page, ...tail];
 }
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	if (typeof value !== "object" || value === null) return false;
+	const proto = Object.getPrototypeOf(value);
+	return proto === Object.prototype || proto === null;
+}
+
+export function sameData(a: unknown, b: unknown): boolean {
+	if (Object.is(a, b)) return true;
+	if (Array.isArray(a)) {
+		return (
+			Array.isArray(b) &&
+			a.length === b.length &&
+			a.every((item, index) => sameData(item, b[index]))
+		);
+	}
+	if (!isPlainObject(a) || !isPlainObject(b)) return false;
+	const keys = Object.keys(a);
+	return (
+		keys.length === Object.keys(b).length &&
+		keys.every((key) => Object.hasOwn(b, key) && sameData(a[key], b[key]))
+	);
+}
+
+export function shareItems<T>(
+	previous: T[],
+	next: T[],
+	getId: (item: T) => string,
+): T[] {
+	const known = new Map(previous.map((item) => [getId(item), item]));
+	let unchanged = previous.length === next.length;
+	const shared = next.map((item, index) => {
+		const old = known.get(getId(item));
+		const kept = old !== undefined && sameData(old, item) ? old : item;
+		if (kept !== previous[index]) unchanged = false;
+		return kept;
+	});
+	return unchanged ? previous : shared;
+}
