@@ -26,8 +26,9 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 
 ## Rules
 
-1. **Capabilities gate calls, not versions.** Adding a capability is safe;
-   removing one breaks shipped web bundles.
+1. **Capabilities gate calls, not versions.** Adding a capability is safe —
+   a surface drops names it does not know — but removing one breaks shipped
+   web bundles. Hosts pin their names in tests, so a typo cannot ship.
 2. **Advertise only what is implemented.** A premature capability sends the web
    side down a path that fails at runtime — worse than the browser fallback.
 3. **The web surface must run unchanged in a browser.** Every host branch is
@@ -53,10 +54,47 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `runtime.start` | `runtime` | Binds a folder to a Space and serves it; refuses taking over a running one |
 | `runtime.stop` | `runtime` | Disconnects a Space; its binding and files stay |
 | `appearance.set` | `appearance` | Edge color (`#rrggbb`) for the window and system bars |
+| `app.ready` | `launch` | First screen painted; the host lifts its launch screen |
+| `haptics.perform` | `haptics` | `tick`, `confirm`, `reject` or `longPress`, in the system's own feel |
+| `files.save` | `files` | Saves an https `url` (downloaded natively) or base64 `data` to shared storage |
+| `navigation.interceptBack` | `navigation.back` | While enabled, system back emits `navigation.back` |
+| `shortcuts.push` | `shortcuts` | Launcher shortcut to an in-app path, ranked by recency |
 
 `runtime.changed` pushes the whole `DeviceRuntime` on every change. Android advertises
 `runtime` only on Android 11+ builds that ship sandboxd; see
 [Local Runtime](local-runtime.md#android-device--android-设备).
+
+`app.foreground` and `app.background` follow the shell's visibility; the page
+also sees `visibilitychange`, because the host pauses the WebView with it.
+
+## Launch
+
+The host holds its launch screen while the WebView starts and the page boots,
+then lifts it on `app.ready` or after 2.5 s, whichever comes first, so a cold
+start never flashes an empty surface. The page calls `app.ready` two frames
+after its first screen renders — from local data, not after the network. The
+same call marks the activity fully drawn, so time to full display is
+measurable (`adb logcat -s ActivityTaskManager` prints `Fully drawn`).
+
+## Back
+
+A WebView alone maps back to history, so an open dialog or drawer would stay
+put while the page behind it changes. Dismissible layers register with
+`dismissOnBack` (`$lib/back-layers.svelte`); while any is open the page asks
+the host to intercept, and each back gesture closes the topmost layer. A new
+document resets interception, so a page that crashed or reloaded mid-dialog
+can never trap back.
+
+## Files
+
+A WebView ignores `<input type="file">` and `download` on its own. The host
+answers file inputs with the system Photo Picker when every accepted type is an
+image or video, otherwise the document picker; neither needs a permission. The
+page routes every `<a download>` (markup or programmatic) through `files.save`:
+https URLs are fetched by the host, so large media never crosses the bridge;
+`blob:` and `data:` bytes go inline as base64. Files land in
+`Pictures/Cohub`, `Movies/Cohub`, `Music/Cohub` or `Download/Cohub` by type,
+through MediaStore, which is why `files` needs Android 10.
 
 ## Edge to edge
 

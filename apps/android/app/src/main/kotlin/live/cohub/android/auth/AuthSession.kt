@@ -71,6 +71,10 @@ class AuthSession(
         token.accessToken
     }
 
+    fun preload() {
+        current()
+    }
+
     fun status(): Identity =
         current()?.let { Identity(authenticated = true, subject = it.subject, userUuid = it.userUuid) }
             ?: Identity.None

@@ -22,6 +22,11 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "cache",
   "runtime",
   "appearance",
+  "launch",
+  "haptics",
+  "files",
+  "navigation.back",
+  "shortcuts",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -31,13 +36,21 @@ export type HostPlatform = z.infer<typeof hostPlatformSchema>;
 
 const identifier = z.string().min(1).max(128);
 
+/** Unknown capabilities from a newer host are dropped, not rejected. */
+const knownCapabilitiesSchema = z
+  .array(z.string().min(1).max(64))
+  .max(64)
+  .transform((names) =>
+    names.filter((name): name is HostBridgeCapability => hostBridgeCapabilitySchema.safeParse(name).success),
+  );
+
 /** Pushed by hosts that predate the `host.describe` handshake. */
 export const hostBridgeHelloSchema = z.object({
   type: z.literal("hello"),
   version: z.number().int().positive(),
   platform: hostPlatformSchema,
   hostId: identifier,
-  capabilities: z.array(hostBridgeCapabilitySchema).max(HOST_BRIDGE_CAPABILITIES.length),
+  capabilities: knownCapabilitiesSchema,
 }).strict();
 export type HostBridgeHello = z.infer<typeof hostBridgeHelloSchema>;
 
@@ -118,6 +131,30 @@ export type DeviceFolderListing = z.infer<typeof deviceFolderListingSchema>;
 
 export const hostColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i);
 
+export const HOST_HAPTICS = ["tick", "confirm", "reject", "longPress"] as const;
+export type HostHaptic = (typeof HOST_HAPTICS)[number];
+
+/** Hosts parse messages on their UI thread; larger files go by URL. */
+export const HOST_FILE_DATA_MAX_LENGTH = 16 * 1024 * 1024;
+
+const savedFileSchema = z.object({
+  name: z.string().min(1).max(255),
+  mimeType: z.string().min(1).max(255).optional(),
+});
+
+export const hostFileSaveParamsSchema = z.union([
+  savedFileSchema.extend({ url: z.url({ protocol: /^https$/ }).max(8_192) }).strict(),
+  savedFileSchema.extend({ data: z.base64().max(HOST_FILE_DATA_MAX_LENGTH) }).strict(),
+]);
+export type HostFileSaveParams = z.infer<typeof hostFileSaveParamsSchema>;
+
+export const hostShortcutSchema = z.object({
+  id: z.string().min(1).max(128),
+  label: z.string().min(1).max(64),
+  path: z.string().regex(/^\/(?!\/)/, "an in-app path").max(2_048),
+}).strict();
+export type HostShortcut = z.infer<typeof hostShortcutSchema>;
+
 /**
  * Methods the web surface may call. Both ends validate with these schemas, so
  * a host cannot answer a shape the web side misreads.
@@ -142,6 +179,11 @@ export const HOST_BRIDGE_METHODS = {
   },
   "runtime.stop": { params: z.object({ spaceId: z.uuid() }).strict(), result: deviceRuntimeSchema },
   "appearance.set": { params: z.object({ backgroundColor: hostColorSchema }).strict(), result: z.boolean() },
+  "app.ready": { params: z.undefined(), result: z.boolean() },
+  "haptics.perform": { params: z.object({ kind: z.enum(HOST_HAPTICS) }).strict(), result: z.boolean() },
+  "files.save": { params: hostFileSaveParamsSchema, result: z.boolean() },
+  "navigation.interceptBack": { params: z.object({ enabled: z.boolean() }).strict(), result: z.boolean() },
+  "shortcuts.push": { params: hostShortcutSchema, result: z.boolean() },
 } as const;
 export type HostBridgeMethod = keyof typeof HOST_BRIDGE_METHODS;
 

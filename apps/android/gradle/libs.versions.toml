@@ -4,6 +4,7 @@ kotlin = "2.4.20"
 coreKtx = "1.19.1"
 lifecycle = "2.11.0"
 activity = "1.13.0"
+splashscreen = "1.2.0"
 browser = "1.10.0"
 webkit = "1.17.1"
 securityCrypto = "1.1.0-alpha06"
@@ -18,6 +19,7 @@ espresso = "3.7.0"
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-activity = { module = "androidx.activity:activity", version.ref = "activity" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
 androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
 androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }

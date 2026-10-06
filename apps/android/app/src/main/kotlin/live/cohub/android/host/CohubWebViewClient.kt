@@ -1,7 +1,7 @@
 package live.cohub.android.host
 
 import android.annotation.SuppressLint
-import android.net.Uri
+import android.graphics.Bitmap
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -17,21 +17,21 @@ import live.cohub.android.R
  * `WebViewClient` objects, hence the suppression.
  */
 @SuppressLint("MissingOnRenderProcessGone")
-class CohubWebViewClient(
-    private val onExternalLink: (Uri) -> Unit,
-    private val onNavigated: (url: String) -> Unit,
-    private val onRenderProcessGone: () -> Unit,
-) : WebViewClient() {
+class CohubWebViewClient(private val listener: SurfaceListener) : WebViewClient() {
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url
         if (WebOrigin.contains(url)) return false
-        onExternalLink(url)
+        listener.onExternalLink(url)
         return true
     }
 
+    override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+        listener.onPageStarted()
+    }
+
     override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
-        onNavigated(url)
+        listener.onNavigated(url)
     }
 
     /**
@@ -40,7 +40,7 @@ class CohubWebViewClient(
      */
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail?): Boolean {
         Toast.makeText(view.context, R.string.web_view_recovering, Toast.LENGTH_SHORT).show()
-        onRenderProcessGone()
+        listener.onRenderProcessGone()
         return true
     }
 }

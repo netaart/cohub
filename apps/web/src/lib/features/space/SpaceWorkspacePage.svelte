@@ -89,6 +89,7 @@ import {
 	subscribeSpaceChannel,
 } from "$lib/features/session-chat";
 import SessionChatPanel from "$lib/features/session-chat/SessionChatPanel.svelte";
+import { pushHostShortcut } from "$lib/host-bridge";
 import { getLocale } from "$lib/i18n/locale.svelte";
 // SettingsOverlay removed — settings merged inline into detail page
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -115,6 +116,7 @@ import {
 	buildSpaceCheckpointRoute,
 	buildSpaceCronjobRoute,
 	buildSpaceNewSessionRoute,
+	buildSpaceRootRoute,
 	buildSpaceSessionRoute,
 	buildSpaceTaskRoute,
 } from "$lib/space-routes";
@@ -559,6 +561,16 @@ async function resolveDefaultFileApp(path: string) {
 // File opens consult the installed Apps; warm the cache so the first stays instant.
 $effect(() => {
 	if (spaceId) void readInstalledApps(spaceId).catch(() => {});
+});
+
+$effect(() => {
+	const label = (space?.name || space?.title)?.trim();
+	if (!space || !label) return;
+	pushHostShortcut({
+		id: `space:${space.id}`,
+		label,
+		path: buildSpaceRootRoute(space.id),
+	});
 });
 
 let openWith = $state<{

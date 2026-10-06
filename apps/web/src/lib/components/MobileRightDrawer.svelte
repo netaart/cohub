@@ -1,4 +1,5 @@
 <script lang="ts">
+import { dismissOnBack } from "$lib/back-layers.svelte";
 import {
 	getDrawerOpenRatio,
 	MOBILE_DRAWER_MAX_WIDTH_VW,
@@ -66,6 +67,8 @@ const backdropStyle = $derived.by(() => {
 function closeDrawer() {
 	uiState.mobileRightDrawerOpen = false;
 }
+
+dismissOnBack(() => uiState.mobileRightDrawerOpen, closeDrawer);
 
 let renderContent = $state(false);
 

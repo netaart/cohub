@@ -20,6 +20,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import live.cohub.android.auth.AuthSession
+import live.cohub.android.files.FileSaver
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.FolderUnavailable
 import live.cohub.android.runtime.toJson
@@ -41,8 +42,11 @@ class HostBridge(
     private val auth: AuthSession,
     private val actions: HostActions,
     private val runtime: DeviceRuntime? = null,
+    private val files: FileSaver? = null,
 ) {
-    private val supportedMethods = if (runtime == null) BASE_METHODS else BASE_METHODS + RUNTIME_METHODS
+    private val supportedMethods = BASE_METHODS +
+        (if (runtime != null) RUNTIME_METHODS else emptySet()) +
+        (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE) else emptySet())
 
     @Volatile
     private var replyProxy: JavaScriptReplyProxy? = null
@@ -111,7 +115,10 @@ class HostBridge(
             put("hostId", actions.hostId())
             put(
                 "capabilities",
-                buildJsonArray { HostCapabilities.advertised(runtime != null).forEach { add(JsonPrimitive(it)) } },
+                buildJsonArray {
+                    HostCapabilities.advertised(runtime = runtime != null, files = files != null)
+                        .forEach { add(JsonPrimitive(it)) }
+                },
             )
         }
 
@@ -168,6 +175,52 @@ class HostBridge(
             val color = params["backgroundColor"]?.jsonPrimitive?.contentOrNull?.let(HostProtocol::parseColor)
                 ?: throw IllegalArgumentException("appearance.set requires a #rrggbb backgroundColor")
             actions.setAppearance(color)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.APP_READY -> {
+            actions.appReady()
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.HAPTICS_PERFORM -> {
+            val kind = HostProtocol.Haptic.of(params.string("kind"))
+                ?: throw IllegalArgumentException("haptics.perform requires a known kind")
+            JsonPrimitive(actions.performHaptic(kind))
+        }
+
+        HostProtocol.Methods.FILES_SAVE -> {
+            val saver = files ?: throw IllegalStateException("This device cannot save files")
+            val name = params.string("name") ?: throw IllegalArgumentException("files.save requires a name")
+            val mimeType = params.string("mimeType")
+            val url = params.string("url")
+            val data = params.string("data")
+            when {
+                url != null && data == null -> {
+                    require(url.startsWith("https://")) { "files.save only downloads https URLs" }
+                    saver.saveUrl(url, name, mimeType)
+                }
+                data != null && url == null -> saver.saveBase64(data, name, mimeType)
+                else -> throw IllegalArgumentException("files.save requires exactly one of url or data")
+            }
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.NAVIGATION_INTERCEPT_BACK -> {
+            val enabled = params["enabled"]?.jsonPrimitive?.booleanOrNull
+                ?: throw IllegalArgumentException("navigation.interceptBack requires enabled")
+            actions.interceptBack(enabled)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.SHORTCUTS_PUSH -> {
+            val id = params.string("id")?.takeIf { it.length <= 128 }
+                ?: throw IllegalArgumentException("shortcuts.push requires an id")
+            val label = params.string("label")?.trim()?.takeIf { it.isNotEmpty() && it.length <= 64 }
+                ?: throw IllegalArgumentException("shortcuts.push requires a label")
+            val path = params.string("path")?.takeIf { it.startsWith("/") && !it.startsWith("//") }
+                ?: throw IllegalArgumentException("shortcuts.push requires an in-app path")
+            actions.pushShortcut(id, label, path)
             JsonPrimitive(true)
         }
 
@@ -265,9 +318,15 @@ class HostBridge(
             HostProtocol.Methods.NAVIGATION_OPEN_PATH,
             HostProtocol.Methods.CACHE_CLEAR,
             HostProtocol.Methods.APPEARANCE_SET,
+            HostProtocol.Methods.APP_READY,
+            HostProtocol.Methods.HAPTICS_PERFORM,
+            HostProtocol.Methods.NAVIGATION_INTERCEPT_BACK,
+            HostProtocol.Methods.SHORTCUTS_PUSH,
         )
     }
 }
+
+private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 
 /** Raised when the user or platform aborts a native surface; maps to `canceled`. */
 class CancellationSignal(message: String) : Exception(message)
@@ -281,6 +340,14 @@ interface HostActions {
     fun openPath(path: String)
     fun clearCache(scope: String)
     fun setAppearance(backgroundColor: Int)
+
+    fun appReady()
+
+    fun performHaptic(kind: HostProtocol.Haptic): Boolean
+
+    fun interceptBack(enabled: Boolean)
+
+    fun pushShortcut(id: String, label: String, path: String)
 
     suspend fun prepareRuntime(): Boolean
 }

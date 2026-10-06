@@ -8,28 +8,24 @@ import {
   hostBridgeResponseSchema,
 } from "./src/host-bridge.js";
 
-test("hello accepts every advertised capability, rejects unknown ones", () => {
-  assert.equal(
-    hostBridgeHelloSchema.safeParse({
-      type: "hello",
-      version: HOST_BRIDGE_VERSION,
-      platform: "android",
-      hostId: "install-1",
-      capabilities: [...HOST_BRIDGE_CAPABILITIES],
-    }).success,
-    true,
-  );
-
-  // A typo must fail loudly: a host believing it announced a capability it did
-  // not would leave the surface permanently on the browser fallback.
-  const result = hostBridgeHelloSchema.safeParse({
+test("hello accepts every known capability and drops unknown ones", () => {
+  const known = hostBridgeHelloSchema.safeParse({
     type: "hello",
     version: HOST_BRIDGE_VERSION,
     platform: "android",
     hostId: "install-1",
-    capabilities: ["auth.signin"],
+    capabilities: [...HOST_BRIDGE_CAPABILITIES],
   });
-  assert.equal(result.success, false);
+  assert.deepEqual(known.success && known.data.capabilities, [...HOST_BRIDGE_CAPABILITIES]);
+
+  const newer = hostBridgeHelloSchema.safeParse({
+    type: "hello",
+    version: HOST_BRIDGE_VERSION,
+    platform: "android",
+    hostId: "install-1",
+    capabilities: ["auth.token", "teleport"],
+  });
+  assert.deepEqual(newer.success && newer.data.capabilities, ["auth.token"]);
 });
 
 test("hello rejects unknown platforms and extra fields", () => {
