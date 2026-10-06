@@ -1042,7 +1042,7 @@ export const spaceMembers = v2.table(
     role: varchar("role", { length: 20 }).$type<SpaceRole>().notNull(),
     createdBy: varchar("created_by", { length: 255 }).notNull(),
     updatedBy: varchar("updated_by", { length: 255 }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
@@ -1051,7 +1051,7 @@ export const spaceMembers = v2.table(
       table.userId,
     ),
     spaceIdx: index("v2_idx_space_members_space").on(table.spaceId),
-    userIdx: index("v2_idx_space_members_user").on(table.userId),
+    userJoinedIdx: index("v2_idx_space_members_user_joined").on(table.userId, table.createdAt.desc(), table.spaceId.desc()),
     userSpaceIdx: index("v2_idx_space_members_user_space").on(table.userId, table.spaceId),
     spaceRoleIdx: index("v2_idx_space_members_space_role").on(table.spaceId, table.role),
   }),

@@ -40,7 +40,7 @@ export type LiveListSource<F, T, E> = {
 	memoLimit: number;
 	key(filter: F): string;
 	id(item: T): string;
-	compare: Compare<T>;
+	compare(filter: F): Compare<T>;
 	emptyExtra(): E;
 	mergeExtra(current: E, incoming: E): E;
 	fetch(filter: F, cursor: string | null): Promise<LivePage<T, E>>;
@@ -296,7 +296,8 @@ export class LiveList<F, T, E> {
 		entry: Entry<F, T, E>,
 		change: LiveChange<F, T>,
 	): Entry<F, T, E> {
-		const { id, compare } = this.#source;
+		const { id } = this.#source;
+		const compare = this.#source.compare(entry.filter);
 		const index = entry.items.findIndex((item) => id(item) === change.id);
 		const fit = change.fit(entry.filter);
 		if (index >= 0) {

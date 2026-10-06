@@ -36,7 +36,8 @@ export class SearchApi {
     input?: {
       spaceLimit?: number;
       sessionLimit?: number;
-      /** Local recent spaces to include in the server candidate set. */
+      recentSpaces?: { id: string; timestamp: number }[];
+      /** @deprecated Use `recentSpaces`; ids without a time count as just visited. */
       recentSpaceIds?: string[];
     },
     customFetch?: Fetch,
@@ -45,6 +46,10 @@ export class SearchApi {
     if (input?.spaceLimit !== undefined) params.set("spaceLimit", String(input.spaceLimit));
     if (input?.sessionLimit !== undefined)
       params.set("sessionLimit", String(input.sessionLimit));
+    for (const recent of input?.recentSpaces ?? []) {
+      params.append("recentSpaceId", recent.id);
+      params.append("recentSpaceAt", new Date(recent.timestamp).toISOString());
+    }
     for (const spaceId of input?.recentSpaceIds ?? [])
       params.append("recentSpaceId", spaceId);
     const query = params.toString();

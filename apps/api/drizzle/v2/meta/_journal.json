@@ -491,6 +491,13 @@
       "when": 1791275270375,
       "tag": "0069_spaces_user_activity_index",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1791305370153,
+      "tag": "0070_space_members_joined_index",
+      "breakpoints": true
     }
   ]
 }

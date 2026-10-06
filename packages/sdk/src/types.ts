@@ -880,7 +880,8 @@ export type SpaceRecord = {
   isPinned?: boolean;
   isArchived?: boolean;
   relation?: "owner" | "member" | "public";
-  /** The viewer's latest turn or visit; account listings sort by it first. */
+  joinedAt?: string;
+  /** Recent listings only: the viewer's latest session message, visit, or joining. */
   personalActivityAt?: string;
 };
 

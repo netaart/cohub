@@ -394,7 +394,7 @@ async function migrateV2Data() {
             ${permission.level === "write" ? "builder" : "guest"},
             ${permission.created_by},
             ${permission.created_by},
-            ${permission.created_at},
+            coalesce(${permission.created_at}::timestamptz, now()),
             ${permission.created_at}
           )
           ON CONFLICT (space_id, user_id) DO NOTHING

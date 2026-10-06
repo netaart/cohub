@@ -1,4 +1,8 @@
-import type { ChannelEnvelope, SpaceRecord } from "@neta-art/cohub";
+import type {
+	ChannelEnvelope,
+	SessionRecord,
+	SpaceRecord,
+} from "@neta-art/cohub";
 import { HttpError } from "@neta-art/cohub";
 import {
 	getCachedSpacePage,
@@ -151,13 +155,25 @@ class SpacesInbox {
 			case "session.created":
 			case "session.updated": {
 				const session = (event.payload as { session?: unknown }).session as
-					| { spaceId?: unknown; lastMessageAt?: unknown }
+					| Partial<SessionRecord>
 					| undefined;
 				if (
-					typeof session?.spaceId === "string" &&
-					typeof session.lastMessageAt === "string"
+					typeof session?.spaceId !== "string" ||
+					typeof session.lastMessageAt !== "string"
 				)
-					this.#bumpSpaceActivity(session.spaceId, session.lastMessageAt);
+					return;
+				this.#bumpSpaceActivity(session.spaceId, session.lastMessageAt);
+				// The Space room hears every session; only the viewer's own count as theirs.
+				const viewer = authStore.userUuid;
+				if (
+					viewer &&
+					(session.userUuid === viewer ||
+						session.participantUserUuids?.includes(viewer))
+				)
+					this.#bumpPersonalActivity(
+						session.spaceId,
+						time(session.lastMessageAt),
+					);
 				return;
 			}
 		}
@@ -183,10 +199,11 @@ class SpacesInbox {
 	}
 
 	#bumpPersonalActivity(spaceId: string, at: number) {
+		if (!at) return;
 		const personalActivityAt = new Date(at).toISOString();
 		this.list.apply({
 			id: spaceId,
-			fit: () => "keep",
+			fit: (filter) => (filter === "recent" ? "unknown" : "keep"),
 			merge: (space) =>
 				time(space.personalActivityAt) >= at
 					? space

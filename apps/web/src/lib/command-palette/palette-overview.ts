@@ -268,11 +268,12 @@ export function refreshPaletteOverview(options?: {
 		try {
 			const fetcher: typeof fetch = (input, init) =>
 				fetch(input, { ...init, signal: options?.signal });
-			const recentSpaceIds = getRecentSpaces(userKey)
-				.slice(0, 10)
-				.map((entry) => entry.spaceId);
+			const recentSpaces = getRecentSpaces(userKey).map((entry) => ({
+				id: entry.spaceId,
+				timestamp: entry.timestamp,
+			}));
 			const data = await sdk.search.overview(
-				{ spaceLimit: 50, sessionLimit: 20, recentSpaceIds },
+				{ spaceLimit: 50, sessionLimit: 20, recentSpaces },
 				fetcher,
 			);
 			// A response from another account, an older request, or before newer

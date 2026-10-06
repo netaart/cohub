@@ -119,7 +119,7 @@ class ChatsInbox {
 		memoLimit: MEMO_LIMIT,
 		key: chatsFilterScope,
 		id: (session) => session.id,
-		compare: compareSessionsByRecentActivity,
+		compare: () => compareSessionsByRecentActivity,
 		emptyExtra: () => [],
 		mergeExtra: mergeForks,
 		fetch: async (filter, cursor) => {

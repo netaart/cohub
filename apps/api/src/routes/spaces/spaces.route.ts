@@ -67,6 +67,7 @@ import { checkpointFsJsonError, listCheckpointDirectory, readCheckpointFile } fr
 import type { AuthUser } from "../../lib/middleware.js";
 import { submitSessionPrompt } from "../../session-prompts.js";
 import { dispatchSpaceListChanged } from "../../space-list-events.js";
+import { decodeSpaceListCursor, isSpaceListFilter, listMemberSpaces, listRecentSpaces, parseSpaceVisits } from "../../space-list.js";
 import { getRuntimeRegistration, getSessionRuntimeRecovery, confirmRuntimeStopped } from "../../runtime.js";
 import runtimeArchivesRouter from "./runtime-archives.route.js";
 import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError, resolveSessionTurnOrigin } from "@cohub/core/sessions";
@@ -754,87 +755,23 @@ router.get("/", async (c) => {
   if (!identity) return authzDenied(c);
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 100);
   const filter = c.req.query("filter") ?? "recent";
-  if (!["recent", "all", "mine", "pinned", "archived"].includes(filter)) return c.json({ message: "invalid filter" }, 400);
+  if (!isSpaceListFilter(filter)) return c.json({ message: "invalid filter" }, 400);
   const query = (c.req.query("q") ?? "").trim().slice(0, 120);
   const exactName = c.req.query("name")?.trim().slice(0, 255) ?? "";
-  const recentSpaceIds = c.req.queries("recentSpaceId") ?? [];
-  const recentSpaceAt = c.req.queries("recentSpaceAt") ?? [];
-  const decoded = decodeSpacePageCursor(c.req.query("cursor"));
-  if (decoded === false) return c.json({ message: "invalid cursor" }, 400);
-  const visitedAt = new Map<string, number>();
-  recentSpaceIds.forEach((id, index) => {
-    const timestamp = Date.parse(recentSpaceAt[index] ?? "");
-    if (!requireValidId(id) || !Number.isFinite(timestamp)) return;
-    visitedAt.set(id, Math.max(visitedAt.get(id) ?? 0, timestamp));
-  });
-  const visits = [...visitedAt].slice(0, 10).map(([id, timestamp]) =>
-    sql`(${id}::uuid, ${new Date(timestamp).toISOString()}::timestamptz)`,
-  );
-  const visitRows = visits.length ? sql`values ${sql.join(visits, sql`, `)}` : sql`select null::uuid, null::timestamptz where false`;
-  const cursorPredicate = decoded ? sql`and (
-    personal_activity_at < ${decoded.activityAt}::timestamptz
-    or (personal_activity_at = ${decoded.activityAt}::timestamptz and relation_rank > ${decoded.relationRank})
-    or (personal_activity_at = ${decoded.activityAt}::timestamptz and relation_rank = ${decoded.relationRank} and space_activity_at < ${decoded.spaceActivityAt}::timestamptz)
-    or (personal_activity_at = ${decoded.activityAt}::timestamptz and relation_rank = ${decoded.relationRank} and space_activity_at = ${decoded.spaceActivityAt}::timestamptz and id > ${decoded.id}::uuid)
-  )` : sql``;
-  const filterPredicate = filter === "mine" ? sql`and visible.user_uuid = ${identity.uuid}`
-    : filter === "pinned" ? sql`and visible.is_pinned`
-    : filter === "archived" ? sql`and visible.is_archived`
-    : sql``;
-  const rows = await db.execute<{
-    id: string; user_uuid: string; name: string; slug: string | null; description: string | null;
-    created_at: Date | string; updated_at: Date | string; last_activity_at: Date | string | null;
-    avatar_url: string | null; owner_display_name: string | null; owner_username: string | null; owner_avatar_url: string | null;
-    is_pinned: boolean; is_archived: boolean; relation: "owner" | "member";
-    personal_activity_at: Date | string;
-    space_activity_at: Date | string; relation_rank: number; relation_owner: boolean;
-  }>(sql`
-    with visits(space_id, visited_at) as (${visitRows}),
-    turn_activity as (
-      select sess.space_id, max(t.created_at) personal_activity_at
-      from v2.session_turns t
-      join v2.space_sessions sess on sess.id = t.session_id
-      where t.user_uuid = ${identity.uuid}
-      group by sess.space_id
-    ),
-    visible as materialized (
-      select s.id, s.user_uuid, s.name, s.slug,
-        nullif(left(regexp_replace(coalesce(s.description, ''), '\\s+', ' ', 'g'), 220), '') description,
-        s.created_at, s.updated_at, s.last_activity_at,
-        nullif(trim(coalesce(s.meta #>> '{publicProfile,avatarUrl}', '')), '') avatar_url,
-        greatest(coalesce(ta.personal_activity_at, 'epoch'::timestamptz), coalesce(visits.visited_at, 'epoch'::timestamptz)) personal_activity_at,
-        coalesce(s.last_activity_at, s.updated_at, s.created_at) space_activity_at,
-        case when s.user_uuid = ${identity.uuid} then 0 else 1 end relation_rank,
-        (s.user_uuid = ${identity.uuid}) relation_owner,
-        pin_assignment.id is not null is_pinned,
-        archive_assignment.id is not null is_archived
-      from v2.spaces s
-      left join v2.space_members sm on sm.space_id = s.id and sm.user_id = ${identity.uuid}
-      left join v2.user_profiles search_owner on search_owner.user_uuid = s.user_uuid
-      left join turn_activity ta on ta.space_id = s.id
-      left join visits on visits.space_id = s.id
-      left join v2.labels pin_label on pin_label.scope_type='user' and pin_label.scope_id=${identity.uuid} and pin_label.system_key='user:pinned'
-      left join v2.label_assignments pin_assignment on pin_assignment.label_id=pin_label.id and pin_assignment.scope_type='user' and pin_assignment.scope_id=${identity.uuid} and pin_assignment.resource_type='space' and pin_assignment.resource_ref=s.id::text
-      left join v2.labels archive_label on archive_label.scope_type='user' and archive_label.scope_id=${identity.uuid} and archive_label.system_key='user:archived'
-      left join v2.label_assignments archive_assignment on archive_assignment.label_id=archive_label.id and archive_assignment.scope_type='user' and archive_assignment.scope_id=${identity.uuid} and archive_assignment.resource_type='space' and archive_assignment.resource_ref=s.id::text
-      where (s.user_uuid=${identity.uuid} or sm.user_id is not null)
-        and (archive_assignment.id is null or ${filter === "archived"})
-        and (${exactName} = '' or s.name = ${exactName})
-        and (${query} = '' or s.name ilike '%' || ${query} || '%' or coalesce(s.description,'') ilike '%' || ${query} || '%' or coalesce(s.slug,'') ilike '%' || ${query} || '%' or coalesce(search_owner.display_name,'') ilike '%' || ${query} || '%' or coalesce(search_owner.username,'') ilike '%' || ${query} || '%')
-    )
-    select visible.*, up.display_name owner_display_name, up.username owner_username, up.avatar_url owner_avatar_url
-    from visible left join v2.user_profiles up on up.user_uuid=visible.user_uuid
-    where true ${filterPredicate} ${cursorPredicate}
-    order by personal_activity_at desc, relation_rank asc, space_activity_at desc, id asc
-    limit ${limit + 1}
-  `);
-  const pageRows = rows.slice(0, limit);
-  const hasMore = rows.length > limit;
-  const lastPageRow = pageRows.at(-1);
-  const nextCursor = hasMore && lastPageRow ? encodeSpacePageCursor(lastPageRow) : null;
-  const sandboxRows = pageRows.length ? await db.select({ spaceId: spaceSandboxes.spaceId, status: spaceSandboxes.status }).from(spaceSandboxes).where(inArray(spaceSandboxes.spaceId, pageRows.map((r) => r.id))) : [];
+  const cursor = decodeSpaceListCursor(c.req.query("cursor"));
+  if (cursor === false) return c.json({ message: "invalid cursor" }, 400);
+
+  const recent = filter === "recent" && !query && !exactName;
+  const { rows, nextCursor } = recent
+    ? {
+        rows: await listRecentSpaces(identity.uuid, parseSpaceVisits(c.req.queries("recentSpaceId") ?? [], c.req.queries("recentSpaceAt") ?? []), limit),
+        nextCursor: null,
+      }
+    : await listMemberSpaces({ userUuid: identity.uuid, filter: filter === "recent" ? "all" : filter, query, exactName, cursor, limit });
+
+  const sandboxRows = rows.length ? await db.select({ spaceId: spaceSandboxes.spaceId, status: spaceSandboxes.status }).from(spaceSandboxes).where(inArray(spaceSandboxes.spaceId, rows.map((r) => r.id))) : [];
   const sandboxBySpace = new Map(sandboxRows.map((r) => [r.spaceId, r.status]));
-  const items = pageRows.map((row) => ({
+  const items = rows.map((row) => ({
     id: row.id, userUuid: row.user_uuid, name: row.name, slug: row.slug, description: row.description,
     createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
     title: null, status: null, meta: null,
@@ -842,24 +779,12 @@ router.get("/", async (c) => {
     publicProfile: { avatarUrl: normalizePublicAvatarUrl(row.avatar_url) },
     ownerProfile: { userUuid: row.user_uuid, username: row.owner_username, displayName: row.owner_display_name, avatarUrl: normalizePublicAvatarUrl(row.owner_avatar_url) },
     sandboxStatus: sandboxBySpace.get(row.id) ?? null, isPinned: row.is_pinned, isArchived: row.is_archived,
-    relation: row.relation_owner ? "owner" : "member",
-    personalActivityAt: new Date(row.personal_activity_at).toISOString(),
+    relation: row.user_uuid === identity.uuid ? "owner" : "member",
+    joinedAt: new Date(row.joined_at).toISOString(),
+    ...(recent ? { personalActivityAt: new Date(row.sort_at).toISOString() } : {}),
   }));
-  return c.json({ items, pageInfo: { hasMore, nextCursor } });
+  return c.json({ items, pageInfo: { hasMore: nextCursor !== null, nextCursor } });
 });
-
-function encodeSpacePageCursor(row: { personal_activity_at: Date | string; relation_rank: number; space_activity_at: Date | string; id: string }) {
-  return Buffer.from(JSON.stringify({ activityAt: new Date(row.personal_activity_at).toISOString(), relationRank: row.relation_rank, spaceActivityAt: new Date(row.space_activity_at).toISOString(), id: row.id })).toString("base64url");
-}
-
-function decodeSpacePageCursor(value: string | undefined): false | null | { activityAt: string; relationRank: number; spaceActivityAt: string; id: string } {
-  if (!value) return null;
-  try {
-    const cursor = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-    if (typeof cursor.activityAt !== "string" || !Number.isSafeInteger(cursor.relationRank) || typeof cursor.spaceActivityAt !== "string" || !Number.isFinite(Date.parse(cursor.activityAt)) || !Number.isFinite(Date.parse(cursor.spaceActivityAt)) || !requireValidId(cursor.id)) return false;
-    return cursor;
-  } catch { return false; }
-}
 
 router.get("/default", async (c) => {
   const user = useAuth(c);

@@ -30,15 +30,18 @@ export function time(value: string | null | undefined) {
 	return Date.parse(value ?? "") || 0;
 }
 
-export const compareSpaces: Compare<SpaceRecord> = (a, b) => {
-	const personal = time(b.personalActivityAt) - time(a.personalActivityAt);
-	if (personal) return personal;
-	const relation =
-		(a.relation === "owner" ? 0 : 1) - (b.relation === "owner" ? 0 : 1);
-	if (relation) return relation;
-	const space =
-		time(b.lastActivityAt ?? b.updatedAt ?? b.createdAt) -
-		time(a.lastActivityAt ?? a.updatedAt ?? a.createdAt);
-	if (space) return space;
-	return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-};
+const byIdDesc = (a: SpaceRecord, b: SpaceRecord) =>
+	a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+
+function byTime(
+	at: (space: SpaceRecord) => string | null | undefined,
+): Compare<SpaceRecord> {
+	return (a, b) => time(at(b)) - time(at(a)) || byIdDesc(a, b);
+}
+
+const byPersonalActivity = byTime((space) => space.personalActivityAt);
+const byJoined = byTime((space) => space.joinedAt);
+
+export function compareSpaces(filter: SpacesFilter): Compare<SpaceRecord> {
+	return filter === "recent" ? byPersonalActivity : byJoined;
+}
