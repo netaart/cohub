@@ -10,6 +10,7 @@ import {
 	X,
 } from "lucide-svelte";
 import { onMount, tick, untrack } from "svelte";
+import { MediaQuery, SvelteMap } from "svelte/reactivity";
 import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
 import { page } from "$app/state";
 import { getCacheUserKey } from "$lib/cache/keys";
@@ -30,6 +31,7 @@ import {
 import {
 	absorbLensPrefix,
 	buildSearchPlan,
+	COMMAND_PALETTE_LENSES,
 	type CommandPaletteLens,
 	lensOf,
 } from "$lib/command-palette/lens";
@@ -72,6 +74,8 @@ import type { CommandPaletteItem } from "$lib/command-palette/types";
 import CommandPaletteLensBar from "$lib/components/command-palette/CommandPaletteLensBar.svelte";
 import CommandPaletteRecentQueries from "$lib/components/command-palette/CommandPaletteRecentQueries.svelte";
 import CommandPaletteResultRow from "$lib/components/command-palette/CommandPaletteResultRow.svelte";
+import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
+import SwipePager from "$lib/components/list-page/SwipePager.svelte";
 import { settingsSectionLabel } from "$lib/components/settings-section";
 import ToolCallList from "$lib/components/ToolCallList.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -115,7 +119,7 @@ const locale = $derived(getLocale());
 const RESULT_LIMIT = 30;
 const DEBOUNCE_MS = 180;
 const POINTER_HOVER_ARM_MS = 220;
-const FULL_SCREEN_QUERY = "(max-width: 640px)";
+const fullScreen = new MediaQuery("max-width: 640px");
 
 /**
  * Land a rebuilt default list without a redundant render. The result list is
@@ -130,6 +134,10 @@ function applyDefaultItems(next: CommandPaletteItem[]) {
 
 let open = $state(false);
 let lens = $state<CommandPaletteLens>("all");
+/** What the landing page showed mid-swipe, held until its own results arrive. */
+let seed = $state<CommandPaletteItem[] | null>(null);
+let swipePosition = $state<number | null>(null);
+const lensSnapshots = new SvelteMap<string, CommandPaletteItem[]>();
 let query = $state("");
 let openIntent = $state<CommandPaletteIntent>("navigate");
 let historyBacked = false;
@@ -236,9 +244,10 @@ const isSpacePickerMode = $derived(
 		(searchPlan.resourceTypes?.length === 1 &&
 			searchPlan.resourceTypes[0] === "space"),
 );
-const showRecentQueries = $derived(
-	!runMode && !isSpacePickerMode && !query.trim() && recentQueries.length > 0,
+const hasRecentQueries = $derived(
+	!runMode && !query.trim() && recentQueries.length > 0,
 );
+const showRecentQueries = $derived(hasRecentQueries && !isSpacePickerMode);
 const resultLimit = $derived(
 	isSpacePickerMode ? SPACE_PAGE_SIZE : RESULT_LIMIT,
 );
@@ -354,8 +363,27 @@ const isSearching = $derived(
 		!legacyDefaultDone ||
 		!archivedDone,
 );
+const lensSettled = $derived(
+	trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope
+		? defaultDone && legacyDefaultDone
+		: localDone,
+);
+const pending = $derived(seed !== null && !lensSettled);
 const renderedItems = $derived(
-	mergedItems.length > 0 || !isSearching ? mergedItems : settledItems,
+	pending && seed
+		? seed
+		: mergedItems.length > 0 || !isSearching
+			? mergedItems
+			: settledItems,
+);
+const swipeable = $derived(
+	fullScreen.current && showLensBar && activeLens !== null,
+);
+const lensIndex = $derived(
+	activeLens ? COMMAND_PALETTE_LENSES.indexOf(activeLens) : 0,
+);
+const lensPosition = $derived(
+	activeLens ? (swipeable ? (swipePosition ?? lensIndex) : lensIndex) : null,
 );
 const showingSettledItems = $derived(
 	isSearching && mergedItems.length === 0 && settledItems.length > 0,
@@ -431,8 +459,8 @@ function handleCommandInput(event: Event) {
 			: absorbLensPrefix(lens, value);
 	// Set the DOM value directly: `query` may not change (`s:` → "").
 	if (next.input !== value) input.value = next.input;
-	if (next.lens !== lens) selectLens(next.lens);
 	query = next.input;
+	if (next.lens !== lens) selectLens(next.lens);
 	widenSpaceFilter();
 }
 
@@ -446,17 +474,38 @@ function selectLens(next: CommandPaletteLens) {
 	if (parsed.explicitTypeFilter) query = parsed.query;
 	if (next === "space" && lens !== "space")
 		spaceFilter = getCachedSpaceFilterPref();
+	if (next !== activeLens) {
+		seed = previewFor(next) ?? [];
+		settledItems = seed;
+		localDone = false;
+		legacyDefaultDone = false;
+	}
 	lens = next;
 	activeIndex = 0;
 	refocusInput();
 }
 
-function isFullScreen() {
-	return window.matchMedia(FULL_SCREEN_QUERY).matches;
+function snapshotKey(target: CommandPaletteLens) {
+	return `${target === "space" ? spaceFilter : ""}:${target}\n${query}`;
+}
+
+function previewFor(target: CommandPaletteLens) {
+	const snapshot = lensSnapshots.get(snapshotKey(target));
+	if (snapshot) return snapshot;
+	if (activeLens !== "all" || target === "all") return null;
+	if (target === "space" && spaceFilter !== "all") return null;
+	return renderedItems.filter((item) => item.type === target);
+}
+
+function bindResults(node: HTMLDivElement) {
+	resultsEl = node;
+	return () => {
+		if (resultsEl === node) resultsEl = null;
+	};
 }
 
 function refocusInput() {
-	if (!isFullScreen()) inputEl?.focus();
+	if (!fullScreen.current) inputEl?.focus();
 }
 
 function clearInput() {
@@ -621,9 +670,10 @@ function openPalette(detail?: OpenCommandPaletteDetail, restored = false) {
 	armPointerHover();
 	resetRunState();
 	open = true;
-	historyBacked = restored || isFullScreen();
+	historyBacked = restored || fullScreen.current;
 	if (historyBacked && !restored) writeHistoryEntry();
-	if (!restored || !isFullScreen()) void tick().then(() => inputEl?.focus());
+	if (!restored || !fullScreen.current)
+		void tick().then(() => inputEl?.focus());
 	warmSpacePickerCache();
 }
 
@@ -653,6 +703,9 @@ function teardownPalette() {
 	activeIndex = 0;
 	settledItems = [];
 	archivedItems = [];
+	seed = null;
+	swipePosition = null;
+	lensSnapshots.clear();
 	searchToken += 1;
 	localController?.abort();
 	remoteController?.abort();
@@ -1063,6 +1116,15 @@ $effect(() => {
 });
 
 $effect(() => {
+	if (seed && lensSettled) seed = null;
+});
+
+$effect(() => {
+	if (!open || runMode || !activeLens || seed || isSearching) return;
+	lensSnapshots.set(snapshotKey(activeLens), mergedItems);
+});
+
+$effect(() => {
 	if (activeIndex >= renderedItems.length)
 		activeIndex = Math.max(renderedItems.length - 1, 0);
 });
@@ -1117,6 +1179,69 @@ onMount(() => {
 });
 </script>
 
+{#snippet spaceFilterRow()}
+	<div class="space-filter-row">
+		<div class="space-filter-bar" role="tablist" aria-orientation="horizontal" aria-label={m.command_filter_spaces({}, { locale })}>
+			{#each SPACE_FILTER_KEYS as key (key)}
+				<button
+					id={`command-space-filter-${key}`}
+					type="button"
+					class="space-filter-btn"
+					class:active={spaceFilter === key}
+					role="tab"
+					aria-selected={spaceFilter === key}
+					aria-controls="command-palette-results"
+					tabindex={spaceFilter === key ? 0 : -1}
+					onclick={() => selectSpaceFilter(key)}
+					onkeydown={(event) => handleSpaceFilterKeydown(event, key)}
+				>{spaceFilterLabel(key)}</button>
+			{/each}
+		</div>
+		<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={openSpacesManager}>
+			<Settings2 class="h-3.5 w-3.5" />
+			<span>{m.spaces_manage({}, { locale })}</span>
+		</a>
+	</div>
+{/snippet}
+
+{#snippet emptyState(active: boolean)}
+	{@const picker = active && isSpacePickerMode}
+	{@const idle = trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope}
+	<div class="command-empty">
+		<div class="command-empty-mark"><CornerDownRight class="h-4 w-4" /></div>
+		<div>
+			<div class="text-[13px] font-medium text-text-secondary">
+				{#if picker && spaceFilter === "recent"}
+					{m.command_no_recent({}, { locale })}
+				{:else if picker && spaceFilter === "pinned"}
+					{m.command_no_pinned({}, { locale })}
+				{:else if picker && spaceFilter === "mine"}
+					{m.command_no_owned({}, { locale })}
+				{:else if picker && spaceFilter === "archived"}
+					{m.spaces_empty_archived({}, { locale })}
+				{:else if idle}
+					{m.command_lens_ready({}, { locale })}
+				{:else}
+					{m.command_no_matching({}, { locale })}
+				{/if}
+			</div>
+			<div class="mt-1 text-[12px] text-text-tertiary">
+				{#if picker && spaceFilter === "recent"}
+					{m.command_recent_hint({}, { locale })}
+				{:else if picker && spaceFilter === "pinned"}
+					{m.command_pin_hint({}, { locale })}
+				{:else if picker && spaceFilter === "archived"}
+					{m.spaces_empty_archived_hint({}, { locale })}
+				{:else if idle}
+					{m.command_try_filters({}, { locale })}
+				{:else}
+					{m.command_try_other({}, { locale })}
+				{/if}
+			</div>
+		</div>
+	</div>
+{/snippet}
+
 {#if open}
 	<div class="command-palette-root" role="presentation" onmousedown={(event) => { if (event.target === event.currentTarget) closePalette(); }}>
 		<div class="command-palette" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" onkeydown={handlePaletteKeydown}>
@@ -1153,35 +1278,14 @@ onMount(() => {
 				</div>
 
 				{#if showLensBar}
-					<CommandPaletteLensBar lens={activeLens} onSelect={selectLens} />
+					<CommandPaletteLensBar lens={activeLens} position={lensPosition} onSelect={selectLens} />
 				{/if}
 
-				{#if isSpacePickerMode && !runMode}
-					<div class="space-filter-row">
-						<div class="space-filter-bar" role="tablist" aria-orientation="horizontal" aria-label={m.command_filter_spaces({}, { locale })}>
-							{#each SPACE_FILTER_KEYS as key (key)}
-								<button
-									id={`command-space-filter-${key}`}
-									type="button"
-									class="space-filter-btn"
-									class:active={spaceFilter === key}
-									role="tab"
-									aria-selected={spaceFilter === key}
-									aria-controls="command-palette-results"
-									tabindex={spaceFilter === key ? 0 : -1}
-									onclick={() => selectSpaceFilter(key)}
-									onkeydown={(event) => handleSpaceFilterKeydown(event, key)}
-								>{spaceFilterLabel(key)}</button>
-							{/each}
-						</div>
-						<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={openSpacesManager}>
-							<Settings2 class="h-3.5 w-3.5" />
-							<span>{m.spaces_manage({}, { locale })}</span>
-						</a>
-					</div>
+				{#if !swipeable && isSpacePickerMode && !runMode}
+					{@render spaceFilterRow()}
 				{/if}
 
-				{#if showRecentQueries}
+				{#if !swipeable && showRecentQueries}
 					<CommandPaletteRecentQueries queries={recentQueries} onPick={pickRecentQuery} onClear={forgetRecentQueries} />
 				{/if}
 			</div>
@@ -1217,59 +1321,59 @@ onMount(() => {
 					{/if}
 				</div>
 			{:else}
-				<div id="command-palette-results" bind:this={resultsEl} class:searching={showingSettledItems} class="command-results" role="listbox" tabindex="-1" aria-label={m.command_search_results({}, { locale })} onscroll={handleResultsScroll} ontouchmove={dismissKeyboard}>
-					{#if renderedItems.length === 0}
-						<div class="command-empty">
-							<div class="command-empty-mark"><CornerDownRight class="h-4 w-4" /></div>
-							<div>
-								<div class="text-[13px] font-medium text-text-secondary">
-									{#if isSpacePickerMode && spaceFilter === "recent"}
-										{m.command_no_recent({}, { locale })}
-									{:else if isSpacePickerMode && spaceFilter === "pinned"}
-										{m.command_no_pinned({}, { locale })}
-									{:else if isSpacePickerMode && spaceFilter === "mine"}
-										{m.command_no_owned({}, { locale })}
-									{:else if isSpacePickerMode && spaceFilter === "archived"}
-										{m.spaces_empty_archived({}, { locale })}
-									{:else if trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope}
-										{m.command_lens_ready({}, { locale })}
-									{:else}
-										{m.command_no_matching({}, { locale })}
+				<SwipePager
+					keys={COMMAND_PALETTE_LENSES}
+					index={lensIndex}
+					enabled={swipeable}
+					onChange={(index) => selectLens(COMMAND_PALETTE_LENSES[index] ?? "all")}
+					onPosition={(next) => (swipePosition = next)}
+				>
+					{#snippet page(index, active)}
+						{@const pageLens = COMMAND_PALETTE_LENSES[index] ?? "all"}
+						{@const items = active ? renderedItems : previewFor(pageLens)}
+						<div
+							class:searching={active && (pending || showingSettledItems)}
+							class="command-results"
+							onscroll={active ? handleResultsScroll : undefined}
+							{@attach active ? bindResults : undefined}
+						>
+							{#if swipeable && pageLens === "space"}
+								{@render spaceFilterRow()}
+							{:else if swipeable && hasRecentQueries}
+								<CommandPaletteRecentQueries queries={recentQueries} onPick={pickRecentQuery} onClear={forgetRecentQueries} />
+							{/if}
+							<div
+								id={active ? "command-palette-results" : undefined}
+								role="listbox"
+								tabindex="-1"
+								aria-label={m.command_search_results({}, { locale })}
+								ontouchmove={dismissKeyboard}
+							>
+								{#if !items || (active && items.length === 0 && isSearching)}
+									<ListRowSkeleton density="compact" rows={6} label={m.common_loading({}, { locale })} />
+								{:else if items.length === 0}
+									{@render emptyState(active)}
+								{:else}
+									{#each items as item, itemIndex (`${item.type}:${item.id || item.turnId || item.sessionId || item.spaceId}`)}
+										<CommandPaletteResultRow
+											{item}
+											active={active && itemIndex === activeIndex}
+											pinnable={active && isSpacePickerMode && item.type === "space" && !item.isArchived}
+											onActivate={() => void activate(item)}
+											onHover={() => handleResultPointerMove(itemIndex)}
+											onTogglePin={() => togglePin(item)}
+										/>
+									{/each}
+									{#if active && isSpacePickerMode && mergedItemsRaw.length > spaceDisplayLimit}
+										<div class="flex items-center justify-center py-2 text-[11px] text-text-tertiary">
+											<span>{m.command_showing({ shown: spaceDisplayLimit, total: mergedItemsRaw.length }, { locale })}</span>
+										</div>
 									{/if}
-								</div>
-								<div class="mt-1 text-[12px] text-text-tertiary">
-									{#if isSpacePickerMode && spaceFilter === "recent"}
-										{m.command_recent_hint({}, { locale })}
-									{:else if isSpacePickerMode && spaceFilter === "pinned"}
-										{m.command_pin_hint({}, { locale })}
-									{:else if isSpacePickerMode && spaceFilter === "archived"}
-										{m.spaces_empty_archived_hint({}, { locale })}
-									{:else if trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope}
-										{m.command_try_filters({}, { locale })}
-									{:else}
-										{m.command_try_other({}, { locale })}
-									{/if}
-								</div>
+								{/if}
 							</div>
 						</div>
-					{:else}
-						{#each renderedItems as item, index (`${item.type}:${item.id || item.turnId || item.sessionId || item.spaceId}`)}
-							<CommandPaletteResultRow
-								{item}
-								active={index === activeIndex}
-								pinnable={isSpacePickerMode && item.type === "space" && !item.isArchived}
-								onActivate={() => void activate(item)}
-								onHover={() => handleResultPointerMove(index)}
-								onTogglePin={() => togglePin(item)}
-							/>
-						{/each}
-						{#if isSpacePickerMode && mergedItemsRaw.length > spaceDisplayLimit}
-							<div class="flex items-center justify-center py-2 text-[11px] text-text-tertiary">
-								<span>{m.command_showing({ shown: spaceDisplayLimit, total: mergedItemsRaw.length }, { locale })}</span>
-							</div>
-						{/if}
-					{/if}
-				</div>
+					{/snippet}
+				</SwipePager>
 			{/if}
 
 			<div class="command-footer">
@@ -1406,6 +1510,8 @@ onMount(() => {
 	}
 
 	.command-results {
+		flex: 1 1 auto;
+		min-height: 0;
 		overflow-y: auto;
 		padding: 8px;
 		transition: opacity 120ms cubic-bezier(0.25, 1, 0.5, 1);

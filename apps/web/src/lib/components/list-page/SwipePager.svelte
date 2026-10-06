@@ -257,7 +257,7 @@ $effect(() => {
 <style>
 	.pager {
 		display: flex;
-		overflow: hidden;
+		overflow: clip;
 		touch-action: pan-y pinch-zoom;
 	}
 
