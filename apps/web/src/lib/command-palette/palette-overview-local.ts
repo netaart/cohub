@@ -115,7 +115,7 @@ export function buildLocalPaletteOverview(input: {
 					id: session.id,
 					spaceId: list.spaceId,
 					spaceName,
-					title: session.title || "Untitled session",
+					title: session.title || null,
 					viewerRelation:
 						session.userUuid === input.viewerUserUuid
 							? "creator"

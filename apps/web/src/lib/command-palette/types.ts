@@ -1,7 +1,10 @@
 import type {
+	GlobalSearchChatHit,
+	GlobalSearchResult,
 	GlobalSearchType,
 	GlobalSearchViewerRelation,
 	LabelResourceType,
+	SearchTextRange,
 	SpacePublicProfile,
 	UserProfile,
 } from "@neta-art/cohub";
@@ -25,25 +28,18 @@ export type CommandPaletteItem = {
 	id: string;
 	spaceId: string;
 	sessionId: string | null;
-	turnId: string | null;
-	sequence: number | null;
 	title: string;
+	titleHighlights?: SearchTextRange[];
 	excerpt: string | null;
+	hit?: GlobalSearchChatHit | null;
+	matchCount?: number;
 	spaceName: string | null;
 	ownerProfile?: Pick<
 		UserProfile,
 		"userUuid" | "displayName" | "avatarUrl"
 	> | null;
 	spaceProfile?: SpacePublicProfile | null;
-	sessionTitle: string | null;
-	matchedField:
-		| "userText"
-		| "title"
-		| "name"
-		| "description"
-		| "command"
-		| "labelName"
-		| "labelItemContent";
+	matchedField: GlobalSearchResult["matchedField"] | "command";
 	href: string;
 	score: number;
 	textScore: number;
@@ -63,11 +59,4 @@ export type CommandPaletteItem = {
 	isArchived?: boolean;
 	localScore?: number;
 	remoteScore?: number;
-};
-
-export type CommandPaletteSearchState = {
-	items: CommandPaletteItem[];
-	localDone: boolean;
-	remoteDone: boolean;
-	remoteError: string | null;
 };

@@ -41,7 +41,9 @@ import type {
   PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
 import type { MessageRecord } from "@cohub/protocol/model";
-import type { ModelThinkingLevel } from "@cohub/protocol";
+import type { ModelThinkingLevel, SearchTextRange } from "@cohub/protocol";
+
+export type { SearchTextRange } from "@cohub/protocol";
 
 export type {
   BoardAnimation,
@@ -1115,21 +1117,28 @@ export type SpaceChannelBindingInput = {
   config?: ChannelConfig | null;
 };
 
-export type GlobalSearchType = "turn" | "session" | "space" | "label";
+export type GlobalSearchType = "chat" | "space" | "label";
 
 export type GlobalSearchViewerRelation = "creator" | "participant" | "unrelated";
+
+export type GlobalSearchChatHit = {
+  turnId: string;
+  sequence: number;
+  excerpt: string;
+  highlights: SearchTextRange[];
+};
 
 export type GlobalSearchResult = {
   type: GlobalSearchType;
   id: string;
   spaceId: string;
   sessionId: string | null;
-  turnId: string | null;
-  sequence: number | null;
   title: string;
+  titleHighlights?: SearchTextRange[];
   excerpt?: string | null;
+  hit?: GlobalSearchChatHit | null;
+  matchCount?: number;
   spaceName?: string | null;
-  sessionTitle?: string | null;
   ownerProfile?: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
   spaceProfile?: SpacePublicProfile | null;
   matchedField: "userText" | "title" | "name" | "description" | "labelName" | "labelItemContent";

@@ -10,8 +10,7 @@ export type CommandPaletteSearchPlan = {
 };
 
 const REMOTE_TYPES = new Set<CommandPaletteResourceType>([
-	"turn",
-	"session",
+	"chat",
 	"space",
 	"label",
 ]);

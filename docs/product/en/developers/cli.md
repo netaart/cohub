@@ -245,6 +245,8 @@ cohub models ls --model-type multimodal
 cohub generate "A calm lake at sunrise" --model <model> --output lake.png
 ```
 
+`search` finds Spaces, chats by title or by the messages sent in them, and label items. `--types chat,space,label` narrows the result types, and `--space-id` searches every chat you can view in one Space; chat rows show the matching message.
+
 `models ls` shows each LLM's per-million-token cost (for example `$3 /M input · $15 /M output`) and hides models marked `hidden`. `models ls --model-type multimodal` shows each model's unit price (for example `$0.04 / image` or `$0.10–$0.50 / second`); `--json` returns the raw `pricing` object (`unit`, `amount` or `min`/`max`, optional `note`).
 
 ## Output discipline

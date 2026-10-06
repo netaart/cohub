@@ -15,8 +15,6 @@ export class SearchApi {
       types?: GlobalSearchType[];
       spaceId?: string;
       labelRef?: string;
-      /** Keep raw turn-level rows instead of one best turn per session. */
-      groupTurns?: boolean;
     },
     customFetch?: Fetch,
   ) {
@@ -25,7 +23,6 @@ export class SearchApi {
     for (const type of input.types ?? []) params.append("type", type);
     if (input.spaceId) params.set("spaceId", input.spaceId);
     if (input.labelRef) params.set("labelRef", input.labelRef);
-    if (input.groupTurns === false) params.set("groupTurns", "false");
     return this.transport.request<GlobalSearchResponse>(`/api/search?${params.toString()}`, {
       fetch: customFetch,
     });

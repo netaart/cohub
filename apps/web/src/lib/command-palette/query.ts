@@ -1,10 +1,12 @@
 import type { CommandPaletteResourceType } from "./types";
 
 const TYPE_ALIASES = new Map<string, CommandPaletteResourceType>([
-	["turn", "turn"],
-	["turns", "turn"],
-	["session", "session"],
-	["sessions", "session"],
+	["chat", "chat"],
+	["chats", "chat"],
+	["session", "chat"],
+	["sessions", "chat"],
+	["turn", "chat"],
+	["turns", "chat"],
 	["space", "space"],
 	["spaces", "space"],
 	["label", "label"],
@@ -14,8 +16,8 @@ const TYPE_ALIASES = new Map<string, CommandPaletteResourceType>([
 ]);
 
 const SHORT_PREFIX_TYPES = new Map<string, CommandPaletteResourceType>([
-	["t", "turn"],
-	["s", "session"],
+	["s", "chat"],
+	["t", "chat"],
 	["a", "space"],
 	["l", "label"],
 	["c", "command"],
