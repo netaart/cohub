@@ -47,6 +47,7 @@ import live.cohub.android.host.LauncherShortcuts
 import live.cohub.android.host.SurfaceListener
 import live.cohub.android.host.WebOrigin
 import live.cohub.android.host.WebSurface
+import live.cohub.android.host.WebWarmup
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.toJson
 import live.cohub.android.ui.ShellAppearance
@@ -180,6 +181,7 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     private fun mountSurface(path: String) {
+        WebWarmup.prefetch(path)
         val next = WebSurface(this, surfaceListener)
         next.setBackgroundColor(appearance.backgroundColor)
         // Without the bridge the surface still runs on its browser path; this
@@ -383,6 +385,8 @@ class MainActivity : ComponentActivity(), HostActions {
             return
         }
 
+        val destination = pending.redirectPath ?: "/"
+        if (surface != null) WebWarmup.prefetch(destination)
         lifecycleScope.launch {
             runCatching { auth.completeSignIn(code, pending.challenge.verifier) }
                 .onSuccess { hostPrefs.edit { remove(KEY_FORCE_LOGIN) } }
@@ -390,7 +394,7 @@ class MainActivity : ComponentActivity(), HostActions {
                     Log.w(TAG, "Sign-in failed", it)
                     toast(R.string.sign_in_failed)
                 }
-            navigate(pending.redirectPath ?: "/")
+            navigate(destination)
         }
     }
 

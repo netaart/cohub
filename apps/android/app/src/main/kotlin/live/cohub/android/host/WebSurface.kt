@@ -10,10 +10,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
-import androidx.webkit.Profile
-import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
 import androidx.webkit.WebViewOutcomeReceiver
 import androidx.webkit.WebViewStartUpConfig
 import androidx.webkit.WebViewStartUpResult
@@ -105,10 +102,7 @@ class WebSurface(context: Context, listener: SurfaceListener) {
                 context,
                 config,
                 object : WebViewOutcomeReceiver<WebViewStartUpResult, WebViewStartupException> {
-                    override fun onResult(result: WebViewStartUpResult) = main.execute {
-                        preconnect()
-                        onReady()
-                    }
+                    override fun onResult(result: WebViewStartUpResult) = main.execute(onReady)
 
                     override fun onError(error: WebViewStartupException) = main.execute {
                         Log.w(TAG, "Async WebView start-up failed", error)
@@ -116,13 +110,6 @@ class WebSurface(context: Context, listener: SurfaceListener) {
                     }
                 },
             )
-        }
-
-        @OptIn(markerClass = [Profile.ExperimentalPreconnect::class])
-        private fun preconnect() {
-            if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return
-            val profile = ProfileStore.getInstance().getOrCreateProfile(Profile.DEFAULT_PROFILE_NAME)
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.PRECONNECT)) profile.preconnect(BuildConfig.API_ORIGIN)
         }
     }
 }

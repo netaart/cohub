@@ -15,7 +15,8 @@ app/src/main/kotlin/live/cohub/android/
     HostProtocol.kt          wire constants (mirrors packages/protocol)
     HostCapabilities.kt      what this build advertises
     HostBridge.kt            request dispatch, events, capability handshake
-    WebSurface.kt            the WebView island, async start-up, preconnect
+    WebSurface.kt            the WebView island, async start-up
+    WebWarmup.kt             prefetches the next document, preconnects the API
     WebOrigin.kt             the one origin that loads in-shell
     LastPage.kt              the page a cold start reopens
     LauncherShortcuts.kt     long-press shortcuts into recent Spaces
@@ -61,9 +62,9 @@ included, to `adb logcat -s CohubWeb`.
 A cold start opens a shared link if there is one, otherwise the last in-app page
 (`LastPage`, cleared on sign-out), otherwise `/`. Start-up overlaps its slow
 parts: the WebView provider loads on a background thread
-(`WebViewCompat.startUpWebView`) while credentials decrypt on another, the API
-origin is preconnected, and the launch screen stays until the page reports its
-first screen (see the bridge doc's Launch section).
+(`WebViewCompat.startUpWebView`) while credentials decrypt on another, the first
+document is prefetched and the API origin preconnected, and the launch screen
+stays until the page reports its first screen (see the bridge doc's Launch section).
 
 `-PcohubEnv=dev|prod` (default prod) selects origins and the Logto native app;
 single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohubGatewayOrigin`,
