@@ -1,5 +1,9 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
+import {
+	getFilterBarPill,
+	hasFilterBarPill,
+} from "$lib/components/list-page/filter-bar";
 
 let {
 	label,
@@ -25,12 +29,17 @@ let {
 	ref?: HTMLElement | null;
 } = $props();
 
+const barPill = hasFilterBarPill() ? getFilterBarPill() : null;
+const onPill = $derived(kind !== "menu" && Boolean(barPill?.()));
+
 const className = $derived(
-	`inline-flex h-8 max-w-[200px] shrink-0 select-none items-center gap-1.5 rounded-[7px] px-[var(--list-row-pad-x)] text-[12px] font-medium transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 lg:h-7 lg:rounded-[6px] ${
+	`relative inline-flex h-8 max-w-[200px] shrink-0 select-none items-center gap-1.5 rounded-[7px] px-[var(--list-row-pad-x)] text-[12px] font-medium transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 lg:h-7 lg:rounded-[6px] ${
 		kind === "menu"
 			? "bg-bg-surface text-text-secondary hover:bg-bg-hover hover:text-text-primary"
 			: active
-				? "bg-brand-muted text-brand-muted-fg hover:bg-brand-muted-hover"
+				? onPill
+					? "text-brand-muted-fg"
+					: "bg-brand-muted text-brand-muted-fg hover:bg-brand-muted-hover"
 				: "text-text-tertiary hover:bg-bg-hover hover:text-text-secondary"
 	}`,
 );
