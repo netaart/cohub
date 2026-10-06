@@ -21,6 +21,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "navigation",
   "cache",
   "runtime",
+  "appearance",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -115,6 +116,8 @@ export const deviceFolderListingSchema = z.object({
 }).strict();
 export type DeviceFolderListing = z.infer<typeof deviceFolderListingSchema>;
 
+export const hostColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i);
+
 /**
  * Methods the web surface may call. Both ends validate with these schemas, so
  * a host cannot answer a shape the web side misreads.
@@ -138,6 +141,7 @@ export const HOST_BRIDGE_METHODS = {
     result: deviceRuntimeSchema.extend({ refused: z.enum(DEVICE_RUNTIME_REFUSALS).nullable() }).strict(),
   },
   "runtime.stop": { params: z.object({ spaceId: z.uuid() }).strict(), result: deviceRuntimeSchema },
+  "appearance.set": { params: z.object({ backgroundColor: hostColorSchema }).strict(), result: z.boolean() },
 } as const;
 export type HostBridgeMethod = keyof typeof HOST_BRIDGE_METHODS;
 

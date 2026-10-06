@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- WebView derives prefers-color-scheme from isLightTheme. -->
+    <style name="Base.Theme.Cohub" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
     <!--
       Edge-to-edge with a transparent system bar background. The web app draws
       its own chrome, so the native theme must not paint one over it.
     -->
-    <style name="Theme.Cohub" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+    <style name="Theme.Cohub" parent="Base.Theme.Cohub">
+        <item name="android:windowBackground">@color/shell_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

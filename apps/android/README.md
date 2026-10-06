@@ -25,7 +25,9 @@ app/src/main/kotlin/live/cohub/android/
     RuntimeService.kt        foreground service running every enabled binding
     RuntimeConnection.kt     /runtime/relay client (no local Harness)
     SandboxBridge.kt         supervises sandboxd over one folder
-  ui/WebSurfaceHost.kt       Compose wrapper for the WebView
+  ui/
+    WebSurfaceHost.kt        Compose wrapper for the WebView, edge-to-edge insets
+    ShellAppearance.kt       the page's edge color, persisted for cold start
 ```
 
 The device Runtime is described in `docs/local-runtime.md` ("Android device").

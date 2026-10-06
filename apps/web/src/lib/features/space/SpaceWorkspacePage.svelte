@@ -2360,10 +2360,16 @@ function closeInlineBoard() {
 	if (path) windowManager.close("board", path);
 	else windowManager.closeActive();
 }
-async function commitInlineBoard(boardId: string, patch: import("@cohub/protocol").BoardPatch) {
+async function commitInlineBoard(
+	boardId: string,
+	patch: import("@cohub/protocol").BoardPatch,
+) {
 	await boardPreview.commitBoard(boardId, patch);
 }
-function playInlineBoard(boardId: string, command: import("@cohub/protocol").BoardPlaybackCommand) {
+function playInlineBoard(
+	boardId: string,
+	command: import("@cohub/protocol").BoardPlaybackCommand,
+) {
 	return boardPreview.playBoard(boardId, command);
 }
 async function retryInlineBoardSave(boardId: string) {
@@ -3777,7 +3783,7 @@ const headerActions = {
   :global(.port-ready-toast) {
     position: fixed;
     left: 50%;
-    top: 58px;
+    top: calc(58px + env(safe-area-inset-top, 0px));
     z-index: var(--z-fullscreen);
     display: flex;
     max-width: min(680px, calc(100vw - 24px));

@@ -164,6 +164,13 @@ class HostBridge(
             JsonPrimitive(true)
         }
 
+        HostProtocol.Methods.APPEARANCE_SET -> {
+            val color = params["backgroundColor"]?.jsonPrimitive?.contentOrNull?.let(HostProtocol::parseColor)
+                ?: throw IllegalArgumentException("appearance.set requires a #rrggbb backgroundColor")
+            actions.setAppearance(color)
+            JsonPrimitive(true)
+        }
+
         HostProtocol.Methods.RUNTIME_LIST -> requireRuntime().instances.value.toJson()
 
         HostProtocol.Methods.RUNTIME_BROWSE -> {
@@ -257,6 +264,7 @@ class HostBridge(
             HostProtocol.Methods.SHARE_TEXT,
             HostProtocol.Methods.NAVIGATION_OPEN_PATH,
             HostProtocol.Methods.CACHE_CLEAR,
+            HostProtocol.Methods.APPEARANCE_SET,
         )
     }
 }
@@ -271,6 +279,7 @@ interface HostActions {
     fun shareText(text: String, title: String?)
     fun openPath(path: String)
     fun clearCache(scope: String)
+    fun setAppearance(backgroundColor: Int)
 
     suspend fun prepareRuntime(): Boolean
 }

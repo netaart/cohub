@@ -1102,7 +1102,7 @@ onDestroy(() => {
 
 	@media (pointer: coarse) {
 		.board-changes-chip {
-			top: calc(8px + env(safe-area-inset-top, 0px));
+			top: calc(8px + var(--safe-area-top));
 			padding: 6px 6px 6px 12px;
 		}
 		.board-changes-action { min-height: 32px; padding: 6px 10px; }

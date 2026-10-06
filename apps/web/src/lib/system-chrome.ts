@@ -1,3 +1,5 @@
+import { syncHostAppearance } from "$lib/host-bridge";
+
 // Matches light `--bg-primary` (oklch(100% 0 0)). The manifest, the inline
 // FOUC script and this fallback must agree so cold start, first paint and the
 // root canvas share one color.
@@ -5,9 +7,8 @@ export const DEFAULT_PWA_THEME_COLOR = "#FFFFFF";
 export const DEFAULT_PWA_BACKGROUND_COLOR = "#FFFFFF";
 
 /**
- * Keep browser chrome aligned with the actual shell background, including
- * space-level custom theme.css overrides. RGB output is used for compatibility
- * with older Android WebView/Chrome versions that do not parse OKLCH metadata.
+ * Keep browser chrome and the native host's system bars aligned with the
+ * actual shell background, including space-level custom theme.css overrides.
  */
 export function syncSystemChromeColor(fallback = DEFAULT_PWA_THEME_COLOR) {
 	if (typeof document === "undefined") return;
@@ -15,22 +16,25 @@ export function syncSystemChromeColor(fallback = DEFAULT_PWA_THEME_COLOR) {
 	const rootColor = getComputedStyle(document.documentElement)
 		.getPropertyValue("--bg-primary")
 		.trim();
-	const color = resolveCssColor(rootColor) ?? fallback;
+	const color = toSrgbHex(rootColor) ?? fallback;
 
 	for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
 		meta.setAttribute("content", color);
 	}
+	syncHostAppearance(color);
 }
 
-function resolveCssColor(value: string): string | null {
-	if (!value || typeof document === "undefined" || !document.body) return null;
+let probe: CanvasRenderingContext2D | null | undefined;
 
-	const probe = document.createElement("span");
-	probe.style.color = value;
-	if (!probe.style.color) return null;
-	probe.hidden = true;
-	document.body.append(probe);
-	const resolved = getComputedStyle(probe).color;
-	probe.remove();
-	return resolved || null;
+function toSrgbHex(value: string): string | null {
+	if (!value || !CSS.supports("color", value)) return null;
+	probe ??= document
+		.createElement("canvas")
+		.getContext("2d", { willReadFrequently: true });
+	if (!probe) return null;
+	probe.clearRect(0, 0, 1, 1);
+	probe.fillStyle = value;
+	probe.fillRect(0, 0, 1, 1);
+	const [r, g, b] = probe.getImageData(0, 0, 1, 1).data;
+	return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
 }
