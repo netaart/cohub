@@ -128,7 +128,7 @@ $effect(() => {
 	const observer = new ResizeObserver(() => {
 		updateEdges();
 		if (!interacted) revealActive(false);
-		if (position !== null) placePill(position, false);
+		if (position !== null) placePill(position, Number.isInteger(position));
 	});
 	observer.observe(el);
 	if (el.firstElementChild) observer.observe(el.firstElementChild);

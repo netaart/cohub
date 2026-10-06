@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { UserSessionSpaceSummary } from "@neta-art/cohub";
-import { Plus, Search } from "lucide-svelte";
+import { Plus, Search, X } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import { openAreaSearch } from "$lib/command-palette/open";
 import FilterBar from "$lib/components/list-page/FilterBar.svelte";
@@ -47,11 +47,11 @@ const shownIndex = $derived(Math.round(position));
 const lists: (ChatsList | undefined)[] = [];
 
 function select(index: number) {
-	if (index === pageIndex) {
-		lists[index]?.scrollToTop();
+	if (index === 0 && pageIndex === 0) {
+		lists[0]?.scrollToTop();
 		return;
 	}
-	inbox.setSpace(pages[index] ?? null);
+	inbox.setSpace(index === pageIndex ? null : (pages[index] ?? null));
 }
 
 $effect(() => {
@@ -114,9 +114,18 @@ onMount(() => {
 				onclick={() => select(0)}
 			/>
 			{#each inbox.spaceChips as space, index (space.id)}
-				<FilterChip label={space.name} active={shownIndex === index + 1} onclick={() => select(index + 1)}>
+				{@const selected = pageIndex === index + 1}
+				<FilterChip
+					label={space.name}
+					active={shownIndex === index + 1}
+					title={selected ? m.chats_space_all_hint({}, { locale }) : space.name}
+					onclick={() => select(index + 1)}
+				>
 					{#snippet leading()}
 						<SpaceAvatar name={space.name} profile={space.publicProfile ?? null} size="xxs" />
+					{/snippet}
+					{#snippet trailing()}
+						{#if selected}<X class="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />{/if}
 					{/snippet}
 				</FilterChip>
 			{/each}

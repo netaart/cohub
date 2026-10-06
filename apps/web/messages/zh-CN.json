@@ -2162,7 +2162,7 @@
 	"chats_source_group_channels": "Channel",
 	"chats_source_group_automations": "自动化",
 	"chats_space_all": "全部",
-	"chats_space_all_hint": "所有 Space 的对话",
+	"chats_space_all_hint": "显示所有 Space 的对话",
 	"chats_empty_filtered": "这里还没有对话",
 	"chats_empty_filtered_hint": "暂无符合该来源和 Space 的对话。",
 	"chats_show_all": "显示全部对话",

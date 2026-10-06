@@ -2162,7 +2162,7 @@
 	"chats_source_group_channels": "Channels",
 	"chats_source_group_automations": "Automations",
 	"chats_space_all": "All",
-	"chats_space_all_hint": "Chats from every Space",
+	"chats_space_all_hint": "Show chats from every Space",
 	"chats_empty_filtered": "No chats here",
 	"chats_empty_filtered_hint": "Nothing matches this source and Space yet.",
 	"chats_show_all": "Show all chats",
