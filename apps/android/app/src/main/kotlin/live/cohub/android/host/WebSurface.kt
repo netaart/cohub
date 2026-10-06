@@ -5,22 +5,24 @@ import android.content.Context
 import android.net.Uri
 import android.webkit.WebSettings
 import android.webkit.WebView
-import androidx.core.net.toUri
 import androidx.webkit.WebViewCompat
 import live.cohub.android.BuildConfig
 
 /**
- * The WebView island, reused for the process lifetime: recreating it would
+ * The WebView island, reused for the activity's lifetime: recreating it would
  * discard the web app's state and force a cold start on every tap.
  */
 @SuppressLint("SetJavaScriptEnabled")
 class WebSurface(
-    private val webView: WebView,
+    context: Context,
     onExternalLink: (Uri) -> Unit,
+    onNavigated: (url: String) -> Unit,
     onRenderProcessGone: () -> Unit,
 ) {
+    val view = WebView(context)
+
     init {
-        webView.settings.apply {
+        view.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             cacheMode = WebSettings.LOAD_DEFAULT
@@ -28,40 +30,32 @@ class WebSurface(
             // The web app owns its gestures; native pinch-zoom would fight them.
             builtInZoomControls = false
             displayZoomControls = false
-            if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         }
-        webView.webViewClient = CohubWebViewClient(
-            webOrigin = WEB_ORIGIN,
-            onExternalLink = onExternalLink,
-            onRenderProcessGone = onRenderProcessGone,
-        )
-        webView.webChromeClient = CohubWebChromeClient()
+        if (BuildConfig.WEB_DEBUGGING) WebView.setWebContentsDebuggingEnabled(true)
+        view.webViewClient = CohubWebViewClient(onExternalLink, onNavigated, onRenderProcessGone)
+        view.webChromeClient = CohubWebChromeClient()
     }
 
     fun load(path: String = "/") {
-        webView.loadUrl(origin() + path)
+        view.loadUrl(WebOrigin.urlOf(path))
     }
 
     fun setBackgroundColor(color: Int) {
-        webView.setBackgroundColor(color)
+        view.setBackgroundColor(color)
     }
 
-    fun canGoBack(): Boolean = webView.canGoBack()
+    fun canGoBack(): Boolean = view.canGoBack()
 
     fun goBack() {
-        webView.goBack()
+        view.goBack()
     }
 
     /** A dead renderer cannot be reused; callers must build a new surface. */
     fun destroy() {
-        webView.destroy()
+        view.destroy()
     }
 
-    private fun origin() = BuildConfig.WEB_ORIGIN.trimEnd('/')
-
     companion object {
-        private val WEB_ORIGIN: Uri = BuildConfig.WEB_ORIGIN.toUri()
-
         // Chromium misreports safe-area insets before M140.
         private const val SAFE_AREA_MIN_VERSION = 140
 

@@ -12,8 +12,8 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
-import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -35,11 +35,13 @@ import live.cohub.android.host.CancellationSignal
 import live.cohub.android.host.HostActions
 import live.cohub.android.host.HostBridge
 import live.cohub.android.host.HostProtocol
+import live.cohub.android.host.LastPage
+import live.cohub.android.host.WebOrigin
 import live.cohub.android.host.WebSurface
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.toJson
 import live.cohub.android.ui.ShellAppearance
-import live.cohub.android.ui.WebSurfaceHost
+import live.cohub.android.ui.SurfaceContainer
 
 /** The shell: one WebView for product UI, one bridge for native capability. */
 class MainActivity : ComponentActivity(), HostActions {
@@ -47,6 +49,8 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var auth: AuthSession
     private lateinit var runtime: DeviceRuntime
     private lateinit var bridge: HostBridge
+    private lateinit var lastPage: LastPage
+    private lateinit var container: SurfaceContainer
     private lateinit var surface: WebSurface
     private lateinit var appearance: ShellAppearance
     private lateinit var customTabs: ActivityResultLauncher<Intent>
@@ -54,6 +58,10 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var notificationPermission: ActivityResultLauncher<String>
     private var pendingResult: CompletableDeferred<Unit>? = null
     private val preparing = Mutex()
+
+    private val back = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = surface.goBack()
+    }
 
     /**
      * One immutable snapshot in a single volatile field, so the redirect handler
@@ -76,6 +84,7 @@ class MainActivity : ComponentActivity(), HostActions {
         val app = application as CohubApplication
         auth = app.auth
         runtime = app.runtime
+        lastPage = app.lastPage
         bridge = HostBridge(
             scope = lifecycleScope,
             auth = auth,
@@ -99,30 +108,51 @@ class MainActivity : ComponentActivity(), HostActions {
             }
         }
 
-        lifecycleScope.launch {
-            auth.restore()
-            intent?.data?.takeIf(::isSignInRedirect)?.let(::handleSignInRedirect)
+        onBackPressedDispatcher.addCallback(this, back)
+        container = SurfaceContainer(this)
+        setContentView(container)
+        // Recents replays the launching intent after a process death.
+        val link = intent?.data?.takeIf {
+            savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
         }
+        mountSurface(link?.takeUnless(::isSignInRedirect)?.let(WebOrigin::pathOf) ?: lastPage.read() ?: "/")
+        link?.takeIf(::isSignInRedirect)?.let(::handleSignInRedirect)
+    }
 
-        setContent {
-            WebSurfaceHost(
-                onCreate = { webView, recreate ->
-                    surface = WebSurface(
-                        webView = webView,
-                        onExternalLink = ::openExternally,
-                        onRenderProcessGone = recreate,
-                    )
-                    surface.setBackgroundColor(appearance.backgroundColor)
-                    // Without the bridge the surface still runs on its
-                    // browser path; this only explains missing features.
-                    if (!bridge.attach(webView, BuildConfig.WEB_ORIGIN.toUri())) {
-                        Toast.makeText(this@MainActivity, R.string.bridge_unavailable, Toast.LENGTH_LONG).show()
-                    }
-                    surface.load()
-                    surface
-                },
-            )
+    override fun onDestroy() {
+        container.removeAllViews()
+        surface.destroy()
+        super.onDestroy()
+    }
+
+    private fun mountSurface(path: String) {
+        surface = WebSurface(
+            context = this,
+            onExternalLink = ::openExternally,
+            onNavigated = ::onNavigated,
+            onRenderProcessGone = ::remountSurface,
+        )
+        surface.setBackgroundColor(appearance.backgroundColor)
+        // Without the bridge the surface still runs on its browser path; this
+        // only explains missing features.
+        if (!bridge.attach(surface.view, WebOrigin.uri)) {
+            Toast.makeText(this, R.string.bridge_unavailable, Toast.LENGTH_LONG).show()
         }
+        container.show(surface.view)
+        surface.load(path)
+    }
+
+    private fun remountSurface() {
+        val dead = surface
+        container.removeView(dead.view)
+        dead.destroy()
+        back.isEnabled = false
+        mountSurface(lastPage.read() ?: "/")
+    }
+
+    private fun onNavigated(url: String) {
+        back.isEnabled = surface.canGoBack()
+        lastPage.remember(url)
     }
 
     override fun onStart() {
@@ -132,7 +162,8 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.data?.takeIf(::isSignInRedirect)?.let(::handleSignInRedirect)
+        val data = intent.data ?: return
+        if (isSignInRedirect(data)) handleSignInRedirect(data) else WebOrigin.pathOf(data)?.let(surface::load)
     }
 
     override fun hostId(): String = installId()

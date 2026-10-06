@@ -2,7 +2,6 @@ import javax.inject.Inject
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -77,10 +76,10 @@ android {
         buildConfigField("String", "LOGTO_APP_ID", "\"$logtoAppId\"")
         buildConfigField("String", "LOGTO_API_RESOURCE", "\"$logtoApiResource\"")
         buildConfigField("String", "OAUTH_REDIRECT_URI", "\"$webOrigin$oauthRedirectPath\"")
+        buildConfigField("boolean", "WEB_DEBUGGING", "${cohubEnv == "dev"}")
     }
 
     buildFeatures {
-        compose = true
         buildConfig = true
     }
 
@@ -100,6 +99,7 @@ android {
         val ciSigning = signingConfigs.findByName("ci")
         debug {
             if (ciSigning != null) signingConfig = ciSigning
+            buildConfigField("boolean", "WEB_DEBUGGING", "true")
         }
         release {
             isMinifyEnabled = true
@@ -210,22 +210,14 @@ androidComponents {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.activity)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.webkit)
     implementation(libs.androidx.security.crypto)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
-
-    implementation(platform(libs.compose.bom))
-    implementation(libs.compose.ui)
-    implementation(libs.compose.ui.graphics)
-    implementation(libs.compose.ui.tooling.preview)
-    implementation(libs.compose.foundation)
-    debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)

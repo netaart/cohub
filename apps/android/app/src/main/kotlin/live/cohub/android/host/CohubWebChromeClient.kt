@@ -5,11 +5,10 @@ import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import live.cohub.android.BuildConfig
 
-/** Mirrors page console output to logcat in debug builds. */
 class CohubWebChromeClient : WebChromeClient() {
 
     override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-        if (!BuildConfig.DEBUG) return false
+        if (!BuildConfig.WEB_DEBUGGING) return false
         val line = "${message.message()} (${message.sourceId()}:${message.lineNumber()})"
         when (message.messageLevel()) {
             ConsoleMessage.MessageLevel.ERROR -> Log.e(TAG, line)

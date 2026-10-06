@@ -1,192 +1,144 @@
 package live.cohub.android.auth
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
-import java.util.Base64
-import java.util.concurrent.atomic.AtomicLong
-
-private const val TAG = "CohubAuth"
 
 /**
- * The host's single source of credential truth.
- *
- * Refreshes are single-flight: concurrent callers share one exchange rather
- * than each spending a rotating refresh token, which would invalidate the rest.
+ * Single-flight refresh. Logto rotates the refresh token on every use, so each
+ * rotation must be persisted: replaying a spent one ends the session.
  */
 class AuthSession(
     private val store: CredentialStore,
     private val config: AuthConfig,
+    private val endpoint: TokenEndpoint = HttpTokenEndpoint(config.tokenEndpoint()),
     private val clock: () -> Long = System::currentTimeMillis,
     private val onAccountChanged: (signedIn: Boolean) -> Unit = {},
 ) {
-    private val refreshMutex = Mutex()
-    private val generation = AtomicLong(0)
+    private val exchange = Mutex()
 
-    @Volatile
-    private var accessToken: String? = null
-
-    @Volatile
-    private var accessTokenExpiresAt: Long = 0
-
-    @Volatile
-    private var identity: Identity = Identity.None
-
-    suspend fun restore() {
-        val stored = store.read()
-        if (stored == null) {
-            identity = Identity.None
-            return
-        }
-        identity = Identity(authenticated = true, subject = stored.subject, userUuid = stored.userUuid)
-        generation.incrementAndGet()
-    }
+    private val lock = Any()
+    private var generation = 0L
+    private var loaded = false
+    private var credentials: StoredCredentials? = null
 
     /** A token good for at least [SKEW_MS] of work; null when there is no session. */
-    suspend fun accessToken(forceRefresh: Boolean = false): String? = refreshMutex.withLock {
-        val now = clock()
-        if (!forceRefresh) {
-            val cached = accessToken
-            if (cached != null && accessTokenExpiresAt - SKEW_MS > now) return@withLock cached
+    suspend fun accessToken(forceRefresh: Boolean = false): String? = exchange.withLock {
+        val (stored, version) = synchronized(lock) { current() to generation }
+        if (stored == null) return@withLock null
+        if (!forceRefresh && stored.accessToken != null && stored.accessTokenExpiresAt - SKEW_MS > clock()) {
+            return@withLock stored.accessToken
         }
-        val stored = store.read() ?: return@withLock null
-        val token = runCatching { exchangeRefreshToken(stored.refreshToken) }
-            .getOrElse { error ->
-                if (error is OAuthFailure && (error.status == 400 || error.status == 401)) clear()
-                return@withLock null
-            }
-        publish(token)
+        val token = try {
+            endpoint.exchange(refreshFields(stored.refreshToken))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (error is OAuthFailure && (error.status == 400 || error.status == 401)) clear(version)
+            return@withLock null
+        }
+        val next = stored.copy(
+            refreshToken = token.refreshToken ?: stored.refreshToken,
+            idToken = token.idToken ?: stored.idToken,
+            subject = token.subject ?: stored.subject,
+            accessToken = token.accessToken,
+            accessTokenExpiresAt = clock() + token.expiresInSeconds * 1_000,
+        )
+        if (!commit(next, expectedGeneration = version)) return@withLock null
         token.accessToken
     }
 
-    suspend fun completeSignIn(code: String, verifier: String): String {
-        val token = exchangeAuthorizationCode(code, verifier)
-        store.write(
+    suspend fun completeSignIn(code: String, verifier: String): String = exchange.withLock {
+        val token = endpoint.exchange(codeFields(code, verifier))
+        val refreshToken = token.refreshToken
+            ?: error("Authorization response carried no refresh token; is offline_access granted?")
+        commit(
             StoredCredentials(
-                refreshToken = token.refreshToken
-                    ?: error("Authorization response carried no refresh token; is offline_access granted?"),
+                refreshToken = refreshToken,
                 idToken = token.idToken,
                 subject = token.subject,
                 userUuid = null,
+                accessToken = token.accessToken,
+                accessTokenExpiresAt = clock() + token.expiresInSeconds * 1_000,
             ),
+            expectedGeneration = null,
         )
-        publish(token)
-        identity = Identity(authenticated = true, subject = token.subject, userUuid = null)
-        generation.incrementAndGet()
         onAccountChanged(true)
-        return token.accessToken
+        token.accessToken
     }
 
-    fun status(): Identity = identity
+    fun status(): Identity =
+        current()?.let { Identity(authenticated = true, subject = it.subject, userUuid = it.userUuid) }
+            ?: Identity.None
 
-    fun hasCredentials(): Boolean = store.read() != null
+    fun hasCredentials(): Boolean = current() != null
 
-    fun accountKey(): String? = store.read()?.let { it.subject ?: it.userUuid ?: "" }
+    fun accountKey(): String? = current()?.let { it.subject ?: it.userUuid ?: "" }
 
-    fun sessionVersion(): Long = generation.get()
+    fun sessionVersion(): Long = synchronized(lock) { generation }
 
-    fun clear() {
-        store.clear()
-        accessToken = null
-        accessTokenExpiresAt = 0
-        identity = Identity.None
-        generation.incrementAndGet()
+    fun clear() = clear(expectedGeneration = null)
+
+    private fun clear(expectedGeneration: Long?) {
+        synchronized(lock) {
+            if (expectedGeneration != null && expectedGeneration != generation) return
+            credentials = null
+            loaded = true
+            generation += 1
+            runCatching { store.clear() }.onFailure { Log.e(TAG, "Could not clear credentials", it) }
+        }
         onAccountChanged(false)
     }
 
-    private fun publish(token: TokenResponse) {
-        accessToken = token.accessToken
-        accessTokenExpiresAt = clock() + token.expiresInSeconds * 1_000
+    private fun current(): StoredCredentials? = synchronized(lock) {
+        if (!loaded) {
+            credentials = store.read()
+            loaded = true
+        }
+        credentials
     }
 
-    private suspend fun exchangeAuthorizationCode(code: String, verifier: String): TokenResponse =
-        postToken(
-            mapOf(
-                "grant_type" to "authorization_code",
-                "code" to code,
-                "code_verifier" to verifier,
-                "redirect_uri" to config.redirectUri,
-                "client_id" to config.appId,
-                "resource" to config.apiResource,
-            ),
-        )
+    private suspend fun commit(next: StoredCredentials, expectedGeneration: Long?): Boolean =
+        withContext(Dispatchers.IO) {
+            synchronized(lock) {
+                if (expectedGeneration != null && expectedGeneration != generation) return@withContext false
+                // Memory first: the token has already rotated server-side.
+                credentials = next
+                loaded = true
+                if (expectedGeneration == null) generation += 1
+                runCatching { store.write(next) }.onFailure { Log.e(TAG, "Could not persist credentials", it) }
+                true
+            }
+        }
 
-    private suspend fun exchangeRefreshToken(refreshToken: String): TokenResponse =
-        postToken(
-            mapOf(
-                "grant_type" to "refresh_token",
-                "refresh_token" to refreshToken,
-                "client_id" to config.appId,
-                "resource" to config.apiResource,
-            ),
-        )
+    private fun refreshFields(refreshToken: String) = mapOf(
+        "grant_type" to "refresh_token",
+        "refresh_token" to refreshToken,
+        "client_id" to config.appId,
+        "resource" to config.apiResource,
+    )
 
-    private suspend fun postToken(fields: Map<String, String>): TokenResponse = withContext(Dispatchers.IO) {
-        val body = fields.entries.joinToString("&") { (key, value) ->
-            "${URLEncoder.encode(key, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
-        }
-        val connection = (URL(config.tokenEndpoint()).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-            setRequestProperty("Accept", "application/json")
-        }
-        try {
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val status = connection.responseCode
-            val payload = (if (status in 200..299) connection.inputStream else connection.errorStream)
-                ?.bufferedReader()?.use { it.readText() }
-                .orEmpty()
-            if (status !in 200..299) throw OAuthFailure(status, payload)
-            val json = Json.parseToJsonElement(payload) as? JsonObject
-                ?: throw OAuthFailure(status, "Malformed token response")
-            TokenResponse(
-                accessToken = json["access_token"]?.jsonPrimitive?.content
-                    ?: throw OAuthFailure(status, "Token response had no access_token"),
-                refreshToken = json["refresh_token"]?.jsonPrimitive?.content,
-                idToken = json["id_token"]?.jsonPrimitive?.content,
-                expiresInSeconds = json["expires_in"]?.jsonPrimitive?.content?.toLongOrNull() ?: 3_600,
-                subject = json["id_token"]?.jsonPrimitive?.content?.let(::subjectFromIdToken),
-            )
-        } catch (error: IOException) {
-            throw OAuthFailure(0, error.message ?: "Network failure during token exchange")
-        } finally {
-            connection.disconnect()
-        }
-    }
+    private fun codeFields(code: String, verifier: String) = mapOf(
+        "grant_type" to "authorization_code",
+        "code" to code,
+        "code_verifier" to verifier,
+        "redirect_uri" to config.redirectUri,
+        "client_id" to config.appId,
+        "resource" to config.apiResource,
+    )
 
     private companion object {
+        const val TAG = "CohubAuth"
+
         /** Refresh before expiry so a request in flight never races the clock. */
         const val SKEW_MS = 30_000L
-        const val CONNECT_TIMEOUT_MS = 15_000
-        const val READ_TIMEOUT_MS = 20_000
     }
 }
 
 private fun AuthConfig.tokenEndpoint(): String = endpoint.trimEnd('/') + "/oidc/token"
-
-/**
- * Read `sub` for local cache partitioning only; it is not verified here and
- * never feeds an authorization decision.
- */
-private fun subjectFromIdToken(idToken: String): String? = runCatching {
-    val payload = idToken.split('.').getOrNull(1) ?: return null
-    val decoded = Base64.getUrlDecoder().decode(payload).toString(Charsets.UTF_8)
-    (Json.parseToJsonElement(decoded) as? JsonObject)?.get("sub")?.jsonPrimitive?.content
-}.onFailure { error ->
-    Log.w(TAG, "Could not read sub from the ID token", error)
-}.getOrNull()
 
 data class AuthConfig(
     val endpoint: String,
@@ -204,13 +156,3 @@ data class Identity(
         val None = Identity(authenticated = false, subject = null, userUuid = null)
     }
 }
-
-private data class TokenResponse(
-    val accessToken: String,
-    val refreshToken: String?,
-    val idToken: String?,
-    val expiresInSeconds: Long,
-    val subject: String?,
-)
-
-class OAuthFailure(val status: Int, message: String) : Exception(message)

@@ -1,24 +1,29 @@
 # Cohub Android shell
 
-A thin native host for the Cohub web app. Compose owns start-up, sign-in, deep
+A thin native host for the Cohub web app. The shell owns start-up, sign-in, deep
 links and system capabilities; the product UI stays in a WebView island so
-Boards, docs and editors keep one implementation. All cross-boundary traffic
-uses the versioned `cohub.host.v1` bridge — see `docs/native-host-bridge.md`.
+Boards, docs and editors keep one implementation. The WebView sits in a plain
+view, not Compose: it composites synchronously on the UI thread, so every layer
+above it costs frames. All cross-boundary traffic uses the versioned
+`cohub.host.v1` bridge — see `docs/native-host-bridge.md`.
 
 ```
 app/src/main/kotlin/live/cohub/android/
   CohubApplication.kt        process-wide AuthSession and DeviceRuntime
-  MainActivity.kt            activity host, edge-to-edge, deep links
+  MainActivity.kt            activity host, edge-to-edge, deep links, back
   host/
     HostProtocol.kt          wire constants (mirrors packages/protocol)
     HostCapabilities.kt      what this build advertises
     HostBridge.kt            request dispatch, events, capability handshake
     WebSurface.kt            the WebView island
-    CohubWebViewClient.kt    navigation policy, renderer-crash recovery
-    CohubWebChromeClient.kt  page console → logcat (debug builds)
+    WebOrigin.kt             the one origin that loads in-shell
+    LastPage.kt              the page a cold start reopens
+    CohubWebViewClient.kt    navigation policy, history, renderer-crash recovery
+    CohubWebChromeClient.kt  page console → logcat (web debugging builds)
   auth/
-    AuthSession.kt           tokens + identity, in memory only
+    AuthSession.kt           single-flight refresh, persists every rotation
     CredentialStore.kt       EncryptedSharedPreferences persistence
+    TokenEndpoint.kt         OIDC token exchange
     Pkce.kt                  PKCE + authorization URL
   runtime/
     DeviceRuntime.kt         folder → Space bindings, like `runtime up` per directory
@@ -26,7 +31,7 @@ app/src/main/kotlin/live/cohub/android/
     RuntimeConnection.kt     /runtime/relay client (no local Harness)
     SandboxBridge.kt         supervises sandboxd over one folder
   ui/
-    WebSurfaceHost.kt        Compose wrapper for the WebView, edge-to-edge insets
+    SurfaceContainer.kt      holds the WebView, pads insets it misreports
     ShellAppearance.kt       the page's edge color, persisted for cold start
 ```
 
@@ -44,8 +49,12 @@ The APK embeds `apps/sandbox`, cross-compiled by `:app:buildSandboxd` with Go
 (on `PATH`) and the NDK pinned in `app/build.gradle.kts`
 (`sdkmanager "ndk;<version>"`).
 
-Debug builds (including CI dev APKs) are inspectable at `chrome://inspect` and
-mirror the page console, uncaught errors included, to `adb logcat -s CohubWeb`.
+Debug builds and every dev-environment build (`BuildConfig.WEB_DEBUGGING`) are
+inspectable at `chrome://inspect` and mirror the page console, uncaught errors
+included, to `adb logcat -s CohubWeb`.
+
+A cold start opens a shared link if there is one, otherwise the last in-app page
+(`LastPage`, cleared on sign-out), otherwise `/`.
 
 `-PcohubEnv=dev|prod` (default prod) selects origins and the Logto native app;
 single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohubGatewayOrigin`,
@@ -57,13 +66,14 @@ single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohu
 `.github/workflows/android.yml` has two jobs:
 
 - **dev** — every PR and main push that touches the shell tests, lints and
-  assembles a dev APK (and checks the R8 release build). Same-repo builds are
-  signed with the dev key (repository secrets `ANDROID_DEV_KEYSTORE_BASE64` /
-  `ANDROID_DEV_KEYSTORE_PASSWORD`) and published to the CDN as
+  assembles a dev APK. Same-repo builds publish the R8 release variant (a
+  debuggable build runs far slower than what ships), signed with the dev key
+  (repository secrets `ANDROID_DEV_KEYSTORE_BASE64` /
+  `ANDROID_DEV_KEYSTORE_PASSWORD`), to the CDN as
   `android/pr/<n>/cohub-dev-pr-<n>-<sha>.apk` or
   `android/main/cohub-dev-main-<sha>.apk`; the PR comment and the run summary
-  link the APK with a QR code. Fork builds use a throwaway debug key, so they
-  install but cannot sign in.
+  link the APK with a QR code. Fork builds publish the debug variant with a
+  throwaway debug key, so they install but cannot sign in.
 - **release** — every `vX.Y.Z` tag builds the prod APK (versionCode
   `X*1_000_000 + Y*1_000 + Z`), signed with the release key held by the
   `android-release` environment (`ANDROID_RELEASE_KEYSTORE_BASE64` /

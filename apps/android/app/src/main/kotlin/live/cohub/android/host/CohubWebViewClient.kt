@@ -18,16 +18,20 @@ import live.cohub.android.R
  */
 @SuppressLint("MissingOnRenderProcessGone")
 class CohubWebViewClient(
-    private val webOrigin: Uri,
     private val onExternalLink: (Uri) -> Unit,
+    private val onNavigated: (url: String) -> Unit,
     private val onRenderProcessGone: () -> Unit,
 ) : WebViewClient() {
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url
-        if (url.host == webOrigin.host && url.scheme == webOrigin.scheme) return false
+        if (WebOrigin.contains(url)) return false
         onExternalLink(url)
         return true
+    }
+
+    override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
+        onNavigated(url)
     }
 
     /**

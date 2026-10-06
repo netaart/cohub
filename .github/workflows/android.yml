@@ -136,12 +136,16 @@ jobs:
         id: apk
         env:
           FILE: ${{ steps.build.outputs.file }}
+          SIGNED: ${{ steps.build.outputs.signed }}
         run: |
           set -euo pipefail
-          out=app/build/outputs/apk/debug
+          variant=debug
+          if [[ "$SIGNED" == true ]]; then variant=release; fi
+          out="app/build/outputs/apk/$variant"
           mkdir -p dist
-          cp "$out/app-debug.apk" "dist/$FILE"
+          cp "$out/app-$variant.apk" "dist/$FILE"
           {
+            echo "variant=$variant"
             echo "application_id=$(jq -r '.applicationId' "$out/output-metadata.json")"
             echo "version_name=$(jq -r '.elements[0].versionName' "$out/output-metadata.json")"
             echo "version_code=$(jq -r '.elements[0].versionCode' "$out/output-metadata.json")"
@@ -203,6 +207,7 @@ jobs:
           APPLICATION_ID: ${{ steps.apk.outputs.application_id }}
           VERSION_NAME: ${{ steps.apk.outputs.version_name }}
           VERSION_CODE: ${{ steps.apk.outputs.version_code }}
+          VARIANT: ${{ steps.apk.outputs.variant }}
           SIZE: ${{ steps.apk.outputs.size }}
           SHA256: ${{ steps.apk.outputs.sha256 }}
         run: |
@@ -219,7 +224,7 @@ jobs:
             fi
             echo
             echo "- Version \`$VERSION_NAME\` ($VERSION_CODE) from \`$SHA\`"
-            echo "- \`$APPLICATION_ID\` · dev environment"
+            echo "- \`$APPLICATION_ID\` · dev environment · $VARIANT build"
             echo "- SHA-256 \`$SHA256\`"
             if [[ "$SIGNED" != true ]]; then
               echo
