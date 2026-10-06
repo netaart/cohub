@@ -131,7 +131,7 @@ $effect(() => {
 	<button
 		bind:this={button}
 		type="button"
-		class={`inline-flex min-h-8 items-center gap-1.5 rounded px-1 text-text-tertiary hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand ${triggerClass}`}
+		class={`relative -mx-1 inline-flex items-center gap-1 rounded px-1 text-inherit after:absolute after:-inset-y-1.5 after:inset-x-0 hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand ${triggerClass}`}
 		aria-label={title}
 		aria-haspopup="dialog"
 		aria-expanded={open}

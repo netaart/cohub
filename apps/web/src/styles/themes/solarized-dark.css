@@ -59,6 +59,7 @@
 	--bg-surface: var(--neutral-80);
 	--bg-surface-hover: var(--neutral-70);
 	--bg-elevated: var(--neutral-60);
+	--bg-subtle: color-mix(in srgb, var(--bg-elevated) 42%, transparent);
 	--bg-input: var(--neutral-95);
 	--bg-code: var(--neutral-100);
 	--bg-header-alt: var(--neutral-80);
@@ -73,7 +74,9 @@
 
 	/* Borders */
 	--border-primary: var(--neutral-60);
+	--border-default: var(--border-primary);
 	--border-subtle: var(--neutral-70);
+	--border-strong: var(--neutral-50);
 
 	/* Interactive states */
 	--bg-hover: oklch(24% 0.024 198 / 1);

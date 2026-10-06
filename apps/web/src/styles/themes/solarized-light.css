@@ -59,6 +59,7 @@
 	--bg-surface: var(--neutral-90);
 	--bg-surface-hover: var(--neutral-80);
 	--bg-elevated: var(--neutral-100);
+	--bg-subtle: var(--bg-surface-hover);
 	--bg-input: var(--neutral-100);
 	--bg-code: var(--neutral-90);
 	--bg-header-alt: var(--neutral-90);
@@ -73,7 +74,9 @@
 
 	/* Borders */
 	--border-primary: var(--neutral-50);
+	--border-default: var(--border-primary);
 	--border-subtle: var(--neutral-60);
+	--border-strong: var(--neutral-40);
 
 	/* Interactive states */
 	--bg-hover: oklch(94% 0.032 92 / 1);

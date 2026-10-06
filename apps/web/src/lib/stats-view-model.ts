@@ -54,10 +54,7 @@ export type StatsViewModel = {
 	timing: StatsBarSegment[];
 	usage: StatsBarSegment[];
 	groups: StatsGroup[];
-	showCostNote: boolean;
-	showAuxiliaryNote: boolean;
-	showTimingNote: boolean;
-	partial: boolean;
+	elapsed: string | null;
 };
 
 const numberFormatter = (locale: Locale) =>
@@ -296,10 +293,7 @@ export function buildStatsViewModel(
 		timing,
 		usage,
 		groups,
-		showCostNote: stats.modelCostUsd != null || stats.generationCostUsd != null,
-		showAuxiliaryNote: Boolean(stats.compactions || stats.imageToTextCalls),
-		showTimingNote: stats.modelMs != null || stats.toolMs != null,
-		partial: stats.partial,
+		elapsed: stats.elapsedMs == null ? null : duration(stats.elapsedMs),
 	};
 }
 
