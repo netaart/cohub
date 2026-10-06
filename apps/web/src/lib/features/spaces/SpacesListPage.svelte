@@ -28,6 +28,7 @@ import FilterChip from "$lib/components/list-page/FilterChip.svelte";
 import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
 import ListHeader from "$lib/components/list-page/ListHeader.svelte";
 import SwipePager from "$lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
 import SpaceLabelPicker from "$lib/features/spaces/SpaceLabelPicker.svelte";
 import SpacesListPane from "$lib/features/spaces/SpacesListPane.svelte";
 import {
@@ -52,9 +53,7 @@ const locale = $derived(getLocale());
 const compact = $derived(useCompactShell());
 let filter = $state<SpacesFilter>(lastFilter);
 const filterIndex = $derived(SPACES_FILTERS.indexOf(filter));
-let swipePosition = $state<number | null>(null);
-const position = $derived(compact ? (swipePosition ?? filterIndex) : filterIndex);
-const shownIndex = $derived(Math.round(position));
+const tabs = new SwipeTabs(() => ({ index: filterIndex, enabled: compact }));
 let spaces = $state<SpaceRecord[]>([]);
 let cursor = $state<string | null>(null);
 let hasMore = $state(false);
@@ -71,7 +70,6 @@ let requestGeneration = 0;
 let staleBefore = 0;
 type FirstPage = { page: SpaceListPage; startedAt: number };
 const inflight = new Map<string, { request: Promise<FirstPage>; startedAt: number }>();
-const panes: (SpacesListPane | undefined)[] = [];
 
 const selecting = $derived(selected.size > 0);
 const allSelectedPinned = $derived(
@@ -265,7 +263,7 @@ function reloadAll() {
 
 function selectFilter(value: SpacesFilter) {
 	if (value === filter) {
-		panes[filterIndex]?.scrollToTop();
+		tabs.scrollToTop();
 		return;
 	}
 	filter = value;
@@ -337,7 +335,7 @@ $effect(() => {
 
 onMount(() => {
 	void load({ reset: true });
-	const stopScrollTop = onListScrollTop(() => panes[filterIndex]?.scrollToTop());
+	const stopScrollTop = onListScrollTop(() => tabs.scrollToTop());
 	const refreshOnReturn = () => {
 		if (document.visibilityState === "visible") void load();
 	};
@@ -423,11 +421,11 @@ onMount(() => {
 		<FilterBar
 			label={m.spaces_title({}, { locale })}
 			role="tablist"
-			activeKey={SPACES_FILTERS[shownIndex] ?? null}
-			{position}
+			activeKey={SPACES_FILTERS[tabs.shown] ?? null}
+			position={tabs.position}
 		>
 			{#each SPACES_FILTERS as value, index (value)}
-				<FilterChip label={filterLabel(value)} active={shownIndex === index} onclick={() => selectFilter(value)} />
+				<FilterChip label={filterLabel(value)} active={tabs.shown === index} onclick={() => selectFilter(value)} />
 			{/each}
 		</FilterBar>
 	</div>
@@ -445,13 +443,13 @@ onMount(() => {
 		enabled={compact}
 		locked={selecting}
 		onChange={(index) => selectFilter(SPACES_FILTERS[index] ?? filter)}
-		onPosition={(next) => (swipePosition = next)}
+		onPosition={tabs.track}
 	>
 		{#snippet page(index, active)}
 			{@const value = SPACES_FILTERS[index] ?? filter}
 			{@const memo = active ? null : pageMemo.get(memoKey(value))}
 			<SpacesListPane
-				bind:this={() => panes[index], (instance) => (panes[index] = instance)}
+				bind:this={() => tabs.panes[index], (pane) => (tabs.panes[index] = pane)}
 				filter={value}
 				spaces={active ? spaces : (memo?.items ?? [])}
 				loading={active ? loading : !memo}

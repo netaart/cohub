@@ -3,6 +3,10 @@ import { type Snippet, untrack } from "svelte";
 import { prefersReducedMotion } from "svelte/motion";
 import { POINTER_DRAG_CLICK_SUPPRESS_MS } from "$lib/drag/pointer-drag-core";
 import { FLICK_VELOCITY_PX_PER_MS } from "$lib/gestures/axis-lock";
+import {
+	canScrollHorizontally,
+	isTextEditingTarget,
+} from "$lib/gestures/pager-yield";
 
 const {
 	keys,
@@ -32,6 +36,7 @@ const GLIDE_MAX_MS = 240;
 
 type Drag = {
 	id: number;
+	target: EventTarget | null;
 	x: number;
 	y: number;
 	from: number;
@@ -134,9 +139,10 @@ function gestures(node: HTMLElement) {
 	const onStart = (event: TouchEvent) => {
 		if (drag || locked || event.touches.length > 1) return;
 		const touch = event.changedTouches[0];
-		if (!touch) return;
+		if (!touch || isTextEditingTarget(event.target)) return;
 		drag = {
 			id: touch.identifier,
+			target: event.target,
 			x: touch.clientX,
 			y: touch.clientY,
 			from: position,
@@ -156,7 +162,11 @@ function gestures(node: HTMLElement) {
 		if (!drag.axis) {
 			const dy = touch.clientY - drag.y;
 			if (Math.max(Math.abs(dx), Math.abs(dy)) < AXIS_LOCK_PX) return;
-			if (Math.abs(dx) <= Math.abs(dy) * AXIS_RATIO || !event.cancelable) {
+			if (
+				Math.abs(dx) <= Math.abs(dy) * AXIS_RATIO ||
+				!event.cancelable ||
+				canScrollHorizontally(drag.target, node, dx)
+			) {
 				drag = null;
 				return;
 			}
@@ -200,6 +210,7 @@ function gestures(node: HTMLElement) {
 		event.stopPropagation();
 	};
 
+	untrack(() => onPosition?.(position));
 	node.addEventListener("touchstart", onStart, { passive: true });
 	node.addEventListener("touchmove", onMove, { passive: false });
 	node.addEventListener("touchend", onEnd);

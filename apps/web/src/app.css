@@ -236,6 +236,32 @@ body.sidebar-resizing .panel-shell-fade {
 	padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
 
+@utility scrollbar-quiet {
+	@media (hover: hover) {
+		scrollbar-width: thin;
+		scrollbar-color: transparent transparent;
+		transition: scrollbar-color 200ms;
+
+		&:hover,
+		&:has(:focus-visible) {
+			scrollbar-color: var(--scrollbar-thumb) transparent;
+		}
+
+		&::-webkit-scrollbar-thumb {
+			background: transparent;
+		}
+
+		&:hover::-webkit-scrollbar-thumb,
+		&:has(:focus-visible)::-webkit-scrollbar-thumb {
+			background: var(--scrollbar-thumb);
+		}
+
+		&::-webkit-scrollbar-thumb:hover {
+			background: var(--scrollbar-thumb-hover);
+		}
+	}
+}
+
 /* Lock body scroll when drawer is open */
 body.drawer-open {
 	overflow: hidden;

@@ -2150,6 +2150,7 @@
 	"spaces_label_empty": "No labels yet. Type a name to create one.",
 	"chats_filter_label": "Filter chats",
 	"chats_source_label": "Chat source",
+	"chats_source_current": "Chat source: {source}",
 	"chats_source_all": "All sources",
 	"chats_source_other": "Other",
 	"chats_source_group_clients": "Clients",

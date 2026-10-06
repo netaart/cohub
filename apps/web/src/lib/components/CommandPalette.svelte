@@ -76,6 +76,7 @@ import CommandPaletteRecentQueries from "$lib/components/command-palette/Command
 import CommandPaletteResultRow from "$lib/components/command-palette/CommandPaletteResultRow.svelte";
 import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
 import SwipePager from "$lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
 import { settingsSectionLabel } from "$lib/components/settings-section";
 import ToolCallList from "$lib/components/ToolCallList.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -136,7 +137,6 @@ let open = $state(false);
 let lens = $state<CommandPaletteLens>("all");
 /** What the landing page showed mid-swipe, held until its own results arrive. */
 let seed = $state<CommandPaletteItem[] | null>(null);
-let swipePosition = $state<number | null>(null);
 const lensSnapshots = new SvelteMap<string, CommandPaletteItem[]>();
 let query = $state("");
 let openIntent = $state<CommandPaletteIntent>("navigate");
@@ -382,9 +382,11 @@ const swipeable = $derived(
 const lensIndex = $derived(
 	activeLens ? COMMAND_PALETTE_LENSES.indexOf(activeLens) : 0,
 );
-const lensPosition = $derived(
-	activeLens ? (swipeable ? (swipePosition ?? lensIndex) : lensIndex) : null,
-);
+const lensTabs = new SwipeTabs(() => ({
+	index: lensIndex,
+	enabled: swipeable,
+}));
+const lensPosition = $derived(activeLens ? lensTabs.position : null);
 const showingSettledItems = $derived(
 	isSearching && mergedItems.length === 0 && settledItems.length > 0,
 );
@@ -704,7 +706,6 @@ function teardownPalette() {
 	settledItems = [];
 	archivedItems = [];
 	seed = null;
-	swipePosition = null;
 	lensSnapshots.clear();
 	searchToken += 1;
 	localController?.abort();
@@ -1326,14 +1327,14 @@ onMount(() => {
 					index={lensIndex}
 					enabled={swipeable}
 					onChange={(index) => selectLens(COMMAND_PALETTE_LENSES[index] ?? "all")}
-					onPosition={(next) => (swipePosition = next)}
+					onPosition={lensTabs.track}
 				>
 					{#snippet page(index, active)}
 						{@const pageLens = COMMAND_PALETTE_LENSES[index] ?? "all"}
 						{@const items = active ? renderedItems : previewFor(pageLens)}
 						<div
 							class:searching={active && (pending || showingSettledItems)}
-							class="command-results"
+							class="command-results scrollbar-quiet"
 							onscroll={active ? handleResultsScroll : undefined}
 							{@attach active ? bindResults : undefined}
 						>
