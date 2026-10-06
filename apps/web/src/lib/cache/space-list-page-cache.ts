@@ -9,6 +9,7 @@ type CachedSpacePage = {
 	filter: string;
 	query: string;
 	items: SpaceRecord[];
+	hasMore?: boolean;
 	updatedAt: number;
 };
 
@@ -38,6 +39,7 @@ export async function setCachedSpacePage(
 		filter,
 		query: query.trim().toLocaleLowerCase(),
 		items: page.items,
+		hasMore: page.pageInfo.hasMore,
 		updatedAt: Date.now(),
 	};
 	await idbPut("space_lists", record);

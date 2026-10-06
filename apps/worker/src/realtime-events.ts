@@ -1,13 +1,16 @@
-import { createSessionStatsRefresher, refreshSessionStatsAndPublish } from "@cohub/core/sessions";
+import { createLogger } from "@cohub/infra/logging";
+import { createSessionStatsRefresher, readSessionParticipantUserUuids, refreshSessionStatsAndPublish, resolveSessionAudienceRooms } from "@cohub/core/sessions";
 import { isSettledStatsTurn } from "@cohub/protocol/model";
 import { db } from "./db.js";
 import { randomUUID } from "node:crypto";
-import { REALTIME_OUTBOUND_CHANNEL, type RealtimeSessionRecord, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
+import { getRealtimeSpaceRoom, REALTIME_OUTBOUND_CHANNEL, type RealtimeSessionRecord, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
 import type { spaceSessions } from "@cohub/db";
 import type { SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { redisCommandClient } from "./redis.js";
 import { enqueueSpaceHookFromEvent } from "./space-hooks.js";
+
+const logger = createLogger({ serviceName: "cohub-worker" });
 
 const toIsoOrNull = (value: Date | string | null | undefined) => {
   if (!value) return null;
@@ -128,10 +131,15 @@ export async function dispatchSessionUpdated(input: { session: typeof spaceSessi
     lastMessageId: input.session.lastMessageId,
     createdAt: toIso(input.session.createdAt),
     updatedAt: toIso(input.session.updatedAt),
+    participantUserUuids: readSessionParticipantUserUuids(input.session.meta),
   };
+  const rooms = await resolveSessionAudienceRooms(db, input.session).catch((error) => {
+    logger.warn("[Realtime] failed to resolve session audience", { sessionId: session.id, error });
+    return [getRealtimeSpaceRoom(session.spaceId)];
+  });
   await redisCommandClient.publish(REALTIME_OUTBOUND_CHANNEL, JSON.stringify({
     id: randomUUID(), timestamp: Date.now(), domain: "session", type: "session.updated",
-    spaceId: session.spaceId, sessionId: session.id,
+    spaceId: session.spaceId, sessionId: session.id, rooms,
     payload: { session, changed: input.changed },
   }));
 }

@@ -39,6 +39,7 @@ import { installHostDownloads } from "$lib/host-files";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
+import { startLiveLists } from "$lib/lists/live-lists";
 import { resolveAppArea, shouldHideMobileTabBar } from "$lib/mobile-nav";
 import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion.svelte";
 import {
@@ -571,6 +572,7 @@ onMount(() => {
 	}
 
 	let stopDesktopCommands: (() => void) | null = null;
+	let stopLiveLists: (() => void) | null = null;
 	const stopViewportOffsetGuard = installViewportOffsetGuard();
 
 	const stopHostDownloads = installHostDownloads();
@@ -583,6 +585,7 @@ onMount(() => {
 			turnNotifications.start();
 			// Listen in the shell, not a page, so delivery never depends on route.
 			stopDesktopCommands = startDesktopCommandListener();
+			stopLiveLists = startLiveLists();
 		}
 		initSpacePinRealtime();
 	});
@@ -598,6 +601,7 @@ onMount(() => {
 		delete window.cohubDisableVConsole;
 		delete window.cohubEnableVConsole;
 		stopDesktopCommands?.();
+		stopLiveLists?.();
 		stopHostDownloads();
 		stopViewportOffsetGuard();
 		turnNotifications.stop();

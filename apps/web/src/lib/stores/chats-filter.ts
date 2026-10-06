@@ -1,8 +1,10 @@
 import type {
+	SessionRecord,
 	UserSessionSourceKey,
 	UserSessionSpaceSummary,
 } from "@neta-art/cohub";
 import type { Locale } from "$lib/i18n/locale";
+import type { LiveFit } from "$lib/lists/live-list-core";
 import { m } from "$lib/paraglide/messages.js";
 
 export type ChatsFilter = {
@@ -82,6 +84,32 @@ export function resolveSessionSourceKey(
 export function chatsFilterScope(filter: ChatsFilter): string {
 	const source = filter.source ?? "all";
 	return filter.space ? `space:${filter.space.id}:${source}` : source;
+}
+
+export type SessionEventRecord = Partial<SessionRecord> & {
+	id: string;
+	spaceId: string;
+};
+
+export function sessionFit(
+	session: SessionEventRecord,
+	filter: ChatsFilter,
+	viewer: string | null,
+): LiveFit {
+	if (filter.space && session.spaceId !== filter.space.id) return "out";
+	if (!filter.space) {
+		const participants = session.participantUserUuids;
+		const listed =
+			Boolean(viewer) &&
+			(session.userUuid === viewer ||
+				Boolean(viewer && participants?.includes(viewer)));
+		if (!listed) return participants ? "out" : "keep";
+	}
+	if (!filter.source) return "in";
+	// Source labels are server-attributed: a raw mismatch never removes a row.
+	return resolveSessionSourceKey(session.source) === filter.source
+		? "in"
+		: "keep";
 }
 
 export function sameChatsFilter(a: ChatsFilter, b: ChatsFilter) {

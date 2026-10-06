@@ -1,27 +1,12 @@
 <script lang="ts" module>
-import type { SpaceListPage, SpaceRecord } from "@neta-art/cohub";
-import { SvelteMap } from "svelte/reactivity";
 import type { SpacesFilter } from "$lib/features/spaces/spaces-filter";
 
-type MemoPage = {
-	items: SpaceRecord[];
-	cursor: string | null;
-	hasMore: boolean;
-	fetchedAt: number;
-};
-
 let lastFilter: SpacesFilter = "recent";
-const pageMemo = new SvelteMap<string, MemoPage>();
 </script>
 
 <script lang="ts">
 import { Archive, ArchiveRestore, Pin, PinOff, Plus, Search, Tag, X } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
-import { getCacheUserKey } from "$lib/cache/keys";
-import {
-	getCachedSpacePage,
-	setCachedSpacePage,
-} from "$lib/cache/space-list-page-cache";
 import { openAreaSearch } from "$lib/command-palette/open";
 import FilterBar from "$lib/components/list-page/FilterBar.svelte";
 import FilterChip from "$lib/components/list-page/FilterChip.svelte";
@@ -31,45 +16,32 @@ import SwipePager from "$lib/components/list-page/SwipePager.svelte";
 import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
 import SpaceLabelPicker from "$lib/features/spaces/SpaceLabelPicker.svelte";
 import SpacesListPane from "$lib/features/spaces/SpacesListPane.svelte";
-import {
-	matchesSpacesFilter,
-	SPACES_FILTERS,
-} from "$lib/features/spaces/spaces-filter";
+import { SPACES_FILTERS } from "$lib/features/spaces/spaces-filter";
+import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { onListScrollTop } from "$lib/layout/list-scroll-top";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { pruneSelection, selectRange, toggleSelection } from "$lib/selection";
-import { authStore } from "$lib/stores/auth.svelte";
-import { getRecentSpaces } from "$lib/stores/recent-space";
 import { toggleSpaceArchive } from "$lib/stores/space-pins.svelte";
 
-const PAGE_SIZE = 50;
-const NEIGHBOUR_STALE_MS = 60_000;
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
+const list = spacesInbox.list;
 const locale = $derived(getLocale());
 const compact = $derived(useCompactShell());
 let filter = $state<SpacesFilter>(lastFilter);
 const filterIndex = $derived(SPACES_FILTERS.indexOf(filter));
 const tabs = new SwipeTabs(() => ({ index: filterIndex, enabled: compact }));
-let spaces = $state<SpaceRecord[]>([]);
-let cursor = $state<string | null>(null);
-let hasMore = $state(false);
-let loading = $state(true);
-let refreshing = $state(false);
-let loadingMore = $state(false);
-let error = $state("");
+const view = $derived(list.view(filter));
+const spaces = $derived(view.items);
+let actionError = $state("");
 let selected = $state<Set<string>>(new Set());
 let anchorId: string | null = null;
 let busy = $state(false);
 let labelAnchor = $state<HTMLElement | null>(null);
 let labelPickerOpen = $state(false);
-let requestGeneration = 0;
-let staleBefore = 0;
-type FirstPage = { page: SpaceListPage; startedAt: number };
-const inflight = new Map<string, { request: Promise<FirstPage>; startedAt: number }>();
 
 const selecting = $derived(selected.size > 0);
 const allSelectedPinned = $derived(
@@ -91,174 +63,10 @@ function filterLabel(value: SpacesFilter) {
 	}
 }
 
-function memoKey(value: SpacesFilter) {
-	return `${getCacheUserKey()}:${value}`;
-}
-
-function remember(value: SpacesFilter, page: MemoPage) {
-	pageMemo.set(memoKey(value), page);
-}
-
-function isFresh(page: MemoPage | undefined) {
-	return Boolean(
-		page &&
-			page.fetchedAt > staleBefore &&
-			Date.now() - page.fetchedAt < NEIGHBOUR_STALE_MS,
-	);
-}
-
-function recentSpaces() {
-	return getRecentSpaces(authStore.userUuid ?? "").map((entry) => ({
-		id: entry.spaceId,
-		timestamp: entry.timestamp,
-	}));
-}
-
-// Only prewarm and landing share a request, and never one sent before the last invalidation.
-function fetchFirstPage(value: SpacesFilter, reuse = false): Promise<FirstPage> {
-	const key = memoKey(value);
-	const pending = inflight.get(key);
-	if (reuse && pending && pending.startedAt > staleBefore) return pending.request;
-	const startedAt = Date.now();
-	const request = sdk.spaces
-		.list({
-			limit: PAGE_SIZE,
-			cursor: null,
-			filter: value,
-			query: "",
-			recentSpaces: recentSpaces(),
-		})
-		.then((page) => {
-			void setCachedSpacePage(value, "", page).catch(() => undefined);
-			return { page, startedAt };
-		})
-		.finally(() => {
-			if (inflight.get(key)?.request === request) inflight.delete(key);
-		});
-	inflight.set(key, { request, startedAt });
-	return request;
-}
-
-async function readCachedPage(value: SpacesFilter): Promise<MemoPage | null> {
-	const cached = await getCachedSpacePage(value, "").catch(() => null);
-	if (!cached) return null;
-	return {
-		items: cached.items.filter((space) => matchesSpacesFilter(space, value)),
-		cursor: null,
-		hasMore: false,
-		fetchedAt: 0,
-	};
-}
-
-async function prewarm(values: SpacesFilter[]) {
-	await Promise.all(
-		values.map(async (value) => {
-			const key = memoKey(value);
-			if (!pageMemo.has(key)) {
-				const cached = await readCachedPage(value);
-				if (cached && !pageMemo.has(key)) pageMemo.set(key, cached);
-			}
-			if (isFresh(pageMemo.get(key)) || value === filter) return;
-			try {
-				const { page, startedAt } = await fetchFirstPage(value, true);
-				if (value === filter || key !== memoKey(value)) return;
-				remember(value, {
-					items: page.items,
-					cursor: page.pageInfo.nextCursor,
-					hasMore: page.pageInfo.hasMore,
-					fetchedAt: startedAt,
-				});
-			} catch {}
-		}),
-	);
-}
-
 function neighbours() {
 	return [SPACES_FILTERS[filterIndex - 1], SPACES_FILTERS[filterIndex + 1]].filter(
 		(value) => value !== undefined,
 	);
-}
-
-async function load(options: { reset?: boolean } = {}) {
-	const generation = ++requestGeneration;
-	const requestFilter = filter;
-	loadingMore = false;
-	if (options.reset) {
-		error = "";
-		const memo = pageMemo.get(memoKey(requestFilter));
-		spaces = memo?.items ?? [];
-		cursor = memo?.cursor ?? null;
-		hasMore = memo?.hasMore ?? false;
-		loading = spaces.length === 0;
-		if (!memo) {
-			const cached = await readCachedPage(requestFilter);
-			if (generation !== requestGeneration) return;
-			if (cached) {
-				remember(requestFilter, cached);
-				spaces = cached.items;
-			}
-		}
-		loading = spaces.length === 0;
-	}
-	refreshing = spaces.length > 0;
-	try {
-		const { page, startedAt } = await fetchFirstPage(
-			requestFilter,
-			options.reset,
-		);
-		if (generation !== requestGeneration) return;
-		spaces = page.items;
-		cursor = page.pageInfo.nextCursor;
-		hasMore = page.pageInfo.hasMore;
-		remember(requestFilter, { items: spaces, cursor, hasMore, fetchedAt: startedAt });
-		error = "";
-		selected = pruneSelection(selected, spaces.map((space) => space.id));
-	} catch (cause) {
-		if (generation !== requestGeneration) return;
-		error =
-			cause instanceof Error
-				? cause.message
-				: m.spaces_load_failed({}, { locale });
-	} finally {
-		if (generation === requestGeneration) {
-			loading = false;
-			refreshing = false;
-		}
-	}
-}
-
-async function loadMore() {
-	if (loading || refreshing || loadingMore || !hasMore || !cursor) return;
-	const generation = requestGeneration;
-	loadingMore = true;
-	try {
-		const page = await sdk.spaces.list({
-			limit: PAGE_SIZE,
-			cursor,
-			filter,
-			query: "",
-			recentSpaces: recentSpaces(),
-		});
-		if (generation !== requestGeneration) return;
-		const known = new Set(spaces.map((space) => space.id));
-		spaces = [...spaces, ...page.items.filter((space) => !known.has(space.id))];
-		cursor = page.pageInfo.nextCursor;
-		hasMore = page.pageInfo.hasMore;
-	} catch (cause) {
-		if (generation !== requestGeneration) return;
-		error =
-			cause instanceof Error
-				? cause.message
-				: m.spaces_load_failed({}, { locale });
-	} finally {
-		if (generation === requestGeneration) loadingMore = false;
-	}
-}
-
-function reloadAll() {
-	staleBefore = Date.now();
-	void load();
-	if (compact) void prewarm(neighbours());
 }
 
 function selectFilter(value: SpacesFilter) {
@@ -269,7 +77,6 @@ function selectFilter(value: SpacesFilter) {
 	filter = value;
 	lastFilter = value;
 	clearSelection();
-	void load({ reset: true });
 }
 
 function clearSelection() {
@@ -285,15 +92,20 @@ function toggle(id: string, event?: MouseEvent) {
 	anchorId = id;
 }
 
-async function runBatch(action: () => Promise<unknown>) {
+async function runBatch(
+	action: () => Promise<unknown>,
+	flags?: { isPinned?: boolean; isArchived?: boolean },
+) {
 	if (!selected.size || busy) return;
+	const ids = [...selected];
 	busy = true;
+	actionError = "";
 	try {
 		await action();
+		if (flags) spacesInbox.applyViewerFlags(ids, flags);
 		clearSelection();
-		reloadAll();
 	} catch (cause) {
-		error =
+		actionError =
 			cause instanceof Error
 				? cause.message
 				: m.spaces_update_failed({}, { locale });
@@ -305,19 +117,25 @@ async function runBatch(action: () => Promise<unknown>) {
 function pinSelection() {
 	const ids = [...selected];
 	const unpin = allSelectedPinned;
-	return runBatch(() =>
-		sdk.user.labels.patchResources(
-			ids,
-			unpin
-				? { removeLabelRefs: ["Pinned"] }
-				: { addLabelRefs: ["Pinned"], removeLabelRefs: ["Archived"] },
-		),
+	return runBatch(
+		() =>
+			sdk.user.labels.patchResources(
+				ids,
+				unpin
+					? { removeLabelRefs: ["Pinned"] }
+					: { addLabelRefs: ["Pinned"], removeLabelRefs: ["Archived"] },
+			),
+		unpin ? { isPinned: false } : { isPinned: true, isArchived: false },
 	);
 }
 
 function archiveSelection() {
 	const ids = [...selected];
-	return runBatch(() => toggleSpaceArchive(ids, filter !== "archived"));
+	const archive = filter !== "archived";
+	return runBatch(
+		() => toggleSpaceArchive(ids, archive),
+		archive ? { isArchived: true, isPinned: false } : { isArchived: false },
+	);
 }
 
 function applyLabel(labelRef: string) {
@@ -328,40 +146,37 @@ function applyLabel(labelRef: string) {
 }
 
 $effect(() => {
+	const value = filter;
+	return untrack(() => list.watch(value));
+});
+
+$effect(() => {
 	if (!compact) return;
 	const values = neighbours();
-	untrack(() => void prewarm(values));
+	untrack(() => {
+		for (const value of values) void list.open(value);
+	});
+});
+
+$effect(() => {
+	const ids = spaces.map((space) => space.id);
+	untrack(() => {
+		selected = pruneSelection(selected, ids);
+	});
 });
 
 onMount(() => {
-	void load({ reset: true });
 	const stopScrollTop = onListScrollTop(() => tabs.scrollToTop());
-	const refreshOnReturn = () => {
-		if (document.visibilityState === "visible") void load();
-	};
 	const onKeydown = (event: KeyboardEvent) => {
 		if (event.key !== "Escape" || event.defaultPrevented || !selecting) return;
 		if (labelPickerOpen) return;
 		event.preventDefault();
 		clearSelection();
 	};
-	window.addEventListener("focus", refreshOnReturn);
 	window.addEventListener("keydown", onKeydown);
-	document.addEventListener("visibilitychange", refreshOnReturn);
-	const unsubscribeRealtime = sdk.onUserEvent((event) => {
-		if (
-			event.type === "space.list.changed" ||
-			(event.type === "label.assignments.updated" &&
-				event.payload.resourceType === "space")
-		)
-			reloadAll();
-	});
 	return () => {
 		stopScrollTop();
-		unsubscribeRealtime();
-		window.removeEventListener("focus", refreshOnReturn);
 		window.removeEventListener("keydown", onKeydown);
-		document.removeEventListener("visibilitychange", refreshOnReturn);
 	};
 });
 </script>
@@ -385,7 +200,6 @@ onMount(() => {
 	<div class="shrink-0 border-b border-border-subtle">
 		<ListHeader
 			title={m.spaces_title({}, { locale })}
-			busy={refreshing}
 			brand={!selecting}
 			children={selecting ? selectionTitle : undefined}
 		>
@@ -430,10 +244,14 @@ onMount(() => {
 		</FilterBar>
 	</div>
 
-	{#if error}
+	{#if actionError || view.error}
 		<div class="flex shrink-0 items-center gap-3 border-b border-border-subtle px-[var(--list-content-x)] py-2 text-[12px] text-error-fg" role="alert">
-			<span class="min-w-0 flex-1 truncate">{error}</span>
-			<button type="button" class="shrink-0 text-text-secondary underline underline-offset-2 hover:text-text-primary" onclick={() => void load()}>{m.spaces_retry({}, { locale })}</button>
+			<span class="min-w-0 flex-1 truncate">{actionError || view.error}</span>
+			{#if actionError}
+				<button type="button" class="shrink-0 text-text-secondary hover:text-text-primary" aria-label={m.common_close({}, { locale })} onclick={() => (actionError = "")}><X class="h-3.5 w-3.5" /></button>
+			{:else}
+				<button type="button" class="shrink-0 text-text-secondary underline underline-offset-2 hover:text-text-primary" onclick={() => void list.sync(filter)}>{m.spaces_retry({}, { locale })}</button>
+			{/if}
 		</div>
 	{/if}
 
@@ -447,18 +265,18 @@ onMount(() => {
 	>
 		{#snippet page(index, active)}
 			{@const value = SPACES_FILTERS[index] ?? filter}
-			{@const memo = active ? null : pageMemo.get(memoKey(value))}
+			{@const pageView = list.view(value)}
 			<SpacesListPane
 				bind:this={() => tabs.panes[index], (pane) => (tabs.panes[index] = pane)}
 				filter={value}
-				spaces={active ? spaces : (memo?.items ?? [])}
-				loading={active ? loading : !memo}
-				loadingMore={active && loadingMore}
-				error={active && Boolean(error)}
+				spaces={pageView.items}
+				loading={pageView.loading}
+				loadingMore={pageView.loadingMore}
+				error={Boolean(pageView.error)}
 				{compact}
 				selected={active ? selected : NO_SELECTION}
 				onToggle={toggle}
-				onLoadMore={active ? () => void loadMore() : undefined}
+				onLoadMore={active ? () => void list.loadMore(value) : undefined}
 			/>
 		{/snippet}
 	</SwipePager>

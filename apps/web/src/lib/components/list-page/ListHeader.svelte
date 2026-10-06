@@ -1,25 +1,38 @@
 <script lang="ts">
 import { Loader2 } from "lucide-svelte";
 import type { Snippet } from "svelte";
+import { fade } from "svelte/transition";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { DURATION_FAST, svelteEaseOut } from "$lib/motion.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { uiState } from "$lib/stores/ui.svelte";
+import { syncStatus } from "$lib/sync/sync-status.svelte";
 
 const {
 	title,
-	busy = false,
 	brand = true,
 	actions,
 	children,
 }: {
 	title: string;
-	busy?: boolean;
 	brand?: boolean;
 	actions?: Snippet;
 	children?: Snippet;
 } = $props();
 
 const locale = $derived(getLocale());
+const status = $derived.by(() => {
+	switch (syncStatus.phase) {
+		case "offline":
+			return m.sync_waiting_network({}, { locale });
+		case "connecting":
+			return m.sync_connecting({}, { locale });
+		case "updating":
+			return m.sync_updating({}, { locale });
+		default:
+			return null;
+	}
+});
 </script>
 
 <header class="flex h-11 shrink-0 items-center gap-1 pl-[calc(var(--list-content-x)-4px)] pr-[calc(var(--list-content-x)-9px)] lg:h-10 lg:pl-[var(--list-content-x)] lg:pr-[calc(var(--list-content-x)-6px)]">
@@ -38,11 +51,18 @@ const locale = $derived(getLocale());
 	<div class="flex min-w-0 flex-1 items-center gap-1.5 {brand ? 'lg:pl-0' : 'pl-1 lg:pl-0'}">
 		{#if children}
 			{@render children()}
+		{:else if status}
+			<h1 class="sr-only">{title}</h1>
+			<span
+				class="flex min-w-0 items-center gap-1.5 text-[15px] font-semibold tracking-tight text-text-secondary lg:text-[13px]"
+				role="status"
+				in:fade={{ duration: DURATION_FAST, easing: svelteEaseOut }}
+			>
+				<Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin text-text-tertiary lg:h-3 lg:w-3" aria-hidden="true" />
+				<span class="truncate">{status}</span>
+			</span>
 		{:else}
-			<h1 class="truncate text-[15px] font-semibold tracking-tight text-text-primary lg:text-[13px]">{title}</h1>
-			{#if busy}
-				<Loader2 class="h-3 w-3 shrink-0 animate-spin text-text-placeholder" aria-hidden="true" />
-			{/if}
+			<h1 class="truncate text-[15px] font-semibold tracking-tight text-text-primary lg:text-[13px]" in:fade={{ duration: DURATION_FAST, easing: svelteEaseOut }}>{title}</h1>
 		{/if}
 	</div>
 	{#if actions}
