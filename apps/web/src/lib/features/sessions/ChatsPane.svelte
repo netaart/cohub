@@ -8,6 +8,7 @@ import FilterChip from "$lib/components/list-page/FilterChip.svelte";
 import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
 import ListHeader from "$lib/components/list-page/ListHeader.svelte";
 import SwipePager from "$lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import ChatsList from "$lib/features/sessions/ChatsList.svelte";
 import ChatsSourcePicker from "$lib/features/sessions/ChatsSourcePicker.svelte";
@@ -41,14 +42,11 @@ const keys = $derived(pages.map((space) => space?.id ?? ALL_KEY));
 const pageIndex = $derived(
 	Math.max(0, keys.indexOf(filter.space?.id ?? ALL_KEY)),
 );
-let swipePosition = $state<number | null>(null);
-const position = $derived(isPage ? (swipePosition ?? pageIndex) : pageIndex);
-const shownIndex = $derived(Math.round(position));
-const lists: (ChatsList | undefined)[] = [];
+const tabs = new SwipeTabs(() => ({ index: pageIndex, enabled: isPage }));
 
 function select(index: number) {
 	if (index === 0 && pageIndex === 0) {
-		lists[0]?.scrollToTop();
+		tabs.scrollToTop();
 		return;
 	}
 	inbox.setSpace(index === pageIndex ? null : (pages[index] ?? null));
@@ -65,7 +63,7 @@ $effect(() => {
 onMount(() => {
 	void modelsCatalogStore.load().catch(() => undefined);
 	const stopScrollTop = isPage
-		? onListScrollTop(() => lists[pageIndex]?.scrollToTop())
+		? onListScrollTop(() => tabs.scrollToTop())
 		: undefined;
 	const release = inbox.retain();
 	return () => {
@@ -75,19 +73,14 @@ onMount(() => {
 });
 </script>
 
-{#snippet sourcePicker()}
-	<ChatsSourcePicker value={filter.source} onChange={(source) => inbox.setSource(source)} />
-{/snippet}
-
 <section class="flex h-full min-h-0 flex-col {isPage ? 'bg-bg-primary' : 'list-compact'}">
 	<div class="shrink-0 border-b border-border-subtle">
 		<ListHeader title={m.nav_tab_chats({}, { locale })} busy={inbox.refreshing} brand={isPage}>
 			{#snippet actions()}
 				{#if isPage}
 					<HeaderAction label={m.list_search({}, { locale })} icon={Search} onclick={() => openAreaSearch("chats")} />
-				{:else}
-					<div class="mr-0.5">{@render sourcePicker()}</div>
 				{/if}
+				<ChatsSourcePicker value={filter.source} onChange={(source) => inbox.setSource(source)} />
 				<HeaderAction
 					label={m.sidebar_new_chat({}, { locale })}
 					icon={Plus}
@@ -103,21 +96,20 @@ onMount(() => {
 		<FilterBar
 			label={m.chats_filter_label({}, { locale })}
 			role="tablist"
-			activeKey={keys[shownIndex] ?? null}
-			{position}
-			leading={isPage ? sourcePicker : undefined}
+			activeKey={keys[tabs.shown] ?? null}
+			position={tabs.position}
 		>
 			<FilterChip
 				label={m.chats_space_all({}, { locale })}
 				title={m.chats_space_all_hint({}, { locale })}
-				active={shownIndex === 0}
+				active={tabs.shown === 0}
 				onclick={() => select(0)}
 			/>
 			{#each inbox.spaceChips as space, index (space.id)}
 				{@const selected = pageIndex === index + 1}
 				<FilterChip
 					label={space.name}
-					active={shownIndex === index + 1}
+					active={tabs.shown === index + 1}
 					title={selected ? m.chats_space_all_hint({}, { locale }) : space.name}
 					onclick={() => select(index + 1)}
 				>
@@ -137,12 +129,12 @@ onMount(() => {
 		index={pageIndex}
 		enabled={isPage}
 		onChange={(index) => inbox.setSpace(pages[index] ?? null)}
-		onPosition={(next) => (swipePosition = next)}
+		onPosition={tabs.track}
 	>
 		{#snippet page(index, active)}
 			{@const pageFilter = { ...filter, space: pages[index] ?? null }}
 			<ChatsList
-				bind:this={() => lists[index], (instance) => (lists[index] = instance)}
+				bind:this={() => tabs.panes[index], (pane) => (tabs.panes[index] = pane)}
 				view={inbox.view(pageFilter)}
 				filter={pageFilter}
 				{active}

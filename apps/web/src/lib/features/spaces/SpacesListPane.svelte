@@ -144,7 +144,7 @@ function onScroll(event: Event) {
 <div
 	bind:this={scroller}
 	bind:clientHeight={viewportHeight}
-	class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain py-1.5"
+	class="scrollbar-quiet min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain py-1.5"
 	onscroll={onScroll}
 	use:scrollMemory={{ key: `spaces:${filter}`, ready: spaces.length > 0 }}
 >

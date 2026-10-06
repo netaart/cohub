@@ -1,14 +1,15 @@
 <script lang="ts">
 import type { UserSessionSourceKey } from "@neta-art/cohub";
-import { Check, ChevronDown } from "lucide-svelte";
+import { Check, ListFilter } from "lucide-svelte";
 import AdaptivePopover from "$lib/components/list-page/AdaptivePopover.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
+import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import {
 	CHATS_SOURCE_GROUPS,
 	type ChatsSourceGroup,
 	chatsSourceName,
+	DEFAULT_CHATS_FILTER,
 } from "$lib/stores/chats-filter";
 
 const {
@@ -60,20 +61,16 @@ function pick(source: UserSessionSourceKey | null) {
 	</button>
 {/snippet}
 
-<FilterChip
+<HeaderAction
 	bind:ref={anchor}
-	kind="menu"
+	label={m.chats_source_current({ source: sourceName(value) }, { locale })}
+	icon={ListFilter}
 	expanded={open}
-	label={sourceName(value)}
-	title={m.chats_source_label({}, { locale })}
+	indicator={value !== DEFAULT_CHATS_FILTER.source}
 	onclick={() => {
 		open = !open;
 	}}
->
-	{#snippet trailing()}
-		<ChevronDown class="h-3 w-3 shrink-0 opacity-70 transition-transform duration-150 {open ? 'rotate-180' : ''}" />
-	{/snippet}
-</FilterChip>
+/>
 
 <AdaptivePopover {open} {anchor} label={m.chats_source_label({}, { locale })} width={220} onClose={() => (open = false)}>
 	<div role="menu" aria-label={m.chats_source_label({}, { locale })}>

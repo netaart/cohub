@@ -2156,6 +2156,7 @@
 	"spaces_label_empty": "还没有标签，输入名称即可创建。",
 	"chats_filter_label": "筛选对话",
 	"chats_source_label": "对话来源",
+	"chats_source_current": "对话来源：{source}",
 	"chats_source_all": "全部来源",
 	"chats_source_other": "其他",
 	"chats_source_group_clients": "客户端",
