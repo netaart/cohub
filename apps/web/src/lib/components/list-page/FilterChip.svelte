@@ -14,33 +14,29 @@ let {
 	title,
 	leading,
 	trailing,
-	expanded,
 	ref = $bindable(null),
 }: {
 	label: string;
 	active?: boolean;
 	href?: string;
 	onclick?: (event: MouseEvent) => void;
-	kind?: "tab" | "toggle" | "menu" | "action";
+	kind?: "tab" | "toggle" | "action";
 	title?: string;
 	leading?: Snippet;
 	trailing?: Snippet;
-	expanded?: boolean;
 	ref?: HTMLElement | null;
 } = $props();
 
 const barPill = hasFilterBarPill() ? getFilterBarPill() : null;
-const onPill = $derived(kind !== "menu" && Boolean(barPill?.()));
+const onPill = $derived(Boolean(barPill?.()));
 
 const className = $derived(
 	`relative inline-flex h-8 max-w-[200px] shrink-0 select-none items-center gap-1.5 rounded-[7px] px-[var(--list-row-pad-x)] text-[12px] font-medium transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 lg:h-7 lg:rounded-[6px] ${
-		kind === "menu"
-			? "bg-bg-surface text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-			: active
-				? onPill
-					? "text-brand-muted-fg"
-					: "bg-brand-muted text-brand-muted-fg hover:bg-brand-muted-hover"
-				: "text-text-tertiary hover:bg-bg-hover hover:text-text-secondary"
+		active
+			? onPill
+				? "text-brand-muted-fg"
+				: "bg-brand-muted text-brand-muted-fg hover:bg-brand-muted-hover"
+			: "text-text-tertiary hover:bg-bg-hover hover:text-text-secondary"
 	}`,
 );
 </script>
@@ -72,8 +68,6 @@ const className = $derived(
 		role={kind === "tab" ? "tab" : undefined}
 		aria-selected={kind === "tab" ? active : undefined}
 		aria-pressed={kind === "toggle" ? active : undefined}
-		aria-haspopup={kind === "menu" ? "menu" : undefined}
-		aria-expanded={kind === "menu" ? expanded : undefined}
 		title={title ?? label}
 		{onclick}
 	>{@render content()}</button>

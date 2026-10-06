@@ -51,12 +51,12 @@ function requestName(provider: string, model: string, id: string) {
 					</div>
 					<div class="relative h-2 overflow-hidden rounded-full bg-border-subtle" aria-label={`${name}: ${formatDurationMs(request.durationMs, locale)}`}>
 						<div
-							class="absolute inset-y-0 rounded-full bg-border-strong"
+							class="absolute inset-y-0 rounded-full bg-text-placeholder/25"
 							style={`left: ${request.left}%; width: ${request.width}%;`}
 						></div>
 						{#if request.firstToken > 0}
 							<div
-								class="absolute inset-y-0 bg-border-strong"
+								class="absolute inset-y-0 bg-text-placeholder/40"
 								style={`left: ${request.left}%; width: ${(request.width * request.firstToken) / 100}%;`}
 							></div>
 						{/if}
@@ -80,7 +80,7 @@ function requestName(provider: string, model: string, id: string) {
 			<span>{formatDurationMs(timeline.durationMs, locale)}</span>
 		</div>
 		<div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-placeholder">
-			<span class="inline-flex items-center gap-1"><i aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-border-strong"></i>{m.stats_ttft({}, { locale })}</span>
+			<span class="inline-flex items-center gap-1"><i aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-text-placeholder/50"></i>{m.stats_ttft({}, { locale })}</span>
 			<span class="inline-flex items-center gap-1"><i aria-hidden="true" class="h-1.5 w-1.5 rounded-full bg-brand"></i>{m.stats_output({}, { locale })}</span>
 		</div>
 	</details>

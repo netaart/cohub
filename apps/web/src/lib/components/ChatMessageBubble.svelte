@@ -706,8 +706,8 @@ function handleCopy() {
             <StatsPopover title={message.meta?.turn ? m.stats_turn({}, { locale }) : m.stats_call({}, { locale })} triggerClass="shrink-0">
               {#snippet trigger()}
                 {#if hasUsage && tokenDisplay}<span class={getTokenDisplayClass(inputContextPercent)}>{tokenDisplay}</span>{/if}
-                {#if hasDuration}<span class="shrink-0 whitespace-nowrap tabular-nums">{durationDisplay}</span>{/if}
-                {#if !tokenDisplay && !hasDuration}<span>{m.stats_turn({}, { locale })}</span>{/if}
+                {#if hasDuration}<span class="shrink-0 whitespace-nowrap tabular-nums text-text-placeholder/65">{durationDisplay}</span>{/if}
+                {#if !tokenDisplay && !hasDuration}<span class="text-text-placeholder/65">{m.stats_turn({}, { locale })}</span>{/if}
               {/snippet}
               <StatsContent stats={footerStats} scope="turn" requests={footerRequests} />
             </StatsPopover>

@@ -83,22 +83,20 @@ function sectionTitle(key: StatsSectionKey) {
 
 function segmentClass(tone: "brand" | "strong" | "subtle") {
 	if (tone === "brand") return "bg-brand";
-	if (tone === "strong") return "bg-border-strong";
-	return "bg-border-subtle";
+	if (tone === "strong") return "bg-text-placeholder";
+	return "bg-text-placeholder/50";
 }
 </script>
 
 <div class="space-y-4">
 	{#if view.hero.length}
-		<section aria-label={m.stats_summary({}, { locale })}>
-			<div class="grid grid-cols-2 border-y border-border-subtle sm:grid-cols-3">
-				{#each view.hero as item, index (item.key)}
-					<div class={`min-w-0 py-3 ${index > 0 ? "border-l border-border-subtle pl-3 sm:pl-4" : "pr-3"} ${index === 2 ? "col-span-2 border-t sm:col-span-1 sm:border-t-0" : ""}`}>
-						<div class="truncate font-mono text-[19px] leading-none tabular-nums text-text-primary">{item.value}</div>
-						<div class="mt-1.5 truncate text-[10px] text-text-placeholder">{label(item.label)}</div>
-					</div>
-				{/each}
-			</div>
+		<section class="grid grid-cols-3 gap-3" aria-label={m.stats_summary({}, { locale })}>
+			{#each view.hero as item (item.key)}
+				<div class="min-w-0">
+					<div class="truncate font-mono text-[19px] leading-none tabular-nums text-text-primary">{item.value}</div>
+					<div class="mt-1.5 truncate text-[10px] text-text-placeholder">{label(item.label)}</div>
+				</div>
+			{/each}
 		</section>
 	{/if}
 
@@ -108,7 +106,7 @@ function segmentClass(tone: "brand" | "strong" | "subtle") {
 				<div>
 					<div class="mb-1.5 flex items-center justify-between gap-3 text-[10px] text-text-placeholder">
 						<span>{m.stats_timing({}, { locale })}</span>
-						{#if stats.elapsedMs != null}<span class="tabular-nums">{label("elapsed")} · {view.hero.find((item) => item.label === "elapsed")?.value ?? ""}</span>{/if}
+						{#if view.elapsed}<span class="tabular-nums">{view.elapsed}</span>{/if}
 					</div>
 					<div class="flex h-1.5 overflow-hidden rounded-full bg-border-subtle" role="img" aria-label={m.stats_timing({}, { locale })}>
 						{#each view.timing as segment (segment.key)}
@@ -159,16 +157,4 @@ function segmentClass(tone: "brand" | "strong" | "subtle") {
 			</dl>
 		</section>
 	{/each}
-
-	{#if view.showCostNote || view.showAuxiliaryNote || view.partial || view.showTimingNote}
-		<details class="border-t border-border-subtle pt-3 text-[11px] leading-relaxed text-text-tertiary">
-			<summary class="cursor-pointer text-text-secondary">{m.stats_details({}, { locale })}</summary>
-			<div class="mt-2 space-y-1.5">
-				{#if view.showCostNote}<p>{m.stats_cost_note({}, { locale })}</p>{/if}
-				{#if view.showAuxiliaryNote}<p>{m.stats_aux_included({}, { locale })}</p>{/if}
-				{#if view.partial}<p>{m.stats_partial({}, { locale })}</p>{/if}
-				{#if view.showTimingNote}<p>{m.stats_timing_note({}, { locale })}</p>{/if}
-			</div>
-		</details>
-	{/if}
 </div>

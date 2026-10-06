@@ -36,3 +36,21 @@ export function settingsSectionLabel(section: SettingsSection, locale: Locale) {
 			return m.nav_channels({}, options);
 	}
 }
+
+export function settingsSectionTitle(section: SettingsSection, locale: Locale) {
+	const options = { locale };
+	switch (section) {
+		case "general":
+			return m.nav_general({}, options);
+		case "activity":
+			return m.page_title_activity({}, options);
+		case "referrals":
+			return m.page_title_referrals({}, options);
+		case "billing":
+			return m.page_title_billing({}, options);
+		case "rules":
+			return m.page_title_rules({}, options);
+		case "channels":
+			return m.page_title_channels({}, options);
+	}
+}

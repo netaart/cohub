@@ -29,3 +29,13 @@ export function resolveSettingsSection(
 		? (segment as SettingsSection)
 		: null;
 }
+
+export function resolveSettingsSectionRoot(
+	pathname: string,
+): SettingsSection | null {
+	const segments = pathname.split("/").filter(Boolean);
+	if (segments.length !== 2 || segments[0] !== "settings") return null;
+	return (SETTINGS_SECTIONS as readonly string[]).includes(segments[1])
+		? (segments[1] as SettingsSection)
+		: null;
+}

@@ -90,6 +90,7 @@ import {
 } from "$lib/features/app/app-realtime";
 import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
 import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
+import { clearAccountSnapshots } from "$lib/features/settings/account-snapshots";
 import { appActionName } from "$lib/features/space/modules/task-run-utils";
 import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
 import { extractGenerationPromptPreview } from "$lib/generation-task-media";
@@ -2808,6 +2809,7 @@ async function handleLogout() {
 	clearAllCachedSpaceLists();
 	clearCachedPaletteOverview();
 	clearTaskRunsMemoryCache();
+	clearAccountSnapshots();
 	await clearAllIndexedDbCache().catch((error) => {
 		console.warn("[sidebar] Failed to clear IndexedDB cache", error);
 	});
@@ -3806,7 +3808,7 @@ $effect(() => {
       {:else if area === "chats"}
         <div class="flex-1"></div>
       {:else}
-        <nav class="mt-3 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
+        <nav class="scrollbar-quiet mt-3 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
           <button type="button" class="rail-button text-text-tertiary" onclick={returnFromSettings} aria-label={m.nav_back({}, { locale })} title={m.nav_back({}, { locale })}>
             <ArrowLeft class="h-4 w-4" />
           </button>
@@ -4017,7 +4019,7 @@ $effect(() => {
 
     <!-- Sessions / Checkpoints -->
     {#if currentSpace}
-      <div class="flex-1 overflow-y-auto px-1.5 pb-2 pt-1 min-h-0">
+      <div class="scrollbar-quiet flex-1 overflow-y-auto px-1.5 pb-2 pt-1 min-h-0">
         {#if loadingSessions && sessions.length === 0 && loadingCheckpoints && checkpoints.length === 0}
           {@render sidebarEmptyState(m.common_loading({}, { locale }), true)}
         {:else}
@@ -4271,7 +4273,7 @@ $effect(() => {
         {/if}
       </div>
     {:else}
-      <div class="flex-1 overflow-y-auto px-1.5 pb-2 pt-1 min-h-0">
+      <div class="scrollbar-quiet flex-1 overflow-y-auto px-1.5 pb-2 pt-1 min-h-0">
         <div class="px-1 py-6 text-[12px] text-text-placeholder text-center">
           {m.sidebar_select_space_for_chats({}, { locale })}
         </div>
@@ -4294,7 +4296,7 @@ $effect(() => {
         <span class="truncate">{m.nav_back({}, { locale })}</span>
       </button>
     </div>
-    <nav class="flex-1 overflow-y-auto px-1.5 py-2 space-y-[2px]">
+    <nav class="scrollbar-quiet flex-1 overflow-y-auto px-1.5 py-2 space-y-[2px]">
       {#each settingsTabs as tab (tab.id)}
         {@const isActive = activeSettingsTab === tab.id}
         <a

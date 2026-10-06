@@ -4,7 +4,6 @@ import type { SessionRecord } from "@neta-art/cohub";
 import { onMount } from "svelte";
 import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
 import StatsContent from "$lib/components/StatsContent.svelte";
-import { formatTokenCount } from "$lib/format-usage";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
@@ -71,11 +70,7 @@ onMount(() => {
 </script>
 
 {#if stats}
-  <p class="mb-3 text-[11px] text-text-tertiary">{m.stats_settled({}, { locale })}</p>
   <StatsContent stats={stats.own} scope="session" />
-  {#if stats.auxiliaryUsage?.totalTokens != null}
-    <p class="mt-3 text-[11px] text-text-tertiary">{m.stats_session_auxiliary({ count: formatTokenCount(stats.auxiliaryUsage.totalTokens) }, { locale })}</p>
-  {/if}
   {#if stats.inherited.turns || stats.inherited.compactions}
     <details class="mt-3 border-t border-border-subtle pt-3">
       <summary class="cursor-pointer text-text-secondary">{m.stats_inherited({}, { locale })}</summary>

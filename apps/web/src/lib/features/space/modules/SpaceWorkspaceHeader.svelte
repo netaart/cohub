@@ -232,7 +232,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 					{#if context.routeView === "session" && context.activeSession}
 						<button type="button" class="menu-item" role="menuitem" onclick={() => { actions.closeResourceActionMenu(); statsOpen = true; }}>
 							<Gauge class="h-3.5 w-3.5" />
-							<span>{m.stats_session({}, { locale })}</span>
+							<span>{m.stats_menu({}, { locale })}</span>
 						</button>
 					{/if}
 					<button type="button" class="menu-item" onclick={actions.insertHeaderReference} role="menuitem">

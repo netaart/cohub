@@ -117,7 +117,7 @@ function onScroll(event: Event) {
 
 <div
 	bind:this={scroller}
-	class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-[var(--list-gutter-x)] py-1.5"
+	class="scrollbar-quiet min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-[var(--list-gutter-x)] py-1.5"
 	onscroll={onScroll}
 	use:scrollMemory={{ key: `chats:${variant}:${chatsFilterScope(filter)}`, ready: rows.length > 0 }}
 >

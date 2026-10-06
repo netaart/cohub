@@ -60,6 +60,7 @@
 	--bg-surface: var(--neutral-80); /* 27% — cards, panels */
 	--bg-surface-hover: var(--neutral-70); /* 32% — hover on surface */
 	--bg-elevated: var(--neutral-60); /* 38% — overlays, dropdowns */
+	--bg-subtle: color-mix(in srgb, var(--bg-elevated) 42%, transparent);
 	--bg-input: var(--neutral-90);
 	--bg-code: var(--neutral-100); /* 14% — code blocks */
 	--bg-header-alt: var(--neutral-80);
@@ -80,7 +81,9 @@
 
 	/* Borders */
 	--border-primary: var(--neutral-60); /* 38% — visible borders */
+	--border-default: var(--border-primary);
 	--border-subtle: var(--neutral-70); /* 32% — subtle dividers */
+	--border-strong: var(--neutral-50);
 
 	/* Interactive states — brighter than surface to signal affordance */
 	--bg-hover: oklch(28% 0.007 250 / 1); /* > bg-surface (27%) */
