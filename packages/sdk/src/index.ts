@@ -17,6 +17,7 @@ export { CohubHttpClient, createHttpClient } from "./http.js";
 export { BillingApi } from "./apis/billing.js";
 export { CohubClient, createCohubClient } from "./client.js";
 export { WebsocketClient, createWebsocketClient } from "./websocket.js";
+export type { WebsocketClientState } from "./websocket.js";
 export { VoiceApi, VoiceInputClient, createVoiceInputClient } from "./voice-input.js";
 export { UsersApi } from "./apis/users.js";
 export { AppsApi } from "./apis/apps.js";

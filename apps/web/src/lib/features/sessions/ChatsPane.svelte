@@ -59,7 +59,7 @@ $effect(() => {
 	const neighbours = [pages[pageIndex - 1], pages[pageIndex + 1]]
 		.filter((space) => space !== undefined)
 		.map((space) => ({ ...filter, space }));
-	untrack(() => void inbox.prewarm(neighbours));
+	untrack(() => inbox.prewarm(neighbours));
 });
 
 onMount(() => {
@@ -81,7 +81,7 @@ onMount(() => {
 
 <section class="flex h-full min-h-0 flex-col {isPage ? 'bg-bg-primary' : 'list-compact'}">
 	<div class="shrink-0 border-b border-border-subtle">
-		<ListHeader title={m.nav_tab_chats({}, { locale })} busy={inbox.refreshing} brand={isPage}>
+		<ListHeader title={m.nav_tab_chats({}, { locale })} brand={isPage}>
 			{#snippet actions()}
 				{#if isPage}
 					<HeaderAction label={m.list_search({}, { locale })} icon={Search} onclick={() => openAreaSearch("chats")} />
@@ -143,7 +143,7 @@ onMount(() => {
 			{@const pageFilter = { ...filter, space: pages[index] ?? null }}
 			<ChatsList
 				bind:this={() => lists[index], (instance) => (lists[index] = instance)}
-				view={inbox.view(pageFilter)}
+				view={inbox.viewOf(pageFilter)}
 				filter={pageFilter}
 				{active}
 				{variant}

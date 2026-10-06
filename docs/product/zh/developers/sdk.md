@@ -81,6 +81,23 @@ const stop = session.subscribe({
 stop();
 ```
 
+## 账号级实时更新
+
+`client.onUserEvent()` 无需加入任何 Space，就能收到当前账号的事件：你创建或参与的每个 Chat 的 `session.created` 和 `session.updated`（附带 `participantUserUuids`），以及你所在的 Space 发生变化时的 `space.list.changed`。用这些事件维护本地缓存的 Chat / Space 列表，不必轮询，只在连接断开过之后重新拉取：
+
+```ts
+let wasOpen = client.connectionState === "open";
+client.onConnection(({ state }) => {
+  if (state === "open" && !wasOpen) void refetchLists();
+  wasOpen = state === "open";
+});
+client.onUserEvent((event) => {
+  if (event.type === "session.updated") applySession(event.payload.session);
+});
+```
+
+`client.spaces.list()` 返回的条目包含 `personalActivityAt`，即查看者自己在该 Space 的最近活动时间，列表首先按它排序。
+
 ## Apps
 
 通过 `client.apps` 创建与管理 Apps，包括发布、更新、版本，以及按 slug 查找。

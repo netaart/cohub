@@ -516,12 +516,7 @@ onMount(() => {
 	});
 
 	const onVisible = () => {
-		if (document.visibilityState === "visible") {
-			void list.refresh();
-			sessionChat.onVisibilityChanged(true);
-		} else {
-			sessionChat.onVisibilityChanged(false);
-		}
+		sessionChat.onVisibilityChanged(document.visibilityState === "visible");
 	};
 	document.addEventListener("visibilitychange", onVisible);
 	return () => {

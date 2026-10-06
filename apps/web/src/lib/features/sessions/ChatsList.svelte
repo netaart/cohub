@@ -126,7 +126,7 @@ function onScroll(event: Event) {
 	{:else if view.error && view.sessions.length === 0}
 		<div class="px-3 py-8 text-center">
 			<p class="text-[12px] text-error-soft">{view.error}</p>
-			<button type="button" class="mt-3 text-[12px] text-text-secondary underline underline-offset-2 hover:text-text-primary" onclick={() => void chatsInbox.refresh()}>
+			<button type="button" class="mt-3 text-[12px] text-text-secondary underline underline-offset-2 hover:text-text-primary" onclick={() => void chatsInbox.list.sync(filter)}>
 				{m.common_retry({}, { locale })}
 			</button>
 		</div>

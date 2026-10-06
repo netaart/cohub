@@ -843,6 +843,7 @@ router.get("/", async (c) => {
     ownerProfile: { userUuid: row.user_uuid, username: row.owner_username, displayName: row.owner_display_name, avatarUrl: normalizePublicAvatarUrl(row.owner_avatar_url) },
     sandboxStatus: sandboxBySpace.get(row.id) ?? null, isPinned: row.is_pinned, isArchived: row.is_archived,
     relation: row.relation_owner ? "owner" : "member",
+    personalActivityAt: new Date(row.personal_activity_at).toISOString(),
   }));
   return c.json({ items, pageInfo: { hasMore, nextCursor } });
 });

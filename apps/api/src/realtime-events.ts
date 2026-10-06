@@ -8,8 +8,12 @@ import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnRecord
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { dispatchRealtimeEvent } from "./channels.js";
 import { buildResourceLabelSnapshot, type LabelResourceType } from "@cohub/core/labels/resource-events";
+import { createLogger } from "@cohub/infra/logging";
+import { readSessionParticipantUserUuids, resolveSessionAudienceRooms } from "@cohub/core/sessions";
 import { db } from "./db/index.js";
 import { activeTurnFromRow, activeTurnFromTurn, ACTIVE_TURN_STATUSES, isActiveTurnStatus } from "./session-active-turns.js";
+
+const logger = createLogger({ serviceName: "cohub-api" });
 
 const toIsoOrNull = (value: Date | string | null | undefined) => {
   if (!value) return null;
@@ -42,7 +46,7 @@ const pickRealtimeMessageMeta = (meta: Record<string, unknown> | null | undefine
   return Object.keys(picked).length > 0 ? picked : null;
 };
 
-export const toRealtimeSessionRecord = (session: SessionRecord | {
+type RealtimeSessionInput = SessionRecord | {
   id: string;
   spaceId: string;
   userUuid?: string | null;
@@ -57,7 +61,10 @@ export const toRealtimeSessionRecord = (session: SessionRecord | {
   updatedAt: Date | string | null;
   activeTurn?: SessionActiveTurn | null;
   activeTurnSequence?: number;
-}): RealtimeSessionRecord => ({
+  meta?: unknown;
+};
+
+export const toRealtimeSessionRecord = (session: RealtimeSessionInput): RealtimeSessionRecord => ({
   id: session.id,
   spaceId: session.spaceId,
   userUuid: session.userUuid ?? null,
@@ -76,6 +83,7 @@ export const toRealtimeSessionRecord = (session: SessionRecord | {
   lastMessageId: session.lastMessageId,
   createdAt: toIso(session.createdAt),
   updatedAt: toIso(session.updatedAt),
+  ...("meta" in session ? { participantUserUuids: readSessionParticipantUserUuids(session.meta) } : {}),
 });
 
 export const messageRecordFromRow = (message: typeof sessionMessages.$inferSelect): MessageRecord => ({
@@ -174,7 +182,14 @@ export const toRealtimeTaskRecord = (task: {
   updatedAt: toIso(task.updatedAt),
 });
 
-export async function dispatchSessionCreated(session: Parameters<typeof toRealtimeSessionRecord>[0]) {
+async function sessionEventRooms(session: RealtimeSessionInput) {
+  return resolveSessionAudienceRooms(db, session).catch((error) => {
+    logger.warn("[Realtime] failed to resolve session audience", { sessionId: session.id, error });
+    return [getRealtimeSpaceRoom(session.spaceId)];
+  });
+}
+
+export async function dispatchSessionCreated(session: RealtimeSessionInput) {
   const realtimeSession = toRealtimeSessionRecord(session);
   await dispatchRealtimeEvent({
     id: randomUUID(),
@@ -183,12 +198,13 @@ export async function dispatchSessionCreated(session: Parameters<typeof toRealti
     type: "session.created",
     spaceId: realtimeSession.spaceId,
     sessionId: realtimeSession.id,
+    rooms: await sessionEventRooms(session),
     payload: { session: realtimeSession },
   });
 }
 
 export async function dispatchSessionUpdated(input: {
-  session: Parameters<typeof toRealtimeSessionRecord>[0];
+  session: RealtimeSessionInput;
   changed: string[];
 }) {
   if (input.changed.length === 0) return;
@@ -200,6 +216,7 @@ export async function dispatchSessionUpdated(input: {
     type: "session.updated",
     spaceId: realtimeSession.spaceId,
     sessionId: realtimeSession.id,
+    rooms: await sessionEventRooms(input.session),
     payload: { session: realtimeSession, changed: input.changed },
   });
 }
