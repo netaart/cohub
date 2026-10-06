@@ -41,7 +41,7 @@ function normalizeLabelRef(value: string) {
 		.join("/");
 }
 
-function parseLabelScope(value: string) {
+export function parseLabelScope(value: string) {
 	const trimmed = value.trim();
 	if (!trimmed) return null;
 	const [labelRef = "", ...rest] = trimmed.split(/\s+/);
@@ -63,6 +63,28 @@ function parseTypeList(value: string) {
 		types.push(type);
 	}
 	return uniqueTypes(types);
+}
+
+export type TypePrefix = {
+	type: CommandPaletteResourceType;
+	rest: string;
+};
+
+export function takeTypePrefix(input: string): TypePrefix | null {
+	const short = /^\s*([tsacl]):\s*/i.exec(input);
+	if (short) {
+		const type = SHORT_PREFIX_TYPES.get((short[1] ?? "").toLowerCase());
+		return type ? { type, rest: input.slice(short[0].length) } : null;
+	}
+	const long = /^\s*type:(\S+)\s+/i.exec(input);
+	if (long) {
+		const types = parseTypeList(long[1] ?? "");
+		return types?.length === 1 && types[0]
+			? { type: types[0], rest: input.slice(long[0].length) }
+			: null;
+	}
+	const label = /^\s*label:(?=\S+\s)/i.exec(input);
+	return label ? { type: "label", rest: input.slice(label[0].length) } : null;
 }
 
 export function parseCommandPaletteQuery(

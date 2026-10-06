@@ -630,10 +630,5 @@ class ChatsInbox {
 export const chatsInbox = new ChatsInbox();
 
 export function openNewChatSpacePicker() {
-	openCommandPalette({
-		title: m.chats_new_chat_in(),
-		query: "a: ",
-		placeholder: m.sidebar_search_spaces(),
-		intent: "new-chat",
-	});
+	openCommandPalette({ lens: "space", intent: "new-chat" });
 }

@@ -3,19 +3,16 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import type { PaletteOverviewResponse, SpaceRecord } from "@neta-art/cohub";
 import {
 	CornerDownRight,
-	FolderKanban,
 	Loader2,
-	MessageSquare,
-	Pin,
-	Plus,
 	Search,
 	Settings2,
-	Tag,
 	TerminalSquare,
+	X,
 } from "lucide-svelte";
-import { onMount, tick } from "svelte";
-import { goto } from "$app/navigation";
+import { onMount, tick, untrack } from "svelte";
+import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
 import { page } from "$app/state";
+import { getCacheUserKey } from "$lib/cache/keys";
 import {
 	getCachedSpacePage,
 	setCachedSpacePage,
@@ -30,12 +27,23 @@ import {
 	getLocalPaletteOverview,
 	spaceRecordToCommandItem,
 } from "$lib/command-palette/default-items";
+import {
+	absorbLensPrefix,
+	buildSearchPlan,
+	type CommandPaletteLens,
+	lensOf,
+} from "$lib/command-palette/lens";
+import {
+	commandLensLabel,
+	commandLensPlaceholder,
+} from "$lib/command-palette/lens-copy";
 import { searchLocalCommandItems } from "$lib/command-palette/local-search";
 import {
 	mergeCommandResults,
 	sameCommandItemSequence,
 } from "$lib/command-palette/merge-results";
 import {
+	type CommandPaletteHistoryEntry,
 	type CommandPaletteIntent,
 	OPEN_COMMAND_PALETTE_EVENT,
 	type OpenCommandPaletteDetail,
@@ -52,19 +60,20 @@ import {
 	openCommandItem,
 	rememberCommandItem,
 } from "$lib/command-palette/recent";
+import {
+	clearRecentQueries,
+	getRecentQueries,
+	type RecentQuery,
+	rememberRecentQuery,
+} from "$lib/command-palette/recent-queries";
 import { searchRemoteCommandItems } from "$lib/command-palette/remote-search";
-import {
-	getRemoteResourceTypes,
-	typeLabelFor,
-} from "$lib/command-palette/scope";
+import { getRemoteResourceTypes } from "$lib/command-palette/scope";
 import type { CommandPaletteItem } from "$lib/command-palette/types";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import {
-	SETTINGS_SECTION_ICONS,
-	settingsSectionLabel,
-} from "$lib/components/settings-section";
+import CommandPaletteLensBar from "$lib/components/command-palette/CommandPaletteLensBar.svelte";
+import CommandPaletteRecentQueries from "$lib/components/command-palette/CommandPaletteRecentQueries.svelte";
+import CommandPaletteResultRow from "$lib/components/command-palette/CommandPaletteResultRow.svelte";
+import { settingsSectionLabel } from "$lib/components/settings-section";
 import ToolCallList from "$lib/components/ToolCallList.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
@@ -92,11 +101,21 @@ function syncPinStateInItems(spaceId: string, isPinned: boolean) {
 	localItems = patch(localItems);
 }
 
+function togglePin(item: CommandPaletteItem) {
+	const wasPinned = item.isPinned ?? false;
+	syncPinStateInItems(item.spaceId, !wasPinned);
+	void toggleSpacePin(item.spaceId).catch((error) => {
+		console.warn("[command-palette] pin toggle failed", error);
+		syncPinStateInItems(item.spaceId, wasPinned);
+	});
+}
+
 const MIN_QUERY_LENGTH = 2;
 const locale = $derived(getLocale());
 const RESULT_LIMIT = 30;
 const DEBOUNCE_MS = 180;
 const POINTER_HOVER_ARM_MS = 220;
+const FULL_SCREEN_QUERY = "(max-width: 640px)";
 
 /**
  * Land a rebuilt default list without a redundant render. The result list is
@@ -109,15 +128,12 @@ function applyDefaultItems(next: CommandPaletteItem[]) {
 	defaultItems = next;
 }
 
-function defaultPlaceholder() {
-	return m.command_placeholder({}, { locale });
-}
-
 let open = $state(false);
+let lens = $state<CommandPaletteLens>("all");
 let query = $state("");
-let title = $state("");
-let placeholder = $state("");
 let openIntent = $state<CommandPaletteIntent>("navigate");
+let historyBacked = false;
+let recentQueries = $state<RecentQuery[]>([]);
 let inputEl = $state<HTMLInputElement | null>(null);
 let resultsEl = $state<HTMLDivElement | null>(null);
 let activeIndex = $state(0);
@@ -178,6 +194,7 @@ function handleResultsScroll(event: Event) {
 // Space filter reset on change
 $effect(() => {
 	spaceFilter;
+	lens;
 	query;
 	open;
 	spaceDisplayLimit = SPACE_PAGE_SIZE;
@@ -188,21 +205,39 @@ const currentSpaceId = $derived.by(() => {
 	const id = match?.[1] ?? null;
 	return id === "new" ? null : id;
 });
-const parsedQuery = $derived(parseCommandPaletteQuery(query));
-const searchPlan = $derived({
-	query: parsedQuery.query,
-	resourceTypes: parsedQuery.resourceTypes,
-	labelRef: parsedQuery.labelRef,
-});
+const searchPlan = $derived(buildSearchPlan(lens, query));
+const activeLens = $derived(lensOf(searchPlan.resourceTypes));
 const trimmedQuery = $derived(searchPlan.query.trim());
 const hasLabelScope = $derived(
 	Boolean(searchPlan.labelRef && searchPlan.resourceTypes?.includes("label")),
 );
-const typeLabel = $derived(typeLabelFor(searchPlan.resourceTypes));
+const typeLabel = $derived(
+	searchPlan.resourceTypes?.length
+		? searchPlan.resourceTypes
+				.map((type) => commandLensLabel(type, locale))
+				.join(" + ")
+		: null,
+);
+const title = $derived(
+	runMode
+		? m.command_run_title({}, { locale })
+		: openIntent === "new-chat"
+			? m.chats_new_chat_in({}, { locale })
+			: m.command_title({}, { locale }),
+);
+const placeholder = $derived(
+	runMode
+		? m.command_run_placeholder({}, { locale })
+		: commandLensPlaceholder(activeLens ?? "all", locale),
+);
+const showLensBar = $derived(!runMode && openIntent !== "new-chat");
 const isSpacePickerMode = $derived(
 	openIntent === "new-chat" ||
 		(searchPlan.resourceTypes?.length === 1 &&
 			searchPlan.resourceTypes[0] === "space"),
+);
+const showRecentQueries = $derived(
+	!runMode && !isSpacePickerMode && !query.trim() && recentQueries.length > 0,
 );
 const resultLimit = $derived(
 	isSpacePickerMode ? SPACE_PAGE_SIZE : RESULT_LIMIT,
@@ -352,13 +387,6 @@ const statusText = $derived.by(() => {
 		: m.command_status_done_many({ label, count }, { locale });
 });
 
-function profileFor(item: CommandPaletteItem) {
-	if (item.type !== "space") return null;
-	return item.ownerProfile?.userUuid && item.ownerProfile.displayName
-		? item.ownerProfile
-		: null;
-}
-
 function armPointerHover() {
 	suppressPointerHover = true;
 	if (pointerHoverTimer != null) window.clearTimeout(pointerHoverTimer);
@@ -384,7 +412,8 @@ function remoteSearchSpaceId(
 }
 
 function handleCommandInput(event: Event) {
-	const value = (event.currentTarget as HTMLInputElement).value;
+	const input = event.currentTarget as HTMLInputElement;
+	const value = input.value;
 	if (runMode) {
 		runCommand = value;
 		if (runStatus !== "running" && runStatus !== "queued") {
@@ -396,10 +425,61 @@ function handleCommandInput(event: Event) {
 		}
 		return;
 	}
-	query = value;
-	// Searching should search the full Space set; Recent remains the empty-query
-	if (value.trim() && isSpacePickerMode && spaceFilter !== "archived")
+	const next =
+		openIntent === "new-chat"
+			? { lens, input: value }
+			: absorbLensPrefix(lens, value);
+	// Set the DOM value directly: `query` may not change (`s:` → "").
+	if (next.input !== value) input.value = next.input;
+	if (next.lens !== lens) selectLens(next.lens);
+	query = next.input;
+	widenSpaceFilter();
+}
+
+function widenSpaceFilter() {
+	if (query.trim() && isSpacePickerMode && spaceFilter !== "archived")
 		spaceFilter = "all";
+}
+
+function selectLens(next: CommandPaletteLens) {
+	const parsed = parseCommandPaletteQuery(query);
+	if (parsed.explicitTypeFilter) query = parsed.query;
+	if (next === "space" && lens !== "space")
+		spaceFilter = getCachedSpaceFilterPref();
+	lens = next;
+	activeIndex = 0;
+	refocusInput();
+}
+
+function isFullScreen() {
+	return window.matchMedia(FULL_SCREEN_QUERY).matches;
+}
+
+function refocusInput() {
+	if (!isFullScreen()) inputEl?.focus();
+}
+
+function clearInput() {
+	if (runMode) runCommand = "";
+	else query = "";
+	activeIndex = 0;
+	inputEl?.focus();
+}
+
+function pickRecentQuery(entry: RecentQuery) {
+	selectLens(entry.lens);
+	query = entry.query;
+	widenSpaceFilter();
+}
+
+function forgetRecentQueries() {
+	clearRecentQueries(getCacheUserKey());
+	recentQueries = [];
+	refocusInput();
+}
+
+function dismissKeyboard() {
+	if (document.activeElement === inputEl) inputEl?.blur();
 }
 
 const SPACE_FILTER_KEYS: SpaceFilter[] = [
@@ -493,52 +573,6 @@ function handleSpaceFilterKeydown(event: KeyboardEvent, current: SpaceFilter) {
 	);
 }
 
-function typeMeta(type: CommandPaletteItem["type"]) {
-	if (type === "turn") return { className: "turn", icon: MessageSquare };
-	if (type === "session") return { className: "session", icon: TerminalSquare };
-	if (type === "label") return { className: "label", icon: Tag };
-	if (type === "command") return { className: "command", icon: Plus };
-	return { className: "space", icon: FolderKanban };
-}
-
-function contextFor(item: CommandPaletteItem) {
-	if (item.type === "command")
-		return item.excerpt ?? m.command_ctx_command({}, { locale });
-	if (item.type === "space")
-		return item.excerpt ?? m.command_ctx_space({}, { locale });
-	if (item.type === "label")
-		return `${m.command_ctx_label({ label: item.labelRef ?? item.labelName ?? "Label" }, { locale })}${item.spaceName ? ` · ${item.spaceName}` : ""}`;
-	if (item.type === "session")
-		return item.spaceName ?? m.command_ctx_session({}, { locale });
-	return `${item.spaceName ?? "Space"}${item.sessionTitle ? ` / ${item.sessionTitle}` : ""} · ${m.command_ctx_turn({ n: item.sequence ?? "?" }, { locale })}`;
-}
-
-function itemTimestamp(item: CommandPaletteItem) {
-	if (!item.updatedAt) return null;
-	const date = new Date(item.updatedAt);
-	const time = date.getTime();
-	if (!Number.isFinite(time)) return null;
-
-	const now = new Date();
-	const isSameLocalDay =
-		date.getFullYear() === now.getFullYear() &&
-		date.getMonth() === now.getMonth() &&
-		date.getDate() === now.getDate();
-	const pad = (value: number) => String(value).padStart(2, "0");
-	const dateLabel = `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}`;
-	const timeLabel = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-	const timezoneLabel = new Intl.DateTimeFormat(undefined, {
-		timeZoneName: "short",
-	})
-		.formatToParts(date)
-		.find((part) => part.type === "timeZoneName")?.value;
-
-	return {
-		label: isSameLocalDay ? timeLabel : dateLabel,
-		title: `${dateLabel} ${timeLabel}${timezoneLabel ? ` ${timezoneLabel}` : ""}`,
-	};
-}
-
 function resetRunState() {
 	runMode = false;
 	runCommand = "";
@@ -575,25 +609,45 @@ function warmSpacePickerCache() {
 		});
 }
 
-function openPalette(detail?: OpenCommandPaletteDetail) {
-	title = detail?.title ?? m.command_title({}, { locale });
-	placeholder = detail?.placeholder ?? defaultPlaceholder();
-	query = detail?.query ?? "";
+function openPalette(detail?: OpenCommandPaletteDetail, restored = false) {
 	openIntent = detail?.intent ?? "navigate";
+	const initial = absorbLensPrefix(detail?.lens ?? "all", detail?.query ?? "");
+	lens = openIntent === "new-chat" ? "space" : initial.lens;
+	query = initial.input;
 	spaceFilter = getCachedSpaceFilterPref();
+	widenSpaceFilter();
+	recentQueries = getRecentQueries(getCacheUserKey());
 	activeIndex = 0;
 	armPointerHover();
 	resetRunState();
 	open = true;
-	void tick().then(() => inputEl?.focus());
+	historyBacked = restored || isFullScreen();
+	if (historyBacked && !restored) writeHistoryEntry();
+	if (!restored || !isFullScreen()) void tick().then(() => inputEl?.focus());
 	warmSpacePickerCache();
 }
 
+function writeHistoryEntry() {
+	const commandPalette: CommandPaletteHistoryEntry = {
+		lens,
+		query,
+		intent: openIntent,
+	};
+	const state = { ...page.state, commandPalette };
+	if (page.state.commandPalette) replaceState("", state);
+	else pushState("", state);
+}
+
 function closePalette() {
+	if (historyBacked && page.state.commandPalette) history.back();
+	teardownPalette();
+}
+
+function teardownPalette() {
 	open = false;
+	historyBacked = false;
+	lens = "all";
 	query = "";
-	title = m.command_title({}, { locale });
-	placeholder = defaultPlaceholder();
 	openIntent = "navigate";
 	spaceFilter = getCachedSpaceFilterPref();
 	activeIndex = 0;
@@ -603,6 +657,21 @@ function closePalette() {
 	localController?.abort();
 	remoteController?.abort();
 	resetRunState();
+}
+
+async function leavePalette(navigate: () => Promise<unknown>) {
+	if (openIntent === "navigate" && query.trim().length >= MIN_QUERY_LENGTH)
+		recentQueries = rememberRecentQuery(getCacheUserKey(), { lens, query });
+	if (historyBacked && page.state.commandPalette) writeHistoryEntry();
+	await navigate();
+	closePalette();
+}
+
+function openSpacesManager(event: MouseEvent) {
+	if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey)
+		return;
+	event.preventDefault();
+	void leavePalette(() => goto("/spaces"));
 }
 
 function resetSearch(options?: { clearDefaultLists?: boolean }) {
@@ -789,8 +858,6 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 
 function openRunCommandMode() {
 	runMode = true;
-	title = m.command_run_title({}, { locale });
-	placeholder = m.command_run_placeholder({}, { locale });
 	runCommand = "";
 	runTaskId = null;
 	runProgress = null;
@@ -867,24 +934,24 @@ async function activate(item: CommandPaletteItem | undefined) {
 	// New-chat intent: only space (or create-space) actions are valid.
 	if (openIntent === "new-chat") {
 		if (item.type === "space" && item.spaceId) {
+			const spaceId = item.spaceId;
 			rememberCommandItem(item);
-			closePalette();
-			await goto(buildUserNewSessionRoute(item.spaceId), {
-				keepFocus: true,
-				noScroll: true,
-			});
+			await leavePalette(() =>
+				goto(buildUserNewSessionRoute(spaceId), {
+					keepFocus: true,
+					noScroll: true,
+				}),
+			);
 			return;
 		}
 		if (item.type === "command" && item.id === "new-space") {
-			await openCommandItem(item);
-			closePalette();
+			await leavePalette(() => openCommandItem(item));
 			return;
 		}
 		// Ignore sessions/labels/turns — keep palette open for a real space pick.
 		return;
 	}
-	await openCommandItem(item);
-	closePalette();
+	await leavePalette(() => openCommandItem(item));
 }
 
 function moveActive(delta: number) {
@@ -916,8 +983,6 @@ function handlePaletteKeydown(event: KeyboardEvent) {
 			}
 			if (runCommand.trim()) {
 				runMode = false;
-				title = m.command_title({}, { locale });
-				placeholder = defaultPlaceholder();
 				runStatus = "idle";
 				return;
 			}
@@ -926,8 +991,7 @@ function handlePaletteKeydown(event: KeyboardEvent) {
 		return;
 	}
 	if (isComposingKeyboardEvent(event)) return;
-	if ((event.target as HTMLElement | null)?.getAttribute("role") === "tab")
-		return;
+	if ((event.target as HTMLElement | null)?.closest("button, a")) return;
 	if (runMode) {
 		if (event.key === "Enter") {
 			event.preventDefault();
@@ -1009,6 +1073,19 @@ $effect(() => {
 	void scrollActiveIntoView();
 });
 
+$effect(() => {
+	const entry = page.state.commandPalette;
+	untrack(() => {
+		if (entry && !open) openPalette(entry, true);
+		else if (!entry && open && historyBacked) teardownPalette();
+	});
+});
+
+afterNavigate(({ type }) => {
+	if (type === "popstate" && open && !page.state.commandPalette)
+		teardownPalette();
+});
+
 onMount(() => {
 	window.addEventListener("keydown", handleGlobalKeydown, { capture: true });
 	window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, handleOpenPaletteEvent);
@@ -1043,52 +1120,71 @@ onMount(() => {
 {#if open}
 	<div class="command-palette-root" role="presentation" onmousedown={(event) => { if (event.target === event.currentTarget) closePalette(); }}>
 		<div class="command-palette" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" onkeydown={handlePaletteKeydown}>
-			<div class="command-input-row">
-				{#if runMode}
-					<TerminalSquare class="h-4 w-4 text-brand" />
-				{:else}
-					<Search class="h-4 w-4 text-text-tertiary" />
+			<div class="command-header">
+				<div class="command-input-row">
+					<div class="command-field">
+						{#if runMode}
+							<TerminalSquare class="h-4 w-4 shrink-0 text-brand" />
+						{:else}
+							<Search class="h-4 w-4 shrink-0 text-text-tertiary" />
+						{/if}
+						<input
+							bind:this={inputEl}
+							value={runMode ? runCommand : query}
+							class="command-input"
+							{placeholder}
+							autocomplete="off"
+							spellcheck="false"
+							enterkeyhint={runMode ? "go" : "search"}
+							oninput={handleCommandInput}
+						/>
+						{#if runMode ? runCommand : query}
+							<button type="button" class="command-clear" aria-label={m.command_clear_query({}, { locale })} title={m.command_clear_query({}, { locale })} onclick={clearInput}>
+								<X class="h-3.5 w-3.5" />
+							</button>
+						{/if}
+					</div>
+					{#if runMode}
+						<div class="command-shortcut">↵ {m.command_run({}, { locale })}</div>
+					{:else}
+						<div class="command-shortcut">⌘K</div>
+					{/if}
+					<button type="button" class="command-cancel" onclick={closePalette}>{m.common_cancel({}, { locale })}</button>
+				</div>
+
+				{#if showLensBar}
+					<CommandPaletteLensBar lens={activeLens} onSelect={selectLens} />
 				{/if}
-				<input
-					bind:this={inputEl}
-					value={runMode ? runCommand : query}
-					class="command-input"
-					placeholder={placeholder}
-					autocomplete="off"
-					spellcheck="false"
-					oninput={handleCommandInput}
-				/>
-				{#if runMode}
-					<div class="command-shortcut">↵ {m.command_run({}, { locale })}</div>
-				{:else}
-					<div class="command-shortcut">⌘K</div>
+
+				{#if isSpacePickerMode && !runMode}
+					<div class="space-filter-row">
+						<div class="space-filter-bar" role="tablist" aria-orientation="horizontal" aria-label={m.command_filter_spaces({}, { locale })}>
+							{#each SPACE_FILTER_KEYS as key (key)}
+								<button
+									id={`command-space-filter-${key}`}
+									type="button"
+									class="space-filter-btn"
+									class:active={spaceFilter === key}
+									role="tab"
+									aria-selected={spaceFilter === key}
+									aria-controls="command-palette-results"
+									tabindex={spaceFilter === key ? 0 : -1}
+									onclick={() => selectSpaceFilter(key)}
+									onkeydown={(event) => handleSpaceFilterKeydown(event, key)}
+								>{spaceFilterLabel(key)}</button>
+							{/each}
+						</div>
+						<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={openSpacesManager}>
+							<Settings2 class="h-3.5 w-3.5" />
+							<span>{m.spaces_manage({}, { locale })}</span>
+						</a>
+					</div>
+				{/if}
+
+				{#if showRecentQueries}
+					<CommandPaletteRecentQueries queries={recentQueries} onPick={pickRecentQuery} onClear={forgetRecentQueries} />
 				{/if}
 			</div>
-
-			{#if isSpacePickerMode && !runMode}
-				<div class="space-filter-row">
-				<div class="space-filter-bar" role="tablist" aria-orientation="horizontal" aria-label={m.command_filter_spaces({}, { locale })}>
-					{#each SPACE_FILTER_KEYS as key (key)}
-						<button
-							id={`command-space-filter-${key}`}
-							type="button"
-							class="space-filter-btn"
-							class:active={spaceFilter === key}
-							role="tab"
-							aria-selected={spaceFilter === key}
-							aria-controls="command-palette-results"
-							tabindex={spaceFilter === key ? 0 : -1}
-							onclick={() => selectSpaceFilter(key)}
-							onkeydown={(event) => handleSpaceFilterKeydown(event, key)}
-						>{spaceFilterLabel(key)}</button>
-					{/each}
-				</div>
-				<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={closePalette}>
-					<Settings2 class="h-3.5 w-3.5" />
-					<span>{m.spaces_manage({}, { locale })}</span>
-				</a>
-				</div>
-			{/if}
 
 			{#if runMode}
 				<div bind:this={resultsEl} class="command-results command-runner">
@@ -1121,7 +1217,7 @@ onMount(() => {
 					{/if}
 				</div>
 			{:else}
-				<div id="command-palette-results" bind:this={resultsEl} class:searching={showingSettledItems} class="command-results" role="listbox" aria-label={m.command_search_results({}, { locale })} onscroll={handleResultsScroll}>
+				<div id="command-palette-results" bind:this={resultsEl} class:searching={showingSettledItems} class="command-results" role="listbox" tabindex="-1" aria-label={m.command_search_results({}, { locale })} onscroll={handleResultsScroll} ontouchmove={dismissKeyboard}>
 					{#if renderedItems.length === 0}
 						<div class="command-empty">
 							<div class="command-empty-mark"><CornerDownRight class="h-4 w-4" /></div>
@@ -1158,73 +1254,14 @@ onMount(() => {
 						</div>
 					{:else}
 						{#each renderedItems as item, index (`${item.type}:${item.id || item.turnId || item.sessionId || item.spaceId}`)}
-							{@const meta = typeMeta(item.type)}
-							{@const section = settingsCommandSection(item)}
-							{@const Icon = section ? SETTINGS_SECTION_ICONS[section] : meta.icon}
-							{@const profile = profileFor(item)}
-							{@const timestamp = itemTimestamp(item)}
-							<div
-								class:active={index === activeIndex}
-								class="command-result"
-								onpointermove={() => handleResultPointerMove(index)}
-								role="option"
-								aria-selected={index === activeIndex}
-								tabindex="-1"
-							>
-								<button
-									type="button"
-									class="command-result-main"
-									onclick={() => void activate(item)}
-								>
-									{#if item.type === "space"}
-										<SpaceAvatar name={item.title || item.spaceName || item.spaceId} profile={item.spaceProfile} size="sm" />
-									{:else}
-										<div class={`command-type-mark ${meta.className}`} aria-label={item.type}>
-											<Icon class="h-3.5 w-3.5" />
-										</div>
-									{/if}
-									<div class="min-w-0 flex-1 text-left">
-										<div class="flex min-w-0 items-center gap-2">
-											<span class="truncate text-[13px] font-medium text-text-primary">{item.title}</span>
-										</div>
-										<div class="command-context-row">
-											{#if profile}
-												<span class="command-profile" title={profile.displayName}>
-													<UserAvatar name={profile.displayName} avatarUrl={profile.avatarUrl} size="xxs" class="border-0 bg-bg-primary text-[8px]" />
-													<span class="truncate">{profile.displayName}</span>
-												</span>
-												<span class="command-context-separator">·</span>
-											{/if}
-											<span class="command-context" title={contextFor(item)}>{contextFor(item)}</span>
-											{#if timestamp}
-												<span class="command-context-separator">·</span>
-												<time class="command-time" datetime={item.updatedAt ?? undefined} title={timestamp.title}>{timestamp.label}</time>
-											{/if}
-										</div>
-									</div>
-									<div class="command-enter">↵</div>
-								</button>
-								{#if isSpacePickerMode && item.type === "space" && !item.isArchived}
-									<button
-										type="button"
-										class="command-pin-btn"
-										class:pinned={item.isPinned}
-										title={item.isPinned ? m.command_unpin({}, { locale }) : m.command_pin({}, { locale })}
-										aria-label={item.isPinned ? m.command_unpin_item({ title: item.title }, { locale }) : m.command_pin_item({ title: item.title }, { locale })}
-										onclick={(e) => {
-									e.stopPropagation();
-									const wasPinned = item.isPinned ?? false;
-									syncPinStateInItems(item.spaceId, !wasPinned);
-									void toggleSpacePin(item.spaceId).catch((err) => {
-										console.warn("[palette] pin toggle failed", err);
-										syncPinStateInItems(item.spaceId, wasPinned);
-									});
-								}}
-									>
-										<Pin class="h-3.5 w-3.5" />
-									</button>
-								{/if}
-							</div>
+							<CommandPaletteResultRow
+								{item}
+								active={index === activeIndex}
+								pinnable={isSpacePickerMode && item.type === "space" && !item.isArchived}
+								onActivate={() => void activate(item)}
+								onHover={() => handleResultPointerMove(index)}
+								onTogglePin={() => togglePin(item)}
+							/>
 						{/each}
 						{#if isSpacePickerMode && mergedItemsRaw.length > spaceDisplayLimit}
 							<div class="flex items-center justify-center py-2 text-[11px] text-text-tertiary">
@@ -1236,7 +1273,7 @@ onMount(() => {
 			{/if}
 
 			<div class="command-footer">
-				<div class:error={Boolean(runError)} class="command-status" role="status" aria-live="polite">
+				<div class:error={Boolean(runMode ? runError : remoteError)} class="command-status" role="status" aria-live="polite">
 					{#if runMode}
 						{#if runStatus === "queued" || runStatus === "running"}<Loader2 class="h-3 w-3 animate-spin text-brand" />{/if}
 						<span>{runError || (runStatus === "done" ? m.command_done({ id: runTaskId ?? "" }, { locale }) : runStatus === "running" ? m.command_running({}, { locale }) : runStatus === "queued" ? m.command_queued({}, { locale }) : currentSpaceId ? m.command_press_run({}, { locale }) : m.command_open_space({}, { locale }))}</span>
@@ -1245,7 +1282,10 @@ onMount(() => {
 						<span>{statusText}</span>
 					{/if}
 				</div>
-				<div class="hidden items-center gap-2 sm:flex"><span>↑↓</span><span>C-n/p</span><span>{m.command_navigate({}, { locale })}</span><span>↵</span><span>{m.command_open_verb({}, { locale })}</span><span>esc</span><span>{m.command_close({}, { locale })}</span></div>
+				<div class="command-keys">
+					<span>↑↓</span><span>C-n/p</span><span>{m.command_navigate({}, { locale })}</span>
+					<span>↵</span><span>{m.command_open_verb({}, { locale })}</span><span>esc</span><span>{m.command_close({}, { locale })}</span>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -1276,13 +1316,25 @@ onMount(() => {
 		animation: command-enter 140ms cubic-bezier(0.16, 1, 0.3, 1);
 	}
 
+	.command-header {
+		flex-shrink: 0;
+		border-bottom: 1px solid var(--border-subtle);
+		background: color-mix(in oklch, var(--bg-primary) 30%, transparent);
+	}
+
 	.command-input-row {
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		padding: 14px 16px;
-		border-bottom: 1px solid var(--border-subtle);
-		background: color-mix(in oklch, var(--bg-primary) 30%, transparent);
+		padding: 14px 16px 10px;
+	}
+
+	.command-field {
+		display: flex;
+		min-width: 0;
+		flex: 1;
+		align-items: center;
+		gap: 12px;
 	}
 
 	.command-input {
@@ -1298,8 +1350,48 @@ onMount(() => {
 
 	.command-input::placeholder { color: var(--text-placeholder); }
 
+	.command-clear {
+		display: grid;
+		place-items: center;
+		flex: 0 0 auto;
+		width: 22px;
+		height: 22px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--bg-hover);
+		color: var(--text-tertiary);
+		cursor: pointer;
+		transition: color 90ms cubic-bezier(0.25, 1, 0.5, 1);
+	}
+
+	.command-clear:hover { color: var(--text-primary); }
+
+	.command-clear:focus-visible,
+	.command-cancel:focus-visible,
+	.space-filter-btn:focus-visible,
+	.space-manage-link:focus-visible {
+		outline: 2px solid color-mix(in oklch, var(--brand) 42%, transparent);
+		outline-offset: -2px;
+	}
+
+	.command-cancel {
+		display: none;
+		flex: 0 0 auto;
+		align-items: center;
+		min-height: 44px;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		padding: 0 6px;
+		color: var(--text-secondary);
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+
+	.command-cancel:active { color: var(--text-primary); }
+
 	.command-shortcut,
-	.command-enter,
 	.command-footer {
 		font-family: var(--font-mono);
 		letter-spacing: 0.02em;
@@ -1321,188 +1413,6 @@ onMount(() => {
 
 	.command-results.searching {
 		opacity: 0.72;
-	}
-
-	.command-result {
-		position: relative;
-		display: flex;
-		width: 100%;
-		align-items: center;
-		gap: 4px;
-		border: 0;
-		border-radius: 9px;
-		background: transparent;
-		padding: 6px 6px;
-		color: inherit;
-		transition: background-color 90ms cubic-bezier(0.25, 1, 0.5, 1), transform 90ms cubic-bezier(0.25, 1, 0.5, 1);
-	}
-
-	.command-result-main {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		min-width: 0;
-		flex: 1;
-		border: 0;
-		background: transparent;
-		color: inherit;
-		padding: 4px 4px;
-		border-radius: 7px;
-		cursor: pointer;
-	}
-
-	.command-result-main:focus-visible {
-		outline: 2px solid color-mix(in oklch, var(--brand) 42%, transparent);
-		outline-offset: -2px;
-	}
-
-	.command-pin-btn {
-		display: grid;
-		place-items: center;
-		flex: 0 0 auto;
-		width: 28px;
-		height: 28px;
-		border: 0;
-		border-radius: 7px;
-		background: transparent;
-		color: var(--text-tertiary);
-		opacity: 0;
-		cursor: pointer;
-		transition: opacity 90ms cubic-bezier(0.25, 1, 0.5, 1), background-color 90ms cubic-bezier(0.25, 1, 0.5, 1), color 90ms cubic-bezier(0.25, 1, 0.5, 1);
-	}
-
-	.command-pin-btn:focus-visible {
-		opacity: 1;
-		outline: 2px solid color-mix(in oklch, var(--brand) 42%, transparent);
-		outline-offset: -2px;
-	}
-
-	.command-pin-btn.pinned {
-		opacity: 1;
-		color: var(--brand);
-	}
-
-	.command-pin-btn:hover {
-		opacity: 1;
-		background: var(--bg-hover);
-		color: var(--brand);
-	}
-
-	.command-pin-btn:active {
-		transform: scale(0.92);
-	}
-
-	.command-result.active .command-pin-btn { opacity: 1; }
-	.command-result.active .command-pin-btn:not(.pinned) { color: var(--text-tertiary); }
-
-	.command-result::before {
-		content: "";
-		position: absolute;
-		left: 0;
-		top: 8px;
-		bottom: 8px;
-		width: 2px;
-		border-radius: 999px;
-		background: transparent;
-	}
-
-	.command-result.active { background: color-mix(in oklch, var(--brand-bg) 56%, var(--bg-hover) 44%); }
-	.command-result.active::before { background: var(--brand); }
-	.command-result.active .command-enter {
-		opacity: 1;
-	}
-	.command-result.active .command-time { color: var(--text-secondary); }
-	.command-result.active .command-type-mark { border-color: color-mix(in oklch, currentColor 36%, transparent); }
-
-	.command-type-mark {
-		display: grid;
-		place-items: center;
-		width: 28px;
-		height: 28px;
-		border: 1px solid color-mix(in oklch, currentColor 18%, transparent);
-		border-radius: 7px;
-		background: color-mix(in oklch, currentColor 10%, var(--bg-primary) 90%);
-		color: var(--text-tertiary);
-	}
-
-	.command-type-mark.space {
-		color: var(--brand);
-		background: color-mix(in oklch, var(--brand) 12%, var(--bg-primary) 88%);
-	}
-
-	.command-type-mark.session {
-		color: color-mix(in oklch, var(--text-secondary) 82%, var(--brand) 18%);
-		background: color-mix(in oklch, var(--text-secondary) 8%, var(--bg-primary) 92%);
-	}
-
-	.command-type-mark.turn {
-		color: color-mix(in oklch, var(--text-tertiary) 72%, var(--brand) 28%);
-		background: color-mix(in oklch, var(--text-tertiary) 7%, var(--bg-primary) 93%);
-	}
-
-	.command-type-mark.label {
-		color: color-mix(in oklch, var(--brand) 76%, var(--text-secondary) 24%);
-		background: color-mix(in oklch, var(--brand) 9%, var(--bg-primary) 91%);
-	}
-
-	.command-type-mark.command {
-		color: var(--brand);
-		background: color-mix(in oklch, var(--brand) 10%, var(--bg-primary) 90%);
-	}
-
-	.command-context-row {
-		margin-top: 2px;
-		display: flex;
-		min-width: 0;
-		align-items: center;
-		gap: 6px;
-		color: var(--text-tertiary);
-		font-size: 12px;
-		line-height: 1.35;
-	}
-
-	.command-profile {
-		display: inline-flex;
-		min-width: 0;
-		max-width: min(190px, 42%);
-		flex-shrink: 0;
-		align-items: center;
-		gap: 5px;
-		color: color-mix(in oklch, var(--text-secondary) 86%, var(--brand) 14%);
-	}
-
-	.command-context {
-		min-width: 0;
-		flex: 0 1 auto;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.command-context-separator {
-		flex: 0 0 auto;
-		color: var(--text-placeholder);
-	}
-
-	.command-time {
-		flex: 0 0 auto;
-		color: var(--text-placeholder);
-		font-family: var(--font-mono);
-		font-size: 10px;
-		font-variant-numeric: tabular-nums;
-		letter-spacing: 0.01em;
-		line-height: 1;
-		white-space: nowrap;
-	}
-
-	.command-enter {
-		width: 12px;
-		flex: 0 0 auto;
-		opacity: 0;
-		color: var(--brand);
-		font-size: 13px;
-		line-height: 1;
-		text-align: right;
 	}
 
 	.command-empty {
@@ -1533,44 +1443,40 @@ onMount(() => {
 		font-size: 10px;
 	}
 
+	.command-keys {
+		display: flex;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 8px;
+	}
+
 	.space-filter-row {
 		display: flex;
 		align-items: center;
 		gap: 8px;
-		padding: 6px 8px;
-		border-bottom: 1px solid var(--border-subtle);
+		padding: 0 8px 6px;
 	}
 
 	.space-filter-bar {
 		display: flex;
 		min-width: 0;
 		gap: 2px;
+		overflow-x: auto;
+		scrollbar-width: none;
 	}
 
+	.space-filter-bar::-webkit-scrollbar { display: none; }
+
+	.space-filter-btn,
 	.space-manage-link {
 		display: inline-flex;
 		flex-shrink: 0;
 		align-items: center;
-		gap: 4px;
-		margin-left: auto;
-		border-radius: 6px;
-		padding: 4px 8px;
-		color: var(--text-placeholder);
-		font-size: 11px;
-		transition: background-color 90ms, color 90ms;
-	}
-
-	.space-manage-link:hover {
-		background: var(--bg-hover);
-		color: var(--text-secondary);
-	}
-
-	.space-filter-btn {
-		min-height: 36px;
+		min-height: 28px;
 		border: 0;
 		border-radius: 6px;
 		background: transparent;
-		padding: 4px 12px;
+		padding: 0 10px;
 		color: var(--text-tertiary);
 		font-size: 12px;
 		font-weight: 500;
@@ -1578,14 +1484,24 @@ onMount(() => {
 		transition: background-color 90ms, color 90ms;
 	}
 
-	.space-filter-btn:hover {
+	.space-filter-btn:hover,
+	.space-manage-link:hover {
 		background: var(--bg-hover);
 		color: var(--text-secondary);
 	}
 
 	.space-filter-btn.active {
-		background: color-mix(in oklch, var(--brand) 12%, var(--bg-primary) 88%);
-		color: var(--brand);
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
+	.space-manage-link {
+		gap: 4px;
+		margin-left: auto;
+		padding: 0 8px;
+		color: var(--text-placeholder);
+		font-size: 11px;
+		font-weight: 400;
 	}
 
 	.command-status {
@@ -1612,53 +1528,71 @@ onMount(() => {
 
 	@media (max-width: 640px) {
 		.command-palette-root {
-			align-items: flex-end;
+			align-items: stretch;
 			padding: 0;
-			background: var(--overlay-scrim);
+			background: var(--bg-primary);
 		}
 
 		.command-palette {
-			width: 100vw;
-			max-height: min(82svh, 680px);
-			border-right: 0;
-			border-bottom: 0;
-			border-left: 0;
-			border-radius: 16px 16px 0 0;
-			animation-name: command-sheet-enter;
+			width: 100%;
+			max-height: none;
+			padding-top: env(safe-area-inset-top, 0px);
+			border: 0;
+			border-radius: 0;
+			background: var(--bg-primary);
+			box-shadow: none;
+			animation: command-screen-enter 160ms cubic-bezier(0.16, 1, 0.3, 1);
 		}
 
-		.command-palette::before {
-			content: "";
-			align-self: center;
-			width: 36px;
-			height: 4px;
-			margin-top: 8px;
-			border-radius: 999px;
-			background: var(--border-primary);
+		.command-header {
+			background: transparent;
 		}
 
 		.command-input-row {
-			padding: 12px 14px 13px;
+			gap: 4px;
+			padding: 6px 6px 2px 10px;
 		}
 
-		.command-shortcut,
-		.command-enter {
+		.command-field {
+			height: 38px;
+			gap: 8px;
+			border-radius: 10px;
+			background: var(--bg-surface);
+			padding: 0 6px 0 10px;
+		}
+
+		/* 16px keeps iOS from zooming into the focused field. */
+		.command-input {
+			font-size: 16px;
+		}
+
+		.command-clear {
+			width: 28px;
+			height: 28px;
+			background: transparent;
+		}
+
+		.command-shortcut {
 			display: none;
 		}
 
-		.command-result {
-			min-height: 58px;
-			gap: 6px;
-			padding: 8px 8px;
+		.command-cancel {
+			display: inline-flex;
 		}
 
-		.space-filter-btn {
-			min-height: 44px;
+		.command-results {
+			flex: 1;
+			overscroll-behavior: contain;
+			padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+		}
+
+		.space-filter-btn,
+		.space-manage-link {
+			min-height: 36px;
 		}
 
 		.space-manage-link {
-			min-width: 44px;
-			min-height: 44px;
+			min-width: 36px;
 			justify-content: center;
 		}
 
@@ -1666,32 +1600,28 @@ onMount(() => {
 			display: none;
 		}
 
-		.command-type-mark {
-			width: 32px;
-			height: 32px;
-		}
-
-		.command-pin-btn,
-		.command-pin-btn:not(.pinned) {
-			width: 44px;
-			height: 44px;
-			opacity: 1;
-		}
-
 		.command-footer {
-			padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+			display: none;
+			padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+		}
+
+		.command-footer:has(.command-status.error) {
+			display: flex;
+		}
+
+		.command-keys {
+			display: none;
 		}
 	}
 
-	@keyframes command-sheet-enter {
-		from { opacity: 0; transform: translateY(14px); }
+	@keyframes command-screen-enter {
+		from { opacity: 0; transform: translateY(8px); }
 		to { opacity: 1; transform: translateY(0); }
 	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.command-palette,
-		.command-results,
-		.command-result {
+		.command-results {
 			animation: none;
 			transition: none;
 		}

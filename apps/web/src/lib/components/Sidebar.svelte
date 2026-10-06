@@ -2409,11 +2409,7 @@ function openSearch() {
 
 function openSpacePalette() {
 	onClose?.();
-	openCommandPalette({
-		title: m.sidebar_switch_space_title({}, { locale }),
-		query: "a: ",
-		placeholder: m.sidebar_search_spaces({}, { locale }),
-	});
+	openCommandPalette({ lens: "space" });
 }
 
 function mainRouteWithWindow(pathname: string) {

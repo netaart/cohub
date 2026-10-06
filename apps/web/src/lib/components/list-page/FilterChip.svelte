@@ -17,7 +17,7 @@ let {
 	active?: boolean;
 	href?: string;
 	onclick?: (event: MouseEvent) => void;
-	kind?: "tab" | "toggle" | "menu";
+	kind?: "tab" | "toggle" | "menu" | "action";
 	title?: string;
 	leading?: Snippet;
 	trailing?: Snippet;
