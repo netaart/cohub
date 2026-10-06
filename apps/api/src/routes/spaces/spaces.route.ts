@@ -591,17 +591,15 @@ async function findOwnedHomeSpace(userUuid: string): Promise<SpaceRow | null> {
 }
 
 async function findLandingSpace(userUuid: string): Promise<SpaceRow | null> {
-  const [space] = await db
+  const home = await findOwnedHomeSpace(userUuid);
+  if (home) return home;
+  const [recent] = await db
     .select()
     .from(spaces)
     .where(eq(spaces.userUuid, userUuid))
-    .orderBy(
-      sql`(${spaces.slug} = ${HOME_SPACE_SLUG}) desc nulls last`,
-      sql`${spaces.lastActivityAt} desc nulls last`,
-      desc(spaces.createdAt),
-    )
+    .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, sql`${spaces.createdAt} desc nulls last`)
     .limit(1);
-  return space ?? null;
+  return recent ?? null;
 }
 
 type PreparedHomeMods = Awaited<ReturnType<typeof prepareSpaceModInserts>>;

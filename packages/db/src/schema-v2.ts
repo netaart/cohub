@@ -148,7 +148,7 @@ export const spaces = v2.table(
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
   },
   (table) => ({
-    userUuidIdx: index("v2_idx_spaces_user_uuid").on(table.userUuid),
+    userActivityIdx: index("v2_idx_spaces_user_activity").on(table.userUuid, table.lastActivityAt.desc().nullsLast(), table.createdAt.desc().nullsLast()),
     baseCheckpointIdx: index("v2_idx_spaces_base_checkpoint_id").on(table.baseCheckpointId),
     headCheckpointIdx: index("v2_idx_spaces_head_checkpoint_id").on(table.headCheckpointId),
     lastActivityIdx: index("v2_idx_spaces_last_activity_at").on(table.lastActivityAt.desc().nullsLast(), table.createdAt.desc().nullsLast()),
