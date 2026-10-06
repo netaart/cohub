@@ -20,6 +20,7 @@
  * written into the other space's board.
  */
 
+import type { SpaceFsChange } from "@cohub/protocol/fs";
 import {
 	availabilityFromError,
 	type BoardFileSnapshotFacts,
@@ -39,6 +40,7 @@ import {
 const MAX_CONCURRENT = 4;
 /** Memoised results, keyed by space, path and mtime. */
 const MEMO_LIMIT = 512;
+const CHANGE_VERDICT_LIMIT = 4096;
 
 type PreviewRequest = {
 	path: string;
@@ -192,7 +194,7 @@ async function readSnapshot(
 	});
 	// A file whose content cannot contribute to its card is fully described by its
 	// metadata, so this is a complete result and no request is made. Its metadata
-	// comes from the change event (see invalidateFilePreview), which is why it does
+	// comes from the change event (see invalidateFilePreviews), which is why it does
 	// not go stale.
 	if (!shouldRead(request)) return { facts: base, complete: true };
 
@@ -277,31 +279,57 @@ export function loadFilePreview(
 	return promise;
 }
 
+function setRecent<V>(map: Map<string, V>, key: string, value: V) {
+	map.delete(key);
+	map.set(key, value);
+	if (map.size <= CHANGE_VERDICT_LIMIT) return;
+	const oldest = map.keys().next().value;
+	if (oldest !== undefined) map.delete(oldest);
+}
+
 /**
- * Drop the memoised preview for a file after a filesystem change.
+ * Drop memoised previews after a filesystem change event.
  *
- * `meta` is the change event's own metadata. Carrying it through means a card
- * refreshes its size and mtime without a stat request — and for a file whose
- * content is never read (a PDF, an archive), it is the only way those ever update.
+ * Each change's own metadata is carried through, so a card refreshes its size
+ * and mtime without a stat request — and for a file whose content is never read
+ * (a PDF, an archive), it is the only way those ever update.
  */
-export function invalidateFilePreview(
+export function invalidateFilePreviews(
 	spaceId: string,
-	path: string,
-	meta: FileChangeMeta = {},
+	changes: readonly SpaceFsChange[],
 ) {
-	const key = filePreviewScope(spaceId, path);
-	const prefix = `${key}@`;
-	for (const memoised of [...memo.keys()]) {
-		if (memoised.startsWith(prefix)) memo.delete(memoised);
+	const events: FilePreviewInvalidation[] = [];
+	for (const change of changes) {
+		if (change.path) {
+			const meta = {
+				size: change.size,
+				mtimeMs: change.mtimeMs,
+				removed: change.kind === "delete",
+			};
+			events.push({ spaceId, path: change.path, meta });
+		}
+		if (change.oldPath)
+			events.push({ spaceId, path: change.oldPath, meta: { removed: true } });
 	}
-	// A removal is authoritative: record it rather than waiting for a read to 404.
-	// Any other change proves the file is there, so clear a stale verdict.
-	if (meta.removed) availability.set(key, "missing");
-	else availability.delete(key);
-	// Mark the file stale even when nothing was memoised: a board that has not read
-	// it yet still needs to know its snapshot is out of date.
-	stalePaths.set(key, meta);
-	notify({ spaceId, path, meta });
+	if (events.length === 0) return;
+
+	const scopes = new Set(
+		events.map((event) => filePreviewScope(spaceId, event.path)),
+	);
+	for (const key of memo.keys()) {
+		if (scopes.has(key.slice(0, key.lastIndexOf("@")))) memo.delete(key);
+	}
+	for (const { path, meta } of events) {
+		const key = filePreviewScope(spaceId, path);
+		// A removal is authoritative: record it rather than waiting for a read to
+		// 404. Any other change proves the file is there, so clear a stale verdict.
+		if (meta.removed) setRecent(availability, key, "missing");
+		else availability.delete(key);
+		// Mark the file stale even when nothing was memoised: a board that has not
+		// read it yet still needs to know its snapshot is out of date.
+		setRecent(stalePaths, key, meta);
+	}
+	for (const event of events) notify(event);
 }
 
 /** Monotonic counter for reactive consumers; bumped on every invalidation. */

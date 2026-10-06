@@ -4,7 +4,10 @@ import type {
 	BoardPlaybackSnapshot,
 	RequestSource,
 } from "@cohub/protocol";
-import type { SpaceFsFileResponse, SpaceFsPreparingFile } from "@neta-art/cohub";
+import type {
+	SpaceFsFileResponse,
+	SpaceFsPreparingFile,
+} from "@neta-art/cohub";
 import { HttpError } from "@neta-art/cohub";
 import { type BoardDocument, parseBoardManifest } from "@neta-art/cohub/board";
 import {
@@ -16,7 +19,11 @@ import {
 	mergeBoardAutomationActivity,
 } from "$lib/board/board-activity";
 import { resolveBoardManifestText } from "$lib/board/board-manifest-text";
-import { type BoardSync, type BoardSyncState, createBoardSync } from "$lib/board/board-sync";
+import {
+	type BoardSync,
+	type BoardSyncState,
+	createBoardSync,
+} from "$lib/board/board-sync";
 import { boardPathMatchesTarget } from "$lib/board/board-sync-policy";
 import {
 	deleteBoardPendingPatch,
@@ -54,20 +61,37 @@ type BoardPreviewControllerOptions = {
 	onClearSavePendingSoon?: (path: string) => void;
 };
 
-export function createBoardWindowController(options: BoardPreviewControllerOptions) {
+export function createBoardWindowController(
+	options: BoardPreviewControllerOptions,
+) {
 	let boards = $state.raw<InlineBoardPanelState[]>([]);
 	let activeBoardPath = $state<string | null>(null);
-	let requestTokenByPath: Record<string, number> = {};
+	const requestTokens = new Map<string, number>();
+	let nextRequestToken = 0;
 	const syncs = new Map<string, { sync: BoardSync; unsubscribe: () => void }>();
 	const manifestRefreshByPath = new Map<string, Promise<void>>();
 	const manifestRefreshRequested = new Set<string>();
 	let automationActivities = $state<BoardAutomationActivity[]>([]);
-	const activityTimers = new Map<string, { settle: ReturnType<typeof setTimeout>; expire: ReturnType<typeof setTimeout> }>();
-	const activityModelRequests = new Map<string, Promise<{ provider: string | null; id: string } | null>>();
+	const activityTimers = new Map<
+		string,
+		{
+			settle: ReturnType<typeof setTimeout>;
+			expire: ReturnType<typeof setTimeout>;
+		}
+	>();
+	const activityModelRequests = new Map<
+		string,
+		Promise<{ provider: string | null; id: string } | null>
+	>();
 	let disposed = false;
 
-	function updateBoards(boardId: string, update: (board: InlineBoardPanelState) => InlineBoardPanelState) {
-		boards = boards.map((board) => (board.boardId === boardId ? update(board) : board));
+	function updateBoards(
+		boardId: string,
+		update: (board: InlineBoardPanelState) => InlineBoardPanelState,
+	) {
+		boards = boards.map((board) =>
+			board.boardId === boardId ? update(board) : board,
+		);
 	}
 
 	function clearActivityTimers(id: string) {
@@ -81,12 +105,21 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 	function scheduleActivityLifecycle(activity: BoardAutomationActivity) {
 		clearActivityTimers(activity.id);
 		const settle = setTimeout(() => {
-			automationActivities = automationActivities.map((item) => (item.id === activity.id && item.updatedAt === activity.updatedAt ? { ...item, status: "settled" } : item));
+			automationActivities = automationActivities.map((item) =>
+				item.id === activity.id && item.updatedAt === activity.updatedAt
+					? { ...item, status: "settled" }
+					: item,
+			);
 		}, BOARD_AUTOMATION_ACTIVE_MS);
-		const expire = setTimeout(() => {
-			clearActivityTimers(activity.id);
-			automationActivities = automationActivities.filter((item) => item.id !== activity.id);
-		}, Math.max(0, boardAutomationExpiresAt(activity) - Date.now()));
+		const expire = setTimeout(
+			() => {
+				clearActivityTimers(activity.id);
+				automationActivities = automationActivities.filter(
+					(item) => item.id !== activity.id,
+				);
+			},
+			Math.max(0, boardAutomationExpiresAt(activity) - Date.now()),
+		);
 		activityTimers.set(activity.id, { settle, expire });
 	}
 
@@ -101,35 +134,64 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 				const oldest = activityModelRequests.keys().next().value;
 				if (oldest) activityModelRequests.delete(oldest);
 			}
-			request = sdk.space(spaceId).session(sessionId).turns.get(turnId)
-				.then(({ turn }) => (turn.model ? { provider: turn.provider, id: turn.model } : null))
+			request = sdk
+				.space(spaceId)
+				.session(sessionId)
+				.turns.get(turnId)
+				.then(({ turn }) =>
+					turn.model ? { provider: turn.provider, id: turn.model } : null,
+				)
 				.catch(() => null);
 			activityModelRequests.set(key, request);
 		}
 		void request.then((model) => {
 			if (disposed || !model) return;
-			automationActivities = automationActivities.map((item) => (item.id === activity.id && item.source.turnId === turnId ? { ...item, model } : item));
+			automationActivities = automationActivities.map((item) =>
+				item.id === activity.id && item.source.turnId === turnId
+					? { ...item, model }
+					: item,
+			);
 		});
 	}
 
-	function noteAutomation(boardId: string, event: { actorId: string; mutationId: string; itemIds: string[]; source: RequestSource }) {
+	function noteAutomation(
+		boardId: string,
+		event: {
+			actorId: string;
+			mutationId: string;
+			itemIds: string[];
+			source: RequestSource;
+		},
+	) {
 		const document = boards.find((item) => item.boardId === boardId)?.document;
 		if (!document) return;
-		const activity = createBoardAutomationActivity(document, { boardId, actorId: event.actorId, txId: event.mutationId, itemIds: event.itemIds, source: event.source });
+		const activity = createBoardAutomationActivity(document, {
+			boardId,
+			actorId: event.actorId,
+			txId: event.mutationId,
+			itemIds: event.itemIds,
+			source: event.source,
+		});
 		if (!activity) return;
 		const previous = automationActivities;
 		automationActivities = mergeBoardAutomationActivity(previous, activity);
 		const retained = new Set(automationActivities.map((item) => item.id));
-		for (const item of previous) if (!retained.has(item.id)) clearActivityTimers(item.id);
-		const current = automationActivities.find((item) => item.id === activity.id);
+		for (const item of previous)
+			if (!retained.has(item.id)) clearActivityTimers(item.id);
+		const current = automationActivities.find(
+			(item) => item.id === activity.id,
+		);
 		if (!current) return;
 		scheduleActivityLifecycle(current);
 		resolveActivityModel(current);
 	}
 
 	function clearActivitiesForBoard(boardId: string) {
-		for (const activity of automationActivities) if (activity.boardId === boardId) clearActivityTimers(activity.id);
-		automationActivities = automationActivities.filter((item) => item.boardId !== boardId);
+		for (const activity of automationActivities)
+			if (activity.boardId === boardId) clearActivityTimers(activity.id);
+		automationActivities = automationActivities.filter(
+			(item) => item.boardId !== boardId,
+		);
 	}
 
 	function adoptSyncState(boardId: string, state: BoardSyncState) {
@@ -154,13 +216,19 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 				apply: (patch, input) => client.apply(patch, input),
 			},
 			store: {
-				listPending: async () => (await listBoardPendingPatches(spaceId, boardId)).map((record) => ({ mutationId: record.mutationId, patch: record.patch })),
+				listPending: async () =>
+					(await listBoardPendingPatches(spaceId, boardId)).map((record) => ({
+						mutationId: record.mutationId,
+						patch: record.patch,
+					})),
 				putPending: async (entry) => {
 					await writeBoardPendingPatch({ spaceId, boardId, ...entry });
 				},
-				deletePending: (mutationId) => deleteBoardPendingPatch({ spaceId, boardId, mutationId }),
+				deletePending: (mutationId) =>
+					deleteBoardPendingPatch({ spaceId, boardId, mutationId }),
 				readDocument: () => readBoardDocumentCache(spaceId, boardId),
-				writeDocument: (version, document) => writeBoardDocumentCache({ spaceId, boardId, version, document }),
+				writeDocument: (version, document) =>
+					writeBoardDocumentCache({ spaceId, boardId, version, document }),
 			},
 			onChange: (state) => adoptSyncState(boardId, state),
 		});
@@ -168,8 +236,17 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 			changed: (event) => {
 				const { payload } = event;
 				sync.receive(payload);
-				if (payload.source && payload.changed.items.length && boardAutomationKind(payload.source)) {
-					noteAutomation(boardId, { actorId: payload.actorId, mutationId: payload.mutationId, itemIds: payload.changed.items, source: payload.source });
+				if (
+					payload.source &&
+					payload.changed.items.length &&
+					boardAutomationKind(payload.source)
+				) {
+					noteAutomation(boardId, {
+						actorId: payload.actorId,
+						mutationId: payload.mutationId,
+						itemIds: payload.changed.items,
+						source: payload.source,
+					});
 				}
 			},
 			playback: (event) => sync.receivePlayback(event.payload.playback),
@@ -188,13 +265,22 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 		clearActivitiesForBoard(boardId);
 	}
 
+	function hasBoard(path: string) {
+		return boards.some((item) => item.path === path);
+	}
+
 	function isCurrent(token: number, path: string, sourceKey: string) {
-		return token === requestTokenByPath[path] && boards.some((item) => item.path === path) && sourceKey === options.getSourceKey();
+		return (
+			token === requestTokens.get(path) &&
+			hasBoard(path) &&
+			sourceKey === options.getSourceKey()
+		);
 	}
 
 	async function readManifest(path: string): Promise<string> {
 		const rawFile = await options.readFile(path);
-		if (!rawFile || typeof rawFile !== "object" || !("content" in rawFile)) throw new Error("Board manifest is being prepared. Retry in a moment.");
+		if (!rawFile || typeof rawFile !== "object" || !("content" in rawFile))
+			throw new Error("Board manifest is being prepared. Retry in a moment.");
 		const { file, error } = await tryResolveTextFileResponse(rawFile);
 		if (error) throw new Error(error);
 		const content = resolveBoardManifestText(file);
@@ -204,45 +290,85 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 		return manifest.boardId;
 	}
 
-	async function openBoard(path: string, input: { activate?: boolean; showLoading?: boolean } = {}) {
+	async function openBoard(
+		path: string,
+		input: { activate?: boolean; showLoading?: boolean } = {},
+	) {
 		const activate = input.activate ?? true;
+		const existing = boards.find((item) => item.path === path);
+		if (!existing && input.showLoading === false) return;
 		const sourceKey = options.getSourceKey();
 		if (activate) options.onBeforeOpenBoard?.();
-		const token = (requestTokenByPath[path] ?? 0) + 1;
-		requestTokenByPath = { ...requestTokenByPath, [path]: token };
+		const token = ++nextRequestToken;
+		requestTokens.set(path, token);
 		if (activate) activeBoardPath = path;
-		const existing = boards.find((item) => item.path === path);
-		if (!existing) {
-			if (input.showLoading === false) return;
-			boards = [...boards, { path, boardId: null, document: null, playback: null, loading: true, saving: false, error: null, saveError: null }];
-		}
+		if (!existing)
+			boards = [
+				...boards,
+				{
+					path,
+					boardId: null,
+					document: null,
+					playback: null,
+					loading: true,
+					saving: false,
+					error: null,
+					saveError: null,
+				},
+			];
 		if (activate) options.onOpenPanel?.();
 		try {
 			const boardId = await readManifest(path);
 			if (!isCurrent(token, path, sourceKey)) return;
 			const previous = boards.find((item) => item.path === path)?.boardId;
 			if (previous === boardId && syncs.has(boardId)) return;
-			if (previous && previous !== boardId && !boards.some((item) => item.boardId === previous && item.path !== path)) releaseSync(previous);
-			const sibling = boards.find((item) => item.boardId === boardId && item.path !== path);
+			if (
+				previous &&
+				previous !== boardId &&
+				!boards.some((item) => item.boardId === previous && item.path !== path)
+			)
+				releaseSync(previous);
+			const sibling = boards.find(
+				(item) => item.boardId === boardId && item.path !== path,
+			);
 			boards = boards.map((item) =>
 				item.path === path
-					? { ...item, boardId, document: sibling?.document ?? null, playback: sibling?.playback ?? null, loading: !sibling?.document, error: null }
+					? {
+							...item,
+							boardId,
+							document: sibling?.document ?? null,
+							playback: sibling?.playback ?? null,
+							loading: !sibling?.document,
+							error: null,
+						}
 					: item,
 			);
 			const sync = ensureSync(boardId);
 			adoptSyncState(boardId, sync.state);
 		} catch (cause) {
 			if (!isCurrent(token, path, sourceKey)) return;
-			if (existing?.document && cause instanceof HttpError && cause.status === 404) {
+			if (
+				existing?.document &&
+				cause instanceof HttpError &&
+				cause.status === 404
+			) {
 				closeBoard(path);
 				return;
 			}
-			const message = cause instanceof Error ? cause.message : "Failed to open board";
-			boards = boards.map((item) => (item.path === path ? (item.document ? { ...item, saveError: message } : { ...item, loading: false, error: message }) : item));
+			const message =
+				cause instanceof Error ? cause.message : "Failed to open board";
+			boards = boards.map((item) =>
+				item.path === path
+					? item.document
+						? { ...item, saveError: message }
+						: { ...item, loading: false, error: message }
+					: item,
+			);
 		}
 	}
 
 	function refreshBoardManifest(path: string) {
+		if (!hasBoard(path)) return Promise.resolve();
 		const active = manifestRefreshByPath.get(path);
 		if (active) {
 			manifestRefreshRequested.add(path);
@@ -269,29 +395,43 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 
 	function closeBoard(path = activeBoardPath) {
 		if (!path) return;
-		requestTokenByPath = { ...requestTokenByPath, [path]: (requestTokenByPath[path] ?? 0) + 1 };
+		requestTokens.delete(path);
 		const index = boards.findIndex((item) => item.path === path);
 		const closing = boards[index];
 		const next = boards.filter((item) => item.path !== path);
-		if (closing?.boardId && !next.some((item) => item.boardId === closing.boardId)) releaseSync(closing.boardId);
+		if (
+			closing?.boardId &&
+			!next.some((item) => item.boardId === closing.boardId)
+		)
+			releaseSync(closing.boardId);
 		boards = next;
-		if (activeBoardPath === path) activeBoardPath = next[Math.max(0, index - 1)]?.path ?? next[0]?.path ?? null;
+		if (activeBoardPath === path)
+			activeBoardPath =
+				next[Math.max(0, index - 1)]?.path ?? next[0]?.path ?? null;
 		if (next.length === 0) options.onClosePanel?.();
 		options.onBoardClosed?.(path);
 	}
 
 	function closeBoardsAtPath(path: string, recursive = false) {
-		for (const board of boards.filter((item) => boardPathMatchesTarget(item.path, path, recursive))) closeBoard(board.path);
+		for (const board of boards.filter((item) =>
+			boardPathMatchesTarget(item.path, path, recursive),
+		))
+			closeBoard(board.path);
 	}
 
 	function activateBoard(path: string) {
-		if (!boards.some((item) => item.path === path)) return;
+		if (!hasBoard(path)) return;
 		activeBoardPath = path;
 		options.onOpenPanel?.();
 	}
 
 	function renamePath(fromPath: string, toPath: string) {
-		const rename = (value: string) => (value === fromPath ? toPath : value.startsWith(`${fromPath}/`) ? `${toPath}${value.slice(fromPath.length)}` : value);
+		const rename = (value: string) =>
+			value === fromPath
+				? toPath
+				: value.startsWith(`${fromPath}/`)
+					? `${toPath}${value.slice(fromPath.length)}`
+					: value;
 		boards = boards.map((board) => ({ ...board, path: rename(board.path) }));
 		if (activeBoardPath) activeBoardPath = rename(activeBoardPath);
 	}
@@ -317,8 +457,12 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 			switch (command.type) {
 				case "play":
 					return board.play(command.animationId, {
-						...(command.position === undefined ? {} : { position: command.position }),
-						...(command.timeScale === undefined ? {} : { timeScale: command.timeScale }),
+						...(command.position === undefined
+							? {}
+							: { position: command.position }),
+						...(command.timeScale === undefined
+							? {}
+							: { timeScale: command.timeScale }),
 						...(command.seed ? { seed: command.seed } : {}),
 					});
 				case "pause":
@@ -340,7 +484,8 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 	function dispose() {
 		disposed = true;
 		for (const boardId of [...syncs.keys()]) releaseSync(boardId);
-		for (const activity of automationActivities) clearActivityTimers(activity.id);
+		for (const activity of automationActivities)
+			clearActivityTimers(activity.id);
 		activityModelRequests.clear();
 		boards = [];
 	}
@@ -358,6 +503,7 @@ export function createBoardWindowController(options: BoardPreviewControllerOptio
 		get automationActivities() {
 			return automationActivities;
 		},
+		hasBoard,
 		openBoard,
 		closeBoard,
 		activateBoard,

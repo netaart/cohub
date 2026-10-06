@@ -11,6 +11,7 @@ import { getCurrentRedirectPath, redirectToSignIn } from "$lib/auth-redirect";
 import { decideUnauthorizedRecovery } from "$lib/auth-unauthorized";
 import { getClientInstanceId } from "$lib/client-instance";
 import { hostOwnsCredentials } from "$lib/host-bridge";
+import { createSharedGetFetch } from "$lib/shared-get-fetch";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 
 type UnauthorizedContext = Parameters<
@@ -119,7 +120,7 @@ const createWebSdk = (options: Partial<CohubClientOptions> = {}) => {
 				const clientId = getClientInstanceId();
 				return { via: "web", ...(clientId ? { clientId } : {}) };
 			}),
-		fetch: createBillingAwareFetch(baseFetch),
+		fetch: createBillingAwareFetch(createSharedGetFetch(baseFetch)),
 		websocket: {
 			url: PUBLIC_GATEWAY_ORIGIN ?? undefined,
 			getAccessToken: resolveAccessToken,

@@ -356,11 +356,23 @@ const IDB_FAILURE_WINDOW_MS = 30_000;
 const IDB_FAILURE_THRESHOLD = 6;
 const IDB_RECOVERY_COOLDOWN_MS = 5 * 60_000;
 
+const IDB_TIMEOUT_STALL_LAG_MS = 500;
+
 export class CacheTimeoutError extends Error {
-	constructor(message = "IndexedDB operation timed out") {
+	/** Hidden, frozen or blocked page: not evidence of a broken IndexedDB. */
+	readonly pageStalled: boolean;
+
+	constructor(message = "IndexedDB operation timed out", pageStalled = false) {
 		super(message);
 		this.name = "CacheTimeoutError";
+		this.pageStalled = pageStalled;
 	}
+}
+
+function isPageVisible() {
+	return (
+		typeof document === "undefined" || document.visibilityState === "visible"
+	);
 }
 
 function withTimeout<T>(
@@ -370,8 +382,19 @@ function withTimeout<T>(
 ): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const timeout = new Promise<never>((_, reject) => {
+		const startedAt = performance.now();
+		const visibleAtStart = isPageVisible();
 		timer = setTimeout(() => {
-			reject(new CacheTimeoutError(`${label} timed out after ${ms}ms`));
+			const lag = performance.now() - startedAt - ms;
+			const pageStalled =
+				!visibleAtStart || !isPageVisible() || lag > IDB_TIMEOUT_STALL_LAG_MS;
+			const detail = pageStalled ? " while the page was stalled" : "";
+			reject(
+				new CacheTimeoutError(
+					`${label} timed out after ${ms}ms${detail}`,
+					pageStalled,
+				),
+			);
 		}, ms);
 	});
 	return Promise.race([promise, timeout]).finally(() => {
@@ -432,7 +455,7 @@ let lastIdbRecoveryAt = 0;
 let idbRecoveryInFlight: Promise<void> | null = null;
 
 function isSevereIdbFailure(error: unknown) {
-	if (error instanceof CacheTimeoutError) return true;
+	if (error instanceof CacheTimeoutError) return !error.pageStalled;
 	if (!error || typeof error !== "object") return false;
 	const name = "name" in error ? String(error.name) : "";
 	const message = "message" in error ? String(error.message) : "";

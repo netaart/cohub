@@ -38,7 +38,7 @@ import type {
 	BoardAutomationActivity,
 	BoardCollaboratorProfile,
 } from "$lib/board/board-activity";
-import { invalidateFilePreview } from "$lib/board/board-file-preview-source";
+import { invalidateFilePreviews } from "$lib/board/board-file-preview-source";
 import { spaceFsRepo } from "$lib/cache/repositories/space-fs-repo";
 import { spaceRecordRepo } from "$lib/cache/repositories/space-record-repo";
 import {
@@ -1168,7 +1168,6 @@ const immersiveFilesInset = $derived(
 
 let workspaceWidthTick = $state(0);
 let pageMounted = $state(false);
-let spaceFsEventTail = Promise.resolve();
 let spaceFsEventGeneration = 0;
 let lastSandboxFsSeq: number | null = null;
 const spaceFsRefreshCoordinator = createSpaceFsRefreshCoordinator(
@@ -1728,11 +1727,11 @@ function normalizeSandboxFsPayload(
 }
 
 function enqueueSpaceFsChanged(payload: ChannelEnvelope) {
-	const eventPayload = payload.payload as SpaceFsChangedPayload;
+	const rawPayload = payload.payload as SpaceFsChangedPayload;
 	const eventSpaceId = payload.spaceId ?? spaceId;
 	const installedAppsChanged =
-		eventPayload.resync ||
-		eventPayload.changes?.some(
+		rawPayload.resync ||
+		rawPayload.changes?.some(
 			(change) =>
 				change.path === SPACE_INSTALLED_APPS_PATH ||
 				change.oldPath === SPACE_INSTALLED_APPS_PATH,
@@ -1745,46 +1744,27 @@ function enqueueSpaceFsChanged(payload: ChannelEnvelope) {
 			void readInstalledApps(eventSpaceId).catch(() => {});
 	}
 
+	if (eventSpaceId !== spaceId) return;
+	const eventPayload = normalizeSandboxFsPayload(rawPayload);
+	if (!eventPayload) return;
 	const generation = spaceFsEventGeneration;
 	const sourceKey = activeFsSourceKey;
-	const prepared = spaceFsEventTail
-		.catch(() => undefined)
-		.then(async () => {
+	void spaceFsRepo
+		.invalidateFsChanged(eventSpaceId, eventPayload)
+		.then(({ refreshDirs }) => {
 			if (generation !== spaceFsEventGeneration || eventSpaceId !== spaceId)
-				return null;
-			const eventPayload = normalizeSandboxFsPayload(
-				payload.payload as SpaceFsChangedPayload,
-			);
-			if (!eventPayload) return null;
-			const { refreshDirs } = await spaceFsRepo.invalidateFsChanged(
-				eventSpaceId,
-				eventPayload,
-			);
-			return { eventPayload, refreshDirs };
-		});
-	spaceFsEventTail = prepared.then(
-		() => undefined,
-		(error) => {
-			console.error("[files] Failed to invalidate filesystem cache", error);
-		},
-	);
-	void prepared
-		.then((result) => {
-			if (
-				!result ||
-				generation !== spaceFsEventGeneration ||
-				eventSpaceId !== spaceId
-			)
 				return;
 			scheduleSpaceFsRefresh({
-				eventPayload: result.eventPayload,
-				dirs: result.refreshDirs,
+				eventPayload,
+				dirs: refreshDirs,
 				eventSpaceId,
 				sourceKey,
 				generation,
 			});
 		})
-		.catch(() => undefined);
+		.catch((error) => {
+			console.error("[files] Failed to apply filesystem change", error);
+		});
 }
 
 function isCurrentSpaceFsRefresh(batch: SpaceFsRefreshBatch) {
@@ -1809,16 +1789,7 @@ function scheduleSpaceFsRefresh(input: {
 	if (eventPayload.resync || spaceConfigChanged(eventPayload.changes))
 		refreshSpaceConfig(eventSpaceId);
 
-	for (const change of eventPayload.changes ?? []) {
-		const meta = {
-			size: change.size,
-			mtimeMs: change.mtimeMs,
-			removed: change.kind === "delete",
-		};
-		if (change.path) invalidateFilePreview(eventSpaceId, change.path, meta);
-		if (change.oldPath)
-			invalidateFilePreview(eventSpaceId, change.oldPath, { removed: true });
-	}
+	invalidateFilePreviews(eventSpaceId, eventPayload.changes ?? []);
 
 	const batch: SpaceFsRefreshBatch = {
 		eventSpaceId,
@@ -1846,9 +1817,8 @@ function scheduleSpaceFsRefresh(input: {
 		}
 		if (
 			change.path &&
-			(change.kind === "create" ||
-				change.kind === "modify" ||
-				change.kind === "rename")
+			change.kind !== "delete" &&
+			boardPreview.hasBoard(change.path)
 		)
 			batch.boardManifestPaths.add(change.path);
 
@@ -2872,7 +2842,6 @@ onMount(() => {
 });
 function resetSpaceScopedState(currentSpaceId: string) {
 	spaceFsEventGeneration += 1;
-	spaceFsEventTail = Promise.resolve();
 	spaceFsRefreshCoordinator.reset();
 	lastSandboxFsSeq = null;
 	if (danmakuCatchupTimer) clearTimeout(danmakuCatchupTimer);
