@@ -223,6 +223,7 @@ body.sidebar-resizing .panel-shell-fade {
 /* `safe-area-top` consumes the inset for descendants; fixed overlays use env() directly. */
 :root {
 	--safe-area-top: env(safe-area-inset-top, 0px);
+	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
 	--public-header-height: calc(3rem + env(safe-area-inset-top, 0px));
 }
 

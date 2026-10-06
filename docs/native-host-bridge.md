@@ -64,7 +64,8 @@ The host draws the surface under transparent system bars. The page lays out
 around them with `env(safe-area-inset-*)`: the surface pinned to the viewport
 top pads itself with the `safe-area-top` utility and consumes the inset, so
 chrome nested inside offsets by `--safe-area-top` (0 once consumed), while fixed
-overlays read `env()` directly. Whenever the shell background changes (theme,
+overlays read `env()` directly. The mobile tab bar likewise consumes
+`--safe-area-bottom`. Whenever the shell background changes (theme,
 system scheme, Space style) the page sends `appearance.set`; the host persists
 the color for the next cold start and derives icon contrast from it. WebViews
 older than Chromium 140 misreport the insets, so Android pads them natively

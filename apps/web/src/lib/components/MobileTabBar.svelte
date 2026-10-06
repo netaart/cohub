@@ -10,7 +10,7 @@ const activeArea = $derived(resolveAppArea(page.url.pathname));
 </script>
 
 <nav
-  class="flex h-[52px] shrink-0 items-stretch border-t border-border-subtle bg-bg-primary pb-[env(safe-area-inset-bottom)] lg:hidden"
+  class="flex h-[calc(52px+env(safe-area-inset-bottom,0px))] shrink-0 items-stretch border-t border-border-subtle bg-bg-primary pb-[env(safe-area-inset-bottom,0px)] lg:hidden"
   aria-label={m.nav_tabs_aria({}, { locale })}
 >
   {#each APP_AREAS as area (area)}
