@@ -14,8 +14,10 @@ import java.util.Base64
 
 private const val TAG = "CohubAuth"
 
-fun interface TokenEndpoint {
+interface TokenEndpoint {
     suspend fun exchange(fields: Map<String, String>): TokenResponse
+
+    suspend fun revoke(fields: Map<String, String>)
 }
 
 data class TokenResponse(
@@ -28,43 +30,55 @@ data class TokenResponse(
 
 class OAuthFailure(val status: Int, message: String) : Exception(message)
 
-class HttpTokenEndpoint(private val url: String) : TokenEndpoint {
+/** [oidc] is the provider's OIDC base, e.g. `https://auth.example/oidc`. */
+class HttpTokenEndpoint(private val oidc: String) : TokenEndpoint {
 
-    override suspend fun exchange(fields: Map<String, String>): TokenResponse = withContext(Dispatchers.IO) {
-        val body = fields.entries.joinToString("&") { (key, value) ->
-            "${URLEncoder.encode(key, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
-        }
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-            setRequestProperty("Accept", "application/json")
-        }
-        try {
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val status = connection.responseCode
-            val payload = (if (status in 200..299) connection.inputStream else connection.errorStream)
-                ?.bufferedReader()?.use { it.readText() }
-                .orEmpty()
-            if (status !in 200..299) throw OAuthFailure(status, payload)
-            val json = Json.parseToJsonElement(payload) as? JsonObject
-                ?: throw OAuthFailure(status, "Malformed token response")
-            TokenResponse(
-                accessToken = json["access_token"]?.jsonPrimitive?.content
-                    ?: throw OAuthFailure(status, "Token response had no access_token"),
-                refreshToken = json["refresh_token"]?.jsonPrimitive?.content,
-                idToken = json["id_token"]?.jsonPrimitive?.content,
-                expiresInSeconds = json["expires_in"]?.jsonPrimitive?.content?.toLongOrNull() ?: 3_600,
-                subject = json["id_token"]?.jsonPrimitive?.content?.let(::subjectFromIdToken),
-            )
-        } catch (error: IOException) {
-            throw OAuthFailure(0, error.message ?: "Network failure during token exchange")
-        } finally {
-            connection.disconnect()
-        }
+    override suspend fun exchange(fields: Map<String, String>): TokenResponse {
+        val (status, payload) = post("$oidc/token", fields)
+        val json = runCatching { Json.parseToJsonElement(payload) as? JsonObject }.getOrNull()
+            ?: throw OAuthFailure(status, "Malformed token response")
+        return TokenResponse(
+            accessToken = json["access_token"]?.jsonPrimitive?.content
+                ?: throw OAuthFailure(status, "Token response had no access_token"),
+            refreshToken = json["refresh_token"]?.jsonPrimitive?.content,
+            idToken = json["id_token"]?.jsonPrimitive?.content,
+            expiresInSeconds = json["expires_in"]?.jsonPrimitive?.content?.toLongOrNull() ?: 3_600,
+            subject = json["id_token"]?.jsonPrimitive?.content?.let(::subjectFromIdToken),
+        )
     }
+
+    override suspend fun revoke(fields: Map<String, String>) {
+        post("$oidc/token/revocation", fields)
+    }
+
+    /** The 2xx status and body; anything else throws [OAuthFailure]. */
+    private suspend fun post(url: String, fields: Map<String, String>): Pair<Int, String> =
+        withContext(Dispatchers.IO) {
+            val body = fields.entries.joinToString("&") { (key, value) ->
+                "${URLEncoder.encode(key, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
+            }
+            val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                setRequestProperty("Accept", "application/json")
+            }
+            try {
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                val status = connection.responseCode
+                val payload = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }
+                    .orEmpty()
+                if (status !in 200..299) throw OAuthFailure(status, payload)
+                status to payload
+            } catch (error: IOException) {
+                throw OAuthFailure(0, error.message ?: "Network failure calling $url")
+            } finally {
+                connection.disconnect()
+            }
+        }
 
     private companion object {
         const val CONNECT_TIMEOUT_MS = 15_000

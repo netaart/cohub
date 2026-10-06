@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var customTabs: ActivityResultLauncher<Intent>
     private lateinit var allFilesAccess: ActivityResultLauncher<Intent>
     private lateinit var notificationPermission: ActivityResultLauncher<String>
+    private val hostPrefs by lazy { getSharedPreferences("cohub-host", MODE_PRIVATE) }
     private var pendingResult: CompletableDeferred<Unit>? = null
     private val preparing = Mutex()
 
@@ -180,6 +181,7 @@ class MainActivity : ComponentActivity(), HostActions {
             resource = BuildConfig.LOGTO_API_RESOURCE,
             challenge = challenge,
             state = state,
+            forceLogin = hostPrefs.getBoolean(KEY_FORCE_LOGIN, false),
         )
         try {
             customTabs.launch(CustomTabsIntent.Builder().build().intent.apply { data = url })
@@ -188,6 +190,11 @@ class MainActivity : ComponentActivity(), HostActions {
             // surface can share, so failing loudly is the safer behaviour.
             throw CancellationSignal("No browser available to complete sign-in")
         }
+    }
+
+    override suspend fun signOut() {
+        hostPrefs.edit { putBoolean(KEY_FORCE_LOGIN, true) }
+        auth.signOut()
     }
 
     override fun shareText(text: String, title: String?) {
@@ -274,6 +281,7 @@ class MainActivity : ComponentActivity(), HostActions {
 
         lifecycleScope.launch {
             runCatching { auth.completeSignIn(code, pending.challenge.verifier) }
+                .onSuccess { hostPrefs.edit { remove(KEY_FORCE_LOGIN) } }
                 .onFailure {
                     Log.w(TAG, "Sign-in failed", it)
                     toast(R.string.sign_in_failed)
@@ -292,15 +300,14 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     /** Stable per-install id for routing hints; never an authorization input. */
-    private fun installId(): String {
-        val prefs = getSharedPreferences("cohub-host", MODE_PRIVATE)
-        return prefs.getString(KEY_INSTALL_ID, null) ?: java.util.UUID.randomUUID().toString().also {
-            prefs.edit { putString(KEY_INSTALL_ID, it) }
+    private fun installId(): String =
+        hostPrefs.getString(KEY_INSTALL_ID, null) ?: java.util.UUID.randomUUID().toString().also {
+            hostPrefs.edit { putString(KEY_INSTALL_ID, it) }
         }
-    }
 
     private companion object {
         const val TAG = "CohubShell"
         const val KEY_INSTALL_ID = "install_id"
+        const val KEY_FORCE_LOGIN = "force_login"
     }
 }

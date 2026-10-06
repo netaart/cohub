@@ -46,6 +46,10 @@ object AuthorizationRequest {
     // Logto issues a refresh token only with consent.
     private const val PROMPT = "consent"
 
+    // After a sign-out: the browser still holds a Logto session that would
+    // otherwise return the same account without asking.
+    private const val PROMPT_LOGIN = "login consent"
+
     fun build(
         endpoint: String,
         appId: String,
@@ -53,12 +57,13 @@ object AuthorizationRequest {
         resource: String,
         challenge: Pkce.Challenge,
         state: String,
+        forceLogin: Boolean = false,
     ): Uri = (endpoint.trimEnd('/') + "/oidc/auth").toUri().buildUpon()
         .appendQueryParameter("client_id", appId)
         .appendQueryParameter("redirect_uri", redirectUri)
         .appendQueryParameter("response_type", "code")
         .appendQueryParameter("scope", SCOPES)
-        .appendQueryParameter("prompt", PROMPT)
+        .appendQueryParameter("prompt", if (forceLogin) PROMPT_LOGIN else PROMPT)
         .appendQueryParameter("resource", resource)
         .appendQueryParameter("code_challenge", challenge.challenge)
         .appendQueryParameter("code_challenge_method", challenge.method)

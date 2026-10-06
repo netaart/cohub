@@ -44,7 +44,7 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `auth.getSessionVersion` | `auth.token` | Bumps on any session change |
 | `auth.getSession` | `auth.session` | Identity for the cache partition key |
 | `auth.signIn` | `auth.signIn` | System browser + PKCE; returns immediately |
-| `auth.signOut` | `auth.token` | Clears the host store, pushes `auth.signedOut` |
+| `auth.signOut` | `auth.token` | Clears the host store and revokes the grant, pushes `auth.signedOut`; the next sign-in prompts for login |
 | `share.text` | `share` | Native share sheet |
 | `navigation.openPath` | `navigation` | In-shell path navigation |
 | `cache.clear` | `cache` | Host state only; IndexedDB is the web app's |

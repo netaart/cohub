@@ -140,7 +140,7 @@ class HostBridge(
         }
 
         HostProtocol.Methods.AUTH_SIGN_OUT -> {
-            auth.clear()
+            actions.signOut()
             emit(HostProtocol.Events.AUTH_SIGNED_OUT)
             JsonPrimitive(true)
         }
@@ -276,6 +276,7 @@ class CancellationSignal(message: String) : Exception(message)
 interface HostActions {
     fun hostId(): String
     fun startSignIn(redirectPath: String?)
+    suspend fun signOut()
     fun shareText(text: String, title: String?)
     fun openPath(path: String)
     fun clearCache(scope: String)

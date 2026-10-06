@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Single-flight refresh. Logto rotates the refresh token on every use, so each
@@ -14,7 +15,7 @@ import kotlinx.coroutines.withContext
 class AuthSession(
     private val store: CredentialStore,
     private val config: AuthConfig,
-    private val endpoint: TokenEndpoint = HttpTokenEndpoint(config.tokenEndpoint()),
+    private val endpoint: TokenEndpoint = HttpTokenEndpoint(config.endpoint.trimEnd('/') + "/oidc"),
     private val clock: () -> Long = System::currentTimeMillis,
     private val onAccountChanged: (signedIn: Boolean) -> Unit = {},
 ) {
@@ -80,6 +81,23 @@ class AuthSession(
 
     fun sessionVersion(): Long = synchronized(lock) { generation }
 
+    /**
+     * Ends the session, then revokes its grant as the web SDK does, so a copy of
+     * the refresh token cannot outlive sign-out. Revocation is best effort.
+     */
+    suspend fun signOut() {
+        val refreshToken = current()?.refreshToken
+        clear()
+        if (refreshToken == null) return
+        try {
+            withTimeoutOrNull(REVOKE_TIMEOUT_MS) { endpoint.revoke(revokeFields(refreshToken)) }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not revoke the refresh token", error)
+        }
+    }
+
     fun clear() = clear(expectedGeneration = null)
 
     private fun clear(expectedGeneration: Long?) {
@@ -121,6 +139,12 @@ class AuthSession(
         "resource" to config.apiResource,
     )
 
+    private fun revokeFields(refreshToken: String) = mapOf(
+        "token" to refreshToken,
+        "token_type_hint" to "refresh_token",
+        "client_id" to config.appId,
+    )
+
     private fun codeFields(code: String, verifier: String) = mapOf(
         "grant_type" to "authorization_code",
         "code" to code,
@@ -135,10 +159,9 @@ class AuthSession(
 
         /** Refresh before expiry so a request in flight never races the clock. */
         const val SKEW_MS = 30_000L
+        const val REVOKE_TIMEOUT_MS = 5_000L
     }
 }
-
-private fun AuthConfig.tokenEndpoint(): String = endpoint.trimEnd('/') + "/oidc/token"
 
 data class AuthConfig(
     val endpoint: String,
