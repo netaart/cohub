@@ -1,11 +1,14 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 import { prefersReducedMotion } from "svelte/motion";
+import { setFilterBarPill } from "$lib/components/list-page/filter-bar";
+import { EASE_OUT } from "$lib/motion.svelte";
 
 const {
 	label,
 	role = "group",
 	activeKey = null,
+	position = null,
 	leading,
 	trailing,
 	children,
@@ -13,6 +16,7 @@ const {
 	label: string;
 	role?: "group" | "tablist" | "navigation";
 	activeKey?: string | null;
+	position?: number | null;
 	leading?: Snippet;
 	trailing?: Snippet;
 	children: Snippet;
@@ -21,14 +25,20 @@ const {
 const EDGE_PX = 20;
 const KEEP_IN_VIEW_PX = 24;
 const PIN_LEADING_MIN_PX = 320;
+const PILL_MS = 240;
 
 let scroller = $state<HTMLDivElement | null>(null);
+let group = $state<HTMLDivElement | null>(null);
+let pill = $state<HTMLSpanElement | null>(null);
+let pillPlaced = false;
 let barWidth = $state(0);
 const pinLeading = $derived(barWidth === 0 || barWidth >= PIN_LEADING_MIN_PX);
 let fadeStart = $state(false);
 let fadeEnd = $state(false);
 let revealedOnce = false;
 let interacted = false;
+
+setFilterBarPill(() => position !== null);
 
 function updateEdges() {
 	const el = scroller;
@@ -53,6 +63,26 @@ function revealActive(smooth: boolean) {
 		left: Math.max(0, next),
 		behavior: smooth && !prefersReducedMotion.current ? "smooth" : "auto",
 	});
+}
+
+function placePill(value: number, animate: boolean) {
+	const chips = group?.querySelectorAll<HTMLElement>("[data-filter-chip]");
+	if (!pill || !chips?.length) return;
+	const clamped = Math.min(Math.max(value, 0), chips.length - 1);
+	const from = chips[Math.floor(clamped)] as HTMLElement;
+	const to = chips[Math.ceil(clamped)] as HTMLElement;
+	const t = clamped - Math.floor(clamped);
+	const x = from.offsetLeft + (to.offsetLeft - from.offsetLeft) * t;
+	const width = from.offsetWidth + (to.offsetWidth - from.offsetWidth) * t;
+	pill.style.transition =
+		animate && pillPlaced && !prefersReducedMotion.current
+			? `transform ${PILL_MS}ms ${EASE_OUT}, width ${PILL_MS}ms ${EASE_OUT}`
+			: "none";
+	pill.style.top = `${from.offsetTop}px`;
+	pill.style.height = `${from.offsetHeight}px`;
+	pill.style.width = `${width}px`;
+	pill.style.transform = `translate3d(${x}px, 0, 0)`;
+	pillPlaced = true;
 }
 
 function scrollInput(node: HTMLElement) {
@@ -98,10 +128,16 @@ $effect(() => {
 	const observer = new ResizeObserver(() => {
 		updateEdges();
 		if (!interacted) revealActive(false);
+		if (position !== null) placePill(position, false);
 	});
 	observer.observe(el);
 	if (el.firstElementChild) observer.observe(el.firstElementChild);
 	return () => observer.disconnect();
+});
+
+$effect(() => {
+	if (position === null || !pill) return;
+	placePill(position, Number.isInteger(position));
 });
 
 $effect(() => {
@@ -115,12 +151,8 @@ $effect(() => {
 });
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
 	class="flex h-11 shrink-0 items-center gap-1.5 px-[var(--list-gutter-x)] lg:h-9"
-	{role}
-	aria-label={label}
-	onkeydown={handleKeydown}
 	bind:clientWidth={barWidth}
 >
 	{#if leading && pinLeading}
@@ -140,7 +172,23 @@ $effect(() => {
 				{@render leading()}
 				<span class="mx-0.5 h-4 w-px shrink-0 bg-border-subtle" aria-hidden="true"></span>
 			{/if}
-			{@render children()}
+			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+			<div
+				bind:this={group}
+				class="relative flex items-center gap-1"
+				{role}
+				aria-label={label}
+				onkeydown={handleKeydown}
+			>
+				{#if position !== null}
+					<span
+						bind:this={pill}
+						class="pointer-events-none absolute left-0 rounded-[7px] bg-brand-muted lg:rounded-[6px]"
+						aria-hidden="true"
+					></span>
+				{/if}
+				{@render children()}
+			</div>
 		</div>
 	</div>
 	{#if trailing}

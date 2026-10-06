@@ -6,6 +6,7 @@ import type {
 	UserSessionSourceKey,
 	UserSessionSpaceSummary,
 } from "@neta-art/cohub";
+import { SvelteMap } from "svelte/reactivity";
 import { goto } from "$app/navigation";
 import { resolveAppEntryRoute } from "$lib/app-entry";
 import type { SessionListForkRecord } from "$lib/cache/db";
@@ -56,6 +57,8 @@ const REALTIME_REFRESH_DEBOUNCE_MS = 400;
 const SPACE_CHIP_LIMIT = 6;
 const SPACE_PAGE_SIZE = 50;
 const SPACE_CHIPS_TTL_MS = 60_000;
+const NEIGHBOUR_STALE_MS = 60_000;
+const MEMO_LIMIT = 12;
 
 type Page = {
 	sessions: UserSessionListItem[];
@@ -63,7 +66,15 @@ type Page = {
 	pageInfo: { hasMore: boolean; nextCursor: string | null };
 };
 
-const MEMO_LIMIT = 12;
+type MemoPage = Page & { fetchedAt: number };
+
+export type ChatsView = {
+	readonly sessions: UserSessionListItem[];
+	readonly forks: SessionListForkRecord[];
+	readonly loading: boolean;
+	readonly loadingMore: boolean;
+	readonly error: string | null;
+};
 
 const EMPTY_PAGE_INFO = { hasMore: false, nextCursor: null };
 
@@ -159,7 +170,8 @@ class ChatsInbox {
 	#activation = 0;
 	#firstPageInfo = emptyUserSessionListPageInfo();
 	#extraPages = 0;
-	#memo = new Map<string, Page>();
+	#memo = new SvelteMap<string, MemoPage>();
+	#inflight = new Map<string, Promise<{ page: Page; startedAt: number }>>();
 
 	get spaceChips(): UserSessionSpaceSummary[] {
 		const selected = this.filter.space;
@@ -187,25 +199,45 @@ class ChatsInbox {
 		this.#applyFilter({ ...this.filter, source });
 	}
 
-	toggleSpace(space: UserSessionSpaceSummary | null) {
-		const next = space && this.filter.space?.id !== space.id ? space : null;
-		this.#applyFilter({ ...this.filter, space: next });
-	}
-
 	setSpace(space: UserSessionSpaceSummary | null) {
 		this.#applyFilter({ ...this.filter, space });
 	}
 
+	view(filter: ChatsFilter): ChatsView {
+		if (sameChatsFilter(filter, this.filter)) return this;
+		const memo = this.#memo.get(chatsFilterScope(filter));
+		return {
+			sessions: memo?.sessions ?? [],
+			forks: memo?.forks ?? [],
+			loading: !memo,
+			loadingMore: false,
+			error: null,
+		};
+	}
+
 	async prewarm(filters: readonly ChatsFilter[]) {
 		const userKey = this.#userKey;
-		for (const filter of filters) {
-			const scope = chatsFilterScope(filter);
-			if (this.#memo.has(scope)) continue;
-			const cached = await this.#readCachedPage(filter).catch(() => null);
-			if (!cached || userKey !== this.#userKey || this.#memo.has(scope))
-				continue;
-			this.#remember(scope, cached);
-		}
+		await Promise.all(
+			filters.map(async (filter) => {
+				const scope = chatsFilterScope(filter);
+				if (!this.#memo.has(scope)) {
+					const cached = await this.#readCachedPage(filter).catch(() => null);
+					if (userKey !== this.#userKey) return;
+					if (cached && !this.#memo.has(scope))
+						this.#remember(scope, { ...cached, fetchedAt: 0 });
+				}
+				const memo = this.#memo.get(scope);
+				if (memo && Date.now() - memo.fetchedAt < NEIGHBOUR_STALE_MS) return;
+				if (sameChatsFilter(filter, this.filter)) return;
+				try {
+					const { page, startedAt } = await this.#fetchFirstPage(filter, true);
+					if (userKey !== this.#userKey || sameChatsFilter(filter, this.filter))
+						return;
+					this.#remember(scope, { ...page, fetchedAt: startedAt });
+					void this.#persistFirstPage(filter, page, userKey);
+				} catch {}
+			}),
+		);
 	}
 
 	showAll() {
@@ -227,10 +259,10 @@ class ChatsInbox {
 			mergeSessionRecord(existing ?? undefined, session) as UserSessionListItem,
 			...this.sessions.filter((item) => item.id !== session.id),
 		]);
-		void this.#persistFirstPage();
+		void this.#persistFirstPage(this.filter, this.#firstPage(), this.#userKey);
 	}
 
-	async refresh() {
+	async refresh(options?: { reuse?: boolean }) {
 		const seq = ++this.#refreshSeq;
 		const generation = this.#generation;
 		const filter = this.filter;
@@ -239,8 +271,10 @@ class ChatsInbox {
 		else this.refreshing = true;
 		this.error = null;
 		try {
-			const startedAt = Date.now();
-			const page = await this.#fetchPage(filter, null);
+			const { page, startedAt } = await this.#fetchFirstPage(
+				filter,
+				options?.reuse,
+			);
 			if (seq !== this.#refreshSeq || generation !== this.#generation) return;
 			if ((await getCacheUserKeyAsync()) !== userKey) return;
 			this.#firstPageInfo = page.pageInfo;
@@ -249,7 +283,7 @@ class ChatsInbox {
 				this.#extraPages > 0 ? this.#mergeById(page.sessions) : page.sessions,
 				{ forks: page.forks, authoritative: true, startedAt },
 			);
-			void this.#persistFirstPage(filter, userKey);
+			void this.#persistFirstPage(filter, this.#firstPage(), userKey);
 		} catch (error) {
 			if (seq !== this.#refreshSeq || generation !== this.#generation) return;
 			console.warn("[chats] Failed to refresh", error);
@@ -317,6 +351,7 @@ class ChatsInbox {
 			this.#userKey = userKey;
 			this.filter = readChatsFilter(userKey);
 			this.#memo.clear();
+			this.#inflight.clear();
 			this.sessions = [];
 			this.forks = [];
 			this.pageInfo = emptyUserSessionListPageInfo();
@@ -361,7 +396,7 @@ class ChatsInbox {
 		this.error = null;
 		if (this.#userKey) writeChatsFilter(this.#userKey, next);
 		this.#watchSpace();
-		void this.#hydrate().then(() => this.refresh());
+		void this.#hydrate().then(() => this.refresh({ reuse: true }));
 	}
 
 	async #hydrate() {
@@ -400,10 +435,12 @@ class ChatsInbox {
 			sessions,
 		) as UserSessionListItem[];
 		if (options?.forks) this.forks = mergeForks(this.forks, options.forks);
-		this.#remember(chatsFilterScope(this.filter), {
-			sessions: this.sessions.slice(0, PAGE_SIZE),
-			forks: this.forks,
-			pageInfo: this.#firstPageInfo,
+		const scope = chatsFilterScope(this.filter);
+		this.#remember(scope, {
+			...this.#firstPage(),
+			fetchedAt: options?.authoritative
+				? (options.startedAt ?? Date.now())
+				: (this.#memo.get(scope)?.fetchedAt ?? 0),
 		});
 		reconcileGenerationStateFromSessionList(this.sessions, {
 			authoritative: options?.authoritative,
@@ -411,7 +448,15 @@ class ChatsInbox {
 		});
 	}
 
-	#remember(scope: string, page: Page) {
+	#firstPage(): Page {
+		return {
+			sessions: this.sessions.slice(0, PAGE_SIZE),
+			forks: this.forks,
+			pageInfo: this.#firstPageInfo,
+		};
+	}
+
+	#remember(scope: string, page: MemoPage) {
 		this.#memo.delete(scope);
 		this.#memo.set(scope, page);
 		if (this.#memo.size > MEMO_LIMIT)
@@ -457,6 +502,21 @@ class ChatsInbox {
 					pageInfo: cached.pageInfo,
 				}
 			: null;
+	}
+
+	// Only prewarm and landing share a request, so other refreshes never miss later changes.
+	#fetchFirstPage(filter: ChatsFilter, reuse = false) {
+		const scope = chatsFilterScope(filter);
+		const pending = this.#inflight.get(scope);
+		if (reuse && pending) return pending;
+		const startedAt = Date.now();
+		const request = this.#fetchPage(filter, null)
+			.then((page) => ({ page, startedAt }))
+			.finally(() => {
+				if (this.#inflight.get(scope) === request) this.#inflight.delete(scope);
+			});
+		this.#inflight.set(scope, request);
+		return request;
 	}
 
 	async #fetchPage(filter: ChatsFilter, cursor: string | null): Promise<Page> {
@@ -510,13 +570,17 @@ class ChatsInbox {
 		};
 	}
 
-	async #persistFirstPage(filter = this.filter, userKey?: string | null) {
+	async #persistFirstPage(
+		filter: ChatsFilter,
+		page: Page,
+		userKey: string | null,
+	) {
 		if (filter.space) return;
 		await setCachedUserSessionList(
 			chatsFilterScope(filter),
-			this.sessions.slice(0, PAGE_SIZE),
-			this.#firstPageInfo,
-			{ expectedUserKey: userKey ?? this.#userKey, forks: this.forks },
+			page.sessions,
+			page.pageInfo,
+			{ expectedUserKey: userKey, forks: page.forks },
 		);
 	}
 
