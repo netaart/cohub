@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Credentials live in EncryptedSharedPreferences, whose Keystore-backed key is
-  not portable across devices. Excluding all app data from backup keeps that
-  invariant honest: a restored backup can never resurrect a session the device
-  key can no longer decrypt.
+  Credentials are sealed with an AndroidKeyStore key that never leaves the
+  device. Excluding all app data from backup keeps that invariant honest: a
+  restored backup can never resurrect a session the device key cannot open.
 -->
 <data-extraction-rules>
     <cloud-backup>

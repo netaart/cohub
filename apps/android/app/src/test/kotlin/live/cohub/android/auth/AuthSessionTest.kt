@@ -9,12 +9,9 @@ import org.junit.Test
 class AuthSessionTest {
 
     private class MemoryStore(var stored: StoredCredentials?) : CredentialStore {
-        override fun read() = stored
-        override fun write(credentials: StoredCredentials) {
+        override suspend fun read() = stored
+        override suspend fun write(credentials: StoredCredentials?) {
             stored = credentials
-        }
-        override fun clear() {
-            stored = null
         }
     }
 

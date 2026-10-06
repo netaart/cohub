@@ -26,7 +26,8 @@ app/src/main/kotlin/live/cohub/android/
     FileSaver.kt             downloads → MediaStore, no storage permission
   auth/
     AuthSession.kt           single-flight refresh, persists every rotation
-    CredentialStore.kt       EncryptedSharedPreferences persistence
+    CredentialStore.kt       one sealed DataStore file outside backups
+    CredentialCipher.kt      AES-256-GCM under an AndroidKeyStore key
     TokenEndpoint.kt         OIDC token exchange
     Pkce.kt                  PKCE + authorization URL
   runtime/

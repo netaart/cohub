@@ -1,18 +1,29 @@
 package live.cohub.android.auth
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
-import java.io.IOException
+import android.util.Log
+import androidx.datastore.core.CorruptionException
+import androidx.datastore.core.DataStore
+import androidx.datastore.core.DataStoreFactory
+import androidx.datastore.core.Serializer
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.security.InvalidKeyException
+import java.security.UnrecoverableKeyException
+import javax.crypto.AEADBadTagException
 
 interface CredentialStore {
-    fun read(): StoredCredentials?
+    suspend fun read(): StoredCredentials?
 
-    fun write(credentials: StoredCredentials)
-
-    fun clear()
+    suspend fun write(credentials: StoredCredentials?)
 }
 
+@Serializable
 data class StoredCredentials(
     val refreshToken: String,
     val idToken: String?,
@@ -22,57 +33,68 @@ data class StoredCredentials(
     val accessTokenExpiresAt: Long = 0,
 )
 
-/**
- * Encrypted with a Keystore-backed key so a device dump does not yield tokens.
- * The web view asks for a token over the bridge, per request.
- */
-class EncryptedCredentialStore(context: Context) : CredentialStore {
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        FILE_NAME,
-        MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+class SealedCredentialStore(file: File, private val cipher: CredentialCipher) : CredentialStore {
+
+    constructor(context: Context) : this(
+        File(context.noBackupFilesDir, FILE_NAME),
+        CredentialCipher(KeystoreKey(KEY_ALIAS)),
     )
 
-    override fun read(): StoredCredentials? {
-        val refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null) ?: return null
-        return StoredCredentials(
-            refreshToken = refreshToken,
-            idToken = prefs.getString(KEY_ID_TOKEN, null),
-            subject = prefs.getString(KEY_SUBJECT, null),
-            userUuid = prefs.getString(KEY_USER_UUID, null),
-            accessToken = prefs.getString(KEY_ACCESS_TOKEN, null),
-            accessTokenExpiresAt = prefs.getLong(KEY_ACCESS_TOKEN_EXPIRES_AT, 0),
-        )
-    }
+    private val data: DataStore<StoredCredentials?> = DataStoreFactory.create(
+        serializer = CredentialSerializer(cipher),
+        corruptionHandler = ReplaceFileCorruptionHandler { error ->
+            Log.w(TAG, "Discarding unreadable credentials", error)
+            cipher.reset()
+            null
+        },
+        produceFile = { file },
+    )
 
-    override fun write(credentials: StoredCredentials) {
-        val saved = prefs.edit()
-            .putString(KEY_REFRESH_TOKEN, credentials.refreshToken)
-            .putString(KEY_ID_TOKEN, credentials.idToken)
-            .putString(KEY_SUBJECT, credentials.subject)
-            .putString(KEY_USER_UUID, credentials.userUuid)
-            .putString(KEY_ACCESS_TOKEN, credentials.accessToken)
-            .putLong(KEY_ACCESS_TOKEN_EXPIRES_AT, credentials.accessTokenExpiresAt)
-            .commit()
-        if (!saved) throw IOException("Could not persist credentials")
-    }
+    override suspend fun read(): StoredCredentials? = data.data.first()
 
-    override fun clear() {
-        val cleared = prefs.edit().clear().commit()
-        if (!cleared) throw IOException("Could not clear credentials")
+    override suspend fun write(credentials: StoredCredentials?) {
+        try {
+            data.updateData { credentials }
+        } catch (_: UnrecoverableKeyException) {
+            cipher.reset()
+            data.updateData { credentials }
+        }
     }
 
     private companion object {
-        const val FILE_NAME = "cohub-credentials"
-        const val KEY_REFRESH_TOKEN = "refresh_token"
-        const val KEY_ID_TOKEN = "id_token"
-        const val KEY_SUBJECT = "subject"
-        const val KEY_USER_UUID = "user_uuid"
-        const val KEY_ACCESS_TOKEN = "access_token"
-        const val KEY_ACCESS_TOKEN_EXPIRES_AT = "access_token_expires_at"
+        const val TAG = "CohubAuth"
+        const val FILE_NAME = "credentials.bin"
+        const val KEY_ALIAS = "cohub.credentials.v1"
+    }
+}
+
+internal class CredentialSerializer(private val cipher: CredentialCipher) : Serializer<StoredCredentials?> {
+
+    override val defaultValue: StoredCredentials? = null
+
+    override suspend fun readFrom(input: InputStream): StoredCredentials? {
+        val sealed = input.readBytes()
+        if (sealed.isEmpty()) return null
+        val plaintext = try {
+            cipher.open(sealed)
+        } catch (error: AEADBadTagException) {
+            throw CorruptionException("Credentials do not open with this key", error)
+        } catch (error: InvalidKeyException) {
+            throw CorruptionException("Credential key is no longer usable", error)
+        }
+        return try {
+            json.decodeFromString(StoredCredentials.serializer(), plaintext.decodeToString())
+        } catch (error: IllegalArgumentException) {
+            throw CorruptionException("Credentials are malformed", error)
+        }
+    }
+
+    override suspend fun writeTo(t: StoredCredentials?, output: OutputStream) {
+        if (t == null) return
+        output.write(cipher.seal(json.encodeToString(StoredCredentials.serializer(), t).encodeToByteArray()))
+    }
+
+    private companion object {
+        val json = Json { ignoreUnknownKeys = true }
     }
 }

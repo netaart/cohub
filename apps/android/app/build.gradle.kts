@@ -215,7 +215,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.browser)
     implementation(libs.androidx.webkit)
-    implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.datastore)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)

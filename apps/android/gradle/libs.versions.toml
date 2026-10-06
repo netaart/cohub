@@ -7,7 +7,7 @@ activity = "1.13.0"
 splashscreen = "1.2.0"
 browser = "1.10.0"
 webkit = "1.17.1"
-securityCrypto = "1.1.0-alpha06"
+datastore = "1.2.1"
 coroutines = "1.11.0"
 serialization = "1.10.0"
 okhttp = "5.5.0"
@@ -22,7 +22,7 @@ androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtim
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
 androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
 androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
-androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
+androidx-datastore = { module = "androidx.datastore:datastore", version.ref = "datastore" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }

@@ -29,6 +29,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.withStarted
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -208,7 +209,10 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun onStart() {
         super.onStart()
-        runtime.resume()
+        lifecycleScope.launch {
+            auth.load()
+            withStarted { runtime.resume() }
+        }
         surface?.resume()
         bridge.emit(HostProtocol.Events.APP_FOREGROUND)
     }
@@ -272,7 +276,7 @@ class MainActivity : ComponentActivity(), HostActions {
         openExternally(path.toUri())
     }
 
-    override fun clearCache(scope: String) {
+    override suspend fun clearCache(scope: String) {
         // IndexedDB belongs to the web app; the host clears only what it owns.
         if (scope == "user" || scope == "all") auth.clear()
     }

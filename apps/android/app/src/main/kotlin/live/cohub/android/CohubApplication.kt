@@ -6,9 +6,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import live.cohub.android.auth.Account
 import live.cohub.android.auth.AuthConfig
 import live.cohub.android.auth.AuthSession
-import live.cohub.android.auth.EncryptedCredentialStore
+import live.cohub.android.auth.SealedCredentialStore
 import live.cohub.android.files.FileSaver
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
@@ -22,17 +23,16 @@ class CohubApplication : Application() {
 
     val auth: AuthSession by lazy {
         AuthSession(
-            store = EncryptedCredentialStore(this),
+            store = SealedCredentialStore(this),
             config = AuthConfig(
                 endpoint = BuildConfig.LOGTO_ENDPOINT,
                 appId = BuildConfig.LOGTO_APP_ID,
                 redirectUri = BuildConfig.OAUTH_REDIRECT_URI,
                 apiResource = BuildConfig.LOGTO_API_RESOURCE,
             ),
-            onAccountChanged = { signedIn ->
-                if (signedIn) {
-                    runtime.accountChanged()
-                } else {
+            onAccountChanged = { previous, current ->
+                runtime.accountChanged()
+                if (previous is Account.SignedIn && current !is Account.SignedIn) {
                     runtime.stopAll()
                     lastPage.clear()
                     LauncherShortcuts.clear(this)
@@ -41,7 +41,7 @@ class CohubApplication : Application() {
         )
     }
 
-    val runtime: DeviceRuntime by lazy { DeviceRuntime(this) { auth.accountKey() } }
+    val runtime: DeviceRuntime by lazy { DeviceRuntime(this) { (auth.account as? Account.SignedIn)?.key } }
 
     val lastPage: LastPage by lazy { LastPage(this) }
 
@@ -51,6 +51,6 @@ class CohubApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        scope.launch(Dispatchers.IO) { auth.preload() }
+        scope.launch { auth.load() }
     }
 }

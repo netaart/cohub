@@ -2,7 +2,7 @@ package live.cohub.android.auth
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -17,19 +17,28 @@ class AuthSession(
     private val config: AuthConfig,
     private val endpoint: TokenEndpoint = HttpTokenEndpoint(config.endpoint.trimEnd('/') + "/oidc"),
     private val clock: () -> Long = System::currentTimeMillis,
-    private val onAccountChanged: (signedIn: Boolean) -> Unit = {},
+    private val onAccountChanged: (previous: Account, current: Account) -> Unit = { _, _ -> },
 ) {
     private val exchange = Mutex()
 
-    private val lock = Any()
-    private var generation = 0L
-    private var loaded = false
-    private var credentials: StoredCredentials? = null
+    private val writes = Mutex()
+
+    @Volatile
+    private var session: Session? = null
+
+    private data class Session(val credentials: StoredCredentials?, val generation: Long)
+
+    val account: Account
+        get() = session.toAccount()
+
+    suspend fun load() {
+        loaded()
+    }
 
     /** A token good for at least [SKEW_MS] of work; null when there is no session. */
     suspend fun accessToken(forceRefresh: Boolean = false): String? = exchange.withLock {
-        val (stored, version) = synchronized(lock) { current() to generation }
-        if (stored == null) return@withLock null
+        val current = loaded()
+        val stored = current.credentials ?: return@withLock null
         if (!forceRefresh && stored.accessToken != null && stored.accessTokenExpiresAt - SKEW_MS > clock()) {
             return@withLock stored.accessToken
         }
@@ -38,7 +47,9 @@ class AuthSession(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            if (error is OAuthFailure && (error.status == 400 || error.status == 401)) clear(version)
+            if (error is OAuthFailure && (error.status == 400 || error.status == 401)) {
+                change(null, expectedGeneration = current.generation)
+            }
             return@withLock null
         }
         val next = stored.copy(
@@ -48,7 +59,7 @@ class AuthSession(
             accessToken = token.accessToken,
             accessTokenExpiresAt = clock() + token.expiresInSeconds * 1_000,
         )
-        if (!commit(next, expectedGeneration = version)) return@withLock null
+        change(next, expectedGeneration = current.generation) ?: return@withLock null
         token.accessToken
     }
 
@@ -56,7 +67,7 @@ class AuthSession(
         val token = endpoint.exchange(codeFields(code, verifier))
         val refreshToken = token.refreshToken
             ?: error("Authorization response carried no refresh token; is offline_access granted?")
-        commit(
+        change(
             StoredCredentials(
                 refreshToken = refreshToken,
                 idToken = token.idToken,
@@ -67,32 +78,22 @@ class AuthSession(
             ),
             expectedGeneration = null,
         )
-        onAccountChanged(true)
         token.accessToken
     }
 
-    fun preload() {
-        current()
-    }
-
-    fun status(): Identity =
-        current()?.let { Identity(authenticated = true, subject = it.subject, userUuid = it.userUuid) }
+    suspend fun status(): Identity =
+        loaded().credentials?.let { Identity(authenticated = true, subject = it.subject, userUuid = it.userUuid) }
             ?: Identity.None
 
-    fun hasCredentials(): Boolean = current() != null
-
-    fun accountKey(): String? = current()?.let { it.subject ?: it.userUuid ?: "" }
-
-    fun sessionVersion(): Long = synchronized(lock) { generation }
+    suspend fun sessionVersion(): Long = loaded().generation
 
     /**
      * Ends the session, then revokes its grant as the web SDK does, so a copy of
      * the refresh token cannot outlive sign-out. Revocation is best effort.
      */
     suspend fun signOut() {
-        val refreshToken = current()?.refreshToken
-        clear()
-        if (refreshToken == null) return
+        loaded()
+        val refreshToken = change(null, expectedGeneration = null)?.credentials?.refreshToken ?: return
         try {
             withTimeoutOrNull(REVOKE_TIMEOUT_MS) { endpoint.revoke(revokeFields(refreshToken)) }
         } catch (error: CancellationException) {
@@ -102,39 +103,51 @@ class AuthSession(
         }
     }
 
-    fun clear() = clear(expectedGeneration = null)
-
-    private fun clear(expectedGeneration: Long?) {
-        synchronized(lock) {
-            if (expectedGeneration != null && expectedGeneration != generation) return
-            credentials = null
-            loaded = true
-            generation += 1
-            runCatching { store.clear() }.onFailure { Log.e(TAG, "Could not clear credentials", it) }
-        }
-        onAccountChanged(false)
+    suspend fun clear() {
+        change(null, expectedGeneration = null)
     }
 
-    private fun current(): StoredCredentials? = synchronized(lock) {
-        if (!loaded) {
-            credentials = store.read()
-            loaded = true
-        }
-        credentials
+    private suspend fun loaded(): Session = session ?: writes.withLock {
+        session ?: Session(read(), generation = 0).also(::publish)
     }
 
-    private suspend fun commit(next: StoredCredentials, expectedGeneration: Long?): Boolean =
-        withContext(Dispatchers.IO) {
-            synchronized(lock) {
-                if (expectedGeneration != null && expectedGeneration != generation) return@withContext false
-                // Memory first: the token has already rotated server-side.
-                credentials = next
-                loaded = true
-                if (expectedGeneration == null) generation += 1
-                runCatching { store.write(next) }.onFailure { Log.e(TAG, "Could not persist credentials", it) }
-                true
+    private suspend fun read(): StoredCredentials? = try {
+        store.read()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Log.e(TAG, "Could not read credentials", error)
+        null
+    }
+
+    private suspend fun change(next: StoredCredentials?, expectedGeneration: Long?): Session? =
+        withContext(NonCancellable) {
+            writes.withLock {
+                val current = session ?: Session(null, generation = 0)
+                if (expectedGeneration != null && expectedGeneration != current.generation) return@withLock null
+                val bump = next == null || expectedGeneration == null
+                try {
+                    store.write(next)
+                } catch (error: Exception) {
+                    Log.e(TAG, "Could not persist credentials", error)
+                }
+                publish(Session(next, if (bump) current.generation + 1 else current.generation))
+                current
             }
         }
+
+    private fun publish(next: Session) {
+        val previous = session.toAccount()
+        session = next
+        val current = next.toAccount()
+        if (current != previous) onAccountChanged(previous, current)
+    }
+
+    private fun Session?.toAccount(): Account = when {
+        this == null -> Account.Loading
+        credentials == null -> Account.SignedOut
+        else -> Account.SignedIn(credentials.subject ?: credentials.userUuid ?: "")
+    }
 
     private fun refreshFields(refreshToken: String) = mapOf(
         "grant_type" to "refresh_token",
@@ -165,6 +178,14 @@ class AuthSession(
         const val SKEW_MS = 30_000L
         const val REVOKE_TIMEOUT_MS = 5_000L
     }
+}
+
+sealed interface Account {
+    data object Loading : Account
+
+    data object SignedOut : Account
+
+    data class SignedIn(val key: String) : Account
 }
 
 data class AuthConfig(

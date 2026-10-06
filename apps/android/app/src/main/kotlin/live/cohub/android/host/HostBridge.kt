@@ -95,7 +95,10 @@ class HostBridge(
         }
 
         scope.launch {
-            runCatching { dispatch(method, id, params) }
+            runCatching {
+                auth.load()
+                dispatch(method, id, params)
+            }
                 .onSuccess { result -> reply(proxy, id, result) }
                 .onFailure { error ->
                     val code = if (error is CancellationSignal) {
@@ -338,7 +341,7 @@ interface HostActions {
     suspend fun signOut()
     fun shareText(text: String, title: String?)
     fun openPath(path: String)
-    fun clearCache(scope: String)
+    suspend fun clearCache(scope: String)
     fun setAppearance(backgroundColor: Int)
 
     fun appReady()
