@@ -26,6 +26,7 @@ import live.cohub.android.BuildConfig
 import live.cohub.android.CohubApplication
 import live.cohub.android.MainActivity
 import live.cohub.android.R
+import live.cohub.android.auth.Account
 import java.io.File
 import java.util.UUID
 
@@ -62,7 +63,10 @@ class RuntimeService : Service() {
             return START_NOT_STICKY
         }
         if (watching == null) {
-            watching = scope.launch(Dispatchers.Main.immediate) { runtime.enabled.collect(::reconcile) }
+            watching = scope.launch(Dispatchers.Main.immediate) {
+                app.auth.load()
+                runtime.enabled.collect(::reconcile)
+            }
             scope.launch { runtime.instances.collect(::showNotification) }
         }
         return START_STICKY
@@ -106,7 +110,7 @@ class RuntimeService : Service() {
         val spaceId = binding.spaceId
         val runtimeId = UUID.randomUUID().toString()
         val token: suspend (Boolean) -> String = { force ->
-            auth.accessToken(force) ?: if (auth.hasCredentials()) {
+            auth.accessToken(force) ?: if (auth.account is Account.SignedIn) {
                 error("Access token unavailable")
             } else {
                 throw RuntimeRejected(RuntimeRejected.SIGNED_OUT)

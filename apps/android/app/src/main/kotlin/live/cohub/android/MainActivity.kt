@@ -29,6 +29,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.withStarted
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -46,6 +47,7 @@ import live.cohub.android.host.LauncherShortcuts
 import live.cohub.android.host.SurfaceListener
 import live.cohub.android.host.WebOrigin
 import live.cohub.android.host.WebSurface
+import live.cohub.android.host.WebWarmup
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.toJson
 import live.cohub.android.ui.ShellAppearance
@@ -179,6 +181,7 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     private fun mountSurface(path: String) {
+        WebWarmup.prefetch(path)
         val next = WebSurface(this, surfaceListener)
         next.setBackgroundColor(appearance.backgroundColor)
         // Without the bridge the surface still runs on its browser path; this
@@ -208,7 +211,10 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun onStart() {
         super.onStart()
-        runtime.resume()
+        lifecycleScope.launch {
+            auth.load()
+            withStarted { runtime.resume() }
+        }
         surface?.resume()
         bridge.emit(HostProtocol.Events.APP_FOREGROUND)
     }
@@ -272,7 +278,7 @@ class MainActivity : ComponentActivity(), HostActions {
         openExternally(path.toUri())
     }
 
-    override fun clearCache(scope: String) {
+    override suspend fun clearCache(scope: String) {
         // IndexedDB belongs to the web app; the host clears only what it owns.
         if (scope == "user" || scope == "all") auth.clear()
     }
@@ -379,6 +385,8 @@ class MainActivity : ComponentActivity(), HostActions {
             return
         }
 
+        val destination = pending.redirectPath ?: "/"
+        if (surface != null) WebWarmup.prefetch(destination)
         lifecycleScope.launch {
             runCatching { auth.completeSignIn(code, pending.challenge.verifier) }
                 .onSuccess { hostPrefs.edit { remove(KEY_FORCE_LOGIN) } }
@@ -386,7 +394,7 @@ class MainActivity : ComponentActivity(), HostActions {
                     Log.w(TAG, "Sign-in failed", it)
                     toast(R.string.sign_in_failed)
                 }
-            navigate(pending.redirectPath ?: "/")
+            navigate(destination)
         }
     }
 
