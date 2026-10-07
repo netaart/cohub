@@ -15,6 +15,7 @@ import {
 	aggregateUserModelRankings,
 	buildUsageDateRange,
 	resolveUsageDays,
+	stripUsageCost,
 	type GenerationUsageRow,
 	type UsageAggregation,
 	type UsageRow,
@@ -79,40 +80,11 @@ export type SpaceActivityResponse = UsageAggregation & {
 	contributors: SpaceActivityContributors;
 };
 
-/**
- * Zero out cost figures for viewers without space-management access. The
- * response shape is preserved so clients can treat both variants uniformly.
- */
 export function stripActivityCost(
 	activity: SpaceActivityResponse,
 ): SpaceActivityResponse {
 	return {
-		...activity,
-		hourly: activity.hourly.map((row) => ({
-			...row,
-			costInput: 0,
-			costOutput: 0,
-			costCacheRead: 0,
-			costCacheWrite: 0,
-			costTotal: 0,
-		})),
-		summary: {
-			...activity.summary,
-			costInput: 0,
-			costOutput: 0,
-			costCacheRead: 0,
-			costCacheWrite: 0,
-			costTotal: 0,
-		},
-		generation: {
-			...activity.generation,
-			hourly: activity.generation.hourly.map((row) => ({
-				...row,
-				costTotal: 0,
-			})),
-			summary: { ...activity.generation.summary, costTotal: 0 },
-		},
-		totals: { ...activity.totals, costTotal: 0 },
+		...stripUsageCost(activity),
 		rankings: {
 			...activity.rankings,
 			llmModels: activity.rankings.llmModels.map((row) => ({

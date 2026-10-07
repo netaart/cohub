@@ -805,7 +805,7 @@ export function registerSpaces(program: Command): void {
         console.log("\n  Summary:");
         table([usage.totals], [
           { key: "totalTokens", label: "Tokens" },
-          { key: "costTotal", label: "Cost ($)" },
+          ...(usage.totals.costTotal ? [{ key: "costTotal", label: "Cost ($)" }] : []),
           { key: "requestCount", label: "Requests" },
           { key: "successCount", label: "Success" },
           { key: "errorCount", label: "Errors" },

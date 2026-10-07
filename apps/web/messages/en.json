@@ -1905,6 +1905,8 @@
 	"common_apply": "Apply",
 	"space_profile_usage": "Over the last {days} days, this Space used {tokens} tokens across {requests} LLM requests, totaling {cost}{generation}.",
 	"space_profile_generation": " · generation {count} requests at {cost} official cost",
+	"space_profile_usage_no_cost": "Over the last {days} days, this Space used {tokens} tokens across {requests} LLM requests{generation}.",
+	"space_profile_generation_no_cost": " · generation {count} requests",
 	"space_profile_show_less": "Show less",
 	"space_profile_show_full": "Show full profile",
 	"common_close": "Close",

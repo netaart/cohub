@@ -5,6 +5,7 @@ import type {
 	SpaceUsageResponse,
 	UserProfile,
 } from "@neta-art/cohub";
+import { canViewSpaceCost } from "$lib/activity";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -51,6 +52,46 @@ let {
 
 const locale = $derived(getLocale());
 
+const usageText = $derived.by(() => {
+	if (!usage) return "";
+	const showCost = canViewSpaceCost(space?.access);
+	const base = {
+		days: usage.days,
+		tokens: formatTokenCount(usage.summary.totalTokens),
+		requests: usage.summary.requestCount,
+	};
+	const generation = usage.generation?.summary;
+	if (!showCost) {
+		return m.space_profile_usage_no_cost(
+			{
+				...base,
+				generation: generation?.requestCount
+					? m.space_profile_generation_no_cost(
+							{ count: generation.requestCount },
+							{ locale },
+						)
+					: "",
+			},
+			{ locale },
+		);
+	}
+	return m.space_profile_usage(
+		{
+			...base,
+			cost: formatUsageCost(usage.summary.costTotal, locale),
+			generation: generation?.requestCount
+				? m.space_profile_generation(
+						{
+							count: generation.requestCount,
+							cost: formatUsageCost(generation.costTotal, locale),
+						},
+						{ locale },
+					)
+				: "",
+		},
+		{ locale },
+	);
+});
 const spaceName = $derived(space?.name || space?.title || "Untitled space");
 const owner = $derived(space?.ownerProfile ?? null);
 const sortedMembers = $derived(
@@ -128,7 +169,7 @@ function userTitle(
 				</p>
 			{/if}
 			{#if usage}
-				<p>{m.space_profile_usage({ days: usage.days, tokens: formatTokenCount(usage.summary.totalTokens), requests: usage.summary.requestCount, cost: formatUsageCost(usage.summary.costTotal, locale), generation: usage.generation?.summary.requestCount ? m.space_profile_generation({ count: usage.generation.summary.requestCount, cost: formatUsageCost(usage.generation.summary.costTotal, locale) }, { locale }) : "" }, { locale })}</p>
+				<p>{usageText}</p>
 			{/if}
 		</div>
 		{#if canExpand}

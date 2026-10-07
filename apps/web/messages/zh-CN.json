@@ -1905,6 +1905,8 @@
 	"common_apply": "应用",
 	"space_profile_usage": "最近 {days} 天，此 Space 使用了 {tokens} 个 Token、{requests} 次 LLM 请求，合计 {cost}{generation}。",
 	"space_profile_generation": " · 另有生成 {count} 次请求，官方花费 {cost}",
+	"space_profile_usage_no_cost": "最近 {days} 天，此 Space 使用了 {tokens} 个 Token、{requests} 次 LLM 请求{generation}。",
+	"space_profile_generation_no_cost": " · 另有生成 {count} 次请求",
 	"space_profile_show_less": "收起",
 	"space_profile_show_full": "显示完整资料",
 	"common_close": "关闭",

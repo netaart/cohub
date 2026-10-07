@@ -9,7 +9,6 @@ import { formatCompactAbsoluteTime } from "$lib/time-format";
 type Props = {
 	items: SpaceActivityContributor[];
 	memberCount: number;
-	/** Cost reads as commercial data — hide it for non space managers. */
 	showCost: boolean;
 };
 

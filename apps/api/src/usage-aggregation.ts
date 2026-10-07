@@ -469,3 +469,31 @@ export function aggregateUsage(
     },
   };
 }
+
+export function stripUsageCost<T extends UsageAggregation>(usage: T): T {
+  return {
+    ...usage,
+    hourly: usage.hourly.map((row) => ({
+      ...row,
+      costInput: 0,
+      costOutput: 0,
+      costCacheRead: 0,
+      costCacheWrite: 0,
+      costTotal: 0,
+    })),
+    summary: {
+      ...usage.summary,
+      costInput: 0,
+      costOutput: 0,
+      costCacheRead: 0,
+      costCacheWrite: 0,
+      costTotal: 0,
+    },
+    generation: {
+      ...usage.generation,
+      hourly: usage.generation.hourly.map((row) => ({ ...row, costTotal: 0 })),
+      summary: { ...usage.generation.summary, costTotal: 0 },
+    },
+    totals: { ...usage.totals, costTotal: 0 },
+  };
+}

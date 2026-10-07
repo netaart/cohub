@@ -2,7 +2,7 @@
 import type { SpaceActivityResponse } from "@neta-art/cohub";
 import { onMount, untrack } from "svelte";
 import { page } from "$app/state";
-import { buildActivityDays } from "$lib/activity";
+import { buildActivityDays, canViewSpaceCost } from "$lib/activity";
 import { ensureAuth } from "$lib/auth";
 import ActivityContributors from "$lib/components/activity/ActivityContributors.svelte";
 import ActivityHeatmap from "$lib/components/activity/ActivityHeatmap.svelte";
@@ -34,8 +34,7 @@ onMount(async () => {
 	const record = (await getCachedSpaceRecord(spaceId))?.space;
 	if (!record) return;
 	spaceName = record.name || record.title || spaceId;
-	canViewCost =
-		record.access?.role === "host" || record.access?.role === "builder";
+	canViewCost = canViewSpaceCost(record.access);
 });
 </script>
 

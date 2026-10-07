@@ -1,4 +1,4 @@
-import type { SpaceUsageResponse } from "@neta-art/cohub";
+import type { SpaceAccess, SpaceUsageResponse } from "@neta-art/cohub";
 import { formatCurrency, toIntlTag } from "$lib/i18n/format";
 import type { Locale } from "$lib/i18n/locale";
 
@@ -61,6 +61,10 @@ export function buildActivityDays(
 	return Array.from({ length: days }, (_, index) =>
 		ensure(dateKey(addDays(today, index - days + 1))),
 	);
+}
+
+export function canViewSpaceCost(access: SpaceAccess | null | undefined) {
+	return access?.permissions.includes("member.view") === true;
 }
 
 export function formatCompact(value: number, locale: Locale = "en") {

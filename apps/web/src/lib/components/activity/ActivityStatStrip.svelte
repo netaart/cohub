@@ -7,7 +7,6 @@ import { m } from "$lib/paraglide/messages.js";
 type Props = {
 	days: ActivityDay[];
 	totals: UsageTotals;
-	/** Cost reads as commercial data — hide it for non space managers. */
 	showCost: boolean;
 };
 
