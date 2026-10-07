@@ -13,7 +13,6 @@ import (
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
-	"github.com/pion/webrtc/v4/pkg/media"
 	"golang.org/x/time/rate"
 
 	"github.com/cohub/apps/sandbox/display"
@@ -28,7 +27,6 @@ const (
 	inputEventsPerSec = 600
 	inputBurst        = 1200
 	maxChannelMessage = 256 << 10
-	defaultFrameTime  = 33 * time.Millisecond
 )
 
 type controlMessage struct {
@@ -42,19 +40,24 @@ type controlMessage struct {
 }
 
 type session struct {
-	id       string
-	display  string
-	userID   string
-	control  bool
-	manager  *Manager
-	logger   *slog.Logger
-	pc       *webrtc.PeerConnection
-	track    *webrtc.TrackLocalStaticSample
-	sender   *webrtc.RTPSender
-	sub      *display.Subscriber
-	ctx      context.Context
-	cancel   context.CancelFunc
-	openedAt time.Time
+	id                   string
+	display              string
+	userID               string
+	control              bool
+	manager              *Manager
+	logger               *slog.Logger
+	pc                   *webrtc.PeerConnection
+	track                *videoTrack
+	sender               *webrtc.RTPSender
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	openedAt             time.Time
+	subscribed, gathered time.Duration
+
+	mediaMu sync.Mutex
+	sub     *display.Subscriber
+	paused  bool
+	bitrate atomic.Int64
 
 	connected atomic.Bool
 	relayed   atomic.Bool
@@ -72,60 +75,62 @@ func openSession(ctx context.Context, manager *Manager, params OpenParams, serve
 	if err != nil {
 		return nil, "", err
 	}
-	sub, err := manager.hub.Subscribe(ctx, params.Display)
-	if err != nil {
-		return nil, "", err
-	}
 	pc, err := api.NewPeerConnection(webrtc.Configuration{ICEServers: servers})
 	if err != nil {
-		sub.Close()
 		return nil, "", err
 	}
-	fail := func(err error) (*session, string, error) {
-		sub.Close()
+	track, err := newVideoTrack()
+	if err != nil {
 		_ = pc.Close()
 		return nil, "", err
 	}
-	track, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000}, "display", "cohub")
-	if err != nil {
-		return fail(err)
-	}
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: params.Offer}); err != nil {
-		return fail(invalid("offer rejected: %v", err))
+		_ = pc.Close()
+		return nil, "", invalid("offer rejected: %v", err)
 	}
 	sender, err := pc.AddTrack(track)
 	if err != nil {
-		return fail(invalid("offer has no video to receive: %v", err))
+		_ = pc.Close()
+		return nil, "", invalid("offer has no video to receive: %v", err)
 	}
 
 	sessionCtx, cancel := context.WithCancel(context.Background())
 	current := &session{
 		id: params.SessionID, display: params.Display, userID: params.UserID, control: params.Control,
-		manager: manager, logger: logger, pc: pc, track: track, sender: sender, sub: sub,
+		manager: manager, logger: logger, pc: pc, track: track, sender: sender,
 		ctx: sessionCtx, cancel: cancel, openedAt: time.Now(),
 		inputs: make(chan display.InputBatch, inputQueue), limiter: rate.NewLimiter(inputEventsPerSec, inputBurst),
+	}
+	fail := func(err error) (*session, string, error) {
+		current.close(ReasonFailed)
+		return nil, "", err
 	}
 	current.lastPing.Store(time.Now().UnixMilli())
 	pc.OnConnectionStateChange(current.onConnectionState)
 	pc.OnDataChannel(current.onDataChannel)
 
+	subscribed := make(chan error, 1)
+	go func() { subscribed <- current.attach() }()
 	answer, err := pc.CreateAnswer(nil)
 	if err != nil {
-		cancel()
 		return fail(invalid("cannot answer offer: %v", err))
 	}
-	gathered := webrtc.GatheringCompletePromise(pc)
+	gathered := gatheredWithin(pc, gatherTimeout)
 	if err := pc.SetLocalDescription(answer); err != nil {
-		cancel()
 		return fail(err)
 	}
-	select {
-	case <-gathered:
-	case <-time.After(gatherTimeout):
-		logger.Debug("ICE gathering incomplete; answering with partial candidates")
-	case <-ctx.Done():
-		cancel()
-		return fail(ctx.Err())
+	for subscribed != nil || gathered != nil {
+		select {
+		case err := <-subscribed:
+			if err != nil {
+				return fail(err)
+			}
+			subscribed, current.subscribed = nil, time.Since(current.openedAt)
+		case <-gathered:
+			gathered, current.gathered = nil, time.Since(current.openedAt)
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		}
 	}
 
 	select {
@@ -136,6 +141,19 @@ func openSession(ctx context.Context, manager *Manager, params OpenParams, serve
 	return current, pc.LocalDescription().SDP, nil
 }
 
+func gatheredWithin(pc *webrtc.PeerConnection, wait time.Duration) <-chan struct{} {
+	complete := webrtc.GatheringCompletePromise(pc)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-complete:
+		case <-time.After(wait):
+		}
+		close(done)
+	}()
+	return done
+}
+
 // followEstimate feeds congestion control to the encoder. A direct path,
 // e.g. on a LAN, may use the hub's full range; TURN traffic is billed, so
 // a relayed one stays below relayMaxBitrate.
@@ -144,41 +162,116 @@ func (s *session) followEstimate(estimator cc.BandwidthEstimator) {
 		if s.relayed.Load() {
 			bitrate = min(bitrate, relayMaxBitrate)
 		}
-		s.sub.SetBitrate(bitrate)
+		s.bitrate.Store(int64(bitrate))
+		if sub := s.subscription(); sub != nil {
+			sub.SetBitrate(bitrate)
+		}
 	}
 	follow(estimator.GetTargetBitrate())
 	estimator.OnTargetBitrateChange(follow)
 }
 
 func (s *session) run() {
-	s.logger.Info("rtc session opened", slog.String("userId", s.userID), slog.Bool("control", s.control))
+	s.logger.Info("rtc session opened",
+		slog.String("userId", s.userID), slog.Bool("control", s.control),
+		slog.Duration("subscribed", s.subscribed), slog.Duration("gathered", s.gathered),
+	)
 	go s.readRTCP()
 	if s.control {
 		go s.applyInput()
 	}
-	go s.watch()
+	go s.resyncOnBind()
 	stopWatch := s.manager.hub.OnChange(s.onDisplays)
 	defer stopWatch()
+	s.watch()
+}
 
-	var lastPTS uint64
-	written := false
+func (s *session) subscription() *display.Subscriber {
+	s.mediaMu.Lock()
+	defer s.mediaMu.Unlock()
+	return s.sub
+}
+
+func (s *session) attach() error {
+	sub, err := s.manager.hub.Subscribe(s.ctx, s.display)
+	if err != nil {
+		return err
+	}
+	s.mediaMu.Lock()
+	if s.paused || s.sub != nil || s.ctx.Err() != nil {
+		s.mediaMu.Unlock()
+		sub.Close()
+		return nil
+	}
+	s.sub = sub
+	s.mediaMu.Unlock()
+	if bitrate := s.bitrate.Load(); bitrate > 0 {
+		sub.SetBitrate(int(bitrate))
+	}
+	go s.forward(sub)
+	return nil
+}
+
+func (s *session) forward(sub *display.Subscriber) {
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-s.sub.Done():
-			s.close(ReasonDisplayEnded)
-			return
-		case sample := <-s.sub.Samples():
-			duration := defaultFrameTime
-			if written && sample.PTS > lastPTS {
-				duration = min(time.Second, time.Duration(sample.PTS-lastPTS)*time.Microsecond)
+		case <-sub.Done():
+			if sub.Err() != nil {
+				s.close(ReasonDisplayEnded)
 			}
-			lastPTS, written = sample.PTS, true
-			if err := s.track.WriteSample(media.Sample{Data: sample.Data, Duration: duration}); err != nil && !errors.Is(err, context.Canceled) {
+			return
+		case sample := <-sub.Samples():
+			if err := s.track.WriteFrame(sample.Data, sample.PTS, sample.Key); err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Debug("rtc write failed", slog.String("error", err.Error()))
 			}
 		}
+	}
+}
+
+func (s *session) resyncOnBind() {
+	select {
+	case <-s.track.Bound():
+		if sub := s.subscription(); sub != nil {
+			sub.Resync()
+		}
+	case <-s.ctx.Done():
+	}
+}
+
+func (s *session) pause() {
+	s.mediaMu.Lock()
+	s.paused = true
+	sub := s.sub
+	s.sub = nil
+	s.mediaMu.Unlock()
+	if sub != nil {
+		sub.Close()
+	}
+}
+
+func (s *session) resume() {
+	s.mediaMu.Lock()
+	paused := s.paused
+	s.paused = false
+	s.mediaMu.Unlock()
+	if !paused {
+		return
+	}
+	if err := s.attach(); err != nil && s.ctx.Err() == nil {
+		s.logger.Info("rtc session could not resume", slog.String("error", err.Error()))
+		reason := ReasonFailed
+		if code := display.ErrorCode(err); code == display.CodeNotFound || code == display.CodeUnavailable {
+			reason = ReasonDisplayEnded
+		}
+		s.close(reason)
+	}
+}
+
+func (s *session) requestKeyframe() {
+	if sub := s.subscription(); sub != nil {
+		sub.RequestKeyframe()
 	}
 }
 
@@ -191,7 +284,7 @@ func (s *session) readRTCP() {
 		for _, packet := range packets {
 			switch packet.(type) {
 			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
-				s.sub.RequestKeyframe()
+				s.requestKeyframe()
 			}
 		}
 	}
@@ -271,7 +364,11 @@ func (s *session) onControl(message webrtc.DataChannelMessage) {
 	case "ping":
 		s.send(controlMessage{Type: "pong", ID: incoming.ID})
 	case "keyframe":
-		s.sub.RequestKeyframe()
+		s.requestKeyframe()
+	case "pause":
+		s.pause()
+	case "resume":
+		go s.resume()
 	}
 }
 
@@ -333,9 +430,14 @@ func (s *session) send(message controlMessage) {
 func (s *session) close(reason string) {
 	s.closeOnce.Do(func() {
 		s.send(controlMessage{Type: "closed", Reason: reason})
-		path, sent := s.route()
+		var path string
+		var sent uint64
+		// Pion races its own teardown against GetStats once closed.
+		if s.pc.ConnectionState() != webrtc.PeerConnectionStateClosed {
+			path, sent = s.route()
+		}
 		s.cancel()
-		s.sub.Close()
+		s.pause()
 		_ = s.pc.Close()
 		s.manager.forget(s)
 		s.logger.Info("rtc session closed",

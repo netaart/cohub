@@ -232,7 +232,7 @@ export type DisplayControlMessage =
   | { type: "closed"; reason: DisplaySessionCloseReason | (string & {}) }
   | { type: "error"; code: string; message: string };
 
-export type DisplayViewerMessage = { type: "ping"; id: number } | { type: "keyframe" };
+export type DisplayViewerMessage = { type: "ping"; id: number } | { type: "keyframe" } | { type: "pause" } | { type: "resume" };
 
 export function normalizeDisplayPoint(x: number, y: number, width: number, height: number): { x: number; y: number } {
   const unit = (value: number, extent: number) => Math.min(1, Math.max(0, extent > 1 ? value / (extent - 1) : 0));

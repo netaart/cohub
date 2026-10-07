@@ -51,7 +51,6 @@ const {
 	onCloseWindow,
 }: Props = $props();
 
-const HIDDEN_GRACE_MS = 10_000;
 const SCROLL_INTERVAL_MS = 250;
 const NOTICE_MS = 2_500;
 const MAX_PASTE_PIECES = 16;
@@ -78,15 +77,10 @@ let pageVisible = $state(
 );
 let notice = $state<string | null>(null);
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+let showDetails = $state(false);
 
 $effect(() => {
-	const wanted = active && pageVisible;
-	if (wanted) {
-		view.setWanted(true);
-		return;
-	}
-	const timer = setTimeout(() => view.setWanted(false), HIDDEN_GRACE_MS);
-	return () => clearTimeout(timer);
+	view.setWanted(active && pageVisible);
 });
 
 $effect(() => {
@@ -282,6 +276,61 @@ const statusLabel = $derived.by(() => {
 	return parts.join(" · ");
 });
 
+function formatBitrate(bps: number) {
+	return bps >= 1_000_000
+		? `${(bps / 1_000_000).toFixed(1)} Mbps`
+		: `${Math.round(bps / 1_000)} kbps`;
+}
+
+const details = $derived.by((): Array<[label: string, value: string]> => {
+	if (!stats || phase.kind !== "live") return [];
+	const rows: Array<[string, string | null]> = [
+		[
+			m.display_stats_path({}, { locale }),
+			stats.path &&
+				[
+					stats.path === "relay"
+						? m.display_path_relay({}, { locale })
+						: m.display_path_direct({}, { locale }),
+					stats.relayProtocol?.toUpperCase(),
+				]
+					.filter(Boolean)
+					.join(" · "),
+		],
+		[
+			m.display_stats_ping({}, { locale }),
+			stats.rttMs != null ? `${stats.rttMs} ms` : null,
+		],
+		[
+			m.display_stats_video({}, { locale }),
+			stats.width && stats.height
+				? `${stats.width} × ${stats.height}${stats.fps != null ? ` · ${Math.round(stats.fps)} fps` : ""}`
+				: null,
+		],
+		[
+			m.display_stats_bitrate({}, { locale }),
+			stats.bitrate != null ? formatBitrate(stats.bitrate) : null,
+		],
+		[
+			m.display_stats_jitter_buffer({}, { locale }),
+			stats.jitterBufferMs != null ? `${stats.jitterBufferMs} ms` : null,
+		],
+		[
+			m.display_stats_decode({}, { locale }),
+			stats.decodeMs != null ? `${stats.decodeMs} ms` : null,
+		],
+		[
+			m.display_stats_packets_lost({}, { locale }),
+			stats.packetsLost != null ? String(stats.packetsLost) : null,
+		],
+		[
+			m.display_stats_freezes({}, { locale }),
+			stats.freezes != null ? String(stats.freezes) : null,
+		],
+	];
+	return rows.filter((row): row is [string, string] => row[1] != null);
+});
+
 const headerActions = $derived.by((): PreviewHeaderAction[] => {
 	const system = (action: "back" | "home" | "recents") => ({
 		hidden: !controllable || !display?.system?.includes(action),
@@ -362,7 +411,15 @@ const problemCopy = $derived.by(() => {
 	>
 		{#snippet controls()}
 			<span class="display-dot" data-phase={phase.kind} aria-hidden="true"></span>
-			{#if statusLabel}<span class="display-status hidden sm:inline">{statusLabel}</span>{/if}
+			{#if statusLabel}
+				<button
+					type="button"
+					class="display-status hidden sm:inline"
+					title={m.display_stats_toggle({}, { locale })}
+					aria-expanded={showDetails}
+					onclick={() => (showDetails = !showDetails)}
+				>{statusLabel}</button>
+			{/if}
 		{/snippet}
 	</PreviewHeader>
 
@@ -383,8 +440,18 @@ const problemCopy = $derived.by(() => {
 				muted
 				playsinline
 				disablepictureinpicture
+				onloadeddata={() => view.frameShown()}
 			></video>
 		</div>
+
+		{#if showDetails && details.length}
+			<dl class="display-details">
+				{#each details as [label, value] (label)}
+					<dt>{label}</dt>
+					<dd>{value}</dd>
+				{/each}
+			</dl>
+		{/if}
 
 		{#if phase.kind === "connecting" || phase.kind === "idle"}
 			<div class="display-overlay">
@@ -428,9 +495,48 @@ const problemCopy = $derived.by(() => {
 	}
 	.display-status {
 		flex: 0 0 auto;
+		border: 0;
+		background: none;
+		padding: 0;
 		color: var(--text-tertiary);
+		font: inherit;
 		font-size: 11px;
 		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	.display-status:hover {
+		color: var(--text-secondary);
+	}
+	.display-status:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
+		border-radius: 3px;
+	}
+	.display-details {
+		position: absolute;
+		top: 8px;
+		right: 8px;
+		display: grid;
+		grid-template-columns: auto auto;
+		gap: 2px 12px;
+		margin: 0;
+		padding: 8px 10px;
+		border: 1px solid var(--border-subtle);
+		border-radius: 7px;
+		background: var(--bg-elevated);
+		color: var(--text-secondary);
+		font-size: 11px;
+		line-height: 1.5;
+		font-variant-numeric: tabular-nums;
+		pointer-events: none;
+	}
+	.display-details dt {
+		color: var(--text-tertiary);
+	}
+	.display-details dd {
+		margin: 0;
+		text-align: right;
 		white-space: nowrap;
 	}
 	.display-surface {

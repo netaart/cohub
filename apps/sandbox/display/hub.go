@@ -22,8 +22,9 @@ const (
 	startTimeout     = 10 * time.Second
 	streamLinger     = 2 * time.Second
 	keyframeDebounce = 250 * time.Millisecond
+	keyframeRetry    = time.Second
 	bitrateInterval  = 500 * time.Millisecond
-	subscriberBuffer = 64
+	subscriberBuffer = 8
 
 	DefaultBitrate = 2_000_000
 	MinBitrate     = 150_000
@@ -409,7 +410,7 @@ func (h *Hub) Subscribe(ctx context.Context, display string) (*Subscriber, error
 		sub.Close()
 		return nil, current.err
 	}
-	h.requestKeyframe(current, true)
+	h.requestKeyframe(current, false)
 	return sub, nil
 }
 
@@ -484,6 +485,25 @@ func (s *Subscriber) RequestKeyframe() {
 	s.hub.requestKeyframe(s.stream, false)
 }
 
+func (s *Subscriber) Resync() {
+	h := s.hub
+	h.mu.Lock()
+	if _, ok := s.stream.subs[s]; !ok {
+		h.mu.Unlock()
+		return
+	}
+	s.needKey = true
+	for drained := false; !drained; {
+		select {
+		case <-s.samples:
+		default:
+			drained = true
+		}
+	}
+	h.mu.Unlock()
+	h.requestKeyframe(s.stream, true)
+}
+
 func (h *Hub) scheduleBitrateLocked(current *stream) {
 	target := 0
 	for sub := range current.subs {
@@ -551,9 +571,10 @@ func (h *Hub) deliver(id uint32, sample Sample) {
 	if sample.Key {
 		sample.Data = current.params.complete(sample.Data)
 	}
-	starved := false
+	starved, waiting := false, false
 	for sub := range current.subs {
 		if sub.needKey && !sample.Key {
+			waiting = true
 			continue
 		}
 		select {
@@ -564,8 +585,10 @@ func (h *Hub) deliver(id uint32, sample Sample) {
 			starved = true
 		}
 	}
+	// A requested key frame may have been dropped; keep asking while anyone waits.
+	ask := starved || (waiting && time.Since(current.keyAskedAt) >= keyframeRetry)
 	h.mu.Unlock()
-	if starved {
+	if ask {
 		// Off the read loop: a provider that stops reading must not stall it.
 		go h.requestKeyframe(current, false)
 	}

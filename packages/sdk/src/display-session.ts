@@ -8,17 +8,11 @@ import {
   type DisplayViewerMessage,
 } from "@cohub/protocol";
 import type { SpaceDisplaysApi } from "./apis/displays.js";
+import { type DisplayConnectionStats, type DisplayStatsCounters, readDisplayStats } from "./display-stats.js";
+
+export type { DisplayConnectionStats } from "./display-stats.js";
 
 export type DisplayConnectionState = "connecting" | "connected" | "closed";
-
-export type DisplayConnectionStats = {
-  path: "direct" | "relay" | null;
-  rttMs: number | null;
-  fps: number | null;
-  bitrate: number | null;
-  width: number | null;
-  height: number | null;
-};
 
 type Events = {
   state: DisplayConnectionState;
@@ -51,7 +45,8 @@ export class DisplayConnection {
   private pingId = 0;
   private lastPingAt = 0;
   private rtt: number | null = null;
-  private lastBytes: { bytes: number; at: number } | null = null;
+  private counters: DisplayStatsCounters | null = null;
+  private isPaused = false;
 
   private constructor(
     private readonly api: SpaceDisplaysApi,
@@ -71,7 +66,10 @@ export class DisplayConnection {
     };
     this.controlChannel = pc.createDataChannel(DISPLAY_CONTROL_CHANNEL);
     this.controlChannel.onmessage = (event) => this.onControl(event.data);
-    this.controlChannel.onopen = () => this.startPings();
+    this.controlChannel.onopen = () => {
+      if (this.isPaused) this.sendControl({ type: "pause" });
+      this.startPings();
+    };
     this.controlChannel.onclose = () => this.close(this.reason ?? "closed");
     this.inputChannel = control ? pc.createDataChannel(DISPLAY_INPUT_CHANNEL) : null;
   }
@@ -144,27 +142,27 @@ export class DisplayConnection {
     this.sendControl({ type: "keyframe" });
   }
 
+  get paused(): boolean {
+    return this.isPaused;
+  }
+
+  pause() {
+    if (this.isPaused) return;
+    this.isPaused = true;
+    this.sendControl({ type: "pause" });
+  }
+
+  resume() {
+    if (!this.isPaused) return;
+    this.isPaused = false;
+    this.counters = null;
+    this.sendControl({ type: "resume" });
+  }
+
   async stats(): Promise<DisplayConnectionStats> {
-    const report = await this.pc.getStats();
-    const result: DisplayConnectionStats = { path: null, rttMs: this.rtt, fps: null, bitrate: null, width: null, height: null };
-    report.forEach((entry) => {
-      if (entry.type === "candidate-pair" && entry.nominated && entry.state === "succeeded") {
-        const local = report.get(entry.localCandidateId);
-        const remote = report.get(entry.remoteCandidateId);
-        result.path = local?.candidateType === "relay" || remote?.candidateType === "relay" ? "relay" : "direct";
-        if (typeof entry.currentRoundTripTime === "number") result.rttMs = Math.round(entry.currentRoundTripTime * 1000);
-      }
-      if (entry.type === "inbound-rtp" && entry.kind === "video") {
-        result.fps = entry.framesPerSecond ?? null;
-        result.width = entry.frameWidth ?? null;
-        result.height = entry.frameHeight ?? null;
-        const now = entry.timestamp as number;
-        const bytes = entry.bytesReceived as number;
-        if (this.lastBytes && now > this.lastBytes.at) result.bitrate = Math.round(((bytes - this.lastBytes.bytes) * 8 * 1000) / (now - this.lastBytes.at));
-        this.lastBytes = { bytes, at: now };
-      }
-    });
-    return result;
+    const { stats, counters } = readDisplayStats(await this.pc.getStats(), this.counters, this.rtt);
+    this.counters = counters;
+    return stats;
   }
 
   close(reason = "closed") {
