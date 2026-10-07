@@ -4,61 +4,43 @@ import {
 	subscribeCacheMessages,
 } from "$lib/cache/broadcast";
 import { getCacheUserKey } from "$lib/cache/keys";
-import {
-	canCommitPaletteOverviewRefresh,
-	isUsablePaletteOverview,
-} from "$lib/command-palette/palette-overview-cache-policy";
-import {
-	isOverviewSnapshotExpired,
-	isOverviewSnapshotStale,
-	shouldRevalidateOverview,
-} from "$lib/command-palette/palette-overview-staleness";
 import { sdk } from "$lib/sdk";
 import { getRecentSpaces } from "$lib/stores/recent-space";
 
 /**
- * Client cache for /api/palette/overview — the empty-query default list data.
- *
- * Memory + localStorage snapshot with a 60s freshness window. Viewer activity
- * records a user-scoped invalidation marker, and a debounced, throttled
- * background revalidation warms the snapshot afterwards, so the palette
- * usually opens straight from cache instead of fetching. Failures retain the
- * last-known-good snapshot and let the UI use its local fallback path.
- *
- * Both the snapshot and the throttle are shared across tabs: the snapshot and
- * the invalidation marker live in localStorage, and a successful refresh is
- * announced over the shared cache BroadcastChannel so other tabs adopt the
- * payload and extend their throttle without refetching it themselves.
- *
- * The throttle baseline is the snapshot's own commit time (plus this tab's
- * last attempt), so it needs no separate bookkeeping and stays consistent
- * with the other IndexedDB/localStorage caches.
- *
- * Freshness is not purely time-based: device-local activity (opening a Space)
- * is folded into the rendered list instead of invalidating the snapshot;
- * cross-device changes are picked up by the freshness window and the
- * foreground (focus / visibility) revalidation.
+ * Client cache for /api/palette/overview: a memory + localStorage snapshot
+ * shared across tabs. Viewer activity marks it stale and schedules a
+ * throttled background refresh, so the palette usually opens from cache.
  */
 
 const STORAGE_PREFIX = "cohub:palette-overview";
 const INVALIDATION_STORAGE_PREFIX = "cohub:palette-overview-invalidated";
 const CACHE_VERSION = 1;
+const FRESH_MS = 60_000;
+const HARD_EXPIRY_MS = 10 * 60_000;
+const MIN_REVALIDATE_MS = 120_000;
+const REVALIDATE_DEBOUNCE_MS = 1_500;
 
 type StoredOverview = PaletteOverviewResponse & { cachedAt: number };
 
 type MemoryState = {
 	userKey: string;
 	snapshot: StoredOverview | null;
-	/** Persisted so this and other tabs can observe viewer activity. */
 	invalidatedAt: number;
-	/** When the last refresh attempt started in this tab. */
 	lastRefreshStartedAt: number;
 	latestRequestId: number;
 	inFlight: Promise<PaletteOverviewResponse | null> | null;
 };
 
+export type PaletteOverviewSnapshot = {
+	data: PaletteOverviewResponse | null;
+	isStale: boolean;
+};
+
 let memoryState: MemoryState | null = null;
 let nextRequestId = 0;
+let subscribedToBroadcast = false;
+let revalidateTimer: ReturnType<typeof setTimeout> | null = null;
 
 function isBrowser() {
 	return typeof window !== "undefined" && typeof localStorage !== "undefined";
@@ -70,6 +52,18 @@ function storageKey(userKey: string) {
 
 function invalidationStorageKey(userKey: string) {
 	return `${INVALIDATION_STORAGE_PREFIX}:${encodeURIComponent(userKey)}:v${CACHE_VERSION}`;
+}
+
+function isUsable(
+	data: PaletteOverviewResponse | null,
+): data is PaletteOverviewResponse {
+	return Boolean(data && data.degraded !== true && Array.isArray(data.spaces));
+}
+
+function isStale(snapshot: StoredOverview, invalidatedAt: number, now: number) {
+	return (
+		invalidatedAt > snapshot.cachedAt || now - snapshot.cachedAt > FRESH_MS
+	);
 }
 
 function readInvalidatedAt(userKey: string) {
@@ -84,34 +78,14 @@ function readInvalidatedAt(userKey: string) {
 	}
 }
 
-function safeParse(value: string | null): StoredOverview | null {
-	if (!value) return null;
-	try {
-		const parsed = JSON.parse(value) as StoredOverview;
-		if (
-			!parsed ||
-			!Number.isFinite(parsed.cachedAt) ||
-			!Array.isArray(parsed.spaces) ||
-			!Array.isArray(parsed.recentSessions) ||
-			parsed.degraded === true
-		)
-			return null;
-		return parsed;
-	} catch {
-		return null;
-	}
-}
-
 function readCached(userKey: string): StoredOverview | null {
 	if (!isBrowser()) return null;
 	try {
-		const stored = safeParse(localStorage.getItem(storageKey(userKey)));
-		if (!stored) return null;
-		if (
-			isOverviewSnapshotExpired({ cachedAt: stored.cachedAt, now: Date.now() })
-		)
-			return null;
-		return stored;
+		const stored = JSON.parse(
+			localStorage.getItem(storageKey(userKey)) ?? "null",
+		) as StoredOverview | null;
+		if (!isUsable(stored) || !Number.isFinite(stored.cachedAt)) return null;
+		return Date.now() - stored.cachedAt > HARD_EXPIRY_MS ? null : stored;
 	} catch {
 		return null;
 	}
@@ -120,12 +94,10 @@ function readCached(userKey: string): StoredOverview | null {
 function getMemoryState(userKey = getCacheUserKey()): MemoryState {
 	ensureBroadcastSubscription();
 	if (memoryState?.userKey === userKey) return memoryState;
-	const snapshot = readCached(userKey);
-	const invalidatedAt = readInvalidatedAt(userKey);
 	memoryState = {
 		userKey,
-		snapshot,
-		invalidatedAt,
+		snapshot: readCached(userKey),
+		invalidatedAt: readInvalidatedAt(userKey),
 		lastRefreshStartedAt: 0,
 		latestRequestId: 0,
 		inFlight: null,
@@ -134,64 +106,29 @@ function getMemoryState(userKey = getCacheUserKey()): MemoryState {
 }
 
 function syncPersistedInvalidation(state: MemoryState) {
-	const persisted = readInvalidatedAt(state.userKey);
-	if (persisted <= state.invalidatedAt) return;
-	state.invalidatedAt = persisted;
+	state.invalidatedAt = Math.max(
+		state.invalidatedAt,
+		readInvalidatedAt(state.userKey),
+	);
 }
 
-/**
- * Adopt a snapshot another tab committed. The payload is shared through
- * localStorage, so a warm in one tab leaves every other tab warm too; without
- * this, a tab that warmed elsewhere would still render its own older snapshot
- * while the browser-wide throttle stops it from refetching.
- */
-function syncPersistedSnapshot(state: MemoryState) {
-	const persisted = readCached(state.userKey);
-	if (!persisted) return;
-	if (state.snapshot && persisted.cachedAt <= state.snapshot.cachedAt) return;
-	state.snapshot = persisted;
-}
-
-/** Pull in anything other tabs have written before reading or deciding. */
+/** Pull in snapshots and invalidations other tabs have written. */
 function syncFromOtherTabs(state: MemoryState) {
 	syncPersistedInvalidation(state);
-	syncPersistedSnapshot(state);
+	const persisted = readCached(state.userKey);
+	if (persisted && persisted.cachedAt > (state.snapshot?.cachedAt ?? 0))
+		state.snapshot = persisted;
 }
 
-/**
- * The throttle baseline: the later of this tab's last attempt and the
- * snapshot's commit time. The commit time is shared (localStorage), so a
- * refresh in any tab holds off every other tab; the per-tab attempt time
- * additionally bounds retries after a failure.
- */
-function lastRefreshBaseline(state: MemoryState) {
-	return Math.max(state.lastRefreshStartedAt, state.snapshot?.cachedAt ?? 0);
-}
-
-let subscribedToBroadcast = false;
-
-/**
- * Adopt refreshes committed by other tabs as they happen. Same idea as the
- * other cache repos: the durable payload lives in storage, the shared cache
- * channel only announces it. This keeps a tab that is already running in
- * sync without polling storage.
- */
 function ensureBroadcastSubscription() {
 	if (subscribedToBroadcast) return;
 	subscribedToBroadcast = true;
 	subscribeCacheMessages((message) => {
 		if (message.store !== "palette_overview") return;
-		const state = memoryState;
-		if (!state || state.userKey !== message.userKey) return;
-		syncFromOtherTabs(state);
+		if (memoryState?.userKey === message.userKey)
+			syncFromOtherTabs(memoryState);
 	});
 }
-
-export type PaletteOverviewSnapshot = {
-	data: PaletteOverviewResponse | null;
-	/** True when the next palette open must refetch before/at first render. */
-	isStale: boolean;
-};
 
 export function getPaletteOverviewSnapshot(): PaletteOverviewSnapshot {
 	const state = getMemoryState();
@@ -200,22 +137,10 @@ export function getPaletteOverviewSnapshot(): PaletteOverviewSnapshot {
 	if (!snapshot) return { data: null, isStale: true };
 	return {
 		data: snapshot,
-		isStale: isOverviewSnapshotStale({
-			cachedAt: snapshot.cachedAt,
-			invalidatedAt: state.invalidatedAt,
-			now: Date.now(),
-		}),
+		isStale: isStale(snapshot, state.invalidatedAt, Date.now()),
 	};
 }
 
-/**
- * Mark the overview cache as outdated after viewer activity (message sent,
- * session created, pin changed, ...). The refetch itself is deferred and
- * coalesced: a debounced background revalidation warms the snapshot so the
- * next palette open serves from cache instead of fetching, and the minimum
- * revalidate interval keeps a burst of activity from becoming a burst of
- * requests. Local-activity ordering is folded in at render time regardless.
- */
 export function invalidatePaletteOverview() {
 	const state = getMemoryState();
 	syncPersistedInvalidation(state);
@@ -226,9 +151,7 @@ export function invalidatePaletteOverview() {
 			invalidationStorageKey(state.userKey),
 			String(state.invalidatedAt),
 		);
-	} catch {
-		// The in-memory timestamp still protects this tab.
-	}
+	} catch {}
 	schedulePaletteOverviewRevalidate();
 }
 
@@ -246,9 +169,7 @@ export function clearCachedPaletteOverview() {
 	try {
 		localStorage.removeItem(storageKey(userKey));
 		localStorage.removeItem(invalidationStorageKey(userKey));
-	} catch {
-		// Storage is best-effort.
-	}
+	} catch {}
 }
 
 export function refreshPaletteOverview(options?: {
@@ -266,43 +187,33 @@ export function refreshPaletteOverview(options?: {
 	const requestInvalidatedAt = state.invalidatedAt;
 	const promise = (async (): Promise<PaletteOverviewResponse | null> => {
 		try {
-			const fetcher: typeof fetch = (input, init) =>
-				fetch(input, { ...init, signal: options?.signal });
-			const recentSpaces = getRecentSpaces(userKey).map((entry) => ({
-				id: entry.spaceId,
-				timestamp: entry.timestamp,
-			}));
 			const data = await sdk.search.overview(
-				{ spaceLimit: 50, sessionLimit: 20, recentSpaces },
-				fetcher,
+				{
+					spaceLimit: 50,
+					recentSpaces: getRecentSpaces(userKey).map((entry) => ({
+						id: entry.spaceId,
+						timestamp: entry.timestamp,
+					})),
+				},
+				(input, init) => fetch(input, { ...init, signal: options?.signal }),
 			);
-			// A response from another account, an older request, or before newer
-			// viewer activity must never write memory or persistent storage.
-			if (
-				!canCommitPaletteOverviewRefresh({
-					requestUserKey: userKey,
-					currentUserKey: getCacheUserKey(),
-					requestStateIsCurrent: memoryState === state,
-					requestId,
-					latestRequestId: state.latestRequestId,
-					requestInvalidatedAt,
-					currentInvalidatedAt: state.invalidatedAt,
-					persistedInvalidatedAt: readInvalidatedAt(userKey),
-				})
-			)
-				return null;
-			if (!isUsablePaletteOverview(data)) return null;
+			// Never commit a response from another account, an older request,
+			// or one that predates newer viewer activity.
+			const current =
+				memoryState === state &&
+				getCacheUserKey() === userKey &&
+				state.latestRequestId === requestId &&
+				state.invalidatedAt === requestInvalidatedAt &&
+				readInvalidatedAt(userKey) <= requestInvalidatedAt;
+			if (!current || !isUsable(data)) return null;
 
 			const stored: StoredOverview = { ...data, cachedAt: Date.now() };
 			state.snapshot = stored;
 			if (isBrowser()) {
 				try {
 					localStorage.setItem(storageKey(userKey), JSON.stringify(stored));
-				} catch {
-					// Quota failures are non-fatal; memory cache still applies.
-				}
+				} catch {}
 			}
-			// Tell other tabs to adopt the payload and extend their throttle.
 			publishCacheMessage({
 				type: "cache-updated",
 				store: "palette_overview",
@@ -316,38 +227,18 @@ export function refreshPaletteOverview(options?: {
 			return null;
 		}
 	})();
+	const release = () => {
+		if (state.inFlight === promise) state.inFlight = null;
+	};
 	state.inFlight = promise;
-	options?.signal?.addEventListener(
-		"abort",
-		() => {
-			if (state.inFlight === promise) state.inFlight = null;
-		},
-		{ once: true },
-	);
-	void promise.then(
-		() => {
-			if (state.inFlight === promise) state.inFlight = null;
-		},
-		() => {
-			if (state.inFlight === promise) state.inFlight = null;
-		},
-	);
+	options?.signal?.addEventListener("abort", release, { once: true });
+	void promise.finally(release);
 	return promise;
 }
 
-const REVALIDATE_DEBOUNCE_MS = 1_500;
-let revalidateTimer: ReturnType<typeof setTimeout> | null = null;
-
 /**
- * Refresh the overview only when it can actually change what the palette
- * shows: skip when the snapshot is already fresh (local activity is folded in
- * at render time) and throttle bursts of invalidations.
- *
- * The throttle and the snapshot are shared across tabs, so an open in one tab
- * is served by a warm another tab already did.
- *
- * Resolves with the fresh payload only when a request was made, so callers do
- * not rebuild the list for a no-op.
+ * Refresh only when the snapshot is stale and the shared throttle allows it.
+ * Resolves with a payload only when a request was made.
  */
 export function revalidatePaletteOverview(options?: {
 	signal?: AbortSignal;
@@ -358,45 +249,28 @@ export function revalidatePaletteOverview(options?: {
 	const now = Date.now();
 	const snapshot = state.snapshot;
 	if (!options?.force && snapshot) {
-		const stale = isOverviewSnapshotStale({
-			cachedAt: snapshot.cachedAt,
-			invalidatedAt: state.invalidatedAt,
-			now,
-		});
-		if (!stale) return Promise.resolve(null);
-		if (
-			!shouldRevalidateOverview({
-				lastRefreshStartedAt: lastRefreshBaseline(state),
-				now,
-			})
-		)
+		if (!isStale(snapshot, state.invalidatedAt, now))
 			return Promise.resolve(null);
+		const lastRefresh = Math.max(state.lastRefreshStartedAt, snapshot.cachedAt);
+		if (now - lastRefresh < MIN_REVALIDATE_MS) return Promise.resolve(null);
 	}
 	return refreshPaletteOverview(options);
 }
 
-/**
- * Coalesced background revalidation used outside the palette's open path
- * (viewer activity, tab focus / visibility). Coalescing plus the minimum
- * interval keeps a burst of activity from turning into a burst of requests.
- */
 export function schedulePaletteOverviewRevalidate() {
-	if (!isBrowser()) return;
-	if (revalidateTimer != null) return;
+	if (!isBrowser() || revalidateTimer != null) return;
 	revalidateTimer = setTimeout(() => {
 		revalidateTimer = null;
 		void revalidatePaletteOverview();
 	}, REVALIDATE_DEBOUNCE_MS);
 }
 
-/** Drop a pending background revalidation (logout / cache reset). */
 export function cancelScheduledPaletteOverviewRevalidate() {
 	if (revalidateTimer == null) return;
 	clearTimeout(revalidateTimer);
 	revalidateTimer = null;
 }
 
-/** Mark viewer activity; invalidation schedules a background revalidation. */
 export function noteViewerActivity() {
 	invalidatePaletteOverview();
 }

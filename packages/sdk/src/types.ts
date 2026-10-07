@@ -1179,20 +1179,9 @@ export type PaletteOverviewSpace = {
   updatedAt: string | null;
 };
 
-export type PaletteOverviewSession = {
-  id: string;
-  spaceId: string;
-  spaceName: string | null;
-  title: string | null;
-  viewerRelation: "creator" | "participant";
-  lastMessageAt: string | null;
-  updatedAt: string | null;
-};
-
 export type PaletteOverviewResponse = {
   generatedAt: string;
   spaces: PaletteOverviewSpace[];
-  recentSessions: PaletteOverviewSession[];
   /** Present when the server could not produce a complete overview. */
   degraded?: boolean;
 };

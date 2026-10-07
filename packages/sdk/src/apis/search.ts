@@ -32,7 +32,6 @@ export class SearchApi {
   overview(
     input?: {
       spaceLimit?: number;
-      sessionLimit?: number;
       recentSpaces?: { id: string; timestamp: number }[];
       /** @deprecated Use `recentSpaces`; ids without a time count as just visited. */
       recentSpaceIds?: string[];
@@ -41,8 +40,6 @@ export class SearchApi {
   ) {
     const params = new URLSearchParams();
     if (input?.spaceLimit !== undefined) params.set("spaceLimit", String(input.spaceLimit));
-    if (input?.sessionLimit !== undefined)
-      params.set("sessionLimit", String(input.sessionLimit));
     for (const recent of input?.recentSpaces ?? []) {
       params.append("recentSpaceId", recent.id);
       params.append("recentSpaceAt", new Date(recent.timestamp).toISOString());

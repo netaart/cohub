@@ -309,10 +309,7 @@ const mergedItemsRaw = $derived.by(() => {
 	if (isSpacePickerMode && spaceFilter === "archived") return archivedItems;
 	// Long, specific queries let strong matches bypass the personal-relevance tier.
 	const isLongQuery = trimmedQuery.length >= 12;
-	// Only the space picker "Recent" tab uses the overview-backed list. The
-	// plain palette default list and every other picker tab stay on the local
-	// legacy derivation, which reads the same IndexedDB caches the old default
-	// list used (no overview snapshot, no overview refetch).
+	// Only the space picker "Recent" tab uses the overview-backed list.
 	const useOverviewDefaults = isSpacePickerMode && spaceFilter === "recent";
 	const defaultSource = useOverviewDefaults
 		? defaultItems.length > 0
@@ -775,32 +772,18 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 				viewerUserUuid: myUserUuid,
 				paletteOverview: overview,
 			});
-		// Only the space picker "Recent" tab consumes the overview payload. The
-		// plain palette default list (no query, no `a:`) and the other picker
-		// tabs stay on the pre-overview local derivation, which reads the same
-		// IndexedDB / space-list caches as before — no overview snapshot, no
-		// overview refetch, no snapshot-driven re-sort.
 		const useOverviewDefaults = isSpacePickerMode && spaceFilter === "recent";
-		// The space list cache feeds both paths; keep it fresh (the helper checks
-		// its own staleness unless forced).
 		if (useOverviewDefaults) {
-			// First frame = last server payload (the cached overview snapshot)
-			// folded with local caches: device visits and viewer-authored turns
-			// re-rank it, and newly cached spaces/sessions are merged in. The
-			// frame therefore tracks what the refetched response will say, so the
-			// swap-in does not visibly re-sort the list. Only when no snapshot
-			// exists at all does the frame fall back to a purely local synthesis.
+			// First frame: the cached snapshot folded with local caches, so the
+			// refetched response swaps in without re-sorting.
 			const snapshot = getPaletteOverviewSnapshot();
 			const snapshotData = snapshot.data;
-			const hasSnapshotItems = Boolean(
-				snapshotData?.spaces.length || snapshotData?.recentSessions.length,
-			);
 			void getLocalPaletteOverview({
 				signal: defaultSignal,
 				viewerUserUuid: myUserUuid,
 			})
 				.then((local) =>
-					snapshotData && hasSnapshotItems
+					snapshotData?.spaces.length
 						? mergeLocalOverviewIntoSnapshot(snapshotData, local)
 						: local,
 				)
@@ -816,12 +799,7 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 				.finally(() => {
 					if (token === searchToken) defaultDone = true;
 				});
-			// Detached from the search signal: the refetch survives tab/query changes
-			// (aborting it here previously delayed the correct list by a full
-			// re-request cycle). Revalidation is throttled and skipped while the
-			// snapshot is fresh — viewer activity is folded in locally at render
-			// time, so most opens land here with nothing to fetch. The fresh server
-			// response is authoritative and replaces the merged frame in place.
+			// Detached from the search signal so the refetch survives tab changes.
 			void revalidatePaletteOverview().then((fresh) => {
 				if (!fresh || token !== searchToken) return;
 				return buildDefaults(fresh)
