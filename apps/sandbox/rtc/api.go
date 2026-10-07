@@ -1,6 +1,7 @@
 package rtc
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,7 +61,7 @@ func toWebRTCServers(servers []ICEServer) ([]webrtc.ICEServer, error) {
 				return nil, fmt.Errorf("unsupported ICE url %q", url)
 			}
 		}
-		entry := webrtc.ICEServer{URLs: server.URLs}
+		entry := webrtc.ICEServer{URLs: relayURLs(server.URLs)}
 		if server.Username != "" || server.Credential != "" {
 			entry.Username = server.Username
 			entry.Credential = server.Credential
@@ -69,6 +70,33 @@ func toWebRTCServers(servers []ICEServer) ([]webrtc.ICEServer, error) {
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+// relayURLs keeps STUN plus one UDP and one TLS relay (TCP only as a fallback).
+func relayURLs(urls []string) []string {
+	kept := make([]string, 0, len(urls))
+	var udp, tls, tcp string
+	for _, url := range urls {
+		switch {
+		case strings.HasPrefix(url, "stun:"):
+			kept = append(kept, url)
+		case strings.HasPrefix(url, "turns:"):
+			tls = cmp.Or(tls, url)
+		case strings.Contains(url, "transport=tcp"):
+			tcp = cmp.Or(tcp, url)
+		default:
+			udp = cmp.Or(udp, url)
+		}
+	}
+	if udp == "" && tls == "" {
+		udp = tcp
+	}
+	for _, url := range []string{udp, tls} {
+		if url != "" {
+			kept = append(kept, url)
+		}
+	}
+	return kept
 }
 
 var h264Profiles = []string{"42e01f", "42001f"}
@@ -96,12 +124,18 @@ func newAPI(logger *slog.Logger) (*webrtc.API, <-chan cc.BandwidthEstimator, err
 		}
 	}
 
+	if err := media.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: playoutDelayURI}, webrtc.RTPCodecTypeVideo); err != nil {
+		return nil, nil, err
+	}
+
 	registry := &interceptor.Registry{}
 	congestion, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		return gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(display.DefaultBitrate),
 			gcc.SendSideBWEMinBitrate(display.MinBitrate),
 			gcc.SendSideBWEMaxBitrate(display.MaxBitrate),
+			// Pacing bursty screen frames only adds latency.
+			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
 		)
 	})
 	if err != nil {

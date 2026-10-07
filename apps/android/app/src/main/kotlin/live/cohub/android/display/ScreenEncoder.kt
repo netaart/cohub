@@ -45,6 +45,8 @@ internal class ScreenEncoder(
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+            // High refresh screens would otherwise overshoot the bitrate budget.
+            setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER, fps.toFloat())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, KEY_FRAME_INTERVAL_SECONDS)
             // A still screen produces no frames; repeating the last one lets a
             // key frame request be answered and a joining viewer see something.
