@@ -16,5 +16,6 @@
     <string name="display_sharing">正在与 Space 共享此屏幕</string>
     <string name="display_sharing_control">正在共享此屏幕，Space 可以操作它</string>
     <string name="display_stop">停止共享</string>
+    <string name="display_control_restricted">点右上角 ⋮，选择「允许受限设置」，再到无障碍中开启 Cohub。</string>
     <string name="display_control_description">允许你共享屏幕的 Space 读取屏幕上的控件，并点按、滑动和输入。仅在你共享屏幕期间生效，也只作用于你能看到的内容。</string>
 </resources>

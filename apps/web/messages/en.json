@@ -57,7 +57,7 @@
 	"runtime_display_declined": "Screen sharing wasn't allowed.",
 	"runtime_display_failed": "Couldn't share the screen. Try again.",
 	"runtime_display_shared_elsewhere": "This screen is shared with another Space. Sharing here stops that.",
-	"runtime_display_control_hint": "If the switch is greyed out, open Cohub's App info, choose Allow restricted settings from its menu, then come back.",
+	"runtime_display_control_hint": "If Android blocks it, tap Allow control again to open App info, then choose Allow restricted settings from the ⋮ menu.",
 	"virtual_display_title": "Virtual screen",
 	"virtual_display_hint": "Programs started in the sandbox while it runs show on it.",
 	"virtual_display_start": "Start virtual screen",

@@ -1,6 +1,7 @@
 package live.cohub.android
 
 import android.Manifest
+import android.app.AppOpsManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -394,8 +395,26 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     override fun openControlSettings(): Boolean = runCatching {
-        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        if (isControlRestrictionAcknowledged()) {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:$packageName".toUri())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            Toast.makeText(this, R.string.display_control_restricted, Toast.LENGTH_LONG).show()
+        } else {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
     }.isSuccess
+
+    /** Restricted and refused once, so App info now offers Allow restricted settings. */
+    private fun isControlRestrictionAcknowledged(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+        return runCatching {
+            getSystemService(AppOpsManager::class.java)
+                .unsafeCheckOpNoThrow(OP_ACCESS_RESTRICTED_SETTINGS, applicationInfo.uid, packageName) ==
+                AppOpsManager.MODE_IGNORED
+        }.getOrDefault(false)
+    }
 
     private suspend fun <I> awaitResult(launcher: ActivityResultLauncher<I>, input: I) {
         val result = CompletableDeferred<Unit>()
@@ -455,6 +474,8 @@ class MainActivity : ComponentActivity(), HostActions {
         const val TAG = "CohubShell"
         const val KEY_INSTALL_ID = "install_id"
         const val KEY_FORCE_LOGIN = "force_login"
+
+        const val OP_ACCESS_RESTRICTED_SETTINGS = "android:access_restricted_settings"
 
         const val LAUNCH_TIMEOUT_MS = 2_500L
         const val SPLASH_FADE_MS = 180L

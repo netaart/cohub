@@ -57,7 +57,7 @@
 	"runtime_display_declined": "未允许共享屏幕。",
 	"runtime_display_failed": "屏幕共享失败，请重试。",
 	"runtime_display_shared_elsewhere": "此屏幕正在与另一个 Space 共享，在这里共享会停止那边的共享。",
-	"runtime_display_control_hint": "如果开关是灰色的：打开 Cohub 的「应用信息」，在右上角菜单中选择「允许受限设置」，再回来开启。",
+	"runtime_display_control_hint": "如果被系统拦截，再点一次「允许控制」会打开应用信息，在右上角 ⋮ 菜单中选择「允许受限设置」即可。",
 	"virtual_display_title": "虚拟屏幕",
 	"virtual_display_hint": "运行期间，沙箱里启动的程序会显示在这块屏幕上。",
 	"virtual_display_start": "启动虚拟屏幕",
