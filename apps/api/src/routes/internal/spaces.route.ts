@@ -19,6 +19,8 @@ import { abortSessionTurn, failSessionTurn, interruptSessionTurn } from "../../s
 import { hasPermission } from "../../permissions.js";
 import { dispatchTurnFinalized, dispatchTurnUpdated } from "../../session-output.js";
 import { submitSessionPrompt, type PromptAccessMode, type SubmitSessionPromptContext } from "../../session-prompts.js";
+import { hostPromptImages } from "../../session-images.js";
+import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError } from "@cohub/core/sessions";
 import { verifyAppSessionToken } from "../../app-sessions.js";
 import { mergePromptContextAuth, promptAuthContextFromAppSession } from "../../prompt-auth-context.js";
@@ -433,13 +435,20 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
     throw error;
   }
 
+  let content: ContentBlock[];
+  try {
+    content = normalizeContentBlocks(body.content);
+  } catch (error) {
+    return c.json({ message: error instanceof Error ? error.message : String(error) }, 400);
+  }
+
   try {
     const result = await submitSessionPrompt({
       spaceId,
       sessionId,
       userId,
       clientMessageId,
-      content: body.content,
+      content: await hostPromptImages(content, { userUuid: userId, spaceId, sessionId }),
       source: body.source?.trim() || "scheduled_task",
       model: body.model ?? null,
       provider: body.provider ?? null,

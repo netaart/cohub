@@ -3,7 +3,7 @@ import { Agent as PiAgent } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type Api, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type ImageContent, type Model, type SimpleStreamOptions, type TranscriptContext, isContextOverflow, isRetryableAssistantError, toToolDeclaration, type AssistantMessage } from "@earendil-works/pi-ai";
 import { context, trace, type Span } from "@opentelemetry/api";
 import { sumStatsUsage } from "@cohub/protocol/model";
-import type { Usage } from "@cohub/protocol/core";
+import { IMAGE_URL_MIME_TYPE, imageUrlContent, type Usage } from "@cohub/protocol/core";
 import { createRequestMetric, persistRequestMetric, recordRetryWait } from "../metrics.js";
 import { logger } from "../logger.js";
 import { sendOutput } from "../redis.js";
@@ -298,7 +298,7 @@ function collectOmittableHistoryImageBlocks(messages: unknown[]) {
       : null;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
-      if (!isLlmImageBlock(block)) continue;
+      if (!isLlmImageBlock(block) || block.mimeType === IMAGE_URL_MIME_TYPE) continue;
       images.push({ block, bytes: block.data.length + Buffer.byteLength(block.mimeType, "utf8") });
     }
   }
@@ -339,6 +339,7 @@ function toLlmImageContent(block: Record<string, unknown>): ImageContent | null 
       : typeof block.media_type === "string" && block.media_type.trim()
         ? block.media_type.trim()
         : "application/octet-stream";
+    if (mimeType === IMAGE_URL_MIME_TYPE) return imageUrlContent(directData);
     if (!isSupportedLlmImageMimeType(mimeType)) return null;
     return {
       type: "image",
@@ -350,7 +351,7 @@ function toLlmImageContent(block: Record<string, unknown>): ImageContent | null 
   const source = block.source && typeof block.source === "object" && !Array.isArray(block.source)
     ? block.source as Record<string, unknown>
     : null;
-
+  if (source?.type === "url" && typeof source.url === "string" && source.url.trim()) return imageUrlContent(source.url.trim());
   if (source?.type !== "base64" || typeof source.data !== "string" || !source.data.trim()) {
     return null;
   }

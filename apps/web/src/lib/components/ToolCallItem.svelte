@@ -1,5 +1,6 @@
 <script lang="ts">
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-svelte";
+import ImageBlocks from "$lib/components/ImageBlocks.svelte";
 import ToolInputDetail from "$lib/components/ToolInputDetail.svelte";
 import ToolOutputDetail from "$lib/components/ToolOutputDetail.svelte";
 import {
@@ -211,7 +212,12 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 					{#if showResult}
 						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2">
 							<div class="pt-[3px] font-mono text-[10px] uppercase leading-none tracking-wide select-none {tool.status === 'failed' ? 'text-status-error' : 'text-text-placeholder'}">{resultLabel}</div>
-							<ToolOutputDetail value={visibleResult} failed={tool.status === 'failed'} partial={tool.resultPartial} idPrefix={detailIdPrefix} />
+							<div class="min-w-0 space-y-2">
+								<ToolOutputDetail value={visibleResult} failed={tool.status === 'failed'} partial={tool.resultPartial} idPrefix={detailIdPrefix} />
+								{#if tool.resultImages}
+									<ImageBlocks blocks={tool.resultImages} />
+								{/if}
+							</div>
 						</div>
 					{:else if tool.resultOmitted}
 						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2">

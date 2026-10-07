@@ -17,6 +17,7 @@ import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { piMessagesApi } from "@earendil-works/pi-ai/api/pi-messages.lazy";
+import { withImageInputs } from "./image-content.js";
 import { withRequestProfiles } from "./request-profile/index.js";
 
 /** Auth + catalog surface shared by completion registries. */
@@ -40,7 +41,7 @@ const PI_API_STREAMS = {
 } satisfies Partial<Record<Api, ProviderStreams>>;
 
 const API_STREAMS: Partial<Record<Api, ProviderStreams>> = Object.fromEntries(
-  Object.entries(PI_API_STREAMS).map(([api, streams]) => [api, withRequestProfiles(streams)]),
+  Object.entries(PI_API_STREAMS).map(([api, streams]) => [api, withImageInputs(withRequestProfiles(streams))]),
 );
 
 type ModelsCacheEntry = {

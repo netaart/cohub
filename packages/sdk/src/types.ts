@@ -1304,7 +1304,9 @@ export type CreateSpacePromptResponse =
 
 export type {
   CompletionAssistantMessage,
+  CompletionImageInput,
   CompletionMessage,
+  CompletionMessageInput,
   CompletionMessageRole,
   CompletionThinkingLevel,
   CompletionUsage,

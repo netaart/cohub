@@ -168,3 +168,40 @@ export async function safeFetch(params: {
 export function allowedHostFromBaseUrl(value: string) {
   return new URL(value).hostname;
 }
+
+export async function readResponseBufferLimited(response: Response, maxBytes: number, label: string) {
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (contentLength > maxBytes) throw new Error(`${label} exceeds ${maxBytes} bytes`);
+  if (!response.body) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length > maxBytes) throw new Error(`${label} exceeds ${maxBytes} bytes`);
+    return buffer;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`${label} exceeds ${maxBytes} bytes`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), total);
+}
+
+const REMOTE_IMAGE_MAX_BYTES = 32 * 1024 * 1024;
+
+export async function fetchRemoteImage(input: { url: string; maxBytes?: number; timeoutMs?: number; signal?: AbortSignal }) {
+  const label = "Remote image";
+  const response = await safeFetch({ url: input.url, label, timeoutMs: input.timeoutMs, init: { signal: input.signal, headers: { Accept: "image/*" } } });
+  if (!response.ok) throw new Error(`${label} download failed ${response.status}`);
+  const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
+  if (!mimeType.startsWith("image/") && mimeType !== "application/octet-stream") throw new Error(`${label} is not an image: ${mimeType}`);
+  return { data: await readResponseBufferLimited(response, input.maxBytes ?? REMOTE_IMAGE_MAX_BYTES, label), mimeType };
+}

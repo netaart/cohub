@@ -1,5 +1,5 @@
 import type { CompletionImageDescriptionFallback, CompletionMessage, CompletionUsage } from "@cohub/protocol";
-import type { ContentBlock } from "@cohub/protocol/core";
+import { imageBlockToPi, type ContentBlock } from "@cohub/protocol/core";
 import type {
   Api,
   ImageContent,
@@ -10,7 +10,6 @@ import {
   resolveModelTaskApiKey,
   type ImageToTextConfig,
 } from "@cohub/infra/config-runtime/model-tasks";
-import { contentBlockToPiImage, restoreRemoteImageUrls } from "./image-content.js";
 import { createModelsFromRegistry } from "./pi-models-adapter.js";
 import type { RuntimeLlmModel } from "./completion-registry.js";
 
@@ -33,7 +32,7 @@ function finiteOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTextConfig["model"], "requestProfile"> {
+function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTextConfig["model"], "requestProfile" | "imageUrlInput"> {
   const model = config.model;
   return {
     id: model.id,
@@ -54,6 +53,7 @@ function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTex
     headers: model.headers,
     compat: model.compat as Model<Api>["compat"],
     requestProfile: model.requestProfile,
+    imageUrlInput: model.imageUrlInput,
   };
 }
 
@@ -165,7 +165,6 @@ async function describeImage(input: {
     reasoning,
     timeoutMs: 30_000,
     signal: input.signal,
-    onPayload: (payload) => restoreRemoteImageUrls(payload),
   });
   if (response.stopReason === "error" || response.stopReason === "aborted") {
     throw new Error(response.errorMessage?.trim() || "Image description request failed");
@@ -223,7 +222,7 @@ export async function prepareCompletionImagesForModel(input: {
 
   const calls: ImageToTextCall[] = [];
   await mapWithConcurrency(pending, 2, async (item) => {
-    const image = contentBlockToPiImage(item.block);
+    const image = imageBlockToPi(item.block);
     if (!image) return;
     const startedAt = Date.now();
     try {

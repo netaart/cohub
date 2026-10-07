@@ -411,17 +411,6 @@ export function extractContentText(blocks: ContentBlock[]): string {
     .trim();
 }
 
-export function extractContentImages(blocks: ContentBlock[]): Array<{ type: "image"; data: string; mimeType: string }> {
-  const results: Array<{ type: "image"; data: string; mimeType: string }> = [];
-  for (const b of blocks) {
-    if (b.type !== "image") continue;
-    const img = b as { type: "image"; source: { type: "url"; url: string } | { type: "base64"; media_type: string; data: string } };
-    if (img.source.type !== "base64") continue;
-    results.push({ type: "image", data: img.source.data, mimeType: img.source.media_type });
-  }
-  return results;
-}
-
 const sendOutputSchema = z.union([
   z.object({
     type: z.literal("stream_update"),

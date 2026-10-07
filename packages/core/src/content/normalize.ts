@@ -1,4 +1,10 @@
-import type { ContentBlock } from "@cohub/protocol/core";
+import {
+  IMAGE_URL_MIME_TYPE,
+  parseBase64DataUrl,
+  sniffBase64ImageMimeType,
+  type ContentBlock,
+  type ImageBlock,
+} from "@cohub/protocol/core";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -13,42 +19,43 @@ const readString = (record: Record<string, unknown>, keys: string[]) => {
   return null;
 };
 
-const normalizeImageBlock = (block: Record<string, unknown>): Extract<ContentBlock, { type: "image" }> => {
+const IMAGE_BLOCK_TYPES = new Set(["image", "image_url", "input_image"]);
+
+const imageUrlOf = (block: Record<string, unknown>, source: Record<string, unknown> | null) => {
+  if (source?.type === "url" && typeof source.url === "string") return source.url.trim();
+  const imageUrl = block.image_url;
+  if (typeof imageUrl === "string") return imageUrl.trim();
+  if (isRecord(imageUrl) && typeof imageUrl.url === "string") return imageUrl.url.trim();
+  if (block.mimeType === IMAGE_URL_MIME_TYPE && typeof block.data === "string") return block.data.trim();
+  return readString(block, ["uri", "url"])?.trim() ?? "";
+};
+
+const base64Image = (data: string, declaredMediaType: string | null, meta: Record<string, unknown> | undefined): ImageBlock => {
+  const dataUrl = parseBase64DataUrl(data);
+  const payload = dataUrl?.data ?? data.trim();
+  const declared = dataUrl?.mediaType ?? declaredMediaType?.trim().toLowerCase();
+  const mediaType = declared && declared !== "application/octet-stream"
+    ? declared
+    : sniffBase64ImageMimeType(payload) ?? declared ?? "application/octet-stream";
+  return { type: "image", source: { type: "base64", media_type: mediaType, data: payload }, ...(meta ? { _meta: meta } : {}) };
+};
+
+const normalizeImageBlock = (block: Record<string, unknown>): ImageBlock => {
   const source = isRecord(block.source) ? block.source : null;
   const meta = cleanMeta(block._meta);
 
-  if (source?.type === "url" && typeof source.url === "string" && source.url.trim()) {
-    return { type: "image", source: { type: "url", url: source.url }, ...(meta ? { _meta: meta } : {}) };
+  const url = imageUrlOf(block, source);
+  if (url) {
+    if (parseBase64DataUrl(url)) return base64Image(url, null, meta);
+    if (!/^https?:\/\//i.test(url)) throw new Error("Invalid image content: image URLs must use HTTP(S)");
+    return { type: "image", source: { type: "url", url }, ...(meta ? { _meta: meta } : {}) };
   }
 
-  if (typeof block.uri === "string" && block.uri.trim()) {
-    return { type: "image", source: { type: "url", url: block.uri }, ...(meta ? { _meta: meta } : {}) };
-  }
+  const record = source ?? block;
+  const data = readString(record, source?.type === "base64" ? ["data"] : ["data", "base64", "contentBase64"]);
+  if (data) return base64Image(data, readString(record, ["media_type", "mediaType", "mimeType"]), meta);
 
-  if (typeof block.url === "string" && block.url.trim()) {
-    return { type: "image", source: { type: "url", url: block.url }, ...(meta ? { _meta: meta } : {}) };
-  }
-
-  const data = source?.type === "base64"
-    ? readString(source, ["data"])
-    : readString(source ?? block, ["data", "base64", "contentBase64"]);
-  const mediaType = source?.type === "base64"
-    ? readString(source, ["media_type", "mediaType", "mimeType"])
-    : readString(source ?? block, ["media_type", "mediaType", "mimeType"]);
-
-  if (data) {
-    return {
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: mediaType ?? "application/octet-stream",
-        data,
-      },
-      ...(meta ? { _meta: meta } : {}),
-    };
-  }
-
-  throw new Error("Invalid image content: expected source.url or base64 source with data");
+  throw new Error("Invalid image content: expected an image URL or base64 data");
 };
 
 export const normalizeContentBlockStrict = (block: ContentBlock | Record<string, unknown>): ContentBlock => {
@@ -56,7 +63,11 @@ export const normalizeContentBlockStrict = (block: ContentBlock | Record<string,
     throw new Error("Invalid content block: missing type");
   }
 
-  if (block.type === "image") return normalizeImageBlock(block);
+  if (IMAGE_BLOCK_TYPES.has(block.type)) return normalizeImageBlock(block);
+  if (block.type === "input_text" && typeof block.text === "string") {
+    const meta = cleanMeta(block._meta);
+    return { type: "text", text: block.text, ...(meta ? { _meta: meta } : {}) };
+  }
 
   if (block.type === "tool_result" && Array.isArray(block.content)) {
     return {

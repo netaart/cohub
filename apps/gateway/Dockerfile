@@ -28,6 +28,9 @@ COPY packages/protocol/tsconfig.build.json ./packages/protocol/tsconfig.build.js
 COPY packages/infra/package.json ./packages/infra/package.json
 COPY packages/infra/tsconfig.json ./packages/infra/tsconfig.json
 COPY packages/infra/tsconfig.build.json ./packages/infra/tsconfig.build.json
+COPY packages/media/package.json ./packages/media/package.json
+COPY packages/media/tsconfig.json ./packages/media/tsconfig.json
+COPY packages/media/tsconfig.build.json ./packages/media/tsconfig.build.json
 COPY apps/gateway/package.json ./apps/gateway/package.json
 
 # Install full deps (build needs dev deps like typescript)
@@ -47,6 +50,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY packages/identity ./packages/identity
 COPY packages/protocol ./packages/protocol
 COPY packages/infra ./packages/infra
+COPY packages/media ./packages/media
 COPY apps/gateway/src ./apps/gateway/src
 COPY apps/gateway/tsconfig.json apps/gateway/tsconfig.build.json ./apps/gateway/
 

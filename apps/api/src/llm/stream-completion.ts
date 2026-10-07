@@ -1,4 +1,4 @@
-import type { ContentBlock } from "@cohub/protocol/core";
+import { imageBlockToPi, type ContentBlock } from "@cohub/protocol/core";
 import type {
   CompletionAssistantMessage,
   CompletionMessage,
@@ -16,11 +16,8 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import type { CompletionModelRegistry, RuntimeLlmModel } from "./completion-registry.js";
-import { contentBlockToPiImage, restoreRemoteImageUrls } from "./image-content.js";
 import { prepareCompletionImagesForModel, type ImageToTextCall } from "./image-to-text.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "./pi-models-adapter.js";
-
-export { restoreRemoteImageUrls } from "./image-content.js";
 
 const THINKING_LEVELS = new Set<CompletionThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -45,7 +42,7 @@ function contentBlocksToPiContent(blocks: ContentBlock[]): string | Array<{ type
       continue;
     }
     if (block.type === "image") {
-      const image = contentBlockToPiImage(block);
+      const image = imageBlockToPi(block);
       if (image) parts.push(image);
       continue;
     }
@@ -275,9 +272,6 @@ export async function* streamCompletionEvents(input: RunCompletionInput): AsyncG
       maxTokens: typeof input.maxTokens === "number" && Number.isFinite(input.maxTokens) ? Math.floor(input.maxTokens) : undefined,
       reasoning,
       signal: input.signal,
-      // pi-ai only models images as base64; rewrite URL markers back to remote URLs
-      // so Cohub never downloads image bytes.
-      onPayload: (payload) => restoreRemoteImageUrls(payload),
     });
 
     for await (const event of stream) {

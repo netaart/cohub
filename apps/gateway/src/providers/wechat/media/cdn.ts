@@ -13,7 +13,7 @@ import {
   encryptAesEcb,
   parseWeChatAesKey,
 } from "./crypto.js";
-import { allowedHostFromBaseUrl, safeFetch } from "./url.js";
+import { allowedHostFromBaseUrl, safeFetch } from "@cohub/infra/safe-fetch";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
 const CDN_MAX_RETRIES = 3;

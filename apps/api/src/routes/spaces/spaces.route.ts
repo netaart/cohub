@@ -16,6 +16,7 @@ import { db } from "../../db/index.js";
 import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/postgres-error.js";
 import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
+import { hostPromptImages } from "../../session-images.js";
 import { useAuth, getOptionalAuth, getAppSessionPrincipal, requireValidId, buildSpaceListItems, authzDenied, getSpacePublicProfile, normalizePublicAvatarUrl } from "../../lib/middleware.js";
 import { config } from "../../config.js";
 import { scheduleSandboxAutoDestroy } from "../../sandbox-idle-scheduler.js";
@@ -52,6 +53,7 @@ import { syncSpaceChannelConfigCache, getSpaceChannelsBySpaceId, bindSpaceChanne
 import { fallbackBoundChannelHealth, getChannelHealthMap } from "../../channel-health.js";
 import { createCronJob, enqueueTask } from "../../tasks.js";
 import { RUN_COMMAND_TASK_TYPE } from "@cohub/core/commands";
+import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignLabelsToSession, parseLabelRefs, resolveLabelPaths, resolveOrCreateLabelPaths } from "@cohub/core/labels";
 import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
@@ -2050,7 +2052,12 @@ router.post("/:id/prompt", async (c) => {
     throw error;
   }
 
-  const content = body.content;
+  let content: ContentBlock[];
+  try {
+    content = await hostPromptImages(normalizeContentBlocks(body.content), { userUuid: user.uuid, spaceId, sessionId });
+  } catch (error) {
+    return c.json({ message: error instanceof Error ? error.message : String(error) }, 400);
+  }
   const clientMessageId = body.clientMessageId?.trim() || crypto.randomUUID();
   const source = resolveSessionSourceFromRequest(c, typeof body.source === "string" ? body.source : null);
   const requestSource = getRequestSource(c);

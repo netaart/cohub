@@ -1,12 +1,12 @@
 import { buildFileReferencesText, buildImageReferencesText } from "@cohub/protocol";
-import type { ContentBlock } from "@cohub/protocol/core";
+import { IMAGE_UNAVAILABLE_TEXT, type ContentBlock } from "@cohub/protocol/core";
 import type { GatewayInboundEvent } from "@cohub/protocol/gateway";
 import { buildTraceHeaders } from "@cohub/infra/tracing";
 import { createLogger } from "@cohub/infra/logging";
+import { normalizeImage } from "@cohub/media";
+import { readResponseBufferLimited, safeFetch } from "@cohub/infra/safe-fetch";
 import { gatewayConfig } from "../config.js";
-import { readResponseBufferLimited } from "../limited-response.js";
 import { detectImageMimeType, imageExtensionFromMimeType, sanitizeFilename } from "./mime.js";
-import { safeFetch } from "./safe-fetch.js";
 import { tempMediaBlob } from "./temp-media-file.js";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
@@ -116,12 +116,23 @@ async function putPlannedAttachment(input: {
   if (!response.ok) throw new Error(`${input.label} upload failed ${response.status}`);
 }
 
+async function prepareDurableImage(image: InboundDownloadedImage, label: string): Promise<InboundDownloadedImage & { compressed: boolean }> {
+  const normalized = await normalizeImage(image.buffer, image.mediaType).catch((error: unknown) => {
+    logger.warn(`[InboundMedia:${label}] image kept uncompressed`, { id: image.id, error });
+    return null;
+  });
+  if (!normalized?.changed) return { ...image, compressed: false };
+  const stem = image.filename?.replace(/\.[^.]+$/, "") || image.id;
+  return { ...image, buffer: normalized.data, mediaType: normalized.mimeType, filename: `${stem}.webp`, compressed: true };
+}
+
 export async function uploadPlannedImageAttachment(input: {
   buffer: Buffer;
   mediaType: string;
   plan: GatewayImageAttachmentPlan;
   source: InboundMediaSource;
   originalUrl?: string | null;
+  original?: { mediaType: string; size: number };
 }): Promise<ContentBlock> {
   await putPlannedAttachment({
     body: new Uint8Array(input.buffer),
@@ -140,6 +151,7 @@ export async function uploadPlannedImageAttachment(input: {
       objectKey: input.plan.objectKey,
       source: input.source,
       originalUrl: input.originalUrl ?? null,
+      ...(input.original ? { originalMediaType: input.original.mediaType, originalSize: input.original.size } : {}),
     },
   };
 }
@@ -364,6 +376,9 @@ export async function ingestInboundMedia(input: {
       };
     });
 
+    const durableImages = new Map(await Promise.all(images.map(async (image) => [image.id, await prepareDurableImage(image, label)] as const)));
+    const durableImageOf = (image: InboundDownloadedImage) => durableImages.get(image.id) ?? { ...image, compressed: false };
+
     // Reserve private file slots for every image so durable failures can demote without re-plan.
     const imageFileSlots = images.map((image) => {
       const fallback = `${image.id}.${imageExtensionFromMimeType(image.mediaType)}`;
@@ -381,12 +396,15 @@ export async function ingestInboundMedia(input: {
 
     const plan = await requestGatewayAttachmentPlan({
       event: input.event,
-      images: images.map((image) => ({
-        id: image.id,
-        size: image.buffer.length,
-        mimeType: image.mediaType,
-        filename: image.filename ?? `${image.id}.${imageExtensionFromMimeType(image.mediaType)}`,
-      })),
+      images: images.map((image) => {
+        const durable = durableImageOf(image);
+        return {
+          id: image.id,
+          size: durable.buffer.length,
+          mimeType: durable.mediaType,
+          filename: durable.filename ?? `${image.id}.${imageExtensionFromMimeType(durable.mediaType)}`,
+        };
+      }),
       files: [
         ...plannedFiles.map((file) => ({
           id: file.id,
@@ -426,17 +444,20 @@ export async function ingestInboundMedia(input: {
         logger.warn(`[InboundMedia:${label}] image durable plan missing; demoted to file`, { id: image.id });
         continue;
       }
+      const durable = durableImageOf(image);
       try {
         const imageBlock = await uploadPlannedImageAttachment({
-          buffer: image.buffer,
-          mediaType: image.mediaType,
+          buffer: durable.buffer,
+          mediaType: durable.mediaType,
           plan: imagePlan,
           source: input.source,
           originalUrl: image.originalUrl,
+          original: durable.compressed ? { mediaType: image.mediaType, size: image.buffer.length } : undefined,
         });
         imageBlocksById[image.id] = imageBlock;
         blocks.push(imageBlock);
         uploadedImageUrls.push(imagePlan.publicUrl);
+        if (durable.compressed) continue;
         durableImageById.set(image.id, {
           publicUrl: imagePlan.publicUrl,
           filename: fallbackName,
@@ -453,7 +474,7 @@ export async function ingestInboundMedia(input: {
     let uploadedFilePaths: string[] = [];
     let fileFailures = 0;
 
-    // Private upload: ordinary files + only demoted images (pre-reserved slots).
+    // Private upload: ordinary files + demoted or compressed images (pre-reserved slots).
     const privateUploadFiles = [
       ...plannedFiles.map((file) => ({
         id: file.id,
@@ -462,7 +483,7 @@ export async function ingestInboundMedia(input: {
         mediaType: file.mimeType,
       })),
       ...imageFileSlots
-        .filter((slot) => demotedImageIds.has(slot.imageId))
+        .filter((slot) => demotedImageIds.has(slot.imageId) || durableImages.get(slot.imageId)?.compressed)
         .map((slot) => ({
           id: slot.id,
           buffer: slot.buffer,
@@ -540,7 +561,7 @@ export async function ingestInboundMedia(input: {
       if (imageBlocksById[image.id]) continue;
       const failureBlock: ContentBlock = {
         type: "text",
-        text: "[Image unavailable]",
+        text: IMAGE_UNAVAILABLE_TEXT,
         _meta: { source: input.source, originalUrl: image.originalUrl ?? null, reason: "demote_file_upload_failed" },
       };
       imageBlocksById[image.id] = failureBlock;

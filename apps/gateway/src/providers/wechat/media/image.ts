@@ -5,7 +5,7 @@ import { WeChatMessageItemType, WeChatUploadMediaType, type WeChatImageItem, typ
 import { aesEcbPaddedSize } from "./crypto.js";
 import { downloadWeChatCdnImage, uploadWeChatCdnBuffer } from "./cdn.js";
 import { detectImageMimeType } from "./mime.js";
-import { safeFetch } from "./url.js";
+import { safeFetch } from "@cohub/infra/safe-fetch";
 
 export const WECHAT_INBOUND_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 export const WECHAT_INBOUND_IMAGE_MAX_COUNT = 4;
