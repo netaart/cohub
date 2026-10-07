@@ -1,7 +1,16 @@
+import { DISPLAY_ID_PATTERN } from "@cohub/protocol/display";
 import { buildSpaceRootRoute } from "$lib/space-routes";
 import { parseAppWindowKey } from "./app-window-key";
 
-export type WindowKind = "file" | "board" | "port" | "app";
+export type WindowKind = "file" | "board" | "port" | "app" | "display";
+
+export const WINDOW_KINDS: readonly WindowKind[] = [
+	"file",
+	"board",
+	"port",
+	"app",
+	"display",
+];
 
 export type WindowRef = {
 	kind: WindowKind;
@@ -15,6 +24,10 @@ const LEGACY_WINDOW_QUERY_KEY = "preview";
 /** An App id, or an App id bound to a workspace file. */
 export function isValidAppKey(key: string): boolean {
 	return parseAppWindowKey(key) !== null;
+}
+
+export function isValidDisplayKey(key: string): boolean {
+	return DISPLAY_ID_PATTERN.test(key);
 }
 
 /** Accept only integer ports in 1..65535. Reject host-injection forms. */
@@ -39,11 +52,11 @@ export function parseWindowParam(
 		value.slice(0, separator) === "work" ? "app" : value.slice(0, separator);
 	const key = value.slice(separator + 1);
 	if (!key) return null;
-	if (kind !== "file" && kind !== "board" && kind !== "port" && kind !== "app")
-		return null;
+	if (!(WINDOW_KINDS as readonly string[]).includes(kind)) return null;
 	if (kind === "port" && !isValidPortKey(key)) return null;
 	if (kind === "app" && !isValidAppKey(key)) return null;
-	return { kind, key };
+	if (kind === "display" && !isValidDisplayKey(key)) return null;
+	return { kind: kind as WindowKind, key };
 }
 
 function windowSearchParams(

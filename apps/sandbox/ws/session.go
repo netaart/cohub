@@ -231,6 +231,8 @@ func (s *Server) sendHeartbeat(session *connectionSession, includeSnapshot bool)
 			ProcessAbort:       true,
 			ProcessRg:          rpc.HasRipgrep(),
 			ProcessFd:          rpc.HasFd(),
+			Display:            true,
+			RTC:                true,
 		}
 		message.Filesystem = &protocol.SandboxFilesystem{
 			DefaultCwd: s.cfg.WorkspaceDir,

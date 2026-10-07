@@ -179,6 +179,11 @@ cohub runtime down
 
 # Optional: request a new Space (-n is --new, not --name).
 cohub runtime up -n --name another-project
+
+# Optional: share this computer's screen (asks first, default no),
+# or a virtual one on a headless Linux machine.
+cohub runtime up --display
+cohub runtime up --display xvfb:1920x1080
 ```
 
 Bindings are scoped by local directory, account, and environment, and stored in
@@ -189,6 +194,29 @@ If not ready within 30 seconds, it returns exit code 2 and continues connecting.
 `--yes` authorizes local execution without interaction. `down` retains all data and
 requires `--yes` when work is unconfirmed. Network reconnection is automatic; it does
 not replay model or tool work, and a disconnect does not confirm a task stopped.
+
+### Displays
+
+Screens a Space's machine shares: a phone from the Android app, or a computer from
+`cohub runtime up --display`. Coordinates are pixels of the display, or of a screenshot when
+`--size` gives its dimensions:
+
+```bash
+cohub spaces displays ls
+cohub spaces displays capture --max-size 1280 -o screen.jpg
+cohub spaces displays tap 540 1200
+cohub spaces displays swipe 288 1000 288 300 --size 576x1280
+cohub spaces displays tap 300 200 --count 2   # double-click; --button secondary right-clicks
+cohub spaces displays type "hello"
+cohub spaces displays key Control+a
+cohub spaces displays press back              # phones list their system buttons
+```
+
+On macOS, the terminal running the Runtime needs Screen Recording, and Accessibility to control
+the screen (System Settings → Privacy & Security). Linux needs an X11 session; Wayland is not
+supported yet.
+
+`act` runs a JSON array of actions from `--actions` or stdin, in one timeline.
 
 ### Boards
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
+import type { DisplayInfo } from "../display/index.js";
 import { contentBlockSchema } from "../core/content-schema.js";
 import { harnessArchiveSchema, type HarnessArchive } from "./archive.js";
 import { nativeRuntimeEventSchema } from "./native.js";
@@ -33,6 +34,7 @@ export const RUNTIME_MAX_BATCH_INPUT_BYTES = 2 * 1024 * 1024;
 export const RUNTIME_RECOVERY_BATCH_SIZE = 64;
 export const runtimeRegistrationKey = (spaceId: string) => `runtime:space:${spaceId}`;
 export const runtimeWorkspaceKey = (spaceId: string) => `runtime:workspace:${spaceId}`;
+export const runtimeDisplaysKey = (spaceId: string) => `runtime:displays:${spaceId}`;
 export const runtimeWorkspaceSchema = z.object({
   runtimeId: z.string().uuid(),
   connectionId: z.string().uuid(),
@@ -140,6 +142,7 @@ export const fileWatcherStatusSchema = z.object({
 export type RuntimeStatus = {
   kind: "cloud" | "local"; online: boolean; runtimeId?: string | null; capabilities: RuntimeCapabilities | null;
   fileWatcher: z.infer<typeof fileWatcherStatusSchema> | null;
+  displays?: DisplayInfo[] | null;
   /** Authoritative file-bridge lease; absent on older servers. */
   workspace?: { online: boolean; observedAt: string | null };
   observedAt?: string;

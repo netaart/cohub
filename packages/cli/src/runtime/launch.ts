@@ -16,13 +16,24 @@ import type { RuntimeDiagnostic } from "./diagnostics.js";
 import { createDiagnosticConsole, printRuntimeSummary, runtimeWebUrl, type RuntimeSummary } from "./presentation.js";
 import { runRuntime, type RuntimeLaunch } from "./supervisor.js";
 
-export type RuntimeUpOptions = { space?: string; new?: boolean; name?: string; harness: string[]; pi?: string; codex?: string; yes?: boolean; json?: boolean; detach?: boolean; verbose?: boolean };
+export type RuntimeUpOptions = { space?: string; new?: boolean; name?: string; harness: string[]; pi?: string; codex?: string; display?: string | boolean; yes?: boolean; json?: boolean; detach?: boolean; verbose?: boolean };
 export const resolveLocalSpaceName = (root: string, name?: string) => name?.trim() || basename(root) || "local-space";
 export function parseRuntimeHarnesses(values: string[]): ("pi" | "codex")[] {
   const names = values.flatMap((value) => value.split(",")).map((name) => name.trim()).filter(Boolean);
   if (names.some((name) => !isLocalHarness(name))) throw new Error("Harness must be pi or codex");
   return [...new Set(names.length ? names : ["pi"])] as ("pi" | "codex")[];
 }
+
+export function parseRuntimeDisplay(value: string | boolean | undefined): string | undefined {
+  if (value === undefined || value === false) return undefined;
+  const spec = value === true ? "auto" : value.trim();
+  if (!/^(auto|macos|x11(:[\w.:-]+)?|xvfb(:\d{3,4}x\d{3,4})?)$/.test(spec)) {
+    throw new Error("Display must be auto, macos, x11[:display] or xvfb[:WIDTHxHEIGHT]");
+  }
+  return spec;
+}
+
+const isVirtualDisplay = (spec: string) => spec.startsWith("xvfb");
 
 async function requestedRuntimeSpace(program: Command, target?: string): Promise<string | null> {
   const ref = target?.trim() || explicitSpace(program);
@@ -81,10 +92,11 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   const binding = await getRuntimeSpaceBinding(root, identity);
   const existingId = requested || binding?.spaceId;
   let harnesses = parseRuntimeHarnesses(options.harness);
+  let display = parseRuntimeDisplay(options.display);
   if (existingId && !options.new) {
     const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, existingId));
     if (existing) {
-      if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || options.pi || options.codex) {
+      if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || options.pi || options.codex || display && display !== existing.display) {
         throw new Error("Runtime is running with a different configuration. Use down first");
       }
       // `up` is the single idempotent entry: a reused instance adopts its running
@@ -120,6 +132,10 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
       process.stderr.write(`\nDirectory  ${root}\n${requested ? `Space  ${runtimeWebUrl(requested)}\n` : ""}`);
       const answer = await rl.question("Collaborators can execute as your OS user, beyond this folder. Allow? [Y/n] ");
       if (/^n(o)?$/i.test(answer.trim())) return;
+      if (display && !isVirtualDisplay(display)) {
+        const share = await rl.question("Collaborators and agents can see and control this screen. Share it? [y/N] ");
+        if (!/^y(es)?$/i.test(share.trim())) display = undefined;
+      }
     } finally { rl.close(); }
   }
   if (options.yes && createNew && binding && !options.name) name = `${name}-${randomUUID().slice(0, 6)}`;
@@ -141,7 +157,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   });
   // Consent (or --yes) precedes any user-level integration install; failure never blocks startup.
   const native = await ensureNativeSync({ root, spaceId, identity, harnesses, yes: options.yes, executables: { pi: options.pi, codex: options.codex } });
-  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables: { pi: options.pi, codex: options.codex }, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory };
+  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables: { pi: options.pi, codex: options.codex }, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory, display };
   const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
   if (existing) {
     if (existing.root !== root) throw new Error("This Space is running in another directory");

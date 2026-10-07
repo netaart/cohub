@@ -6,6 +6,7 @@ import {
 	Globe,
 	Menu,
 	Minimize2,
+	MonitorSmartphone,
 	MoreHorizontal,
 	MousePointer2,
 	PanelRight,
@@ -54,7 +55,8 @@ const kindIcon = {
 	board: MousePointer2,
 	port: Globe,
 	app: Rocket,
-} as const;
+	display: MonitorSmartphone,
+} as const satisfies Record<Window["kind"], unknown>;
 
 const primaryActions = $derived(
 	actions.filter((action) => action.primary && !action.hidden),

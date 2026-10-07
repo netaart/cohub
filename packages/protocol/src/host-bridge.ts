@@ -27,6 +27,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "files",
   "navigation.back",
   "shortcuts",
+  "display",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -129,6 +130,13 @@ export const deviceFolderListingSchema = z.object({
 }).strict();
 export type DeviceFolderListing = z.infer<typeof deviceFolderListingSchema>;
 
+export const deviceDisplayStatusSchema = z.object({
+  sharedWith: z.uuid().nullable(),
+  control: z.boolean(),
+  error: z.string().min(1).max(64).nullable(),
+}).strict();
+export type DeviceDisplayStatus = z.infer<typeof deviceDisplayStatusSchema>;
+
 export const hostColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i);
 
 export const HOST_HAPTICS = ["tick", "confirm", "reject", "longPress"] as const;
@@ -184,10 +192,14 @@ export const HOST_BRIDGE_METHODS = {
   "files.save": { params: hostFileSaveParamsSchema, result: z.boolean() },
   "navigation.interceptBack": { params: z.object({ enabled: z.boolean() }).strict(), result: z.boolean() },
   "shortcuts.push": { params: hostShortcutSchema, result: z.boolean() },
+  "display.status": { params: z.undefined(), result: deviceDisplayStatusSchema },
+  "display.share": { params: z.object({ spaceId: z.uuid() }).strict(), result: deviceDisplayStatusSchema },
+  "display.stop": { params: z.undefined(), result: deviceDisplayStatusSchema },
+  "display.openControlSettings": { params: z.undefined(), result: z.boolean() },
 } as const;
 export type HostBridgeMethod = keyof typeof HOST_BRIDGE_METHODS;
 
-export const HOST_BRIDGE_EVENTS = ["auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background", "runtime.changed"] as const;
+export const HOST_BRIDGE_EVENTS = ["auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background", "runtime.changed", "display.changed"] as const;
 export type HostBridgeEventName = (typeof HOST_BRIDGE_EVENTS)[number];
 
 export const HOST_BRIDGE_ERROR = {

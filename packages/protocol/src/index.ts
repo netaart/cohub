@@ -24,6 +24,7 @@ export * from "./realtime/types.js";
 export * from "./task/index.js";
 export * from "./fs/index.js";
 export * from "./ports/index.js";
+export * from "./display/index.js";
 export * from "./search/index.js";
 export * from "./sent-turns.js";
 export * from "./generation/index.js";

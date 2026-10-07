@@ -116,6 +116,15 @@ cohub runtime up ./my-project
 绑定按目录、账号和环境隔离，保存在 `~/.config/cohub/runtime-spaces.json`。
 这适合让 Cohub Agents 直接面对本地工作树。详见 [CLI](/zh/docs/developers/cli)。
 
+## 共享手机屏幕
+
+当 Cohub Android 应用为某个 Space 提供服务时，还可以把手机屏幕共享给它。在手机上打开该 Space 的 Runtime 菜单，选择「共享屏幕」；
+每次共享 Android 都会请求授权。之后，能管理该 Space 的人可以在 Web 或其他设备上通过「屏幕 → 查看」实时看到手机屏幕，
+Space 的 Agent 也可以对它截图。
+
+如果希望人和 Agent 能在手机上点按、滑动和输入，选择「允许控制」，并在无障碍设置中启用 Cohub。控制只在共享屏幕期间生效。
+你可以随时在 Runtime 菜单或通知中停止共享。
+
 ## 实用建议
 
 - 把可发布输出放在稳定路径

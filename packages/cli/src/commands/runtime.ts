@@ -15,7 +15,7 @@ import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirector
 import { atLeastLevel, diagnosticLevels, formatDiagnostic, formatImportProgress, formatNativeSync, printRuntimeSummary } from "../runtime/presentation.js";
 import { readRuntimeDiagnosticEvents, RuntimeDiagnosticReader, runtimeDiagnosticsDirectory, serializeDiagnosticError, type RuntimeDiagnosticLevel } from "../runtime/diagnostics.js";
 
-export { resolveLocalSpaceName, parseRuntimeHarnesses } from "../runtime/launch.js";
+export { resolveLocalSpaceName, parseRuntimeDisplay, parseRuntimeHarnesses } from "../runtime/launch.js";
 
 const reportFailure = (cause: unknown) => {
   process.stderr.write(`Runtime failed: ${serializeDiagnosticError(cause).message}\n`);
@@ -50,6 +50,7 @@ export function registerRuntime(program: Command) {
     .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--pi <path>", "Pi executable")
     .option("--codex <path>", "Codex executable")
+    .option("--display [screen]", "Share a screen: auto (this computer), or xvfb[:WIDTHxHEIGHT] for a virtual one")
     .option("-y, --yes", "Accept defaults and authorize local execution and native sync")
     .option("--verbose", "Show diagnostic details")
     .option("--json", "JSON output")
@@ -197,6 +198,8 @@ export function registerRuntime(program: Command) {
           if (local) printRuntimeSummary(local);
           else process.stdout.write(`Local process  Not running\nSpace  ${spaceId}\nLogs  ${result.diagnosticsPath}\n`);
           process.stdout.write(`Server  ${remote.error ? `Unknown — ${remote.error}` : remote.value?.online ? "Harness connected" : "Offline"}\nArchives  ${pendingLocalArchives} pending · ${failedLocalArchives} failed\n`);
+          const displays = remote.value?.displays ?? [];
+          if (displays.length) process.stdout.write(`Displays  ${displays.map((display) => `${display.name || display.id} ${display.width}x${display.height}${display.input ? "" : " (view only)"}`).join(" · ")}\n`);
           process.stdout.write(formatNativeSync(nativeSync.config, local?.native, nativeSync.error));
         }
       } catch (cause) { reportFailure(cause); }

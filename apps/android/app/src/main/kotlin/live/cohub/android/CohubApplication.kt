@@ -10,6 +10,7 @@ import live.cohub.android.auth.Account
 import live.cohub.android.auth.AuthConfig
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.auth.SealedCredentialStore
+import live.cohub.android.display.DeviceDisplay
 import live.cohub.android.files.FileSaver
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
@@ -33,6 +34,7 @@ class CohubApplication : Application() {
             onAccountChanged = { previous, current ->
                 runtime.accountChanged()
                 if (previous is Account.SignedIn && current !is Account.SignedIn) {
+                    display.stop()
                     runtime.stopAll()
                     lastPage.clear()
                     LauncherShortcuts.clear(this)
@@ -44,6 +46,8 @@ class CohubApplication : Application() {
     val runtime: DeviceRuntime by lazy { DeviceRuntime(this) { (auth.account as? Account.SignedIn)?.key } }
 
     val lastPage: LastPage by lazy { LastPage(this) }
+
+    val display: DeviceDisplay by lazy { DeviceDisplay(this, scope) }
 
     val files: FileSaver? by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) FileSaver(this, http, scope) { auth.accessToken() } else null

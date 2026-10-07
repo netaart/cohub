@@ -30,6 +30,10 @@ object HostProtocol {
         const val FILES_SAVE = "files.save"
         const val NAVIGATION_INTERCEPT_BACK = "navigation.interceptBack"
         const val SHORTCUTS_PUSH = "shortcuts.push"
+        const val DISPLAY_STATUS = "display.status"
+        const val DISPLAY_SHARE = "display.share"
+        const val DISPLAY_STOP = "display.stop"
+        const val DISPLAY_OPEN_CONTROL_SETTINGS = "display.openControlSettings"
     }
 
     enum class Haptic(val wire: String) {
@@ -58,6 +62,7 @@ object HostProtocol {
         const val APP_FOREGROUND = "app.foreground"
         const val APP_BACKGROUND = "app.background"
         const val RUNTIME_CHANGED = "runtime.changed"
+        const val DISPLAY_CHANGED = "display.changed"
     }
 
     private val COLOR = Regex("^#[0-9a-fA-F]{6}$")

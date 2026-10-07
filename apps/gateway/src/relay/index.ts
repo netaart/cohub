@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { gatewayConfig } from "../config.js";
 import { redisCommandClient, REALTIME_OUTBOUND_CHANNEL } from "../redis.js";
-import { parseRuntimeRegistration, runtimeRegistrationKey, runtimeWorkspaceKey } from "@cohub/protocol";
+import { parseRuntimeRegistration, runtimeDisplaysKey, runtimeRegistrationKey, runtimeWorkspaceKey } from "@cohub/protocol";
 import { publishRuntimeChanged } from "./status.js";
 import { authorizeLocalSandbox, reportLocalSandboxStatus } from "../api-client.js";
 import { enqueueSpaceHookFromEvent } from "../space-hooks.js";
@@ -97,6 +97,7 @@ const sandboxRelay = createSandboxRelay({
   runtimeChanged: publishRuntimeChanged,
   publishWatcherEvent: publishRelayWatcherEvent,
   storeWatcherStatus: async (spaceId, status) => { await redisCommandClient.set(`sandbox:watcher:${spaceId}`, JSON.stringify(status), "EX", 60); },
+  storeDisplays: async (spaceId, snapshot) => { await redisCommandClient.set(runtimeDisplaysKey(spaceId), JSON.stringify(snapshot), "EX", 60); },
   publishChannelHint: async (channelId, endpoint) => { await redisCommandClient.set(relayChannelHintKey(channelId), endpoint, "EX", CHANNEL_HINT_TTL_SECONDS); },
   readChannelHint: (channelId) => redisCommandClient.get(relayChannelHintKey(channelId)),
   clearChannelHint: async (channelId) => { await redisCommandClient.del(relayChannelHintKey(channelId)); },

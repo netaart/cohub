@@ -6,6 +6,12 @@ import { goto } from "$app/navigation";
 import { floatNear, portal } from "$lib/actions/portal";
 import DeviceFolderPicker from "$lib/components/DeviceFolderPicker.svelte";
 import {
+	deviceDisplayStatus,
+	openDeviceControlSettings,
+	shareDeviceDisplay,
+	stopDeviceDisplay,
+} from "$lib/device-display.svelte";
+import {
 	type DeviceRuntimeRefusal,
 	deviceRuntimeInstances,
 	isDeviceRuntimeRunning,
@@ -28,8 +34,15 @@ import {
 	runtimeTone,
 } from "../runtime-status-view";
 
-const { spaceId, canManage = false }: { spaceId: string; canManage?: boolean } =
-	$props();
+const {
+	spaceId,
+	canManage = false,
+	onOpenDisplay,
+}: {
+	spaceId: string;
+	canManage?: boolean;
+	onOpenDisplay?: (displayId: string) => void;
+} = $props();
 const locale = $derived(getLocale());
 const status = $derived(cachedRuntimeStatus(spaceId));
 let open = $state(false);
@@ -81,6 +94,44 @@ const serving = $derived(isDeviceRuntimeRunning(device));
 let deviceBusy = $state(false);
 let deviceHint = $state<string | null>(null);
 let pickingFolder = $state(false);
+const displays = $derived(
+	tone !== "unknown" && status?.workspace?.online
+		? (status.displays ?? [])
+		: [],
+);
+const screen = $derived(serving ? deviceDisplayStatus() : null);
+const sharingHere = $derived(screen?.sharedWith === spaceId);
+const screenLabel = $derived(
+	sharingHere
+		? screen?.control
+			? m.runtime_display_sharing_control({}, { locale })
+			: m.runtime_display_sharing({}, { locale })
+		: m.runtime_not_connected({}, { locale }),
+);
+
+async function updateScreen(action: () => Promise<unknown>) {
+	if (deviceBusy) return;
+	deviceBusy = true;
+	deviceHint = null;
+	try {
+		const outcome = await action();
+		if (outcome === "declined")
+			deviceHint = m.runtime_display_declined({}, { locale });
+		else if (outcome === "failed")
+			deviceHint = m.runtime_display_failed({}, { locale });
+		void refresh();
+	} catch {
+		deviceHint = m.runtime_display_failed({}, { locale });
+	} finally {
+		deviceBusy = false;
+	}
+}
+
+function openDisplay(displayId: string) {
+	close();
+	onOpenDisplay?.(displayId);
+}
+
 const deviceLabel = $derived(
 	device ? describeDevice(device) : m.runtime_not_connected({}, { locale }),
 );
@@ -229,7 +280,19 @@ $effect(() => {
 					<div class="runtime-row"><dt>{m.runtime_workspace_bridge({}, { locale })}</dt><dd>{bridgeLabel}</dd></div>
 					<div class="runtime-row"><dt>{m.runtime_file_watcher({}, { locale })}</dt><dd>{watcherLabel}{#if watcher}<span class="runtime-meta block">{watcher.backend} · {ageLabel(Date.parse(watcher.observedAt))}</span>{/if}</dd></div>
 					{#if deviceInstances}<div class="runtime-row"><dt>{m.runtime_this_device({}, { locale })}</dt><dd class:is-failed={device?.state === "error"}>{deviceLabel}{#if device}<span class="runtime-meta block">{device.label}</span>{/if}</dd></div>{/if}
+					{#if screen}<div class="runtime-row"><dt>{m.runtime_this_screen({}, { locale })}</dt><dd>{screenLabel}{#if screen.sharedWith && !sharingHere}<span class="runtime-meta block">{m.runtime_display_shared_elsewhere({}, { locale })}</span>{/if}</dd></div>{/if}
 				</dl>
+				{#if displays.length > 0}
+					<div class="runtime-displays">
+						<h3>{m.runtime_displays({}, { locale })}</h3>
+						{#each displays as item (item.id)}
+							<div class="runtime-display">
+								<span class="runtime-display-name">{item.name || item.id}<span class="runtime-meta">{item.width}×{item.height}</span></span>
+								{#if canManage && onOpenDisplay}<button type="button" class="runtime-display-open" onclick={() => openDisplay(item.id)}>{m.runtime_display_open({}, { locale })}</button>{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
 				{#if tone !== "online"}
 					<p class="runtime-hint">{tone === "attention" ? m.runtime_degraded_hint({}, { locale }) : tone === "unknown" ? m.runtime_unknown_hint({}, { locale }) : m.runtime_disconnected_hint({}, { locale })}</p>
 				{/if}
@@ -238,6 +301,14 @@ $effect(() => {
 					{#if deviceHint}<p class="runtime-hint">{deviceHint}</p>{/if}
 					<div class="runtime-device-actions">
 						{#if serving}
+							{#if screen}
+								{#if sharingHere}
+									<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void updateScreen(stopDeviceDisplay)}>{m.runtime_display_stop({}, { locale })}</button>
+									{#if !screen.control}<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(openDeviceControlSettings)}>{m.runtime_display_allow_control({}, { locale })}</button>{/if}
+								{:else}
+									<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(() => shareDeviceDisplay(spaceId))}>{m.runtime_display_share({}, { locale })}</button>
+								{/if}
+							{/if}
 							<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void updateDevice(async () => { await stopDeviceRuntime(spaceId); return null; })}>{m.runtime_device_disconnect({}, { locale })}</button>
 						{:else if device}
 							{@const root = device.root}
@@ -294,7 +365,14 @@ $effect(() => {
 .runtime-action { display: inline-flex; flex: 0 0 auto; height: 32px; width: 32px; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-tertiary); cursor: pointer; }
 .runtime-action:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .runtime-action:disabled { opacity: .5; cursor: default; }
-.runtime-device-actions { display: flex; gap: 8px; margin-top: 10px; }
+.runtime-device-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.runtime-displays { margin-top: 4px; border-top: 1px solid var(--border-subtle); padding-top: 10px; }
+.runtime-displays h3 { margin: 0 0 4px; color: var(--text-tertiary); font-size: 12px; font-weight: 500; }
+.runtime-display { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--text-secondary); }
+.runtime-display-name { display: flex; min-width: 0; align-items: baseline; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-display-open { flex: 0 0 auto; height: 28px; padding: 0 10px; border-radius: 6px; background: var(--bg-input); box-shadow: inset 0 0 0 1px var(--border-subtle); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.runtime-display-open:hover { background: var(--bg-hover); color: var(--text-primary); }
+.runtime-display-open:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .runtime-device-action { display: flex; flex: 1; min-height: 36px; align-items: center; justify-content: center; border-radius: 6px; background: var(--brand); color: var(--brand-contrast-fg); font-size: 13px; font-weight: 500; cursor: pointer; }
 .runtime-device-action:hover { background: var(--brand-hover); }
 .runtime-device-action[data-secondary="true"] { background: var(--bg-input); color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--border-subtle); }
@@ -310,5 +388,6 @@ $effect(() => {
 	.runtime-backdrop { background: var(--overlay-scrim); }
 	.runtime-action { width: 44px; height: 44px; }
 	.runtime-device-action { min-height: 44px; }
+	.runtime-display-open { height: 36px; padding: 0 14px; }
 }
 </style>

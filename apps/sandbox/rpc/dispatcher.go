@@ -21,9 +21,11 @@ import (
 	"github.com/google/uuid"
 	ignore "github.com/sabhiram/go-gitignore"
 
+	"github.com/cohub/apps/sandbox/display"
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/process"
 	"github.com/cohub/apps/sandbox/protocol"
+	"github.com/cohub/apps/sandbox/rtc"
 	"github.com/cohub/apps/sandbox/search"
 )
 
@@ -41,6 +43,8 @@ type Dispatcher struct {
 	gitignoreMu    sync.Mutex
 	gitignoreCache *gitignoreCacheEntry
 	searchManager  *search.Manager
+	displays       *display.Hub
+	sessions       *rtc.Manager
 }
 
 type gitignoreMatcher struct {
@@ -160,6 +164,8 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
 		return accepted, d.complete(request, accepted.OpID, d.handleProcessAbort(request))
+	case "display.list", "display.capture", "display.input", "rtc.open", "rtc.close":
+		return accepted, d.complete(request, accepted.OpID, d.handleDisplay(request, ownerIdentity))
 	default:
 		return accepted, d.failed(request, accepted.OpID, "UNSUPPORTED_METHOD", fmt.Sprintf("unsupported method: %s", request.Method))
 	}

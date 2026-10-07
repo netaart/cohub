@@ -21,6 +21,7 @@ object HostCapabilities {
     const val FILES = "files"
     const val NAVIGATION_BACK = "navigation.back"
     const val SHORTCUTS = "shortcuts"
+    const val DISPLAY = "display"
 
     private val always: List<String> = listOf(
         AUTH_TOKEN,
@@ -37,5 +38,5 @@ object HostCapabilities {
     )
 
     fun advertised(runtime: Boolean, files: Boolean): List<String> =
-        always + listOfNotNull(RUNTIME.takeIf { runtime }, FILES.takeIf { files })
+        always + listOfNotNull(RUNTIME.takeIf { runtime }, DISPLAY.takeIf { runtime }, FILES.takeIf { files })
 }

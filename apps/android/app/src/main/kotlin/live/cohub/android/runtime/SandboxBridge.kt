@@ -29,6 +29,7 @@ class SandboxBridge(
     private val spaceId: String,
     private val relayUrl: String,
     private val runtimeId: String,
+    private val displaySocket: File,
     private val token: suspend () -> String,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -66,6 +67,7 @@ class SandboxBridge(
                     "COHUB_RUNTIME_MANAGED" to "1",
                     "COHUB_RUNTIME_CONTROL_FD" to "2", // a JVM child inherits only the standard streams
                     "COHUB_LOG_FORMAT" to "json",
+                    "COHUB_DISPLAY" to "unix:${displaySocket.path}",
                     "HOME" to home.path,
                     "TMPDIR" to tmp.path,
                     // Other apps' private storage is unreadable, and thumbnails churn.

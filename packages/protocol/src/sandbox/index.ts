@@ -1,3 +1,4 @@
+import type { DisplayCapture, DisplayCaptureParams, DisplayInfo, DisplayInputBatch, RtcIceServer } from "../display/index.js";
 import type { WORKSPACE_CANDIDATE_INDEX_FAMILY } from "../search/index.js";
 
 export const AGENT_SANDBOX_PROTOCOL_VERSION = "1" as const;
@@ -28,6 +29,11 @@ export const RPC_METHODS = [
   "fs.search",
   "process.start",
   "process.abort",
+  "display.list",
+  "display.capture",
+  "display.input",
+  "rtc.open",
+  "rtc.close",
 ] as const;
 
 export type FsChange = {
@@ -88,6 +94,8 @@ export const RPC_ERROR_CODES = [
   "IO_ERROR",
   "INTERNAL_ERROR",
   "SEARCH_UNAVAILABLE",
+  "UNAVAILABLE",
+  "BUSY",
 ] as const;
 
 export type RpcErrorCode = (typeof RPC_ERROR_CODES)[number];
@@ -140,6 +148,8 @@ export type SandboxCapabilities = {
   processAbort: boolean;
   processRg?: boolean;
   processFd?: boolean;
+  display?: boolean;
+  rtc?: boolean;
 };
 
 export type SandboxFilesystemRoot = {
@@ -438,6 +448,18 @@ export type ProcessAbortResult = {
   aborted: boolean;
 };
 
+export type DisplayRpcCaptureParams = DisplayCaptureParams & { display: string };
+export type DisplayRpcInputParams = DisplayInputBatch & { display: string };
+
+export type RtcOpenParams = {
+  sessionId: string;
+  display: string;
+  offer: string;
+  iceServers: RtcIceServer[];
+  control: boolean;
+  userId?: string;
+};
+
 export type RpcRequestMap = {
   "fs.read": {
     params: FsReadParams;
@@ -486,6 +508,26 @@ export type RpcRequestMap = {
   "process.abort": {
     params: ProcessAbortParams;
     result: ProcessAbortResult;
+  };
+  "display.list": {
+    params: Record<string, never>;
+    result: { displays: DisplayInfo[] };
+  };
+  "display.capture": {
+    params: DisplayRpcCaptureParams;
+    result: DisplayCapture;
+  };
+  "display.input": {
+    params: DisplayRpcInputParams;
+    result: { applied: number };
+  };
+  "rtc.open": {
+    params: RtcOpenParams;
+    result: { answer: string };
+  };
+  "rtc.close": {
+    params: { sessionId: string };
+    result: { closed: boolean };
   };
 };
 

@@ -35,6 +35,8 @@ import AppWindow from "./AppWindow.svelte";
 import type { InlineAppPreview } from "./app-window-controller.svelte";
 import BoardWindow from "./BoardWindow.svelte";
 import type { InlineBoardPanelState } from "./board-window-controller.svelte";
+import DisplayWindow from "./DisplayWindow.svelte";
+import type { DisplayTab } from "./display-window-controller.svelte";
 import type { FileWorkspaceInlineFile } from "./file-workspace-controller.svelte";
 import InlineFilePanel from "./InlineFilePanel.svelte";
 import PortWindow from "./PortWindow.svelte";
@@ -92,7 +94,10 @@ export type SpaceFileDomainProps = {
 	retainedAppKeys: ReadonlySet<string>;
 	appShell: AppRuntimeShellContext;
 	activeInlineAppKey: string | null;
-	activeWindowKind: "file" | "board" | "port" | "app" | null;
+	displayTabs: DisplayTab[];
+	activeDisplay: string | null;
+	displayNames: Record<string, string>;
+	activeWindowKind: Window["kind"] | null;
 	inlinePortEndpoint: SpacePublicEndpoint | null;
 	previewEndpoints: SpacePublicEndpoints;
 	inlineFileDownloadUrl: string;
@@ -158,6 +163,8 @@ export type SpaceFileDomainProps = {
 	onCloseInlineBoardTab: (path: string) => void;
 	onActivateInlinePort: (port: string) => void;
 	onCloseInlinePortTab: (port: string) => void;
+	onActivateDisplay: (display: string) => void;
+	onCloseDisplayTab: (display: string) => void;
 	/** App windows are addressed by window key; see `app-window-key`. */
 	onActivateInlineApp: (key: string) => void;
 	onCloseInlineAppTab: (key: string) => void;
@@ -181,7 +188,10 @@ export type SpaceFileDomainProps = {
 	onOverwriteInlineFile: () => void | Promise<void>;
 	onReloadInlineFile: () => void | Promise<void>;
 	onOpenInlinePort: (port: string, url: string) => void;
-	onCommitInlineBoard: (boardId: string, patch: import("@cohub/protocol").BoardPatch) => void | Promise<void>;
+	onCommitInlineBoard: (
+		boardId: string,
+		patch: import("@cohub/protocol").BoardPatch,
+	) => void | Promise<void>;
 	onPlayInlineBoard: (
 		boardId: string,
 		command: import("@cohub/protocol").BoardPlaybackCommand,
@@ -262,6 +272,9 @@ let {
 	retainedAppKeys,
 	appShell,
 	activeInlineAppKey,
+	displayTabs,
+	activeDisplay,
+	displayNames,
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,
@@ -321,6 +334,8 @@ let {
 	onCloseInlineBoardTab,
 	onActivateInlinePort,
 	onCloseInlinePortTab,
+	onActivateDisplay,
+	onCloseDisplayTab,
 	onActivateInlineApp,
 	onCloseInlineAppTab,
 	onRetryInlineApp,
@@ -408,6 +423,14 @@ const windows = $derived([
 		syncStatus: "idle" as const,
 		active: activeWindowKind === "port" && tab.port === activeInlinePort,
 	})),
+	...displayTabs.map((tab) => ({
+		kind: "display" as const,
+		key: tab.display,
+		label: displayNames[tab.display] ?? tab.display,
+		title: displayNames[tab.display] ?? tab.display,
+		syncStatus: "idle" as const,
+		active: activeWindowKind === "display" && tab.display === activeDisplay,
+	})),
 	...inlineAppTabs.map((tab) => ({
 		kind: "app" as const,
 		key: tab.key,
@@ -443,6 +466,7 @@ function activateWindow(kind: Window["kind"], key: string) {
 	if (kind === "file") onActivateInlineFile(key);
 	else if (kind === "board") onActivateInlineBoard(key);
 	else if (kind === "port") onActivateInlinePort(key);
+	else if (kind === "display") onActivateDisplay(key);
 	else onActivateInlineApp(key);
 }
 
@@ -450,6 +474,7 @@ function closeWindow(kind: Window["kind"], key: string) {
 	if (kind === "file") onCloseInlineFileTab(key);
 	else if (kind === "board") onCloseInlineBoardTab(key);
 	else if (kind === "port") onCloseInlinePortTab(key);
+	else if (kind === "display") onCloseDisplayTab(key);
 	else onCloseInlineAppTab(key);
 }
 
@@ -594,6 +619,28 @@ function previewContentOut(node: Element) {
 		/>
 	</div>
 {/if}
+
+{#each displayTabs as tab (tab.display)}
+	{@const isActiveDisplay =
+		activeWindowKind === "display" && tab.display === activeDisplay}
+	<div
+		class="h-full min-h-0"
+		hidden={!isActiveDisplay}
+		inert={!isActiveDisplay}
+		aria-hidden={!isActiveDisplay}
+	>
+		<DisplayWindow
+			{spaceId}
+			displayId={tab.display}
+			active={isActiveDisplay}
+			{windows}
+			{chrome}
+			onActivateWindow={activateWindow}
+			onCloseWindow={closeWindow}
+			{isMobile}
+		/>
+	</div>
+{/each}
 
 {#each retainedAppTabs as tab (tab.id)}
 	{@const isActiveApp =

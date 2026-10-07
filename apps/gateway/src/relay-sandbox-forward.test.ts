@@ -69,6 +69,7 @@ function clusterFixture() {
       runtimeChanged: async () => undefined,
       publishWatcherEvent: async () => undefined,
       storeWatcherStatus: async () => undefined,
+      storeDisplays: async () => undefined,
       publishChannelHint: async (channelId: string, owner: string) => { hints.set(channelId, owner); },
       readChannelHint: async (channelId: string) => hints.get(channelId) ?? null,
       clearChannelHint: async (channelId: string) => { hints.delete(channelId); },

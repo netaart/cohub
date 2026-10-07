@@ -168,6 +168,10 @@ cohub runtime down
 
 # 可选：请求新建 Space（-n 是 --new，不再是 --name）
 cohub runtime up -n --name another-project
+
+# 可选：共享这台电脑的屏幕（会先询问，默认否），或在无界面的 Linux 上启动一块虚拟屏
+cohub runtime up --display
+cohub runtime up --display xvfb:1920x1080
 ```
 
 绑定按本地目录、账号和环境隔离，保存在 `~/.config/cohub/runtime-spaces.json`。
@@ -175,6 +179,25 @@ cohub runtime up -n --name another-project
 `-d` 返回 Space 链接、进程 ID 和日志位置后在后台运行；30 秒内尚未就绪时返回退出码 2，进程继续连接。
 `--yes` 用于非交互执行授权。`down` 保留所有数据，存在未确认执行时需加 `--yes`。
 断网会自动重连，但不会自动重跑模型或工具；断连不代表任务已经停止。
+
+### Displays
+
+Space 所在机器共享的屏幕：Android 应用共享的手机，或 `cohub runtime up --display` 共享的电脑。坐标是屏幕像素；用 `--size` 指定截图尺寸时，则是截图上的像素：
+
+```bash
+cohub spaces displays ls
+cohub spaces displays capture --max-size 1280 -o screen.jpg
+cohub spaces displays tap 540 1200
+cohub spaces displays swipe 288 1000 288 300 --size 576x1280
+cohub spaces displays tap 300 200 --count 2   # 双击；--button secondary 为右键
+cohub spaces displays type "hello"
+cohub spaces displays key Control+a
+cohub spaces displays press back              # 手机会列出它支持的系统按键
+```
+
+在 macOS 上，运行 Runtime 的终端需要「屏幕录制」权限，操作屏幕还需要「辅助功能」权限（系统设置 → 隐私与安全性）。Linux 需要 X11 会话，暂不支持 Wayland。
+
+`act` 从 `--actions` 或 stdin 读取 JSON 动作数组，按同一时间线执行。
 
 ### Boards
 

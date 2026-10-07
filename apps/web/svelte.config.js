@@ -29,6 +29,7 @@ const config = {
 			"@cohub/protocol/model/status": `${protocolDir}/model/status.ts`,
 			"@cohub/protocol/model": `${protocolDir}/model/session.ts`,
 			"@cohub/protocol/ports": `${protocolDir}/ports/index.ts`,
+			"@cohub/protocol/display": `${protocolDir}/display/index.ts`,
 			"@cohub/protocol/realtime/types": `${protocolDir}/realtime/types.ts`,
 			"@cohub/protocol/realtime/schema": `${protocolDir}/realtime/schema.ts`,
 			"@cohub/protocol/realtime": `${protocolDir}/realtime/index.ts`,

@@ -117,6 +117,17 @@ Bindings are scoped by directory, account, and environment, and stored in
 `~/.config/cohub/runtime-spaces.json`. This is useful when you want Cohub Agents
 against a local working tree. See [CLI](/docs/developers/cli).
 
+## Share a phone screen
+
+When the Cohub Android app serves a Space, it can also share the phone's screen with it. Open the
+Space's Runtime menu on the phone and choose **Share screen**; Android asks for permission each
+time. Anyone who can manage the Space then sees the screen live from **Screens → View**, on the web
+or another device, and the Space's Agents can take screenshots of it.
+
+To let people and Agents tap, swipe and type on the phone, choose **Allow control** and enable Cohub
+in Accessibility settings. Control only works while the screen is shared. Stop sharing from the
+Runtime menu or the notification at any time.
+
 ## Practical tips
 
 - Keep publishable outputs in stable paths

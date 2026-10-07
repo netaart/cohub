@@ -19,6 +19,7 @@ import {
 } from "@cohub/protocol/realtime/types";
 import type { BoardAwarenessUpdate } from "@cohub/protocol/realtime";
 import { ensureRealtimeConnected } from "../realtime.js";
+import { SpaceDisplaysApi } from "./displays.js";
 import type { WebsocketClient, WebsocketEventPayload } from "../websocket.js";
 import { HttpError, type HttpTransport, type Fetch } from "../transport.js";
 import {
@@ -2244,6 +2245,7 @@ export class SpaceClient {
   readonly webhooks: SpaceWebhooksApi;
   readonly env: SpaceEnvApi;
   readonly sandbox: SpaceSandboxApi;
+  readonly displays: SpaceDisplaysApi;
   readonly invitations: SpaceInvitationsApi;
   readonly labels: SpaceLabelsApi;
   readonly boards: SpaceBoardsApi;
@@ -2269,6 +2271,7 @@ export class SpaceClient {
     this.webhooks = new SpaceWebhooksApi(transport, id);
     this.env = new SpaceEnvApi(transport, id);
     this.sandbox = new SpaceSandboxApi(transport, id);
+    this.displays = new SpaceDisplaysApi(transport, id);
     this.invitations = new SpaceInvitationsApi(transport, id);
     this.labels = new SpaceLabelsApi(transport, id);
     this.boards = new SpaceBoardsApi(transport, id, websocketClient);

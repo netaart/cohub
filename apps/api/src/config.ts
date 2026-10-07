@@ -36,6 +36,8 @@ export type AppConfig = {
   checkpointCacheSubpath: string;
   configsSubpath: string;
   platformConfigRoot: string;
+  rtcTurnKeyId?: string;
+  rtcTurnKeyApiToken?: string;
   turnObjectS3Endpoint?: string;
   turnObjectS3PublicEndpoint?: string;
   turnObjectS3Region: string;
@@ -214,6 +216,8 @@ export const config: AppConfig = {
   checkpointCacheSubpath: process.env.CHECKPOINT_CACHE_SUBPATH ?? `${process.env.SPACE_STORAGE_SUBPATH ?? (env === "prod" ? "cohub-prod" : "cohub-dev")}/checkpoints`,
   configsSubpath: process.env.CONFIGS_SUBPATH ?? (env === "prod" ? "configs/prod" : "configs/dev"),
   platformConfigRoot: process.env.PLATFORM_CONFIG_ROOT ?? "/configs",
+  rtcTurnKeyId: process.env.RTC_TURN_KEY_ID?.trim() || undefined,
+  rtcTurnKeyApiToken: process.env.RTC_TURN_KEY_API_TOKEN?.trim() || undefined,
   turnObjectS3Endpoint: process.env.TURN_OBJECT_S3_ENDPOINT ?? "http://127.0.0.1:9000",
   turnObjectS3PublicEndpoint: process.env.TURN_OBJECT_S3_PUBLIC_ENDPOINT,
   turnObjectS3Region: process.env.TURN_OBJECT_S3_REGION ?? "us-west-1",

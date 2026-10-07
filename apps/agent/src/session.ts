@@ -34,7 +34,6 @@ import { hydrateContextImages } from "./runtime/context-images.js";
 import { readPublicAssetImageUrl } from "./public-asset-storage.js";
 import type { createSandboxCodingTools } from "./sandbox/tools.js";
 import type { Permission } from "@cohub/core/permissions";
-import type { PromptAccessMode } from "@cohub/core/sessions";
 import {
   applyAssistantMessageEvent,
   applyToolExecutionEnd,
@@ -123,7 +122,7 @@ export type SessionHandle = {
   currentAssistantMessageOrdinal?: number | null;
   currentStreamMessageId?: string | null;
   currentLlmRound?: number | null;
-  currentAccessMode: PromptAccessMode | null;
+  toolProfile: string | null;
   ownerEpoch: number;
   lastActiveAt: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -1196,7 +1195,7 @@ export async function loadOrCreateSessionHandle(input: {
     currentAssistantMessageOrdinal: null,
     currentStreamMessageId: null,
     currentLlmRound: null,
-    currentAccessMode: null,
+    toolProfile: null,
     ownerEpoch: 0,
     lastActiveAt: Date.now(),
     idleTimer: null,
