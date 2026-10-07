@@ -63,7 +63,7 @@ All routes are under `/api/spaces/:id`.
 | Route | Permission | Notes |
 | --- | --- | --- |
 | `GET displays` | `sandbox.view` | Live list from the machine |
-| `GET displays/:display/capture` | `sandbox.manage` | `format`, `quality`, `maxSize` |
+| `GET displays/:display/capture` | `sandbox.manage` | `format`, `quality`, `maxSize` (default 1920) |
 | `POST displays/:display/input` | `sandbox.manage` | `{ events }`, resolves once performed |
 | `POST displays/:display/sessions` | `sandbox.manage` | `{ offer, control? }` → `201 { sessionId, answer }` |
 | `DELETE displays/:display/sessions/:session` | `sandbox.manage` | |

@@ -28,7 +28,7 @@ type Info struct {
 var displayIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
 func (i Info) valid() bool {
-	return displayIDPattern.MatchString(i.ID) && utf8.RuneCountInString(i.Name) <= 200 && i.Width >= 0 && i.Height >= 0 && i.Width <= 16384 && i.Height <= 16384
+	return displayIDPattern.MatchString(i.ID) && utf16Len(i.Name) <= 200 && i.Width >= 0 && i.Height >= 0 && i.Width <= 16384 && i.Height <= 16384
 }
 
 // known drops the names this version does not know, so a newer provider
@@ -110,6 +110,9 @@ func (p *CaptureParams) normalize() error {
 	}
 	if p.Quality < 1 || p.Quality > 100 {
 		return errorf(CodeInvalid, "quality must be within 1..100")
+	}
+	if p.MaxSize == 0 {
+		p.MaxSize = DefaultMaxSize
 	}
 	if p.MaxSize < 0 || p.MaxSize > 16384 {
 		return errorf(CodeInvalid, "maxSize must be within 0..16384")

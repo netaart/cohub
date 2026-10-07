@@ -34,13 +34,14 @@ type x11Screen struct {
 	xtest   bool
 	lsb32   bool
 
-	mu      sync.Mutex
-	keys    map[uint32]x11Key
-	scratch []xproto.Keycode
-	next    int
-	perCode int
-	shift   xproto.Keycode
-	pressed byte
+	mu       sync.Mutex
+	keys     map[uint32]x11Key
+	borrowed map[uint32]x11Key
+	scratch  []xproto.Keycode
+	next     int
+	perCode  int
+	shift    xproto.Keycode
+	pressed  byte
 }
 
 type x11Key struct {
@@ -148,12 +149,14 @@ func x11Button(button string) byte {
 }
 
 func (s *x11Screen) Pointer(action string, x, y float64, button string) error {
-	px, py, err := s.point(x, y)
-	if err != nil {
-		return err
-	}
-	if err := s.fake(xMotionNotify, 0, px, py); err != nil {
-		return err
+	if action != "cancel" {
+		px, py, err := s.point(x, y)
+		if err != nil {
+			return err
+		}
+		if err := s.fake(xMotionNotify, 0, px, py); err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -241,6 +244,9 @@ func (s *x11Screen) Text(text string) error {
 func (s *x11Screen) press(keysym uint32, down bool) error {
 	key, ok := s.keys[keysym]
 	if !ok {
+		key, ok = s.borrowed[keysym]
+	}
+	if !ok {
 		var err error
 		if key, err = s.borrow(keysym); err != nil {
 			return err
@@ -270,7 +276,7 @@ func (s *x11Screen) loadKeymap(setup *xproto.SetupInfo) error {
 		return fmt.Errorf("read X keyboard mapping: %w", err)
 	}
 	s.perCode = int(reply.KeysymsPerKeycode)
-	s.keys = map[uint32]x11Key{}
+	s.keys, s.borrowed = map[uint32]x11Key{}, map[uint32]x11Key{}
 	for i := 0; i < count; i++ {
 		code := xproto.Keycode(int(setup.MinKeycode) + i)
 		syms := reply.Keysyms[i*s.perCode : (i+1)*s.perCode]
@@ -306,12 +312,18 @@ func (s *x11Screen) borrow(keysym uint32) (x11Key, error) {
 	}
 	code := s.scratch[s.next%len(s.scratch)]
 	s.next++
+	for previous, key := range s.borrowed {
+		if key.code == code {
+			delete(s.borrowed, previous)
+		}
+	}
 	syms := make([]xproto.Keysym, s.perCode)
 	syms[0], syms[1%s.perCode] = xproto.Keysym(keysym), xproto.Keysym(keysym)
 	if err := xproto.ChangeKeyboardMappingChecked(s.conn, 1, code, byte(s.perCode), syms).Check(); err != nil {
 		return x11Key{}, errorf(CodeFailed, "map X key: %v", err)
 	}
-	return x11Key{code: code}, nil
+	s.borrowed[keysym] = x11Key{code: code}
+	return s.borrowed[keysym], nil
 }
 
 func (s *x11Screen) Close() error {

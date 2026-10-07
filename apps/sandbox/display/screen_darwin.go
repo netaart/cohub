@@ -242,8 +242,11 @@ func (s *macScreen) point(x, y float64) cgPoint {
 func (s *macScreen) Pointer(action string, x, y float64, button string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	at := s.point(x, y)
-	s.at = at
+	at := s.at
+	if action != "cancel" {
+		at = s.point(x, y)
+		s.at = at
+	}
 	switch action {
 	case "down":
 		if button == "" {

@@ -97,13 +97,17 @@ func (t Tree) sanitize(limit int) Tree {
 	return clean
 }
 
+func utf16Len(text string) int {
+	return len(utf16.Encode([]rune(text)))
+}
+
 // clip bounds text in UTF-16 units, as JavaScript clients count it.
 func clip(text string) string {
 	text = strings.ToValidUTF8(strings.TrimSpace(text), "")
-	runes := []rune(text)
-	if len(utf16.Encode(runes)) <= maxElementText {
+	if utf16Len(text) <= maxElementText {
 		return text
 	}
+	runes := []rune(text)
 	units := 0
 	for i, r := range runes {
 		units += utf16.RuneLen(r)

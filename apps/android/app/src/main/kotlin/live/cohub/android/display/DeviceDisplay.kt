@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
@@ -36,6 +38,7 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     private val resized = MutableStateFlow(0)
     /** Typed loosely: InputDriver needs Android 11, this class does not. */
     private var driver: Any? = null
+    private val inputs = Mutex()
 
     val status: StateFlow<DisplayStatus> = combine(share, DisplayControl.service, failure) { current, control, error ->
         DisplayStatus(current?.spaceId, control != null, error)
@@ -99,7 +102,7 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     @RequiresApi(Build.VERSION_CODES.R)
     internal suspend fun input(spaceId: String, display: String, events: List<InputEvent>) {
         val capture = capture(spaceId, display)
-        inputDriver().apply(events, capture.size.width, capture.size.height)
+        inputs.withLock { inputDriver().apply(events, capture.size.width, capture.size.height) }
     }
 
     @RequiresApi(Build.VERSION_CODES.R)

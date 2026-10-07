@@ -70,5 +70,7 @@ func (p *ProviderConn) answer(ctx context.Context, call wireMessage, handle Prov
 			reply.Result = raw
 		}
 	}
-	_ = p.wire.writeJSON(reply)
+	if err := p.wire.writeJSON(reply); err != nil && reply.Error == nil {
+		_ = p.wire.writeJSON(wireMessage{Type: "reply", ID: call.ID, Error: errorf(CodeFailed, "the %s result could not be sent: %v", call.Method, err)})
+	}
 }
