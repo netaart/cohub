@@ -1631,7 +1631,6 @@
 	"task_stage_commit": "正在提交检查点",
 	"task_stage_materialize": "正在物化最新文件",
 	"task_stage_write": "正在写入检查点记录",
-	"task_stage_mirror": "正在镜像仓库",
 	"task_stage_completed": "已完成",
 	"task_one_time": "一次性任务",
 	"task_from_cronjob": "来自定时任务",

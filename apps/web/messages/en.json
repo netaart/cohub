@@ -1631,7 +1631,6 @@
 	"task_stage_commit": "Committing checkpoint",
 	"task_stage_materialize": "Materializing latest files",
 	"task_stage_write": "Writing checkpoint record",
-	"task_stage_mirror": "Mirroring repository",
 	"task_stage_completed": "Completed",
 	"task_one_time": "One-time task",
 	"task_from_cronjob": "From cronjob",

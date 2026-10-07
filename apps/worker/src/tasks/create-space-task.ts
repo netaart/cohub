@@ -16,7 +16,6 @@ import { restoreWorkspaceFromCheckpoint, restoreSystemRepoFromCheckpoint } from 
 import { ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/paths.js";
 import { materializeLatest } from "../checkpoint/materialize.js";
 import { scanWorkspace } from "../checkpoint/scan.js";
-import { isGiteaMirrorEnabled, mirrorRepositoryToGitea } from "../gitea.js";
 import { ensureWorkerLocalTmpDir, getWorkerLocalTmpDir, removeWorkerLocalTmpDir } from "../local-tmp.js";
 import {
   resolveCreateSpaceSource,
@@ -207,13 +206,6 @@ async function postCheckpointRestore(input: {
     return scan.files.length;
   }).then(({ result, duration }) => ({ status: "ready", durationMs: duration, files: result }), (error) => ({ status: "failed", error: error instanceof Error ? error.message : String(error) }));
   stages.latestMaterialization = latest;
-
-  const mirror = await timeIt("mirrorSystemRepo", async () => {
-    if (!isGiteaMirrorEnabled()) return { status: "disabled" as const };
-    await mirrorRepositoryToGitea(dirs.repoDir, input.targetSpace.storageRepoName, "main");
-    return { status: "pushed" as const };
-  }).then(({ result, duration }) => ({ ...result, durationMs: duration }), (error) => ({ status: "failed" as const, error: error instanceof Error ? error.message : String(error) }));
-  stages.mirror = mirror;
   return stages;
 }
 

@@ -19,7 +19,6 @@
     "db:check-drift": "node ../../scripts/db/check-drift.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:migrate:data:v2": "tsx src/db/migrate-v2-data.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },

@@ -4,7 +4,6 @@ import { spaceChannels, spaceMembers, spaceMods, spaces } from "@cohub/db";
 import { eq } from "drizzle-orm";
 import { db } from "./db/index.js";
 import type { AuthUser } from "./lib/middleware.js";
-import { buildStorageRepoName } from "./lib/middleware.js";
 import {
   type ChannelModelSelection,
   validateChannelModelConfig,
@@ -124,7 +123,6 @@ async function insertOwnedSpaceRecord(
   input: CreateOwnedSpaceInput,
 ): Promise<CreateOwnedSpaceResult> {
   const spaceId = crypto.randomUUID();
-  const storageRepoName = buildStorageRepoName(spaceId);
   const extraEnv = input.extraEnv ?? [];
   const mods = (input.mods ?? []).map((mod) => ({ ...mod, spaceId }));
   const channelBindings = input.channelBindings ?? [];
@@ -140,7 +138,6 @@ async function insertOwnedSpaceRecord(
         name: input.name,
         slug: input.slug,
         description: input.description ?? null,
-        storageRepoName,
         baseCheckpointId:
           input.bootstrapSource.type === "checkpoint"
             ? input.bootstrapSource.checkpointId

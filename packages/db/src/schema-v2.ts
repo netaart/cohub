@@ -84,35 +84,6 @@ export const userProfiles = v2.table(
 );
 
 
-export const userGitAccounts = v2.table(
-  "user_git_accounts",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userUuid: varchar("user_uuid", { length: 255 }).notNull(),
-    provider: varchar("provider", { length: 50 }).notNull().default("gitea"),
-    giteaUserId: integer("gitea_user_id").notNull(),
-    giteaUsername: varchar("gitea_username", { length: 255 }).notNull(),
-    giteaPasswordEncrypted: text("gitea_password_encrypted").notNull(),
-    giteaAccessTokenEncrypted: text("gitea_access_token_encrypted").notNull(),
-    status: varchar("status", { length: 20 }).default("active"),
-    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
-    meta: jsonb("meta"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => ({
-    userUuidProviderUniqueIdx: uniqueIndex("v2_uq_user_git_accounts_user_provider").on(
-      table.userUuid,
-      table.provider,
-    ),
-    giteaUsernameUniqueIdx: uniqueIndex("v2_uq_user_git_accounts_gitea_username").on(
-      table.giteaUsername,
-    ),
-    userUuidIdx: index("v2_idx_user_git_accounts_user_uuid").on(table.userUuid),
-    providerIdx: index("v2_idx_user_git_accounts_provider").on(table.provider),
-  }),
-);
-
 export const userChannels = v2.table(
   "user_channels",
   {
@@ -139,7 +110,7 @@ export const spaces = v2.table(
     name: varchar("name", { length: 255 }).notNull(),
     slug: varchar("slug", { length: 80 }),
     description: text("description"),
-    storageRepoName: varchar("storage_repo_name", { length: 255 }).notNull(),
+    storageRepoName: varchar("storage_repo_name", { length: 255 }),
     baseCheckpointId: uuid("base_checkpoint_id"),
     headCheckpointId: uuid("head_checkpoint_id"),
     meta: jsonb("meta"),
@@ -161,9 +132,6 @@ export const spaces = v2.table(
     spaceSlugFormatCheck: check(
       "v2_chk_spaces_slug_format",
       sql`${table.slug} is null or (length(${table.slug}) between 1 and 80 and ${table.slug} !~ '[^a-z0-9_-]' and left(${table.slug}, 1) ~ '[a-z0-9]' and right(${table.slug}, 1) ~ '[a-z0-9]')`,
-    ),
-    storageRepoNameUniqueIdx: uniqueIndex("v2_uq_spaces_storage_repo_name").on(
-      table.storageRepoName,
     ),
   }),
 );

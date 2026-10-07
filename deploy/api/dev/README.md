@@ -27,8 +27,7 @@ vim secrets.yaml
 - `REDIS_URL` - Redis 连接地址
 - `LITELLM_API_KEY` - LiteLLM API key
 - `GENERATION_API_KEY` - Generation SDK API key used by the Worker; configure it on the deployment, not in a Space
-- `GITEA_TOKEN` - Gitea 管理员 API token（用于自动创建托管 Git 账号）
-- `APP_ENCRYPTION_KEY` - 应用级加密密钥（用于加密存储影子账号密码和 access token）
+- `APP_ENCRYPTION_KEY` - 应用级密钥（用于加密存储凭据、签名会话与执行授权 token）
 - `WORKER_SECRET` - Worker 通信密钥
 - `TURN_OBJECT_S3_ACCESS_KEY_ID` / `TURN_OBJECT_S3_SECRET_ACCESS_KEY` - Turn 中间消息 OSS 写入凭证
 - `PUBLIC_ASSET_OSS_ACCESS_KEY_ID` / `PUBLIC_ASSET_OSS_SECRET_ACCESS_KEY` - 公开资产 OSS 写入凭证（用于头像和旧客户端附件上传）
@@ -41,7 +40,6 @@ vim secrets.yaml
 Billing 启用后，Cohub 使用 `usd_micro_cent` credit type：`1 usd_micro_cent = $0.00000001`，`100_000_000` 单位等于 `$1`。free plan 每月赠送 `$10` 时，billing grant amount 应为 `1_000_000_000`。
 
 同时请确认 `values.yaml` 中已填写：
-- `GITEA_MANAGED_EMAIL_DOMAIN` - 托管 Gitea 影子账号使用的邮箱域名后缀
 - `PUBLIC_ASSET_OSS_ENDPOINT` / `PUBLIC_ASSET_OSS_PUBLIC_ENDPOINT` / `PUBLIC_ASSET_OSS_REGION` / `PUBLIC_ASSET_OSS_BUCKET` / `PUBLIC_ASSET_CDN_BASE_URL` / `APP_ASSET_CDN_BASE_URL` (formerly `WORK_ASSET_CDN_BASE_URL`) - 头像、旧附件和 Work asset 配置
 - `APP_STANDALONE_HOST_TEMPLATE` - App 独立域名模板，`{id}` 为 App ID（如 `{id}-dev.apps.example.com`）；不配置则不提供独立域名
 - `USER_UPLOAD_S3_ENDPOINT` / `USER_UPLOAD_S3_REGION` / `CHAT_ATTACHMENT_S3_BUCKET` / `CHAT_ATTACHMENT_PUBLIC_BASE_URL` / `SPACE_UPLOAD_S3_BUCKET` - R2 用户上传配置；聊天 Bucket 绑定公开域名，Space Bucket 保持私有并为 `uploads/`、`dev/uploads/` 配置 3 天生命周期
