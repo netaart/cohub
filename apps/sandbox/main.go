@@ -109,6 +109,9 @@ type displaysPayload struct {
 var buildVersion = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == display.EncoderCommand {
+		os.Exit(display.RunEncoder(os.Args[2:]))
+	}
 	showVersion := flag.Bool("version", false, "print sandbox version and exit")
 	localMode := flag.Bool("local", false, "run in local dial-out mode (connect to the gateway relay)")
 	localRoot := flag.String("root", "", "local mode: workspace directory to expose")

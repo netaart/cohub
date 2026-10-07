@@ -10,6 +10,7 @@ const RPC_ERRORS: Record<string, Pick<DisplayErrorResponse, "status" | "code">> 
   BAD_REQUEST: { status: 400, code: "invalid_request" },
   NOT_FOUND: { status: 404, code: "display_not_found" },
   UNAVAILABLE: { status: 409, code: "display_unavailable" },
+  PREEMPTED: { status: 409, code: "display_preempted" },
   BUSY: { status: 429, code: "display_busy" },
   UNSUPPORTED_METHOD: { status: 501, code: "display_unsupported" },
   TIMEOUT: { status: 504, code: "display_timeout" },

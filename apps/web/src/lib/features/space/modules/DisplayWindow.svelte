@@ -3,6 +3,7 @@ import {
 	type DisplayInputEvent,
 	splitDisplayText,
 } from "@cohub/protocol/display";
+import type { SpacePresenceUser } from "@neta-art/cohub";
 import {
 	ChevronLeft,
 	Circle,
@@ -11,9 +12,10 @@ import {
 	RefreshCw,
 	Square,
 } from "lucide-svelte";
-import { onDestroy } from "svelte";
+import { onDestroy, untrack } from "svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import DisplayViewers from "./DisplayViewers.svelte";
 import {
 	containedRect,
 	keyboardInput,
@@ -36,6 +38,8 @@ type Props = {
 	windows: Window[];
 	chrome: PreviewChrome;
 	isMobile: boolean;
+	canControl: boolean;
+	people: SpacePresenceUser[];
 	onActivateWindow: (kind: Window["kind"], key: string) => void;
 	onCloseWindow: (kind: Window["kind"], key: string) => void;
 };
@@ -47,6 +51,8 @@ const {
 	windows,
 	chrome,
 	isMobile,
+	canControl,
+	people,
 	onActivateWindow,
 	onCloseWindow,
 }: Props = $props();
@@ -60,6 +66,7 @@ const locale = $derived(getLocale());
 const view = createDisplayView(
 	() => spaceId,
 	() => displayId,
+	() => canControl,
 );
 const phase = $derived(view.phase);
 const display = $derived(view.display);
@@ -95,6 +102,13 @@ $effect(() => {
 	};
 	document.addEventListener("visibilitychange", update);
 	return () => document.removeEventListener("visibilitychange", update);
+});
+
+// Access can arrive after the window opened, e.g. from a link: follow it.
+$effect(() => {
+	const wanted = canControl;
+	const current = view.connection;
+	if (current && current.control !== wanted) untrack(() => view.reconnect());
 });
 
 $effect(() => {
@@ -363,6 +377,7 @@ const problemCopy = $derived.by(() => {
 		{#snippet controls()}
 			<span class="display-dot" data-phase={phase.kind} aria-hidden="true"></span>
 			{#if statusLabel}<span class="display-status hidden sm:inline">{statusLabel}</span>{/if}
+			{#if phase.kind === "live"}<DisplayViewers viewers={display?.viewers} {people} />{/if}
 		{/snippet}
 	</PreviewHeader>
 
@@ -406,6 +421,8 @@ const problemCopy = $derived.by(() => {
 
 		{#if phase.kind === "live" && display && !display.input}
 			<div class="display-pill">{display.desktop ? m.display_view_only_desktop({}, { locale }) : m.display_view_only({}, { locale })}</div>
+		{:else if phase.kind === "live" && view.connection && !view.connection.control}
+			<div class="display-pill">{m.display_view_only_permission({}, { locale })}</div>
 		{:else if notice}
 			<div class="display-pill" role="status">{notice}</div>
 		{/if}

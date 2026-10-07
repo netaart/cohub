@@ -155,6 +155,7 @@ class DisplayError(val code: String, message: String) : Exception(message) {
         const val UNSUPPORTED = "unsupported"
         const val INVALID = "invalid"
         const val BUSY = "busy"
+        const val TIMEOUT = "timeout"
         const val FAILED = "failed"
     }
 }

@@ -542,7 +542,7 @@ export type RpcRequestMap = {
     result: { answer: string };
   };
   "rtc.close": {
-    params: { sessionId: string };
+    params: { sessionId: string; userId?: string };
     result: { closed: boolean };
   };
 };

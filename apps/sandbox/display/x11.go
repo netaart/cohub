@@ -33,6 +33,7 @@ type x11Screen struct {
 	root    xproto.Window
 	xtest   bool
 	lsb32   bool
+	atspi   *atspi
 
 	mu       sync.Mutex
 	keys     map[uint32]x11Key
@@ -64,6 +65,7 @@ func openX11(display, name string) (*x11Screen, error) {
 	}
 	setup := xproto.Setup(conn)
 	s := &x11Screen{display: display, name: name, conn: conn, root: setup.DefaultScreen(conn).Root, xtest: xtest.Init(conn) == nil}
+	s.atspi = &atspi{screen: s}
 	for _, format := range setup.PixmapFormats {
 		if format.Depth == setup.DefaultScreen(conn).RootDepth {
 			s.lsb32 = format.BitsPerPixel == 32 && setup.ImageByteOrder == xproto.ImageOrderLSBFirst
@@ -91,8 +93,16 @@ func (s *x11Screen) Info() (Info, error) {
 	}
 	return Info{
 		ID: "screen", Name: s.name, Width: width, Height: height,
-		Capture: s.lsb32, Input: s.xtest, Desktop: true,
+		Capture: s.lsb32, Input: s.xtest, Desktop: true, Tree: atspiAvailable(),
 	}, nil
+}
+
+func (s *x11Screen) Tree(ctx context.Context, maxElements int) (Tree, error) {
+	return s.atspi.Tree(ctx, maxElements)
+}
+
+func (s *x11Screen) Element(ref, action string, text *string) error {
+	return s.atspi.Element(ref, action, text)
 }
 
 func (s *x11Screen) Source(fps int) []string {
@@ -241,6 +251,25 @@ func (s *x11Screen) Text(text string) error {
 	return nil
 }
 
+func (s *x11Screen) replaceText(text string) error {
+	s.mu.Lock()
+	err := s.press(namedKeys["Control"].x11, true)
+	if err == nil {
+		err = s.press(runeKeysym('a'), true)
+		_ = s.press(runeKeysym('a'), false)
+	}
+	_ = s.press(namedKeys["Control"].x11, false)
+	if err == nil && text == "" {
+		err = s.press(namedKeys["Delete"].x11, true)
+		_ = s.press(namedKeys["Delete"].x11, false)
+	}
+	s.mu.Unlock()
+	if err != nil || text == "" {
+		return err
+	}
+	return s.Text(text)
+}
+
 func (s *x11Screen) press(keysym uint32, down bool) error {
 	key, ok := s.keys[keysym]
 	if !ok {
@@ -333,5 +362,6 @@ func (s *x11Screen) Close() error {
 		_ = s.fake(xButtonRelease, s.pressed, 0, 0)
 	}
 	s.conn.Close()
+	s.atspi.Close()
 	return nil
 }

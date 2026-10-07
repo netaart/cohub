@@ -31,8 +31,10 @@ import (
 //	sandboxd → provider  {"type":"call","id":N,"method":…,"params":…}    id 0 expects no reply
 //
 // Methods: stream.start {stream, display, codec, bitrate, fps, maxSize};
-// stream.stop {stream}; stream.update {stream, bitrate}; stream.keyframe
-// {stream}; capture CaptureParams → CaptureResult; input InputBatch.
+// stream.stop {stream}; stream.update {stream, bitrate, fps?}; stream.keyframe
+// {stream}; capture CaptureParams → CaptureResult; tree TreeParams → Tree;
+// input InputBatch, refused once past its startBy; cancel {id}, sent when
+// sandboxd stops waiting for call id, which a provider may abandon.
 const (
 	WireVersion = 1
 
@@ -181,4 +183,9 @@ type StreamStart struct {
 type StreamControl struct {
 	Stream  uint32 `json:"stream"`
 	Bitrate int    `json:"bitrate,omitempty"`
+	FPS     int    `json:"fps,omitempty"`
+}
+
+type wireCancel struct {
+	ID uint64 `json:"id"`
 }

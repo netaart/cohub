@@ -2,6 +2,7 @@ package display
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -35,6 +37,10 @@ type ElementScreen interface {
 	Element(ref, action string, text *string) error
 }
 
+type nativeVideoScreen interface {
+	nativeEncoder() *videoEncoder
+}
+
 const screenPollInterval = 2 * time.Second
 
 func ServeScreen(ctx context.Context, conn io.ReadWriteCloser, name string, screen Screen, logger *slog.Logger) {
@@ -44,10 +50,12 @@ func ServeScreen(ctx context.Context, conn io.ReadWriteCloser, name string, scre
 	if err != nil {
 		return
 	}
-	d := &desktop{provider: provider, screen: screen, ffmpeg: findFFmpeg(), logger: logger, streams: map[uint32]*desktopStream{}}
+	d := &desktop{provider: provider, screen: screen, ffmpeg: findFFmpeg(), logger: logger, streams: map[uint32]*desktopStream{}, keys: map[string]bool{}}
+	defer d.releaseAll()
 	defer d.stopAll()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	d.ctx = ctx
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
 	if !d.publish() {
@@ -58,11 +66,15 @@ func ServeScreen(ctx context.Context, conn io.ReadWriteCloser, name string, scre
 }
 
 type desktop struct {
+	ctx      context.Context // the connection's; a call's ends with its answer
 	provider *ProviderConn
 	screen   Screen
 	ffmpeg   *ffmpeg
 	logger   *slog.Logger
-	inputMu  sync.Mutex
+
+	inputMu sync.Mutex
+	keys    map[string]bool // held down, guarded by inputMu
+	button  string
 
 	mu      sync.Mutex
 	info    Info
@@ -80,8 +92,10 @@ func (d *desktop) publish() bool {
 		d.logger.Warn("display lost", slog.String("error", err.Error()))
 		return false
 	}
-	info.Stream = d.ffmpeg != nil && d.screen.Source(DefaultFPS) != nil
-	_, info.Tree = d.screen.(ElementScreen)
+	info.Stream = len(d.encoders()) > 0
+	if _, ok := d.screen.(ElementScreen); !ok {
+		info.Tree = false
+	}
 	d.mu.Lock()
 	changed := !info.equal(d.info)
 	resized := d.info.Width != info.Width || d.info.Height != info.Height
@@ -100,6 +114,19 @@ func (d *desktop) publish() bool {
 		}
 	}
 	return d.provider.SetDisplays([]Info{info}) == nil
+}
+
+func (d *desktop) encoders() []*videoEncoder {
+	var encoders []*videoEncoder
+	if native, ok := d.screen.(nativeVideoScreen); ok {
+		if encoder := native.nativeEncoder(); encoder != nil {
+			encoders = append(encoders, encoder)
+		}
+	}
+	if d.ffmpeg != nil && d.screen.Source(DefaultFPS) != nil {
+		encoders = append(encoders, d.ffmpeg.encoder(d.screen.Source))
+	}
+	return encoders
 }
 
 func (d *desktop) watch(ctx context.Context, cancel context.CancelFunc) {
@@ -129,9 +156,9 @@ func (d *desktop) handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, errorf(CodeNotFound, "unknown display")
 		}
 		if !info.Stream {
-			return nil, errorf(CodeUnavailable, "streaming needs ffmpeg with an H.264 encoder")
+			return nil, errorf(CodeUnavailable, "live video needs ffmpeg with an H.264 encoder")
 		}
-		d.startStream(ctx, params)
+		d.startStream(params)
 		return nil, nil
 	case "stream.stop":
 		var params StreamControl
@@ -147,9 +174,19 @@ func (d *desktop) handle(ctx context.Context, method string, raw json.RawMessage
 		if stream != nil && params.Bitrate > 0 {
 			stream.encoder.setBitrate(params.Bitrate)
 		}
+		if stream != nil && params.FPS > 0 {
+			stream.encoder.setFPS(max(1, min(MaxFPS, params.FPS)))
+		}
 		return nil, nil
 	case "stream.keyframe":
-		// A one second GOP bounds recovery; restarting ffmpeg would take longer.
+		var params StreamControl
+		_ = json.Unmarshal(raw, &params)
+		d.mu.Lock()
+		stream := d.streams[params.Stream]
+		d.mu.Unlock()
+		if stream != nil {
+			stream.encoder.requestKeyframe()
+		}
 		return nil, nil
 	case "capture":
 		var params CaptureParams
@@ -182,26 +219,25 @@ func (d *desktop) handle(ctx context.Context, method string, raw json.RawMessage
 		if !info.Input {
 			return nil, errorf(CodeUnavailable, "input is not permitted")
 		}
-		return nil, d.input(ctx, batch.Events)
+		return nil, d.input(ctx, batch)
 	default:
 		return nil, errorf(CodeUnsupported, "unsupported method %q", method)
 	}
 }
 
-func (d *desktop) startStream(parent context.Context, params StreamStart) {
-	ctx, cancel := context.WithCancel(parent)
-	fps := max(1, min(60, params.FPS))
+func (d *desktop) startStream(params StreamStart) {
+	ctx, cancel := context.WithCancel(d.ctx)
 	maxSize := params.MaxSize
 	if maxSize <= 0 {
 		maxSize = DefaultMaxSize
 	}
 	encoder := &encoderStream{
-		ffmpeg:  d.ffmpeg,
-		source:  func() []string { return d.screen.Source(fps) },
-		fps:     fps,
-		maxSize: maxSize,
-		bitrate: max(MinBitrate, min(MaxBitrate, params.Bitrate)),
-		deliver: func(sample Sample) error { return d.provider.WriteSample(params.Stream, sample) },
+		encoders: d.encoders(),
+		maxSize:  maxSize,
+		fps:      max(1, min(MaxFPS, params.FPS)),
+		bitrate:  max(MinBitrate, min(MaxBitrate, params.Bitrate)),
+		deliver:  func(sample Sample) error { return d.provider.WriteSample(params.Stream, sample) },
+		logger:   d.logger,
 	}
 	d.mu.Lock()
 	if previous := d.streams[params.Stream]; previous != nil {
@@ -251,31 +287,72 @@ func (d *desktop) stopAll() {
 	}
 }
 
-func (d *desktop) input(ctx context.Context, events []InputEvent) error {
+func (d *desktop) input(ctx context.Context, batch InputBatch) error {
 	d.inputMu.Lock()
 	defer d.inputMu.Unlock()
+	if batch.StartBy > 0 && time.Now().UnixMilli() > batch.StartBy {
+		return errorf(CodeTimeout, "the input waited too long to start")
+	}
 	started := time.Now()
-	for _, event := range events {
+	pressed := map[string]bool{}
+	pointer := false
+	for _, event := range batch.Events {
 		if event.T != nil {
 			if wait := time.Until(started.Add(time.Duration(*event.T) * time.Millisecond)); wait > 0 {
 				select {
 				case <-ctx.Done():
-					return ctx.Err()
 				case <-time.After(wait):
 				}
 			}
 		}
-		if err := d.apply(event); err != nil {
+		err := ctx.Err()
+		if err == nil {
+			err = d.apply(event)
+		}
+		if err != nil {
+			d.release(pressed, pointer)
 			return err
+		}
+		switch {
+		case event.Type == "key" && event.Action == "down":
+			pressed[event.Key] = true
+		case event.Type == "pointer" && event.Action == "down":
+			pointer = true
 		}
 	}
 	return nil
 }
 
+func (d *desktop) release(keys map[string]bool, pointer bool) {
+	if pointer && d.button != "" {
+		_ = d.apply(InputEvent{Type: "pointer", Action: "cancel", X: new(float64), Y: new(float64)})
+	}
+	for key := range keys {
+		if d.keys[key] {
+			_ = d.apply(InputEvent{Type: "key", Action: "up", Key: key})
+		}
+	}
+}
+
+func (d *desktop) releaseAll() {
+	d.inputMu.Lock()
+	defer d.inputMu.Unlock()
+	d.release(maps.Clone(d.keys), true)
+}
+
 func (d *desktop) apply(event InputEvent) error {
 	switch event.Type {
 	case "pointer":
-		return d.screen.Pointer(event.Action, *event.X, *event.Y, event.Button)
+		if err := d.screen.Pointer(event.Action, *event.X, *event.Y, event.Button); err != nil {
+			return err
+		}
+		switch event.Action {
+		case "down":
+			d.button = cmp.Or(event.Button, "primary")
+		case "up", "cancel":
+			d.button = ""
+		}
+		return nil
 	case "scroll":
 		return d.screen.Scroll(*event.X, *event.Y, event.DX, event.DY)
 	case "key":
@@ -283,8 +360,10 @@ func (d *desktop) apply(event InputEvent) error {
 			if err := d.screen.Key(true, event.Key); err != nil {
 				return err
 			}
+			d.keys[event.Key] = true
 		}
 		if event.Action != "down" {
+			delete(d.keys, event.Key)
 			return d.screen.Key(false, event.Key)
 		}
 		return nil

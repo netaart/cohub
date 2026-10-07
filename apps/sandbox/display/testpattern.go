@@ -35,7 +35,7 @@ func newTestScreen(logger *slog.Logger) *testScreen {
 }
 
 func (s *testScreen) Info() (Info, error) {
-	return Info{ID: "test", Name: "Test pattern", Width: testDisplayWidth, Height: testDisplayHeight, Capture: true, Input: true, Desktop: true}, nil
+	return Info{ID: "test", Name: "Test pattern", Width: testDisplayWidth, Height: testDisplayHeight, Capture: true, Input: true, Desktop: true, Tree: true}, nil
 }
 
 func (s *testScreen) Source(fps int) []string {

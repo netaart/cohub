@@ -1,12 +1,23 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { stale } from "./scripts/display-vocabulary.js";
 import {
   compileDisplayActions,
   DisplayActionError,
   type DisplayInputEvent,
+  displayElementSchema,
+  displayInfoSchema,
   displayInputBatchSchema,
   displaysSnapshotSchema,
 } from "./src/display/index.js";
+
+type Fixture = {
+  inputBatches: { name: string; valid: boolean; events: unknown[] }[];
+  displays: { name: string; info: unknown; known: { system: string[]; needs: string[] } }[];
+  elements: { name: string; element: unknown; clean: { role: string; states: string[]; actions: string[] } }[];
+};
+const fixture = JSON.parse(readFileSync(new URL("./fixtures/display.json", import.meta.url), "utf8")) as Fixture;
 
 describe("displays", () => {
   it("compiles actions into one timeline that satisfies the wire schema", () => {
@@ -48,5 +59,23 @@ describe("displays", () => {
     const parsed = displaysSnapshotSchema.parse({ displays: [{ ...display, system: ["back", "assistant"] }] });
     assert.deepEqual(parsed.displays[0]?.system, ["back"]);
     assert.equal(displaysSnapshotSchema.safeParse({ displays: [{ ...display, id: "../etc" }] }).success, false);
+  });
+
+  it("agrees with sandboxd on the shared cases", () => {
+    for (const { name, valid, events } of fixture.inputBatches) {
+      assert.equal(displayInputBatchSchema.safeParse({ events }).success, valid, name);
+    }
+    for (const { name, info, known } of fixture.displays) {
+      const parsed = displayInfoSchema.parse(info);
+      assert.deepEqual({ system: parsed.system, needs: parsed.needs }, known, name);
+    }
+    for (const { name, element, clean } of fixture.elements) {
+      const parsed = displayElementSchema.parse(element);
+      assert.deepEqual({ role: parsed.role, states: parsed.states, actions: parsed.actions }, clean, name);
+    }
+  });
+
+  it("keeps the generated Go and Kotlin vocabulary current", async () => {
+    assert.deepEqual(await stale(), [], "run pnpm --filter @cohub/protocol generate:display");
   });
 });

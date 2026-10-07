@@ -129,7 +129,6 @@ internal class ElementTree {
         const val ANCESTOR_DEPTH = 4
         const val TAP_MS = 60L
         const val LONG_PRESS_MS = 800L
-        const val TEXT_MAX = 500
     }
 
     private fun AccessibilityNodeInfo.isMeaningful() =
@@ -164,8 +163,8 @@ internal class ElementTree {
             put("ref", ref)
             put("depth", depth)
             put("role", role(depth))
-            name?.let { put("name", it.take(TEXT_MAX)) }
-            value?.let { put("value", it.take(TEXT_MAX)) }
+            name?.let { put("name", it.take(DisplayVocabulary.MAX_ELEMENT_TEXT)) }
+            value?.let { put("value", it.take(DisplayVocabulary.MAX_ELEMENT_TEXT)) }
             put("bounds", JsonArray(listOf(
                 unit(bounds.left, width), unit(bounds.top, height),
                 unit(bounds.width(), width), unit(bounds.height(), height),

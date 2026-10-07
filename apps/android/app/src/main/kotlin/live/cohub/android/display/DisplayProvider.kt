@@ -9,7 +9,9 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -26,11 +28,10 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "CohubDisplay"
-private const val DEFAULT_TREE_ELEMENTS = 300
-private const val MAX_TREE_ELEMENTS = 1000
 
 @RequiresApi(Build.VERSION_CODES.R)
 internal class DisplayProvider(
@@ -79,6 +80,7 @@ internal class DisplayProvider(
     private inner class Connection(private val client: LocalSocket) {
         private val writer = DisplayWire.Writer(client.outputStream)
         private val streams = mutableMapOf<Int, Stream>()
+        private val calls = ConcurrentHashMap<Long, Job>()
 
         private inner class Stream(val id: Int, val capture: ScreenCapture) : StreamSink {
             @Volatile var open = true
@@ -116,7 +118,7 @@ internal class DisplayProvider(
                 val reader = DisplayWire.reader(client.inputStream)
                 while (true) {
                     val message = runInterruptible { DisplayWire.read(reader) } ?: break
-                    if (message.string("type") == "call") launch { handle(message) }
+                    if (message.string("type") == "call") call(message)
                 }
             } catch (error: IOException) {
                 Log.i(TAG, "Display connection closed: ${error.message}")
@@ -127,6 +129,20 @@ internal class DisplayProvider(
                 open.forEach { it.open = false; it.capture.unsubscribe(it) }
                 runCatching { client.close() }
             }
+        }
+
+        private fun CoroutineScope.call(message: JsonObject) {
+            val id = message["id"]?.jsonPrimitive?.longOrNull ?: 0L
+            if (message.string("method") == "cancel") {
+                (message["params"] as? JsonObject)?.get("id")?.jsonPrimitive?.longOrNull?.let { calls[it]?.cancel() }
+                return
+            }
+            val job = launch(start = CoroutineStart.LAZY) { handle(message) }
+            if (id != 0L) {
+                calls[id] = job
+                job.invokeOnCompletion { calls.remove(id, job) }
+            }
+            job.start()
         }
 
         private suspend fun handle(call: JsonObject) {
@@ -179,10 +195,14 @@ internal class DisplayProvider(
                     put("height", capture.height)
                 }
             }
-            "tree" -> display.tree(spaceId, params.string("display").orEmpty(), (params.int("maxElements") ?: DEFAULT_TREE_ELEMENTS).coerceIn(1, MAX_TREE_ELEMENTS))
+            "tree" -> display.tree(
+                spaceId,
+                params.string("display").orEmpty(),
+                (params.int("maxElements") ?: DisplayVocabulary.DEFAULT_TREE_ELEMENTS).coerceIn(1, DisplayVocabulary.MAX_TREE_ELEMENTS),
+            )
             "input" -> {
                 val events = params["events"] as? JsonArray ?: throw DisplayError(DisplayError.INVALID, "events are required")
-                display.input(spaceId, params.string("display").orEmpty(), InputEvent.parseAll(events))
+                display.input(spaceId, params.string("display").orEmpty(), InputEvent.parseAll(events), params.long("startBy") ?: 0L)
                 JsonNull
             }
             else -> throw DisplayError(DisplayError.UNSUPPORTED, "unsupported method $method")
@@ -193,6 +213,8 @@ internal class DisplayProvider(
 private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 
 private fun JsonObject.int(key: String): Int? = this[key]?.jsonPrimitive?.intOrNull
+
+private fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
 
 @RequiresApi(Build.VERSION_CODES.R)
 internal fun CoroutineScope.launchDisplayProvider(spaceId: String, socket: File, display: DeviceDisplay) =

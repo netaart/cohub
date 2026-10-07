@@ -5,7 +5,9 @@ export * from "./actions.js";
 /**
  * Displays: a machine's screens, shared with people over WebRTC and with
  * agents as stills and input. Mirrored in Go by `apps/sandbox/display` and
- * `apps/sandbox/rtc`, and in Kotlin by the Android display provider.
+ * `apps/sandbox/rtc`, and in Kotlin by the Android display provider; the
+ * vocabulary and limits below are generated into both
+ * (`pnpm --filter @cohub/protocol generate:display`).
  *
  * Coordinates are normalized to the display (0..1, origin top-left), so
  * viewers and agents never need its pixel size to act on it.
@@ -16,10 +18,17 @@ const unit = z.number().min(0).max(1);
 export const DISPLAY_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 export const displayIdSchema = z.string().regex(DISPLAY_ID_PATTERN);
 
+export const DISPLAYS_MAX = 16;
+export const DISPLAY_NAME_MAX = 200;
+export const DISPLAY_DIMENSION_MAX = 16_384;
+
 export const DISPLAY_SYSTEM_ACTIONS = ["back", "home", "recents", "notifications", "quickSettings", "lock"] as const;
 export type DisplaySystemAction = (typeof DISPLAY_SYSTEM_ACTIONS)[number];
 export const DISPLAY_PERMISSIONS = ["screenRecording", "accessibility"] as const;
 export type DisplayPermission = (typeof DISPLAY_PERMISSIONS)[number];
+export const DISPLAY_POINTER_ACTIONS = ["down", "move", "up", "cancel"] as const;
+export const DISPLAY_KEY_ACTIONS = ["down", "up", "press"] as const;
+export const DISPLAY_BUTTONS = ["primary", "secondary", "middle"] as const;
 
 /** A list of known names; names a newer machine adds are dropped, so older clients keep working. */
 const knownNames = <T extends string>(names: readonly T[], max: number) =>
@@ -28,11 +37,17 @@ const knownNames = <T extends string>(names: readonly T[], max: number) =>
     .max(max)
     .transform((values) => values.filter((value): value is T => (names as readonly string[]).includes(value)));
 
+export const displayViewerSchema = z.object({
+  userId: z.string().min(1).max(64),
+  control: z.boolean().optional(),
+});
+export type DisplayViewer = z.infer<typeof displayViewerSchema>;
+
 export const displayInfoSchema = z.object({
   id: displayIdSchema,
-  name: z.string().max(200),
-  width: z.number().int().min(0).max(16_384),
-  height: z.number().int().min(0).max(16_384),
+  name: z.string().max(DISPLAY_NAME_MAX),
+  width: z.number().int().min(0).max(DISPLAY_DIMENSION_MAX),
+  height: z.number().int().min(0).max(DISPLAY_DIMENSION_MAX),
   stream: z.boolean(),
   capture: z.boolean(),
   input: z.boolean(),
@@ -40,10 +55,10 @@ export const displayInfoSchema = z.object({
   desktop: z.boolean().optional(),
   tree: z.boolean().optional(),
   needs: knownNames(DISPLAY_PERMISSIONS, 8).optional(),
+  viewers: z.array(displayViewerSchema).max(16).optional(),
 });
 export type DisplayInfo = z.infer<typeof displayInfoSchema>;
 
-export const DISPLAYS_MAX = 16;
 export const displaysSnapshotSchema = z.object({
   displays: z.array(displayInfoSchema).max(DISPLAYS_MAX),
 });
@@ -69,12 +84,14 @@ export const DISPLAY_ELEMENT_ACTIONS = ["click", "longPress", "focus", "setText"
 export type DisplayElementAction = (typeof DISPLAY_ELEMENT_ACTIONS)[number];
 
 export const DISPLAY_ELEMENT_REF_PATTERN = /^e\d{1,9}\.\d{1,5}$/;
+export const DISPLAY_TREE_DEFAULT_ELEMENTS = 300;
 export const DISPLAY_TREE_MAX_ELEMENTS = 1_000;
+export const DISPLAY_TREE_MAX_DEPTH = 64;
 export const DISPLAY_ELEMENT_TEXT_MAX = 500;
 
 export const displayElementSchema = z.object({
   ref: z.string().regex(DISPLAY_ELEMENT_REF_PATTERN),
-  depth: z.number().int().min(0).max(64),
+  depth: z.number().int().min(0).max(DISPLAY_TREE_MAX_DEPTH),
   role: z
     .string()
     .max(32)
@@ -90,12 +107,13 @@ export type DisplayElement = z.infer<typeof displayElementSchema>;
 
 export const displayTreeParamsSchema = z.object({
   maxElements: z.number().int().min(1).max(DISPLAY_TREE_MAX_ELEMENTS).optional(),
+  actionable: z.boolean().optional(),
 });
 export type DisplayTreeParams = z.infer<typeof displayTreeParamsSchema>;
 
 export const displayTreeSchema = z.object({
-  width: z.number().int().min(0).max(16_384),
-  height: z.number().int().min(0).max(16_384),
+  width: z.number().int().min(0).max(DISPLAY_DIMENSION_MAX),
+  height: z.number().int().min(0).max(DISPLAY_DIMENSION_MAX),
   elements: z.array(displayElementSchema).max(DISPLAY_TREE_MAX_ELEMENTS),
   truncated: z.boolean().optional(),
 });
@@ -103,18 +121,20 @@ export type DisplayTree = z.infer<typeof displayTreeSchema>;
 
 export const DISPLAY_INPUT_MAX_EVENTS = 512;
 export const DISPLAY_INPUT_MAX_TEXT = 4_096;
+export const DISPLAY_INPUT_MAX_KEY = 64;
 export const DISPLAY_INPUT_MAX_SCHEDULE_MS = 60_000;
+export const DISPLAY_SCROLL_MAX = 10;
 
-const delta = z.number().min(-10).max(10);
+const delta = z.number().min(-DISPLAY_SCROLL_MAX).max(DISPLAY_SCROLL_MAX);
 const at = z.number().int().min(0).max(DISPLAY_INPUT_MAX_SCHEDULE_MS).optional();
 
 export const displayInputEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pointer"),
-    action: z.enum(["down", "move", "up", "cancel"]),
+    action: z.enum(DISPLAY_POINTER_ACTIONS),
     x: unit,
     y: unit,
-    button: z.enum(["primary", "secondary", "middle"]).optional(),
+    button: z.enum(DISPLAY_BUTTONS).optional(),
     t: at,
   }),
   z.object({
@@ -127,8 +147,8 @@ export const displayInputEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("key"),
-    action: z.enum(["down", "up", "press"]),
-    key: z.string().min(1).max(64),
+    action: z.enum(DISPLAY_KEY_ACTIONS),
+    key: z.string().min(1).max(DISPLAY_INPUT_MAX_KEY),
     t: at,
   }),
   z.object({
@@ -171,10 +191,12 @@ export const displayInputBatchSchema = z
   });
 export type DisplayInputBatch = z.infer<typeof displayInputBatchSchema>;
 
+export const DISPLAY_CAPTURE_DEFAULT_MAX_SIZE = 1_920;
+
 export const displayCaptureParamsSchema = z.object({
   format: z.enum(["jpeg", "png"]).optional(),
   quality: z.number().int().min(1).max(100).optional(),
-  maxSize: z.number().int().min(1).max(16_384).optional(),
+  maxSize: z.number().int().min(1).max(DISPLAY_DIMENSION_MAX).optional(),
 });
 export type DisplayCaptureParams = z.infer<typeof displayCaptureParamsSchema>;
 

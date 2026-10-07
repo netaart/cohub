@@ -104,7 +104,7 @@ func (d *Dispatcher) handleDisplay(request protocol.RPCRequest, identity string)
 	case "display.input":
 		var batch display.InputBatch
 		if err = json.Unmarshal(request.Params, &batch); err == nil {
-			if err = hub.Input(ctx, batch); err == nil {
+			if err = hub.Input(ctx, batch, display.InputScripted); err == nil {
 				result = displayInputResult{Applied: len(batch.Events)}
 			}
 		}
@@ -140,6 +140,8 @@ func displayRPCCode(err error) string {
 		return "BUSY"
 	case display.CodeTimeout:
 		return "TIMEOUT"
+	case display.CodePreempted:
+		return "PREEMPTED"
 	default:
 		return "INTERNAL_ERROR"
 	}
