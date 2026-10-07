@@ -12,6 +12,7 @@ import { UndiciInstrumentation } from "@opentelemetry/instrumentation-undici";
 import { IORedisInstrumentation } from "@opentelemetry/instrumentation-ioredis";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { FilteringSpanProcessor } from "./filtering.js";
+import { serviceNameFromEnv } from "./service-name.js";
 
 export type TracingOptions = {
   serviceName: string;
@@ -74,7 +75,7 @@ export function initTracing(options: TracingOptions) {
   if (envFlag("OTEL_SDK_DISABLED")) return;
 
   const ENV = options.environment ?? process.env.ENV ?? "dev";
-  const serviceName = resolveServiceName(options.serviceName, ENV);
+  const serviceName = resolveServiceName(serviceNameFromEnv(options.serviceName), ENV);
   const resource: Resource = resourceFromAttributes({
     "service.name": serviceName,
     "service.version": options.serviceVersion ?? process.env.IMAGE_TAG ?? "latest",
