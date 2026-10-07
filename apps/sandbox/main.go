@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cohub/apps/sandbox/display"
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/filewatch"
 	"github.com/cohub/apps/sandbox/portwatch"
@@ -21,6 +22,7 @@ import (
 	"github.com/cohub/apps/sandbox/relay"
 	"github.com/cohub/apps/sandbox/report"
 	"github.com/cohub/apps/sandbox/rpc"
+	"github.com/cohub/apps/sandbox/rtc"
 	"github.com/cohub/apps/sandbox/search"
 	"github.com/cohub/apps/sandbox/workspace"
 	"github.com/cohub/apps/sandbox/ws"
@@ -97,6 +99,10 @@ func toProtocolPortChanges(changes []portwatch.Change) []protocol.PortChange {
 	return out
 }
 
+type displaysPayload struct {
+	Displays []display.Info `json:"displays"`
+}
+
 // buildVersion is stamped at build time via -ldflags "-X main.buildVersion=...".
 // Containerized sandboxes receive a version env; standalone local binaries use
 // this build value as the source of truth.
@@ -133,9 +139,18 @@ func main() {
 	runCloud(logger, cfg)
 }
 
+type sandboxRuntime struct {
+	server          *ws.Server
+	search          *search.Manager
+	displays        *display.Hub
+	requestFSResync func()
+	watchStatus     func() filewatch.Status
+	close           func()
+}
+
 // buildRuntime wires the shared sandbox runtime (process manager, dispatcher, ws
-// server) and starts the file/port watchers. The returned cleanup closes the
-// watchers. It is used by both cloud (listen) and local (dial-out) modes.
+// server, displays) and starts the file/port watchers and the display provider
+// connection. close stops them.
 //
 // fsSink/portsSink override where watcher batches are delivered. Cloud mode
 // leaves them nil and broadcasts to attached data sessions; local mode routes
@@ -149,7 +164,7 @@ func buildRuntime(
 	hostname string,
 	fsSink func(protocol.FSChangedPayload),
 	portsSink func(protocol.PortsChangedPayload),
-) (*ws.Server, func(), func(), *search.Manager, func() filewatch.Status) {
+) sandboxRuntime {
 	processManager := process.NewManager(logger)
 	searchManager := search.NewManager(cfg, logger)
 	searchManager.Start()
@@ -157,6 +172,24 @@ func buildRuntime(
 	dispatcher.SetSearchManager(searchManager)
 	server := ws.NewServer(cfg, dispatcher, processManager, reporter, state, hostname, logger)
 	server.SetSearchEnabled(searchManager.Enabled())
+
+	displaySpec := os.Getenv("COHUB_DISPLAY")
+	_ = os.Unsetenv("COHUB_DISPLAY")
+	dial, err := display.DialerFor(displaySpec, logger)
+	if err != nil {
+		logger.Warn("display provider disabled", slog.String("error", err.Error()))
+	}
+	displays := display.NewHub(dial, logger)
+	viewers := rtc.NewManager(displays, logger)
+	var virtual *display.Virtual
+	if dial == nil {
+		virtual = display.NewVirtual(displays, logger)
+	} else {
+		logger.Info("display provider enabled", slog.String("display", displaySpec))
+	}
+	dispatcher.SetDisplays(displays, viewers, virtual)
+	displayCtx, stopDisplays := context.WithCancel(context.Background())
+	go displays.Run(displayCtx)
 
 	if fsSink == nil {
 		fsSink = server.BroadcastFSChanged
@@ -199,12 +232,25 @@ func buildRuntime(
 		logger.Info("port watcher started", slog.Any("ports", cfg.PublicPorts))
 	}
 
-	closers = append(closers, searchManager.Close)
-	return server, func() {
-		for _, close := range closers {
-			close()
+	closers = append(closers, searchManager.Close, func() {
+		viewers.CloseAll(rtc.ReasonShutdown)
+		stopDisplays()
+		if virtual != nil {
+			virtual.Stop()
 		}
-	}, requestFSResync, searchManager, watchStatus
+	})
+	return sandboxRuntime{
+		server:          server,
+		search:          searchManager,
+		displays:        displays,
+		requestFSResync: requestFSResync,
+		watchStatus:     watchStatus,
+		close: func() {
+			for _, close := range closers {
+				close()
+			}
+		},
+	}
 }
 
 func runCloud(logger *slog.Logger, cfg env.Config) {
@@ -213,8 +259,9 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 	hostname, _ := os.Hostname()
 	reporter := report.NewClient(cfg, hostname)
 
-	server, closeWatchers, _, searchManager, _ := buildRuntime(logger, cfg, state, reporter, hostname, nil, nil)
-	defer closeWatchers()
+	sandbox := buildRuntime(logger, cfg, state, reporter, hostname, nil, nil)
+	defer sandbox.close()
+	server, searchManager := sandbox.server, sandbox.search
 	server.SetFSResyncOnAttach(true)
 
 	initialMeta := map[string]interface{}{
@@ -380,11 +427,31 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 		client.PublishEvent("ports.changed", payload)
 	}
 
-	server, closeWatchers, watcherResync, _, watchStatus := buildRuntime(logger, cfg, state, nil, hostname, fsSink, portsSink)
-	defer closeWatchers()
-	requestFSResync = watcherResync
-	client.SetServer(server)
-	client.SetWatcherStatus(watchStatus)
+	sandbox := buildRuntime(logger, cfg, state, nil, hostname, fsSink, portsSink)
+	defer sandbox.close()
+	requestFSResync = sandbox.requestFSResync
+	client.SetServer(sandbox.server)
+	client.SetWatcherStatus(sandbox.watchStatus)
+	displayStatus := func() interface{} { return displaysPayload{Displays: sandbox.displays.Displays()} }
+	client.SetStatus("displays", displayStatus)
+	// Changes coalesce: a slow relay never stalls the hub, and the latest snapshot wins.
+	displaysChanged := make(chan struct{}, 1)
+	sandbox.displays.OnChange(func([]display.Info) {
+		select {
+		case displaysChanged <- struct{}{}:
+		default:
+		}
+	})
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-displaysChanged:
+				client.PublishEvent("displays", displayStatus())
+			}
+		}
+	}()
 
 	logger.Info("local sandbox starting",
 		slog.String("spaceId", cfg.SpaceID),

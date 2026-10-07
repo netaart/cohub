@@ -59,6 +59,10 @@
       "types": "./dist/ports/index.d.ts",
       "default": "./dist/ports/index.js"
     },
+    "./display": {
+      "types": "./dist/display/index.d.ts",
+      "default": "./dist/display/index.js"
+    },
     "./search": {
       "types": "./dist/search/index.d.ts",
       "default": "./dist/search/index.js"

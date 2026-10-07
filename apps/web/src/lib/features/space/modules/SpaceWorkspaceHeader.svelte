@@ -88,6 +88,7 @@ export type SpaceWorkspaceHeaderActions = {
 	labelHeaderResource: (anchorEl?: HTMLElement | null) => void | Promise<void>;
 	insertHeaderReference: () => void;
 	toggleRightSidebar: () => void | Promise<void>;
+	openDisplay: (displayId: string) => void;
 };
 
 type Props = {
@@ -170,7 +171,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 </script>
 
 {#snippet HeaderActions()}
-	<SpaceRuntimeStatus spaceId={context.spaceId} canManage={context.space?.access?.permissions.includes("sandbox.manage") === true} />
+	<SpaceRuntimeStatus spaceId={context.spaceId} canManage={context.space?.access?.permissions.includes("sandbox.manage") === true} onOpenDisplay={actions.openDisplay} />
 	{#if context.activeSessionId && context.canManageSessionAccess}
 		<button
 			type="button"

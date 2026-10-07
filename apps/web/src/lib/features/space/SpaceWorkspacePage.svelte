@@ -148,6 +148,7 @@ import { appWindowKey } from "./modules/app-window-key";
 import { createBoardWindowController } from "./modules/board-window-controller.svelte";
 import DesktopLayerHost from "./modules/DesktopLayerHost.svelte";
 import { createDesktopLayerManager } from "./modules/desktop-layer-manager.svelte";
+import { createDisplayWindowController } from "./modules/display-window-controller.svelte";
 import { createFileWorkspaceController } from "./modules/file-workspace-controller.svelte";
 import { classifyInlineFileFsChange } from "./modules/file-workspace-utils";
 import {
@@ -211,6 +212,7 @@ import {
 	type PublishedAppOpenInput,
 } from "./modules/workspace-app-open";
 import { createWorkspaceLayoutController } from "./modules/workspace-layout-controller.svelte";
+import { cachedRuntimeStatus } from "./runtime-status.svelte";
 import { createWorkspaceSidePanelController } from "./side-panel/workspace-side-panel-controller.svelte";
 import { displayUserName, fallbackUserName } from "./space-utils";
 
@@ -440,6 +442,26 @@ const portPreview = createPortPreviewController({
 	onPortClosed: (port) => windowManager.tabClosed("port", port),
 	onBeforeOpenPort: () => {},
 });
+const displayWindows = createDisplayWindowController({
+	onOpenPanel: () => {
+		if (uiState.filesColumnHidden) uiState.setFilesColumnHidden(false);
+		ensurePreviewPanelFits();
+	},
+	onClosePanel: () => {
+		queueMicrotask(() => {
+			if (!activeWindowKind) closePreviewFocusMode();
+		});
+	},
+	onDisplayClosed: (display) => windowManager.tabClosed("display", display),
+});
+const displayNames = $derived(
+	Object.fromEntries(
+		(cachedRuntimeStatus(spaceId)?.displays ?? []).map((item) => [
+			item.id,
+			item.name || item.id,
+		]),
+	),
+);
 async function openMessageUrl(href: string, event: MouseEvent) {
 	try {
 		const url = new URL(href, page.url.href);
@@ -958,6 +980,8 @@ const windowManager = createWindowManager({
 	getActivePort: () => portPreview.activePort,
 	getAppTabs: () => appPreview.previews,
 	getActiveAppKey: () => appPreview.activeKey,
+	getDisplayTabs: () => displayWindows.tabs,
+	getActiveDisplay: () => displayWindows.active,
 	openFile: (path, optionsArg) =>
 		fileWorkspace.openInlineFile(path, optionsArg as never),
 	activateFile: (path) => fileWorkspace.activateInlineFile(path),
@@ -974,6 +998,9 @@ const windowManager = createWindowManager({
 	openApp: (input) => appPreview.openApp(input),
 	activateApp: (key) => appPreview.activateApp(key),
 	closeApp: (key) => appPreview.closeApp(key ?? undefined),
+	openDisplay: (display) => displayWindows.open(display),
+	activateDisplay: (display) => displayWindows.activate(display),
+	closeDisplay: (display) => displayWindows.close(display ?? undefined),
 	getPortEndpointUrl: (port) => previewEndpoints[port]?.url,
 	syncUrl: (ref, replace = true) => syncPreviewQuery(ref, replace),
 	onBudgetCleanup: () => {
@@ -3042,6 +3069,7 @@ $effect(() => {
 				for (const tab of [...portPreview.previews])
 					portPreview.closePort(tab.port);
 				appPreview.closeAll();
+				displayWindows.closeAll();
 			});
 			appliedPreviewContextKey = contextKey;
 		}
@@ -3126,6 +3154,9 @@ const spaceFileDomainProps = $derived.by<
 	retainedAppKeys,
 	activeInlineAppKey,
 	appShell,
+	displayTabs: displayWindows.tabs,
+	activeDisplay: displayWindows.active,
+	displayNames,
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,
@@ -3185,6 +3216,10 @@ const spaceFileDomainProps = $derived.by<
 	onCloseInlineBoardTab: closeInlineBoardTab,
 	onActivateInlinePort: activateInlinePortTab,
 	onCloseInlinePortTab: closeInlinePortTab,
+	onActivateDisplay: (display: string) =>
+		windowManager.activate("display", display),
+	onCloseDisplayTab: (display: string) =>
+		windowManager.close("display", display),
 	onActivateInlineApp: activateInlineAppTab,
 	onCloseInlineAppTab: closeInlineAppTab,
 	onRetryInlineApp: retryInlineApp,
@@ -3280,6 +3315,10 @@ const resourceActionState = $derived({
 });
 const headerActions = {
 	openShareModal: (id: string) => sessionChat.openShareModal(id),
+	openDisplay: (displayId: string) => {
+		if (filesColumnHidden) previewLayout.setFilesColumnHidden(false);
+		windowManager.openDisplay(displayId);
+	},
 	startSessionRename,
 	cancelSessionRename,
 	submitSessionRename,

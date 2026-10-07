@@ -204,6 +204,23 @@ Android 应用像 `runtime up` 一样为手机上的文件夹提供本地 Runtim
 文件夹可打开原 Space 或改绑；运行中的文件夹或 Space 不会被抢占。前台服务在后台保持所有绑定连接，退出登录时全部停止；未断开的绑定在服务被系统重启或下次打开应用时恢复，不随开机自启。
 文件工具限定在文件夹内，`bash` 以应用身份运行并使用 `sh`，`find` / `grep` 在缺少 `fd` / `rg` 时使用内置实现。
 
+### Screen sharing / 屏幕共享
+
+A device Runtime can also share the phone's screen with one Space it serves: people watch and steer
+it from the web over WebRTC, and the Space's agents use it through screenshots and input. Sharing
+needs the system's capture consent each time and lasts until the user stops it; control needs Cohub
+enabled in Accessibility settings. See [Displays](displays.md).
+
+设备 Runtime 还可以把手机屏幕共享给它所服务的一个 Space：人在 Web 端通过 WebRTC 查看和操作，Space 的 Agent 通过截图和输入使用它。
+每次共享都需要系统的录屏授权，直到用户停止；操作屏幕还需要在无障碍设置中启用 Cohub。详见 [Displays](displays.md)。
+
+On a computer, `cohub runtime up --display` shares its screen the same way (macOS, or Linux with
+X11; asking first unless `--yes`), and `--display xvfb[:WxH]` gives a headless Linux machine a
+virtual screen that programs started in the Space draw on.
+
+在电脑上，`cohub runtime up --display` 以同样方式共享屏幕（macOS，或使用 X11 的 Linux；除非传入 `--yes`，否则会先询问），
+`--display xvfb[:WxH]` 则为无界面的 Linux 机器启动一块虚拟屏，Space 中启动的程序都画在上面。
+
 ## Lifecycle / 生命周期
 
 Foreground and detached startup share one supervisor. Readiness requires both the
@@ -432,8 +449,9 @@ results arrive, so they cannot be charged as cloud executions.
 
 The Android smoke test runs host builds of sandboxd the way the app starts them (managed, control
 events on stderr), two folders side by side behind the real gateway relay, with no bash, rg or fd on
-PATH and folders laid out like shared storage, then drives `find`, `grep`, `read`, `bash`, file moves
-and the folder fence through the agent's sandbox client. It needs Go and touches only a temporary directory.
+PATH and folders laid out like shared storage, then drives `find`, `grep`, `read`, `bash`, file moves,
+the folder fence, and a screen shared from a provider socket like the app's, through the agent's
+sandbox client. It needs Go and touches only a temporary directory.
 
 ```bash
 pnpm exec tsx scripts/android/runtime-smoke.mts

@@ -8,7 +8,11 @@ import {
 	windowRefsEqual,
 } from "./window-navigation";
 import type { WindowKind, WindowRef } from "./window-route";
-import { isValidAppKey, isValidPortKey } from "./window-route";
+import {
+	isValidAppKey,
+	isValidDisplayKey,
+	isValidPortKey,
+} from "./window-route";
 import type { WorkspaceAppOpenContext } from "./workspace-app-context";
 
 type FileTabLike = {
@@ -25,6 +29,10 @@ type BoardTabLike = {
 type PortTabLike = {
 	port: string;
 	url: string;
+};
+
+type DisplayTabLike = {
+	display: string;
 };
 
 type AppTabLike = {
@@ -44,6 +52,8 @@ type WindowManagerOptions = {
 	getActivePort: () => string | null;
 	getAppTabs: () => AppTabLike[];
 	getActiveAppKey: () => string | null;
+	getDisplayTabs: () => DisplayTabLike[];
+	getActiveDisplay: () => string | null;
 	openFile: (
 		path: string,
 		options?: { preserveHistory?: boolean; position?: unknown },
@@ -69,6 +79,9 @@ type WindowManagerOptions = {
 	}) => void;
 	activateApp: (key: string) => void;
 	closeApp: (key?: string | null) => void;
+	openDisplay: (display: string) => void;
+	activateDisplay: (display: string) => void;
+	closeDisplay: (display?: string | null) => void;
 	getPortEndpointUrl: (port: string) => string | null | undefined;
 	syncUrl: (ref: WindowRef | null, replace?: boolean) => void;
 	onBudgetCleanup?: () => void;
@@ -100,7 +113,7 @@ function isDirtyFileTab(tab: FileTabLike) {
 }
 
 /**
- * Single active-tab coordinator over file/board/port/app domain controllers.
+ * Single active-tab coordinator over file/board/port/app/display domain controllers.
  * Owns: the active preview ref, access order, budget, URL sync, open/close.
  * Does not own: file drafts, board docs, port endpoints (domain controllers do).
  *
@@ -192,6 +205,8 @@ export function createWindowManager(options: WindowManagerOptions) {
 			return options.getBoardTabs().some((tab) => tab.path === key);
 		if (kind === "port")
 			return options.getPortTabs().some((tab) => tab.port === key);
+		if (kind === "display")
+			return options.getDisplayTabs().some((tab) => tab.display === key);
 		return options.getAppTabs().some((tab) => tab.key === key);
 	}
 
@@ -206,6 +221,8 @@ export function createWindowManager(options: WindowManagerOptions) {
 		if (port) refs.push({ kind: "port", key: port });
 		const appKey = options.getActiveAppKey();
 		if (appKey) refs.push({ kind: "app", key: appKey });
+		const display = options.getActiveDisplay();
+		if (display) refs.push({ kind: "display", key: display });
 		return refs;
 	}
 
@@ -285,6 +302,12 @@ export function createWindowManager(options: WindowManagerOptions) {
 				weight: 3,
 				protected: tab.loading || tab.windowState?.dirty === true,
 			})),
+			...options.getDisplayTabs().map((tab) => ({
+				kind: "display" as const,
+				key: tab.display,
+				weight: 4,
+				protected: false,
+			})),
 		];
 		let total = candidates.reduce((sum, tab) => sum + tab.weight, 0);
 		if (total <= weightLimit) return;
@@ -331,6 +354,7 @@ export function createWindowManager(options: WindowManagerOptions) {
 			if (kind === "file") options.closeFile(key, skipConfirm);
 			else if (kind === "board") options.closeBoard(key);
 			else if (kind === "port") options.closePort(key);
+			else if (kind === "display") options.closeDisplay(key);
 			else options.closeApp(key);
 		});
 	}
@@ -451,14 +475,39 @@ export function createWindowManager(options: WindowManagerOptions) {
 		}
 	}
 
+	function openDisplay(
+		display: string,
+		opts: { syncUrl?: boolean; source?: WindowNavigationSource } = {},
+	) {
+		if (!isValidDisplayKey(display)) return;
+		const syncUrl = opts.syncUrl ?? true;
+		const hadPreview = Boolean(currentRef());
+		const ref = { kind: "display" as const, key: display };
+		beginNavigation(ref, opts.source ?? (syncUrl ? "user" : "route"));
+		commitActive(ref);
+		if (hasTab("display", display)) options.activateDisplay(display);
+		else options.openDisplay(display);
+		if (syncUrl) options.syncUrl(ref, hadPreview);
+		enforceBudget();
+		if (syncUrl) {
+			const current = currentRef();
+			if (current) options.syncUrl(current, true);
+		}
+	}
+
+	function activateInDomain(kind: WindowKind, key: string) {
+		if (kind === "file") options.activateFile(key);
+		else if (kind === "board") options.activateBoard(key);
+		else if (kind === "port") options.activatePort(key);
+		else if (kind === "display") options.activateDisplay(key);
+		else options.activateApp(key);
+	}
+
 	function activate(kind: WindowKind, key: string, syncUrl = true) {
 		const ref = { kind, key };
 		beginNavigation(ref, syncUrl ? "user" : "route");
 		commitActive(ref);
-		if (kind === "file") options.activateFile(key);
-		else if (kind === "board") options.activateBoard(key);
-		else if (kind === "port") options.activatePort(key);
-		else options.activateApp(key);
+		activateInDomain(kind, key);
 		if (syncUrl) options.syncUrl(ref, true);
 	}
 
@@ -531,6 +580,9 @@ export function createWindowManager(options: WindowManagerOptions) {
 			for (const tab of [...options.getAppTabs()]) {
 				options.closeApp(tab.key);
 			}
+			for (const tab of [...options.getDisplayTabs()]) {
+				options.closeDisplay(tab.display);
+			}
 		});
 		if (syncUrl) options.syncUrl(null, true);
 	}
@@ -566,10 +618,7 @@ export function createWindowManager(options: WindowManagerOptions) {
 		if (hasTab(ref.kind, ref.key)) {
 			beginNavigation(ref, "route");
 			commitActive(ref);
-			if (ref.kind === "file") options.activateFile(ref.key);
-			else if (ref.kind === "board") options.activateBoard(ref.key);
-			else if (ref.kind === "port") options.activatePort(ref.key);
-			else options.activateApp(ref.key);
+			activateInDomain(ref.kind, ref.key);
 			return { ok: true as const };
 		}
 		if (ref.kind === "file") {
@@ -578,6 +627,10 @@ export function createWindowManager(options: WindowManagerOptions) {
 		}
 		if (ref.kind === "board") {
 			void openBoard(ref.key, { syncUrl: false, source: "route" });
+			return { ok: true as const };
+		}
+		if (ref.kind === "display") {
+			openDisplay(ref.key, { syncUrl: false, source: "route" });
 			return { ok: true as const };
 		}
 		if (ref.kind === "app") {
@@ -649,6 +702,7 @@ export function createWindowManager(options: WindowManagerOptions) {
 		openBoard,
 		openPort,
 		openApp,
+		openDisplay,
 		activate,
 		close,
 		closeActive,

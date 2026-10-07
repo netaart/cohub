@@ -171,7 +171,10 @@ abstract class BuildSandboxd : DefaultTask() {
                 environment("CC", toolchain.resolve("$target${apiLevel.get()}-clang").path)
                 commandLine(
                     "go", "build", "-trimpath", "-buildvcs=false",
-                    "-ldflags", "-s -w -X main.buildVersion=${version.get()}",
+                    // pion's ICE enumerates interfaces through wlynxg/anet, which works
+                    // around Android 11's netlink ban by linking net's private zone
+                    // cache; Go 1.23+ refuses that link unless the check is off.
+                    "-ldflags", "-s -w -checklinkname=0 -X main.buildVersion=${version.get()}",
                     "-o", output.resolve("$abi/libcohub_sandboxd.so").path, ".",
                 )
             }

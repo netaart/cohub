@@ -105,6 +105,13 @@ OTEL_CONSOLE_EXPORTER=false
 
 Without these variables, services keep local instrumentation wiring but do not send telemetry to any external system.
 
+## Displays
+
+Display sessions (watching and steering a shared phone screen) connect peer-to-peer over WebRTC.
+Without configuration viewers use a public STUN server; for networks that block direct connections,
+set a Cloudflare Realtime TURN key on the API (`RTC_TURN_KEY_ID`, `RTC_TURN_KEY_API_TOKEN`). See
+[Displays](displays.md).
+
 ## Security reports
 
 See `SECURITY.md`. Prefer GitHub Private Vulnerability Reporting or email `dev@talesof.ai`.

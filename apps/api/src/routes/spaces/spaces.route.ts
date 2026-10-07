@@ -4,7 +4,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { fileWatcherStatusSchema, getDefaultSpaceModsForEnv, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
   HOME_SPACE_SLUG,
   parseSpaceSlug,
@@ -1872,8 +1872,13 @@ router.get("/:id/runtime", async (c) => {
   const [sandbox, registration] = await Promise.all([
     getSpaceSandboxBySpaceId(spaceId), getRuntimeRegistration(spaceId),
   ]);
-  const rawWatcher = sandbox?.provider === "local" && registration
-    ? await redisCommandClient.get(`sandbox:watcher:${spaceId}`).catch(() => null) : null;
+  const local = sandbox?.provider === "local" && Boolean(registration);
+  const [rawWatcher, rawDisplays] = local
+    ? await Promise.all([
+      redisCommandClient.get(`sandbox:watcher:${spaceId}`).catch(() => null),
+      redisCommandClient.get(runtimeDisplaysKey(spaceId)).catch(() => null),
+    ])
+    : [null, null];
   let fileWatcher = null;
   if (rawWatcher) {
     try {
@@ -1881,9 +1886,16 @@ router.get("/:id/runtime", async (c) => {
       if (parsed.success) fileWatcher = parsed.data;
     } catch { /* Invalid telemetry never affects Runtime availability. */ }
   }
+  let displays = null;
+  if (rawDisplays) {
+    try {
+      const parsed = displaysSnapshotSchema.safeParse(JSON.parse(rawDisplays));
+      if (parsed.success) displays = parsed.data.displays;
+    } catch { /* A malformed snapshot only hides displays. */ }
+  }
   const rawWorkspace = registration ? await redisCommandClient.get(runtimeWorkspaceKey(spaceId)) : null;
   const workspace = runtimeWorkspaceStatus(registration?.runtimeId, rawWorkspace);
-  return c.json({ kind: sandbox?.provider ?? "cloud", online: Boolean(registration), runtimeId: registration?.runtimeId ?? null, capabilities: registration?.capabilities ?? null, fileWatcher: workspace.online ? fileWatcher : null, workspace, observedAt: new Date().toISOString() });
+  return c.json({ kind: sandbox?.provider ?? "cloud", online: Boolean(registration), runtimeId: registration?.runtimeId ?? null, capabilities: registration?.capabilities ?? null, fileWatcher: workspace.online ? fileWatcher : null, displays: workspace.online ? displays : null, workspace, observedAt: new Date().toISOString() });
 });
 
 router.get("/:id/sessions/:sessionId/runtime", async (c) => {

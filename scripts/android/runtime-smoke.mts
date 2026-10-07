@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -25,6 +26,33 @@ const root = join(base, "storage");
 const unreadable = join(root, "Android/data");
 const server = http.createServer();
 const bridges: ReturnType<typeof spawn>[] = [];
+
+function serveDisplay(path: string, inputs: unknown[][]) {
+  const frame = (message: object) => {
+    const body = Buffer.from(JSON.stringify(message));
+    const header = Buffer.alloc(5);
+    header.writeUInt32BE(body.length + 1);
+    header[4] = 1;
+    return Buffer.concat([header, body]);
+  };
+  return net.createServer((socket) => {
+    socket.write(frame({ type: "hello", version: 1, name: "smoke" }));
+    socket.write(frame({ type: "displays", displays: [{ id: "screen", name: "Smoke phone", width: 1080, height: 2400, stream: true, capture: true, input: true }] }));
+    let pending = Buffer.alloc(0);
+    socket.on("data", (chunk: Buffer) => {
+      pending = Buffer.concat([pending, chunk]);
+      while (pending.length >= 4 && pending.length >= 4 + pending.readUInt32BE(0)) {
+        const size = pending.readUInt32BE(0);
+        const call = JSON.parse(pending.subarray(5, 4 + size).toString()) as { type: string; id?: number; method: string; params: { events?: unknown[] } };
+        pending = pending.subarray(4 + size);
+        if (call.type !== "call" || !call.id) continue;
+        if (call.method === "input") inputs.push(call.params.events ?? []);
+        const result = call.method === "capture" ? { mimeType: "image/png", data: "iVBORw0KGgo=", width: 2, height: 2 } : null;
+        socket.write(frame({ type: "reply", id: call.id, result }));
+      }
+    });
+  }).listen(path);
+}
 
 try {
   const files: Record<string, string | Buffer> = {
@@ -58,7 +86,7 @@ try {
     peerEndpoint: (id: string) => `ws://127.0.0.1:${port}/internal/sandbox-relay/${id}`,
     authorize: async (token: string) => { authorized.push(token); return { ok: true, userId: "owner" }; },
     renewWorkspace: async () => true, releaseWorkspace: async () => undefined, reportStatus: async () => undefined,
-    runtimeChanged: async () => undefined, publishWatcherEvent: async () => undefined, storeWatcherStatus: async () => undefined,
+    runtimeChanged: async () => undefined, publishWatcherEvent: async () => undefined, storeWatcherStatus: async () => undefined, storeDisplays: async () => undefined,
     publishChannelHint: async () => undefined, readChannelHint: async () => null, clearChannelHint: async () => undefined,
     dialForward: async () => { throw new Error("single gateway"); },
   });
@@ -72,12 +100,13 @@ try {
     });
   });
 
-  const startBridge = async (spaceId: string, runtimeId: string, root: string) => {
+  const startBridge = async (spaceId: string, runtimeId: string, root: string, display?: string) => {
     const started = spawn(join(base, "sandboxd"), ["--local", "--space", spaceId, "--root", root, "--relay", `ws://127.0.0.1:${port}/sandbox/relay`], {
       cwd: root,
       env: {
         PATH: bin, HOME: join(base, spaceId), TMPDIR: base, COHUB_RELAY_TOKEN: `token-${spaceId}`, COHUB_RUNTIME_ID: runtimeId,
         COHUB_RUNTIME_MANAGED: "1", COHUB_RUNTIME_CONTROL_FD: "2", COHUB_LOG_FORMAT: "json",
+        ...(display ? { COHUB_DISPLAY: `unix:${display}` } : {}),
       },
       stdio: ["pipe", "ignore", "pipe"],
     });
@@ -112,10 +141,13 @@ try {
     assert.equal(await exited, 0);
   };
 
-  step("serve two folders side by side: DCIM, and the whole storage");
+  step("serve two folders side by side: DCIM, and the whole storage with the screen shared");
+  const displaySocket = join(base, "display.sock");
+  const displayInputs: unknown[][] = [];
+  const displayServer = serveDisplay(displaySocket, displayInputs);
   const [photosBridge, storageBridge] = await Promise.all([
     startBridge(photosSpace, "2f0d1c55-8b1a-4e3e-9d4c-6a1c2b3d4e5f", join(root, "DCIM")),
-    startBridge(storageSpace, "6b7e2d1a-1c4f-4a8e-9b3d-2e5f6a7b8c9d", root),
+    startBridge(storageSpace, "6b7e2d1a-1c4f-4a8e-9b3d-2e5f6a7b8c9d", root, displaySocket),
   ]);
   assert.deepEqual([...authorized].sort(), [`token-${photosSpace}`, `token-${storageSpace}`].sort());
   const [photos, storage] = await Promise.all([attach(photosSpace), attach(storageSpace)]);
@@ -154,6 +186,22 @@ try {
   assert.equal(moved.exitCode, 0);
   const after = await storage<{ matches: string[] }>("fs.find", { pattern: "IMG_20261001*", path: "DCIM", mode: "glob", limit: 10 });
   assert.deepEqual(after.matches, ["2026-10-01/IMG_20261001_101500.jpg"], "the other Space sees the move");
+
+  step("the shared screen: listed, captured and steered through the relay; viewers only via the API");
+  let shared: Array<{ id: string }> = [];
+  for (let attempt = 0; attempt < 50 && shared.length === 0; attempt += 1) {
+    shared = (await storage<{ displays: Array<{ id: string }> }>("display.list", {})).displays;
+    if (shared.length === 0) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.deepEqual(shared.map((display) => display.id), ["screen"]);
+  assert.deepEqual((await photos<{ displays: unknown[] }>("display.list", {})).displays, [], "only the sharing Space sees it");
+  const shot = await storage<{ mimeType: string; width: number }>("display.capture", { display: "screen", maxSize: 640 });
+  assert.equal(shot.mimeType, "image/png");
+  const tap = [{ type: "pointer", action: "down", x: 0.5, y: 0.5, t: 0 }, { type: "pointer", action: "up", x: 0.5, y: 0.5, t: 60 }];
+  assert.deepEqual(await storage("display.input", { display: "screen", events: tap }), { applied: 2 });
+  assert.deepEqual(displayInputs, [tap]);
+  await assert.rejects(storage("rtc.open", { sessionId: "0b5f7c2e-8c1d-4a3e-9f6b-2d7a1c9e4b10", display: "screen", offer: "v=0", iceServers: [], control: true }), /through the API/);
+  displayServer.close();
 
   step("stopping one folder leaves the other serving");
   await stopBridge(photosSpace, photosBridge);

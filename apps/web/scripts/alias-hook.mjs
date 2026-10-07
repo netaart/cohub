@@ -53,6 +53,10 @@ const PACKAGE_SOURCES = [
 		`${packagesRoot}/protocol/src/desktop-command.ts`,
 	],
 	["@cohub/protocol/task", `${packagesRoot}/protocol/src/task/index.ts`],
+	[
+		"@cohub/protocol/display",
+		`${packagesRoot}/protocol/src/display/index.ts`,
+	],
 	["@cohub/protocol", `${packagesRoot}/protocol/src/index.ts`],
 ];
 

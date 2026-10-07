@@ -59,8 +59,13 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `files.save` | `files` | Saves an https `url` (downloaded natively) or base64 `data` to shared storage |
 | `navigation.interceptBack` | `navigation.back` | While enabled, system back emits `navigation.back` |
 | `shortcuts.push` | `shortcuts` | Launcher shortcut to an in-app path, ranked by recency |
+| `display.status` | `display` | The Space this screen is shared with, and whether control is on |
+| `display.share` | `display` | Asks for screen capture consent, then shares with a Space this device serves |
+| `display.stop` | `display` | Stops sharing; every stream ends |
+| `display.openControlSettings` | `display` | Opens Accessibility settings, where the user allows control |
 
-`runtime.changed` pushes the whole `DeviceRuntime` on every change. Android advertises
+`runtime.changed` pushes the whole `DeviceRuntime` on every change, `display.changed` the whole
+display status. `display` rides on `runtime`; see [Displays](displays.md). Android advertises
 `runtime` only on Android 11+ builds that ship sandboxd; see
 [Local Runtime](local-runtime.md#android-device--android-设备).
 

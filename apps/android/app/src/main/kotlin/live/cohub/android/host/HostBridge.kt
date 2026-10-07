@@ -20,9 +20,11 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import live.cohub.android.auth.AuthSession
+import live.cohub.android.display.DeviceDisplay
 import live.cohub.android.files.FileSaver
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.FolderUnavailable
+import live.cohub.android.runtime.RuntimeInstance
 import live.cohub.android.runtime.toJson
 import java.util.UUID
 
@@ -43,9 +45,11 @@ class HostBridge(
     private val actions: HostActions,
     private val runtime: DeviceRuntime? = null,
     private val files: FileSaver? = null,
+    private val display: DeviceDisplay? = null,
 ) {
     private val supportedMethods = BASE_METHODS +
         (if (runtime != null) RUNTIME_METHODS else emptySet()) +
+        (if (runtime != null && display != null) DISPLAY_METHODS else emptySet()) +
         (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE) else emptySet())
 
     @Volatile
@@ -119,7 +123,7 @@ class HostBridge(
             put(
                 "capabilities",
                 buildJsonArray {
-                    HostCapabilities.advertised(runtime = runtime != null, files = files != null)
+                    HostCapabilities.advertised(runtime = runtime != null && display != null, files = files != null)
                         .forEach { add(JsonPrimitive(it)) }
                 },
             )
@@ -252,8 +256,30 @@ class HostBridge(
             requireRuntime().instances.value.toJson()
         }
 
+        HostProtocol.Methods.DISPLAY_STATUS -> requireDisplay().status.value.toJson()
+
+        HostProtocol.Methods.DISPLAY_SHARE -> {
+            val spaceId = requireSpaceId(params)
+            val serving = requireRuntime().instances.value.any { it.spaceId == spaceId && isRunning(it.state) }
+            if (!serving) throw IllegalStateException("This device does not serve that Space")
+            val grant = actions.requestScreenCapture() ?: throw CancellationSignal("Screen capture was not granted")
+            requireDisplay().awaitShare(spaceId) { actions.startSharing(spaceId, grant) }.toJson()
+        }
+
+        HostProtocol.Methods.DISPLAY_STOP -> {
+            requireDisplay().stop()
+            requireDisplay().status.value.toJson()
+        }
+
+        HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS -> JsonPrimitive(actions.openControlSettings())
+
         else -> throw IllegalArgumentException("Unhandled method: $method")
     }
+
+    private fun requireDisplay(): DeviceDisplay = display ?: throw IllegalStateException("This device cannot share its screen")
+
+    private fun isRunning(state: RuntimeInstance.State) =
+        state == RuntimeInstance.State.READY || state == RuntimeInstance.State.CONNECTING
 
     private fun requireRuntime(): DeviceRuntime = runtime ?: throw IllegalStateException("This device cannot serve a Space")
 
@@ -304,6 +330,12 @@ class HostBridge(
     }
 
     private companion object {
+        val DISPLAY_METHODS = setOf(
+            HostProtocol.Methods.DISPLAY_STATUS,
+            HostProtocol.Methods.DISPLAY_SHARE,
+            HostProtocol.Methods.DISPLAY_STOP,
+            HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS,
+        )
         val RUNTIME_METHODS = setOf(
             HostProtocol.Methods.RUNTIME_LIST,
             HostProtocol.Methods.RUNTIME_BROWSE,
@@ -353,4 +385,12 @@ interface HostActions {
     fun pushShortcut(id: String, label: String, path: String)
 
     suspend fun prepareRuntime(): Boolean
+
+    suspend fun requestScreenCapture(): ScreenCaptureGrant?
+
+    fun startSharing(spaceId: String, grant: ScreenCaptureGrant)
+
+    fun openControlSettings(): Boolean
 }
+
+class ScreenCaptureGrant(val resultCode: Int, val data: android.content.Intent)

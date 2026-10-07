@@ -36,6 +36,15 @@ app/src/main/kotlin/live/cohub/android/
     RuntimeService.kt        foreground service running every enabled binding
     RuntimeConnection.kt     /runtime/relay client (no local Harness)
     SandboxBridge.kt         supervises sandboxd over one folder
+  display/
+    DeviceDisplay.kt         this screen: shared with one served Space, control state
+    ScreenCapture.kt         MediaProjection mirror → encoder, stills, rotation
+    ScreenEncoder.kt         hardware H.264 from a Surface, live bitrate and key frames
+    DisplayProvider.kt       the display wire protocol on a per-Space private socket
+    DisplayWire.kt           frames, mirroring apps/sandbox/display/wire.go
+    ControlService.kt        AccessibilityService: gestures, text, system buttons
+    InputDriver.kt           live and scheduled input onto the service
+    GesturePlanner.kt        input → exact gestures; live drags as continued strokes
   ui/
     SurfaceContainer.kt      holds the WebView, pads insets it misreports
     ShellAppearance.kt       the page's edge color, persisted for cold start

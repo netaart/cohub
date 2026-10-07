@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     file unzip zip \
     python3 python3-pip python3-venv python3-dev \
     ffmpeg imagemagick libimage-exiftool-perl \
+    xvfb \
     vim tree tmux htop xz-utils less \
     build-essential \
     strace lsof \

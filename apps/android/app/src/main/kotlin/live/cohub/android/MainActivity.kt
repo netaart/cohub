@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionConfig
+import android.media.projection.MediaProjectionManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -44,11 +46,13 @@ import live.cohub.android.host.HostBridge
 import live.cohub.android.host.HostProtocol
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
+import live.cohub.android.host.ScreenCaptureGrant
 import live.cohub.android.host.SurfaceListener
 import live.cohub.android.host.WebOrigin
 import live.cohub.android.host.WebSurface
 import live.cohub.android.host.WebWarmup
 import live.cohub.android.runtime.DeviceRuntime
+import live.cohub.android.runtime.RuntimeService
 import live.cohub.android.runtime.toJson
 import live.cohub.android.ui.ShellAppearance
 import live.cohub.android.ui.SurfaceContainer
@@ -66,6 +70,8 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var customTabs: ActivityResultLauncher<Intent>
     private lateinit var allFilesAccess: ActivityResultLauncher<Intent>
     private lateinit var notificationPermission: ActivityResultLauncher<String>
+    private lateinit var screenCapture: ActivityResultLauncher<Intent>
+    private var pendingCapture: CompletableDeferred<ScreenCaptureGrant?>? = null
     private val app get() = application as CohubApplication
     private val hostPrefs by lazy { getSharedPreferences("cohub-host", MODE_PRIVATE) }
     private var pendingResult: CompletableDeferred<Unit>? = null
@@ -141,6 +147,7 @@ class MainActivity : ComponentActivity(), HostActions {
             actions = this,
             runtime = runtime.takeIf { it.available },
             files = app.files,
+            display = app.display,
         )
         fileChooser = FileChooser(this)
 
@@ -153,10 +160,19 @@ class MainActivity : ComponentActivity(), HostActions {
         notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
             pendingResult?.complete(Unit)
         }
+        screenCapture = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val data = result.data
+            pendingCapture?.complete(if (result.resultCode == RESULT_OK && data != null) ScreenCaptureGrant(result.resultCode, data) else null)
+        }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 runtime.instances.collect { bridge.emit(HostProtocol.Events.RUNTIME_CHANGED, it.toJson()) }
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                app.display.status.collect { bridge.emit(HostProtocol.Events.DISPLAY_CHANGED, it.toJson()) }
             }
         }
 
@@ -358,6 +374,28 @@ class MainActivity : ComponentActivity(), HostActions {
         }
         runtime.hasStorageAccess()
     }
+
+    override suspend fun requestScreenCapture(): ScreenCaptureGrant? = preparing.withLock {
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        // The whole display: a single app would break input coordinates.
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+        } else {
+            manager.createScreenCaptureIntent()
+        }
+        val result = CompletableDeferred<ScreenCaptureGrant?>()
+        pendingCapture = result
+        screenCapture.launch(intent)
+        result.await().also { pendingCapture = null }
+    }
+
+    override fun startSharing(spaceId: String, grant: ScreenCaptureGrant) {
+        RuntimeService.share(this, spaceId, grant.resultCode, grant.data)
+    }
+
+    override fun openControlSettings(): Boolean = runCatching {
+        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.isSuccess
 
     private suspend fun <I> awaitResult(launcher: ActivityResultLauncher<I>, input: I) {
         val result = CompletableDeferred<Unit>()
