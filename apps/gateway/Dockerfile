@@ -69,6 +69,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 FROM node:24-slim AS runtime
 
 ENV NODE_ENV=production
+ENV NODE_OPTIONS=--max-old-space-size-percentage=75
 
 WORKDIR /app
 

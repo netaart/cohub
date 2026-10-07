@@ -472,7 +472,7 @@ export class SpaceFilesApi {
 
   read(path: string, customFetch?: Fetch, signal?: AbortSignal) {
     const params = new URLSearchParams({ path });
-    return this.transport.request<SpaceFsFileResponse | SpaceFsPreparingFile>(
+    return this.transport.requestRevalidated<SpaceFsFileResponse | SpaceFsPreparingFile>(
       `/api/spaces/${this.spaceId}/fs/file?${params.toString()}`,
       { fetch: customFetch, signal },
     );

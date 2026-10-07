@@ -6,7 +6,6 @@ metadata:
 data:
   ENV: "{{ENV}}"
   LOG_LEVEL: "{{LOG_LEVEL}}"
-  NODE_OPTIONS: "--max-old-space-size=1536"
   WORKSPACE_ROOT: "{{WORKSPACE_ROOT}}"
   CHECKPOINT_CACHE_ROOT: "{{CHECKPOINT_CACHE_ROOT}}"
   SESSIONS_DIR: "{{SESSIONS_DIR}}"

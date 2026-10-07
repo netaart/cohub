@@ -10,6 +10,7 @@ import { readFile } from "node:fs/promises";
 import { ensureFsCdnManifest, shouldUseFsCdnForMeta } from "../../space-fs-cdn-cache.js";
 import { FS_CDN_DOWNLOAD_WAIT_TIMEOUT_MS } from "../../space-fs-cdn-constants.js";
 import { getOptionalAuth, useAuth, requireValidId, authzDenied } from "../../lib/middleware.js";
+import { jsonWithEtag } from "../../lib/json-etag.js";
 import { hasPermission } from "../../permissions.js";
 import { getSpacePendingDiffFile, getSpacePendingDiffSummary } from "../../checkpoint-pending-diff.js";
 import { checkpointFsJsonError } from "../../checkpoint-fs.js";
@@ -231,7 +232,7 @@ router.get("/file", async (c) => {
   try {
     const result = await readSpaceFile(spaceId, path, { visibility });
     if (!("content" in result)) return c.json(result, 202);
-    return c.json(result);
+    return result.delivery === "url" ? c.json(result) : jsonWithEtag(c, result);
   } catch (error) {
     const { status, body } = spaceFsJsonError(error);
     return c.json(body, status as never);

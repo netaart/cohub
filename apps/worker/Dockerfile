@@ -84,6 +84,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 FROM node:24-slim AS runtime
 
 ENV NODE_ENV=production
+ENV NODE_OPTIONS=--max-old-space-size-percentage=70
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && \
   rm -rf /var/lib/apt/lists/*

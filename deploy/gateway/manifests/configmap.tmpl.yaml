@@ -6,6 +6,5 @@ metadata:
 data:
   ENV: "__ENV__"
   LOG_LEVEL: "__LOG_LEVEL__"
-  NODE_OPTIONS: "--max-old-space-size=1536"
   API_BASE_URL: "__API_BASE_URL__"
   LOGTO_ENDPOINT: "__LOGTO_ENDPOINT__"

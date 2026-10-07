@@ -77,6 +77,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 
 FROM node:24-slim AS runtime
 ENV NODE_ENV=production
+ENV NODE_OPTIONS=--max-old-space-size-percentage=75
 ENV PORT=8787
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && \
