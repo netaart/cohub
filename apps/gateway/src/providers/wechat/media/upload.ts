@@ -12,7 +12,7 @@ import { WeChatMessageItemType, WeChatUploadMediaType, type WeChatMessageItem } 
 import { uploadWeChatCdnFile } from "./cdn.js";
 import { aesEcbPaddedSize } from "./crypto.js";
 import { detectImageMimeType } from "./mime.js";
-import { safeFetch } from "./url.js";
+import { safeFetch } from "@cohub/infra/safe-fetch";
 
 export const WECHAT_OUTBOUND_ATTACHMENT_MAX_BYTES = UPLOAD_MAX_FILE_BYTES;
 const LARGE_MEDIA_TIMEOUT_MS = 10 * 60 * 1000;

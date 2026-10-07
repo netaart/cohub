@@ -31,6 +31,8 @@ export type ModelDef = {
   contextWindow?: number;
   maxTokens?: number;
   requestProfile?: ModelRequestProfile;
+  /** `false` sends remote images inline instead of as URLs. */
+  imageUrlInput?: boolean;
   headers?: Record<string, string>;
   compat?: unknown;
   [key: string]: unknown;
@@ -41,6 +43,7 @@ export type ProviderConfig = {
   apiKey?: string;
   api?: string;
   requestProfile?: ModelRequestProfile;
+  imageUrlInput?: boolean;
   headers?: Record<string, string>;
   compat?: unknown;
   models?: ModelDef[];
@@ -115,6 +118,7 @@ export function isModelDefinition(value: unknown, options: { partial?: boolean }
     && (value.contextWindow === undefined || isPositiveInteger(value.contextWindow))
     && (value.maxTokens === undefined || isPositiveInteger(value.maxTokens))
     && (value.requestProfile === undefined || REQUEST_PROFILES.has(value.requestProfile as ModelRequestProfile))
+    && (value.imageUrlInput === undefined || typeof value.imageUrlInput === "boolean")
     && (value.headers === undefined || isStringRecord(value.headers))
     && (value.compat === undefined || isRecord(value.compat));
 }
@@ -125,6 +129,7 @@ function isProviderConfig(value: unknown): value is ProviderConfig {
     && (value.apiKey === undefined || isNonEmptyString(value.apiKey))
     && (value.api === undefined || isNonEmptyString(value.api))
     && (value.requestProfile === undefined || REQUEST_PROFILES.has(value.requestProfile as ModelRequestProfile))
+    && (value.imageUrlInput === undefined || typeof value.imageUrlInput === "boolean")
     && (value.headers === undefined || isStringRecord(value.headers))
     && (value.compat === undefined || isRecord(value.compat))
     && (value.models === undefined || (Array.isArray(value.models) && value.models.every((model) => isModelDefinition(model))));

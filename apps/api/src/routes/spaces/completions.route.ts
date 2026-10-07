@@ -16,7 +16,7 @@ import type {
   SpaceCompletionResult,
   SpaceCompletionStreamEvent,
 } from "@cohub/protocol";
-import type { ContentBlock } from "@cohub/protocol/core";
+import { normalizeContentBlocksSafe } from "@cohub/core/content/normalize";
 import { createLogger } from "@cohub/infra/logging";
 import { authzDenied, requireValidId, useAuth } from "../../lib/middleware.js";
 import { hasPermission } from "../../permissions.js";
@@ -55,7 +55,7 @@ const contentBlockSchema = z.object({
 
 const completionMessageSchema = z.object({
   role: z.enum(["user", "assistant", "system"]),
-  content: z.array(contentBlockSchema).min(1),
+  content: z.union([z.string().min(1), z.array(contentBlockSchema).min(1)]),
 });
 
 const createCompletionSchema = z.object({
@@ -149,7 +149,7 @@ function summarizeMessagesShape(raw: unknown): {
       invalidRoleCount += 1;
     }
     const content = (message as { content?: unknown }).content;
-    if (!Array.isArray(content) || content.length === 0) {
+    if (typeof content === "string" ? !content : !Array.isArray(content) || content.length === 0) {
       emptyContentCount += 1;
     }
   }
@@ -160,14 +160,14 @@ function summarizeMessagesShape(raw: unknown): {
   };
 }
 
-function isContentBlock(value: unknown): value is ContentBlock {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value) && typeof (value as { type?: unknown }).type === "string");
-}
-
 function normalizeMessages(raw: z.infer<typeof createCompletionSchema>["messages"]): CompletionMessage[] {
   return raw.map((message) => ({
     role: message.role,
-    content: message.content.filter(isContentBlock),
+    content: typeof message.content === "string"
+      ? [{ type: "text" as const, text: message.content }]
+      : normalizeContentBlocksSafe(message.content, {
+          onInvalid: (issue) => logger.warn("[Completion] dropped unreadable content block", { message: issue.message }),
+        }),
   })).filter((message) => message.content.length > 0);
 }
 

@@ -29,6 +29,7 @@
     "@cohub/db": "workspace:*",
     "@cohub/identity": "workspace:*",
     "@cohub/infra": "workspace:*",
+    "@cohub/media": "workspace:*",
     "@cohub/model-runtime": "workspace:*",
     "@cohub/protocol": "workspace:*",
     "@cohub/sandbox-client": "workspace:*",

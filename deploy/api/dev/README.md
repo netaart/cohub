@@ -25,7 +25,6 @@ vim secrets.yaml
 需要填写的字段：
 - `DATABASE_URL` - 数据库连接地址
 - `REDIS_URL` - Redis 连接地址
-- `LITELLM_API_KEY` - LiteLLM API key
 - `GENERATION_API_KEY` - Generation SDK API key used by the Worker; configure it on the deployment, not in a Space
 - `APP_ENCRYPTION_KEY` - 应用级密钥（用于加密存储凭据、签名会话与执行授权 token）
 - `WORKER_SECRET` - Worker 通信密钥

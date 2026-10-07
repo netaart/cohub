@@ -1,6 +1,5 @@
-import type { ContentBlock } from "@cohub/protocol/core";
+import { imageBlockToPi, type ContentBlock } from "@cohub/protocol/core";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import { contentBlockToPiImage } from "@cohub/model-runtime/image-content";
 
 export type SessionTitleInputPart = { type: "text"; text: string } | ImageContent;
 
@@ -24,7 +23,7 @@ export function buildSessionTitleContent(content: ContentBlock[], includeImages:
     if (block.type === "text" && block.text.trim()) {
       parts.push({ type: "text", text: block.text });
     } else if (includeImages && block.type === "image") {
-      const image = contentBlockToPiImage(block);
+      const image = imageBlockToPi(block);
       if (image) parts.push(image);
     }
   }

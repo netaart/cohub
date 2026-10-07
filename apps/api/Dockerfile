@@ -16,6 +16,9 @@ COPY packages/billing/tsconfig.build.json ./packages/billing/tsconfig.build.json
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/core/tsconfig.json ./packages/core/tsconfig.json
 COPY packages/core/tsconfig.build.json ./packages/core/tsconfig.build.json
+COPY packages/media/package.json ./packages/media/package.json
+COPY packages/media/tsconfig.json ./packages/media/tsconfig.json
+COPY packages/media/tsconfig.build.json ./packages/media/tsconfig.build.json
 COPY packages/model-runtime/package.json ./packages/model-runtime/package.json
 COPY packages/model-runtime/tsconfig.json ./packages/model-runtime/tsconfig.json
 COPY packages/model-runtime/tsconfig.build.json ./packages/model-runtime/tsconfig.build.json
@@ -52,6 +55,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY packages/identity ./packages/identity
 COPY packages/billing ./packages/billing
 COPY packages/core ./packages/core
+COPY packages/media ./packages/media
 COPY packages/model-runtime ./packages/model-runtime
 COPY packages/sandbox-controller ./packages/sandbox-controller
 COPY packages/sandbox-client ./packages/sandbox-client

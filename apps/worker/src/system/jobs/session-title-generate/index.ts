@@ -20,7 +20,6 @@ import type { Api, ImageContent, Model } from "@earendil-works/pi-ai";
 import type { Job } from "bullmq";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../../db.js";
-import { restoreRemoteImageUrls } from "@cohub/model-runtime/image-content";
 import { createModelsFromRegistry } from "@cohub/model-runtime/pi-models-adapter";
 import { loadModelTasksConfig } from "../../../model-tasks.js";
 import { dispatchSessionUpdated, scheduleSessionStatsRefresh } from "../../../realtime-events.js";
@@ -33,7 +32,7 @@ function finiteOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function toRuntimeModel(config: ModelTaskModelConfig): Model<Api> & Pick<ModelTaskModelConfig, "requestProfile"> {
+function toRuntimeModel(config: ModelTaskModelConfig): Model<Api> & Pick<ModelTaskModelConfig, "requestProfile" | "imageUrlInput"> {
   return {
     id: config.id,
     name: config.name?.trim() || config.id,
@@ -53,6 +52,7 @@ function toRuntimeModel(config: ModelTaskModelConfig): Model<Api> & Pick<ModelTa
     headers: config.headers,
     compat: config.compat as Model<Api>["compat"],
     requestProfile: config.requestProfile,
+    imageUrlInput: config.imageUrlInput,
   };
 }
 
@@ -87,7 +87,6 @@ async function completeTask(task: ModelTaskConfig, content: Array<{ type: "text"
     headers: model.headers,
     maxTokens: 256,
     timeoutMs: 30_000,
-    onPayload: (payload) => restoreRemoteImageUrls(payload),
   });
   if (response.stopReason === "error" || response.stopReason === "aborted") {
     throw new Error(response.errorMessage?.trim() || "Model task request failed");

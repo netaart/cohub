@@ -66,7 +66,7 @@ function normalizeUsage(value: unknown): Usage | null {
   };
 }
 
-function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTextConfig["model"], "requestProfile"> {
+function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTextConfig["model"], "requestProfile" | "imageUrlInput"> {
   const model = config.model;
   return {
     id: model.id,
@@ -87,6 +87,7 @@ function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTex
     headers: model.headers,
     compat: model.compat as Model<Api>["compat"],
     requestProfile: model.requestProfile,
+    imageUrlInput: model.imageUrlInput,
   };
 }
 

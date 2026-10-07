@@ -49,7 +49,7 @@ const getStorage = (): PresignStorageConfig => ({
   secretAccessKey: config.publicAssetOssSecretAccessKey,
 });
 
-const requireStorage = (): RequiredStorage => {
+export const requirePublicAssetOssStorage = (): RequiredStorage => {
   const storage = getStorage();
   if (!storage.endpoint || !storage.bucket || !storage.accessKeyId || !storage.secretAccessKey) {
     throw new PublicFileConfigError("public file storage is not configured");
@@ -64,7 +64,7 @@ const requireStorage = (): RequiredStorage => {
 };
 
 const getS3Client = () => {
-  const storage = requireStorage();
+  const storage = requirePublicAssetOssStorage();
   s3Client ??= new S3Client({
     endpoint: storage.endpoint,
     region: storage.region,
@@ -107,12 +107,14 @@ export function normalizePublicFilePath(input: string, options: { allowEmpty?: b
 export const buildPublicFileObjectKey = (spaceId: string, path: string) =>
   `${spacePrefix(spaceId)}${normalizePublicFilePath(path)}`;
 
-export const buildPublicFileUrl = (spaceId: string, path: string) => {
-  const objectKey = buildPublicFileObjectKey(spaceId, path);
+export const buildPublicAssetCdnUrl = (objectKey: string) => {
   const baseUrl = config.publicAssetCdnBaseUrl;
   if (!baseUrl) throw new PublicFileConfigError("PUBLIC_ASSET_CDN_BASE_URL is required");
   return `${baseUrl}/${objectKey.split("/").map(encodeURIComponent).join("/")}`;
 };
+
+export const buildPublicFileUrl = (spaceId: string, path: string) =>
+  buildPublicAssetCdnUrl(buildPublicFileObjectKey(spaceId, path));
 
 
 function normalizeMimeType(value: string | null | undefined) {
@@ -162,7 +164,7 @@ export function createPublicFileUpload(
 
   return {
     entries: entries.map((entry) => {
-      const storage = requireStorage();
+      const storage = requirePublicAssetOssStorage();
       const signed = createPresignedPutObjectUrl(
         options.endpoint === "internal"
           ? { ...storage, publicEndpoint: storage.endpoint }
@@ -201,7 +203,7 @@ export async function listPublicFiles(
   const prefix = `${rootPrefix}${path ? `${path}/` : ""}`;
   const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, options.limit ?? DEFAULT_LIST_LIMIT));
   const result = await getS3Client().send(new ListObjectsV2Command({
-    Bucket: requireStorage().bucket,
+    Bucket: requirePublicAssetOssStorage().bucket,
     Prefix: prefix,
     Delimiter: options.recursive ? undefined : "/",
     ContinuationToken: options.cursor,

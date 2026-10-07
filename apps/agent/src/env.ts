@@ -72,9 +72,6 @@ export const EnvSchema = z.object({
   TURN_OBJECT_S3_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   TURN_OBJECT_S3_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
   TURN_OBJECT_CDN_BASE_URL: z.string().optional().transform((value) => value?.replace(/\/+$/, "")),
-  PUBLIC_ASSET_CDN_BASE_URL: z.string().optional().transform((value) => value?.replace(/\/+$/, "")),
-  CHAT_ATTACHMENT_PUBLIC_BASE_URL: z.string().optional().transform((value) => value?.replace(/\/+$/, "")),
-  PUBLIC_ASSET_DOWNLOAD_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
