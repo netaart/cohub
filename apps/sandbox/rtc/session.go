@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +24,7 @@ const (
 	InputChannel   = "input"
 
 	inputQueue        = 256
+	relayMaxBitrate   = 6_000_000
 	inputEventsPerSec = 600
 	inputBurst        = 1200
 	maxChannelMessage = 256 << 10
@@ -55,6 +57,7 @@ type session struct {
 	openedAt time.Time
 
 	connected atomic.Bool
+	relayed   atomic.Bool
 	lastPing  atomic.Int64
 	channelMu sync.Mutex
 	channel   *webrtc.DataChannel
@@ -133,9 +136,18 @@ func openSession(ctx context.Context, manager *Manager, params OpenParams, serve
 	return current, pc.LocalDescription().SDP, nil
 }
 
+// followEstimate feeds congestion control to the encoder. A direct path,
+// e.g. on a LAN, may use the hub's full range; TURN traffic is billed, so
+// a relayed one stays below relayMaxBitrate.
 func (s *session) followEstimate(estimator cc.BandwidthEstimator) {
-	s.sub.SetBitrate(estimator.GetTargetBitrate())
-	estimator.OnTargetBitrateChange(func(bitrate int) { s.sub.SetBitrate(bitrate) })
+	follow := func(bitrate int) {
+		if s.relayed.Load() {
+			bitrate = min(bitrate, relayMaxBitrate)
+		}
+		s.sub.SetBitrate(bitrate)
+	}
+	follow(estimator.GetTargetBitrate())
+	estimator.OnTargetBitrateChange(follow)
 }
 
 func (s *session) run() {
@@ -212,6 +224,7 @@ func (s *session) onConnectionState(state webrtc.PeerConnectionState) {
 		if !s.connected.Swap(true) {
 			s.lastPing.Store(time.Now().UnixMilli())
 			path, _ := s.route()
+			s.relayed.Store(strings.Contains(path, "relay"))
 			s.logger.Info("rtc session connected", slog.String("path", path), slog.Duration("after", time.Since(s.openedAt)))
 		}
 	case webrtc.PeerConnectionStateFailed:

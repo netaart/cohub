@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 	"unicode/utf16"
+	"unsafe"
 
 	"github.com/ebitengine/purego"
 )
@@ -27,11 +28,12 @@ func platformDialer(spec string, logger *slog.Logger) (Dialer, error) {
 		return nil, err
 	}
 	requestCaptureOnce.Do(func() {
+		// Each request shows the system prompt once; grants apply after a restart.
 		if !cg.preflightCapture() {
 			cg.requestCapture()
 			logger.Warn("allow Screen Recording for this terminal in System Settings → Privacy & Security, then restart the Runtime")
 		}
-		if !cg.trusted() {
+		if !promptAccessibility() {
 			logger.Warn("allow Accessibility for this terminal in System Settings → Privacy & Security so the Space can control this Mac")
 		}
 	})
@@ -56,8 +58,12 @@ var cg struct {
 	preflightCapture func() bool
 	requestCapture   func() bool
 	trusted          func() bool
+	trustedPrompt    func(options uintptr) bool
+	dictionary       func(allocator uintptr, keys, values *uintptr, count int, keyCallbacks, valueCallbacks uintptr) uintptr
 	release          func(uintptr)
 }
+
+var quartzLibs struct{ foundation, services uintptr }
 
 var (
 	quartzOnce sync.Once
@@ -95,9 +101,37 @@ func loadQuartz() error {
 		purego.RegisterLibFunc(&cg.preflightCapture, graphics, "CGPreflightScreenCaptureAccess")
 		purego.RegisterLibFunc(&cg.requestCapture, graphics, "CGRequestScreenCaptureAccess")
 		purego.RegisterLibFunc(&cg.trusted, services, "AXIsProcessTrusted")
+		purego.RegisterLibFunc(&cg.trustedPrompt, services, "AXIsProcessTrustedWithOptions")
+		purego.RegisterLibFunc(&cg.dictionary, foundation, "CFDictionaryCreate")
 		purego.RegisterLibFunc(&cg.release, foundation, "CFRelease")
+		quartzLibs.foundation, quartzLibs.services = foundation, services
 	})
 	return quartzErr
+}
+
+func promptAccessibility() bool {
+	symbol := func(lib uintptr, name string) uintptr {
+		address, err := purego.Dlsym(lib, name)
+		if err != nil {
+			return 0
+		}
+		return address
+	}
+	prompt := symbol(quartzLibs.services, "kAXTrustedCheckOptionPrompt")
+	yes := symbol(quartzLibs.foundation, "kCFBooleanTrue")
+	keyCallbacks := symbol(quartzLibs.foundation, "kCFTypeDictionaryKeyCallBacks")
+	valueCallbacks := symbol(quartzLibs.foundation, "kCFTypeDictionaryValueCallBacks")
+	if prompt == 0 || yes == 0 || keyCallbacks == 0 || valueCallbacks == 0 {
+		return cg.trusted()
+	}
+	// The option key and value are CF globals: read the pointers they hold.
+	key, value := **(**uintptr)(unsafe.Pointer(&prompt)), **(**uintptr)(unsafe.Pointer(&yes))
+	options := cg.dictionary(0, &key, &value, 1, keyCallbacks, valueCallbacks)
+	if options == 0 {
+		return cg.trusted()
+	}
+	defer cg.release(options)
+	return cg.trustedPrompt(options)
 }
 
 const (
@@ -145,10 +179,17 @@ func (s *macScreen) size() (float64, float64) {
 
 func (s *macScreen) Info() (Info, error) {
 	width, height := s.size()
-	return Info{
+	info := Info{
 		ID: "screen", Name: s.name, Width: int(width), Height: int(height),
 		Capture: cg.preflightCapture(), Input: cg.trusted(), Desktop: true,
-	}, nil
+	}
+	if !info.Capture {
+		info.Needs = append(info.Needs, "screenRecording")
+	}
+	if !info.Input {
+		info.Needs = append(info.Needs, "accessibility")
+	}
+	return info, nil
 }
 
 func (s *macScreen) Source(fps int) []string {

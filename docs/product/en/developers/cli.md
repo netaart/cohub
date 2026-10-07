@@ -197,15 +197,19 @@ not replay model or tool work, and a disconnect does not confirm a task stopped.
 
 ### Displays
 
-Screens a Space's machine shares: a phone from the Android app, or a computer from
-`cohub runtime up --display`. Coordinates are pixels of the display, or of a screenshot when
-`--size` gives its dimensions:
+Screens a Space's machine shares: a phone from the Android app, a computer from
+`cohub runtime up --display`, or a sandbox's virtual screen. Coordinates are pixels of your latest
+`capture` (or of `--size`); where a display has an element tree, refs from `tree` are more precise:
 
 ```bash
 cohub spaces displays ls
-cohub spaces displays capture --max-size 1280 -o screen.jpg
+cohub spaces displays start                   # a virtual screen, where available; stop ends it
+cohub spaces displays capture -o screen.jpg   # longest edge 1280 by default
+cohub spaces displays tree                    # e3.12 button "Send" (980,2210 120x80)
+cohub spaces displays tap e3.12 --screenshot  # act, then save a screenshot
+cohub spaces displays type "hello" --into e3.4
 cohub spaces displays tap 540 1200
-cohub spaces displays swipe 288 1000 288 300 --size 576x1280
+cohub spaces displays swipe 288 1000 288 300
 cohub spaces displays tap 300 200 --count 2   # double-click; --button secondary right-clicks
 cohub spaces displays type "hello"
 cohub spaces displays key Control+a

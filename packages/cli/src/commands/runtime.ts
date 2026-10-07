@@ -199,7 +199,7 @@ export function registerRuntime(program: Command) {
           else process.stdout.write(`Local process  Not running\nSpace  ${spaceId}\nLogs  ${result.diagnosticsPath}\n`);
           process.stdout.write(`Server  ${remote.error ? `Unknown — ${remote.error}` : remote.value?.online ? "Harness connected" : "Offline"}\nArchives  ${pendingLocalArchives} pending · ${failedLocalArchives} failed\n`);
           const displays = remote.value?.displays ?? [];
-          if (displays.length) process.stdout.write(`Displays  ${displays.map((display) => `${display.name || display.id} ${display.width}x${display.height}${display.input ? "" : " (view only)"}`).join(" · ")}\n`);
+          if (displays.length) process.stdout.write(`Displays  ${displays.map((display) => `${display.name || display.id} ${display.width}x${display.height}${display.needs?.length ? ` (needs ${display.needs.join(", ")})` : display.input ? "" : " (view only)"}`).join(" · ")}\n`);
           process.stdout.write(formatNativeSync(nativeSync.config, local?.native, nativeSync.error));
         }
       } catch (cause) { reportFailure(cause); }

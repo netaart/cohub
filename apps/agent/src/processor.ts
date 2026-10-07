@@ -15,8 +15,6 @@ import { getSpace } from "./api.js";
 import { abortSessionTurn, failSessionTurn, interruptSessionTurn, persistAssistantMessage, persistUserMessage, publishSessionTurnsUpdated } from "./persistence.js";
 import { ensureSandboxConnection } from "./sandbox-pool.js";
 import { createSandboxCodingTools } from "./sandbox/tools.js";
-import { DISPLAY_TOOL_NAMES } from "./sandbox/display-tools.js";
-import { hasSharedDisplays } from "./sandbox/displays.js";
 import { CohubModelRegistry } from "./runtime/model-registry.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
 import { loadImageToTextConfig } from "./runtime/image-to-text-config.js";
@@ -731,20 +729,16 @@ async function createTurnExecutionToken(input: {
   });
 }
 
-function selectTools(allTools: AgentTool[], accessMode: PromptAccessMode, displays: boolean) {
-  if (accessMode !== "full_access") {
-    const readOnlyTools = new Set(["read", "ls", "find", "grep"]);
-    return allTools.filter((tool) => readOnlyTools.has(tool.name));
-  }
-  return displays ? allTools : allTools.filter((tool) => !DISPLAY_TOOL_NAMES.has(tool.name));
+function filterToolsForAccessMode(allTools: AgentTool[], accessMode: PromptAccessMode) {
+  if (accessMode === "full_access") return allTools;
+  const readOnlyTools = new Set(["read", "ls", "find", "grep"]);
+  return allTools.filter((tool) => readOnlyTools.has(tool.name));
 }
 
-async function configureHandleTools(handle: SessionHandle, spaceId: string, accessMode: PromptAccessMode) {
-  const displays = accessMode === "full_access" && await hasSharedDisplays(spaceId);
-  const profile = `${accessMode}:${displays ? "displays" : "none"}`;
-  if (handle.toolProfile === profile) return;
-  await handle.session.configureTools(selectTools(tools, accessMode, displays));
-  handle.toolProfile = profile;
+async function configureHandleAccessMode(handle: SessionHandle, accessMode: PromptAccessMode) {
+  if (handle.currentAccessMode === accessMode) return;
+  await handle.session.configureTools(filterToolsForAccessMode(tools, accessMode));
+  handle.currentAccessMode = accessMode;
 }
 
 function formatTurnFailureMessage(error: unknown) {
@@ -941,7 +935,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
       });
       const activeHandle = handle;
       try {
-        await configureHandleTools(activeHandle, data.spaceId, accessMode);
+        await configureHandleAccessMode(activeHandle, accessMode);
       } catch (error) {
         logger.error(`[Agent] failed to configure tools sessionId=${data.sessionId} turnId=${batch.ownerTurn.id} accessMode=${accessMode}:`, error);
         throw error;

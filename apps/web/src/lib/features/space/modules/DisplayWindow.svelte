@@ -321,10 +321,15 @@ const headerActions = $derived.by((): PreviewHeaderAction[] => {
 const problemCopy = $derived.by(() => {
 	if (phase.kind !== "problem") return null;
 	const copy: Record<DisplayProblem, { title: string; hint: string }> = {
-		unavailable: {
-			title: m.display_unavailable_title({}, { locale }),
-			hint: m.display_unavailable_hint({}, { locale }),
-		},
+		unavailable: display?.needs?.includes("screenRecording")
+			? {
+					title: m.display_screen_recording_title({}, { locale }),
+					hint: m.display_screen_recording_hint({}, { locale }),
+				}
+			: {
+					title: m.display_unavailable_title({}, { locale }),
+					hint: m.display_unavailable_hint({}, { locale }),
+				},
 		offline: {
 			title: m.display_offline_title({}, { locale }),
 			hint: m.display_offline_hint({}, { locale }),
@@ -400,7 +405,7 @@ const problemCopy = $derived.by(() => {
 		{/if}
 
 		{#if phase.kind === "live" && display && !display.input}
-			<div class="display-pill">{m.display_view_only({}, { locale })}</div>
+			<div class="display-pill">{display.desktop ? m.display_view_only_desktop({}, { locale }) : m.display_view_only({}, { locale })}</div>
 		{:else if notice}
 			<div class="display-pill" role="status">{notice}</div>
 		{/if}

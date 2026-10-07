@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -32,24 +33,8 @@ func platformDialer(spec string, logger *slog.Logger) (Dialer, error) {
 	case "x11":
 		return x11Dialer(arg, hostName(), logger), nil
 	case "xvfb":
-		size := arg
-		if size == "" {
-			size = defaultXvfbSize
-		}
-		if !xvfbSizePattern.MatchString(size) {
-			return nil, fmt.Errorf("xvfb size must be WIDTHxHEIGHT, got %q", size)
-		}
-		server := &xvfb{size: size, logger: logger}
-		if err := server.ensure(); err != nil {
-			return nil, err
-		}
-		_ = os.Setenv("DISPLAY", server.display)
-		return screenDialer("xvfb", func() (Screen, error) {
-			if err := server.ensure(); err != nil {
-				return nil, err
-			}
-			return openX11(server.display, "Virtual display")
-		}, logger), nil
+		dial, _, err := startVirtual(arg, logger)
+		return dial, err
 	default:
 		return nil, fmt.Errorf("unknown display spec %q", spec)
 	}
@@ -59,14 +44,73 @@ func x11Dialer(display, name string, logger *slog.Logger) Dialer {
 	return screenDialer("x11", func() (Screen, error) { return openX11(display, name) }, logger)
 }
 
+// virtualAvailable offers virtual screens to headless machines only, so a
+// desktop session keeps its DISPLAY.
+func virtualAvailable() bool {
+	_, err := exec.LookPath("Xvfb")
+	return err == nil && os.Getenv("DISPLAY") == ""
+}
+
+func startVirtual(size string, logger *slog.Logger) (Dialer, func(), error) {
+	if size == "" {
+		size = defaultXvfbSize
+	}
+	if !xvfbSizePattern.MatchString(size) {
+		return nil, nil, errorf(CodeInvalid, "virtual screen size must be WIDTHxHEIGHT, got %q", size)
+	}
+	server := &xvfb{size: size, logger: logger}
+	if err := server.ensure(); err != nil {
+		return nil, nil, errorf(CodeUnavailable, "%v", err)
+	}
+	previous, had := os.LookupEnv("DISPLAY")
+	_ = os.Setenv("DISPLAY", server.display)
+	dial := screenDialer("xvfb", func() (Screen, error) {
+		if err := server.ensure(); err != nil {
+			return nil, err
+		}
+		return openX11(server.display, "Virtual display")
+	}, logger)
+	stop := func() {
+		server.stop()
+		if os.Getenv("DISPLAY") != server.display {
+			return
+		}
+		if had {
+			_ = os.Setenv("DISPLAY", previous)
+		} else {
+			_ = os.Unsetenv("DISPLAY")
+		}
+	}
+	return dial, stop, nil
+}
+
 type xvfb struct {
 	size    string
 	logger  *slog.Logger
+	mu      sync.Mutex
 	display string
+	cmd     *exec.Cmd
 	exited  chan struct{}
+	stopped bool
+}
+
+func (x *xvfb) stop() {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	x.stopped = true
+	if x.cmd != nil {
+		_ = x.cmd.Process.Kill()
+		<-x.exited
+		x.logger.Info("virtual display stopped", slog.String("display", x.display))
+	}
 }
 
 func (x *xvfb) ensure() error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.stopped {
+		return fmt.Errorf("the virtual display was stopped")
+	}
 	if x.exited != nil {
 		select {
 		case <-x.exited:
@@ -109,7 +153,7 @@ func (x *xvfb) ensure() error {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-	x.exited = exited
+	x.cmd, x.exited = cmd, exited
 	x.logger.Info("virtual display started", slog.String("display", x.display), slog.String("size", x.size))
 	return nil
 }

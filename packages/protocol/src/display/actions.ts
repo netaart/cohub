@@ -1,10 +1,20 @@
-import { DISPLAY_INPUT_MAX_SCHEDULE_MS, type DisplayInputEvent, type DisplaySystemAction, normalizeDisplayPoint, splitDisplayText } from "./index.js";
+import {
+  DISPLAY_ELEMENT_REF_PATTERN,
+  DISPLAY_INPUT_MAX_SCHEDULE_MS,
+  DISPLAY_INPUT_MAX_TEXT,
+  type DisplayElementAction,
+  type DisplayInputEvent,
+  type DisplaySystemAction,
+  normalizeDisplayPoint,
+  splitDisplayText,
+} from "./index.js";
 
 export const DISPLAY_ACTION_TYPES = ["tap", "long_press", "swipe", "scroll", "type", "key", "system", "wait"] as const;
 export type DisplayActionType = (typeof DISPLAY_ACTION_TYPES)[number];
 
 export type DisplayAction = {
   type: DisplayActionType;
+  ref?: string;
   x?: number;
   y?: number;
   to_x?: number;
@@ -78,8 +88,24 @@ export function compileDisplayActions(actions: readonly DisplayAction[], width: 
   };
   const duration = (action: DisplayAction, fallback: number) =>
     Math.round(Math.min(MAX_STEP_MS, Math.max(1, action.duration_ms ?? fallback)));
+  const element = (ref: string, elementAction: DisplayElementAction, text?: string) => {
+    if (!DISPLAY_ELEMENT_REF_PATTERN.test(ref)) throw new DisplayActionError(`"${ref}" is not an element ref such as e3.12`);
+    events.push({ type: "element", ref, action: elementAction, ...(text === undefined ? {} : { text }), t });
+    t += TAP_MS;
+  };
 
   for (const action of actions) {
+    if (action.ref !== undefined) {
+      if (action.type === "tap" && (action.count ?? 1) === 1 && (action.button ?? "primary") === "primary") element(action.ref, "click");
+      else if (action.type === "long_press") element(action.ref, "longPress");
+      else if (action.type === "type") {
+        if (action.text === undefined || action.text.length > DISPLAY_INPUT_MAX_TEXT) throw new DisplayActionError(`type into an element needs text of at most ${DISPLAY_INPUT_MAX_TEXT} characters`);
+        element(action.ref, "setText", action.text);
+      } else if (action.type === "scroll") element(action.ref, action.direction === "up" || action.direction === "left" ? "scrollBackward" : "scrollForward");
+      else throw new DisplayActionError(`${action.type} cannot take a ref; use coordinates`);
+      t += ACTION_GAP_MS;
+      continue;
+    }
     switch (action.type) {
       case "tap": {
         const at = { ...point(action), ...(action.button && action.button !== "primary" ? { button: action.button } : {}) };

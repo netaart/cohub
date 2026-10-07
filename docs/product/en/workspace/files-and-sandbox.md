@@ -122,11 +122,19 @@ against a local working tree. See [CLI](/docs/developers/cli).
 When the Cohub Android app serves a Space, it can also share the phone's screen with it. Open the
 Space's Runtime menu on the phone and choose **Share screen**; Android asks for permission each
 time. Anyone who can manage the Space then sees the screen live from **Screens → View**, on the web
-or another device, and the Space's Agents can take screenshots of it.
+or another device, and the Space's Agents can take screenshots of it and read its controls.
 
 To let people and Agents tap, swipe and type on the phone, choose **Allow control** and enable Cohub
 in Accessibility settings. Control only works while the screen is shared. Stop sharing from the
 Runtime menu or the notification at any time.
+
+## Virtual screens
+
+A cloud sandbox can run a virtual screen. Choose the screen button in the Space header, then
+**Start virtual screen**: programs started in the sandbox from then on show on it — a browser an
+Agent opens, for example — and you can watch and steer them live. Stop it from the same place; it
+also ends when the sandbox stops. A sandbox created before virtual screens existed asks to be
+updated with **Force recovery** in the Space settings.
 
 ## Practical tips
 

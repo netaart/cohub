@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"log/slog"
+	"slices"
 	"sync"
 )
 
@@ -22,9 +23,11 @@ var testBars = []color.RGBA{
 type testScreen struct {
 	logger *slog.Logger
 
-	mu      sync.Mutex
-	pointer *[2]float64
-	events  int
+	mu       sync.Mutex
+	pointer  *[2]float64
+	events   int
+	snapshot int
+	field    string
 }
 
 func newTestScreen(logger *slog.Logger) *testScreen {
@@ -96,3 +99,43 @@ func (s *testScreen) Text(string) error {
 }
 
 func (s *testScreen) Close() error { return nil }
+
+var testElements = []Element{
+	{Depth: 0, Role: "window", Name: "Test pattern", Bounds: [4]float64{0, 0, 1, 1}},
+	{Depth: 1, Role: "textField", Name: "Name", Bounds: [4]float64{0.1, 0.2, 0.5, 0.1}, States: []string{"editable"}, Actions: []string{"click", "focus", "setText"}},
+	{Depth: 1, Role: "button", Name: "Submit", Bounds: [4]float64{0.1, 0.4, 0.2, 0.1}, Actions: []string{"click", "longPress"}},
+}
+
+func (s *testScreen) Tree(context.Context, int) (Tree, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot++
+	elements := slices.Clone(testElements)
+	for i := range elements {
+		elements[i].Ref = fmt.Sprintf("e%d.%d", s.snapshot, i+1)
+	}
+	elements[1].Value = s.field
+	return Tree{Width: testDisplayWidth, Height: testDisplayHeight, Elements: elements}, nil
+}
+
+func (s *testScreen) Element(ref, action string, text *string) error {
+	s.mu.Lock()
+	var snapshot, index int
+	_, _ = fmt.Sscanf(ref, "e%d.%d", &snapshot, &index)
+	if snapshot != s.snapshot || index < 1 || index > len(testElements) {
+		s.mu.Unlock()
+		return errorf(CodeInvalid, "element %s is not in the latest tree; read the tree again", ref)
+	}
+	element := testElements[index-1]
+	if !slices.Contains(element.Actions, action) {
+		s.mu.Unlock()
+		return errorf(CodeUnsupported, "%s cannot %s", element.Role, action)
+	}
+	if action == "setText" {
+		s.field = *text
+	}
+	s.mu.Unlock()
+	b := element.Bounds
+	s.record("element."+action, &[2]float64{b[0] + b[2]/2, b[1] + b[3]/2})
+	return nil
+}

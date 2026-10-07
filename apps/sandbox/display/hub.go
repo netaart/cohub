@@ -27,7 +27,7 @@ const (
 
 	DefaultBitrate = 2_000_000
 	MinBitrate     = 150_000
-	MaxBitrate     = 8_000_000
+	MaxBitrate     = 16_000_000
 	DefaultFPS     = 30
 	DefaultMaxSize = 1920
 )
@@ -37,10 +37,11 @@ var reconnectDelays = []time.Duration{250 * time.Millisecond, time.Second, 2 * t
 var ErrStreamEnded = errors.New("display stream ended")
 
 type Hub struct {
-	dial   Dialer
 	logger *slog.Logger
 
 	mu         sync.Mutex
+	dial       Dialer
+	dialed     chan struct{}
 	conn       *providerConn
 	displays   []Info
 	streams    map[string]*stream
@@ -53,6 +54,7 @@ type Hub struct {
 func NewHub(dial Dialer, logger *slog.Logger) *Hub {
 	return &Hub{
 		dial:      dial,
+		dialed:    make(chan struct{}),
 		logger:    logger.With(slog.String("component", "display")),
 		streams:   map[string]*stream{},
 		byID:      map[uint32]*stream{},
@@ -61,13 +63,39 @@ func NewHub(dial Dialer, logger *slog.Logger) *Hub {
 }
 
 func (h *Hub) Run(ctx context.Context) {
-	if h.dial == nil {
-		return
+	for ctx.Err() == nil {
+		h.mu.Lock()
+		dial, dialed := h.dial, h.dialed
+		h.mu.Unlock()
+		runCtx, cancel := context.WithCancel(ctx)
+		go func() {
+			select {
+			case <-dialed:
+			case <-runCtx.Done():
+			}
+			cancel()
+		}()
+		if dial != nil {
+			h.keepConnected(runCtx, dial)
+		}
+		<-runCtx.Done()
+		cancel()
 	}
+}
+
+func (h *Hub) SetDialer(dial Dialer) {
+	h.mu.Lock()
+	h.dial = dial
+	close(h.dialed)
+	h.dialed = make(chan struct{})
+	h.mu.Unlock()
+}
+
+func (h *Hub) keepConnected(ctx context.Context, dial Dialer) {
 	attempt := 0
 	for ctx.Err() == nil {
 		started := time.Now()
-		err := h.connect(ctx)
+		err := h.connect(ctx, dial)
 		if ctx.Err() != nil {
 			return
 		}
@@ -141,8 +169,8 @@ func (h *Hub) setDisplays(displays []Info) {
 	}
 }
 
-func (h *Hub) connect(ctx context.Context) error {
-	raw, err := h.dial(ctx)
+func (h *Hub) connect(ctx context.Context, dial Dialer) error {
+	raw, err := dial(ctx)
 	if err != nil {
 		return err
 	}
@@ -248,6 +276,24 @@ func (h *Hub) Capture(ctx context.Context, params CaptureParams) (CaptureResult,
 		return CaptureResult{}, errorf(CodeFailed, "provider returned no image")
 	}
 	return result, nil
+}
+
+func (h *Hub) Tree(ctx context.Context, params TreeParams) (Tree, error) {
+	if err := params.normalize(); err != nil {
+		return Tree{}, err
+	}
+	if err := h.requireAbility(params.Display, func(info Info) bool { return info.Tree }, "tree"); err != nil {
+		return Tree{}, err
+	}
+	conn, err := h.currentConn()
+	if err != nil {
+		return Tree{}, err
+	}
+	var tree Tree
+	if err := conn.call(ctx, "tree", params, &tree, callTimeout); err != nil {
+		return Tree{}, err
+	}
+	return tree.sanitize(params.MaxElements), nil
 }
 
 func (h *Hub) Input(ctx context.Context, batch InputBatch) error {

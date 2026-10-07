@@ -1,4 +1,4 @@
-import type { DisplayCapture, DisplayCaptureParams, DisplayInfo, DisplayInputBatch, RtcIceServer } from "../display/index.js";
+import type { DisplayCapture, DisplayCaptureParams, DisplayInputBatch, DisplayList, DisplayTree, DisplayTreeParams, DisplayVirtualStart, RtcIceServer } from "../display/index.js";
 import type { WORKSPACE_CANDIDATE_INDEX_FAMILY } from "../search/index.js";
 
 export const AGENT_SANDBOX_PROTOCOL_VERSION = "1" as const;
@@ -32,6 +32,9 @@ export const RPC_METHODS = [
   "display.list",
   "display.capture",
   "display.input",
+  "display.tree",
+  "display.start",
+  "display.stop",
   "rtc.open",
   "rtc.close",
 ] as const;
@@ -450,6 +453,7 @@ export type ProcessAbortResult = {
 
 export type DisplayRpcCaptureParams = DisplayCaptureParams & { display: string };
 export type DisplayRpcInputParams = DisplayInputBatch & { display: string };
+export type DisplayRpcTreeParams = DisplayTreeParams & { display: string };
 
 export type RtcOpenParams = {
   sessionId: string;
@@ -511,7 +515,7 @@ export type RpcRequestMap = {
   };
   "display.list": {
     params: Record<string, never>;
-    result: { displays: DisplayInfo[] };
+    result: DisplayList;
   };
   "display.capture": {
     params: DisplayRpcCaptureParams;
@@ -520,6 +524,18 @@ export type RpcRequestMap = {
   "display.input": {
     params: DisplayRpcInputParams;
     result: { applied: number };
+  };
+  "display.tree": {
+    params: DisplayRpcTreeParams;
+    result: DisplayTree;
+  };
+  "display.start": {
+    params: DisplayVirtualStart;
+    result: DisplayList;
+  };
+  "display.stop": {
+    params: Record<string, never>;
+    result: DisplayList;
   };
   "rtc.open": {
     params: RtcOpenParams;

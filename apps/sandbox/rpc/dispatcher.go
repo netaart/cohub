@@ -45,6 +45,7 @@ type Dispatcher struct {
 	searchManager  *search.Manager
 	displays       *display.Hub
 	sessions       *rtc.Manager
+	virtual        *display.Virtual
 }
 
 type gitignoreMatcher struct {
@@ -164,7 +165,7 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
 		return accepted, d.complete(request, accepted.OpID, d.handleProcessAbort(request))
-	case "display.list", "display.capture", "display.input", "rtc.open", "rtc.close":
+	case "display.list", "display.capture", "display.input", "display.tree", "display.start", "display.stop", "rtc.open", "rtc.close":
 		return accepted, d.complete(request, accepted.OpID, d.handleDisplay(request, ownerIdentity))
 	default:
 		return accepted, d.failed(request, accepted.OpID, "UNSUPPORTED_METHOD", fmt.Sprintf("unsupported method: %s", request.Method))

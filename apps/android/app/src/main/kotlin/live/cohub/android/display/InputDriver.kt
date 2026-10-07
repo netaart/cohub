@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 @RequiresApi(Build.VERSION_CODES.R)
 internal class InputDriver(private val scope: CoroutineScope, private val densityDpi: () -> Int) {
     private var previous: GestureDescription.StrokeDescription? = null
+    val elements = ElementTree()
 
     private val sink = object : StrokeSink {
         override fun dispatch(stroke: StrokePlan, continuation: Boolean, willContinue: Boolean, done: (Boolean) -> Unit) {
@@ -67,6 +68,7 @@ internal class InputDriver(private val scope: CoroutineScope, private val densit
             is InputEvent.Key -> if (event.action != "up") service.key(event.key)
             is InputEvent.Text -> service.type(event.text)
             is InputEvent.System -> service.system(event.action)
+            is InputEvent.Element -> elements.perform(service, event.ref, event.action, event.text)
         }
     }
 
@@ -85,6 +87,7 @@ internal class InputDriver(private val scope: CoroutineScope, private val densit
                 is Step.Key -> if (step.action != "up") service.key(step.key)
                 is Step.Text -> service.type(step.text)
                 is Step.System -> service.system(step.action)
+                is Step.Element -> elements.perform(service, step.event.ref, step.event.action, step.event.text)
             }
         }
     }

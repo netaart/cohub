@@ -182,13 +182,17 @@ cohub runtime up --display xvfb:1920x1080
 
 ### Displays
 
-Space 所在机器共享的屏幕：Android 应用共享的手机，或 `cohub runtime up --display` 共享的电脑。坐标是屏幕像素；用 `--size` 指定截图尺寸时，则是截图上的像素：
+Space 所在机器共享的屏幕：Android 应用共享的手机、`cohub runtime up --display` 共享的电脑，或沙箱的虚拟屏幕。坐标是最近一次 `capture` 截图上的像素（或 `--size` 指定的尺寸）；屏幕支持控件树时，用 `tree` 给出的引用更精确：
 
 ```bash
 cohub spaces displays ls
-cohub spaces displays capture --max-size 1280 -o screen.jpg
+cohub spaces displays start                   # 可用时启动虚拟屏幕；stop 停止
+cohub spaces displays capture -o screen.jpg   # 默认最长边 1280
+cohub spaces displays tree                    # e3.12 button "Send" (980,2210 120x80)
+cohub spaces displays tap e3.12 --screenshot  # 操作后保存截图
+cohub spaces displays type "hello" --into e3.4
 cohub spaces displays tap 540 1200
-cohub spaces displays swipe 288 1000 288 300 --size 576x1280
+cohub spaces displays swipe 288 1000 288 300
 cohub spaces displays tap 300 200 --count 2   # 双击；--button secondary 为右键
 cohub spaces displays type "hello"
 cohub spaces displays key Control+a

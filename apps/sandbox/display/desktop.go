@@ -29,6 +29,12 @@ type Screen interface {
 	Close() error
 }
 
+type ElementScreen interface {
+	Screen
+	Tree(ctx context.Context, maxElements int) (Tree, error)
+	Element(ref, action string, text *string) error
+}
+
 const screenPollInterval = 2 * time.Second
 
 func ServeScreen(ctx context.Context, conn io.ReadWriteCloser, name string, screen Screen, logger *slog.Logger) {
@@ -75,6 +81,7 @@ func (d *desktop) publish() bool {
 		return false
 	}
 	info.Stream = d.ffmpeg != nil && d.screen.Source(DefaultFPS) != nil
+	_, info.Tree = d.screen.(ElementScreen)
 	d.mu.Lock()
 	changed := !info.equal(d.info)
 	resized := d.info.Width != info.Width || d.info.Height != info.Height
@@ -157,6 +164,16 @@ func (d *desktop) handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, err
 		}
 		return encodeImage(img, params)
+	case "tree":
+		screen, ok := d.screen.(ElementScreen)
+		if !ok {
+			return nil, errorf(CodeUnsupported, "this display has no element tree")
+		}
+		var params TreeParams
+		if err := json.Unmarshal(raw, &params); err != nil || params.normalize() != nil {
+			return nil, errorf(CodeInvalid, "invalid tree params")
+		}
+		return screen.Tree(ctx, params.MaxElements)
 	case "input":
 		var batch InputBatch
 		if err := json.Unmarshal(raw, &batch); err != nil {
@@ -272,7 +289,13 @@ func (d *desktop) apply(event InputEvent) error {
 		}
 		return nil
 	case "text":
-		return d.screen.Text(event.Text)
+		return d.screen.Text(*event.Text)
+	case "element":
+		screen, ok := d.screen.(ElementScreen)
+		if !ok {
+			return errorf(CodeUnsupported, "this display has no element tree")
+		}
+		return screen.Element(event.Ref, event.Action, event.Text)
 	case "system":
 		return errorf(CodeUnsupported, "this display has no %s button", event.Action)
 	default:

@@ -126,6 +126,8 @@ data class DisplayInfo(
     val capture: Boolean,
     val input: Boolean,
     val system: List<String> = emptyList(),
+    val tree: Boolean = false,
+    val needs: List<String> = emptyList(),
 ) {
     fun toJson(): JsonObject = buildJsonObject {
         put("id", id)
@@ -136,6 +138,8 @@ data class DisplayInfo(
         put("capture", capture)
         put("input", input)
         if (system.isNotEmpty()) put("system", JsonArray(system.map(::JsonPrimitive)))
+        if (tree) put("tree", true)
+        if (needs.isNotEmpty()) put("needs", JsonArray(needs.map(::JsonPrimitive)))
     }
 }
 

@@ -11,12 +11,22 @@ export * from "./actions.js";
  * viewers and agents never need its pixel size to act on it.
  */
 
+const unit = z.number().min(0).max(1);
+
 export const DISPLAY_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 export const displayIdSchema = z.string().regex(DISPLAY_ID_PATTERN);
 
 export const DISPLAY_SYSTEM_ACTIONS = ["back", "home", "recents", "notifications", "quickSettings", "lock"] as const;
 export type DisplaySystemAction = (typeof DISPLAY_SYSTEM_ACTIONS)[number];
-const isSystemAction = (action: string): action is DisplaySystemAction => (DISPLAY_SYSTEM_ACTIONS as readonly string[]).includes(action);
+export const DISPLAY_PERMISSIONS = ["screenRecording", "accessibility"] as const;
+export type DisplayPermission = (typeof DISPLAY_PERMISSIONS)[number];
+
+/** A list of known names; names a newer machine adds are dropped, so older clients keep working. */
+const knownNames = <T extends string>(names: readonly T[], max: number) =>
+  z
+    .array(z.string().max(32))
+    .max(max)
+    .transform((values) => values.filter((value): value is T => (names as readonly string[]).includes(value)));
 
 export const displayInfoSchema = z.object({
   id: displayIdSchema,
@@ -26,13 +36,10 @@ export const displayInfoSchema = z.object({
   stream: z.boolean(),
   capture: z.boolean(),
   input: z.boolean(),
-  /** System buttons it has, e.g. a phone's back and home; names a newer machine adds are dropped. */
-  system: z
-    .array(z.string().max(32))
-    .max(16)
-    .transform((actions) => actions.filter(isSystemAction))
-    .optional(),
+  system: knownNames(DISPLAY_SYSTEM_ACTIONS, 16).optional(),
   desktop: z.boolean().optional(),
+  tree: z.boolean().optional(),
+  needs: knownNames(DISPLAY_PERMISSIONS, 8).optional(),
 });
 export type DisplayInfo = z.infer<typeof displayInfoSchema>;
 
@@ -42,11 +49,62 @@ export const displaysSnapshotSchema = z.object({
 });
 export type DisplaysSnapshot = z.infer<typeof displaysSnapshotSchema>;
 
+export type DisplayVirtualState = "available" | "running";
+export type DisplayList = { displays: DisplayInfo[]; virtual?: DisplayVirtualState };
+
+export const DISPLAY_VIRTUAL_SIZE_PATTERN = /^\d{3,4}x\d{3,4}$/;
+export const displayVirtualStartSchema = z.object({
+  size: z.string().regex(DISPLAY_VIRTUAL_SIZE_PATTERN).optional(),
+});
+export type DisplayVirtualStart = z.infer<typeof displayVirtualStartSchema>;
+
+export const DISPLAY_ELEMENT_ROLES = [
+  "window", "dialog", "group", "list", "listItem", "text", "heading", "image", "button", "link",
+  "textField", "checkbox", "radio", "switch", "slider", "tab", "menu", "menuItem", "web", "other",
+] as const;
+export type DisplayElementRole = (typeof DISPLAY_ELEMENT_ROLES)[number];
+export const DISPLAY_ELEMENT_STATES = ["focused", "selected", "checked", "disabled", "editable", "password", "scrollable", "expanded"] as const;
+export type DisplayElementState = (typeof DISPLAY_ELEMENT_STATES)[number];
+export const DISPLAY_ELEMENT_ACTIONS = ["click", "longPress", "focus", "setText", "scrollForward", "scrollBackward"] as const;
+export type DisplayElementAction = (typeof DISPLAY_ELEMENT_ACTIONS)[number];
+
+export const DISPLAY_ELEMENT_REF_PATTERN = /^e\d{1,9}\.\d{1,5}$/;
+export const DISPLAY_TREE_MAX_ELEMENTS = 1_000;
+export const DISPLAY_ELEMENT_TEXT_MAX = 500;
+
+export const displayElementSchema = z.object({
+  ref: z.string().regex(DISPLAY_ELEMENT_REF_PATTERN),
+  depth: z.number().int().min(0).max(64),
+  role: z
+    .string()
+    .max(32)
+    .transform((role): DisplayElementRole => ((DISPLAY_ELEMENT_ROLES as readonly string[]).includes(role) ? (role as DisplayElementRole) : "other")),
+  name: z.string().max(DISPLAY_ELEMENT_TEXT_MAX).optional(),
+  /** The current text of a field; never reported for passwords. */
+  value: z.string().max(DISPLAY_ELEMENT_TEXT_MAX).optional(),
+  bounds: z.tuple([unit, unit, unit, unit]),
+  states: knownNames(DISPLAY_ELEMENT_STATES, 16).optional(),
+  actions: knownNames(DISPLAY_ELEMENT_ACTIONS, 16).optional(),
+});
+export type DisplayElement = z.infer<typeof displayElementSchema>;
+
+export const displayTreeParamsSchema = z.object({
+  maxElements: z.number().int().min(1).max(DISPLAY_TREE_MAX_ELEMENTS).optional(),
+});
+export type DisplayTreeParams = z.infer<typeof displayTreeParamsSchema>;
+
+export const displayTreeSchema = z.object({
+  width: z.number().int().min(0).max(16_384),
+  height: z.number().int().min(0).max(16_384),
+  elements: z.array(displayElementSchema).max(DISPLAY_TREE_MAX_ELEMENTS),
+  truncated: z.boolean().optional(),
+});
+export type DisplayTree = z.infer<typeof displayTreeSchema>;
+
 export const DISPLAY_INPUT_MAX_EVENTS = 512;
 export const DISPLAY_INPUT_MAX_TEXT = 4_096;
 export const DISPLAY_INPUT_MAX_SCHEDULE_MS = 60_000;
 
-const unit = z.number().min(0).max(1);
 const delta = z.number().min(-10).max(10);
 const at = z.number().int().min(0).max(DISPLAY_INPUT_MAX_SCHEDULE_MS).optional();
 
@@ -83,6 +141,13 @@ export const displayInputEventSchema = z.discriminatedUnion("type", [
     action: z.enum(DISPLAY_SYSTEM_ACTIONS),
     t: at,
   }),
+  z.object({
+    type: z.literal("element"),
+    ref: z.string().regex(DISPLAY_ELEMENT_REF_PATTERN),
+    action: z.enum(DISPLAY_ELEMENT_ACTIONS),
+    text: z.string().max(DISPLAY_INPUT_MAX_TEXT).optional(),
+    t: at,
+  }),
 ]);
 export type DisplayInputEvent = z.infer<typeof displayInputEventSchema>;
 
@@ -95,6 +160,9 @@ export const displayInputBatchSchema = z
     events.forEach((event, index) => {
       if (event.type === "scroll" && !event.dx && !event.dy) {
         ctx.addIssue({ code: "custom", path: ["events", index], message: "scroll needs dx or dy" });
+      }
+      if (event.type === "element" && (event.action === "setText") !== (event.text !== undefined)) {
+        ctx.addIssue({ code: "custom", path: ["events", index, "text"], message: "text goes with setText only" });
       }
       if (event.t === undefined) return;
       if (event.t < last) ctx.addIssue({ code: "custom", path: ["events", index, "t"], message: "t must ascend" });

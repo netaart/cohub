@@ -29,6 +29,8 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "CohubDisplay"
+private const val DEFAULT_TREE_ELEMENTS = 300
+private const val MAX_TREE_ELEMENTS = 1000
 
 @RequiresApi(Build.VERSION_CODES.R)
 internal class DisplayProvider(
@@ -177,6 +179,7 @@ internal class DisplayProvider(
                     put("height", capture.height)
                 }
             }
+            "tree" -> display.tree(spaceId, params.string("display").orEmpty(), (params.int("maxElements") ?: DEFAULT_TREE_ELEMENTS).coerceIn(1, MAX_TREE_ELEMENTS))
             "input" -> {
                 val events = params["events"] as? JsonArray ?: throw DisplayError(DisplayError.INVALID, "events are required")
                 display.input(spaceId, params.string("display").orEmpty(), InputEvent.parseAll(events))

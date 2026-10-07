@@ -21,6 +21,8 @@ type Info struct {
 	Input   bool     `json:"input"`
 	System  []string `json:"system,omitempty"`
 	Desktop bool     `json:"desktop,omitempty"`
+	Tree    bool     `json:"tree,omitempty"`
+	Needs   []string `json:"needs,omitempty"`
 }
 
 var displayIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
@@ -29,26 +31,28 @@ func (i Info) valid() bool {
 	return displayIDPattern.MatchString(i.ID) && utf8.RuneCountInString(i.Name) <= 200 && i.Width >= 0 && i.Height >= 0 && i.Width <= 16384 && i.Height <= 16384
 }
 
-// known drops the system buttons this version does not know, so a newer
-// provider still shares its screen.
+// known drops the names this version does not know, so a newer provider
+// still shares its screen.
 func (i Info) known() Info {
-	system := make([]string, 0, len(i.System))
-	for _, action := range i.System {
-		if systemActions[action] && !slices.Contains(system, action) {
-			system = append(system, action)
+	i.System = knownNames(i.System, systemActions)
+	i.Needs = knownNames(i.Needs, permissions)
+	return i
+}
+
+func knownNames(names []string, known map[string]bool) []string {
+	var kept []string
+	for _, name := range names {
+		if known[name] && !slices.Contains(kept, name) {
+			kept = append(kept, name)
 		}
 	}
-	i.System = system
-	if len(system) == 0 {
-		i.System = nil
-	}
-	return i
+	return kept
 }
 
 func (i Info) equal(other Info) bool {
 	return i.ID == other.ID && i.Name == other.Name && i.Width == other.Width && i.Height == other.Height &&
 		i.Stream == other.Stream && i.Capture == other.Capture && i.Input == other.Input &&
-		i.Desktop == other.Desktop && slices.Equal(i.System, other.System)
+		i.Desktop == other.Desktop && i.Tree == other.Tree && slices.Equal(i.System, other.System) && slices.Equal(i.Needs, other.Needs)
 }
 
 type Sample struct {
@@ -129,7 +133,8 @@ type InputEvent struct {
 	DY     float64  `json:"dy,omitempty"`
 	Button string   `json:"button,omitempty"`
 	Key    string   `json:"key,omitempty"`
-	Text   string   `json:"text,omitempty"`
+	Text   *string  `json:"text,omitempty"`
+	Ref    string   `json:"ref,omitempty"`
 	T      *int     `json:"t,omitempty"`
 }
 
@@ -150,10 +155,16 @@ var (
 	keyActions     = map[string]bool{"down": true, "up": true, "press": true}
 	buttons        = map[string]bool{"": true, "primary": true, "secondary": true, "middle": true}
 	systemActions  = map[string]bool{"back": true, "home": true, "recents": true, "notifications": true, "quickSettings": true, "lock": true}
+	permissions    = map[string]bool{"screenRecording": true, "accessibility": true}
+	elementActions = map[string]bool{"click": true, "longPress": true, "focus": true, "setText": true, "scrollForward": true, "scrollBackward": true}
 )
 
 func validUnit(value *float64) bool {
 	return value != nil && !math.IsNaN(*value) && *value >= 0 && *value <= 1
+}
+
+func validText(text string) bool {
+	return utf8.RuneCountInString(text) <= MaxInputTextLen && !strings.ContainsRune(text, 0)
 }
 
 func validDelta(value float64) bool {
@@ -209,8 +220,18 @@ func (e InputEvent) validate() error {
 			return errors.New("key is required")
 		}
 	case "text":
-		if e.Text == "" || utf8.RuneCountInString(e.Text) > MaxInputTextLen || strings.ContainsRune(e.Text, 0) {
+		if e.Text == nil || *e.Text == "" || !validText(*e.Text) {
 			return fmt.Errorf("text must be 1..%d characters", MaxInputTextLen)
+		}
+	case "element":
+		if !elementRefPattern.MatchString(e.Ref) {
+			return errors.New("ref must be an element ref such as e3.12")
+		}
+		if !elementActions[e.Action] {
+			return errors.New("element action is not supported")
+		}
+		if (e.Action == "setText") != (e.Text != nil) || e.Text != nil && !validText(*e.Text) {
+			return fmt.Errorf("setText needs text of at most %d characters, other actions none", MaxInputTextLen)
 		}
 	case "system":
 		if !systemActions[e.Action] {

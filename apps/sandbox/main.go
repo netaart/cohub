@@ -181,12 +181,15 @@ func buildRuntime(
 	}
 	displays := display.NewHub(dial, logger)
 	viewers := rtc.NewManager(displays, logger)
-	dispatcher.SetDisplays(displays, viewers)
-	displayCtx, stopDisplays := context.WithCancel(context.Background())
-	if dial != nil {
-		go displays.Run(displayCtx)
+	var virtual *display.Virtual
+	if dial == nil {
+		virtual = display.NewVirtual(displays, logger)
+	} else {
 		logger.Info("display provider enabled", slog.String("display", displaySpec))
 	}
+	dispatcher.SetDisplays(displays, viewers, virtual)
+	displayCtx, stopDisplays := context.WithCancel(context.Background())
+	go displays.Run(displayCtx)
 
 	if fsSink == nil {
 		fsSink = server.BroadcastFSChanged
@@ -232,6 +235,9 @@ func buildRuntime(
 	closers = append(closers, searchManager.Close, func() {
 		viewers.CloseAll(rtc.ReasonShutdown)
 		stopDisplays()
+		if virtual != nil {
+			virtual.Stop()
+		}
 	})
 	return sandboxRuntime{
 		server:          server,

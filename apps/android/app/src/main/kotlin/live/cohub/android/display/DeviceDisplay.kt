@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -83,7 +85,8 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
         val size = current.capture.size
         val control = DisplayControl.service.value != null
         val system = if (control) ControlService.GLOBAL_ACTIONS.keys.toList() else emptyList()
-        return listOf(DisplayInfo(SCREEN_ID, Build.MODEL ?: "Android", size.width, size.height, stream = true, capture = true, input = control, system = system))
+        val needs = if (control) emptyList() else listOf("accessibility")
+        return listOf(DisplayInfo(SCREEN_ID, Build.MODEL ?: "Android", size.width, size.height, stream = true, capture = true, input = control, system = system, tree = control, needs = needs))
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
@@ -96,9 +99,20 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     @RequiresApi(Build.VERSION_CODES.R)
     internal suspend fun input(spaceId: String, display: String, events: List<InputEvent>) {
         val capture = capture(spaceId, display)
-        val input = driver as? InputDriver ?: InputDriver(scope) { share.value?.capture?.size?.densityDpi ?: context.resources.displayMetrics.densityDpi }.also { driver = it }
-        input.apply(events, capture.size.width, capture.size.height)
+        inputDriver().apply(events, capture.size.width, capture.size.height)
     }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    internal suspend fun tree(spaceId: String, display: String, maxElements: Int): JsonObject {
+        val size = capture(spaceId, display).size
+        val service = DisplayControl.service.value
+            ?: throw DisplayError(DisplayError.UNAVAILABLE, "control is off; enable Cohub in Accessibility settings")
+        return withContext(Dispatchers.Default) { inputDriver().elements.read(service, size.width, size.height, maxElements) }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun inputDriver(): InputDriver =
+        driver as? InputDriver ?: InputDriver(scope) { share.value?.capture?.size?.densityDpi ?: context.resources.displayMetrics.densityDpi }.also { driver = it }
 
     companion object {
         const val SCREEN_ID = "screen"

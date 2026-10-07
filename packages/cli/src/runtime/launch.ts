@@ -30,6 +30,11 @@ export function parseRuntimeDisplay(value: string | boolean | undefined): string
   if (!/^(auto|macos|x11(:[\w.:-]+)?|xvfb(:\d{3,4}x\d{3,4})?)$/.test(spec)) {
     throw new Error("Display must be auto, macos, x11[:display] or xvfb[:WIDTHxHEIGHT]");
   }
+  if (process.platform === "linux" && spec === "auto" && !process.env.DISPLAY) {
+    throw new Error(process.env.WAYLAND_DISPLAY
+      ? "Wayland sessions cannot be shared yet: log in with an X11 session, or use --display xvfb for a virtual screen"
+      : "No X11 session to share (DISPLAY is unset): use --display xvfb for a virtual screen");
+  }
   return spec;
 }
 

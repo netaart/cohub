@@ -27,7 +27,8 @@ Agent ── display.capture / display.input (sandbox RPC) ───────
   next key frame instead of decoding garbage; the bitrate follows the slowest viewer; the encoder stops
   2 s after the last viewer leaves.
 - **`rtc.Manager`** — pion WebRTC, H.264 only, with NACK, RTCP reports and send-side congestion
-  control (GCC) whose estimate drives the encoder. Signaling is one complete offer and answer
+  control (GCC) whose estimate drives the encoder, up to 16 Mbps on a direct path (a LAN) and
+  6 Mbps through a TURN relay, whose traffic is billed. Signaling is one complete offer and answer
   (WHEP-shaped), so no trickle channel exists. At most 4 viewers per Space; a session closes on
   DELETE, a failed connection, 30 s without a ping, 12 h, or shutdown.
 
@@ -37,7 +38,9 @@ looked at; `compileDisplayActions` (`@cohub/protocol/display`) turns tap (or mul
 press, swipe, scroll, type, key (or a shortcut such as `Control+a`), system and wait actions into
 one scheduled batch, so gestures land exactly.
 
-A display describes what it takes: `desktop` displays take mouse and keyboard input — hover, every
+A display describes what it takes, and what it still `needs`: permissions such as
+`screenRecording` and `accessibility` the user has to grant, which clients turn into guidance.
+`desktop` displays take mouse and keyboard input — hover, every
 mouse button, function keys and shortcuts — while touch screens take taps, gestures, text and
 editing keys, plus the system buttons they list in `system` (names a client does not know are
 dropped, so newer machines stay compatible). Viewers follow suit: the web forwards hover, right
@@ -49,7 +52,7 @@ always types the viewer's own clipboard.
 | unset | none |
 | `auto` | this computer's screen: the main display on macOS, `$DISPLAY` on Linux |
 | `macos` / `x11[:<display>]` | the same, explicitly |
-| `xvfb[:<W>x<H>]` | a virtual screen (1280×800 by default); see [Desktops](#desktops) |
+| `xvfb[:<W>x<H>]` | a virtual screen (1280×800 by default) from start; see [Virtual screens](#virtual-screens) for one on request |
 | `unix:<path>` | a provider socket (the Android app) |
 | `test` | the built-in test pattern, the reference provider |
 
@@ -139,26 +142,59 @@ screenshots and input, so agents work; only live video needs it.
   exports `DISPLAY` so every program started in the sandbox draws on it, restarts it on the same
   display if it dies, and stops it on exit. It needs the `xvfb` package; the sandbox image ships it.
 
+## Elements
+
+Pixels are a fallback: where the platform has an accessibility API, a display reports `tree` and
+`display.tree` reads its interface as elements — `ref`, `depth`, `role`, `name`, `value`,
+`bounds` (normalized x, y, width, height), `states` and `actions`, depth first.
+
+- **Refs** are `e<snapshot>.<index>`. Every read is a new snapshot; providers keep the last few, and
+  acting on a ref re-checks that its element is still on screen, unchanged and in place, so a
+  stale ref is refused rather than landing on whatever moved under it.
+- **Vocabulary**: roles, states and actions are closed lists in `@cohub/protocol/display`.
+  sandboxd sanitizes every tree — valid unique refs, known names (an unknown role becomes `other`,
+  unknown states and actions are dropped), text clipped to 500 characters, bounds clamped, at most
+  1000 elements — so clients can trust its shape. Password fields never report their value.
+- **Acting**: `element` input events (`click`, `longPress`, `focus`, `setText`, `scrollForward`,
+  `scrollBackward`) ride the same input path as pointers, with the same permission, rate limits
+  and timeline. An element that cannot click itself falls back to a clickable ancestor, then to a
+  tap at its center.
+- **Providers**: Android reads the active window through its accessibility service, which the
+  user already enables for control. The test pattern implements a small reference tree. Desktop
+  trees (macOS AX, Linux AT-SPI) are not implemented yet; for web pages in a sandbox browser,
+  `agent-browser` drives the page through CDP.
+
+## Virtual screens
+
+A machine that has Xvfb, no configured provider and no desktop session (`DISPLAY` unset) — a
+cloud sandbox or a headless server — reports `virtual: "available"` in
+`display.list`; `display.start` (`POST displays/virtual`, optional `size`) starts one on request and
+`display.stop` (`DELETE displays/virtual`) ends it. Programs started in the sandbox afterwards
+inherit its `DISPLAY`, so a headed browser or a desktop app an agent launches can be watched and
+steered live. Nothing runs until someone starts it. Cloud sandboxes offer it from the header's
+screen button; a sandbox that predates virtual screens (no `virtual` field, or `display_unsupported`)
+is updated by recovering it from the Space settings.
+
 ## Agents
 
-While a display is shared with the Space, full-access turns get two tools:
-
-- `display_screenshot` — a JPEG of the display (longest edge 1280 by default).
-- `display_input` — actions in the pixel coordinates of the latest screenshot, run as one timeline;
-  answers with a screenshot taken after the screen settles.
-
-Turns without a shared display do not see the tools. The same actions are available from the CLI:
+Agents use displays through the CLI and the `cohub` skill, like every other Space capability:
 
 ```bash
 cohub spaces displays ls
-cohub spaces displays capture --max-size 1280
-cohub spaces displays tap 540 1200
-cohub spaces displays tap 300 200 --count 2            # double-click on a desktop
-cohub spaces displays swipe 540 1800 540 600 --size 576x1280
+cohub spaces displays start                          # a virtual screen, where available
+cohub spaces displays capture                        # later coordinates are its pixels
+cohub spaces displays tree                           # elements with refs and boxes
+cohub spaces displays tap e3.12 --screenshot         # act, then save what the screen shows
+cohub spaces displays type "hello" --into e3.4       # replace a field's text
+cohub spaces displays tap 300 200 --count 2          # double-click a point
 cohub spaces displays key Control+a
 cohub spaces displays press back
-echo '[{"type":"tap","x":540,"y":1200},{"type":"type","text":"hello"}]' | cohub spaces displays act
+echo '[{"type":"tap","ref":"e3.12"},{"type":"type","text":"hello"}]' | cohub spaces displays act
 ```
+
+`capture` defaults to a 1280 px longest edge, within what agents downscale images to, and the CLI
+remembers each display's latest screenshot size, so coordinates mean what the agent saw without
+`--size`; the memory resets when the display itself changes size.
 
 ## Release order
 

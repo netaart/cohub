@@ -165,19 +165,23 @@ cohub spaces files -h
 
 ## Displays
 
-A Space's machine can share a screen, such as the user's phone or computer. In a Chat, prefer the `display_screenshot` and `display_input` tools when they are available. From the CLI, coordinates are display pixels, or screenshot pixels with `--size`:
+A Space's machine can share a screen: the user's phone or computer, or a virtual screen in the sandbox. Prefer elements over pixels where `ls` lists `tree`: refs name exactly one element, and one that changed since is refused. Coordinates are pixels of your latest `capture`.
 
 ```bash
-cohub spaces displays ls
-cohub spaces displays capture --max-size 1280 -o /tmp/screen.jpg
-cohub spaces displays tap <x> <y> --size <WxH>
-cohub spaces displays swipe <x1> <y1> <x2> <y2> --size <WxH>
-cohub spaces displays type "<text>"
-cohub spaces displays key Control+a          # keys and shortcuts; shortcuts need a desktop
-cohub spaces displays press back             # system buttons a phone lists
+cohub spaces displays ls                       # abilities; "Virtual screen: available" means `start` works
+cohub spaces displays start                    # virtual screen; GUI programs started afterwards draw on it
+cohub spaces displays capture -o /tmp/screen.jpg   # then `read` the image
+cohub spaces displays tree                     # e3.12 button "Send" (980,2210 120x80)
+cohub spaces displays tap e3.12 --screenshot /tmp/after.jpg
+cohub spaces displays type "hello" --into e3.4 # replaces the field's text
+cohub spaces displays tap <x> <y>              # --count 2 double-clicks, --button secondary right-clicks
+cohub spaces displays swipe <x1> <y1> <x2> <y2>
+cohub spaces displays type "<text>"            # into the focused field
+cohub spaces displays key Control+a            # shortcuts need a desktop
+cohub spaces displays press back               # system buttons a phone lists
 ```
 
-Look at a fresh screenshot before acting and after each step. If no display is shared, ask the user to share their phone screen from the Runtime menu, or their computer with `cohub runtime up --display`.
+Look before acting and after each step (`--screenshot`, or a new `tree`; refs to an element that moved or changed are refused). If nothing is shared, ask the user to share their phone from its Runtime menu or their computer with `cohub runtime up --display`, or start a virtual screen yourself when one is available. If a display `needs` a permission, tell the user which one to grant.
 
 ## Labels
 

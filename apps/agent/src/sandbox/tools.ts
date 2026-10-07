@@ -71,7 +71,6 @@ import {
 } from "@cohub/sandbox-client";
 
 import { ensureSandboxConnection, pruneSandboxConnections } from "../sandbox-pool.js";
-import { createDisplayTools, type DisplayRpc } from "./display-tools.js";
 import { getSpaceSandbox, recoverSpaceSandbox } from "../api.js";
 import { classifySandboxInfrastructureError, type SandboxInfrastructureError } from "@cohub/sandbox-client";
 import { logger } from "../logger.js";
@@ -1351,18 +1350,6 @@ function withSandboxFailureResult<T extends AgentTool>(tool: T): T {
   return { ...tool, execute } as T;
 }
 
-async function currentDisplayRpc(): Promise<DisplayRpc> {
-  const connection = await getCurrentConnection("display.list");
-  const context = captureToolRpcContext();
-  return {
-    list: async () => (await tracedRpc(connection, "display.list", {}, { context })).displays,
-    capture: (display, maxSize) => tracedRpc(connection, "display.capture", { display, maxSize, format: "jpeg", quality: 85 }, { context }),
-    input: async (display, events) => {
-      await tracedRpc(connection, "display.input", { display, events }, { context });
-    },
-  };
-}
-
 export function createSandboxCodingTools() {
   const toolCwd = SANDBOX_WORKSPACE_PATH;
 
@@ -1403,9 +1390,5 @@ export function createSandboxCodingTools() {
       checkAccess: assertCurrentActorCanViewSpaceFiles,
       resolveSandboxProvider,
     })),
-    ...createDisplayTools({
-      scope: () => `${getCurrentSpaceId()}:${getCurrentToolExecutionContext()?.sessionId ?? ""}`,
-      rpc: currentDisplayRpc,
-    }).map(withSandboxFailureResult),
   ];
 }

@@ -51,6 +51,18 @@ export function createDisplayView(
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
 	let statsTimer: ReturnType<typeof setInterval> | null = null;
 
+	function unavailable(current: number) {
+		phase = { kind: "problem", problem: "unavailable" };
+		void sdk
+			.space(spaceId())
+			.displays.list()
+			.then(({ displays }) => {
+				if (current === generation)
+					display = displays.find((item) => item.id === displayId()) ?? null;
+			})
+			.catch(() => undefined);
+	}
+
 	function clearTimers() {
 		if (retryTimer) clearTimeout(retryTimer);
 		if (statsTimer) clearInterval(statsTimer);
@@ -93,7 +105,8 @@ export function createDisplayView(
 			if (current !== generation) return;
 			const problem = problemFromError(error);
 			if (problem === "failed" && retry()) return;
-			phase = { kind: "problem", problem };
+			if (problem === "unavailable") unavailable(current);
+			else phase = { kind: "problem", problem };
 		}
 	}
 
@@ -106,7 +119,7 @@ export function createDisplayView(
 			return;
 		}
 		if (reason === "display_ended") {
-			phase = { kind: "problem", problem: "unavailable" };
+			unavailable(generation);
 			return;
 		}
 		if (reason && TRANSIENT_CLOSES.has(reason) && retry()) return;

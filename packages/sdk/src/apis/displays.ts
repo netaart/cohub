@@ -1,9 +1,12 @@
 import type {
   DisplayCapture,
   DisplayCaptureParams,
-  DisplayInfo,
   DisplayInputEvent,
+  DisplayList,
   DisplaySession,
+  DisplayTree,
+  DisplayTreeParams,
+  DisplayVirtualStart,
   RtcIceServers,
 } from "@cohub/protocol";
 import { type ConnectDisplayOptions, connectDisplay } from "../display-session.js";
@@ -24,7 +27,24 @@ export class SpaceDisplaysApi {
   }
 
   list(options: { signal?: AbortSignal } = {}) {
-    return this.transport.request<{ displays: DisplayInfo[] }>(`/api/spaces/${this.spaceId}/displays`, { signal: options.signal });
+    return this.transport.request<DisplayList>(`/api/spaces/${this.spaceId}/displays`, { signal: options.signal });
+  }
+
+  startVirtual(params: DisplayVirtualStart = {}) {
+    return this.transport.request<DisplayList>(`/api/spaces/${this.spaceId}/displays/virtual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    });
+  }
+
+  stopVirtual() {
+    return this.transport.request<DisplayList>(`/api/spaces/${this.spaceId}/displays/virtual`, { method: "DELETE" });
+  }
+
+  tree(displayId: string, params: DisplayTreeParams = {}, options: { signal?: AbortSignal } = {}) {
+    const search = params.maxElements ? `?maxElements=${params.maxElements}` : "";
+    return this.transport.request<DisplayTree>(this.path(displayId, `/tree${search}`), { signal: options.signal });
   }
 
   capture(displayId: string, params: DisplayCaptureParams = {}, options: { signal?: AbortSignal } = {}) {

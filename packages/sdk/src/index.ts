@@ -25,8 +25,22 @@ export { DesktopCommandsApi } from "./apis/desktop-commands.js";
 export { SpaceDisplaysApi } from "./apis/displays.js";
 export { DisplayConnection, connectDisplay } from "./display-session.js";
 export type { ConnectDisplayOptions, DisplayConnectionState, DisplayConnectionStats } from "./display-session.js";
-export { compileDisplayActions, DISPLAY_ACTION_TYPES, DISPLAY_SYSTEM_ACTIONS, DisplayActionError, normalizeDisplayPoint } from "@cohub/protocol";
-export type { DisplayAction, DisplayCapture, DisplayCaptureParams, DisplayInfo, DisplayInputEvent, DisplaySession, DisplaySystemAction, RtcIceServer, RtcIceServers } from "@cohub/protocol";
+export { compileDisplayActions, DISPLAY_ACTION_TYPES, DISPLAY_ELEMENT_REF_PATTERN, DISPLAY_SYSTEM_ACTIONS, DisplayActionError, normalizeDisplayPoint } from "@cohub/protocol";
+export type {
+  DisplayAction,
+  DisplayCapture,
+  DisplayCaptureParams,
+  DisplayElement,
+  DisplayInfo,
+  DisplayInputEvent,
+  DisplayList,
+  DisplaySession,
+  DisplaySystemAction,
+  DisplayTree,
+  DisplayVirtualStart,
+  RtcIceServer,
+  RtcIceServers,
+} from "@cohub/protocol";
 export type { CreateDesktopCommandInput, WaitForDesktopCommandOptions } from "./apis/desktop-commands.js";
 export { AppSurfaceApi } from "./app-surface.js";
 export type { AppSurfaceHandler, AppSurfaceHandlerContext } from "./app-surface.js";

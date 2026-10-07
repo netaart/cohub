@@ -169,8 +169,6 @@ pnpm dev
 - `ls` -> `fs.stat` + `fs.ls`
 - `find` -> `process.start` (`fd`) when `processFd`, otherwise `fs.find`
 - `grep` -> `process.start` (`rg`) when `processRg`, otherwise `fs.grep`
-- `display_screenshot` / `display_input` -> `display.list` + `display.capture` / `display.input`,
-  offered only while a display is shared with the Space (see [Displays](displays.md))
 
 ## Web/API filesystem (local sandbox, M4)
 

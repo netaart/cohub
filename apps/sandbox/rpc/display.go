@@ -5,33 +5,49 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/cohub/apps/sandbox/display"
 	"github.com/cohub/apps/sandbox/protocol"
 	"github.com/cohub/apps/sandbox/rtc"
 )
 
-// rtcIdentityPrefix limits viewer sessions to the API, which authorizes
+// rtcIdentityPrefix limits viewer sessions and virtual screens to the API, which authorizes
 // the viewer and mints its TURN credentials. The identity is what an
 // authenticated caller declares, so this keeps other callers on their own
 // paths rather than being a security boundary.
 const rtcIdentityPrefix = "api-"
 
-func (d *Dispatcher) SetDisplays(hub *display.Hub, sessions *rtc.Manager) {
+func (d *Dispatcher) SetDisplays(hub *display.Hub, sessions *rtc.Manager, virtual *display.Virtual) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.displays = hub
 	d.sessions = sessions
+	d.virtual = virtual
 }
 
-func (d *Dispatcher) displayServices() (*display.Hub, *rtc.Manager) {
+func (d *Dispatcher) displayServices() (*display.Hub, *rtc.Manager, *display.Virtual) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.displays, d.sessions
+	return d.displays, d.sessions, d.virtual
 }
+
+const virtualStartTimeout = 5 * time.Second
 
 type displayListResult struct {
 	Displays []display.Info `json:"displays"`
+	Virtual  string         `json:"virtual,omitempty"`
+}
+
+func listDisplays(hub *display.Hub, virtual *display.Virtual) displayListResult {
+	result := displayListResult{Displays: hub.Displays()}
+	if virtual != nil {
+		result.Virtual = "available"
+		if virtual.Running() {
+			result.Virtual = "running"
+		}
+	}
+	return result
 }
 
 type displayInputResult struct {
@@ -39,7 +55,7 @@ type displayInputResult struct {
 }
 
 func (d *Dispatcher) handleDisplay(request protocol.RPCRequest, identity string) interface{} {
-	hub, sessions := d.displayServices()
+	hub, sessions, virtual := d.displayServices()
 	if hub == nil {
 		return d.failed(request, "", "UNSUPPORTED_METHOD", "displays are not enabled")
 	}
@@ -50,7 +66,36 @@ func (d *Dispatcher) handleDisplay(request protocol.RPCRequest, identity string)
 	)
 	switch request.Method {
 	case "display.list":
-		result = displayListResult{Displays: hub.Displays()}
+		result = listDisplays(hub, virtual)
+	case "display.tree":
+		var params display.TreeParams
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			result, err = hub.Tree(ctx, params)
+		}
+	case "display.start", "display.stop":
+		if !strings.HasPrefix(identity, rtcIdentityPrefix) {
+			return d.failed(request, "", "ACCESS_DENIED", "virtual screens are managed through the API")
+		}
+		if virtual == nil {
+			return d.failed(request, "", "UNAVAILABLE", "this sandbox cannot run a virtual screen")
+		}
+		starting := request.Method == "display.start"
+		if starting {
+			var params struct {
+				Size string `json:"size"`
+			}
+			if err = json.Unmarshal(request.Params, &params); err == nil {
+				err = virtual.Start(params.Size)
+			}
+		} else {
+			virtual.Stop()
+		}
+		// Answer once the hub has followed, so the list matches the screen.
+		deadline := time.Now().Add(virtualStartTimeout)
+		for err == nil && (len(hub.Displays()) == 0) == starting && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		result = listDisplays(hub, virtual)
 	case "display.capture":
 		var params display.CaptureParams
 		if err = json.Unmarshal(request.Params, &params); err == nil {

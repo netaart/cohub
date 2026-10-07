@@ -23,6 +23,6 @@ export function displayErrorResponse(error: unknown): DisplayErrorResponse | nul
   if (!(error instanceof SandboxRpcError)) return null;
   const mapped = RPC_ERRORS[error.rpcErrorCode];
   if (!mapped) return null;
-  const message = mapped.code === "display_unsupported" ? "Update the Cohub runtime on this machine to share its displays." : error.message;
+  const message = mapped.code === "display_unsupported" ? "This machine runs an older sandbox: restart the sandbox, or update the Cohub runtime." : error.message;
   return { ...mapped, message };
 }

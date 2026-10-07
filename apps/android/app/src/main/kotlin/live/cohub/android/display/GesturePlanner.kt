@@ -17,6 +17,7 @@ sealed interface InputEvent {
     data class Key(val action: String, val key: String, override val at: Long?) : InputEvent
     data class Text(val text: String, override val at: Long?) : InputEvent
     data class System(val action: String, override val at: Long?) : InputEvent
+    data class Element(val ref: String, val action: String, val text: String?, override val at: Long?) : InputEvent
 
     companion object {
         fun parseAll(events: JsonArray): List<InputEvent> = events.map { parse(it as? JsonObject ?: invalid("event must be an object")) }
@@ -33,6 +34,7 @@ sealed interface InputEvent {
                 "key" -> Key(action ?: invalid("key needs an action"), string("key") ?: invalid("key is required"), at)
                 "text" -> Text(string("text") ?: invalid("text is required"), at)
                 "system" -> System(action ?: invalid("system needs an action"), at)
+                "element" -> Element(string("ref") ?: invalid("element needs a ref"), action ?: invalid("element needs an action"), string("text"), at)
                 else -> invalid("unknown event type")
             }
         }
@@ -52,6 +54,7 @@ sealed interface Step {
     data class Key(override val atMs: Long, val action: String, val key: String) : Step
     data class Text(override val atMs: Long, val text: String) : Step
     data class System(override val atMs: Long, val action: String) : Step
+    data class Element(override val atMs: Long, val event: InputEvent.Element) : Step
 }
 
 object GesturePlanner {
@@ -95,6 +98,7 @@ object GesturePlanner {
                 is InputEvent.Key -> steps.add(Step.Key(time, event.action, event.key))
                 is InputEvent.Text -> steps.add(Step.Text(time, event.text))
                 is InputEvent.System -> steps.add(Step.System(time, event.action))
+                is InputEvent.Element -> steps.add(Step.Element(time, event))
             }
         }
         if (stroke != null) throw DisplayError(DisplayError.INVALID, "a scheduled pointer down needs an up")

@@ -6,6 +6,8 @@ import {
   displayIdSchema,
   displayInputBatchSchema,
   displaySessionRequestSchema,
+  displayTreeParamsSchema,
+  displayVirtualStartSchema,
   isUuid,
 } from "@cohub/protocol";
 import { hasPermission } from "../../permissions.js";
@@ -66,6 +68,49 @@ router.get("/:id/displays/:displayId/capture", async (c) => {
     const capture = await callSandboxRpc(auth.spaceId, "display.capture", { ...parsed.data, display });
     c.header("Cache-Control", "no-store");
     return c.json(capture);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.get("/:id/displays/:displayId/tree", async (c) => {
+  const auth = await authorize(c, "sandbox.manage");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  const maxElements = c.req.query("maxElements");
+  const parsed = displayTreeParamsSchema.safeParse(maxElements ? { maxElements: Number(maxElements) } : {});
+  if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid tree" }, 400);
+  try {
+    const tree = await callSandboxRpc(auth.spaceId, "display.tree", { ...parsed.data, display });
+    c.header("Cache-Control", "no-store");
+    return c.json(tree);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.post("/:id/displays/virtual", async (c) => {
+  const auth = await authorize(c, "sandbox.manage");
+  if (auth instanceof Response) return auth;
+  const parsed = displayVirtualStartSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid size" }, 400);
+  try {
+    const result = await callSandboxRpc(auth.spaceId, "display.start", parsed.data);
+    logger.info("[Displays] virtual screen started", { spaceId: auth.spaceId, userId: auth.user.uuid, size: parsed.data.size });
+    return c.json(result);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.delete("/:id/displays/virtual", async (c) => {
+  const auth = await authorize(c, "sandbox.manage");
+  if (auth instanceof Response) return auth;
+  try {
+    const result = await callSandboxRpc(auth.spaceId, "display.stop", {});
+    logger.info("[Displays] virtual screen stopped", { spaceId: auth.spaceId, userId: auth.user.uuid });
+    return c.json(result);
   } catch (error) {
     return displayError(c, error, auth.spaceId);
   }
