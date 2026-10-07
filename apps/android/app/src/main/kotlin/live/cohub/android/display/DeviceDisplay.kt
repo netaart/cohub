@@ -100,9 +100,14 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    internal suspend fun input(spaceId: String, display: String, events: List<InputEvent>) {
+    internal suspend fun input(spaceId: String, display: String, events: List<InputEvent>, startBy: Long) {
         val capture = capture(spaceId, display)
-        inputs.withLock { inputDriver().apply(events, capture.size.width, capture.size.height) }
+        inputs.withLock {
+            if (startBy > 0 && System.currentTimeMillis() > startBy) {
+                throw DisplayError(DisplayError.TIMEOUT, "the input waited too long to start")
+            }
+            inputDriver().apply(events, capture.size.width, capture.size.height)
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.R)

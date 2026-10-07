@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,19 +24,30 @@ const (
 	streamLinger     = 2 * time.Second
 	keyframeDebounce = 250 * time.Millisecond
 	keyframeRetry    = time.Second
-	bitrateInterval  = 500 * time.Millisecond
+	updateInterval   = 500 * time.Millisecond
 	subscriberBuffer = 8
+	liveGrace        = 2 * time.Second
 
 	DefaultBitrate = 2_000_000
 	MinBitrate     = 150_000
 	MaxBitrate     = 16_000_000
 	DefaultFPS     = 30
-	DefaultMaxSize = 1920
+	MaxFPS         = 60
 )
 
 var reconnectDelays = []time.Duration{250 * time.Millisecond, time.Second, 2 * time.Second, 5 * time.Second}
 
 var ErrStreamEnded = errors.New("display stream ended")
+
+var errPreempted = errorf(CodePreempted, "a person is controlling the display; look at it again before acting")
+
+type InputSource int
+
+const (
+	InputScripted InputSource = iota // through the API: agents and the CLI
+	InputLive                        // a person on a live session
+	InputCleanup                     // releasing what a closed session held
+)
 
 type Hub struct {
 	logger *slog.Logger
@@ -44,12 +56,20 @@ type Hub struct {
 	dial       Dialer
 	dialed     chan struct{}
 	conn       *providerConn
-	displays   []Info
+	displays   []Info // as the provider reports them
+	snapshot   []Info // with viewers, as listeners last saw it
 	streams    map[string]*stream
 	byID       map[uint32]*stream
 	nextStream uint32
 	listeners  map[int]func([]Info)
 	nextListen int
+	liveAt     map[string]time.Time
+	scripted   map[*scriptedInput]struct{}
+}
+
+type scriptedInput struct {
+	display string
+	cancel  context.CancelCauseFunc
 }
 
 func NewHub(dial Dialer, logger *slog.Logger) *Hub {
@@ -60,6 +80,8 @@ func NewHub(dial Dialer, logger *slog.Logger) *Hub {
 		streams:   map[string]*stream{},
 		byID:      map[uint32]*stream{},
 		listeners: map[int]func([]Info){},
+		liveAt:    map[string]time.Time{},
+		scripted:  map[*scriptedInput]struct{}{},
 	}
 }
 
@@ -120,13 +142,18 @@ func (h *Hub) keepConnected(ctx context.Context, dial Dialer) {
 func (h *Hub) Displays() []Info {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return append([]Info{}, h.displays...)
+	return slices.Clone(h.snapshot)
 }
 
 func (h *Hub) Display(id string) (Info, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.displayLocked(id)
+	for _, info := range h.snapshot {
+		if info.ID == id {
+			return info, true
+		}
+	}
+	return Info{}, false
 }
 
 func (h *Hub) displayLocked(id string) (Info, bool) {
@@ -155,18 +182,31 @@ func (h *Hub) OnChange(fn func([]Info)) (cancel func()) {
 
 func (h *Hub) setDisplays(displays []Info) {
 	h.mu.Lock()
-	if slices.EqualFunc(h.displays, displays, Info.equal) {
+	h.displays = displays
+	h.publishUnlock()
+}
+
+// publishUnlock tells listeners about a changed snapshot and unlocks h.mu.
+func (h *Hub) publishUnlock() {
+	snapshot := make([]Info, 0, len(h.displays))
+	for _, info := range h.displays {
+		if current := h.streams[info.ID]; current != nil {
+			info.Viewers = current.viewersLocked()
+		}
+		snapshot = append(snapshot, info)
+	}
+	if slices.EqualFunc(h.snapshot, snapshot, Info.equal) {
 		h.mu.Unlock()
 		return
 	}
-	h.displays = displays
+	h.snapshot = snapshot
 	listeners := make([]func([]Info), 0, len(h.listeners))
 	for _, fn := range h.listeners {
 		listeners = append(listeners, fn)
 	}
 	h.mu.Unlock()
 	for _, fn := range listeners {
-		fn(slices.Clone(displays))
+		fn(slices.Clone(snapshot))
 	}
 }
 
@@ -215,7 +255,7 @@ func (h *Hub) handleMessage(conn *providerConn, message wireMessage) {
 		}
 		valid := make([]Info, 0, len(*message.Displays))
 		for _, info := range *message.Displays {
-			if info.valid() && len(valid) < 16 {
+			if info.valid() && len(valid) < MaxDisplays {
 				valid = append(valid, info.known())
 			}
 		}
@@ -290,14 +330,22 @@ func (h *Hub) Tree(ctx context.Context, params TreeParams) (Tree, error) {
 	if err != nil {
 		return Tree{}, err
 	}
+	limit := params.MaxElements
+	if params.Actionable {
+		params.MaxElements = MaxTreeElements
+	}
 	var tree Tree
-	if err := conn.call(ctx, "tree", params, &tree, callTimeout); err != nil {
+	if err := conn.call(ctx, "tree", TreeParams{Display: params.Display, MaxElements: params.MaxElements}, &tree, callTimeout); err != nil {
 		return Tree{}, err
 	}
-	return tree.sanitize(params.MaxElements), nil
+	tree = tree.sanitize(params.MaxElements)
+	if params.Actionable {
+		tree = tree.actionable(limit)
+	}
+	return tree, nil
 }
 
-func (h *Hub) Input(ctx context.Context, batch InputBatch) error {
+func (h *Hub) Input(ctx context.Context, batch InputBatch, source InputSource) error {
 	if err := batch.Validate(); err != nil {
 		return err
 	}
@@ -314,6 +362,33 @@ func (h *Hub) Input(ctx context.Context, batch InputBatch) error {
 			timeout = max(timeout, callTimeout+time.Duration(*event.T)*time.Millisecond)
 		}
 	}
+	h.mu.Lock()
+	switch source {
+	case InputLive:
+		h.liveAt[batch.Display] = time.Now()
+		for input := range h.scripted {
+			if input.display == batch.Display {
+				input.cancel(errPreempted)
+			}
+		}
+	case InputScripted:
+		if time.Since(h.liveAt[batch.Display]) < liveGrace {
+			h.mu.Unlock()
+			return errPreempted
+		}
+		var cancel context.CancelCauseFunc
+		ctx, cancel = context.WithCancelCause(ctx)
+		input := &scriptedInput{display: batch.Display, cancel: cancel}
+		h.scripted[input] = struct{}{}
+		defer func() {
+			h.mu.Lock()
+			delete(h.scripted, input)
+			h.mu.Unlock()
+			cancel(nil)
+		}()
+	}
+	h.mu.Unlock()
+	batch.StartBy = time.Now().Add(callTimeout).UnixMilli()
 	return conn.call(ctx, "input", batch, nil, timeout)
 }
 
@@ -337,22 +412,41 @@ type stream struct {
 	ready   chan struct{}
 	err     error
 
-	bitrate       int
-	bitrateSentAt time.Time
-	bitrateTimer  *time.Timer
-	keyAskedAt    time.Time
-	lingerTimer   *time.Timer
+	bitrate      int
+	fps          int
+	updateSentAt time.Time
+	updateTimer  *time.Timer
+	keyAskedAt   time.Time
+	lingerTimer  *time.Timer
 }
 
 type Subscriber struct {
 	hub     *Hub
 	stream  *stream
+	viewer  Viewer
 	samples chan Sample
 	done    chan struct{}
 	err     error
 	needKey bool
 	bitrate int
+	fps     int
 	closed  atomic.Bool
+}
+
+func (s *stream) viewersLocked() []Viewer {
+	var viewers []Viewer
+	for sub := range s.subs {
+		if sub.viewer.UserID == "" {
+			continue
+		}
+		if i := slices.IndexFunc(viewers, func(v Viewer) bool { return v.UserID == sub.viewer.UserID }); i >= 0 {
+			viewers[i].Control = viewers[i].Control || sub.viewer.Control
+		} else {
+			viewers = append(viewers, sub.viewer)
+		}
+	}
+	slices.SortFunc(viewers, func(a, b Viewer) int { return strings.Compare(a.UserID, b.UserID) })
+	return viewers
 }
 
 func (s *Subscriber) Samples() <-chan Sample { return s.samples }
@@ -370,7 +464,7 @@ func (s *Subscriber) Err() error {
 
 func (s *Subscriber) Display() string { return s.stream.display }
 
-func (h *Hub) Subscribe(ctx context.Context, display string) (*Subscriber, error) {
+func (h *Hub) Subscribe(ctx context.Context, display string, viewer Viewer) (*Subscriber, error) {
 	h.mu.Lock()
 	info, ok := h.displayLocked(display)
 	switch {
@@ -387,7 +481,7 @@ func (h *Hub) Subscribe(ctx context.Context, display string) (*Subscriber, error
 	current := h.streams[display]
 	if current == nil {
 		h.nextStream++
-		current = &stream{id: h.nextStream, display: display, conn: h.conn, subs: map[*Subscriber]struct{}{}, ready: make(chan struct{}), bitrate: DefaultBitrate}
+		current = &stream{id: h.nextStream, display: display, conn: h.conn, subs: map[*Subscriber]struct{}{}, ready: make(chan struct{}), bitrate: DefaultBitrate, fps: DefaultFPS}
 		h.streams[display] = current
 		h.byID[current.id] = current
 		go h.start(current)
@@ -396,9 +490,9 @@ func (h *Hub) Subscribe(ctx context.Context, display string) (*Subscriber, error
 		current.lingerTimer.Stop()
 		current.lingerTimer = nil
 	}
-	sub := &Subscriber{hub: h, stream: current, samples: make(chan Sample, subscriberBuffer), done: make(chan struct{}), needKey: true}
+	sub := &Subscriber{hub: h, stream: current, viewer: viewer, samples: make(chan Sample, subscriberBuffer), done: make(chan struct{}), needKey: true}
 	current.subs[sub] = struct{}{}
-	h.mu.Unlock()
+	h.publishUnlock()
 
 	select {
 	case <-current.ready:
@@ -418,7 +512,7 @@ func (h *Hub) start(current *stream) {
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 	err := current.conn.call(ctx, "stream.start", StreamStart{
-		Stream: current.id, Display: current.display, Codec: "h264", Bitrate: current.bitrate, FPS: DefaultFPS, MaxSize: DefaultMaxSize,
+		Stream: current.id, Display: current.display, Codec: "h264", Bitrate: current.bitrate, FPS: current.fps, MaxSize: DefaultMaxSize,
 	}, nil, startTimeout)
 	if err != nil {
 		h.logger.Warn("display stream failed to start", slog.String("display", current.display), slog.String("error", err.Error()))
@@ -437,15 +531,16 @@ func (s *Subscriber) Close() {
 	}
 	h := s.hub
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	current := s.stream
 	if _, ok := current.subs[s]; !ok {
+		h.mu.Unlock()
 		return
 	}
 	delete(current.subs, s)
 	s.finish(nil)
+	defer h.publishUnlock()
 	if len(current.subs) > 0 {
-		h.scheduleBitrateLocked(current)
+		h.scheduleUpdateLocked(current)
 		return
 	}
 	current.lingerTimer = time.AfterFunc(streamLinger, func() {
@@ -471,14 +566,28 @@ func (s *Subscriber) finish(err error) {
 }
 
 func (s *Subscriber) SetBitrate(bps int) {
+	s.set(func() bool {
+		changed := s.bitrate != bps
+		s.bitrate = bps
+		return changed
+	})
+}
+
+func (s *Subscriber) SetFPS(fps int) {
+	s.set(func() bool {
+		changed := s.fps != fps
+		s.fps = fps
+		return changed
+	})
+}
+
+func (s *Subscriber) set(apply func() bool) {
 	h := s.hub
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, ok := s.stream.subs[s]; !ok || s.bitrate == bps {
-		return
+	if _, ok := s.stream.subs[s]; ok && apply() {
+		h.scheduleUpdateLocked(s.stream)
 	}
-	s.bitrate = bps
-	h.scheduleBitrateLocked(s.stream)
 }
 
 func (s *Subscriber) RequestKeyframe() {
@@ -504,43 +613,52 @@ func (s *Subscriber) Resync() {
 	h.requestKeyframe(s.stream, true)
 }
 
-func (h *Hub) scheduleBitrateLocked(current *stream) {
-	target := 0
+func (current *stream) targetsLocked() (bitrate, fps int) {
 	for sub := range current.subs {
-		if sub.bitrate > 0 && (target == 0 || sub.bitrate < target) {
-			target = sub.bitrate
+		if sub.bitrate > 0 && (bitrate == 0 || sub.bitrate < bitrate) {
+			bitrate = sub.bitrate
+		}
+		wanted := sub.fps
+		if wanted <= 0 {
+			wanted = DefaultFPS
+		}
+		if fps == 0 || wanted < fps {
+			fps = wanted
 		}
 	}
-	if target == 0 {
+	if bitrate == 0 {
+		bitrate = current.bitrate
+	}
+	return max(MinBitrate, min(MaxBitrate, bitrate)), max(1, min(MaxFPS, fps))
+}
+
+func (h *Hub) scheduleUpdateLocked(current *stream) {
+	if len(current.subs) == 0 || current.updateTimer != nil {
 		return
 	}
-	target = max(MinBitrate, min(MaxBitrate, target))
-	if target == current.bitrate || current.bitrateTimer != nil {
+	if bitrate, fps := current.targetsLocked(); bitrate == current.bitrate && fps == current.fps {
 		return
 	}
-	wait := bitrateInterval - time.Since(current.bitrateSentAt)
-	current.bitrateTimer = time.AfterFunc(max(0, wait), func() {
+	wait := updateInterval - time.Since(current.updateSentAt)
+	current.updateTimer = time.AfterFunc(max(0, wait), func() {
 		h.mu.Lock()
-		current.bitrateTimer = nil
-		if h.byID[current.id] != current {
+		current.updateTimer = nil
+		if h.byID[current.id] != current || len(current.subs) == 0 {
 			h.mu.Unlock()
 			return
 		}
-		latest := 0
-		for sub := range current.subs {
-			if sub.bitrate > 0 && (latest == 0 || sub.bitrate < latest) {
-				latest = sub.bitrate
-			}
-		}
-		latest = max(MinBitrate, min(MaxBitrate, latest))
-		if latest == current.bitrate || len(current.subs) == 0 {
+		bitrate, fps := current.targetsLocked()
+		if bitrate == current.bitrate && fps == current.fps {
 			h.mu.Unlock()
 			return
 		}
-		current.bitrate = latest
-		current.bitrateSentAt = time.Now()
+		update := StreamControl{Stream: current.id, Bitrate: bitrate}
+		if fps != current.fps {
+			update.FPS = fps
+		}
+		current.bitrate, current.fps, current.updateSentAt = bitrate, fps, time.Now()
 		h.mu.Unlock()
-		_ = current.conn.notify("stream.update", StreamControl{Stream: current.id, Bitrate: latest})
+		_ = current.conn.notify("stream.update", update)
 	})
 }
 
@@ -606,7 +724,7 @@ func (h *Hub) endStream(id uint32, reason error) {
 		sub.finish(reason)
 	}
 	current.subs = map[*Subscriber]struct{}{}
-	h.mu.Unlock()
+	h.publishUnlock()
 	h.logger.Info("display stream ended", slog.String("display", current.display), slog.String("reason", reason.Error()))
 }
 
@@ -618,8 +736,8 @@ func (h *Hub) removeStreamLocked(current *stream) {
 	if current.lingerTimer != nil {
 		current.lingerTimer.Stop()
 	}
-	if current.bitrateTimer != nil {
-		current.bitrateTimer.Stop()
+	if current.updateTimer != nil {
+		current.updateTimer.Stop()
 	}
 }
 
@@ -710,8 +828,14 @@ func (p *providerConn) call(ctx context.Context, method string, params any, resu
 	case <-p.done:
 		return errorf(CodeUnavailable, "display provider disconnected")
 	case <-timer.C:
+		_ = p.notify("cancel", wireCancel{ID: id})
 		return errorf(CodeTimeout, "%s timed out", method)
 	case <-ctx.Done():
+		_ = p.notify("cancel", wireCancel{ID: id})
+		var displayErr *Error
+		if errors.As(context.Cause(ctx), &displayErr) {
+			return displayErr
+		}
 		return ctx.Err()
 	}
 }

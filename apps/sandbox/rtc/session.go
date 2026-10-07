@@ -27,6 +27,10 @@ const (
 	inputEventsPerSec = 600
 	inputBurst        = 1200
 	maxChannelMessage = 256 << 10
+	// A direct path this close is a LAN: it gets the full frame rate, and
+	// keeps it until the round trip is well past, so the rate never flaps.
+	lanRoundTrip = 15 * time.Millisecond
+	lanLeaveTrip = 40 * time.Millisecond
 )
 
 type controlMessage struct {
@@ -57,16 +61,24 @@ type session struct {
 	mediaMu sync.Mutex
 	sub     *display.Subscriber
 	paused  bool
-	bitrate atomic.Int64
+	fps     atomic.Int64
 
 	connected atomic.Bool
 	relayed   atomic.Bool
+	estimate  atomic.Int64
 	lastPing  atomic.Int64
 	channelMu sync.Mutex
 	channel   *webrtc.DataChannel
 	inputs    chan display.InputBatch
 	limiter   *rate.Limiter
+	held      held // what this viewer holds down, touched by applyInput only
+	lan       bool // touched by watch only
 	closeOnce sync.Once
+}
+
+type held struct {
+	keys    map[string]bool
+	pointer bool
 }
 
 func openSession(ctx context.Context, manager *Manager, params OpenParams, servers []webrtc.ICEServer) (*session, string, error) {
@@ -100,6 +112,7 @@ func openSession(ctx context.Context, manager *Manager, params OpenParams, serve
 		manager: manager, logger: logger, pc: pc, track: track, sender: sender,
 		ctx: sessionCtx, cancel: cancel, openedAt: time.Now(),
 		inputs: make(chan display.InputBatch, inputQueue), limiter: rate.NewLimiter(inputEventsPerSec, inputBurst),
+		held: held{keys: map[string]bool{}},
 	}
 	fail := func(err error) (*session, string, error) {
 		current.close(ReasonFailed)
@@ -108,6 +121,11 @@ func openSession(ctx context.Context, manager *Manager, params OpenParams, serve
 	current.lastPing.Store(time.Now().UnixMilli())
 	pc.OnConnectionStateChange(current.onConnectionState)
 	pc.OnDataChannel(current.onDataChannel)
+	if transport := sender.Transport(); transport != nil {
+		transport.ICETransport().OnSelectedCandidatePairChange(func(pair *webrtc.ICECandidatePair) {
+			current.onPath(pair.Local.Typ == webrtc.ICECandidateTypeRelay || pair.Remote.Typ == webrtc.ICECandidateTypeRelay)
+		})
+	}
 
 	subscribed := make(chan error, 1)
 	go func() { subscribed <- current.attach() }()
@@ -159,16 +177,29 @@ func gatheredWithin(pc *webrtc.PeerConnection, wait time.Duration) <-chan struct
 // a relayed one stays below relayMaxBitrate.
 func (s *session) followEstimate(estimator cc.BandwidthEstimator) {
 	follow := func(bitrate int) {
-		if s.relayed.Load() {
-			bitrate = min(bitrate, relayMaxBitrate)
-		}
-		s.bitrate.Store(int64(bitrate))
-		if sub := s.subscription(); sub != nil {
-			sub.SetBitrate(bitrate)
-		}
+		s.estimate.Store(int64(bitrate))
+		s.applyBitrate()
 	}
 	follow(estimator.GetTargetBitrate())
 	estimator.OnTargetBitrateChange(follow)
+}
+
+func (s *session) applyBitrate() {
+	bitrate := int(s.estimate.Load())
+	sub := s.subscription()
+	if bitrate == 0 || sub == nil {
+		return
+	}
+	if s.relayed.Load() {
+		bitrate = min(bitrate, relayMaxBitrate)
+	}
+	sub.SetBitrate(bitrate)
+}
+
+func (s *session) onPath(relayed bool) {
+	if s.relayed.Swap(relayed) != relayed {
+		s.applyBitrate()
+	}
 }
 
 func (s *session) run() {
@@ -193,7 +224,7 @@ func (s *session) subscription() *display.Subscriber {
 }
 
 func (s *session) attach() error {
-	sub, err := s.manager.hub.Subscribe(s.ctx, s.display)
+	sub, err := s.manager.hub.Subscribe(s.ctx, s.display, display.Viewer{UserID: s.userID, Control: s.control})
 	if err != nil {
 		return err
 	}
@@ -205,8 +236,9 @@ func (s *session) attach() error {
 	}
 	s.sub = sub
 	s.mediaMu.Unlock()
-	if bitrate := s.bitrate.Load(); bitrate > 0 {
-		sub.SetBitrate(int(bitrate))
+	s.applyBitrate()
+	if fps := s.fps.Load(); fps > 0 {
+		sub.SetFPS(int(fps))
 	}
 	go s.forward(sub)
 	return nil
@@ -298,6 +330,9 @@ func (s *session) watch() {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
+			if s.connected.Load() {
+				s.followRoundTrip()
+			}
 			age := time.Since(s.openedAt)
 			switch {
 			case age > maxLifetime:
@@ -311,13 +346,42 @@ func (s *session) watch() {
 	}
 }
 
+func (s *session) followRoundTrip() {
+	rtt, ok := s.roundTrip()
+	if !ok {
+		return
+	}
+	limit := lanRoundTrip
+	if s.lan {
+		limit = lanLeaveTrip
+	}
+	s.lan = !s.relayed.Load() && rtt <= limit
+	fps := display.DefaultFPS
+	if s.lan {
+		fps = display.MaxFPS
+	}
+	s.fps.Store(int64(fps))
+	if sub := s.subscription(); sub != nil {
+		sub.SetFPS(fps)
+	}
+}
+
+func (s *session) roundTrip() (time.Duration, bool) {
+	for _, value := range s.pc.GetStats() {
+		if pair, ok := value.(webrtc.ICECandidatePairStats); ok && pair.Nominated && pair.State == webrtc.StatsICECandidatePairStateSucceeded && pair.CurrentRoundTripTime > 0 {
+			return time.Duration(pair.CurrentRoundTripTime * float64(time.Second)), true
+		}
+	}
+	return 0, false
+}
+
 func (s *session) onConnectionState(state webrtc.PeerConnectionState) {
 	switch state {
 	case webrtc.PeerConnectionStateConnected:
 		if !s.connected.Swap(true) {
 			s.lastPing.Store(time.Now().UnixMilli())
 			path, _ := s.route()
-			s.relayed.Store(strings.Contains(path, "relay"))
+			s.onPath(strings.Contains(path, "relay"))
 			s.logger.Info("rtc session connected", slog.String("path", path), slog.Duration("after", time.Since(s.openedAt)))
 		}
 	case webrtc.PeerConnectionStateFailed:
@@ -396,13 +460,47 @@ func (s *session) applyInput() {
 	for {
 		select {
 		case <-s.ctx.Done():
+			s.releaseHeld()
 			return
 		case batch := <-s.inputs:
-			if err := s.manager.hub.Input(s.ctx, batch); err != nil && s.ctx.Err() == nil {
+			if err := s.manager.hub.Input(s.ctx, batch, display.InputLive); err != nil && s.ctx.Err() == nil {
 				s.send(controlMessage{Type: "error", Code: display.ErrorCode(err), Message: err.Error()})
+				continue
 			}
+			s.held.track(batch.Events)
 		}
 	}
+}
+
+func (h *held) track(events []display.InputEvent) {
+	for _, event := range events {
+		switch {
+		case event.Type == "key" && event.Action == "down":
+			h.keys[event.Key] = true
+		case event.Type == "key" && event.Action == "up":
+			delete(h.keys, event.Key)
+		case event.Type == "pointer" && event.Action == "down":
+			h.pointer = true
+		case event.Type == "pointer" && (event.Action == "up" || event.Action == "cancel"):
+			h.pointer = false
+		}
+	}
+}
+
+func (s *session) releaseHeld() {
+	var events []display.InputEvent
+	if s.held.pointer {
+		events = append(events, display.InputEvent{Type: "pointer", Action: "cancel", X: new(float64), Y: new(float64)})
+	}
+	for key := range s.held.keys {
+		events = append(events, display.InputEvent{Type: "key", Action: "up", Key: key})
+	}
+	if len(events) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = s.manager.hub.Input(ctx, display.InputBatch{Display: s.display, Events: events}, display.InputCleanup)
 }
 
 func (s *session) onDisplays(displays []display.Info) {

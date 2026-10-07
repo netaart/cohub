@@ -41,6 +41,7 @@ export function problemFromError(error: unknown): DisplayProblem {
 export function createDisplayView(
 	spaceId: () => string,
 	displayId: () => string,
+	control: () => boolean,
 ) {
 	let phase = $state<DisplayPhase>({ kind: "idle" });
 	let connection = $state<DisplayConnection | null>(null);
@@ -83,7 +84,9 @@ export function createDisplayView(
 		framed = false;
 		phase = { kind: "connecting" };
 		try {
-			const next = await sdk.space(spaceId()).displays.connect(displayId());
+			const next = await sdk
+				.space(spaceId())
+				.displays.connect(displayId(), { control: control() });
 			if (current !== generation) {
 				next.close();
 				return;

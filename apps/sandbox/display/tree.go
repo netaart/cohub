@@ -2,15 +2,15 @@ package display
 
 import (
 	"math"
-	"regexp"
 	"slices"
 	"strings"
-	"unicode/utf16"
+	"unicode/utf8"
 )
 
 type TreeParams struct {
 	Display     string `json:"display"`
 	MaxElements int    `json:"maxElements,omitempty"`
+	Actionable  bool   `json:"actionable,omitempty"`
 }
 
 type Tree struct {
@@ -29,28 +29,6 @@ type Element struct {
 	Bounds  [4]float64 `json:"bounds"`
 	States  []string   `json:"states,omitempty"`
 	Actions []string   `json:"actions,omitempty"`
-}
-
-const (
-	DefaultTreeElements = 300
-	MaxTreeElements     = 1000
-	maxTreeDepth        = 64
-	maxElementText      = 500
-)
-
-var (
-	elementRefPattern = regexp.MustCompile(`^e\d{1,9}\.\d{1,5}$`)
-	elementRoles      = names("window", "dialog", "group", "list", "listItem", "text", "heading", "image", "button", "link",
-		"textField", "checkbox", "radio", "switch", "slider", "tab", "menu", "menuItem", "web", "other")
-	elementStates = names("focused", "selected", "checked", "disabled", "editable", "password", "scrollable", "expanded")
-)
-
-func names(values ...string) map[string]bool {
-	set := make(map[string]bool, len(values))
-	for _, value := range values {
-		set[value] = true
-	}
-	return set
 }
 
 func (p *TreeParams) normalize() error {
@@ -78,7 +56,7 @@ func (t Tree) sanitize(limit int) Tree {
 		if !elementRoles[element.Role] {
 			element.Role = "other"
 		}
-		element.Depth = min(max(element.Depth, 0), maxTreeDepth)
+		element.Depth = min(max(element.Depth, 0), MaxTreeDepth)
 		element.Name = clip(element.Name)
 		element.Value = clip(element.Value)
 		for i, value := range element.Bounds {
@@ -97,23 +75,32 @@ func (t Tree) sanitize(limit int) Tree {
 	return clean
 }
 
-func utf16Len(text string) int {
-	return len(utf16.Encode([]rune(text)))
+func (t Tree) actionable(limit int) Tree {
+	kept := t.Elements[:0:0]
+	for _, element := range t.Elements {
+		if len(element.Actions) == 0 && !slices.Contains(element.States, "editable") {
+			continue
+		}
+		if len(kept) == limit {
+			t.Truncated = true
+			break
+		}
+		element.Depth = 0
+		kept = append(kept, element)
+	}
+	t.Elements = kept
+	return t
 }
 
-// clip bounds text in UTF-16 units, as JavaScript clients count it.
+// textLen counts characters, as zod does on the TypeScript side.
+func textLen(text string) int {
+	return utf8.RuneCountInString(text)
+}
+
 func clip(text string) string {
 	text = strings.ToValidUTF8(strings.TrimSpace(text), "")
-	if utf16Len(text) <= maxElementText {
+	if textLen(text) <= MaxElementText {
 		return text
 	}
-	runes := []rune(text)
-	units := 0
-	for i, r := range runes {
-		units += utf16.RuneLen(r)
-		if units > maxElementText-1 {
-			return string(runes[:i]) + "…"
-		}
-	}
-	return text
+	return string([]rune(text)[:MaxElementText-1]) + "…"
 }

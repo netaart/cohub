@@ -19,7 +19,9 @@ import { callSandboxRpc } from "../../space-sandbox-rpc.js";
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
 
-type Permission = "sandbox.view" | "sandbox.manage";
+// Watching a display takes sandbox.view; steering it, or starting a virtual
+// screen, takes command.execute, as running a command on the machine does.
+type Permission = "sandbox.view" | "command.execute";
 
 async function authorize(c: Context, permission: Permission) {
   const user = useAuth(c);
@@ -53,7 +55,7 @@ router.get("/:id/displays", async (c) => {
 });
 
 router.get("/:id/displays/:displayId/capture", async (c) => {
-  const auth = await authorize(c, "sandbox.manage");
+  const auth = await authorize(c, "sandbox.view");
   if (auth instanceof Response) return auth;
   const display = displayParam(c);
   if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
@@ -74,12 +76,15 @@ router.get("/:id/displays/:displayId/capture", async (c) => {
 });
 
 router.get("/:id/displays/:displayId/tree", async (c) => {
-  const auth = await authorize(c, "sandbox.manage");
+  const auth = await authorize(c, "sandbox.view");
   if (auth instanceof Response) return auth;
   const display = displayParam(c);
   if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
   const maxElements = c.req.query("maxElements");
-  const parsed = displayTreeParamsSchema.safeParse(maxElements ? { maxElements: Number(maxElements) } : {});
+  const parsed = displayTreeParamsSchema.safeParse({
+    ...(maxElements ? { maxElements: Number(maxElements) } : {}),
+    ...(c.req.query("actionable") === "true" ? { actionable: true } : {}),
+  });
   if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid tree" }, 400);
   try {
     const tree = await callSandboxRpc(auth.spaceId, "display.tree", { ...parsed.data, display });
@@ -91,7 +96,7 @@ router.get("/:id/displays/:displayId/tree", async (c) => {
 });
 
 router.post("/:id/displays/virtual", async (c) => {
-  const auth = await authorize(c, "sandbox.manage");
+  const auth = await authorize(c, "command.execute");
   if (auth instanceof Response) return auth;
   const parsed = displayVirtualStartSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid size" }, 400);
@@ -105,7 +110,7 @@ router.post("/:id/displays/virtual", async (c) => {
 });
 
 router.delete("/:id/displays/virtual", async (c) => {
-  const auth = await authorize(c, "sandbox.manage");
+  const auth = await authorize(c, "command.execute");
   if (auth instanceof Response) return auth;
   try {
     const result = await callSandboxRpc(auth.spaceId, "display.stop", {});
@@ -117,7 +122,7 @@ router.delete("/:id/displays/virtual", async (c) => {
 });
 
 router.post("/:id/displays/:displayId/input", async (c) => {
-  const auth = await authorize(c, "sandbox.manage");
+  const auth = await authorize(c, "command.execute");
   if (auth instanceof Response) return auth;
   const display = displayParam(c);
   if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
@@ -131,14 +136,14 @@ router.post("/:id/displays/:displayId/input", async (c) => {
 });
 
 router.post("/:id/displays/:displayId/sessions", async (c) => {
-  const auth = await authorize(c, "sandbox.manage");
+  const parsed = displaySessionRequestSchema.safeParse(await c.req.json().catch(() => null));
+  const control = parsed.data?.control ?? true;
+  const auth = await authorize(c, control ? "command.execute" : "sandbox.view");
   if (auth instanceof Response) return auth;
   const display = displayParam(c);
   if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
-  const parsed = displaySessionRequestSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid offer" }, 400);
   const sessionId = randomUUID();
-  const control = parsed.data.control ?? true;
   try {
     const { iceServers } = await getIceServers(auth.user.uuid);
     const { answer } = await callSandboxRpc(auth.spaceId, "rtc.open", {
@@ -152,12 +157,12 @@ router.post("/:id/displays/:displayId/sessions", async (c) => {
 });
 
 router.delete("/:id/displays/:displayId/sessions/:sessionId", async (c) => {
-  const auth = await authorize(c, "sandbox.manage");
+  const auth = await authorize(c, "sandbox.view");
   if (auth instanceof Response) return auth;
   const sessionId = c.req.param("sessionId");
   if (!isUuid(sessionId)) return c.json({ code: "invalid_request", message: "invalid session" }, 400);
   try {
-    const result = await callSandboxRpc(auth.spaceId, "rtc.close", { sessionId });
+    const result = await callSandboxRpc(auth.spaceId, "rtc.close", { sessionId, userId: auth.user.uuid });
     logger.info("[Displays] session closed", { spaceId: auth.spaceId, sessionId, userId: auth.user.uuid, closed: result.closed });
     return c.json(result);
   } catch (error) {
@@ -166,7 +171,7 @@ router.delete("/:id/displays/:displayId/sessions/:sessionId", async (c) => {
 });
 
 router.get("/:id/rtc/ice-servers", async (c) => {
-  const auth = await authorize(c, "sandbox.manage");
+  const auth = await authorize(c, "sandbox.view");
   if (auth instanceof Response) return auth;
   c.header("Cache-Control", "private, no-store");
   return c.json(await getIceServers(auth.user.uuid));

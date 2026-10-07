@@ -4,11 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 type Info struct {
@@ -23,12 +21,16 @@ type Info struct {
 	Desktop bool     `json:"desktop,omitempty"`
 	Tree    bool     `json:"tree,omitempty"`
 	Needs   []string `json:"needs,omitempty"`
+	Viewers []Viewer `json:"viewers,omitempty"`
 }
 
-var displayIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+type Viewer struct {
+	UserID  string `json:"userId"`
+	Control bool   `json:"control,omitempty"`
+}
 
 func (i Info) valid() bool {
-	return displayIDPattern.MatchString(i.ID) && utf16Len(i.Name) <= 200 && i.Width >= 0 && i.Height >= 0 && i.Width <= 16384 && i.Height <= 16384
+	return displayIDPattern.MatchString(i.ID) && textLen(i.Name) <= MaxNameLen && i.Width >= 0 && i.Height >= 0 && i.Width <= MaxDimension && i.Height <= MaxDimension
 }
 
 // known drops the names this version does not know, so a newer provider
@@ -36,6 +38,7 @@ func (i Info) valid() bool {
 func (i Info) known() Info {
 	i.System = knownNames(i.System, systemActions)
 	i.Needs = knownNames(i.Needs, permissions)
+	i.Viewers = nil
 	return i
 }
 
@@ -52,7 +55,8 @@ func knownNames(names []string, known map[string]bool) []string {
 func (i Info) equal(other Info) bool {
 	return i.ID == other.ID && i.Name == other.Name && i.Width == other.Width && i.Height == other.Height &&
 		i.Stream == other.Stream && i.Capture == other.Capture && i.Input == other.Input &&
-		i.Desktop == other.Desktop && i.Tree == other.Tree && slices.Equal(i.System, other.System) && slices.Equal(i.Needs, other.Needs)
+		i.Desktop == other.Desktop && i.Tree == other.Tree && slices.Equal(i.System, other.System) && slices.Equal(i.Needs, other.Needs) &&
+		slices.Equal(i.Viewers, other.Viewers)
 }
 
 type Sample struct {
@@ -75,6 +79,7 @@ const (
 	CodeInvalid     = "invalid"
 	CodeBusy        = "busy"
 	CodeTimeout     = "timeout"
+	CodePreempted   = "preempted" // a person took over the display
 	CodeFailed      = "failed"
 )
 
@@ -114,8 +119,8 @@ func (p *CaptureParams) normalize() error {
 	if p.MaxSize == 0 {
 		p.MaxSize = DefaultMaxSize
 	}
-	if p.MaxSize < 0 || p.MaxSize > 16384 {
-		return errorf(CodeInvalid, "maxSize must be within 0..16384")
+	if p.MaxSize < 0 || p.MaxSize > MaxDimension {
+		return errorf(CodeInvalid, "maxSize must be within 0..%d", MaxDimension)
 	}
 	return nil
 }
@@ -144,34 +149,29 @@ type InputEvent struct {
 type InputBatch struct {
 	Display string       `json:"display"`
 	Events  []InputEvent `json:"events"`
+	StartBy int64        `json:"startBy,omitempty"`
 }
 
-const (
-	MaxInputEvents   = 512
-	MaxInputTextLen  = 4096
-	MaxInputSchedule = 60 * time.Second
-	maxKeyLen        = 64
-)
+const MaxInputSchedule = MaxInputScheduleMs * time.Millisecond
 
-var (
-	pointerActions = map[string]bool{"down": true, "move": true, "up": true, "cancel": true}
-	keyActions     = map[string]bool{"down": true, "up": true, "press": true}
-	buttons        = map[string]bool{"": true, "primary": true, "secondary": true, "middle": true}
-	systemActions  = map[string]bool{"back": true, "home": true, "recents": true, "notifications": true, "quickSettings": true, "lock": true}
-	permissions    = map[string]bool{"screenRecording": true, "accessibility": true}
-	elementActions = map[string]bool{"click": true, "longPress": true, "focus": true, "setText": true, "scrollForward": true, "scrollBackward": true}
-)
+func names(values ...string) map[string]bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		set[value] = true
+	}
+	return set
+}
 
 func validUnit(value *float64) bool {
 	return value != nil && !math.IsNaN(*value) && *value >= 0 && *value <= 1
 }
 
 func validText(text string) bool {
-	return utf8.RuneCountInString(text) <= MaxInputTextLen && !strings.ContainsRune(text, 0)
+	return textLen(text) <= MaxInputTextLen && !strings.ContainsRune(text, 0)
 }
 
 func validDelta(value float64) bool {
-	return !math.IsNaN(value) && value >= -10 && value <= 10
+	return !math.IsNaN(value) && value >= -MaxScroll && value <= MaxScroll
 }
 
 func (b InputBatch) Validate() error {
@@ -205,7 +205,7 @@ func (e InputEvent) validate() error {
 		if !validUnit(e.X) || !validUnit(e.Y) {
 			return errors.New("pointer x and y must be within 0..1")
 		}
-		if !buttons[e.Button] {
+		if e.Button != "" && !buttons[e.Button] {
 			return errors.New("button must be primary, secondary or middle")
 		}
 	case "scroll":
@@ -213,13 +213,13 @@ func (e InputEvent) validate() error {
 			return errors.New("scroll x and y must be within 0..1")
 		}
 		if !validDelta(e.DX) || !validDelta(e.DY) || (e.DX == 0 && e.DY == 0) {
-			return errors.New("scroll needs dx or dy within -10..10")
+			return fmt.Errorf("scroll needs dx or dy within -%[1]d..%[1]d", MaxScroll)
 		}
 	case "key":
 		if !keyActions[e.Action] {
 			return errors.New("key action must be down, up or press")
 		}
-		if e.Key == "" || len(e.Key) > maxKeyLen {
+		if e.Key == "" || textLen(e.Key) > MaxKeyLen {
 			return errors.New("key is required")
 		}
 	case "text":

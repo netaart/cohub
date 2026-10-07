@@ -1,6 +1,10 @@
 <script lang="ts">
 import type { DeviceRuntimeInstance } from "@cohub/protocol/host-bridge";
-import { type DisplayList, HttpError } from "@neta-art/cohub";
+import {
+	type DisplayList,
+	HttpError,
+	type SpacePresenceUser,
+} from "@neta-art/cohub";
 import { Monitor, RefreshCw, Settings2, X } from "lucide-svelte";
 import { tick, untrack } from "svelte";
 import { goto } from "$app/navigation";
@@ -35,14 +39,21 @@ import {
 	harnessModelCounts,
 	runtimeTone,
 } from "../runtime-status-view";
+import DisplayViewers from "./DisplayViewers.svelte";
 
 const {
 	spaceId,
 	canManage = false,
+	canView = false,
+	canControl = false,
+	people = [],
 	onOpenDisplay,
 }: {
 	spaceId: string;
 	canManage?: boolean;
+	canView?: boolean;
+	canControl?: boolean;
+	people?: SpacePresenceUser[];
 	onOpenDisplay?: (displayId: string) => void;
 } = $props();
 const locale = $derived(getLocale());
@@ -341,7 +352,8 @@ $effect(() => {
 						{#each displays as item (item.id)}
 							<div class="runtime-display">
 								<span class="runtime-display-name">{item.name || item.id}<span class="runtime-meta">{item.width}×{item.height}</span></span>
-								{#if canManage && onOpenDisplay}<button type="button" class="runtime-display-open" onclick={() => openDisplay(item.id)}>{m.runtime_display_open({}, { locale })}</button>{/if}
+								<DisplayViewers viewers={item.viewers} {people} />
+								{#if canView && onOpenDisplay}<button type="button" class="runtime-display-open" onclick={() => openDisplay(item.id)}>{m.runtime_display_open({}, { locale })}</button>{/if}
 							</div>
 						{/each}
 					</div>
@@ -382,7 +394,7 @@ $effect(() => {
 			</div>
 		</div>
 	{/if}
-{:else if status?.kind === "cloud" && canManage && onOpenDisplay}
+{:else if status?.kind === "cloud" && canView && onOpenDisplay}
 	<button bind:this={trigger} type="button" class="runtime-chip" aria-haspopup="dialog" aria-expanded={open} aria-label={m.virtual_display_title({}, { locale })} title={m.virtual_display_title({}, { locale })} onclick={() => open ? close() : void showVirtual()}>
 		<Monitor class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 	</button>
@@ -398,16 +410,19 @@ $effect(() => {
 					{#each virtualPanel.list.displays as item (item.id)}
 						<div class="runtime-display">
 							<span class="runtime-display-name">{item.name || item.id}<span class="runtime-meta">{item.width}×{item.height}</span></span>
+							<DisplayViewers viewers={item.viewers} {people} />
 							<button type="button" class="runtime-display-open" onclick={() => openDisplay(item.id)}>{m.runtime_display_open({}, { locale })}</button>
 						</div>
 					{/each}
-					<div class="runtime-device-actions">
-						{#if virtualPanel.list.virtual === "running"}
-							<button type="button" class="runtime-device-action" data-secondary="true" disabled={virtualBusy} onclick={() => void setVirtual(false)}>{m.virtual_display_stop({}, { locale })}</button>
-						{:else}
-							<button type="button" class="runtime-device-action" disabled={virtualBusy} onclick={() => void setVirtual(true)}>{m.virtual_display_start({}, { locale })}</button>
-						{/if}
-					</div>
+					{#if canControl}
+						<div class="runtime-device-actions">
+							{#if virtualPanel.list.virtual === "running"}
+								<button type="button" class="runtime-device-action" data-secondary="true" disabled={virtualBusy} onclick={() => void setVirtual(false)}>{m.virtual_display_stop({}, { locale })}</button>
+							{:else}
+								<button type="button" class="runtime-device-action" disabled={virtualBusy} onclick={() => void setVirtual(true)}>{m.virtual_display_start({}, { locale })}</button>
+							{/if}
+						</div>
+					{/if}
 				{:else if virtualPanel.kind === "loading"}
 					<p class="runtime-hint">{m.display_connecting({}, { locale })}</p>
 				{:else}
@@ -463,7 +478,7 @@ $effect(() => {
 .runtime-displays { margin-top: 4px; border-top: 1px solid var(--border-subtle); padding-top: 10px; }
 .runtime-displays h3 { margin: 0 0 4px; color: var(--text-tertiary); font-size: 12px; font-weight: 500; }
 .runtime-display { display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--text-secondary); }
-.runtime-display-name { display: flex; min-width: 0; align-items: baseline; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-display-name { display: flex; flex: 1; min-width: 0; align-items: baseline; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-display-open { flex: 0 0 auto; height: 28px; padding: 0 10px; border-radius: 6px; background: var(--bg-input); box-shadow: inset 0 0 0 1px var(--border-subtle); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
 .runtime-display-open:hover { background: var(--bg-hover); color: var(--text-primary); }
 .runtime-display-open:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }

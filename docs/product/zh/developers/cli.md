@@ -189,6 +189,7 @@ cohub spaces displays ls
 cohub spaces displays start                   # 可用时启动虚拟屏幕；stop 停止
 cohub spaces displays capture -o screen.jpg   # 默认最长边 1280
 cohub spaces displays tree                    # e3.12 button "Send" (980,2210 120x80)
+cohub spaces displays tree --actionable       # 只列出可操作的控件
 cohub spaces displays tap e3.12 --screenshot  # 操作后保存截图
 cohub spaces displays type "hello" --into e3.4
 cohub spaces displays tap 540 1200
@@ -201,7 +202,7 @@ cohub spaces displays press back              # 手机会列出它支持的系�
 
 在 macOS 上，运行 Runtime 的终端需要「屏幕录制」权限，操作屏幕还需要「辅助功能」权限（系统设置 → 隐私与安全性）。Linux 需要 X11 会话，暂不支持 Wayland。
 
-`act` 从 `--actions` 或 stdin 读取 JSON 动作数组，按同一时间线执行。
+`act` 从 `--actions` 或 stdin 读取 JSON 动作数组，按同一时间线执行。有人在操作屏幕时，动作会以 `display_preempted` 停止，先重新看一眼屏幕再继续。查看画面、`capture` 和 `tree` 需要沙箱的查看权限；操作屏幕和 `start` / `stop` 需要执行命令的权限。
 
 ### Boards
 

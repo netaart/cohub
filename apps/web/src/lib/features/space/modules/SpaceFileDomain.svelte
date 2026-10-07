@@ -10,6 +10,7 @@ import type {
 	AppRecord,
 	AppRuntimeShellContext,
 	SpacePendingDiffFileResponse,
+	SpacePresenceUser,
 	SpaceRecord,
 } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
@@ -97,6 +98,8 @@ export type SpaceFileDomainProps = {
 	displayTabs: DisplayTab[];
 	activeDisplay: string | null;
 	displayNames: Record<string, string>;
+	canControlDisplays: boolean;
+	onlineUsers: SpacePresenceUser[];
 	activeWindowKind: Window["kind"] | null;
 	inlinePortEndpoint: SpacePublicEndpoint | null;
 	previewEndpoints: SpacePublicEndpoints;
@@ -275,6 +278,8 @@ let {
 	displayTabs,
 	activeDisplay,
 	displayNames,
+	canControlDisplays,
+	onlineUsers,
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,
@@ -638,6 +643,8 @@ function previewContentOut(node: Element) {
 			onActivateWindow={activateWindow}
 			onCloseWindow={closeWindow}
 			{isMobile}
+			canControl={canControlDisplays}
+			people={onlineUsers}
 		/>
 	</div>
 {/each}

@@ -24,19 +24,34 @@ Agent ── display.capture / display.input (sandbox RPC) ───────
   sandboxd itself (see [Desktops](#desktops)). `COHUB_DISPLAY` picks one, see below.
 - **`display.Hub`** — one encoder per display however many viewers watch; every viewer starts at a
   key frame (parameter sets are cached for late joiners); a viewer that falls behind resumes at the
-  next key frame instead of decoding garbage; the bitrate follows the slowest viewer; the encoder stops
-  2 s after the last viewer leaves.
+  next key frame instead of decoding garbage; bitrate and frame rate follow the slowest viewer; the
+  encoder stops 2 s after the last viewer leaves. The hub also knows who watches: every display it
+  reports carries `viewers` (`userId`, and `control` for those who may steer it).
 - **`rtc.Manager`** — pion WebRTC, H.264 only, with NACK, RTCP reports and send-side congestion
   control (GCC) whose estimate drives the encoder, up to 16 Mbps on a direct path (a LAN) and
-  6 Mbps through a TURN relay, whose traffic is billed. Signaling is one complete offer and answer
-  (WHEP-shaped), so no trickle channel exists. At most 4 viewers per Space; a session closes on
-  DELETE, a failed connection, 30 s without a ping, 12 h, or shutdown.
+  6 Mbps through a TURN relay, whose traffic is billed; the cap follows ICE when it moves between a
+  relay and a direct path. A direct path within 15 ms round trip, a LAN, gets 60 fps instead of 30.
+  Frames come at a variable rate (a still screen sends almost none), so each RTP frame carries its
+  own capture time. Signaling is one complete offer and answer (WHEP-shaped), so no trickle channel
+  exists. At most 4 viewers per Space; a session closes on DELETE, a failed connection, 30 s
+  without a ping, 12 h, or shutdown.
 
 Coordinates are normalized to the display (0..1, origin top-left) everywhere on the wire, so
 viewers and agents never need its pixel size. Agents and the CLI speak pixels of the image they
 looked at; `compileDisplayActions` (`@cohub/protocol/display`) turns tap (or multi-click), long
 press, swipe, scroll, type, key (or a shortcut such as `Control+a`), system and wait actions into
 one scheduled batch, so gestures land exactly.
+
+### Input
+
+Input reaches a provider as scheduled batches, one at a time per display, from two sources. A
+person on a live session comes first: their input cancels the scripted batches in flight (from the
+API, so agents and the CLI) and refuses new ones for 2 s with `display_preempted`, so the two never
+interleave; the agent looks again and goes on. Every batch carries `startBy`: a provider refuses one
+it could not start in time, since its caller has stopped waiting, and sandboxd sends `cancel` for any
+call it stops waiting for. Nothing stays held down: a batch that ends early releases the keys and
+button it pressed, a closing session releases what its viewer held, and a desktop provider releases
+everything when it stops.
 
 A display describes what it takes, and what it still `needs`: permissions such as
 `screenRecording` and `accessibility` the user has to grant, which clients turn into guidance.
@@ -62,20 +77,28 @@ All routes are under `/api/spaces/:id`.
 
 | Route | Permission | Notes |
 | --- | --- | --- |
-| `GET displays` | `sandbox.view` | Live list from the machine |
-| `GET displays/:display/capture` | `sandbox.manage` | `format`, `quality`, `maxSize` (default 1920) |
-| `POST displays/:display/input` | `sandbox.manage` | `{ events }`, resolves once performed |
-| `POST displays/:display/sessions` | `sandbox.manage` | `{ offer, control? }` → `201 { sessionId, answer }` |
-| `DELETE displays/:display/sessions/:session` | `sandbox.manage` | |
-| `GET rtc/ice-servers` | `sandbox.manage` | Short-lived TURN credentials, see below |
+| `GET displays` | `sandbox.view` | Live list from the machine, with `viewers` |
+| `GET displays/:display/capture` | `sandbox.view` | `format`, `quality`, `maxSize` (default 1920) |
+| `GET displays/:display/tree` | `sandbox.view` | `maxElements`, `actionable=true` for only what takes an action |
+| `POST displays/:display/input` | `command.execute` | `{ events }`, resolves once performed |
+| `POST displays/:display/sessions` | `sandbox.view`, `command.execute` with control | `{ offer, control? }` → `201 { sessionId, answer }` |
+| `DELETE displays/:display/sessions/:session` | `sandbox.view` | |
+| `POST`, `DELETE displays/virtual` | `command.execute` | Start or stop a virtual screen |
+| `GET rtc/ice-servers` | `sandbox.view` | Short-lived TURN credentials, see below |
+
+Watching takes what seeing the Runtime does, so builders and hosts may watch; steering takes what
+running a command on the machine does, which builders and their agents have too.
 
 Errors: `sandbox_offline` (503), `display_not_found` (404), `display_unavailable` (409, e.g. the
-screen is not shared), `display_busy` (429), `display_unsupported` (501, an older sandboxd).
-Session opens and closes are logged with user, Space, display and session as the audit trail.
+screen is not shared), `display_preempted` (409, a person took over), `display_busy` (429),
+`display_unsupported` (501, an older sandboxd). Session opens and closes are logged with user,
+Space, display and session as the audit trail.
 
 The display snapshot also rides on the Runtime: sandboxd sends a `displays` control frame on every
-change and pong, the gateway keeps it 60 s under `runtime:displays:<space>` and publishes
-`space.runtime.changed` only when it changes, and `GET /runtime` returns it as `displays`.
+change (a viewer joining or leaving is one) and pong, the gateway keeps it 60 s under
+`runtime:displays:<space>` and publishes `space.runtime.changed` only when it changes, and
+`GET /runtime` returns it as `displays`. A cloud sandbox reports its virtual screen through
+`GET displays` when its panel opens; an open live session hears every change on its control channel.
 
 ## TURN
 
@@ -121,10 +144,22 @@ Screen sharing rides on the device Runtime and needs Android 11.
 Desktop providers implement `display.Screen` (`apps/sandbox/display/desktop.go`): report the
 screen, give ffmpeg input arguments, capture a still, and perform pointer, scroll, key and text
 input. The shared runtime adds the wire protocol, change polling (resolution, permission grants),
-scheduled input and the encoder: ffmpeg with `h264_videotoolbox` on macOS or `libx264`
-(Constrained Baseline, zero latency, one second GOP, longest edge 1920), restarted in place when
-congestion control moves the bitrate by more than a third. Without ffmpeg a desktop still serves
-screenshots and input, so agents work; only live video needs it.
+scheduled input and the encoder. An encoder is a process writing H.264 in FLV, which frames every
+access unit so it leaves the moment it is encoded:
+
+- **ffmpeg** — `h264_videotoolbox` on macOS or `libx264` (Constrained Baseline, zero latency,
+  longest edge 1920). `mpdecimate` drops frames that repeat the last one, so a still screen sends one
+  frame every 2 s, a key frame; key frames come every 2 s by time, since ffmpeg cannot make one on
+  request. A new bitrate (by more than a third) or frame rate restarts it in place.
+- **Native, on macOS 12.3+** — sandboxd runs itself as a child (`__display-encoder`) that captures
+  with ScreenCaptureKit and encodes with VideoToolbox in low-latency mode. It changes bitrate and
+  frame rate in place and encodes a key frame whenever one is asked for, re-encoding the last frame
+  of a still screen, so a joining viewer sees it at once and a lost packet heals at once. It needs
+  no ffmpeg. As a child it can only cost the stream: one that fails before its first frame hands over
+  to ffmpeg for the rest of the Runtime's life.
+
+Without an encoder a desktop still serves screenshots and input, so agents work; only live video
+needs one.
 
 - **`cohub runtime up --display`** shares this computer's screen. Sharing a real screen asks for
   consent (default no) unless `--yes` is passed; `--display xvfb` starts a virtual one instead.
@@ -134,7 +169,9 @@ screenshots and input, so agents work; only live video needs it.
   pixels, keys by virtual key code, text as Unicode events in any layout; stills from
   `screencapture`, video from AVFoundation. The terminal running the Runtime needs **Screen
   Recording** (the first share shows the system prompt; the grant applies after a restart) and
-  **Accessibility** for control. Until granted, the display is listed without that ability.
+  **Accessibility** for control and the element tree. Until granted, the display is listed
+  without that ability. Stills come straight from Quartz where the system still offers it, from
+  `screencapture` otherwise.
 - **Linux (X11)** — a pure Go X11 client (`jezek/xgb`): XTest for input, buttons 4–7 for scrolling,
   a spare keycode remapped per character so any Unicode text types regardless of keyboard layout;
   `GetImage` for stills, `x11grab` for video. Wayland sessions are not supported yet.
@@ -159,10 +196,21 @@ Pixels are a fallback: where the platform has an accessibility API, a display re
   `scrollBackward`) ride the same input path as pointers, with the same permission, rate limits
   and timeline. An element that cannot click itself falls back to a clickable ancestor, then to a
   tap at its center.
-- **Providers**: Android reads the active window through its accessibility service, which the
-  user already enables for control. The test pattern implements a small reference tree. Desktop
-  trees (macOS AX, Linux AT-SPI) are not implemented yet; for web pages in a sandbox browser,
-  `agent-browser` drives the page through CDP.
+- **Providers**:
+  - **Android** reads the active window through its accessibility service, which the user already
+    enables for control.
+  - **macOS** reads the window in front through the Accessibility API, with the same grant as
+    control; `AXPress`, `AXShowMenu` and `AXValue` act on elements, a tap at the center otherwise.
+  - **Linux** reads the showing windows, the active one first, over AT-SPI, the accessibility bus
+    GTK, Qt, Firefox and Chrome speak (Chrome when started with `--force-renderer-accessibility`).
+    A display reports `tree` where a bus is reachable (`AT_SPI_BUS_ADDRESS`, or a desktop session's
+    `org.a11y.Bus`).
+  - The test pattern implements a small reference tree.
+
+  For web pages in a sandbox browser, `agent-browser` drives the page through CDP more precisely
+  still.
+- **`actionable`** keeps only the elements that take an action, flat but with their refs, which is
+  what an agent looking for a target needs and far fewer tokens.
 
 ## Virtual screens
 
@@ -171,7 +219,10 @@ cloud sandbox or a headless server — reports `virtual: "available"` in
 `display.list`; `display.start` (`POST displays/virtual`, optional `size`) starts one on request and
 `display.stop` (`DELETE displays/virtual`) ends it. Programs started in the sandbox afterwards
 inherit its `DISPLAY`, so a headed browser or a desktop app an agent launches can be watched and
-steered live. Nothing runs until someone starts it. Cloud sandboxes offer it from the header's
+steered live. Where `dbus-daemon` and at-spi2-core are installed (the sandbox image has both), the
+virtual screen brings its own accessibility bus and exports `AT_SPI_BUS_ADDRESS`,
+`ACCESSIBILITY_ENABLED=1` and `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`, so those programs' interfaces
+read as elements. Nothing runs until someone starts it. Cloud sandboxes offer it from the header's
 screen button; a sandbox that predates virtual screens (no `virtual` field, or `display_unsupported`)
 is updated by recovering it from the Space settings.
 
@@ -184,6 +235,7 @@ cohub spaces displays ls
 cohub spaces displays start                          # a virtual screen, where available
 cohub spaces displays capture                        # later coordinates are its pixels
 cohub spaces displays tree                           # elements with refs and boxes
+cohub spaces displays tree --actionable              # only what takes an action
 cohub spaces displays tap e3.12 --screenshot         # act, then save what the screen shows
 cohub spaces displays type "hello" --into e3.4       # replace a field's text
 cohub spaces displays tap 300 200 --count 2          # double-click a point
@@ -196,6 +248,15 @@ echo '[{"type":"tap","ref":"e3.12"},{"type":"type","text":"hello"}]' | cohub spa
 remembers each display's latest screenshot size, so coordinates mean what the agent saw without
 `--size`; the memory resets when the display itself changes size.
 
+## Vocabulary
+
+`@cohub/protocol/display` is the one source of the names (roles, states, actions, system buttons,
+permissions) and limits every side shares; `pnpm --filter @cohub/protocol generate:display`
+writes them into `apps/sandbox/display/vocabulary_gen.go` and the Android app's
+`DisplayVocabulary.kt`, and the protocol tests fail when either is stale. Rules the vocabulary
+cannot carry live in `packages/protocol/fixtures/display.json`, which the TypeScript and Go tests
+both run. Lengths count characters (code points), as zod does.
+
 ## Release order
 
 Deploy the API and Gateway first, then publish sandboxd and update the CLI pin and the Android app.
@@ -205,7 +266,7 @@ An older sandboxd answers display routes with `display_unsupported`; older web c
 ## Verification
 
 ```bash
-cd apps/sandbox && go test ./rtc   # pion-to-pion end to end through the hub
-pnpm --filter @cohub/protocol test
+cd apps/sandbox && go test ./rtc ./display   # pion-to-pion end to end; the shared cases
+pnpm --filter @cohub/protocol test           # the shared cases; generated files are current
 cd apps/android && ./gradlew :app:lintDebug
 ```

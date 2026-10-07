@@ -206,6 +206,7 @@ cohub spaces displays ls
 cohub spaces displays start                   # a virtual screen, where available; stop ends it
 cohub spaces displays capture -o screen.jpg   # longest edge 1280 by default
 cohub spaces displays tree                    # e3.12 button "Send" (980,2210 120x80)
+cohub spaces displays tree --actionable       # only what takes an action
 cohub spaces displays tap e3.12 --screenshot  # act, then save a screenshot
 cohub spaces displays type "hello" --into e3.4
 cohub spaces displays tap 540 1200
@@ -220,7 +221,10 @@ On macOS, the terminal running the Runtime needs Screen Recording, and Accessibi
 the screen (System Settings → Privacy & Security). Linux needs an X11 session; Wayland is not
 supported yet.
 
-`act` runs a JSON array of actions from `--actions` or stdin, in one timeline.
+`act` runs a JSON array of actions from `--actions` or stdin, in one timeline. When a person acts on
+the screen, the action stops with `display_preempted`: look again before acting. Watching, `capture`
+and `tree` take view access to the sandbox; acting and `start` / `stop` take what running commands
+does.
 
 ### Boards
 

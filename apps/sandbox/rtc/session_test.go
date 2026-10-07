@@ -27,7 +27,7 @@ func (p *syntheticProvider) serve(ctx context.Context, rw io.ReadWriteCloser) {
 		return
 	}
 	_ = conn.SetDisplays([]display.Info{{ID: "main", Name: "Synthetic", Width: 640, Height: 360, Stream: true, Capture: true, Input: true}})
-	_ = conn.Serve(ctx, func(ctx context.Context, method string, raw json.RawMessage) (any, error) {
+	_ = conn.Serve(ctx, func(_ context.Context, method string, raw json.RawMessage) (any, error) {
 		switch method {
 		case "stream.start":
 			var start display.StreamStart
@@ -184,10 +184,10 @@ func TestSessionStreamsAndAcceptsInput(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	if !manager.Close(id) {
+	if !manager.Close(id, "") {
 		t.Fatal("session should have been open")
 	}
-	if manager.Count() != 0 || manager.Close(id) {
+	if manager.Count() != 0 || manager.Close(id, "") {
 		t.Fatal("session must be gone after close")
 	}
 }

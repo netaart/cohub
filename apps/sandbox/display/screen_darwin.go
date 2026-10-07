@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -59,11 +58,19 @@ var cg struct {
 	requestCapture   func() bool
 	trusted          func() bool
 	trustedPrompt    func(options uintptr) bool
-	dictionary       func(allocator uintptr, keys, values *uintptr, count int, keyCallbacks, valueCallbacks uintptr) uintptr
+	createImage      func(display uint32) uintptr
+	imageWidth       func(uintptr) uintptr
+	imageHeight      func(uintptr) uintptr
+	imageBytesPerRow func(uintptr) uintptr
+	imageBitsPerPx   func(uintptr) uintptr
+	imageProvider    func(uintptr) uintptr
+	providerCopyData func(uintptr) uintptr
+	dataBytes        func(uintptr) unsafe.Pointer
+	dataLength       func(uintptr) int
 	release          func(uintptr)
 }
 
-var quartzLibs struct{ foundation, services uintptr }
+var quartzLibs struct{ graphics, services uintptr }
 
 var (
 	quartzOnce sync.Once
@@ -72,65 +79,50 @@ var (
 
 func loadQuartz() error {
 	quartzOnce.Do(func() {
-		open := func(path string) uintptr {
-			if quartzErr != nil {
-				return 0
-			}
-			lib, err := purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
-			if err != nil {
-				quartzErr = fmt.Errorf("load %s: %w", filepath.Base(path), err)
-			}
-			return lib
-		}
-		graphics := open("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
-		foundation := open("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
-		services := open("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
-		if quartzErr != nil {
+		if quartzErr = loadCF(); quartzErr != nil {
 			return
 		}
-		purego.RegisterLibFunc(&cg.mainDisplay, graphics, "CGMainDisplayID")
-		purego.RegisterLibFunc(&cg.pixelsWide, graphics, "CGDisplayPixelsWide")
-		purego.RegisterLibFunc(&cg.pixelsHigh, graphics, "CGDisplayPixelsHigh")
-		purego.RegisterLibFunc(&cg.mouseEvent, graphics, "CGEventCreateMouseEvent")
-		purego.RegisterLibFunc(&cg.keyboardEvent, graphics, "CGEventCreateKeyboardEvent")
-		purego.RegisterLibFunc(&cg.setUnicodeString, graphics, "CGEventKeyboardSetUnicodeString")
-		purego.RegisterLibFunc(&cg.scrollEvent, graphics, "CGEventCreateScrollWheelEvent2")
-		purego.RegisterLibFunc(&cg.setFlags, graphics, "CGEventSetFlags")
-		purego.RegisterLibFunc(&cg.setIntegerField, graphics, "CGEventSetIntegerValueField")
-		purego.RegisterLibFunc(&cg.post, graphics, "CGEventPost")
-		purego.RegisterLibFunc(&cg.preflightCapture, graphics, "CGPreflightScreenCaptureAccess")
-		purego.RegisterLibFunc(&cg.requestCapture, graphics, "CGRequestScreenCaptureAccess")
+		graphics, err := openFramework("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+		if err != nil {
+			quartzErr = err
+			return
+		}
+		services, err := openFramework("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+		if err != nil {
+			quartzErr = err
+			return
+		}
+		for name, fn := range map[string]any{
+			"CGMainDisplayID": &cg.mainDisplay, "CGDisplayPixelsWide": &cg.pixelsWide, "CGDisplayPixelsHigh": &cg.pixelsHigh,
+			"CGEventCreateMouseEvent": &cg.mouseEvent, "CGEventCreateKeyboardEvent": &cg.keyboardEvent,
+			"CGEventKeyboardSetUnicodeString": &cg.setUnicodeString, "CGEventCreateScrollWheelEvent2": &cg.scrollEvent,
+			"CGEventSetFlags": &cg.setFlags, "CGEventSetIntegerValueField": &cg.setIntegerField, "CGEventPost": &cg.post,
+			"CGPreflightScreenCaptureAccess": &cg.preflightCapture, "CGRequestScreenCaptureAccess": &cg.requestCapture,
+			"CGImageGetWidth": &cg.imageWidth, "CGImageGetHeight": &cg.imageHeight, "CGImageGetBytesPerRow": &cg.imageBytesPerRow, "CGImageGetBitsPerPixel": &cg.imageBitsPerPx,
+			"CGImageGetDataProvider": &cg.imageProvider, "CGDataProviderCopyData": &cg.providerCopyData,
+		} {
+			purego.RegisterLibFunc(fn, graphics, name)
+		}
+		// Gone from newer SDKs; where the system still has it, stills skip a process.
+		if symbolAddress(graphics, "CGDisplayCreateImage") != 0 {
+			purego.RegisterLibFunc(&cg.createImage, graphics, "CGDisplayCreateImage")
+		}
 		purego.RegisterLibFunc(&cg.trusted, services, "AXIsProcessTrusted")
 		purego.RegisterLibFunc(&cg.trustedPrompt, services, "AXIsProcessTrustedWithOptions")
-		purego.RegisterLibFunc(&cg.dictionary, foundation, "CFDictionaryCreate")
-		purego.RegisterLibFunc(&cg.release, foundation, "CFRelease")
-		quartzLibs.foundation, quartzLibs.services = foundation, services
+		purego.RegisterLibFunc(&cg.dataBytes, cf.lib, "CFDataGetBytePtr")
+		purego.RegisterLibFunc(&cg.dataLength, cf.lib, "CFDataGetLength")
+		cg.release = cf.release
+		quartzLibs.graphics, quartzLibs.services = graphics, services
 	})
 	return quartzErr
 }
 
 func promptAccessibility() bool {
-	symbol := func(lib uintptr, name string) uintptr {
-		address, err := purego.Dlsym(lib, name)
-		if err != nil {
-			return 0
-		}
-		return address
-	}
-	prompt := symbol(quartzLibs.services, "kAXTrustedCheckOptionPrompt")
-	yes := symbol(quartzLibs.foundation, "kCFBooleanTrue")
-	keyCallbacks := symbol(quartzLibs.foundation, "kCFTypeDictionaryKeyCallBacks")
-	valueCallbacks := symbol(quartzLibs.foundation, "kCFTypeDictionaryValueCallBacks")
-	if prompt == 0 || yes == 0 || keyCallbacks == 0 || valueCallbacks == 0 {
-		return cg.trusted()
-	}
-	// The option key and value are CF globals: read the pointers they hold.
-	key, value := **(**uintptr)(unsafe.Pointer(&prompt)), **(**uintptr)(unsafe.Pointer(&yes))
-	options := cg.dictionary(0, &key, &value, 1, keyCallbacks, valueCallbacks)
+	options := cfDictionary(global(quartzLibs.services, "kAXTrustedCheckOptionPrompt"), cf.yes)
 	if options == 0 {
 		return cg.trusted()
 	}
-	defer cg.release(options)
+	defer cf.release(options)
 	return cg.trustedPrompt(options)
 }
 
@@ -159,6 +151,7 @@ var cgModifierFlags = map[string]uint64{"Shift": cgFlagShift, "Control": cgFlagC
 type macScreen struct {
 	display uint32
 	name    string
+	tree    *axTree
 
 	mu       sync.Mutex
 	flags    uint64
@@ -170,7 +163,43 @@ type macScreen struct {
 }
 
 func newMacScreen() *macScreen {
-	return &macScreen{display: cg.mainDisplay(), name: hostName()}
+	s := &macScreen{display: cg.mainDisplay(), name: hostName()}
+	s.tree = &axTree{screen: s}
+	return s
+}
+
+func (s *macScreen) Tree(ctx context.Context, maxElements int) (Tree, error) {
+	return s.tree.Tree(ctx, maxElements)
+}
+
+func (s *macScreen) Element(ref, action string, text *string) error {
+	return s.tree.Element(ref, action, text)
+}
+
+func (s *macScreen) click(x, y float64) error {
+	if err := s.Pointer("down", x, y, "primary"); err != nil {
+		return err
+	}
+	return s.Pointer("up", x, y, "primary")
+}
+
+func (s *macScreen) replaceText(text string) error {
+	err := s.Key(true, "Meta")
+	if err == nil {
+		err = s.Key(true, "a")
+		_ = s.Key(false, "a")
+	}
+	_ = s.Key(false, "Meta")
+	if err != nil {
+		return err
+	}
+	if text == "" {
+		if err := s.Key(true, "Delete"); err != nil {
+			return err
+		}
+		return s.Key(false, "Delete")
+	}
+	return s.Text(text)
 }
 
 func (s *macScreen) size() (float64, float64) {
@@ -181,7 +210,7 @@ func (s *macScreen) Info() (Info, error) {
 	width, height := s.size()
 	info := Info{
 		ID: "screen", Name: s.name, Width: int(width), Height: int(height),
-		Capture: cg.preflightCapture(), Input: cg.trusted(), Desktop: true,
+		Capture: cg.preflightCapture(), Input: cg.trusted(), Desktop: true, Tree: cg.trusted(),
 	}
 	if !info.Capture {
 		info.Needs = append(info.Needs, "screenRecording")
@@ -200,6 +229,9 @@ func (s *macScreen) Source(fps int) []string {
 }
 
 func (s *macScreen) Capture(ctx context.Context) (image.Image, error) {
+	if img := s.captureInProcess(); img != nil {
+		return img, nil
+	}
 	file, err := os.CreateTemp("", "cohub-screen-*.jpg")
 	if err != nil {
 		return nil, err
@@ -220,6 +252,36 @@ func (s *macScreen) Capture(ctx context.Context) (image.Image, error) {
 		return nil, errorf(CodeFailed, "read screenshot: %v", err)
 	}
 	return img, nil
+}
+
+func (s *macScreen) captureInProcess() image.Image {
+	if cg.createImage == nil {
+		return nil
+	}
+	ref := cg.createImage(s.display)
+	if ref == 0 {
+		return nil
+	}
+	defer cf.release(ref)
+	width, height, stride := int(cg.imageWidth(ref)), int(cg.imageHeight(ref)), int(cg.imageBytesPerRow(ref))
+	data := cg.providerCopyData(cg.imageProvider(ref))
+	if data == 0 {
+		return nil
+	}
+	defer cf.release(data)
+	if width <= 0 || height <= 0 || cg.imageBitsPerPx(ref) != 32 || stride < width*4 || cg.dataLength(data) < stride*height {
+		return nil
+	}
+	pixels := unsafe.Slice((*byte)(cg.dataBytes(data)), stride*height)
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		row := pixels[y*stride : y*stride+width*4]
+		out := img.Pix[y*img.Stride : y*img.Stride+width*4]
+		for x := 0; x < width*4; x += 4 {
+			out[x], out[x+1], out[x+2], out[x+3] = row[x+2], row[x+1], row[x], 0xff
+		}
+	}
+	return img
 }
 
 func (s *macScreen) post(event uintptr) error {

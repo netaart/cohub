@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -11,6 +13,15 @@ import (
 	"sync"
 	"time"
 )
+
+type videoEncoder struct {
+	name    string
+	command func(ctx context.Context, fps, bitrate, maxSize int) *exec.Cmd
+	live    bool
+	failed  func()
+}
+
+const EncoderCommand = "__display-encoder"
 
 type ffmpeg struct {
 	path  string
@@ -43,93 +54,87 @@ func findFFmpeg() *ffmpeg {
 	return ffmpegFound
 }
 
+const (
+	// keyframeSeconds bounds how long a viewer that lost a packet, or joined
+	// a running stream, waits: ffmpeg cannot insert a key frame on request.
+	keyframeSeconds   = 2
+	stillFrameSeconds = keyframeSeconds
+)
+
+func (f *ffmpeg) encoder(source func(fps int) []string) *videoEncoder {
+	return &videoEncoder{name: "ffmpeg", command: func(ctx context.Context, fps, bitrate, maxSize int) *exec.Cmd {
+		return exec.CommandContext(ctx, f.path, f.encodeArgs(source(fps), fps, bitrate, maxSize)...)
+	}}
+}
+
 func (f *ffmpeg) encodeArgs(source []string, fps, bitrate, maxSize int) []string {
 	rate := strconv.Itoa(bitrate)
-	gop := strconv.Itoa(fps)
-	limit := strconv.Itoa(maxSize)
-	scale := fmt.Sprintf("scale='if(gte(iw,ih),min(%[1]s,iw),-2)':'if(gte(iw,ih),-2,min(%[1]s,ih))':flags=fast_bilinear,format=yuv420p", limit)
+	filters := fmt.Sprintf("scale='if(gte(iw,ih),min(%[1]d,iw),-2)':'if(gte(iw,ih),-2,min(%[1]d,ih))':flags=fast_bilinear,format=yuv420p,mpdecimate=max=%[2]d",
+		maxSize, fps*stillFrameSeconds)
 	args := append([]string{"-hide_banner", "-loglevel", "error", "-nostdin"}, source...)
-	args = append(args, "-vf", scale, "-c:v", f.codec)
+	args = append(args, "-vf", filters, "-c:v", f.codec)
 	if f.codec == "h264_videotoolbox" {
 		args = append(args, "-realtime", "1", "-allow_sw", "1", "-profile:v", "baseline")
 	} else {
 		args = append(args, "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline")
 	}
 	return append(args,
-		"-g", gop, "-keyint_min", gop, "-bf", "0",
+		"-g", strconv.Itoa(fps*keyframeSeconds*5), "-bf", "0",
+		"-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", keyframeSeconds),
 		"-b:v", rate, "-maxrate", rate, "-bufsize", rate,
-		"-bsf:v", "h264_metadata=aud=insert", "-f", "h264", "pipe:1",
+		"-flush_packets", "1", "-flvflags", "no_duration_filesize", "-f", "flv", "pipe:1",
 	)
-}
-
-func (f *ffmpeg) encode(ctx context.Context, args []string, deliver func(Sample) error) error {
-	cmd := exec.CommandContext(ctx, f.path, args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	started := time.Now()
-	var splitter accessUnitSplitter
-	buffer := make([]byte, 64<<10)
-	for {
-		n, readErr := stdout.Read(buffer)
-		for _, unit := range splitter.push(buffer[:n]) {
-			if err := deliver(Sample{Data: unit, PTS: uint64(time.Since(started).Microseconds())}); err != nil {
-				_ = cmd.Process.Kill()
-				_ = cmd.Wait()
-				return err
-			}
-		}
-		if readErr != nil {
-			break
-		}
-	}
-	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
-		return fmt.Errorf("ffmpeg: %v %s", err, bytes.TrimSpace(stderr.Bytes()))
-	}
-	return nil
 }
 
 const (
 	restartRatio    = 0.35
 	restartInterval = 4 * time.Second
+	stderrLimit     = 4 << 10
 )
 
 type encoderStream struct {
-	ffmpeg  *ffmpeg
-	source  func() []string
-	fps     int
-	maxSize int
-	deliver func(Sample) error
+	encoders []*videoEncoder
+	maxSize  int
+	deliver  func(Sample) error
+	logger   *slog.Logger
 
-	mu        sync.Mutex
-	bitrate   int
-	running   int
-	startedAt time.Time
-	cancel    context.CancelFunc
-	restart   *time.Timer
+	mu         sync.Mutex
+	bitrate    int
+	fps        int
+	runBitrate int
+	runFPS     int
+	startedAt  time.Time
+	cancel     context.CancelFunc
+	restart    *time.Timer
+	control    io.Writer // the running live encoder's stdin
 }
 
 func (s *encoderStream) start(ctx context.Context, ended func(error)) {
 	go func() {
 		var err error
-		for ctx.Err() == nil {
+		for ctx.Err() == nil && len(s.encoders) > 0 {
+			encoder := s.encoders[0]
 			s.mu.Lock()
 			runCtx, cancel := context.WithCancel(ctx)
-			s.cancel, s.running, s.startedAt = cancel, s.bitrate, time.Now()
-			args := s.ffmpeg.encodeArgs(s.source(), s.fps, s.bitrate, s.maxSize)
+			s.cancel, s.runBitrate, s.runFPS, s.startedAt = cancel, s.bitrate, s.fps, time.Now()
+			bitrate, fps := s.bitrate, s.fps
 			s.mu.Unlock()
-			err = s.ffmpeg.encode(runCtx, args, s.deliver)
+			var frames int
+			frames, err = s.run(runCtx, encoder, fps, bitrate)
 			restarted := runCtx.Err() != nil && ctx.Err() == nil
 			cancel()
-			if !restarted {
-				break
+			if restarted {
+				continue
 			}
+			if frames == 0 && err != nil && encoder.failed != nil {
+				encoder.failed()
+			}
+			if frames == 0 && err != nil && len(s.encoders) > 1 {
+				s.logger.Warn("display encoder failed; trying the next", slog.String("encoder", encoder.name), slog.String("error", err.Error()))
+				s.encoders = s.encoders[1:]
+				continue
+			}
+			break
 		}
 		if ctx.Err() == nil {
 			ended(err)
@@ -137,15 +142,91 @@ func (s *encoderStream) start(ctx context.Context, ended func(error)) {
 	}()
 }
 
+func (s *encoderStream) run(ctx context.Context, encoder *videoEncoder, fps, bitrate int) (frames int, err error) {
+	cmd := encoder.command(ctx, fps, bitrate, s.maxSize)
+	stderr := &limitedBuffer{limit: stderrLimit}
+	cmd.Stderr = stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return 0, err
+	}
+	var control io.WriteCloser
+	if encoder.live {
+		if control, err = cmd.StdinPipe(); err != nil {
+			return 0, err
+		}
+	}
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	if control != nil {
+		s.mu.Lock()
+		s.control = control
+		s.mu.Unlock()
+		defer func() {
+			s.mu.Lock()
+			s.control = nil
+			s.mu.Unlock()
+		}()
+	}
+	reader := newFLVReader(stdout)
+	for {
+		sample, readErr := reader.next()
+		if readErr != nil {
+			break
+		}
+		frames++
+		if err := s.deliver(sample); err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return frames, err
+		}
+	}
+	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+		return frames, fmt.Errorf("%s: %v %s", encoder.name, err, bytes.TrimSpace(stderr.Bytes()))
+	}
+	return frames, nil
+}
+
+func (s *encoderStream) tellLocked(format string, args ...any) bool {
+	if s.control == nil {
+		return false
+	}
+	_, _ = fmt.Fprintf(s.control, format+"\n", args...)
+	return true
+}
+
 func (s *encoderStream) setBitrate(bps int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.bitrate = bps
-	if s.restart != nil || s.cancel == nil {
+	if s.tellLocked("bitrate %d", bps) {
 		return
 	}
-	change := float64(bps-s.running) / float64(max(1, s.running))
+	change := float64(bps-s.runBitrate) / float64(max(1, s.runBitrate))
 	if change > -restartRatio && change < restartRatio {
+		return
+	}
+	s.scheduleRestartLocked()
+}
+
+func (s *encoderStream) setFPS(fps int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fps = fps
+	if !s.tellLocked("fps %d", fps) && fps != s.runFPS {
+		s.scheduleRestartLocked()
+	}
+}
+
+func (s *encoderStream) requestKeyframe() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tellLocked("keyframe")
+}
+
+func (s *encoderStream) scheduleRestartLocked() {
+	if s.restart != nil || s.cancel == nil {
 		return
 	}
 	wait := max(0, restartInterval-time.Since(s.startedAt))
@@ -173,4 +254,16 @@ func (s *encoderStream) stop() {
 		s.restart.Stop()
 	}
 	s.mu.Unlock()
+}
+
+type limitedBuffer struct {
+	bytes.Buffer
+	limit int
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if room := b.limit - b.Len(); room > 0 {
+		b.Buffer.Write(p[:min(len(p), room)])
+	}
+	return len(p), nil
 }

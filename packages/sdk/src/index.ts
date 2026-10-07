@@ -37,6 +37,8 @@ export type {
   DisplaySession,
   DisplaySystemAction,
   DisplayTree,
+  DisplayTreeParams,
+  DisplayViewer,
   DisplayVirtualStart,
   RtcIceServer,
   RtcIceServers,

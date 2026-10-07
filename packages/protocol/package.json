@@ -150,6 +150,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "generate:display": "tsx scripts/display-vocabulary.ts",
     "test": "node ../../scripts/test/run.mjs --test-isolation=none '*.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -62,8 +62,19 @@ func startVirtual(size string, logger *slog.Logger) (Dialer, func(), error) {
 	if err := server.ensure(); err != nil {
 		return nil, nil, errorf(CodeUnavailable, "%v", err)
 	}
-	previous, had := os.LookupEnv("DISPLAY")
-	_ = os.Setenv("DISPLAY", server.display)
+	vars := map[string]string{"DISPLAY": server.display}
+	stopBus := func() {}
+	if os.Getenv("AT_SPI_BUS_ADDRESS") == "" {
+		if address, stop, err := startA11yBus(server.display, logger); err == nil {
+			stopBus = stop
+			vars["AT_SPI_BUS_ADDRESS"] = address
+			vars["ACCESSIBILITY_ENABLED"] = "1"
+			vars["QT_LINUX_ACCESSIBILITY_ALWAYS_ON"] = "1"
+		} else {
+			logger.Debug("no accessibility bus for the virtual display", slog.String("error", err.Error()))
+		}
+	}
+	restore := exportEnv(vars)
 	dial := screenDialer("xvfb", func() (Screen, error) {
 		if err := server.ensure(); err != nil {
 			return nil, err
@@ -72,14 +83,8 @@ func startVirtual(size string, logger *slog.Logger) (Dialer, func(), error) {
 	}, logger)
 	stop := func() {
 		server.stop()
-		if os.Getenv("DISPLAY") != server.display {
-			return
-		}
-		if had {
-			_ = os.Setenv("DISPLAY", previous)
-		} else {
-			_ = os.Unsetenv("DISPLAY")
-		}
+		stopBus()
+		restore()
 	}
 	return dial, stop, nil
 }

@@ -43,7 +43,10 @@ export class SpaceDisplaysApi {
   }
 
   tree(displayId: string, params: DisplayTreeParams = {}, options: { signal?: AbortSignal } = {}) {
-    const search = params.maxElements ? `?maxElements=${params.maxElements}` : "";
+    const query = new URLSearchParams();
+    if (params.maxElements) query.set("maxElements", String(params.maxElements));
+    if (params.actionable) query.set("actionable", "true");
+    const search = query.size ? `?${query}` : "";
     return this.transport.request<DisplayTree>(this.path(displayId, `/tree${search}`), { signal: options.signal });
   }
 

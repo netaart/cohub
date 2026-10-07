@@ -3157,6 +3157,8 @@ const spaceFileDomainProps = $derived.by<
 	displayTabs: displayWindows.tabs,
 	activeDisplay: displayWindows.active,
 	displayNames,
+	canControlDisplays: hasAccessPermission("command.execute"),
+	onlineUsers,
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,

@@ -15,6 +15,7 @@ import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
 import { resolveSpace } from "../space.js";
+import { webUrl } from "../web.js";
 
 type Size = { width: number; height: number };
 type TargetOptions = { display?: string; size?: string; screenshot?: string | boolean; json?: boolean };
@@ -86,6 +87,10 @@ async function target(spacesCmd: Command, opts: { display?: string }) {
   const api = createClient().space(spaceId).displays;
   const { displays } = await api.list();
   return { spaceId, api, display: pickDisplay(displays, opts.display) };
+}
+
+function displayUrl(spaceId: string, displayId: string) {
+  return webUrl(`/spaces/${spaceId}?window=${encodeURIComponent(`display:${displayId}`)}`);
 }
 
 function needsHint(display: DisplayInfo) {
@@ -164,7 +169,7 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
   displays
     .command("ls")
     .alias("list")
-    .description("List shared displays")
+    .description("List shared displays and who watches them")
     .option("--json", "Output as JSON")
     .action(async (opts: { json?: boolean }) => {
       try {
@@ -178,12 +183,14 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
               ...display,
               size: `${display.width}x${display.height}`,
               abilities: [display.stream && "view", display.capture && "capture", display.input && "control", display.tree && "tree", display.desktop && "desktop"].filter(Boolean).join(", "),
+              watching: display.viewers?.length ? `${display.viewers.length}${display.viewers.some((viewer) => viewer.control) ? " (controlling)" : ""}` : "—",
             })),
             [
               { key: "id", label: "ID" },
               { key: "name", label: "Name" },
               { key: "size", label: "Size" },
               { key: "abilities", label: "Abilities" },
+              { key: "watching", label: "Watching" },
             ],
           );
           for (const display of result.displays) {
@@ -207,8 +214,10 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
         const spaceId = await resolveSpace(spacesCmd);
         if (opts.size) parseSize(opts.size);
         const result = await createClient().space(spaceId).displays.startVirtual(opts.size ? { size: opts.size } : {});
-        if (jsonRequested(opts)) return outJson(result);
+        const url = result.displays[0] ? displayUrl(spaceId, result.displays[0].id) : null;
+        if (jsonRequested(opts)) return outJson({ ...result, url });
         ok("Virtual screen running; programs started from now on draw on it");
+        if (url) console.log(`  Watch and take over: ${url}`);
       } catch (e: unknown) {
         handleHttp(e);
       }
@@ -253,17 +262,22 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
     .description("Read the interface as elements: refs to act on, roles, names and boxes")
     .option("-d, --display <id>", "Display id; defaults to the only shared display")
     .option("--max <n>", "Most elements to return (default 300)")
+    .option("--actionable", "Only elements that take an action, flat: fewer tokens when looking for a target")
     .option("--json", "Output as JSON")
-    .action(async (opts: { display?: string; max?: string; json?: boolean }) => {
+    .action(async (opts: { display?: string; max?: string; actionable?: boolean; json?: boolean }) => {
       try {
         const { spaceId, api, display } = await target(spacesCmd, opts);
         if (!display.tree) return error("This display has no element tree", "Use capture and coordinates instead.");
-        const tree = await api.tree(display.id, opts.max ? { maxElements: parseNumber("max", opts.max) } : {});
+        const tree = await api.tree(display.id, {
+          ...(opts.max ? { maxElements: parseNumber("max", opts.max) } : {}),
+          ...(opts.actionable ? { actionable: true } : {}),
+        });
         if (jsonRequested(opts)) return outJson(tree);
         const frame = await frameOf(spaceId, display);
         console.log(formatTree(tree, frame));
         console.log(`\n  Boxes are x,y and size in ${frame.width}x${frame.height} pixels. Act with: tap <ref> · type <text> --into <ref> · scroll <direction> --in <ref>`);
         if (tree.truncated) console.log("  More elements exist; pass --max to read more.");
+        if (display.viewers?.some((viewer) => viewer.control)) console.log("  A person is watching with control; what you do here pauses while they act.");
       } catch (e: unknown) {
         handleHttp(e);
       }

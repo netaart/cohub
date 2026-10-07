@@ -42,6 +42,7 @@ type OpenResult struct {
 
 type CloseParams struct {
 	SessionID string `json:"sessionId"`
+	UserID    string `json:"userId,omitempty"`
 }
 
 type CloseResult struct {
@@ -118,11 +119,11 @@ func (m *Manager) Open(ctx context.Context, params OpenParams) (OpenResult, erro
 	return OpenResult{Answer: answer}, nil
 }
 
-func (m *Manager) Close(id string) bool {
+func (m *Manager) Close(id, userID string) bool {
 	m.mu.Lock()
 	current := m.sessions[id]
 	m.mu.Unlock()
-	if current == nil {
+	if current == nil || userID != "" && current.userID != userID {
 		return false
 	}
 	current.close(ReasonClosed)
@@ -168,7 +169,7 @@ func (m *Manager) Handle(ctx context.Context, method string, raw json.RawMessage
 		if err := json.Unmarshal(raw, &params); err != nil {
 			return nil, invalid("invalid params: %v", err)
 		}
-		return CloseResult{Closed: m.Close(params.SessionID)}, nil
+		return CloseResult{Closed: m.Close(params.SessionID, params.UserID)}, nil
 	default:
 		return nil, errors.New("unsupported method")
 	}
