@@ -859,7 +859,6 @@ export type SpaceRecord = {
   name: string | null;
   slug: string | null;
   description: string | null;
-  storageRepoName?: string | null;
   baseCheckpointId?: string | null;
   headCheckpointId?: string | null;
   title: string | null;

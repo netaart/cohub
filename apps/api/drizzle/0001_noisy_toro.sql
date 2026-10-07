@@ -1,1 +1,0 @@
-ALTER TABLE "runtimes" ALTER COLUMN "status" SET DEFAULT 'hibernated';

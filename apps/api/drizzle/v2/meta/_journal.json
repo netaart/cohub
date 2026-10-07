@@ -498,6 +498,13 @@
       "when": 1791305370153,
       "tag": "0070_space_members_joined_index",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1791335943369,
+      "tag": "0071_drop_gitea_legacy",
+      "breakpoints": true
     }
   ]
 }

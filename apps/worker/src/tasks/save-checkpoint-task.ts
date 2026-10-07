@@ -33,7 +33,6 @@ import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PA
 import { syncSystemRepo, type CheckpointAsset } from "../checkpoint/repo-sync.js";
 import { saveCheckpointWithLock, type SaveCheckpointInput, type SaveCheckpointResult } from "../checkpoint/save.js";
 import { hashFile, scanWorkspace, type ScannedFile } from "../checkpoint/scan.js";
-import { isGiteaMirrorEnabled, mirrorRepositoryToGitea } from "../gitea.js";
 
 const SAVE_VERSION = 2;
 
@@ -254,7 +253,6 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
       sourceTaskRunId: input.sourceTaskRunId ?? null,
       savedBy: input.userId ?? null,
       ...(input.requestSource ? { requestSource: input.requestSource } : {}),
-      mirror: { status: "queued" },
     },
     createdAt,
   }).returning());
@@ -275,20 +273,6 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
   const boardSnapshots = await timeIt(timings, "saveBoardCheckpointSnapshots", () => saveBoardCheckpointSnapshots({ checkpointId: checkpoint.id, spaceId }));
   await timeIt(timings, "updateCheckpointBoardMeta", () => updateCheckpointMeta(db, checkpoint.id, { board: { snapshotCount: boardSnapshots.count }, timings }));
   await timeIt(timings, "updateSpaceHead", () => db.update(spaces).set({ headCheckpointId: checkpoint.id, updatedAt: new Date() }).where(eq(spaces.id, spaceId)));
-
-  if (isGiteaMirrorEnabled()) await progress("mirror_repository");
-  const mirrorMeta = await timeIt(timings, "mirrorRepository", async () => {
-    if (!isGiteaMirrorEnabled()) return { provider: "none" as const, status: "disabled" as const };
-    try {
-      await mirrorRepositoryToGitea(dirs.repoDir, space.storageRepoName, branch);
-      return { provider: "gitea" as const, status: "pushed" as const, pushedAt: new Date().toISOString() };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[save_checkpoint] failed to mirror repo for space=${spaceId} checkpoint=${checkpoint.id}:`, error);
-      return { provider: "gitea" as const, status: "failed" as const, error: message };
-    }
-  });
-  await timeIt(timings, "updateMirrorMeta", () => updateCheckpointMeta(db, checkpoint.id, { mirror: mirrorMeta, timings }));
 
   let publishedUserConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
   if (space.slug === CONFIG_SPACE_SLUG) {

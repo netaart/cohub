@@ -31,7 +31,7 @@ async function database() {
     [space.mine, viewer, "Mine"], [space.member, other, "Team"], [space.public, other, "Public"], [space.private, other, "Private"],
   ];
   for (const [spaceId, owner, name] of spaces) {
-    await client.query(`INSERT INTO v2.spaces (id, user_uuid, name, storage_repo_name) VALUES ($1, $2, $3, $3)`, [spaceId, owner, name]);
+    await client.query(`INSERT INTO v2.spaces (id, user_uuid, name) VALUES ($1, $2, $3)`, [spaceId, owner, name]);
   }
   await client.query(`INSERT INTO v2.space_members (space_id, user_id, role, created_by, updated_by) VALUES ($1, $2, 'builder', $3, $3)`, [space.member, viewer, other]);
   const policy = `INSERT INTO v2.access_policies (resource_type, resource_id, signed_in_user_role, created_by, updated_by) VALUES ($1, $2, $3, $4, $4)`;

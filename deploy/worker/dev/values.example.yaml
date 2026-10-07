@@ -32,8 +32,6 @@ SANDBOX_IDLE_REAPER_LIMIT: "50"
 
 # ========== Worker 配置 ==========
 INTERNAL_API_BASE_URL: "http://cohub-api-dev:8787"
-GITEA_BASE_URL: "https://gitea.example.com"
-GITEA_ORG: "cohub-checkpoints-dev"
 # Optional. Leave empty to use the Generation SDK default.
 GENERATION_BASE_URL: ""
 SPACE_STORAGE_ROOT: "/space-storage"
