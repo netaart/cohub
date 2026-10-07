@@ -50,6 +50,7 @@ import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
 import { sortAppsByRecentUpdate } from "$lib/app-sort";
 import { signOut } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
+import { removeLegacyLocalStorage } from "$lib/cache/cleanup";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
 import type { SessionListForkRecord } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
@@ -222,7 +223,6 @@ import {
 } from "$lib/stores/task-runs-cache";
 import { uiState } from "$lib/stores/ui.svelte";
 import { formatCompactAbsoluteTime } from "$lib/time-format";
-import { clearActivityCache } from "$lib/user-activity";
 import { resolveWorkspaceRouteContext } from "$lib/workspace-route";
 
 const {
@@ -2816,11 +2816,11 @@ async function handleLogout() {
 	clearCachedPaletteOverview();
 	clearTaskRunsMemoryCache();
 	clearAccountSnapshots();
+	removeLegacyLocalStorage();
 	await clearAllIndexedDbCache().catch((error) => {
 		console.warn("[sidebar] Failed to clear IndexedDB cache", error);
 	});
 	const userUuid = authStore.userUuid;
-	if (userUuid) clearActivityCache(userUuid);
 	if (userUuid) clearRecentSpace(userUuid);
 	if (userUuid) clearGrantedAppScopes(userUuid);
 	authStore.reset();

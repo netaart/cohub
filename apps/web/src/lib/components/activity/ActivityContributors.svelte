@@ -1,10 +1,10 @@
 <script lang="ts">
 import type { SpaceActivityContributor } from "@neta-art/cohub";
+import { formatCompact, formatCost } from "$lib/activity";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { formatCompactAbsoluteTime } from "$lib/time-format";
-import { formatCompact, formatCost } from "$lib/user-activity";
 
 type Props = {
 	items: SpaceActivityContributor[];

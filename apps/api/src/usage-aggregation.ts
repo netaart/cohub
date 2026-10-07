@@ -42,7 +42,7 @@ type HourlyBucket = {
   models: Set<string>;
 };
 
-export type UsageAggregationResult = {
+type UsageAggregationResult = {
   hourly: Array<Omit<HourlyBucket, "models"> & { models: string[] }>;
   summary: {
     totalTokens: number;
@@ -66,7 +66,7 @@ export type UsageAggregationResult = {
  * dimensions) into hourly buckets and a summary. Shared by space-level and
  * user-level usage endpoints.
  */
-export function aggregateUsageRows(rows: readonly UsageRow[]): UsageAggregationResult {
+function aggregateUsageRows(rows: readonly UsageRow[]): UsageAggregationResult {
   const hourlyMap = new Map<string, HourlyBucket>();
 
   for (const row of rows) {
@@ -125,8 +125,7 @@ export function aggregateUsageRows(rows: readonly UsageRow[]): UsageAggregationR
   return { hourly, summary };
 }
 
-/** Reusable zero summary — shared by reduce targets and tests. */
-export const EMPTY_USAGE_SUMMARY = {
+const EMPTY_USAGE_SUMMARY = {
 	totalTokens: 0,
 	inputTokens: 0,
 	outputTokens: 0,
@@ -142,7 +141,7 @@ export const EMPTY_USAGE_SUMMARY = {
 	errorCount: 0,
 } as const;
 
-export type UsageSummary = {
+type UsageSummary = {
 	totalTokens: number;
 	inputTokens: number;
 	outputTokens: number;
@@ -158,12 +157,7 @@ export type UsageSummary = {
 	errorCount: number;
 };
 
-/**
- * Reduce hourly buckets into a summary. Exported so callers that already hold
- * hourly rows from another source (e.g. a GROUP BY query) can reuse the exact
- * same summary semantics without re-reading raw detail rows.
- */
-export function summarizeUsageHourly(hourly: readonly UsageSummary[]): UsageSummary {
+function summarizeUsageHourly(hourly: readonly UsageSummary[]): UsageSummary {
 	return hourly.reduce(
 		(acc, stat) => ({
 			totalTokens: acc.totalTokens + stat.totalTokens,
@@ -300,7 +294,7 @@ type GenerationHourlyBucket = {
   usageTypes: Set<string>;
 };
 
-export type GenerationUsageAggregationResult = {
+type GenerationUsageAggregationResult = {
   hourly: Array<Omit<GenerationHourlyBucket, "models" | "usageTypes"> & { models: string[]; usageTypes: string[] }>;
   summary: {
     costTotal: number;
@@ -393,7 +387,7 @@ export const GENERATION_USAGE_SELECT_COLUMNS = {
 } as const;
 
 /** Aggregate generation usage rows into hourly buckets and a summary. */
-export function aggregateGenerationUsageRows(
+function aggregateGenerationUsageRows(
   rows: readonly GenerationUsageRow[],
 ): GenerationUsageAggregationResult {
   const hourlyMap = new Map<string, GenerationHourlyBucket>();
@@ -441,4 +435,37 @@ export function aggregateGenerationUsageRows(
   );
 
   return { hourly, summary };
+}
+
+export type UsageTotals = {
+  totalTokens: number;
+  requestCount: number;
+  successCount: number;
+  errorCount: number;
+  costTotal: number;
+};
+
+export type UsageAggregation = UsageAggregationResult & {
+  generation: GenerationUsageAggregationResult;
+  totals: UsageTotals;
+};
+
+export function aggregateUsage(
+  rows: readonly UsageRow[],
+  generationRows: readonly GenerationUsageRow[],
+): UsageAggregation {
+  const { hourly, summary } = aggregateUsageRows(rows);
+  const generation = aggregateGenerationUsageRows(generationRows);
+  return {
+    hourly,
+    summary,
+    generation,
+    totals: {
+      totalTokens: summary.totalTokens,
+      requestCount: summary.requestCount + generation.summary.requestCount,
+      successCount: summary.successCount + generation.summary.successCount,
+      errorCount: summary.errorCount + generation.summary.errorCount,
+      costTotal: Number((summary.costTotal + generation.summary.costTotal).toFixed(8)),
+    },
+  };
 }

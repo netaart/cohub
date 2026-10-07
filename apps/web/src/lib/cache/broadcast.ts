@@ -1,7 +1,7 @@
 export type CacheBroadcastStore =
 	| "space_records"
 	| "space_lists"
-	| "space_activity"
+	| "activity"
 	| "session_lists"
 	| "session_list_indexes"
 	| "session_details"

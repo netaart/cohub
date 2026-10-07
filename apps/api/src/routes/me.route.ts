@@ -27,8 +27,7 @@ import {
   type SessionSourceFilter,
 } from "../space-sessions.js";
 import {
-  aggregateGenerationUsageRows,
-  aggregateUsageRows,
+  aggregateUsage,
   aggregateUserModelRankings,
   GENERATION_USAGE_SELECT_COLUMNS,
   InvalidUsageRangeError,
@@ -441,10 +440,8 @@ router.get("/activity", async (c) => {
     return c.json({ message: "failed to load activity data" }, 500);
   }
 
-  const { hourly, summary } = aggregateUsageRows(rows);
-  const generation = aggregateGenerationUsageRows(generationRows);
   const rankings = { ...aggregateUserModelRankings(rows, generationRows), apps: workRankings };
-  return c.json({ hourly, summary, generation, days, range, rankings });
+  return c.json({ ...aggregateUsage(rows, generationRows), days, range, rankings });
 });
 
 export default router;

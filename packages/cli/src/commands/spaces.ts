@@ -803,7 +803,7 @@ export function registerSpaces(program: Command): void {
         const usage = await client.space(spaceId).usage.get(parseInteger(days ?? "30", "days", { min: 1 }));
         if (jsonRequested(opts)) return outJson(usage);
         console.log("\n  Summary:");
-        table([usage.summary], [
+        table([usage.totals], [
           { key: "totalTokens", label: "Tokens" },
           { key: "costTotal", label: "Cost ($)" },
           { key: "requestCount", label: "Requests" },

@@ -33,6 +33,13 @@ const response: SpaceActivityResponse = {
 		hourly: [],
 		summary: { costTotal: 0, requestCount: 0, successCount: 0, errorCount: 0 },
 	},
+	totals: {
+		totalTokens: 12_400,
+		requestCount: 86,
+		successCount: 84,
+		errorCount: 2,
+		costTotal: 3.21,
+	},
 	rankings: {
 		llmModels: [
 			{

@@ -4,4 +4,6 @@ import SpaceActivityView from "$lib/features/space/modules/SpaceActivityView.sve
 let { data }: { data: { spaceId: string } } = $props();
 </script>
 
-<SpaceActivityView {data} />
+{#key data.spaceId}
+	<SpaceActivityView {data} />
+{/key}

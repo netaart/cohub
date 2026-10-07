@@ -20,7 +20,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 21;
+export const DB_VERSION = 22;
 
 export type SessionListForkRecord = Partial<
 	Omit<SessionForkRecord, "parentSessionId">
@@ -302,7 +302,7 @@ export type StoreName =
 	| "space_fs_epochs"
 	| "space_records"
 	| "space_lists"
-	| "space_activity"
+	| "activity"
 	| "label_trees"
 	| "label_items"
 	| "resource_labels"
@@ -710,14 +710,17 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 			if (oldVersion < 20 && db.objectStoreNames.contains("board_documents")) {
 				db.deleteObjectStore("board_documents");
 			}
+			// Activity snapshots changed shape; the cache refills from the server.
+			if (oldVersion < 22 && db.objectStoreNames.contains("space_activity")) {
+				db.deleteObjectStore("space_activity");
+			}
 			createStore(db, "space_lists", []);
 			createStore(db, "space_records", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "space_activity", [
-				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+			createStore(db, "activity", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);

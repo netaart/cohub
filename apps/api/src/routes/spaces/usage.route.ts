@@ -6,8 +6,7 @@ import { getOptionalAuth, requireValidId, authzDenied } from "../../lib/middlewa
 import { hasPermission } from "../../permissions.js";
 import { createLogger } from "@cohub/infra/logging";
 import {
-  aggregateGenerationUsageRows,
-  aggregateUsageRows,
+  aggregateUsage,
   buildUsageDateRange,
   GENERATION_USAGE_SELECT_COLUMNS,
   resolveUsageDays,
@@ -64,14 +63,7 @@ router.get("/", async (c) => {
     return c.json({ message: "failed to load usage data" }, 500);
   }
 
-  const { hourly, summary } = aggregateUsageRows(rows);
-  const generation = aggregateGenerationUsageRows(generationRows);
-  return c.json({
-    hourly,
-    summary,
-    generation,
-    days,
-  });
+  return c.json({ ...aggregateUsage(rows, generationRows), days });
 });
 
 export default router;

@@ -37,7 +37,6 @@ router.get("/", async (c) => {
 		const activity = await loadSpaceActivity({
 			spaceId,
 			daysParam: c.req.query("days"),
-			includeCost,
 		});
 		return c.json(includeCost ? activity : stripActivityCost(activity));
 	} catch (error) {

@@ -11,12 +11,12 @@ import { and, asc, desc, eq, gte, lt, lte, sql } from "drizzle-orm";
 import { createLogger } from "@cohub/infra/logging";
 import { db } from "./db/index.js";
 import {
-	aggregateGenerationUsageRows,
-	aggregateUsageRows,
+	aggregateUsage,
 	aggregateUserModelRankings,
 	buildUsageDateRange,
 	resolveUsageDays,
 	type GenerationUsageRow,
+	type UsageAggregation,
 	type UsageRow,
 	type UserModelRankings,
 } from "./usage-aggregation.js";
@@ -71,11 +71,8 @@ export type SpaceActivityContributors = {
 	memberCount: number;
 };
 
-export type SpaceActivityResponse = {
+export type SpaceActivityResponse = UsageAggregation & {
 	days: number;
-	hourly: ReturnType<typeof aggregateUsageRows>["hourly"];
-	summary: ReturnType<typeof aggregateUsageRows>["summary"];
-	generation: ReturnType<typeof aggregateGenerationUsageRows>;
 	rankings: UserModelRankings & {
 		apps: SpaceActivityAppRanking[];
 	};
@@ -115,6 +112,7 @@ export function stripActivityCost(
 			})),
 			summary: { ...activity.generation.summary, costTotal: 0 },
 		},
+		totals: { ...activity.totals, costTotal: 0 },
 		rankings: {
 			...activity.rankings,
 			llmModels: activity.rankings.llmModels.map((row) => ({
@@ -273,8 +271,6 @@ function workTitle(meta: unknown, slug: string): string {
 export async function loadSpaceActivity(input: {
 	spaceId: string;
 	daysParam: string | undefined;
-	/** Cost figures stay private to space managers. */
-	includeCost: boolean;
 }): Promise<SpaceActivityResponse> {
 	const days = resolveUsageDays(input.daysParam);
 	const { startDate, now } = buildUsageDateRange(days);
@@ -387,8 +383,7 @@ export async function loadSpaceActivity(input: {
 		throw error;
 	}
 
-	const { hourly, summary } = aggregateUsageRows(usageRows);
-	const generation = aggregateGenerationUsageRows(generationRows);
+	const usage = aggregateUsage(usageRows, generationRows);
 	const modelRankings = aggregateUserModelRankings(usageRows, generationRows);
 
 	// Profiles load only for the contributors actually returned (≤50 rows).
@@ -417,10 +412,8 @@ export async function loadSpaceActivity(input: {
 		}));
 
 	return {
+		...usage,
 		days,
-		hourly,
-		summary,
-		generation,
 		rankings: {
 			llmModels: modelRankings.llmModels,
 			generationModels: modelRankings.generationModels,

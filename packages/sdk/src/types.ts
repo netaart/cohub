@@ -1755,11 +1755,21 @@ export type GenerationUsageBlock = {
   summary: GenerationUsageSummary;
 };
 
+/** LLM + generation combined. */
+export type UsageTotals = {
+  totalTokens: number;
+  requestCount: number;
+  successCount: number;
+  errorCount: number;
+  costTotal: number;
+};
+
 export type SpaceUsageResponse = {
   hourly: SpaceUsageHourlyStat[];
   summary: SpaceUsageSummary;
   /** Generation rollups (image / video / music). Optional for older servers. */
   generation?: GenerationUsageBlock;
+  totals: UsageTotals;
   days: number;
 };
 
