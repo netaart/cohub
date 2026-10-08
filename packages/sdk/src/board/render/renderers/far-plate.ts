@@ -69,22 +69,28 @@ export function drawFarPlate(
 	graphics.fill({ color: style.accent, alpha: style.accentAlpha ?? 0.9 });
 }
 
+export function farStrokeSamples<T>(points: readonly T[]): readonly T[] {
+	if (points.length <= FAR_STROKE_MAX_POINTS) return points;
+	const step = Math.ceil(points.length / FAR_STROKE_MAX_POINTS);
+	const out: T[] = [];
+	for (let i = 0; i < points.length - 1; i += step) out.push(points[i] as T);
+	out.push(points[points.length - 1] as T);
+	return out;
+}
+
 export function drawFarStroke(
 	graphics: Graphics,
 	points: ReadonlyArray<{ x: number; y: number }>,
 	style: { color: number; width: number; alpha?: number },
 ) {
-	if (points.length < 2) return;
-	const step = Math.max(1, Math.ceil(points.length / FAR_STROKE_MAX_POINTS));
-	const first = points[0];
-	if (!first) return;
+	const samples = farStrokeSamples(points);
+	if (samples.length < 2) return;
+	const first = samples[0] as { x: number; y: number };
 	graphics.moveTo(first.x, first.y);
-	for (let i = step; i < points.length; i += step) {
-		const point = points[i];
-		if (point) graphics.lineTo(point.x, point.y);
+	for (let i = 1; i < samples.length; i += 1) {
+		const point = samples[i] as { x: number; y: number };
+		graphics.lineTo(point.x, point.y);
 	}
-	const last = points[points.length - 1];
-	if (last) graphics.lineTo(last.x, last.y);
 	graphics.stroke({
 		color: style.color,
 		width: style.width,

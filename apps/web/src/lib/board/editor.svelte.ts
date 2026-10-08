@@ -74,7 +74,10 @@ import {
 	readBoardCameraPolicy,
 	writeBoardCameraPolicy,
 } from "$lib/board/board-camera-policy";
-import { appendBoardDrawSample } from "$lib/board/board-draw-input";
+import {
+	appendBoardDrawSamples,
+	type BoardDrawInputSample,
+} from "$lib/board/board-draw-input";
 import { createBoardItemId } from "$lib/board/board-id";
 import {
 	type BoardItemEntry,
@@ -97,6 +100,7 @@ import {
 	type BoardToolId,
 	canTapSelectWithHand,
 	isContinuousBoardTool,
+	isCreationBoardTool,
 	isWithinHandTapSlop,
 } from "$lib/board/board-tool";
 import {
@@ -230,6 +234,7 @@ export type BoardPointerEvent = {
 	pointerType: string;
 	cancelled: boolean;
 	pressure: number;
+	samples?: readonly BoardDrawInputSample[];
 };
 
 export type BoardViewState = {
@@ -281,7 +286,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	);
 	let selection = $state<string[]>([]);
 	let tool = $state<BoardToolId>(options.initialTool ?? "select");
-	let interaction = $state<BoardInteraction>({ type: "idle" });
+	// Raw: gestures are replaced, never mutated.
+	let interaction = $state.raw<BoardInteraction>({ type: "idle" });
 	let hoverId = $state<string | null>(null);
 	let hoverPoint = $state<WorldPoint | null>(null);
 	let hoverPointerType = $state("mouse");
@@ -647,31 +653,30 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		commit({}, record);
 	}
 
-	function applyPatch(patch: BoardPatch) {
-		const result = applyBoardPatchToDocument(base, patch, { cascade: true });
+	function applyPatch(patch: BoardPatch): boolean {
+		const result = applyBoardPatchToDocument(base, patch);
 		if (!result.ok) {
 			saveError =
 				result.diagnostics[0]?.message ?? "Could not apply the change";
-			return;
+			return false;
 		}
 		adopt(result.document, Object.keys(patch.items ?? {}));
 		send(patch);
+		return true;
 	}
 
 	function undo() {
 		const entry = undoStack.at(-1);
 		if (!entry) return;
 		undoStack = undoStack.slice(0, -1);
-		redoStack = [...redoStack, entry];
-		applyPatch(entry.undo);
+		if (applyPatch(entry.undo)) redoStack = [...redoStack, entry];
 	}
 
 	function redo() {
 		const entry = redoStack.at(-1);
 		if (!entry) return;
 		redoStack = redoStack.slice(0, -1);
-		undoStack = [...undoStack, entry];
-		applyPatch(entry.redo);
+		if (applyPatch(entry.redo)) undoStack = [...undoStack, entry];
 	}
 
 	function retrySave() {
@@ -905,11 +910,14 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 	function addEntries(
 		entries: BoardItemEntry[],
-		select = !isContinuousBoardTool(tool),
+		{
+			select = !isContinuousBoardTool(tool),
+			enter = true,
+		}: { select?: boolean; enter?: boolean } = {},
 	) {
 		if (options.readonly || entries.length === 0) return;
 		const changes = placeNew(entries);
-		markAdded([...changes.keys()]);
+		if (enter) markAdded([...changes.keys()]);
 		selection = select ? [...changes.keys()] : [];
 		commitItems(changes);
 		maybeReturnToSelect();
@@ -1011,7 +1019,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 					} as BoardItem,
 				};
 			});
-		addEntries([task, ...arrows], false);
+		addEntries([task, ...arrows], { select: false });
 		selection = [task.id];
 		return task.id;
 	}
@@ -1047,25 +1055,28 @@ export function createBoardEditor(options: BoardEditorOptions) {
 					height: Math.max(minimum, Math.abs(dy)),
 				};
 		const geometry = isShapeKind(state.geometry) ? state.geometry : "rectangle";
-		addEntries([
-			state.kind === "shape"
-				? createShapeBoardItem(
-						geometry,
-						state.start.x,
-						state.start.y,
-						state.color,
-						state.id,
-						box,
-					)
-				: createFrameBoardItem(
-						state.start.x,
-						state.start.y,
-						state.color,
-						"Frame",
-						state.id,
-						box,
-					),
-		]);
+		addEntries(
+			[
+				state.kind === "shape"
+					? createShapeBoardItem(
+							geometry,
+							state.start.x,
+							state.start.y,
+							state.color,
+							state.id,
+							box,
+						)
+					: createFrameBoardItem(
+							state.start.x,
+							state.start.y,
+							state.color,
+							"Frame",
+							state.id,
+							box,
+						),
+			],
+			{ enter: false },
+		);
 	}
 
 	function commitDraw(
@@ -1075,7 +1086,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		size: number,
 	) {
 		if (points.length === 0) return;
-		addEntries([createDrawBoardItem(points, color, size, id)]);
+		addEntries([createDrawBoardItem(points, color, size, id)], {
+			enter: false,
+		});
 	}
 
 	function beginTextDraft(at: WorldPoint) {
@@ -1494,7 +1507,6 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			rescene([id]);
 			return;
 		}
-		if (created) markAdded([id]);
 		commitItems(new Map([[id, next as BoardItem]]));
 	}
 
@@ -1871,20 +1883,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 					}
 				: undefined,
 		);
-		addEntries([entry]);
-	}
-
-	function appendDrawSample(
-		gesture: Extract<BoardInteraction, { type: "drawing" }>,
-		event: BoardPointerEvent,
-	) {
-		const points = appendBoardDrawSample(
-			gesture.points,
-			gesture.pointerId,
-			event,
-			camera.zoom,
-		);
-		return points === gesture.points ? gesture : { ...gesture, points };
+		addEntries([entry], { enter: false });
 	}
 
 	function beginPinch() {
@@ -1959,11 +1958,13 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 		if (tool === "draw") {
 			const style = toolStyles.draw;
+			const points: BoardDrawPoint[] = [];
+			appendBoardDrawSamples(points, [event], camera.zoom);
 			interaction = {
 				type: "drawing",
 				id: createBoardItemId(),
 				pointerId: event.pointerId,
-				points: [{ x: event.world.x, y: event.world.y, p: event.pressure }],
+				points,
 				color: style.color,
 				size: style.size,
 			};
@@ -2131,9 +2132,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 		switch (interaction.type) {
 			case "idle":
-				hoverId = hoveredTransformControl
-					? null
-					: (topItemAt(event.world)?.id ?? null);
+				hoverId =
+					isCreationBoardTool(tool) || hoveredTransformControl
+						? null
+						: (topItemAt(event.world)?.id ?? null);
 				return;
 			case "panning": {
 				const dx = event.screen.x - interaction.start.x;
@@ -2167,8 +2169,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 								duplicate: false,
 								moved: true,
 							};
-						} else interaction.moved = true;
-					} else interaction.moved = true;
+						} else interaction = { ...interaction, moved: true };
+					} else interaction = { ...interaction, moved: true };
 				}
 				if (event.shiftKey) {
 					if (Math.abs(dx) >= Math.abs(dy)) dy = 0;
@@ -2197,7 +2199,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				return;
 			}
 			case "resizing": {
-				interaction.moved = true;
+				if (!interaction.moved) interaction = { ...interaction, moved: true };
 				const frames = new Map<string, BoardFrame>();
 				if (interaction.single) {
 					const id = [...interaction.origin.keys()][0] as string;
@@ -2231,8 +2233,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				return;
 			}
 			case "rotating": {
-				interaction.moved = true;
-				interaction.current = event.world;
+				interaction = { ...interaction, moved: true, current: event.world };
 				let delta =
 					angleFrom(interaction.pivot, event.world) - interaction.startAngle;
 				if (event.shiftKey) delta = Math.round(delta / 15) * 15;
@@ -2254,7 +2255,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				return;
 			}
 			case "draggingArrowHandle": {
-				interaction.moved = true;
+				if (!interaction.moved) interaction = { ...interaction, moved: true };
 				const { arrowId, which, origin } = interaction;
 				const arrow = scene.get(arrowId) as
 					| SceneItem<BoardArrowItem>
@@ -2342,8 +2343,19 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				return;
 			}
 			case "drawing":
-				if ((event.buttons & 1) === 0) return;
-				interaction = appendDrawSample(interaction, event);
+				if (
+					event.pointerId !== interaction.pointerId ||
+					(event.buttons & 1) === 0
+				)
+					return;
+				if (
+					appendBoardDrawSamples(
+						interaction.points,
+						event.samples ?? [event],
+						camera.zoom,
+					)
+				)
+					interaction = { ...interaction };
 				return;
 			case "creatingArrow": {
 				const exclude = interaction.startItemId
@@ -2409,8 +2421,13 @@ export function createBoardEditor(options: BoardEditorOptions) {
 					selection = [];
 				break;
 			case "drawing": {
-				const finished = appendDrawSample(gesture, event);
-				commitDraw(finished.id, finished.points, finished.color, finished.size);
+				const pressure = gesture.points.at(-1)?.p ?? event.pressure;
+				appendBoardDrawSamples(
+					gesture.points,
+					[{ world: event.world, pressure }],
+					camera.zoom,
+				);
+				commitDraw(gesture.id, gesture.points, gesture.color, gesture.size);
 				break;
 			}
 			case "creatingArrow":
@@ -2884,6 +2901,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				return;
 			}
 			tool = value;
+			if (isCreationBoardTool(value)) hoverId = null;
 			if (value === "draw" || value === "arrow") {
 				selection = [];
 				editingId = null;

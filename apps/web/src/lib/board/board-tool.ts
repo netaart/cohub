@@ -28,3 +28,13 @@ export function isWithinHandTapSlop(dx: number, dy: number): boolean {
 export function isContinuousBoardTool(tool: BoardToolId): boolean {
 	return tool === "draw";
 }
+
+export function isCreationBoardTool(tool: BoardToolId): boolean {
+	return (
+		tool === "text" ||
+		tool === "shape" ||
+		tool === "draw" ||
+		tool === "arrow" ||
+		tool === "frame"
+	);
+}
