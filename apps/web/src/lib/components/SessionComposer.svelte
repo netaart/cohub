@@ -606,7 +606,9 @@ function submitDraft() {
 		return;
 	}
 	onsubmit();
-	textareaEl?.blur();
+	// Keep typing on desktop; dismiss the keyboard on mobile.
+	if (isMobileComposerInput()) textareaEl?.blur();
+	else textareaEl?.focus({ preventScroll: true });
 	collapseComposer();
 }
 
