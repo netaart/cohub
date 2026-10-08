@@ -75,6 +75,8 @@ import type { CommandPaletteItem } from "$lib/command-palette/types";
 import CommandPaletteLensBar from "$lib/components/command-palette/CommandPaletteLensBar.svelte";
 import CommandPaletteRecentQueries from "$lib/components/command-palette/CommandPaletteRecentQueries.svelte";
 import CommandPaletteResultRow from "$lib/components/command-palette/CommandPaletteResultRow.svelte";
+import FilterBar from "$lib/components/list-page/FilterBar.svelte";
+import FilterChip from "$lib/components/list-page/FilterChip.svelte";
 import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
 import SwipePager from "$lib/components/list-page/SwipePager.svelte";
 import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
@@ -248,7 +250,6 @@ const isSpacePickerMode = $derived(
 const hasRecentQueries = $derived(
 	!runMode && !query.trim() && recentQueries.length > 0,
 );
-const showRecentQueries = $derived(hasRecentQueries && !isSpacePickerMode);
 const resultLimit = $derived(
 	isSpacePickerMode ? SPACE_PAGE_SIZE : RESULT_LIMIT,
 );
@@ -1154,29 +1155,28 @@ onMount(() => {
 });
 </script>
 
+{#snippet spaceManageLink()}
+	<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={openSpacesManager}>
+		<Settings2 class="h-3.5 w-3.5" />
+		<span>{m.spaces_manage({}, { locale })}</span>
+	</a>
+{/snippet}
+
 {#snippet spaceFilterRow()}
-	<div class="space-filter-row">
-		<div class="space-filter-bar" role="tablist" aria-orientation="horizontal" aria-label={m.command_filter_spaces({}, { locale })}>
-			{#each SPACE_FILTER_KEYS as key (key)}
-				<button
-					id={`command-space-filter-${key}`}
-					type="button"
-					class="space-filter-btn"
-					class:active={spaceFilter === key}
-					role="tab"
-					aria-selected={spaceFilter === key}
-					aria-controls="command-palette-results"
-					tabindex={spaceFilter === key ? 0 : -1}
-					onclick={() => selectSpaceFilter(key)}
-					onkeydown={(event) => handleSpaceFilterKeydown(event, key)}
-				>{spaceFilterLabel(key)}</button>
-			{/each}
-		</div>
-		<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={openSpacesManager}>
-			<Settings2 class="h-3.5 w-3.5" />
-			<span>{m.spaces_manage({}, { locale })}</span>
-		</a>
-	</div>
+	<FilterBar label={m.command_filter_spaces({}, { locale })} role="tablist" activeKey={spaceFilter} trailing={spaceManageLink}>
+		{#each SPACE_FILTER_KEYS as key (key)}
+			<FilterChip
+				id={`command-space-filter-${key}`}
+				tone="neutral"
+				label={spaceFilterLabel(key)}
+				active={spaceFilter === key}
+				aria-controls="command-palette-results"
+				tabindex={spaceFilter === key ? 0 : -1}
+				onclick={() => selectSpaceFilter(key)}
+				onkeydown={(event) => handleSpaceFilterKeydown(event, key)}
+			/>
+		{/each}
+	</FilterBar>
 {/snippet}
 
 {#snippet emptyState(active: boolean)}
@@ -1255,14 +1255,6 @@ onMount(() => {
 				{#if showLensBar}
 					<CommandPaletteLensBar lens={activeLens} position={lensPosition} glide={lensTabs.glide} onSelect={selectLens} />
 				{/if}
-
-				{#if !swipeable && isSpacePickerMode && !runMode}
-					{@render spaceFilterRow()}
-				{/if}
-
-				{#if !swipeable && showRecentQueries}
-					<CommandPaletteRecentQueries queries={recentQueries} onPick={pickRecentQuery} onClear={forgetRecentQueries} />
-				{/if}
 			</div>
 
 			{#if runMode}
@@ -1307,17 +1299,20 @@ onMount(() => {
 						{@const pageLens = COMMAND_PALETTE_LENSES[index] ?? "all"}
 						{@const items = active ? renderedItems : previewFor(pageLens)}
 						<div
-							class:searching={active && (pending || showingSettledItems)}
 							class="command-results scrollbar-quiet"
 							onscroll={active ? handleResultsScroll : undefined}
 							{@attach active ? bindResults : undefined}
 						>
-							{#if swipeable && pageLens === "space"}
-								{@render spaceFilterRow()}
-							{:else if swipeable && hasRecentQueries}
-								<CommandPaletteRecentQueries queries={recentQueries} onPick={pickRecentQuery} onClear={forgetRecentQueries} />
+							{#if swipeable ? pageLens === "space" : isSpacePickerMode}
+								<div class="command-subbar">{@render spaceFilterRow()}</div>
+							{:else if hasRecentQueries}
+								<div class="command-subbar">
+									<CommandPaletteRecentQueries queries={recentQueries} onPick={pickRecentQuery} onClear={forgetRecentQueries} />
+								</div>
 							{/if}
 							<div
+								class:searching={active && (pending || showingSettledItems)}
+								class="command-list"
 								id={active ? "command-palette-results" : undefined}
 								role="listbox"
 								tabindex="-1"
@@ -1383,6 +1378,8 @@ onMount(() => {
 	}
 
 	.command-palette {
+		--palette-x: 16px;
+		--palette-bg: color-mix(in oklch, var(--bg-surface) 94%, var(--brand-900) 6%);
 		width: min(720px, calc(100vw - 32px));
 		max-height: min(640px, calc(100vh - 96px));
 		display: flex;
@@ -1390,13 +1387,15 @@ onMount(() => {
 		overflow: hidden;
 		border: 1px solid color-mix(in oklch, var(--border-primary) 72%, var(--brand) 8%);
 		border-radius: 14px;
-		background: color-mix(in oklch, var(--bg-surface) 94%, var(--brand-900) 6%);
+		background: var(--palette-bg);
 		box-shadow: 0 24px 80px color-mix(in oklch, var(--neutral-100) 74%, transparent), 0 0 0 1px color-mix(in oklch, var(--neutral-0) 4%, transparent) inset;
 		animation: command-enter 140ms cubic-bezier(0.16, 1, 0.3, 1);
 	}
 
 	.command-header {
 		flex-shrink: 0;
+		--list-gutter-x: calc(var(--palette-x) - var(--list-row-pad-x));
+		padding-bottom: 2px;
 		border-bottom: 1px solid var(--border-subtle);
 		background: color-mix(in oklch, var(--bg-primary) 30%, transparent);
 	}
@@ -1405,7 +1404,7 @@ onMount(() => {
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		padding: 14px 16px 10px;
+		padding: 14px var(--palette-x) 8px;
 	}
 
 	.command-field {
@@ -1447,7 +1446,6 @@ onMount(() => {
 
 	.command-clear:focus-visible,
 	.command-cancel:focus-visible,
-	.space-filter-btn:focus-visible,
 	.space-manage-link:focus-visible {
 		outline: 2px solid color-mix(in oklch, var(--brand) 42%, transparent);
 		outline-offset: -2px;
@@ -1485,14 +1483,38 @@ onMount(() => {
 	}
 
 	.command-results {
+		--list-gutter-x: calc(var(--palette-x) - 8px - var(--list-row-pad-x));
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
 		padding: 8px;
+	}
+
+	.command-subbar {
+		position: sticky;
+		top: -8px;
+		z-index: 1;
+		margin-top: -8px;
+		padding-top: 8px;
+		background: var(--palette-bg);
+	}
+
+	/* 8px + FilterBar height (h-11 / lg:h-9) */
+	.command-results:has(> .command-subbar) {
+		scroll-padding-top: 52px;
+	}
+
+	@media (min-width: 1024px) {
+		.command-results:has(> .command-subbar) {
+			scroll-padding-top: 44px;
+		}
+	}
+
+	.command-list {
 		transition: opacity 120ms cubic-bezier(0.25, 1, 0.5, 1);
 	}
 
-	.command-results.searching {
+	.command-list.searching {
 		opacity: 0.72;
 	}
 
@@ -1531,58 +1553,21 @@ onMount(() => {
 		gap: 8px;
 	}
 
-	.space-filter-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 0 8px 6px;
-	}
-
-	.space-filter-bar {
-		display: flex;
-		min-width: 0;
-		gap: 2px;
-		overflow-x: auto;
-		scrollbar-width: none;
-	}
-
-	.space-filter-bar::-webkit-scrollbar { display: none; }
-
-	.space-filter-btn,
 	.space-manage-link {
 		display: inline-flex;
-		flex-shrink: 0;
 		align-items: center;
-		min-height: 28px;
-		border: 0;
+		gap: 4px;
+		height: 28px;
 		border-radius: 6px;
-		background: transparent;
-		padding: 0 10px;
-		color: var(--text-tertiary);
-		font-size: 12px;
-		font-weight: 500;
-		cursor: pointer;
+		padding: 0 var(--list-row-pad-x);
+		color: var(--text-placeholder);
+		font-size: 11px;
 		transition: background-color 90ms, color 90ms;
 	}
 
-	.space-filter-btn:hover,
 	.space-manage-link:hover {
 		background: var(--bg-hover);
 		color: var(--text-secondary);
-	}
-
-	.space-filter-btn.active {
-		background: var(--bg-hover);
-		color: var(--text-primary);
-	}
-
-	.space-manage-link {
-		gap: 4px;
-		margin-left: auto;
-		padding: 0 8px;
-		color: var(--text-placeholder);
-		font-size: 11px;
-		font-weight: 400;
 	}
 
 	.command-status {
@@ -1615,12 +1600,13 @@ onMount(() => {
 		}
 
 		.command-palette {
+			--palette-x: 18px;
+			--palette-bg: var(--bg-primary);
 			width: 100%;
 			max-height: none;
 			padding-top: env(safe-area-inset-top, 0px);
 			border: 0;
 			border-radius: 0;
-			background: var(--bg-primary);
 			box-shadow: none;
 			animation: command-screen-enter 160ms cubic-bezier(0.16, 1, 0.3, 1);
 		}
@@ -1667,14 +1653,12 @@ onMount(() => {
 			padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 		}
 
-		.space-filter-btn,
 		.space-manage-link {
-			min-height: 36px;
-		}
-
-		.space-manage-link {
-			min-width: 36px;
+			width: 32px;
+			height: 32px;
 			justify-content: center;
+			border-radius: 7px;
+			padding: 0;
 		}
 
 		.space-manage-link span {
@@ -1702,7 +1686,7 @@ onMount(() => {
 
 	@media (prefers-reduced-motion: reduce) {
 		.command-palette,
-		.command-results {
+		.command-list {
 			animation: none;
 			transition: none;
 		}

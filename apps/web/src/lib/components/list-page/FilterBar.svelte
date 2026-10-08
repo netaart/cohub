@@ -115,6 +115,7 @@ function scrollInput(node: HTMLElement) {
 }
 
 function handleKeydown(event: KeyboardEvent) {
+	if (event.defaultPrevented) return;
 	if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
 	const root = (event.currentTarget as HTMLElement | null) ?? null;
 	const chips = [

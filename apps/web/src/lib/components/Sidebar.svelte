@@ -3913,7 +3913,7 @@ $effect(() => {
       <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-brand text-[11px] font-bold text-brand-contrast-fg transition-colors group-hover:bg-brand-hover">
         C
       </div>
-      <span class="truncate text-[13px] font-semibold tracking-tight text-text-primary @max-[210px]:hidden">Cohub</span>
+      <span class="truncate text-[13px] font-semibold tracking-tight text-text-primary @max-[232px]:hidden">Cohub</span>
     </a>
     <div class="ml-auto flex shrink-0 items-center gap-1">
       {#if !isMobile}
@@ -3936,12 +3936,15 @@ $effect(() => {
       {/if}
       <button
         type="button"
-        class="group/search flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
+        class="group/search flex h-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary {isMobile ? 'w-7' : 'gap-1.5 bg-bg-surface px-2'}"
         onclick={openSearch}
         title={m.sidebar_search_everywhere_shortcut({}, { locale })}
         aria-label={m.sidebar_search_everywhere({}, { locale })}
       >
-        <Search class="h-3.5 w-3.5 transition-colors group-hover/search:text-brand" />
+        <Search class="h-3.5 w-3.5 transition-colors group-hover/search:text-brand {isMobile ? '' : 'text-text-placeholder'}" />
+        {#if !isMobile}
+          <span class="font-mono text-[11px] tracking-[0.02em]" aria-hidden="true">⌘K</span>
+        {/if}
       </button>
       {#if isMobile}
         <a
