@@ -269,6 +269,35 @@ body.sidebar-resizing .panel-shell-fade {
 	}
 }
 
+@utility header-action {
+	display: inline-flex;
+	flex: 0 0 auto;
+	height: 32px;
+	min-width: 32px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	border-radius: 7px;
+	padding: 0 8px;
+	color: var(--text-tertiary);
+	white-space: nowrap;
+	cursor: pointer;
+	transition:
+		background-color 120ms ease,
+		color 120ms ease;
+
+	&:hover,
+	&[aria-expanded="true"] {
+		background: var(--bg-hover);
+		color: var(--text-secondary);
+	}
+
+	&:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
+	}
+}
+
 /* Lock body scroll when drawer is open */
 body.drawer-open {
 	overflow: hidden;

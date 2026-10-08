@@ -41,6 +41,9 @@ import {
 } from "../runtime-status-view";
 import DisplayViewers from "./DisplayViewers.svelte";
 
+// Cloud sandbox displays stay hidden until they ship; flip to restore the entry.
+const CLOUD_DISPLAY_ENTRY = false;
+
 const {
 	spaceId,
 	canManage = false,
@@ -321,10 +324,11 @@ $effect(() => {
 </script>
 
 {#if status?.kind === "local"}
-	<button bind:this={trigger} type="button" class="runtime-chip" data-tone={tone} aria-haspopup="dialog" aria-expanded={open} aria-label={`${m.runtime_title({}, { locale })} · ${label}`} title={`${m.runtime_title({}, { locale })} · ${label}`} onclick={() => open ? close() : void show()}>
-		<Monitor class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-		<span class="runtime-location">{m.runtime_local({}, { locale })}</span>
-		<span class="runtime-state"><span class="runtime-dot" aria-hidden="true"></span>{label}</span>
+	<button bind:this={trigger} type="button" class="header-action" data-tone={tone} aria-haspopup="dialog" aria-expanded={open} aria-label={`${m.runtime_title({}, { locale })} · ${label}`} title={`${m.runtime_title({}, { locale })} · ${label}`} onclick={() => open ? close() : void show()}>
+		<Monitor class="h-4 w-4 shrink-0" aria-hidden="true" />
+		<span class="hidden text-[13px] font-medium lg:inline">{m.runtime_local({}, { locale })}</span>
+		<span class="runtime-dot" aria-hidden="true"></span>
+		{#if tone === "attention" || tone === "offline"}<span class="runtime-label hidden lg:inline">{label}</span>{/if}
 	</button>
 	{#if open}
 		<button type="button" class="runtime-backdrop" aria-hidden="true" tabindex="-1" use:portal onclick={close}></button>
@@ -394,9 +398,9 @@ $effect(() => {
 			</div>
 		</div>
 	{/if}
-{:else if status?.kind === "cloud" && canView && onOpenDisplay}
-	<button bind:this={trigger} type="button" class="runtime-chip" aria-haspopup="dialog" aria-expanded={open} aria-label={m.virtual_display_title({}, { locale })} title={m.virtual_display_title({}, { locale })} onclick={() => open ? close() : void showVirtual()}>
-		<Monitor class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+{:else if CLOUD_DISPLAY_ENTRY && status?.kind === "cloud" && canView && onOpenDisplay}
+	<button bind:this={trigger} type="button" class="header-action" aria-haspopup="dialog" aria-expanded={open} aria-label={m.virtual_display_title({}, { locale })} title={m.virtual_display_title({}, { locale })} onclick={() => open ? close() : void showVirtual()}>
+		<Monitor class="h-4 w-4 shrink-0" aria-hidden="true" />
 	</button>
 	{#if open}
 		<button type="button" class="runtime-backdrop" aria-hidden="true" tabindex="-1" use:portal onclick={close}></button>
@@ -444,13 +448,12 @@ $effect(() => {
 {/if}
 
 <style>
-.runtime-chip { display: inline-flex; flex: 0 0 auto; height: 30px; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-secondary); cursor: pointer; font-size: 12px; white-space: nowrap; }
-.runtime-chip:hover, .runtime-chip[aria-expanded="true"] { background: var(--bg-hover); }
 .runtime-state { display: inline-flex; align-items: center; gap: 5px; color: var(--text-tertiary); font-size: 12px; }
 .runtime-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--text-placeholder); }
 [data-tone="online"] .runtime-dot { background: var(--status-running); }
 [data-tone="attention"] .runtime-dot { background: var(--color-warning); }
-[data-tone="attention"] .runtime-state { color: var(--color-warning); }
+[data-tone="attention"] .runtime-state, [data-tone="attention"] .runtime-label { color: var(--color-warning); }
+.runtime-label { font-size: 13px; }
 [data-tone="offline"] .runtime-dot { background: transparent; box-shadow: inset 0 0 0 1px var(--text-placeholder); }
 .runtime-backdrop { position: fixed; inset: 0; z-index: 120; cursor: default; }
 .runtime-popover { display: flex; flex-direction: column; max-width: calc(100vw - 16px); max-height: calc(100dvh - 32px); border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-elevated); box-shadow: 0 10px 30px color-mix(in srgb, var(--overlay-scrim-strong) 20%, transparent); overflow: hidden; }
@@ -487,12 +490,10 @@ $effect(() => {
 .runtime-device-action[data-secondary="true"] { background: var(--bg-input); color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--border-subtle); }
 .runtime-device-action[data-secondary="true"]:hover { background: var(--bg-hover); color: var(--text-primary); }
 .runtime-device-action:disabled { opacity: .6; cursor: default; }
-.runtime-chip:focus-visible, .runtime-action:focus-visible, .runtime-device-action:focus-visible, summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.runtime-action:focus-visible, .runtime-device-action:focus-visible, summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .runtime-popover:focus { outline: none; }
 .is-failed { color: var(--color-error-soft); }
 @media (max-width: 640px) {
-	.runtime-location { display: none; }
-	.runtime-chip { padding: 0 6px; gap: 5px; }
 	.runtime-popover { left: 8px !important; right: 8px !important; top: auto !important; bottom: max(8px, env(safe-area-inset-bottom)) !important; width: auto !important; max-height: calc(100dvh - 32px); }
 	.runtime-backdrop { background: var(--overlay-scrim); }
 	.runtime-action { width: 44px; height: 44px; }

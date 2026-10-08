@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { SpaceRecord } from "@neta-art/cohub";
-import { Check, Pin, Plus } from "lucide-svelte";
+import { Check, MoreHorizontal, Pin, Plus } from "lucide-svelte";
 import ListRow from "$lib/components/list-page/ListRow.svelte";
 import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
 import ListRowText from "$lib/components/list-page/ListRowText.svelte";
@@ -29,6 +29,8 @@ const {
 	selected,
 	onToggle,
 	onLoadMore,
+	menuId = null,
+	onMenu,
 }: {
 	filter: SpacesFilter;
 	spaces: SpaceRecord[];
@@ -39,6 +41,8 @@ const {
 	selected: ReadonlySet<string>;
 	onToggle: (id: string, event?: MouseEvent) => void;
 	onLoadMore?: () => void;
+	menuId?: string | null;
+	onMenu?: (space: SpaceRecord, anchor: HTMLElement) => void;
 } = $props();
 
 const OVERSCAN_ROWS = 6;
@@ -48,6 +52,7 @@ const locale = $derived(getLocale());
 const density = $derived<ListRowDensity>(compact ? "comfortable" : "compact");
 const rowHeight = $derived(LIST_ROW_HEIGHT[density]);
 const selecting = $derived(selected.size > 0);
+const rowMenus = $derived(!compact && onMenu !== undefined);
 let scroller = $state<HTMLDivElement | null>(null);
 let scrollTop = $state(0);
 let viewportHeight = $state(600);
@@ -119,6 +124,16 @@ function handleRowClick(event: MouseEvent, id: string) {
 	onToggle(id, event);
 }
 
+function openMenuFromContext(event: MouseEvent, space: SpaceRecord) {
+	if (!rowMenus || selecting) return;
+	const trigger = (
+		event.currentTarget as HTMLElement
+	).querySelector<HTMLElement>("[data-row-menu]");
+	if (!trigger) return;
+	event.preventDefault();
+	onMenu?.(space, trigger);
+}
+
 function onScroll(event: Event) {
 	const element = event.currentTarget as HTMLElement;
 	scrollTop = element.scrollTop;
@@ -174,6 +189,7 @@ function onScroll(event: Event) {
 					class="space-row absolute inset-x-0"
 					style:top={`${(start + index) * rowHeight}px`}
 					use:longPress={{ onLongPress: () => onToggle(space.id) }}
+					oncontextmenu={(event) => openMenuFromContext(event, space)}
 				>
 					<ListRow
 						{density}
@@ -217,6 +233,24 @@ function onScroll(event: Event) {
 								{/snippet}
 							</ListRowText>
 						</a>
+						{#snippet trailing()}
+							{#if rowMenus}
+								{@const open = menuId === space.id}
+								<button
+									type="button"
+									data-row-menu
+									class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-[opacity,background-color,color] duration-100 hover:bg-bg-active hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 {open ? 'bg-bg-active text-text-primary opacity-100' : selecting ? 'pointer-events-none opacity-0' : 'opacity-0 group-hover/row:opacity-100'}"
+									aria-label={m.inline_more_actions({}, { locale })}
+									title={m.inline_more_actions({}, { locale })}
+									aria-haspopup="menu"
+									aria-expanded={open}
+									tabindex={selecting ? -1 : undefined}
+									onclick={(event) => onMenu?.(space, event.currentTarget)}
+								>
+									<MoreHorizontal class="h-4 w-4" />
+								</button>
+							{/if}
+						{/snippet}
 					</ListRow>
 				</li>
 			{/each}
