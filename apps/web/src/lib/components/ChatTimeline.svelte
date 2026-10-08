@@ -13,7 +13,6 @@ import ToolExecutionCard from "$lib/components/ToolExecutionCard.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { getModelDisplayName, type ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
-import type { SentTurnIndex } from "$lib/sent-turns";
 import type { ChatMessage, TimelineItem } from "$lib/session-tree";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
@@ -29,9 +28,6 @@ type Props = {
 	/** Whether older turns are currently being loaded (scroll-up pagination) */
 	loadingOlder?: boolean;
 	modelsCatalog?: ModelCatalogItem[];
-	/** Caller-side fan-out, shared by the process card and tool-call rows. */
-	sentTurns?: SentTurnIndex | null;
-	spaceId?: string | null;
 	onMarkdownRenderStart?: (message: ChatMessage) => void;
 	onMarkdownRendered?: (message: ChatMessage) => void;
 	onLoadIntermediate?: (
@@ -59,8 +55,6 @@ let {
 	loading = false,
 	loadingOlder = false,
 	modelsCatalog,
-	sentTurns = null,
-	spaceId = null,
 	onMarkdownRenderStart,
 	onMarkdownRendered,
 	onLoadIntermediate,
@@ -235,7 +229,7 @@ $effect(() => {
 							forking={forkingTurnId === forkTurn?.id}
 					/>
 				{:else if item.kind === 'process' && item.turn}
-						<ProcessCard turn={item.turn} summary={item.summary} intermediateMessages={item.intermediateMessages} streaming={item.streaming} {modelsCatalog} {onLoadIntermediate} {onRequestIntermediateSync} {onLoadToolCalls} {onOpenFile} {onOpenUrl} {sentTurns} {spaceId} />
+						<ProcessCard turn={item.turn} summary={item.summary} intermediateMessages={item.intermediateMessages} streaming={item.streaming} {modelsCatalog} {onLoadIntermediate} {onRequestIntermediateSync} {onLoadToolCalls} {onOpenFile} {onOpenUrl} />
 				{:else if item.kind === 'turn_footer'}
 					{@const modelName = getModelDisplayName(modelsCatalog, {
 						provider: item.runtimeProvider,

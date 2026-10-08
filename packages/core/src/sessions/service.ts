@@ -3,11 +3,12 @@ import { randomUUID as defaultRandomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ContentBlock } from "@cohub/protocol/core";
-import type { SessionTurnIntent, SessionTurnRecord, SessionTurnOrigin } from "@cohub/protocol/model";
+import { readSessionTurnOrigin, type SessionTurnIntent, type SessionTurnRecord, type SessionTurnOrigin } from "@cohub/protocol/model";
 import { AGENT_TURN_ABORT_CHANNEL, type ModelThinkingLevel } from "@cohub/protocol";
 import { sessionTurnSegments, sessionTurns, spaceSessions, spaces } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
 import { resolveSessionTurnOrigin } from "./turn-origin.js";
+import { appendSentTurn, sentTurnRefFor } from "./sent-turns.js";
 import { turnTriggerReference } from "../references/turn-trigger.js";
 import type { ReferenceInput } from "../references/types.js";
 import { normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
@@ -213,6 +214,18 @@ export function createSessionServices(input: {
     return session;
   }
 
+  async function recordSentTurn(meta: unknown, child: { spaceId: string; sessionId: string; turnId: string }) {
+    const origin = readSessionTurnOrigin(meta, child.spaceId);
+    const ref = sentTurnRefFor(origin, child);
+    if (!origin || !ref) return;
+    try {
+      const caller = await appendSentTurn(input.db, origin, ref);
+      if (caller) await input.onSessionTurnUpdated?.({ spaceId: origin.spaceId, turn: toSessionTurnRecord(caller) });
+    } catch (error) {
+      logger.warn("[Session] failed to record sent turn on caller", { callerTurnId: origin.turnId, childTurnId: child.turnId, error });
+    }
+  }
+
   async function createSessionTurn(turnInput: {
     sessionId: string;
     userUuid: string;
@@ -281,6 +294,7 @@ export function createSessionServices(input: {
       sessionId: turnInput.sessionId,
       userUuids: [turnInput.userUuid],
     })).catch((error) => logger.warn("[Session] failed to publish session participant labels", error));
+    await recordSentTurn(row.meta, { spaceId, sessionId: row.sessionId, turnId: row.id });
     return { ...row, spaceId };
   }
 

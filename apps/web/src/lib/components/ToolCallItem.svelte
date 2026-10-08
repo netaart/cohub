@@ -1,6 +1,7 @@
 <script lang="ts">
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-svelte";
 import ImageBlocks from "$lib/components/ImageBlocks.svelte";
+import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
 import ToolInputDetail from "$lib/components/ToolInputDetail.svelte";
 import ToolOutputDetail from "$lib/components/ToolOutputDetail.svelte";
 import {
@@ -16,8 +17,8 @@ import {
 } from "$lib/format-duration";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
-import type { SentTurnLink } from "$lib/sent-turns";
-import { buildSpaceSessionRoute } from "$lib/space-routes";
+import { NO_SENT_SESSIONS } from "$lib/sent-turns";
+import { useSessionRelations } from "$lib/session-relations-context";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type Props = {
@@ -29,9 +30,6 @@ type Props = {
 	showDuration?: boolean;
 	onExpand?: () => void | Promise<void>;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
-	/** The Session this call prompted, when it is inside the loaded window. */
-	sentTurn?: SentTurnLink | null;
-	spaceId?: string | null;
 };
 
 const {
@@ -43,8 +41,6 @@ const {
 	showDuration = true,
 	onExpand,
 	onOpenFile,
-	sentTurn = null,
-	spaceId = null,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -125,13 +121,9 @@ const statusLabel = $derived(
 );
 const inputSummary = $derived(summarizeToolInput(tool.name, tool.input));
 const detailIdPrefix = $derived(`tool-call-${sanitizeToolDomId(tool.id)}`);
-const sentTurnHref = $derived(
-	sentTurn && spaceId
-		? buildSpaceSessionRoute(spaceId, sentTurn.sessionId)
-		: null,
-);
-const sentTurnLabel = $derived(
-	sentTurn ? (sentTurn.title ?? sentTurn.sessionId.slice(0, 8)) : "",
+const relations = useSessionRelations();
+const sentSessions = $derived(
+	relations?.sentByToolCall(tool.id) ?? NO_SENT_SESSIONS,
 );
 
 $effect(() => {
@@ -230,10 +222,25 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 							<div class="text-[12px] leading-snug text-text-placeholder">{runningPhase === 'drafting' ? m.tool_receiving_call({}, { locale }) : m.tool_running_verb({ verb: runningVerb }, { locale })}</div>
 						</div>
 					{/if}
-					{#if sentTurnHref}
+					{#if sentSessions.length > 0}
 						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2 max-sm:grid-cols-[1.25rem_minmax(0,1fr)] max-sm:gap-1.5">
 							<div class="pt-[3px] font-mono text-[10px] uppercase leading-none tracking-wide text-text-placeholder select-none">{m.tool_to({}, { locale })}</div>
-							<a href={sentTurnHref} class="min-w-0 truncate text-[12px] leading-snug text-text-secondary underline-offset-2 transition-colors hover:text-text-primary hover:underline hover:decoration-brand/35" title={m.sent_open_session({}, { locale })}>{sentTurnLabel}</a>
+							<div class="flex min-w-0 flex-col items-start gap-0.5">
+								{#each sentSessions as session (`${session.spaceId}:${session.sessionId}`)}
+									<RelatedSessionLink ref={session} class="flex min-h-[18px] max-w-full min-w-0 items-center gap-1.5 text-[12px] leading-snug text-text-secondary underline-offset-2 transition-colors [&[href]]:hover:text-text-primary [&[href]]:hover:underline [&[href]]:hover:decoration-brand/35">
+										{#snippet children({ label, status })}
+											{#if status === "loading"}
+												<span class="h-2.5 w-28 rounded-[3px] bg-bg-surface" aria-hidden="true"></span>
+											{:else}
+												<span class="min-w-0 truncate {status === 'unavailable' ? 'text-text-placeholder' : ''}">{label}</span>
+											{/if}
+											{#if session.count > 1}
+												<span class="shrink-0 tabular-nums text-text-placeholder">×{session.count}</span>
+											{/if}
+										{/snippet}
+									</RelatedSessionLink>
+								{/each}
+							</div>
 						</div>
 					{/if}
 				</div>

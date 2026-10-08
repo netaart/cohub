@@ -25,6 +25,7 @@ import SessionModelSelectorDialog from "$lib/features/space/modules/SessionModel
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { provideMarkdownWorkspaceAsset } from "$lib/markdown-asset-context";
 import { m } from "$lib/paraglide/messages.js";
+import { provideSessionRelations } from "$lib/session-relations-context";
 import type { NewChatBackgroundConfig } from "$lib/space-config";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
@@ -74,6 +75,7 @@ const locale = $derived(getLocale());
 // Chat markdown resolves workspace-relative images and media to workspace
 // files. Provide it once here instead of threading it through the timeline.
 provideMarkdownWorkspaceAsset(untrack(() => host.resolveWorkspaceAsset));
+provideSessionRelations(untrack(() => host.relations));
 
 const access = $derived(host.access);
 const activeSessionState = $derived(host.activeSessionState);
@@ -363,8 +365,6 @@ async function handleDraftDrop(event: DragEvent) {
 					}}
 					onOpenUrl={onOpenUrl}
 					modelsCatalog={host.modelsCatalog ?? undefined}
-					sentTurns={host.sentTurns}
-					spaceId={host.spaceId}
 				/>
 			{/key}
 		{/if}

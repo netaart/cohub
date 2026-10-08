@@ -1,4 +1,5 @@
 import { isUuidLike } from "./identifiers.js";
+import { normalizeRequestSource } from "./provenance.js";
 import type { SessionTurnOriginKind } from "./turn-origin.js";
 
 /**
@@ -7,9 +8,11 @@ import type { SessionTurnOriginKind } from "./turn-origin.js";
  * state belongs to the child Session).
  */
 export type SentTurnRef = {
+  spaceId?: string;
   sessionId: string;
   turnId: string;
   kind: SessionTurnOriginKind;
+  toolCallId?: string;
 };
 
 const KINDS: readonly SessionTurnOriginKind[] = ["prompt", "scheduled_prompt", "background_task", "hook"];
@@ -23,7 +26,14 @@ export const normalizeSentTurnRef = (value: unknown): SentTurnRef | null => {
   if (!isUuidLike(input.sessionId) || !isUuidLike(input.turnId)) return null;
   const kind = String(input.kind) as SessionTurnOriginKind;
   if (!KINDS.includes(kind)) return null;
-  return { sessionId: input.sessionId as string, turnId: input.turnId as string, kind };
+  const source = normalizeRequestSource({ spaceId: input.spaceId, toolCallId: input.toolCallId });
+  return {
+    ...(source?.spaceId ? { spaceId: source.spaceId } : {}),
+    sessionId: input.sessionId as string,
+    turnId: input.turnId as string,
+    kind,
+    ...(source?.toolCallId ? { toolCallId: source.toolCallId } : {}),
+  };
 };
 
 /** Deduplicates by child Turn, so a retried request cannot render one twice. */

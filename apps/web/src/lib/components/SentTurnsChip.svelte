@@ -14,7 +14,7 @@ const label = $derived(
 );
 </script>
 
-<span class="inline-flex shrink-0 items-center gap-1.5">
+<span class="inline-flex shrink-0 items-center gap-1.5 text-[13px]">
 	<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70"></span>
 	<span class="text-brand/80">{label}</span>
 </span>
