@@ -168,7 +168,7 @@ test("history records before/after and restores an earlier version", async () =>
 		opacity: 1,
 		style: {},
 		type: "text",
-		props: { text: "two", fontSize: 24, fontWeight: 500, font: "sans", align: "left", lineHeight: 1.3333333333333333, reveal: 1 },
+		props: { text: "two", fontSize: 24, fontWeight: 500, font: "sans", align: "left", lineHeight: 1.3333333333333333, reveal: 1, caret: false },
 	});
 	await restoreBoardVersion(db, { spaceId, boardId, actorId, version: 1 });
 	const read = await readBoard(db, { spaceId, boardId });

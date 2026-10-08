@@ -159,7 +159,7 @@ export const BoardTextItemSchema = z
 				lineHeight: finite.min(0.5).max(4).default(4 / 3),
 				width: finite.positive().optional(),
 				reveal: ratio.default(1),
-			caret: z.boolean().default(false),
+				caret: z.boolean().default(false),
 			})
 			.strict()
 			.prefault({}),
