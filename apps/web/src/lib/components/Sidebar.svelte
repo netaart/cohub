@@ -124,7 +124,6 @@ import {
 	type SessionForkEdge,
 	type SessionTreeItem,
 } from "$lib/session-fork-tree";
-import { getSessionPreview } from "$lib/session-preview";
 import {
 	mergeSessionRecord,
 	mergeSessionRecords,
@@ -3198,7 +3197,7 @@ $effect(() => {
 				<div class="flex min-h-8 items-center rounded-[var(--sidebar-item-radius)] px-1.5 py-2 text-[12px] text-text-placeholder" style={itemIndentStyle}>{m.sidebar_no_items({}, { locale })}</div>
 			{/if}
 		{:else if orderedItems.length > 0}
-			<div style={itemIndentStyle}>
+			<div class="space-y-[1px]" style={itemIndentStyle}>
 				{#each orderedItems as item (item.id)}
 					{@const isActive = isLabelAssignmentActive(item)}
 					{@const itemDraggable = isDraggableLabelItem(item)}
@@ -3211,8 +3210,7 @@ $effect(() => {
 							{session}
 							title={sessionItem?.title ?? sessionTitle(session)}
 							href={buildPreferredSessionRoute(currentSpaceId!, session.id)}
-							density="compact"
-							subtitle={getSessionPreview(session, sessionItem?.title ?? sessionTitle(session))}
+							density="dense"
 							active={isActive}
 							{isMobile}
 							modelsCatalog={modelsCatalog ?? undefined}
@@ -3538,7 +3536,7 @@ $effect(() => {
 		{@render sidebarEmptyState(m.sidebar_no_chats({}, { locale }))}
 	{:else}
 		{@const chatItems = preview ? sidebarSessionItems.slice(0, sidebarFlyoutPreviewLimit) : sidebarSessionItems}
-		<div>
+		<div class="space-y-[2px]">
 			{#each chatItems as item (item.session.id)}
 				{@const session = item.session}
 				{@const isActive = activeSession?.id === session.id}
@@ -3546,8 +3544,7 @@ $effect(() => {
 					{session}
 					title={item.title}
 					href={buildPreferredSessionRoute(currentSpaceId!, session.id)}
-					density="compact"
-					subtitle={getSessionPreview(session, item.title)}
+					density="dense"
 					active={isActive}
 					{isMobile}
 					modelsCatalog={modelsCatalog ?? undefined}

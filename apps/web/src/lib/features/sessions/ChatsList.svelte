@@ -4,8 +4,8 @@ import { Plus } from "lucide-svelte";
 import { goto } from "$app/navigation";
 import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
 import {
+	type FixedListRowDensity,
 	LIST_ROW_AVATAR,
-	type ListRowDensity,
 } from "$lib/components/list-page/list-row";
 import SessionRow from "$lib/components/SessionRow.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
@@ -21,7 +21,6 @@ import {
 	buildSessionForkTree,
 	getSessionTreeTitle,
 } from "$lib/session-fork-tree";
-import { getSessionPreview } from "$lib/session-preview";
 import {
 	buildSpaceSessionRoute,
 	buildUserSessionRoute,
@@ -50,7 +49,9 @@ const LOAD_MORE_THRESHOLD_PX = 480;
 const locale = $derived(getLocale());
 const isPage = $derived(variant === "page");
 const scoped = $derived(Boolean(filter.space));
-const density = $derived<ListRowDensity>(isPage ? "comfortable" : "compact");
+const density = $derived<FixedListRowDensity>(
+	isPage ? "comfortable" : "compact",
+);
 const isDefaultFilter = $derived(filter.source === "web" && !filter.space);
 const sessions = $derived(view.sessions);
 const forks = $derived(view.forks);
@@ -81,11 +82,10 @@ function spaceName(session: UserSessionListItem) {
 	return session.space?.name?.trim() || m.spaces_default_name({}, { locale });
 }
 
-function subtitleFor(row: (typeof rows)[number], title: string) {
-	const preview = getSessionPreview(row.session, title);
-	if (scoped || row.fork) return preview;
-	const name = spaceName(row.session);
-	return preview ? `${name} · ${preview}` : name;
+function tooltipFor(row: (typeof rows)[number]) {
+	const space = scoped ? null : spaceName(row.session);
+	const fork = row.fork ? forkTooltip(row.fork.parentTitle) : null;
+	return [space, fork].filter(Boolean).join(" · ") || undefined;
 }
 
 function forkTooltip(parentTitle: string | null | undefined) {
@@ -170,13 +170,12 @@ function onScroll(event: Event) {
 						{title}
 						href={hrefFor(session)}
 						{density}
-						subtitle={subtitleFor(row, title)}
 						active={activeSessionId === session.id}
 						isMobile={isPage}
 						modelsCatalog={modelsCatalogStore.items ?? undefined}
 						showSourceBadge={!filter.source}
 						tree={row.tree}
-						tooltip={row.fork ? forkTooltip(row.fork.parentTitle) : undefined}
+						tooltip={tooltipFor(row)}
 						showInsert={false}
 						showRename={false}
 						onNavigate={open}

@@ -18,6 +18,10 @@ import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import {
+	getSessionPreview,
+	getSessionPreviewText,
+} from "$lib/session-preview";
 import { getSessionSidebarActivity } from "$lib/session-sidebar-activity";
 import { getSessionActivityAt } from "$lib/session-sort";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -34,7 +38,6 @@ const {
 	title,
 	href,
 	density,
-	subtitle = null,
 	active = false,
 	isMobile = false,
 	modelsCatalog,
@@ -65,7 +68,6 @@ const {
 	title: string;
 	href: string;
 	density: ListRowDensity;
-	subtitle?: string | null;
 	active?: boolean;
 	isMobile?: boolean;
 	modelsCatalog?: ModelCatalogItem[] | null;
@@ -106,6 +108,7 @@ type Participant = {
 const locale = $derived(getLocale());
 let renameInput = $state<HTMLInputElement | null>(null);
 
+const dense = $derived(density === "dense");
 const activity = $derived(
 	getSessionSidebarActivity(
 		sessionGenerationStore.get(session.id),
@@ -122,24 +125,8 @@ const isUnread = $derived(
 	unreadTracker.isUnread(session, session.lastMessageId),
 );
 const time = $derived(formatCompactAbsoluteTime(getSessionActivityAt(session)));
-const sourceName = $derived(
-	chatsSourceName(resolveSessionSourceKey(session.source), locale),
-);
-const hasMessages = $derived(
-	Boolean(session.latestMessageText || session.lastMessageAt),
-);
-const ownSubtitle = $derived(subtitle?.trim() || null);
-const fallbackSubtitle = $derived(
-	hasMessages ? sourceName : m.chats_row_no_messages({}, { locale }),
-);
-const sourceBadge = $derived(
-	showSourceBadge &&
-		!showActivity &&
-		ownSubtitle &&
-		resolveSessionSourceKey(session.source) !== "web"
-		? sourceName
-		: "",
-);
+const sourceKey = $derived(resolveSessionSourceKey(session.source));
+const sourceName = $derived(chatsSourceName(sourceKey, locale));
 const participants = $derived(
 	visibleParticipants(sessionParticipants(session), authStore.userUuid),
 );
@@ -150,6 +137,25 @@ const participantLabel = $derived(
 				.map((participant) => participant.name)
 				.join(", ")} +${participants.length - 3}`
 		: participants.map((participant) => participant.name).join(", "),
+);
+const hasMessages = $derived(
+	Boolean(session.latestMessageText || session.lastMessageAt),
+);
+// Web chats keep a preview that repeats the title; others fall back to the source.
+const preview = $derived(
+	dense
+		? null
+		: sourceKey === "web"
+			? getSessionPreviewText(session)
+			: getSessionPreview(session, title),
+);
+const showSourceLine = $derived(
+	!dense && !showActivity && !preview && hasMessages,
+);
+const sourceBadge = $derived(
+	showSourceBadge && !activity.active && !showSourceLine && sourceKey !== "web"
+		? sourceName
+		: "",
 );
 
 const guide = $derived<"column" | "indent" | null>(
@@ -163,7 +169,7 @@ const guide = $derived<"column" | "indent" | null>(
 );
 const indentPx = $derived(
 	guide === "indent" && tree
-		? Math.min(tree.depth, isMobile ? 1 : 3) * 12
+		? Math.min(tree.depth, isMobile ? 1 : 3) * (isMobile ? 10 : 12)
 		: 0,
 );
 const isFork = $derived(Boolean(tree && tree.depth > 0));
@@ -226,35 +232,41 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 	{/if}
 {/snippet}
 
+{#snippet unreadDot()}
+	{#if isUnread}
+		<span class="size-[0.45em] shrink-0 rounded-full bg-brand/70" role="img" aria-label={m.sidebar_unread({}, { locale })}></span>
+	{/if}
+{/snippet}
+
 {#snippet meta()}
-	<span class="inline-flex items-center gap-1.5 {actionCount ? 'group-hover/row:hidden group-focus-within/row:hidden' : ''}">{time}</span>
+	<span class="inline-flex items-center gap-1.5 {actionCount ? 'group-hover/row:hidden group-focus-within/row:hidden' : ''}">
+		{#if sourceBadge}
+			<span class="max-w-20 truncate rounded-[3px] bg-bg-hover-strong px-1.5 py-px text-[10px] font-medium leading-none text-text-tertiary" title={sourceBadge}>{sourceBadge}</span>
+		{/if}
+		{time}
+	</span>
+{/snippet}
+
+{#snippet people()}
+	<span class="inline-flex min-w-0 shrink-0 items-center gap-1.5 {dense ? 'max-w-[60%]' : 'max-w-[40%]'}" title={participantLabel}>
+		<span class="inline-flex shrink-0 -space-x-1.5 opacity-80">
+			{#each participants.slice(0, 3) as participant (participant.key)}
+				<UserAvatar name={participant.name} avatarUrl={participant.avatarUrl} size="xxs" class="border-bg-primary {dense ? 'h-3.5 w-3.5 text-[7px]' : ''}" />
+			{/each}
+		</span>
+		<span class="min-w-0 truncate">{participantLabel}</span>
+	</span>
 {/snippet}
 
 {#snippet secondLine()}
 	{#if showActivity}
-		<span class={activity.phase === "failed" ? "text-error-soft" : activity.active ? "text-text-tertiary" : "text-text-placeholder"}>
+		<span class={activity.phase === "failed" ? "text-error-soft" : activity.active ? "text-text-tertiary" : "text-text-placeholder"} title={activity.text ? `${activity.label} · ${activity.text}` : activity.label}>
 			{activity.label}{activity.text ? ` · ${activity.text}` : ""}{#if activity.active}<span class="session-activity-caret" aria-hidden="true">▍</span>{/if}
 		</span>
-	{:else if ownSubtitle}
-		<span title={ownSubtitle}>{ownSubtitle}</span>
+	{:else if preview}
+		<span title={preview}>{preview}</span>
 	{:else}
-		<span class="text-text-placeholder">{fallbackSubtitle}</span>
-	{/if}
-{/snippet}
-
-{#snippet status()}
-	{#if sourceBadge}
-		<span class="max-w-24 truncate rounded-[4px] bg-bg-hover-strong px-1.5 py-px text-[10px] font-medium leading-[14px] text-text-tertiary">{sourceBadge}</span>
-	{/if}
-	{#if participants.length > 0}
-		<span class="inline-flex shrink-0 -space-x-1.5" title={participantLabel}>
-			{#each participants.slice(0, 3) as participant (participant.key)}
-				<UserAvatar name={participant.name} avatarUrl={participant.avatarUrl} size="xxs" class="border-bg-primary" />
-			{/each}
-		</span>
-	{/if}
-	{#if isUnread}
-		<span class="h-2 w-2 shrink-0 rounded-full bg-brand" role="img" aria-label={m.sidebar_unread({}, { locale })}></span>
+		<span class="text-text-placeholder">{showSourceLine ? sourceName : m.chats_row_no_messages({}, { locale })}</span>
 	{/if}
 {/snippet}
 
@@ -264,7 +276,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 			bind:this={renameInput}
 			value={renameValue}
 			type="text"
-			class="min-w-0 flex-1 bg-transparent text-[14px] leading-tight text-text-primary outline-none"
+			class="min-w-0 flex-1 bg-transparent text-[length:var(--list-title-size)] leading-tight text-text-primary outline-none"
 			placeholder={m.sidebar_session_name({}, { locale })}
 			maxlength="80"
 			disabled={renameSaving}
@@ -316,7 +328,13 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		ondragstart={(event: DragEvent) => onDragStart?.(event, session, title)}
 		ondragend={onDragEnd}
 	>
-		<ListRowText {title} strong={isUnread} {meta} subtitle={secondLine} {status} />
+		<ListRowText
+			{title}
+			badge={unreadDot}
+			{meta}
+			lead={participants.length > 0 ? people : undefined}
+			subtitle={dense && !showActivity ? undefined : secondLine}
+		/>
 		{#snippet trailing()}
 			{#if actionCount > 0}
 				<span class="pointer-events-none absolute right-1.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100">
@@ -383,27 +401,27 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 	}
 
 	:global(.session-row--indent) {
-		padding-left: calc(var(--list-row-pad-x) + 8px + var(--fork-indent, 0px));
+		padding-left: calc(var(--list-row-pad-x) + var(--fork-indent, 0px));
 	}
 
 	:global(.session-row--indent)::before {
 		content: "";
-		left: calc(var(--list-row-pad-x) + var(--fork-indent, 0px) - 4px);
-		top: 0;
-		bottom: 0;
+		left: calc(var(--list-row-pad-x) + var(--fork-indent, 0px) - 7px);
+		top: 6px;
+		bottom: 6px;
 		width: 2px;
 	}
 
 	:global(.session-row--indent)::after {
 		content: "";
-		left: calc(var(--list-row-pad-x) + var(--fork-indent, 0px) - 4px);
+		left: calc(var(--list-row-pad-x) + var(--fork-indent, 0px) - 7px);
 		top: calc(50% - 1px);
-		width: 8px;
+		width: 7px;
 		height: 2px;
 	}
 
 	:global(.session-row--last)::before {
-		bottom: calc(50% - 1px);
+		bottom: 50%;
 	}
 
 	.session-activity-caret {

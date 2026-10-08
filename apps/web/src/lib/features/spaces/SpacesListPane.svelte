@@ -5,9 +5,9 @@ import ListRow from "$lib/components/list-page/ListRow.svelte";
 import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
 import ListRowText from "$lib/components/list-page/ListRowText.svelte";
 import {
+	type FixedListRowDensity,
 	LIST_ROW_AVATAR,
 	LIST_ROW_HEIGHT,
-	type ListRowDensity,
 } from "$lib/components/list-page/list-row";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import type { SpacesFilter } from "$lib/features/spaces/spaces-filter";
@@ -49,7 +49,9 @@ const OVERSCAN_ROWS = 6;
 const LOAD_MORE_ROWS = 8;
 
 const locale = $derived(getLocale());
-const density = $derived<ListRowDensity>(compact ? "comfortable" : "compact");
+const density = $derived<FixedListRowDensity>(
+	compact ? "comfortable" : "compact",
+);
 const rowHeight = $derived(LIST_ROW_HEIGHT[density]);
 const selecting = $derived(selected.size > 0);
 const rowMenus = $derived(!compact && onMenu !== undefined);

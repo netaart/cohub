@@ -21,20 +21,36 @@ function normalize(value: string) {
 	return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function plainLatestMessage(session: SessionRecord, limit: number) {
+	const raw = session.latestMessageText;
+	return raw ? stripPreviewMarkdown(raw.slice(0, limit * 4)) || null : null;
+}
+
+function truncate(text: string, limit: number) {
+	if (text.length <= limit) return text;
+	const head = text
+		.slice(0, Math.max(0, limit - 1))
+		.replace(/[\uD800-\uDBFF]$/, "");
+	return `${head.trimEnd()}…`;
+}
+
+export function getSessionPreviewText(
+	session: SessionRecord,
+	limit = 96,
+): string | null {
+	const text = plainLatestMessage(session, limit);
+	return text ? truncate(text, limit) : null;
+}
+
 export function getSessionPreview(
 	session: SessionRecord,
 	shownTitle: string | null = session.title,
 	limit = 96,
 ): string | null {
 	const title = shownTitle?.trim();
-	const raw = session.latestMessageText;
-	if (!title || !raw) return null;
-	const text = stripPreviewMarkdown(raw.slice(0, limit * 4));
+	if (!title) return null;
+	const text = plainLatestMessage(session, limit);
+	if (!text) return null;
 	const shown = normalize(stripPreviewMarkdown(title));
-	if (!text || normalize(text).startsWith(shown)) return null;
-	if (text.length <= limit) return text;
-	const head = text
-		.slice(0, Math.max(0, limit - 1))
-		.replace(/[\uD800-\uDBFF]$/, "");
-	return `${head.trimEnd()}…`;
+	return normalize(text).startsWith(shown) ? null : truncate(text, limit);
 }
