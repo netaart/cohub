@@ -15,6 +15,7 @@ import {
 	failGeneration,
 	interruptGeneration,
 } from "./session-generation-controller";
+import { generationTurnChanged } from "./session-generation-state";
 
 type HandledGenerationRealtimeEffect = {
 	handled: true;
@@ -609,7 +610,11 @@ export function applyGenerationStreamEvent(
 			event.turn.status === "merged" ||
 			event.turn.status === "cancelled"
 		) {
-			interruptGeneration(sessionId);
+			// Only the live Turn's own finalize interrupts it.
+			const current = sessionGenerationStore.get(sessionId);
+			if (!generationTurnChanged(current?.turnId, event.turn.id)) {
+				interruptGeneration(sessionId);
+			}
 			return handledEffect({
 				shouldScroll: false,
 				shouldReconcile: true,

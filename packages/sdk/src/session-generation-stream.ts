@@ -412,12 +412,19 @@ function normalizeSnapshotIntermediateMessages(
   );
 }
 
+type StreamSnapshot = NonNullable<SessionTurnStreamSnapshotResponse["snapshot"]>;
+
+type SnapshotRecovery = { events: WebsocketEventPayload[] };
+
 export class SessionGenerationStreamClient {
   private readonly reducer = new SessionPatchReducer();
   private messageId: string | null = null;
   private messageOrdinal: number | null = null;
   private intermediateMessages: GenerationStreamIntermediateMessage[] = [];
   private patchState: SessionPatchState | null = null;
+  private recovery: SnapshotRecovery | null = null;
+  private resyncedMessageKey: string | null = null;
+  private disposed = false;
 
   constructor(
     private readonly websocketClient: WebsocketClient | null,
@@ -440,83 +447,119 @@ export class SessionGenerationStreamClient {
       this.sessionId,
       this.fetchStreamSnapshot,
     );
-    const shouldRecover =
-      options.recover === true || options.initialSnapshot !== undefined;
-    let recovering = shouldRecover;
-    let disposed = false;
-    let recoveryAborted = false;
-    let bufferedEvents: WebsocketEventPayload[] = [];
-    let bufferedEventsReplayed = false;
     const releaseRoom = this.websocketClient.retainRooms([getRealtimeSpaceRoom(this.spaceId)]);
     const unsubscribe = this.websocketClient.on("event", (event) => {
       if (event.spaceId !== this.spaceId || event.sessionId !== this.sessionId) {
         return;
       }
-      if (recovering && isGenerationRealtimeEvent(event)) {
-        bufferedEvents.push(event);
-        if (bufferedEvents.length > SNAPSHOT_RECOVERY_MAX_BUFFERED_EVENTS) {
-          recoveryAborted = true;
-          recovering = false;
-          stream.replayBufferedEvents(bufferedEvents, handlers);
-          bufferedEvents = [];
-          bufferedEventsReplayed = true;
-        }
-        return;
-      }
-      stream.handleEvent(event, handlers);
+      stream.receive(event, handlers);
     });
 
-    if (shouldRecover) {
-      void stream
-        .recoverFromSnapshot(
-          handlers,
-          options,
-          () => !recoveryAborted && !disposed,
-        )
-        .finally(() => {
-          if (disposed || bufferedEventsReplayed) return;
-          recovering = false;
-          stream.replayBufferedEvents(bufferedEvents, handlers);
-          bufferedEventsReplayed = true;
-        });
+    const { initialSnapshot } = options;
+    if (initialSnapshot !== undefined) {
+      void stream.recover(handlers, async () => initialSnapshot, options);
+    } else if (options.recover === true) {
+      void stream.recover(handlers, () => stream.loadSnapshot(), options);
     }
 
     return () => {
-      disposed = true;
+      stream.dispose();
       unsubscribe();
       releaseRoom();
     };
   }
 
-  private async recoverFromSnapshot(
+  private receive(
+    event: WebsocketEventPayload,
     handlers: GenerationStreamSubscriptionHandlers,
-    options: GenerationStreamSubscribeOptions,
-    shouldContinue: () => boolean,
   ) {
-    const snapshot =
-      options.initialSnapshot !== undefined
-        ? options.initialSnapshot
-        : options.recover === true && this.fetchStreamSnapshot
-          ? (
-              await withTimeout(
-                this.fetchStreamSnapshot(),
-                SNAPSHOT_RECOVERY_TIMEOUT_MS,
-              ).catch((error) => {
-                console.warn(
-                  "[SessionGenerationStreamClient] Failed to recover stream snapshot:",
-                  error,
-                );
-                return { snapshot: null };
-              })
-            ).snapshot
-          : null;
-    if (!shouldContinue()) return;
-    if (!snapshot) return;
-    this.seedFromSnapshot(snapshot, handlers, options);
+    if (this.disposed) return;
+    const recovery = this.recovery;
+    if (recovery && isGenerationRealtimeEvent(event)) {
+      recovery.events.push(event);
+      if (recovery.events.length > SNAPSHOT_RECOVERY_MAX_BUFFERED_EVENTS) {
+        this.finishRecovery(recovery, handlers);
+      }
+      return;
+    }
+    this.handleEvent(event, handlers);
+  }
+
+  private dispose() {
+    this.disposed = true;
+    this.recovery = null;
+  }
+
+  private async loadSnapshot(): Promise<StreamSnapshot | null> {
+    if (!this.fetchStreamSnapshot) return null;
+    try {
+      const response = await withTimeout(this.fetchStreamSnapshot(), SNAPSHOT_RECOVERY_TIMEOUT_MS);
+      return response.snapshot;
+    } catch (error) {
+      console.warn("[SessionGenerationStreamClient] Failed to recover stream snapshot:", error);
+      return null;
+    }
+  }
+
+  private async recover(
+    handlers: GenerationStreamSubscriptionHandlers,
+    load: () => Promise<StreamSnapshot | null>,
+    options?: GenerationStreamSubscribeOptions,
+    resync?: { turnId: string | null; event: WebsocketEventPayload },
+  ) {
+    const recovery: SnapshotRecovery = { events: resync ? [resync.event] : [] };
+    this.recovery = recovery;
+    const snapshot = await load().catch(() => null);
+    if (this.recovery !== recovery) return;
+    const expectedTurnId = resync?.turnId;
+    if (snapshot && (!expectedTurnId || !snapshot.turnId || snapshot.turnId === expectedTurnId)) {
+      this.seedFromSnapshot(snapshot, handlers, options);
+    }
+    this.finishRecovery(recovery, handlers);
+  }
+
+  private finishRecovery(
+    recovery: SnapshotRecovery,
+    handlers: GenerationStreamSubscriptionHandlers,
+  ) {
+    if (this.recovery !== recovery) return;
+    this.recovery = null;
+    this.replayBufferedEvents(recovery.events, handlers);
+  }
+
+  private shouldResync(turnId: string | null, messageId: string | null) {
+    if (!this.fetchStreamSnapshot || this.recovery) return false;
+    const key = `${turnId ?? ""}:${messageId ?? ""}`;
+    if (key === this.resyncedMessageKey) return false;
+    this.resyncedMessageKey = key;
+    return true;
+  }
+
+  private liveState() {
+    return this.reducer.get({ spaceId: this.spaceId, sessionId: this.sessionId });
+  }
+
+  private isForeignTurn(turnId: string | null | undefined) {
+    if (!turnId) return false;
+    const live = this.liveState();
+    return (
+      (live.status === "streaming" || live.status === "pending") &&
+      live.turnId != null &&
+      live.turnId !== turnId
+    );
+  }
+
+  private isLiveMessage(message: MessageRecord) {
+    if (this.messageId == null && this.messageOrdinal == null) return true;
+    const meta = message.meta ?? {};
+    if (typeof meta.messageOrdinal === "number" && this.messageOrdinal != null) {
+      return meta.messageOrdinal === this.messageOrdinal;
+    }
+    return typeof meta.streamMessageId === "string" && meta.streamMessageId === this.messageId;
   }
 
   private seedFromSnapshot(
-    snapshot: NonNullable<SessionTurnStreamSnapshotResponse["snapshot"]>,
+    snapshot: StreamSnapshot,
     handlers: GenerationStreamSubscriptionHandlers,
     options?: GenerationStreamSubscribeOptions,
   ) {
@@ -588,7 +631,7 @@ export class SessionGenerationStreamClient {
       ) {
         continue;
       }
-      this.handleEvent(event, handlers);
+      this.receive(event, handlers);
     }
   }
 
@@ -754,6 +797,15 @@ export class SessionGenerationStreamClient {
       anchorUserMessageId,
     };
     const result = this.reducer.applyPatch(input);
+    if (
+      !result.applied &&
+      result.reason === "version_mismatch" &&
+      this.shouldResync(turnId, messageId)
+    ) {
+      // The snapshot is cached before a patch is published, so it covers this one.
+      void this.recover(handlers, () => this.loadSnapshot(), undefined, { turnId, event });
+      return;
+    }
     this.handleAppliedState(
       handlers,
       "patch",
@@ -771,30 +823,21 @@ export class SessionGenerationStreamClient {
     const message = event.payload.message;
     if (!isRecord(message)) return;
     const commit = parseAssistantMessageCommit(message as MessageRecord);
-
-    if (commit.kind === "intermediate") {
-      const intermediate = messageRecordToIntermediate(commit.message);
-      if (intermediate) {
-        this.addIntermediateMessage(intermediate);
+    const turnId = getTurnIdFromMessage(commit.message);
+    const key = { spaceId: this.spaceId, sessionId: this.sessionId, turnId };
+    if (commit.kind !== "ignored" && !this.isForeignTurn(turnId)) {
+      if (commit.kind === "intermediate") {
+        const intermediate = messageRecordToIntermediate(commit.message);
+        if (intermediate) this.addIntermediateMessage(intermediate);
+        if (this.isLiveMessage(commit.message)) {
+          this.reducer.start({ ...key, turnId: turnId ?? this.liveState().turnId });
+          this.resetCurrentMessage();
+        }
+      } else {
+        if (commit.kind === "final") this.reducer.complete(key);
+        else this.reducer.fail(key);
+        this.resetCurrentMessage();
       }
-      this.reducer.reset({ spaceId: this.spaceId, sessionId: this.sessionId });
-      this.resetCurrentMessage();
-    }
-    if (commit.kind === "final") {
-      this.reducer.complete({
-        spaceId: this.spaceId,
-        sessionId: this.sessionId,
-        turnId: getTurnIdFromMessage(commit.message),
-      });
-      this.resetCurrentMessage();
-    }
-    if (commit.kind === "error") {
-      this.reducer.fail({
-        spaceId: this.spaceId,
-        sessionId: this.sessionId,
-        turnId: getTurnIdFromMessage(commit.message),
-      });
-      this.resetCurrentMessage();
     }
 
     this.emit(handlers, {
@@ -811,20 +854,12 @@ export class SessionGenerationStreamClient {
     const turn = event.payload.turn;
     if (!isRecord(turn)) return;
     const typedTurn = turn as SessionTurnRecord;
-    if (typedTurn.status === "interrupted") {
-      this.reducer.interrupt({
-        spaceId: this.spaceId,
-        sessionId: this.sessionId,
-        turnId: typedTurn.id,
-      });
-    } else {
-      this.reducer.complete({
-        spaceId: this.spaceId,
-        sessionId: this.sessionId,
-        turnId: typedTurn.id,
-      });
+    if (!this.isForeignTurn(typedTurn.id)) {
+      const key = { spaceId: this.spaceId, sessionId: this.sessionId, turnId: typedTurn.id };
+      if (typedTurn.status === "interrupted") this.reducer.interrupt(key);
+      else this.reducer.complete(key);
+      this.resetCurrentMessage();
     }
-    this.resetCurrentMessage();
     this.emit(handlers, {
       type: "finalized",
       turn: typedTurn,
