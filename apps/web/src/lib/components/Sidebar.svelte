@@ -114,6 +114,7 @@ import {
 	resolveAppArea,
 } from "$lib/mobile-nav";
 import { m } from "$lib/paraglide/messages.js";
+import { createRefreshCoordinator } from "$lib/refresh-coordinator";
 import { sdk } from "$lib/sdk";
 import {
 	buildSessionForkTree,
@@ -280,6 +281,23 @@ let expandedLabelIdsBySpace = $state<Record<string, Set<string>>>({});
 let loadingLabelIdsBySpace = $state<Record<string, Set<string>>>({});
 /** Per space+label load tokens so stale finally blocks cannot clear a newer load. */
 const labelItemsLoadTokens = new Map<string, number>();
+const labelItemsRefresh = createRefreshCoordinator<{
+	spaceId: string;
+	labelId: string;
+	labelRef: string;
+}>({
+	keyOf: ({ spaceId, labelId }) => labelItemsLoadKey(spaceId, labelId),
+	isCurrent: ({ spaceId }) => spaceId === currentSpaceId,
+	refresh: async ({ spaceId, labelId, labelRef }) => {
+		const result = await fetchLabelItemsFirstPageFresh(
+			spaceId,
+			labelId,
+			labelRef,
+		);
+		if (spaceId === currentSpaceId)
+			applyLabelItemsPage(spaceId, labelId, result);
+	},
+});
 /** Hard stop so a hung await never leaves label rows on Loading… forever. */
 const LABEL_ITEMS_LOADING_WATCHDOG_MS = 8_000;
 const labelItemsLoadingWatchdogs = new Map<
@@ -449,19 +467,10 @@ const sessionsById = $derived.by(
 	() => new Map(sessions.map((session) => [session.id, session])),
 );
 const labelSessionsById = $derived.by(() => {
-	const byId = new Map<string, SessionRecord>();
-	const preferRicher = (
-		existing: SessionRecord | undefined,
-		incoming: SessionRecord,
-	) => {
-		if (!existing) return incoming;
-		if (sessionIsRicher(incoming, existing)) return incoming;
-		if (sessionIsRicher(existing, incoming)) return existing;
-		return mergeSessionRecord(existing, incoming);
-	};
-	for (const session of sessions) byId.set(session.id, session);
-	for (const session of Object.values(currentLabelSessionDetails)) {
-		byId.set(session.id, preferRicher(byId.get(session.id), session));
+	const byId = new Map(sessionsById);
+	for (const detail of Object.values(currentLabelSessionDetails)) {
+		const listed = sessionsById.get(detail.id);
+		byId.set(detail.id, listed ? mergeSessionRecord(detail, listed) : detail);
 	}
 	return byId;
 });
@@ -1596,13 +1605,10 @@ async function loadLabelItems(
 			return;
 		}
 
-		const result = await fetchLabelItemsFirstPageFresh(
-			spaceId,
-			labelId,
-			labelRef,
+		await labelItemsRefresh.refresh(
+			{ spaceId, labelId, labelRef },
+			{ ensureFresh: force },
 		);
-		if (spaceId !== currentSpaceId) return;
-		applyLabelItemsPage(spaceId, labelId, result);
 	} catch (error) {
 		console.warn("[sidebar] Failed to load label items", {
 			spaceId,
@@ -1659,11 +1665,20 @@ function didSessionActivityChange(
 	);
 }
 
-function refreshExpandedSessionActivityLabels(spaceId: string) {
+function refreshExpandedSessionActivityLabels(
+	spaceId: string,
+	sessionIds: string[],
+) {
 	const expanded = expandedLabelIdsBySpace[spaceId];
 	if (!expanded || spaceId !== currentSpaceId) return;
 	for (const label of flattenLabels(labels)) {
 		if (!expanded.has(label.id) || !isSessionActivityLabel(label)) continue;
+		const listed = new Set(
+			(labelItemsBySpace[spaceId]?.[label.id] ?? [])
+				.filter((item) => item.resourceType === "session")
+				.map((item) => item.resourceRef),
+		);
+		if (sessionIds.every((sessionId) => listed.has(sessionId))) continue;
 		void loadLabelItems(label.id, { force: true });
 	}
 }
@@ -2876,7 +2891,7 @@ onMount(() => {
 			);
 			const shouldPreserveLoadedPageInfo =
 				sessions.length > nextSessions.length;
-			let shouldRefreshActivityLabels = false;
+			const activeSessionIds: string[] = [];
 			sessions = mergeSessionSnapshotForDisplay(sessions, nextSessions);
 			for (const session of nextSessions) {
 				const previous = previousSessionsById.get(session.id);
@@ -2884,12 +2899,11 @@ onMount(() => {
 					optimisticPrependWebAppLabelSession(spaceId, session);
 					continue;
 				}
-				if (didSessionActivityChange(previous, session)) {
-					shouldRefreshActivityLabels = true;
-				}
+				if (didSessionActivityChange(previous, session))
+					activeSessionIds.push(session.id);
 			}
-			if (shouldRefreshActivityLabels)
-				refreshExpandedSessionActivityLabels(spaceId);
+			if (activeSessionIds.length > 0)
+				refreshExpandedSessionActivityLabels(spaceId, activeSessionIds);
 			applySessionForks(forks);
 			if (pageInfo && !shouldPreserveLoadedPageInfo)
 				sessionsPageInfo = pageInfo;

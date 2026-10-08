@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, gte, inArray, isNull, max, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
-import type { SessionActiveTurn } from "@cohub/protocol/model";
+import { sessionTurnIsActive, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
 import { getRealtimeSpaceRoom, type RealtimeRoom, type SessionUpdatedEvent } from "@cohub/protocol/realtime";
-import { ACTIVE_TURN_STATUSES, activeTurnFromRow } from "./active-turn.js";
+import { type SessionActiveTurnState, sessionActiveTurnState } from "./active-turn.js";
 import { resolveSessionAudienceRooms } from "./session-audience.js";
 import { readSessionParticipantUserUuids } from "./session-meta.js";
 import { refreshSessionStats } from "./stats.js";
@@ -15,21 +14,40 @@ export type SessionSnapshotEvent = SessionUpdatedEvent & { rooms: RealtimeRoom[]
 
 const SNAPSHOT_FIELDS = ["title", "latestMessageText", "lastMessageAt", "lastMessageId", "participantUserUuids", "activeTurn", "activeTurnSequence", "stats"];
 
-export async function readSessionActiveTurn(db: Database, sessionId: string): Promise<{ activeTurn: SessionActiveTurn | null; activeTurnSequence?: number }> {
-  const [[active], [latest]] = await Promise.all([
-    db.select({
-      id: sessionTurns.id, sequence: sessionTurns.sequence, status: sessionTurns.status,
-      provider: sessionTurns.provider, model: sessionTurns.model, startedAt: sessionTurns.startedAt,
+export async function readSessionActiveTurns(db: Database, sessionIds: string[]): Promise<Map<string, SessionActiveTurnState>> {
+  const ids = [...new Set(sessionIds)];
+  if (ids.length === 0) return new Map();
+  const latestTurn = db.select({ sequence: sessionTurns.sequence }).from(sessionTurns)
+    .where(eq(sessionTurns.sessionId, spaceSessions.id))
+    .orderBy(desc(sessionTurns.sequence))
+    .limit(1)
+    .as("latest_turn");
+  const [activeRows, latestRows] = await Promise.all([
+    db.selectDistinctOn([sessionTurns.sessionId], {
+      sessionId: sessionTurns.sessionId,
+      id: sessionTurns.id,
+      sequence: sessionTurns.sequence,
+      status: sessionTurns.status,
+      provider: sessionTurns.provider,
+      model: sessionTurns.model,
+      startedAt: sessionTurns.startedAt,
       meta: sql<unknown>`jsonb_build_object('userMessageId', ${sessionTurns.meta}->'userMessageId')`,
     }).from(sessionTurns)
-      .where(and(eq(sessionTurns.sessionId, sessionId), inArray(sessionTurns.status, [...ACTIVE_TURN_STATUSES])))
-      .orderBy(desc(sessionTurns.sequence))
-      .limit(1),
-    db.select({ sequence: max(sessionTurns.sequence) }).from(sessionTurns).where(eq(sessionTurns.sessionId, sessionId)),
+      .where(and(inArray(sessionTurns.sessionId, ids), sessionTurnIsActive(sessionTurns.status)))
+      .orderBy(sessionTurns.sessionId, desc(sessionTurns.sequence)),
+    db.select({ sessionId: spaceSessions.id, sequence: latestTurn.sequence }).from(spaceSessions)
+      .leftJoinLateral(latestTurn, sql`true`)
+      .where(inArray(spaceSessions.id, ids)),
   ]);
-  const activeTurn = activeTurnFromRow(active ?? null);
-  const activeTurnSequence = activeTurn?.sequence ?? latest?.sequence ?? null;
-  return { activeTurn, ...(activeTurnSequence == null ? {} : { activeTurnSequence }) };
+  const activeBySessionId = new Map(activeRows.map((row) => [row.sessionId, row]));
+  return new Map(latestRows.map((row) => [
+    row.sessionId,
+    sessionActiveTurnState(activeBySessionId.get(row.sessionId) ?? null, row.sequence),
+  ]));
+}
+
+export async function readSessionActiveTurn(db: Database, sessionId: string): Promise<SessionActiveTurnState> {
+  return (await readSessionActiveTurns(db, [sessionId])).get(sessionId) ?? { activeTurn: null };
 }
 
 /** Refreshes stats and publishes the Session's complete record, plus descendants'. Call after commit. */

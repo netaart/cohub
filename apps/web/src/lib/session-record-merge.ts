@@ -50,6 +50,24 @@ function isOlderSnapshot(
 	return Date.parse(incoming.updatedAt) < Date.parse(existing.updatedAt);
 }
 
+const HYDRATED_PROFILE_KEYS = ["userProfile", "participantProfiles"] as const;
+type HydratedProfileKey = (typeof HYDRATED_PROFILE_KEYS)[number];
+
+function settleHydratedProfile<K extends HydratedProfileKey>(
+	result: SessionRecord,
+	key: K,
+	known: SessionRecord[K],
+	received: SessionRecord[K],
+	receivedIsCurrent: boolean,
+) {
+	const value =
+		received !== undefined && (receivedIsCurrent || known === undefined)
+			? received
+			: known;
+	if (value === undefined) delete result[key];
+	else result[key] = value;
+}
+
 /**
  * Merge a possibly partial realtime session patch into a cached full session.
  *
@@ -75,8 +93,11 @@ export function mergeSessionRecord(
 			: previous;
 	const meta = hasOwn(incoming, "meta") ? incoming.meta : existing?.meta;
 	const activeTurnAccepted = shouldApplyActiveTurn(existing, incoming);
+	const incomingIsOlder = Boolean(
+		existing && isOlderSnapshot(incoming, existing),
+	);
 	const result: SessionRecord & { stats?: unknown } =
-		existing && isOlderSnapshot(incoming, existing)
+		existing && incomingIsOlder
 			? {
 					...existing,
 					meta: stats ? { ...existing.meta, stats } : existing.meta,
@@ -91,15 +112,9 @@ export function mergeSessionRecord(
 					...existing,
 					...incoming,
 					meta: stats ? { ...meta, stats } : (meta ?? null),
-					userProfile: hasOwn(incoming, "userProfile")
-						? incoming.userProfile
-						: existing?.userProfile,
 					participantUserUuids: hasOwn(incoming, "participantUserUuids")
 						? incoming.participantUserUuids
 						: existing?.participantUserUuids,
-					participantProfiles: hasOwn(incoming, "participantProfiles")
-						? incoming.participantProfiles
-						: existing?.participantProfiles,
 					...(hasOwn(incoming, "activeTurn") && !activeTurnAccepted
 						? {
 								activeTurn: existing?.activeTurn,
@@ -107,6 +122,15 @@ export function mergeSessionRecord(
 							}
 						: {}),
 				};
+	for (const key of HYDRATED_PROFILE_KEYS) {
+		settleHydratedProfile(
+			result,
+			key,
+			existing?.[key],
+			incoming[key],
+			!incomingIsOlder,
+		);
+	}
 	// The wire-only field must not survive in canonical/cache records: they can
 	// pass through another merge before being stored or applied to the workspace.
 	result.meta = sanitizeSessionStatsMeta(result.meta);

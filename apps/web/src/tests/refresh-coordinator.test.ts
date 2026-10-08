@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createCatalogRefreshCoordinator } from "../lib/features/space/modules/catalog-refresh-coordinator.ts";
+import { createRefreshCoordinator } from "../lib/refresh-coordinator.ts";
 
 function deferred() {
 	let resolve = () => {};
@@ -17,8 +17,8 @@ test("ensureFresh coalesces concurrent changes into one trailing refresh", {
 	let calls = 0;
 	const gates = [deferred(), deferred()] as const;
 	const secondStarted = deferred();
-	const coordinator = createCatalogRefreshCoordinator({
-		getSpaceId: () => activeSpaceId,
+	const coordinator = createRefreshCoordinator<string>({
+		isCurrent: (spaceId) => spaceId === activeSpaceId,
 		refresh: async () => {
 			const call = calls++;
 			if (call === 1) secondStarted.resolve();
@@ -46,8 +46,8 @@ test("ensureFresh does not refresh a space after navigation", async () => {
 	let activeSpaceId = "space-1";
 	let calls = 0;
 	const gate = deferred();
-	const coordinator = createCatalogRefreshCoordinator({
-		getSpaceId: () => activeSpaceId,
+	const coordinator = createRefreshCoordinator<string>({
+		isCurrent: (spaceId) => spaceId === activeSpaceId,
 		refresh: async () => {
 			calls += 1;
 			await gate.promise;

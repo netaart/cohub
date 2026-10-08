@@ -3,7 +3,6 @@ import { COHUB_AGENT_TURNS_QUEUE, createBullmqQueue, defaultJobRetention } from 
 import { getCurrentRequestId, getOrCreateRequestId } from "@cohub/infra/tracing";
 import { injectTrace } from "@cohub/infra/tracing/propagator";
 import { createSessionServices, HarnessUnavailableError, ModelUnavailableError } from "@cohub/core/sessions";
-import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
 import { createSandboxLifecycleController, getSandboxPromptRecoveryReason } from "@cohub/sandbox-controller";
 import { isLocalHarness } from "@cohub/protocol";
 import { db } from "./db/index.js";
@@ -12,9 +11,9 @@ import { redisCommandClient } from "./redis.js";
 import { expandPromptTemplate, type LoadPromptTemplatesOptions, type ExpandedPromptTemplate } from "./prompt-templates.js";
 import { expandSkillCommand, type ExpandedSkill, type LoadSkillsOptions } from "./skills.js";
 import { ensureSpaceSandbox, recoverSpaceSandbox } from "./space-sandboxes.js";
-import { getSpaceSessionById, getSpaceById } from "./space-sessions.js";
+import { assignSessionUserLabelsAndDispatch, getSpaceSessionById, getSpaceById } from "./space-sessions.js";
 import { touchSpaceActivity } from "./space-activity.js";
-import { dispatchLabelAssignmentsUpdated, dispatchSessionUpdated, dispatchTurnCreated } from "./realtime-events.js";
+import { dispatchSessionUpdated, dispatchTurnCreated } from "./realtime-events.js";
 import { dispatchTurnUpdated } from "./session-output.js";
 import { hydrateTurnAuthorProfiles } from "./session-turns.js";
 import { createLogger } from "@cohub/infra/logging";
@@ -128,16 +127,7 @@ export function getSessionDomainServices(input?: {
       });
       await dispatchSessionUpdated({ session, changed });
     },
-    onSessionParticipantsUpdated: async ({ spaceId, sessionId, userUuids }) => {
-      const affectedLabelIds = await assignSessionParticipantSystemLabels({ db, spaceId, sessionId, userUuids });
-      await dispatchLabelAssignmentsUpdated({
-        spaceId,
-        resourceType: "session",
-        resourceRef: sessionId,
-        sessionId,
-        affectedLabelIds,
-      });
-    },
+    onSessionParticipantsUpdated: assignSessionUserLabelsAndDispatch,
     agentTurnQueue: {
       enqueue: (job) => agentTurnQueue.add(AGENT_TURN_JOB_NAME, {
         spaceId: job.spaceId,

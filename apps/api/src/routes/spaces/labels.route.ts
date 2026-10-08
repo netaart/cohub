@@ -9,7 +9,7 @@ import { filterSessionsByPermission, getSpaceMemberRole, hasPermission } from ".
 import { dispatchLabelAssignmentsUpdated } from "../../realtime-events.js";
 import { listSessionForksForSessions } from "../../session-forks.js";
 import { redactSessionForksForViewer } from "../../session-fork-visibility.js";
-import { hydrateSessionParticipantProfiles } from "../../space-sessions.js";
+import { attachActiveTurns, hydrateSessionParticipantProfiles } from "../../space-sessions.js";
 
 const router = new Hono();
 const SCOPE_TYPE = "space";
@@ -672,26 +672,13 @@ router.get("/items", async (c) => {
   const decodedCursor = decodeItemsCursor(c.req.query("cursor"));
   if (!decodedCursor.ok) return c.json({ message: "invalid cursor" }, 400);
   const cursor = decodedCursor.cursor;
-  if (label.source === "system") {
-    if (cursor?.type === "manual") return c.json({ message: "invalid cursor" }, 400);
-    const page = await listVisibleSystemLabelItems({
-      spaceId: access.spaceId,
-      user: access.user,
-      labelId: label.id,
-      limit,
-      cursor: cursor?.type === "sessionActivity" ? cursor : null,
-    });
-    return c.json(page);
-  }
-  if (cursor?.type === "sessionActivity") return c.json({ message: "invalid cursor" }, 400);
-  const page = await listVisibleManualLabelItems({
-    spaceId: access.spaceId,
-    user: access.user,
-    labelId: label.id,
-    limit,
-    cursor: cursor?.type === "manual" ? cursor : null,
-  });
-  return c.json(page);
+  const system = label.source === "system";
+  if (cursor && cursor.type !== (system ? "sessionActivity" : "manual")) return c.json({ message: "invalid cursor" }, 400);
+  const input = { spaceId: access.spaceId, user: access.user, labelId: label.id, limit };
+  const page = system
+    ? await listVisibleSystemLabelItems({ ...input, cursor: cursor?.type === "sessionActivity" ? cursor : null })
+    : await listVisibleManualLabelItems({ ...input, cursor: cursor?.type === "manual" ? cursor : null });
+  return c.json({ ...page, sessions: await attachActiveTurns(page.sessions) });
 });
 
 router.post("/attach", async (c) => {

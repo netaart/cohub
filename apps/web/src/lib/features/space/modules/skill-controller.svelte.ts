@@ -1,17 +1,17 @@
 import type { SkillCatalogEntry } from "@neta-art/cohub";
+import {
+	createRefreshCoordinator,
+	type RefreshOptions,
+} from "$lib/refresh-coordinator";
 import { sdk } from "$lib/sdk";
 import { readCachedSkills, writeCachedSkills } from "$lib/skill-cache";
-import {
-	type CatalogRefreshOptions,
-	createCatalogRefreshCoordinator,
-} from "./catalog-refresh-coordinator";
 
 export function createSkillController(options: { getSpaceId: () => string }) {
 	let items = $state<SkillCatalogEntry[]>([]);
 	let loaded = $state(false);
 	let loadedFor = $state<string | null>(null);
-	const refreshCoordinator = createCatalogRefreshCoordinator({
-		getSpaceId: options.getSpaceId,
+	const refreshCoordinator = createRefreshCoordinator<string>({
+		isCurrent: (targetSpaceId) => options.getSpaceId() === targetSpaceId,
 		refresh: async (targetSpaceId) => {
 			try {
 				const response = await sdk.skills.list({ spaceId: targetSpaceId });
@@ -43,7 +43,7 @@ export function createSkillController(options: { getSpaceId: () => string }) {
 		loadedFor = targetSpaceId;
 	}
 
-	async function load(loadOptions: CatalogRefreshOptions = {}) {
+	async function load(loadOptions: RefreshOptions = {}) {
 		const targetSpaceId = options.getSpaceId();
 		if (loadedFor !== targetSpaceId) restore(targetSpaceId);
 		await refreshCoordinator.refresh(targetSpaceId, loadOptions);

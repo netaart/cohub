@@ -512,6 +512,13 @@
       "when": 1791425759260,
       "tag": "0072_turn_stats",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1791447082934,
+      "tag": "0073_session_turns_active_index",
+      "breakpoints": true
     }
   ]
 }

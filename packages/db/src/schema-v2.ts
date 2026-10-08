@@ -15,6 +15,7 @@ import {
   unique,
   check,
   doublePrecision,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { TaskPayload } from "@cohub/protocol/task";
@@ -750,6 +751,12 @@ export const providerMessageRefs = v2.table(
   }),
 );
 
+export const ACTIVE_SESSION_TURN_STATUSES = ["queued", "running", "abort_requested"] as const satisfies readonly SessionTurnStatus[];
+
+// Literal SQL, not bound params, so prepared generic plans still match the partial index.
+export const sessionTurnIsActive = (status: AnyPgColumn) =>
+  sql`${status} in (${sql.raw(ACTIVE_SESSION_TURN_STATUSES.map((value) => `'${value}'`).join(", "))})`;
+
 export const sessionTurns = v2.table(
   "session_turns",
   {
@@ -784,6 +791,7 @@ export const sessionTurns = v2.table(
   },
   (table) => ({
     sessionIdx: index("v2_idx_session_turns_session_id").on(table.sessionId),
+    activeIdx: index("v2_idx_session_turns_active").on(table.sessionId, table.sequence).where(sessionTurnIsActive(table.status)),
     sessionSequenceUniqueIdx: uniqueIndex("v2_uq_session_turns_session_sequence").on(
       table.sessionId,
       table.sequence,

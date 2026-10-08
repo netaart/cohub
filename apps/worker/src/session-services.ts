@@ -59,6 +59,7 @@ export function getSessionDomainServices(input: {
     onSessionTurnUpdated: dispatchTurnUpdated,
     onSessionParticipantsUpdated: async ({ spaceId, sessionId, userUuids }) => {
       const affectedLabelIds = await assignSessionParticipantSystemLabels({ db, spaceId, sessionId, userUuids });
+      if (affectedLabelIds.length === 0) return;
       await dispatchLabelAssignmentsUpdated({
         spaceId,
         resourceType: "session",

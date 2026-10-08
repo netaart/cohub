@@ -11,12 +11,11 @@ import { isSandboxUsableStatus } from "@cohub/sandbox-controller";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
 import {
-  ACTIVE_TURN_STATUSES,
   claimSessionFallbackTitle,
   deriveSessionFallbackTitle,
   initializeSessionParticipantsMeta,
   normalizeSessionTitle,
-  pickActiveTurns,
+  readSessionActiveTurns,
   readSessionParticipantUserUuids,
   readSessionTitleSource,
   resolveMessageTurnId,
@@ -210,13 +209,14 @@ const normalizeRequiredUserUuid = (userUuid: string | null | undefined) => {
   return normalized;
 };
 
-async function assignSessionUserLabelsAndDispatch(input: { spaceId: string; sessionId: string; userUuids: string[] }) {
+export async function assignSessionUserLabelsAndDispatch(input: { spaceId: string; sessionId: string; userUuids: string[] }) {
   const affectedLabelIds = await assignSessionParticipantSystemLabels({
     db,
     spaceId: input.spaceId,
     sessionId: input.sessionId,
     userUuids: input.userUuids,
   });
+  if (affectedLabelIds.length === 0) return;
   await dispatchLabelAssignmentsUpdated({
     spaceId: input.spaceId,
     resourceType: "session",
@@ -354,28 +354,11 @@ const sessionListOrderBy = [
 ] as const;
 
 export async function attachActiveTurns<T extends { id: string; meta?: unknown }>(sessions: T[]) {
-  sessions = sessions.map(sanitizeSessionRecordStats);
-  if (sessions.length === 0) return pickActiveTurns(sessions, []);
-
-  const rows = await db
-    .select({
-      sessionId: sessionTurns.sessionId,
-      id: sessionTurns.id,
-      sequence: sessionTurns.sequence,
-      status: sessionTurns.status,
-      provider: sessionTurns.provider,
-      model: sessionTurns.model,
-      startedAt: sessionTurns.startedAt,
-      meta: sessionTurns.meta,
-    })
-    .from(sessionTurns)
-    .where(and(
-      inArray(sessionTurns.sessionId, sessions.map((session) => session.id)),
-      inArray(sessionTurns.status, [...ACTIVE_TURN_STATUSES]),
-    ))
-    .orderBy(asc(sessionTurns.sessionId), desc(sessionTurns.sequence));
-
-  return pickActiveTurns(sessions, rows);
+  const states = await readSessionActiveTurns(db, sessions.map((session) => session.id));
+  return sessions.map((session) => ({
+    ...sanitizeSessionRecordStats(session),
+    ...(states.get(session.id) ?? { activeTurn: null }),
+  }));
 }
 
 export const listSpaceSessions = async (
