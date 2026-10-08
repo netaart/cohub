@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import { readSessionTurnOrigin, resolveCohubEnvironment } from "@neta-art/cohub";
+import { readSentTurns, readSessionTurnOrigin, resolveCohubEnvironment } from "@neta-art/cohub";
 import type {
   CohubHttpClient,
   ContentBlock,
@@ -1646,6 +1646,11 @@ function registerTurns(sessionsCmd: Command): void {
         ]);
         const origin = readSessionTurnOrigin(result.turn.meta, spaceId);
         if (origin) console.log(`\nOrigin (${origin.kind}): space=${origin.spaceId} session=${origin.sessionId} turn=${origin.turnId}${origin.toolCallId ? ` toolCall=${origin.toolCallId}` : ""}`);
+        const sent = readSentTurns(result.turn.meta);
+        if (sent.length > 0) {
+          console.log(`\nSent (${sent.length}):`);
+          for (const ref of sent) console.log(`  ${ref.spaceId ? `space=${ref.spaceId} ` : ""}session=${ref.sessionId} turn=${ref.turnId}${ref.toolCallId ? ` toolCall=${ref.toolCallId}` : ""}`);
+        }
         if (result.turn.userText) console.log(`\nUser:\n${result.turn.userText}`);
         if (result.turn.assistantText) console.log(`\nAssistant:\n${result.turn.assistantText}`);
       } catch (e: unknown) {

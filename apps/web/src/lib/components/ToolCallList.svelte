@@ -5,11 +5,6 @@ import ToolCallItem from "$lib/components/ToolCallItem.svelte";
 import { buildToolCallViewModels } from "$lib/components/tool-call-format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
-import {
-	EMPTY_SENT_TURNS,
-	type SentTurnIndex,
-	sentTurnForToolCall,
-} from "$lib/sent-turns";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type Props = {
@@ -20,9 +15,6 @@ type Props = {
 	onLoadToolCalls?: () => Promise<MessageToolCallsFile | null>;
 	flush?: boolean;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
-	/** Caller-side fan-out; a tool row shows the child it dispatched. */
-	sentTurns?: SentTurnIndex | null;
-	spaceId?: string | null;
 };
 
 const {
@@ -33,8 +25,6 @@ const {
 	onLoadToolCalls,
 	flush = false,
 	onOpenFile,
-	sentTurns = null,
-	spaceId = null,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -80,7 +70,7 @@ function retryLoad() {
 			</button>
 		{/if}
 		{#each tools as tool (tool.id)}
-			<ToolCallItem {tool} loading={loading && requestedLoad && !effectiveFile} needsDetails={Boolean(onLoadToolCalls) && !effectiveFile} defaultExpanded={defaultExpanded || (streaming && tool.status === 'running')} autoExpandWhileRunning={streaming} onExpand={ensureLoaded} {onOpenFile} sentTurn={sentTurnForToolCall(sentTurns ?? EMPTY_SENT_TURNS, tool.id)} {spaceId} />
+			<ToolCallItem {tool} loading={loading && requestedLoad && !effectiveFile} needsDetails={Boolean(onLoadToolCalls) && !effectiveFile} defaultExpanded={defaultExpanded || (streaming && tool.status === 'running')} autoExpandWhileRunning={streaming} onExpand={ensureLoaded} {onOpenFile} />
 		{/each}
 	</div>
 {/if}

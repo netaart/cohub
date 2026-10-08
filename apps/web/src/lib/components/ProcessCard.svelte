@@ -25,11 +25,8 @@ import {
 import { getLocale } from "$lib/i18n/locale.svelte";
 import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
-import {
-	EMPTY_SENT_TURNS,
-	type SentTurnIndex,
-	sentTurnsForTurn,
-} from "$lib/sent-turns";
+import { NO_SENT_SESSIONS } from "$lib/sent-turns";
+import { useSessionRelations } from "$lib/session-relations-context";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type IntermediateLoadState =
@@ -45,8 +42,6 @@ type Props = {
 	intermediateMessages?: StoredIntermediateMessage[] | null;
 	streaming?: boolean;
 	modelsCatalog?: ModelCatalogItem[];
-	sentTurns?: SentTurnIndex | null;
-	spaceId?: string | null;
 	onLoadIntermediate?: (
 		turn: SessionTurnRecord,
 	) => Promise<StoredIntermediateMessage[]>;
@@ -67,8 +62,6 @@ const {
 	intermediateMessages: liveIntermediateMessages = null,
 	streaming = false,
 	modelsCatalog,
-	sentTurns = null,
-	spaceId = null,
 	onLoadIntermediate,
 	onRequestIntermediateSync,
 	onLoadToolCalls,
@@ -380,8 +373,9 @@ const summaryLabel = $derived(
 			: m.process_title({}, { locale })),
 );
 
-const sentLinks = $derived(
-	sentTurnsForTurn(sentTurns ?? EMPTY_SENT_TURNS, turn),
+const relations = useSessionRelations();
+const sentSessions = $derived(
+	relations?.sentByTurn(turn.id) ?? NO_SENT_SESSIONS,
 );
 </script>
 
@@ -389,8 +383,8 @@ const sentLinks = $derived(
 	<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md disabled:cursor-wait disabled:opacity-75" disabled={isLoading} onclick={() => void toggle()} title={usageTitle || undefined}>
 		{#if isLoading}<Loader2 class="w-3.5 h-3.5 text-text-tertiary shrink-0 animate-spin" />{:else}<ChevronRight class="w-3.5 h-3.5 text-text-tertiary shrink-0" />{/if}
 		<span class="text-[13px] text-text-tertiary tabular-nums">{summaryLabel}</span>
-		{#if sentLinks.length > 0}
-			<SentTurnsChip count={sentLinks.length} />
+		{#if sentSessions.length > 0}
+			<SentTurnsChip count={sentSessions.length} />
 		{/if}
 	</button>
 {:else}
@@ -398,13 +392,11 @@ const sentLinks = $derived(
 		<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md" onclick={() => void toggle()} title={usageTitle || undefined}>
 			<ChevronDown class="w-3.5 h-3.5 text-text-tertiary shrink-0" />
 			<span class="text-[13px] text-text-tertiary tabular-nums">{summaryLabel}</span>
-			{#if sentLinks.length > 0}
-				<SentTurnsChip count={sentLinks.length} />
+			{#if sentSessions.length > 0}
+				<SentTurnsChip count={sentSessions.length} />
 			{/if}
 		</button>
-		{#if sentLinks.length > 0 && spaceId}
-			<SentTurnsList links={sentLinks} {spaceId} />
-		{/if}
+		<SentTurnsList sessions={sentSessions} />
 		<div class="flex flex-col gap-2">
 			{#if loadError}
 				<button type="button" class="mx-[var(--chat-msg-inset)] rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 text-left text-[12px] text-status-error hover:bg-status-error/10" onclick={() => void ensureLoaded()}>
@@ -417,7 +409,7 @@ const sentLinks = $derived(
 				</button>
 			{/if}
 			{#each expandedMessages as msg (msg.id)}
-				<IntermediateMessageBubble message={msg} streaming={streaming} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: msg }) : undefined} {onOpenFile} {onOpenUrl} {sentTurns} {spaceId} />
+				<IntermediateMessageBubble message={msg} streaming={streaming} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: msg }) : undefined} {onOpenFile} {onOpenUrl} />
 			{/each}
 		</div>
 		<button type="button" class="flex items-center gap-1.5 px-[var(--chat-msg-inset)] py-1.5 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer text-text-placeholder hover:text-text-tertiary rounded-md self-start" onclick={() => void toggle()}>

@@ -67,9 +67,28 @@ The SDK exports `SessionTurnOrigin`, `readSessionTurnOrigin(meta, spaceId?)` and
 `normalizeSessionTurnOrigin`. The reader also supports historical background-task
 origins when supplied their owning Space. Existing Turn HTTP/realtime payloads and
 Web caches retain origin inside `meta`, without new fetches, subscriptions or loading
-states. Relationship cards and native harness subagent import are separate UI/runtime
-work, not part of this recording layer. Native subthreads not imported as Cohub Turns
-and direct-generation executions are outside this prompt-origin path.
+states. Native harness subagent import is separate runtime work. Native subthreads
+not imported as Cohub Turns and direct-generation executions are outside this
+prompt-origin path.
+
+## Caller side
+
+When a direct prompt (`kind: "prompt"`) creates a Turn, the Session service appends
+`{ spaceId, sessionId, turnId, kind, toolCallId? }` to the caller Turn's
+`meta.messagesSent` and publishes `session.turn.updated` for the caller, so its
+watchers see the fan-out while the caller is still running. The append is one jsonb
+concatenation, so concurrent children never overwrite each other; writers that touch
+a running Turn's `meta` merge with `||` instead of rewriting it. The list is the
+caller's only copy and is not truncated. Scheduled runs, background tasks and hooks
+are not mirrored. The SDK reads it with `readSentTurns(meta)`; entries recorded before
+`spaceId` was added omit it.
+
+Web projects both halves from loaded Turns: the child's user message links back to
+the caller ("From …"), and the caller's process card and tool-call rows link to the
+children, folding repeat prompts to one Session. Follow-ups a Turn sends to its own
+Session are not shown, since they appear in the same timeline. Titles come from the
+loaded Space list, then the Session cache, then a bounded fetch of only the links on
+screen; a 403/404 renders the Session as unavailable rather than as a link.
 
 ## Recovery and validation
 

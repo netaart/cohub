@@ -5,97 +5,86 @@ import {
 	type SessionTurnRecord,
 } from "@cohub/protocol/model";
 
-/**
- * Cross-Session prompting from the caller's side: `meta.messagesSent` on the
- * caller pairs with `meta.origin` on the child. Both come from already-loaded
- * Turns, so no extra request and no child title stored on the Turn.
- */
-export type SentTurnLink = SentTurnRef & {
-	callerTurnId: string;
-	title: string | null;
-};
+export type RelatedSessionRef = { spaceId: string; sessionId: string };
+
+export type SentSession = RelatedSessionRef & { count: number };
 
 export type SentTurnIndex = {
-	links: SentTurnLink[];
-	byCallerTurn: Map<string, SentTurnLink[]>;
-	byToolCallId: Map<string, SentTurnLink>;
+	key: string;
+	byCallerTurn: ReadonlyMap<string, readonly SentSession[]>;
+	byToolCall: ReadonlyMap<string, readonly SentSession[]>;
 };
 
-/** Shared empty value so components can default props without allocating. */
+export const NO_SENT_SESSIONS: readonly SentSession[] = [];
+
 export const EMPTY_SENT_TURNS: SentTurnIndex = {
-	links: [],
+	key: "",
 	byCallerTurn: new Map(),
-	byToolCallId: new Map(),
+	byToolCall: new Map(),
 };
+
+function groupBySession(
+	refs: readonly SentTurnRef[],
+	fallbackSpaceId: string,
+): SentSession[] {
+	const sessions = new Map<string, SentSession>();
+	for (const ref of refs) {
+		const spaceId = ref.spaceId ?? fallbackSpaceId;
+		const key = `${spaceId}:${ref.sessionId}`;
+		const current = sessions.get(key);
+		if (current) current.count += 1;
+		else sessions.set(key, { spaceId, sessionId: ref.sessionId, count: 1 });
+	}
+	return [...sessions.values()];
+}
 
 export function buildSentTurnIndex(
 	turns: readonly SessionTurnRecord[],
 	spaceId: string | null,
+	previous: SentTurnIndex = EMPTY_SENT_TURNS,
 ): SentTurnIndex {
-	if (turns.length === 0 || !spaceId) return EMPTY_SENT_TURNS;
-	const links: SentTurnLink[] = [];
-	const byCallerTurn = new Map<string, SentTurnLink[]>();
-	const byTurnId = new Map<string, SentTurnLink>();
+	if (!spaceId || turns.length === 0) return EMPTY_SENT_TURNS;
+	const fanOut: Array<[turnId: string, refs: SentTurnRef[]]> = [];
+	let key = "";
 	for (const turn of turns) {
-		const refs = readSentTurns(turn.meta);
-		if (refs.length === 0) continue;
-		const own = refs.map(
-			(ref): SentTurnLink => ({ ...ref, callerTurnId: turn.id, title: null }),
+		const refs = readSentTurns(turn.meta).filter(
+			(ref) => ref.sessionId !== turn.sessionId,
 		);
-		links.push(...own);
-		byCallerTurn.set(turn.id, own);
-		for (const link of own) byTurnId.set(link.turnId, link);
+		if (refs.length === 0) continue;
+		fanOut.push([turn.id, refs]);
+		key += `${turn.id}:${refs.map((ref) => ref.turnId).join(",")};`;
 	}
-	if (links.length === 0) return EMPTY_SENT_TURNS;
-	const byToolCallId = new Map<string, SentTurnLink>();
-	for (const turn of turns) {
-		const origin = readSessionTurnOrigin(turn.meta, spaceId);
-		if (!origin?.toolCallId) continue;
-		const link = byTurnId.get(turn.id);
-		if (link) byToolCallId.set(origin.toolCallId, link);
+	if (fanOut.length === 0) return EMPTY_SENT_TURNS;
+	key = `${spaceId}|${key}`;
+	if (previous.key === key) return previous;
+
+	const byCallerTurn = new Map<string, readonly SentSession[]>();
+	const byToolCall = new Map<string, SentTurnRef[]>();
+	for (const [turnId, refs] of fanOut) {
+		byCallerTurn.set(turnId, groupBySession(refs, spaceId));
+		for (const ref of refs) {
+			if (!ref.toolCallId) continue;
+			const own = byToolCall.get(ref.toolCallId);
+			if (own) own.push(ref);
+			else byToolCall.set(ref.toolCallId, [ref]);
+		}
 	}
-	return { links, byCallerTurn, byToolCallId };
+	return {
+		key,
+		byCallerTurn,
+		byToolCall: new Map(
+			[...byToolCall].map(([toolCallId, refs]) => [
+				toolCallId,
+				groupBySession(refs, spaceId),
+			]),
+		),
+	};
 }
 
-export const sentTurnsForTurn = (
-	index: SentTurnIndex,
-	turn: SessionTurnRecord | null | undefined,
-): SentTurnLink[] => (turn ? (index.byCallerTurn.get(turn.id) ?? []) : []);
-
-export const sentTurnForToolCall = (
-	index: SentTurnIndex,
-	toolCallId: string,
-): SentTurnLink | null => index.byToolCallId.get(toolCallId) ?? null;
-
-/**
- * Applies child titles read from the Session detail cache. A miss stays an id
- * rather than fetching a Session the user is not looking at. Kept free of cache
- * and SDK imports so the projection stays testable under plain Node.
- */
-export function applySentTurnTitles(
-	index: SentTurnIndex,
-	titles: ReadonlyMap<string, string | null>,
-): SentTurnIndex {
-	if (index.links.length === 0 || titles.size === 0) return index;
-	const links = index.links.map((link) => {
-		const title = titles.get(link.sessionId) ?? null;
-		return title === link.title ? link : { ...link, title };
-	});
-	if (links.every((link, position) => link === index.links[position])) {
-		return index;
-	}
-	const byCallerTurn = new Map<string, SentTurnLink[]>();
-	const byTurnId = new Map<string, SentTurnLink>();
-	for (const link of links) {
-		const own = byCallerTurn.get(link.callerTurnId);
-		if (own) own.push(link);
-		else byCallerTurn.set(link.callerTurnId, [link]);
-		byTurnId.set(link.turnId, link);
-	}
-	const byToolCallId = new Map<string, SentTurnLink>();
-	for (const [toolCallId, link] of index.byToolCallId) {
-		const updated = byTurnId.get(link.turnId);
-		if (updated) byToolCallId.set(toolCallId, updated);
-	}
-	return { links, byCallerTurn, byToolCallId };
+export function readSentFrom(
+	turn: Pick<SessionTurnRecord, "sessionId" | "meta"> | null | undefined,
+): RelatedSessionRef | null {
+	const origin = turn ? readSessionTurnOrigin(turn.meta) : null;
+	if (!turn || !origin || origin.sessionId === turn.sessionId) return null;
+	return { spaceId: origin.spaceId, sessionId: origin.sessionId };
 }

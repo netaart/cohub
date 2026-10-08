@@ -7,7 +7,6 @@ import type {
 import ChatMessageBubble from "$lib/components/ChatMessageBubble.svelte";
 import SystemCompactionNotice from "$lib/components/SystemCompactionNotice.svelte";
 import type { ModelCatalogItem } from "$lib/model-catalog";
-import type { SentTurnIndex } from "$lib/sent-turns";
 import type { ChatMessage } from "$lib/session-tree";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
@@ -18,8 +17,6 @@ type Props = {
 	onLoadToolCalls?: () => Promise<MessageToolCallsFile | null>;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 	onOpenUrl?: (href: string, event: MouseEvent) => void | Promise<void>;
-	sentTurns?: SentTurnIndex | null;
-	spaceId?: string | null;
 };
 
 const {
@@ -29,8 +26,6 @@ const {
 	onLoadToolCalls,
 	onOpenFile,
 	onOpenUrl,
-	sentTurns = null,
-	spaceId = null,
 }: Props = $props();
 const isCompaction = $derived(message.meta?.messageKind === "compacted");
 const compaction = $derived(
@@ -86,6 +81,6 @@ const chatMessage = $derived({
 	/>
 {:else}
 	<div class="pl-5">
-		<ChatMessageBubble message={chatMessage} {modelsCatalog} {onOpenFile} {onOpenUrl} {sentTurns} {spaceId} />
+		<ChatMessageBubble message={chatMessage} {modelsCatalog} {onOpenFile} {onOpenUrl} />
 	</div>
 {/if}
