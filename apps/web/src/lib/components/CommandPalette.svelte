@@ -1395,7 +1395,6 @@ onMount(() => {
 	.command-header {
 		flex-shrink: 0;
 		--list-gutter-x: calc(var(--palette-x) - var(--list-row-pad-x));
-		padding-bottom: 2px;
 		border-bottom: 1px solid var(--border-subtle);
 		background: color-mix(in oklch, var(--bg-primary) 30%, transparent);
 	}
@@ -1495,18 +1494,17 @@ onMount(() => {
 		top: -8px;
 		z-index: 1;
 		margin-top: -8px;
-		padding-top: 8px;
 		background: var(--palette-bg);
 	}
 
-	/* 8px + FilterBar height (h-11 / lg:h-9) */
+	/* FilterBar height (h-11 / lg:h-9) */
 	.command-results:has(> .command-subbar) {
-		scroll-padding-top: 52px;
+		scroll-padding-top: 44px;
 	}
 
 	@media (min-width: 1024px) {
 		.command-results:has(> .command-subbar) {
-			scroll-padding-top: 44px;
+			scroll-padding-top: 36px;
 		}
 	}
 
