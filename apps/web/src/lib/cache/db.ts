@@ -62,6 +62,7 @@ export type SessionListIndexItem = {
 		source: string | null;
 		status: string | null;
 		activeTurn?: SessionRecord["activeTurn"];
+		lastTurnIssue?: SessionRecord["lastTurnIssue"];
 		userProfile?: SessionRecord["userProfile"];
 		participantProfiles?: SessionRecord["participantProfiles"];
 	};

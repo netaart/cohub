@@ -150,6 +150,14 @@ export type SessionActiveTurn = {
   anchorUserMessageId: string | null;
 };
 
+export type SessionTurnIssue = {
+  turnId: string;
+  sequence: number;
+  status: "failed" | "interrupted";
+  reason: string | null;
+  errorMessage: string | null;
+};
+
 export type SessionRecord = {
   id: string;
   spaceId: string;
@@ -162,6 +170,7 @@ export type SessionRecord = {
   status: string | null;
   activeTurn?: SessionActiveTurn | null;
   activeTurnSequence?: number;
+  lastTurnIssue?: SessionTurnIssue | null;
   externalSessionId: string | null;
   meta: Record<string, unknown> | null;
   latestMessageText: string | null;

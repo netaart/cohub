@@ -12,7 +12,9 @@ type Database = PostgresJsDatabase<Record<string, unknown>>;
 
 export type SessionSnapshotEvent = SessionUpdatedEvent & { rooms: RealtimeRoom[] };
 
-const SNAPSHOT_FIELDS = ["title", "latestMessageText", "lastMessageAt", "lastMessageId", "participantUserUuids", "activeTurn", "activeTurnSequence", "stats"];
+const SNAPSHOT_FIELDS = ["title", "latestMessageText", "lastMessageAt", "lastMessageId", "participantUserUuids", "activeTurn", "activeTurnSequence", "lastTurnIssue", "stats"];
+const SETTLED_TURN_STATUSES = ["completed", "failed", "interrupted"] as const;
+const TURN_ISSUE_ERROR_LIMIT = 240;
 
 export async function readSessionActiveTurns(db: Database, sessionIds: string[]): Promise<Map<string, SessionActiveTurnState>> {
   const ids = [...new Set(sessionIds)];
@@ -22,6 +24,17 @@ export async function readSessionActiveTurns(db: Database, sessionIds: string[])
     .orderBy(desc(sessionTurns.sequence))
     .limit(1)
     .as("latest_turn");
+  const settledTurn = db.select({
+    id: sessionTurns.id,
+    sequence: sessionTurns.sequence,
+    status: sessionTurns.status,
+    reason: sql<string | null>`${sessionTurns.summary}->>'reason'`.as("turn_issue_reason"),
+    errorMessage: sql<string | null>`left(${sessionTurns.errorMessage}, ${TURN_ISSUE_ERROR_LIMIT})`.as("turn_issue_error"),
+  }).from(sessionTurns)
+    .where(and(eq(sessionTurns.sessionId, spaceSessions.id), inArray(sessionTurns.status, SETTLED_TURN_STATUSES)))
+    .orderBy(desc(sessionTurns.sequence))
+    .limit(1)
+    .as("settled_turn");
   const [activeRows, latestRows] = await Promise.all([
     db.selectDistinctOn([sessionTurns.sessionId], {
       sessionId: sessionTurns.sessionId,
@@ -35,19 +48,34 @@ export async function readSessionActiveTurns(db: Database, sessionIds: string[])
     }).from(sessionTurns)
       .where(and(inArray(sessionTurns.sessionId, ids), sessionTurnIsActive(sessionTurns.status)))
       .orderBy(sessionTurns.sessionId, desc(sessionTurns.sequence)),
-    db.select({ sessionId: spaceSessions.id, sequence: latestTurn.sequence }).from(spaceSessions)
+    db.select({
+      sessionId: spaceSessions.id,
+      sequence: latestTurn.sequence,
+      settledId: settledTurn.id,
+      settledSequence: settledTurn.sequence,
+      settledStatus: settledTurn.status,
+      settledReason: settledTurn.reason,
+      settledErrorMessage: settledTurn.errorMessage,
+    }).from(spaceSessions)
       .leftJoinLateral(latestTurn, sql`true`)
+      .leftJoinLateral(settledTurn, sql`true`)
       .where(inArray(spaceSessions.id, ids)),
   ]);
   const activeBySessionId = new Map(activeRows.map((row) => [row.sessionId, row]));
   return new Map(latestRows.map((row) => [
     row.sessionId,
-    sessionActiveTurnState(activeBySessionId.get(row.sessionId) ?? null, row.sequence),
+    sessionActiveTurnState(
+      activeBySessionId.get(row.sessionId) ?? null,
+      row.sequence,
+      row.settledId && row.settledSequence != null && row.settledStatus
+        ? { id: row.settledId, sequence: row.settledSequence, status: row.settledStatus, reason: row.settledReason, errorMessage: row.settledErrorMessage }
+        : null,
+    ),
   ]));
 }
 
 export async function readSessionActiveTurn(db: Database, sessionId: string): Promise<SessionActiveTurnState> {
-  return (await readSessionActiveTurns(db, [sessionId])).get(sessionId) ?? { activeTurn: null };
+  return (await readSessionActiveTurns(db, [sessionId])).get(sessionId) ?? { activeTurn: null, lastTurnIssue: null };
 }
 
 /** Refreshes stats and publishes the Session's complete record, plus descendants'. Call after commit. */

@@ -110,11 +110,11 @@ let renameInput = $state<HTMLInputElement | null>(null);
 
 const dense = $derived(density === "dense");
 const activity = $derived(
-	getSessionSidebarActivity(
-		sessionGenerationStore.get(session.id),
+	getSessionSidebarActivity(sessionGenerationStore.get(session.id), {
+		locale,
 		modelsCatalog,
-		session.activeTurn,
-	),
+		session,
+	}),
 );
 const showActivity = $derived(
 	activity.active ||
@@ -150,7 +150,7 @@ const preview = $derived(
 			: getSessionPreview(session, title),
 );
 const showSourceLine = $derived(
-	!dense && !showActivity && !preview && hasMessages,
+	!dense && !showActivity && !preview && hasMessages && sourceKey !== "web",
 );
 const sourceBadge = $derived(
 	showSourceBadge && !activity.active && !showSourceLine && sourceKey !== "web"
@@ -265,8 +265,10 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		</span>
 	{:else if preview}
 		<span title={preview}>{preview}</span>
-	{:else}
-		<span class="text-text-placeholder">{showSourceLine ? sourceName : m.chats_row_no_messages({}, { locale })}</span>
+	{:else if showSourceLine}
+		<span class="text-text-placeholder">{sourceName}</span>
+	{:else if !hasMessages}
+		<span class="text-text-placeholder">{m.chats_row_no_messages({}, { locale })}</span>
 	{/if}
 {/snippet}
 

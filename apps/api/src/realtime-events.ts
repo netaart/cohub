@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { sessionMessages } from "@cohub/db";
 import type { RealtimeMessageRecord, RealtimeSessionRecord, RealtimeTaskRecord, RealtimeTurnRecord, SpacePresenceSnapshot } from "@cohub/protocol/realtime";
 import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime";
-import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnRecord } from "@cohub/protocol/model";
+import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnIssue, SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { dispatchRealtimeEvent } from "./channels.js";
 import { buildResourceLabelSnapshot, type LabelResourceType } from "@cohub/core/labels/resource-events";
@@ -58,6 +58,7 @@ type RealtimeSessionInput = SessionRecord | {
   updatedAt: Date | string | null;
   activeTurn?: SessionActiveTurn | null;
   activeTurnSequence?: number;
+  lastTurnIssue?: SessionTurnIssue | null;
   meta?: unknown;
 };
 
@@ -73,6 +74,9 @@ export const toRealtimeSessionRecord = (session: RealtimeSessionInput): Realtime
     : {}),
   ...(session.activeTurnSequence !== undefined
     ? { activeTurnSequence: session.activeTurnSequence }
+    : {}),
+  ...(session.lastTurnIssue !== undefined
+    ? { lastTurnIssue: session.lastTurnIssue }
     : {}),
   externalSessionId: session.externalSessionId,
   latestMessageText: session.latestMessageText ?? null,

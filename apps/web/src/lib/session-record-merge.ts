@@ -105,6 +105,9 @@ export function mergeSessionRecord(
 						? {
 								activeTurn: incoming.activeTurn,
 								activeTurnSequence: incoming.activeTurnSequence,
+								...(hasOwn(incoming, "lastTurnIssue")
+									? { lastTurnIssue: incoming.lastTurnIssue }
+									: {}),
 							}
 						: {}),
 				}
@@ -119,6 +122,7 @@ export function mergeSessionRecord(
 						? {
 								activeTurn: existing?.activeTurn,
 								activeTurnSequence: existing?.activeTurnSequence,
+								lastTurnIssue: existing?.lastTurnIssue,
 							}
 						: {}),
 				};

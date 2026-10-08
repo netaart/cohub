@@ -1,5 +1,5 @@
 import { ACTIVE_SESSION_TURN_STATUSES } from "@cohub/db";
-import type { SessionActiveTurn, SessionTurnRecord, SessionTurnStatus } from "@cohub/protocol/model";
+import type { SessionActiveTurn, SessionTurnIssue, SessionTurnRecord, SessionTurnStatus } from "@cohub/protocol/model";
 import { getRealtimeSpaceRoom, getRealtimeUserRoom } from "@cohub/protocol/realtime";
 
 /** The subset of an active `session_turns` row that shapes a `SessionActiveTurn`. */
@@ -13,9 +13,18 @@ export type ActiveTurnRow = {
   meta: unknown;
 };
 
+export type SettledTurnRow = {
+  id: string;
+  sequence: number;
+  status: SessionTurnStatus;
+  reason: string | null;
+  errorMessage: string | null;
+};
+
 export type SessionActiveTurnState = {
   activeTurn: SessionActiveTurn | null;
   activeTurnSequence?: number;
+  lastTurnIssue: SessionTurnIssue | null;
 };
 
 const readAnchorUserMessageId = (meta: unknown): string | null => {
@@ -40,13 +49,23 @@ export const activeTurnFromRow = (row: ActiveTurnRow | null): SessionActiveTurn 
     }
   : null;
 
+const turnIssueFromRow = (row: SettledTurnRow | null): SessionTurnIssue | null =>
+  row && (row.status === "failed" || row.status === "interrupted")
+    ? { turnId: row.id, sequence: row.sequence, status: row.status, reason: row.reason, errorMessage: row.errorMessage }
+    : null;
+
 export const sessionActiveTurnState = (
   active: ActiveTurnRow | null,
   latestSequence: number | null,
+  settled: SettledTurnRow | null = null,
 ): SessionActiveTurnState => {
   const activeTurn = activeTurnFromRow(active);
   const activeTurnSequence = activeTurn?.sequence ?? latestSequence;
-  return { activeTurn, ...(activeTurnSequence == null ? {} : { activeTurnSequence }) };
+  return {
+    activeTurn,
+    ...(activeTurnSequence == null ? {} : { activeTurnSequence }),
+    lastTurnIssue: activeTurn ? null : turnIssueFromRow(settled),
+  };
 };
 
 export const activeTurnFromTurn = (
@@ -79,8 +98,8 @@ export function sessionActiveTurnEvent(input: {
     sessionId: turn.sessionId,
     rooms: [getRealtimeSpaceRoom(spaceId), ...(turn.userUuid ? [getRealtimeUserRoom(turn.userUuid)] : [])],
     payload: {
-      session: { id: turn.sessionId, spaceId, activeTurn, activeTurnSequence: activeTurn.sequence },
-      changed: ["activeTurn", "activeTurnSequence"],
+      session: { id: turn.sessionId, spaceId, activeTurn, activeTurnSequence: activeTurn.sequence, lastTurnIssue: null },
+      changed: ["activeTurn", "activeTurnSequence", "lastTurnIssue"],
     },
   };
 }

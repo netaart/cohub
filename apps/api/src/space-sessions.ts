@@ -357,7 +357,7 @@ export async function attachActiveTurns<T extends { id: string; meta?: unknown }
   const states = await readSessionActiveTurns(db, sessions.map((session) => session.id));
   return sessions.map((session) => ({
     ...sanitizeSessionRecordStats(session),
-    ...(states.get(session.id) ?? { activeTurn: null }),
+    ...(states.get(session.id) ?? { activeTurn: null, lastTurnIssue: null }),
   }));
 }
 

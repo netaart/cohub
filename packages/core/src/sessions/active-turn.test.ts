@@ -3,8 +3,8 @@ import { it } from "node:test";
 import { sessionActiveTurnState } from "./active-turn.js";
 
 it("idle sessions keep the latest turn sequence", () => {
-  assert.deepEqual(sessionActiveTurnState(null, 7), { activeTurn: null, activeTurnSequence: 7 });
-  assert.deepEqual(sessionActiveTurnState(null, null), { activeTurn: null });
+  assert.deepEqual(sessionActiveTurnState(null, 7), { activeTurn: null, activeTurnSequence: 7, lastTurnIssue: null });
+  assert.deepEqual(sessionActiveTurnState(null, null), { activeTurn: null, lastTurnIssue: null });
 });
 
 it("live sessions are sequenced by their active turn", () => {

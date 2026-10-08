@@ -1,9 +1,12 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { SessionRecord } from "@neta-art/cohub";
+import type { Locale } from "$lib/i18n/locale";
 import { getModelDisplayName, type ModelCatalogItem } from "$lib/model-catalog";
+import { m } from "$lib/paraglide/messages.js";
 import type { SessionGenerationState } from "$lib/stores/session-generation.svelte";
 
 type SessionActiveTurn = NonNullable<SessionRecord["activeTurn"]>;
+type SessionTurnIssue = NonNullable<SessionRecord["lastTurnIssue"]>;
 
 export type SessionSidebarActivityPhase =
 	| "idle"
@@ -110,7 +113,7 @@ function findToolNameForResult(blocks: ContentBlock[], resultIndex: number) {
 	return null;
 }
 
-function findLatestSignal(blocks: ContentBlock[]) {
+function findLatestSignal(blocks: ContentBlock[], locale: Locale) {
 	for (let index = blocks.length - 1; index >= 0; index -= 1) {
 		const block = blocks[index];
 		if (!block) continue;
@@ -122,7 +125,11 @@ function findLatestSignal(blocks: ContentBlock[]) {
 			);
 			return {
 				phase: "result" as const,
-				label: name ?? (block.is_error ? "error" : "tool_result"),
+				label:
+					name ??
+					(block.is_error
+						? m.session_activity_tool_error({}, { locale })
+						: m.session_activity_tool_result({}, { locale })),
 				text: text || null,
 				progressKey: `result:${block.tool_use_id}:${index}`,
 			};
@@ -149,7 +156,7 @@ function findLatestSignal(blocks: ContentBlock[]) {
 			);
 			return {
 				phase: "tool" as const,
-				label: "shell_command",
+				label: m.session_activity_command({}, { locale }),
 				text: text || null,
 				progressKey: `shell-command:${index}`,
 			};
@@ -159,7 +166,7 @@ function findLatestSignal(blocks: ContentBlock[]) {
 			if (text) {
 				return {
 					phase: "thinking" as const,
-					label: "thinking",
+					label: m.session_activity_thinking({}, { locale }),
 					text,
 					progressKey: `thinking:${index}`,
 				};
@@ -170,7 +177,7 @@ function findLatestSignal(blocks: ContentBlock[]) {
 			if (text) {
 				return {
 					phase: "streaming" as const,
-					label: "streaming",
+					label: m.session_activity_writing({}, { locale }),
 					text,
 					progressKey: `text:${index}`,
 				};
@@ -190,13 +197,14 @@ const idleActivity: SessionSidebarActivity = {
 
 function activeTurnActivity(
 	activeTurn: SessionActiveTurn,
+	locale: Locale,
 ): SessionSidebarActivity {
 	const label =
 		activeTurn.status === "queued"
-			? "queued"
+			? m.session_activity_queued({}, { locale })
 			: activeTurn.status === "abort_requested"
-				? "stopping"
-				: "running";
+				? m.session_activity_stopping({}, { locale })
+				: m.session_activity_running({}, { locale });
 	return {
 		active: true,
 		phase: activeTurn.status === "queued" ? "queued" : "pending",
@@ -206,31 +214,70 @@ function activeTurnActivity(
 	};
 }
 
+function issueActivity(
+	issue: SessionTurnIssue,
+	locale: Locale,
+): SessionSidebarActivity {
+	if (issue.status === "failed") {
+		return {
+			active: false,
+			phase: "failed",
+			label: m.session_activity_failed({}, { locale }),
+			text: compactInlineText(issue.errorMessage) || null,
+			progressKey: `failed:${issue.turnId}`,
+		};
+	}
+	const label =
+		issue.reason === "abort"
+			? m.session_activity_stopped({}, { locale })
+			: issue.reason === "stale_active_recovered"
+				? m.session_activity_run_lost({}, { locale })
+				: m.session_activity_interrupted({}, { locale });
+	return {
+		active: false,
+		phase: "interrupted",
+		label,
+		text: null,
+		progressKey: `interrupted:${issue.turnId}`,
+	};
+}
+
 export function getSessionSidebarActivity(
 	state: SessionGenerationState | null | undefined,
-	modelsCatalog?: ModelCatalogItem[] | null,
-	activeTurn?: SessionActiveTurn | null,
+	options: {
+		locale: Locale;
+		modelsCatalog?: ModelCatalogItem[] | null;
+		session?: Pick<SessionRecord, "activeTurn" | "lastTurnIssue">;
+	},
 ): SessionSidebarActivity {
+	const { locale, modelsCatalog, session } = options;
+	const activeTurn = session?.activeTurn;
 	if (activeTurn) {
 		const live =
 			activeTurn.status === "running" && state?.turnId === activeTurn.id
-				? detailFor(state, modelsCatalog)
+				? detailFor(state, modelsCatalog, locale)
 				: null;
-		return live?.active ? live : activeTurnActivity(activeTurn);
+		return live?.active ? live : activeTurnActivity(activeTurn, locale);
 	}
+	const issue = session?.lastTurnIssue;
+	const newerLocalTurn =
+		(state?.status === "pending" || state?.status === "streaming") &&
+		state.turnId !== issue?.turnId;
+	if (issue && !newerLocalTurn) return issueActivity(issue, locale);
 	if (activeTurn === null) return idleActivity;
-	return state ? detailFor(state, modelsCatalog) : idleActivity;
+	return state ? detailFor(state, modelsCatalog, locale) : idleActivity;
 }
 
 function detailFor(
 	state: SessionGenerationState,
-	modelsCatalog?: ModelCatalogItem[] | null,
+	modelsCatalog: ModelCatalogItem[] | null | undefined,
+	locale: Locale,
 ): SessionSidebarActivity {
 	if (state.status === "failed") {
 		return {
 			active: false,
 			phase: "failed",
-			label: "failed",
+			label: m.session_activity_failed({}, { locale }),
 			text: compactInlineText(state.error, 58) || null,
 			progressKey: "failed",
 		};
@@ -239,7 +286,7 @@ function detailFor(
 		return {
 			active: false,
 			phase: "interrupted",
-			label: "interrupted",
+			label: m.session_activity_interrupted({}, { locale }),
 			text: null,
 			progressKey: "interrupted",
 		};
@@ -255,7 +302,9 @@ function detailFor(
 		return {
 			active: true,
 			phase: "waiting_model",
-			label: model ? `waiting ${model}` : "waiting model",
+			label: model
+				? m.session_activity_waiting_model({ model }, { locale })
+				: m.session_activity_waiting({}, { locale }),
 			text: null,
 			progressKey: `waiting:${state.turnId ?? state.sessionId}:${state.llmRound ?? 1}`,
 		};
@@ -264,7 +313,7 @@ function detailFor(
 		return {
 			active: true,
 			phase: "pending",
-			label: "starting agent",
+			label: m.session_activity_starting({}, { locale }),
 			text: null,
 			progressKey: state.turnId ?? "pending",
 		};
@@ -272,15 +321,15 @@ function detailFor(
 	if (state.status === "streaming") {
 		const messageSources = [...(state.intermediateMessages ?? [])].reverse();
 		for (const message of messageSources) {
-			const signal = findLatestSignal(message.content);
+			const signal = findLatestSignal(message.content, locale);
 			if (signal) return { active: true, ...signal };
 		}
-		const signal = findLatestSignal(state.contentBlocks);
+		const signal = findLatestSignal(state.contentBlocks, locale);
 		if (signal) return { active: true, ...signal };
 		return {
 			active: true,
 			phase: "streaming",
-			label: "streaming",
+			label: m.session_activity_writing({}, { locale }),
 			text: null,
 			progressKey: state.turnId ?? "streaming",
 		};
