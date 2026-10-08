@@ -22,12 +22,14 @@ import {
 const {
 	host,
 	seed = null,
+	pending = false,
 	isNewDraft = false,
 	draftSpace = null,
 	onChangeSpace,
 }: {
 	host: SessionChatHost;
 	seed?: UserSessionListItem | null;
+	pending?: boolean;
 	isNewDraft?: boolean;
 	draftSpace?: SpaceRecord | null;
 	onChangeSpace?: () => void;
@@ -77,14 +79,16 @@ const showDraftHint = $derived(
 
 <section class="flex h-full min-h-0 flex-col bg-chat-bg">
 	{#if !hasContent}
-		<div
-			class="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center"
-		>
-			<p class="text-[14px] text-text-secondary">{m.chat_select_chat({}, { locale })}</p>
-			<p class="text-[12px] text-text-placeholder">
-				{m.chat_no_selected_hint({}, { locale })}
-			</p>
-		</div>
+		{#if !pending}
+			<div
+				class="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center"
+			>
+				<p class="text-[14px] text-text-secondary">{m.chat_select_chat({}, { locale })}</p>
+				<p class="text-[12px] text-text-placeholder">
+					{m.chat_no_selected_hint({}, { locale })}
+				</p>
+			</div>
+		{/if}
 	{:else}
 		<header
 			class="relative z-10 flex shrink-0 items-center gap-2 border-b border-chat-panel-border bg-chat-panel px-3 py-2.5 sm:px-4"
