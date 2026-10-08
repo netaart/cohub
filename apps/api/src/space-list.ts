@@ -30,6 +30,7 @@ export type SpaceListRow = {
 };
 
 export const RECENT_SPACE_LIMIT = 50;
+const LEGACY_SPACE_LIST_LIMIT = 100;
 const RECENT_SESSION_WINDOW = 500;
 const MAX_SPACE_VISITS = 10;
 const UUID_PATTERN = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
@@ -125,8 +126,8 @@ function membershipPage(input: {
   `;
 }
 
-async function hydrate(userUuid: string, page: SQL): Promise<SpaceListRow[]> {
-  return db.execute<SpaceListRow>(sql`
+function hydrateQuery(userUuid: string, page: SQL) {
+  return sql`
     with page as (${page})
     select s.id, s.user_uuid, s.name, s.slug,
       nullif(left(regexp_replace(coalesce(s.description, ''), '\\s+', ' ', 'g'), 220), '') description,
@@ -141,7 +142,11 @@ async function hydrate(userUuid: string, page: SQL): Promise<SpaceListRow[]> {
     join v2.spaces s on s.id = page.id
     left join v2.user_profiles up on up.user_uuid = s.user_uuid
     order by page.sort_at desc, page.id desc
-  `);
+  `;
+}
+
+async function hydrate(userUuid: string, page: SQL): Promise<SpaceListRow[]> {
+  return db.execute<SpaceListRow>(hydrateQuery(userUuid, page));
 }
 
 export function listRecentSpaces(userUuid: string, visits: SpaceVisit[], limit = RECENT_SPACE_LIMIT) {
@@ -156,6 +161,30 @@ export async function listMemberSpaces(input: Parameters<typeof membershipPage>[
     rows: items,
     nextCursor: rows.length > input.limit && last ? encodeSpaceListCursor(last) : null,
   };
+}
+
+const activityTime = (value: Date | string | null) => (value ? new Date(value).getTime() : Number.NEGATIVE_INFINITY);
+
+export function compareLegacySpaceRows(left: SpaceListRow, right: SpaceListRow): number {
+  return activityTime(right.last_activity_at) - activityTime(left.last_activity_at)
+    || activityTime(right.created_at) - activityTime(left.created_at)
+    || right.id.localeCompare(left.id);
+}
+
+export function buildLegacySpaceListQuery(userUuid: string) {
+  return hydrateQuery(userUuid, sql`
+    select sm.space_id id, sm.created_at sort_at, sm.created_at joined_at
+    from v2.space_members sm
+    join v2.spaces s on s.id = sm.space_id
+    where sm.user_id = ${userUuid}
+    order by s.last_activity_at desc nulls last, s.created_at desc nulls last, s.id desc
+    limit ${LEGACY_SPACE_LIST_LIMIT}
+  `);
+}
+
+export async function listLegacySpaces(userUuid: string): Promise<SpaceListRow[]> {
+  const rows = await db.execute<SpaceListRow>(buildLegacySpaceListQuery(userUuid));
+  return [...rows].sort(compareLegacySpaceRows);
 }
 
 function encodeSpaceListCursor(row: SpaceListRow): string {

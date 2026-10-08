@@ -265,17 +265,16 @@ export class SpacesApi {
     const options = typeof optionsOrFetch === "function" ? {} : optionsOrFetch;
     const fetch = typeof optionsOrFetch === "function" ? optionsOrFetch : customFetch;
     const params = new URLSearchParams();
+    params.set("filter", options.filter ?? "recent");
     if (options.limit) params.set("limit", String(options.limit));
     if (options.cursor) params.set("cursor", options.cursor);
-    if (options.filter) params.set("filter", options.filter);
     if (options.query) params.set("q", options.query);
     if (options.name) params.set("name", options.name);
     for (const recent of options.recentSpaces ?? []) {
       params.append("recentSpaceId", recent.id);
       params.append("recentSpaceAt", new Date(recent.timestamp).toISOString());
     }
-    const query = params.toString();
-    return this.transport.request<SpaceListPage>(`/api/spaces${query ? `?${query}` : ""}`, { fetch });
+    return this.transport.request<SpaceListPage>(`/api/spaces?${params}`, { fetch });
   }
 
   /** Landing Space within the user's own Spaces; use `ensureHome()` for a write target. */
