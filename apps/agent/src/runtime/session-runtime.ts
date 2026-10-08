@@ -650,6 +650,7 @@ function createStreamFn(getRuntime: () => StreamRuntime, shouldOmit: (message: A
         const requestOptions = {
           ...options,
           threadId: runtime.threadId,
+          imageInputCache: toolCtx?.imageInputCache,
           headers: model.provider === "cohub"
             ? mergeHeaders(streamHeaders, {
                 "x-litellm-track-extra": JSON.stringify({
