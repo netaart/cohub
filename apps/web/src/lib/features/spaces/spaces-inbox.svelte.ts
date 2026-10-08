@@ -19,12 +19,11 @@ import { LiveList } from "$lib/lists/live-list.svelte";
 import { sdk } from "$lib/sdk";
 import { authStore } from "$lib/stores/auth.svelte";
 import { getRecentSpaces, onRecentSpaceVisit } from "$lib/stores/recent-space";
+import type { ViewerFlags } from "$lib/stores/space-pins.svelte";
 
 const PAGE_SIZE = 50;
 const PINNED_SYSTEM_KEY = "user:pinned";
 const ARCHIVED_SYSTEM_KEY = "user:archived";
-
-type ViewerFlags = { isPinned?: boolean; isArchived?: boolean };
 
 function recentVisits() {
 	return getRecentSpaces(authStore.userUuid ?? "").map((entry) => ({
@@ -89,6 +88,8 @@ class SpacesInbox {
 			});
 		},
 	});
+
+	filter = $state<SpacesFilter>("recent");
 
 	#stop: (() => void) | null = null;
 	#refreshing = new Map<string, Promise<void>>();

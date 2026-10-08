@@ -94,6 +94,7 @@ import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
 import { clearAccountSnapshots } from "$lib/features/settings/account-snapshots";
 import { appActionName } from "$lib/features/space/modules/task-run-utils";
 import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
+import SpacesViewsNav from "$lib/features/spaces/SpacesViewsNav.svelte";
 import { extractGenerationPromptPreview } from "$lib/generation-task-media";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -106,9 +107,10 @@ import {
 } from "$lib/labels/resource-label-actions";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import {
-	APP_AREAS,
 	type AppArea,
 	appAreaHref,
+	DESKTOP_APP_AREAS,
+	isAppAreaPage,
 	resolveAppArea,
 } from "$lib/mobile-nav";
 import { m } from "$lib/paraglide/messages.js";
@@ -393,8 +395,9 @@ const workspaceRoute = $derived(
 );
 const routeSpaceId = $derived(workspaceRoute.spaceId);
 const shown = $derived(isMobile || !useCompactShell());
+const spacesHome = $derived(area === "spaces" && !routeSpaceId && !isMobile);
 const fallbackSpaceId = $derived.by(() => {
-	if (area !== "spaces" || routeSpaceId || !shown) return null;
+	if (area !== "spaces" || routeSpaceId || !isMobile) return null;
 	void currentPath;
 	const userUuid = authStore.userUuid;
 	return userUuid ? (getRecentSpace(userUuid)?.spaceId ?? null) : null;
@@ -3678,13 +3681,14 @@ $effect(() => {
       </button>
       <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
       <nav class="mt-2 flex flex-col items-center gap-1" aria-label={m.nav_tabs_aria({}, { locale })}>
-        {#each APP_AREAS as item (item)}
+        {#each DESKTOP_APP_AREAS as item (item)}
           {@const Icon = APP_AREA_ICONS[item]}
+          {@const current = isAppAreaPage(item, currentPath)}
           <a
             href={appAreaHref(item)}
-            class="flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {area === item ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+            class="flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {current ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
             aria-label={appAreaLabel(item, locale)}
-            aria-current={area === item ? "page" : undefined}
+            aria-current={current ? "page" : undefined}
             title={appAreaLabel(item, locale)}
             onclick={(event) => openArea(event, item)}
           >
@@ -3695,7 +3699,9 @@ $effect(() => {
 
       <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
 
-      {#if area === "spaces"}
+      {#if spacesHome}
+        <SpacesViewsNav variant="rail" />
+      {:else if area === "spaces"}
         <div class="mt-2 flex w-full flex-col items-center gap-1">
           <button
             type="button"
@@ -3885,9 +3891,10 @@ $effect(() => {
         <button
           type="button"
           data-user-menu
-          class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-bg-hover-strong transition-colors duration-100 hover:bg-bg-hover"
+          class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-bg-hover-strong transition-[background-color,box-shadow] duration-100 hover:bg-bg-hover {area === 'account' ? 'ring-2 ring-border-strong ring-offset-2 ring-offset-[var(--sidebar-bg)]' : ''}"
           onclick={() => { showUserMenu = !showUserMenu; }}
           aria-label={userDisplayName}
+          aria-current={area === "account" ? "page" : undefined}
           title={userDisplayName}
         >
           <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="md" class="h-full w-full border-0" />
@@ -3901,33 +3908,32 @@ $effect(() => {
   class="list-compact {isMobile ? 'h-full w-full' : 'h-screen w-full'} flex flex-col bg-[var(--sidebar-bg)]"
 >
   <!-- Brand Header -->
-  <div class="flex h-[48px] shrink-0 items-center gap-2 border-b border-border-subtle px-3">
-    <a href="/" class="group flex shrink-0 items-center gap-2" aria-label={m.sidebar_cohub_home({}, { locale })} title={m.sidebar_home({}, { locale })}>
+  <div class="@container flex h-[48px] shrink-0 items-center gap-2 border-b border-border-subtle px-3">
+    <a href="/" class="group flex min-w-0 items-center gap-2" aria-label={m.sidebar_cohub_home({}, { locale })} title={m.sidebar_home({}, { locale })}>
       <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-brand text-[11px] font-bold text-brand-contrast-fg transition-colors group-hover:bg-brand-hover">
         C
       </div>
-      {#if isMobile}
-        <span class="truncate text-[13px] font-semibold tracking-tight text-text-primary">Cohub</span>
-      {/if}
+      <span class="truncate text-[13px] font-semibold tracking-tight text-text-primary @max-[210px]:hidden">Cohub</span>
     </a>
-    {#if !isMobile}
-      <nav class="flex min-w-0 items-center gap-0.5" aria-label={m.nav_tabs_aria({}, { locale })}>
-        {#each APP_AREAS as item (item)}
-          {@const Icon = APP_AREA_ICONS[item]}
-          <a
-            href={appAreaHref(item)}
-            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] transition-colors duration-100 {area === item ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
-            aria-label={appAreaLabel(item, locale)}
-            aria-current={area === item ? "page" : undefined}
-            title={appAreaLabel(item, locale)}
-            onclick={(event) => openArea(event, item)}
-          >
-            <Icon class="h-3.5 w-3.5" />
-          </a>
-        {/each}
-      </nav>
-    {/if}
     <div class="ml-auto flex shrink-0 items-center gap-1">
+      {#if !isMobile}
+        <nav class="mr-1 flex items-center gap-0.5" aria-label={m.nav_tabs_aria({}, { locale })}>
+          {#each DESKTOP_APP_AREAS as item (item)}
+            {@const Icon = APP_AREA_ICONS[item]}
+            {@const current = isAppAreaPage(item, currentPath)}
+            <a
+              href={appAreaHref(item)}
+              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] transition-colors duration-100 {current ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+              aria-label={appAreaLabel(item, locale)}
+              aria-current={current ? "page" : undefined}
+              title={appAreaLabel(item, locale)}
+              onclick={(event) => openArea(event, item)}
+            >
+              <Icon class="h-3.5 w-3.5" />
+            </a>
+          {/each}
+        </nav>
+      {/if}
       <button
         type="button"
         class="group/search flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
@@ -3950,8 +3956,7 @@ $effect(() => {
         >
           <MessageSquare class="h-3.5 w-3.5" />
         </a>
-      {/if}
-      {#if !isMobile}
+      {:else}
         <button
           type="button"
           class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
@@ -3965,7 +3970,9 @@ $effect(() => {
     </div>
   </div>
 
-  {#if area === "spaces"}
+  {#if spacesHome}
+    <SpacesViewsNav variant="list" />
+  {:else if area === "spaces"}
     <!-- Space Switcher -->
     <div class="px-1.5 py-1 shrink-0 border-b border-border-subtle">
       <button
@@ -4436,7 +4443,8 @@ $effect(() => {
       <button
         type="button"
         data-user-menu
-        class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-[6px] rounded-[5px] hover:bg-bg-hover transition-colors duration-100 cursor-pointer"
+        class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-[6px] rounded-[5px] transition-colors duration-100 cursor-pointer {area === 'account' ? 'bg-bg-active' : 'hover:bg-bg-hover'}"
+        aria-current={area === "account" ? "page" : undefined}
         onclick={() => { showHelpMenu = false; showUserMenu = !showUserMenu; }}
       >
         <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="xs" class="h-[22px] w-[22px] border-0" />

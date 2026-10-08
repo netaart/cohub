@@ -2,8 +2,14 @@ export type AppArea = "chats" | "spaces" | "account";
 
 export const APP_AREAS: readonly AppArea[] = ["chats", "spaces", "account"];
 
+export const DESKTOP_APP_AREAS: readonly AppArea[] = ["chats", "spaces"];
+
 export function isSpaceCreatePath(pathname: string): boolean {
 	return pathname === "/spaces/new" || pathname.startsWith("/spaces/new/");
+}
+
+export function isSpacesHomePath(pathname: string): boolean {
+	return pathname === "/spaces" || isSpaceCreatePath(pathname);
 }
 
 export function isSessionsPath(pathname: string): boolean {
@@ -22,6 +28,17 @@ export function resolveAppArea(pathname: string): AppArea {
 	if (isSessionsPath(pathname)) return "chats";
 	if (isAccountPath(pathname)) return "account";
 	return "spaces";
+}
+
+export function isAppAreaPage(area: AppArea, pathname: string): boolean {
+	switch (area) {
+		case "chats":
+			return isSessionsPath(pathname);
+		case "spaces":
+			return isSpacesHomePath(pathname);
+		case "account":
+			return isAccountPath(pathname);
+	}
 }
 
 export function appAreaHref(area: AppArea): string {

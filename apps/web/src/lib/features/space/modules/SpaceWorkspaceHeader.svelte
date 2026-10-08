@@ -182,7 +182,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 	{#if context.activeSessionId && context.canManageSessionAccess}
 		<button
 			type="button"
-			class="header-action-btn {context.isActiveSessionPublic ? 'is-shared' : ''}"
+			class="header-action {context.isActiveSessionPublic ? 'is-shared' : ''}"
 			onclick={() => actions.openShareModal(context.activeSessionId!)}
 			title={context.isActiveSessionPublic ? "Session is public" : "Share session"}
 		>
@@ -200,7 +200,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 		<div class="relative" data-resource-actions>
 			<button
 				type="button"
-				class="header-action-btn is-square"
+				class="header-action"
 				onclick={(event) => {
 					event.stopPropagation();
 					resourceActionsRootEl = event.currentTarget;
@@ -261,7 +261,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 	{#if context.rightSidebarAvailable}
 		<button
 			type="button"
-			class="header-action-btn"
+			class="header-action"
 			onclick={() => runAction(actions.toggleRightSidebar)}
 			title={`${context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })} (Ctrl+Alt+→ / ⌃⌥→)`}
 			aria-label={context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })}
@@ -354,38 +354,11 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 	</ColumnHeader>
 
 <style>
-
-	.header-action-btn {
-		display: inline-flex;
-		height: 32px;
-		min-width: 32px;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		border: 0;
-		border-radius: 7px;
-		background: transparent;
-		padding: 0 8px;
-		color: var(--text-tertiary);
-		cursor: pointer;
-		transition: background-color 120ms ease, color 120ms ease;
-	}
-
-	.header-action-btn.is-square {
-		width: 32px;
-		padding: 0;
-	}
-
-	.header-action-btn:hover {
-		background: var(--bg-hover);
-		color: var(--text-secondary);
-	}
-
-	.header-action-btn.is-shared {
+	.header-action.is-shared {
 		color: var(--success-soft);
 	}
 
-	.header-action-btn.is-shared:hover {
+	.header-action.is-shared:hover {
 		background: var(--success-bg);
 		color: var(--success);
 	}

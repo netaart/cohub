@@ -242,6 +242,7 @@
 	"spaces_unarchive": "取消归档",
 	"spaces_label_placeholder": "标签名称",
 	"spaces_label_add": "添加标签",
+	"spaces_select": "选择",
 	"spaces_selected_aria": "选择 {name}",
 	"spaces_update_failed": "更新 Space 失败。",
 	"spaces_apply_label_failed": "添加标签失败。",

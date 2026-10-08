@@ -17,13 +17,13 @@ import { flattenLabelsWithRefs } from "$lib/stores/space-labels";
 const {
 	open,
 	anchor,
-	count,
+	title,
 	onApply,
 	onClose,
 }: {
 	open: boolean;
 	anchor: HTMLElement | null;
-	count: number;
+	title: string;
 	onApply: (labelRef: string) => Promise<void>;
 	onClose: () => void;
 } = $props();
@@ -79,8 +79,8 @@ async function apply(labelRef: string) {
 }
 </script>
 
-<AdaptivePopover {open} {anchor} {onClose} label={m.spaces_label_title({ count }, { locale })} width={260} placement="bottom-end">
-	<div class="px-2 pb-1 pt-1.5 text-[11px] text-text-tertiary">{m.spaces_label_title({ count }, { locale })}</div>
+<AdaptivePopover {open} {anchor} {onClose} label={title} width={260} placement="bottom-end">
+	<div class="px-2 pb-1 pt-1.5 text-[11px] text-text-tertiary">{title}</div>
 	<form
 		class="px-1 pb-1"
 		onsubmit={(event) => {

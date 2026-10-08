@@ -1,11 +1,15 @@
-<script lang="ts" module>
-import type { SpacesFilter } from "$lib/features/spaces/spaces-filter";
-
-let lastFilter: SpacesFilter = "recent";
-</script>
-
 <script lang="ts">
-import { Archive, ArchiveRestore, Pin, PinOff, Plus, Search, Tag, X } from "lucide-svelte";
+import type { SpaceRecord } from "@neta-art/cohub";
+import {
+	Archive,
+	ArchiveRestore,
+	Pin,
+	PinOff,
+	Plus,
+	Search,
+	Tag,
+	X,
+} from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import { openAreaSearch } from "$lib/command-palette/open";
 import FilterBar from "$lib/components/list-page/FilterBar.svelte";
@@ -15,23 +19,36 @@ import ListHeader from "$lib/components/list-page/ListHeader.svelte";
 import SwipePager from "$lib/components/list-page/SwipePager.svelte";
 import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
 import SpaceLabelPicker from "$lib/features/spaces/SpaceLabelPicker.svelte";
+import SpaceRowMenu from "$lib/features/spaces/SpaceRowMenu.svelte";
 import SpacesListPane from "$lib/features/spaces/SpacesListPane.svelte";
-import { SPACES_FILTERS } from "$lib/features/spaces/spaces-filter";
+import {
+	SPACES_FILTERS,
+	type SpacesFilter,
+} from "$lib/features/spaces/spaces-filter";
 import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
+import { spacesFilterLabel } from "$lib/features/spaces/spaces-views";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { onListScrollTop } from "$lib/layout/list-scroll-top";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { pruneSelection, selectRange, toggleSelection } from "$lib/selection";
-import { toggleSpaceArchive } from "$lib/stores/space-pins.svelte";
+import {
+	archiveFlags,
+	pinFlags,
+	setSpacesArchived,
+	setSpacesPinned,
+	type ViewerFlags,
+} from "$lib/stores/space-pins.svelte";
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
+
+type LabelTarget = { ids: string[]; anchor: HTMLElement | null; title: string };
 
 const list = spacesInbox.list;
 const locale = $derived(getLocale());
 const compact = $derived(useCompactShell());
-let filter = $state<SpacesFilter>(lastFilter);
+const filter = $derived(spacesInbox.filter);
 const filterIndex = $derived(SPACES_FILTERS.indexOf(filter));
 const tabs = new SwipeTabs(() => ({ index: filterIndex, enabled: compact }));
 const view = $derived(list.view(filter));
@@ -41,32 +58,21 @@ let selected = $state<Set<string>>(new Set());
 let anchorId: string | null = null;
 let busy = $state(false);
 let labelAnchor = $state<HTMLElement | null>(null);
-let labelPickerOpen = $state(false);
+let labelTarget = $state<LabelTarget | null>(null);
+let menu = $state<{ id: string; anchor: HTMLElement } | null>(null);
 
 const selecting = $derived(selected.size > 0);
 const allSelectedPinned = $derived(
-	selecting && spaces.every((space) => !selected.has(space.id) || space.isPinned),
+	selecting &&
+		spaces.every((space) => !selected.has(space.id) || space.isPinned),
 );
-
-function filterLabel(value: SpacesFilter) {
-	switch (value) {
-		case "recent":
-			return m.spaces_section_recent({}, { locale });
-		case "all":
-			return m.spaces_section_all({}, { locale });
-		case "mine":
-			return m.command_mine({}, { locale });
-		case "pinned":
-			return m.spaces_section_pinned({}, { locale });
-		case "archived":
-			return m.spaces_archived({}, { locale });
-	}
-}
+const menuSpace = $derived(menu ? (list.find(menu.id) ?? null) : null);
 
 function neighbours() {
-	return [SPACES_FILTERS[filterIndex - 1], SPACES_FILTERS[filterIndex + 1]].filter(
-		(value) => value !== undefined,
-	);
+	return [
+		SPACES_FILTERS[filterIndex - 1],
+		SPACES_FILTERS[filterIndex + 1],
+	].filter((value) => value !== undefined);
 }
 
 function selectFilter(value: SpacesFilter) {
@@ -74,76 +80,159 @@ function selectFilter(value: SpacesFilter) {
 		tabs.scrollToTop();
 		return;
 	}
-	filter = value;
-	lastFilter = value;
-	clearSelection();
+	spacesInbox.filter = value;
 }
 
 function clearSelection() {
 	selected = new Set();
 	anchorId = null;
-	labelPickerOpen = false;
+	labelTarget = null;
 }
 
 function toggle(id: string, event?: MouseEvent) {
 	selected = event?.shiftKey
-		? selectRange(selected, spaces.map((space) => space.id), anchorId, id)
+		? selectRange(
+				selected,
+				spaces.map((space) => space.id),
+				anchorId,
+				id,
+			)
 		: toggleSelection(selected, id);
 	anchorId = id;
 }
 
-async function runBatch(
-	action: () => Promise<unknown>,
-	flags?: { isPinned?: boolean; isArchived?: boolean },
+function failed(cause: unknown) {
+	actionError =
+		cause instanceof Error
+			? cause.message
+			: m.spaces_update_failed({}, { locale });
+}
+
+async function setFlags(
+	ids: string[],
+	flags: ViewerFlags,
+	write: () => Promise<unknown>,
 ) {
-	if (!selected.size || busy) return;
-	const ids = [...selected];
+	const previous = ids.map((id) => {
+		const space = list.find(id);
+		return [
+			id,
+			{
+				isPinned: space?.isPinned ?? false,
+				isArchived: space?.isArchived ?? false,
+			},
+		] as const;
+	});
+	actionError = "";
+	spacesInbox.applyViewerFlags(ids, flags);
+	try {
+		await write();
+	} catch (cause) {
+		for (const [id, before] of previous)
+			spacesInbox.applyViewerFlags([id], before);
+		failed(cause);
+	}
+}
+
+function setPinned(ids: string[], pinned: boolean) {
+	return setFlags(ids, pinFlags(pinned), () => setSpacesPinned(ids, pinned));
+}
+
+function setArchived(ids: string[], archived: boolean) {
+	return setFlags(ids, archiveFlags(archived), () =>
+		setSpacesArchived(ids, archived),
+	);
+}
+
+async function applyLabel(labelRef: string) {
+	if (!labelTarget || busy) return;
+	const { ids } = labelTarget;
 	busy = true;
 	actionError = "";
 	try {
-		await action();
-		if (flags) spacesInbox.applyViewerFlags(ids, flags);
-		clearSelection();
+		await sdk.user.labels.patchResources(ids, { addLabelRefs: [labelRef] });
+		if (selecting) clearSelection();
+		else labelTarget = null;
 	} catch (cause) {
-		actionError =
-			cause instanceof Error
-				? cause.message
-				: m.spaces_update_failed({}, { locale });
+		failed(cause);
 	} finally {
 		busy = false;
 	}
 }
 
-function pinSelection() {
+function selectionIds() {
 	const ids = [...selected];
-	const unpin = allSelectedPinned;
-	return runBatch(
-		() =>
-			sdk.user.labels.patchResources(
-				ids,
-				unpin
-					? { removeLabelRefs: ["Pinned"] }
-					: { addLabelRefs: ["Pinned"], removeLabelRefs: ["Archived"] },
-			),
-		unpin ? { isPinned: false } : { isPinned: true, isArchived: false },
-	);
+	clearSelection();
+	return ids;
+}
+
+function pinSelection() {
+	const pinned = !allSelectedPinned;
+	void setPinned(selectionIds(), pinned);
 }
 
 function archiveSelection() {
-	const ids = [...selected];
-	const archive = filter !== "archived";
-	return runBatch(
-		() => toggleSpaceArchive(ids, archive),
-		archive ? { isArchived: true, isPinned: false } : { isArchived: false },
+	const archived = filter !== "archived";
+	void setArchived(selectionIds(), archived);
+}
+
+function toggleSelectionLabel() {
+	labelTarget = labelTarget
+		? null
+		: {
+				ids: [...selected],
+				anchor: labelAnchor,
+				title: m.spaces_label_title({ count: selected.size }, { locale }),
+			};
+}
+
+function nameOf(space: SpaceRecord | null) {
+	return (
+		space?.name?.trim() ||
+		space?.title?.trim() ||
+		m.spaces_default_name({}, { locale })
 	);
 }
 
-function applyLabel(labelRef: string) {
-	const ids = [...selected];
-	return runBatch(() =>
-		sdk.user.labels.patchResources(ids, { addLabelRefs: [labelRef] }),
-	);
+function openMenu(space: SpaceRecord, anchor: HTMLElement) {
+	menu = menu?.id === space.id ? null : { id: space.id, anchor };
 }
+
+function closeMenu() {
+	menu?.anchor.focus({ preventScroll: true });
+	menu = null;
+}
+
+function fromMenu(action: (space: SpaceRecord, anchor: HTMLElement) => void) {
+	return (space: SpaceRecord) => {
+		const anchor = menu?.anchor;
+		closeMenu();
+		if (anchor) action(space, anchor);
+	};
+}
+
+const rowActions = {
+	onPin: fromMenu((space) => void setPinned([space.id], !space.isPinned)),
+	onArchive: fromMenu(
+		(space) => void setArchived([space.id], !space.isArchived),
+	),
+	onLabel: fromMenu((space, anchor) => {
+		labelTarget = {
+			ids: [space.id],
+			anchor,
+			title: m.spaces_label_add({}, { locale }),
+		};
+	}),
+	onSelect: fromMenu((space) => toggle(space.id)),
+};
+
+$effect(() => {
+	void filter;
+	untrack(() => {
+		clearSelection();
+		menu = null;
+	});
+});
 
 $effect(() => {
 	const value = filter;
@@ -169,7 +258,7 @@ onMount(() => {
 	const stopScrollTop = onListScrollTop(() => tabs.scrollToTop());
 	const onKeydown = (event: KeyboardEvent) => {
 		if (event.key !== "Escape" || event.defaultPrevented || !selecting) return;
-		if (labelPickerOpen) return;
+		if (labelTarget) return;
 		event.preventDefault();
 		clearSelection();
 	};
@@ -209,22 +298,21 @@ onMount(() => {
 						label={allSelectedPinned ? m.command_unpin({}, { locale }) : m.command_pin({}, { locale })}
 						icon={allSelectedPinned ? PinOff : Pin}
 						disabled={busy}
-						onclick={() => void pinSelection()}
+						onclick={pinSelection}
 					/>
 					<HeaderAction
 						label={filter === "archived" ? m.spaces_unarchive({}, { locale }) : m.spaces_archive({}, { locale })}
 						icon={filter === "archived" ? ArchiveRestore : Archive}
 						disabled={busy}
-						onclick={() => void archiveSelection()}
+						onclick={archiveSelection}
 					/>
 					<HeaderAction
 						bind:ref={labelAnchor}
 						label={m.spaces_label_add({}, { locale })}
 						icon={Tag}
 						disabled={busy}
-						onclick={() => {
-							labelPickerOpen = !labelPickerOpen;
-						}}
+						expanded={labelTarget !== null}
+						onclick={toggleSelectionLabel}
 					/>
 				{:else}
 					<HeaderAction label={m.list_search({}, { locale })} icon={Search} shortcut="⌘K" onclick={() => openAreaSearch("spaces")} />
@@ -232,17 +320,19 @@ onMount(() => {
 				{/if}
 			{/snippet}
 		</ListHeader>
-		<FilterBar
-			label={m.spaces_title({}, { locale })}
-			role="tablist"
-			activeKey={SPACES_FILTERS[tabs.shown] ?? null}
-			position={tabs.position}
-			glide={tabs.glide}
-		>
-			{#each SPACES_FILTERS as value, index (value)}
-				<FilterChip label={filterLabel(value)} active={tabs.shown === index} onclick={() => selectFilter(value)} />
-			{/each}
-		</FilterBar>
+		{#if compact}
+			<FilterBar
+				label={m.spaces_title({}, { locale })}
+				role="tablist"
+				activeKey={SPACES_FILTERS[tabs.shown] ?? null}
+				position={tabs.position}
+				glide={tabs.glide}
+			>
+				{#each SPACES_FILTERS as value, index (value)}
+					<FilterChip label={spacesFilterLabel(value, locale)} active={tabs.shown === index} onclick={() => selectFilter(value)} />
+				{/each}
+			</FilterBar>
+		{/if}
 	</div>
 
 	{#if actionError || view.error}
@@ -278,17 +368,21 @@ onMount(() => {
 				selected={active ? selected : NO_SELECTION}
 				onToggle={toggle}
 				onLoadMore={active ? () => void list.loadMore(value) : undefined}
+				menuId={menu?.id ?? null}
+				onMenu={openMenu}
 			/>
 		{/snippet}
 	</SwipePager>
 </section>
 
+<SpaceRowMenu space={menuSpace} name={nameOf(menuSpace)} anchor={menu?.anchor ?? null} {...rowActions} onClose={closeMenu} />
+
 <SpaceLabelPicker
-	open={labelPickerOpen && selecting}
-	anchor={labelAnchor}
-	count={selected.size}
+	open={labelTarget !== null}
+	anchor={labelTarget?.anchor ?? null}
+	title={labelTarget?.title ?? ""}
 	onApply={applyLabel}
 	onClose={() => {
-		labelPickerOpen = false;
+		labelTarget = null;
 	}}
 />
