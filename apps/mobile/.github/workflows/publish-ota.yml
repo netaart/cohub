@@ -257,7 +257,7 @@ jobs:
     needs: [prepare, android]
     if: github.repository == 'markbang/cohub-mobile' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35  # three publish attempts, each bounded by a 5-minute response timeout
     steps:
       - name: Checkout selected commit
         uses: actions/checkout@v7
@@ -315,40 +315,51 @@ jobs:
           # publishes a matching native distribution. Report the skip instead of failing
           # the pipeline, so a release run shows the real state and the next steps.
           COHUB_OTA_RUNTIME_VERSION="$runtime" npx expo config --type public --json > "$RUNNER_TEMP/ota-config.json"
-          set +e
-          OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/scripts/publish.ts" \
-            --app-id cohub-mobile \
-            --config "$RUNNER_TEMP/ota-config.json" \
-            --runtime "$runtime" \
-            --fingerprint "$SOURCE_FINGERPRINT" \
-            --commit "$SOURCE_COMMIT" \
-            --delta-bases 3 \
-            --channel "$CHANNEL" \
-            --platform android \
-            --export-dir "$OTA_EXPORT_DIR" 2>&1 | tee "$RUNNER_TEMP/ota-publish.log"
-          status=${PIPESTATUS[0]}
-          set -e
-          if [[ $status -eq 0 ]]; then exit 0; fi
-          if grep -q "Fingerprint mismatch" "$RUNNER_TEMP/ota-publish.log"; then
-            {
-              echo "## OTA skipped (Android)"
-              echo
-              echo "The OTA server rejected this bundle because its native fingerprint differs from the latest update on runtime \`$runtime\`."
-              echo "This commit changed native/SDK code, so it cannot ride the installed binary."
-              echo
-              echo "Run **Native Release** with \`platform=android\`, \`profile=distribution\`, and the release tag to publish a matching native distribution; JS-only commits publish again afterwards."
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning title=Android OTA skipped::Native fingerprint changed; ship a new native distribution first."
-            exit 0
-          fi
-          exit "$status"
+          # Transient transport/server failures retry. Repeating is safe: blobs are
+          # content-addressed, an interrupted attempt leaves at most an unserved Staged
+          # release, and the concurrency group keeps a newer commit from being overtaken.
+          attempts=$(node --input-type=module -e 'import { OTA_PUBLISH_ATTEMPTS } from "./scripts/ota-publish.mjs"; process.stdout.write(String(OTA_PUBLISH_ATTEMPTS))')
+          for attempt in $(seq 1 "$attempts"); do
+            set +e
+            OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/scripts/publish.ts" \
+              --app-id cohub-mobile \
+              --config "$RUNNER_TEMP/ota-config.json" \
+              --runtime "$runtime" \
+              --fingerprint "$SOURCE_FINGERPRINT" \
+              --commit "$SOURCE_COMMIT" \
+              --delta-bases 3 \
+              --channel "$CHANNEL" \
+              --platform android \
+              --export-dir "$OTA_EXPORT_DIR" 2>&1 | tee "$RUNNER_TEMP/ota-publish.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [[ $status -eq 0 ]]; then exit 0; fi
+            if grep -q "Fingerprint mismatch" "$RUNNER_TEMP/ota-publish.log"; then
+              {
+                echo "## OTA skipped (Android)"
+                echo
+                echo "The OTA server rejected this bundle because its native fingerprint differs from the latest update on runtime \`$runtime\`."
+                echo "This commit changed native/SDK code, so it cannot ride the installed binary."
+                echo
+                echo "Run **Native Release** with \`platform=android\`, \`profile=distribution\`, and the release tag to publish a matching native distribution; JS-only commits publish again afterwards."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning title=Android OTA skipped::Native fingerprint changed; ship a new native distribution first."
+              exit 0
+            fi
+            if (( attempt == attempts )) || ! node --input-type=module -e 'import { readFileSync } from "node:fs"; import { isTransientOtaFailure } from "./scripts/ota-publish.mjs"; process.exit(isTransientOtaFailure(readFileSync(process.env.RUNNER_TEMP + "/ota-publish.log", "utf8")) ? 0 : 1)'; then
+              exit "$status"
+            fi
+            delay=$((attempt * 30))
+            echo "::warning title=Android OTA retry::Attempt $attempt/$attempts failed with a transient error; retrying in ${delay}s."
+            sleep "$delay"
+          done
 
   publish-ios:
     name: Upload iOS ${{ needs.prepare.outputs.channel }}
     needs: [prepare, ios]
     if: github.repository == 'markbang/cohub-mobile' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35  # three publish attempts, each bounded by a 5-minute response timeout
     steps:
       - name: Checkout selected commit
         uses: actions/checkout@v7
@@ -403,30 +414,39 @@ jobs:
           # Mirrors the Android publish: a fingerprint-mismatch rejection means this
           # commit needs a new native distribution, not that the pipeline is broken.
           COHUB_OTA_RUNTIME_VERSION="$runtime" npx expo config --type public --json > "$RUNNER_TEMP/ota-config.json"
-          set +e
-          OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/scripts/publish.ts" \
-            --app-id cohub-mobile \
-            --config "$RUNNER_TEMP/ota-config.json" \
-            --runtime "$runtime" \
-            --fingerprint "$SOURCE_FINGERPRINT" \
-            --commit "$SOURCE_COMMIT" \
-            --delta-bases 3 \
-            --channel "$CHANNEL" \
-            --platform ios \
-            --export-dir "$OTA_EXPORT_DIR" 2>&1 | tee "$RUNNER_TEMP/ota-publish.log"
-          status=${PIPESTATUS[0]}
-          set -e
-          if [[ $status -eq 0 ]]; then exit 0; fi
-          if grep -q "Fingerprint mismatch" "$RUNNER_TEMP/ota-publish.log"; then
-            {
-              echo "## OTA skipped (iOS)"
-              echo
-              echo "The OTA server rejected this bundle because its native fingerprint differs from the latest update on runtime \`$runtime\`."
-              echo "This commit changed native/SDK code, so it cannot ride the installed binary."
-              echo
-              echo "Run **Native Release** with \`platform=ios\`, \`profile=production\`, and \`submit=true\` to publish a matching TestFlight build; JS-only commits publish again afterwards."
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning title=iOS OTA skipped::Native fingerprint changed; ship a new native distribution first."
-            exit 0
-          fi
-          exit "$status"
+          # Retries transient failures exactly like the Android publish.
+          attempts=$(node --input-type=module -e 'import { OTA_PUBLISH_ATTEMPTS } from "./scripts/ota-publish.mjs"; process.stdout.write(String(OTA_PUBLISH_ATTEMPTS))')
+          for attempt in $(seq 1 "$attempts"); do
+            set +e
+            OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/scripts/publish.ts" \
+              --app-id cohub-mobile \
+              --config "$RUNNER_TEMP/ota-config.json" \
+              --runtime "$runtime" \
+              --fingerprint "$SOURCE_FINGERPRINT" \
+              --commit "$SOURCE_COMMIT" \
+              --delta-bases 3 \
+              --channel "$CHANNEL" \
+              --platform ios \
+              --export-dir "$OTA_EXPORT_DIR" 2>&1 | tee "$RUNNER_TEMP/ota-publish.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [[ $status -eq 0 ]]; then exit 0; fi
+            if grep -q "Fingerprint mismatch" "$RUNNER_TEMP/ota-publish.log"; then
+              {
+                echo "## OTA skipped (iOS)"
+                echo
+                echo "The OTA server rejected this bundle because its native fingerprint differs from the latest update on runtime \`$runtime\`."
+                echo "This commit changed native/SDK code, so it cannot ride the installed binary."
+                echo
+                echo "Run **Native Release** with \`platform=ios\`, \`profile=production\`, and \`submit=true\` to publish a matching TestFlight build; JS-only commits publish again afterwards."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning title=iOS OTA skipped::Native fingerprint changed; ship a new native distribution first."
+              exit 0
+            fi
+            if (( attempt == attempts )) || ! node --input-type=module -e 'import { readFileSync } from "node:fs"; import { isTransientOtaFailure } from "./scripts/ota-publish.mjs"; process.exit(isTransientOtaFailure(readFileSync(process.env.RUNNER_TEMP + "/ota-publish.log", "utf8")) ? 0 : 1)'; then
+              exit "$status"
+            fi
+            delay=$((attempt * 30))
+            echo "::warning title=iOS OTA retry::Attempt $attempt/$attempts failed with a transient error; retrying in ${delay}s."
+            sleep "$delay"
+          done

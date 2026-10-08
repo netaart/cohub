@@ -83,6 +83,22 @@ export function assertReachableFromMain(sha) {
   run("git", ["merge-base", "--is-ancestor", sha, "origin/main"]);
 }
 
+export const OTA_PUBLISH_ATTEMPTS = 3;
+const OTA_HTTP_STATUS = /\bOTA (\d{3}):/;
+const TRANSIENT_NETWORK_ERROR = /fetch failed|UND_ERR_[A-Z_]+|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up/;
+
+/**
+ * Whether a failed publish is worth repeating. Only the transport and server
+ * availability can change between attempts; any other rejection (auth,
+ * fingerprint mismatch, partial rollout in progress) would fail the same way.
+ */
+export function isTransientOtaFailure(log) {
+  const text = String(log ?? "");
+  const status = OTA_HTTP_STATUS.exec(text)?.[1];
+  if (status) return status === "429" || status.startsWith("5");
+  return TRANSIENT_NETWORK_ERROR.test(text);
+}
+
 export function assertFingerprintsMatch(expected, actual) {
   const native = parseFingerprintHash(expected, "the latest native distribution");
   const current = parseFingerprintHash(actual, "the selected commit");

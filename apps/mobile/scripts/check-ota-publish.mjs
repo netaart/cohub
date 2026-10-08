@@ -16,6 +16,8 @@ import {
   NATIVE_FINGERPRINT_ASSET,
   IOS_NATIVE_FINGERPRINT_ASSET,
   assertFingerprintsMatch,
+  isTransientOtaFailure,
+  OTA_PUBLISH_ATTEMPTS,
 } from "./ota-publish.mjs";
 
 const YAML = createRequire(import.meta.url)("yaml");
@@ -32,6 +34,17 @@ assert.equal(fingerprintAssetName("1.6.0"), NATIVE_FINGERPRINT_ASSET);
 assert.doesNotThrow(() => assertFingerprintsMatch("b".repeat(40), "B".repeat(40)));
 assert.throws(() => assertFingerprintsMatch("a".repeat(40), "b".repeat(40)), /mismatch/);
 assert.throws(() => parseFingerprintHash("nope", "test"), /Invalid native fingerprint/);
+
+// The 2026-09-30 Android publish failed on this response timeout and succeeded on a manual rerun.
+const headersTimeoutLog = "node:internal/modules/run_main:107\n[TypeError: fetch failed] {\n  [cause]: HeadersTimeoutError: Headers Timeout Error\n    code: 'UND_ERR_HEADERS_TIMEOUT'\n  }\n}";
+assert.equal(isTransientOtaFailure(headersTimeoutLog), true);
+assert.equal(isTransientOtaFailure("Error: read ECONNRESET"), true);
+assert.equal(isTransientOtaFailure("Error: OTA 502: Bad Gateway"), true);
+assert.equal(isTransientOtaFailure("Error: OTA 429: slow down"), true);
+assert.equal(isTransientOtaFailure("Error: OTA 401: invalid api key"), false, "credential failures do not retry");
+assert.equal(isTransientOtaFailure("Error: OTA 409: Fingerprint mismatch"), false);
+assert.equal(isTransientOtaFailure("Error: Export metadata is missing the selected platform"), false, "local input errors do not retry");
+assert.equal(isTransientOtaFailure(""), false);
 
 const fingerprintConfig = createRequire(import.meta.url)("../fingerprint.config.js");
 assert.ok(
@@ -77,6 +90,67 @@ for (const publish of [publishAndroid, publishIos]) {
   assert.match(publishStep.run, /GITHUB_STEP_SUMMARY/, "A skipped publish must explain itself in the run summary");
   assert.match(publishStep.run, /::warning/, "A skipped publish must surface a warning annotation");
   assert.match(publishStep.run, /exit "\$status"/, "Any other CLI failure must still fail the job");
+  assert.match(publishStep.run, /isTransientOtaFailure/, "Only transient failures may retry");
+  assert.ok(publish["timeout-minutes"] >= OTA_PUBLISH_ATTEMPTS * 5 + 5, "The job must outlast every attempt's 5-minute response timeout");
+  execFileSync("bash", ["-n"], { input: publishStep.run });
+}
+
+// Run the real publish step against a stub CLI to check the retry decisions.
+for (const [platform, publish] of [["android", publishAndroid], ["ios", publishIos]]) {
+  const script = publish.steps.find((step) => step.name === "Publish exported bundle").run;
+  const runPublish = (outcomes) => {
+    const temp = mkdtempSync(join(tmpdir(), "cohub-ota-retry-"));
+    try {
+      mkdirSync(join(temp, "bin"));
+      mkdirSync(join(temp, "ota-cli/scripts"), { recursive: true });
+      mkdirSync(join(temp, "export"));
+      writeFileSync(join(temp, "bin/npx"), `#!/usr/bin/env bash\ncase "$*" in *fingerprint*) echo '{"hash":"${"a".repeat(40)}"}' ;; *) echo '{}' ;; esac\n`, { mode: 0o755 });
+      writeFileSync(join(temp, "bin/sleep"), "#!/usr/bin/env bash\necho \"slept $1\" >> \"$RUNNER_TEMP/sleeps\"\n", { mode: 0o755 });
+      // Each call consumes the next scripted outcome: "ok" or a log line to fail with.
+      writeFileSync(join(temp, "ota-cli/scripts/publish.ts"), `
+        const fs = process.getBuiltinModule("node:fs");
+        const counter = process.env.RUNNER_TEMP + "/calls";
+        const call = fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0;
+        fs.writeFileSync(counter, String(call + 1));
+        const outcome = ${JSON.stringify(outcomes)}[call];
+        if (outcome === "ok") { console.log('{"status":"Live"}'); process.exit(0); }
+        console.error(outcome); process.exit(1);
+      `);
+      const result = spawnSync("bash", ["-c", script], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${join(temp, "bin")}:${process.env.PATH}`,
+          RUNNER_TEMP: temp,
+          GITHUB_STEP_SUMMARY: join(temp, "summary"),
+          OTA_SERVER: "https://ota.example.com",
+          OTA_API_KEY: "test-key",
+          CHANNEL: "production",
+          OTA_PLATFORM: platform,
+          SOURCE_COMMIT: "c".repeat(40),
+          COHUB_OTA_RUNTIME_VERSION: "b".repeat(40),
+          OTA_EXPORT_DIR: join(temp, "export"),
+        },
+      });
+      const read = (name) => { try { return readFileSync(join(temp, name), "utf8"); } catch { return ""; } };
+      return { status: result.status, calls: Number(read("calls")), sleeps: read("sleeps").trim().split("\n").filter(Boolean), output: result.stdout + result.stderr };
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  };
+  const recovered = runPublish([headersTimeoutLog, "Error: OTA 503: unavailable", "ok"]);
+  assert.equal(recovered.status, 0, recovered.output);
+  assert.equal(recovered.calls, 3, `${platform}: transient failures retry until success`);
+  assert.deepEqual(recovered.sleeps, ["slept 30", "slept 60"], `${platform}: retries back off`);
+  const exhausted = runPublish([headersTimeoutLog, headersTimeoutLog, headersTimeoutLog, "ok"]);
+  assert.notEqual(exhausted.status, 0, `${platform}: the job fails once attempts run out`);
+  assert.equal(exhausted.calls, OTA_PUBLISH_ATTEMPTS);
+  const rejected = runPublish(["Error: OTA 401: invalid api key", "ok"]);
+  assert.notEqual(rejected.status, 0);
+  assert.equal(rejected.calls, 1, `${platform}: permanent failures do not retry`);
+  const mismatch = runPublish(["Error: OTA 409: Fingerprint mismatch", "ok"]);
+  assert.equal(mismatch.status, 0, `${platform}: a fingerprint mismatch stays an explained skip`);
+  assert.equal(mismatch.calls, 1);
 }
 assert.match(JSON.stringify(publishAndroid.steps), /--platform android/);
 assert.match(JSON.stringify(publishIos.steps), /--platform ios/);
