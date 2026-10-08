@@ -178,6 +178,7 @@ let runStatus = $state<"idle" | "queued" | "running" | "done" | "failed">(
 );
 let runError = $state("");
 let runPollTimer: number | null = null;
+let scheduledSearchKey: string | null = null;
 
 type SpaceFilter = SpaceFilterPref | "archived";
 let spaceFilter = $state<SpaceFilter>("all");
@@ -707,6 +708,7 @@ function teardownPalette() {
 	seed = null;
 	lensSnapshots.clear();
 	searchToken += 1;
+	scheduledSearchKey = null;
 	localController?.abort();
 	remoteController?.abort();
 	resetRunState();
@@ -749,7 +751,14 @@ function resetSearch(options?: { clearDefaultLists?: boolean }) {
 	activeIndex = 0;
 }
 
+function searchScheduleKey(plan: typeof searchPlan, spaceId: string | null) {
+	return `${openIntent}:${spaceId ?? ""}:${spaceFilter}:${plan.resourceTypes?.join(",") ?? ""}:${plan.labelRef ?? ""}:${plan.query}`;
+}
+
 function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
+	const scheduleKey = searchScheduleKey(plan, spaceId);
+	if (scheduledSearchKey === scheduleKey) return;
+	scheduledSearchKey = scheduleKey;
 	const q = plan.query.trim();
 	const isLabelScope = Boolean(
 		plan.labelRef && plan.resourceTypes?.includes("label"),
@@ -1072,7 +1081,8 @@ function handleOpenPaletteEvent(event: Event) {
 $effect(() => {
 	if (!open || runMode) return;
 	if (isSpacePickerMode && spaceFilter === "archived") {
-		resetSearch({ clearDefaultLists: false });
+		if (archivedItems.length > 0) archivedItems = [];
+		if (!archivedDone) archivedDone = true;
 		return;
 	}
 	scheduleSearch(searchPlan, currentSpaceId);
@@ -1081,7 +1091,7 @@ $effect(() => {
 $effect(() => {
 	if (!open || runMode || !isSpacePickerMode || spaceFilter !== "archived") {
 		archivedToken += 1;
-		archivedDone = true;
+		if (!archivedDone) archivedDone = true;
 		return;
 	}
 	return loadArchivedSpaces(searchPlan.query);
