@@ -42,6 +42,14 @@ function shouldApplyActiveTurn(
 	);
 }
 
+function isOlderSnapshot(
+	incoming: { updatedAt?: unknown },
+	existing: SessionRecord,
+) {
+	if (typeof incoming.updatedAt !== "string") return false;
+	return Date.parse(incoming.updatedAt) < Date.parse(existing.updatedAt);
+}
+
 /**
  * Merge a possibly partial realtime session patch into a cached full session.
  *
@@ -66,13 +74,18 @@ export function mergeSessionRecord(
 			? received
 			: previous;
 	const meta = hasOwn(incoming, "meta") ? incoming.meta : existing?.meta;
-	// A stats notification is not a fresh title/activity/profile snapshot.
 	const activeTurnAccepted = shouldApplyActiveTurn(existing, incoming);
 	const result: SessionRecord & { stats?: unknown } =
-		hasOwn(incoming, "stats") && existing
+		existing && isOlderSnapshot(incoming, existing)
 			? {
 					...existing,
 					meta: stats ? { ...existing.meta, stats } : existing.meta,
+					...(hasOwn(incoming, "activeTurn") && activeTurnAccepted
+						? {
+								activeTurn: incoming.activeTurn,
+								activeTurnSequence: incoming.activeTurnSequence,
+							}
+						: {}),
 				}
 			: {
 					...existing,

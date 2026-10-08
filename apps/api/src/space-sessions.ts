@@ -11,10 +11,12 @@ import { isSandboxUsableStatus } from "@cohub/sandbox-controller";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
 import {
+  ACTIVE_TURN_STATUSES,
   claimSessionFallbackTitle,
   deriveSessionFallbackTitle,
   initializeSessionParticipantsMeta,
   normalizeSessionTitle,
+  pickActiveTurns,
   readSessionParticipantUserUuids,
   readSessionTitleSource,
   resolveMessageTurnId,
@@ -41,7 +43,6 @@ import { fallbackPublicUserProfile, getProfilesByUuids } from "./user-profiles.j
 import { enqueueSessionMessagePostprocess } from "./session-message-postprocess-queue.js";
 import { enqueueSessionTitleGeneration } from "./session-title-queue.js";
 import { touchSpaceActivity } from "./space-activity.js";
-import { ACTIVE_TURN_STATUSES, pickActiveTurns } from "./session-active-turns.js";
 import { sessionListSourceCondition } from "./session-source-filter.js";
 import {
   decodeSessionListCursor,

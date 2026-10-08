@@ -181,7 +181,12 @@ export type StatsTurn = {
   finalUsage?: Usage | null; durationMs?: number | null; createdAt?: string | Date | null;
   completedAt?: string | Date | null; meta?: unknown; intermediateSummary?: SessionTurnIntermediateSummary | null;
 };
-export const isSettledStatsTurn = (turn: Pick<StatsTurn, "status">) => ["completed", "failed", "interrupted", "cancelled", "merged"].includes(turn.status);
+/** Bump when `readTurnStats` changes; stored Turn stats rebuild lazily. */
+export const TURN_STATS_VERSION = 1;
+export type TurnStatsRecord = { version: number; stats: ExecutionStats };
+
+export const SETTLED_STATS_TURN_STATUSES = ["completed", "failed", "interrupted", "cancelled", "merged"] as const;
+export const isSettledStatsTurn = (turn: Pick<StatsTurn, "status">) => (SETTLED_STATS_TURN_STATUSES as readonly string[]).includes(turn.status);
 
 export function readTurnStats(turn: StatsTurn): ExecutionStats {
   const result = emptyExecutionStats();

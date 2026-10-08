@@ -78,33 +78,47 @@ export function restoreImageUrls(payload: unknown): unknown {
 
 const omittedImage = (): TextContent => ({ type: "text", text: IMAGE_UNAVAILABLE_TEXT });
 
-async function inlineImageUrls(context: TranscriptContext, signal?: AbortSignal): Promise<TranscriptContext> {
+export type ImageInputCache = Map<string, ImageContent | TextContent>;
+
+export const createImageInputCache = (): ImageInputCache => new Map();
+
+export type ImageInputOptions = { imageInputCache?: ImageInputCache };
+
+export async function inlineImageUrls(
+  context: TranscriptContext,
+  options: { signal?: AbortSignal; cache?: ImageInputCache; fetchImage?: typeof fetchRemoteImage } = {},
+): Promise<TranscriptContext> {
+  const { signal, cache = createImageInputCache(), fetchImage = fetchRemoteImage } = options;
   const urls = [...new Set(context.messages.flatMap((message) => contentOf(message)?.filter(isImageUrlContent).map((image) => image.data) ?? []))];
-  const images = new Map<string, ImageContent | TextContent>();
+  const pending = urls.filter((url) => !cache.has(url));
   let cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(INLINE_CONCURRENCY, urls.length) }, async () => {
-    for (let url = urls[cursor++]; url !== undefined; url = urls[cursor++]) {
-      const image = await fetchRemoteImage({ url, maxBytes: INLINE_MAX_BYTES, timeoutMs: INLINE_TIMEOUT_MS, signal }).catch((error: unknown) => {
+  await Promise.all(Array.from({ length: Math.min(INLINE_CONCURRENCY, pending.length) }, async () => {
+    for (let url = pending[cursor++]; url !== undefined; url = pending[cursor++]) {
+      const image = await fetchImage({ url, maxBytes: INLINE_MAX_BYTES, timeoutMs: INLINE_TIMEOUT_MS, signal }).catch((error: unknown) => {
+        if (signal?.aborted) return undefined;
         logger.warn("[ImageInput] failed to inline remote image", { url, error });
         return null;
       });
-      images.set(url, image ? { type: "image", data: image.data.toString("base64"), mimeType: image.mimeType } : omittedImage());
+      if (image === undefined) continue;
+      cache.set(url, image ? { type: "image", data: image.data.toString("base64"), mimeType: image.mimeType } : omittedImage());
     }
   }));
   const messages = context.messages.map((message) => {
     const content = contentOf(message);
     if (!content?.some(isImageUrlContent)) return message;
-    return { ...message, content: content.map((block) => isImageUrlContent(block) ? images.get(block.data) ?? omittedImage() : block) } as Message;
+    return { ...message, content: content.map((block) => isImageUrlContent(block) ? cache.get(block.data) ?? omittedImage() : block) } as Message;
   });
   return { ...context, messages } as TranscriptContext;
 }
 
 export function withImageInputs(streams: ProviderStreams): ProviderStreams {
   const wrap = <O extends StreamOptions>(call: (model: Model<Api>, context: TranscriptContext, options?: O) => ReturnType<ProviderStreams["stream"]>) =>
-    (model: Model<Api>, context: TranscriptContext, options?: O) => {
+    (model: Model<Api>, context: TranscriptContext, rawOptions?: O) => {
+      const { imageInputCache, ...rest } = (rawOptions ?? {}) as O & ImageInputOptions;
+      const options = rawOptions ? rest as O : undefined;
       if (!hasImageUrls(context.messages)) return call(model, context, options);
       if (!acceptsImageUrls(model)) {
-        return lazyStream(model, async () => call(model, await inlineImageUrls(context, options?.signal), options));
+        return lazyStream(model, async () => call(model, await inlineImageUrls(context, { signal: options?.signal, cache: imageInputCache }), options));
       }
       const onPayload = options?.onPayload;
       return call(model, context, {

@@ -26,6 +26,7 @@ import type {
   SessionTurnIntermediateSummary,
   SessionTurnStatus,
   SessionTurnSummary,
+  TurnStatsRecord,
 } from "@cohub/protocol/model";
 
 export type SpaceRole = "host" | "builder" | "guest";
@@ -774,6 +775,7 @@ export const sessionTurns = v2.table(
     intermediateSummary: jsonb("intermediate_summary").$type<SessionTurnIntermediateSummary | null>(),
     harnessIndex: jsonb("harness_index").$type<HarnessArchiveIndex | null>(),
     meta: jsonb("meta"),
+    stats: jsonb("stats").$type<TurnStatsRecord | null>(),
     startedAt: timestamp("started_at", { withTimezone: true }).defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     durationMs: integer("duration_ms"),

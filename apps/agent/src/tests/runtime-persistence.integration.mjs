@@ -55,8 +55,8 @@ mock.module("../runtime/remote-runtime.js", { exports: { executeRemoteHarnessTur
 const { persistAssistantMessage, persistBatchUserMessages, persistUserMessage } = await import("../persistence.js");
 const { claimNextTurnBatch, loadClaimedTurnBatch, resolveBatchAccessMode } = await import("../batch.js");
 const { createRuntimeContextReader } = await import("../runtime/context-reader.js");
-const { scheduleSessionStatsRefresh } = await import("../session-stats.js");
-after(async () => { await scheduleSessionStatsRefresh.flush(); await engine.close(); });
+const { scheduleSessionSnapshot } = await import("../session-snapshot.js");
+after(async () => { await scheduleSessionSnapshot.flush(); await engine.close(); });
 
 async function setup(resolution = false, channels = 0) {
   const spaceId = crypto.randomUUID(), sessionId = crypto.randomUUID(), turnId = crypto.randomUUID(), userMessageId = crypto.randomUUID();

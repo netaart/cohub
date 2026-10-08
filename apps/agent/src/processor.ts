@@ -21,6 +21,7 @@ import { clearCurrentSessionExecutionAuth, setCurrentSessionExecutionAuth } from
 import { resolveSpaceFileVisibility } from "./runtime/cross-space-query-access.js";
 import { normalizeGenerationPolicy } from "@cohub/protocol/generation";
 import { runWithToolExecutionContext } from "./tool-context.js";
+import { createImageInputCache } from "@cohub/model-runtime/image-content";
 import { loadOrCreateSessionHandle, ensurePendingUserMessage, hasSessionUserMessage, removePendingUserMessage, resetStreamState, drainStreamStateBeforeReset, persistInterruptedAssistantSnapshot, refreshSessionHandleFileSignature, type SessionHandle } from "./session.js";
 import { claimNextTurnBatch, buildUserMessagesForBatch, enqueueNextRunnableTurn, resolveBatchAccessMode, type ClaimedTurnBatch } from "./batch.js";
 import { acquireSessionLock } from "./session-lock.js";
@@ -1078,6 +1079,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
           spaceEnv,
           env: promptEnv,
           abortSignal: abortController.signal,
+          imageInputCache: createImageInputCache(),
         }, async () => {
           try {
             if (abortController.signal.aborted) throw new Error("aborted");

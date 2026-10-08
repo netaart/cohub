@@ -1,4 +1,4 @@
-export function createSessionStatsRefresher(
+export function createSessionSnapshotScheduler(
   refresh: (sessionId: string, fromSequence?: number) => Promise<unknown>,
   onError: (error: unknown, sessionId: string) => void,
   delayMs = 25,
@@ -20,7 +20,7 @@ export function createSessionStatsRefresher(
     const existing = pending.get(sessionId);
     if (existing) {
       existing.dirty = true;
-      existing.fromSequence = existing.fromSequence == null || fromSequence == null ? undefined : Math.min(existing.fromSequence, fromSequence);
+      existing.fromSequence = existing.fromSequence == null ? fromSequence : fromSequence == null ? existing.fromSequence : Math.min(existing.fromSequence, fromSequence);
       return existing.promise;
     }
     const state = { dirty: false, fromSequence, promise: Promise.resolve() };

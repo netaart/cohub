@@ -16,6 +16,7 @@ await engine.exec(`create table v2.session_turns (${config.columns.map((column) 
 const warnings = [];
 mock.module("../db.js", { exports: { db } });
 mock.module("../logger.js", { exports: { logger: { warn: (...args) => warnings.push(args) } } });
+mock.module("../session-snapshot.js", { exports: { scheduleSessionSnapshot: async () => {} } });
 const { persistRequestMetric, recordRetryWait } = await import("../metrics.ts");
 after(() => engine.close());
 

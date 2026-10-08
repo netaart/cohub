@@ -21,7 +21,6 @@ type HandledGenerationRealtimeEffect = {
 	shouldScroll: boolean;
 	shouldReconcile: boolean;
 	shouldRestoreSnapshot: boolean;
-	shouldRefreshSessions: boolean;
 };
 
 export type GenerationRealtimeEffect =
@@ -31,7 +30,6 @@ export type GenerationRealtimeEffect =
 			shouldScroll: false;
 			shouldReconcile: false;
 			shouldRestoreSnapshot: false;
-			shouldRefreshSessions: false;
 	  };
 
 const ignoredEffect: GenerationRealtimeEffect = {
@@ -39,7 +37,6 @@ const ignoredEffect: GenerationRealtimeEffect = {
 	shouldScroll: false,
 	shouldReconcile: false,
 	shouldRestoreSnapshot: false,
-	shouldRefreshSessions: false,
 };
 
 function handledEffect(
@@ -510,7 +507,6 @@ export function applyGenerationStreamEvent(
 			shouldScroll: false,
 			shouldReconcile: false,
 			shouldRestoreSnapshot: false,
-			shouldRefreshSessions: false,
 		});
 	}
 
@@ -520,7 +516,6 @@ export function applyGenerationStreamEvent(
 			shouldScroll: true,
 			shouldReconcile: false,
 			shouldRestoreSnapshot: false,
-			shouldRefreshSessions: false,
 		});
 	}
 
@@ -542,7 +537,6 @@ export function applyGenerationStreamEvent(
 					shouldScroll: false,
 					shouldReconcile: false,
 					shouldRestoreSnapshot: false,
-					shouldRefreshSessions: false,
 				});
 			}
 			const archived = intermediateFromCommitMessage(
@@ -564,7 +558,6 @@ export function applyGenerationStreamEvent(
 				shouldScroll: true,
 				shouldReconcile: false,
 				shouldRestoreSnapshot: false,
-				shouldRefreshSessions: false,
 			});
 		}
 		if (event.commit.kind === "final" || event.commit.kind === "error") {
@@ -601,14 +594,12 @@ export function applyGenerationStreamEvent(
 				shouldScroll: true,
 				shouldReconcile: true,
 				shouldRestoreSnapshot: false,
-				shouldRefreshSessions: true,
 			});
 		}
 		return handledEffect({
 			shouldScroll: false,
 			shouldReconcile: false,
 			shouldRestoreSnapshot: false,
-			shouldRefreshSessions: false,
 		});
 	}
 
@@ -623,7 +614,6 @@ export function applyGenerationStreamEvent(
 				shouldScroll: false,
 				shouldReconcile: true,
 				shouldRestoreSnapshot: false,
-				shouldRefreshSessions: true,
 			});
 		}
 		// Content blocks are NOT updated here — session.turn.finalized
@@ -634,7 +624,6 @@ export function applyGenerationStreamEvent(
 			shouldScroll: true,
 			shouldReconcile: true,
 			shouldRestoreSnapshot: false,
-			shouldRefreshSessions: true,
 		});
 	}
 
@@ -644,7 +633,6 @@ export function applyGenerationStreamEvent(
 			shouldScroll: false,
 			shouldReconcile: false,
 			shouldRestoreSnapshot: false,
-			shouldRefreshSessions: false,
 		});
 	}
 
@@ -655,7 +643,6 @@ export function applyGenerationStreamEvent(
 			shouldScroll: false,
 			shouldReconcile: true,
 			shouldRestoreSnapshot,
-			shouldRefreshSessions: false,
 		});
 	}
 
