@@ -20,20 +20,20 @@ const SIZES = {
 	sm: {
 		box: "h-7 w-7",
 		tile: "rounded-[8px]",
-		pair: "text-[10px] font-semibold",
+		pair: "text-[11px] font-semibold",
 		single: "text-[14px] font-medium",
 	},
 	md: {
 		box: "h-9 w-9",
 		tile: "rounded-[10px]",
-		pair: "text-[11px] font-semibold",
-		single: "text-[16px] font-medium",
+		pair: "text-[13px] font-semibold",
+		single: "text-[18px] font-medium",
 	},
 	lg: {
 		box: "h-12 w-12",
 		tile: "rounded-[14px]",
-		pair: "text-[13px] font-semibold",
-		single: "text-[20px] font-medium",
+		pair: "text-[17px] font-semibold",
+		single: "text-[24px] font-medium",
 	},
 } as const satisfies Record<AvatarSize, Scale>;
 
