@@ -1,14 +1,12 @@
 <script lang="ts">
 import type { BoardViewport } from "@neta-art/cohub/board";
 import { Bot, Check, Scan, Smartphone, Terminal } from "lucide-svelte";
+import { identityColor } from "$lib/avatar-identity";
 import type {
 	BoardAutomationActivity,
 	BoardCollaboratorProfile,
 } from "$lib/board/board-activity";
-import {
-	collaborationColorToken,
-	type RemoteBoardAwarenessPeer,
-} from "$lib/board/board-awareness";
+import type { RemoteBoardAwarenessPeer } from "$lib/board/board-awareness";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { getModelDisplayName } from "$lib/model-catalog";
@@ -93,7 +91,8 @@ function avatarUrl(actorId: string) {
 function cursorAction(peer: RemoteBoardAwarenessPeer): string | null {
 	const gesture = peer.gesture;
 	if (gesture?.kind === "draw") return m.collab_drawing({}, { locale });
-	if (gesture?.kind === "arrow" && gesture.startItemId) return m.collab_connecting({}, { locale });
+	if (gesture?.kind === "arrow" && gesture.startItemId)
+		return m.collab_connecting({}, { locale });
 	if (gesture?.kind === "arrow" || gesture?.kind === "box")
 		return m.collab_creating({}, { locale });
 	if (gesture?.kind === "transform") {
@@ -160,10 +159,11 @@ const cursors = $derived.by(() => {
 		return [
 			{
 				key: peer.connectionId,
+				actorId: peer.actorId,
 				name: displayName(peer.actorId, peer.actorName),
 				action,
 				avatar: avatarUrl(peer.actorId),
-				color: `var(${collaborationColorToken(peer.actorId)})`,
+				color: identityColor(peer.actorId),
 				pointerType: cursor?.pointerType ?? null,
 				viewportMode,
 				mobile,
@@ -223,7 +223,7 @@ const automation = $derived.by(() => {
 				title: actionable
 					? `${label} \u2014 ${m.collab_open_chat({}, { locale })}`
 					: label,
-				color: `var(${collaborationColorToken(activity.actorId)})`,
+				color: identityColor(activity.actorId),
 				avatar: avatarUrl(activity.actorId),
 				name,
 				actionable,
@@ -237,6 +237,7 @@ const automation = $derived.by(() => {
 </script>
 
 {#snippet ActivityBody(marker: {
+	activity: BoardAutomationActivity;
 	kind: "cli" | "agent";
 	label: string;
 	name: string;
@@ -258,7 +259,7 @@ const automation = $derived.by(() => {
 		{/if}
 	</span>
 	<span class="collab-activity-label">{marker.label}</span>
-	<UserAvatar name={marker.name} avatarUrl={marker.avatar} size="xxs" class="collab-activity-avatar" />
+	<UserAvatar name={marker.name} avatarUrl={marker.avatar} seed={marker.activity.actorId} size="xxs" class="collab-activity-avatar" />
 {/snippet}
 
 <div class="collab-overlay">
@@ -292,7 +293,7 @@ const automation = $derived.by(() => {
 
 			<span class="collab-tag">
 				<span class="collab-avatar-wrap">
-					<UserAvatar name={cursor.name} avatarUrl={cursor.avatar} size="xs" class="collab-avatar" />
+					<UserAvatar name={cursor.name} avatarUrl={cursor.avatar} seed={cursor.actorId} size="xs" class="collab-avatar" />
 					{#if cursor.mobile}
 						<span class="collab-badge"><Smartphone class="h-2 w-2" /></span>
 					{/if}

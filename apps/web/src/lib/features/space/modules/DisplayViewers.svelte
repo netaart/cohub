@@ -52,7 +52,7 @@ const label = $derived.by(() => {
 	<span class="display-viewers" role="img" aria-label={label} title={label}>
 		{#each others.slice(0, limit) as viewer (viewer.userId)}
 			<span class="display-viewer" class:is-control={viewer.control}>
-				<UserAvatar size="xxs" name={name(viewer)} avatarUrl={profiles.get(viewer.userId)?.avatarUrl ?? null} />
+				<UserAvatar size="xxs" name={name(viewer)} avatarUrl={profiles.get(viewer.userId)?.avatarUrl ?? null} seed={viewer.userId} />
 			</span>
 		{/each}
 		{#if others.length > limit}<span class="display-viewers-more">+{others.length - limit}</span>{/if}

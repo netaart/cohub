@@ -56,6 +56,9 @@ const spaceName = $derived(
 		? draftSpaceName || (host.spaceId ? "Space" : "")
 		: seed?.space?.name?.trim() || (session ? "Space" : ""),
 );
+const spaceId = $derived(
+	isDraft ? host.spaceId : (session?.spaceId ?? seed?.spaceId ?? null),
+);
 const spaceProfile = $derived(
 	isDraft
 		? (draftSpace?.publicProfile ?? null)
@@ -115,7 +118,7 @@ const showDraftHint = $derived(
 						: m.chat_choose_space({}, { locale })}
 				>
 					{#if spaceName}
-						<SpaceAvatar name={spaceName} profile={spaceProfile} size="sm" />
+						<SpaceAvatar name={spaceName} profile={spaceProfile} seed={spaceId} size="sm" />
 					{/if}
 					<div class="min-w-0 flex-1">
 						<div class="truncate text-[13px] font-medium text-text-primary">
@@ -138,6 +141,7 @@ const showDraftHint = $derived(
 					<SpaceAvatar
 						name={spaceName || seed?.space?.name || "Space"}
 						profile={spaceProfile}
+						seed={spaceId}
 						size="sm"
 					/>
 				{/if}

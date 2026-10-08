@@ -74,7 +74,7 @@ function handleCardKeydown(
 				onblur={() => turnNotifications.setInteractionPaused(notification.id, false)}
 			>
 				<div class="flex min-w-0 items-center gap-2">
-					<SpaceAvatar name={title} profile={notification.space?.publicProfile} size="xs" />
+					<SpaceAvatar name={title} profile={notification.space?.publicProfile} seed={notification.spaceId} size="xs" />
 					<div class="min-w-0 flex-1 truncate text-[12px] font-medium leading-5 text-text-primary">
 						{title}
 					</div>

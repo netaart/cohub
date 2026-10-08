@@ -241,7 +241,7 @@ onMount(() => {
 					{:else}
 						<div class="flex w-16 shrink-0 flex-col items-center gap-1.5">
 							<label class="group relative h-14 w-14 cursor-pointer overflow-hidden rounded-full border border-border-subtle bg-bg-hover-strong transition-colors hover:border-brand/50" title={avatarUrl ? m.settings_change_avatar({}, { locale }) : m.settings_upload_avatar({}, { locale })} aria-label={avatarUrl ? m.settings_change_avatar({}, { locale }) : m.settings_upload_avatar({}, { locale })}>
-								<UserAvatar name={displayName || username} {avatarUrl} size="lg" loading="eager" class="h-full w-full border-0" />
+								<UserAvatar name={displayName || username} {avatarUrl} seed={userUuid} size="lg" loading="eager" class="h-full w-full border-0" />
 								<span class="absolute inset-0 flex items-center justify-center bg-overlay-scrim-strong opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">{#if uploadingAvatar}<Loader2 class="h-4 w-4 animate-spin text-overlay-control-text" />{:else}<Upload class="h-4 w-4 text-overlay-control-text" />{/if}</span>
 								<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="sr-only" disabled={uploadingAvatar} onchange={handleAvatarFileChange} />
 							</label>

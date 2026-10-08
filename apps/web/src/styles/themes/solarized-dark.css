@@ -179,8 +179,8 @@
 	--shadow-strong: oklch(0% 0 0 / 0.3);
 	--brand-ring: color-mix(in srgb, var(--brand) 28%, transparent);
 	--mask-opaque: black;
-	--avatar-placeholder-bg: var(--bg-hover-strong);
-	--avatar-placeholder-fg: var(--text-placeholder);
+	--identity-l: 74%;
+	--identity-c: 0.09;
 
 	/* App background */
 	--app-bg-image: none;

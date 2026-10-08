@@ -280,29 +280,6 @@ function previewMatchesItem(
 	return Boolean(item && sameFrame(preview.frame, item.frame));
 }
 
-const COLLABORATION_COLOR_FALLBACKS = [
-	0xe8450e, 0x2563eb, 0x16a34a, 0xe11d48, 0xd97706, 0x7c3aed,
-] as const;
-
-export function collaborationColorIndex(actorId: string): number {
-	let hash = 0;
-	for (let index = 0; index < actorId.length; index += 1) {
-		hash = (hash * 31 + actorId.charCodeAt(index)) | 0;
-	}
-	return Math.abs(hash) % COLLABORATION_COLOR_FALLBACKS.length;
-}
-
-export function collaborationColorToken(actorId: string): string {
-	return `--board-collaboration-${collaborationColorIndex(actorId) + 1}`;
-}
-
-export function collaborationColor(actorId: string): number {
-	return (
-		COLLABORATION_COLOR_FALLBACKS[collaborationColorIndex(actorId)] ??
-		COLLABORATION_COLOR_FALLBACKS[0]
-	);
-}
-
 export function createBoardAwarenessController(options: ControllerOptions) {
 	const now = options.now ?? Date.now;
 	const peers = new Map<string, RemoteBoardAwarenessPeer>();

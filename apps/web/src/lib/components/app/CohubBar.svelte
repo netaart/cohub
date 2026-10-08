@@ -19,6 +19,7 @@ export type CohubBarSpace = {
 };
 
 export type CohubBarOwner = {
+	userUuid?: string | null;
 	username: string | null;
 	displayName: string;
 	avatarUrl?: string | null;
@@ -97,8 +98,8 @@ const totalViewsTitle = $derived(
 			<SpaceAvatar
 				name={spaceName}
 				profile={space?.publicProfile}
+				seed={space?.id}
 				size="xs"
-				class="translate-y-0"
 			/>
 			<span class="min-w-0 truncate font-medium leading-none text-text-secondary"
 				>{spaceName}</span
@@ -137,9 +138,9 @@ const totalViewsTitle = $derived(
 			name={publisherName}
 			avatarUrl={publisherAvatarUrl}
 			username={publisher?.username}
+			seed={publisher?.userUuid}
 			size="xs"
 			class="min-w-0 text-text-secondary"
-			avatarClass="h-5 w-5 rounded-full bg-bg-elevated text-[8px]"
 			nameClass="hidden max-w-32 truncate font-medium leading-none sm:inline"
 		/>
 	</div>

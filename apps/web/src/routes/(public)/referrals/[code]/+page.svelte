@@ -99,7 +99,7 @@ async function claim() {
 		{:else}
 			<div class="border-t border-border-subtle pt-7">
 				<div class="flex items-center gap-3">
-					<UserAvatar name={referral.inviter.displayName} avatarUrl={referral.inviter.avatarUrl} size="lg" />
+					<UserAvatar name={referral.inviter.displayName} avatarUrl={referral.inviter.avatarUrl} seed={referral.inviter.userUuid} size="lg" />
 					<div class="min-w-0"><p class="truncate text-[13px] font-medium text-text-primary">{referral.inviter.displayName}</p>{#if referral.inviter.username}<p class="mt-0.5 text-[11px] text-text-tertiary">@{referral.inviter.username}</p>{/if}</div>
 				</div>
 				<h1 class="mt-6 text-[22px] font-semibold tracking-tight text-text-primary">{m.referral_referred_you({ name: referral.inviter.displayName }, { locale })}</h1>

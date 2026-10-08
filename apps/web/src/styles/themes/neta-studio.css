@@ -185,8 +185,8 @@
 	--brand-ring: color-mix(in srgb, var(--brand) 28%, transparent);
 	--status-running: #6ee1d8;
 	--mask-opaque: black;
-	--avatar-placeholder-bg: var(--bg-hover-strong);
-	--avatar-placeholder-fg: var(--text-placeholder);
+	--identity-l: 78%;
+	--identity-c: 0.12;
 
 	/* App background — Neta Studio slate board texture. Opaque navigation and
 	   chat surfaces keep the reading layer calm above it. */

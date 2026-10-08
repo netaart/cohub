@@ -201,6 +201,7 @@ import {
 	getLabelDisplayTitle,
 	getLabelRefById,
 	getLabelUserProfile,
+	getSessionUserUuidFromLabel,
 	hydrateChannelLabelsForLabels,
 	hydrateUserProfilesForLabels,
 	isSessionChannelLabel,
@@ -3328,7 +3329,7 @@ $effect(() => {
 				{@const labelProfile = getReactiveLabelUserProfile(label)}
 				{@const labelChannel = getReactiveLabelChannelInfo(label)}
 				{#if labelProfile || isSessionUserLabel(label)}
-					<UserAvatar name={getReactiveLabelDisplayName(label)} avatarUrl={labelProfile?.avatarUrl} size="xxs" class="border-0 bg-bg-elevated" />
+					<UserAvatar name={getReactiveLabelDisplayName(label)} avatarUrl={labelProfile?.avatarUrl} seed={getSessionUserUuidFromLabel(label)} size="xxs" class="border-0" />
 				{:else if labelChannel || isSessionChannelLabel(label)}
 					<ChannelProviderIcon provider={labelChannel?.provider} size="xxs" />
 				{/if}
@@ -3386,7 +3387,7 @@ $effect(() => {
 						{@const childProfile = getReactiveLabelUserProfile(child)}
 						{@const childChannel = getReactiveLabelChannelInfo(child)}
 						{#if childProfile || isSessionUserLabel(child)}
-							<UserAvatar name={getReactiveLabelDisplayName(child)} avatarUrl={childProfile?.avatarUrl} size="xxs" class="border-0 bg-bg-elevated" />
+							<UserAvatar name={getReactiveLabelDisplayName(child)} avatarUrl={childProfile?.avatarUrl} seed={getSessionUserUuidFromLabel(child)} size="xxs" class="border-0" />
 						{:else if childChannel || isSessionChannelLabel(child)}
 							<ChannelProviderIcon provider={childChannel?.provider} size="xxs" />
 						{/if}
@@ -3722,7 +3723,7 @@ $effect(() => {
             title={currentSpace ? currentSpace.name || currentSpace.title || currentSpace.id : m.sidebar_select_space({}, { locale })}
           >
             {#if currentSpace}
-              <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} size="sm" />
+              <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} seed={currentSpace.id} size="sm" />
             {:else}
               <FolderKanban class="h-4 w-4" />
             {/if}
@@ -3908,7 +3909,7 @@ $effect(() => {
           aria-current={area === "account" ? "page" : undefined}
           title={userDisplayName}
         >
-          <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="md" class="h-full w-full border-0" />
+          <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} seed={authStore.userUuid} size="md" class="h-full w-full border-0" />
         </button>
       </div>
     </div>
@@ -3995,7 +3996,7 @@ $effect(() => {
         onclick={openSpacePalette}
       >
         {#if currentSpace}
-          <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} size="sm" />
+          <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} seed={currentSpace.id} size="sm" />
           <span class="flex-1 text-[13px] font-medium text-text-primary truncate text-left">{currentSpace.name || currentSpace.title || currentSpace.id.slice(0, 12)}</span>
           {@render syncSpinner(false)}
         {:else}
@@ -4461,7 +4462,7 @@ $effect(() => {
         aria-current={area === "account" ? "page" : undefined}
         onclick={() => { showHelpMenu = false; showUserMenu = !showUserMenu; }}
       >
-        <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="xs" class="h-[22px] w-[22px] border-0" />
+        <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} seed={authStore.userUuid} size="xs" class="h-[22px] w-[22px] border-0" />
         <div class="flex-1 min-w-0 text-left">
           <p class="text-[12px] text-text-secondary truncate">{userDisplayName}</p>
         </div>

@@ -882,7 +882,7 @@ $effect(() => {
 													name={order.buyerProfile.displayName}
 													avatarUrl={order.buyerProfile.avatarUrl}
 													size="xs"
-													class="border-0 bg-bg-surface"
+													class="border-0"
 												/>
 											{/if}
 											<div class="min-w-0">

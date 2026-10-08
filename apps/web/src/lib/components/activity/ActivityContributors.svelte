@@ -36,6 +36,7 @@ const displayName = (contributor: SpaceActivityContributor) =>
 					<UserAvatar
 						name={displayName(contributor)}
 						avatarUrl={contributor.profile?.avatarUrl ?? null}
+						seed={contributor.userUuid}
 						size="xs"
 					/>
 					<span class="max-w-36 truncate text-[12px] text-text-secondary">{displayName(contributor)}</span>

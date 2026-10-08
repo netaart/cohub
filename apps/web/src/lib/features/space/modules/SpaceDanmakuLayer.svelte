@@ -57,8 +57,8 @@ onMount(() => {
 					<UserAvatar
 						name={item.authorName}
 						avatarUrl={item.avatarUrl}
+						seed={item.userUuid}
 						size="xxs"
-						loading="lazy"
 					/>
 					<span class="danmaku-name">{item.authorName}</span>
 					<span class="danmaku-sep" aria-hidden="true">·</span>

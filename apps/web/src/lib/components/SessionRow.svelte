@@ -251,7 +251,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 	<span class="inline-flex min-w-0 shrink-0 items-center gap-1.5 {dense ? 'max-w-[60%]' : 'max-w-[40%]'}" title={participantLabel}>
 		<span class="inline-flex shrink-0 -space-x-1.5 opacity-80">
 			{#each participants.slice(0, 3) as participant (participant.key)}
-				<UserAvatar name={participant.name} avatarUrl={participant.avatarUrl} size="xxs" class="border-bg-primary {dense ? 'h-3.5 w-3.5 text-[7px]' : ''}" />
+				<UserAvatar name={participant.name} avatarUrl={participant.avatarUrl} seed={participant.key} size="xxs" class="border-bg-primary {dense ? 'h-3.5 w-3.5' : ''}" />
 			{/each}
 		</span>
 		<span class="min-w-0 truncate">{participantLabel}</span>

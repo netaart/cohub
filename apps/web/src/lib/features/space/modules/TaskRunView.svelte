@@ -154,6 +154,7 @@ function userTitle(
 		<UserIdentity
 			name={displayUserName(profile, userUuid)}
 			avatarUrl={profile?.avatarUrl}
+			seed={userUuid}
 			username={profile?.username}
 			title={userTitle(profile, userUuid)}
 			size="xxs"

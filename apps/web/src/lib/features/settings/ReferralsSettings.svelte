@@ -150,7 +150,7 @@ async function rotateLink() {
 					<div class="divide-y divide-border-subtle border-y border-border-subtle">
 						{#each dashboard.items as item (item.id)}
 							<div class="flex min-h-14 items-center gap-3 py-2.5">
-								<UserAvatar name={item.profile?.displayName || m.referral_c_user({}, { locale })} avatarUrl={item.profile?.avatarUrl} size="sm" class="shrink-0" />
+								<UserAvatar name={item.profile?.displayName || m.referral_c_user({}, { locale })} avatarUrl={item.profile?.avatarUrl} seed={item.profile?.userUuid} size="sm" class="shrink-0" />
 								<div class="min-w-0 flex-1"><div class="truncate text-[12px] font-medium text-text-primary">{item.profile?.displayName || m.referral_c_user({}, { locale })}</div><div class="mt-0.5 truncate text-[10px] text-text-placeholder">{item.profile?.username ? `@${item.profile.username} · ` : ""}{m.referral_joined({ date: formatDate(item.claimedAt, locale) }, { locale })}</div></div>
 								<span class="shrink-0 text-[11px] {item.status === 'rewarded' ? 'text-status-running' : 'text-text-tertiary'}">{item.status === "rewarded" ? m.referral_rewarded({}, { locale }) : item.status === "qualified" ? m.referral_processing({}, { locale }) : m.referral_pending({}, { locale })}</span>
 							</div>

@@ -665,11 +665,11 @@ function handleCopy() {
             <UserIdentity
               name={userDisplayName}
               avatarUrl={message.authorProfile?.avatarUrl}
+              seed={message.authorProfile?.userUuid ?? message.authorUuid}
               username={message.authorProfile?.username}
               title={userDisplayName}
               size="xxs"
               class="text-inherit"
-              avatarClass="border-0 bg-brand/15 text-brand"
             />
           {/if}
           {#if isCancelledBeforeDispatch}

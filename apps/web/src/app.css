@@ -243,6 +243,25 @@ body.sidebar-resizing .panel-shell-fade {
 	padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
 
+/* Components layer so call-site utilities still override avatar colors. */
+@layer components {
+	.avatar {
+		border: 1px solid var(--border-subtle);
+		background-color: var(--bg-elevated);
+		color: var(--text-tertiary);
+	}
+
+	.avatar[data-toned] {
+		border-color: color-mix(in oklab, var(--avatar-tone) 24%, transparent);
+		background-color: color-mix(
+			in oklab,
+			var(--avatar-tone) 16%,
+			var(--bg-primary)
+		);
+		color: var(--avatar-tone);
+	}
+}
+
 @utility scrollbar-quiet {
 	@media (hover: hover) {
 		scrollbar-width: thin;

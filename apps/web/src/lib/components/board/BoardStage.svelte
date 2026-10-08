@@ -54,10 +54,7 @@ import { onDestroy, onMount, untrack } from "svelte";
 import { goto } from "$app/navigation";
 import type { BoardAssetManager } from "$lib/board/board-asset-manager";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
-import {
-	type BoardAwarenessController,
-	collaborationColor,
-} from "$lib/board/board-awareness";
+import type { BoardAwarenessController } from "$lib/board/board-awareness";
 import {
 	fileAvailability,
 	filePreviewVersion,
@@ -76,6 +73,7 @@ import {
 	type BoardBackgroundLoadState,
 	type BoardThemeBackground,
 	type BoardThemeSnapshot,
+	boardIdentityColor,
 	boardThemeKey,
 	resolveBoardBackground,
 	resolveBoardTheme,
@@ -666,7 +664,7 @@ function syncStage() {
 		palette,
 	);
 
-	drawRemoteAwareness(context.colors, context.colorScheme);
+	drawRemoteAwareness(theme);
 	drawTransient(palette, context.colors, context.colorScheme);
 	drawChangedHighlights(palette, renderScene);
 
@@ -674,11 +672,12 @@ function syncStage() {
 	if (frame.running || scene.animated) scheduleTick();
 }
 
-function drawRemoteAwareness(colors: BoardShapeColors, mode: "dark" | "light") {
+function drawRemoteAwareness(theme: BoardThemeSnapshot) {
 	if (!overlay) return;
+	const { colors, colorScheme: mode } = theme;
 	const inv = 1 / Math.max(editor.camera.zoom, 0.0001);
 	for (const peer of awareness.peers) {
-		const collaboration = collaborationColor(peer.actorId);
+		const collaboration = boardIdentityColor(theme, peer.actorId);
 		const selection = peer.state?.selection;
 		if (selection?.bounds && selection.count > 0) {
 			const bounds = selection.bounds;

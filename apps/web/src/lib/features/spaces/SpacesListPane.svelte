@@ -149,7 +149,7 @@ function onScroll(event: Event) {
 </script>
 
 {#snippet avatar(space: SpaceRecord, name: string, isSelected: boolean)}
-	<SpaceAvatar {name} profile={space.publicProfile} size={LIST_ROW_AVATAR[density]} />
+	<SpaceAvatar {name} profile={space.publicProfile} seed={space.id} size={LIST_ROW_AVATAR[density]} />
 	<span
 		class="absolute -bottom-1 -right-1 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-bg-primary transition-[opacity,transform] duration-150 {isSelected ? 'bg-brand text-brand-contrast-fg' : 'bg-bg-elevated text-transparent ring-1 ring-inset ring-border-primary'} {isSelected || selecting ? 'opacity-100' : compact ? 'scale-90 opacity-0' : 'scale-90 opacity-0 group-hover/row:scale-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100'}"
 		aria-hidden="true"

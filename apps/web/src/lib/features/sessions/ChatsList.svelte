@@ -181,7 +181,7 @@ function onScroll(event: Event) {
 						onNavigate={open}
 					>
 						{#snippet avatar()}
-							<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} size={LIST_ROW_AVATAR[density]} />
+							<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} seed={session.spaceId} size={LIST_ROW_AVATAR[density]} />
 						{/snippet}
 					</SessionRow>
 				</li>

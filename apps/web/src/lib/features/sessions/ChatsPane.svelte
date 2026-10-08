@@ -116,7 +116,7 @@ onMount(() => {
 					onclick={() => select(index + 1)}
 				>
 					{#snippet leading()}
-						<SpaceAvatar name={space.name} profile={space.publicProfile ?? null} size="xxs" />
+						<SpaceAvatar name={space.name} profile={space.publicProfile ?? null} seed={space.id} size="xxs" />
 					{/snippet}
 					{#snippet trailing()}
 						{#if selected}<X class="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />{/if}

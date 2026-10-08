@@ -100,7 +100,7 @@ const timestamp = $derived.by(() => {
 >
 	<button type="button" class="command-result-main" onclick={onActivate}>
 		{#if showsSpaceAvatar}
-			<SpaceAvatar name={item.spaceName || item.title || item.spaceId} profile={item.spaceProfile} size="sm" />
+			<SpaceAvatar name={item.spaceName || item.title || item.spaceId} profile={item.spaceProfile} seed={item.spaceId} size="sm" />
 		{:else}
 			<div class={`command-type-mark ${meta.className}`} aria-label={item.type}>
 				<Icon class="h-3.5 w-3.5" />
@@ -116,7 +116,7 @@ const timestamp = $derived.by(() => {
 			<div class="command-context-row">
 				{#if profile}
 					<span class="command-profile" title={profile.displayName}>
-						<UserAvatar name={profile.displayName} avatarUrl={profile.avatarUrl} size="xxs" class="border-0 bg-bg-primary text-[8px]" />
+						<UserAvatar name={profile.displayName} avatarUrl={profile.avatarUrl} seed={profile.userUuid} size="xxs" class="border-0" />
 						<span class="truncate">{profile.displayName}</span>
 					</span>
 					<span class="command-context-separator">·</span>

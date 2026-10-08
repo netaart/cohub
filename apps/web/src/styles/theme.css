@@ -71,13 +71,15 @@
 	--board-color-rose-fill: var(--error-400);
 	--board-color-rose-label: var(--text-primary);
 
-	/* Collaboration identity colors — assigned per actor, theme-driven. */
-	--board-collaboration-1: var(--brand);
-	--board-collaboration-2: var(--info-400);
-	--board-collaboration-3: var(--success-400);
-	--board-collaboration-4: var(--error-400);
-	--board-collaboration-5: var(--warning-400);
-	--board-collaboration-6: var(--info-500);
+	/* Identity tones; themes set `--identity-l` / `--identity-c`. */
+	--identity-1: oklch(var(--identity-l) var(--identity-c) 25);
+	--identity-2: oklch(var(--identity-l) var(--identity-c) 65);
+	--identity-3: oklch(var(--identity-l) var(--identity-c) 105);
+	--identity-4: oklch(var(--identity-l) var(--identity-c) 150);
+	--identity-5: oklch(var(--identity-l) var(--identity-c) 195);
+	--identity-6: oklch(var(--identity-l) var(--identity-c) 245);
+	--identity-7: oklch(var(--identity-l) var(--identity-c) 290);
+	--identity-8: oklch(var(--identity-l) var(--identity-c) 340);
 }
 
 @media (min-width: 960px) {

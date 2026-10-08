@@ -293,7 +293,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 						title={spaceTitle}
 						aria-label={m.space_header_open_space({}, { locale })}
 					>
-						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} size="xs" />
+						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} seed={context.spaceId} size="xs" />
 					</button>
 					<div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
 						{#if sessionRename.renaming && context.activeSession}
@@ -335,12 +335,12 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 					</div>
 				{:else if routeHeaderTitle}
 					<button type="button" class="inline-flex shrink-0 items-center text-text-primary transition-colors hover:text-text-secondary lg:hidden" title={spaceTitle} aria-label={m.space_header_open_space({}, { locale })}>
-						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} size="xs" />
+						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} seed={context.spaceId} size="xs" />
 					</button>
 					<span class="min-w-0 truncate text-[13px] text-text-secondary">{routeHeaderTitle}</span>
 				{:else}
 					<button type="button" class="inline-flex min-w-0 items-center gap-1.5 truncate text-left text-[13px] text-text-primary transition-colors hover:text-text-secondary">
-						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} size="xs" />
+						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} seed={context.spaceId} size="xs" />
 						{spaceTitle}
 					</button>
 				{/if}
