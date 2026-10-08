@@ -1,4 +1,3 @@
-
 import {
 	applyBoardDelta,
 	applyBoardPatchToDocument,
@@ -15,14 +14,20 @@ export type BoardPendingPatch = { mutationId: string; patch: BoardPatch };
 
 export type BoardSyncTransport = {
 	get(): Promise<BoardReadResult>;
-	apply(patch: BoardPatch, options: { mutationId: string; clientId?: string }): Promise<BoardApplyResult>;
+	apply(
+		patch: BoardPatch,
+		options: { mutationId: string; clientId?: string },
+	): Promise<BoardApplyResult>;
 };
 
 export type BoardSyncStore = {
 	listPending(): Promise<BoardPendingPatch[]>;
 	putPending(entry: BoardPendingPatch): Promise<void>;
 	deletePending(mutationId: string): Promise<void>;
-	readDocument(): Promise<{ version: number; document: Record<string, unknown> } | null>;
+	readDocument(): Promise<{
+		version: number;
+		document: Record<string, unknown>;
+	} | null>;
 	writeDocument(version: number, document: BoardDocument): Promise<void>;
 };
 
@@ -45,10 +50,16 @@ export type BoardChangedPayload = {
 
 const RETRY_BASE_MS = 1000;
 const RETRY_MAX_MS = 30_000;
+const PERSIST_INTERVAL_MS = 500;
 
 function isRejection(error: unknown): boolean {
 	const status = (error as { status?: number }).status;
-	return typeof status === "number" && status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status);
+	return (
+		typeof status === "number" &&
+		status >= 400 &&
+		status < 500 &&
+		![401, 403, 408, 429].includes(status)
+	);
 }
 
 function errorMessage(error: unknown): string {
@@ -59,6 +70,7 @@ export function createBoardSync(options: {
 	transport: BoardSyncTransport;
 	store: BoardSyncStore;
 	clientId?: string;
+	persistIntervalMs?: number;
 	onChange: (state: BoardSyncState) => void;
 }) {
 	let server: BoardDocument | null = null;
@@ -77,6 +89,8 @@ export function createBoardSync(options: {
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
 	let retryDelay = RETRY_BASE_MS;
 	let disposed = false;
+	let unpersisted: { version: number; document: BoardDocument } | null = null;
+	let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function recompute() {
 		if (!server) {
@@ -85,29 +99,64 @@ export function createBoardSync(options: {
 		}
 		let next = server;
 		for (const entry of pending) {
-			const result = applyBoardPatchToDocument(next, entry.patch, { cascade: true });
+			const result = applyBoardPatchToDocument(next, entry.patch);
 			if (result.ok) next = result.document;
 		}
 		document = next;
 	}
 
 	function snapshot(): BoardSyncState {
-		return { document, version, title, playback, loaded, pending: pending.length, error: writeError ?? readError };
+		return {
+			document,
+			version,
+			title,
+			playback,
+			loaded,
+			pending: pending.length,
+			error: writeError ?? readError,
+		};
 	}
 
 	function emit() {
 		if (!disposed) options.onChange(snapshot());
 	}
 
-	function adoptServer(next: BoardDocument, nextVersion: number, persist: boolean) {
+	function adoptServer(
+		next: BoardDocument,
+		nextVersion: number,
+		persist: boolean,
+	) {
 		server = next;
 		version = nextVersion;
 		recompute();
-		if (persist) void options.store.writeDocument(nextVersion, next).catch(() => undefined);
+		if (persist) schedulePersist(nextVersion, next);
+	}
+
+	function schedulePersist(nextVersion: number, next: BoardDocument) {
+		unpersisted = { version: nextVersion, document: next };
+		persistTimer ??= setTimeout(
+			persistNow,
+			options.persistIntervalMs ?? PERSIST_INTERVAL_MS,
+		);
+	}
+
+	function persistNow() {
+		if (persistTimer) clearTimeout(persistTimer);
+		persistTimer = null;
+		const entry = unpersisted;
+		unpersisted = null;
+		if (entry)
+			void options.store
+				.writeDocument(entry.version, entry.document)
+				.catch(() => undefined);
 	}
 
 	function adoptRead(result: BoardReadResult, readPlaybackRevision: number) {
-		const parsed = parseBoardDocument({ board: result.board, items: result.items ?? {}, animations: result.animations ?? {} });
+		const parsed = parseBoardDocument({
+			board: result.board,
+			items: result.items ?? {},
+			animations: result.animations ?? {},
+		});
 		if (!parsed.ok) throw new Error(`Board ${result.id} could not be read.`);
 		title = result.title;
 		if (readPlaybackRevision === playbackRevision) playback = result.playback;
@@ -127,7 +176,8 @@ export function createBoardSync(options: {
 					const readPlaybackRevision = playbackRevision;
 					const result = await options.transport.get();
 					if (disposed) return;
-					if (result.version >= version || !loaded) adoptRead(result, readPlaybackRevision);
+					if (result.version >= version || !loaded)
+						adoptRead(result, readPlaybackRevision);
 					readError = null;
 					emit();
 				} while (refreshAgain && !disposed);
@@ -157,12 +207,27 @@ export function createBoardSync(options: {
 			while (pending.length && !disposed) {
 				const entry = pending[0] as BoardPendingPatch;
 				try {
-					const result = await options.transport.apply(entry.patch, { mutationId: entry.mutationId, ...(options.clientId ? { clientId: options.clientId } : {}) });
-					const stillPending = pending.some((item) => item.mutationId === entry.mutationId);
-					pending = pending.filter((item) => item.mutationId !== entry.mutationId);
-					void options.store.deletePending(entry.mutationId).catch(() => undefined);
-					if (stillPending && server && !result.replayed && result.status === "applied" && result.version === version + 1) {
-						const next = applyBoardPatchToDocument(server, entry.patch, { cascade: true });
+					const result = await options.transport.apply(entry.patch, {
+						mutationId: entry.mutationId,
+						...(options.clientId ? { clientId: options.clientId } : {}),
+					});
+					const stillPending = pending.some(
+						(item) => item.mutationId === entry.mutationId,
+					);
+					pending = pending.filter(
+						(item) => item.mutationId !== entry.mutationId,
+					);
+					void options.store
+						.deletePending(entry.mutationId)
+						.catch(() => undefined);
+					if (
+						stillPending &&
+						server &&
+						!result.replayed &&
+						result.status === "applied" &&
+						result.version === version + 1
+					) {
+						const next = applyBoardPatchToDocument(server, entry.patch);
 						if (next.ok) adoptServer(next.document, result.version, true);
 						else void refresh();
 					} else if (result.version > version) void refresh();
@@ -172,8 +237,12 @@ export function createBoardSync(options: {
 					emit();
 				} catch (cause) {
 					if (isRejection(cause)) {
-						pending = pending.filter((item) => item.mutationId !== entry.mutationId);
-						void options.store.deletePending(entry.mutationId).catch(() => undefined);
+						pending = pending.filter(
+							(item) => item.mutationId !== entry.mutationId,
+						);
+						void options.store
+							.deletePending(entry.mutationId)
+							.catch(() => undefined);
 						writeError = errorMessage(cause);
 						recompute();
 						emit();
@@ -212,7 +281,10 @@ export function createBoardSync(options: {
 			pending = [...pending, entry];
 			recompute();
 			emit();
-			return options.store.putPending(entry).catch(() => undefined).then(() => flush());
+			return options.store
+				.putPending(entry)
+				.catch(() => undefined)
+				.then(() => flush());
 		},
 		receive(payload: BoardChangedPayload) {
 			if (!loaded) {
@@ -224,10 +296,18 @@ export function createBoardSync(options: {
 				void refresh();
 				return;
 			}
-			adoptServer(applyBoardDelta(server, payload.after), payload.version, true);
+			adoptServer(
+				applyBoardDelta(server, payload.after),
+				payload.version,
+				true,
+			);
 			if (pending.some((entry) => entry.mutationId === payload.mutationId)) {
-				pending = pending.filter((entry) => entry.mutationId !== payload.mutationId);
-				void options.store.deletePending(payload.mutationId).catch(() => undefined);
+				pending = pending.filter(
+					(entry) => entry.mutationId !== payload.mutationId,
+				);
+				void options.store
+					.deletePending(payload.mutationId)
+					.catch(() => undefined);
 				recompute();
 			}
 			emit();
@@ -253,6 +333,7 @@ export function createBoardSync(options: {
 		dispose() {
 			disposed = true;
 			if (retryTimer) clearTimeout(retryTimer);
+			persistNow();
 		},
 	};
 }

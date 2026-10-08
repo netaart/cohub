@@ -1,13 +1,18 @@
 import type {
+	BoardDrawItem,
+	BoardDrawPoint,
 	BoardFrame,
 	BoardSceneItem as BoardItem,
 	BoardScene as BoardModelScene,
+	SceneItem,
 } from "@neta-art/cohub/board";
 import {
 	CORNER_RESIZE_HANDLES,
+	drawPointsBounds,
 	frameCorners,
 	frameHandlePosition,
 	frameRayIntersection,
+	parseBoardItem,
 	type Rect,
 	type ResizeHandle,
 	rotationHandleAnchor,
@@ -20,8 +25,13 @@ import type {
 	BoardRenderPalette,
 	getBoardCardRenderer,
 } from "@neta-art/cohub/board/render";
-import { clippingAncestor, type ClipGroup, isClippingFrame, syncClipGroup } from "@neta-art/cohub/board/render";
-import type { Container, Graphics } from "pixi.js";
+import {
+	type ClipGroup,
+	clippingAncestor,
+	isClippingFrame,
+	syncClipGroup,
+} from "@neta-art/cohub/board/render";
+import { type Container, Graphics } from "pixi.js";
 import type {
 	BoardSelectionTransform,
 	BoardTransformControl,
@@ -39,7 +49,10 @@ type CardEntry = {
 
 const FAR_LAYER_ENTER = 450;
 const FAR_LAYER_EXIT = 350;
+const FAR_PASS_BATCH = 240;
+const FAR_LIVE_LIMIT = 64;
 const Z_FAR_LAYER = -1;
+const Z_LIVE_STROKE = Number.MAX_SAFE_INTEGER - 1;
 const Z_OVERLAY = Number.MAX_SAFE_INTEGER;
 
 const POOL_LIMIT_PER_RENDERER = 48;
@@ -98,8 +111,16 @@ function frameEdgePoints(
 	}
 }
 
+export type BoardLiveStroke = {
+	id: string;
+	points: BoardDrawPoint[];
+	color: string;
+	size: number;
+};
+
 export type SceneSyncInput = {
 	items: readonly BoardItem[];
+	strokes: readonly BoardLiveStroke[];
 	scene: BoardModelScene;
 	context: BoardRenderContext;
 	getItem: (id: string) => BoardItem | null;
@@ -147,14 +168,12 @@ export type BoardScene = {
 
 export function createBoardScene(options: {
 	world: Container;
-	farLayer: Graphics;
 	overlay: Graphics;
 	getRenderer: typeof getBoardCardRenderer;
 	onFarLayerFrame?: () => void;
 }): BoardScene {
-	const { world, farLayer, overlay, getRenderer } = options;
+	const { world, overlay, getRenderer } = options;
 	world.sortableChildren = true;
-	farLayer.zIndex = Z_FAR_LAYER;
 	overlay.zIndex = Z_OVERLAY;
 	const cards = new Map<string, CardEntry>();
 	const clips = new Map<string, ClipGroup>();
@@ -165,8 +184,14 @@ export function createBoardScene(options: {
 	let farSig: string | null = null;
 	let farActive = false;
 	let lastStructureVersion = -1;
-	let farBuildToken = 0;
-	let farBuildFrame = 0;
+	const liveStrokes = new Map<
+		string,
+		{
+			container: Container;
+			renderer: BoardCardRenderer;
+			template: BoardDrawItem;
+		}
+	>();
 
 	function setHeldKey(
 		context: BoardRenderContext,
@@ -231,8 +256,13 @@ export function createBoardScene(options: {
 		}
 		for (const [id, entry] of clips) {
 			const frame = scene.get(id);
-			if (!frame || !isClippingFrame(frame) || entry.group.children.length <= 1) {
-				for (const child of [...entry.group.children]) if (child !== entry.mask) world.addChild(child);
+			if (
+				!frame ||
+				!isClippingFrame(frame) ||
+				entry.group.children.length <= 1
+			) {
+				for (const child of [...entry.group.children])
+					if (child !== entry.mask) world.addChild(child);
 				entry.group.destroy({ children: true });
 				clips.delete(id);
 				continue;
@@ -269,29 +299,151 @@ export function createBoardScene(options: {
 		return entry;
 	}
 
-	function rebuildFarLayer(input: SceneSyncInput, signature: string) {
-		const { context, getItem, pinnedIds } = input;
-		const ids = visibleFacts(input).orderedIds;
-		const token = ++farBuildToken;
+	// Double-buffered: a pass paints the hidden layer, then swaps it in.
+	let farFront = createFarLayer();
+	let farBack = createFarLayer();
+	let farPainted = false;
+	let farCovered: ReadonlySet<string> = new Set();
+	let farInput: SceneSyncInput | null = null;
+	let farRunning = false;
+	let farQueued = false;
+	let farFrame = 0;
+
+	function createFarLayer() {
+		const layer = new Graphics({ label: "board-far-layer" });
+		layer.zIndex = Z_FAR_LAYER;
+		layer.visible = false;
+		world.addChild(layer);
+		return layer;
+	}
+
+	function requestFarPass(signature: string) {
 		farSig = signature;
-		cancelAnimationFrame(farBuildFrame);
-		farLayer.clear();
+		if (farRunning) farQueued = true;
+		else runFarPass();
+	}
+
+	function runFarPass() {
+		if (!farInput) return;
+		farRunning = true;
+		farQueued = false;
+		const { context, getItem, pinnedIds } = farInput;
+		const ids = visibleFacts(farInput).orderedIds;
+		const target = farPainted ? farBack : farFront;
+		const painted = new Set<string>();
+		target.clear();
+		if (target === farFront) farCovered = painted;
 		let index = 0;
 		const step = () => {
-			if (token !== farBuildToken) return;
-			const end = Math.min(ids.length, index + 240);
+			farFrame = 0;
+			const end = Math.min(ids.length, index + FAR_PASS_BATCH);
 			for (; index < end; index += 1) {
 				const id = ids[index] as string;
 				if (pinnedIds.has(id)) continue;
 				const item = getItem(id);
 				if (!item) continue;
-				getRenderer(item, context).renderFar?.(farLayer, item, context);
+				getRenderer(item, context).renderFar?.(target, item, context);
+				painted.add(id);
 			}
+			if (index < ids.length) {
+				farFrame = requestAnimationFrame(step);
+				if (target === farFront) options.onFarLayerFrame?.();
+				return;
+			}
+			if (target === farBack) {
+				farBack = farFront;
+				farFront = target;
+				farBack.visible = false;
+				farBack.clear();
+				farCovered = painted;
+			}
+			farFront.visible = farActive;
+			farPainted = true;
+			farRunning = false;
 			options.onFarLayerFrame?.();
-			if (index < ids.length) farBuildFrame = requestAnimationFrame(step);
-			else farBuildFrame = 0;
+			if (farQueued) runFarPass();
 		};
 		step();
+	}
+
+	function resetFarLayer() {
+		cancelAnimationFrame(farFrame);
+		farFrame = 0;
+		farRunning = false;
+		farQueued = false;
+		farInput = null;
+		farPainted = false;
+		farCovered = new Set();
+		farSig = null;
+		farFront.clear();
+		farBack.clear();
+	}
+
+	function syncLiveStrokes(input: SceneSyncInput) {
+		const { strokes, context, getItem } = input;
+		const live = new Set<string>();
+		for (const stroke of strokes) {
+			if (stroke.points.length === 0 || getItem(stroke.id)) continue;
+			let entry = liveStrokes.get(stroke.id);
+			if (
+				entry &&
+				(entry.template.style.stroke !== stroke.color ||
+					entry.template.style.strokeWidth !== stroke.size)
+			) {
+				removeLiveStroke(stroke.id, context);
+				entry = undefined;
+			}
+			const item = entry
+				? liveStrokeItem(stroke, entry.template)
+				: createLiveStroke(stroke, input);
+			if (!item) continue;
+			live.add(stroke.id);
+			entry = liveStrokes.get(stroke.id);
+			entry?.renderer.update(entry.container, item, context);
+		}
+		for (const id of liveStrokes.keys()) {
+			if (!live.has(id)) removeLiveStroke(id, context);
+		}
+	}
+
+	function liveStrokeItem(
+		stroke: BoardLiveStroke,
+		template: BoardDrawItem,
+	): SceneItem<BoardDrawItem> {
+		return {
+			...template,
+			id: stroke.id,
+			props: { points: stroke.points },
+			frame: { ...drawPointsBounds(stroke.points, stroke.size), rotation: 0 },
+		};
+	}
+
+	function createLiveStroke(
+		stroke: BoardLiveStroke,
+		input: SceneSyncInput,
+	): SceneItem<BoardDrawItem> | null {
+		const parsed = parseBoardItem({
+			type: "draw",
+			style: { stroke: stroke.color, strokeWidth: stroke.size },
+			props: { points: stroke.points.slice(0, 1) },
+		});
+		if (!parsed.ok || parsed.item.type !== "draw") return null;
+		const template = parsed.item as BoardDrawItem;
+		const item = liveStrokeItem(stroke, template);
+		const renderer = getRenderer(item, input.context);
+		const container = renderer.create(item, input.context);
+		container.zIndex = Z_LIVE_STROKE;
+		world.addChild(container);
+		liveStrokes.set(stroke.id, { container, renderer, template });
+		return item;
+	}
+
+	function removeLiveStroke(id: string, context: BoardRenderContext) {
+		const entry = liveStrokes.get(id);
+		if (!entry) return;
+		liveStrokes.delete(id);
+		world.removeChild(entry.container);
+		entry.renderer.destroy?.(entry.container, context);
 	}
 
 	let visibleMemo: {
@@ -359,9 +511,10 @@ export function createBoardScene(options: {
 			: visibleCount > FAR_LAYER_ENTER;
 		const farModeChanged = nextFarActive !== farActive;
 		farActive = nextFarActive;
-		farLayer.visible = farActive;
+		farFront.visible = farActive;
 
 		if (farActive) {
+			farInput = input;
 			const nextFarSig = [
 				structureVersion,
 				geometryVersion,
@@ -370,20 +523,23 @@ export function createBoardScene(options: {
 				visibleIds === null ? "all" : visibleFacts(input).signature,
 			].join("|");
 			if (farSig === null || (nextFarSig !== farSig && !gestureActive)) {
-				rebuildFarLayer(input, nextFarSig);
+				requestFarPass(nextFarSig);
 			}
 		} else if (farModeChanged) {
-			farBuildToken += 1;
-			cancelAnimationFrame(farBuildFrame);
-			farBuildFrame = 0;
-			farLayer.clear();
-			farSig = null;
+			resetFarLayer();
 		}
 
 		const wanted = new Set<string>(pinnedIds);
 		if (farActive) {
-			const { unbatched } = visibleFacts(input);
+			const { orderedIds, unbatched } = visibleFacts(input);
 			for (const id of unbatched) wanted.add(id);
+			let budget = FAR_LIVE_LIMIT;
+			for (const id of orderedIds) {
+				if (budget === 0) break;
+				if (farCovered.has(id) || wanted.has(id)) continue;
+				wanted.add(id);
+				budget -= 1;
+			}
 		} else if (visibleIds === null) {
 			for (const item of items) wanted.add(item.id);
 		} else {
@@ -440,6 +596,7 @@ export function createBoardScene(options: {
 		if (structureChanged || liveSetChanged) syncClips(scene);
 
 		if (structureChanged || farModeChanged || liveSetChanged) applyChildOrder();
+		syncLiveStrokes(input);
 	}
 
 	function applyChildOrder() {
@@ -479,10 +636,20 @@ export function createBoardScene(options: {
 				.stroke({ color: brand, width: inv, alpha: 0.7 });
 		}
 
-		if (bindTarget) traceFrame(overlay, bindTarget).stroke({ color: brand, width: 2 * inv, alpha: 0.9 });
+		if (bindTarget)
+			traceFrame(overlay, bindTarget).stroke({
+				color: brand,
+				width: 2 * inv,
+				alpha: 0.9,
+			});
 		if (arrowDraft) {
 			const { from, to, size, targetFrame } = arrowDraft;
-			if (targetFrame) traceFrame(overlay, targetFrame).stroke({ color: brand, width: 2 * inv, alpha: 0.9 });
+			if (targetFrame)
+				traceFrame(overlay, targetFrame).stroke({
+					color: brand,
+					width: 2 * inv,
+					alpha: 0.9,
+				});
 			overlay
 				.moveTo(from.x, from.y)
 				.lineTo(to.x, to.y)
@@ -586,12 +753,9 @@ export function createBoardScene(options: {
 		for (const entry of clips.values()) entry.group.destroy({ children: true });
 		clips.clear();
 		animatedIds.clear();
-		farLayer.clear();
-		farSig = null;
+		for (const id of [...liveStrokes.keys()]) removeLiveStroke(id, context);
+		resetFarLayer();
 		farActive = false;
-		farBuildToken += 1;
-		cancelAnimationFrame(farBuildFrame);
-		farBuildFrame = 0;
 		visibleMemo = null;
 		lastStructureVersion = -1;
 	}

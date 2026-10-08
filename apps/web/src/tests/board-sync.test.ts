@@ -1,19 +1,41 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { BoardApplyResult, BoardPatch, BoardReadResult } from "@cohub/protocol";
+import type {
+	BoardApplyResult,
+	BoardPatch,
+	BoardReadResult,
+} from "@cohub/protocol";
 import { applyBoardPatchToDocument } from "@cohub/protocol";
-import { type BoardPendingPatch, type BoardSyncState, createBoardSync } from "../lib/board/board-sync.ts";
+import {
+	type BoardPendingPatch,
+	type BoardSyncState,
+	createBoardSync,
+} from "../lib/board/board-sync.ts";
 import { boardDocument } from "./board/fixtures.ts";
 
 /** An in-memory server and cache; `fail` makes the next applies throw. */
-function harness(options: { items?: Record<string, unknown>; cached?: { version: number; items: Record<string, unknown> }; pending?: BoardPendingPatch[]; replayed?: number } = {}) {
+function harness(
+	options: {
+		items?: Record<string, unknown>;
+		cached?: { version: number; items: Record<string, unknown> };
+		pending?: BoardPendingPatch[];
+		replayed?: number;
+	} = {},
+) {
 	let server = boardDocument({ items: options.items ?? {} });
 	let version = 1;
 	const failures: Array<Error & { status?: number }> = [];
 	const applied: string[] = [];
 	const store = {
-		pending: new Map((options.pending ?? []).map((entry) => [entry.mutationId, entry])),
-		document: options.cached ? { version: options.cached.version, document: boardDocument({ items: options.cached.items }) } : null,
+		pending: new Map(
+			(options.pending ?? []).map((entry) => [entry.mutationId, entry]),
+		),
+		document: options.cached
+			? {
+					version: options.cached.version,
+					document: boardDocument({ items: options.cached.items }),
+				}
+			: null,
 	};
 	const states: BoardSyncState[] = [];
 	let gate: Promise<void> | null = null;
@@ -22,30 +44,61 @@ function harness(options: { items?: Record<string, unknown>; cached?: { version:
 			async get(): Promise<BoardReadResult> {
 				// The wire carries the parsed document: complete, defaults filled.
 				const { board, items, animations } = server;
-				return { id: "b", title: "Board", version, updatedAt: null, board, items, animations, playback: null };
+				return {
+					id: "b",
+					title: "Board",
+					version,
+					updatedAt: null,
+					board,
+					items,
+					animations,
+					playback: null,
+				};
 			},
-			async apply(patch: BoardPatch, { mutationId }): Promise<BoardApplyResult> {
+			async apply(
+				patch: BoardPatch,
+				{ mutationId },
+			): Promise<BoardApplyResult> {
 				if (gate) await gate;
 				const failure = failures.shift();
 				if (failure) throw failure;
-				const result = applyBoardPatchToDocument(server, patch, { cascade: true });
+				const result = applyBoardPatchToDocument(server, patch, {
+					cascade: true,
+				});
 				assert.ok(result.ok);
 				server = result.document;
 				version += 1;
 				applied.push(mutationId);
-				if (options.replayed) return { mutationId, status: "applied", replayed: true, version: options.replayed, changed: { board: false, items: [], animations: [] }, diagnostics: [] };
-				return { mutationId, status: "applied", replayed: false, version, changed: { board: false, items: [], animations: [] }, diagnostics: [] };
+				if (options.replayed)
+					return {
+						mutationId,
+						status: "applied",
+						replayed: true,
+						version: options.replayed,
+						changed: { board: false, items: [], animations: [] },
+						diagnostics: [],
+					};
+				return {
+					mutationId,
+					status: "applied",
+					replayed: false,
+					version,
+					changed: { board: false, items: [], animations: [] },
+					diagnostics: [],
+				};
 			},
 		},
 		store: {
 			listPending: async () => [...store.pending.values()],
-			putPending: async (entry) => void store.pending.set(entry.mutationId, entry),
+			putPending: async (entry) =>
+				void store.pending.set(entry.mutationId, entry),
 			deletePending: async (id) => void store.pending.delete(id),
 			readDocument: async () => store.document,
 			writeDocument: async (nextVersion, document) => {
 				store.document = { version: nextVersion, document };
 			},
 		},
+		persistIntervalMs: 0,
 		onChange: (state) => states.push(state),
 	});
 	return {
@@ -74,12 +127,24 @@ function harness(options: { items?: Record<string, unknown>; cached?: { version:
 		},
 		/** A write by another client, as its realtime payload. */
 		remote(patch: BoardPatch) {
-			const result = applyBoardPatchToDocument(server, patch, { cascade: true });
+			const result = applyBoardPatchToDocument(server, patch, {
+				cascade: true,
+			});
 			assert.ok(result.ok);
 			server = result.document;
 			version += 1;
-			const items = Object.fromEntries(Object.keys(patch.items ?? {}).map((id) => [id, server.items[id] ?? null]));
-			return { mutationId: crypto.randomUUID(), baseVersion: version - 1, version, after: { items } };
+			const items = Object.fromEntries(
+				Object.keys(patch.items ?? {}).map((id) => [
+					id,
+					server.items[id] ?? null,
+				]),
+			);
+			return {
+				mutationId: crypto.randomUUID(),
+				baseVersion: version - 1,
+				version,
+				after: { items },
+			};
 		},
 	};
 }
@@ -87,7 +152,10 @@ function harness(options: { items?: Record<string, unknown>; cached?: { version:
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 test("the cached document shows before the server answers", async () => {
-	const board = harness({ items: { a: { type: "shape" } }, cached: { version: 1, items: { cached: { type: "shape" } } } });
+	const board = harness({
+		items: { a: { type: "shape" } },
+		cached: { version: 1, items: { cached: { type: "shape" } } },
+	});
 	const started = board.sync.start();
 	await flush();
 	assert.ok(board.states[0]?.document?.items.cached);
@@ -109,6 +177,7 @@ test("a local write shows at once and is adopted without a read", async () => {
 	assert.equal(board.sync.state.pending, 0);
 	assert.equal(board.sync.state.version, 2);
 	assert.equal(board.store.pending.size, 0);
+	await flush();
 	assert.equal(board.store.document?.version, 2);
 });
 
@@ -156,7 +225,9 @@ test("a gap in realtime versions falls back to a read", async () => {
 	const board = harness({ items: { a: { type: "shape" } } });
 	await board.sync.start();
 	board.remote({ items: { a: { rotation: 10 } } });
-	const skipped = board.remote({ items: { b: { type: "text", props: { text: "Hi" } } } });
+	const skipped = board.remote({
+		items: { b: { type: "text", props: { text: "Hi" } } },
+	});
 	board.sync.receive(skipped);
 	await flush();
 	await flush();
@@ -167,7 +238,11 @@ test("a gap in realtime versions falls back to a read", async () => {
 test("a rejected write is dropped; a failed one is kept for retry", async () => {
 	const board = harness();
 	await board.sync.start();
-	board.failures.push(Object.assign(new Error("items.a.props.nope: unknown property"), { status: 400 }));
+	board.failures.push(
+		Object.assign(new Error("items.a.props.nope: unknown property"), {
+			status: 400,
+		}),
+	);
 	await board.sync.commit({ items: { a: { type: "shape" } } });
 	await flush();
 	assert.equal(board.sync.state.pending, 0);
@@ -187,7 +262,9 @@ for (const status of [401, 403]) {
 	test(`authentication failure ${status} retains unsent edits until retry`, async () => {
 		const board = harness();
 		await board.sync.start();
-		board.failures.push(Object.assign(new Error("Authentication required"), { status }));
+		board.failures.push(
+			Object.assign(new Error("Authentication required"), { status }),
+		);
 		await board.sync.commit({ items: { unsent: { type: "shape" } } });
 		assert.equal(board.sync.state.pending, 1);
 		assert.equal(board.store.pending.size, 1);

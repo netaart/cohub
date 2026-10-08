@@ -60,6 +60,36 @@ function perpendicularDistance(
 	return Math.hypot(point.x - projX, point.y - projY);
 }
 
+export function trimDrawPoints(
+	points: readonly DrawPoint[],
+	trim: number | undefined,
+): readonly DrawPoint[] {
+	if (trim === undefined || trim >= 1) return points;
+	if (trim <= 0) return [];
+	if (points.length < 2) return points;
+	let total = 0;
+	for (let i = 1; i < points.length; i += 1) {
+		const a = points[i - 1] as DrawPoint;
+		const b = points[i] as DrawPoint;
+		total += Math.hypot(b.x - a.x, b.y - a.y);
+	}
+	let remaining = total * trim;
+	const out: DrawPoint[] = [points[0] as DrawPoint];
+	for (let i = 1; i < points.length; i += 1) {
+		const a = points[i - 1] as DrawPoint;
+		const b = points[i] as DrawPoint;
+		const length = Math.hypot(b.x - a.x, b.y - a.y);
+		if (length >= remaining) {
+			const t = length > 0 ? remaining / length : 0;
+			out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, p: a.p + (b.p - a.p) * t });
+			return out;
+		}
+		out.push(b);
+		remaining -= length;
+	}
+	return out;
+}
+
 export function buildStrokeOutline(
 	points: DrawPoint[],
 	size: number,
@@ -126,86 +156,145 @@ export type StrokeRibbonGeometry = {
 	progress: Float32Array;
 };
 
+export type StrokeRibbonMesh = {
+	positions: Float32Array;
+	indices: Uint32Array;
+	distances: Float32Array;
+	length: number;
+};
+
+export type StrokeRibbonBuilder = {
+	build(points: readonly DrawPoint[]): StrokeRibbonMesh;
+};
+
+const SAMPLE_VERTICES = RIBBON_CIRCLE_SIDES + 1 + 4;
+const SAMPLE_TRIANGLES = RIBBON_CIRCLE_SIDES + 2;
+
+function segmentNormal(points: readonly DrawPoint[], index: number): { x: number; y: number } | null {
+	const from = points[index];
+	const to = points[index + 1];
+	if (!from || !to) return null;
+	const length = Math.hypot(to.x - from.x, to.y - from.y);
+	return length < 1e-6 ? null : { x: -(to.y - from.y) / length, y: (to.x - from.x) / length };
+}
+
+function edgeOffset(points: readonly DrawPoint[], index: number, own: { x: number; y: number }) {
+	if (isStrokeCorner(points, index)) return own;
+	const before = segmentNormal(points, index - 1);
+	const after = segmentNormal(points, index);
+	if (!before || !after) return own;
+	const x = before.x + after.x;
+	const y = before.y + after.y;
+	const length = Math.hypot(x, y);
+	if (length < 1e-6) return own;
+	const scale = 1 / Math.max(0.5, (x * own.x + y * own.y) / length);
+	return { x: (x / length) * scale, y: (y / length) * scale };
+}
+
+/** A growing stroke re-emits only its last two samples. */
+export function createStrokeRibbonBuilder(size: number): StrokeRibbonBuilder {
+	let positions = new Float32Array(SAMPLE_VERTICES * 64 * 2);
+	let distances = new Float32Array(SAMPLE_VERTICES * 64);
+	let indices = new Uint32Array(SAMPLE_TRIANGLES * 64 * 3);
+	let lengths = new Float64Array(64);
+	let marks = new Uint32Array(128);
+	let source: readonly DrawPoint[] | null = null;
+	let built = 0;
+	let vertexCount = 0;
+	let indexCount = 0;
+
+	function grow<T extends Float32Array | Float64Array | Uint32Array>(buffer: T, needed: number): T {
+		if (buffer.length >= needed) return buffer;
+		const next = new (buffer.constructor as new (length: number) => T)(Math.max(needed, buffer.length * 2));
+		next.set(buffer);
+		return next;
+	}
+
+	function vertex(x: number, y: number, at: number) {
+		positions[vertexCount * 2] = x;
+		positions[vertexCount * 2 + 1] = y;
+		distances[vertexCount] = at;
+		return vertexCount++;
+	}
+
+	function triangle(a: number, b: number, c: number) {
+		indices[indexCount++] = a;
+		indices[indexCount++] = b;
+		indices[indexCount++] = c;
+	}
+
+	function emit(points: readonly DrawPoint[], index: number) {
+		positions = grow(positions, (vertexCount + SAMPLE_VERTICES) * 2);
+		distances = grow(distances, vertexCount + SAMPLE_VERTICES);
+		indices = grow(indices, indexCount + SAMPLE_TRIANGLES * 3);
+		const point = points[index] as DrawPoint;
+		const at = lengths[index] ?? 0;
+		const radius = sampleRadius(size, point.p);
+		if (isStrokeCorner(points, index)) {
+			const center = vertex(point.x, point.y, at);
+			for (let side = 0; side < RIBBON_CIRCLE_SIDES; side += 1) {
+				const angle = (side / RIBBON_CIRCLE_SIDES) * Math.PI * 2;
+				vertex(point.x + Math.cos(angle) * radius, point.y + Math.sin(angle) * radius, at);
+			}
+			for (let side = 0; side < RIBBON_CIRCLE_SIDES; side += 1) {
+				triangle(center, center + 1 + side, center + 1 + ((side + 1) % RIBBON_CIRCLE_SIDES));
+			}
+		}
+		const next = points[index + 1];
+		const normal = segmentNormal(points, index);
+		if (!next || !normal) return;
+		const start = edgeOffset(points, index, normal);
+		const end = edgeOffset(points, index + 1, normal);
+		const nextAt = lengths[index + 1] ?? at;
+		const nextRadius = sampleRadius(size, next.p);
+		const leftA = vertex(point.x + start.x * radius, point.y + start.y * radius, at);
+		const rightA = vertex(point.x - start.x * radius, point.y - start.y * radius, at);
+		const leftB = vertex(next.x + end.x * nextRadius, next.y + end.y * nextRadius, nextAt);
+		const rightB = vertex(next.x - end.x * nextRadius, next.y - end.y * nextRadius, nextAt);
+		triangle(leftA, rightA, leftB);
+		triangle(rightA, rightB, leftB);
+	}
+
+	return {
+		build(points) {
+			const count = points.length;
+			const from = points === source && count >= built ? Math.max(0, built - 2) : 0;
+			source = points;
+			built = count;
+			lengths = grow(lengths, count);
+			marks = grow(marks, count * 2);
+			vertexCount = from > 0 ? (marks[from * 2] as number) : 0;
+			indexCount = from > 0 ? (marks[from * 2 + 1] as number) : 0;
+			for (let index = from; index < count; index += 1) {
+				const before = points[index - 1];
+				const point = points[index] as DrawPoint;
+				lengths[index] = before ? (lengths[index - 1] as number) + Math.hypot(point.x - before.x, point.y - before.y) : 0;
+			}
+			for (let index = from; index < count; index += 1) {
+				marks[index * 2] = vertexCount;
+				marks[index * 2 + 1] = indexCount;
+				emit(points, index);
+			}
+			return {
+				positions: positions.subarray(0, vertexCount * 2),
+				indices: indices.subarray(0, indexCount),
+				distances: distances.subarray(0, vertexCount),
+				length: count ? (lengths[count - 1] as number) : 0,
+			};
+		},
+	};
+}
+
 export function buildStrokeRibbonGeometry(
 	points: readonly DrawPoint[],
 	size: number,
 ): StrokeRibbonGeometry {
-	const positions: number[] = [];
-	const indices: number[] = [];
-	const uvs: number[] = [];
-	const progress: number[] = [];
-	if (points.length === 0) {
-		return {
-			positions: new Float32Array(),
-			indices: new Uint32Array(),
-			uvs: new Float32Array(),
-			progress: new Float32Array(),
-		};
-	}
-
-	const lengths = new Array<number>(points.length).fill(0);
-	for (let i = 1; i < points.length; i += 1) {
-		const from = points[i - 1];
-		const to = points[i];
-		if (from && to) {
-			lengths[i] =
-				(lengths[i - 1] ?? 0) + Math.hypot(to.x - from.x, to.y - from.y);
-		}
-	}
-	const total = Math.max(lengths.at(-1) ?? 0, 1e-6);
-	const addVertex = (x: number, y: number, at: number) => {
-		const normalized = at / total;
-		positions.push(x, y);
-		uvs.push(normalized, 0);
-		progress.push(normalized);
-		return positions.length / 2 - 1;
-	};
-	const addTriangle = (a: number, b: number, c: number) => indices.push(a, b, c);
-	const addRoundPoint = (point: DrawPoint, at: number) => {
-		const radius = sampleRadius(size, point.p);
-		const center = addVertex(point.x, point.y, at);
-		const circle: number[] = [];
-		for (let side = 0; side < RIBBON_CIRCLE_SIDES; side += 1) {
-			const angle = (side / RIBBON_CIRCLE_SIDES) * Math.PI * 2;
-			circle.push(addVertex(
-				point.x + Math.cos(angle) * radius,
-				point.y + Math.sin(angle) * radius,
-				at,
-			));
-		}
-		for (let side = 0; side < RIBBON_CIRCLE_SIDES; side += 1) {
-			addTriangle(center, circle[side] as number, circle[(side + 1) % RIBBON_CIRCLE_SIDES] as number);
-		}
-	};
-	for (let i = 0; i < points.length; i += 1) {
-		const point = points[i];
-		if (!point) continue;
-		if (isStrokeCorner(points, i)) addRoundPoint(point, lengths[i] ?? 0);
-		if (i === points.length - 1) continue;
-		const next = points[i + 1];
-		if (!next) continue;
-		const dx = next.x - point.x;
-		const dy = next.y - point.y;
-		const length = Math.hypot(dx, dy);
-		if (length < 1e-6) continue;
-		const normalX = -dy / length;
-		const normalY = dx / length;
-		const radius = sampleRadius(size, point.p);
-		const leftA = addVertex(point.x + normalX * radius, point.y + normalY * radius, lengths[i] ?? 0);
-		const rightA = addVertex(point.x - normalX * radius, point.y - normalY * radius, lengths[i] ?? 0);
-		const nextRadius = sampleRadius(size, next.p);
-		const leftB = addVertex(next.x + normalX * nextRadius, next.y + normalY * nextRadius, lengths[i + 1] ?? 0);
-		const rightB = addVertex(next.x - normalX * nextRadius, next.y - normalY * nextRadius, lengths[i + 1] ?? 0);
-		addTriangle(leftA, rightA, leftB);
-		addTriangle(rightA, rightB, leftB);
-	}
-
-	return {
-		positions: new Float32Array(positions),
-		indices: new Uint32Array(indices),
-		uvs: new Float32Array(uvs),
-		progress: new Float32Array(progress),
-	};
+	const mesh = createStrokeRibbonBuilder(size).build(points);
+	const total = Math.max(mesh.length, 1e-6);
+	const progress = mesh.distances.map((at) => at / total);
+	const uvs = new Float32Array(progress.length * 2);
+	for (let index = 0; index < progress.length; index += 1) uvs[index * 2] = progress[index] as number;
+	return { positions: mesh.positions.slice(), indices: mesh.indices.slice(), uvs, progress };
 }
 
 export function distanceToStroke(

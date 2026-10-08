@@ -112,6 +112,21 @@ describe("headless board export", { skip: available ? false : "@napi-rs/canvas i
     assert.ok(visible > 100, `expected draw pixels, got ${visible}`);
   });
 
+  test("paints a stroke inside its own bounds", async () => {
+    const stroke = boardDocument({
+      items: { d: { type: "draw", style: { strokeWidth: 16 }, props: { points: [{ x: 0, y: 0, p: 0.5 }, { x: 200, y: 0, p: 0.5 }, { x: 200, y: 100, p: 0.5 }] } } },
+    });
+    const result = exportBoardImageBytes(headless, stroke, { scale: 1, padding: 0, background: "transparent" });
+    assert.ok(result);
+    const { loadImage, createCanvas } = await import("@napi-rs/canvas");
+    const canvas = createCanvas(result.plan.width, result.plan.height);
+    const context = canvas.getContext("2d");
+    context.drawImage(await loadImage(result.bytes), 0, 0);
+    const alpha = (x: number, y: number) => context.getImageData(x, y, 1, 1).data[3] ?? 0;
+    // Both caps reach the image edges: the ink is neither shifted nor clipped.
+    assert.ok(alpha(0, 8) > 64 && alpha(canvas.width - 9, canvas.height - 1) > 64);
+  });
+
   test("renders a task-only document to non-transparent pixels", async () => {
     const { parent: _parent, ...task } = items.task1;
     const result = exportBoardImageBytes(headless, boardDocument({ items: { task1: task } }), { scale: 1, background: "transparent" });

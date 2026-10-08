@@ -1,4 +1,4 @@
-
+import { BOARD_DRAW_STROKE_SIZE } from "@cohub/protocol/board-constants";
 import {
 	type BoardFileSnapshotFacts,
 	type BoardItem,
@@ -13,7 +13,7 @@ import {
 	pointsRect,
 	type ShapeKind,
 } from "@neta-art/cohub/board";
-import { BOARD_DRAW_STROKE_SIZE } from "@cohub/protocol/board-constants";
+import { quantizeDrawCoordinate } from "$lib/board/board-draw-input";
 import { createBoardItemId } from "$lib/board/board-id";
 import { getResourceTitle, inferMediaKind } from "$lib/board/board-media";
 
@@ -32,12 +32,22 @@ export const DUPLICATE_OFFSET = 24;
 
 function item(value: Record<string, unknown>): BoardItem {
 	const parsed = parseBoardItem(value);
-	if (!parsed.ok) throw new Error(`Invalid Board item: ${parsed.diagnostics[0]?.path}: ${parsed.diagnostics[0]?.message}`);
+	if (!parsed.ok)
+		throw new Error(
+			`Invalid Board item: ${parsed.diagnostics[0]?.path}: ${parsed.diagnostics[0]?.message}`,
+		);
 	return parsed.item;
 }
 
-function centered(x: number, y: number, size: { width: number; height: number }) {
-	return { position: { x: x - size.width / 2, y: y - size.height / 2 }, size: { ...size } };
+function centered(
+	x: number,
+	y: number,
+	size: { width: number; height: number },
+) {
+	return {
+		position: { x: x - size.width / 2, y: y - size.height / 2 },
+		size: { ...size },
+	};
 }
 
 export function mediaFrameSize(
@@ -46,15 +56,27 @@ export function mediaFrameSize(
 	maxEdge = 480,
 	fallback = DEFAULT_MEDIA_SIZE,
 ): { width: number; height: number } {
-	if (!naturalWidth || !naturalHeight || !Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
+	if (
+		!naturalWidth ||
+		!naturalHeight ||
+		!Number.isFinite(naturalWidth) ||
+		!Number.isFinite(naturalHeight) ||
+		naturalWidth <= 0 ||
+		naturalHeight <= 0
+	) {
 		return { ...fallback };
 	}
 	const scale = Math.min(1, maxEdge / Math.max(naturalWidth, naturalHeight));
-	return { width: Math.max(24, naturalWidth * scale), height: Math.max(24, naturalHeight * scale) };
+	return {
+		width: Math.max(24, naturalWidth * scale),
+		height: Math.max(24, naturalHeight * scale),
+	};
 }
 
 function cleanSnapshot(snapshot: BoardMediaSnapshot): BoardMediaSnapshot {
-	return Object.fromEntries(Object.entries(snapshot).filter(([, value]) => value !== undefined)) as BoardMediaSnapshot;
+	return Object.fromEntries(
+		Object.entries(snapshot).filter(([, value]) => value !== undefined),
+	) as BoardMediaSnapshot;
 }
 
 export function createFileNodeForPath(
@@ -65,17 +87,61 @@ export function createFileNodeForPath(
 	id = createBoardItemId(),
 ): BoardItemEntry {
 	const kind = inferMediaKind(path, snapshot.mimeType);
-	const title = snapshot.title ?? (kind === "file" || kind === "text" ? fileStem(path) : getResourceTitle(path));
+	const title =
+		snapshot.title ??
+		(kind === "file" || kind === "text"
+			? fileStem(path)
+			: getResourceTitle(path));
 	if (kind === "image" || kind === "video") {
-		const size = mediaFrameSize(snapshot.naturalWidth, snapshot.naturalHeight, 480, kind === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_MEDIA_SIZE);
-		const mimeType = snapshot.mimeType ?? (kind === "video" ? "video/*" : undefined);
-		return { id, item: item({ type: kind, ...centered(x, y, size), props: { src: path, snapshot: cleanSnapshot({ ...snapshot, title, mimeType }) } }) };
+		const size = mediaFrameSize(
+			snapshot.naturalWidth,
+			snapshot.naturalHeight,
+			480,
+			kind === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_MEDIA_SIZE,
+		);
+		const mimeType =
+			snapshot.mimeType ?? (kind === "video" ? "video/*" : undefined);
+		return {
+			id,
+			item: item({
+				type: kind,
+				...centered(x, y, size),
+				props: {
+					src: path,
+					snapshot: cleanSnapshot({ ...snapshot, title, mimeType }),
+				},
+			}),
+		};
 	}
 	if (kind === "audio") {
-		return { id, item: item({ type: "audio", ...centered(x, y, DEFAULT_AUDIO_SIZE), props: { src: path, snapshot: cleanSnapshot({ ...snapshot, title, mimeType: snapshot.mimeType ?? "audio/*" }) } }) };
+		return {
+			id,
+			item: item({
+				type: "audio",
+				...centered(x, y, DEFAULT_AUDIO_SIZE),
+				props: {
+					src: path,
+					snapshot: cleanSnapshot({
+						...snapshot,
+						title,
+						mimeType: snapshot.mimeType ?? "audio/*",
+					}),
+				},
+			}),
+		};
 	}
-	const size = filePreviewKind(snapshot) === "cover" ? DEFAULT_FILE_COVER_SIZE : DEFAULT_FILE_SIZE;
-	return { id, item: item({ type: "file", ...centered(x, y, size), props: { src: path, snapshot: cleanSnapshot({ ...snapshot, title }) } }) };
+	const size =
+		filePreviewKind(snapshot) === "cover"
+			? DEFAULT_FILE_COVER_SIZE
+			: DEFAULT_FILE_SIZE;
+	return {
+		id,
+		item: item({
+			type: "file",
+			...centered(x, y, size),
+			props: { src: path, snapshot: cleanSnapshot({ ...snapshot, title }) },
+		}),
+	};
 }
 
 export function createTaskBoardItem(
@@ -87,17 +153,45 @@ export function createTaskBoardItem(
 	id = createBoardItemId(),
 ): BoardItemEntry {
 	const artifact = featuredTaskArtifact(snapshot.artifacts);
-	const visual = artifact?.type === "image" || artifact?.type === "video" ? artifact : null;
+	const visual =
+		artifact?.type === "image" || artifact?.type === "video" ? artifact : null;
 	const size = visual
-		? mediaFrameSize(visual.naturalWidth, visual.naturalHeight, 480, DEFAULT_TASK_MEDIA_SIZE)
+		? mediaFrameSize(
+				visual.naturalWidth,
+				visual.naturalHeight,
+				480,
+				DEFAULT_TASK_MEDIA_SIZE,
+			)
 		: artifact?.type === "audio"
 			? DEFAULT_TASK_MEDIA_SIZE
 			: DEFAULT_TASK_SIZE;
-	return { id, item: item({ type: "task", ...centered(x, y, size), ...(metadata ? { metadata } : {}), props: { taskRunId, snapshot } }) };
+	return {
+		id,
+		item: item({
+			type: "task",
+			...centered(x, y, size),
+			...(metadata ? { metadata } : {}),
+			props: { taskRunId, snapshot },
+		}),
+	};
 }
 
-export function createTextBoardItem(text: string, x: number, y: number, color: string = DEFAULT_BOARD_TOOL_STYLES.text.color, id = createBoardItemId()): BoardItemEntry {
-	return { id, item: item({ type: "text", position: { x, y }, ...(color === "neutral" ? {} : { style: { fill: color } }), props: { text } }) };
+export function createTextBoardItem(
+	text: string,
+	x: number,
+	y: number,
+	color: string = DEFAULT_BOARD_TOOL_STYLES.text.color,
+	id = createBoardItemId(),
+): BoardItemEntry {
+	return {
+		id,
+		item: item({
+			type: "text",
+			position: { x, y },
+			...(color === "neutral" ? {} : { style: { fill: color } }),
+			props: { text },
+		}),
+	};
 }
 
 export function createShapeBoardItem(
@@ -108,8 +202,21 @@ export function createShapeBoardItem(
 	id = createBoardItemId(),
 	box?: { x: number; y: number; width: number; height: number },
 ): BoardItemEntry {
-	const placement = box ? { position: { x: box.x, y: box.y }, size: { width: box.width, height: box.height } } : centered(x, y, DEFAULT_SHAPE_SIZE);
-	return { id, item: item({ type: "shape", ...placement, style: { stroke: color }, props: { geometry } }) };
+	const placement = box
+		? {
+				position: { x: box.x, y: box.y },
+				size: { width: box.width, height: box.height },
+			}
+		: centered(x, y, DEFAULT_SHAPE_SIZE);
+	return {
+		id,
+		item: item({
+			type: "shape",
+			...placement,
+			style: { stroke: color },
+			props: { geometry },
+		}),
+	};
 }
 
 export function createFrameBoardItem(
@@ -120,8 +227,21 @@ export function createFrameBoardItem(
 	id = createBoardItemId(),
 	box?: { x: number; y: number; width: number; height: number },
 ): BoardItemEntry {
-	const placement = box ? { position: { x: box.x, y: box.y }, size: { width: box.width, height: box.height } } : centered(x, y, DEFAULT_FRAME_SIZE);
-	return { id, item: item({ type: "frame", ...placement, ...(color === "neutral" ? {} : { style: { stroke: color } }), props: { label } }) };
+	const placement = box
+		? {
+				position: { x: box.x, y: box.y },
+				size: { width: box.width, height: box.height },
+			}
+		: centered(x, y, DEFAULT_FRAME_SIZE);
+	return {
+		id,
+		item: item({
+			type: "frame",
+			...placement,
+			...(color === "neutral" ? {} : { style: { stroke: color } }),
+			props: { label },
+		}),
+	};
 }
 
 export type BoardAppMetadata = {
@@ -132,7 +252,12 @@ export type BoardAppMetadata = {
 	icon?: string;
 };
 
-export function createAppBoardItem(app: BoardAppMetadata, x: number, y: number, id = createBoardItemId()): BoardItemEntry {
+export function createAppBoardItem(
+	app: BoardAppMetadata,
+	x: number,
+	y: number,
+	id = createBoardItemId(),
+): BoardItemEntry {
 	const frame = createFrameBoardItem(x, y, "brand", app.name, id);
 	return { id, item: { ...frame.item, metadata: { cohubApp: app } } };
 }
@@ -144,8 +269,20 @@ export function createDrawBoardItem(
 	id = createBoardItemId(),
 ): BoardItemEntry {
 	const origin = pointsRect(worldPoints);
-	const points = worldPoints.map((point) => ({ x: point.x - origin.x, y: point.y - origin.y, p: point.p }));
-	return { id, item: item({ type: "draw", position: { x: origin.x, y: origin.y }, style: { stroke: color, strokeWidth: size }, props: { points } }) };
+	const points = worldPoints.map((point) => ({
+		x: quantizeDrawCoordinate(point.x - origin.x),
+		y: quantizeDrawCoordinate(point.y - origin.y),
+		p: point.p,
+	}));
+	return {
+		id,
+		item: item({
+			type: "draw",
+			position: { x: origin.x, y: origin.y },
+			style: { stroke: color, strokeWidth: size },
+			props: { points },
+		}),
+	};
 }
 
 export function createArrowBoardItem(
@@ -156,7 +293,10 @@ export function createArrowBoardItem(
 	size: number = DEFAULT_BOARD_TOOL_STYLES.arrow.size,
 	startEnd?: { item: string; anchor?: unknown },
 ): BoardItemEntry {
-	const local = (point: { x: number; y: number }) => ({ x: point.x - start.x, y: point.y - start.y });
+	const local = (point: { x: number; y: number }) => ({
+		x: point.x - start.x,
+		y: point.y - start.y,
+	});
 	return {
 		id,
 		item: item({
@@ -223,5 +363,11 @@ export function subtitleForBoardItem(value: BoardItem): string {
 }
 
 export function textDraftSize(text: string, fontSize: number) {
-	return layoutBoardText({ text, fontSize, fontWeight: 500, font: "sans", lineHeight: 4 / 3 });
+	return layoutBoardText({
+		text,
+		fontSize,
+		fontWeight: 500,
+		font: "sans",
+		lineHeight: 4 / 3,
+	});
 }

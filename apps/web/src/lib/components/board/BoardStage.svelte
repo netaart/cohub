@@ -2,7 +2,6 @@
 import type { BoardPlaybackSnapshot } from "@cohub/protocol";
 import type {
 	BoardArrowItem,
-	BoardDrawPoint,
 	BoardFileSnapshotFacts,
 	BoardItem,
 	BoardScene as BoardModelScene,
@@ -18,14 +17,11 @@ import {
 	cameraForState,
 	createBoardPlayer,
 	featuredTaskArtifact,
-	isStrokeCorner,
 	pickBoardColor,
-	pointToWorld,
 	type Rect,
 	resolveItemColor,
 	resolveSceneArrow,
 	type ScreenPoint,
-	sampleRadius,
 	sceneItemToItem,
 	screenPoint,
 	screenToWorld,
@@ -74,7 +70,8 @@ import {
 	boardMediaActionAt,
 	playableBoardMedia,
 } from "$lib/board/board-media-playback";
-import { createBoardScene } from "$lib/board/board-scene";
+import { toBoardPointerEvent } from "$lib/board/board-pointer";
+import { type BoardLiveStroke, createBoardScene } from "$lib/board/board-scene";
 import {
 	type BoardBackgroundLoadState,
 	type BoardThemeBackground,
@@ -83,6 +80,7 @@ import {
 	resolveBoardBackground,
 	resolveBoardTheme,
 } from "$lib/board/board-theme";
+import { isCreationBoardTool } from "$lib/board/board-tool";
 import { resizeCursorForHandle } from "$lib/board/core/selection-transform";
 import type { BoardEditor, BoardPointerEvent } from "$lib/board/editor.svelte";
 import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
@@ -161,7 +159,6 @@ let background: Container | null = null;
 let boardBackdrop: BoardThemeBackground | null = $state(null);
 let backdropUrl: string | null = $state(null);
 let backdropLoadState: BoardBackgroundLoadState | null = $state(null);
-let farLayer: Graphics | null = null;
 let overlay: Graphics | null = null;
 let scene: ReturnType<typeof createBoardScene> | null = null;
 let sketches: BrowserBoardSketchHost | null = null;
@@ -508,6 +505,30 @@ function remotePreviewItems(): Map<string, BoardItem> {
 	return previews;
 }
 
+function liveStrokes(): BoardLiveStroke[] {
+	const strokes: BoardLiveStroke[] = [];
+	for (const peer of awareness.peers) {
+		const gesture = peer.gesture;
+		if (gesture?.kind !== "draw") continue;
+		strokes.push({
+			id: gesture.itemId,
+			points: gesture.points,
+			color: gesture.color,
+			size: gesture.size,
+		});
+	}
+	const interaction = editor.interaction;
+	if (interaction.type === "drawing") {
+		strokes.push({
+			id: interaction.id,
+			points: interaction.points,
+			color: interaction.color,
+			size: interaction.size,
+		});
+	}
+	return strokes;
+}
+
 function pushMovingItems(frame: BoardPlayerFrame): Map<string, BoardItem> {
 	const previews = remotePreviewItems();
 	const moving = new Map<string, BoardItem>(previews);
@@ -597,6 +618,7 @@ function syncStage() {
 
 	scene.sync({
 		items: renderScene.items,
+		strokes: liveStrokes(),
 		scene: renderScene,
 		context,
 		getItem: (id) => renderScene.get(id) ?? null,
@@ -652,49 +674,6 @@ function syncStage() {
 	if (frame.running || scene.animated) scheduleTick();
 }
 
-function drawFreehandStroke(
-	graphics: Graphics,
-	points: readonly BoardDrawPoint[],
-	style: { color: number; size: number; alpha: number },
-) {
-	if (points.length === 0) return;
-	if (points.length === 1) {
-		const point = points[0];
-		if (point) {
-			graphics
-				.circle(point.x, point.y, sampleRadius(style.size, point.p))
-				.fill({
-					color: style.color,
-					alpha: style.alpha,
-				});
-		}
-		return;
-	}
-	for (let index = 1; index < points.length; index += 1) {
-		const from = points[index - 1];
-		const to = points[index];
-		if (!from || !to) continue;
-		const width =
-			sampleRadius(style.size, from.p) + sampleRadius(style.size, to.p);
-		graphics.moveTo(from.x, from.y).lineTo(to.x, to.y).stroke({
-			color: style.color,
-			width,
-			alpha: style.alpha,
-			cap: "round",
-			join: "round",
-		});
-	}
-	for (let index = 0; index < points.length; index += 1) {
-		const point = points[index];
-		if (!point) continue;
-		if (!isStrokeCorner(points, index)) continue;
-		graphics.circle(point.x, point.y, sampleRadius(style.size, point.p)).fill({
-			color: style.color,
-			alpha: style.alpha,
-		});
-	}
-}
-
 function drawRemoteAwareness(colors: BoardShapeColors, mode: "dark" | "light") {
 	if (!overlay) return;
 	const inv = 1 / Math.max(editor.camera.zoom, 0.0001);
@@ -717,16 +696,7 @@ function drawRemoteAwareness(colors: BoardShapeColors, mode: "dark" | "light") {
 		}
 
 		const gesture = peer.gesture;
-		if (!gesture) continue;
-		if (gesture.kind === "draw") {
-			const color = pickBoardColor(colors, gesture.color, mode);
-			drawFreehandStroke(overlay, gesture.points, {
-				color: color.stroke,
-				size: gesture.size,
-				alpha: 0.9,
-			});
-			continue;
-		}
+		if (!gesture || gesture.kind === "draw") continue;
 		if (gesture.kind === "arrow") {
 			const color = pickBoardColor(colors, gesture.color, mode);
 			const angle = Math.atan2(
@@ -812,15 +782,6 @@ function drawTransient(
 				guide.axis === "x" ? guide.to : guide.at,
 			)
 			.stroke({ color: palette.brand, width: inv, alpha: 0.9 });
-	}
-
-	if (interaction.type === "drawing" && interaction.points.length > 0) {
-		const color = pickBoardColor(colors, interaction.color, mode);
-		drawFreehandStroke(overlay, interaction.points, {
-			color: color.stroke,
-			size: interaction.size,
-			alpha: 0.92,
-		});
 	}
 
 	if (interaction.type === "creatingArrow") {
@@ -939,24 +900,13 @@ function toScreenPoint(
 function inputCamera() {
 	return playbackCamera ?? editor.camera;
 }
-function toPointerEvent(event: PointerEvent) {
-	const screen = toScreenPoint(event);
-	return {
-		pointerId: event.pointerId,
-		screen,
-		world: pointToWorld(screen, inputCamera()),
-		shiftKey: event.shiftKey,
-		metaKey: event.metaKey,
-		ctrlKey: event.ctrlKey,
-		altKey: event.altKey,
-		button: event.button,
-		buttons: event.buttons,
-		pointerType: event.pointerType,
-		cancelled:
-			event.type === "pointercancel" || event.type === "lostpointercapture",
-		pressure:
-			event.pointerType === "pen" && event.pressure > 0 ? event.pressure : 0.5,
-	};
+function toPointerEvent(event: PointerEvent): BoardPointerEvent {
+	return toBoardPointerEvent(
+		event,
+		host?.getBoundingClientRect() ?? new DOMRect(),
+		inputCamera(),
+		event.type === "pointermove" && editor.interaction.type === "drawing",
+	);
 }
 
 function pointerType(event: PointerEvent): "mouse" | "pen" | "touch" {
@@ -1325,20 +1275,11 @@ const cursor = $derived.by(() => {
 		);
 	if (control?.kind === "rotate") return ROTATE_CURSOR;
 
-	switch (editor.tool) {
-		case "draw":
-		case "arrow":
-		case "shape":
-		case "frame":
-		case "text":
-			return "crosshair";
-		default: {
-			const hovered = editor.hoverId ? editor.itemById(editor.hoverId) : null;
-			return hovered && !hovered.locked && shapeCapabilities(hovered).canMove
-				? "move"
-				: "default";
-		}
-	}
+	if (isCreationBoardTool(editor.tool)) return "crosshair";
+	const hovered = editor.hoverId ? editor.itemById(editor.hoverId) : null;
+	return hovered && !hovered.locked && shapeCapabilities(hovered).canMove
+		? "move"
+		: "default";
 });
 
 let disposed = false;
@@ -1376,15 +1317,12 @@ onMount(async () => {
 	world = new Container({ isRenderGroup: true, label: "board-world" });
 	nodeLayer = new Container({ label: "board-nodes" });
 	overlay = new Graphics({ label: "board-interaction-overlay" });
-	farLayer = new Graphics({ label: "board-far-layer" });
-	nodeLayer.addChild(farLayer);
 	world.addChild(nodeLayer, overlay);
 	scene = createBoardScene({
 		world: nodeLayer,
-		farLayer,
 		overlay,
 		getRenderer: getBoardCardRenderer,
-		onFarLayerFrame: scheduleRender,
+		onFarLayerFrame: scheduleTick,
 	});
 	sketches = createBoardSketchHost({
 		readModule: async (src) => {
@@ -1527,7 +1465,6 @@ onDestroy(() => {
 	nodeLayer = null;
 	world = null;
 	overlay = null;
-	farLayer = null;
 	app?.destroy({ removeView: true });
 	app = null;
 	onExportReady?.(null);

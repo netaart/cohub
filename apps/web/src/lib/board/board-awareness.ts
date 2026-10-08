@@ -12,7 +12,10 @@ import {
 	BOARD_AWARENESS_WORLD_EXTENT_LIMIT,
 } from "@cohub/protocol/realtime";
 import type { BoardAwarenessUpdatedEvent } from "@neta-art/cohub";
-import type { BoardFrame, BoardSceneItem as BoardItem } from "@neta-art/cohub/board";
+import type {
+	BoardFrame,
+	BoardSceneItem as BoardItem,
+} from "@neta-art/cohub/board";
 import { selectionBounds } from "@neta-art/cohub/board";
 import type { BoardEditor, BoardInteraction } from "$lib/board/editor.svelte";
 
@@ -511,10 +514,8 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 				) {
 					peer.gesture = { ...gesture, from: 0, points: [...gesture.points] };
 				} else if (gesture.from === current.points.length) {
-					peer.gesture = {
-						...current,
-						points: [...current.points, ...gesture.points],
-					};
+					current.points.push(...gesture.points);
+					peer.gesture = { ...current };
 				}
 			} else {
 				peer.gesture = gesture;
@@ -542,7 +543,9 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 			const gesture = peer.gesture;
 			const applied =
 				gesture.kind === "transform"
-					? gesture.items.every((preview) => previewMatchesItem(preview, itemsById.get(preview.itemId)))
+					? gesture.items.every((preview) =>
+							previewMatchesItem(preview, itemsById.get(preview.itemId)),
+						)
 					: itemsById.has(gesture.itemId);
 			if (!applied) continue;
 			peer.gesture = null;
