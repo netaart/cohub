@@ -144,6 +144,8 @@ CREATE TABLE "v2"."board_items" (
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+-- Indexed before inserts: later steps look items up per row.
+CREATE UNIQUE INDEX "v2_uq_board_items_board_id" ON "v2"."board_items" USING btree ("board_id", "id");
 
 WITH nodes AS (
   SELECT n.*,
@@ -214,6 +216,8 @@ SELECT
 FROM nodes n
 JOIN "v2"."boards" b ON b."id" = n."board_id";
 
+ANALYZE "v2"."board_items";
+
 -- Connections become arrows bound to the items they join.
 WITH connections AS (
   SELECT c.*,
@@ -267,7 +271,6 @@ UPDATE "v2"."board_items" SET "binds" = ARRAY(
   SELECT DISTINCT value FROM (VALUES ("data"->'props'->'start'->>'item'), ("data"->'props'->'end'->>'item')) AS ends(value) WHERE value IS NOT NULL
 ) WHERE "type" = 'arrow';
 
-CREATE UNIQUE INDEX "v2_uq_board_items_board_id" ON "v2"."board_items" USING btree ("board_id", "id");
 CREATE INDEX "v2_idx_board_items_parent" ON "v2"."board_items" USING btree ("board_id", "parent_id", "z");
 CREATE INDEX "v2_idx_board_items_bounds" ON "v2"."board_items" USING gist (box(point("min_x", "min_y"), point("max_x", "max_y")));
 CREATE INDEX "v2_idx_board_items_src" ON "v2"."board_items" USING btree ("board_id", "src");
