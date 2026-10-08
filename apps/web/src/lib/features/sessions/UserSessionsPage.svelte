@@ -1,8 +1,9 @@
 <script lang="ts">
-import type {
-	SessionRecord,
-	SpaceRecord,
-	UserSessionListItem,
+import {
+	HttpError,
+	type SessionRecord,
+	type SpaceRecord,
+	type UserSessionListItem,
 } from "@neta-art/cohub";
 import { onDestroy, onMount, untrack } from "svelte";
 import { goto } from "$app/navigation";
@@ -20,6 +21,7 @@ import {
 	type WindowRef,
 	withWindowParam,
 } from "$lib/features/space/modules/window-route";
+import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { sdk } from "$lib/sdk";
 import {
@@ -35,8 +37,12 @@ import {
 	getLastUserSessionId,
 	setLastUserSessionId,
 } from "$lib/stores/last-user-session";
+import { forgetCachedSession } from "$lib/stores/session-detail-cache";
 import { getCachedSpaceList } from "$lib/stores/space-list-cache";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+import {
+	cacheSpaceRecordSoon,
+	getCachedSpaceRecord,
+} from "$lib/stores/space-record-cache";
 import {
 	type ResolveWorkspaceAsset,
 	WorkspaceAssetAccessError,
@@ -170,8 +176,12 @@ const routeTurnSequence = $derived.by(() => {
 		? Math.floor(sequence)
 		: null;
 });
+let routeSeed = $state<UserSessionListItem | null>(null);
 const activeSeed = $derived(
-	routeSessionId ? list.findById(routeSessionId) : null,
+	routeSessionId
+		? (list.findById(routeSessionId) ??
+				(routeSeed?.id === routeSessionId ? routeSeed : null))
+		: null,
 );
 
 function isCurrentOpen(seq: number, sessionId: string | null) {
@@ -235,8 +245,14 @@ function clearChatSession() {
 	});
 }
 
-function resolveSpaceFromCache(spaceId: string): SpaceRecord | null {
-	return getCachedSpaceList()?.find((space) => space.id === spaceId) ?? null;
+async function resolveSpaceFromCache(
+	spaceId: string,
+): Promise<SpaceRecord | null> {
+	const listed =
+		spacesInbox.find(spaceId) ??
+		getCachedSpaceList()?.find((space) => space.id === spaceId);
+	if (listed) return listed;
+	return (await getCachedSpaceRecord(spaceId).catch(() => null))?.space ?? null;
 }
 
 function clearDraftSpace() {
@@ -250,12 +266,13 @@ function clearDraftSpace() {
  */
 async function ensureDraftSpace(spaceId: string): Promise<SpaceRecord | null> {
 	if (draftSpace?.id === spaceId) return draftSpace;
-	const cached = resolveSpaceFromCache(spaceId);
+	const seq = ++draftSpaceLookupSeq;
+	const cached = await resolveSpaceFromCache(spaceId);
+	if (seq !== draftSpaceLookupSeq) return null;
 	if (cached) {
 		draftSpace = cached;
 		return cached;
 	}
-	const seq = ++draftSpaceLookupSeq;
 	try {
 		const space = await sdk.space(spaceId).get();
 		if (seq !== draftSpaceLookupSeq) return null;
@@ -286,9 +303,9 @@ async function openRouteSession(sessionId: string | null) {
 	}
 
 	if (!isDesktop) {
-		const known = list.findById(sessionId);
+		const known = await list.findLocal(sessionId);
+		if (!isCurrentOpen(seq, sessionId)) return;
 		if (known) {
-			if (!isCurrentOpen(seq, sessionId)) return;
 			await goto(buildSpaceSessionRoute(known.spaceId, sessionId), {
 				replaceState: true,
 			});
@@ -309,58 +326,87 @@ async function openRouteSession(sessionId: string | null) {
 	}
 
 	const turnSequence = routeTurnSequence;
-	const known = list.findById(sessionId);
+	const known = await list.findLocal(sessionId);
+	if (!isCurrentOpen(seq, sessionId)) return;
 	if (known) {
-		if (!isCurrentOpen(seq, sessionId)) return;
+		// Cache-only records may be stale; check before opening upserts it.
+		const unlisted = !list.findById(sessionId);
+		routeSeed = known;
 		await openChatSession({
 			spaceId: known.spaceId,
 			sessionId: known.id,
 			session: known,
 			turnSequence,
 		});
+		if (unlisted) void confirmCachedSession(seq, known);
 		return;
 	}
 
 	try {
-		const detail = await sdk.user.getSession(sessionId);
-		if (!isCurrentOpen(seq, sessionId)) return;
-		list.upsertSession({
-			...detail.session,
-			space: {
-				id: detail.space.id,
-				name: detail.space.name ?? detail.space.title ?? "Space",
-				slug: detail.space.slug ?? null,
-				publicProfile: detail.space.publicProfile ?? null,
-			},
-		});
-		if (!isCurrentOpen(seq, sessionId)) return;
+		const seed = await adoptServerSession(seq, sessionId);
+		if (!seed) return;
 		await openChatSession({
-			spaceId: detail.session.spaceId,
-			sessionId: detail.session.id,
-			session: detail.session,
+			spaceId: seed.spaceId,
+			sessionId: seed.id,
+			session: seed,
 			turnSequence,
 		});
 	} catch (error) {
 		if (!isCurrentOpen(seq, sessionId)) return;
-		console.warn("[sessions] failed to open session", error);
-		failedOpenIds.add(sessionId);
-		// Drop a stale remembered id so the next auto-select can fall back.
-		const userUuid = authStore.userUuid;
-		if (userUuid) clearLastUserSessionId(userUuid);
-		const fallback =
-			list.sessions.find(
-				(session) => session.id !== sessionId && !failedOpenIds.has(session.id),
-			) ?? null;
-		if (fallback) {
-			await goto(buildUserSessionRoute(fallback.id), {
-				replaceState: true,
-				keepFocus: true,
-				noScroll: true,
-			});
-			return;
-		}
-		await goto(buildSessionsRoute(), { replaceState: true });
+		await leaveFailedSession(sessionId, error);
 	}
+}
+
+async function adoptServerSession(seq: number, sessionId: string) {
+	const detail = await sdk.user.getSession(sessionId);
+	if (!isCurrentOpen(seq, sessionId)) return null;
+	routeSeed = {
+		...detail.session,
+		space: {
+			id: detail.space.id,
+			name: detail.space.name ?? detail.space.title ?? "Space",
+			slug: detail.space.slug ?? null,
+			publicProfile: detail.space.publicProfile ?? null,
+		},
+	};
+	list.upsertSession(routeSeed);
+	return routeSeed;
+}
+
+async function confirmCachedSession(seq: number, cached: SessionRecord) {
+	try {
+		await adoptServerSession(seq, cached.id);
+	} catch (error) {
+		// Only a definite 403/404 drops local data.
+		const gone =
+			error instanceof HttpError &&
+			(error.status === 403 || error.status === 404);
+		if (!gone) return;
+		void forgetCachedSession(cached.spaceId, cached.id).catch(() => undefined);
+		if (isCurrentOpen(seq, cached.id))
+			await leaveFailedSession(cached.id, error);
+	}
+}
+
+async function leaveFailedSession(sessionId: string, error: unknown) {
+	console.warn("[sessions] failed to open session", error);
+	failedOpenIds.add(sessionId);
+	// Drop a stale remembered id so the next auto-select can fall back.
+	const userUuid = authStore.userUuid;
+	if (userUuid) clearLastUserSessionId(userUuid);
+	const fallback =
+		list.sessions.find(
+			(session) => session.id !== sessionId && !failedOpenIds.has(session.id),
+		) ?? null;
+	if (fallback) {
+		await goto(buildUserSessionRoute(fallback.id), {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true,
+		});
+		return;
+	}
+	await goto(buildSessionsRoute(), { replaceState: true });
 }
 
 function handleChangeDraftSpace() {
@@ -547,6 +593,7 @@ onDestroy(() => {
 			<SessionConversationPanel
 				host={sessionChat}
 				seed={activeSeed}
+				pending={Boolean(routeSessionId) || list.view.loading}
 				isNewDraft={routeIsNew}
 				{draftSpace}
 				onChangeSpace={handleChangeDraftSpace}

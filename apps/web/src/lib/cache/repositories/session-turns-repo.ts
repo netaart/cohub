@@ -7,6 +7,7 @@ import {
 import {
 	idbDelete,
 	idbGet,
+	idbGetByIndex,
 	idbPut,
 	type SessionTurnsCacheRecord,
 } from "$lib/cache/db";
@@ -188,9 +189,13 @@ async function readRecord(spaceId: string, sessionId: string) {
 			console.warn("[sessionTurnsRepo] Failed to read turn cache:", error),
 	});
 	if (!record) return null;
+	return { record: remember(record), source: "indexeddb" as CacheSource };
+}
+
+function remember(record: SessionTurnsCacheRecord) {
 	const touched = { ...record, lastAccessedAt: Date.now() };
-	memory.set(key, touched);
-	return { record: touched, source: "indexeddb" as CacheSource };
+	memory.set(record.key, touched);
+	return touched;
 }
 
 async function writeRecord(
@@ -308,6 +313,28 @@ export const sessionTurnsRepo = {
 		ensureBroadcastSubscription();
 		const result = await readRecord(spaceId, sessionId);
 		return result ? toSnapshot(result.record, result.source) : null;
+	},
+
+	async find(sessionId: string) {
+		ensureBroadcastSubscription();
+		const record = await readSessionTurnsCacheSafely({
+			read: () =>
+				idbGetByIndex<SessionTurnsCacheRecord>(
+					"session_turns",
+					"by_user_session",
+					[getCacheUserKey(), sessionId],
+				),
+			onError: (error) =>
+				console.warn("[sessionTurnsRepo] Failed to find turn cache:", error),
+		});
+		if (!record) return null;
+		const cached = memory.get(record.key);
+		return {
+			spaceId: record.spaceId,
+			...(cached
+				? toSnapshot(cached, "memory")
+				: toSnapshot(remember(record), "indexeddb")),
+		};
 	},
 
 	async replaceTail(

@@ -83,6 +83,7 @@ export class LiveList<F, T, E> {
 	readonly #emptyView: LiveView<T, E>;
 	#entries = new SvelteMap<string, Entry<F, T, E>>();
 	#inflight = new Map<string, Flight<F, T, E>>();
+	#hydrating = new Map<string, Promise<void>>();
 	#watchers = new Map<string, { filter: F; count: number }>();
 	#staleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	#persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -114,6 +115,7 @@ export class LiveList<F, T, E> {
 		this.#generation += 1;
 		this.#entries.clear();
 		this.#inflight.clear();
+		this.#hydrating.clear();
 		for (const timer of this.#staleTimers.values()) clearTimeout(timer);
 		for (const timer of this.#persistTimers.values()) clearTimeout(timer);
 		this.#staleTimers.clear();
@@ -164,10 +166,15 @@ export class LiveList<F, T, E> {
 		};
 	}
 
+	async ready(filter: F) {
+		await this.#ensureUser();
+		await this.#hydrate(filter);
+	}
+
 	async open(filter: F, options: { visible?: boolean } = {}) {
 		await this.#ensureUser();
+		await this.#hydrate(filter);
 		const key = this.#source.key(filter);
-		if (!this.#entries.has(key)) await this.#hydrate(filter);
 		const entry = this.#entries.get(key);
 		if (entry && this.#isLive(entry)) return;
 		if (entry && !options.visible && entry.syncedEpoch === syncStatus.epoch)
@@ -383,7 +390,19 @@ export class LiveList<F, T, E> {
 			void this.open(filter, { visible: true });
 	}
 
-	async #hydrate(filter: F) {
+	#hydrate(filter: F): Promise<void> {
+		const key = this.#source.key(filter);
+		if (this.#entries.has(key)) return Promise.resolve();
+		const pending = this.#hydrating.get(key);
+		if (pending) return pending;
+		const run = this.#readSnapshot(filter).finally(() => {
+			if (this.#hydrating.get(key) === run) this.#hydrating.delete(key);
+		});
+		this.#hydrating.set(key, run);
+		return run;
+	}
+
+	async #readSnapshot(filter: F) {
 		const key = this.#source.key(filter);
 		const generation = this.#generation;
 		const cached = await this.#source.read(filter).catch(() => null);

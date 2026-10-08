@@ -33,6 +33,7 @@ import {
 	writeChatsFilter,
 } from "$lib/stores/chats-filter";
 import { getRecentSpaces } from "$lib/stores/recent-space";
+import { findCachedSession } from "$lib/stores/session-detail-cache";
 import { reconcileGenerationStateFromSessionList } from "$lib/stores/session-generation-list-reconcile";
 import {
 	getCachedSessionListSnapshot,
@@ -46,6 +47,7 @@ import {
 	getCachedSpaceLabelsSnapshot,
 } from "$lib/stores/space-labels";
 import { getCachedSpaceList } from "$lib/stores/space-list-cache";
+import { getCachedSpaceRecord } from "$lib/stores/space-record-cache";
 import {
 	getCachedUserSessionListSnapshot,
 	setCachedUserSessionList,
@@ -249,6 +251,21 @@ class ChatsInbox {
 		return this.list.find(sessionId) ?? null;
 	}
 
+	async findLocal(sessionId: string): Promise<UserSessionListItem | null> {
+		const known = this.findById(sessionId);
+		if (known) return known;
+		const [cached] = await Promise.all([
+			findCachedSession(sessionId),
+			this.#ensureUser().then(() => this.list.ready(this.filter)),
+		]);
+		const listed = this.findById(sessionId);
+		if (listed || !cached) return listed;
+		return {
+			...cached.session,
+			space: await this.#cachedSpaceSummary(cached.spaceId),
+		};
+	}
+
 	upsertSession(session: UserSessionListItem) {
 		this.#applySession(session, { settled: true, space: session.space });
 	}
@@ -383,6 +400,13 @@ class ChatsInbox {
 			this.list.findBy((session) => session.spaceId === spaceId)?.space ??
 			null
 		);
+	}
+
+	async #cachedSpaceSummary(spaceId: string) {
+		const known = this.#spaceSummary(spaceId);
+		if (known) return known;
+		const cached = await getCachedSpaceRecord(spaceId).catch(() => null);
+		return cached ? spaceSummaryOf(cached.space) : null;
 	}
 
 	async #readCachedPage(filter: ChatsFilter) {

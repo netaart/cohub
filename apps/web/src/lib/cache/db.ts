@@ -20,7 +20,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 22;
+export const DB_VERSION = 23;
 
 export type SessionListForkRecord = Partial<
 	Omit<SessionForkRecord, "parentSessionId">
@@ -603,25 +603,26 @@ function resetDbConnection(db?: IDBDatabase | null) {
 	clearOpenDegraded();
 }
 
-function createStore(
+function defineStore(
 	db: IDBDatabase,
+	tx: IDBTransaction,
 	name: StoreName,
 	indexes: Array<{ name: string; keyPath: string | string[] }>,
 ) {
-	if (db.objectStoreNames.contains(name)) return;
-	const store = db.createObjectStore(name, { keyPath: "key" });
-	for (const index of indexes) store.createIndex(index.name, index.keyPath);
+	const store = db.objectStoreNames.contains(name)
+		? tx.objectStore(name)
+		: db.createObjectStore(name, { keyPath: "key" });
+	for (const index of indexes)
+		if (!store.indexNames.contains(index.name))
+			store.createIndex(index.name, index.keyPath);
 }
 
 /**
  * Summaries cached before list views dropped inline generation media can hold
  * megabytes each. Slim them in place so the first screen keeps its cache.
  */
-function slimTaskRunSummaries(transaction: IDBTransaction | null) {
-	const cursorRequest = transaction
-		?.objectStore("task_run_summaries")
-		.openCursor();
-	if (!cursorRequest) return;
+function slimTaskRunSummaries(tx: IDBTransaction) {
+	const cursorRequest = tx.objectStore("task_run_summaries").openCursor();
 	cursorRequest.onsuccess = () => {
 		const cursor = cursorRequest.result;
 		if (!cursor) return;
@@ -687,22 +688,21 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 		};
 		request.onupgradeneeded = (event) => {
 			const db = request.result;
+			const tx = request.transaction as IDBTransaction;
 			const { oldVersion } = event as IDBVersionChangeEvent;
 			if (
 				oldVersion < 18 &&
 				db.objectStoreNames.contains("task_run_summaries")
 			) {
-				slimTaskRunSummaries(request.transaction);
+				slimTaskRunSummaries(tx);
 			}
 			if (
 				oldVersion < 19 &&
-				request.transaction &&
 				db.objectStoreNames.contains("board_pending_txs")
 			) {
 				// Preserve unsent v2 commands verbatim for recovery. They must never
 				// be replayed as v3 merge patches or silently deleted during upgrade.
-				request.transaction.objectStore("board_pending_txs").name =
-					"board_legacy_pending_txs";
+				tx.objectStore("board_pending_txs").name = "board_legacy_pending_txs";
 			}
 			// Cached documents used to be compact (every value that matched its
 			// schema default was omitted). They are stored complete now, and a
@@ -714,44 +714,46 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 			if (oldVersion < 22 && db.objectStoreNames.contains("space_activity")) {
 				db.deleteObjectStore("space_activity");
 			}
-			createStore(db, "space_lists", []);
-			createStore(db, "space_records", [
+			defineStore(db, tx, "space_lists", []);
+			defineStore(db, tx, "space_records", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "activity", [
+			defineStore(db, tx, "activity", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "session_lists", [
+			defineStore(db, tx, "session_lists", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "session_list_indexes", [
+			defineStore(db, tx, "session_list_indexes", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "session_details", [
-				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
-				{
-					name: "by_user_space_session",
-					keyPath: ["userKey", "spaceId", "sessionId"],
-				},
-				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
-				{ name: "by_updated_at", keyPath: "updatedAt" },
-			]);
-			createStore(db, "session_turns", [
+			defineStore(db, tx, "session_details", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_session",
 					keyPath: ["userKey", "spaceId", "sessionId"],
 				},
+				{ name: "by_user_session", keyPath: ["userKey", "sessionId"] },
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
+				{ name: "by_updated_at", keyPath: "updatedAt" },
+			]);
+			defineStore(db, tx, "session_turns", [
+				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+				{
+					name: "by_user_space_session",
+					keyPath: ["userKey", "spaceId", "sessionId"],
+				},
+				{ name: "by_user_session", keyPath: ["userKey", "sessionId"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
-			createStore(db, "session_generation_snapshots", [
+			defineStore(db, tx, "session_generation_snapshots", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_session",
@@ -760,7 +762,7 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				{ name: "by_expires_at", keyPath: "expiresAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "space_fs_dirs", [
+			defineStore(db, tx, "space_fs_dirs", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_dir",
@@ -768,16 +770,16 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				},
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
-			createStore(db, "space_fs_epochs", [
+			defineStore(db, tx, "space_fs_epochs", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "label_trees", [
+			defineStore(db, tx, "label_trees", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "label_items", [
+			defineStore(db, tx, "label_items", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_label",
@@ -786,7 +788,7 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "resource_labels", [
+			defineStore(db, tx, "resource_labels", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_resource",
@@ -794,12 +796,12 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				},
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
-			createStore(db, "user_profiles", [
+			defineStore(db, tx, "user_profiles", [
 				{ name: "by_user_uuid", keyPath: ["userKey", "userUuid"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "file_pending_drafts", [
+			defineStore(db, tx, "file_pending_drafts", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_path",
@@ -807,7 +809,7 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				},
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "board_pending_txs", [
+			defineStore(db, tx, "board_pending_txs", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_board",
@@ -815,11 +817,11 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				},
 				{ name: "by_created_at", keyPath: "createdAt" },
 			]);
-			createStore(db, "board_documents", [
+			defineStore(db, tx, "board_documents", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "task_run_summaries", [
+			defineStore(db, tx, "task_run_summaries", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_session",
@@ -832,11 +834,11 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
-			createStore(db, "session_files", [
+			defineStore(db, tx, "session_files", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
-			createStore(db, "task_run_details", [
+			defineStore(db, tx, "task_run_details", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
 					name: "by_user_space_session",
@@ -1114,6 +1116,21 @@ export async function idbGetAll<T>(storeName: StoreName) {
 			});
 		})) ?? []
 	);
+}
+
+export async function idbGetByIndex<T>(
+	storeName: StoreName,
+	indexName: string,
+	query: IDBValidKey | IDBKeyRange,
+) {
+	return withObjectStore(storeName, "readonly", (store) => {
+		return new Promise<T | null>((resolve, reject) => {
+			const request = store.index(indexName).get(query);
+			request.onsuccess = () =>
+				resolve((request.result as T | undefined) ?? null);
+			request.onerror = () => reject(request.error);
+		});
+	});
 }
 
 export async function idbGetAllByIndex<T>(
