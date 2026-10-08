@@ -1,6 +1,7 @@
 import type { Usage } from "@cohub/protocol/core";
 import { formatCurrency } from "$lib/i18n/format";
 import type { Locale } from "$lib/i18n/locale";
+import { m } from "$lib/paraglide/messages.js";
 
 /** Compact token count for message/process meta bars (matches chat bubble style). */
 export function formatTokenCount(n: number): string {
@@ -37,6 +38,39 @@ export function formatUsageCostFromUsage(
 export function getDisplayInputTokens(usage: Usage | null | undefined): number {
 	if (!usage) return 0;
 	return (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+}
+
+export function formatInputTokens(
+	usage: Usage | null | undefined,
+	locale: Locale,
+): string {
+	const input = getDisplayInputTokens(usage);
+	if (input <= 0) return "";
+	const cached = usage?.cacheRead ?? 0;
+	const count = formatTokenCount(input);
+	return cached > 0
+		? `${count} (${m.chat_cached({ count: formatTokenCount(cached) }, { locale })})`
+		: count;
+}
+
+export function formatUsageBreakdown(
+	usage: Usage | null | undefined,
+	locale: Locale,
+): string {
+	const input = formatInputTokens(usage, locale);
+	const output = usage?.output ?? 0;
+	return [input && `↑${input}`, output > 0 && `↓${formatTokenCount(output)}`]
+		.filter(Boolean)
+		.join(" ");
+}
+
+export function getContextUsagePercent(
+	usage: Usage | null | undefined,
+	contextWindow: number | null | undefined,
+): number | null {
+	const input = getDisplayInputTokens(usage);
+	if (!input || !contextWindow || contextWindow <= 0) return null;
+	return Math.max(0, Math.min(100, (input / contextWindow) * 100));
 }
 
 export function getUsageTotalTokens(usage: Usage | null | undefined): number {

@@ -15,9 +15,10 @@ import {
 	isDisplayableDurationMs,
 } from "$lib/format-duration";
 import {
+	formatInputTokens,
 	formatTokenCount,
+	formatUsageBreakdown,
 	formatUsageCost,
-	getDisplayInputTokens,
 	getUsageCostTotal,
 	getUsageTotalTokens,
 	sumUsages,
@@ -254,26 +255,16 @@ const intermediateUsage = $derived.by(() => {
 	if (effectiveMessages.length === 0) return null;
 	return sumUsages(effectiveMessages.map((message) => message.usage));
 });
-const usageInputTokens = $derived(getDisplayInputTokens(intermediateUsage));
-const usageCachedTokens = $derived(intermediateUsage?.cacheRead ?? 0);
+const usageInputLabel = $derived(formatInputTokens(intermediateUsage, locale));
 const usageOutputTokens = $derived(intermediateUsage?.output ?? 0);
 const usageTokens = $derived(getUsageTotalTokens(intermediateUsage));
 const usageCostTotal = $derived(getUsageCostTotal(intermediateUsage));
 const usageCostLabel = $derived(
 	usageCostTotal == null ? "" : formatUsageCost(usageCostTotal, locale),
 );
-const usageBreakdownLabel = $derived.by(() => {
-	if (usageInputTokens <= 0 && usageOutputTokens <= 0) return "";
-	const inputLabel =
-		usageInputTokens > 0 ? `↑${formatTokenCount(usageInputTokens)}` : "";
-	const cachedLabel =
-		usageCachedTokens > 0
-			? `(${m.chat_cached({ count: formatTokenCount(usageCachedTokens) }, { locale })})`
-			: "";
-	const outputLabel =
-		usageOutputTokens > 0 ? `↓${formatTokenCount(usageOutputTokens)}` : "";
-	return [inputLabel, cachedLabel, outputLabel].filter(Boolean).join(" ");
-});
+const usageBreakdownLabel = $derived(
+	formatUsageBreakdown(intermediateUsage, locale),
+);
 const intermediateDurationMs = $derived.by(() => {
 	if (!useLiveMetrics) return summary?.durationMs ?? null;
 	const durations = effectiveMessages
@@ -300,21 +291,8 @@ const durationTitle = $derived(
 const usageTitle = $derived.by(() => {
 	if (!intermediateUsage && !durationTitle && !compactionDetailLabel) return "";
 	const parts: string[] = [];
-	if (usageInputTokens > 0) {
-		parts.push(
-			usageCachedTokens > 0
-				? m.chat_input_label(
-						{
-							value: `${formatTokenCount(usageInputTokens)} (${formatTokenCount(usageCachedTokens)} cached)`,
-						},
-						{ locale },
-					)
-				: m.chat_input_label(
-						{ value: formatTokenCount(usageInputTokens) },
-						{ locale },
-					),
-		);
-	}
+	if (usageInputLabel)
+		parts.push(m.chat_input_label({ value: usageInputLabel }, { locale }));
 	if (usageOutputTokens > 0)
 		parts.push(
 			m.chat_output_label(

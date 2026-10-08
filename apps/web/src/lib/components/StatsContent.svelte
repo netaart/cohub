@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { ExecutionStats, RequestMetric } from "@cohub/protocol/model";
+import StatsGroup from "$lib/components/StatsGroup.svelte";
 import StatsTimeline from "$lib/components/StatsTimeline.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -145,16 +146,9 @@ function segmentClass(tone: "brand" | "strong" | "subtle") {
 	<StatsTimeline requests={requests} />
 
 	{#each view.groups as group (group.key)}
-		<section class="border-t border-border-subtle pt-3" aria-label={sectionTitle(group.key)}>
-			<h4 class="mb-2 text-[10px] font-medium uppercase tracking-[0.12em] text-text-placeholder">{sectionTitle(group.key)}</h4>
-			<dl class="grid grid-cols-1 gap-x-5 gap-y-2 sm:grid-cols-2">
-				{#each group.items as item (item.key)}
-					<div class="flex min-w-0 items-baseline justify-between gap-3">
-						<dt class="min-w-0 truncate text-text-tertiary">{label(item.label)}</dt>
-						<dd class="shrink-0 text-right tabular-nums text-text-primary">{item.value}</dd>
-					</div>
-				{/each}
-			</dl>
-		</section>
+		<StatsGroup
+			title={sectionTitle(group.key)}
+			items={group.items.map((item) => ({ ...item, label: label(item.label) }))}
+		/>
 	{/each}
 </div>

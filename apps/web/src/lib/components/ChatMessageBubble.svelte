@@ -19,6 +19,9 @@ import {
 import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
 import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
 import StatsContent from "$lib/components/StatsContent.svelte";
+import StatsGroup, {
+	type StatsGroupItem,
+} from "$lib/components/StatsGroup.svelte";
 import StatsPopover from "$lib/components/StatsPopover.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import {
@@ -27,8 +30,11 @@ import {
 	isDisplayableDurationMs,
 } from "$lib/format-duration";
 import {
+	formatInputTokens,
 	formatTokenCount,
+	formatUsageBreakdown,
 	formatUsageCost,
+	getContextUsagePercent,
 	getDisplayInputTokens,
 	getUsageCostTotal,
 } from "$lib/format-usage";
@@ -362,18 +368,8 @@ const footerRequests = $derived.by(() => {
 	const receipt = requestMetricSchema.safeParse(message.meta?.llmTiming);
 	return receipt.success ? [receipt.data] : [];
 });
-const footerUsage = $derived(
-	message.meta?.turn
-		? (footerStats.usage ?? message.meta.turn.totalUsage)
-		: message.meta?.usage,
-);
-const footerDuration = $derived(
-	message.meta?.turn
-		? (footerStats.elapsedMs ?? message.meta.turn.durationMs)
-		: message.meta?.durationMs,
-);
 const hasDuration = $derived.by(() => {
-	const durationMs = footerDuration;
+	const durationMs = message.meta?.durationMs;
 	return (
 		message.role === "assistant" &&
 		message.meta?.streaming !== true &&
@@ -383,11 +379,11 @@ const hasDuration = $derived.by(() => {
 });
 
 const durationDisplay = $derived(
-	hasDuration ? formatDurationMs(footerDuration ?? 0, locale) : "",
+	hasDuration ? formatDurationMs(message.meta?.durationMs ?? 0, locale) : "",
 );
 
 const durationDetailText = $derived.by(() => {
-	const durationMs = footerDuration;
+	const durationMs = message.meta?.durationMs;
 	if (!hasDuration || typeof durationMs !== "number") return "";
 	return formatDurationDetail(
 		durationMs,
@@ -397,7 +393,7 @@ const durationDetailText = $derived.by(() => {
 });
 
 const hasUsage = $derived.by(() => {
-	const u = footerUsage;
+	const u = message.meta?.usage;
 	if (!u) return false;
 	return Boolean(
 		u.input ||
@@ -429,23 +425,12 @@ const visibleCost = $derived(
 		: null,
 );
 
-const displayInputTokens = $derived.by(() =>
-	getDisplayInputTokens(footerUsage),
-);
-
-const cachedInputTokens = $derived.by(() => footerUsage?.cacheRead ?? 0);
-
 const tokenDisplay = $derived.by(() => {
-	const u = footerUsage;
+	const u = message.meta?.usage;
 	if (!u) return "";
 	// Cost stays in hover detail only; outer bar keeps the existing token-first layout.
-	const parts: string[] = [];
-	if (displayInputTokens > 0) {
-		const inputLabel = `↑${formatTokenCount(displayInputTokens)}`;
-		parts.push(inputLabel);
-	}
-	if (u.output) parts.push(`↓${formatTokenCount(u.output)}`);
-	if (parts.length > 0) return parts.join(" ");
+	const breakdown = formatUsageBreakdown(u, locale);
+	if (breakdown) return breakdown;
 	if (u.totalTokens)
 		return m.chat_tokens(
 			{ count: formatTokenCount(u.totalTokens) },
@@ -466,24 +451,11 @@ const tokenDisplay = $derived.by(() => {
 });
 
 const tokenDetailText = $derived.by(() => {
-	const u = footerUsage;
+	const u = message.meta?.usage;
 	if (!u) return "";
 	const parts: string[] = [];
-	if (displayInputTokens > 0) {
-		parts.push(
-			cachedInputTokens > 0
-				? m.chat_input_label(
-						{
-							value: `${formatTokenCount(displayInputTokens)} (${formatTokenCount(cachedInputTokens)} cached)`,
-						},
-						{ locale },
-					)
-				: m.chat_input_label(
-						{ value: formatTokenCount(displayInputTokens) },
-						{ locale },
-					),
-		);
-	}
+	const input = formatInputTokens(u, locale);
+	if (input) parts.push(m.chat_input_label({ value: input }, { locale }));
 	if (u.output)
 		parts.push(
 			m.chat_output_label({ value: formatTokenCount(u.output) }, { locale }),
@@ -522,15 +494,46 @@ const modelContextWindow = $derived.by(() => {
 		: null;
 });
 
-const inputContextPercent = $derived.by(() => {
-	// A Turn footer shows cumulative usage, not the latest context window size.
-	if (message.meta?.turn) return null;
-	const latestInputTokens = getDisplayInputTokens(message.meta?.usage);
-	if (!latestInputTokens || !modelContextWindow) return null;
-	return Math.max(
-		0,
-		Math.min(100, (latestInputTokens / modelContextWindow) * 100),
-	);
+const inputContextPercent = $derived(
+	getContextUsagePercent(message.meta?.usage, modelContextWindow),
+);
+
+const finalResponseItems = $derived.by((): StatsGroupItem[] => {
+	if (!message.meta?.turn || isDirectGeneration) return [];
+	const u = message.meta.usage;
+	const input = getDisplayInputTokens(u);
+	const items: StatsGroupItem[] = [];
+	if (input > 0)
+		items.push({
+			key: "input",
+			label: m.stats_input({}, { locale }),
+			value: formatTokenCount(input),
+		});
+	if (u?.cacheRead)
+		items.push({
+			key: "cache",
+			label: m.stats_cache_tokens({}, { locale }),
+			value: formatTokenCount(u.cacheRead),
+		});
+	if (u?.output)
+		items.push({
+			key: "output",
+			label: m.stats_output({}, { locale }),
+			value: formatTokenCount(u.output),
+		});
+	if (inputContextPercent != null)
+		items.push({
+			key: "context",
+			label: m.stats_context_usage({}, { locale }),
+			value: `${Math.round(inputContextPercent)}%`,
+		});
+	if (hasDuration)
+		items.push({
+			key: "duration",
+			label: m.stats_response_time({}, { locale }),
+			value: durationDisplay,
+		});
+	return items;
 });
 
 function getTokenDisplayClass(percent: number | null) {
@@ -706,6 +709,9 @@ function handleCopy() {
                 {#if hasDuration}<span class="shrink-0 whitespace-nowrap tabular-nums text-text-placeholder/65">{durationDisplay}</span>{/if}
                 {#if !tokenDisplay && !hasDuration}<span class="text-text-placeholder/65">{m.stats_turn({}, { locale })}</span>{/if}
               {/snippet}
+              {#if finalResponseItems.length}
+                <StatsGroup title={m.stats_final_response({}, { locale })} items={finalResponseItems} class="mb-4 border-b border-border-subtle pb-3" />
+              {/if}
               <StatsContent stats={footerStats} scope="turn" requests={footerRequests} />
             </StatsPopover>
           {:else}
