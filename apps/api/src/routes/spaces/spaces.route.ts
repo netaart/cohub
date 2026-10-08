@@ -69,7 +69,7 @@ import { checkpointFsJsonError, listCheckpointDirectory, readCheckpointFile } fr
 import type { AuthUser } from "../../lib/middleware.js";
 import { submitSessionPrompt } from "../../session-prompts.js";
 import { dispatchSpaceListChanged } from "../../space-list-events.js";
-import { decodeSpaceListCursor, isSpaceListFilter, listMemberSpaces, listRecentSpaces, parseSpaceVisits } from "../../space-list.js";
+import { decodeSpaceListCursor, isSpaceListFilter, listLegacySpaces, listMemberSpaces, listRecentSpaces, parseSpaceVisits, type SpaceListRow } from "../../space-list.js";
 import { getRuntimeRegistration, getSessionRuntimeRecovery, confirmRuntimeStopped } from "../../runtime.js";
 import runtimeArchivesRouter from "./runtime-archives.route.js";
 import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError, resolveSessionTurnOrigin } from "@cohub/core/sessions";
@@ -749,12 +749,36 @@ async function ensureHomeSpace(
   }, 409);
 }
 
+async function toSpaceListItems(rows: SpaceListRow[], viewerUuid: string, options: { personalActivity: boolean }) {
+  const sandboxRows = rows.length ? await db.select({ spaceId: spaceSandboxes.spaceId, status: spaceSandboxes.status }).from(spaceSandboxes).where(inArray(spaceSandboxes.spaceId, rows.map((r) => r.id))) : [];
+  const sandboxBySpace = new Map(sandboxRows.map((r) => [r.spaceId, r.status]));
+  return rows.map((row) => ({
+    id: row.id, userUuid: row.user_uuid, name: row.name, slug: row.slug, description: row.description,
+    createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+    title: null, status: null, meta: null,
+    lastActivityAt: row.last_activity_at ? new Date(row.last_activity_at).toISOString() : null,
+    publicProfile: { avatarUrl: normalizePublicAvatarUrl(row.avatar_url) },
+    ownerProfile: { userUuid: row.user_uuid, username: row.owner_username, displayName: row.owner_display_name, avatarUrl: normalizePublicAvatarUrl(row.owner_avatar_url) },
+    sandboxStatus: sandboxBySpace.get(row.id) ?? null, isPinned: row.is_pinned, isArchived: row.is_archived,
+    relation: row.user_uuid === viewerUuid ? "owner" : "member",
+    joinedAt: new Date(row.joined_at).toISOString(),
+    ...(options.personalActivity ? { personalActivityAt: new Date(row.sort_at).toISOString() } : {}),
+  }));
+}
+
 router.get("/", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   if (!(await hasPermission(user, "user.space.list", { spaceId: "" }))) return authzDenied(c);
   const identity = asAccountIdentity(user);
   if (!identity) return authzDenied(c);
+
+  // Legacy clients send a bare request and expect an array.
+  if (!new URL(c.req.url).search) {
+    c.header("Deprecation", "true");
+    return c.json(await toSpaceListItems(await listLegacySpaces(identity.uuid), identity.uuid, { personalActivity: false }));
+  }
+
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 100);
   const filter = c.req.query("filter") ?? "recent";
   if (!isSpaceListFilter(filter)) return c.json({ message: "invalid filter" }, 400);
@@ -771,20 +795,7 @@ router.get("/", async (c) => {
       }
     : await listMemberSpaces({ userUuid: identity.uuid, filter: filter === "recent" ? "all" : filter, query, exactName, cursor, limit });
 
-  const sandboxRows = rows.length ? await db.select({ spaceId: spaceSandboxes.spaceId, status: spaceSandboxes.status }).from(spaceSandboxes).where(inArray(spaceSandboxes.spaceId, rows.map((r) => r.id))) : [];
-  const sandboxBySpace = new Map(sandboxRows.map((r) => [r.spaceId, r.status]));
-  const items = rows.map((row) => ({
-    id: row.id, userUuid: row.user_uuid, name: row.name, slug: row.slug, description: row.description,
-    createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
-    title: null, status: null, meta: null,
-    lastActivityAt: row.last_activity_at ? new Date(row.last_activity_at).toISOString() : null,
-    publicProfile: { avatarUrl: normalizePublicAvatarUrl(row.avatar_url) },
-    ownerProfile: { userUuid: row.user_uuid, username: row.owner_username, displayName: row.owner_display_name, avatarUrl: normalizePublicAvatarUrl(row.owner_avatar_url) },
-    sandboxStatus: sandboxBySpace.get(row.id) ?? null, isPinned: row.is_pinned, isArchived: row.is_archived,
-    relation: row.user_uuid === identity.uuid ? "owner" : "member",
-    joinedAt: new Date(row.joined_at).toISOString(),
-    ...(recent ? { personalActivityAt: new Date(row.sort_at).toISOString() } : {}),
-  }));
+  const items = await toSpaceListItems(rows, identity.uuid, { personalActivity: recent });
   return c.json({ items, pageInfo: { hasMore: nextCursor !== null, nextCursor } });
 });
 
