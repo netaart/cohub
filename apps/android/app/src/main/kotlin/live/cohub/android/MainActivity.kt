@@ -80,6 +80,7 @@ class MainActivity : ComponentActivity(), HostActions {
 
     private var surface: WebSurface? = null
     private var startPath = "/"
+    private var surfaceLost = false
 
     private var launched = false
     private var reportedDrawn = false
@@ -106,7 +107,7 @@ class MainActivity : ComponentActivity(), HostActions {
             lastPage.remember(url)
         }
 
-        override fun onRenderProcessGone() = remountSurface()
+        override fun onRenderProcessGone(crashed: Boolean) = recoverSurface(crashed)
 
         override fun onShowFileChooser(callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean =
             fileChooser.show(callback, params)
@@ -212,14 +213,20 @@ class MainActivity : ComponentActivity(), HostActions {
         next.load(path)
     }
 
-    private fun remountSurface() {
+    private fun recoverSurface(crashed: Boolean) {
         val dead = surface ?: return
         surface = null
         container.removeView(dead.view)
         dead.destroy()
         historyBack.isEnabled = false
         layerBack.isEnabled = false
-        mountSurface(lastPage.read() ?: "/")
+        startPath = lastPage.read() ?: "/"
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            surfaceLost = true
+            return
+        }
+        if (crashed) toast(R.string.web_view_recovering)
+        mountSurface(startPath)
     }
 
     private fun navigate(path: String) {
@@ -231,6 +238,10 @@ class MainActivity : ComponentActivity(), HostActions {
         lifecycleScope.launch {
             auth.load()
             withStarted { runtime.resume() }
+        }
+        if (surfaceLost) {
+            surfaceLost = false
+            mountSurface(startPath)
         }
         surface?.resume()
         bridge.emit(HostProtocol.Events.APP_FOREGROUND)

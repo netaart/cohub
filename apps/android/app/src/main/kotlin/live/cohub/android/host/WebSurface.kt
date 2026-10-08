@@ -23,7 +23,7 @@ interface SurfaceListener {
     fun onExternalLink(url: Uri)
     fun onPageStarted()
     fun onNavigated(url: String)
-    fun onRenderProcessGone()
+    fun onRenderProcessGone(crashed: Boolean)
     fun onShowFileChooser(callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean
     fun onDownload(url: String, contentDisposition: String?, mimeType: String?)
 }
@@ -47,7 +47,8 @@ class WebSurface(context: Context, listener: SurfaceListener) {
             displayZoomControls = false
         }
         if (BuildConfig.WEB_DEBUGGING) WebView.setWebContentsDebuggingEnabled(true)
-        view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+        // Waived priority gets the renderer reclaimed whenever the app is hidden.
+        view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
         view.webViewClient = CohubWebViewClient(listener)
         view.webChromeClient = CohubWebChromeClient(listener)
         view.setDownloadListener { url, _, contentDisposition, mimeType, _ ->

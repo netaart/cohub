@@ -2,12 +2,11 @@ package live.cohub.android.host
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.util.Log
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
-import live.cohub.android.R
 
 /**
  * Only the Cohub origin loads in-shell; anything else goes to the system
@@ -34,13 +33,14 @@ class CohubWebViewClient(private val listener: SurfaceListener) : WebViewClient(
         listener.onNavigated(url)
     }
 
-    /**
-     * The renderer can be killed under memory pressure; the default behaviour is
-     * to crash the app. Rebuilding the view keeps that invisible to the user.
-     */
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail?): Boolean {
-        Toast.makeText(view.context, R.string.web_view_recovering, Toast.LENGTH_SHORT).show()
-        listener.onRenderProcessGone()
+        val crashed = detail?.didCrash() ?: true
+        Log.w(TAG, "Renderer gone (crashed=$crashed, priority=${detail?.rendererPriorityAtExit()})")
+        listener.onRenderProcessGone(crashed)
         return true
+    }
+
+    private companion object {
+        const val TAG = "CohubShell"
     }
 }
