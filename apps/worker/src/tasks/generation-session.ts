@@ -7,7 +7,7 @@ import type { SessionTurnRecord } from "@cohub/protocol/model";
 import { sanitizeContentBlocksForPostgresJson } from "@cohub/core/content/sanitize";
 import { db } from "../db.js";
 import { wakeAgentSession } from "../session-services.js";
-import { dispatchSessionUpdated, dispatchTurnUpdated } from "../realtime-events.js";
+import { dispatchTurnUpdated } from "../realtime-events.js";
 
 const toIso = (value: Date | null | undefined) => value?.toISOString() ?? null;
 
@@ -98,7 +98,7 @@ export async function finalizeGenerationSession(input: { taskRunId: string; payl
       updatedAt: completedAt,
       meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(generationMeta)}::jsonb`,
     }).where(and(eq(sessionTurns.id, turnId), eq(sessionTurns.sessionId, sessionId), eq(sessionTurns.executionKind, "direct_generation"), inArray(sessionTurns.status, ["queued", "running"]))).returning();
-    if (!turn) return { turn: null, session: null };
+    if (!turn) return null;
 
     const [existing] = await tx.select({ id: sessionMessages.id }).from(sessionMessages).where(and(eq(sessionMessages.sessionId, sessionId), eq(sessionMessages.idempotencyKey, `generation:${input.taskRunId}:result`))).limit(1);
     if (existing) {
@@ -107,11 +107,10 @@ export async function finalizeGenerationSession(input: { taskRunId: string; payl
       const [sequence] = await tx.select({ max: sql<number>`coalesce(max(${sessionMessages.sequence}), 0)::int` }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId));
       await tx.insert(sessionMessages).values({ sessionId, turnId, role: "assistant", content, text, model: input.result.model || request.model, sequence: (sequence?.max ?? 0) + 1, idempotencyKey: `generation:${input.taskRunId}:result`, meta: { ...output.meta, messageKind: "generation_result", turnId, generationTaskId: input.taskRunId, generationStatus: "completed" }, completedAt });
     }
-    const [session] = await tx.update(spaceSessions).set({ latestMessageText: text, lastMessageAt: completedAt, updatedAt: completedAt }).where(eq(spaceSessions.id, sessionId)).returning();
-    return { turn, session: session ?? null };
+    await tx.update(spaceSessions).set({ latestMessageText: text, lastMessageAt: completedAt, updatedAt: completedAt }).where(eq(spaceSessions.id, sessionId));
+    return turn;
   });
-  if (updatedTurn.turn && input.payload.spaceId) await dispatchTurnUpdated({ spaceId: input.payload.spaceId, turn: toTurnRecord(updatedTurn.turn) }).catch(() => undefined);
-  if (updatedTurn.session) await dispatchSessionUpdated({ session: updatedTurn.session, changed: ["latestMessageText", "lastMessageAt", "updatedAt"] }).catch(() => undefined);
+  if (updatedTurn && input.payload.spaceId) await dispatchTurnUpdated({ spaceId: input.payload.spaceId, turn: toTurnRecord(updatedTurn) }).catch(() => undefined);
   await wakeAgentSession(input.payload.spaceId ?? "", sessionId, "generation_complete").catch(() => undefined);
 }
 
@@ -156,7 +155,7 @@ export async function failGenerationSession(input: { taskRunId: string; payload:
   const text = textFromContent(content);
   const updatedTurn = await db.transaction(async (tx) => {
     const [turn] = await tx.update(sessionTurns).set({ status: "failed", assistantContent: content, assistantText: text, model: request.model, errorMessage: message, summary: { text, finishReason: "failed" }, completedAt, durationMs: sql<number>`greatest(0, floor(extract(epoch from (${completedAtIso}::timestamptz - ${sessionTurns.startedAt})) * 1000)::int)`, updatedAt: completedAt }).where(and(eq(sessionTurns.id, turnId), eq(sessionTurns.sessionId, sessionId), eq(sessionTurns.executionKind, "direct_generation"), inArray(sessionTurns.status, ["queued", "running"]))).returning();
-    if (!turn) return { turn: null, session: null };
+    if (!turn) return null;
 
     const [existing] = await tx.select({ id: sessionMessages.id }).from(sessionMessages).where(and(eq(sessionMessages.sessionId, sessionId), eq(sessionMessages.idempotencyKey, `generation:${input.taskRunId}:result`))).limit(1);
     if (existing) {
@@ -165,10 +164,9 @@ export async function failGenerationSession(input: { taskRunId: string; payload:
       const [sequence] = await tx.select({ max: sql<number>`coalesce(max(${sessionMessages.sequence}), 0)::int` }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId));
       await tx.insert(sessionMessages).values({ sessionId, turnId, role: "assistant", content, text, model: request.model, sequence: (sequence?.max ?? 0) + 1, idempotencyKey: `generation:${input.taskRunId}:result`, meta: { ...output.meta, messageKind: "generation_result", turnId, generationTaskId: input.taskRunId, generationStatus: "failed" }, completedAt });
     }
-    const [session] = await tx.update(spaceSessions).set({ latestMessageText: text, lastMessageAt: completedAt, updatedAt: completedAt }).where(eq(spaceSessions.id, sessionId)).returning();
-    return { turn, session: session ?? null };
+    await tx.update(spaceSessions).set({ latestMessageText: text, lastMessageAt: completedAt, updatedAt: completedAt }).where(eq(spaceSessions.id, sessionId));
+    return turn;
   });
-  if (updatedTurn.turn && input.payload.spaceId) await dispatchTurnUpdated({ spaceId: input.payload.spaceId, turn: toTurnRecord(updatedTurn.turn) }).catch(() => undefined);
-  if (updatedTurn.session) await dispatchSessionUpdated({ session: updatedTurn.session, changed: ["latestMessageText", "lastMessageAt", "updatedAt"] }).catch(() => undefined);
+  if (updatedTurn && input.payload.spaceId) await dispatchTurnUpdated({ spaceId: input.payload.spaceId, turn: toTurnRecord(updatedTurn) }).catch(() => undefined);
   await wakeAgentSession(input.payload.spaceId ?? "", sessionId, "generation_failed").catch(() => undefined);
 }

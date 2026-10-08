@@ -1,20 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import { sessionTurns } from "@cohub/db";
-import type { RequestMetric } from "@cohub/protocol/model";
+import { isSettledStatsTurn, type RequestMetric } from "@cohub/protocol/model";
 import { db } from "./db.js";
 import { logger } from "./logger.js";
+import { scheduleSessionSnapshot } from "./session-snapshot.js";
+
+async function updateTurnMetrics(turnId: string, meta: SQL) {
+  const [turn] = await db.update(sessionTurns).set({ meta }).where(eq(sessionTurns.id, turnId))
+    .returning({ sessionId: sessionTurns.sessionId, sequence: sessionTurns.sequence, status: sessionTurns.status });
+  if (turn && isSettledStatsTurn(turn)) void scheduleSessionSnapshot(turn.sessionId, turn.sequence);
+}
 
 /** Namespaced, idempotent receipts: retries and replies share no accounting identity.
  * This is observational only; an unavailable metrics write never fails execution. */
 export async function persistRequestMetric(turnId: string | undefined, request: RequestMetric) {
   if (!turnId) return;
   try {
-    await db.update(sessionTurns).set({
-      meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || jsonb_build_object('metrics',
-        coalesce(${sessionTurns.meta}->'metrics', '{}'::jsonb) || jsonb_build_object('version', 1, 'requests',
-          coalesce(${sessionTurns.meta}->'metrics'->'requests', '{}'::jsonb) || jsonb_build_object(${request.id}::text, ${JSON.stringify(request)}::jsonb)))`,
-    }).where(eq(sessionTurns.id, turnId));
+    await updateTurnMetrics(turnId, sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || jsonb_build_object('metrics',
+      coalesce(${sessionTurns.meta}->'metrics', '{}'::jsonb) || jsonb_build_object('version', 1, 'requests',
+        coalesce(${sessionTurns.meta}->'metrics'->'requests', '{}'::jsonb) || jsonb_build_object(${request.id}::text, ${JSON.stringify(request)}::jsonb)))`);
   } catch (error) {
     logger.warn("[Metrics] failed to persist request receipt", { turnId, requestId: request.id, error });
   }
@@ -27,12 +32,10 @@ export function createRequestMetric(provider: string, model: string): RequestMet
 export async function recordRetryWait(turnId: string | undefined, durationMs: number) {
   if (!turnId) return;
   try {
-    await db.update(sessionTurns).set({
-      meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || jsonb_build_object('metrics',
-        coalesce(${sessionTurns.meta}->'metrics', '{}'::jsonb) || jsonb_build_object('version', 1,
-          'retryCount', coalesce((${sessionTurns.meta}->'metrics'->>'retryCount')::int, 0) + 1,
-          'retryWaitMs', coalesce((${sessionTurns.meta}->'metrics'->>'retryWaitMs')::double precision, 0) + ${durationMs}))`,
-    }).where(eq(sessionTurns.id, turnId));
+    await updateTurnMetrics(turnId, sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || jsonb_build_object('metrics',
+      coalesce(${sessionTurns.meta}->'metrics', '{}'::jsonb) || jsonb_build_object('version', 1,
+        'retryCount', coalesce((${sessionTurns.meta}->'metrics'->>'retryCount')::int, 0) + 1,
+        'retryWaitMs', coalesce((${sessionTurns.meta}->'metrics'->>'retryWaitMs')::double precision, 0) + ${durationMs}))`);
   } catch (error) {
     logger.warn("[Metrics] failed to persist retry wait", { turnId, error });
   }

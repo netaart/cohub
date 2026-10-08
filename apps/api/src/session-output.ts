@@ -1,4 +1,4 @@
-import { createSessionStatsRefresher, refreshSessionStatsAndPublish } from "@cohub/core/sessions";
+import { createSessionSnapshotScheduler, publishSessionSnapshot } from "@cohub/core/sessions";
 import { isSettledStatsTurn } from "@cohub/protocol/model";
 import { createLogger } from "@cohub/infra/logging";
 import { randomUUID } from "node:crypto";
@@ -21,9 +21,9 @@ import { toRealtimeMessageRecord, toRealtimeTurnRecord, dispatchSessionActiveTur
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
-const scheduleSessionStatsRefresh = createSessionStatsRefresher(
-  (sessionId, fromSequence) => refreshSessionStatsAndPublish(db, sessionId, dispatchRealtimeEvent, fromSequence),
-  (error, sessionId) => logger.warn("[Metrics] failed to refresh session stats", { sessionId, error }),
+const scheduleSessionSnapshot = createSessionSnapshotScheduler(
+  (sessionId, fromSequence) => publishSessionSnapshot(db, sessionId, dispatchRealtimeEvent, fromSequence),
+  (error, sessionId) => logger.warn("[Realtime] failed to publish session snapshot", { sessionId, error }),
 );
 
 const messageTurnId = (message: MessageRecord) =>
@@ -156,7 +156,7 @@ export const dispatchSessionOutput = async (output: GatewaySessionOutput) => {
 };
 
 export const dispatchTurnUpdated = async (input: { spaceId: string; sessionId: string; turn: SessionTurnRecord }) => {
-  if (isSettledStatsTurn(input.turn)) void scheduleSessionStatsRefresh(input.sessionId, input.turn.sequence);
+  if (isSettledStatsTurn(input.turn)) void scheduleSessionSnapshot(input.sessionId, input.turn.sequence);
   await dispatchRealtimeEvent({
     id: randomUUID(),
     timestamp: Date.now(),
@@ -168,7 +168,7 @@ export const dispatchTurnUpdated = async (input: { spaceId: string; sessionId: s
       turn: toRealtimeTurnRecord(input.turn),
     },
   });
-  await dispatchSessionActiveTurn({ spaceId: input.spaceId, sessionId: input.sessionId, turn: input.turn });
+  await dispatchSessionActiveTurn({ spaceId: input.spaceId, turn: input.turn });
 };
 
 const truncateTurnPreview = (text: string | null | undefined) => {
@@ -178,7 +178,7 @@ const truncateTurnPreview = (text: string | null | undefined) => {
 };
 
 export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId: string; turn: SessionTurnRecord }) => {
-  void scheduleSessionStatsRefresh(input.sessionId, input.turn.sequence);
+  void scheduleSessionSnapshot(input.sessionId, input.turn.sequence);
   await clearSessionStreamSnapshot({ spaceId: input.spaceId, sessionId: input.sessionId, turnId: input.turn.id });
   const sessionLabelRefs = await listResourceLabelRefs({
     db,
@@ -205,7 +205,6 @@ export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId:
       sessionLabelRefs,
     },
   });
-  await dispatchSessionActiveTurn({ spaceId: input.spaceId, sessionId: input.sessionId, turn: input.turn });
 
   if (!input.turn.userUuid) return;
   await dispatchRealtimeEvent({

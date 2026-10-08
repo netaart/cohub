@@ -10,7 +10,6 @@ import {
   type ModelTaskConfig,
   type ModelTaskModelConfig,
 } from "@cohub/infra/config-runtime/model-tasks";
-import { createLogger } from "@cohub/infra/logging";
 import {
   SESSION_TITLE_GENERATE_JOB,
   type SessionTitleGenerateJobData,
@@ -22,11 +21,9 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../../db.js";
 import { createModelsFromRegistry } from "@cohub/model-runtime/pi-models-adapter";
 import { loadModelTasksConfig } from "../../../model-tasks.js";
-import { dispatchSessionUpdated, scheduleSessionStatsRefresh } from "../../../realtime-events.js";
+import { scheduleSessionSnapshot } from "../../../realtime-events.js";
 import { buildSessionTitleContent } from "../../../session-title-content.js";
 import { registerSystemJob } from "../../registry.js";
-
-const logger = createLogger({ serviceName: "cohub-worker" });
 
 function finiteOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -174,10 +171,7 @@ export async function runSessionTitleGenerateJob(data: SessionTitleGenerateJobDa
   });
   if (!updated) return { ok: true, skipped: "title_changed" };
 
-  await dispatchSessionUpdated({ session: updated, changed: ["title", "updatedAt"] }).catch((error) => {
-    logger.warn("[SessionTitle] failed to dispatch session.updated", error);
-  });
-  void scheduleSessionStatsRefresh(data.sessionId);
+  void scheduleSessionSnapshot(data.sessionId);
   return { ok: true, title: generated.title };
 }
 

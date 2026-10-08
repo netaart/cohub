@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { pickActiveTurns, type ActiveTurnRow } from "./session-active-turns.js";
+import { pickActiveTurns, type ActiveTurnRow } from "./active-turn.js";
 
 const row = (overrides: Partial<ActiveTurnRow> & Pick<ActiveTurnRow, "sessionId" | "id">): ActiveTurnRow => ({
   sequence: 1,

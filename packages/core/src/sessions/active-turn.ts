@@ -1,4 +1,5 @@
 import type { SessionActiveTurn, SessionTurnRecord, SessionTurnStatus } from "@cohub/protocol/model";
+import { getRealtimeSpaceRoom, getRealtimeUserRoom } from "@cohub/protocol/realtime";
 
 /**
  * The subset of an active `session_turns` row that shapes a `SessionActiveTurn`.
@@ -54,6 +55,27 @@ export const activeTurnFromTurn = (
         anchorUserMessageId: readAnchorUserMessageId(turn.meta),
       }
     : null;
+
+/** Live Turn transitions only; settled Turns reach clients in the Session snapshot. */
+export function sessionActiveTurnEvent(input: {
+  spaceId: string;
+  turn: Parameters<typeof activeTurnFromTurn>[0] & Pick<SessionTurnRecord, "sessionId" | "userUuid">;
+}) {
+  const activeTurn = activeTurnFromTurn(input.turn);
+  if (!activeTurn) return null;
+  const { spaceId, turn } = input;
+  return {
+    domain: "session" as const,
+    type: "session.updated" as const,
+    spaceId,
+    sessionId: turn.sessionId,
+    rooms: [getRealtimeSpaceRoom(spaceId), ...(turn.userUuid ? [getRealtimeUserRoom(turn.userUuid)] : [])],
+    payload: {
+      session: { id: turn.sessionId, spaceId, activeTurn, activeTurnSequence: activeTurn.sequence },
+      changed: ["activeTurn", "activeTurnSequence"],
+    },
+  };
+}
 
 /**
  * Attach the active turn (if any) to each session, preserving the input order.

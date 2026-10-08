@@ -3,7 +3,8 @@ import { after, test } from "node:test";
 import { eq } from "drizzle-orm";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { sessionTurnSegments, sessionTurns, spaceSessions, taskRuns } from "@cohub/db";
-import { refreshSessionStats, refreshSessionStatsAndPublish } from "./stats.ts";
+import { refreshSessionStats } from "./stats.ts";
+import { publishSessionSnapshot } from "./snapshot.ts";
 
 // Same opt-in isolated engine convention as the runtime integration tests.
 const home = process.env.RUNTIME_TEST_DB_HOME;
@@ -64,7 +65,7 @@ test("fork aggregation respects segment bounds and does not duplicate overlappin
   assert.equal(result.stats.auxiliaryUsage, null, "copied parent title usage is not new consumption");
 });
 
-test("late usage corrections rebuild descendants and publish stats without leaking meta", async () => {
+test("late usage corrections rebuild descendants and publish snapshots without leaking meta", async () => {
   const parent = await session({ privateCustom: "do not broadcast" });
   const child = await session();
   const row = await turn(parent.id, 1, 10);
@@ -72,11 +73,11 @@ test("late usage corrections rebuild descendants and publish stats without leaki
   await refreshSessionStats(db, child.id);
   await db.update(sessionTurns).set({ totalUsage: { totalTokens: 25 } }).where(eq(sessionTurns.id, row.id));
   const events = [];
-  await refreshSessionStatsAndPublish(db, parent.id, async (event) => events.push(event));
+  await publishSessionSnapshot(db, parent.id, async (event) => events.push(event), 1);
   assert.equal(events.length, 2);
   assert.equal(events.find((event) => event.sessionId === child.id).payload.session.stats.inherited.usage.totalTokens, 25);
   assert(events.every((event) => event.payload.session.meta === undefined));
-  assert(events.every((event) => event.type === "session.updated" && event.payload.changed[0] === "stats"));
+  assert(events.every((event) => event.type === "session.updated" && event.payload.changed.includes("stats")));
 });
 
 test("compaction and title usage remain subsets or separate auxiliary operations", async () => {

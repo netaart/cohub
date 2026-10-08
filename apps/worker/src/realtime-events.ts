@@ -1,16 +1,12 @@
-import { createLogger } from "@cohub/infra/logging";
-import { createSessionStatsRefresher, readSessionParticipantUserUuids, refreshSessionStatsAndPublish, resolveSessionAudienceRooms } from "@cohub/core/sessions";
+import { createSessionSnapshotScheduler, publishSessionSnapshot } from "@cohub/core/sessions";
 import { isSettledStatsTurn } from "@cohub/protocol/model";
 import { db } from "./db.js";
 import { randomUUID } from "node:crypto";
-import { getRealtimeSpaceRoom, REALTIME_OUTBOUND_CHANNEL, type RealtimeSessionRecord, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
-import type { spaceSessions } from "@cohub/db";
+import { REALTIME_OUTBOUND_CHANNEL, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
 import type { SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { redisCommandClient } from "./redis.js";
 import { enqueueSpaceHookFromEvent } from "./space-hooks.js";
-
-const logger = createLogger({ serviceName: "cohub-worker" });
 
 const toIsoOrNull = (value: Date | string | null | undefined) => {
   if (!value) return null;
@@ -112,37 +108,10 @@ export const dispatchTaskUpdated = async (input: {
   changed: string[];
 }) => {
   if (input.task.sessionId && input.task.taskType === "generation" && ["completed", "failed"].includes(input.task.status)) {
-    void scheduleSessionStatsRefresh(input.task.sessionId);
+    void scheduleSessionSnapshot(input.task.sessionId);
   }
   await publishTaskEvent({ type: "task.updated", task: input.task, changed: input.changed });
 };
-
-export async function dispatchSessionUpdated(input: { session: typeof spaceSessions.$inferSelect; changed: string[] }) {
-  const session: RealtimeSessionRecord = {
-    id: input.session.id,
-    spaceId: input.session.spaceId,
-    userUuid: input.session.userUuid ?? null,
-    title: input.session.title,
-    source: input.session.source,
-    status: input.session.status,
-    externalSessionId: input.session.externalSessionId,
-    latestMessageText: input.session.latestMessageText ?? null,
-    lastMessageAt: toIsoOrNull(input.session.lastMessageAt),
-    lastMessageId: input.session.lastMessageId,
-    createdAt: toIso(input.session.createdAt),
-    updatedAt: toIso(input.session.updatedAt),
-    participantUserUuids: readSessionParticipantUserUuids(input.session.meta),
-  };
-  const rooms = await resolveSessionAudienceRooms(db, input.session).catch((error) => {
-    logger.warn("[Realtime] failed to resolve session audience", { sessionId: session.id, error });
-    return [getRealtimeSpaceRoom(session.spaceId)];
-  });
-  await redisCommandClient.publish(REALTIME_OUTBOUND_CHANNEL, JSON.stringify({
-    id: randomUUID(), timestamp: Date.now(), domain: "session", type: "session.updated",
-    spaceId: session.spaceId, sessionId: session.id, rooms,
-    payload: { session, changed: input.changed },
-  }));
-}
 
 async function dispatchTurnEvent(input: {
   type: "session.turn.created" | "session.turn.updated";
@@ -166,12 +135,12 @@ async function dispatchTurnEvent(input: {
 export const dispatchTurnCreated = (input: { spaceId: string; turn: SessionTurnRecord }) =>
   dispatchTurnEvent({ type: "session.turn.created", ...input });
 
-export const scheduleSessionStatsRefresh = createSessionStatsRefresher(
-  (sessionId, fromSequence) => refreshSessionStatsAndPublish(db, sessionId, (event) => redisCommandClient.publish(REALTIME_OUTBOUND_CHANNEL, JSON.stringify(event)), fromSequence),
-  (error, sessionId) => console.warn("[Metrics] failed to refresh session stats", { sessionId, error }),
+export const scheduleSessionSnapshot = createSessionSnapshotScheduler(
+  (sessionId, fromSequence) => publishSessionSnapshot(db, sessionId, (event) => redisCommandClient.publish(REALTIME_OUTBOUND_CHANNEL, JSON.stringify(event)), fromSequence),
+  (error, sessionId) => console.warn("[Realtime] failed to publish session snapshot", { sessionId, error }),
 );
 
 export async function dispatchTurnUpdated(input: { spaceId: string; turn: SessionTurnRecord }) {
-  if (isSettledStatsTurn(input.turn)) void scheduleSessionStatsRefresh(input.turn.sessionId, input.turn.sequence);
+  if (isSettledStatsTurn(input.turn)) void scheduleSessionSnapshot(input.turn.sessionId, input.turn.sequence);
   await dispatchTurnEvent({ type: "session.turn.updated", ...input });
 }

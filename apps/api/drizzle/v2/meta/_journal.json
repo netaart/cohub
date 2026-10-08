@@ -505,6 +505,13 @@
       "when": 1791335943369,
       "tag": "0071_drop_gitea_legacy",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1791425759260,
+      "tag": "0072_turn_stats",
+      "breakpoints": true
     }
   ]
 }

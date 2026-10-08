@@ -20,8 +20,8 @@ import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { sessionMessages, sessionTurns, spaceChannels, spaceSessionBindings, spaceSessions, providerMessageRefs, userChannels, userProfiles } from "@cohub/db";
 import { listResourceLabelRefs } from "@cohub/core/labels";
 import { collectImageToTextTiming, collectToolMetrics } from "@cohub/protocol/model";
-import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen } from "@cohub/core/sessions";
-import { scheduleSessionStatsRefresh } from "./session-stats.js";
+import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen, sessionActiveTurnEvent } from "@cohub/core/sessions";
+import { scheduleSessionSnapshot } from "./session-snapshot.js";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { addImageToTextCallsToSummary, claimSessionFallbackTitle, countToolCallsInContent, createImageToTextUsageSummaryAccumulator, deriveMessagePreviewText, deriveSessionFallbackTitle, finalizeImageToTextUsageSummary, readImageToTextCalls, readSessionTitleSource, resolveMessageTurnId, shouldGenerateSessionTitle, summarizeSessionTurnCompactions, sumImageToTextUsage } from "@cohub/core/sessions";
 import { buildTraceHeaders, getCurrentRequestId } from "@cohub/infra/tracing";
@@ -243,17 +243,22 @@ export async function publishSessionTurnsUpdated(input: {
     eq(sessionTurns.sessionId, input.sessionId),
     inArray(sessionTurns.id, turnIds),
   ));
-  await Promise.all(rows.map(({ turn, spaceId }) => publishRealtimeEnvelope({
-    domain: "session",
-    type: "session.turn.updated",
-    spaceId,
-    sessionId: input.sessionId,
-    payload: { turn: toTurnRecord(turn) },
-  })));
+  await Promise.all(rows.map(async ({ turn, spaceId }) => {
+    const record = toTurnRecord(turn);
+    await publishRealtimeEnvelope({
+      domain: "session",
+      type: "session.turn.updated",
+      spaceId,
+      sessionId: input.sessionId,
+      payload: { turn: record },
+    });
+    const activeTurn = sessionActiveTurnEvent({ spaceId, turn: record });
+    if (activeTurn) await publishRealtimeEnvelope(activeTurn);
+  }));
 }
 
 async function publishTurnFinalized(spaceId: string, turn: SessionTurnRecord) {
-  void scheduleSessionStatsRefresh(turn.sessionId, turn.sequence);
+  void scheduleSessionSnapshot(turn.sessionId, turn.sequence);
   await clearPersistedSessionStreamSnapshot(spaceId, turn.sessionId, turn.id);
   const sessionLabelRefs = await listResourceLabelRefs({
     db,
@@ -946,7 +951,7 @@ async function publishInterruptedResult(spaceId: string, result: Awaited<ReturnT
   if (messages.length) indexTurnReferences({ spaceId, sessionId: turn.sessionId, turnId: turn.id, messages });
   if (finalized) await publishTurnFinalized(spaceId, turn);
   else {
-    void scheduleSessionStatsRefresh(turn.sessionId, turn.sequence);
+    void scheduleSessionSnapshot(turn.sessionId, turn.sequence);
     await publishRealtimeEnvelope({ domain: "session", type: "session.turn.updated", spaceId, sessionId: turn.sessionId, payload: { turn } });
   }
 }
@@ -1231,7 +1236,7 @@ export async function persistCompactionEvent(
     });
   } else if (state.ownerTurnRow) {
     if (!["queued", "running", "abort_requested"].includes(state.ownerTurnRow.status)) {
-      void scheduleSessionStatsRefresh(input.sessionId, state.ownerTurnRow.sequence);
+      void scheduleSessionSnapshot(input.sessionId, state.ownerTurnRow.sequence);
     }
     const turn = toTurnRecord(state.ownerTurnRow);
     await publishRealtimeEnvelope({

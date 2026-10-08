@@ -211,7 +211,13 @@ export function getSessionSidebarActivity(
 	modelsCatalog?: ModelCatalogItem[] | null,
 	activeTurn?: SessionActiveTurn | null,
 ): SessionSidebarActivity {
-	if (activeTurn) return activeTurnActivity(activeTurn);
+	if (activeTurn) {
+		const live =
+			activeTurn.status === "running" && state?.turnId === activeTurn.id
+				? detailFor(state, modelsCatalog)
+				: null;
+		return live?.active ? live : activeTurnActivity(activeTurn);
+	}
 	if (activeTurn === null) return idleActivity;
 	return state ? detailFor(state, modelsCatalog) : idleActivity;
 }
