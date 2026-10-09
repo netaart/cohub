@@ -8,7 +8,9 @@ migration or billing ledger. Local sandboxes return `workspaceUsage: null`.
 `workspace.usage.dispatch` and `workspace.usage.scan` are ordinary jobs on
 `cohub-system`, consumed by the existing system worker. A scan receives a
 `spaceId` and reads `/space-storage/{spaceId}/workspace`, including dependency,
-build, and hidden folders. It does not wake the sandbox.
+build, and hidden folders. It does not wake the sandbox. The index a sandbox keeps
+under `/space-system/{spaceId}/index` and the checkpoint cache are not part of the
+workspace and are not counted.
 
 `/api/queues` and `/api/queues/metrics` include these jobs in system queue counts;
 `registeredJobs` lists their names. Counts are queue-wide, not per job name. Jobs
@@ -16,21 +18,35 @@ waiting for a NAS scan slot use BullMQ delayed state and do not occupy worker
 concurrency. External autoscaling should focus on executable `waiting` and
 `active` work rather than treating future `delayed` jobs as immediate demand.
 
+`workspaceUsage` is part of the space detail response and the SDK `SpaceRecord`,
+so `GET /api/spaces/:id`, Space settings, and `cohub spaces get [id]` show it.
+Space list responses omit it: the list stays a bounded index read.
+
 ## Incremental Behavior
 
 The system tracks whether a workspace may have changed; it does not incrementally
-calculate byte deltas. Cloud API write batches and worker create/import/restore
-operations mark a workspace dirty before and after writing. An atomic revision
-and writer count coalesce each batch without recording per-file events. Sandbox
-provision, resume, and stop transitions also mark usage dirty. Inventory and scan
-jobs reconcile lifecycle state as a recovery mechanism.
+calculate byte deltas. These direct writers mark a workspace dirty before and after
+their batch:
 
-A stopped workspace becomes clean after a successful scan with an unchanged
-revision and no active writers. Clean stopped workspaces have no scan scheduled,
-so they are skipped until a tracked write or lifecycle change marks them dirty.
-Running or uncertain sandboxes remain dirty and are recalibrated at most once
-every 48 hours. Initial scans are not subject to this cooldown. Changes during a
-scan remain dirty and wait for the same cooldown before another scan.
+- API file writes, deletes, moves, exclusive creates, and multipart uploads that
+  land on the volume while no sandbox is dialable (`apps/api/src/space-fs-backend.ts`).
+- The worker's `create_space` task, which restores a checkpoint, imports a git
+  repo, and materializes the latest snapshot during bootstrap.
+
+Writes through a running sandbox need no marker: a running workspace is never
+clean. Sandbox provision, resume, and stop transitions also mark usage dirty.
+Inventory and scan jobs reconcile lifecycle state as a recovery mechanism.
+
+An atomic revision and writer count coalesce each batch without recording per-file
+events. A stopped workspace becomes clean after a successful scan with an unchanged
+revision and no active writers. Running or uncertain sandboxes remain dirty and are
+recalibrated at most once every 48 hours. Initial scans are not subject to this
+cooldown. Writes during a scan remain dirty and wait for the same cooldown.
+
+Clean workspaces are measured again after 30 days. That bound only matters when a
+write marker was lost, because both markers of a write would have to fail while
+Redis was unavailable; lost state otherwise means **unknown**, and unknown is never
+clean.
 
 Each calibration still runs a full `pdu` traversal of that workspace. There is no
 reliable general-purpose incremental byte counter for arbitrary processes writing
@@ -41,23 +57,27 @@ workspace dirty. A true delta counter would require every writer to report exact
 allocated-byte additions, replacements, and deletions, or a reliable server-side
 filesystem change journal.
 
-Stopped-workspace writes are coalesced for five minutes. Pdu scan failures retain
-the last successful bytes and measurement time, and retry no sooner than the
-configured minimum interval. Path preflight failures before pdu starts do not
-consume the scan cooldown. A successful scan while files are changing is still an
-estimate, not a point-in-time filesystem snapshot.
+Stopped-workspace writes are coalesced for five minutes, and a scan starts no
+sooner than `max(five minutes, last measurement + 48 hours)`. Pdu scan failures and
+path preflight failures retain the last successful bytes and measurement time, keep
+the workspace dirty, and record `error` so retries back off instead of retrying
+every dispatch. A successful scan while files are changing is still an estimate,
+not a point-in-time filesystem snapshot. A workspace larger than the five-minute
+pdu budget never receives a value; it stays `pending` and consumes one scan slot per
+attempt.
 
 ## Scheduling Policy
 
 - Dispatch runs every minute. It reconciles 200 database space/sandbox records
-  using a UUID cursor, then enqueues due scans through a bounded pending window
-  (default 50). Inventory reads metadata only; it does not enumerate NAS files.
-  A full inventory rotation takes approximately `ceil(space count / 200)` minutes.
-- The default minimum interval between pdu scan attempts is 48 hours. The same
-  limit applies to writes, lifecycle changes, changes during a scan, and retries.
-- The global scan concurrency defaults to one per environment, and each pdu
-  process defaults to one thread. Environments sharing a NAS must budget their
-  combined scan load.
+  using a UUID cursor, then reserves due scans through a bounded pending window
+  (four per batch, one scan slot). Inventory reads metadata only; it does not
+  enumerate NAS files. A full inventory rotation takes approximately
+  `ceil(space count / 200)` minutes.
+- The minimum interval between pdu scan attempts is 48 hours per workspace. The
+  same limit applies to writes, lifecycle changes, changes during a scan, and
+  retries.
+- One global scan slot per environment and one pdu thread per scan, so
+  environments sharing a NAS must budget their combined scan load.
 - No read path starts pdu. API summary reads degrade to unknown on Redis errors.
 
 ## Redis and Recovery
@@ -71,9 +91,12 @@ times atomically. UUID revisions and expiring scan tokens reject stale results.
 Missing or evicted state means **unknown**, never zero or clean. Bounded inventory
 recreates missing state and gradually scans it. Enable Redis persistence to retain
 the 48-hour cooldown and avoid recalibration after Redis loss. Without persistence,
-lost state is unknown and scans resume in bounded order. A Redis outage before a
-write marker is recorded fails the write before touching NAS; a failed completion
-marker leaves the workspace dirty.
+lost state is unknown and scans resume in bounded order.
+
+Usage is an estimate, so a Redis failure never blocks a write: the marker is best
+effort, and a write whose markers both fail stays unmeasured until the workspace's
+next lifecycle change or clean recalibration. A failed marker is logged, not
+retried, because the retry would delay the user's write.
 
 The scanner measures allocated blocks, deduplicates hardlinks within a workspace,
 stays on one filesystem, and never follows symlinks. It does not account for
@@ -85,17 +108,11 @@ billing ledger.
 
 ## Fixed Policy
 
-The initial NAS protection policy is intentionally fixed in worker code: one
-global scan slot per environment, one pdu thread, a five-minute timeout, a
-48-hour minimum interval per workspace, and a dispatch batch size of 50. The
-dispatcher runs every minute. These values are not deployment settings. A local
-`WORKSPACE_USAGE_PDU_PATH` override is available for tests and development only.
-
-`workspaceUsage` is included in normal space detail/list responses and SDK
-`SpaceRecord`. `cohub spaces get [id] --json` exposes it unchanged; normal CLI
-output includes bytes, measurement time, and status. Web Space settings display
-bytes and measurement time, reuse cached space data, refresh on the usage event or
-focus, and hide the row for local sandboxes.
+The NAS protection policy is fixed in worker code rather than deployment settings:
+one global scan slot per environment, one pdu thread, a five-minute timeout, a
+48-hour minimum interval per workspace, a 30-day clean recalibration, an inventory
+page of 200, and a dispatch batch of four. A local `WORKSPACE_USAGE_PDU_PATH`
+override is available for tests and development only.
 
 ## Validation
 
