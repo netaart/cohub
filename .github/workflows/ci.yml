@@ -26,6 +26,12 @@ jobs:
   js-checks:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
     steps:
@@ -93,6 +99,12 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Test queue authentication with Redis
+        working-directory: packages/infra
+        env:
+          BULLMQ_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: node --import tsx --test src/bullmq/authenticated-queue.integration.ts
 
       - name: Test
         run: pnpm test

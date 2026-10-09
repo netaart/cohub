@@ -49,6 +49,11 @@ spec:
                 secretKeyRef:
                   name: {{APP_NAME}}-secrets
                   key: BULLMQ_REDIS_URL
+            - name: BULLMQ_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{APP_NAME}}-secrets
+                  key: BULLMQ_SIGNING_KEY
             - name: WORKER_SECRET
               valueFrom:
                 secretKeyRef:
