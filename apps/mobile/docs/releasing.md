@@ -150,7 +150,7 @@ The prepare job creates the GitHub Release when the tag has none. Its notes list
 
 Push tags as a person or with a token that triggers workflows. Tags created with the default `GITHUB_TOKEN` do not start downstream workflows.
 
-The app's history was imported with its tags renamed: the former `vX.Y.Z` tags of `markbang/cohub-mobile` are `cohub-mobile-vX.Y.Z` here, and their GitHub Releases stay in that repository. OTA publication and device E2E read the newest app release's APK and fingerprint files from this repository, so at least one `cohub-mobile-v*` release carrying them must exist here.
+The app's history was imported from `markbang/cohub-mobile`. Only its last release came along, as `cohub-mobile-v2.2.14` on the imported commit, so release notes and OTA have a starting point: OTA publication and device E2E read the newest app release's APK and fingerprint files from this repository. Earlier versions and their GitHub Releases stay in `markbang/cohub-mobile`.
 
 ## Normal release
 
