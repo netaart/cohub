@@ -94,6 +94,12 @@ jobs:
           PUBLIC_MARKETPLACE_APP_ID=899432b9-7976-4bd1-a7b9-b9b83ea11f32
           EOF
 
+      - name: Check queue infrastructure
+        run: |
+          pnpm --filter @cohub/infra... build
+          pnpm --filter @cohub/infra typecheck
+          pnpm --filter @cohub/infra test
+
       - name: Test queue authentication with Redis
         working-directory: packages/infra
         env:
