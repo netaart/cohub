@@ -43,7 +43,7 @@ The complete upstream inventory and installation options are in the [upstream RE
 3. Add concise task-specific pointers to `AGENTS.md`. State that existing project conventions and the task scope govern dependency choices, filenames, theme/motion values, data ownership, and build/release tooling.
 4. Treat sibling skill mentions as references, not permission to automatically install the entire collection. Resolve needed sibling guidance deliberately.
 5. Do not execute bundled feedback commands or enable telemetry as part of normal development. The upstream README says automatic telemetry is off by default; feedback submission is separate.
-6. Validate local reference paths after installation. Skill installation must not change application dependencies, release configuration, or the `reference/cohub` revision.
+6. Validate local reference paths after installation. Skill installation must not change application dependencies or release configuration.
 
 The four recommended skills were subsequently installed under `.agents/skills/` at the reviewed commit. See [source and maintenance notes](../.agents/skills/SOURCE.md); project-specific usage boundaries are recorded in the root `AGENTS.md`.
 

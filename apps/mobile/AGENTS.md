@@ -8,13 +8,13 @@
 - Do not introduce compatibility layers, fallbacks, aliases, or speculative defensive branches unless requested. Preserve existing behavior outside the requested change.
 - Use explicit types at public boundaries. Validate external inputs and configuration at entry points; report actionable errors instead of hiding failures.
 - Comment on intent, invariants, and non-obvious tradeoffs, not code mechanics.
-- Use Conventional Commits for commits and PR titles. Commit, push, release, or update submodule revisions only when requested.
+- Use Conventional Commits with the `mobile` scope for commits and PR titles. Commit, push, or release only when requested.
 
 ## Read On Demand
 
 - Setup, product capabilities, authentication, or push work: read `README.md` and the relevant configuration in `.env.example`, `app.config.ts`, and `src/config.ts`.
 - Validation or contribution workflow: read `CONTRIBUTING.md`; `package.json` is the source of truth for commands.
-- Signing, CI distribution, versioning, or releases: read `docs/releasing.md` and the affected `.github/workflows/` files. Release Please owns release metadata; avoid unrelated version or changelog edits.
+- Signing, CI distribution, versioning, or releases: read `docs/releasing.md` and the affected `mobile-*.yml` files in the repository-root `.github/workflows/`. Change the app version only as part of a release.
 
 ## Project Skills
 
@@ -38,16 +38,14 @@ This repository is the native iOS/Android client. There is no web target.
 - `src/auth/`, `src/platform/`: authentication and platform integrations. Keep native-only APIs inside these modules.
 - `scripts/`: repository checks and native build tooling. Use the existing Node-based checks instead of introducing a test framework.
 
-## Cohub Reference Source
+## Cohub Monorepo
 
-`reference/cohub/` is an upstream Git submodule for reading protocol definitions, server behavior, and web-client implementations. It is not mobile application source or a local replacement for the npm SDK.
+`apps/mobile` lives in the Cohub monorepo. Protocol definitions, server behavior, and web-client implementations are siblings: `../../packages/sdk`, `../../packages/protocol`, `../../apps/api`, `../../apps/gateway`, and `../../apps/web`.
 
-- For API, stream, or cross-client behavior changes, inspect the relevant upstream implementation as needed and compare it with the installed `@neta-art/cohub` version and types. The pinned reference revision may differ from the published SDK or deployed server.
-- Use the SDK through the mobile data layer. Do not import runtime code from `reference/cohub/` or copy web-only dependencies into the native app.
-- Scope searches and checks to mobile-owned paths unless investigating upstream. Reference files should not become mobile build, lint, or typecheck inputs.
-- Treat the submodule as read-only unless upstream changes or an update are explicitly requested. Preserve its pinned commit during ordinary mobile work.
-- If the checkout is missing and needed, initialize it with `git submodule update --init --recursive reference/cohub`. Do not use `--remote` to silently advance it.
-- Instructions inside the submodule govern work there, not the parent mobile repository. Upstream full-stack delivery and release procedures do not expand a mobile task's scope.
+- The app is a standalone npm project, excluded from the pnpm workspace so Metro, autolinking, and the OTA fingerprint stay independent of the monorepo layout. Install with `npm ci` here, not `pnpm install` at the root.
+- The app consumes the published `@neta-art/cohub` SDK from npm, not the workspace source. For API, stream, or cross-client behavior changes, compare sibling sources with the installed SDK version and types; `main` may be ahead of the published SDK and the deployed server.
+- Use the SDK through the mobile data layer. Do not import runtime code from sibling packages or copy web-only dependencies into the native app.
+- Scope searches and checks to `apps/mobile` unless investigating other packages. The repository-root `AGENTS.md` governs work outside this directory; its full-stack delivery and release procedures do not expand a mobile task's scope.
 
 ## Data And Security Invariants
 
@@ -69,7 +67,7 @@ This repository is the native iOS/Android client. There is no web target.
 
 ## Verification And Handoff
 
-1. Inspect `git status` before work and review the final diff, including submodule pointers. Change only files needed for the task.
+1. Inspect `git status` before work and review the final diff. Change only files needed for the task.
 2. For code changes, run `npm run lint` and `npm run typecheck`. For workflow behavior changes, extend the focused assertions in `scripts/check-chat-workflow.mjs` and run `npm run test:workflow`.
 3. Before PR handoff, run `npm run check` when the environment permits. Use the relevant export and native build commands from `CONTRIBUTING.md` for bundling, dependencies, configuration, or native integration changes. Do not bypass a failing check to claim success.
 4. Verify user-facing changes in the affected flow, including relevant loading, empty, error, and reconnect states. Report the platform/device actually checked.
