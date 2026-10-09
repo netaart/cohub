@@ -117,6 +117,8 @@ jobs:
           VERSION_CODE: ${{ github.run_number }}
           SHA: ${{ steps.build.outputs.sha }}
         run: |
+          # AGP 9 only creates unit tests for the tested build type (debug by
+          # default), so :app:testReleaseUnitTest no longer exists.
           ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --continue \
             -PcohubEnv=dev \
             -PcohubVersionCode="$VERSION_CODE" \
@@ -315,13 +317,17 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cohub-release.p12"
           echo "COHUB_ANDROID_KEYSTORE=$RUNNER_TEMP/cohub-release.p12" >> "$GITHUB_ENV"
 
-      - name: Test, assemble
+      - name: Test, lint, assemble
         env:
           COHUB_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
           VERSION_CODE: ${{ steps.version.outputs.code }}
         run: |
-          ./gradlew :app:testReleaseUnitTest :app:assembleRelease \
+          # AGP 9 only creates unit tests for the tested build type, which
+          # defaults to debug: there is no :app:testReleaseUnitTest anymore.
+          # The tests are build-type agnostic, so run them once and lint the
+          # variant we actually ship.
+          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease \
             -PcohubEnv=prod \
             -PcohubVersionName="$VERSION_NAME" \
             -PcohubVersionCode="$VERSION_CODE"
