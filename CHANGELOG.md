@@ -4,6 +4,21 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.61 — 2026-10-09
+
+- **Native Android app**: a new Kotlin/WebView host (`apps/android`) wraps the web surface with access a browser cannot reach — a Keystore-sealed encrypted credential store, PKCE and Custom Tabs OAuth, App Links, deep links, foreground services, and native start-up, files, back and shortcuts — over a versioned, capability-gated `cohub.host.v1` bridge defined once in `@cohub/protocol` and implemented by both sides, so an older host degrades to the browser path instead of failing. Device folders are served as local Runtimes with sandboxd cross-compiled per ABI into the APK, and CI builds signed dev and release APKs.
+- **Remote displays over WebRTC**: phones and computers (macOS, Linux X11, or virtual Xvfb screens) share displays with a Space and are watched or steered live from the web over pion WebRTC, with Cloudflare TURN credentials, congestion control and latency tuning (key-frame start, hidden-viewer pause, zero playout delay). Display element trees expose an interface as sanitized refs, roles, names and boxes, and agents drive them through `cohub spaces displays` like any other capability.
+- **Board v3**: Board is rebuilt on a consolidated architecture with one playback runtime shared across web, CLI and exports, pattern background controls, and a double-buffered far layer that keeps large scenes smooth; the scene model, sync/commit path and export pipeline were unified and the legacy authoring and ops services removed.
+- **Live, local-first lists and Session snapshots**: Chats and Spaces render from IndexedDB and follow `session.created`/`session.updated` realtime events whether or not they are on screen, so switching tabs or filters costs no request and shows Telegram-style Connecting…/Updating… instead of per-fetch spinners. Every Turn stores its own stats and a settled Turn publishes one complete Session snapshot including the active Turn, removing per-Turn refetches; prompted Sessions are linked across Spaces in both directions, and search merges sessions and turns into one Chat result.
+- **Images as URLs end to end**: images now travel as URLs through the database, realtime events, agent context and model requests, with the model runtime the single place that resolves them — Anthropic, Chat Completions and Responses APIs receive the remote URL natively while other APIs get them downloaded and inlined per request. Each entry point bounds an image once with the shared `@cohub/media` normalizer, so the agent no longer downloads or re-encodes attachments or re-hydrates history images.
+
+### Bug Fixes
+
+- **Board strokes and far layer**: strokes now render where they land with incremental, quantized live samples and mitred joints, the far layer is double-buffered to stop flicker, local patches match the server, and a stale history step is dropped instead of blocking undo.
+- **Generation stream resilience**: out-of-order rounds and finalizes no longer reset the stream reducer — late events only join history, and a patch that cannot apply buffers live events and reseeds from the snapshot once per message, so the live message no longer freezes until the Turn ends.
+- **Command palette and sidebar**: palette search loops are fixed, the ⌘K hint is restored, and sidebar turn state stays live without per-turn label refetches.
+- **Android lifecycle**: switching apps no longer shows a false crash toast, sign-out sticks across restarts, and restricted settings open App info once instead of failing control.
+
 ## v2.60 — 2026-09-29
 
 - **Desktop open fail-fast**: `cohub desktop open` now fails fast when the desktop that started the chat is gone — the target tab accepts a command before running it, so one nobody accepts within 10 seconds (closed, asleep, or offline) settles as `no_active_client` instead of waiting out the timeout, and a tab that wakes later never opens it. A plain open waits up to 30 seconds by default while an App `--call` still waits up to 10 minutes; the SDK adds `desktop.accept()`, `defaultDesktopCommandTimeoutMs()`, and the accept/open timeout constants.
