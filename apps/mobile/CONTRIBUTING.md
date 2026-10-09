@@ -29,7 +29,7 @@ The commit type picks the release-notes section; `chore` commits stay out of the
 
 ## Pull requests
 
-Keep changes focused. `Mobile CI` must pass Quality and the bundle jobs on pull requests that touch `apps/mobile`. Native debug builds are a manual `Mobile Native CI` workflow, not a PR check. Do not commit `.env`, native signing files, generated `ios/` or `android/` directories, or Expo credentials.
+Keep changes focused. `Mobile CI` must pass Quality and the bundle jobs on pull requests that touch `apps/mobile`. Native debug builds are a manual `Mobile CI` run with `task=native-debug`, not a PR check. Do not commit `.env`, native signing files, generated `ios/` or `android/` directories, or Expo credentials.
 
 ## Releases
 

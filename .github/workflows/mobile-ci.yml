@@ -1,28 +1,88 @@
 name: Mobile CI
 
+# One workflow for the app in apps/mobile:
+# - pull requests and main pushes that touch the app: Quality, Audit, and bundle exports
+# - main pushes also publish production OTA, then run the Android device E2E
+# - cohub-mobile-vX.Y.Z tags build signed Android APKs and a TestFlight build and create the
+#   GitHub Release (path filters do not apply to tag pushes)
+# - manual runs pick one task below
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/mobile/**'
-      - '.github/workflows/mobile-*.yml'
   pull_request:
     branches: [main]
     paths:
       - 'apps/mobile/**'
-      - '.github/workflows/mobile-*.yml'
+      - '.github/workflows/mobile-ci.yml'
+  push:
+    branches: [main]
+    # The monorepo's vX.Y.Z tags release the Cohub services, not the app.
+    tags: ["cohub-mobile-v*"]
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-ci.yml'
   workflow_dispatch:
+    inputs:
+      task:
+        description: What to run
+        required: true
+        type: choice
+        options: [ci, native-debug, native-release, ota, e2e]
+        default: ci
+      platform:
+        description: "native-release: platform to build"
+        required: false
+        type: choice
+        options: [android, ios, all]
+        default: android
+      profile:
+        description: "native-release: distribution is a signed direct-download APK; production is for store artifacts"
+        required: false
+        type: choice
+        options: [distribution, production]
+        default: distribution
+      submit:
+        description: "native-release: submit completed artifacts to the stores"
+        required: false
+        type: boolean
+        default: false
+      android_track:
+        description: "native-release: Google Play track"
+        required: false
+        type: choice
+        options: [internal, production]
+        default: internal
+      release_tag:
+        description: "native-release: existing tag, for example cohub-mobile-v1.2.0"
+        required: false
+        type: string
+      commit:
+        description: "ota: full 40-character commit SHA from origin/main. Main pushes publish github.sha."
+        required: false
+        type: string
+      channel:
+        description: "ota: channel. Main pushes always publish production."
+        required: false
+        type: choice
+        options: [staging, production]
+        default: production
+      flows:
+        description: "e2e: flows to run, comma-separated. Defaults to the whole suite."
+        required: false
+        type: string
 
 permissions:
   contents: read
 
+# Pull requests cancel superseded runs. Main pushes and OTA runs queue per channel so an older
+# commit's OTA never overtakes a newer one; tags and other manual runs queue per ref and task.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: mobile-ci-${{ github.event_name == 'pull_request' && github.ref || (github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.task == 'ota')) && format('ota-{0}', inputs.channel || 'production') || format('{0}-{1}', github.ref, inputs.task) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CI: "true"
   EXPO_NO_TELEMETRY: "1"
+  OTA_CLI_REPOSITORY: https://github.com/markbang/yaota.git
+  OTA_CLI_REVISION: 62e237e864b291c6ee266a6af820569817ab984c
 
 defaults:
   run:
@@ -31,6 +91,7 @@ defaults:
 jobs:
   quality:
     name: Quality
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch') || inputs.task == 'ci'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -56,13 +117,36 @@ jobs:
       - name: Run quality checks
         run: npm run check
 
+  # Runs alongside Quality: the export does not read lint/typecheck results, and
+  # serializing the two added ~70s to every pull request and main push.
+
+  audit:
+    name: Audit
+    # Kept out of Quality so a dependency advisory never blocks OTA, which needs Quality's checks only.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch') || inputs.task == 'ci'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
-  # Runs alongside Quality: the export does not read lint/typecheck results, and
-  # serializing the two added ~70s to every pull request and main push.
   bundle:
     name: Bundle (${{ matrix.platform }})
+    # Runs alongside Quality: the export does not read lint/typecheck results.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch') || inputs.task == 'ci'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -93,3 +177,1114 @@ jobs:
           path: apps/mobile/dist/${{ matrix.platform }}
           if-no-files-found: error
           retention-days: 7
+
+  debug-android:
+    name: Native debug (android)
+    if: inputs.task == 'native-debug'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Android project
+        run: npm run native:android:prepare
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # setup-java hashes the prebuild-generated android/*.gradle files into its cache key
+      # and never falls back to an older entry, so every app version or config bump starts
+      # cold (~4 minutes of re-downloaded dependencies and artifact transforms). The Gradle
+      # caches only depend on the committed dependency set, which changes far less often.
+      - name: Restore Gradle caches
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/mobile/package-lock.json') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Compile debug APKs
+        env:
+          COHUB_ANDROID_ARCHITECTURES: armeabi-v7a,arm64-v8a,x86,x86_64
+        run: npm run native:android:build
+
+      - name: Upload debug APKs
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-android-debug-${{ github.sha }}
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-*-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  debug-ios:
+    name: Native debug (ios)
+    if: inputs.task == 'native-debug'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate iOS project and install pods
+        run: npm run native:ios:prepare
+
+      - name: Compile simulator app
+        run: npm run native:ios:build
+
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-ios-simulator-${{ github.sha }}
+          path: apps/mobile/build/artifacts/Cohub-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  ota-prepare:
+    name: OTA target
+    if: github.repository == 'netaart/cohub' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.task == 'ota')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      channel: ${{ steps.target.outputs.channel }}
+      subject: ${{ steps.target.outputs.subject }}
+    steps:
+      - name: Checkout main history
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate target commit
+        id: target
+        env:
+          COMMIT: ${{ github.event.inputs.commit || github.sha }}
+          CHANNEL: ${{ github.event.inputs.channel || 'production' }}
+        run: |
+          set -euo pipefail
+          sha=$(node --input-type=module -e 'import { parseCommitSha } from "./scripts/ota-publish.mjs"; process.stdout.write(parseCommitSha(process.env.COMMIT))')
+          channel=$(CHANNEL="$CHANNEL" node --input-type=module -e 'import { parseChannel } from "./scripts/ota-publish.mjs"; process.stdout.write(parseChannel(process.env.CHANNEL))')
+          git merge-base --is-ancestor "$sha" origin/main
+          git checkout --force --detach "$sha"
+          {
+            echo "sha=$sha"
+            echo "channel=$channel"
+            echo "subject<<SUBJECT_EOF"
+            git log -1 --format=%s "$sha"
+            echo "SUBJECT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality checks
+        run: npm run check
+
+  ota-android:
+    name: OTA export (android)
+    needs: ota-prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      runtime: ${{ steps.fingerprint.outputs.runtime }}
+      fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.ota-prepare.outputs.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve installed APK runtime
+        id: fingerprint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/native-apk"
+          # The monorepo's release list is dominated by service releases; walk app tags, newest
+          # version first. A just-pushed tag has no release yet, so a failed view is skipped.
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/cohub-mobile-v" --jq '.[].ref | ltrimstr("refs/tags/")' | sort -rV | while read -r candidate; do
+            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -Eq '^cohub-v.+-android-arm64-v8a\.apk$'; then
+              printf '%s\n' "$candidate"
+              break
+            fi
+          done)
+          if [[ -z "$tag" ]]; then
+            echo "No Android APK has been published. Build one OTA-capable APK with a cohub-mobile-vX.Y.Z tag (or Mobile CI task=native-release) first; JS-only changes can OTA after that."
+            exit 1
+          fi
+          asset=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name | select(endswith("-android-arm64-v8a.apk"))')
+          test -n "$asset" || { echo "arm64 APK missing from $tag."; exit 1; }
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir "$RUNNER_TEMP/native-apk"
+          apk="$RUNNER_TEMP/native-apk/$asset"
+          test -f "$apk" || { echo "Failed to download $asset from $tag."; exit 1; }
+          runtime=$(unzip -p "$apk" assets/fingerprint | tr -d '[:space:]' | tr 'A-F' 'a-f')
+          runtime=$(RUNTIME="$runtime" node --input-type=module -e 'import { parseFingerprintHash } from "./scripts/ota-publish.mjs"; process.stdout.write(parseFingerprintHash(process.env.RUNTIME, "installed APK assets/fingerprint"))')
+          echo "Using $tag APK runtime $runtime"
+          {
+            echo "runtime=$runtime"
+            echo "fingerprint=$runtime"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Export Android bundle
+        env:
+          EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
+        run: npx expo export --platform android --output-dir dist/android
+
+      - name: Upload export
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-ota-android-${{ needs.ota-prepare.outputs.channel }}-${{ needs.ota-prepare.outputs.sha }}
+          path: apps/mobile/dist/android
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize candidate
+        env:
+          CHANNEL: ${{ needs.ota-prepare.outputs.channel }}
+          SHA: ${{ needs.ota-prepare.outputs.sha }}
+          SUBJECT: ${{ needs.ota-prepare.outputs.subject }}
+          RUNTIME: ${{ steps.fingerprint.outputs.runtime }}
+          FINGERPRINT: ${{ steps.fingerprint.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## OTA candidate (Android)"
+            echo
+            echo "- Channel: \`$CHANNEL\`"
+            echo "- Commit: \`$SHA\`"
+            echo "- Subject: $SUBJECT"
+            echo "- Runtime: \`$RUNTIME\`"
+            echo "- Native fingerprint: \`$FINGERPRINT\`"
+            echo
+            echo "This job exported the Android bundle. The publish job uploads that artifact immediately; it does not export again."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ota-ios:
+    name: OTA export (ios)
+    needs: ota-prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      runtime: ${{ steps.fingerprint.outputs.runtime }}
+      fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.ota-prepare.outputs.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Native Release extracts this asset from the built IPA and attaches it only for submitted TestFlight builds.
+      - name: Resolve installed iOS runtime
+        id: fingerprint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/native-ipa"
+          # Same app-tag walk as the Android runtime lookup.
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/cohub-mobile-v" --jq '.[].ref | ltrimstr("refs/tags/")' | sort -rV | while read -r candidate; do
+            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -Fxq 'cohub-ios-native-fingerprint.txt'; then
+              printf '%s\n' "$candidate"
+              break
+            fi
+          done)
+          if [[ -z "$tag" ]]; then
+            echo "No iOS OTA fingerprint has been published. Ship one OTA-capable TestFlight build with a cohub-mobile-vX.Y.Z tag (or Mobile CI task=native-release, platform=ios, profile=production, submit=true) first; JS-only changes can OTA after that."
+            exit 1
+          fi
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern 'cohub-ios-native-fingerprint.txt' --dir "$RUNNER_TEMP/native-ipa"
+          fingerprint_file="$RUNNER_TEMP/native-ipa/cohub-ios-native-fingerprint.txt"
+          test -f "$fingerprint_file" || { echo "Failed to download cohub-ios-native-fingerprint.txt from $tag."; exit 1; }
+          runtime=$(tr -d '[:space:]' < "$fingerprint_file" | tr 'A-F' 'a-f')
+          runtime=$(RUNTIME="$runtime" node --input-type=module -e 'import { parseFingerprintHash } from "./scripts/ota-publish.mjs"; process.stdout.write(parseFingerprintHash(process.env.RUNTIME, "released cohub-ios-native-fingerprint.txt"))')
+          echo "Using $tag iOS runtime $runtime"
+          {
+            echo "runtime=$runtime"
+            echo "fingerprint=$runtime"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Export iOS bundle
+        env:
+          EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
+        run: npx expo export --platform ios --output-dir dist/ios
+
+      - name: Upload export
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-ota-ios-${{ needs.ota-prepare.outputs.channel }}-${{ needs.ota-prepare.outputs.sha }}
+          path: apps/mobile/dist/ios
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summarize candidate
+        env:
+          CHANNEL: ${{ needs.ota-prepare.outputs.channel }}
+          SHA: ${{ needs.ota-prepare.outputs.sha }}
+          SUBJECT: ${{ needs.ota-prepare.outputs.subject }}
+          RUNTIME: ${{ steps.fingerprint.outputs.runtime }}
+          FINGERPRINT: ${{ steps.fingerprint.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## OTA candidate (iOS)"
+            echo
+            echo "- Channel: \`$CHANNEL\`"
+            echo "- Commit: \`$SHA\`"
+            echo "- Subject: $SUBJECT"
+            echo "- Runtime: \`$RUNTIME\`"
+            echo "- Native fingerprint: \`$FINGERPRINT\`"
+            echo
+            echo "This job exported the iOS bundle. The publish job uploads that artifact immediately; it does not export again."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  ota-publish-android:
+    name: OTA upload (android)
+    needs: [ota-prepare, ota-android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35  # three publish attempts, each bounded by a 5-minute response timeout
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.ota-prepare.outputs.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Download export
+        uses: actions/download-artifact@v8
+        with:
+          name: cohub-ota-android-${{ needs.ota-prepare.outputs.channel }}-${{ needs.ota-prepare.outputs.sha }}
+          path: ${{ runner.temp }}/cohub-ota-export
+
+      - name: Install pinned OTA CLI
+        env:
+          OTA_CLI_REPOSITORY: ${{ env.OTA_CLI_REPOSITORY }}
+          OTA_CLI_REVISION: ${{ env.OTA_CLI_REVISION }}
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout "$OTA_CLI_REPOSITORY" "$RUNNER_TEMP/ota-cli"
+          git -C "$RUNNER_TEMP/ota-cli" fetch --depth 1 origin "$OTA_CLI_REVISION"
+          git -C "$RUNNER_TEMP/ota-cli" checkout --force "$OTA_CLI_REVISION"
+          test "$(git -C "$RUNNER_TEMP/ota-cli" rev-parse HEAD)" = "$OTA_CLI_REVISION"
+          npm ci --prefix "$RUNNER_TEMP/ota-cli"
+
+      - name: Publish exported bundle
+        env:
+          OTA_SERVER: ${{ vars.MOBILE_OTA_SERVER }}
+          OTA_API_KEY: ${{ secrets.MOBILE_OTA_API_KEY }}
+          CHANNEL: ${{ needs.ota-prepare.outputs.channel }}
+          EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
+          OTA_PLATFORM: android
+          SOURCE_COMMIT: ${{ needs.ota-prepare.outputs.sha }}
+          COHUB_OTA_RUNTIME_VERSION: ${{ needs.ota-android.outputs.runtime }}
+          OTA_EXPORT_DIR: ${{ runner.temp }}/cohub-ota-export
+        run: |
+          set -euo pipefail
+          test -n "$OTA_API_KEY" || { echo "MOBILE_OTA_API_KEY is required."; exit 1; }
+          origin=$(OTA_SERVER="$OTA_SERVER" node --input-type=module -e 'import { parseHttpsOrigin } from "./scripts/ota-publish.mjs"; process.stdout.write(parseHttpsOrigin(process.env.OTA_SERVER, "OTA_SERVER"))')
+          runtime=$(COHUB_OTA_RUNTIME_VERSION="$COHUB_OTA_RUNTIME_VERSION" node --input-type=module -e 'import { parseFingerprintHash } from "./scripts/ota-publish.mjs"; process.stdout.write(parseFingerprintHash(process.env.COHUB_OTA_RUNTIME_VERSION, "prepare runtime"))')
+          test -d "$OTA_EXPORT_DIR"
+          env -u COHUB_OTA_RUNTIME_VERSION npx @expo/fingerprint fingerprint:generate --platform "$OTA_PLATFORM" > "$RUNNER_TEMP/source-fingerprint.json"
+          SOURCE_FINGERPRINT=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; import { fingerprintFromCliJson } from "./scripts/ota-publish.mjs"; process.stdout.write(fingerprintFromCliJson(readFileSync(process.env.RUNNER_TEMP + "/source-fingerprint.json", "utf8"), "source fingerprint"))')
+          # The server rejects a bundle whose fingerprint differs from the latest update
+          # on this runtime (HTTP 409). That is the correct outcome for a commit with
+          # native/SDK changes: it cannot ride the installed binary until Native Release
+          # publishes a matching native distribution. Report the skip instead of failing
+          # the pipeline, so a release run shows the real state and the next steps.
+          COHUB_OTA_RUNTIME_VERSION="$runtime" npx expo config --type public --json > "$RUNNER_TEMP/ota-config.json"
+          # Transient transport/server failures retry. Repeating is safe: blobs are
+          # content-addressed, an interrupted attempt leaves at most an unserved Staged
+          # release, and the concurrency group keeps a newer commit from being overtaken.
+          attempts=$(node --input-type=module -e 'import { OTA_PUBLISH_ATTEMPTS } from "./scripts/ota-publish.mjs"; process.stdout.write(String(OTA_PUBLISH_ATTEMPTS))')
+          for attempt in $(seq 1 "$attempts"); do
+            set +e
+            OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/scripts/publish.ts" \
+              --app-id cohub-mobile \
+              --config "$RUNNER_TEMP/ota-config.json" \
+              --runtime "$runtime" \
+              --fingerprint "$SOURCE_FINGERPRINT" \
+              --commit "$SOURCE_COMMIT" \
+              --delta-bases 3 \
+              --channel "$CHANNEL" \
+              --platform android \
+              --export-dir "$OTA_EXPORT_DIR" 2>&1 | tee "$RUNNER_TEMP/ota-publish.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [[ $status -eq 0 ]]; then exit 0; fi
+            if grep -q "Fingerprint mismatch" "$RUNNER_TEMP/ota-publish.log"; then
+              {
+                echo "## OTA skipped (Android)"
+                echo
+                echo "The OTA server rejected this bundle because its native fingerprint differs from the latest update on runtime \`$runtime\`."
+                echo "This commit changed native/SDK code, so it cannot ride the installed binary."
+                echo
+                echo "Run **Mobile CI** with \`task=native-release\`, \`platform=android\`, \`profile=distribution\`, and the release tag to publish a matching native distribution; JS-only commits publish again afterwards."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning title=Android OTA skipped::Native fingerprint changed; ship a new native distribution first."
+              exit 0
+            fi
+            if (( attempt == attempts )) || ! node --input-type=module -e 'import { readFileSync } from "node:fs"; import { isTransientOtaFailure } from "./scripts/ota-publish.mjs"; process.exit(isTransientOtaFailure(readFileSync(process.env.RUNNER_TEMP + "/ota-publish.log", "utf8")) ? 0 : 1)'; then
+              exit "$status"
+            fi
+            delay=$((attempt * 30))
+            echo "::warning title=Android OTA retry::Attempt $attempt/$attempts failed with a transient error; retrying in ${delay}s."
+            sleep "$delay"
+          done
+
+  ota-publish-ios:
+    name: OTA upload (ios)
+    needs: [ota-prepare, ota-ios]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35  # three publish attempts, each bounded by a 5-minute response timeout
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.ota-prepare.outputs.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install app dependencies
+        run: npm ci
+
+      - name: Download export
+        uses: actions/download-artifact@v8
+        with:
+          name: cohub-ota-ios-${{ needs.ota-prepare.outputs.channel }}-${{ needs.ota-prepare.outputs.sha }}
+          path: ${{ runner.temp }}/cohub-ota-export
+
+      - name: Install pinned OTA CLI
+        env:
+          OTA_CLI_REPOSITORY: ${{ env.OTA_CLI_REPOSITORY }}
+          OTA_CLI_REVISION: ${{ env.OTA_CLI_REVISION }}
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout "$OTA_CLI_REPOSITORY" "$RUNNER_TEMP/ota-cli"
+          git -C "$RUNNER_TEMP/ota-cli" fetch --depth 1 origin "$OTA_CLI_REVISION"
+          git -C "$RUNNER_TEMP/ota-cli" checkout --force "$OTA_CLI_REVISION"
+          test "$(git -C "$RUNNER_TEMP/ota-cli" rev-parse HEAD)" = "$OTA_CLI_REVISION"
+          npm ci --prefix "$RUNNER_TEMP/ota-cli"
+
+      - name: Publish exported bundle
+        env:
+          OTA_SERVER: ${{ vars.MOBILE_OTA_SERVER }}
+          OTA_API_KEY: ${{ secrets.MOBILE_OTA_API_KEY }}
+          CHANNEL: ${{ needs.ota-prepare.outputs.channel }}
+          EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
+          OTA_PLATFORM: ios
+          SOURCE_COMMIT: ${{ needs.ota-prepare.outputs.sha }}
+          COHUB_OTA_RUNTIME_VERSION: ${{ needs.ota-ios.outputs.runtime }}
+          OTA_EXPORT_DIR: ${{ runner.temp }}/cohub-ota-export
+        run: |
+          set -euo pipefail
+          test -n "$OTA_API_KEY" || { echo "MOBILE_OTA_API_KEY is required."; exit 1; }
+          origin=$(OTA_SERVER="$OTA_SERVER" node --input-type=module -e 'import { parseHttpsOrigin } from "./scripts/ota-publish.mjs"; process.stdout.write(parseHttpsOrigin(process.env.OTA_SERVER, "OTA_SERVER"))')
+          runtime=$(COHUB_OTA_RUNTIME_VERSION="$COHUB_OTA_RUNTIME_VERSION" node --input-type=module -e 'import { parseFingerprintHash } from "./scripts/ota-publish.mjs"; process.stdout.write(parseFingerprintHash(process.env.COHUB_OTA_RUNTIME_VERSION, "prepare runtime"))')
+          test -d "$OTA_EXPORT_DIR"
+          env -u COHUB_OTA_RUNTIME_VERSION npx @expo/fingerprint fingerprint:generate --platform "$OTA_PLATFORM" > "$RUNNER_TEMP/source-fingerprint.json"
+          SOURCE_FINGERPRINT=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; import { fingerprintFromCliJson } from "./scripts/ota-publish.mjs"; process.stdout.write(fingerprintFromCliJson(readFileSync(process.env.RUNNER_TEMP + "/source-fingerprint.json", "utf8"), "source fingerprint"))')
+          # Mirrors the Android publish: a fingerprint-mismatch rejection means this
+          # commit needs a new native distribution, not that the pipeline is broken.
+          COHUB_OTA_RUNTIME_VERSION="$runtime" npx expo config --type public --json > "$RUNNER_TEMP/ota-config.json"
+          # Retries transient failures exactly like the Android publish.
+          attempts=$(node --input-type=module -e 'import { OTA_PUBLISH_ATTEMPTS } from "./scripts/ota-publish.mjs"; process.stdout.write(String(OTA_PUBLISH_ATTEMPTS))')
+          for attempt in $(seq 1 "$attempts"); do
+            set +e
+            OTA_SERVER="$origin" node "$RUNNER_TEMP/ota-cli/scripts/publish.ts" \
+              --app-id cohub-mobile \
+              --config "$RUNNER_TEMP/ota-config.json" \
+              --runtime "$runtime" \
+              --fingerprint "$SOURCE_FINGERPRINT" \
+              --commit "$SOURCE_COMMIT" \
+              --delta-bases 3 \
+              --channel "$CHANNEL" \
+              --platform ios \
+              --export-dir "$OTA_EXPORT_DIR" 2>&1 | tee "$RUNNER_TEMP/ota-publish.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [[ $status -eq 0 ]]; then exit 0; fi
+            if grep -q "Fingerprint mismatch" "$RUNNER_TEMP/ota-publish.log"; then
+              {
+                echo "## OTA skipped (iOS)"
+                echo
+                echo "The OTA server rejected this bundle because its native fingerprint differs from the latest update on runtime \`$runtime\`."
+                echo "This commit changed native/SDK code, so it cannot ride the installed binary."
+                echo
+                echo "Run **Mobile CI** with \`task=native-release\`, \`platform=ios\`, \`profile=production\`, and \`submit=true\` to publish a matching TestFlight build; JS-only commits publish again afterwards."
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning title=iOS OTA skipped::Native fingerprint changed; ship a new native distribution first."
+              exit 0
+            fi
+            if (( attempt == attempts )) || ! node --input-type=module -e 'import { readFileSync } from "node:fs"; import { isTransientOtaFailure } from "./scripts/ota-publish.mjs"; process.exit(isTransientOtaFailure(readFileSync(process.env.RUNNER_TEMP + "/ota-publish.log", "utf8")) ? 0 : 1)'; then
+              exit "$status"
+            fi
+            delay=$((attempt * 30))
+            echo "::warning title=iOS OTA retry::Attempt $attempt/$attempts failed with a transient error; retrying in ${delay}s."
+            sleep "$delay"
+          done
+
+  e2e-android:
+    name: E2E (android)
+    # The device run installs a released APK and lets production OTA deliver the current JS,
+    # so on main it waits for the Android OTA upload. A manual run tests the current production
+    # channel as is.
+    needs: ota-publish-android
+    if: >-
+      !cancelled() && (
+        (github.event_name == 'push' && github.ref_type == 'branch' && needs.ota-publish-android.result == 'success') ||
+        inputs.task == 'e2e'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
+      GH_TOKEN: ${{ github.token }}
+      E2E_ACCOUNT_EMAIL: ${{ secrets.MOBILE_E2E_ACCOUNT_EMAIL }}
+      E2E_ACCOUNT_PASSWORD: ${{ secrets.MOBILE_E2E_ACCOUNT_PASSWORD }}
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Maestro
+        run: |
+          set -euo pipefail
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      # The runner user cannot use /dev/kvm by default, and without it the emulator
+      # falls back to software emulation and never finishes booting.
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Fail fast, before paying for an emulator boot, when this commit needs a new
+      # native distribution and no released APK can receive its OTA.
+      - name: Resolve golden release
+        id: golden
+        run: |
+          set -euo pipefail
+          set +e
+          node scripts/e2e/android.mjs --plan-only --abi x86_64
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "available=yes" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -eq 3 ]; then
+            echo "::warning title=E2E skipped::No released APK is native-compatible with this commit. Ship a native distribution first; JS-only changes can ride an existing one."
+            echo "available=no" >> "$GITHUB_OUTPUT"
+          else
+            exit "$status"
+          fi
+
+      # Every route, including app/debug, sits behind Logto (app/_layout.tsx renders
+      # AuthScreen until a session exists). The production tenant signs in with an email
+      # code only, which CI cannot read, and the dev tenant enables password sign-in.
+      - name: Check E2E account
+        id: account
+        run: |
+          set -euo pipefail
+          if [ -z "${E2E_ACCOUNT_EMAIL:-}" ] || [ -z "${E2E_ACCOUNT_PASSWORD:-}" ]; then
+            echo "::warning title=E2E skipped::No E2E account is configured. Add the MOBILE_E2E_ACCOUNT_EMAIL and MOBILE_E2E_ACCOUNT_PASSWORD secrets (dev tenant) to run the device flows."
+            echo "ready=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run device E2E
+        if: steps.golden.outputs.available == 'yes' && steps.account.outputs.ready == 'yes'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # API 35 keeps to system images the action builds reliably; the release APK
+          # only needs its own minSdk satisfied.
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          emulator-boot-timeout: 900
+          disable-animations: true
+          # Action inputs do not inherit defaults.run.
+          working-directory: apps/mobile
+          script: node scripts/e2e/android.mjs --abi x86_64 --flows "${{ inputs.flows || 'e2e/flows' }}"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-e2e-android-${{ github.run_id }}
+          path: apps/mobile/dist/e2e
+          if-no-files-found: ignore
+          retention-days: 14
+
+  release-plan:
+    name: Release plan
+    if: (github.event_name == 'push' && github.ref_type == 'tag' && !github.event.deleted) || inputs.task == 'native-release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.target.outputs.tag }}
+      sha: ${{ steps.target.outputs.sha }}
+      publish: ${{ steps.target.outputs.publish }}
+      android: ${{ steps.target.outputs.android }}
+      android_profile: ${{ steps.target.outputs.android_profile }}
+      android_submit: ${{ steps.target.outputs.android_submit }}
+      android_track: ${{ steps.target.outputs.android_track }}
+      ios: ${{ steps.target.outputs.ios }}
+      ios_submit: ${{ steps.target.outputs.ios_submit }}
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # A pushed tag builds both platforms with fixed settings; a manual run builds what was asked.
+      - name: Resolve release target
+        id: target
+        env:
+          MODE: ${{ github.ref_type == 'tag' && 'tag' || 'manual' }}
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+          PLATFORM: ${{ inputs.platform }}
+          PROFILE: ${{ inputs.profile }}
+          SUBMIT: ${{ inputs.submit }}
+          ANDROID_TRACK: ${{ inputs.android_track }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^cohub-mobile-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Native releases require a stable cohub-mobile-vX.Y.Z tag, received: $RELEASE_TAG"
+            exit 1
+          fi
+          if [[ "$MODE" == "tag" ]]; then
+            plan="publish=true android=true android_profile=distribution android_submit=false android_track=internal ios=true ios_submit=true"
+          else
+            case "$PLATFORM" in
+              android|ios|all) ;;
+              *) echo "Unsupported platform: $PLATFORM"; exit 1 ;;
+            esac
+            case "$PROFILE" in
+              distribution|production) ;;
+              *) echo "Unsupported native build profile: $PROFILE"; exit 1 ;;
+            esac
+            if [[ "$PROFILE" == "distribution" && "$PLATFORM" != "android" ]]; then
+              echo "The distribution profile only supports platform=android."
+              exit 1
+            fi
+            if [[ "$PROFILE" == "distribution" && "$SUBMIT" == "true" ]]; then
+              echo "The distribution profile cannot submit to a store. Use production after configuring store credentials."
+              exit 1
+            fi
+            android=false; ios=false
+            [[ "$PLATFORM" == "all" || "$PLATFORM" == "android" ]] && android=true
+            [[ "$PLATFORM" == "all" || "$PLATFORM" == "ios" ]] && ios=true
+            android_submit=false
+            [[ "$PROFILE" == "production" && "$SUBMIT" == "true" ]] && android_submit=true
+            plan="publish=false android=$android android_profile=$PROFILE android_submit=$android_submit android_track=$ANDROID_TRACK ios=$ios ios_submit=$SUBMIT"
+          fi
+          git fetch --no-tags origin main
+          git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          tag_sha=$(git rev-list -n 1 "$RELEASE_TAG^{commit}")
+          if [[ "$MODE" == "tag" ]]; then
+            event_sha=$(git rev-list -n 1 "$GITHUB_SHA^{commit}")
+            test "$tag_sha" = "$event_sha" || { echo "Tag moved since this push; refusing to release a different commit."; exit 1; }
+          fi
+          git merge-base --is-ancestor "$tag_sha" origin/main || { echo "Release tag must be reachable from origin/main. Refusing to use signing credentials."; exit 1; }
+          git checkout --detach "$tag_sha"
+          node scripts/check-release.mjs --require-native-tag
+          {
+            echo "tag=$RELEASE_TAG"
+            echo "sha=$tag_sha"
+            tr ' ' '\n' <<< "$plan"
+          } >> "$GITHUB_OUTPUT"
+          echo "Using protected main-history tag $RELEASE_TAG at $tag_sha: $plan"
+
+      - name: Ensure GitHub Release exists
+        if: steps.target.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists."
+            exit 0
+          fi
+          # Generated notes would list every monorepo PR; these cover apps/mobile commits only.
+          node scripts/release-notes.mjs "$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.md"
+          # An app release must not replace the services' release as the repository's Latest.
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false \
+            --title "Cohub Mobile ${RELEASE_TAG#cohub-mobile-}" --notes-file "$RUNNER_TEMP/release-notes.md"
+
+  release-android:
+    name: Release ${{ needs.release-plan.outputs.android_profile }} (android)
+    needs: release-plan
+    if: needs.release-plan.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
+    steps:
+      - name: Checkout validated ref
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-plan.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Record native fingerprint
+        run: |
+          set -euo pipefail
+          mkdir -p build/native-release
+          fingerprint=$(npx @expo/fingerprint fingerprint:generate --platform android | node -e 'let raw="";process.stdin.on("data",chunk=>raw+=chunk).on("end",()=>{const hash=String(JSON.parse(raw).hash||"").trim().toLowerCase(); if(!/^[a-f0-9]{40,64}$/.test(hash)) process.exit(1); process.stdout.write(hash)})')
+          printf '%s\n' "$fingerprint" > build/native-release/cohub-android-native-fingerprint.txt
+
+      - name: Validate source metadata
+        env:
+          RELEASE_TAG: ${{ needs.release-plan.outputs.tag }}
+        run: |
+          npm run check
+          npm run release:check -- --require-native-tag
+
+      - name: Prepare Firebase configuration
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.MOBILE_COHUB_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GOOGLE_SERVICES_JSON_BASE64" ]]; then
+            echo "No Android Firebase configuration supplied; remote push token registration will remain unavailable in this build."
+          else
+            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > "$RUNNER_TEMP/google-services.json"
+            test -s "$RUNNER_TEMP/google-services.json"
+            echo "COHUB_GOOGLE_SERVICES_FILE=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
+            echo "Android Firebase configuration prepared."
+          fi
+
+      - name: Generate Android project
+        run: npm run native:android:prepare
+
+      # This also makes recovery builds work for tags created before the helper changed.
+      - name: Configure Android release heap
+        run: |
+          set -euo pipefail
+          gradle_properties=android/gradle.properties
+          memory_args_path=scripts/android-gradle-jvmargs.txt
+          if [[ ! -f "$memory_args_path" ]]; then
+            memory_args_path="$RUNNER_TEMP/android-gradle-jvmargs.txt"
+            git show "origin/main:apps/mobile/scripts/android-gradle-jvmargs.txt" > "$memory_args_path"
+          fi
+          memory_args=$(sed -n '1p' "$memory_args_path")
+          test -n "$memory_args"
+          memory_line="org.gradle.jvmargs=$memory_args"
+          if grep -q '^org\.gradle\.jvmargs=' "$gradle_properties"; then
+            sed -i "s|^org\\.gradle\\.jvmargs=.*$|$memory_line|" "$gradle_properties"
+          else
+            printf '\n%s\n' "$memory_line" >> "$gradle_properties"
+          fi
+          grep -Fxq "$memory_line" "$gradle_properties"
+
+      - name: Resolve Android identifier
+        id: identifiers
+        run: node scripts/print-native-identifiers.mjs
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # setup-java hashes the prebuild-generated android/*.gradle files into its cache key
+      # and never falls back to an older entry, so every release version bump starts cold
+      # (~4 minutes of re-downloaded dependencies and artifact transforms). The Gradle
+      # caches only depend on the committed dependency set, which changes far less often.
+      - name: Restore Gradle caches
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/mobile/package-lock.json') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Validate Android signing inputs
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MOBILE_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MOBILE_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MOBILE_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MOBILE_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo "MOBILE_ANDROID_KEYSTORE_BASE64 is required for Android distribution/release builds"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "MOBILE_ANDROID_KEYSTORE_PASSWORD is required for Android distribution/release builds"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "MOBILE_ANDROID_KEY_ALIAS is required for Android distribution/release builds"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "MOBILE_ANDROID_KEY_PASSWORD is required for Android distribution/release builds"; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/cohub-upload.jks
+          {
+            echo "COHUB_ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/apps/mobile/android/cohub-upload.jks"
+            echo "COHUB_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "COHUB_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "COHUB_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure Android release signing
+        run: node scripts/configure-android-signing.mjs
+
+      - name: Build signed distribution APKs
+        if: needs.release-plan.outputs.android_profile == 'distribution'
+        env:
+          COHUB_ANDROID_ARCHITECTURES: armeabi-v7a,arm64-v8a,x86,x86_64
+        run: npm run native:android:distribution
+
+      - name: Build production AAB
+        if: needs.release-plan.outputs.android_profile == 'production'
+        run: npm run native:android:release
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-android-${{ needs.release-plan.outputs.android_profile }}-${{ github.run_id }}
+          path: |
+            ${{ needs.release-plan.outputs.android_profile == 'production' && 'apps/mobile/android/app/build/outputs/bundle/release/app-release.aab' || 'apps/mobile/android/app/build/outputs/apk/release/app-*-release.apk' }}
+            apps/mobile/build/native-release/cohub-android-native-fingerprint.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Validate Google Play submission input
+        if: needs.release-plan.outputs.android_submit == 'true'
+        env:
+          GOOGLE_PLAY_JSON: ${{ secrets.MOBILE_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: test -n "$GOOGLE_PLAY_JSON" || { echo "MOBILE_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is required when submit=true"; exit 1; }
+
+      - name: Submit Android to Google Play
+        if: needs.release-plan.outputs.android_submit == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.MOBILE_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ steps.identifiers.outputs.android_package }}
+          releaseFiles: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+          tracks: ${{ needs.release-plan.outputs.android_track }}
+          releaseName: ${{ needs.release-plan.outputs.tag }}
+          status: completed
+
+  release-ios:
+    name: Release production (ios)
+    needs: release-plan
+    if: needs.release-plan.outputs.ios == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 65
+    env:
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
+    steps:
+      - name: Checkout validated ref
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-plan.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate source metadata
+        env:
+          RELEASE_TAG: ${{ needs.release-plan.outputs.tag }}
+        run: |
+          npm run check
+          npm run release:check -- --require-native-tag
+
+      - name: Generate iOS project and install pods
+        run: npm run native:ios:prepare
+
+      - name: Resolve iOS identifier
+        id: identifiers
+        run: node scripts/print-native-identifiers.mjs
+
+      - name: Validate iOS signing inputs
+        env:
+          ISSUER_ID: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
+          API_KEY_ID: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
+          TEAM_ID: ${{ vars.MOBILE_APPSTORE_TEAM_ID }}
+          PRIVATE_KEY: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
+          CERTIFICATE: ${{ secrets.MOBILE_APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MOBILE_APPSTORE_CERTIFICATES_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ISSUER_ID" || { echo "MOBILE_APPSTORE_ISSUER_ID repository variable is required"; exit 1; }
+          test -n "$API_KEY_ID" || { echo "MOBILE_APPSTORE_API_KEY_ID repository variable is required"; exit 1; }
+          test -n "$TEAM_ID" || { echo "MOBILE_APPSTORE_TEAM_ID repository variable is required"; exit 1; }
+          test -n "$PRIVATE_KEY" || { echo "MOBILE_APPSTORE_API_PRIVATE_KEY secret is required"; exit 1; }
+          test -n "$CERTIFICATE" || { echo "MOBILE_APPSTORE_CERTIFICATES_FILE_BASE64 secret is required"; exit 1; }
+          test -n "$CERTIFICATE_PASSWORD" || { echo "MOBILE_APPSTORE_CERTIFICATES_PASSWORD secret is required"; exit 1; }
+          {
+            echo "IOS_TEAM_ID=$TEAM_ID"
+            echo "APPSTORE_ISSUER_ID=$ISSUER_ID"
+            echo "APPSTORE_API_KEY_ID=$API_KEY_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Import iOS distribution certificate
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.MOBILE_APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          p12-password: ${{ secrets.MOBILE_APPSTORE_CERTIFICATES_PASSWORD }}
+
+      - name: Download iOS provisioning profile
+        id: profiles
+        uses: apple-actions/download-provisioning-profiles@v6
+        with:
+          bundle-id: ${{ steps.identifiers.outputs.ios_bundle_id }}
+          profile-type: IOS_APP_STORE
+          issuer-id: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
+
+      - name: Resolve provisioning profile name
+        env:
+          PROFILES_JSON: ${{ steps.profiles.outputs.profiles }}
+        run: |
+          profile_name=$(node -e 'const profiles = JSON.parse(process.env.PROFILES_JSON); if (!profiles[0]?.name) process.exit(1); process.stdout.write(profiles[0].name)')
+          echo "IOS_PROFILE_NAME=$profile_name" >> "$GITHUB_ENV"
+
+      - name: Build production IPA
+        run: npm run native:ios:release
+
+      # Publish OTA resolves the iOS runtime from this file, mirroring assets/fingerprint in the Android APK.
+      - name: Record iOS OTA fingerprint
+        run: |
+          set -euo pipefail
+          mkdir -p build/native-release
+          unzip -q build/export/Cohub.ipa -d "$RUNNER_TEMP/ios-ipa"
+          fingerprint_file=$(find "$RUNNER_TEMP/ios-ipa" -type f -path '*EXUpdates.bundle*' -name fingerprint -print -quit)
+          test -n "$fingerprint_file" || { echo "The built IPA does not embed an Expo Updates fingerprint. Confirm expo-updates is included in the iOS build."; exit 1; }
+          fingerprint=$(tr -d '[:space:]' < "$fingerprint_file" | tr 'A-F' 'a-f')
+          if [[ ! "$fingerprint" =~ ^[a-f0-9]{40,64}$ ]]; then
+            echo "The built IPA embeds an invalid Expo Updates fingerprint: $fingerprint"
+            exit 1
+          fi
+          printf '%s\n' "$fingerprint" > build/native-release/cohub-ios-native-fingerprint.txt
+          echo "Recorded iOS OTA fingerprint $fingerprint"
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: cohub-ios-production-${{ github.run_id }}
+          path: |
+            apps/mobile/build/export/Cohub.ipa
+            apps/mobile/build/native-release/cohub-ios-native-fingerprint.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Submit iOS to TestFlight
+        if: needs.release-plan.outputs.ios_submit == 'true'
+        uses: apple-actions/upload-testflight-build@v5
+        with:
+          app-path: apps/mobile/build/export/Cohub.ipa
+          issuer-id: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
+          wait-for-processing: "true"
+
+      # Assigning the external group also submits the first build of each app version
+      # for Beta App Review; Apple reviews asynchronously and this job does not wait for it.
+      - name: Distribute iOS to external TestFlight testers
+        if: needs.release-plan.outputs.ios_submit == 'true'
+        env:
+          APPSTORE_ISSUER_ID: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_ID: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
+          TESTFLIGHT_EXTERNAL_BETA_GROUP: ${{ vars.MOBILE_TESTFLIGHT_EXTERNAL_BETA_GROUP }}
+        run: node scripts/submit-testflight-beta.mjs
+
+  release-publish-android:
+    name: Attach Android APKs and fingerprint
+    needs: [release-plan, release-android]
+    if: needs.release-plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout publish script
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-plan.outputs.tag }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Download formal Android APKs
+        uses: actions/download-artifact@v8
+        with:
+          name: cohub-android-distribution-${{ github.run_id }}
+          path: apps/mobile/build/release
+
+      - name: Upload formal APKs to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Artifact downloads preserve the original directory layout.
+          mapfile -t apks < <(find build/release -type f -name 'app-*-release.apk' | sort)
+          test "${#apks[@]}" -eq 4 || { echo "Expected four Android ABI APKs, found ${#apks[@]}"; exit 1; }
+          mapfile -t fingerprints < <(find build/release -type f -name 'cohub-android-native-fingerprint.txt')
+          test "${#fingerprints[@]}" -eq 1 || { echo "Expected one native fingerprint file, found ${#fingerprints[@]}"; exit 1; }
+          for apk in "${apks[@]}"; do
+            abi=$(basename "$apk" | sed -E 's/^app-(.+)-release\.apk$/\1/')
+            case "$abi" in
+              armeabi-v7a|arm64-v8a|x86|x86_64) ;;
+              *) echo "Unexpected Android APK name: $(basename "$apk")"; exit 1 ;;
+            esac
+            # Keep the cohub-vX.Y.Z APK names that Yaota and the landing page match.
+            release_apk="cohub-${RELEASE_TAG#cohub-mobile-}-android-${abi}.apk"
+            cp "$apk" "$release_apk"
+            gh release upload "$RELEASE_TAG" "$release_apk" --repo "$GITHUB_REPOSITORY" --clobber
+          done
+          gh release upload "$RELEASE_TAG" "${fingerprints[0]}" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Upload APKs to Yaota
+        env:
+          OTA_SERVER: ${{ vars.MOBILE_OTA_SERVER }}
+          OTA_API_KEY: ${{ secrets.MOBILE_OTA_API_KEY }}
+          YAOTA_APP_ID: cohub-mobile
+          RELEASE_TAG: ${{ needs.release-plan.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -n "$OTA_SERVER" || { echo "MOBILE_OTA_SERVER is required to distribute APKs from Yaota."; exit 1; }
+          test -n "$OTA_API_KEY" || { echo "MOBILE_OTA_API_KEY is required to publish APKs to Yaota."; exit 1; }
+          release_json=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json name,body,url)
+          export RELEASE_TITLE=$(RELEASE_JSON="$release_json" node -e 'process.stdout.write(JSON.parse(process.env.RELEASE_JSON).name || "")')
+          export RELEASE_NOTES=$(RELEASE_JSON="$release_json" node -e 'process.stdout.write(JSON.parse(process.env.RELEASE_JSON).body || "")')
+          export RELEASE_URL=$(RELEASE_JSON="$release_json" node -e 'process.stdout.write(JSON.parse(process.env.RELEASE_JSON).url || "")')
+          shopt -s nullglob
+          files=(cohub-"${RELEASE_TAG#cohub-mobile-}"-android-*.apk)
+          test "${#files[@]}" -eq 4 || { echo "Expected four renamed APKs before Yaota upload, found ${#files[@]}"; exit 1; }
+          node --experimental-strip-types scripts/publish-yaota-apks.mjs "${files[@]}"
+
+  release-attach-ios:
+    name: Attach iOS OTA fingerprint
+    needs: [release-plan, release-ios]
+    if: needs.release-plan.outputs.ios_submit == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download iOS artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: cohub-ios-production-${{ github.run_id }}
+          path: apps/mobile/build/ios-artifact
+
+      # Only a submitted TestFlight build is distributed, so only its fingerprint may claim the release's iOS runtime.
+      - name: Upload fingerprint to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          fingerprint=$(find build/ios-artifact -type f -name cohub-ios-native-fingerprint.txt -print -quit)
+          test -n "$fingerprint" || { echo "The iOS artifact is missing cohub-ios-native-fingerprint.txt."; exit 1; }
+          gh release upload "$RELEASE_TAG" "$fingerprint" --repo "$GITHUB_REPOSITORY" --clobber

@@ -57,28 +57,44 @@ assert.ok(
 assert.ok(fingerprintConfig.sourceSkips.includes("PackageJsonAndroidAndIosScriptsIfNotContainRun"));
 
 const parse = (file) => YAML.parse(readFileSync(file, "utf8"), { uniqueKeys: true });
-// The app's workflows live in the monorepo root and run every step from apps/mobile.
-const workflow = (name) => {
-  const parsed = parse(fileURLToPath(new URL(`../../../.github/workflows/${name}`, import.meta.url)));
-  assert.equal(parsed.defaults?.run?.["working-directory"], "apps/mobile", `${name} must run its steps from apps/mobile`);
-  assert.match(parsed.name, /^Mobile /, `${name} must be named apart from the monorepo's workflows`);
-  return parsed;
-};
-const ota = workflow("mobile-publish-ota.yml");
-assert.deepEqual(ota.on.push.branches, ["main"]);
-assert.deepEqual(ota.on.push.paths, ["apps/mobile/**"], "Only app changes publish OTA");
-assert.ok(Object.hasOwn(ota.on, "workflow_dispatch"));
-assert.deepEqual(ota.on.workflow_dispatch.inputs.channel.options, ["staging", "production"]);
-assert.equal(ota.on.workflow_dispatch.inputs.channel.default, "production");
-assert.equal(ota.concurrency["cancel-in-progress"], false);
-assert.equal(ota.concurrency.group, "mobile-ota-publish-${{ github.event.inputs.channel || 'production' }}");
-assert.equal(ota.env.OTA_CLI_REPOSITORY, OTA_CLI_REPOSITORY);
-assert.equal(ota.env.OTA_CLI_REVISION, OTA_CLI_REVISION);
-assert.match(ota.jobs.prepare.if, /refs\/heads\/main/);
-const publishAndroid = ota.jobs["publish-android"];
-const publishIos = ota.jobs["publish-ios"];
-assert.deepEqual(publishAndroid.needs, ["prepare", "android"]);
-assert.deepEqual(publishIos.needs, ["prepare", "ios"]);
+// The app has one workflow in the monorepo root, and every step runs from apps/mobile.
+const mobile = parse(fileURLToPath(new URL("../../../.github/workflows/mobile-ci.yml", import.meta.url)));
+assert.equal(mobile.name, "Mobile CI");
+assert.equal(mobile.defaults?.run?.["working-directory"], "apps/mobile", "Mobile CI must run its steps from apps/mobile");
+const appPaths = ["apps/mobile/**", ".github/workflows/mobile-ci.yml"];
+assert.deepEqual(mobile.on.pull_request.paths, appPaths, "Pull requests run Mobile CI only for app changes");
+assert.deepEqual(mobile.on.push.paths, appPaths, "Main pushes run Mobile CI only for app changes");
+assert.deepEqual(mobile.on.push.branches, ["main"]);
+assert.deepEqual(mobile.on.push.tags, ["cohub-mobile-v*"], "The monorepo's vX.Y.Z tags release the services, not the app");
+assert.equal(Object.hasOwn(mobile.on, "release"), false, "Only a tag push starts automatic native release; release events must not duplicate it");
+const inputs = mobile.on.workflow_dispatch.inputs;
+assert.deepEqual(inputs.task.options, ["ci", "native-debug", "native-release", "ota", "e2e"]);
+assert.ok(Object.keys(inputs).length <= 10, "workflow_dispatch accepts at most 10 inputs");
+assert.deepEqual(inputs.channel.options, ["staging", "production"]);
+assert.equal(inputs.channel.default, "production");
+assert.ok(inputs.platform.options.includes("ios"), "Manual native releases must allow iOS-only TestFlight builds");
+assert.equal(mobile.concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}", "Only pull requests cancel superseded runs");
+assert.match(mobile.concurrency.group, /format\('ota-\{0\}', inputs\.channel \|\| 'production'\)/, "Main pushes and OTA runs queue per channel so an older OTA never overtakes a newer one");
+assert.equal(mobile.env.OTA_CLI_REPOSITORY, OTA_CLI_REPOSITORY);
+assert.equal(mobile.env.OTA_CLI_REVISION, OTA_CLI_REVISION);
+const jobs = mobile.jobs;
+for (const [id, job] of Object.entries(jobs)) {
+  assert.equal(Object.hasOwn(job, "uses"), false, `${id} must not hand the monorepo's secrets to a reusable workflow`);
+  for (const step of job.steps ?? []) {
+    if (step.run) execFileSync("bash", ["-n"], { input: step.run });
+  }
+}
+for (const id of ["quality", "audit", "bundle"]) {
+  assert.match(jobs[id].if, /github\.event_name == 'pull_request'/, `${id} runs for pull requests`);
+  assert.match(jobs[id].if, /github\.ref_type == 'branch'/, `${id} does not run for release tags`);
+}
+assert.equal(JSON.stringify(jobs.quality.steps).includes("npm audit"), false, "Advisories are reported by Audit, apart from Quality");
+assert.match(jobs["ota-prepare"].if, /refs\/heads\/main/);
+assert.equal(Object.hasOwn(jobs["ota-prepare"], "needs"), false, "OTA runs its own checks, so an Audit advisory never blocks it");
+const publishAndroid = jobs["ota-publish-android"];
+const publishIos = jobs["ota-publish-ios"];
+assert.deepEqual(publishAndroid.needs, ["ota-prepare", "ota-android"]);
+assert.deepEqual(publishIos.needs, ["ota-prepare", "ota-ios"]);
 for (const publish of [publishAndroid, publishIos]) {
   assert.equal(Object.hasOwn(publish, "environment"), false);
   assert.equal(JSON.stringify(publish.steps).includes("apps/easc/bin/easc.js"), false);
@@ -144,7 +160,7 @@ for (const [platform, publish] of [["android", publishAndroid], ["ios", publishI
         },
       });
       const read = (name) => { try { return readFileSync(join(temp, name), "utf8"); } catch { return ""; } };
-      return { status: result.status, calls: Number(read("calls")), sleeps: read("sleeps").trim().split("\n").filter(Boolean), output: result.stdout + result.stderr };
+      return { status: result.status, calls: Number(read("calls")), sleeps: read("sleeps").trim().split("\n").filter(Boolean), summary: read("summary"), output: result.stdout + result.stderr };
     } finally {
       rmSync(temp, { recursive: true, force: true });
     }
@@ -162,80 +178,76 @@ for (const [platform, publish] of [["android", publishAndroid], ["ios", publishI
   const mismatch = runPublish(["Error: OTA 409: Fingerprint mismatch", "ok"]);
   assert.equal(mismatch.status, 0, `${platform}: a fingerprint mismatch stays an explained skip`);
   assert.equal(mismatch.calls, 1);
+  assert.match(mismatch.summary, /Run \*\*Mobile CI\*\* with `task=native-release`/, `${platform}: the skip summary names the release task literally`);
 }
 assert.match(JSON.stringify(publishAndroid.steps), /--platform android/);
 assert.match(JSON.stringify(publishIos.steps), /--platform ios/);
 assert.equal(JSON.stringify(publishAndroid.steps).includes("dist/android"), false);
 assert.equal(JSON.stringify(publishIos.steps).includes("dist/ios"), false);
-assert.match(JSON.stringify(ota.jobs.android.steps), /assets\/fingerprint/);
-assert.match(JSON.stringify(ota.jobs.android.steps), /arm64-v8a/);
-assert.match(JSON.stringify(ota.jobs.android.steps), /--platform android/);
-assert.ok(JSON.stringify(ota.jobs.ios.steps).includes(IOS_NATIVE_FINGERPRINT_ASSET));
-assert.match(JSON.stringify(ota.jobs.ios.steps), /--platform ios/);
-assert.match(JSON.stringify(ota.jobs.android.steps), /cohub-ota-android-/);
-assert.match(JSON.stringify(ota.jobs.ios.steps), /cohub-ota-ios-/);
+assert.match(JSON.stringify(jobs["ota-android"].steps), /assets\/fingerprint/);
+assert.match(JSON.stringify(jobs["ota-android"].steps), /arm64-v8a/);
+assert.match(JSON.stringify(jobs["ota-android"].steps), /--platform android/);
+assert.ok(JSON.stringify(jobs["ota-ios"].steps).includes(IOS_NATIVE_FINGERPRINT_ASSET));
+assert.match(JSON.stringify(jobs["ota-ios"].steps), /--platform ios/);
+assert.match(JSON.stringify(jobs["ota-android"].steps), /cohub-ota-android-/);
+assert.match(JSON.stringify(jobs["ota-ios"].steps), /cohub-ota-ios-/);
 
-const nativeCi = workflow("mobile-native-ci.yml");
-assert.equal(Object.hasOwn(nativeCi.on, "push"), false);
-assert.equal(Object.hasOwn(nativeCi.on, "pull_request"), false, "PR workflow must not compile native debug builds");
-assert.ok(Object.hasOwn(nativeCi.on, "workflow_dispatch"), "Native CI remains available as a manual run");
-
-const nativeRelease = workflow("mobile-native-release.yml");
-assert.ok(nativeRelease.on.workflow_dispatch.inputs.platform.options.includes("ios"), "Native Release must allow iOS-only TestFlight builds");
+for (const id of ["debug-android", "debug-ios"]) {
+  assert.equal(jobs[id].if, "inputs.task == 'native-debug'", "Native debug builds run only on request, never for pull requests");
+}
 
 // Gradle caches must key on the committed dependency set. setup-java hashes the
 // prebuild-generated android/*.gradle files and offers no older-entry fallback, so its
 // cache goes cold on every app version or config bump (~4 minutes of re-downloads).
-for (const [file, parsed] of [["mobile-native-ci.yml", nativeCi], ["mobile-native-release.yml", nativeRelease]]) {
-  const javaStep = parsed.jobs.android.steps.find((step) => step.uses === "actions/setup-java@v6");
-  assert.ok(javaStep, `${file} must set up Java for the Android build`);
-  assert.equal(javaStep.with.cache, undefined, `${file} must cache Gradle explicitly instead of through setup-java`);
-  const gradleCache = parsed.jobs.android.steps.find((step) => String(step.uses).startsWith("actions/cache@"));
-  assert.ok(gradleCache, `${file} must restore the Gradle caches`);
-  assert.match(gradleCache.with.path, /~\/\.gradle\/caches/, `${file} must cache the Gradle dependency caches`);
-  assert.match(gradleCache.with.path, /~\/\.gradle\/wrapper/, `${file} must cache the Gradle wrapper distributions`);
-  assert.match(gradleCache.with.key, /hashFiles\('apps\/mobile\/package-lock\.json'\)/, `${file} must key the Gradle cache on the committed dependency set`);
-  assert.match(gradleCache.with["restore-keys"], /gradle-\$\{\{ runner\.os \}\}-/, `${file} must fall back to the previous Gradle cache so dependency updates stay warm`);
+for (const id of ["debug-android", "release-android"]) {
+  const javaStep = jobs[id].steps.find((step) => step.uses === "actions/setup-java@v6");
+  assert.ok(javaStep, `${id} must set up Java for the Android build`);
+  assert.equal(javaStep.with.cache, undefined, `${id} must cache Gradle explicitly instead of through setup-java`);
+  const gradleCache = jobs[id].steps.find((step) => String(step.uses).startsWith("actions/cache@"));
+  assert.ok(gradleCache, `${id} must restore the Gradle caches`);
+  assert.match(gradleCache.with.path, /~\/\.gradle\/caches/, `${id} must cache the Gradle dependency caches`);
+  assert.match(gradleCache.with.path, /~\/\.gradle\/wrapper/, `${id} must cache the Gradle wrapper distributions`);
+  assert.match(gradleCache.with.key, /hashFiles\('apps\/mobile\/package-lock\.json'\)/, `${id} must key the Gradle cache on the committed dependency set`);
+  assert.match(gradleCache.with["restore-keys"], /gradle-\$\{\{ runner\.os \}\}-/, `${id} must fall back to the previous Gradle cache so dependency updates stay warm`);
 }
 
-const ci = workflow("mobile-ci.yml");
-for (const event of ["push", "pull_request"]) {
-  assert.deepEqual(ci.on[event].paths, ["apps/mobile/**", ".github/workflows/mobile-*.yml"], `Mobile CI must ${event} only for app changes`);
-}
-const e2e = workflow("mobile-e2e-android.yml");
-assert.deepEqual(e2e.on.workflow_run.workflows, [ota.name], "E2E must chain off the OTA workflow by its current name");
-workflow("mobile-security.yml");
-assert.deepEqual(ci.jobs.bundle.strategy.matrix.platform, ["android", "ios"], "CI must still export both platform bundles");
-assert.equal(Object.hasOwn(ci.jobs.bundle, "needs"), false, "CI exports must not serialize behind Quality: they are independent and serializing them doubled every run's wall clock");
+assert.deepEqual(jobs.bundle.strategy.matrix.platform, ["android", "ios"], "CI must still export both platform bundles");
+assert.equal(Object.hasOwn(jobs.bundle, "needs"), false, "CI exports must not serialize behind Quality: they are independent and serializing them doubled every run's wall clock");
+assert.equal(jobs["e2e-android"].needs, "ota-publish-android", "Device E2E on main tests the JS that OTA just published");
+assert.match(jobs["e2e-android"].if, /!cancelled\(\)/, "A manual E2E run must not be skipped because the OTA jobs did not run");
+assert.match(jobs["e2e-android"].if, /inputs\.task == 'e2e'/);
 
-const testFlightUpload = nativeRelease.jobs.ios.steps.find((step) => step.name === "Submit iOS to TestFlight");
+const releaseIos = jobs["release-ios"];
+const testFlightUpload = releaseIos.steps.find((step) => step.name === "Submit iOS to TestFlight");
 assert.equal(testFlightUpload.with["wait-for-processing"], "true", "TestFlight uploads must confirm Apple processed the build");
 assert.equal(Object.hasOwn(testFlightUpload.with, "uses-non-exempt-encryption"), false, "TestFlight uploads must not patch build metadata with a limited API key");
 const appJson = JSON.parse(readFileSync("app.json", "utf8"));
 assert.equal(appJson.expo.ios.infoPlist.ITSAppUsesNonExemptEncryption, false, "iOS builds must declare export compliance in Info.plist");
-assert.equal(nativeRelease.jobs.ios.env.EXPO_PUBLIC_UPDATES_URL, "${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}");
-assert.ok(JSON.stringify(nativeRelease.jobs.ios.steps).includes("EXUpdates.bundle"), "iOS builds must record the fingerprint embedded in the IPA");
-assert.ok(JSON.stringify(nativeRelease.jobs.ios.steps).includes(IOS_NATIVE_FINGERPRINT_ASSET));
-const iosArtifact = nativeRelease.jobs.ios.steps.find((step) => step.uses === "actions/upload-artifact@v7");
+assert.equal(releaseIos.env.EXPO_PUBLIC_UPDATES_URL, "${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}");
+assert.ok(JSON.stringify(releaseIos.steps).includes("EXUpdates.bundle"), "iOS builds must record the fingerprint embedded in the IPA");
+assert.ok(JSON.stringify(releaseIos.steps).includes(IOS_NATIVE_FINGERPRINT_ASSET));
+const iosArtifact = releaseIos.steps.find((step) => step.uses === "actions/upload-artifact@v7");
 assert.ok(iosArtifact.with.path.includes(IOS_NATIVE_FINGERPRINT_ASSET));
-const attachIosFingerprint = nativeRelease.jobs["attach-ios-fingerprint"];
-assert.equal(attachIosFingerprint.needs, "ios");
-assert.match(JSON.stringify(attachIosFingerprint.if), /inputs\.submit == true/);
+const attachIosFingerprint = jobs["release-attach-ios"];
+assert.deepEqual(attachIosFingerprint.needs, ["release-plan", "release-ios"]);
+assert.match(attachIosFingerprint.if, /ios_submit == 'true'/, "Only a submitted TestFlight build may claim the release's iOS runtime");
 assert.equal(attachIosFingerprint.permissions.contents, "write");
 assert.match(JSON.stringify(attachIosFingerprint.steps), /gh release upload/);
-assert.match(JSON.stringify(nativeRelease.jobs.android.steps), /native-fingerprint/);
-assert.match(nativeRelease.jobs.android.steps.find((step) => step.uses === "actions/upload-artifact@v7").with.path, /native-fingerprint/);
+assert.match(JSON.stringify(jobs["release-android"].steps), /native-fingerprint/);
+assert.match(jobs["release-android"].steps.find((step) => step.uses === "actions/upload-artifact@v7").with.path, /native-fingerprint/);
 
-const taggedRelease = workflow("mobile-native-tag.yml");
-assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /gh release upload/, "GitHub Release must still attach APKs");
-assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /publish-yaota-apks/, "Native Tag Release must publish the same APKs to Yaota");
-assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /OTA_SERVER/);
-assert.deepEqual(taggedRelease.on.push.tags, ["cohub-mobile-v*"], "The monorepo's vX.Y.Z tags release the services, not the app");
-assert.deepEqual(Object.keys(taggedRelease.on), ["push"], "Only a tag push starts automatic native release; release events must not duplicate it");
-assert.equal(taggedRelease.concurrency["cancel-in-progress"], false);
-assert.match(taggedRelease.concurrency.group, /github.ref/);
-assert.match(taggedRelease.jobs.prepare.if, /!github.event.deleted/);
-const prepareSteps = JSON.stringify(taggedRelease.jobs.prepare.steps);
+const publishRelease = jobs["release-publish-android"];
+assert.match(JSON.stringify(publishRelease.steps), /gh release upload/, "GitHub Release must still attach APKs");
+assert.match(JSON.stringify(publishRelease.steps), /publish-yaota-apks/, "A tag release must publish the same APKs to Yaota");
+assert.match(JSON.stringify(publishRelease.steps), /OTA_SERVER/);
+assert.deepEqual(publishRelease.needs, ["release-plan", "release-android"]);
+assert.match(publishRelease.if, /outputs\.publish == 'true'/, "Only a tag push attaches APKs and publishes them to Yaota");
+assert.match(JSON.stringify(publishRelease.steps), /cohub-android-native-fingerprint.txt/);
+
+const plan = jobs["release-plan"];
+assert.match(plan.if, /!github\.event\.deleted/);
+assert.match(plan.if, /inputs\.task == 'native-release'/);
+const prepareSteps = JSON.stringify(plan.steps);
 assert.match(prepareSteps, /--is-ancestor/);
 assert.match(prepareSteps, /--require-native-tag/);
 assert.match(prepareSteps, /--verify-tag/);
@@ -243,18 +255,19 @@ assert.match(prepareSteps, /--latest=false/, "An app release must not become the
 assert.match(prepareSteps, /scripts\/release-notes\.mjs/);
 assert.equal(prepareSteps.includes("--generate-notes"), false, "Generated notes would list every monorepo PR");
 assert.match(prepareSteps, /GITHUB_SHA/);
-assert.equal(taggedRelease.jobs.prepare.permissions.contents, "write");
-const validateTag = taggedRelease.jobs.prepare.steps.find((step) => step.id === "target");
-for (const job of Object.values(taggedRelease.jobs)) {
-  for (const step of job.steps ?? []) {
-    if (step.run) execFileSync("bash", ["-n"], { input: step.run });
-  }
+assert.equal(plan.permissions.contents, "write");
+assert.match(plan.steps.find((step) => step.name === "Ensure GitHub Release exists").if, /publish == 'true'/, "A manual native release must not create a GitHub Release");
+for (const platform of ["android", "ios"]) {
+  assert.equal(jobs[`release-${platform}`].needs, "release-plan");
+  assert.equal(jobs[`release-${platform}`].if, `needs.release-plan.outputs.${platform} == 'true'`);
 }
-// Execute the actual tag validation shell against a local Git remote, without signing or publishing.
+const validateTag = plan.steps.find((step) => step.id === "target");
+// Execute the actual release plan shell against a local Git remote, without signing or publishing.
 const tagFixture = mkdtempSync(join(tmpdir(), "cohub-native-tag-"));
 try {
   const remote = join(tagFixture, "remote.git");
   const checkout = join(tagFixture, "checkout");
+  const output = join(tagFixture, "output");
   const git = (...args) => execFileSync("git", args, { cwd: checkout, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
   execFileSync("git", ["clone", remote, checkout], { stdio: "ignore" });
@@ -271,12 +284,22 @@ try {
   git("tag", "-a", "cohub-mobile-v1.2.3", "-m", "test release");
   git("tag", "cohub-mobile-v1.2.4");
   git("push", "origin", "main", "--tags");
-  const runTag = (tag, sha = releaseSha) => spawnSync("bash", ["-e", "-c", validateTag.run], {
-    cwd: checkout, encoding: "utf8", env: { ...process.env, RELEASE_TAG: tag, GITHUB_SHA: sha, GITHUB_OUTPUT: join(tagFixture, "output") },
-  });
+  const runPlan = (env) => {
+    writeFileSync(output, "");
+    const result = spawnSync("bash", ["-e", "-c", validateTag.run], {
+      cwd: checkout, encoding: "utf8", env: { ...process.env, MODE: "tag", GITHUB_SHA: releaseSha, GITHUB_OUTPUT: output, ...env },
+    });
+    const outputs = Object.fromEntries(readFileSync(output, "utf8").trim().split("\n").filter(Boolean).map((line) => line.split("=")));
+    return { ...result, outputs };
+  };
+  const runTag = (tag, sha = releaseSha) => runPlan({ RELEASE_TAG: tag, GITHUB_SHA: sha });
   let result = runTag("cohub-mobile-v1.2.3");
   assert.equal(result.status, 0, result.stderr);
-  assert.match(readFileSync(join(tagFixture, "output"), "utf8"), /tag=cohub-mobile-v1.2.3/);
+  assert.deepEqual(result.outputs, {
+    tag: "cohub-mobile-v1.2.3", sha: releaseSha, publish: "true",
+    android: "true", android_profile: "distribution", android_submit: "false", android_track: "internal",
+    ios: "true", ios_submit: "true",
+  }, "A tag push publishes signed APKs and submits iOS to TestFlight");
   result = runTag("cohub-mobile-v1.2.3", git("rev-parse", "cohub-mobile-v1.2.3"));
   assert.equal(result.status, 0, result.stderr);
   for (const tag of ["v1.2.3", "cohub-mobile-v01.2.3", "cohub-mobile-v1.2.3-beta.1", "cohub-mobile-v1.2", "cohub-mobile-v1.2.3;echo unsafe"]) {
@@ -287,6 +310,32 @@ try {
   result = runTag("cohub-mobile-v1.2.4");
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Tag mismatch/);
+
+  const manual = (env) => runPlan({ MODE: "manual", RELEASE_TAG: "cohub-mobile-v1.2.3", PLATFORM: "android", PROFILE: "distribution", SUBMIT: "false", ANDROID_TRACK: "internal", ...env });
+  result = manual({});
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.outputs.publish, "false", "A manual run never publishes to the GitHub Release or Yaota");
+  assert.equal(result.outputs.android, "true");
+  assert.equal(result.outputs.ios, "false");
+  result = manual({ PLATFORM: "all", PROFILE: "production", SUBMIT: "true", ANDROID_TRACK: "production" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(
+    [result.outputs.android, result.outputs.android_profile, result.outputs.android_submit, result.outputs.android_track, result.outputs.ios, result.outputs.ios_submit],
+    ["true", "production", "true", "production", "true", "true"],
+  );
+  result = manual({ PLATFORM: "ios" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /only supports platform=android/);
+  result = manual({ SUBMIT: "true" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /cannot submit to a store/);
+  result = manual({ PLATFORM: "desktop" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /Unsupported platform/);
+  result = manual({ RELEASE_TAG: "" });
+  assert.notEqual(result.status, 0, "A manual native release requires a release tag");
+  assert.match(result.stdout, /stable cohub-mobile-vX.Y.Z/);
+
   git("checkout", "main");
   git("commit", "--allow-empty", "-m", "test: newer main");
   const newerSha = git("rev-parse", "HEAD");
@@ -294,6 +343,8 @@ try {
   result = runTag("cohub-mobile-v1.2.3", newerSha);
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /Tag moved/);
+  result = manual({ GITHUB_SHA: newerSha });
+  assert.equal(result.status, 0, "A manual run on main builds an existing tag");
   git("checkout", "-b", "unmerged");
   git("commit", "--allow-empty", "-m", "test: unmerged release");
   const unmergedSha = git("rev-parse", "HEAD");
@@ -302,36 +353,19 @@ try {
   result = runTag("cohub-mobile-v1.2.6", unmergedSha);
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /reachable from origin\/main/);
+  result = manual({ RELEASE_TAG: "cohub-mobile-v1.2.6" });
+  assert.notEqual(result.status, 0, "Signing credentials are used only for tags on main");
+  assert.match(result.stdout, /reachable from origin\/main/);
 } finally {
   rmSync(tagFixture, { recursive: true, force: true });
 }
-for (const platform of ["android", "ios"]) {
-  const job = taggedRelease.jobs[platform];
-  assert.equal(job.needs, "prepare");
-  assert.equal(job.uses, "./.github/workflows/mobile-native-release.yml");
-  assert.equal(job.with.platform, platform);
-  assert.equal(job.with.release_tag, "${{ needs.prepare.outputs.tag }}");
-  // inherit would hand every monorepo secret to the native build.
-  assert.equal(typeof job.secrets, "object", `${platform} must pass its secrets explicitly`);
-  for (const [name, value] of Object.entries(job.secrets)) {
-    assert.ok(Object.hasOwn(nativeRelease.on.workflow_call.secrets, name), `${name} must be declared by the reusable workflow`);
-    assert.equal(value, `\${{ secrets.${name} }}`);
-  }
-}
-assert.equal(taggedRelease.jobs.android.with.profile, "distribution");
-assert.equal(taggedRelease.jobs.android.with.submit, false);
-assert.equal(taggedRelease.jobs.ios.with.profile, "production");
-assert.equal(taggedRelease.jobs.ios.with.submit, true);
-assert.equal(taggedRelease.jobs.ios.permissions.contents, "write");
-assert.deepEqual(taggedRelease.jobs["publish-android"].needs, ["prepare", "android"]);
-assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /cohub-android-native-fingerprint.txt/);
-const publishApkStep = taggedRelease.jobs["publish-android"].steps.find((step) => step.name === "Upload formal APKs to GitHub Release");
+const publishApkStep = publishRelease.steps.find((step) => step.name === "Upload formal APKs to GitHub Release");
 assert.ok(publishApkStep, "The release workflow must attach formal Android APKs to the GitHub Release");
 assert.match(publishApkStep.run, /find build\/release/, "Artifact downloads keep their directory layout, so the publish step must locate APKs recursively");
 assert.equal(publishApkStep.run.includes("build/release/*.apk"), false, "A flat glob misses APKs nested under android/app/build/outputs");
 assert.match(publishApkStep.run, /cohub-\$\{RELEASE_TAG#cohub-mobile-\}-android-/, "APK names stay cohub-vX.Y.Z for Yaota and the landing page");
 for (const platform of ["android", "ios"]) {
-  assert.match(JSON.stringify(ota.jobs[platform].steps), /matching-refs\/tags\/cohub-mobile-v/, `${platform} OTA must resolve its runtime from app releases only`);
+  assert.match(JSON.stringify(jobs[`ota-${platform}`].steps), /matching-refs\/tags\/cohub-mobile-v/, `${platform} OTA must resolve its runtime from app releases only`);
 }
 
 // Release notes replace Release Please and cover app commits only.

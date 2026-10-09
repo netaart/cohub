@@ -14,7 +14,7 @@
 
 - Setup, product capabilities, authentication, or push work: read `README.md` and the relevant configuration in `.env.example`, `app.config.ts`, and `src/config.ts`.
 - Validation or contribution workflow: read `CONTRIBUTING.md`; `package.json` is the source of truth for commands.
-- Signing, CI distribution, versioning, or releases: read `docs/releasing.md` and the affected `mobile-*.yml` files in the repository-root `.github/workflows/`. Change the app version only as part of a release.
+- Signing, CI distribution, versioning, or releases: read `docs/releasing.md` and `.github/workflows/mobile-ci.yml` at the repository root. Change the app version only as part of a release.
 
 ## Project Skills
 

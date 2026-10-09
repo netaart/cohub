@@ -107,7 +107,7 @@ function listReleases(repository) {
   const refs = JSON.parse(run("gh", ["api", `repos/${repository}/git/matching-refs/tags/${TAG_PREFIX}`, "--jq", "[.[].ref]"]));
   return newestAppTags(refs, CANDIDATE_LIMIT).flatMap((tag) => {
     const result = spawnSync("gh", ["release", "view", tag, "--repo", repository, "--json", "tagName,publishedAt,isDraft,isPrerelease"], { encoding: "utf8" });
-    // A pushed tag has no release until Mobile Native Tag Release creates one.
+    // A pushed tag has no release until its Mobile CI run creates one.
     if (result.status !== 0 && /release not found/i.test(result.stderr)) return [];
     if (result.status !== 0) throw new Error(`gh release view ${tag} failed: ${result.stderr.trim()}`);
     const release = JSON.parse(result.stdout);

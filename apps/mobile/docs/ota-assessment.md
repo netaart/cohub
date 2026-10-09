@@ -21,7 +21,7 @@ Primary sources:
 ## Current Capabilities
 
 - [app.config.ts](../app.config.ts) enables OTA only with a build-time HTTPS endpoint. It uses `ON_LOAD`, zero startup wait, native fingerprints, production request headers, and a pinned signing certificate. Cached/embedded code starts immediately while the startup procedure checks/downloads updates. Downloaded updates normally apply on a subsequent cold launch.
-- [.github/workflows/mobile-publish-ota.yml](../../../.github/workflows/mobile-publish-ota.yml) runs `npm run check` before platform exports and publication. It pins the fork CLI and publishes against installed native runtimes. Native compatibility and signing safeguards should remain intact.
+- The OTA jobs of [.github/workflows/mobile-ci.yml](../../../.github/workflows/mobile-ci.yml) run `npm run check` before platform exports and publication. It pins the fork CLI and publishes against installed native runtimes. Native compatibility and signing safeguards should remain intact.
 - [AppUpdateBanner.tsx](../src/components/AppUpdateBanner.tsx) exposes Android APK updates, not OTA status. Its About update row is hidden on iOS. [app/debug/updates.tsx](../app/debug/updates.tsx) exposes manual OTA check/download/reload; there is no production OTA `useUpdates()` observer or foreground check in the inspected app code.
 - The SDK's `useUpdates()`, download progress, check/download errors, and `reloadAsync({ reloadScreenOptions })` are client capabilities and do not require EAS hosting. EAS dashboards and managed rollout policies are separate service capabilities.
 

@@ -2,13 +2,13 @@
 
 ## Overview
 
-The app lives in `apps/mobile` of the [Cohub monorepo](https://github.com/netaart/cohub). Its workflows are the repository-root `.github/workflows/mobile-*.yml` files, named `Mobile ...`, and they run from `apps/mobile`. The repository does not require Expo Application Services (EAS) for builds.
+The app lives in `apps/mobile` of the [Cohub monorepo](https://github.com/netaart/cohub). One workflow, `Mobile CI` (`.github/workflows/mobile-ci.yml` at the repository root), builds and releases it, running every step from `apps/mobile`. The repository does not require Expo Application Services (EAS) for builds.
 
-1. `Mobile CI` validates PRs and `main` pushes that touch `apps/mobile`, and exports Android and iOS JavaScript bundles in parallel with the quality checks.
-2. `Mobile Native CI` is a manual dispatch that compiles Android debug APKs and an iOS simulator app for internal validation. It does not run on pull requests or `main` pushes.
-3. Pushing a stable `cohub-mobile-vX.Y.Z` tag starts `Mobile Native Tag Release`. It creates the GitHub Release with notes from the app's commits, attaches signed Android APKs, and uploads a signed iOS IPA to TestFlight. Both platforms record their OTA fingerprints.
+1. Pull requests and `main` pushes that touch `apps/mobile` run Quality, Audit, and Android/iOS bundle exports in parallel.
+2. A `main` push also publishes production OTA, then runs the Android device E2E against it.
+3. Pushing a stable `cohub-mobile-vX.Y.Z` tag runs the release jobs. They create the GitHub Release with notes from the app's commits, attaches signed Android APKs, and uploads a signed iOS IPA to TestFlight. Both platforms record their OTA fingerprints.
 
-A `main` push that touches `apps/mobile` runs quality checks, bundle exports, security checks, and production Android and iOS OTA. It does not compile native packages. Every stable app tag, including a PATCH tag, starts both native distributions. Keep JS-only work on `main` without creating a tag until a native release is intended.
+Manual runs (Actions -> `Mobile CI` -> Run workflow) pick one `task`: `ci`, `native-debug` (Android debug APKs and an iOS simulator app for internal validation), `native-release`, `ota` (staging or a specific SHA), or `e2e`. Pull requests and `main` pushes never compile native packages. Every stable app tag, including a PATCH tag, starts both native distributions. Keep JS-only work on `main` without creating a tag until a native release is intended.
 
 The monorepo's own `vX.Y.Z` tags release and deploy the Cohub services. Never push a `vX.Y.Z` tag for the app: it would start production service deployments and no app build.
 
@@ -70,7 +70,7 @@ The first formally signed package must be produced by a new release created afte
 
 ### In-app Android updates
 
-About > Application and the in-app update banner scan Yaota (`https://mobile.talesofai.com/api/apks`) for the newest signed APK for the device, so they only prompt when a new native package is required; JS-only releases stay silent and arrive through OTA. Native Tag Release attaches the four ABI APKs to the GitHub Release, then publishes the same files to Yaota. The app selects the device ABI, downloads the APK from Yaota into its private cache, verifies the published size and SHA-256 digest, and grants Android's package installer temporary access through a `content://` URI. The primary update action does not open a browser. Missing or malformed digests block installation.
+About > Application and the in-app update banner scan Yaota (`https://mobile.talesofai.com/api/apks`) for the newest signed APK for the device, so they only prompt when a new native package is required; JS-only releases stay silent and arrive through OTA. The tag release attaches the four ABI APKs to the GitHub Release, then publishes the same files to Yaota. The app selects the device ABI, downloads the APK from Yaota into its private cache, verifies the published size and SHA-256 digest, and grants Android's package installer temporary access through a `content://` URI. The primary update action does not open a browser. Missing or malformed digests block installation.
 
 Downloads show progress and can be cancelled. Failed or cancelled downloads are removed; a verified APK is retained for installation retries. Closing the installer does not snooze the release or count as a successful update. Android checks package/signature compatibility and requires user confirmation. The update sheet includes an Installation permission action for Android's "Install unknown apps" setting. Keep the same signing key for every release.
 
@@ -78,15 +78,15 @@ Migration: users must install a new signed native APK containing `expo-intent-la
 
 ### Optional OTA service
 
-`expo-updates` is installed, but OTA is disabled until `EXPO_PUBLIC_UPDATES_URL` is set to an absolute HTTPS Expo Updates protocol endpoint at native build time. `Mobile Native Release` reads it from the `MOBILE_EXPO_PUBLIC_UPDATES_URL` repository variable for Android and iOS builds. A GitHub Release URL or ordinary JSON version manifest is not an OTA service.
+`expo-updates` is installed, but OTA is disabled until `EXPO_PUBLIC_UPDATES_URL` is set to an absolute HTTPS Expo Updates protocol endpoint at native build time. Native builds read it from the `MOBILE_EXPO_PUBLIC_UPDATES_URL` repository variable for Android and iOS builds. A GitHub Release URL or ordinary JSON version manifest is not an OTA service.
 
 - The client uses `ON_LOAD` with a zero startup wait: launch cached/embedded code, download an update in the background, and load it on a subsequent cold launch. It does not reload an active chat.
 - `runtimeVersion` uses the `fingerprint` policy. `fingerprint.config.js` skips app version fields (`version`, `android.versionCode`, `ios.buildNumber`), so a release version bump does not change the runtime and JS-only commits keep riding the installed binary. Changing Expo SDK, native dependencies, permissions, or other native configuration changes the fingerprint and requires a new APK or TestFlight build. Android and iOS fingerprints differ, so each platform publishes its own runtime.
 - Use the same production environment values when building the native binary and exporting OTA bundles. `EXPO_PUBLIC_*` values are public.
 - The deployed service is [markbang/yaota](https://github.com/markbang/yaota). The manifest endpoint is `https://mobile.talesofai.com/manifest`; the Worker serves content-addressed assets from the `expo-updates` R2 bucket through `/ota-assets/ID/HASH`. Repository variables `MOBILE_EXPO_PUBLIC_UPDATES_URL` and `MOBILE_OTA_SERVER` are configured.
-- A push to `main` that touches `apps/mobile` publishes production Android and iOS OTA automatically. The workflow exports that commit, resolves each platform's runtime from its installed native binary (`assets/fingerprint` in the arm64 APK of the newest `cohub-mobile-v*` release that has one, `cohub-ios-native-fingerprint.txt` likewise), then uploads both platforms immediately. A missing iOS fingerprint fails the iOS export job only; Android publishing still completes. Manual Actions > Mobile Publish OTA remains for staging or a specific SHA. There is no environment approval gate.
+- A push to `main` that touches `apps/mobile` publishes production Android and iOS OTA automatically. The workflow exports that commit, resolves each platform's runtime from its installed native binary (`assets/fingerprint` in the arm64 APK of the newest `cohub-mobile-v*` release that has one, `cohub-ios-native-fingerprint.txt` likewise), then uploads both platforms immediately. A missing iOS fingerprint fails the iOS export job only; Android publishing still completes. A manual `Mobile CI` run with `task=ota` remains for staging or a specific SHA. Main pushes and OTA runs queue per channel, so an older commit's OTA never overtakes a newer one. There is no environment approval gate.
 - Each platform's upload retries transient failures (network errors, timeouts, HTTP 5xx/429) up to three times with a growing delay. Auth errors, fingerprint mismatches, and other rejections fail or skip immediately. Repeating is safe: blobs are content-addressed, an interrupted attempt leaves at most an unserved Staged release, and the per-channel concurrency group keeps a retry from overtaking a newer commit.
-- Mobile Native Release attaches `cohub-android-native-fingerprint.txt` to signed Android distributions and `cohub-ios-native-fingerprint.txt` to the GitHub Release when a production iOS build is submitted to TestFlight. Bootstrap each platform once with an OTA-capable native binary; after that, JS-only work does not need a new package. OTA is indexed with the runtime embedded in that binary (`assets/fingerprint` in the APK, `EXUpdates.bundle/fingerprint` in the IPA) so installed devices can receive it.
+- The native release attaches `cohub-android-native-fingerprint.txt` to signed Android distributions and `cohub-ios-native-fingerprint.txt` to the GitHub Release when a production iOS build is submitted to TestFlight. Bootstrap each platform once with an OTA-capable native binary; after that, JS-only work does not need a new package. OTA is indexed with the runtime embedded in that binary (`assets/fingerprint` in the APK, `EXUpdates.bundle/fingerprint` in the IPA) so installed devices can receive it.
 - An existing iOS build cannot gain `expo-updates` configuration through OTA. Ship one new TestFlight build with `EXPO_PUBLIC_UPDATES_URL` set before iOS OTA can serve devices.
 - Mobile publication needs the `MOBILE_OTA_API_KEY` secret and the `MOBILE_OTA_SERVER` variable. CI runs the pinned Yaota `scripts/publish.ts` on Node 24, reusing the existing Expo export. It computes the source native fingerprint independently from the installed runtime, exports the public Expo config, and records the source commit. `--delta-bases 3` generates verified BSDIFF40 patches against up to three compatible historical releases. The release stays staged until patch preparation succeeds, then activates automatically. See [the delta integration notes](yaota-delta.md).
 - When OTA is enabled, `app.config.ts` sends app ID `cohub-mobile` and channel `production`, and requires manifests signed against `certs/ota-certificate.crt`. The matching private key is held in the server repository's `OTA_SIGNING_PRIVATE_KEY` secret and installed as the Worker secret `CODE_SIGNING_PRIVATE_KEY`. Never put the private key in this repository or replace the certificate without a native migration.
@@ -115,7 +115,7 @@ A Google Play release requires an upload keystore and these GitHub Actions secre
 | `MOBILE_ANDROID_KEY_PASSWORD` | Upload key password |
 | `MOBILE_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Google Play Developer API service account JSON |
 
-The service account must be invited to the app in Google Play Console. The package name is `io.github.markbang.cohubmobile`. Use the manual `Mobile Native Release` workflow with `platform=android`, `profile=production`, and `submit=true` after these credentials are configured.
+The service account must be invited to the app in Google Play Console. The package name is `io.github.markbang.cohubmobile`. Run `Mobile CI` manually with `task=native-release`, `platform=android`, `profile=production`, and `submit=true` after these credentials are configured.
 
 ### iOS
 
@@ -142,7 +142,7 @@ Commit types only choose the release-notes section. Version numbering does not d
 
 ## Tag automation setup
 
-`Mobile Native Tag Release` is triggered only by `cohub-mobile-v*` tag pushes. It reuses `Mobile Native Release` with Android `distribution` / `submit=false` and iOS `production` / `submit=true`. Android attachment and iOS TestFlight publication finish independently; check both platform results before declaring a dual-platform release complete. TestFlight processing or review may delay tester availability after upload.
+The release jobs of `Mobile CI` start on `cohub-mobile-v*` tag pushes. Their plan job builds Android `distribution` / `submit=false` and iOS `production` / `submit=true`. Android attachment and iOS TestFlight publication finish independently; check both platform results before declaring a dual-platform release complete. TestFlight processing or review may delay tester availability after upload.
 
 A tag must point to a commit reachable from `origin/main`, must match `package.json` and `app.json`, and must be a stable `cohub-mobile-vX.Y.Z` without a prerelease suffix or leading zeros. A moved tag or version mismatch fails before signing. Do not retag a published version.
 
@@ -150,13 +150,13 @@ The prepare job creates the GitHub Release when the tag has none. Its notes list
 
 Push tags as a person or with a token that triggers workflows. Tags created with the default `GITHUB_TOKEN` do not start downstream workflows.
 
-The app's history was imported with its tags renamed: the former `vX.Y.Z` tags of `markbang/cohub-mobile` are `cohub-mobile-vX.Y.Z` here, and their GitHub Releases stay in that repository. Publish OTA and device E2E read the newest app release's APK and fingerprint files from this repository, so at least one `cohub-mobile-v*` release carrying them must exist here.
+The app's history was imported with its tags renamed: the former `vX.Y.Z` tags of `markbang/cohub-mobile` are `cohub-mobile-vX.Y.Z` here, and their GitHub Releases stay in that repository. OTA publication and device E2E read the newest app release's APK and fingerprint files from this repository, so at least one `cohub-mobile-v*` release carrying them must exist here.
 
 ## Normal release
 
 1. Merge feature PRs with Conventional Commit titles.
 2. Open a release PR that sets the new version in `package.json`, `package-lock.json`, and `app.json`, titled `chore(mobile): release X.Y.Z`. From `apps/mobile`, `npm version X.Y.Z --no-git-tag-version` updates both npm files; edit `expo.version` in `app.json` to match.
-3. Confirm `Mobile CI` and `Mobile Security` are green, then merge.
+3. Confirm `Mobile CI` is green, then merge.
 4. Tag the merged commit and push the tag:
 
    ```bash
@@ -164,7 +164,7 @@ The app's history was imported with its tags renamed: the former `vX.Y.Z` tags o
    git push origin cohub-mobile-vX.Y.Z
    ```
 
-5. Wait for `Mobile Native Tag Release`: the GitHub Release, Android APK attachment, Yaota publication, and iOS TestFlight processing/fingerprint attachment. No manual build dispatch is required.
+5. Wait for the tag's `Mobile CI` run: the GitHub Release, Android APK attachment, Yaota publication, and iOS TestFlight processing/fingerprint attachment. No manual build dispatch is required.
 
 Replace the placeholders with the validated release version and commit. Merely creating a local tag does not trigger GitHub Actions.
 
@@ -172,7 +172,7 @@ GitHub-hosted macOS runner usage may be subject to your GitHub plan's Actions qu
 
 ## Manual native builds
 
-Open Actions -> `Mobile Native Release` -> Run workflow. Choose:
+Open Actions -> `Mobile CI` -> Run workflow with `task=native-release` and an existing `release_tag`. Choose:
 
 - `distribution` for signed standalone Android release APKs
 - `production` for signed store artifacts (AAB/IPA)
@@ -192,11 +192,11 @@ The iOS command requires macOS and Xcode. The Android command requires the Andro
 
 ## Recovery
 
-If a tag-triggered native build fails, inspect the failed job and rerun failed jobs in `Mobile Native Tag Release` for that tag. Do not rerun an already successful TestFlight upload with the same build number. If only APK attachment failed, rerun that job without rebuilding. For manual recovery, `Mobile Native Release` still accepts the existing tag and platform/profile inputs; Android manual runs produce Actions artifacts that must be attached explicitly. Keep the same release keystore and passwords for all future versions.
+If a tag-triggered native build fails, inspect the failed job and rerun failed jobs in that tag's `Mobile CI` run. Do not rerun an already successful TestFlight upload with the same build number. If only APK attachment failed, rerun that job without rebuilding. For manual recovery, a `task=native-release` run accepts the existing tag and platform/profile inputs; manual runs produce Actions artifacts and never attach to the GitHub Release or publish to Yaota. Keep the same release keystore and passwords for all future versions.
 
-For a Google Play failure, configure the Android signing and Play service-account secrets first, then rerun `Mobile Native Release` with:
+For a Google Play failure, configure the Android signing and Play service-account secrets first, then run `Mobile CI` from `main` with:
 
-- ref: the existing `cohub-mobile-vX.Y.Z` tag
+- task: `native-release`
 - profile: `production`
 - platform: `android`
 - submit: `true` when the store upload should be retried

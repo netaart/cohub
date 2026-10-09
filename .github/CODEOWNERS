@@ -1,2 +1,2 @@
 /apps/mobile/ @markbang
-/.github/workflows/mobile-*.yml @markbang
+/.github/workflows/mobile-ci.yml @markbang

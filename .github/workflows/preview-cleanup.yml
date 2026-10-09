@@ -10,9 +10,9 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**.md'
-      # The mobile app has its own workflows (mobile-*.yml).
+      # The mobile app has its own workflow (mobile-ci.yml).
       - 'apps/mobile/**'
-      - '.github/workflows/mobile-*.yml'
+      - '.github/workflows/mobile-ci.yml'
 
 concurrency:
   group: preview-${{ github.event.pull_request.number }}

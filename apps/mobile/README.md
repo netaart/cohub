@@ -1,7 +1,6 @@
 # Cohub Mobile
 
 [![Mobile CI](https://github.com/netaart/cohub/actions/workflows/mobile-ci.yml/badge.svg)](https://github.com/netaart/cohub/actions/workflows/mobile-ci.yml)
-[![Mobile Security](https://github.com/netaart/cohub/actions/workflows/mobile-security.yml/badge.svg)](https://github.com/netaart/cohub/actions/workflows/mobile-security.yml)
 
 A native iOS and Android client for Cohub, built with React Native and Expo.
 
