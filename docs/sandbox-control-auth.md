@@ -4,7 +4,11 @@ Cloud `/sandbox` connections require an Ed25519 JWT before the HTTP upgrade. The
 
 API and Agent require the same `SANDBOX_CONTROL_PRIVATE_KEY` (PKCS8 PEM) within an environment. fs-api uses the API Secret. Generate this key with `openssl genpkey -algorithm ED25519` and store it in the deployment Secrets. Use distinct keys for dev and prod. Keep the private key out of Space variables, Pod metadata, logs and user-controlled containers. API derives `SANDBOX_CONTROL_PUBLIC_KEY` and injects only that public key into each cloud sandbox Pod. A cloud listener refuses to start without a valid public key. Local dial-out sandboxes retain gateway relay authentication.
 
+For a manually started cloud listener, export the corresponding SPKI PEM public key as `SANDBOX_CONTROL_PUBLIC_KEY` and set `COHUB_SPACE_ID`. Direct clients, including `LOCAL_SANDBOX_WS_URL` overrides, need the matching platform private key; local dial-out mode uses its existing relay token.
+
 ## Deployment
+
+The deployment identity needs `get`, `create` and `patch` on `networkpolicies.networking.k8s.io` in the sandbox namespace (`cohub-sessions-dev` or `cohub-sessions`). Have a cluster administrator grant these namespace-scoped permissions before running the API deployment script; the preview workflow also uses that script. Validate CNI support and check for overlapping ingress policies before rollout.
 
 1. Add the private key to the API and Agent Secrets. Build the sandbox image and set the API's desired sandbox image to that version.
 2. Deploy API, fs-api and Agent with these changes and matching Secrets in a coordinated maintenance window. API deployment applies `sandbox-network-policy.yaml`; control connections can be interrupted until all client Pods carry the `cohub.live/sandbox-control-client=true` label supplied by their deployment templates. The policy namespace matches the supplied dev/prod manifests; adjust it when using custom namespaces. The label also covers preview API deployments.
