@@ -21,7 +21,6 @@ import {
   OTA_PUBLISH_ATTEMPTS,
 } from "./ota-publish.mjs";
 import { parseAppTag, parseCommits, renderReleaseNotes } from "./release-notes.mjs";
-import { newestAppTags } from "./e2e/resolve-golden.mjs";
 
 const YAML = createRequire(import.meta.url)("yaml");
 
@@ -68,7 +67,7 @@ assert.deepEqual(mobile.on.push.branches, ["main"]);
 assert.deepEqual(mobile.on.push.tags, ["cohub-mobile-v*"], "The monorepo's vX.Y.Z tags release the services, not the app");
 assert.equal(Object.hasOwn(mobile.on, "release"), false, "Only a tag push starts automatic native release; release events must not duplicate it");
 const inputs = mobile.on.workflow_dispatch.inputs;
-assert.deepEqual(inputs.task.options, ["ci", "native-debug", "native-release", "ota", "e2e"]);
+assert.deepEqual(inputs.task.options, ["ci", "native-debug", "native-release", "ota"]);
 assert.ok(Object.keys(inputs).length <= 10, "workflow_dispatch accepts at most 10 inputs");
 assert.deepEqual(inputs.channel.options, ["staging", "production"]);
 assert.equal(inputs.channel.default, "production");
@@ -212,9 +211,6 @@ for (const id of ["debug-android", "release-android"]) {
 
 assert.deepEqual(jobs.bundle.strategy.matrix.platform, ["android", "ios"], "CI must still export both platform bundles");
 assert.equal(Object.hasOwn(jobs.bundle, "needs"), false, "CI exports must not serialize behind Quality: they are independent and serializing them doubled every run's wall clock");
-assert.equal(jobs["e2e-android"].needs, "ota-publish-android", "Device E2E on main tests the JS that OTA just published");
-assert.match(jobs["e2e-android"].if, /!cancelled\(\)/, "A manual E2E run must not be skipped because the OTA jobs did not run");
-assert.match(jobs["e2e-android"].if, /inputs\.task == 'e2e'/);
 
 const releaseIos = jobs["release-ios"];
 const testFlightUpload = releaseIos.steps.find((step) => step.name === "Submit iOS to TestFlight");
@@ -426,11 +422,6 @@ try {
   rmSync(notesFixture, { recursive: true, force: true });
 }
 
-// E2E picks its golden APK among app tags, ignoring the services' vX.Y.Z tags.
-assert.deepEqual(
-  newestAppTags(["refs/tags/cohub-mobile-v2.2.9", "refs/tags/cohub-mobile-v2.10.0", "refs/tags/cohub-mobile-v2.2.14", "refs/tags/cohub-mobile-v2.3.0-rc.1"], 2),
-  ["cohub-mobile-v2.10.0", "cohub-mobile-v2.2.14"],
-);
 
 assert.equal(OTA_CLI_REVISION.length, 40);
 

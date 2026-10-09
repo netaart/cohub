@@ -5,10 +5,10 @@
 The app lives in `apps/mobile` of the [Cohub monorepo](https://github.com/netaart/cohub). One workflow, `Mobile CI` (`.github/workflows/mobile-ci.yml` at the repository root), builds and releases it, running every step from `apps/mobile`. The repository does not require Expo Application Services (EAS) for builds.
 
 1. Pull requests and `main` pushes that touch `apps/mobile` run Quality and Android/iOS bundle exports in parallel.
-2. A `main` push also publishes production OTA, then runs the Android device E2E against it.
+2. A `main` push also publishes production Android and iOS OTA.
 3. Pushing a stable `cohub-mobile-vX.Y.Z` tag runs the release jobs. They create the GitHub Release with notes from the app's commits, attaches signed Android APKs, and uploads a signed iOS IPA to TestFlight. Both platforms record their OTA fingerprints.
 
-Manual runs (Actions -> `Mobile CI` -> Run workflow) pick one `task`: `ci`, `native-debug` (Android debug APKs and an iOS simulator app for internal validation), `native-release`, `ota` (staging or a specific SHA), or `e2e`. Pull requests and `main` pushes never compile native packages. Every stable app tag, including a PATCH tag, starts both native distributions. Keep JS-only work on `main` without creating a tag until a native release is intended.
+Manual runs (Actions -> `Mobile CI` -> Run workflow) pick one `task`: `ci`, `native-debug` (Android debug APKs and an iOS simulator app for internal validation), `native-release`, or `ota` (staging or a specific SHA). Pull requests and `main` pushes never compile native packages. Every stable app tag, including a PATCH tag, starts both native distributions. Keep JS-only work on `main` without creating a tag until a native release is intended.
 
 The monorepo's own `vX.Y.Z` tags release and deploy the Cohub services. Never push a `vX.Y.Z` tag for the app: it would start production service deployments and no app build.
 
@@ -24,7 +24,7 @@ Logto 1.3 supports SDK 57 peer dependencies, so `npm ci` no longer uses `legacy-
 
 ## One-time repository setup
 
-Actions secrets and variables for the app carry a `MOBILE_` prefix so they stay apart from the monorepo's service credentials. The tag release passes only its signing secrets to the native build instead of inheriting every repository secret. Device E2E reads the `MOBILE_E2E_ACCOUNT_EMAIL` and `MOBILE_E2E_ACCOUNT_PASSWORD` secrets.
+Actions secrets and variables for the app carry a `MOBILE_` prefix so they stay apart from the monorepo's service credentials. The tag release passes only its signing secrets to the native build instead of inheriting every repository secret.
 
 ### Android formal distribution
 
@@ -150,7 +150,7 @@ The prepare job creates the GitHub Release when the tag has none. Its notes list
 
 Push tags as a person or with a token that triggers workflows. Tags created with the default `GITHUB_TOKEN` do not start downstream workflows.
 
-The app's history was imported from `markbang/cohub-mobile`. Only its last release came along, as `cohub-mobile-v2.2.14` on the imported commit, so release notes and OTA have a starting point: OTA publication and device E2E read the newest app release's APK and fingerprint files from this repository. Earlier versions and their GitHub Releases stay in `markbang/cohub-mobile`.
+The app's history was imported from `markbang/cohub-mobile`. Only its last release came along, as `cohub-mobile-v2.2.14` on the imported commit, so release notes and OTA have a starting point: OTA publication reads the newest app release's APK and fingerprint files from this repository. Earlier versions and their GitHub Releases stay in `markbang/cohub-mobile`.
 
 ## Normal release
 
