@@ -1184,7 +1184,7 @@ export async function uploadSpaceFiles(
     try {
       const buffer = Buffer.from(await candidate.file.arrayBuffer());
       const { stats, created, createdDirs: directories } = await writeSpacePath(workspaceDir, candidate.relativePath, buffer);
-      directories.forEach((path) => createdDirs.add(path));
+      for (const path of directories) createdDirs.add(path);
       uploaded.push({
         path: candidate.relativePath,
         name: candidate.name,
