@@ -121,7 +121,7 @@ type ExportOptions = JsonOptions & {
   items?: string;
   rect?: string;
   theme?: string;
-  background?: string;
+  paper?: string;
   format?: string;
   quality?: string;
   images?: boolean;
@@ -191,7 +191,7 @@ function registerExportCommand(boards: Command): void {
     .option("--scale <factor>", "Output pixels per board unit", "2")
     .option("--padding <units>", "Padding around the content in board units")
     .option("--theme <mode>", "dark or light", "dark")
-    .option("--background <mode>", "paper or transparent", "paper")
+    .option("--paper <mode>", "Output paper: paper or transparent", "paper")
     .option("--format <format>", `Override the format (${BOARD_EXPORT_FORMATS.join(", ")}, ${BOARD_VIDEO_FORMATS.join(", ")})`)
     .option("--quality <q>", "JPEG/WebP quality from 0 to 1", "0.92")
     .option("--fps <rate>", "Video frame rate; defaults to the --at step")
@@ -231,7 +231,7 @@ Examples:
             scale: parseNumber(options.scale ?? "2", "--scale", { min: 0.01, max: 16 }),
             ...(options.padding === undefined ? {} : { padding: parseNumber(options.padding, "--padding", { min: 0 }) }),
             colorScheme: parseChoice(options.theme, "--theme", ["dark", "light"] as const),
-            background: parseChoice(options.background, "--background", ["paper", "transparent"] as const),
+            background: parseChoice(options.paper, "--paper", ["paper", "transparent"] as const),
             format: videoFormat,
             fps,
             output: out,
@@ -253,7 +253,7 @@ Examples:
           scale: parseNumber(options.scale ?? "2", "--scale", { min: 0.01, max: 16 }),
           ...(options.padding === undefined ? {} : { padding: parseNumber(options.padding, "--padding", { min: 0 }) }),
           colorScheme: parseChoice(options.theme, "--theme", ["dark", "light"] as const),
-          background: parseChoice(options.background, "--background", ["paper", "transparent"] as const),
+          background: parseChoice(options.paper, "--paper", ["paper", "transparent"] as const),
           format: parseExportFormat(options, out),
           quality: parseNumber(options.quality ?? "0.92", "--quality", { min: 0, max: 1 }),
           withImages: options.images !== false,
@@ -290,6 +290,9 @@ A Board is one JSON document: { board, items, animations }.
   get      read it
   apply    write it with a JSON Merge Patch; null deletes
   schema   the schema of any part, and what tracks can animate
+  preset   tracks for a preset motion, ready to apply
+  history  list versions, or restore one
+  export   render an image, a frame sequence or a video
   examples starter documents
 Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
 
@@ -326,7 +329,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
 
   boards.command("get <board>")
     .description("Print the Board document as JSON")
-    .option("--only <sections>", "items, animations, or both (comma-separated)")
+    .option("--only <sections>", "board, items, animations (comma-separated)")
     .option("--items <ids>", "Only these items")
     .option("--within <frame-id>", "A frame and everything inside it")
     .option("--rect <rect>", "Items intersecting x,y,width,height")
@@ -336,13 +339,14 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .addHelpText("after", `
   cohub boards get plan.board
   cohub boards get plan.board --within s2
-  cohub boards get plan.board --only animations`)
+  cohub boards get plan.board --only board`)
     .action(async (target: string, options: { only?: string; items?: string; within?: string; rect?: string; animations?: string; limit?: string; cursor?: string }) => {
       try {
         const only = list(options.only);
-        if (only?.some((section) => section !== "items" && section !== "animations")) throw new Error("--only takes items, animations, or both.");
+        if (only?.some((section) => section !== "board" && section !== "items" && section !== "animations")) throw new Error("--only takes board, items, animations, or a combination.");
+        const sections = only ? new Set(only) : null;
         const input: BoardReadInput = {
-          ...(only ? { only: only as BoardReadInput["only"] } : {}),
+          ...(only ? { only: only.filter((section): section is NonNullable<BoardReadInput["only"]>[number] => section !== "board") as BoardReadInput["only"] } : {}),
           ...(list(options.items) ? { items: list(options.items) } : {}),
           ...(options.within ? { within: options.within } : {}),
           ...(options.rect ? { rect: parseRect(options.rect) } : {}),
@@ -350,7 +354,19 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
           ...(options.limit ? { limit: parseNumber(options.limit, "--limit", { min: 1, integer: true }) } : {}),
           ...(options.cursor ? { cursor: options.cursor } : {}),
         };
-        outJson(await (await boardClient(boards, target)).get(input));
+        const result = await (await boardClient(boards, target)).get(input);
+        if (!sections) return outJson(result);
+        outJson({
+          id: result.id,
+          title: result.title,
+          version: result.version,
+          updatedAt: result.updatedAt,
+          playback: result.playback,
+          ...(sections.has("board") ? { board: result.board } : {}),
+          ...(sections.has("items") && result.items ? { items: result.items } : {}),
+          ...(sections.has("animations") && result.animations ? { animations: result.animations } : {}),
+          ...(result.next ? { next: result.next } : {}),
+        });
       } catch (cause) {
         handleHttp(cause);
       }
@@ -426,6 +442,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
   boards.command("schema [target]")
     .description("Print JSON Schema for a part of a Board")
     .addHelpText("after", `
+With a target: one item type, or animation, track, or camera.
 Targets: ${BOARD_SCHEMA_TARGETS.join(", ")}
 Without a target: units, item types, colors and every animatable property.`)
     .action((target?: string) => {
@@ -442,15 +459,16 @@ Without a target: units, item types, colors and every animatable property.`)
   boards.command("preset <name>")
     .description("Print tracks for a preset motion as a patch for apply")
     .requiredOption("--targets <ids>", "Comma-separated item ids")
-    .requiredOption("--animation <id>", "Animation to add the tracks to")
+    .option("--animation <id>", "Wrap the tracks in this animation; omit to get bare tracks")
     .option("--at <time>", "Start of the first target", "0")
     .option("--stagger <time>", "Delay added per target", "0")
     .option("--duration <time>", "Length of each target's motion")
     .option("--ease <ease>", "CSS easing, e.g. ease-out or cubic-bezier(.2,.8,.2,1)")
     .addHelpText("after", `
 Presets: ${BOARD_PRESET_NAMES.join(", ")}
-  cohub boards preset rise --targets a,b,c --animation intro --stagger 120ms | cohub boards apply plan.board -i -`)
-    .action((name: string, options: { targets: string; animation: string; at: string; stagger: string; duration?: string; ease?: string }) => {
+  cohub boards preset rise --targets a,b,c --animation intro --stagger 120ms | cohub boards apply plan.board -i -
+  cohub boards preset float --targets ship | jq -c '{animations:{idle:.}}' | cohub boards apply plan.board -i -`)
+    .action((name: string, options: { targets: string; animation?: string; at: string; stagger: string; duration?: string; ease?: string }) => {
       try {
         if (!isBoardPresetName(name)) throw new Error(`Unknown preset ${name}; expected ${BOARD_PRESET_NAMES.join(", ")}.`);
         const targets = list(options.targets);
@@ -462,7 +480,7 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
           ...(options.duration ? { duration: parseBoardTime(options.duration, "--duration") } : {}),
           ...(options.ease ? { ease: options.ease } : {}),
         });
-        outJson({ animations: { [options.animation]: { tracks } } });
+        outJson(options.animation ? { animations: { [options.animation]: { tracks } } } : { tracks });
       } catch (cause) {
         handleHttp(cause);
       }

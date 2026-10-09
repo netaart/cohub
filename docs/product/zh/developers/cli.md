@@ -206,30 +206,35 @@ cohub spaces displays press back              # 手机会列出它支持的系�
 
 ### Boards
 
-Board 命令支持 Board ID 或 `.board` 路径。读取按资源范围执行，查询单个 item 不会加载整个 Board。
+Board 是一个 JSON 文档，包含三个集合——`board` 设置、`items` 和 `animations`——所有命令都支持 Board ID 或 `.board` 路径。`get` 按资源范围读取，查询单个 item 不会加载整个 Board：
 
 ```bash
-cohub -s <spaceId> boards inspect boards/plan.board --json
-cohub -s <spaceId> boards items list <boardId>
-cohub -s <spaceId> boards items get <boardId> <itemId> --json
-cohub -s <spaceId> boards connections list <boardId>
-cohub -s <spaceId> boards effects get <boardId> <effectId> --json
-cohub -s <spaceId> boards compositions get <boardId> <compositionId> --json
+cohub -s <spaceId> boards get boards/plan.board --json
+cohub -s <spaceId> boards get <boardId> --only board
+cohub -s <spaceId> boards get <boardId> --only items
+cohub -s <spaceId> boards get <boardId> --items title,note
+cohub -s <spaceId> boards get <boardId> --within s1
 ```
 
-使用 `boards examples` 生成 JSON 模板，使用 `boards capabilities --json` 查看支持的 schema。多个变更可以通过 semantic command batch 原子提交：
+`apply` 是唯一的写入方式：对文档应用 JSON Merge Patch，字段合并、`null` 删除、未提及的字段保持不变。`--replace` 让文档等于 patch 而非合并。`--dry-run` 校验但不写入，`--base-version` / `--mutation-id` 用于控制重试。
 
 ```bash
-cohub boards examples item text > item.json
-cohub -s <spaceId> boards items create <boardId> --input item.json
-cohub boards examples batch basic > changes.json
-cohub -s <spaceId> boards batch <boardId> --input changes.json --dry-run
-cohub -s <spaceId> boards batch <boardId> --input changes.json
+cohub -s <spaceId> boards apply <boardId> '{"items":{"title":{"props":{"text":"New title"}}}}'
+cohub -s <spaceId> boards apply <boardId> -i patch.json --dry-run
+cohub -s <spaceId> boards apply <boardId> -i - < changes.json
 ```
 
-batch 文件包含 `commands` 数组，可以组合 item、connection、effect、composition 和 Board patch，不需要包含完整 Board 快照。需要严格控制重试时使用 `--base-version` 和 `--mutation-id`。
+`boards schema` 是各字段的权威说明；`boards preset` 会把预设动效输出为轨迹——带 `--animation` 时是一份可直接 `apply` 的 patch，不带时是纯 `tracks`：
 
-播放命令统一位于 `boards playback` 下；图片渲染仍使用 `boards export`。
+```bash
+cohub -s <spaceId> boards schema                 # 单位、item 类型、颜色、可动画属性
+cohub -s <spaceId> boards schema arrow           # 指定一个 target
+cohub -s <spaceId> boards examples lesson > lesson.json
+cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub boards apply <boardId> -i -
+cohub -s <spaceId> boards preset float --targets ship   # 纯 tracks，可自行折进动画
+```
+
+`boards history` 列出历史版本或恢复到某个版本。时间线播放使用 `boards` 顶层命令（`play`、`pause`、`resume`、`seek`、`next`、`stop`），图片和视频渲染仍使用 `boards export`，`boards watch` 会流式输出变更与播放状态。
 
 ### Search 与 models
 

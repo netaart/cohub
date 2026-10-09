@@ -58,7 +58,7 @@ Common commands:
   cohub runtime up ./my-project
   cohub runtime logs --follow
   cohub search "release notes"
-  cohub -s <space-id> boards inspect <board-id>
+  cohub -s <space-id> boards get <board-id>
   cohub -s <space-id> spaces turns ls --author others
   cohub -s <space-id> spaces sessions turns ls <session-id>
   cohub -s home spaces files ls

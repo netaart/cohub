@@ -232,57 +232,63 @@ cohub -s <spaceId> spaces activity 365 --json
 
 ## Boards
 
-Board targets accept a Board ID or a `.board` path. Every command supports `-h` and `--json`:
+A Board is one JSON document with three collections — `board` settings, `items`,
+and `animations`. Board targets accept a Board ID or a `.board` path. Every
+command supports `-h`, and the global `--json` makes the output machine-readable:
 
 ```bash
 cohub boards -h
-cohub -s <spaceId> boards inspect boards/plan.board --json
-cohub -s <spaceId> boards items list <boardId>
-cohub -s <spaceId> boards connections list <boardId>
-cohub -s <spaceId> boards capabilities <boardId>
+cohub -s <spaceId> boards get boards/plan.board --json
+cohub -s <spaceId> boards get <boardId> --only items
+cohub -s <spaceId> boards get <boardId> --only board
+cohub -s <spaceId> boards schema
+cohub -s <spaceId> boards history <boardId> --json
 cohub -s <spaceId> boards watch <boardId> --json
 ```
 
-Use targeted reads for large Boards:
+Use the filters so a large Board is not read whole:
 
 ```bash
-cohub -s <spaceId> boards items get <boardId> <itemId> --json
-cohub -s <spaceId> boards connections get <boardId> <connectionId> --json
-cohub -s <spaceId> boards effects get <boardId> <effectId> --json
-cohub -s <spaceId> boards compositions get <boardId> <compositionId> --json
+cohub -s <spaceId> boards get <boardId> --items title,note
+cohub -s <spaceId> boards get <boardId> --within s1
+cohub -s <spaceId> boards get <boardId> --rect 0,0,1600,900
 ```
 
-Create semantic JSON from an example, then apply it to one resource:
+Start from an example and write it with `apply`, a JSON Merge Patch where fields
+merge, `null` deletes, and unmentioned fields stay:
 
 ```bash
-cohub boards examples item text > item.json
-cohub -s <spaceId> boards items create <boardId> --input item.json
+cohub boards examples workflow > seed.json
+cohub -s <spaceId> boards create boards/plan.board --title "Plan" -i seed.json
 
-cohub boards examples composition fade > intro.json
-cohub -s <spaceId> boards compositions apply <boardId> --input intro.json
+cohub -s <spaceId> boards apply <boardId> '{"items":{"title":{"props":{"text":"Updated"}}}}'
+cohub -s <spaceId> boards apply <boardId> -i changes.json
 ```
 
-Apply related changes atomically with one request. The batch contains semantic commands, not a full Board snapshot:
-
-```json
-{"commands":[
-  {"type":"item.patch","itemId":"title","patch":{"props":{"text":"Updated"}}},
-  {"type":"connection.create","connection":{"id":"title-agent","source":{"itemId":"title"},"target":{"itemId":"agent"}}}
-]}
-```
+Group a whole change into one patch so it lands as one version. `--replace` makes
+the document equal to the patch instead of merging; `--cascade` also deletes
+children and the tracks targeting a deleted item:
 
 ```bash
-cohub boards examples batch basic > changes.json
-cohub -s <spaceId> boards batch <boardId> --input changes.json --dry-run
-cohub -s <spaceId> boards batch <boardId> --input changes.json
+cohub -s <spaceId> boards apply <boardId> -i changes.json --dry-run
+cohub -s <spaceId> boards apply <boardId> -i changes.json --base-version 12 --mutation-id deploy-1
 ```
 
-Use `--base-version` and `--mutation-id` for controlled, retry-safe scripts. Use `--dry-run` to validate without writing. Playback is grouped under `playback`:
+Use `--base-version` and `--mutation-id` for controlled, retry-safe scripts, and
+`--dry-run` to validate without writing. `boards preset` prints a preset motion as
+tracks — an apply-ready patch with `--animation`, bare tracks without it:
 
 ```bash
-cohub -s <spaceId> boards playback play <boardId> <compositionId>
-cohub -s <spaceId> boards playback seek <boardId> <playbackId> 400
-cohub -s <spaceId> boards playback stop <boardId> <playbackId>
+cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub boards apply <boardId> -i -
+cohub -s <spaceId> boards preset float --targets ship > idle-tracks.json
+```
+
+Playback commands sit on `boards` directly:
+
+```bash
+cohub -s <spaceId> boards play <boardId> <animationId> --at 2.5s
+cohub -s <spaceId> boards seek <boardId> 12.5s
+cohub -s <spaceId> boards stop <boardId>
 ```
 
 ## Search

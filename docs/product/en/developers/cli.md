@@ -228,30 +228,35 @@ does.
 
 ### Boards
 
-Board commands accept a Board ID or a `.board` path. Reads are resource-scoped, so inspecting one item does not load the whole Board.
+A Board is one JSON document with three collections — `board` settings, `items`, and `animations` — and every command accepts a Board ID or a `.board` path. `get` is resource-scoped, so reading one item does not load the whole Board:
 
 ```bash
-cohub -s <spaceId> boards inspect boards/plan.board --json
-cohub -s <spaceId> boards items list <boardId>
-cohub -s <spaceId> boards items get <boardId> <itemId> --json
-cohub -s <spaceId> boards connections list <boardId>
-cohub -s <spaceId> boards effects get <boardId> <effectId> --json
-cohub -s <spaceId> boards compositions get <boardId> <compositionId> --json
+cohub -s <spaceId> boards get boards/plan.board --json
+cohub -s <spaceId> boards get <boardId> --only board
+cohub -s <spaceId> boards get <boardId> --only items
+cohub -s <spaceId> boards get <boardId> --items title,note
+cohub -s <spaceId> boards get <boardId> --within s1
 ```
 
-Use `boards examples` for starter JSON and `boards capabilities --json` for supported schemas. Apply a group of changes atomically with a semantic command batch:
+`apply` is the only write: a JSON Merge Patch of the document where fields merge, `null` deletes, and anything unmentioned stays. `--replace` makes the document equal to the patch instead of merging it. `--dry-run` validates without writing, and `--base-version` / `--mutation-id` control retries.
 
 ```bash
-cohub boards examples item text > item.json
-cohub -s <spaceId> boards items create <boardId> --input item.json
-cohub boards examples batch basic > changes.json
-cohub -s <spaceId> boards batch <boardId> --input changes.json --dry-run
-cohub -s <spaceId> boards batch <boardId> --input changes.json
+cohub -s <spaceId> boards apply <boardId> '{"items":{"title":{"props":{"text":"New title"}}}}'
+cohub -s <spaceId> boards apply <boardId> -i patch.json --dry-run
+cohub -s <spaceId> boards apply <boardId> -i - < changes.json
 ```
 
-A batch file has a `commands` array. It can combine item, connection, effect, composition, and Board patch commands without containing a full Board snapshot. Use `--base-version` and `--mutation-id` for controlled retries.
+`boards schema` is the source of truth for every field, and `boards preset` prints tracks for a preset motion — as an apply-ready patch with `--animation`, or bare `tracks` without it:
 
-Playback commands are grouped under `boards playback`; image rendering remains available through `boards export`.
+```bash
+cohub -s <spaceId> boards schema                 # units, item types, colors, animatable properties
+cohub -s <spaceId> boards schema arrow           # one target
+cohub -s <spaceId> boards examples lesson > lesson.json
+cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub boards apply <boardId> -i -
+cohub -s <spaceId> boards preset float --targets ship   # bare tracks, to fold into your own animation
+```
+
+`boards history` lists versions or restores one. Timeline playback lives on the top-level `boards` commands (`play`, `pause`, `resume`, `seek`, `next`, `stop`), image and video rendering stays on `boards export`, and `boards watch` streams changes and playback.
 
 Board media and effects use the same item model as every other Board element. `video` and `audio` items accept `props.time` in milliseconds, so an animation track can target `props.time` directly. For example:
 
