@@ -4,15 +4,22 @@
 
 -- Reject identifiers that cannot be represented before touching any source rows.
 -- Do not silently rename identifiers: external links may still refer to them.
+--
+-- Legacy `file` nodes may carry a path-shaped id (e.g. `world:file:a/b.md`). Those
+-- cannot be represented as v3 item ids, so they are dropped rather than rejected:
+-- their Boards keep functioning and the full v2 state stays archived in the
+-- migration transaction. Every other identifier must still be representable.
 DO $$
 BEGIN
   IF EXISTS (
     SELECT 1 FROM (
-      SELECT "node_id" AS id FROM "v2"."board_nodes" WHERE "deleted_at" IS NULL
+      SELECT "node_id" AS id FROM "v2"."board_nodes"
+        WHERE "deleted_at" IS NULL AND NOT ("type" = 'file' AND "node_id" ~ '[[:space:]/]')
       UNION ALL SELECT "connection_id" FROM "v2"."board_connections" WHERE "deleted_at" IS NULL
       UNION ALL SELECT 'connection-' || c."connection_id" FROM "v2"."board_connections" c
         JOIN "v2"."board_nodes" n ON n."board_id" = c."board_id" AND n."node_id" = c."connection_id"
         WHERE c."deleted_at" IS NULL AND n."deleted_at" IS NULL
+          AND NOT (n."type" = 'file' AND n."node_id" ~ '[[:space:]/]')
       UNION ALL SELECT "id" FROM "v2"."board_compositions"
       UNION ALL SELECT "id" FROM "v2"."board_tracks"
       UNION ALL SELECT "id" FROM "v2"."board_clips"
@@ -154,6 +161,9 @@ WITH nodes AS (
     pg_temp.board_v3_src(n."ref_path") IS NOT NULL AS "has_src"
   FROM "v2"."board_nodes" n
   WHERE n."deleted_at" IS NULL
+    -- Legacy file nodes whose id is a path cannot become v3 items; drop them.
+    -- Connections bound to them fall away too, since their endpoints are gone.
+    AND NOT (n."type" = 'file' AND n."node_id" ~ '[[:space:]/]')
 )
 INSERT INTO "v2"."board_items" ("board_id", "id", "type", "z", "min_x", "min_y", "max_x", "max_y", "src", "data", "version", "created_at", "updated_at")
 SELECT
