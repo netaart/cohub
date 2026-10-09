@@ -903,7 +903,7 @@ jobs:
             --title "Cohub Mobile ${RELEASE_TAG#cohub-mobile-}" --notes-file "$RUNNER_TEMP/release-notes.md"
 
   release-android:
-    name: Release ${{ needs.release-plan.outputs.android_profile }} (android)
+    name: Release (android)
     needs: release-plan
     if: needs.release-plan.outputs.android == 'true'
     runs-on: ubuntu-latest
@@ -1063,7 +1063,7 @@ jobs:
           status: completed
 
   release-ios:
-    name: Release production (ios)
+    name: Release (ios)
     needs: release-plan
     if: needs.release-plan.outputs.ios == 'true'
     runs-on: macos-latest
