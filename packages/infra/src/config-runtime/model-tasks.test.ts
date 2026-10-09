@@ -113,11 +113,15 @@ test("standalone user task keys remain literals; ambient adapters and missing ke
   }).sessionTitle;
   assert.equal(task?.model.apiKey, "SERVICE_ENV_NAME");
   assert.equal(task?.model.headers, undefined);
-  for (const unsafe of [{ ...model, apiKey: undefined }, { ...model, api: "google-vertex" }, { ...model, api: "bedrock-converse-stream" }]) {
+  for (const { model: unsafe, message } of [
+    { model: { ...model, apiKey: undefined }, message: "User model custom/custom requires an explicit API key" },
+    { model: { ...model, api: "google-vertex" }, message: "User model custom/custom uses an unsupported API adapter: google-vertex" },
+    { model: { ...model, api: "bedrock-converse-stream" }, message: "User model custom/custom uses an unsupported API adapter: bedrock-converse-stream" },
+  ]) {
     assert.throws(() => resolveModelTasksConfig({
       platformModels, platformTasks,
       userTasks: { sessionTitle: { model: unsafe } },
-    }), /User models require/);
+    }), { message });
   }
 });
 

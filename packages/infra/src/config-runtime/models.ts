@@ -246,14 +246,15 @@ export function mergeModelsConfigs(
   const providers = new Map<string, ProviderConfig>(Object.entries(platform?.providers ?? {}));
   for (const config of userConfigs) {
     for (const [provider, providerConfig] of Object.entries(config?.providers ?? {})) {
-      // Keep the replacement even when no user model is runnable. Falling back
-      // to the platform provider would restore its credentials unexpectedly.
-      providers.set(provider, {
-        ...providerConfig,
-        models: providerConfig.models?.filter((model) => hasUserModelCredentials({
-          api: model.api ?? providerConfig.api, apiKey: providerConfig.apiKey,
-        })),
-      });
+      for (const model of providerConfig.models ?? []) {
+        assertUserModelCredentials({
+          provider,
+          id: model.id,
+          api: model.api ?? providerConfig.api,
+          apiKey: providerConfig.apiKey,
+        });
+      }
+      providers.set(provider, providerConfig);
     }
   }
   return { providers: Object.fromEntries(providers) };
@@ -283,13 +284,21 @@ const USER_MODEL_APIS = new Set([
   "openai-responses", "pi-messages",
 ]);
 
-function hasUserModelCredentials(model: { api?: string; apiKey?: string }): boolean {
-  return Boolean(model.apiKey?.trim() && model.api && USER_MODEL_APIS.has(model.api));
-}
-
-export function assertUserModelCredentials(model: { api?: string; apiKey?: string }) {
-  if (!hasUserModelCredentials(model)) {
-    throw new Error("User models require an explicit API key and an API-key-based adapter");
+export function assertUserModelCredentials(model: {
+  provider: string;
+  id: string;
+  api?: string;
+  apiKey?: string;
+}) {
+  const label = `User model ${model.provider}/${model.id}`;
+  if (!model.apiKey?.trim()) {
+    throw new Error(`${label} requires an explicit API key`);
+  }
+  if (!model.api) {
+    throw new Error(`${label} requires an API-key-based adapter`);
+  }
+  if (!USER_MODEL_APIS.has(model.api)) {
+    throw new Error(`${label} uses an unsupported API adapter: ${model.api}`);
   }
 }
 

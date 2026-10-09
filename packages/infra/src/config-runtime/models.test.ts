@@ -96,7 +96,9 @@ test("user providers cannot inherit platform connection defaults", () => {
       },
     },
   };
-  assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "default"), false);
+  assert.throws(() => isRuntimeModelAvailable([platform, user], "cohub", "default"), {
+    message: "User model cohub/default requires an explicit API key",
+  });
 });
 
 test("platform environment references resolve only in a runtime copy", (t) => {
@@ -155,48 +157,84 @@ test("a same-name user provider replaces credentials, headers, extensions and mo
   assert.equal(isRuntimeModelAvailable([trusted, user], "cohub", "custom"), true);
 });
 
-test("unusable user transports are excluded without disabling unrelated platform models", () => {
-  for (const provider of [
-    { api: "openai-completions", baseUrl: "https://user.example.test", models: [{ id: "custom" }] },
-    { api: "bedrock-converse-stream", apiKey: "user-key", models: [{ id: "custom" }] },
-    { api: "google-vertex", apiKey: "user-key", models: [{ id: "custom" }] },
-    { api: "openai-completions", apiKey: "user-key", models: [{ id: "custom", api: "google-vertex" }] },
-  ]) {
+test("invalid user credentials fail catalog resolution with the provider, model and reason", () => {
+  const cases = [
+    {
+      provider: { api: "openai-completions", models: [{ id: "custom" }] },
+      message: "User model custom/custom requires an explicit API key",
+    },
+    {
+      provider: { api: "openai-completions", apiKey: "  ", models: [{ id: "custom" }] },
+      message: "User model custom/custom requires an explicit API key",
+    },
+    {
+      provider: { apiKey: "user-key", models: [{ id: "custom" }] },
+      message: "User model custom/custom requires an API-key-based adapter",
+    },
+    {
+      provider: { api: "bedrock-converse-stream", apiKey: "user-key", models: [{ id: "custom" }] },
+      message: "User model custom/custom uses an unsupported API adapter: bedrock-converse-stream",
+    },
+    {
+      provider: { api: "google-vertex", apiKey: "user-key", models: [{ id: "custom" }] },
+      message: "User model custom/custom uses an unsupported API adapter: google-vertex",
+    },
+    {
+      provider: { api: "openai-completions", apiKey: "user-key", models: [{ id: "custom", api: "google-vertex" }] },
+      message: "User model custom/custom uses an unsupported API adapter: google-vertex",
+    },
+  ];
+  for (const { provider, message } of cases) {
     const user: ModelsConfig = { providers: { custom: provider } };
-    const runtime = resolveRuntimeModelsConfig({ platform, user });
-    assert.deepEqual(runtime.providers.custom?.models, []);
-    assert.equal(isRuntimeModelAvailable([platform, user], "custom", "custom"), false);
-    assert.equal(isRuntimeModelAvailable([runtime], "cohub", "default"), true);
-    assert.equal(user.providers.custom?.models?.length, 1);
+    assert.throws(() => mergeModelsConfigs(platform, user), { message });
+    assert.throws(() => resolveRuntimeModelsConfig({ platform, user }), { message });
+    assert.throws(() => isRuntimeModelAvailable([platform, user], "custom", "custom"), { message });
+    assert.deepEqual(user.providers.custom?.models, provider.models);
   }
 });
 
-test("filtering one user model preserves its siblings and works without a platform catalog", () => {
+test("an invalid user model rejects a mixed catalog without a platform catalog", () => {
   const user: ModelsConfig = { providers: {
     custom: {
       api: "openai-completions", baseUrl: "https://user.example.test", apiKey: "user-key",
       models: [{ id: "usable" }, { id: "ambient", api: "google-vertex" }],
     },
   } };
-  assert.deepEqual(flattenModelsCatalog(mergeModelsConfigs(null, user)).map((model) => model.id), ["usable"]);
-  assert.deepEqual(flattenModelsCatalog(resolveRuntimeModelsConfig({ user })).map((model) => model.id), ["usable"]);
+  const expected = { message: "User model custom/ambient uses an unsupported API adapter: google-vertex" };
+  assert.throws(() => mergeModelsConfigs(null, user), expected);
+  assert.throws(() => resolveRuntimeModelsConfig({ user }), expected);
+  assert.deepEqual(user.providers.custom?.models?.map((model) => model.id), ["usable", "ambient"]);
+});
+
+test("valid user models and platform cloud adapters remain available", () => {
+  const user: ModelsConfig = { providers: {
+    custom: {
+      api: "openai-completions", baseUrl: "https://user.example.test", apiKey: "user-key",
+      models: [{ id: "first" }, { id: "second", api: "anthropic-messages" }],
+    },
+  } };
+  assert.deepEqual(flattenModelsCatalog(mergeModelsConfigs(null, user)).map((model) => model.id), ["first", "second"]);
   const trusted: ModelsConfig = { providers: {
     cloud: { api: "google-vertex", baseUrl: "https://platform.example.test", models: [{ id: "platform-cloud" }] },
   } };
-  assert.equal(isRuntimeModelAvailable([resolveRuntimeModelsConfig({ platform: trusted, user })], "cloud", "platform-cloud"), true);
-  assert.equal(user.providers.custom?.models?.length, 2);
+  const runtime = resolveRuntimeModelsConfig({ platform: trusted, user });
+  assert.equal(isRuntimeModelAvailable([runtime], "cloud", "platform-cloud"), true);
+  assert.equal(isRuntimeModelAvailable([runtime], "custom", "first"), true);
+  assert.equal(isRuntimeModelAvailable([runtime], "custom", "second"), true);
 });
 
-test("an invalid same-name user provider never falls back to platform auth", () => {
+test("an invalid same-name user provider fails without exposing platform credentials", () => {
   const user: ModelsConfig = {
     providers: { cohub: { api: "openai-responses", baseUrl: "https://user.example.test", models: [{ id: "default" }] } },
   };
-  const runtime = resolveRuntimeModelsConfig({
-    platform: { providers: { cohub: { ...platform.providers.cohub, apiKey: "synthetic-platform-secret" } } }, user,
+  const trusted: ModelsConfig = {
+    providers: { cohub: { ...platform.providers.cohub, apiKey: "synthetic-platform-secret" } },
+  };
+  assert.throws(() => resolveRuntimeModelsConfig({ platform: trusted, user }), {
+    message: "User model cohub/default requires an explicit API key",
   });
-  assert.equal(runtime.providers.cohub?.apiKey, undefined);
-  assert.deepEqual(runtime.providers.cohub?.models, []);
-  assert.equal(isRuntimeModelAvailable([runtime], "cohub", "default"), false);
+  assert.equal(user.providers.cohub?.apiKey, undefined);
+  assert.equal(trusted.providers.cohub?.apiKey, "synthetic-platform-secret");
 });
 
 test("provider names cannot inherit or alter object prototypes", () => {
