@@ -115,6 +115,13 @@ cohub runtime down
 cohub runtime up -n --name another-project
 ```
 
+On macOS and Linux X11, a new Runtime offers screen sharing by default. The prompt
+explains that collaborators and agents can see and control the screen; Enter accepts,
+and `n` declines. Use `--no-display` to skip sharing, or `--display xvfb[:WIDTHxHEIGHT]`
+for a virtual screen. `--yes` also authorizes default screen sharing. Headless and
+Wayland-only Linux sessions skip the default offer; an existing Runtime keeps its
+screen configuration unless explicitly overridden (configuration changes require a restart).
+
 Runtime diagnostics stay as redacted JSONL under the local Runtime state directory and
 are never uploaded automatically. Use `runtime logs --json` to export a failure report;
 events carry the local `runtimeId` plus server `requestId` / `traceparent` when a turn has

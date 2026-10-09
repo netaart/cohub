@@ -24,14 +24,19 @@ export function parseRuntimeHarnesses(values: string[]): ("pi" | "codex")[] {
   return [...new Set(names.length ? names : ["pi"])] as ("pi" | "codex")[];
 }
 
-export function parseRuntimeDisplay(value: string | boolean | undefined): string | undefined {
-  if (value === undefined || value === false) return undefined;
-  const spec = value === true ? "auto" : value.trim();
+export function parseRuntimeDisplay(
+  value: string | boolean | undefined,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (value === false) return undefined;
+  if (value === undefined && platform !== "darwin" && (platform !== "linux" || !env.DISPLAY)) return undefined;
+  const spec = value === undefined || value === true ? "auto" : value.trim();
   if (!/^(auto|macos|x11(:[\w.:-]+)?|xvfb(:\d{3,4}x\d{3,4})?)$/.test(spec)) {
     throw new Error("Display must be auto, macos, x11[:display] or xvfb[:WIDTHxHEIGHT]");
   }
-  if (process.platform === "linux" && spec === "auto" && !process.env.DISPLAY) {
-    throw new Error(process.env.WAYLAND_DISPLAY
+  if (platform === "linux" && spec === "auto" && !env.DISPLAY) {
+    throw new Error(env.WAYLAND_DISPLAY
       ? "Wayland sessions cannot be shared yet: log in with an X11 session, or use --display xvfb for a virtual screen"
       : "No X11 session to share (DISPLAY is unset): use --display xvfb for a virtual screen");
   }
@@ -97,11 +102,11 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   const binding = await getRuntimeSpaceBinding(root, identity);
   const existingId = requested || binding?.spaceId;
   let harnesses = parseRuntimeHarnesses(options.harness);
-  let display = parseRuntimeDisplay(options.display);
+  let display = options.display === undefined ? undefined : parseRuntimeDisplay(options.display);
   if (existingId && !options.new) {
     const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, existingId));
     if (existing) {
-      if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || options.pi || options.codex || display && display !== existing.display) {
+      if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || options.pi || options.codex || options.display !== undefined && display !== existing.display) {
         throw new Error("Runtime is running with a different configuration. Use down first");
       }
       // `up` is the single idempotent entry: a reused instance adopts its running
@@ -115,6 +120,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
       return;
     }
   }
+  display = parseRuntimeDisplay(options.display);
   if (!options.harness.length) harnesses = await installedHarnesses(root, options);
   if (!harnesses.length) throw new Error("Install and sign in to Pi or Codex, or pass --harness");
   let createNew = Boolean(options.new);
@@ -138,8 +144,8 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
       const answer = await rl.question("Collaborators can execute as your OS user, beyond this folder. Allow? [Y/n] ");
       if (/^n(o)?$/i.test(answer.trim())) return;
       if (display && !isVirtualDisplay(display)) {
-        const share = await rl.question("Collaborators and agents can see and control this screen. Share it? [y/N] ");
-        if (!/^y(es)?$/i.test(share.trim())) display = undefined;
+        const share = await rl.question("Collaborators and agents can see and control this screen. Share it? [Y/n] ");
+        if (!/^(y(es)?)?$/i.test(share.trim())) display = undefined;
       }
     } finally { rl.close(); }
   }

@@ -50,8 +50,9 @@ export function registerRuntime(program: Command) {
     .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--pi <path>", "Pi executable")
     .option("--codex <path>", "Codex executable")
-    .option("--display [screen]", "Share a screen: auto (this computer), or xvfb[:WIDTHxHEIGHT] for a virtual one")
-    .option("-y, --yes", "Accept defaults and authorize local execution and native sync")
+    .option("--display [screen]", "Share a screen (default: auto when available), or xvfb[:WIDTHxHEIGHT] for a virtual one")
+    .option("--no-display", "Disable screen sharing and skip its confirmation")
+    .option("-y, --yes", "Accept defaults and authorize local execution, native sync, and screen sharing")
     .option("--verbose", "Show diagnostic details")
     .option("--json", "JSON output")
     .action(async (dir: string | undefined, options: RuntimeUpOptions) => {

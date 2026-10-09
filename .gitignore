@@ -20,6 +20,7 @@ deploy/api/prod/secrets.yaml
 deploy/api/dev/secrets.yaml
 deploy/gateway/prod/secrets.yaml
 deploy/gateway/dev/secrets.yaml
+deploy/gitea/secrets.yaml
 
 # K8s secrets (do not commit)
 deploy/worker/prod/secrets.yaml
