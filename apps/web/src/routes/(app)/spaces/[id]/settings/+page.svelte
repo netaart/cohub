@@ -2,6 +2,7 @@
 import {
 	type DefaultSpaceModDefinition,
 	getDefaultSpaceModsForEnv,
+	isWorkspaceUsage,
 	normalizeCohubRuntimeEnv,
 } from "@cohub/protocol";
 import type {
@@ -42,7 +43,7 @@ import {
 	X,
 	Zap,
 } from "lucide-svelte";
-import { onDestroy, untrack } from "svelte";
+import { onDestroy } from "svelte";
 import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
 import { PUBLIC_COHUB_ENV } from "$env/static/public";
@@ -69,10 +70,7 @@ import { validateSpaceSlugInput } from "$lib/slug-rules";
 import { buildSpaceLandingRoute } from "$lib/space-routes";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 import { invalidateCachedSpaceMembers } from "$lib/stores/space-profile-cache";
-import {
-	cacheSpaceRecordSoon,
-	getCachedSpaceRecord,
-} from "$lib/stores/space-record-cache";
+import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import SandboxSpecPicker from "./SandboxSpecPicker.svelte";
 
 const locale = $derived(getLocale());
@@ -791,12 +789,8 @@ async function forceRecoverSandbox() {
 	}
 }
 
-async function loadPage(requestedSpaceId: string) {
-	if (space?.id !== requestedSpaceId) space = null;
-	const cached = await getCachedSpaceRecord(requestedSpaceId).catch(() => null);
-	if (spaceId !== requestedSpaceId) return;
-	if (!space && cached?.space) space = cached.space;
-	loading = !space;
+async function loadPage() {
+	loading = true;
 	error = "";
 	invitationsError = "";
 	try {
@@ -859,7 +853,6 @@ async function loadPage(requestedSpaceId: string) {
 				.catch(() => null),
 			invitationPromise,
 		]);
-		if (spaceId !== requestedSpaceId) return;
 		space = spaceResult;
 		spaceDescriptionDraft = spaceResult.description ?? "";
 		cacheSpaceRecordSoon(spaceResult);
@@ -890,43 +883,9 @@ async function loadPage(requestedSpaceId: string) {
 		error =
 			err instanceof Error ? err.message : m.space_failed_load({}, { locale });
 	} finally {
-		if (spaceId === requestedSpaceId) loading = false;
+		loading = false;
 	}
 }
-
-$effect(() => {
-	if (!browser || !spaceId) return;
-	const currentSpaceId = spaceId;
-	let disposed = false;
-	let refreshing = false;
-	const refreshUsage = async () => {
-		if (refreshing || disposed) return;
-		refreshing = true;
-		try {
-			const next = await sdk.space(currentSpaceId).get();
-			if (!disposed && space && space.id === currentSpaceId) {
-				space = { ...space, workspaceUsage: next.workspaceUsage };
-				cacheSpaceRecordSoon(space);
-			}
-		} catch {
-			/* Keep the last server measurement when offline. */
-		} finally {
-			refreshing = false;
-		}
-	};
-	const unsubscribe = subscribeSpaceChannel(currentSpaceId, (event) => {
-		if (event.type === "space.workspace.usage.updated") void refreshUsage();
-	});
-	const onFocus = () => {
-		void refreshUsage();
-	};
-	window.addEventListener("focus", onFocus);
-	return () => {
-		disposed = true;
-		unsubscribe();
-		window.removeEventListener("focus", onFocus);
-	};
-});
 
 async function refreshChannelHealth() {
 	if (loading) return;
@@ -1596,12 +1555,22 @@ function bindScrollSpy(main: HTMLElement | null) {
 	updateActiveSectionFromScroll();
 }
 
+// The scan publishes the measurement it committed, so the row updates from the
+// event payload without refetching the space.
 $effect(() => {
+	if (!browser || !spaceId) return;
 	const currentSpaceId = spaceId;
-	if (browser)
-		untrack(() => {
-			void loadPage(currentSpaceId);
-		});
+	return subscribeSpaceChannel(currentSpaceId, (event) => {
+		if (event.type !== "space.workspace.usage.updated") return;
+		if (!isWorkspaceUsage(event.payload.workspaceUsage)) return;
+		if (!space || space.id !== currentSpaceId) return;
+		space = { ...space, workspaceUsage: event.payload.workspaceUsage };
+		cacheSpaceRecordSoon(space);
+	});
+});
+
+$effect(() => {
+	void loadPage();
 });
 
 $effect(() => {

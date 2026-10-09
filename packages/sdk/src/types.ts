@@ -1,5 +1,4 @@
 import type { WorkspaceUsage } from "@cohub/protocol";
-export type { WorkspaceUsage } from "@cohub/protocol";
 export type { SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type {
   SessionBindingRecord as ProtocolSessionBindingRecord,

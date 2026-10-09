@@ -588,9 +588,9 @@ export function registerSpaces(program: Command): void {
           { key: "status", label: "Status" },
           { key: "createdAt", label: "Created" },
           ...(usage ? [
-            { key: "workspaceBytes", label: "Workspace bytes / 工作区字节" },
-            { key: "workspaceMeasuredAt", label: "Measured at / 统计时间" },
-            { key: "workspaceUsageStatus", label: "Usage status / 统计状态" },
+            { key: "workspaceBytes", label: "Workspace bytes" },
+            { key: "workspaceMeasuredAt", label: "Measured at" },
+            { key: "workspaceUsageStatus", label: "Usage status" },
           ] : []),
         ]);
       } catch (e: unknown) {

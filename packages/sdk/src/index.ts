@@ -438,5 +438,3 @@ export type {
   AppContentKind as WorkContentKind,
 } from "@cohub/protocol";
 export type { PublicUserWorkItem } from "./types.js";
-
-export type { WorkspaceUsage } from "@cohub/protocol";
