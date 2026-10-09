@@ -7,6 +7,7 @@ import { readSessionTurnOrigin, type SessionTurnIntent, type SessionTurnRecord, 
 import { AGENT_TURN_ABORT_CHANNEL, type ModelThinkingLevel } from "@cohub/protocol";
 import { sessionTurnSegments, sessionTurns, spaceSessions, spaces } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
+import { lockPromptSession } from "./prompt-session.js";
 import { resolveSessionTurnOrigin } from "./turn-origin.js";
 import { appendSentTurn, sentTurnRefFor } from "./sent-turns.js";
 import { turnTriggerReference } from "../references/turn-trigger.js";
@@ -227,6 +228,7 @@ export function createSessionServices(input: {
   }
 
   async function createSessionTurn(turnInput: {
+    spaceId: string;
     sessionId: string;
     userUuid: string;
     userContent: ContentBlock[];
@@ -245,8 +247,7 @@ export function createSessionServices(input: {
     const provider = typeof meta.provider === "string" && meta.provider.trim() ? meta.provider.trim() : null;
     const touchedAt = new Date();
     const { row, spaceId } = await input.db.transaction(async (tx) => {
-      const [sessionRow] = await tx.select({ meta: spaceSessions.meta, spaceId: spaceSessions.spaceId }).from(spaceSessions).where(eq(spaceSessions.id, turnInput.sessionId)).for("update").limit(1);
-      if (!sessionRow) throw new Error("session not found");
+      const sessionRow = await lockPromptSession(tx, turnInput);
       const [seqRow] = await tx.select({ max: sql<number>`coalesce(max(${sessionTurns.sequence}), 0)::int` }).from(sessionTurns).where(eq(sessionTurns.sessionId, turnInput.sessionId));
       const [localSegment] = await tx.select({ fromSequence: sessionTurnSegments.fromSequence }).from(sessionTurnSegments).where(and(
         eq(sessionTurnSegments.sessionId, turnInput.sessionId),

@@ -58,6 +58,22 @@ describe("preserveCronPayloadServerFields", () => {
     assert.deepEqual(preserveCronPayloadServerFields({ origin, requestSource }, {}), {});
   });
 
+  it("preserves the original session when a payload is replaced", () => {
+    const original = { sessionId: "original-session", content: [] };
+    for (const replacement of [{ sessionId: "other-space-session" }, { sessionId: null }, {}]) {
+      const updated = preserveCronPayloadServerFields({ ...replacement, content: ["updated"] }, original);
+      assert.equal(updated.sessionId, "original-session");
+      assert.deepEqual(updated.content, ["updated"]);
+    }
+  });
+
+  it("keeps new-session schedules from acquiring a client-supplied target", () => {
+    for (const original of [{}, { sessionId: null }]) {
+      const updated = preserveCronPayloadServerFields({ sessionId: "other-space-session" }, original);
+      assert.deepEqual(updated, original);
+    }
+  });
+
   it("leaves a payload without auth untouched in both directions", () => {
     const merged = preserveCronPayloadServerFields({ content: [], title: "x" }, { content: [] });
     assert.equal("auth" in merged, false);
