@@ -156,7 +156,7 @@
   },
   "dependencies": {
     "@neta-art/generation": "^0.1.30",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "typescript": "^7.0.2"

@@ -3,7 +3,7 @@
 
 FROM node:24-slim AS base
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
+RUN corepack enable
 
 FROM base AS builder
 COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./

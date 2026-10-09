@@ -40,7 +40,7 @@
   "devDependencies": {
     "@fontsource/geist": "^5.3.0",
     "@fontsource/geist-mono": "^5.3.0",
-    "@types/node": "^26.4.0",
+    "@types/node": "catalog:",
     "@types/ws": "^8.18.1",
     "pixi.js": "^8.20.1",
     "tsdown": "^0.22.14",

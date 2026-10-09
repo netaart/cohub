@@ -24,7 +24,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@types/node": "26.4.0",
+    "@types/node": "catalog:",
     "@types/ws": "^8.18.1",
     "typescript": "^7.0.2"
   }

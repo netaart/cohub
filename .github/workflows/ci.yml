@@ -38,7 +38,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
           cache: 'pnpm'
 
       # Optional: only used when available; installs fine without it
@@ -107,7 +107,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: apps/sandbox/go.mod
           cache-dependency-path: apps/sandbox/go.sum
 
       - name: Check formatting

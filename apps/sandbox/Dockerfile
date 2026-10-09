@@ -53,9 +53,9 @@ RUN set -eux; \
     google-chrome --version
 
 # Install latest core CLI tools from GitHub releases (apt versions are too old)
-RUN curl -fsSL https://github.com/sharkdp/fd/releases/download/v10.4.2/fd-v10.4.2-x86_64-unknown-linux-gnu.tar.gz | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/fd' \
- && curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/rg' \
- && curl -fsSL https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64 -o /usr/local/bin/jq \
+RUN curl -fsSL https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-gnu.tar.gz | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/fd' \
+ && curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/rg' \
+ && curl -fsSL https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64 -o /usr/local/bin/jq \
  && chmod +x /usr/local/bin/fd /usr/local/bin/rg /usr/local/bin/jq
 
 RUN ln -sf /usr/bin/python3 /usr/bin/python
@@ -81,7 +81,7 @@ RUN mkdir -p /home/node/.npm-global /home/node/.bun /home/node/.local /home/node
     && chown -R node:node /home/node/.npm-global /home/node/.bun /home/node/.local /home/node/go /home/node/.pnpm-global
 
 # Install Go toolchain
-RUN curl -fsSL https://go.dev/dl/go1.24.2.linux-amd64.tar.gz | tar xz -C /usr/local
+RUN curl -fsSL https://go.dev/dl/go1.24.13.linux-amd64.tar.gz | tar xz -C /usr/local
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 WORKDIR /app

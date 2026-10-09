@@ -3,7 +3,7 @@
 
 FROM node:24-slim AS base
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
+RUN corepack enable
 
 FROM base AS builder
 COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
@@ -85,9 +85,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean \
-  && curl -fsSL https://github.com/sharkdp/fd/releases/download/v10.4.2/fd-v10.4.2-x86_64-unknown-linux-gnu.tar.gz \
+  && curl -fsSL https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-gnu.tar.gz \
     | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/fd' \
-  && curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz \
+  && curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz \
     | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/rg' \
   && chmod +x /usr/local/bin/fd /usr/local/bin/rg
 

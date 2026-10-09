@@ -9,8 +9,7 @@ FROM node:24-slim AS base
 
 WORKDIR /app
 
-# Use Corepack to manage pnpm
-RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
+RUN corepack enable
 
 
 # ============================================

@@ -54,7 +54,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: apps/sandbox/go.mod
           cache-dependency-path: apps/sandbox/go.sum
 
       - name: Resolve version
