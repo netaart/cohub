@@ -152,6 +152,29 @@ test("preview invalid ranges and cancelled streams release the owned descriptor"
   assert.equal(handle.fd, -1);
 });
 
+test("preview HEAD returns metadata without creating a body stream", async (t) => {
+  const { spaceId } = await spaces();
+  let handle;
+  const app = preview(spaceId, async (...args) => {
+    const info = await fs.streamSpaceFile(...args);
+    handle = info.file;
+    t.mock.method(handle, "createReadStream", () => {
+      throw new Error("HEAD must not read file content");
+    });
+    return info;
+  });
+  for (const range of [undefined, "bytes=0-4"]) {
+    const response = await app.request(`/s/${spaceId}/own.txt`, {
+      method: "HEAD",
+      headers: { host: "preview.test", ...(range ? { range } : {}) },
+    });
+    assert.equal(response.status, range ? 206 : 200);
+    assert.equal(response.body, null);
+    assert.equal(response.headers.get("content-length"), range ? "5" : "13");
+    assert.equal(handle.fd, -1);
+  }
+});
+
 test("directory listings and recursive deletion accept native entry names", async () => {
   const { spaceId, root } = await spaces();
   await mkdir(join(root, "tree"));

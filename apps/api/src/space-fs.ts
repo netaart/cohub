@@ -538,7 +538,7 @@ export async function listSpaceDirectory(
         "entry_stats",
         "Stat visible candidate entries and apply ignore filtering; slow when there are many entries or per-entry stat calls hit cold storage.",
         () =>
-          mapWithConcurrency(names.slice(0, MAX_DIR_ENTRIES), MAX_BATCH_READ_CONCURRENCY, async (name) => {
+          mapWithConcurrency(names.slice(0, MAX_DIR_ENTRIES), MAX_DIR_ENTRIES, async (name) => {
             try {
               const stats = await lstat(pinnedDirectoryEntry(directory, name));
               const type = entryType(stats);

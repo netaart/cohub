@@ -178,16 +178,22 @@ export function createPreviewRouter(dependencies: PreviewRouterDependencies) {
           await info.file.close();
           return context.body(null, 416, { ...headers, "content-range": `bytes */${info.size}` });
         }
-        // Transfer the validated descriptor to the stream. EOF/cancellation closes
-        // it; the untrusted pathname is never opened again after validation.
-        const stream = Readable.toWeb(info.file.createReadStream(range ?? {})) as ReadableStream;
-        return context.body(stream, range ? 206 : 200, {
+        const responseHeaders = {
           ...headers,
           "accept-ranges": "bytes",
           "content-length": String(range ? range.end - range.start + 1 : info.size),
           ...(range ? { "content-range": `bytes ${range.start}-${range.end}/${info.size}` } : {}),
           "content-type": info.mimeType ?? "application/octet-stream",
-        });
+        };
+        // Hono dispatches HEAD through GET and drops its body without cancelling it.
+        if (context.req.method === "HEAD") {
+          await info.file.close();
+          return context.body(null, range ? 206 : 200, responseHeaders);
+        }
+        // Transfer the validated descriptor to the stream. EOF/cancellation closes
+        // it; the untrusted pathname is never opened again after validation.
+        const stream = Readable.toWeb(info.file.createReadStream(range ?? {})) as ReadableStream;
+        return context.body(stream, range ? 206 : 200, responseHeaders);
       } catch (error) {
         await info.file.close();
         throw error;
