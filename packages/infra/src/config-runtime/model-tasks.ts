@@ -3,7 +3,7 @@ import { join } from "node:path";
 import {
   assertUserModelCredentials,
   createCachedModelsConfig,
-  getModelConnection,
+  getProtectedModelFields,
   getUserModelsRedisKey,
   isModelDefinition,
   isPlatformModelOverride,
@@ -208,7 +208,7 @@ export function resolveModelTasksConfig(input: {
           : platformProvider;
         const catalogModel = resolvedProvider.models?.find((model) => model.id === id);
         if (!catalogModel) throw new Error("User model tasks must select a configured platform model");
-        const parameters = selectModelParameters(provider, modelOverride, getModelConnection(resolvedProvider, catalogModel), resolvedProvider.headers);
+        const parameters = selectModelParameters(provider, modelOverride, getProtectedModelFields(resolvedProvider, catalogModel), resolvedProvider.headers);
         task = resolveTask(name, { ...platform, ...user, model: { ...parameters, provider } },
           resolvePlatformModelsConfig({ providers: { [provider]: resolvedProvider } }));
       } else {

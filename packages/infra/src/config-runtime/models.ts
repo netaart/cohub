@@ -241,28 +241,29 @@ export function parseCachedModelsConfig(rawText: string): CachedModelsConfig | n
 
 const MODEL_PARAMETER_FIELDS = new Set([
   "id", "name", "reasoning", "defaultThinkingLevel", "thinkingLevelMap",
-  "hidden", "input", "cost", "contextWindow", "maxTokens",
+  "hidden", "input", "contextWindow", "maxTokens",
 ]);
 
-const MODEL_CONNECTION_FIELDS = new Set([
-  "api", "baseUrl", "apiKey", "headers", "compat", "requestProfile", "imageUrlInput",
+const PROTECTED_MODEL_FIELDS = new Set([
+  "api", "baseUrl", "apiKey", "headers", "compat", "requestProfile", "imageUrlInput", "cost",
 ]);
 
-function assertMatchingConnectionField(
+function assertMatchingPlatformField(
   label: string,
   field: string,
   value: unknown,
   platform: Record<string, unknown>,
 ) {
-  if (!MODEL_CONNECTION_FIELDS.has(field)
+  if (!PROTECTED_MODEL_FIELDS.has(field)
     || !Object.hasOwn(platform, field)
     || platform[field] === undefined
     || !isDeepStrictEqual(value, platform[field])) {
+    if (field === "cost") throw new Error(`${label} cannot override platform model pricing: cost`);
     throw new Error(`${label} cannot override platform model connection or extension field: ${field}`);
   }
 }
 
-export function getModelConnection(provider: ProviderConfig, model: ModelDef): Record<string, unknown> {
+export function getProtectedModelFields(provider: ProviderConfig, model: ModelDef): Record<string, unknown> {
   return {
     api: model.api ?? provider.api,
     baseUrl: model.baseUrl ?? provider.baseUrl,
@@ -271,13 +272,14 @@ export function getModelConnection(provider: ProviderConfig, model: ModelDef): R
     compat: model.compat ?? provider.compat,
     requestProfile: model.requestProfile ?? provider.requestProfile,
     imageUrlInput: model.imageUrlInput ?? provider.imageUrlInput,
+    cost: model.cost,
   };
 }
 
 export function selectModelParameters<T extends { id?: string }>(
   provider: string,
   override: T,
-  connection: Record<string, unknown>,
+  platformFields: Record<string, unknown>,
   providerHeaders?: Record<string, string>,
 ): T {
   for (const [field, value] of Object.entries(override)) {
@@ -286,7 +288,7 @@ export function selectModelParameters<T extends { id?: string }>(
     const candidate = field === "headers" && isStringRecord(value)
       ? mergeHeaders(providerHeaders, value) ?? value
       : value;
-    assertMatchingConnectionField(`User model ${provider}/${override.id}`, field, candidate, connection);
+    assertMatchingPlatformField(`User model ${provider}/${override.id}`, field, candidate, platformFields);
   }
   const parameters = { ...override };
   for (const field of Object.keys(parameters)) {
@@ -299,14 +301,13 @@ export function isPlatformModelOverride(provider: string, config: ProviderConfig
   return provider === "cohub" || Object.keys(config).every((key) => key === "models");
 }
 
-export function mergeModelParameters<T extends { cost?: Partial<ModelCost>; thinkingLevelMap?: ThinkingLevelMap }>(
+export function mergeModelParameters<T extends { thinkingLevelMap?: ThinkingLevelMap }>(
   base: T,
   override: T,
 ): T {
   return {
     ...base,
     ...override,
-    ...(override.cost ? { cost: { ...base.cost, ...override.cost } } : {}),
     ...(override.thinkingLevelMap ? { thinkingLevelMap: { ...base.thinkingLevelMap, ...override.thinkingLevelMap } } : {}),
   };
 }
@@ -317,7 +318,7 @@ export function mergeProviderModelParameters(
   override: ProviderConfig,
 ): ProviderConfig {
   for (const [field, value] of Object.entries(override)) {
-    if (field !== "models") assertMatchingConnectionField(`User provider ${provider}`, field, value, base);
+    if (field !== "models") assertMatchingPlatformField(`User provider ${provider}`, field, value, base);
   }
   const models = new Map((base.models ?? []).map((model) => [model.id, model]));
   for (const model of override.models ?? []) {
@@ -325,7 +326,7 @@ export function mergeProviderModelParameters(
     if (!original) {
       throw new Error(`User model ${provider}/${model.id} must select a configured model for parameter overrides`);
     }
-    const parameters = selectModelParameters(provider, model, getModelConnection(base, original), base.headers);
+    const parameters = selectModelParameters(provider, model, getProtectedModelFields(base, original), base.headers);
     models.set(model.id, mergeModelParameters(original, parameters));
   }
   return { ...base, models: [...models.values()] };

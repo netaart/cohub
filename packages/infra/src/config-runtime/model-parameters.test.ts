@@ -56,13 +56,13 @@ test("parameter merges preserve unspecified nested fields and explicit false or 
   const overrides: ModelsConfig = { providers: { cohub: { models: [
     {
       id: "chat", reasoning: false, thinkingLevelMap: { high: null },
-      cost: { input: 3, output: 4 }, input: ["text"], name: "My chat",
+      input: ["text"], name: "My chat",
     },
     { id: "sibling", hidden: false },
   ] } } };
   const models = mergeModelsConfigs(platform, overrides).providers.cohub?.models;
   assert.deepEqual(models?.[0]?.thinkingLevelMap, { low: "low", high: null });
-  assert.deepEqual(models?.[0]?.cost, { input: 3, output: 4, cacheRead: 0.1 });
+  assert.deepEqual(models?.[0]?.cost, { input: 1, output: 2, cacheRead: 0.1 });
   assert.deepEqual(models?.[0]?.input, ["text"]);
   assert.equal(models?.[0]?.reasoning, false);
   assert.equal(models?.[0]?.name, "My chat");
