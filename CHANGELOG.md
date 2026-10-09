@@ -6,6 +6,8 @@ All notable changes to Cohub are documented in this file.
 
 ## v2.61 — 2026-10-09
 
+- **Board v3 CLI surface**: `boards inspect` is replaced by a resource-scoped `boards get` (`--only board|items|animations`, `--items`, `--within`, `--rect`), `boards preset` emits bare `tracks` by default or wraps them when `--animation` is given, and `boards export` takes `--paper` instead of `--background`. The Board authoring guide now lives in `skills/cohub-board/SKILL.md`, with CLI README and developer docs rewritten around the document-as-JSON model.
+- **Default runtime screen sharing**: `cohub runtime up` now offers screen sharing by default on macOS and Linux X11 — Enter accepts, `--no-display` opts out, and `--yes` authorizes it. Headless and Wayland-only sessions skip the offer, and an existing Runtime keeps its screen configuration unless explicitly overridden.
 - **Native Android app**: a new Kotlin/WebView host (`apps/android`) wraps the web surface with access a browser cannot reach — a Keystore-sealed encrypted credential store, PKCE and Custom Tabs OAuth, App Links, deep links, foreground services, and native start-up, files, back and shortcuts — over a versioned, capability-gated `cohub.host.v1` bridge defined once in `@cohub/protocol` and implemented by both sides, so an older host degrades to the browser path instead of failing. Device folders are served as local Runtimes with sandboxd cross-compiled per ABI into the APK, and CI builds signed dev and release APKs.
 - **Remote displays over WebRTC**: phones and computers (macOS, Linux X11, or virtual Xvfb screens) share displays with a Space and are watched or steered live from the web over pion WebRTC, with Cloudflare TURN credentials, congestion control and latency tuning (key-frame start, hidden-viewer pause, zero playout delay). Display element trees expose an interface as sanitized refs, roles, names and boxes, and agents drive them through `cohub spaces displays` like any other capability.
 - **Board v3**: Board is rebuilt on a consolidated architecture with one playback runtime shared across web, CLI and exports, pattern background controls, and a double-buffered far layer that keeps large scenes smooth; the scene model, sync/commit path and export pipeline were unified and the legacy authoring and ops services removed.
@@ -14,6 +16,10 @@ All notable changes to Cohub are documented in this file.
 
 ### Bug Fixes
 
+- **Short user messages** now sit in a grid so the bubble stays right-aligned with its footer instead of drifting from it.
+- **Two-line session lists** dim the preview line so it no longer competes with the title.
+- **Board v3 migration unblocked**: `0067_board_v3` no longer aborts when a Board holds legacy `file` nodes whose id is a path (such as `world:file:characters/x.md`). Board v3 item ids cannot represent those, so the nodes are dropped instead — their Boards keep working, and every source row, the dropped ones included, stays archived verbatim in the `migration:board-v3` transaction. This also releases migrations `0068`–`0073`, which had never reached production.
+- Migration jobs now keep their pod for an hour after finishing, so a failed run still has logs by the time the workflow prints its diagnostics.
 - **Board strokes and far layer**: strokes now render where they land with incremental, quantized live samples and mitred joints, the far layer is double-buffered to stop flicker, local patches match the server, and a stale history step is dropped instead of blocking undo.
 - **Generation stream resilience**: out-of-order rounds and finalizes no longer reset the stream reducer — late events only join history, and a patch that cannot apply buffers live events and reseeds from the snapshot once per message, so the live message no longer freezes until the Turn ends.
 - **Command palette and sidebar**: palette search loops are fixed, the ⌘K hint is restored, and sidebar turn state stays live without per-turn label refetches.
