@@ -39,12 +39,20 @@ test("completion registry never resolves user key literals from the service envi
     if (previous === undefined) delete process.env.R02_COMPLETION_SECRET;
     else process.env.R02_COMPLETION_SECRET = previous;
   });
+  const platform: ModelsConfig = { providers: { cohub: {
+    api: "openai-responses", baseUrl: "https://platform.example.test", apiKey: "R02_COMPLETION_SECRET",
+    models: [{ id: "platform", contextWindow: 100000 }],
+  } } };
   const user: ModelsConfig = {
     providers: {
+      cohub: { ...platform.providers.cohub, models: [{ id: "platform", contextWindow: 200000 }] },
       custom: { api: "openai-completions", baseUrl: "https://user.example.test", apiKey: "R02_COMPLETION_SECRET", models: [{ id: "custom" }] },
     },
   };
-  const registry = new CompletionModelRegistry([resolveRuntimeModelsConfig({ user })]);
+  const registry = new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]);
+  assert.equal(registry.getApiKey("cohub"), "synthetic-completion-secret");
+  assert.equal(registry.find("cohub", "platform")?.baseUrl, "https://platform.example.test");
+  assert.equal(registry.find("cohub", "platform")?.contextWindow, 200000);
   assert.equal(registry.getApiKey("custom"), "R02_COMPLETION_SECRET");
   assert.equal(registry.find("custom", "custom")?.baseUrl, "https://user.example.test");
 });
@@ -60,7 +68,7 @@ test("completion registry cannot combine a user destination with platform auth",
       cohub: { api: "openai-completions", baseUrl: "https://user.example.test", apiKey: "user-key", models: [{ id: "custom" }] },
     },
   };
-  assert.throws(() => new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]), /cohub is reserved/);
+  assert.throws(() => new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]), /cannot override platform model connection/);
 });
 
 test("completion registry merges model parameters and preserves platform defaults", () => {

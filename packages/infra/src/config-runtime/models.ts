@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 export const MODELS_REDIS_KEY_VERSION = "v2";
 export const PLATFORM_MODELS_REDIS_KEY = `configs:models:${MODELS_REDIS_KEY_VERSION}:platform`;
 export const USER_MODELS_REDIS_KEY_PREFIX = `configs:models:${MODELS_REDIS_KEY_VERSION}:user`;
@@ -242,21 +244,59 @@ const MODEL_PARAMETER_FIELDS = new Set([
   "hidden", "input", "cost", "contextWindow", "maxTokens",
 ]);
 
-export function assertModelParameterOverride(provider: string, model: Record<string, unknown>) {
-  const unsupported = Object.keys(model).find((key) => !MODEL_PARAMETER_FIELDS.has(key));
-  if (unsupported) {
-    throw new Error(`User model ${provider}/${model.id} cannot override platform model connection or extension field: ${unsupported}`);
+const MODEL_CONNECTION_FIELDS = new Set([
+  "api", "baseUrl", "apiKey", "headers", "compat", "requestProfile", "imageUrlInput",
+]);
+
+function assertMatchingConnectionField(
+  label: string,
+  field: string,
+  value: unknown,
+  platform: Record<string, unknown>,
+) {
+  if (!MODEL_CONNECTION_FIELDS.has(field)
+    || !Object.hasOwn(platform, field)
+    || platform[field] === undefined
+    || !isDeepStrictEqual(value, platform[field])) {
+    throw new Error(`${label} cannot override platform model connection or extension field: ${field}`);
   }
 }
 
-export function isModelParameterProvider(config: ProviderConfig): boolean {
-  return Object.keys(config).every((key) => key === "models");
+export function getModelConnection(provider: ProviderConfig, model: ModelDef): Record<string, unknown> {
+  return {
+    api: model.api ?? provider.api,
+    baseUrl: model.baseUrl ?? provider.baseUrl,
+    apiKey: provider.apiKey,
+    headers: mergeHeaders(provider.headers, model.headers) ?? model.headers ?? provider.headers,
+    compat: model.compat ?? provider.compat,
+    requestProfile: model.requestProfile ?? provider.requestProfile,
+    imageUrlInput: model.imageUrlInput ?? provider.imageUrlInput,
+  };
 }
 
-export function assertUserProviderDefinition(provider: string, config: ProviderConfig) {
-  if (provider === "cohub" && !isModelParameterProvider(config)) {
-    throw new Error("Provider cohub is reserved for platform model parameter overrides; use a different provider name for custom connections");
+export function selectModelParameters<T extends { id?: string }>(
+  provider: string,
+  override: T,
+  connection: Record<string, unknown>,
+  providerHeaders?: Record<string, string>,
+): T {
+  for (const [field, value] of Object.entries(override)) {
+    if (MODEL_PARAMETER_FIELDS.has(field)) continue;
+    // 模型 headers 与 provider headers 合并后必须保持平台的有效值。
+    const candidate = field === "headers" && isStringRecord(value)
+      ? mergeHeaders(providerHeaders, value) ?? value
+      : value;
+    assertMatchingConnectionField(`User model ${provider}/${override.id}`, field, candidate, connection);
   }
+  const parameters = { ...override };
+  for (const field of Object.keys(parameters)) {
+    if (!MODEL_PARAMETER_FIELDS.has(field)) Reflect.deleteProperty(parameters, field);
+  }
+  return parameters;
+}
+
+export function isPlatformModelOverride(provider: string, config: ProviderConfig): boolean {
+  return provider === "cohub" || Object.keys(config).every((key) => key === "models");
 }
 
 export function mergeModelParameters<T extends { cost?: Partial<ModelCost>; thinkingLevelMap?: ThinkingLevelMap }>(
@@ -276,14 +316,17 @@ export function mergeProviderModelParameters(
   base: ProviderConfig,
   override: ProviderConfig,
 ): ProviderConfig {
+  for (const [field, value] of Object.entries(override)) {
+    if (field !== "models") assertMatchingConnectionField(`User provider ${provider}`, field, value, base);
+  }
   const models = new Map((base.models ?? []).map((model) => [model.id, model]));
   for (const model of override.models ?? []) {
-    assertModelParameterOverride(provider, model);
     const original = models.get(model.id);
     if (!original) {
       throw new Error(`User model ${provider}/${model.id} must select a configured model for parameter overrides`);
     }
-    models.set(model.id, mergeModelParameters(original, model));
+    const parameters = selectModelParameters(provider, model, getModelConnection(base, original), base.headers);
+    models.set(model.id, mergeModelParameters(original, parameters));
   }
   return { ...base, models: [...models.values()] };
 }
@@ -295,12 +338,11 @@ export function mergeModelsConfigs(
   const providers = new Map<string, ProviderConfig>(Object.entries(platform?.providers ?? {}));
   for (const config of userConfigs) {
     for (const [provider, providerConfig] of Object.entries(config?.providers ?? {})) {
-      assertUserProviderDefinition(provider, providerConfig);
       const base = providers.get(provider);
       if (provider === "cohub" && !base) {
         throw new Error("Provider cohub requires a platform model catalog");
       }
-      if (base && isModelParameterProvider(providerConfig)) {
+      if (base && isPlatformModelOverride(provider, providerConfig)) {
         providers.set(provider, mergeProviderModelParameters(provider, base, providerConfig));
         continue;
       }
@@ -319,7 +361,7 @@ export function mergeModelsConfigs(
   return { providers: Object.fromEntries(providers) };
 }
 
-/** Resolve only trusted platform values, before applying any user configuration. */
+/** 仅解析经过来源校验的平台密钥声明。 */
 export function resolvePlatformModelApiKey(value: string | undefined): string | undefined {
   if (!value) return undefined;
   return process.env[value]?.trim() || value;
@@ -365,7 +407,15 @@ export function resolveRuntimeModelsConfig(input: {
   platform?: ModelsConfig | null;
   user?: ModelsConfig | null;
 }): ModelsConfig {
-  return mergeModelsConfigs(resolvePlatformModelsConfig(input.platform), input.user);
+  const merged = mergeModelsConfigs(input.platform, input.user);
+  return {
+    providers: Object.fromEntries(Object.entries(merged.providers).map(([provider, config]) => {
+      const user = Object.hasOwn(input.user?.providers ?? {}, provider) ? input.user?.providers[provider] : undefined;
+      const usesPlatform = Object.hasOwn(input.platform?.providers ?? {}, provider)
+        && (!user || isPlatformModelOverride(provider, user));
+      return [provider, usesPlatform ? { ...config, apiKey: resolvePlatformModelApiKey(config.apiKey) } : config];
+    })),
+  };
 }
 
 export function flattenModelsCatalog(config: ModelsConfig | null | undefined): ModelCatalogEntry[] {

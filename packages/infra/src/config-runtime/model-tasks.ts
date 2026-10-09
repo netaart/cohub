@@ -1,13 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  assertModelParameterOverride,
   assertUserModelCredentials,
-  assertUserProviderDefinition,
   createCachedModelsConfig,
+  getModelConnection,
   getUserModelsRedisKey,
   isModelDefinition,
-  isModelParameterProvider,
+  isPlatformModelOverride,
   mergeHeaders,
   mergeModelParameters,
   mergeProviderModelParameters,
@@ -17,6 +16,7 @@ import {
   PLATFORM_MODELS_REDIS_KEY,
   resolvePlatformModelApiKey,
   resolvePlatformModelsConfig,
+  selectModelParameters,
   type CachedModelsConfig,
   type ModelCost,
   type ModelDef,
@@ -173,7 +173,7 @@ export function resolveModelTasksConfig(input: {
   platformModels?: ModelsConfig | null;
   userModels?: ModelsConfig | null;
 }): ModelTasksConfig {
-  const platformModels = resolvePlatformModelsConfig(input.platformModels);
+  const platformModels = input.platformModels ?? { providers: {} };
   const result: ModelTasksConfig = {};
   for (const name of TASK_NAMES) {
     const platform = input.platformTasks?.[name];
@@ -194,24 +194,27 @@ export function resolveModelTasksConfig(input: {
       const userProvider = Object.hasOwn(input.userModels?.providers ?? {}, provider)
         ? input.userModels?.providers[provider]
         : undefined;
-      if (userProvider) assertUserProviderDefinition(provider, userProvider);
       const usesPlatformProvider = provider === "cohub"
-        || Boolean(platformProvider && (!userProvider || isModelParameterProvider(userProvider)));
-      let models = input.userModels ?? { providers: {} };
+        || Boolean(platformProvider && (!userProvider || isPlatformModelOverride(provider, userProvider)));
       if (usesPlatformProvider) {
-        assertModelParameterOverride(provider, modelOverride);
-        if (!platformProvider?.models?.some((model) => model.id === id)) {
+        if (!platformProvider) {
           throw new Error("User model tasks must select a configured platform model");
         }
         const resolvedProvider = userProvider
           ? mergeProviderModelParameters(provider, platformProvider, {
+              ...userProvider,
               models: userProvider.models?.filter((model) => model.id === id),
             })
           : platformProvider;
-        models = { providers: { [provider]: resolvedProvider } };
+        const catalogModel = resolvedProvider.models?.find((model) => model.id === id);
+        if (!catalogModel) throw new Error("User model tasks must select a configured platform model");
+        const parameters = selectModelParameters(provider, modelOverride, getModelConnection(resolvedProvider, catalogModel), resolvedProvider.headers);
+        task = resolveTask(name, { ...platform, ...user, model: { ...parameters, provider } },
+          resolvePlatformModelsConfig({ providers: { [provider]: resolvedProvider } }));
+      } else {
+        task = resolveTask(name, { ...platform, ...user, model: user.model }, input.userModels ?? { providers: {} });
+        assertUserModelCredentials(task.model);
       }
-      task = resolveTask(name, { ...platform, ...user, model: user.model }, models);
-      if (!usesPlatformProvider) assertUserModelCredentials(task.model);
     } else {
       // Prompt/enabled overrides retain the platform model as one trusted unit,
       // even if a user catalog shadows the same provider name.
@@ -219,7 +222,7 @@ export function resolveModelTasksConfig(input: {
         ...platform.model,
         apiKey: resolvePlatformModelApiKey(platform.model.apiKey),
       };
-      task = resolveTask(name, { ...platform, ...user, model }, platformModels);
+      task = resolveTask(name, { ...platform, ...user, model }, resolvePlatformModelsConfig(platformModels));
     }
     result[name] = task;
   }

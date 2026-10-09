@@ -22,6 +22,7 @@ test("agent registry resolves platform references at the loader boundary, never 
   });
   const user: ModelsConfig = {
     providers: {
+      cohub: { ...platform.providers.cohub, models: [{ id: "platform", contextWindow: 200000 }] },
       custom: {
         api: "openai-completions", baseUrl: "https://user.example.test/v1",
         apiKey: "R02_AGENT_SECRET", models: [{ id: "custom" }],
@@ -30,6 +31,8 @@ test("agent registry resolves platform references at the loader boundary, never 
   };
   const registry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform, user })] });
   assert.equal(registry.getApiKey("cohub"), "synthetic-agent-secret");
+  assert.equal(registry.find("cohub", "platform")?.baseUrl, "https://platform.example.test/v1");
+  assert.equal(registry.find("cohub", "platform")?.contextWindow, 200000);
   assert.equal(registry.getApiKey("custom"), "R02_AGENT_SECRET");
   registry.refresh();
   assert.equal(registry.getApiKey("custom"), "R02_AGENT_SECRET");
@@ -61,5 +64,5 @@ test("agent registry rejects user definitions of the reserved cohub provider", (
       },
     },
   };
-  assert.throws(() => new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform, user })] }), /cohub is reserved/);
+  assert.throws(() => new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform, user })] }), /cannot override platform model connection/);
 });

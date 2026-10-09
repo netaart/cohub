@@ -89,7 +89,7 @@ test("parameter-only layers retain trusted cloud adapters without requiring user
   assert.equal(result.providers.cloud?.models?.[0]?.contextWindow, 200000);
 });
 
-test("model parameter overrides reject connection fields and unknown extensions", () => {
+test("model parameter overrides reject connection changes and unknown extensions", () => {
   for (const field of ["api", "baseUrl", "apiKey", "headers", "compat", "requestProfile", "imageUrlInput", "routingTier", "__proto__"]) {
     const overrides: ModelsConfig = { providers: { cohub: {
       models: [{ id: "chat", contextWindow: 200000, [field]: "user-value" }],
@@ -112,7 +112,7 @@ test("cohub cannot be redefined even with a complete user-owned connection", () 
       const overrides: ModelsConfig = { providers: { cohub: {
         ...fields, models: [{ id: "chat", contextWindow: 200000 }],
       } } };
-      assert.throws(() => mergeModelsConfigs(base, overrides), /cohub is reserved/);
+      assert.throws(() => mergeModelsConfigs(base, overrides), base ? /cannot override platform model connection/ : /cohub requires a platform model catalog/);
     }
   }
 });
@@ -193,7 +193,7 @@ for (const name of ["sessionTitle", "imageToText"] as const) {
       platformModels: platform, platformTasks,
       userModels: { providers: { cohub: { apiKey: "user-key", api: "openai-responses", models: [{ id: "chat" }] } } },
       userTasks: { [name]: { model: { provider: "cohub", id: "chat" } } },
-    }), /cohub is reserved/);
+    }), /User provider cohub cannot override platform model connection or extension field: apiKey/);
     assert.throws(() => resolveModelTasksConfig({
       platformTasks,
       userTasks: { [name]: { model: { provider: "cohub", id: "chat" } } },

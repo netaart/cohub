@@ -231,7 +231,7 @@ test("an invalid same-name user provider fails without exposing platform credent
     providers: { cohub: { ...platform.providers.cohub, apiKey: "synthetic-platform-secret" } },
   };
   assert.throws(() => resolveRuntimeModelsConfig({ platform: trusted, user }), {
-    message: "Provider cohub is reserved for platform model parameter overrides; use a different provider name for custom connections",
+    message: "User provider cohub cannot override platform model connection or extension field: baseUrl",
   });
   assert.equal(user.providers.cohub?.apiKey, undefined);
   assert.equal(trusted.providers.cohub?.apiKey, "synthetic-platform-secret");
