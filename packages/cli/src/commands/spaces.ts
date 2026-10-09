@@ -579,13 +579,19 @@ export function registerSpaces(program: Command): void {
       try {
         const space = await client.spaces.get(spaceId);
         if (jsonRequested(opts)) return outJson(space);
-        table([space], [
+        const usage = space.workspaceUsage;
+        table([{ ...space, workspaceBytes: usage?.bytes ?? "—", workspaceMeasuredAt: usage?.measuredAt ?? "—", workspaceUsageStatus: usage?.status ?? "—" }], [
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
           { key: "slug", label: "Slug" },
           { key: "description", label: "Description", format: (value) => truncateText(value, SPACE_DESCRIPTION_COLUMN_WIDTH) },
           { key: "status", label: "Status" },
           { key: "createdAt", label: "Created" },
+          ...(usage ? [
+            { key: "workspaceBytes", label: "Workspace bytes" },
+            { key: "workspaceMeasuredAt", label: "Measured at" },
+            { key: "workspaceUsageStatus", label: "Usage status" },
+          ] : []),
         ]);
       } catch (e: unknown) {
         handleHttp(e);

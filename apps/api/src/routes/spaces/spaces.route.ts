@@ -17,6 +17,7 @@ import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/
 import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
 import { hostPromptImages } from "../../session-images.js";
+import { readWorkspaceUsage } from "../../workspace-usage.js";
 import { useAuth, getOptionalAuth, getAppSessionPrincipal, requireValidId, buildSpaceListItems, authzDenied, getSpacePublicProfile, normalizePublicAvatarUrl } from "../../lib/middleware.js";
 import { config } from "../../config.js";
 import { scheduleSandboxAutoDestroy } from "../../sandbox-idle-scheduler.js";
@@ -1060,10 +1061,11 @@ async function resolveSpaceRelation(space: SpaceRow, user: AuthUser | null): Pro
 }
 
 async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user: AuthUser | null) {
-  const [sandbox, access, relation] = await Promise.all([
+  const [sandbox, access, relation, workspaceUsage] = await Promise.all([
     getSpaceSandboxBySpaceId(space.id),
     resolvePermissionAccess(user, { spaceId: space.id }),
     resolveSpaceRelation(space, user),
+    readWorkspaceUsage(space.id),
   ]);
   const profileMap = await getProfilesByUuids([space.userUuid]);
   const ownerProfile = profileMap.get(space.userUuid) ?? fallbackPublicUserProfile(space.userUuid);
@@ -1074,6 +1076,7 @@ async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user
     publicProfile: getSpacePublicProfile(space),
     sandboxStatus: sandbox?.status ?? null,
     sandbox: attachSandboxPublicEndpoints(sandbox),
+    workspaceUsage: sandbox?.provider === "local" ? null : workspaceUsage,
     access,
     relation,
     ownerProfile,

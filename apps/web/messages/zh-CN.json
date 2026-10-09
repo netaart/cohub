@@ -2239,5 +2239,9 @@
 	"chats_show_all": "显示全部对话",
 	"chats_new_chat_in": "选择 Space 新建对话",
 	"chats_row_no_messages": "暂无消息",
-	"spaces_row_no_description": "暂无描述"
+	"spaces_row_no_description": "暂无描述",
+	"space_storage_usage": "工作区占用",
+	"space_storage_measured": "统计于 {time}",
+	"space_storage_pending": "等待统计",
+	"space_storage_retry": "更新将自动重试"
 }

@@ -2,6 +2,7 @@
 import {
 	type DefaultSpaceModDefinition,
 	getDefaultSpaceModsForEnv,
+	isWorkspaceUsage,
 	normalizeCohubRuntimeEnv,
 } from "@cohub/protocol";
 import type {
@@ -57,6 +58,8 @@ import Sheet from "$lib/components/Sheet.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UploadProgress from "$lib/components/UploadProgress.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
+import { subscribeSpaceChannel } from "$lib/features/session-chat/space-channel";
+import { formatBytes } from "$lib/format-bytes";
 import { formatDateTime } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -1552,6 +1555,20 @@ function bindScrollSpy(main: HTMLElement | null) {
 	updateActiveSectionFromScroll();
 }
 
+// The scan publishes the measurement it committed, so the row updates from the
+// event payload without refetching the space.
+$effect(() => {
+	if (!browser || !spaceId) return;
+	const currentSpaceId = spaceId;
+	return subscribeSpaceChannel(currentSpaceId, (event) => {
+		if (event.type !== "space.workspace.usage.updated") return;
+		if (!isWorkspaceUsage(event.payload.workspaceUsage)) return;
+		if (!space || space.id !== currentSpaceId) return;
+		space = { ...space, workspaceUsage: event.payload.workspaceUsage };
+		cacheSpaceRecordSoon(space);
+	});
+});
+
 $effect(() => {
 	void loadPage();
 });
@@ -2031,6 +2048,23 @@ $effect(() => {
 
 						<!-- Settings rows -->
 						<div class="divide-y divide-border-subtle border-b border-border-subtle">
+							{#if space?.workspaceUsage}
+								{@const usage = space.workspaceUsage}
+								<div class="flex flex-wrap items-start justify-between gap-x-6 gap-y-2 py-4">
+									<div class="min-w-0">
+										<div class="text-[14px] text-text-primary">{m.space_storage_usage({}, { locale })}</div>
+										<div class="mt-1 text-[12px] leading-5 text-text-tertiary">
+											{#if usage.measuredAt}
+												{m.space_storage_measured({ time: formatDateTime(usage.measuredAt, locale) }, { locale })}
+											{:else}
+												{m.space_storage_pending({}, { locale })}
+											{/if}
+											{#if usage.status === 'error'} · {m.space_storage_retry({}, { locale })}{/if}
+										</div>
+									</div>
+									<span class="shrink-0 text-[14px] font-medium tabular-nums text-text-primary">{usage.bytes === null ? '—' : formatBytes(usage.bytes)}</span>
+								</div>
+							{/if}
 							<!-- Compute spec -->
 							<div class="py-4">
 								<div class="flex items-center justify-between gap-4">

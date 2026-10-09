@@ -29,6 +29,9 @@ import {
   APP_VIEW_STATS_FLUSH_INTERVAL_MS,
   APP_VIEW_STATS_FLUSH_JOB,
   APP_VIEW_STATS_FLUSH_SCHEDULER_ID,
+  WORKSPACE_USAGE_DISPATCH_INTERVAL_MS,
+  WORKSPACE_USAGE_DISPATCH_JOB,
+  WORKSPACE_USAGE_DISPATCH_SCHEDULER_ID,
 } from "@cohub/protocol";
 
 import "../system/jobs/index.js";
@@ -193,6 +196,31 @@ try {
   });
 } catch (error) {
   logger.error("[SystemWorker] Failed to ensure sandbox idle reaper schedule", {
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+// Dispatch only schedules ordinary system jobs; there is no extra queue/consumer.
+try {
+  await systemQueue.upsertJobScheduler(
+    WORKSPACE_USAGE_DISPATCH_SCHEDULER_ID,
+    { every: WORKSPACE_USAGE_DISPATCH_INTERVAL_MS },
+    {
+      name: WORKSPACE_USAGE_DISPATCH_JOB,
+      data: {},
+      opts: {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5_000 },
+        ...defaultJobRetention,
+      },
+    },
+  );
+  logger.info("[SystemWorker] Ensured workspace usage dispatch schedule", {
+    schedulerId: WORKSPACE_USAGE_DISPATCH_SCHEDULER_ID,
+    intervalMs: WORKSPACE_USAGE_DISPATCH_INTERVAL_MS,
+  });
+} catch (error) {
+  logger.error("[SystemWorker] Failed to ensure workspace usage dispatch schedule", {
     error: error instanceof Error ? error.message : String(error),
   });
 }

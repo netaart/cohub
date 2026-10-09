@@ -1,10 +1,13 @@
 import { isBillingAccessBlockedError } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
+import { withWorkspaceUsageWrite } from "@cohub/infra/workspace-usage";
 import { eq, sql } from "drizzle-orm";
 import type { Job } from "bullmq";
 import type { TaskPayload } from "@cohub/protocol/task";
 import { registerTask } from "./registry.js";
 import { db } from "../db.js";
+import { config } from "../config.js";
+import { redisCommandClient } from "../redis.js";
 import { checkpoints, spaces } from "@cohub/db";
 import { checkpointForkReference, spaceForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "../reference-index-queue.js";
@@ -209,11 +212,9 @@ async function postCheckpointRestore(input: {
   return stages;
 }
 
-const createSpaceHandler = async (job: Job) => {
+const createSpaceHandler = async (job: Job, spaceId: string) => {
   const payload = job.data as TaskPayload;
-  const spaceId = payload.spaceId;
   const taskRunId = String(job.id ?? "");
-  if (!spaceId) throw new Error("spaceId is required for create_space task");
   if (!taskRunId) throw new Error("task run id is required for create_space task");
 
   const [space] = await db.select().from(spaces).where(eq(spaces.id, spaceId)).limit(1);
@@ -310,4 +311,10 @@ const createSpaceHandler = async (job: Job) => {
   }
 };
 
-registerTask("create_space", createSpaceHandler);
+registerTask("create_space", (job) => {
+  const spaceId = (job.data as TaskPayload).spaceId;
+  if (!spaceId) throw new Error("spaceId is required for create_space task");
+  // Checkpoint restore, git import and latest materialization write the
+  // workspace directly, so it stays dirty for workspace usage until the task ends.
+  return withWorkspaceUsageWrite(redisCommandClient, config.env, spaceId, () => createSpaceHandler(job, spaceId));
+});

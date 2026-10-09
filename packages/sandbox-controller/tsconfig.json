@@ -8,7 +8,8 @@
     "types": ["node"],
     "paths": {
       "@cohub/db": ["../db/src/index.ts"],
-      "@cohub/protocol/sandbox": ["../protocol/src/sandbox/index.ts"]
+      "@cohub/protocol/sandbox": ["../protocol/src/sandbox/index.ts"],
+      "@cohub/infra/workspace-usage": ["../infra/src/workspace-usage/index.ts"]
     }
   },
   "include": ["src"]

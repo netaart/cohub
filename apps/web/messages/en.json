@@ -2239,5 +2239,9 @@
 	"chats_show_all": "Show all chats",
 	"chats_new_chat_in": "New chat in…",
 	"chats_row_no_messages": "No messages yet",
-	"spaces_row_no_description": "No description"
+	"spaces_row_no_description": "No description",
+	"space_storage_usage": "Workspace storage",
+	"space_storage_measured": "Measured {time}",
+	"space_storage_pending": "Waiting for measurement",
+	"space_storage_retry": "Update will retry"
 }
