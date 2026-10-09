@@ -24,7 +24,7 @@ Logto 1.3 supports SDK 57 peer dependencies, so `npm ci` no longer uses `legacy-
 
 ## One-time repository setup
 
-Actions secrets and variables for the app carry a `MOBILE_` prefix so they stay apart from the monorepo's service credentials. The tag release passes only its signing secrets to the native build instead of inheriting every repository secret. The external TestFlight group is the `MOBILE_TESTFLIGHT_EXTERNAL_BETA_GROUP` variable, and device E2E reads the `MOBILE_E2E_ACCOUNT_EMAIL` and `MOBILE_E2E_ACCOUNT_PASSWORD` secrets.
+Actions secrets and variables for the app carry a `MOBILE_` prefix so they stay apart from the monorepo's service credentials. The tag release passes only its signing secrets to the native build instead of inheriting every repository secret. Device E2E reads the `MOBILE_E2E_ACCOUNT_EMAIL` and `MOBILE_E2E_ACCOUNT_PASSWORD` secrets.
 
 ### Android formal distribution
 
@@ -142,7 +142,7 @@ Commit types only choose the release-notes section. Version numbering does not d
 
 ## Tag automation setup
 
-The release jobs of `Mobile CI` start on `cohub-mobile-v*` tag pushes. Their plan job builds Android `distribution` / `submit=false` and iOS `production` / `submit=true`. Android attachment and iOS TestFlight publication finish independently; check both platform results before declaring a dual-platform release complete. TestFlight processing or review may delay tester availability after upload.
+The release jobs of `Mobile CI` start on `cohub-mobile-v*` tag pushes. Their plan job builds Android `distribution` / `submit=false` and iOS `production` / `submit=true`. Android attachment and iOS TestFlight publication finish independently; check both platform results before declaring a dual-platform release complete. TestFlight processing may delay availability after upload. The workflow does not assign builds to tester groups; add the build to a group in App Store Connect.
 
 A tag must point to a commit reachable from `origin/main`, must match `package.json` and `app.json`, and must be a stable `cohub-mobile-vX.Y.Z` without a prerelease suffix or leading zeros. A moved tag or version mismatch fails before signing. Do not retag a published version.
 

@@ -1162,17 +1162,6 @@ jobs:
           api-private-key: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
           wait-for-processing: "true"
 
-      # Assigning the external group also submits the first build of each app version
-      # for Beta App Review; Apple reviews asynchronously and this job does not wait for it.
-      - name: Distribute iOS to external TestFlight testers
-        if: needs.release-plan.outputs.ios_submit == 'true'
-        env:
-          APPSTORE_ISSUER_ID: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
-          APPSTORE_API_KEY_ID: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
-          APPSTORE_API_PRIVATE_KEY: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
-          TESTFLIGHT_EXTERNAL_BETA_GROUP: ${{ vars.MOBILE_TESTFLIGHT_EXTERNAL_BETA_GROUP }}
-        run: node scripts/submit-testflight-beta.mjs
-
   release-publish-android:
     name: Attach Android APKs and fingerprint
     needs: [release-plan, release-android]
