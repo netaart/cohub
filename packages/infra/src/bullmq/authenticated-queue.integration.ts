@@ -9,7 +9,7 @@ if (!url || !["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname)
   throw new Error("BULLMQ_TEST_REDIS_URL must point to a dedicated loopback Redis instance");
 }
 
-await test("real Redis enforces queue authentication across producers and workers", async () => {
+test("real Redis enforces queue authentication across producers and workers", async () => {
   const name = `auth-${randomUUID()}`;
   const key = randomBytes(32);
   const connection = { url, maxRetriesPerRequest: null };

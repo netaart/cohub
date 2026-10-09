@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { test } from "node:test";
 import { AuthenticatedQueue, readQueueSigningKey } from "./authenticated-queue.js";
 
-await test("queue signing configuration fails before connecting to Redis", () => {
+test("queue signing configuration fails before connecting to Redis", () => {
   const previous = process.env.BULLMQ_SIGNING_KEY;
   try {
     for (const value of [undefined, "", "short", "x".repeat(64), "00".repeat(31), "00".repeat(33)]) {
