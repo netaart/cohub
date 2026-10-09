@@ -83,6 +83,11 @@ const stateClass = $derived(
 		--list-subtitle-size: 14px;
 		--list-subtitle-leading: 20px;
 		--list-meta-size: 12px;
+		--list-subtitle-color: color-mix(
+			in oklab,
+			var(--color-text-tertiary) 60%,
+			var(--color-text-placeholder)
+		);
 	}
 
 	.list-row[data-density="dense"] {
