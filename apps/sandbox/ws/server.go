@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,6 +109,15 @@ func (s *Server) shouldResyncFSOnAttach() bool {
 }
 
 func (s *Server) Run() error {
+	if len(s.cfg.ControlPublicKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("sandbox control public key is required")
+	}
+	addr := fmt.Sprintf("%s:%d", env.DefaultSandboxWSHost, env.DefaultSandboxWSPort)
+	s.logger.Info("sandbox ws server listening", slog.String("addr", addr))
+	return http.ListenAndServe(addr, s.Handler())
+}
+
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/sandbox", s.handleSandbox)
 	mux.HandleFunc("/healthz", s.handleHealthz)
@@ -117,9 +127,7 @@ func (s *Server) Run() error {
 		_, _ = w.Write([]byte("Not found"))
 	})
 
-	addr := fmt.Sprintf("%s:%d", env.DefaultSandboxWSHost, env.DefaultSandboxWSPort)
-	s.logger.Info("sandbox ws server listening", slog.String("addr", addr))
-	return http.ListenAndServe(addr, mux)
+	return mux
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -144,13 +152,19 @@ func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 const wsReadLimit = 50 * 1024 * 1024 // 50MB per websocket message
 
 func (s *Server) handleSandbox(w http.ResponseWriter, r *http.Request) {
+	identity, err := authenticateControl(r, s.cfg.ControlPublicKey, s.cfg.SpaceID)
+	if err != nil {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		s.logger.Error("failed to accept websocket", slog.String("error", err.Error()))
 		return
 	}
 	conn.SetReadLimit(wsReadLimit)
-	s.serveSession(r.Context(), conn, r.RemoteAddr)
+	s.serveSession(r.Context(), conn, r.RemoteAddr, identity)
 }
 
 // ServeDialedConn drives one protocol session over a connection the sandbox
@@ -158,7 +172,7 @@ func (s *Server) handleSandbox(w http.ResponseWriter, r *http.Request) {
 // handleSandbox for the dial-out direction and blocks until the session ends.
 func (s *Server) ServeDialedConn(ctx context.Context, conn *websocket.Conn, remote string) {
 	conn.SetReadLimit(wsReadLimit)
-	s.serveSession(ctx, conn, remote)
+	s.serveSession(ctx, conn, remote, "")
 }
 
 func (s *Server) broadcastAttached(message interface{}, warnMessage string) {

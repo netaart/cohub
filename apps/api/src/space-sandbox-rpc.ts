@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import { createLogger } from "@cohub/infra/logging";
 import {
+  createSandboxConnectionHeaders,
   SandboxRpcError,
   getSandboxClientConnection,
   hasPendingSandboxRequests,
@@ -39,18 +40,6 @@ export class SandboxOfflineError extends Error {
 
 type PoolEntry = { spaceId: string; lastUsedAt: number; idleTimer: ReturnType<typeof setTimeout> | null };
 const entries = new Map<string, PoolEntry>();
-
-function relayAuthHeaders(wsUrl: string): Record<string, string> | undefined {
-  try {
-    const { pathname } = new URL(wsUrl);
-    if (pathname.startsWith("/internal/sandbox-relay/") && config.workerSecret) {
-      return { "x-worker-secret": config.workerSecret };
-    }
-  } catch {
-    // ignore malformed url; resolution below validates it
-  }
-  return undefined;
-}
 
 async function resolveWsEndpoint(spaceId: string): Promise<string> {
   const sandbox = await getSpaceSandboxBySpaceId(spaceId);
@@ -98,7 +87,7 @@ async function ensureConnection(spaceId: string): Promise<SandboxConnection> {
     spaceId,
     wsUrl,
     identity: API_IDENTITY,
-    headers: relayAuthHeaders(wsUrl),
+    headers: (endpoint) => createSandboxConnectionHeaders({ wsUrl: endpoint, spaceId, identity: API_IDENTITY, workerSecret: config.workerSecret }),
   });
   try {
     return await waitForSandboxConnection(spaceId, CONNECT_TIMEOUT_MS);

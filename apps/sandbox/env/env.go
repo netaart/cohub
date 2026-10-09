@@ -1,6 +1,9 @@
 package env
 
 import (
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,6 +36,7 @@ const (
 )
 
 type Config struct {
+	ControlPublicKey               ed25519.PublicKey
 	SpaceID                        string
 	Mode                           string
 	WorkspaceDir                   string
@@ -83,6 +87,19 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("COHUB_SPACE_ID is required")
 	}
 
+	block, _ := pem.Decode([]byte(os.Getenv("SANDBOX_CONTROL_PUBLIC_KEY")))
+	if block == nil {
+		return Config{}, fmt.Errorf("SANDBOX_CONTROL_PUBLIC_KEY must be an Ed25519 public key in PEM format")
+	}
+	publicKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse SANDBOX_CONTROL_PUBLIC_KEY: %w", err)
+	}
+	controlKey, ok := publicKey.(ed25519.PublicKey)
+	if !ok {
+		return Config{}, fmt.Errorf("SANDBOX_CONTROL_PUBLIC_KEY must be Ed25519")
+	}
+
 	workspaceDir := strings.TrimSpace(os.Getenv("WORKSPACE_DIR"))
 	if workspaceDir == "" {
 		workspaceDir = "/workspace"
@@ -104,6 +121,7 @@ func Load() (Config, error) {
 	imageVersion := ResolveSandboxVersion("sandbox:dev")
 
 	return Config{
+		ControlPublicKey:               controlKey,
 		SpaceID:                        spaceID,
 		Mode:                           ModeListen,
 		WorkspaceDir:                   workspaceDir,

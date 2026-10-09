@@ -1,8 +1,38 @@
 package env
 
-import "testing"
+import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
+	"testing"
+)
+
+func setControlPublicKey(t *testing.T) {
+	t.Helper()
+	key, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SANDBOX_CONTROL_PUBLIC_KEY", string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})))
+}
+
+func TestCloudControlKeyRequired(t *testing.T) {
+	t.Setenv("COHUB_SPACE_ID", "space-a")
+	for _, value := range []string{"", "invalid"} {
+		t.Setenv("SANDBOX_CONTROL_PUBLIC_KEY", value)
+		if _, err := Load(); err == nil {
+			t.Fatal("cloud sandbox accepted invalid control key")
+		}
+	}
+}
 
 func TestCloudSearchDefaultsToEnabledLatestRelease(t *testing.T) {
+	setControlPublicKey(t)
 	t.Setenv("COHUB_SPACE_ID", "00000000-0000-0000-0000-000000000001")
 	t.Setenv("COHUB_SEARCH_ENABLED", "")
 	t.Setenv("COHUB_SEARCH_VERSION", "")

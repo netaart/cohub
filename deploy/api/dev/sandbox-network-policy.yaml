@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-control
+  namespace: cohub-sessions-dev
+spec:
+  podSelector:
+    matchLabels:
+      app: agent-sandbox
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cohub-dev
+          podSelector:
+            matchLabels:
+              cohub.live/sandbox-control-client: "true"
+      ports:
+        - protocol: TCP
+          port: 8788
+    - ports:
+        - protocol: TCP
+          port: 1
+          endPort: 8787
+        - protocol: TCP
+          port: 8789
+          endPort: 65535
+        - protocol: UDP
+        - protocol: SCTP

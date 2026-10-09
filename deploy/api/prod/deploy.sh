@@ -215,6 +215,7 @@ render_template "$MANIFESTS_DIR/service.tmpl.yaml" rendered/service.yaml
 kubectl apply -f rendered/configmap.yaml
 kubectl apply -f rendered/service.yaml
 kubectl apply -f rbac.yaml
+kubectl apply -f sandbox-network-policy.yaml
 kubectl apply -f rendered/deployment.yaml
 
 if [ "$ROUTE_ENABLED" = "true" ]; then

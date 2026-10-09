@@ -133,11 +133,13 @@ type SandboxClientRun = {
   controller: AbortController;
 };
 
+type SandboxConnectionHeaders = Record<string, string> | ((wsUrl: string) => Promise<Record<string, string>>);
+
 type SandboxClientRegistration = {
   spaceId: string;
   wsUrl: string;
   identity: string;
-  headers?: Record<string, string>;
+  headers?: SandboxConnectionHeaders;
   started: boolean;
   generation: number;
   activeRun: SandboxClientRun | null;
@@ -361,7 +363,7 @@ function callHookSafely(
     });
 }
 
-function getOrCreateRegistration(spaceId: string, wsUrl: string, identity: string, headers: Record<string, string> | undefined, hooks?: SandboxStatusHooks) {
+function getOrCreateRegistration(spaceId: string, wsUrl: string, identity: string, headers: SandboxConnectionHeaders | undefined, hooks?: SandboxStatusHooks) {
   const existing = registrations.get(spaceId);
   if (existing) {
     if (existing.wsUrl !== wsUrl) existing.wsUrl = wsUrl;
@@ -436,9 +438,10 @@ function isCurrentRun(registration: SandboxClientRegistration, run: SandboxClien
     && !run.controller.signal.aborted;
 }
 
-export async function startSandboxWsClient(input: { spaceId: string; wsUrl: string; identity: string; headers?: Record<string, string>; hooks?: SandboxStatusHooks }) {
+export async function startSandboxWsClient(input: { spaceId: string; wsUrl: string; identity: string; headers?: SandboxConnectionHeaders; hooks?: SandboxStatusHooks }) {
   const spaceId = input.spaceId;
   const wsUrl = input.wsUrl;
+  if (typeof input.headers === "function") await input.headers(wsUrl);
   const registration = getOrCreateRegistration(spaceId, wsUrl, input.identity, input.headers, input.hooks);
   if (registration.started) return;
 
@@ -560,8 +563,11 @@ async function runLoop(registration: SandboxClientRegistration, run: SandboxClie
 }
 
 async function connectOnce(registration: SandboxClientRegistration, run: SandboxClientRun) {
+  const wsUrl = registration.wsUrl;
+  const headers = typeof registration.headers === "function" ? await registration.headers(wsUrl) : registration.headers;
+  if (!isCurrentRun(registration, run)) return;
   await new Promise<void>((resolve, reject) => {
-    const socket = new WebSocket(registration.wsUrl, registration.headers ? { headers: registration.headers } : undefined);
+    const socket = new WebSocket(wsUrl, headers ? { headers } : undefined);
     const signal = run.controller.signal;
     let heartbeat: SandboxHeartbeat | null = null;
     let connection: SandboxConnection | null = null;
