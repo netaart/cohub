@@ -1,10 +1,16 @@
-name: Security
+name: Mobile Security
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-*.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-*.yml'
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
@@ -15,8 +21,12 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: security-${{ github.ref }}
+  group: mobile-security-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: apps/mobile
 
 jobs:
   dependency-review:
@@ -43,8 +53,12 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
+          # The rest of the monorepo is not scanned by this workflow.
+          config: |
+            paths:
+              - apps/mobile
 
       - name: Analyze
         uses: github/codeql-action/analyze@v4
         with:
-          category: /language:javascript-typescript
+          category: /mobile/language:javascript-typescript

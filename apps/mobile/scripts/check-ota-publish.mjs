@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import {
   OTA_CLI_REPOSITORY,
   OTA_CLI_REVISION,
@@ -54,13 +55,21 @@ assert.ok(
 assert.ok(fingerprintConfig.sourceSkips.includes("PackageJsonAndroidAndIosScriptsIfNotContainRun"));
 
 const parse = (file) => YAML.parse(readFileSync(file, "utf8"), { uniqueKeys: true });
-const ota = parse(".github/workflows/publish-ota.yml");
+// The app's workflows live in the monorepo root and run every step from apps/mobile.
+const workflow = (name) => {
+  const parsed = parse(fileURLToPath(new URL(`../../../.github/workflows/${name}`, import.meta.url)));
+  assert.equal(parsed.defaults?.run?.["working-directory"], "apps/mobile", `${name} must run its steps from apps/mobile`);
+  assert.match(parsed.name, /^Mobile /, `${name} must be named apart from the monorepo's workflows`);
+  return parsed;
+};
+const ota = workflow("mobile-publish-ota.yml");
 assert.deepEqual(ota.on.push.branches, ["main"]);
+assert.deepEqual(ota.on.push.paths, ["apps/mobile/**"], "Only app changes publish OTA");
 assert.ok(Object.hasOwn(ota.on, "workflow_dispatch"));
 assert.deepEqual(ota.on.workflow_dispatch.inputs.channel.options, ["staging", "production"]);
 assert.equal(ota.on.workflow_dispatch.inputs.channel.default, "production");
 assert.equal(ota.concurrency["cancel-in-progress"], false);
-assert.equal(ota.concurrency.group, "ota-publish-${{ github.event.inputs.channel || 'production' }}");
+assert.equal(ota.concurrency.group, "mobile-ota-publish-${{ github.event.inputs.channel || 'production' }}");
 assert.equal(ota.env.OTA_CLI_REPOSITORY, OTA_CLI_REPOSITORY);
 assert.equal(ota.env.OTA_CLI_REVISION, OTA_CLI_REVISION);
 assert.match(ota.jobs.prepare.if, /refs\/heads\/main/);
@@ -164,30 +173,36 @@ assert.match(JSON.stringify(ota.jobs.ios.steps), /--platform ios/);
 assert.match(JSON.stringify(ota.jobs.android.steps), /cohub-ota-android-/);
 assert.match(JSON.stringify(ota.jobs.ios.steps), /cohub-ota-ios-/);
 
-const nativeCi = parse(".github/workflows/native-ci.yml");
+const nativeCi = workflow("mobile-native-ci.yml");
 assert.equal(Object.hasOwn(nativeCi.on, "push"), false);
 assert.equal(Object.hasOwn(nativeCi.on, "pull_request"), false, "PR workflow must not compile native debug builds");
 assert.ok(Object.hasOwn(nativeCi.on, "workflow_dispatch"), "Native CI remains available as a manual run");
 
-const nativeRelease = parse(".github/workflows/native-release.yml");
+const nativeRelease = workflow("mobile-native-release.yml");
 assert.ok(nativeRelease.on.workflow_dispatch.inputs.platform.options.includes("ios"), "Native Release must allow iOS-only TestFlight builds");
 
 // Gradle caches must key on the committed dependency set. setup-java hashes the
 // prebuild-generated android/*.gradle files and offers no older-entry fallback, so its
 // cache goes cold on every app version or config bump (~4 minutes of re-downloads).
-for (const [file, workflow] of [["native-ci.yml", nativeCi], ["native-release.yml", nativeRelease]]) {
-  const javaStep = workflow.jobs.android.steps.find((step) => step.uses === "actions/setup-java@v6");
+for (const [file, parsed] of [["mobile-native-ci.yml", nativeCi], ["mobile-native-release.yml", nativeRelease]]) {
+  const javaStep = parsed.jobs.android.steps.find((step) => step.uses === "actions/setup-java@v6");
   assert.ok(javaStep, `${file} must set up Java for the Android build`);
   assert.equal(javaStep.with.cache, undefined, `${file} must cache Gradle explicitly instead of through setup-java`);
-  const gradleCache = workflow.jobs.android.steps.find((step) => String(step.uses).startsWith("actions/cache@"));
+  const gradleCache = parsed.jobs.android.steps.find((step) => String(step.uses).startsWith("actions/cache@"));
   assert.ok(gradleCache, `${file} must restore the Gradle caches`);
   assert.match(gradleCache.with.path, /~\/\.gradle\/caches/, `${file} must cache the Gradle dependency caches`);
   assert.match(gradleCache.with.path, /~\/\.gradle\/wrapper/, `${file} must cache the Gradle wrapper distributions`);
-  assert.match(gradleCache.with.key, /hashFiles\('package-lock\.json'\)/, `${file} must key the Gradle cache on the committed dependency set`);
+  assert.match(gradleCache.with.key, /hashFiles\('apps\/mobile\/package-lock\.json'\)/, `${file} must key the Gradle cache on the committed dependency set`);
   assert.match(gradleCache.with["restore-keys"], /gradle-\$\{\{ runner\.os \}\}-/, `${file} must fall back to the previous Gradle cache so dependency updates stay warm`);
 }
 
-const ci = parse(".github/workflows/ci.yml");
+const ci = workflow("mobile-ci.yml");
+for (const event of ["push", "pull_request"]) {
+  assert.deepEqual(ci.on[event].paths, ["apps/mobile/**", ".github/workflows/mobile-*.yml"], `Mobile CI must ${event} only for app changes`);
+}
+const e2e = workflow("mobile-e2e-android.yml");
+assert.deepEqual(e2e.on.workflow_run.workflows, [ota.name], "E2E must chain off the OTA workflow by its current name");
+workflow("mobile-security.yml");
 assert.deepEqual(ci.jobs.bundle.strategy.matrix.platform, ["android", "ios"], "CI must still export both platform bundles");
 assert.equal(Object.hasOwn(ci.jobs.bundle, "needs"), false, "CI exports must not serialize behind Quality: they are independent and serializing them doubled every run's wall clock");
 
@@ -196,7 +211,7 @@ assert.equal(testFlightUpload.with["wait-for-processing"], "true", "TestFlight u
 assert.equal(Object.hasOwn(testFlightUpload.with, "uses-non-exempt-encryption"), false, "TestFlight uploads must not patch build metadata with a limited API key");
 const appJson = JSON.parse(readFileSync("app.json", "utf8"));
 assert.equal(appJson.expo.ios.infoPlist.ITSAppUsesNonExemptEncryption, false, "iOS builds must declare export compliance in Info.plist");
-assert.equal(nativeRelease.jobs.ios.env.EXPO_PUBLIC_UPDATES_URL, "${{ vars.EXPO_PUBLIC_UPDATES_URL }}");
+assert.equal(nativeRelease.jobs.ios.env.EXPO_PUBLIC_UPDATES_URL, "${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}");
 assert.ok(JSON.stringify(nativeRelease.jobs.ios.steps).includes("EXUpdates.bundle"), "iOS builds must record the fingerprint embedded in the IPA");
 assert.ok(JSON.stringify(nativeRelease.jobs.ios.steps).includes(IOS_NATIVE_FINGERPRINT_ASSET));
 const iosArtifact = nativeRelease.jobs.ios.steps.find((step) => step.uses === "actions/upload-artifact@v7");
@@ -209,7 +224,7 @@ assert.match(JSON.stringify(attachIosFingerprint.steps), /gh release upload/);
 assert.match(JSON.stringify(nativeRelease.jobs.android.steps), /native-fingerprint/);
 assert.match(nativeRelease.jobs.android.steps.find((step) => step.uses === "actions/upload-artifact@v7").with.path, /native-fingerprint/);
 
-const taggedRelease = parse(".github/workflows/native-tag.yml");
+const taggedRelease = workflow("mobile-native-tag.yml");
 assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /gh release upload/, "GitHub Release must still attach APKs");
 assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /publish-yaota-apks/, "Native Tag Release must publish the same APKs to Yaota");
 assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /OTA_SERVER/);
@@ -288,10 +303,15 @@ try {
 for (const platform of ["android", "ios"]) {
   const job = taggedRelease.jobs[platform];
   assert.equal(job.needs, "prepare");
-  assert.equal(job.uses, "./.github/workflows/native-release.yml");
+  assert.equal(job.uses, "./.github/workflows/mobile-native-release.yml");
   assert.equal(job.with.platform, platform);
   assert.equal(job.with.release_tag, "${{ needs.prepare.outputs.tag }}");
-  assert.equal(job.secrets, "inherit");
+  // inherit would hand every monorepo secret to the native build.
+  assert.equal(typeof job.secrets, "object", `${platform} must pass its secrets explicitly`);
+  for (const [name, value] of Object.entries(job.secrets)) {
+    assert.ok(Object.hasOwn(nativeRelease.on.workflow_call.secrets, name), `${name} must be declared by the reusable workflow`);
+    assert.equal(value, `\${{ secrets.${name} }}`);
+  }
 }
 assert.equal(taggedRelease.jobs.android.with.profile, "distribution");
 assert.equal(taggedRelease.jobs.android.with.submit, false);

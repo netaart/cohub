@@ -1,4 +1,4 @@
-name: Native Release
+name: Mobile Native Release
 
 on:
   workflow_call:
@@ -28,23 +28,23 @@ on:
         required: true
         type: string
     secrets:
-      ANDROID_KEYSTORE_BASE64:
+      MOBILE_ANDROID_KEYSTORE_BASE64:
         required: false
-      ANDROID_KEYSTORE_PASSWORD:
+      MOBILE_ANDROID_KEYSTORE_PASSWORD:
         required: false
-      ANDROID_KEY_ALIAS:
+      MOBILE_ANDROID_KEY_ALIAS:
         required: false
-      ANDROID_KEY_PASSWORD:
+      MOBILE_ANDROID_KEY_PASSWORD:
         required: false
-      COHUB_GOOGLE_SERVICES_JSON_BASE64:
+      MOBILE_COHUB_GOOGLE_SERVICES_JSON_BASE64:
         required: false
-      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
+      MOBILE_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:
         required: false
-      APPSTORE_CERTIFICATES_FILE_BASE64:
+      MOBILE_APPSTORE_CERTIFICATES_FILE_BASE64:
         required: false
-      APPSTORE_CERTIFICATES_PASSWORD:
+      MOBILE_APPSTORE_CERTIFICATES_PASSWORD:
         required: false
-      APPSTORE_API_PRIVATE_KEY:
+      MOBILE_APPSTORE_API_PRIVATE_KEY:
         required: false
   workflow_dispatch:
     inputs:
@@ -85,12 +85,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-release-${{ inputs.profile || 'production' }}-${{ inputs.platform || 'all' }}
+  group: mobile-native-release-${{ inputs.profile || 'production' }}-${{ inputs.platform || 'all' }}
   cancel-in-progress: false
 
 env:
   CI: "true"
   EXPO_NO_TELEMETRY: "1"
+
+defaults:
+  run:
+    working-directory: apps/mobile
 
 jobs:
   metadata:
@@ -153,7 +157,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
-      EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
     steps:
       - name: Checkout validated ref
         uses: actions/checkout@v7
@@ -166,6 +170,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -188,7 +193,7 @@ jobs:
 
       - name: Prepare Firebase configuration
         env:
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.COHUB_GOOGLE_SERVICES_JSON_BASE64 }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.MOBILE_COHUB_GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
           set -euo pipefail
           if [[ -z "$GOOGLE_SERVICES_JSON_BASE64" ]]; then
@@ -211,7 +216,7 @@ jobs:
           memory_args_path=scripts/android-gradle-jvmargs.txt
           if [[ ! -f "$memory_args_path" ]]; then
             memory_args_path="$RUNNER_TEMP/android-gradle-jvmargs.txt"
-            git show "origin/main:scripts/android-gradle-jvmargs.txt" > "$memory_args_path"
+            git show "origin/main:apps/mobile/scripts/android-gradle-jvmargs.txt" > "$memory_args_path"
           fi
           memory_args=$(sed -n '1p' "$memory_args_path")
           test -n "$memory_args"
@@ -243,26 +248,26 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/mobile/package-lock.json') }}
           restore-keys: |
             gradle-${{ runner.os }}-
 
       - name: Validate Android signing inputs
         if: inputs.profile == 'distribution' || inputs.profile == 'production'
         env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_BASE64: ${{ secrets.MOBILE_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MOBILE_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MOBILE_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MOBILE_ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          test -n "$KEYSTORE_BASE64" || { echo "ANDROID_KEYSTORE_BASE64 is required for Android distribution/release builds"; exit 1; }
-          test -n "$KEYSTORE_PASSWORD" || { echo "ANDROID_KEYSTORE_PASSWORD is required for Android distribution/release builds"; exit 1; }
-          test -n "$KEY_ALIAS" || { echo "ANDROID_KEY_ALIAS is required for Android distribution/release builds"; exit 1; }
-          test -n "$KEY_PASSWORD" || { echo "ANDROID_KEY_PASSWORD is required for Android distribution/release builds"; exit 1; }
+          test -n "$KEYSTORE_BASE64" || { echo "MOBILE_ANDROID_KEYSTORE_BASE64 is required for Android distribution/release builds"; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo "MOBILE_ANDROID_KEYSTORE_PASSWORD is required for Android distribution/release builds"; exit 1; }
+          test -n "$KEY_ALIAS" || { echo "MOBILE_ANDROID_KEY_ALIAS is required for Android distribution/release builds"; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo "MOBILE_ANDROID_KEY_PASSWORD is required for Android distribution/release builds"; exit 1; }
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/cohub-upload.jks
           {
-            echo "COHUB_ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/android/cohub-upload.jks"
+            echo "COHUB_ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/apps/mobile/android/cohub-upload.jks"
             echo "COHUB_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
             echo "COHUB_ANDROID_KEY_ALIAS=$KEY_ALIAS"
             echo "COHUB_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
@@ -287,24 +292,24 @@ jobs:
         with:
           name: cohub-android-${{ inputs.profile }}-${{ github.run_id }}
           path: |
-            ${{ inputs.profile == 'production' && 'android/app/build/outputs/bundle/release/app-release.aab' || 'android/app/build/outputs/apk/release/app-*-release.apk' }}
-            build/native-release/cohub-android-native-fingerprint.txt
+            ${{ inputs.profile == 'production' && 'apps/mobile/android/app/build/outputs/bundle/release/app-release.aab' || 'apps/mobile/android/app/build/outputs/apk/release/app-*-release.apk' }}
+            apps/mobile/build/native-release/cohub-android-native-fingerprint.txt
           if-no-files-found: error
           retention-days: 30
 
       - name: Validate Google Play submission input
         if: inputs.profile == 'production' && inputs.submit == true
         env:
-          GOOGLE_PLAY_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-        run: test -n "$GOOGLE_PLAY_JSON" || { echo "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is required when submit=true"; exit 1; }
+          GOOGLE_PLAY_JSON: ${{ secrets.MOBILE_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: test -n "$GOOGLE_PLAY_JSON" || { echo "MOBILE_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is required when submit=true"; exit 1; }
 
       - name: Submit Android to Google Play
         if: inputs.profile == 'production' && inputs.submit == true
         uses: r0adkll/upload-google-play@v1
         with:
-          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          serviceAccountJsonPlainText: ${{ secrets.MOBILE_GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: ${{ steps.identifiers.outputs.android_package }}
-          releaseFiles: android/app/build/outputs/bundle/release/app-release.aab
+          releaseFiles: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
           tracks: ${{ inputs.android_track }}
           releaseName: ${{ inputs.release_tag || github.ref_name }}
           status: completed
@@ -316,7 +321,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 65
     env:
-      EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
     steps:
       - name: Checkout validated ref
         uses: actions/checkout@v7
@@ -331,6 +336,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Install dependencies
         if: inputs.distribute_only != true
@@ -358,20 +364,20 @@ jobs:
       - name: Validate iOS signing inputs
         if: inputs.distribute_only != true && inputs.profile == 'production'
         env:
-          ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
-          API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
-          TEAM_ID: ${{ vars.APPSTORE_TEAM_ID }}
-          PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
-          CERTIFICATE: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+          ISSUER_ID: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
+          API_KEY_ID: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
+          TEAM_ID: ${{ vars.MOBILE_APPSTORE_TEAM_ID }}
+          PRIVATE_KEY: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
+          CERTIFICATE: ${{ secrets.MOBILE_APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MOBILE_APPSTORE_CERTIFICATES_PASSWORD }}
         run: |
           set -euo pipefail
-          test -n "$ISSUER_ID" || { echo "APPSTORE_ISSUER_ID repository variable is required"; exit 1; }
-          test -n "$API_KEY_ID" || { echo "APPSTORE_API_KEY_ID repository variable is required"; exit 1; }
-          test -n "$TEAM_ID" || { echo "APPSTORE_TEAM_ID repository variable is required"; exit 1; }
-          test -n "$PRIVATE_KEY" || { echo "APPSTORE_API_PRIVATE_KEY secret is required"; exit 1; }
-          test -n "$CERTIFICATE" || { echo "APPSTORE_CERTIFICATES_FILE_BASE64 secret is required"; exit 1; }
-          test -n "$CERTIFICATE_PASSWORD" || { echo "APPSTORE_CERTIFICATES_PASSWORD secret is required"; exit 1; }
+          test -n "$ISSUER_ID" || { echo "MOBILE_APPSTORE_ISSUER_ID repository variable is required"; exit 1; }
+          test -n "$API_KEY_ID" || { echo "MOBILE_APPSTORE_API_KEY_ID repository variable is required"; exit 1; }
+          test -n "$TEAM_ID" || { echo "MOBILE_APPSTORE_TEAM_ID repository variable is required"; exit 1; }
+          test -n "$PRIVATE_KEY" || { echo "MOBILE_APPSTORE_API_PRIVATE_KEY secret is required"; exit 1; }
+          test -n "$CERTIFICATE" || { echo "MOBILE_APPSTORE_CERTIFICATES_FILE_BASE64 secret is required"; exit 1; }
+          test -n "$CERTIFICATE_PASSWORD" || { echo "MOBILE_APPSTORE_CERTIFICATES_PASSWORD secret is required"; exit 1; }
           {
             echo "IOS_TEAM_ID=$TEAM_ID"
             echo "APPSTORE_ISSUER_ID=$ISSUER_ID"
@@ -382,8 +388,8 @@ jobs:
         if: inputs.distribute_only != true && inputs.profile == 'production'
         uses: apple-actions/import-codesign-certs@v7
         with:
-          p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
-          p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+          p12-file-base64: ${{ secrets.MOBILE_APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          p12-password: ${{ secrets.MOBILE_APPSTORE_CERTIFICATES_PASSWORD }}
 
       - name: Download iOS provisioning profile
         if: inputs.distribute_only != true && inputs.profile == 'production'
@@ -392,9 +398,9 @@ jobs:
         with:
           bundle-id: ${{ steps.identifiers.outputs.ios_bundle_id }}
           profile-type: IOS_APP_STORE
-          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
-          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
-          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          issuer-id: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
 
       - name: Resolve provisioning profile name
         if: inputs.distribute_only != true && inputs.profile == 'production'
@@ -431,8 +437,8 @@ jobs:
         with:
           name: cohub-ios-${{ inputs.profile }}-${{ github.run_id }}
           path: |
-            build/export/Cohub.ipa
-            build/native-release/cohub-ios-native-fingerprint.txt
+            apps/mobile/build/export/Cohub.ipa
+            apps/mobile/build/native-release/cohub-ios-native-fingerprint.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -440,10 +446,10 @@ jobs:
         if: inputs.distribute_only != true && inputs.profile == 'production' && inputs.submit == true
         uses: apple-actions/upload-testflight-build@v5
         with:
-          app-path: build/export/Cohub.ipa
-          issuer-id: ${{ vars.APPSTORE_ISSUER_ID }}
-          api-key-id: ${{ vars.APPSTORE_API_KEY_ID }}
-          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          app-path: apps/mobile/build/export/Cohub.ipa
+          issuer-id: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
           wait-for-processing: "true"
 
       # Assigning the external group also submits the first build of each app version
@@ -451,10 +457,10 @@ jobs:
       - name: Distribute iOS to external TestFlight testers
         if: inputs.profile == 'production' && (inputs.submit == true || inputs.distribute_only == true)
         env:
-          APPSTORE_ISSUER_ID: ${{ vars.APPSTORE_ISSUER_ID }}
-          APPSTORE_API_KEY_ID: ${{ vars.APPSTORE_API_KEY_ID }}
-          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
-          TESTFLIGHT_EXTERNAL_BETA_GROUP: ${{ vars.TESTFLIGHT_EXTERNAL_BETA_GROUP }}
+          APPSTORE_ISSUER_ID: ${{ vars.MOBILE_APPSTORE_ISSUER_ID }}
+          APPSTORE_API_KEY_ID: ${{ vars.MOBILE_APPSTORE_API_KEY_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.MOBILE_APPSTORE_API_PRIVATE_KEY }}
+          TESTFLIGHT_EXTERNAL_BETA_GROUP: ${{ vars.MOBILE_TESTFLIGHT_EXTERNAL_BETA_GROUP }}
           # A distribute-only rerun targets the v2.2.14 build (2002014) already on TestFlight;
           # a build that was never uploaded would spin the wait window and fail.
           COHUB_IOS_BUILD_NUMBER: ${{ inputs.distribute_only == true && '2002014' || '' }}
@@ -472,7 +478,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: cohub-ios-${{ inputs.profile }}-${{ github.run_id }}
-          path: build/ios-artifact
+          path: apps/mobile/build/ios-artifact
 
       # Only a submitted TestFlight build is distributed, so only its fingerprint may claim the release's iOS runtime.
       - name: Upload fingerprint to the GitHub Release

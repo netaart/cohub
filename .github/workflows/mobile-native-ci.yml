@@ -1,4 +1,4 @@
-name: Native CI
+name: Mobile Native CI
 
 on:
   workflow_dispatch:
@@ -7,12 +7,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-ci-${{ github.workflow }}-${{ github.ref }}
+  group: mobile-native-ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CI: "true"
   EXPO_NO_TELEMETRY: "1"
+
+defaults:
+  run:
+    working-directory: apps/mobile
 
 jobs:
   android:
@@ -28,6 +32,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -51,7 +56,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/mobile/package-lock.json') }}
           restore-keys: |
             gradle-${{ runner.os }}-
 
@@ -64,7 +69,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cohub-android-debug-${{ github.sha }}
-          path: android/app/build/outputs/apk/debug/app-*-debug.apk
+          path: apps/mobile/android/app/build/outputs/apk/debug/app-*-debug.apk
           if-no-files-found: error
           retention-days: 7
 
@@ -81,6 +86,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -95,6 +101,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cohub-ios-simulator-${{ github.sha }}
-          path: build/artifacts/Cohub-ios-simulator.zip
+          path: apps/mobile/build/artifacts/Cohub-ios-simulator.zip
           if-no-files-found: error
           retention-days: 7

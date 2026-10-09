@@ -1,7 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: /
+    directory: /apps/mobile
     schedule:
       interval: weekly
       day: monday
@@ -21,15 +21,4 @@ updates:
           - "react-native"
           - "react-native-*"
     commit-message:
-      prefix: chore
-      include: scope
-
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-      day: monday
-      time: "04:30"
-      timezone: UTC
-    commit-message:
-      prefix: ci
+      prefix: chore(mobile)

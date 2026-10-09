@@ -1,8 +1,8 @@
-name: E2E Android
+name: Mobile E2E Android
 
 # The device run installs a released APK and lets production OTA deliver the current
 # JS, so it only makes sense once Publish OTA has published that commit. It therefore
-# chains off Publish OTA instead of running on every pull request, where the JS under
+# chains off Mobile Publish OTA instead of running on every pull request, where the JS under
 # test would not be on any channel yet.
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         required: false
         type: string
   workflow_run:
-    workflows: ["Publish OTA"]
+    workflows: ["Mobile Publish OTA"]
     types: [completed]
     branches: [main]
 
@@ -20,12 +20,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: e2e-android
+  group: mobile-e2e-android
   cancel-in-progress: true
 
 env:
   CI: "true"
   EXPO_NO_TELEMETRY: "1"
+
+defaults:
+  run:
+    working-directory: apps/mobile
 
 jobs:
   android:
@@ -37,10 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      EXPO_PUBLIC_UPDATES_URL: ${{ vars.EXPO_PUBLIC_UPDATES_URL }}
+      EXPO_PUBLIC_UPDATES_URL: ${{ vars.MOBILE_EXPO_PUBLIC_UPDATES_URL }}
       GH_TOKEN: ${{ github.token }}
-      E2E_ACCOUNT_EMAIL: ${{ secrets.E2E_ACCOUNT_EMAIL }}
-      E2E_ACCOUNT_PASSWORD: ${{ secrets.E2E_ACCOUNT_PASSWORD }}
+      E2E_ACCOUNT_EMAIL: ${{ secrets.MOBILE_E2E_ACCOUNT_EMAIL }}
+      E2E_ACCOUNT_PASSWORD: ${{ secrets.MOBILE_E2E_ACCOUNT_PASSWORD }}
     steps:
       - name: Checkout tested commit
         uses: actions/checkout@v7
@@ -52,6 +56,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -98,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${E2E_ACCOUNT_EMAIL:-}" ] || [ -z "${E2E_ACCOUNT_PASSWORD:-}" ]; then
-            echo "::warning title=E2E skipped::No E2E account is configured. Add E2E_ACCOUNT_EMAIL and E2E_ACCOUNT_PASSWORD (dev tenant) to run the device flows."
+            echo "::warning title=E2E skipped::No E2E account is configured. Add the MOBILE_E2E_ACCOUNT_EMAIL and MOBILE_E2E_ACCOUNT_PASSWORD secrets (dev tenant) to run the device flows."
             echo "ready=no" >> "$GITHUB_OUTPUT"
           else
             echo "ready=yes" >> "$GITHUB_OUTPUT"
@@ -115,6 +120,8 @@ jobs:
           target: google_apis
           emulator-boot-timeout: 900
           disable-animations: true
+          # Action inputs do not inherit defaults.run.
+          working-directory: apps/mobile
           script: node scripts/e2e/android.mjs --abi x86_64 --flows "${{ inputs.flows || 'e2e/flows' }}"
 
       - name: Upload evidence
@@ -122,6 +129,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cohub-e2e-android-${{ github.run_id }}
-          path: dist/e2e
+          path: apps/mobile/dist/e2e
           if-no-files-found: ignore
           retention-days: 14
