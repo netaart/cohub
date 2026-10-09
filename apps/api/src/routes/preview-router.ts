@@ -1,4 +1,3 @@
-import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
 import { setCookie } from "hono/cookie";
@@ -173,32 +172,26 @@ export function createPreviewRouter(dependencies: PreviewRouterDependencies) {
       }
 
       const info = await dependencies.streamSpaceFile(spaceId, path, { visibility: "full" });
-      const range = parseRange(context.req.header("range"), info.size);
-      if (range === "invalid") {
-        return context.body(null, 416, {
-          ...headers,
-          "content-range": `bytes */${info.size}`,
-        });
-      }
-      if (range) {
-        const stream = Readable.toWeb(
-          createReadStream(info.target, { start: range.start, end: range.end }),
-        ) as ReadableStream;
-        return context.body(stream, 206, {
+      try {
+        const range = parseRange(context.req.header("range"), info.size);
+        if (range === "invalid") {
+          await info.file.close();
+          return context.body(null, 416, { ...headers, "content-range": `bytes */${info.size}` });
+        }
+        // Transfer the validated descriptor to the stream. EOF/cancellation closes
+        // it; the untrusted pathname is never opened again after validation.
+        const stream = Readable.toWeb(info.file.createReadStream(range ?? {})) as ReadableStream;
+        return context.body(stream, range ? 206 : 200, {
           ...headers,
           "accept-ranges": "bytes",
-          "content-length": String(range.end - range.start + 1),
-          "content-range": `bytes ${range.start}-${range.end}/${info.size}`,
+          "content-length": String(range ? range.end - range.start + 1 : info.size),
+          ...(range ? { "content-range": `bytes ${range.start}-${range.end}/${info.size}` } : {}),
           "content-type": info.mimeType ?? "application/octet-stream",
         });
+      } catch (error) {
+        await info.file.close();
+        throw error;
       }
-      const stream = Readable.toWeb(createReadStream(info.target)) as ReadableStream;
-      return context.body(stream, 200, {
-        ...headers,
-        "accept-ranges": "bytes",
-        "content-length": String(info.size),
-        "content-type": info.mimeType ?? "application/octet-stream",
-      });
     } catch (error) {
       const { status, body } = dependencies.spaceFsJsonError(error);
       return context.json(body, status as never);

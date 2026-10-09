@@ -3,6 +3,8 @@ import { basename, extname } from "node:path";
 import { SPACE_CUSTOM_THEME_CSS_PATH } from "@cohub/protocol";
 import { FS_CDN_LARGE_FILE_THRESHOLD_BYTES, type FsCdnEnvironment } from "./types.js";
 
+// Do not reuse objects/manifests produced before descriptor-bound reads.
+const FS_CDN_CACHE_VERSION = "v2";
 const forcedCdnPaths = new Set([SPACE_CUSTOM_THEME_CSS_PATH]);
 
 const normalizeFsCdnPath = (path: string) => path.replace(/\\/g, "/").replace(/^\.\/+/, "");
@@ -71,11 +73,11 @@ export function buildFsCdnObjectKey(input: {
   const pathHash = fsCdnPathHash(input.path);
   const safeFilename = safeFsCdnFilename(input.path);
   const version = `${input.size}-${Math.trunc(input.mtimeMs)}`;
-  return `${prefix}fs-cache/spaces/${input.spaceId}/files/${pathHash}/${version}/${safeFilename}`;
+  return `${prefix}fs-cache/${FS_CDN_CACHE_VERSION}/spaces/${input.spaceId}/files/${pathHash}/${version}/${safeFilename}`;
 }
 
 export function buildFsCdnManifestKey(input: { env: FsCdnEnvironment; spaceId: string; path: string }) {
-  return `space-fs-cdn:${input.env}:${input.spaceId}:${fsCdnPathHash(input.path)}`;
+  return `space-fs-cdn:${FS_CDN_CACHE_VERSION}:${input.env}:${input.spaceId}:${fsCdnPathHash(input.path)}`;
 }
 
 export function buildFsCdnJobId(input: {
@@ -85,7 +87,7 @@ export function buildFsCdnJobId(input: {
   size: number;
   mtimeMs: number;
 }) {
-  return `fs-cdn|${input.env}|${input.spaceId}|${fsCdnPathHash(input.path)}|${input.size}|${Math.trunc(input.mtimeMs)}`;
+  return `fs-cdn|${FS_CDN_CACHE_VERSION}|${input.env}|${input.spaceId}|${fsCdnPathHash(input.path)}|${input.size}|${Math.trunc(input.mtimeMs)}`;
 }
 
 export function buildFsCdnFailKey(input: {
@@ -95,5 +97,5 @@ export function buildFsCdnFailKey(input: {
   size: number;
   mtimeMs: number;
 }) {
-  return `space-fs-cdn-fail:${input.env}:${input.spaceId}:${fsCdnPathHash(input.path)}:${input.size}:${Math.trunc(input.mtimeMs)}`;
+  return `space-fs-cdn-fail:${FS_CDN_CACHE_VERSION}:${input.env}:${input.spaceId}:${fsCdnPathHash(input.path)}:${input.size}:${Math.trunc(input.mtimeMs)}`;
 }

@@ -6,7 +6,6 @@ import { buildSpaceFsCopyId, isValidSpaceFsCopyId, type SpaceFsCopyJobSource, ty
 import { isUuid } from "@cohub/protocol/identifiers";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { readFile } from "node:fs/promises";
 import { ensureFsCdnManifest, shouldUseFsCdnForMeta } from "../../space-fs-cdn-cache.js";
 import { FS_CDN_DOWNLOAD_WAIT_TIMEOUT_MS } from "../../space-fs-cdn-constants.js";
 import { getOptionalAuth, useAuth, requireValidId, authzDenied } from "../../lib/middleware.js";
@@ -516,24 +515,28 @@ router.get("/download", async (c) => {
       });
     }
     const info = await streamSpaceFile(spaceId, path, { visibility });
-    const meta = {
-      spaceId,
-      path: info.path,
-      name: info.name,
-      size: info.size,
-      mimeType: info.mimeType,
-      mtimeMs: info.mtimeMs,
-    };
-    if (shouldUseFsCdnForMeta(meta)) {
-      const manifest = await ensureFsCdnManifest(meta, "download_miss", FS_CDN_DOWNLOAD_WAIT_TIMEOUT_MS);
-      if (!manifest) return c.json({ message: "file is preparing", retryAfterMs: 2000 }, 202);
-      return c.redirect(manifest.url, 302);
+    try {
+      const meta = {
+        spaceId,
+        path: info.path,
+        name: info.name,
+        size: info.size,
+        mimeType: info.mimeType,
+        mtimeMs: info.mtimeMs,
+      };
+      if (shouldUseFsCdnForMeta(meta)) {
+        const manifest = await ensureFsCdnManifest(meta, "download_miss", FS_CDN_DOWNLOAD_WAIT_TIMEOUT_MS);
+        if (!manifest) return c.json({ message: "file is preparing", retryAfterMs: 2000 }, 202);
+        return c.redirect(manifest.url, 302);
+      }
+      const buffer = await info.file.readFile();
+      return c.body(new Uint8Array(buffer), 200, {
+        "content-type": info.mimeType ?? "application/octet-stream",
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(info.name)}`,
+      });
+    } finally {
+      await info.file.close();
     }
-    const buffer = await readFile(info.target);
-    return c.body(new Uint8Array(buffer), 200, {
-      "content-type": info.mimeType ?? "application/octet-stream",
-      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(info.name)}`,
-    });
   } catch (error) {
     const { status, body: errBody } = spaceFsJsonError(error);
     return c.json(errBody, status as never);
