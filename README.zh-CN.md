@@ -35,6 +35,8 @@ Cohub 用 Cohub 开发。核心开发流程——需求、Agent 运行、Review�
 
 **Web** — 打开 [cohub.live](https://cohub.live) 并登录。
 
+**App** — iOS 和 Android：[cohub-mobile.bangwu.me](https://cohub-mobile.bangwu.me/)。
+
 **CLI** —
 
 ```bash
