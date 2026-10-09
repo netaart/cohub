@@ -1,0 +1,17 @@
+appId: io.github.markbang.cohubmobile
+name: Debug menu entry
+---
+# Each other flow deep-links straight to its screen, so this covers the hidden entry instead:
+# five taps on the version row at the bottom of Settings, which needs scrolling into view.
+- openLink: "cohub://settings"
+- scrollUntilVisible:
+    element:
+      id: "settings.version"
+    direction: DOWN
+# The unlock needs five taps inside its reset window, so they cannot be spread out.
+- tapOn:
+    id: "settings.version"
+    repeat: 5
+    delay: 100
+- assertVisible: "Scroll Diagnostics"
+- assertVisible: "Bubble Layout"

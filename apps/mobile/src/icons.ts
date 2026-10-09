@@ -1,0 +1,153 @@
+import type { LucideIcon } from "lucide-react-native";
+import Activity from "lucide-react-native/icons/activity";
+import CircleAlert from "lucide-react-native/icons/circle-alert";
+import ArrowLeft from "lucide-react-native/icons/arrow-left";
+import ArrowRight from "lucide-react-native/icons/arrow-right";
+import ArrowDown from "lucide-react-native/icons/arrow-down";
+import ArrowUp from "lucide-react-native/icons/arrow-up";
+import Archive from "lucide-react-native/icons/archive";
+import Bell from "lucide-react-native/icons/bell";
+import BookOpen from "lucide-react-native/icons/book-open";
+import Brain from "lucide-react-native/icons/brain";
+import Bookmark from "lucide-react-native/icons/bookmark";
+import Camera from "lucide-react-native/icons/camera";
+import Check from "lucide-react-native/icons/check";
+import CheckCheck from "lucide-react-native/icons/check-check";
+import Code from "lucide-react-native/icons/code";
+import Cloud from "lucide-react-native/icons/cloud";
+import CircleCheck from "lucide-react-native/icons/circle-check";
+import CircleX from "lucide-react-native/icons/circle-x";
+import Clock from "lucide-react-native/icons/clock";
+import ChevronDown from "lucide-react-native/icons/chevron-down";
+import ChevronRight from "lucide-react-native/icons/chevron-right";
+import ChevronUp from "lucide-react-native/icons/chevron-up";
+import CloudOff from "lucide-react-native/icons/cloud-off";
+import Compass from "lucide-react-native/icons/compass";
+import Copy from "lucide-react-native/icons/copy";
+import Database from "lucide-react-native/icons/database";
+import Download from "lucide-react-native/icons/download";
+import Ellipsis from "lucide-react-native/icons/ellipsis";
+import ExternalLink from "lucide-react-native/icons/external-link";
+import Eye from "lucide-react-native/icons/eye";
+import EyeOff from "lucide-react-native/icons/eye-off";
+import FileText from "lucide-react-native/icons/file-text";
+import FingerprintPattern from "lucide-react-native/icons/fingerprint-pattern";
+import Folder from "lucide-react-native/icons/folder";
+import FolderOpen from "lucide-react-native/icons/folder-open";
+import Gift from "lucide-react-native/icons/gift";
+import GitFork from "lucide-react-native/icons/git-fork";
+import Globe from "lucide-react-native/icons/globe";
+import Images from "lucide-react-native/icons/images";
+import Info from "lucide-react-native/icons/info";
+import Layers2 from "lucide-react-native/icons/layers-2";
+import ListFilter from "lucide-react-native/icons/list-filter";
+import ListTree from "lucide-react-native/icons/list-tree";
+import MessagesSquare from "lucide-react-native/icons/messages-square";
+import MessageSquare from "lucide-react-native/icons/message-square";
+import Maximize2 from "lucide-react-native/icons/maximize-2";
+import Minimize2 from "lucide-react-native/icons/minimize-2";
+import Monitor from "lucide-react-native/icons/monitor";
+import Mic from "lucide-react-native/icons/mic";
+import Paperclip from "lucide-react-native/icons/paperclip";
+import Palette from "lucide-react-native/icons/palette";
+import Pin from "lucide-react-native/icons/pin";
+import PinOff from "lucide-react-native/icons/pin-off";
+import Plus from "lucide-react-native/icons/plus";
+import RefreshCw from "lucide-react-native/icons/refresh-cw";
+import Rocket from "lucide-react-native/icons/rocket";
+import Search from "lucide-react-native/icons/search";
+import Share from "lucide-react-native/icons/share";
+import Shield from "lucide-react-native/icons/shield";
+import Sun from "lucide-react-native/icons/sun";
+import Moon from "lucide-react-native/icons/moon";
+import Settings from "lucide-react-native/icons/settings";
+import Sparkles from "lucide-react-native/icons/sparkles";
+import Tag from "lucide-react-native/icons/tag";
+import Square from "lucide-react-native/icons/square";
+import SquarePen from "lucide-react-native/icons/square-pen";
+import Terminal from "lucide-react-native/icons/terminal";
+import Type from "lucide-react-native/icons/type";
+import Trash2 from "lucide-react-native/icons/trash-2";
+import UserRound from "lucide-react-native/icons/user-round";
+import Wifi from "lucide-react-native/icons/wifi";
+import X from "lucide-react-native/icons/x";
+import Zap from "lucide-react-native/icons/zap";
+
+export const icons = {
+  activity: Activity,
+  alert: CircleAlert,
+  archive: Archive,
+  "arrow-left": ArrowLeft,
+  "arrow-right": ArrowRight,
+  "arrow-down": ArrowDown,
+  "arrow-up": ArrowUp,
+  bell: Bell,
+  "book-open": BookOpen,
+  brain: Brain,
+  bookmark: Bookmark,
+  camera: Camera,
+  check: Check,
+  "check-check": CheckCheck,
+  code: Code,
+  cloud: Cloud,
+  "check-circle": CircleCheck,
+  "circle-x": CircleX,
+  clock: Clock,
+  "chevron-down": ChevronDown,
+  "chevron-right": ChevronRight,
+  "chevron-up": ChevronUp,
+  "cloud-off": CloudOff,
+  compass: Compass,
+  copy: Copy,
+  database: Database,
+  download: Download,
+  "external-link": ExternalLink,
+  eye: Eye,
+  "eye-off": EyeOff,
+  "file-text": FileText,
+  filter: ListFilter,
+  fingerprint: FingerprintPattern,
+  folder: Folder,
+  "folder-open": FolderOpen,
+  gift: Gift,
+  "git-fork": GitFork,
+  globe: Globe,
+  images: Images,
+  info: Info,
+  layers: Layers2,
+  "list-tree": ListTree,
+  messages: MessagesSquare,
+  "message-square": MessageSquare,
+  maximize: Maximize2,
+  minimize: Minimize2,
+  monitor: Monitor,
+  mic: Mic,
+  more: Ellipsis,
+  paperclip: Paperclip,
+  palette: Palette,
+  pin: Pin,
+  "pin-off": PinOff,
+  plus: Plus,
+  refresh: RefreshCw,
+  rocket: Rocket,
+  search: Search,
+  share: Share,
+  shield: Shield,
+  sun: Sun,
+  moon: Moon,
+  settings: Settings,
+  sparkles: Sparkles,
+  tag: Tag,
+  "square-pen": SquarePen,
+  stop: Square,
+  sync: RefreshCw,
+  terminal: Terminal,
+  trash: Trash2,
+  type: Type,
+  user: UserRound,
+  wifi: Wifi,
+  x: X,
+  zap: Zap,
+} satisfies Record<string, LucideIcon>;
+
+export type IconName = keyof typeof icons;

@@ -1,0 +1,34 @@
+appId: io.github.markbang.cohubmobile
+name: Composer action-state matrix
+---
+# Cross-checks the on-device result of getComposerActionState against the same
+# function asserted in scripts/check-chat-workflow.mjs.
+- openLink: "cohub://debug/composer"
+- assertVisible:
+    id: "debug.composer.state"
+- copyTextFrom:
+    id: "debug.composer.state"
+- assertTrue: "${maestro.copiedText === 'blocked=false  hasDraft=false  canSend=false  canStop=false'}"
+# A draft makes it sendable but not stoppable: there is nothing running.
+- tapOn: "^单行$"
+- copyTextFrom:
+    id: "debug.composer.state"
+- assertTrue: "${maestro.copiedText === 'blocked=false  hasDraft=true  canSend=true  canStop=false'}"
+- tapOn: "^disabled$"
+- copyTextFrom:
+    id: "debug.composer.state"
+- assertTrue: "${maestro.copiedText === 'blocked=true  hasDraft=true  canSend=false  canStop=false'}"
+- tapOn: "^disabled$"
+- tapOn: "^清空$"
+- copyTextFrom:
+    id: "debug.composer.state"
+- assertTrue: "${maestro.copiedText === 'blocked=false  hasDraft=false  canSend=false  canStop=false'}"
+# Stopping is only offered while a turn runs with no draft of its own.
+- tapOn: "^running$"
+- copyTextFrom:
+    id: "debug.composer.state"
+- assertTrue: "${maestro.copiedText === 'blocked=false  hasDraft=false  canSend=false  canStop=true'}"
+- tapOn: "^附件$"
+- copyTextFrom:
+    id: "debug.composer.state"
+- assertTrue: "${maestro.copiedText === 'blocked=false  hasDraft=true  canSend=true  canStop=false'}"

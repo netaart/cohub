@@ -1,0 +1,99 @@
+{
+  "expo": {
+    "name": "Cohub",
+    "slug": "cohub-mobile",
+    "version": "2.2.14",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "cohub",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "io.github.markbang.cohubmobile",
+      "associatedDomains": [
+        "applinks:cohub.live"
+      ],
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Cohub uses the camera to attach references to a Chat.",
+        "NSMicrophoneUsageDescription": "Cohub uses the microphone for voice input.",
+        "NSPhotoLibraryUsageDescription": "Cohub uses your photo library to attach references to a Chat."
+      }
+    },
+    "android": {
+      "package": "io.github.markbang.cohubmobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1114",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "cohub.live",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "VIBRATE",
+        "REQUEST_INSTALL_PACKAGES"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#f08349"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Cohub uses your photos to attach references to a Chat.",
+          "cameraPermission": "Cohub uses the camera to attach references to a Chat."
+        }
+      ],
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0f1114"
+        }
+      ]
+    ],
+    "extra": {
+      "apiOrigin": "https://api.cohub.live",
+      "gatewayOrigin": "wss://gateway.cohub.live/ws",
+      "authEndpoint": "https://auth.neta.art/",
+      "logtoAppId": "16ai0wao2mud3xqkbzqo0",
+      "apiResource": "https://api.talesofai",
+      "environment": "prod"
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

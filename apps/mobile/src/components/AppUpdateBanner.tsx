@@ -1,0 +1,445 @@
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, AppState as NativeAppState, Platform, Pressable, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AdaptiveSheet } from "@/src/components/AdaptiveSheet";
+import { ReleaseNotes } from "@/src/components/ReleaseNotes";
+import { useTranslation } from "@/src/i18n";
+import { useAppTheme, typography } from "@/src/theme";
+import { AppIcon, PrimaryButton } from "@/src/ui";
+import { openWebLink } from "@/src/platform/browser";
+import {
+  checkForAppUpdate,
+  downloadAndInstallAndroidUpdate,
+  openAndroidInstallPermissionSettings,
+  type ApkUpdateProgress,
+  getInstalledAppVersion,
+  isUpdateSnoozed,
+  snoozeAppUpdate,
+  type AppRelease,
+} from "@/src/platform/app-updates";
+
+export function AppUpdateBanner() {
+  const theme = useAppTheme();
+  const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const [release, setRelease] = useState<AppRelease | null>(null);
+  const [snoozedVersion, setSnoozedVersion] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const presentedVersion = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    let active = true;
+
+    const check = async () => {
+      try {
+        const latest = await checkForAppUpdate();
+        const snoozed = latest ? await isUpdateSnoozed(latest.version) : false;
+        if (!active) return;
+        setSnoozedVersion(snoozed && latest ? latest.version : null);
+        if (latest && !snoozed && presentedVersion.current !== latest.version) {
+          presentedVersion.current = latest.version;
+          setDetailsOpen(true);
+        }
+        setRelease((current) => {
+          if (!latest || snoozed) return null;
+          return current?.version === latest.version &&
+            current.title === latest.title &&
+            current.publishedAt === latest.publishedAt &&
+            current.url === latest.url &&
+            current.notes === latest.notes &&
+            current.downloadUrl === latest.downloadUrl &&
+            current.downloadName === latest.downloadName &&
+            current.downloadSize === latest.downloadSize &&
+            current.downloadSha256 === latest.downloadSha256
+            ? current
+            : latest;
+        });
+      } catch {
+        // An update check is optional and must not affect app startup.
+      }
+    };
+
+    void check();
+    const subscription = NativeAppState.addEventListener("change", (next) => {
+      if (next === "active") void check();
+    });
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
+  if (Platform.OS !== "android" || !release || release.version === snoozedVersion) return null;
+
+  const dismiss = () => {
+    void snoozeAppUpdate(release.version).catch(() => undefined);
+    setSnoozedVersion(release.version);
+    setRelease(null);
+    setDetailsOpen(false);
+  };
+
+  return (
+    <>
+      <View pointerEvents="box-none" style={[styles.bannerLayer, { top: insets.top + 8 }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("update.banner.accessibility", { version: release.version })}
+          onPress={() => setDetailsOpen(true)}
+         
+          style={({ pressed }) => ({
+            ...styles.banner,
+            backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surface,
+            borderColor: theme.colors.accentBorder,
+            shadowColor: theme.colors.shadow,
+          })}
+        >
+          <View style={[styles.bannerIcon, { backgroundColor: theme.colors.accentSoft }]}>
+            <AppIcon name="download" size={17} color={theme.colors.accent} />
+          </View>
+          <View style={styles.bannerText}>
+            <Text numberOfLines={1} style={[typography.bodyMedium, { color: theme.colors.text }]}>{t("update.available", { version: release.version })}</Text>
+            <Text numberOfLines={1} style={[typography.caption, { color: theme.colors.textMuted, marginTop: 1 }]}>{release.title ?? t("update.viewNotes")}</Text>
+          </View>
+          <AppIcon name="chevron-right" size={17} color={theme.colors.textFaint} />
+        </Pressable>
+      </View>
+
+      <AppUpdateDetailsSheet
+        key={`banner-${release.version}`}
+        release={release}
+        visible={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        onLater={dismiss}
+      />
+    </>
+  );
+}
+
+export function AppUpdateDetailsSheet({
+  release,
+  visible,
+  onClose,
+  onLater,
+}: {
+  release: AppRelease;
+  visible: boolean;
+  onClose: () => void;
+  onLater?: () => void;
+}) {
+  const theme = useAppTheme();
+  const { t } = useTranslation();
+  const [opening, setOpening] = useState(false);
+  const [progress, setProgress] = useState<ApkUpdateProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [installerReturned, setInstallerReturned] = useState(false);
+  const operation = useRef<AbortController | null>(null);
+  useEffect(() => () => operation.current?.abort(), []);
+  const releaseDate = formatReleaseDate(release.publishedAt);
+  const assetDetail = release.downloadName
+    ? `${release.downloadName}${release.downloadSize !== null ? ` · ${formatBytes(release.downloadSize)}` : ""}`
+    : null;
+
+  const runOperation = async (action: (signal: AbortSignal) => Promise<void>) => {
+    if (operation.current) return;
+    const controller = new AbortController();
+    operation.current = controller;
+    setOpening(true);
+    setError(null);
+    try {
+      await action(controller.signal);
+    } catch (caught) {
+      if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : t("update.failed"));
+    } finally {
+      if (operation.current === controller) operation.current = null;
+      setOpening(false);
+      setProgress(null);
+    }
+  };
+
+  const installUpdate = () => runOperation(async (signal) => {
+    setInstallerReturned(false);
+    setProgress({ phase: "downloading", fraction: 0 });
+    await downloadAndInstallAndroidUpdate(release, { signal, onProgress: setProgress });
+    if (!signal.aborted) setInstallerReturned(true);
+  });
+  const downloading = progress?.phase === "downloading";
+  const isAndroid = Platform.OS === "android";
+
+  return (
+    <AdaptiveSheet
+      visible={visible}
+      title={t("update.sheet.title")}
+      subtitle={t("update.sheet.subtitle", { version: release.version })}
+      onClose={onClose}
+      dismissible={!opening}
+      scrollable
+      footer={
+        <View style={styles.footer}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={downloading ? t("update.cancel") : t("update.notNow")}
+            onPress={() => {
+              if (downloading) operation.current?.abort();
+              else (onLater ?? onClose)();
+            }}
+            disabled={opening && !downloading}
+            style={({ pressed }) => ({ ...styles.laterButton, opacity: pressed ? 0.6 : 1 })}
+          >
+            <Text style={[typography.bodyMedium, { color: theme.colors.textSecondary }]}>{downloading ? t("update.cancel") : t("update.notNow")}</Text>
+          </Pressable>
+          <PrimaryButton
+            label={isAndroid ? t("update.install") : t("update.openRelease")}
+            icon={isAndroid ? "download" : "external-link"}
+            loading={opening}
+            disabled={isAndroid && !release.downloadUrl}
+            onPress={() => void (isAndroid ? installUpdate() : runOperation(() => openWebLink(release.url)))}
+            style={{ flex: 1, minWidth: 0, minHeight: 46, paddingHorizontal: 14 }}
+          />
+        </View>
+      }
+      testID="app-update-sheet"
+    >
+      <View style={[styles.releaseSummary, { backgroundColor: theme.colors.surfaceRaised, borderColor: theme.colors.border }]}>
+        <View style={[styles.releaseSummaryIcon, { backgroundColor: theme.colors.accentSoft }]}>
+          <AppIcon name="download" size={20} color={theme.colors.accent} />
+        </View>
+        <View style={styles.releaseSummaryText}>
+          <Text style={[typography.heading, { color: theme.colors.text }]}>{release.title ?? `Cohub ${release.version}`}</Text>
+          <Text style={[typography.caption, { color: theme.colors.textMuted, marginTop: 3 }]}>
+            {[release.version, releaseDate].filter(Boolean).join(" · ")}
+          </Text>
+          {assetDetail ? <Text numberOfLines={2} style={[typography.caption, { color: theme.colors.accent, marginTop: 3 }]}>{assetDetail}</Text> : null}
+        </View>
+      </View>
+
+      <View style={[styles.releaseNotice, { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accentBorder }]}>
+        <AppIcon name="info" size={17} color={theme.colors.accent} />
+        <Text style={[typography.body, { color: theme.colors.textSecondary, flex: 1 }]}>
+          {progress?.phase === "downloading" ? t("update.status.downloading", { percent: Math.round(progress.fraction * 100) })
+            : progress?.phase === "verifying" ? t("update.status.verifying")
+            : progress?.phase === "installing" ? t("update.status.installing")
+            : installerReturned ? t("update.status.installerReturned")
+            : isAndroid ? release.downloadUrl ? t("update.status.apkReady") : t("update.status.noApk")
+            : t("update.status.notesAvailable")}
+        </Text>
+      </View>
+
+      {isAndroid ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("update.installPermission")}
+          disabled={opening}
+          onPress={() => void runOperation(() => openAndroidInstallPermissionSettings())}
+          style={({ pressed }) => [styles.githubLink, { borderColor: theme.colors.border, opacity: pressed || opening ? 0.55 : 1 }]}
+        >
+          <AppIcon name="shield" size={16} color={theme.colors.accent} />
+          <Text style={[typography.bodyMedium, { color: theme.colors.accent, flex: 1 }]}>{t("update.installPermission")}</Text>
+          <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
+        </Pressable>
+      ) : null}
+
+      <View style={{ marginTop: 18 }}>
+        <ReleaseNotes content={release.notes} />
+      </View>
+
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel={t("update.openOnGitHub")}
+        onPress={() => void runOperation(() => openWebLink(release.url))}
+        disabled={opening}
+        style={({ pressed }) => [styles.githubLink, { borderColor: theme.colors.border, backgroundColor: pressed ? theme.colors.surfacePressed : "transparent", opacity: opening ? 0.55 : 1 }]}
+      >
+        <AppIcon name="external-link" size={16} color={theme.colors.accent} />
+        <Text style={[typography.bodyMedium, { color: theme.colors.accent, flex: 1 }]}>{t("update.openOnGitHub")}</Text>
+        <AppIcon name="chevron-right" size={16} color={theme.colors.textFaint} />
+      </Pressable>
+      {error ? <Text selectable style={[typography.caption, { color: theme.colors.danger, marginTop: 10 }]}>{error}</Text> : null}
+    </AdaptiveSheet>
+  );
+}
+
+export function AppUpdateRow() {
+  const theme = useAppTheme();
+  const { t } = useTranslation();
+  const [checking, setChecking] = useState(false);
+  const [release, setRelease] = useState<AppRelease | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [status, setStatus] = useState<"idle" | "current" | "error">("idle");
+
+  if (Platform.OS !== "android") return null;
+
+  const check = async () => {
+    if (checking) return;
+    setChecking(true);
+    setRelease(null);
+    setDetailsOpen(false);
+    setStatus("idle");
+    try {
+      const latest = await checkForAppUpdate({ force: true });
+      setRelease(latest);
+      setStatus(latest ? "idle" : "current");
+      if (latest) setDetailsOpen(true);
+    } catch {
+      setStatus("error");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const title = release ? t("update.available", { version: release.version }) : t("update.row.check");
+  const detail = checking
+    ? t("update.row.checking")
+    : status === "current"
+      ? t("update.row.upToDate", { version: getInstalledAppVersion() })
+      : status === "error"
+        ? t("update.row.githubError")
+        : release?.downloadUrl
+          ? t("update.row.apkReady")
+          : release
+            ? t("update.row.notesReady")
+            : t("update.row.checkLatest");
+
+  return (
+    <>
+      <Pressable
+        testID="app-update-row"
+        accessibilityRole="button"
+        accessibilityLabel={release ? t("update.row.a11yView", { version: release.version }) : t("update.row.a11y")}
+        accessibilityState={{ busy: checking }}
+        disabled={checking}
+        onPress={() => void check()}
+       
+        style={({ pressed }) => ({
+          minHeight: 66,
+          paddingHorizontal: 13,
+          paddingVertical: 10,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 11,
+          backgroundColor: pressed ? theme.colors.surfacePressed : "transparent",
+          opacity: checking ? 0.65 : 1,
+        })}
+      >
+        <View style={[styles.updateRowIcon, { backgroundColor: release ? theme.colors.accentSoft : theme.colors.surfaceRaised }]}>
+          {checking ? <ActivityIndicator size="small" color={theme.colors.accent} /> : <AppIcon name={release ? "download" : "refresh"} size={17} color={theme.colors.accent} />}
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={[typography.bodyMedium, { color: theme.colors.text }]}>{title}</Text>
+          <Text numberOfLines={2} style={[typography.caption, { color: release ? theme.colors.accent : theme.colors.textMuted, marginTop: 2 }]}>{detail}</Text>
+        </View>
+        {!checking ? <AppIcon name={release ? "external-link" : "chevron-right"} size={17} color={theme.colors.textFaint} /> : null}
+      </Pressable>
+      {release ? <AppUpdateDetailsSheet key={`row-${release.version}`} release={release} visible={detailsOpen} onClose={() => setDetailsOpen(false)} /> : null}
+    </>
+  );
+}
+
+function formatReleaseDate(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(date);
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const styles = {
+  bannerLayer: {
+    position: "absolute" as const,
+    left: 12,
+    right: 12,
+    zIndex: 100,
+    alignItems: "center" as const,
+  },
+  banner: {
+    width: "100%" as const,
+    maxWidth: 520,
+    minHeight: 58,
+    paddingHorizontal: 11,
+    borderWidth: 1,
+    borderRadius: 14,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    elevation: 7,
+  },
+  bannerIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  bannerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  updateRowIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  releaseSummary: {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 11,
+    padding: 12,
+    borderWidth: 1,
+    borderRadius: 13,
+  },
+  releaseSummaryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  releaseSummaryText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  releaseNotice: {
+    flexDirection: "row" as const,
+    alignItems: "flex-start" as const,
+    gap: 9,
+    padding: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  githubLink: {
+    minHeight: 48,
+    marginTop: 18,
+    paddingHorizontal: 11,
+    borderWidth: 1,
+    borderRadius: 11,
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 9,
+  },
+  footer: {
+    flexDirection: "row" as const,
+    justifyContent: "flex-end" as const,
+    alignItems: "center" as const,
+    gap: 10,
+  },
+  laterButton: {
+    minHeight: 46,
+    paddingHorizontal: 15,
+    justifyContent: "center" as const,
+  },
+} satisfies Record<string, object>;

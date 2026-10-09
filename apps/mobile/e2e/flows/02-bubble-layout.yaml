@@ -1,0 +1,32 @@
+appId: io.github.markbang.cohubmobile
+name: Bubble layout fixtures
+---
+# Deterministic fixtures with no account or backend. The switches have no visible
+# label of their own, so they are addressed by testID.
+- openLink: "cohub://debug/bubble-layout"
+- assertVisible:
+    id: "debug.bubble-layout.record"
+- assertVisible:
+    id: "debug.bubble-layout.narrow"
+- assertVisible:
+    id: "debug.bubble-layout.inverted"
+- tapOn:
+    id: "debug.bubble-layout.narrow"
+- tapOn:
+    id: "debug.bubble-layout.inverted"
+# Boundary repeatedly measures the same text; the native measurement guard is here.
+- tapOn: "^Boundary$"
+- assertVisible: "Boundary 1"
+# Stream exercises the interrupted/restart path of the live card.
+- tapOn: "^Stream$"
+- assertVisible:
+    id: "debug.bubble-layout.stream.toggle"
+- tapOn:
+    id: "debug.bubble-layout.stream.restart"
+- tapOn:
+    id: "debug.bubble-layout.stream.interrupt"
+- tapOn:
+    id: "debug.bubble-layout.stream.restart"
+- tapOn: "^Text$"
+- assertVisible:
+    id: "debug.bubble-layout.record"

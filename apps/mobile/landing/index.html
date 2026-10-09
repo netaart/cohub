@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cohub Mobile — Big ideas. Small screen.</title>
+    <meta
+      name="description"
+      content="Cohub Mobile is a native iOS and Android client for Cohub: Chats, Spaces, live agent sessions, voice input, and push notifications."
+    />
+    <meta name="theme-color" content="#f8f7f3" />
+    <meta property="og:title" content="Cohub Mobile — Big ideas. Small screen." />
+    <meta
+      property="og:description"
+      content="Chats, Spaces, live agent sessions, voice input, and push notifications, in a native app."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="fonts/manrope-latin-variable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <svg class="sr-only" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-arrow" viewBox="0 0 24 24">
+          <path d="M5 12h14m-6-6 6 6-6 6" />
+        </symbol>
+        <symbol id="i-download" viewBox="0 0 24 24">
+          <path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4" />
+        </symbol>
+        <symbol id="i-phone" viewBox="0 0 24 24">
+          <rect x="6" y="2.5" width="12" height="19" rx="3" />
+          <path d="M10 5h4m-3 13.5h2" />
+        </symbol>
+        <symbol id="i-live" viewBox="0 0 24 24">
+          <path d="M2 12h5l3-7 4 14 3-7h5" />
+        </symbol>
+        <symbol id="i-code" viewBox="0 0 24 24">
+          <path d="m7 7-5 5 5 5m10-10 5 5-5 5m-3-14-4 18" />
+        </symbol>
+        <symbol id="i-mic" viewBox="0 0 24 24">
+          <rect x="9" y="2" width="6" height="12" rx="3" />
+          <path d="M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-3 0h6" />
+        </symbol>
+        <symbol id="i-bell" viewBox="0 0 24 24">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-9 12a3 3 0 0 0 6 0" />
+        </symbol>
+        <symbol id="i-sliders" viewBox="0 0 24 24">
+          <path d="M4 7h3m6 0h7M4 17h9m6 0h1" />
+          <circle cx="10" cy="7" r="3" /><circle cx="16" cy="17" r="3" />
+        </symbol>
+        <symbol id="i-cache" viewBox="0 0 24 24">
+          <ellipse cx="12" cy="5" rx="8" ry="3" />
+          <path d="M4 5v7c0 4 16 4 16 0V5M4 12v7c0 4 16 4 16 0v-7" />
+        </symbol>
+        <symbol id="i-android" viewBox="0 0 24 24">
+          <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5902 8.2439 13.8533 7.8508 12 7.8508s-3.5902.3931-5.1367 1.0989L4.841 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3435-4.1021-2.6892-7.5743-6.1185-9.4396" />
+        </symbol>
+        <symbol id="i-apple" viewBox="0 0 24 24">
+          <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <a class="brand" href="#main" aria-label="Cohub Mobile home">
+          <span class="brand-mark" aria-hidden="true"></span>
+          Cohub<span class="brand-edition">MOBILE</span>
+        </a>
+        <nav class="site-nav" aria-label="Primary">
+          <a href="#screens">The app</a>
+          <a href="#features">Why Cohub</a>
+          <a href="https://github.com/markbang/cohub-mobile">GitHub ↗</a>
+        </nav>
+        <a class="header-download" href="#download">
+          Get the app <svg class="icon" aria-hidden="true"><use href="#i-download" /></svg>
+        </a>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero wrap" id="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Your agents. No desk required.</p>
+          <h1 id="hero-title">Big ideas.<br /><span>Small screen.</span></h1>
+          <p class="hero-lead">
+            Keep your agents close. Chats, Spaces, and work in progress — now in a native app
+            for iOS and Android.
+          </p>
+          <div class="dl-row">
+            <!-- The catalog resolver below updates both Android download links. -->
+            <a class="dl-btn dl-btn--primary" data-dl-android href="https://github.com/markbang/cohub-mobile/releases/latest">
+              <svg class="icon icon--fill" aria-hidden="true"><use href="#i-android" /></svg>
+              <span class="dl-label"><small>Download for</small>Android<small data-dl-android-note>APK · Direct install</small></span>
+            </a>
+            <a class="dl-btn" href="https://testflight.apple.com/join/KWhztpkP">
+              <svg class="icon icon--fill" aria-hidden="true"><use href="#i-apple" /></svg>
+              <span class="dl-label"><small>Join the beta on</small>iOS<small>Available via TestFlight</small></span>
+            </a>
+          </div>
+          <p class="hero-note">
+            <svg class="icon" aria-hidden="true"><use href="#i-code" /></svg>
+            Open source. Built for your Cohub workspace.
+          </p>
+        </div>
+        <div class="hero-art">
+          <div class="orbit" aria-hidden="true"></div>
+          <img class="hero-phone hero-phone--back" src="screenshots/chats.png" width="1307" height="2732"
+            alt="Cohub Chats on Android, with a live agent session and running filter" decoding="async" />
+          <img class="hero-phone hero-phone--front" src="screenshots/spaces.png" width="1307" height="2732"
+            alt="Cohub Spaces on Android, with recent projects and pinned workspaces" fetchpriority="high" decoding="async" />
+          <div class="art-note">
+            <svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>
+            <div><strong>A little more freedom.</strong><span>Your workspace, wherever you are.</span></div>
+          </div>
+          <span class="art-caption">Real app. Real screenshots.</span>
+        </div>
+      </section>
+
+      <div class="principles wrap" role="group" aria-label="Cohub at a glance">
+        <p>A smaller screen.<br />Not a smaller workspace.</p>
+        <ul>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-phone" /></svg>Native iOS &amp; Android</li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-live" /></svg>Live agent sessions</li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-code" /></svg>Open source by design</li>
+        </ul>
+      </div>
+
+      <section class="section wrap" id="screens" aria-labelledby="screens-title">
+        <div class="section-heading" data-reveal>
+          <div>
+            <p class="eyebrow">Familiar workspace. Fresh perspective.</p>
+            <h2 id="screens-title">Everything in its place.<br />And in your pocket.</h2>
+          </div>
+          <p>Your conversations, projects, and preferences. A familiar home, made for a smaller screen.</p>
+        </div>
+        <fieldset class="screen-explorer">
+          <legend class="sr-only">Explore the app screens</legend>
+          <input class="sr-only" type="radio" name="screen" id="screen-chats" aria-labelledby="label-chats" aria-controls="panel-chats" checked />
+          <label class="screen-option" for="screen-chats">
+            <span class="option-number">01</span>
+            <span><span class="option-title" id="label-chats"><span class="option-desktop">Keep the conversation going.</span><span class="option-mobile">Chats</span></span>
+              <span class="option-copy">One inbox for Chats across your Spaces. Follow live replies, find what needs your attention, and pick up where you left off.</span>
+            </span>
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </label>
+          <input class="sr-only" type="radio" name="screen" id="screen-spaces" aria-labelledby="label-spaces" aria-controls="panel-spaces" />
+          <label class="screen-option" for="screen-spaces">
+            <span class="option-number">02</span>
+            <span><span class="option-title" id="label-spaces"><span class="option-desktop">A Space for every idea.</span><span class="option-mobile">Spaces</span></span>
+              <span class="option-copy">Chats, Files, Saves, Works, and Task Runs, together in each Space. Pin your favorites and get straight to what matters.</span>
+            </span>
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </label>
+          <input class="sr-only" type="radio" name="screen" id="screen-settings" aria-labelledby="label-settings" aria-controls="panel-settings" />
+          <label class="screen-option" for="screen-settings">
+            <span class="option-number">03</span>
+            <span><span class="option-title" id="label-settings"><span class="option-desktop">Make yourself at home.</span><span class="option-mobile">Settings</span></span>
+              <span class="option-copy">Set your appearance, manage notifications, and tune your rules. Your workspace should feel like yours.</span>
+            </span>
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow" /></svg>
+          </label>
+          <div class="screen-stage">
+            <figure class="screen-panel" id="panel-chats">
+              <figcaption><span>01 / Chats</span><span>Inside the app</span></figcaption>
+              <img src="screenshots/chats.png" width="1307" height="2732" alt="Chats inbox with All, Running, and Completed filters and a live session" loading="lazy" decoding="async" />
+            </figure>
+            <figure class="screen-panel" id="panel-spaces">
+              <figcaption><span>02 / Spaces</span><span>Inside the app</span></figcaption>
+              <img src="screenshots/spaces.png" width="1307" height="2732" alt="Spaces with recent projects, activity times, chat counts, and pin controls" loading="lazy" decoding="async" />
+            </figure>
+            <figure class="screen-panel" id="panel-settings">
+              <figcaption><span>03 / Settings</span><span>Inside the app</span></figcaption>
+              <img src="screenshots/settings.png" width="1307" height="2732" alt="Settings for appearance, language, notifications, rules, and storage" loading="lazy" decoding="async" />
+            </figure>
+          </div>
+        </fieldset>
+      </section>
+
+      <section class="section wrap" id="features" aria-labelledby="features-title">
+        <div class="section-heading" data-reveal>
+          <div>
+            <p class="eyebrow">Made for life away from your desk</p>
+            <h2 id="features-title">Go about your day.<br />Keep your ideas moving.</h2>
+          </div>
+          <p>Not a browser tab in disguise. Native features that make working on your phone feel natural.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card feature-card--voice" data-reveal>
+            <div class="voice-visual" aria-hidden="true">
+              <svg class="icon"><use href="#i-mic" /></svg>
+              <div class="waveform">
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+            </div>
+            <div>
+              <h3>Good ideas don’t wait for a keyboard.</h3>
+              <p>Say what’s on your mind. Native voice input turns your words into a message, ready for your agent.</p>
+            </div>
+          </article>
+          <article class="feature-card" data-reveal>
+            <div class="notification-visual" aria-hidden="true">
+              <svg class="icon"><use href="#i-bell" /></svg>
+              <div><strong>Less checking in.</strong><span>More getting on with your day.</span></div>
+            </div>
+            <div>
+              <h3>Step away.<br />Stay in the loop.</h3>
+              <p>Let notifications bring you back when it matters. One tap opens the right conversation, with the latest updates.</p>
+            </div>
+          </article>
+          <article class="feature-detail" data-reveal>
+            <svg class="icon" aria-hidden="true"><use href="#i-sliders" /></svg>
+            <div><h3>The right model for the moment.</h3><p>Check availability, compare context limits, and choose a thinking level before you send.</p></div>
+          </article>
+          <article class="feature-detail" data-reveal>
+            <svg class="icon" aria-hidden="true"><use href="#i-cache" /></svg>
+            <div><h3>A head start, every time you open.</h3><p>Your cached workspace loads first. Fresh updates follow when you reconnect, so you’re not starting from a blank screen.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="download-section wrap" id="download" aria-labelledby="download-title">
+        <div class="download-panel" data-reveal>
+          <p class="eyebrow">Take it with you</p>
+          <h2 id="download-title">Your workspace.<br />Now pocket-sized.</h2>
+          <p>A little less desk. A little more possibility.</p>
+          <div class="dl-row">
+            <a class="dl-btn dl-btn--primary" data-dl-android href="https://github.com/markbang/cohub-mobile/releases/latest">
+              <svg class="icon icon--fill" aria-hidden="true"><use href="#i-android" /></svg>
+              <span class="dl-label"><small>Download for</small>Android<small data-dl-android-note>APK · Direct install</small></span>
+            </a>
+            <a class="dl-btn" href="https://testflight.apple.com/join/KWhztpkP">
+              <svg class="icon icon--fill" aria-hidden="true"><use href="#i-apple" /></svg>
+              <span class="dl-label"><small>Join the beta on</small>iOS<small>Available via TestFlight</small></span>
+            </a>
+          </div>
+          <div class="download-note">Sign in with your Cohub account. On iOS, install Apple’s TestFlight app first, then open the beta invite.</div>
+          <div class="download-mascot" aria-hidden="true"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer wrap">
+      <div>
+        <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true"></span>Cohub</a>
+        <p>A native home for your Cohub workspace.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/markbang/cohub-mobile">Source ↗</a>
+        <a href="https://github.com/markbang/cohub-mobile/releases">Releases</a>
+        <a href="https://github.com/markbang/cohub-mobile/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/markbang/cohub-mobile/issues">Issues</a>
+        <a href="https://github.com/markbang/cohub-mobile/blob/main/LICENSE">License</a>
+      </nav>
+    </footer>
+
+    <script>
+      // Resolve the Android APK the same way the app does (src/data/update-assets.ts):
+      // newest Available arm64-v8a record from the Yaota catalog, where the record's
+      // url must match the canonical /apk/cohub-v<version>-android-<abi>.apk path.
+      // On any failure the anchors keep their GitHub Releases fallback href.
+      (() => {
+        const ORIGIN = "https://mobile.talesofai.com";
+        const ABI = "arm64-v8a";
+        const VERSION = /^\d+\.\d+\.\d+$/;
+        const SHA256 = /^[a-f0-9]{64}$/;
+
+        const parseVersion = (value) => value.split(".").map(Number);
+        const isNewer = (candidate, current) => {
+          const a = parseVersion(candidate);
+          const b = parseVersion(current);
+          for (let i = 0; i < a.length; i += 1) {
+            if (a[i] !== b[i]) return a[i] > b[i];
+          }
+          return false;
+        };
+
+        const apkUrl = (version) => `${ORIGIN}/apk/cohub-v${version}-android-${ABI}.apk`;
+
+        const pickNewest = (payload) => {
+          if (!payload || !Array.isArray(payload.apks)) return null;
+          let newest = null;
+          for (const item of payload.apks) {
+            if (!item || typeof item !== "object") continue;
+            const version = typeof item.version === "string" ? item.version.trim() : "";
+            const arch = typeof item.arch === "string" ? item.arch.trim() : "";
+            const status = typeof item.status === "string" ? item.status.trim() : "Available";
+            const size = Number(item.size);
+            const sha256 = typeof item.sha256 === "string" ? item.sha256.trim().toLowerCase() : "";
+            if (!VERSION.test(version) || arch !== ABI || status !== "Available") continue;
+            if (!Number.isSafeInteger(size) || size <= 0 || !SHA256.test(sha256)) continue;
+            if (typeof item.url === "string" && item.url.trim() !== apkUrl(version)) continue;
+            if (typeof item.url !== "string") continue;
+            if (!newest || isNewer(version, newest.version)) newest = { version, size };
+          }
+          return newest;
+        };
+
+        const formatSize = (bytes) => `${(bytes / 1024 / 1024).toFixed(0)} MB`;
+
+        const apply = (release) => {
+          document.querySelectorAll("[data-dl-android]").forEach((el) => {
+            el.href = apkUrl(release.version);
+          });
+          document.querySelectorAll("[data-dl-android-note]").forEach((el) => {
+            el.textContent = `v${release.version} · ${formatSize(release.size)}`;
+          });
+        };
+
+        fetch(`${ORIGIN}/api/apks`, { headers: { Accept: "application/json" } })
+          .then((response) => (response.ok ? response.json() : null))
+          .then((payload) => {
+            const release = pickNewest(payload);
+            if (release) apply(release);
+          })
+          .catch(() => {
+            // Keep the GitHub Releases fallback already in the markup.
+          });
+      })();
+    </script>
+
+    <script src="vendor/gsap.min.js"></script>
+    <script src="vendor/ScrollTrigger.min.js"></script>
+    <script>
+      (() => {
+        // Content and the screen explorer remain usable when motion scripts are unavailable.
+        if (!window.gsap || !window.ScrollTrigger) return;
+        gsap.registerPlugin(ScrollTrigger);
+
+        gsap.matchMedia().add("(prefers-reduced-motion: no-preference)", () => {
+          gsap.from(".hero-copy > *", {
+            y: 14,
+            duration: 0.42,
+            stagger: 0.05,
+            ease: "power2.out",
+            clearProps: "transform",
+          });
+          gsap.from(".hero-art", {
+            y: 20,
+            duration: 0.6,
+            ease: "power2.out",
+            clearProps: "transform",
+          });
+          gsap.utils.toArray("[data-reveal]").forEach((element) => {
+            gsap.from(element, {
+              y: 18,
+              duration: 0.45,
+              ease: "power2.out",
+              clearProps: "transform",
+              scrollTrigger: { trigger: element, start: "top 92%", once: true },
+            });
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

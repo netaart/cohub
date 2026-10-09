@@ -1,0 +1,401 @@
+import { openDatabaseAsync, type SQLiteDatabase } from "expo-sqlite";
+import type { MessageRecord, SpaceRecord, UserSessionListItem } from "@neta-art/cohub";
+import { isOptimisticFollowup } from "./followup-queue";
+
+export type CachedHome = {
+  spaces: SpaceRecord[];
+  sessions: UserSessionListItem[];
+};
+
+export type ComposerDraftScope =
+  | { kind: "new" }
+  | { kind: "session"; sessionId: string };
+
+const COMPOSER_DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function composerDraftKey(spaceId: string, scope: ComposerDraftScope) {
+  return JSON.stringify([spaceId, scope.kind, scope.kind === "session" ? scope.sessionId : null]);
+}
+
+let databasePromise: Promise<SQLiteDatabase> | null = null;
+
+function database(): Promise<SQLiteDatabase> {
+  databasePromise ??= initializeDatabase();
+  return databasePromise;
+}
+
+async function initializeDatabase(): Promise<SQLiteDatabase> {
+  const db = await openDatabaseAsync("cohub-mobile.db");
+  await db.execAsync(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS space_list_cache (
+      user_key TEXT PRIMARY KEY NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS space_visits (
+      user_key TEXT NOT NULL,
+      space_id TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      PRIMARY KEY (user_key, space_id)
+    );
+    CREATE TABLE IF NOT EXISTS spaces (
+      user_key TEXT NOT NULL,
+      space_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_key, space_id)
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      user_key TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      space_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_key, session_id)
+    );
+    CREATE TABLE IF NOT EXISTS messages (
+      user_key TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      payload TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_key, session_id, message_id)
+    );
+    CREATE INDEX IF NOT EXISTS messages_session_sequence
+      ON messages (user_key, session_id, sequence);
+    CREATE TABLE IF NOT EXISTS session_read_state (
+      user_key TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_key, session_id)
+    );
+    CREATE TABLE IF NOT EXISTS composer_drafts (
+      user_key TEXT NOT NULL,
+      draft_key TEXT NOT NULL,
+      text TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_key, draft_key)
+    );
+    CREATE TABLE IF NOT EXISTS debug_sessions (
+      session_id TEXT PRIMARY KEY NOT NULL,
+      started_at TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      closed_at TEXT,
+      uploaded_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS debug_events (
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      timestamp TEXT NOT NULL,
+      name TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      PRIMARY KEY (session_id, sequence)
+    );
+    CREATE INDEX IF NOT EXISTS debug_events_session_time
+      ON debug_events (session_id, timestamp);
+  `);
+  return db;
+}
+
+function parse<T>(value: string): T | null {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+export async function hydrateHome(userKey: string): Promise<CachedHome> {
+  const db = await database();
+  const [spaceRows, sessionRows] = await Promise.all([
+    db.getAllAsync<{ payload: string }>(
+      "SELECT payload FROM spaces WHERE user_key = ? ORDER BY updated_at DESC",
+      userKey,
+    ),
+    db.getAllAsync<{ payload: string }>(
+      "SELECT payload FROM sessions WHERE user_key = ? ORDER BY updated_at DESC",
+      userKey,
+    ),
+  ]);
+  return {
+    spaces: spaceRows.flatMap((row) => {
+      const value = parse<SpaceRecord>(row.payload);
+      return value ? [value] : [];
+    }),
+    sessions: sessionRows.flatMap((row) => {
+      const value = parse<UserSessionListItem>(row.payload);
+      return value ? [value] : [];
+    }),
+  };
+}
+
+async function writeSpaces(db: SQLiteDatabase, userKey: string, spaces: readonly SpaceRecord[], now: number) {
+  if (spaces.length === 0) return;
+  const statement = await db.prepareAsync(
+    `INSERT OR REPLACE INTO spaces (user_key, space_id, payload, updated_at) VALUES (?, ?, ?, ?)`,
+  );
+  try {
+    for (const space of spaces) {
+      await statement.executeAsync(userKey, space.id, JSON.stringify(space), now);
+    }
+  } finally {
+    await statement.finalizeAsync();
+  }
+}
+
+async function writeSessions(db: SQLiteDatabase, userKey: string, sessions: readonly UserSessionListItem[], now: number) {
+  if (sessions.length === 0) return;
+  const statement = await db.prepareAsync(
+    `INSERT OR REPLACE INTO sessions (user_key, session_id, space_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)`,
+  );
+  try {
+    for (const session of sessions) {
+      await statement.executeAsync(userKey, session.id, session.spaceId, JSON.stringify(session), now);
+    }
+  } finally {
+    await statement.finalizeAsync();
+  }
+}
+
+export async function saveHome(userKey: string, home: CachedHome) {
+  const db = await database();
+  const now = Date.now();
+  await db.withTransactionAsync(async () => {
+    await writeSpaces(db, userKey, home.spaces, now);
+    await writeSessions(db, userKey, home.sessions, now);
+  });
+}
+
+/** Persist individual Spaces without rewriting the rest of the home cache. */
+export async function saveSpaces(userKey: string, spaces: readonly SpaceRecord[]) {
+  if (spaces.length === 0) return;
+  const db = await database();
+  const now = Date.now();
+  await db.withTransactionAsync(() => writeSpaces(db, userKey, spaces, now));
+}
+
+/** Persist individual Chats without rewriting the rest of the home cache. */
+export async function saveSessions(userKey: string, sessions: readonly UserSessionListItem[]) {
+  if (sessions.length === 0) return;
+  const db = await database();
+  const now = Date.now();
+  await db.withTransactionAsync(() => writeSessions(db, userKey, sessions, now));
+}
+
+/** Drop cached chat rows last written before the cutoff (cache retention). */
+export async function pruneUserCache(userKey: string, cutoff: number) {
+  const db = await database();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM messages WHERE user_key = ? AND updated_at < ?", userKey, cutoff);
+    await db.runAsync("DELETE FROM sessions WHERE user_key = ? AND updated_at < ?", userKey, cutoff);
+    await db.runAsync("DELETE FROM session_read_state WHERE user_key = ? AND updated_at < ?", userKey, cutoff);
+  });
+}
+
+/** Cache-first paint only needs the recent window; older history arrives with the server window. */
+const MESSAGE_CACHE_LIMIT = 30;
+
+export async function loadMessages(userKey: string, sessionId: string) {
+  const db = await database();
+  const rows = await db.getAllAsync<{ payload: string }>(
+    "SELECT payload FROM messages WHERE user_key = ? AND session_id = ? ORDER BY sequence DESC LIMIT ?",
+    userKey,
+    sessionId,
+    MESSAGE_CACHE_LIMIT,
+  );
+  // Query newest-first so the limit keeps the tail, then restore ascending order for rendering.
+  rows.reverse();
+  return rows.flatMap((row) => {
+    const value = parse<MessageRecord>(row.payload);
+    return value ? [value] : [];
+  });
+}
+
+export async function saveMessages(userKey: string, sessionId: string, messages: MessageRecord[]) {
+  const db = await database();
+  const now = Date.now();
+  await db.withTransactionAsync(async () => {
+    if (messages.length === 0) return;
+    const statement = await db.prepareAsync(
+      `INSERT OR REPLACE INTO messages (user_key, session_id, message_id, sequence, payload, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    try {
+      for (const message of messages) {
+        // An unaccepted upload is a transient queue placeholder, not resumable server work.
+        if (isOptimisticFollowup(message)) continue;
+        const meta = message.meta ? { ...message.meta } : null;
+        if (meta) delete meta._mobileLive;
+        const persistable = { ...message, meta };
+        await statement.executeAsync(userKey, sessionId, message.id, message.sequence, JSON.stringify(persistable), now);
+      }
+    } finally {
+      await statement.finalizeAsync();
+    }
+  });
+}
+
+export async function loadSessionReadSequence(userKey: string, sessionId: string): Promise<number | null> {
+  const db = await database();
+  const row = await db.getFirstAsync<{ sequence: number }>(
+    "SELECT sequence FROM session_read_state WHERE user_key = ? AND session_id = ?",
+    userKey,
+    sessionId,
+  );
+  return row?.sequence ?? null;
+}
+
+export async function saveSessionReadSequence(userKey: string, sessionId: string, sequence: number) {
+  const db = await database();
+  await db.runAsync(
+    "INSERT OR REPLACE INTO session_read_state (user_key, session_id, sequence, updated_at) VALUES (?, ?, ?, ?)",
+    userKey,
+    sessionId,
+    sequence,
+    Date.now(),
+  );
+}
+
+export async function loadComposerDraft(userKey: string, spaceId: string, scope: ComposerDraftScope) {
+  const db = await database();
+  const draftKey = composerDraftKey(spaceId, scope);
+  const row = await db.getFirstAsync<{ text: string; updatedAt: number }>(
+    "SELECT text, updated_at AS updatedAt FROM composer_drafts WHERE user_key = ? AND draft_key = ?",
+    userKey,
+    draftKey,
+  );
+  if (!row) return "";
+  if (typeof row.text !== "string" || !Number.isFinite(row.updatedAt) || Date.now() - row.updatedAt > COMPOSER_DRAFT_TTL_MS) {
+    await db.runAsync("DELETE FROM composer_drafts WHERE user_key = ? AND draft_key = ?", userKey, draftKey);
+    return "";
+  }
+  return row.text;
+}
+
+export async function saveComposerDraft(userKey: string, spaceId: string, scope: ComposerDraftScope, text: string) {
+  const db = await database();
+  const draftKey = composerDraftKey(spaceId, scope);
+  if (!text.trim()) {
+    await db.runAsync("DELETE FROM composer_drafts WHERE user_key = ? AND draft_key = ?", userKey, draftKey);
+    return;
+  }
+  await db.runAsync(
+    "INSERT OR REPLACE INTO composer_drafts (user_key, draft_key, text, updated_at) VALUES (?, ?, ?, ?)",
+    userKey,
+    draftKey,
+    text,
+    Date.now(),
+  );
+}
+
+export async function clearComposerDraft(userKey: string, spaceId: string, scope: ComposerDraftScope) {
+  const db = await database();
+  await db.runAsync(
+    "DELETE FROM composer_drafts WHERE user_key = ? AND draft_key = ?",
+    userKey,
+    composerDraftKey(spaceId, scope),
+  );
+}
+
+export type DebugSessionRow = { sessionId: string; startedAt: string; updatedAt: number; closedAt: string | null; uploadedAt: string | null };
+export type DebugEventRow = { sessionId: string; sequence: number; timestamp: string; name: string; payload: string };
+
+export async function upsertDebugSession(session: DebugSessionRow) {
+  const db = await database();
+  await db.runAsync("INSERT OR REPLACE INTO debug_sessions (session_id, started_at, updated_at, closed_at, uploaded_at) VALUES (?, ?, ?, ?, ?)", session.sessionId, session.startedAt, session.updatedAt, session.closedAt, session.uploadedAt);
+}
+
+export async function saveDebugEvent(event: DebugEventRow) {
+  const db = await database();
+  await db.runAsync("INSERT OR REPLACE INTO debug_events (session_id, sequence, timestamp, name, payload) VALUES (?, ?, ?, ?, ?)", event.sessionId, event.sequence, event.timestamp, event.name, event.payload);
+  await db.runAsync("DELETE FROM debug_events WHERE session_id = ? AND sequence <= (SELECT MAX(sequence) - 3999 FROM debug_events WHERE session_id = ?)", event.sessionId, event.sessionId);
+}
+
+export async function loadDebugSessions(): Promise<DebugSessionRow[]> {
+  const db = await database();
+  return db.getAllAsync<DebugSessionRow>("SELECT session_id AS sessionId, started_at AS startedAt, updated_at AS updatedAt, closed_at AS closedAt, uploaded_at AS uploadedAt FROM debug_sessions ORDER BY updated_at DESC LIMIT 10");
+}
+
+export async function loadDebugEvents(sessionId: string): Promise<DebugEventRow[]> {
+  const db = await database();
+  return db.getAllAsync<DebugEventRow>("SELECT session_id AS sessionId, sequence, timestamp, name, payload FROM debug_events WHERE session_id = ? ORDER BY sequence ASC", sessionId);
+}
+
+/** Keep the newest `keep` sessions and drop the rest. The subquery is materialized before
+the delete, so the session rows are still all visible when events are pruned. */
+export async function pruneDebugSessions(keep: number) {
+  const db = await database();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM debug_events WHERE session_id NOT IN (SELECT session_id FROM debug_sessions ORDER BY updated_at DESC LIMIT ?)", keep);
+    await db.runAsync("DELETE FROM debug_sessions WHERE session_id NOT IN (SELECT session_id FROM debug_sessions ORDER BY updated_at DESC LIMIT ?)", keep);
+  });
+}
+
+/** Drop every session, live or retained: used when recording is turned off. */
+export async function clearAllDebugSessions() {
+  const db = await database();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM debug_events");
+    await db.runAsync("DELETE FROM debug_sessions");
+  });
+}
+
+export async function clearUserCache(userKey: string) {
+  const db = await database();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM messages WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM sessions WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM spaces WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM session_read_state WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM composer_drafts WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM space_list_cache WHERE user_key = ?", userKey);
+    await db.runAsync("DELETE FROM space_visits WHERE user_key = ?", userKey);
+  });
+}
+
+export async function loadSpaceListCache(userKey: string): Promise<import("@neta-art/cohub").PaletteOverviewResponse | null> {
+  const db = await database();
+  const row = await db.getFirstAsync<{ payload: string }>("SELECT payload FROM space_list_cache WHERE user_key = ?", userKey);
+  return row ? parse<import("@neta-art/cohub").PaletteOverviewResponse>(row.payload) : null;
+}
+
+export async function saveSpaceListCache(userKey: string, overview: import("@neta-art/cohub").PaletteOverviewResponse): Promise<void> {
+  const db = await database();
+  await db.runAsync("INSERT OR REPLACE INTO space_list_cache (user_key, payload) VALUES (?, ?)", userKey, JSON.stringify(overview));
+}
+
+export async function loadSpaceVisits(userKey: string): Promise<import("./space-list").SpaceVisit[]> {
+  const db = await database();
+  return db.getAllAsync("SELECT space_id AS spaceId, timestamp FROM space_visits WHERE user_key = ? ORDER BY timestamp DESC LIMIT 10", userKey);
+}
+
+export async function saveSpaceVisit(userKey: string, spaceId: string, timestamp: number): Promise<void> {
+  const db = await database();
+  await db.runAsync("INSERT OR REPLACE INTO space_visits (user_key, space_id, timestamp) VALUES (?, ?, ?)", userKey, spaceId, timestamp);
+  await db.runAsync("DELETE FROM space_visits WHERE user_key = ? AND space_id NOT IN (SELECT space_id FROM space_visits WHERE user_key = ? ORDER BY timestamp DESC LIMIT 10)", userKey, userKey);
+}
+
+export type CacheStats = {
+  spaces: number;
+  sessions: number;
+  messages: number;
+  readStates: number;
+};
+
+/** Row counts for the authenticated user's local cache, for the debug inspector. */
+export async function cacheStats(userKey: string): Promise<CacheStats> {
+  const db = await database();
+  const row = await db.getFirstAsync<CacheStats>(
+    `SELECT
+      (SELECT COUNT(*) FROM spaces WHERE user_key = ?) AS spaces,
+      (SELECT COUNT(*) FROM sessions WHERE user_key = ?) AS sessions,
+      (SELECT COUNT(*) FROM messages WHERE user_key = ?) AS messages,
+      (SELECT COUNT(*) FROM session_read_state WHERE user_key = ?) AS readStates`,
+    userKey,
+    userKey,
+    userKey,
+    userKey,
+  );
+  return row ?? { spaces: 0, sessions: 0, messages: 0, readStates: 0 };
+}
