@@ -28,7 +28,7 @@ const platformTasks: ModelTasksConfigOverride = {
 };
 const userModels: ModelsConfig = {
   providers: {
-    cohub: {
+    custom: {
       api: "openai-completions", baseUrl: "https://user.example.test/v1",
       apiKey: "user-literal-key", models: [{ id: "vision", input: ["text", "image"] }],
     },
@@ -50,7 +50,7 @@ for (const name of ["sessionTitle", "imageToText"] as const) {
   test(`${name}: selecting a user provider never inherits platform task secrets`, () => {
     const task = resolveModelTasksConfig({
       platformModels, platformTasks, userModels,
-      userTasks: { [name]: { model: { provider: "cohub", id: "vision" } } },
+      userTasks: { [name]: { model: { provider: "custom", id: "vision" } } },
     })[name];
     assert.ok(task);
     assert.equal(task.model.baseUrl, "https://user.example.test/v1");
@@ -186,7 +186,7 @@ test("file and Redis-cache loads enforce the same boundary without persisting re
     sessionTitle: { ...platformTasks.sessionTitle, model: { provider: "cohub", id: "vision", apiKey: "R02_MODEL_TASK_KEY" } },
   };
   const custom = {
-    providers: { custom: { ...userModels.providers.cohub, apiKey: "R02_MODEL_TASK_KEY" } },
+    providers: { custom: { ...userModels.providers.custom, apiKey: "R02_MODEL_TASK_KEY" } },
   };
   await writeFile(join(platformDir, "models.json"), JSON.stringify(trusted));
   await writeFile(join(platformDir, "model-tasks.json"), JSON.stringify(tasks));

@@ -35,7 +35,24 @@ test("agent registry resolves platform references at the loader boundary, never 
   assert.equal(registry.getApiKey("custom"), "R02_AGENT_SECRET");
 });
 
-test("agent registry does not retain platform headers or models for a replaced provider", () => {
+test("agent registry keeps platform connection and sibling models when parameters change", () => {
+  const user: ModelsConfig = {
+    providers: { cohub: { models: [{ id: "platform", contextWindow: 200000 }] } },
+  };
+  const source: ModelsConfig = { providers: { cohub: {
+    ...platform.providers.cohub,
+    models: [{ id: "platform", contextWindow: 100000 }, { id: "sibling", hidden: true }],
+  } } };
+  const registry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform: source, user })] });
+  assert.equal(registry.find("cohub", "platform")?.contextWindow, 200000);
+  assert.equal(registry.find("cohub", "platform")?.baseUrl, "https://platform.example.test/v1");
+  assert.deepEqual(registry.getHeaders("cohub", "platform"), { "X-Key": "synthetic-platform-header" });
+  assert.equal(registry.find("cohub", "sibling")?.id, "sibling");
+  registry.refresh();
+  assert.equal(registry.find("cohub", "platform")?.contextWindow, 200000);
+});
+
+test("agent registry rejects user definitions of the reserved cohub provider", () => {
   const user: ModelsConfig = {
     providers: {
       cohub: {
@@ -44,9 +61,5 @@ test("agent registry does not retain platform headers or models for a replaced p
       },
     },
   };
-  const registry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform, user })] });
-  assert.equal(registry.getApiKey("cohub"), "user-key");
-  assert.equal(registry.getHeaders("cohub", "custom"), undefined);
-  assert.equal(registry.find("cohub", "platform"), undefined);
-  assert.equal(registry.find("cohub", "custom")?.baseUrl, "https://user.example.test/v1");
+  assert.throws(() => new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform, user })] }), /cohub is reserved/);
 });

@@ -97,7 +97,7 @@ test("user providers cannot inherit platform connection defaults", () => {
     },
   };
   assert.throws(() => isRuntimeModelAvailable([platform, user], "cohub", "default"), {
-    message: "User model cohub/default requires an explicit API key",
+    message: "User model cohub/default cannot override platform model connection or extension field: baseUrl",
   });
 });
 
@@ -131,7 +131,7 @@ test("a same-name user provider replaces credentials, headers, extensions and mo
   withEnv(t, "R02_PLATFORM_MODEL_KEY", "synthetic-platform-key");
   const trusted: ModelsConfig = {
     providers: {
-      cohub: {
+      external: {
         ...platform.providers.cohub,
         apiKey: "R02_PLATFORM_MODEL_KEY",
         headers: { Authorization: "synthetic-header-secret" },
@@ -143,18 +143,18 @@ test("a same-name user provider replaces credentials, headers, extensions and mo
   };
   const user: ModelsConfig = {
     providers: {
-      cohub: {
+      external: {
         api: "openai-completions", baseUrl: "https://user.example.test/v1",
         apiKey: "user-literal-key", models: [{ id: "custom" }],
       },
     },
   };
   const result = resolveRuntimeModelsConfig({ platform: trusted, user });
-  assert.deepEqual(result.providers.cohub, user.providers.cohub);
+  assert.deepEqual(result.providers.external, user.providers.external);
   assert.ok(!JSON.stringify(result).includes("synthetic-"));
-  assert.deepEqual(mergeModelsConfigs(trusted, user).providers.cohub, user.providers.cohub);
-  assert.equal(isRuntimeModelAvailable([trusted, user], "cohub", "default"), false);
-  assert.equal(isRuntimeModelAvailable([trusted, user], "cohub", "custom"), true);
+  assert.deepEqual(mergeModelsConfigs(trusted, user).providers.external, user.providers.external);
+  assert.equal(isRuntimeModelAvailable([trusted, user], "external", "default"), false);
+  assert.equal(isRuntimeModelAvailable([trusted, user], "external", "custom"), true);
 });
 
 test("invalid user credentials fail catalog resolution with the provider, model and reason", () => {
@@ -231,7 +231,7 @@ test("an invalid same-name user provider fails without exposing platform credent
     providers: { cohub: { ...platform.providers.cohub, apiKey: "synthetic-platform-secret" } },
   };
   assert.throws(() => resolveRuntimeModelsConfig({ platform: trusted, user }), {
-    message: "User model cohub/default requires an explicit API key",
+    message: "Provider cohub is reserved for platform model parameter overrides; use a different provider name for custom connections",
   });
   assert.equal(user.providers.cohub?.apiKey, undefined);
   assert.equal(trusted.providers.cohub?.apiKey, "synthetic-platform-secret");

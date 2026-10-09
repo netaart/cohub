@@ -1,11 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  assertModelParameterOverride,
   assertUserModelCredentials,
+  assertUserProviderDefinition,
   createCachedModelsConfig,
   getUserModelsRedisKey,
   isModelDefinition,
+  isModelParameterProvider,
   mergeHeaders,
+  mergeModelParameters,
+  mergeProviderModelParameters,
   MODELS_CACHE_TTL_SEC,
   parseCachedModelsConfig,
   parseModelsConfig,
@@ -161,11 +166,6 @@ export function getUserModelTasksRedisKey(userId: string): string {
   return `${USER_MODEL_TASKS_REDIS_KEY_PREFIX}:${trimmed}`;
 }
 
-const USER_PLATFORM_MODEL_FIELDS = new Set([
-  "provider", "id", "name", "reasoning", "defaultThinkingLevel", "thinkingLevelMap",
-  "hidden", "input", "cost", "contextWindow", "maxTokens",
-]);
-
 /** Select platform models without allowing user input to redirect their credentials. */
 export function resolveModelTasksConfig(input: {
   platformTasks?: ModelTasksConfigOverride | null;
@@ -185,18 +185,31 @@ export function resolveModelTasksConfig(input: {
       // Replacing the task model also replaces platform task credentials,
       // headers and endpoint overrides. Users may select a trusted catalog
       // model, but must define their own provider for a different transport.
-      const provider = user.model.provider?.trim() ?? "";
-      const usesPlatformProvider = Object.hasOwn(platformModels.providers, provider)
-        && !Object.hasOwn(input.userModels?.providers ?? {}, provider);
+      const { provider: providerName, ...modelOverride } = user.model;
+      const provider = providerName?.trim() ?? "";
+      const id = user.model.id?.trim();
+      const platformProvider = Object.hasOwn(platformModels.providers, provider)
+        ? platformModels.providers[provider]
+        : undefined;
+      const userProvider = Object.hasOwn(input.userModels?.providers ?? {}, provider)
+        ? input.userModels?.providers[provider]
+        : undefined;
+      if (userProvider) assertUserProviderDefinition(provider, userProvider);
+      const usesPlatformProvider = provider === "cohub"
+        || Boolean(platformProvider && (!userProvider || isModelParameterProvider(userProvider)));
+      let models = input.userModels ?? { providers: {} };
       if (usesPlatformProvider) {
-        if (Object.keys(user.model).some((key) => !USER_PLATFORM_MODEL_FIELDS.has(key))) {
-          throw new Error("User model tasks cannot override platform model connection settings");
-        }
-        if (!platformModels.providers[provider]?.models?.some((model) => model.id === user.model?.id?.trim())) {
+        assertModelParameterOverride(provider, modelOverride);
+        if (!platformProvider?.models?.some((model) => model.id === id)) {
           throw new Error("User model tasks must select a configured platform model");
         }
+        const resolvedProvider = userProvider
+          ? mergeProviderModelParameters(provider, platformProvider, {
+              models: userProvider.models?.filter((model) => model.id === id),
+            })
+          : platformProvider;
+        models = { providers: { [provider]: resolvedProvider } };
       }
-      const models = usesPlatformProvider ? platformModels : input.userModels ?? { providers: {} };
       task = resolveTask(name, { ...platform, ...user, model: user.model }, models);
       if (!usesPlatformProvider) assertUserModelCredentials(task.model);
     } else {
@@ -232,8 +245,7 @@ function resolveTask(
     ? mergedCost as ModelCost
     : undefined;
   const model = {
-    ...(catalogModel ?? {}),
-    ...(task.model ?? {}),
+    ...mergeModelParameters<ModelTaskModelConfigOverride>(catalogModel ?? {}, task.model ?? {}),
     provider,
     id,
     api: task.model?.api ?? catalogModel?.api ?? providerConfig?.api,

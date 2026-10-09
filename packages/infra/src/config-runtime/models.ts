@@ -237,15 +237,74 @@ export function parseCachedModelsConfig(rawText: string): CachedModelsConfig | n
   };
 }
 
+const MODEL_PARAMETER_FIELDS = new Set([
+  "id", "name", "reasoning", "defaultThinkingLevel", "thinkingLevelMap",
+  "hidden", "input", "cost", "contextWindow", "maxTokens",
+]);
+
+export function assertModelParameterOverride(provider: string, model: Record<string, unknown>) {
+  const unsupported = Object.keys(model).find((key) => !MODEL_PARAMETER_FIELDS.has(key));
+  if (unsupported) {
+    throw new Error(`User model ${provider}/${model.id} cannot override platform model connection or extension field: ${unsupported}`);
+  }
+}
+
+export function isModelParameterProvider(config: ProviderConfig): boolean {
+  return Object.keys(config).every((key) => key === "models");
+}
+
+export function assertUserProviderDefinition(provider: string, config: ProviderConfig) {
+  if (provider === "cohub" && !isModelParameterProvider(config)) {
+    throw new Error("Provider cohub is reserved for platform model parameter overrides; use a different provider name for custom connections");
+  }
+}
+
+export function mergeModelParameters<T extends { cost?: Partial<ModelCost>; thinkingLevelMap?: ThinkingLevelMap }>(
+  base: T,
+  override: T,
+): T {
+  return {
+    ...base,
+    ...override,
+    ...(override.cost ? { cost: { ...base.cost, ...override.cost } } : {}),
+    ...(override.thinkingLevelMap ? { thinkingLevelMap: { ...base.thinkingLevelMap, ...override.thinkingLevelMap } } : {}),
+  };
+}
+
+export function mergeProviderModelParameters(
+  provider: string,
+  base: ProviderConfig,
+  override: ProviderConfig,
+): ProviderConfig {
+  const models = new Map((base.models ?? []).map((model) => [model.id, model]));
+  for (const model of override.models ?? []) {
+    assertModelParameterOverride(provider, model);
+    const original = models.get(model.id);
+    if (!original) {
+      throw new Error(`User model ${provider}/${model.id} must select a configured model for parameter overrides`);
+    }
+    models.set(model.id, mergeModelParameters(original, model));
+  }
+  return { ...base, models: [...models.values()] };
+}
+
 export function mergeModelsConfigs(
   platform?: ModelsConfig | null,
   ...userConfigs: Array<ModelsConfig | null | undefined>
 ): ModelsConfig {
-  // A provider owns both its credentials and its request destination. Never
-  // inherit either half across config sources.
   const providers = new Map<string, ProviderConfig>(Object.entries(platform?.providers ?? {}));
   for (const config of userConfigs) {
     for (const [provider, providerConfig] of Object.entries(config?.providers ?? {})) {
+      assertUserProviderDefinition(provider, providerConfig);
+      const base = providers.get(provider);
+      if (provider === "cohub" && !base) {
+        throw new Error("Provider cohub requires a platform model catalog");
+      }
+      if (base && isModelParameterProvider(providerConfig)) {
+        providers.set(provider, mergeProviderModelParameters(provider, base, providerConfig));
+        continue;
+      }
+      // 自定义连接必须使用自身凭据，参数覆盖则保留原有连接。
       for (const model of providerConfig.models ?? []) {
         assertUserModelCredentials({
           provider,
