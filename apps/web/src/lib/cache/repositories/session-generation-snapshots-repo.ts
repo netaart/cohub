@@ -1,8 +1,10 @@
 import type { SessionGenerationSnapshotCacheRecord } from "$lib/cache/db";
 import { idbDelete, idbDeleteWhere, idbGet, idbPut } from "$lib/cache/db";
 import { getCacheUserKey, sessionGenerationSnapshotKey } from "$lib/cache/keys";
+import { MemoryLru } from "$lib/cache/memory-lru";
 
 const SNAPSHOT_TTL_MS = 2 * 60 * 60 * 1000;
+const memory = new MemoryLru<string, SessionGenerationSnapshotCacheRecord>(16);
 
 export type SessionGenerationSnapshotInput = Omit<
 	SessionGenerationSnapshotCacheRecord,
@@ -23,15 +25,24 @@ function isExpired(record: SessionGenerationSnapshotCacheRecord) {
 
 export const sessionGenerationSnapshotsRepo = {
 	async get(spaceId: string, sessionId: string) {
-		const record = await idbGet<SessionGenerationSnapshotCacheRecord>(
-			"session_generation_snapshots",
-			getKey(spaceId, sessionId),
-		);
-		if (!record) return null;
-		if (record.userKey !== getCacheUserKey() || isExpired(record)) {
-			await this.delete(spaceId, sessionId).catch(() => undefined);
+		const userKey = getCacheUserKey();
+		const key = getKey(spaceId, sessionId);
+		const record =
+			memory.get(key) ??
+			(await idbGet<SessionGenerationSnapshotCacheRecord>(
+				"session_generation_snapshots",
+				key,
+			));
+		if (!record || getCacheUserKey() !== userKey || record.userKey !== userKey)
+			return null;
+		if (isExpired(record)) {
+			memory.delete(key);
+			void idbDelete("session_generation_snapshots", key).catch(
+				() => undefined,
+			);
 			return null;
 		}
+		memory.set(key, record);
 		return record;
 	},
 
@@ -50,20 +61,23 @@ export const sessionGenerationSnapshotsRepo = {
 			updatedAt: input.updatedAt ?? now,
 			expiresAt: input.expiresAt ?? now + SNAPSHOT_TTL_MS,
 		};
+		memory.set(record.key, record);
 		await idbPut("session_generation_snapshots", record);
 		return record;
 	},
 
 	async delete(spaceId: string, sessionId: string) {
-		await idbDelete("session_generation_snapshots", getKey(spaceId, sessionId));
+		const key = getKey(spaceId, sessionId);
+		memory.delete(key);
+		await idbDelete("session_generation_snapshots", key);
 	},
 
 	async deleteExpired() {
 		const now = Date.now();
+		const userKey = getCacheUserKey();
 		await idbDeleteWhere<SessionGenerationSnapshotCacheRecord>(
 			"session_generation_snapshots",
-			(record) =>
-				record.userKey === getCacheUserKey() && record.expiresAt <= now,
+			(record) => record.userKey === userKey && record.expiresAt <= now,
 		);
 	},
 };

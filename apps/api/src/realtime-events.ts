@@ -7,7 +7,7 @@ import type { TaskRunStatus } from "@cohub/protocol/task";
 import { dispatchRealtimeEvent } from "./channels.js";
 import { buildResourceLabelSnapshot, type LabelResourceType } from "@cohub/core/labels/resource-events";
 import { createLogger } from "@cohub/infra/logging";
-import { readSessionActiveTurn, readSessionParticipantUserUuids, resolveSessionAudienceRooms, sessionActiveTurnEvent } from "@cohub/core/sessions";
+import { publishSessionTurnStates, readSessionActiveTurn, readSessionParticipantUserUuids, resolveSessionAudienceRooms } from "@cohub/core/sessions";
 import { db } from "./db/index.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -226,9 +226,10 @@ export async function dispatchSessionUpdated(input: {
   });
 }
 
-export async function dispatchSessionActiveTurn(input: { spaceId: string; turn: SessionTurnRecord }) {
-  const event = sessionActiveTurnEvent(input);
-  if (event) await dispatchRealtimeEvent({ id: randomUUID(), timestamp: Date.now(), ...event });
+export async function dispatchSessionTurnState(spaceId: string, turn: SessionTurnRecord) {
+  await publishSessionTurnStates(db, spaceId, [turn], dispatchRealtimeEvent).catch((error) => {
+    logger.warn("[Realtime] failed to publish user turn state", { sessionId: turn.sessionId, error });
+  });
 }
 
 export async function dispatchTurnCreated(input: {
@@ -249,6 +250,7 @@ export async function dispatchTurnCreated(input: {
       turn: toRealtimeTurnRecord(input.turn),
     },
   });
+  await dispatchSessionTurnState(input.spaceId, input.turn);
 }
 
 export async function dispatchTaskCreated(task: Parameters<typeof toRealtimeTaskRecord>[0]) {

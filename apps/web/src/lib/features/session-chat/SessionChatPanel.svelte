@@ -7,7 +7,7 @@ import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import { ArrowDown, FileCode2, ListTree, Plus, Upload } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import { untrack } from "svelte";
+import { onMount, untrack } from "svelte";
 import AccessStateView from "$lib/components/AccessStateView.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import ChatTimeline from "$lib/components/ChatTimeline.svelte";
@@ -71,6 +71,11 @@ let {
 } = $props();
 
 const locale = $derived(getLocale());
+
+// Only the chat needs model catalogs.
+onMount(() => {
+	void host.loadModelsCatalog();
+});
 
 // Chat markdown resolves workspace-relative images and media to workspace
 // files. Provide it once here instead of threading it through the timeline.

@@ -19,6 +19,10 @@ import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { mergeSessionRecord } from "$lib/session-record-merge";
 import { compareSessionsByRecentActivity } from "$lib/session-sort";
+import {
+	mergeSessionTurnState,
+	readSessionTurnState,
+} from "$lib/session-turn-state";
 import { getSpacePublicProfile } from "$lib/space-profile";
 import { buildUserNewSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -34,7 +38,6 @@ import {
 } from "$lib/stores/chats-filter";
 import { getRecentSpaces } from "$lib/stores/recent-space";
 import { findCachedSession } from "$lib/stores/session-detail-cache";
-import { reconcileGenerationStateFromSessionList } from "$lib/stores/session-generation-list-reconcile";
 import {
 	getCachedSessionListSnapshot,
 	setCachedSessionList,
@@ -154,11 +157,6 @@ class ChatsInbox {
 			);
 		},
 		covered: (filter) => !filter.space || filter.space.id === this.#roomSpaceId,
-		onRows: (sessions, origin) =>
-			reconcileGenerationStateFromSessionList(sessions, {
-				authoritative: origin.authoritative,
-				requestStartedAt: origin.startedAt,
-			}),
 	});
 
 	#userKey: string | null = null;
@@ -342,6 +340,15 @@ class ChatsInbox {
 	}
 
 	#handleEvent(event: ChannelEnvelope) {
+		const turn = readSessionTurnState(event);
+		if (turn?.sessionId) {
+			this.list.apply({
+				id: turn.sessionId,
+				fit: () => "keep",
+				merge: (session) => mergeSessionTurnState(session, turn),
+			});
+			return;
+		}
 		if (event.type !== "session.created" && event.type !== "session.updated")
 			return;
 		const record = readSessionRecord(
@@ -365,7 +372,6 @@ class ChatsInbox {
 			const known = this.list.find(record.id);
 			if (known) {
 				this.list.apply({ id: record.id, fit: () => "keep", merge });
-				reconcileGenerationStateFromSessionList([merge(known)]);
 			}
 			return;
 		}
@@ -386,10 +392,6 @@ class ChatsInbox {
 			settled: options.settled,
 		};
 		this.list.apply(change);
-		if ("activeTurn" in record) {
-			const merged = this.list.find(record.id);
-			if (merged) reconcileGenerationStateFromSessionList([merged]);
-		}
 	}
 
 	#spaceSummary(spaceId: string): UserSessionSpaceSummary | null {

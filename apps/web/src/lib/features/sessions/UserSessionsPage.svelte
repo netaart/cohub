@@ -425,7 +425,11 @@ $effect(() => {
 			existing &&
 			existing.title === session.title &&
 			existing.updatedAt === session.updatedAt &&
-			existing.lastMessageId === session.lastMessageId
+			existing.lastMessageId === session.lastMessageId &&
+			existing.activeTurnSequence === session.activeTurnSequence &&
+			existing.activeTurn?.id === session.activeTurn?.id &&
+			existing.activeTurn?.status === session.activeTurn?.status &&
+			existing.lastTurnIssue === session.lastTurnIssue
 		) {
 			return;
 		}

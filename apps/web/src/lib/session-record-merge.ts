@@ -11,13 +11,6 @@ function hasOwn<T extends object, K extends PropertyKey>(
 	return Object.hasOwn(value, key);
 }
 
-function activeTurnRank(activeTurn: SessionRecord["activeTurn"] | undefined) {
-	if (!activeTurn) return 3;
-	if (activeTurn.status === "abort_requested") return 2;
-	if (activeTurn.status === "running") return 1;
-	return 0;
-}
-
 function shouldApplyActiveTurn(
 	existing: SessionRecord | undefined | null,
 	incoming: Omit<SessionRecord, "meta"> & {
@@ -29,17 +22,29 @@ function shouldApplyActiveTurn(
 		!hasOwn(incoming, "activeTurn") ||
 		!hasOwn(incoming, "activeTurnSequence")
 	) {
-		return hasOwn(incoming, "activeTurn") && incoming.activeTurn === null;
+		return (
+			hasOwn(incoming, "activeTurn") &&
+			incoming.activeTurn === null &&
+			existing?.activeTurnSequence === undefined
+		);
 	}
-	const currentSequence = existing?.activeTurnSequence;
-	const incomingSequence = incoming.activeTurnSequence;
-	if (currentSequence === undefined || incomingSequence === undefined)
-		return true;
-	if (incomingSequence !== currentSequence)
-		return incomingSequence > currentSequence;
-	return (
-		activeTurnRank(incoming.activeTurn) >= activeTurnRank(existing?.activeTurn)
-	);
+	const existingTurnAt = existing?.activeTurn?.updatedAt;
+	const incomingTurnAt = incoming.activeTurn?.updatedAt;
+	if (
+		existingTurnAt &&
+		incomingTurnAt &&
+		Date.parse(incomingTurnAt) < Date.parse(existingTurnAt)
+	)
+		return false;
+	const existingUpdatedAt = existing?.updatedAt;
+	const incomingUpdatedAt = (incoming as { updatedAt?: unknown }).updatedAt;
+	if (
+		typeof existingUpdatedAt === "string" &&
+		typeof incomingUpdatedAt === "string" &&
+		Date.parse(incomingUpdatedAt) < Date.parse(existingUpdatedAt)
+	)
+		return false;
+	return true;
 }
 
 function isOlderSnapshot(

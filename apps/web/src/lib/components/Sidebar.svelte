@@ -106,6 +106,7 @@ import {
 	removeResourceFromLabel,
 } from "$lib/labels/resource-label-actions";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
+import { sameData, shareItems } from "$lib/lists/live-list-core";
 import {
 	type AppArea,
 	appAreaHref,
@@ -128,7 +129,14 @@ import {
 	mergeSessionRecord,
 	mergeSessionRecords,
 } from "$lib/session-record-merge";
-import { sortSessionsByRecentActivity } from "$lib/session-sort";
+import {
+	getSessionActivityAt,
+	sortSessionsByRecentActivity,
+} from "$lib/session-sort";
+import {
+	mergeSessionTurnState,
+	readSessionTurnState,
+} from "$lib/session-turn-state";
 import {
 	resolveSettingsSection,
 	SETTINGS_SECTIONS,
@@ -152,7 +160,6 @@ import { clearGrantedAppScopes } from "$lib/stores/app-grant-cache";
 import { authStore } from "$lib/stores/auth.svelte";
 import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 import {
 	clearRecentSpace,
 	getRecentSpace,
@@ -333,7 +340,6 @@ let billingCreditError = $state<string | null>(null);
 let billingCreditUserId = $state<string | null>(null);
 let billingConfigured = $state<boolean | null>(null);
 let billingSubscriptionName = $state<string | null>(null);
-const modelsCatalog = $derived(modelsCatalogStore.items);
 
 let checkpointsCollapsed = $state(false);
 let chatsCollapsed = $state(false);
@@ -878,8 +884,12 @@ function mergeSessionSnapshotForDisplay(
 	nextSessions: SessionRecord[],
 ) {
 	if (currentSessions.length === 0) return nextSessions;
-	return sortSessionsByRecentActivity(
-		mergeSessionRecords([...currentSessions, ...nextSessions]),
+	return shareItems(
+		currentSessions,
+		sortSessionsByRecentActivity(
+			mergeSessionRecords([...currentSessions, ...nextSessions]),
+		),
+		(session) => session.id,
 	);
 }
 
@@ -2880,8 +2890,44 @@ function handleGlobalSidebarKeydown(event: KeyboardEvent) {
 }
 
 onMount(() => {
-	void modelsCatalogStore.load().catch((error) => {
-		console.error("Failed to load models catalog:", error);
+	// Navigation applies server state directly, without a mounted chat host.
+	const offSessionState = sdk.onUserEvent((event) => {
+		if (event.spaceId !== currentSpaceId) return;
+		const turn = readSessionTurnState(event);
+		const record =
+			event.type === "session.updated" || event.type === "session.created"
+				? (event.payload as { session?: SessionRecord }).session
+				: null;
+		const id = turn?.sessionId ?? record?.id;
+		if (!id || (record && record.spaceId !== currentSpaceId)) return;
+		const merge = (session: SessionRecord) =>
+			turn
+				? mergeSessionTurnState(session, turn)
+				: record
+					? mergeSessionRecord(session, record)
+					: session;
+		const listed = sessionsById.get(id);
+		if (listed) {
+			const next = merge(listed);
+			if (!sameData(listed, next)) {
+				const updated = sessions.map((session) =>
+					session.id === next.id ? next : session,
+				);
+				sessions =
+					getSessionActivityAt(listed) === getSessionActivityAt(next)
+						? updated
+						: sortSessionsByRecentActivity(updated);
+			}
+		}
+		const detail = currentLabelSessionDetails[id];
+		if (detail && currentSpaceId) {
+			const next = merge(detail);
+			if (!sameData(detail, next))
+				labelSessionDetailsBySpace = {
+					...labelSessionDetailsBySpace,
+					[currentSpaceId]: { ...currentLabelSessionDetails, [id]: next },
+				};
+		}
 	});
 	const offSessionListCacheUpdated = onSessionListCacheUpdated(
 		({ spaceId, sessions: nextSessions, forks, pageInfo }) => {
@@ -3004,6 +3050,7 @@ onMount(() => {
 	document.addEventListener("click", handleClickOutside);
 
 	return () => {
+		offSessionState();
 		offSessionListCacheUpdated();
 		offSpaceLabelsCacheUpdated();
 		offUserLabelProfilesUpdated();
@@ -3214,7 +3261,6 @@ $effect(() => {
 							density="dense"
 							active={isActive}
 							{isMobile}
-							modelsCatalog={modelsCatalog ?? undefined}
 							renaming={renamingSessionId === session.id}
 							renameValue={renameTitleValue}
 							renameSaving={renameSaving}
@@ -3548,7 +3594,6 @@ $effect(() => {
 					density="dense"
 					active={isActive}
 					{isMobile}
-					modelsCatalog={modelsCatalog ?? undefined}
 					showSourceBadge={true}
 					renaming={renamingSessionId === session.id}
 					renameValue={renameTitleValue}
@@ -4692,33 +4737,6 @@ $effect(() => {
 	.rail-menu-item:hover {
 		background: var(--color-bg-hover);
 		color: var(--color-text-secondary);
-	}
-
-	.session-activity-caret {
-		display: inline-block;
-		margin-left: 0.0625rem;
-		color: var(--color-brand);
-		font-size: 0.82em;
-		line-height: 1;
-		animation: session-activity-caret 1.15s steps(2, jump-none) infinite;
-	}
-
-	@keyframes session-activity-caret {
-		0%,
-		45% {
-			opacity: 1;
-		}
-		46%,
-		100% {
-			opacity: 0.28;
-		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.session-activity-caret {
-			animation: none;
-			opacity: 0.85;
-		}
 	}
 
 </style>

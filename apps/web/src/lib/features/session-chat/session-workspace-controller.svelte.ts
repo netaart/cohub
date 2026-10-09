@@ -75,6 +75,12 @@ export function createSessionWorkspaceController() {
 	}
 
 	function applySessionsSnapshot(sessions: SessionRecord[]) {
+		const known = new Map(
+			spaceSessions.map((session) => [session.id, session]),
+		);
+		sessions = sessions.map((session) =>
+			mergeSessionRecord(known.get(session.id), session),
+		);
 		const activeSession = activeSessionId
 			? sessionStateById[activeSessionId]?.session
 			: undefined;

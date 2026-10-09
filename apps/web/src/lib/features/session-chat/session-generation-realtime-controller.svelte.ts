@@ -1,13 +1,16 @@
 import type { GenerationStreamEvent } from "@neta-art/cohub";
 import { tick } from "svelte";
+import { getCacheUserKey } from "$lib/cache/keys";
 import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
 import { sdk } from "$lib/sdk";
+import { mergeSessionRecord } from "$lib/session-record-merge";
 import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
 import { completeGeneration } from "$lib/stores/session-generation-controller";
 import {
 	applyGenerationStreamEvent,
 	applyGenerationStreamSnapshot,
 } from "$lib/stores/session-generation-realtime";
+import { shouldResumePendingGeneration } from "$lib/stores/session-generation-state";
 import { SessionRecoveryCoordinator } from "$lib/stores/session-recovery-coordinator";
 import { subscribeGenerationChannel } from "./generation-channel";
 import type { SessionScrollAnchor } from "./session-scroll-controller.svelte";
@@ -152,19 +155,27 @@ export function createSessionGenerationRealtimeController(options: {
 		const inFlight = streamSnapshotRecoveryInFlight.get(sessionId);
 		if (inFlight) return inFlight;
 		lastStreamSnapshotRecoveryByTurn.set(cooldownKey, now);
+		const opSpaceId = input?.spaceId || options.getSpaceId();
+		const userKey = getCacheUserKey();
 		const run = (async () => {
 			try {
-				const opSpaceId = input?.spaceId || options.getSpaceId();
 				if (!opSpaceId) return false;
 				const { snapshot } = await sdk
 					.space(opSpaceId)
 					.session(sessionId)
 					.turns.streamSnapshot();
-				if (!snapshot) return false;
+				if (
+					!snapshot ||
+					userKey !== getCacheUserKey() ||
+					options.getSpaceId() !== opSpaceId
+				)
+					return false;
 				if (turnId && snapshot.turnId && snapshot.turnId !== turnId) {
 					return false;
 				}
 				const current = sessionGenerationStore.get(sessionId);
+				if (!shouldResumePendingGeneration(current, snapshot.turnId))
+					return false;
 				if (
 					current?.turnId &&
 					snapshot.turnId &&
@@ -202,6 +213,10 @@ export function createSessionGenerationRealtimeController(options: {
 	async function reconcileSessionTail(sessionId: string) {
 		const state = options.getSessionState(sessionId);
 		if (!state?.session) return;
+		const opSpaceId = options.getSpaceId();
+		const userKey = getCacheUserKey();
+		const isCurrent = () =>
+			options.getSpaceId() === opSpaceId && getCacheUserKey() === userKey;
 		const inFlight = reconcileSessionTailInFlight.get(sessionId);
 		if (inFlight) return inFlight;
 		const shouldRestoreAnchor =
@@ -217,18 +232,20 @@ export function createSessionGenerationRealtimeController(options: {
 			try {
 				const requestStartedAt = Date.now();
 				const response = await sdk
-					.space(options.getSpaceId())
+					.space(opSpaceId)
 					.session(sessionId)
 					.turns.listPaginated({
 						limit: 30,
 					});
+				if (!isCurrent()) return;
 				await options.syncGenerationStateFromTail(
 					sessionId,
 					response.turns,
 					requestStartedAt,
 				);
+				if (!isCurrent()) return;
 				const snapshot = await sessionTurnsRepo.replaceTail(
-					options.getSpaceId(),
+					opSpaceId,
 					sessionId,
 					{
 						session: response.session,
@@ -236,9 +253,12 @@ export function createSessionGenerationRealtimeController(options: {
 						hasMore: response.hasMore,
 					},
 				);
+				if (!isCurrent()) return;
 				const currentState = options.getSessionState(sessionId);
 				if (!currentState) return;
-				const nextSession = snapshot.session ?? currentState.session;
+				const nextSession = snapshot.session
+					? mergeSessionRecord(currentState.session, snapshot.session)
+					: currentState.session;
 				const nextTurns = preserveSessionTurnRefs(
 					currentState.turns,
 					snapshot.turns,

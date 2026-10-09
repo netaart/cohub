@@ -49,6 +49,7 @@ import { isStale } from "$lib/features/space/runtime-status-view";
 import { asRecord } from "$lib/features/space/space-utils";
 import { resolvePreferredGenerationModel } from "$lib/generation-model-catalog";
 import { formatGenerationPolicyLabel } from "$lib/generation-policy-label";
+import { sameData } from "$lib/lists/live-list-core";
 import { extractSpaceMentionsFromText } from "$lib/mentions/space";
 import {
 	formatThinkingLevelShort,
@@ -72,6 +73,7 @@ import type { SessionRelations } from "$lib/session-relations-context";
 import { sortSessionsByRecentActivity } from "$lib/session-sort";
 import type { TimelineItem } from "$lib/session-tree";
 import { buildTurnTimelineItems } from "$lib/session-turn-render";
+import { mergeSessionTurnState } from "$lib/session-turn-state";
 import type { NewChatComposerApplyPayload } from "$lib/space-config";
 import { materializeSpaceEntries } from "$lib/space-upload";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -107,8 +109,10 @@ import {
 	resetGeneration,
 	startGenerationRequest,
 } from "$lib/stores/session-generation-controller";
-import { reconcileGenerationStateFromSessionList } from "$lib/stores/session-generation-list-reconcile";
-import { isLiveTurnStatus } from "$lib/stores/session-generation-state";
+import {
+	canResumeRecoveredGeneration,
+	hasRunningSessionTurn,
+} from "$lib/stores/session-generation-state";
 import {
 	fetchSessionListWithCache,
 	getCachedSessionListSnapshot,
@@ -211,9 +215,9 @@ export type SessionChatHostOptions = SessionChatEnvironment & {
 	hasSpace?: () => boolean;
 };
 
-// Wire generation store reset once for process-wide leases.
+// Last host releases memory; persisted recovery snapshots stay.
 setSpaceGenerationLastReleaseHandler((spaceId) => {
-	sessionGenerationStore.resetSpace(spaceId);
+	sessionGenerationStore.releaseSpace(spaceId);
 });
 
 export function createSessionChatHost(options: SessionChatHostOptions) {
@@ -722,9 +726,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			isBillingAccessBlockedCode(composerErrorCode),
 	);
 	const activeSessionIsRunning = $derived.by(() =>
-		Boolean(
-			activeGenerationState &&
-				!TERMINAL_GENERATION_STATUSES.has(activeGenerationState.status),
+		hasRunningSessionTurn(
+			activeGenerationState,
+			activeSessionState?.session?.activeTurn,
 		),
 	);
 	const timeline = $derived.by<TimelineItem[]>(() => {
@@ -750,6 +754,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						contentBlocks: activeGenerationState.contentBlocks,
 						finalizedPreview: activeGenerationState.finalizedPreview,
 						status: activeGenerationState.status,
+						resumed: activeGenerationState.resumed,
 						runtimePhase: activeGenerationState.runtimePhase,
 						runtimeProvider: activeGenerationState.runtimeProvider,
 						runtimeModel: activeGenerationState.runtimeModel,
@@ -904,9 +909,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const sessionId = activeSessionId;
 		if (!sessionId) return;
 		untrack(() => {
-			void sessionGenerationStore
-				.restore(spaceId, sessionId)
-				.catch(() => undefined);
 			void loadTurnIndex(sessionId);
 		});
 	});
@@ -1661,7 +1663,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		options?: { cache?: boolean },
 	) {
 		const nextSessions = workspace.upsertSessionRecord(session);
-		reconcileGenerationStateFromSessionList([session]);
 		if (options?.cache !== false) {
 			void patchCachedSessionList(spaceId, () => nextSessions).catch(
 				() => undefined,
@@ -1685,17 +1686,12 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				);
 	}
 
-	function applySessionsSnapshot(
-		sessions: SessionRecord[],
-		options?: { authoritative?: boolean; requestStartedAt?: number },
-	) {
+	function applySessionsSnapshot(sessions: SessionRecord[]) {
 		workspace.applySessionsSnapshot(sessions);
-		reconcileGenerationStateFromSessionList(sessions, options);
 	}
 
 	function seedSessions(sessions: SessionRecord[]) {
 		workspace.seedSessions(sessions);
-		reconcileGenerationStateFromSessionList(sessions);
 	}
 
 	async function syncForkResponseToSessionListCache(
@@ -1733,7 +1729,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const requestSpaceId = spaceId;
 		const run = (async () => {
 			try {
-				const requestStartedAt = Date.now();
 				let backgroundRefreshApplied = false;
 				const sessions = await fetchSessionListWithCache(
 					requestSpaceId,
@@ -1754,19 +1749,13 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 							: (freshSessions) => {
 									if (spaceId !== requestSpaceId) return;
 									backgroundRefreshApplied = true;
-									applySessionsSnapshot(freshSessions, {
-										authoritative: true,
-										requestStartedAt,
-									});
+									applySessionsSnapshot(freshSessions);
 								},
 					},
 				);
 				if (spaceId !== requestSpaceId) return;
 				if (force || !backgroundRefreshApplied) {
-					applySessionsSnapshot(sessions, {
-						authoritative: force,
-						requestStartedAt,
-					});
+					applySessionsSnapshot(sessions);
 				}
 			} catch (error) {
 				console.warn("[space] Failed to refresh sessions:", error);
@@ -1854,11 +1843,17 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		turns: SessionTurnRecord[],
 		requestStartedAt: number,
 	) {
+		const recoverySpaceId = spaceId;
+		const recoveryUserKey = getCacheUserKey();
 		const runningTurn = turns.findLast(
 			(turn) => turn.status === "running" || turn.status === "abort_requested",
 		);
 		if (runningTurn) {
 			const current = sessionGenerationStore.get(sessionId);
+			const currentTurn = sessionStateById[sessionId]?.turns.find(
+				(turn) => turn.id === current?.turnId,
+			);
+			if (currentTurn && currentTurn.sequence > runningTurn.sequence) return;
 			const optimisticTurn = turns.find(
 				(turn) =>
 					turn.meta?.optimistic === true &&
@@ -1872,7 +1867,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			// 1. If the generation already reached a terminal state for the same
 			//    turn, the API data is stale — skip to avoid re-activating.
 			//
-			// 2. If the generation is actively streaming for the same turn and
+			// 2. If generation has advanced (including a new queued follow-up) and
 			//    the API request was sent BEFORE the last streaming event arrived,
 			//    the API data is likely stale (the server may not have persisted
 			//    the completed status yet). Skip to avoid replacing
@@ -1885,7 +1880,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				isSameTurn;
 			const staleApiForActiveStream =
 				current &&
-				isSameTurn &&
 				(current.status === "streaming" || current.status === "pending") &&
 				(current.lastEventAt ?? 0) > requestStartedAt;
 			if (alreadyTerminalForTurn || staleApiForActiveStream) {
@@ -1895,8 +1889,29 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				typeof runningTurn.meta?.userMessageId === "string"
 					? runningTurn.meta.userMessageId
 					: runningTurn.id;
+			if (current?.turnId && !isSameTurn) resetGeneration(sessionId);
+			await restoreSessionStreamSnapshot(sessionId, { turnId: runningTurn.id });
+			if (
+				disposed ||
+				spaceId !== recoverySpaceId ||
+				getCacheUserKey() !== recoveryUserKey
+			)
+				return;
+			const latest = sessionGenerationStore.get(sessionId);
+			const latestTurn = sessionStateById[sessionId]?.turns.find(
+				(turn) => turn.id === latest?.turnId,
+			);
+			if (
+				!canResumeRecoveredGeneration(
+					latest,
+					runningTurn,
+					requestStartedAt,
+					latestTurn?.sequence,
+				)
+			)
+				return;
 			sessionGenerationStore.resumePending(sessionId, {
-				spaceId,
+				spaceId: recoverySpaceId,
 				turnId: runningTurn.id,
 				anchorUserMessageId,
 			});
@@ -1908,7 +1923,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					reason: "running-recovery",
 				});
 			}
-			await restoreSessionStreamSnapshot(sessionId, { turnId: runningTurn.id });
 			return;
 		}
 		const current = sessionGenerationStore.get(sessionId);
@@ -1926,7 +1940,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		if (existing?.loaded && !force) return;
 		const load = async () => {
 			const guard = createKeyedRouteRequestGuard({
-				captureKey: () => `${spaceId}:${sessionId}`,
+				captureKey: () => `${getCacheUserKey()}:${spaceId}:${sessionId}`,
 			});
 			let cached: Awaited<
 				ReturnType<typeof sessionTurnsRepo.getCached>
@@ -1946,10 +1960,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				workspace.sessionStateById = {
 					...sessionStateById,
 					[sessionId]: {
-						session:
-							cached.session ??
-							existing?.session ??
-							spaceSessions.find((s) => s.id === sessionId),
+						session: cached.session
+							? mergeSessionRecord(existing?.session, cached.session)
+							: (existing?.session ??
+								spaceSessions.find((s) => s.id === sessionId)),
 						turns: cached.turns,
 						loading: true,
 						loaded: true,
@@ -2013,6 +2027,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					response.turns,
 					requestStartedAt,
 				);
+				if (!guard.isCurrent()) return;
 				const snapshot = await sessionTurnsRepo.replaceTail(
 					spaceId,
 					sessionId,
@@ -2031,7 +2046,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				workspace.sessionStateById = {
 					...sessionStateById,
 					[sessionId]: {
-						session: snapshot.session ?? response.session,
+						session:
+							currentAfterSnapshot?.session ??
+							snapshot.session ??
+							response.session,
 						turns: nextTurns,
 						loading: false,
 						loaded: true,
@@ -2143,7 +2161,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const key = `${sessionId}:${sequence}`;
 		return turnLoading.runTurnWindowLoad(key, async () => {
 			const guard = createKeyedRouteRequestGuard({
-				captureKey: () => `${spaceId}:${sessionId}`,
+				captureKey: () => `${getCacheUserKey()}:${spaceId}:${sessionId}`,
 			});
 			const state = sessionStateById[sessionId];
 			if (state?.turns.some((turn) => turn.sequence === sequence)) return;
@@ -2492,18 +2510,23 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		reason: string;
 		onHydrated?: () => void;
 	}) {
-		const key = `${input.sessionId}:${input.turnId}`;
+		const opSpaceId = spaceId;
+		const userKey = getCacheUserKey();
+		const isCurrent = () =>
+			!disposed && spaceId === opSpaceId && getCacheUserKey() === userKey;
+		const key = `${opSpaceId}:${input.sessionId}:${input.turnId}`;
 		const inFlight = turnHydrationInFlight.get(key);
 		if (inFlight) return inFlight;
 		const run = sdk
-			.space(spaceId)
+			.space(opSpaceId)
 			.session(input.sessionId)
 			.turns.get(input.turnId)
 			.then(async (response) => {
+				if (!isCurrent()) return;
 				const current = sessionStateById[input.sessionId];
 				if (!current) return;
 				const snapshot = await sessionTurnsRepo.mergeTurns(
-					spaceId,
+					opSpaceId,
 					input.sessionId,
 					[response.turn],
 					{
@@ -2511,11 +2534,16 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						source: "network",
 					},
 				);
+				if (!isCurrent()) return;
+				const latest = sessionStateById[input.sessionId];
+				if (!latest) return;
 				workspace.sessionStateById = {
 					...sessionStateById,
 					[input.sessionId]: {
-						...current,
-						session: snapshot.session ?? current.session,
+						...latest,
+						session: snapshot.session
+							? mergeSessionRecord(latest.session, snapshot.session)
+							: latest.session,
 						turns: snapshot.turns,
 					},
 				};
@@ -2559,57 +2587,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const current = sessionGenerationStore.get(sessionId);
 		if (turnId && current?.turnId && current.turnId !== turnId) return;
 		completeGeneration(sessionId);
-	}
-
-	function syncSidebarGenerationFromTurn(
-		sessionId: string,
-		turn: Partial<SessionTurnRecord> | undefined,
-	) {
-		if (sessionId === activeSessionId || !turn?.id) return;
-		if (isLiveTurnStatus(turn.status)) {
-			const userMessageId =
-				turn.meta && typeof turn.meta.userMessageId === "string"
-					? turn.meta.userMessageId
-					: null;
-			sessionGenerationStore.resumePending(sessionId, {
-				spaceId,
-				turnId: turn.id,
-				anchorUserMessageId: userMessageId,
-			});
-			return;
-		}
-		if (
-			turn.status === "completed" ||
-			turn.status === "failed" ||
-			turn.status === "interrupted" ||
-			turn.status === "merged" ||
-			turn.status === "cancelled"
-		) {
-			completeGenerationForTurn(sessionId, turn.id);
-		}
-	}
-
-	function syncSidebarGenerationFromLifecycle(
-		sessionId: string,
-		payload: Record<string, unknown>,
-	) {
-		if (sessionId === activeSessionId || payload.phase !== "llm_call_started")
-			return;
-		const turnId = typeof payload.turnId === "string" ? payload.turnId : null;
-		const anchorUserMessageId =
-			typeof payload.anchorUserMessageId === "string"
-				? payload.anchorUserMessageId
-				: null;
-		sessionGenerationStore.markRuntimePhase(sessionId, {
-			phase: "llm_call_started",
-			at: typeof payload.at === "string" ? payload.at : null,
-			llmRound: typeof payload.llmRound === "number" ? payload.llmRound : null,
-			provider: typeof payload.provider === "string" ? payload.provider : null,
-			model: typeof payload.model === "string" ? payload.model : null,
-			spaceId,
-			turnId,
-			anchorUserMessageId,
-		});
 	}
 
 	async function handleForkTurn(turn: SessionTurnRecord) {
@@ -2657,7 +2634,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			return;
 		const opSpaceId = spaceId;
 		const opSessionId = activeSessionId;
-		const opTurnId = activeGenerationState?.turnId ?? null;
+		const opTurnId = hasRunningSessionTurn(activeGenerationState)
+			? (activeGenerationState?.turnId ?? null)
+			: (activeSessionState.session.activeTurn?.id ?? null);
 		composer.aborting = true;
 		clearComposerError();
 		try {
@@ -4017,7 +3996,15 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				payload.type === "session.turn.finalized"
 			) {
 				const turn = payload.payload.turn as SessionTurnRecord | undefined;
-				syncSidebarGenerationFromTurn(targetSessionId, turn);
+				const session =
+					workspace.spaceSessions.find((item) => item.id === targetSessionId) ??
+					sessionStateById[targetSessionId]?.session;
+				if (turn?.id && session) {
+					const next = mergeSessionTurnState(session, turn);
+					if (!sameData(session, next)) upsertSessionRecord(next);
+				}
+				// Personal-room projections carry lifecycle only; never overwrite content.
+				if (turn?.id && !Array.isArray(turn.userContent)) return;
 				if (turn?.id && Array.isArray(turn.userContent)) {
 					void sessionTurnsRepo
 						.mergeTurns(spaceId, targetSessionId, [turn], {
@@ -4031,8 +4018,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 							),
 						);
 				}
-			} else if (payload.type === "session.turn.lifecycle") {
-				syncSidebarGenerationFromLifecycle(targetSessionId, payload.payload);
 			}
 			if (payload.type === "session.request.accepted") {
 				clearPostSendRecovery(targetSessionId);

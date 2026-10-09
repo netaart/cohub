@@ -49,10 +49,6 @@ export type LiveListSource<F, T, E> = {
 	read(filter: F): Promise<LivePage<T, E> | null>;
 	write(filter: F, snapshot: LivePage<T, E>): Promise<void>;
 	covered?(filter: F): boolean;
-	onRows?(
-		items: T[],
-		origin: { authoritative: boolean; startedAt?: number },
-	): void;
 };
 
 type Entry<F, T, E> = {
@@ -204,7 +200,6 @@ export class LiveList<F, T, E> {
 		const generation = this.#generation;
 		const epoch = syncStatus.epoch;
 		const covered = this.#source.covered?.(filter) ?? true;
-		const startedAt = Date.now();
 		this.#cancelStaleSync(key);
 		const flight: Flight<F, T, E> = {
 			promise: Promise.resolve(),
@@ -245,7 +240,6 @@ export class LiveList<F, T, E> {
 					next.extra !== current.extra ||
 					next.hasMore !== current.hasMore;
 				this.#set(key, next, { persist: changed, fresh: true });
-				this.#source.onRows?.(page.items, { authoritative: true, startedAt });
 			})
 			.catch((error: unknown) => {
 				if (generation !== this.#generation) return;
@@ -268,7 +262,6 @@ export class LiveList<F, T, E> {
 		const entry = this.#entries.get(key);
 		if (!entry || entry.loadingMore || !entry.hasMore || !entry.cursor) return;
 		const generation = this.#generation;
-		const startedAt = Date.now();
 		this.#set(key, { ...entry, loadingMore: true });
 		try {
 			const page = await this.#source.fetch(filter, entry.cursor);
@@ -283,7 +276,6 @@ export class LiveList<F, T, E> {
 				paged: true,
 				loadingMore: false,
 			});
-			this.#source.onRows?.(page.items, { authoritative: true, startedAt });
 		} catch (error) {
 			console.warn(`[${this.#source.name}] load more failed`, error);
 			const current = this.#entries.get(key);
@@ -419,7 +411,6 @@ export class LiveList<F, T, E> {
 					}
 				: entry,
 		);
-		if (cached) this.#source.onRows?.(cached.items, { authoritative: false });
 		this.#evict();
 	}
 
