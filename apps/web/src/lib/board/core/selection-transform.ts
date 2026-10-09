@@ -1,6 +1,6 @@
 import type {
 	BoardFrame,
-	BoardItem,
+	BoardSceneItem as BoardItem,
 	Rect,
 	ResizeHandle,
 	ShapeResizeMode,
@@ -48,16 +48,11 @@ export function resizeCursorForHandle(
 }
 
 export type BoardSelectionTransform = {
-	/** Oriented for one node; axis-aligned for a group. */
 	frame: BoardFrame;
 	resizeMode: ShapeResizeMode;
 	canRotate: boolean;
 };
 
-/**
- * Resolve transform chrome for a selection. Group controls use a strict
- * capability intersection so a gesture can never mutate only part of a group.
- */
 export function resolveSelectionTransform(
 	items: BoardItem[],
 	bounds: Rect | null,

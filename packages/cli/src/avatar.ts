@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
-import sharp from "sharp";
 import type { CohubHttpClient, PublicAssetPurpose } from "@neta-art/cohub";
+
+const loadSharp = async () => (await import("sharp")).default;
 
 const AVATAR_SIZE = 1024;
 const AVATAR_QUALITY = 86;
@@ -34,6 +35,7 @@ export async function normalizeAvatarFile(path: string): Promise<PreparedAvatar>
   if (originalFormat.mimeType === "image/gif") return { body: original, ...originalFormat };
 
   try {
+    const sharp = await loadSharp();
     const body = await sharp(original)
       .rotate()
       .resize(AVATAR_SIZE, AVATAR_SIZE, { fit: "cover", position: "centre" })
@@ -65,6 +67,7 @@ const CHAT_IMAGE_MAX_EDGE = 1984;
 const CHAT_IMAGE_QUALITY = 86;
 
 export async function normalizeChatImageFile(path: string): Promise<Buffer> {
+  const sharp = await loadSharp();
   return sharp(path)
     .rotate()
     .resize(CHAT_IMAGE_MAX_EDGE, CHAT_IMAGE_MAX_EDGE, { fit: "inside", withoutEnlargement: true })

@@ -325,9 +325,9 @@ const boardHint = $derived(
 						<div class="min-w-0 py-2.5 sm:py-3">
 							<div class="flex min-w-0 items-center gap-2">
 								{#if isSpaceRow(row)}
-									<SpaceAvatar name={row.spaceName} profile={row.spaceProfile} size="sm" />
+									<SpaceAvatar name={row.spaceName} profile={row.spaceProfile} seed={row.spaceId} size="sm" />
 								{:else if isUserRow(row) && userProfile}
-									<UserAvatar name={userProfile.displayName} avatarUrl={userProfile.avatarUrl} size="sm" />
+									<UserAvatar name={userProfile.displayName} avatarUrl={userProfile.avatarUrl} seed={userProfile.userUuid} size="sm" />
 								{/if}
 								{#if spaceHref}
 									<a
@@ -346,7 +346,7 @@ const boardHint = $derived(
 							{#if isSpaceRow(row) && userProfile}
 								<div class="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-text-tertiary sm:mt-0.5 sm:text-[11px]">
 									<span>by</span>
-									<UserAvatar name={userProfile.displayName} avatarUrl={userProfile.avatarUrl} size="xxs" class="border-0" />
+									<UserAvatar name={userProfile.displayName} avatarUrl={userProfile.avatarUrl} seed={userProfile.userUuid} size="xxs" class="border-0" />
 									<span class="min-w-0 truncate">{userProfile.displayName}</span>
 								</div>
 							{/if}

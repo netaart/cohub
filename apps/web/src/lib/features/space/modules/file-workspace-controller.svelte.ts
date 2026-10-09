@@ -87,7 +87,8 @@ type FileWorkspaceControllerOptions = {
 	onOpenInlineFile: (path: string) => Promise<void>;
 	onOpenInlineBoard: (path: string) => Promise<void>;
 	onCloseInlineBoard: () => void;
-	onRenameInlineBoard?: (fromPath: string, toPath: string) => void;
+	/** A path moved; windows other than inline files follow it. */
+	onRenamePath?: (fromPath: string, toPath: string) => void;
 	onOpenInlinePort: (
 		port: string,
 		url: string,
@@ -853,6 +854,17 @@ export function createFileWorkspaceController(
 		return loadFileTree(true);
 	}
 
+	async function revealPath(path: string) {
+		const segments = path.split("/").filter(Boolean);
+		let dirPath = "";
+		for (const segment of segments.slice(0, -1)) {
+			dirPath = dirPath ? `${dirPath}/${segment}` : segment;
+			const node = findFsNode(dirPath);
+			if (node?.type !== "dir") return;
+			if (!node.isOpen) await expandDirectory(node);
+		}
+	}
+
 	/** Open a file in the unified preview surface (Files column). */
 	async function openSpaceFile(path: string) {
 		if (
@@ -1500,12 +1512,8 @@ export function createFileWorkspaceController(
 		const fileName = ensureBoardExtension(name);
 		const path = parentPath ? `${parentPath}/${fileName}` : fileName;
 		try {
-			await sdk.space(options.getSpaceId()).boards.create({
-				path,
-				title: fileName,
-				mutationId: crypto.randomUUID(),
-				items: [],
-			});
+			// The title follows the file name; the server derives it from the path.
+			await sdk.space(options.getSpaceId()).boards.create({ path, mutationId: crypto.randomUUID() });
 			await patchFsDirectory(parentPath, (entries) => [
 				...entries,
 				buildFsEntry(path, "file"),
@@ -1581,7 +1589,7 @@ export function createFileWorkspaceController(
 		}
 
 		renameOpenPaths(fromPath, toPath);
-		options.onRenameInlineBoard?.(fromPath, toPath);
+		options.onRenamePath?.(fromPath, toPath);
 	}
 
 	async function moveNodeToPath(node: SpaceFsNode, toPath: string) {
@@ -1994,6 +2002,7 @@ export function createFileWorkspaceController(
 		expandDirectory,
 		refreshFileTree,
 		openSpaceFile,
+		revealPath,
 		openInlineFile,
 		closeInlineFile,
 		activateInlineFile: (path: string) => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { GATEWAY_ATTACHMENT_MAX_BYTES } from "@cohub/protocol/gateway";
+import { UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 import { createAesEcbDecryptStream, createAesEcbEncryptStream } from "../providers/wechat/media/crypto.js";
 import {
   base64ToTempMediaFile,
@@ -11,8 +11,8 @@ import {
   transformTempMediaFile,
 } from "./temp-media-file.js";
 
-test("gateway attachments are capped at 500 MiB", () => {
-  assert.equal(GATEWAY_ATTACHMENT_MAX_BYTES, 500 * 1024 * 1024);
+test("gateway attachments share the durable upload single-file cap", () => {
+  assert.equal(UPLOAD_MAX_FILE_BYTES, 1024 * 1024 * 1024);
 });
 
 test("MIME-wrapped base64 is decoded across chunk boundaries and cleaned up", async () => {

@@ -42,7 +42,7 @@ export async function executeRemoteHarnessTurn(input: {
   leaseSignal?: AbortSignal;
 }): Promise<void> {
   input.abortSignal.throwIfAborted();
-  if (!input.recovery && input.harness === "pi" && input.accessMode === "read_only") throw new Error("Pi cannot enforce read-only access / Pi 无法保证只读权限");
+  if (!input.recovery && input.harness === "pi" && input.accessMode === "read_only") throw new Error("Pi cannot enforce read-only access");
   const [sandbox, registrationRaw] = await Promise.all([input.recovery ? Promise.resolve(null) : getSpaceSandbox({ spaceId: input.spaceId }), redis.get(runtimeRegistrationKey(input.spaceId))]);
   if ((!input.recovery && sandbox?.sandbox?.provider !== "local") || !registrationRaw) throw new Error("Local Runtime is offline");
   const registration = parseRuntimeRegistration(registrationRaw);
@@ -58,7 +58,7 @@ export async function executeRemoteHarnessTurn(input: {
   const users = buildUserMessagesForBatch(input.batch);
   const user = users.at(-1);
   const first = users[0];
-  if (!user || !first || user.turnId !== input.batch.ownerTurn.id) throw new Error("Invalid Runtime batch / Runtime 批次无效");
+  if (!user || !first || user.turnId !== input.batch.ownerTurn.id) throw new Error("Invalid Runtime batch");
   const userMessageId = user.userMessageId;
   const beforeSequence = first.turnSeq;
   const traceIdentifiers = getActiveTraceIdentifiers(input.requestId?.trim() || user.turnId);

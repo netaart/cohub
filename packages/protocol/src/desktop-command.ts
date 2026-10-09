@@ -32,6 +32,9 @@ export const DESKTOP_COMMAND_ID_MAX_LENGTH = 64;
 export const DESKTOP_COMMAND_ERROR_CODE_MAX_LENGTH = NAVIGATION_ERROR_CODE_MAX_LENGTH;
 export const DESKTOP_COMMAND_ERROR_MESSAGE_MAX_LENGTH = NAVIGATION_ERROR_MESSAGE_MAX_LENGTH;
 
+/** A command nobody accepts within this window settles as `no_active_client`. */
+export const DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS = 10_000;
+export const DESKTOP_COMMAND_OPEN_TIMEOUT_MS = 30_000;
 export const DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 export const DESKTOP_COMMAND_MAX_TIMEOUT_MS = 12 * 60 * 60 * 1_000;
 export const DESKTOP_COMMAND_SETTLEMENT_GRACE_SECONDS = 10 * 60;
@@ -125,8 +128,25 @@ export type DesktopCommandRecord = {
   result?: unknown;
   error?: DesktopCommandError | null;
   createdAt: string;
+  acceptedAt?: string | null;
   settledAt?: string | null;
 };
+
+export const DESKTOP_UNREACHABLE_ERROR: DesktopCommandError = {
+  code: "no_active_client",
+  message: "The Cohub desktop that started this chat did not respond. It may be closed, asleep, or offline.",
+};
+
+export const defaultDesktopCommandTimeoutMs = (command: DesktopCommand): number =>
+  command.call ? DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS : DESKTOP_COMMAND_OPEN_TIMEOUT_MS;
+
+export const isDesktopCommandAcceptOverdue = (
+  record: DesktopCommandRecord,
+  now = Date.now(),
+): boolean =>
+  record.status === "pending" &&
+  !record.acceptedAt &&
+  Date.parse(record.createdAt) + DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS <= now;
 
 export type DesktopCommandDispatchedPayload = {
   commandId: string;

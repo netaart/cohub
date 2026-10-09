@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { BoardDocument, BoardItem } from "@neta-art/cohub/board";
+import { type BoardDocument, buildBoardScene } from "@neta-art/cohub/board";
 import {
 	BOARD_EXPORT_MAX_EDGE,
 	type BoardExportRegion,
@@ -31,7 +31,6 @@ const {
 	document: BoardDocument;
 	bridge: BoardStageExportBridge | null;
 	title: string | null;
-	/** Currently selected ids; enables the Selection scope. */
 	selection: string[];
 } = $props();
 
@@ -56,15 +55,12 @@ let copied = $state(false);
 let failure = $state<string | null>(null);
 let warnings = $state<string[]>([]);
 
-/** Frames make good page-sized exports, so they get their own scope. */
+const scene = $derived(open ? buildBoardScene(boardDocument) : null);
 const frames = $derived(
-	boardDocument.items.filter(
-		(item): item is BoardItem & { type: "frame" } => item.type === "frame",
-	),
+	scene ? scene.items.filter((item) => item.type === "frame").map((item) => ({ id: item.id, label: (item.props as { label: string }).label })) : [],
 );
 const hasSelection = $derived(selection.length > 0);
 
-// Reset per-open so a previous run's error or "Copied" state is never stale.
 $effect(() => {
 	if (!open) return;
 	failure = null;
@@ -82,10 +78,7 @@ const region = $derived.by<BoardExportRegion>(() => {
 	return { kind: "all" };
 });
 
-/** Live size preview, so the scale choice is never a guess. */
-const plan = $derived.by(() =>
-	planBoardExport({ document: boardDocument, region, scale }),
-);
+const plan = $derived.by(() => (scene ? planBoardExport({ scene, region, scale }) : null));
 const sizeLabel = $derived(
 	plan
 		? `${plan.width} × ${plan.height} px`
@@ -93,7 +86,6 @@ const sizeLabel = $derived(
 );
 const clamped = $derived(Boolean(plan?.clamped));
 
-// JPEG has no alpha, so a transparent request would silently produce black.
 const transparencySupported = $derived(format !== "jpeg");
 
 async function run(mode: "download" | "copy") {
@@ -103,7 +95,6 @@ async function run(mode: "download" | "copy") {
 	warnings = [];
 	copied = false;
 	try {
-		// Clipboard images are only reliably accepted as PNG.
 		const outputFormat: BoardImageFormat = mode === "copy" ? "png" : format;
 		const result = await exportBoardImage(bridge, boardDocument, {
 			region,

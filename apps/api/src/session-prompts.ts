@@ -1,6 +1,7 @@
 import type {
   ChannelPromptContext,
   PromptAccessMode,
+  PromptHarness,
   PromptSource,
   PromptTemplateUsageMeta,
   PublicApiPromptContext,
@@ -39,6 +40,8 @@ export const expandPromptContent = async (input: {
   userId: string;
   spaceId: string;
   sessionId?: string | null;
+  harness?: PromptHarness | null;
+  sandboxSemantics?: boolean;
 }) => getSessionDomainServices().expandPromptContent(input);
 
 export const submitSessionPrompt = async (

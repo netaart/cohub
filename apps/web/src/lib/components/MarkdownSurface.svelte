@@ -468,6 +468,19 @@ onMount(() => {
 		return event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
 	}
 
+	/**
+	 * A failed CDN variant (see `data-original-src`) falls back to the original,
+	 * once: `img.src` is normalized, so comparing URLs could loop on a 404.
+	 */
+	function onImageError(e: Event) {
+		const img = e.target;
+		if (!(img instanceof HTMLImageElement)) return;
+		const original = img.dataset.originalSrc;
+		if (!original || img.dataset.fallback) return;
+		img.dataset.fallback = "original";
+		img.src = original;
+	}
+
 	function onClick(e: Event) {
 		const target = e.target as HTMLElement;
 		const askOption = getAskOption(e.target);
@@ -543,7 +556,8 @@ onMount(() => {
 			e.stopPropagation();
 			const img = target as HTMLImageElement;
 			mediaLightbox.show({
-				src: img.src,
+				// Rendered images may be CDN variants; view and download the original.
+				src: img.dataset.originalSrc ?? img.src,
 				type: "image" as const,
 				alt: img.alt,
 			});
@@ -566,6 +580,8 @@ onMount(() => {
 
 	el.addEventListener("pointerdown", onPointerDown);
 	el.addEventListener("click", onClick);
+	// Image `error` does not bubble; capture it to fall back from CDN variants.
+	el.addEventListener("error", onImageError, true);
 	themeObserver = new MutationObserver(() => resetMermaidDiagrams());
 	themeObserver.observe(document.documentElement, {
 		attributeFilter: ["data-theme"],
@@ -574,6 +590,7 @@ onMount(() => {
 	return () => {
 		el.removeEventListener("pointerdown", onPointerDown);
 		el.removeEventListener("click", onClick);
+		el.removeEventListener("error", onImageError, true);
 		themeObserver?.disconnect();
 		themeObserver = null;
 	};

@@ -1,8 +1,9 @@
 <script lang="ts">
-import type { BoardTransactionsPage } from "@neta-art/cohub";
+import type { BoardHistoryPage } from "@neta-art/cohub";
 import {
 	type BoardDocument,
 	type BoardReplayPlayer,
+	type BoardViewport,
 	visibleWorldRect,
 } from "@neta-art/cohub/board";
 import { onDestroy, onMount, untrack } from "svelte";
@@ -13,6 +14,7 @@ import { createBoardAwarenessController } from "$lib/board/board-awareness";
 import {
 	BOARD_REPLAY_PAGE_SIZE,
 	BOARD_REPLAY_STEP_MS,
+	type BoardReplayDocumentFetch,
 	type BoardReplayFetch,
 	type BoardReplaySpeed,
 	loadBoardReplay,
@@ -20,54 +22,39 @@ import {
 	replayPreviousVersion,
 } from "$lib/board/board-replay";
 import { createBoardEditor } from "$lib/board/editor.svelte";
-import type { BoardRuntimeData } from "$lib/board/runtime/board-runtime";
 import BoardReplayTimeline from "$lib/components/board/BoardReplayTimeline.svelte";
 import BoardStage from "$lib/components/board/BoardStage.svelte";
 import BoardZoomMenu from "$lib/components/board/BoardZoomMenu.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
-/**
- * Replays a Board's edit history on a private, view-only stage.
- *
- * The live editor is untouched: replay owns its own `createBoardEditor` in
- * readonly mode, so no gesture here can ever reach the commit queue, and the
- * user's real selection, tool and undo stack survive the visit. Each step feeds
- * the projected document through `loadDocument` with the same key, which is the
- * editor's "remote refresh" path — so newly created items get the same entrance
- * motion a collaborator's edit would.
- */
 
 const {
 	boardId,
 	path,
 	spaceId,
-	runtime,
 	assets,
 	assetSource,
 	initialDocument,
 	initialCamera,
 	profiles,
 	isMobile = false,
-	fetchTransactions,
+	fetchHistory,
+	fetchDocument,
 	liveVersion,
 	onClose,
 }: {
 	boardId: string;
 	path: string;
 	spaceId: string;
-	runtime: BoardRuntimeData;
-	/** Shared with the live stage; replay must never destroy it. */
 	assets: BoardAssetManager;
 	assetSource: BoardAssetSource;
-	/** The live document, shown until the log arrives so the canvas never blanks. */
 	initialDocument: BoardDocument;
-	/** Start from the live camera so opening replay is not a jump. */
-	initialCamera: BoardDocument["viewport"];
+	initialCamera: BoardViewport;
 	profiles: Map<string, BoardCollaboratorProfile>;
 	isMobile?: boolean;
-	fetchTransactions: BoardReplayFetch;
-	/** Newest version seen over realtime; a bump past the head appends the tail. */
+	fetchHistory: BoardReplayFetch;
+	fetchDocument: BoardReplayDocumentFetch;
 	liveVersion: number;
 	onClose: () => void;
 } = $props();
@@ -84,20 +71,18 @@ let speed = $state<BoardReplaySpeed>(4);
 let follow = $state(true);
 let surfaceSize = $state({ width: 0, height: 0 });
 let timer: ReturnType<typeof setTimeout> | null = null;
-/** Bumped on prepend/append so derived lists re-read the player's arrays. */
 let revision = $state(0);
 
-// Replay never publishes presence; peers are not shown either.
 const awareness = createBoardAwarenessController({
 	send: async () => {},
 	onChange: () => {},
 });
 
-/** Same key on every load: each step is a "remote refresh", never a document switch. */
 const replayKey = `${untrack(() => path)}#replay`;
 
 const editor = createBoardEditor({
-	document: untrack(() => ({ ...initialDocument, viewport: initialCamera })),
+	document: untrack(() => initialDocument),
+	viewport: untrack(() => initialCamera),
 	initialTool: "hand",
 	key: replayKey,
 	readonly: true,
@@ -126,8 +111,6 @@ function show(target: number, animateCamera: boolean) {
 	if (!follow || !animateCamera) return;
 	const changed = player.changedItemIds(reached);
 	if (changed.length === 0) return;
-	// Only pan when the change is off-screen: constant re-framing on every
-	// nudge would be nauseating.
 	if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return;
 	const visible = visibleWorldRect(
 		editor.camera,
@@ -172,7 +155,6 @@ function tick() {
 
 function play() {
 	if (!player || playing) return;
-	// Play from the end restarts the story.
 	if (version >= head) show(floor, false);
 	playing = true;
 	scheduleTick();
@@ -213,7 +195,7 @@ async function loadOlder() {
 	if (!player || nextBefore === null || olderState === "loading") return;
 	olderState = "loading";
 	try {
-		const page = await fetchTransactions({
+		const page = await fetchHistory({
 			before: nextBefore,
 			limit: BOARD_REPLAY_PAGE_SIZE,
 		});
@@ -222,17 +204,10 @@ async function loadOlder() {
 		revision += 1;
 		olderState = "idle";
 	} catch {
-		// The link turns into a retry; the floor stays where it is.
 		olderState = "failed";
 	}
 }
 
-/**
- * Extend the tail to the live version. Single-flight: bursts of realtime events
- * collapse into one walk. A version that arrives mid-walk (on success or
- * failure) triggers exactly one more walk; without a new event nothing retries,
- * so a dead network never spins.
- */
 let appending = false;
 let disposed = false;
 async function appendLatest() {
@@ -240,16 +215,12 @@ async function appendLatest() {
 	appending = true;
 	const seen = liveVersion;
 	try {
-		// Walk newest → older until a page connects to our head, holding the
-		// pages seen on the way, then append them oldest → newest in one pass.
-		// Snapshot rows are skipped: only forward payloads extend the timeline.
-		const pages: BoardTransactionsPage[] = [];
+		const pages: BoardHistoryPage[] = [];
 		let before: number | undefined;
 		for (;;) {
-			const page = await fetchTransactions({
+			const page = await fetchHistory({
 				...(before !== undefined ? { before } : {}),
 				limit: BOARD_REPLAY_PAGE_SIZE,
-				snapshot: false,
 			});
 			if (disposed) return;
 			pages.push(page);
@@ -259,7 +230,6 @@ async function appendLatest() {
 		for (const page of pages.reverse()) player.append(page);
 		revision += 1;
 	} catch {
-		// Leave the tail where it is; a newer realtime version retries below.
 	} finally {
 		appending = false;
 	}
@@ -280,8 +250,6 @@ function handleKeydown(event: KeyboardEvent) {
 		event.preventDefault();
 		onClose();
 	} else if (event.key === " ") {
-		// A focused control keeps its native Space activation; only the stage
-		// itself treats Space as play/pause. Transport keys below work anywhere.
 		if (target?.closest("button, a, select, [role='slider']")) return;
 		event.preventDefault();
 		togglePlay();
@@ -302,14 +270,12 @@ function handleKeydown(event: KeyboardEvent) {
 
 onMount(() => {
 	let cancelled = false;
-	loadBoardReplay(fetchTransactions)
+	loadBoardReplay(fetchHistory, fetchDocument)
 		.then((loaded) => {
 			if (cancelled) return;
 			player = loaded.player;
 			nextBefore = loaded.nextBefore;
 			revision += 1;
-			// Rewind to the beginning and start playing immediately; the live
-			// document stayed on screen until this point.
 			show(loaded.player.floor, false);
 			play();
 		})
@@ -345,7 +311,6 @@ onDestroy(() => {
 <div class="board-replay" data-drawer-swipe-ignore>
 	<BoardStage
 		{editor}
-		{runtime}
 		{assets}
 		{spaceId}
 		{assetSource}

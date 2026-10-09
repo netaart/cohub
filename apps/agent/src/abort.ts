@@ -2,10 +2,9 @@ import { Redis } from "ioredis";
 import { env } from "./env.js";
 import { redis } from "./redis.js";
 import { createLogger } from "@cohub/infra/logging";
-
+import { AGENT_TURN_ABORT_CHANNEL } from "@cohub/protocol";
 
 const logger = createLogger({ serviceName: "cohub-agent" });
-export const AGENT_TURN_ABORT_CHANNEL = "pubsub:agent:turn_abort";
 export const getAgentTurnAbortKey = (turnId: string) => `agent:turn:${turnId}:abort`;
 
 export type AgentTurnAbortEvent = {

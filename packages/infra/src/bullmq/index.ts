@@ -29,7 +29,7 @@ export const queueDefinitions = [
     criticality: "critical",
     concurrencyEnv: "AGENT_WORKER_CONCURRENCY",
     defaultConcurrencyPerWorker: DEFAULT_AGENT_WORKER_CONCURRENCY,
-    registeredJobs: ["agent_turns", "agent_session_fork", "sandbox_bash", "sandbox_bash_atomic", "run_command", "sandbox_fs_mutation"],
+    registeredJobs: ["agent_turns", "agent_session_fork", "sandbox_bash", "sandbox_bash_atomic", "run_command", "sandbox_fs_mutation", "sandbox_fs_install"],
   },
   {
     name: COHUB_SYSTEM_QUEUE,
@@ -37,7 +37,7 @@ export const queueDefinitions = [
     criticality: "normal",
     concurrencyEnv: "SYSTEM_WORKER_CONCURRENCY",
     defaultConcurrencyPerWorker: DEFAULT_SYSTEM_WORKER_CONCURRENCY,
-    registeredJobs: ["workspace.usage.scan", "workspace.usage.dispatch", "cdn_cache.warm_file", "sandbox.idle_check", "sandbox.idle_reaper", "work.publish_asset", "work.view_stats.flush", "references.index", "session.message.postprocess", "session.title.generate", "space_hook.dispatch"],
+    registeredJobs: ["cdn_cache.warm_file", "sandbox.idle_check", "sandbox.idle_reaper", "work.publish_asset", "work.view_stats.flush", "references.index", "session.message.postprocess", "session.title.generate", "space_hook.dispatch", "space_fs.copy", "workspace.usage.scan", "workspace.usage.dispatch"],
   },
 ] as const;
 

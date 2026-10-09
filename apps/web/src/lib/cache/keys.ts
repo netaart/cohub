@@ -17,6 +17,11 @@ export function getCacheUserKey() {
 			? authStore.claims.sub.trim()
 			: "";
 	if (subject) return `sub:${subject}`;
+	// A hosted surface never reads ID token claims, so the host-reported subject
+	// stands in for them here. Without this an authenticated native session would
+	// silently fall back to the shared `guest` partition.
+	const hostSubject = authStore.hostSubjectKey;
+	if (hostSubject) return hostSubject;
 	return "guest";
 }
 
@@ -50,9 +55,10 @@ export function sessionListKey(userKey: string, spaceId: string) {
 	return [userKey, spaceId, "recent"].map(encodeKeyPart).join(":");
 }
 
-/** User-level cross-space session list cache key. */
-export function userSessionListKey(userKey: string) {
-	return [userKey, "user", "sessions", "recent"].map(encodeKeyPart).join(":");
+export function userSessionListKey(userKey: string, scope: string) {
+	return [userKey, "user", "sessions", "chats", scope]
+		.map(encodeKeyPart)
+		.join(":");
 }
 
 export function sessionListIndexKey(userKey: string, spaceId: string) {
@@ -117,6 +123,14 @@ export function taskRunKey(
 	taskRunId: string,
 ) {
 	return [userKey, spaceId, taskRunId].map(encodeKeyPart).join(":");
+}
+
+export function sessionFilesKey(
+	userKey: string,
+	spaceId: string,
+	sessionId: string,
+) {
+	return [userKey, spaceId, sessionId, "files"].map(encodeKeyPart).join(":");
 }
 
 export function sessionTurnsKey(

@@ -6,6 +6,7 @@ import type {
 } from "@neta-art/cohub";
 import {
 	Check,
+	Gauge,
 	Globe,
 	ListTree,
 	Loader2,
@@ -19,7 +20,9 @@ import {
 } from "lucide-svelte";
 import { floatNear } from "$lib/actions/portal";
 import ColumnHeader from "$lib/components/ColumnHeader.svelte";
+import SessionStatsDetails from "$lib/components/SessionStatsDetails.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import StatsPopover from "$lib/components/StatsPopover.svelte";
 import { getSessionTitle } from "$lib/features/session-chat";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -85,6 +88,7 @@ export type SpaceWorkspaceHeaderActions = {
 	labelHeaderResource: (anchorEl?: HTMLElement | null) => void | Promise<void>;
 	insertHeaderReference: () => void;
 	toggleRightSidebar: () => void | Promise<void>;
+	openDisplay: (displayId: string) => void;
 };
 
 type Props = {
@@ -99,6 +103,12 @@ let { context, sessionRename, resourceActions, actions }: Props = $props();
 const locale = $derived(getLocale());
 let sessionRenameInputEl: HTMLInputElement | null = $state(null);
 let resourceActionsRootEl: HTMLElement | null = $state(null);
+let statsOpen = $state(false);
+const statsSessionId = $derived(context.activeSessionId);
+$effect(() => {
+	statsSessionId;
+	statsOpen = false;
+});
 let sessionRenameFocused = $state(false);
 
 const spaceTitle = $derived(
@@ -161,11 +171,18 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 </script>
 
 {#snippet HeaderActions()}
-	<SpaceRuntimeStatus spaceId={context.spaceId} canManage={context.space?.access?.permissions.includes("sandbox.manage") === true} />
+	<SpaceRuntimeStatus
+		spaceId={context.spaceId}
+		canManage={context.space?.access?.permissions.includes("sandbox.manage") === true}
+		canView={context.space?.access?.permissions.includes("sandbox.view") === true}
+		canControl={context.space?.access?.permissions.includes("command.execute") === true}
+		people={context.onlineUsers}
+		onOpenDisplay={actions.openDisplay}
+	/>
 	{#if context.activeSessionId && context.canManageSessionAccess}
 		<button
 			type="button"
-			class="header-action-btn {context.isActiveSessionPublic ? 'is-shared' : ''}"
+			class="header-action {context.isActiveSessionPublic ? 'is-shared' : ''}"
 			onclick={() => actions.openShareModal(context.activeSessionId!)}
 			title={context.isActiveSessionPublic ? "Session is public" : "Share session"}
 		>
@@ -183,7 +200,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 		<div class="relative" data-resource-actions>
 			<button
 				type="button"
-				class="header-action-btn is-square"
+				class="header-action"
 				onclick={(event) => {
 					event.stopPropagation();
 					resourceActionsRootEl = event.currentTarget;
@@ -218,8 +235,14 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 						role="menuitem"
 					>
 						<ListTree class="h-3.5 w-3.5" />
-						<span>Label as…</span>
+						<span>{m.inline_label_as({}, { locale })}</span>
 					</button>
+					{#if context.routeView === "session" && context.activeSession}
+						<button type="button" class="menu-item" role="menuitem" onclick={() => { actions.closeResourceActionMenu(); statsOpen = true; }}>
+							<Gauge class="h-3.5 w-3.5" />
+							<span>{m.stats_menu({}, { locale })}</span>
+						</button>
+					{/if}
 					<button type="button" class="menu-item" onclick={actions.insertHeaderReference} role="menuitem">
 						<TextCursorInput class="h-3.5 w-3.5" />
 						<span>{m.space_header_insert_reference({}, { locale })}</span>
@@ -229,13 +252,19 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 		</div>
 	{/if}
 
+	{#if context.activeSession && statsOpen}
+		<StatsPopover title={m.stats_session({}, { locale })} bind:open={statsOpen} anchor={resourceActionsRootEl}>
+			{#key context.activeSession.id}<SessionStatsDetails session={context.activeSession} />{/key}
+		</StatsPopover>
+	{/if}
+
 	{#if context.rightSidebarAvailable}
 		<button
 			type="button"
-			class="header-action-btn"
+			class="header-action"
 			onclick={() => runAction(actions.toggleRightSidebar)}
-			title={context.rightSidebarCollapsed ? "Show files (Ctrl+Alt+→ / ⌃⌥→)" : "Hide files (Ctrl+Alt+→ / ⌃⌥→)"}
-			aria-label={context.rightSidebarCollapsed ? "Show files" : "Hide files"}
+			title={`${context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })} (Ctrl+Alt+→ / ⌃⌥→)`}
+			aria-label={context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })}
 		>
 			{#if context.rightSidebarCollapsed}
 				<PanelRightOpen class="h-4 w-4 shrink-0" />
@@ -264,7 +293,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 						title={spaceTitle}
 						aria-label={m.space_header_open_space({}, { locale })}
 					>
-						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} size="xs" />
+						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} seed={context.spaceId} size="xs" />
 					</button>
 					<div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
 						{#if sessionRename.renaming && context.activeSession}
@@ -306,12 +335,12 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 					</div>
 				{:else if routeHeaderTitle}
 					<button type="button" class="inline-flex shrink-0 items-center text-text-primary transition-colors hover:text-text-secondary lg:hidden" title={spaceTitle} aria-label={m.space_header_open_space({}, { locale })}>
-						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} size="xs" />
+						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} seed={context.spaceId} size="xs" />
 					</button>
 					<span class="min-w-0 truncate text-[13px] text-text-secondary">{routeHeaderTitle}</span>
 				{:else}
 					<button type="button" class="inline-flex min-w-0 items-center gap-1.5 truncate text-left text-[13px] text-text-primary transition-colors hover:text-text-secondary">
-						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} size="xs" />
+						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} seed={context.spaceId} size="xs" />
 						{spaceTitle}
 					</button>
 				{/if}
@@ -325,38 +354,11 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 	</ColumnHeader>
 
 <style>
-
-	.header-action-btn {
-		display: inline-flex;
-		height: 32px;
-		min-width: 32px;
-		align-items: center;
-		justify-content: center;
-		gap: 6px;
-		border: 0;
-		border-radius: 7px;
-		background: transparent;
-		padding: 0 8px;
-		color: var(--text-tertiary);
-		cursor: pointer;
-		transition: background-color 120ms ease, color 120ms ease;
-	}
-
-	.header-action-btn.is-square {
-		width: 32px;
-		padding: 0;
-	}
-
-	.header-action-btn:hover {
-		background: var(--bg-hover);
-		color: var(--text-secondary);
-	}
-
-	.header-action-btn.is-shared {
+	.header-action.is-shared {
 		color: var(--success-soft);
 	}
 
-	.header-action-btn.is-shared:hover {
+	.header-action.is-shared:hover {
 		background: var(--success-bg);
 		color: var(--success);
 	}

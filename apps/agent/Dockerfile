@@ -22,6 +22,9 @@ COPY packages/db/tsconfig.build.json ./packages/db/tsconfig.build.json
 COPY packages/core/package.json ./packages/core/package.json
 COPY packages/core/tsconfig.json ./packages/core/tsconfig.json
 COPY packages/core/tsconfig.build.json ./packages/core/tsconfig.build.json
+COPY packages/media/package.json ./packages/media/package.json
+COPY packages/media/tsconfig.json ./packages/media/tsconfig.json
+COPY packages/media/tsconfig.build.json ./packages/media/tsconfig.build.json
 COPY packages/model-runtime/package.json ./packages/model-runtime/package.json
 COPY packages/model-runtime/tsconfig.json ./packages/model-runtime/tsconfig.json
 COPY packages/model-runtime/tsconfig.build.json ./packages/model-runtime/tsconfig.build.json
@@ -51,6 +54,7 @@ COPY packages/billing ./packages/billing
 COPY packages/infra ./packages/infra
 COPY packages/db ./packages/db
 COPY packages/core ./packages/core
+COPY packages/media ./packages/media
 COPY packages/model-runtime ./packages/model-runtime
 COPY packages/sandbox-controller ./packages/sandbox-controller
 COPY packages/sandbox-client ./packages/sandbox-client
@@ -73,6 +77,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 
 FROM node:24-slim AS runtime
 ENV NODE_ENV=production
+ENV NODE_OPTIONS=--max-old-space-size-percentage=75
 ENV WORKSPACE_ROOT=/space-storage
 ENV SESSIONS_DIR=/sessions
 WORKDIR /app

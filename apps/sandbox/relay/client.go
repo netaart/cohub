@@ -84,10 +84,15 @@ var reconnectDelays = []time.Duration{
 // Client maintains the control connection and lets the runtime publish watcher
 // events over it. The zero value is not usable; construct with NewClient.
 type Client struct {
-	opts          Options
-	mu            sync.Mutex
-	conn          *websocket.Conn // active control connection, nil when disconnected
-	watcherStatus func() filewatch.Status
+	opts     Options
+	mu       sync.Mutex
+	conn     *websocket.Conn // active control connection, nil when disconnected
+	statuses []statusReporter
+}
+
+type statusReporter struct {
+	eventType string
+	current   func() interface{}
 }
 
 type relayConfigError struct {
@@ -158,16 +163,20 @@ func (c *Client) SetServer(server SessionServer) {
 
 // SetWatcherStatus must be called before Run.
 func (c *Client) SetWatcherStatus(status func() filewatch.Status) {
-	c.watcherStatus = status
+	c.SetStatus("watcher.status", func() interface{} { return status() })
 }
 
-func (c *Client) publishWatcherStatus() {
-	if c.watcherStatus != nil {
-		c.PublishEvent("watcher.status", c.watcherStatus())
+func (c *Client) SetStatus(eventType string, current func() interface{}) {
+	c.statuses = append(c.statuses, statusReporter{eventType: eventType, current: current})
+}
+
+func (c *Client) publishStatuses() {
+	for _, status := range c.statuses {
+		c.PublishEvent(status.eventType, status.current())
 	}
 }
 
-// PublishEvent sends a watcher event (fs.changed / ports.changed / watcher.status) over the
+// PublishEvent sends an event (fs.changed / ports.changed / watcher.status / displays) over the
 // active control connection. It is a no-op (drops the event) when the control
 // connection is down; the gateway/web recover via the watcher's resync frame
 // on reconnect. Safe for concurrent use.
@@ -317,7 +326,7 @@ func (c *Client) connectControl(ctx context.Context) error {
 		}
 		switch frame.Type {
 		case "registered":
-			c.publishWatcherStatus()
+			c.publishStatuses()
 			opts.Logger.Info("relay registered", slog.String("spaceId", opts.SpaceID))
 			if opts.OnRegistered != nil {
 				opts.OnRegistered()
@@ -338,7 +347,7 @@ func (c *Client) connectControl(ctx context.Context) error {
 				pendingToken = ""
 			}
 		case "pong":
-			c.publishWatcherStatus()
+			c.publishStatuses()
 			if opts.CurrentToken != nil && pendingToken == "" {
 				next := opts.CurrentToken()
 				if next != "" && next != opts.Token {
@@ -392,6 +401,11 @@ func openDataChannel(ctx context.Context, opts Options, channel string) {
 	cancel()
 	if err != nil {
 		attrs := []any{slog.String("channel", channel), slog.String("error", err.Error()), slog.Duration("duration", time.Since(dialStarted))}
+		// Distinguish an unreachable relay (deadline) from an explicit rejection (status);
+		// the former points at networking, the latter at authorization or pairing.
+		if errors.Is(err, context.DeadlineExceeded) {
+			attrs = append(attrs, slog.String("reason", "dial timeout"))
+		}
 		if response != nil {
 			attrs = append(attrs, slog.Int("status", response.StatusCode))
 		}

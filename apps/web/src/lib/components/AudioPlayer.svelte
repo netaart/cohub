@@ -18,6 +18,8 @@ type Props = {
 	subtitle?: string | null;
 	downloadUrl?: string | null;
 	downloadName?: string | null;
+	/** Plays once ready; switching it off pauses. */
+	autoplay?: boolean;
 };
 
 let {
@@ -26,6 +28,7 @@ let {
 	subtitle = null,
 	downloadUrl = null,
 	downloadName = null,
+	autoplay = false,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -70,24 +73,30 @@ function resetState() {
 	draftSeek = null;
 }
 
+function play(audio: HTMLAudioElement) {
+	const requestedSrc = audio.getAttribute("src");
+	void audio.play().catch((error: unknown) => {
+		// Rapid pause / source switch rejects play() with AbortError, and a
+		// blocked autoplay with NotAllowedError — neither is a media failure.
+		// Real load errors surface via the error event below.
+		if (
+			error instanceof DOMException &&
+			(error.name === "AbortError" || error.name === "NotAllowedError")
+		)
+			return;
+		// Ignore rejections from a stale request (source already switched).
+		if (audioEl !== audio || audio.getAttribute("src") !== requestedSrc) {
+			return;
+		}
+		status = "error";
+	});
+}
+
 function togglePlay() {
 	const audio = audioEl;
 	if (!audio || status !== "ready") return;
-	if (audio.paused) {
-		const requestedSrc = audio.getAttribute("src");
-		void audio.play().catch((error: unknown) => {
-			// Rapid pause / source switch rejects play() with AbortError — not a
-			// media failure. Real load errors surface via the error event below.
-			if (error instanceof DOMException && error.name === "AbortError") return;
-			// Ignore rejections from a stale request (source already switched).
-			if (audioEl !== audio || audio.getAttribute("src") !== requestedSrc) {
-				return;
-			}
-			status = "error";
-		});
-	} else {
-		audio.pause();
-	}
+	if (audio.paused) play(audio);
+	else audio.pause();
 }
 
 function applyVolume(value: number) {
@@ -165,6 +174,14 @@ $effect(() => {
 
 onDestroy(() => {
 	audioEl?.pause();
+});
+
+// Re-runs only on readiness or `autoplay` flips, so a manual pause sticks.
+$effect(() => {
+	const audio = audioEl;
+	if (!audio || status !== "ready") return;
+	if (autoplay) play(audio);
+	else audio.pause();
 });
 </script>
 

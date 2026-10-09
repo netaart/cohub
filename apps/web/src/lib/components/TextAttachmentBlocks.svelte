@@ -63,11 +63,15 @@ function openImagePreview(block: ImageBlock) {
 	const imageBlocks = attachments.filter(isImageAttachment);
 	const index = Math.max(0, imageBlocks.indexOf(block));
 	mediaLightbox.show(
-		imageBlocks.map((item, itemIndex) => ({
-			src: getImageSrc(item),
-			type: "image" as const,
-			alt: getFilename(item, itemIndex),
-		})),
+		imageBlocks.map((item, itemIndex) => {
+			const name = getFilename(item, itemIndex);
+			return {
+				src: getImageSrc(item),
+				type: "image" as const,
+				alt: name,
+				filename: name,
+			};
+		}),
 		index,
 	);
 }

@@ -5,6 +5,7 @@ import type {
 	SpaceUsageResponse,
 	UserProfile,
 } from "@neta-art/cohub";
+import { canViewSpaceCost } from "$lib/activity";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -51,6 +52,46 @@ let {
 
 const locale = $derived(getLocale());
 
+const usageText = $derived.by(() => {
+	if (!usage) return "";
+	const showCost = canViewSpaceCost(space?.access);
+	const base = {
+		days: usage.days,
+		tokens: formatTokenCount(usage.summary.totalTokens),
+		requests: usage.summary.requestCount,
+	};
+	const generation = usage.generation?.summary;
+	if (!showCost) {
+		return m.space_profile_usage_no_cost(
+			{
+				...base,
+				generation: generation?.requestCount
+					? m.space_profile_generation_no_cost(
+							{ count: generation.requestCount },
+							{ locale },
+						)
+					: "",
+			},
+			{ locale },
+		);
+	}
+	return m.space_profile_usage(
+		{
+			...base,
+			cost: formatUsageCost(usage.summary.costTotal, locale),
+			generation: generation?.requestCount
+				? m.space_profile_generation(
+						{
+							count: generation.requestCount,
+							cost: formatUsageCost(generation.costTotal, locale),
+						},
+						{ locale },
+					)
+				: "",
+		},
+		{ locale },
+	);
+});
 const spaceName = $derived(space?.name || space?.title || "Untitled space");
 const owner = $derived(space?.ownerProfile ?? null);
 const sortedMembers = $derived(
@@ -76,7 +117,7 @@ function userTitle(
 	<div bind:this={contentEl} class="space-y-5 sm:space-y-7">
 		<header class="new-chat-profile-fragment space-y-3.5 sm:space-y-4" style:animation-delay="20ms">
 			<div class="flex items-start gap-3 sm:gap-4">
-				<SpaceAvatar name={spaceName} profile={space?.publicProfile} size="lg" loading="eager" class="mt-0.5 h-10 w-10 rounded-[12px] sm:mt-1 sm:h-12 sm:w-12 sm:rounded-[14px]" />
+				<SpaceAvatar name={spaceName} profile={space?.publicProfile} seed={spaceId} size="lg" loading="eager" class="mt-0.5 h-10 w-10 rounded-[12px] sm:mt-1 sm:h-12 sm:w-12 sm:rounded-[14px]" />
 				<div class="min-w-0 flex-1 pt-0.5">
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
 						<h1 class="min-w-0 max-w-full break-words text-[23px] font-semibold leading-[1.08] tracking-[-0.035em] text-text-primary sm:text-[34px]">{spaceName}</h1>
@@ -102,11 +143,12 @@ function userTitle(
 						<UserIdentity
 							name={displayUserName(owner, space?.userUuid)}
 							avatarUrl={owner?.avatarUrl}
+							seed={space?.userUuid}
 							username={owner?.username}
 							title={userTitle(owner, space?.userUuid)}
 							size="xs"
 							class="align-middle text-text-secondary"
-							avatarClass="h-[18px] w-[18px] border-0 bg-bg-elevated sm:h-5 sm:w-5"
+							avatarClass="h-[18px] w-[18px] border-0 sm:h-5 sm:w-5"
 							nameClass="min-w-0 max-w-[9rem] truncate font-medium text-text-primary sm:max-w-none"
 						/>
 					{/if}
@@ -116,11 +158,12 @@ function userTitle(
 							<UserIdentity
 								name={displayUserName(member.profile, member.userId)}
 								avatarUrl={member.profile.avatarUrl}
+								seed={member.userId}
 								username={member.profile.username}
 								title={userTitle(member.profile, member.userId)}
 								size="xs"
 								class="align-middle text-text-secondary"
-								avatarClass="h-[18px] w-[18px] border-0 bg-bg-elevated sm:h-5 sm:w-5"
+								avatarClass="h-[18px] w-[18px] border-0 sm:h-5 sm:w-5"
 								nameClass="min-w-0 max-w-[9rem] truncate font-medium sm:max-w-none"
 							/>{#if index < sortedMembers.length - 1}<span class="inline-block w-1.5 sm:w-2" aria-hidden="true"></span>{:else}<span>. </span>{/if}
 						{/each}
@@ -128,7 +171,7 @@ function userTitle(
 				</p>
 			{/if}
 			{#if usage}
-				<p>{m.space_profile_usage({ days: usage.days, tokens: formatTokenCount(usage.summary.totalTokens), requests: usage.summary.requestCount, cost: formatUsageCost(usage.summary.costTotal, locale), generation: usage.generation?.summary.requestCount ? m.space_profile_generation({ count: usage.generation.summary.requestCount, cost: formatUsageCost(usage.generation.summary.costTotal, locale) }, { locale }) : "" }, { locale })}</p>
+				<p>{usageText}</p>
 			{/if}
 		</div>
 		{#if canExpand}

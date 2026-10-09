@@ -4,9 +4,8 @@ import {
 	createBoardToolStyles,
 } from "@neta-art/cohub/board";
 
-const STORAGE_KEY = "cohub:board:tool-styles:v1";
+const STORAGE_KEY = "cohub:board:tool-styles:v3";
 
-/** Read best-effort device preferences through the SDK's validation boundary. */
 export function readBoardToolStyles(): BoardToolStyleMap {
 	if (typeof localStorage === "undefined") return createBoardToolStyles();
 	try {
@@ -24,6 +23,5 @@ export function writeBoardToolStyles(styles: BoardToolStyleMap) {
 	try {
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(styles));
 	} catch {
-		// Preferences are best-effort and must never block Board interaction.
 	}
 }

@@ -2,12 +2,11 @@ import {
   bindModSkillsConfig,
   bindSpaceModSkillsConfig,
   createCachedSkillsConfig,
-  formatSkillExpansion,
+  createSkillLoader,
   getDirectoryRevision,
   getModSkillsRedisKey,
   getSpaceModSkillsRedisKey,
   getUserSkillsRedisKey,
-  isValidSkillName,
   loadSkillsFromDirectory,
   mergeSkillsConfigs,
   parseCachedSkillsConfig,
@@ -15,15 +14,19 @@ import {
   SKILLS_CACHE_TTL_SEC,
   toSkillCatalog,
   type CachedSkillsConfig,
-  type Skill,
-  type SkillCatalogEntry,
   type ModSkillBinding,
-  type SkillsConfig,
+  type SkillCatalogEntry,
+  type SkillLoader,
   type SkillScope,
+  type SkillScopeLoader,
+  type SkillsConfig,
 } from "@cohub/infra/config-runtime/skills";
-import { getSpaceModMountSignature, listEnabledSpaceMods } from "@cohub/core/space-mods";
-import { createLogger } from "@cohub/infra/logging";
 import { join, resolve } from "node:path";
+import { spaceSandboxes } from "@cohub/db";
+import { eq } from "drizzle-orm";
+import { getSpaceModMountSignature, listEnabledSpaceMods } from "@cohub/core/space-mods";
+import type { PromptHarness } from "@cohub/core/sessions";
+import { createLogger } from "@cohub/infra/logging";
 import { config } from "./config.js";
 import { db } from "./db/index.js";
 import { redisCommandClient } from "./redis.js";
@@ -45,6 +48,9 @@ export type ExpandedSkill = {
 export type LoadSkillsOptions = {
   userId?: string | null;
   spaceId?: string | null;
+  /** Executing Harness of the turn being expanded. Catalog listings omit it
+   * and filter by the space's sandbox provider instead. */
+  harness?: PromptHarness | null;
 };
 
 const SKILLS_DIR = ".agents/skills";
@@ -67,6 +73,12 @@ function getProjectSkillsDir(spaceId: string) {
   return resolve(config.spaceStorageRoot, spaceId, "workspace", SKILLS_DIR);
 }
 
+/**
+ * Project skills read the server-side workspace copy. For local sandboxes the
+ * authoritative workspace lives on the user's machine; the copy reflects the
+ * last checkpoint, and native Harnesses resolve locations relative to their
+ * workspace cwd.
+ */
 async function loadProjectSkills(spaceId: string): Promise<SkillsConfig> {
   const { content } = await loadSkillsFromDirectory({
     dir: getProjectSkillsDir(spaceId),
@@ -224,77 +236,52 @@ async function loadSpaceModSkills(spaceId: string): Promise<SkillsConfig | null>
   return content;
 }
 
-async function fetchSkills(options: LoadSkillsOptions): Promise<Skill[]> {
-  const platformSkills = await loadCachedSkills({
+/** A missing sandbox record is the cloud default (cloud spaces register lazily);
+ * a failed lookup is logged here and fails closed inside the loader. */
+const getSandboxProvider = async (spaceId: string): Promise<"cloud" | "local" | null> => {
+  const [row] = await db
+    .select({ provider: spaceSandboxes.provider })
+    .from(spaceSandboxes)
+    .where(eq(spaceSandboxes.spaceId, spaceId))
+    .limit(1);
+  const provider = row?.provider;
+  return provider === "local" || provider === "cloud" ? provider : null;
+};
+
+const scopeLoaders: SkillScopeLoader = {
+  platform: () => loadCachedSkills({
     redisKey: PLATFORM_SKILLS_REDIS_KEY,
     dir: getPlatformSkillsDir(),
     sandboxDir: SANDBOX_PLATFORM_SKILLS_PATH,
     scope: "platform",
     allowMissing: true,
-  });
+  }),
+  mod: loadSpaceModSkills,
+  user: (userId) => loadCachedSkills({
+    redisKey: getUserSkillsRedisKey(userId),
+    dir: getUserSkillsDir(userId),
+    sandboxDir: SANDBOX_USER_SKILLS_PATH,
+    scope: "user",
+    allowMissing: true,
+  }),
+  project: async (spaceId) => (config.spaceStorageRoot ? loadProjectSkills(spaceId) : null),
+};
 
-  const configs: Array<SkillsConfig | null> = [platformSkills];
-
-  if (options.spaceId) {
-    configs.push(await loadSpaceModSkills(options.spaceId));
-  }
-
-  if (options.userId) {
-    configs.push(await loadCachedSkills({
-      redisKey: getUserSkillsRedisKey(options.userId),
-      dir: getUserSkillsDir(options.userId),
-      sandboxDir: SANDBOX_USER_SKILLS_PATH,
-      scope: "user",
-      allowMissing: true,
-    }));
-  }
-
-  if (options.spaceId && config.spaceStorageRoot) {
-    configs.push(await loadProjectSkills(options.spaceId));
-  }
-
-  return mergeSkillsConfigs(...configs).skills;
-}
+const skillLoader: SkillLoader = createSkillLoader({
+  scopes: scopeLoaders,
+  getSandboxProvider: (spaceId) => getSandboxProvider(spaceId).catch((error) => {
+    logger.warn("[skills] failed to resolve sandbox provider; failing closed to workspace skills", {
+      spaceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }),
+});
 
 export async function listSkills(options: LoadSkillsOptions = {}): Promise<SkillCatalogEntry[]> {
-  return toSkillCatalog(await fetchSkills(options));
+  return toSkillCatalog(await skillLoader.fetch(options));
 }
 
 export async function expandSkillCommand(text: string, options: LoadSkillsOptions = {}): Promise<ExpandedSkill | null> {
-  const trimmed = text.trimStart();
-  if (!trimmed.startsWith("/skill:")) return null;
-
-  const rest = trimmed.slice("/skill:".length);
-  const spaceIndex = rest.search(/\s/);
-  const skillName = spaceIndex === -1 ? rest : rest.slice(0, spaceIndex);
-  const argsText = spaceIndex === -1 ? "" : rest.slice(spaceIndex + 1).trim();
-  if (!skillName) return null;
-  if (!isValidSkillName(skillName)) {
-    throw new Error(`Unknown skill: ${skillName}`);
-  }
-
-  const skill = (await fetchSkills(options)).find((item) => item.name === skillName);
-  if (!skill) {
-    throw new Error(`Unknown skill: ${skillName}`);
-  }
-
-  return {
-    renderedText: formatSkillExpansion({
-      name: skill.name,
-      sandboxFilePath: skill.sandboxFilePath,
-      sandboxBaseDir: skill.sandboxBaseDir,
-      content: skill.content,
-      argsText,
-    }),
-    skill: {
-      name: skill.name,
-      description: skill.description,
-      scope: skill.scope,
-      source: skill.source,
-      sandboxFilePath: skill.sandboxFilePath,
-      sandboxBaseDir: skill.sandboxBaseDir,
-    },
-    argsText,
-    rawInput: text,
-  };
+  return skillLoader.expand(text, options);
 }

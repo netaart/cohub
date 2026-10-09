@@ -217,5 +217,3 @@ export const buildSpaceListItems = async (spaceList: typeof spaces.$inferSelect[
     ownerProfile: profileByUserUuid.get(space.userUuid) ?? null,
   }));
 };
-
-export const buildStorageRepoName = (spaceId: string) => `space-${spaceId}`;

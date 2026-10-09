@@ -1,14 +1,18 @@
 import type {
-	BoardConnection,
+	BoardDrawItem,
+	BoardDrawPoint,
 	BoardFrame,
-	BoardItem,
-	ResolvedConnection,
+	BoardSceneItem as BoardItem,
+	BoardScene as BoardModelScene,
+	SceneItem,
 } from "@neta-art/cohub/board";
 import {
 	CORNER_RESIZE_HANDLES,
+	drawPointsBounds,
 	frameCorners,
 	frameHandlePosition,
 	frameRayIntersection,
+	parseBoardItem,
 	type Rect,
 	type ResizeHandle,
 	rotationHandleAnchor,
@@ -21,8 +25,13 @@ import type {
 	BoardRenderPalette,
 	getBoardCardRenderer,
 } from "@neta-art/cohub/board/render";
-import { createConnectionLayer } from "@neta-art/cohub/board/render";
-import type { Container, Graphics } from "pixi.js";
+import {
+	type ClipGroup,
+	clippingAncestor,
+	isClippingFrame,
+	syncClipGroup,
+} from "@neta-art/cohub/board/render";
+import { type Container, Graphics } from "pixi.js";
 import type {
 	BoardSelectionTransform,
 	BoardTransformControl,
@@ -32,57 +41,22 @@ type CardEntry = {
 	item: BoardItem;
 	container: Container;
 	renderer: BoardCardRenderer;
-	/** Last per-card selection state seen by this card. */
 	selected: boolean;
-	/** Last per-card hover state seen by this card. */
 	hovered: boolean;
-	/** Last live-resize state seen by this card. */
 	resizing: boolean;
-	/** Last global signal (asset readiness / theme) seen by this card. */
 	globalSig: string;
 };
 
-/**
- * Above this many simultaneously visible cards the scene switches to the far
- * layer: every far-capable item is drawn as flat batched geometry instead of a
- * live container. Hysteresis avoids flapping right at the boundary.
- */
 const FAR_LAYER_ENTER = 450;
 const FAR_LAYER_EXIT = 350;
-/**
- * z-index bands.
- *
- * Ordering is expressed through Pixi's `zIndex` (one sort per dirty frame)
- * rather than `setChildIndex` per card, which splices the child array and would
- * be quadratic in the number of live cards on every pan frame. Cards occupy the
- * middle band so the far layer and the overlay can never be reordered into it.
- */
+const FAR_PASS_BATCH = 240;
+const FAR_LIVE_LIMIT = 64;
 const Z_FAR_LAYER = -1;
-/**
- * Connections sit above the far layer but below every card.
- *
- * Relations are context for the nodes they join, so a line must never cover the
- * content it describes. One band for all of them also means the whole relation set
- * is a single batched draw regardless of how many there are.
- */
-const Z_CONNECTIONS = -0.5;
+const Z_LIVE_STROKE = Number.MAX_SAFE_INTEGER - 1;
 const Z_OVERLAY = Number.MAX_SAFE_INTEGER;
 
-/**
- * Materialised containers kept for reuse after their card leaves the viewport.
- * Panning back is then allocation-free; beyond this the surplus is destroyed.
- */
 const POOL_LIMIT_PER_RENDERER = 48;
 
-/**
- * Order-independent hash of an id set.
- *
- * The far batch depends on *which* ids it covers — the visible set, minus the
- * pinned ones which are live containers instead — so it must rebuild when that
- * membership changes, not merely when its size does. A size-only key would miss
- * both a pan that swaps one card for another and the common "select A, then
- * select B". Comparing the sets directly would cost the same as hashing them.
- */
 function idSetSignature(ids: Set<string>): number {
 	let hash = ids.size;
 	for (const id of ids) {
@@ -90,7 +64,6 @@ function idSetSignature(ids: Set<string>): number {
 		for (let i = 0; i < id.length; i += 1) {
 			local = (local * 31 + id.charCodeAt(i)) | 0;
 		}
-		// XOR keeps the combination independent of iteration order.
 		hash ^= local;
 	}
 	return hash;
@@ -138,46 +111,24 @@ function frameEdgePoints(
 	}
 }
 
+export type BoardLiveStroke = {
+	id: string;
+	points: BoardDrawPoint[];
+	color: string;
+	size: number;
+};
+
 export type SceneSyncInput = {
-	items: BoardItem[];
-	/** Relations to draw. Resolved against the live item frames each sync. */
-	connections?: readonly BoardConnection[];
-	/** Connection ids the overlay is previewing, so they are not drawn twice. */
-	connectionSkipIds?: ReadonlySet<string>;
-	/** Selected connection ids, drawn in their selected state. */
-	selectedConnectionIds?: ReadonlySet<string>;
-	/** Connection under the pointer, if any. */
-	hoveredConnectionId?: string | null;
+	items: readonly BoardItem[];
+	strokes: readonly BoardLiveStroke[];
+	scene: BoardModelScene;
 	context: BoardRenderContext;
-	/**
-	 * O(1) item lookup by id. The appearance pass walks the visible set and
-	 * resolves items through this, so per-frame cost tracks what is on screen
-	 * rather than the size of `items`.
-	 */
 	getItem: (id: string) => BoardItem | null;
-	/**
-	 * Ids whose cards should be rendered this frame, or null to disable culling
-	 * (render everything — used until the surface has a real size).
-	 */
 	visibleIds: Set<string> | null;
-	/** Ids always rendered as live containers (selected, editing). */
 	pinnedIds: Set<string>;
-	/**
-	 * A signature of the *global* render signals that affect every card equally
-	 * (asset readiness, theme). Selection and hover are tracked per card, so a
-	 * hover change refreshes only the two affected cards rather than the whole
-	 * viewport.
-	 */
 	globalSig: string;
-	/** Bumped on item membership/order changes. Gates the far-layer rebuild. */
 	structureVersion: number;
-	/** Bumped on geometry changes (nudge, align, drag commit). */
 	geometryVersion: number;
-	/**
-	 * True while a pointer gesture is running. During a gesture only pinned
-	 * items move, and pinned items are never part of the far batch, so the far
-	 * layer is left untouched instead of rebuilt every frame.
-	 */
 	gestureActive: boolean;
 };
 
@@ -187,34 +138,20 @@ export type SceneOverlayInput = {
 	marquee: Rect | null;
 	selection: string[];
 	transform: BoardSelectionTransform | null;
-	/** Whether resize/rotate handles are actionable for the active tool. */
 	controls: boolean;
 	hoveredControl: BoardTransformControl | null;
-	/** Live pointer while rotating; keeps the handle attached to the gesture. */
 	rotationPointer: WorldPoint | null;
-	/** World-space arrow endpoint handles to draw as circles. */
 	arrowEndpoints?: Array<{ x: number; y: number }>;
-	/**
-	 * Connection ports to draw for the hovered or selected node, already resolved
-	 * to world space by the editor (it owns the zoom-normalised offsets).
-	 */
 	ports?: ReadonlyArray<{ x: number; y: number; radius: number }>;
-	/** The port under the pointer, drawn larger so the target is unambiguous. */
 	hoveredPort?: { x: number; y: number } | null;
-	/**
-	 * A relation being dragged: anchor to live pointer, plus the node it would
-	 * attach to. Drawn before the selection chrome so it reads as the active
-	 * gesture rather than as part of the selection.
-	 */
-	connectionDraft?: {
+	arrowDraft?: {
 		from: { x: number; y: number };
 		to: { x: number; y: number };
 		size: number;
 		targetFrame: BoardFrame | null;
 	} | null;
+	bindTarget?: BoardFrame | null;
 };
-
-const EMPTY_CONNECTIONS: readonly BoardConnection[] = [];
 
 export type BoardSceneNode = {
 	item: BoardItem;
@@ -223,75 +160,38 @@ export type BoardSceneNode = {
 
 export type BoardScene = {
 	sync: (input: SceneSyncInput) => void;
-	getNode: (nodeId: string) => BoardSceneNode | null;
-	/** Resolved geometry of a drawn connection, for overlays and hit testing. */
-	resolvedConnection: (connectionId: string) => ResolvedConnection | null;
+	getNode: (itemId: string) => BoardSceneNode | null;
+	readonly animated: boolean;
 	drawOverlay: (input: SceneOverlayInput, palette: BoardRenderPalette) => void;
 	destroy: (context: BoardRenderContext) => void;
 };
 
-/**
- * Owns the Pixi display list for board cards and the selection overlay.
- *
- * The scene is sized by what is *on screen*, not by how large the document is,
- * so a board with tens of thousands of nodes costs the same per frame as one
- * with a few hundred:
- *
- * - **Lazy materialisation.** A card's container is created the first time it
- *   becomes visible and returned to a per-renderer pool when it scrolls away.
- *   Nothing is allocated for the off-screen remainder of the document.
- * - **Visible-set iteration.** Every per-frame pass walks the visible set, never
- *   the full item array. Structure reconciliation is gated on `structureVersion`
- *   so a pan, hover or drag skips it entirely.
- * - **Far layer.** Past `FAR_LAYER_ENTER` visible cards the per-card containers
- *   are dropped in favour of one batched `Graphics` — a couple of draw calls for
- *   the whole viewport. It covers the visible set, so its cost tracks the viewport
- *   too, and it is rebuilt only when that set's membership changes.
- *
- * The far layer sits below the cards (`Z_FAR_LAYER`), which is only correct because
- * *every* renderer implements `renderFar`. Batched shapes keep document order
- * naturally, since one `Graphics` draws in the order it was traced; an item left
- * unbatched would become a live container and be drawn above the entire batch
- * regardless of its document position — a frame, for instance, would hide the cards
- * inside it. The one exception is pinned items (selected or being edited), which
- * stay live and above by design: they are the ones being manipulated.
- */
 export function createBoardScene(options: {
 	world: Container;
-	/** Batched geometry layer for the far LOD; sits under the card containers. */
-	farLayer: Graphics;
 	overlay: Graphics;
 	getRenderer: typeof getBoardCardRenderer;
+	onFarLayerFrame?: () => void;
 }): BoardScene {
-	const { world, farLayer, overlay, getRenderer } = options;
-	// One layer for every relation on the board: connections batch perfectly, so a
-	// container per relation would trade a handful of draw calls for thousands.
-	const connectionLayer = createConnectionLayer({
-		parent: world,
-		zIndex: Z_CONNECTIONS,
-	});
-	// Ordering is by zIndex (see the Z_* bands); the layers that must stay at the
-	// extremes are pinned once here rather than re-indexed every frame.
+	const { world, overlay, getRenderer } = options;
 	world.sortableChildren = true;
-	farLayer.zIndex = Z_FAR_LAYER;
 	overlay.zIndex = Z_OVERLAY;
-	/** Materialised (currently visible) cards, keyed by item id. */
 	const cards = new Map<string, CardEntry>();
-	/** True while the connection layer holds geometry, so it is cleared once. */
-	let connectionsDrawn = false;
-	/** Recycled containers by renderer id, ready to be re-adopted. */
+	const clips = new Map<string, ClipGroup>();
+	const animatedIds = new Set<string>();
 	const pools = new Map<string, Container[]>();
-	// Texture reference ownership: cardId → texture key currently held. The scene
-	// acquires a ref when a card materialises and releases it when the card is
-	// recycled, so the asset manager tracks only displayed preview textures.
-	// Off-screen textures drop to zero refs and enter the cooling pool (LRU).
 	const heldKeys = new Map<string, string>();
-	/** Document z-order position per item id, refreshed on structural changes. */
 	let orderById = new Map<string, number>();
-	/** Signature of the document state the far layer was built from. */
 	let farSig: string | null = null;
 	let farActive = false;
 	let lastStructureVersion = -1;
+	const liveStrokes = new Map<
+		string,
+		{
+			container: Container;
+			renderer: BoardCardRenderer;
+			template: BoardDrawItem;
+		}
+	>();
 
 	function setHeldKey(
 		context: BoardRenderContext,
@@ -306,18 +206,12 @@ export function createBoardScene(options: {
 		else heldKeys.delete(cardId);
 	}
 
-	/** Take a recycled container for this renderer, or null to create one. */
 	function takeFromPool(rendererId: string): Container | null {
 		const pool = pools.get(rendererId);
 		if (!pool || pool.length === 0) return null;
 		return pool.pop() ?? null;
 	}
 
-	/**
-	 * Return a card's container to its pool. Containers keep their children and
-	 * cached parts; the next adopter re-syncs them through `renderer.update`.
-	 * Surplus beyond the pool limit is destroyed so memory stays bounded.
-	 */
 	function recycle(
 		id: string,
 		entry: CardEntry,
@@ -326,8 +220,9 @@ export function createBoardScene(options: {
 	) {
 		setHeldKey(context, id, null);
 		cards.delete(id);
+		animatedIds.delete(id);
 		if (destroyed) return;
-		world.removeChild(entry.container);
+		entry.container.parent?.removeChild(entry.container);
 		entry.container.visible = false;
 		const pool = pools.get(entry.renderer.id) ?? [];
 		if (pool.length >= POOL_LIMIT_PER_RENDERER) {
@@ -338,18 +233,58 @@ export function createBoardScene(options: {
 		pools.set(entry.renderer.id, pool);
 	}
 
-	/** Materialise a card as a live container, reusing a pooled one when possible. */
+	function hostFor(item: BoardItem, scene: BoardModelScene): Container {
+		const clipId = clippingAncestor(scene, item);
+		const frame = clipId ? scene.get(clipId) : undefined;
+		if (!clipId || !frame) return world;
+		let entry = clips.get(clipId);
+		if (!entry) {
+			entry = syncClipGroup(undefined, frame);
+			entry.group.sortableChildren = true;
+			clips.set(clipId, entry);
+		}
+		const parent = hostFor(frame, scene);
+		if (entry.group.parent !== parent) parent.addChild(entry.group);
+		entry.group.zIndex = (orderById.get(clipId) ?? 0) + 0.5;
+		return entry.group;
+	}
+
+	function syncClips(scene: BoardModelScene) {
+		for (const entry of cards.values()) {
+			const host = hostFor(entry.item, scene);
+			if (entry.container.parent !== host) host.addChild(entry.container);
+		}
+		for (const [id, entry] of clips) {
+			const frame = scene.get(id);
+			if (
+				!frame ||
+				!isClippingFrame(frame) ||
+				entry.group.children.length <= 1
+			) {
+				for (const child of [...entry.group.children])
+					if (child !== entry.mask) world.addChild(child);
+				entry.group.destroy({ children: true });
+				clips.delete(id);
+				continue;
+			}
+			syncClipGroup(entry, frame);
+		}
+	}
+
 	function materialize(
 		item: BoardItem,
 		context: BoardRenderContext,
 		globalSig: string,
+		scene: BoardModelScene,
 	): CardEntry {
 		const renderer = getRenderer(item, context);
 		const pooled = takeFromPool(renderer.id);
 		const container = pooled ?? renderer.create(item, context);
 		container.visible = true;
 		if (pooled) renderer.update(container, item, context);
-		world.addChild(container);
+		container.alpha = scene.opacity(item.id);
+		hostFor(item, scene).addChild(container);
+		if (renderer.animated) animatedIds.add(item.id);
 		const entry: CardEntry = {
 			item,
 			container,
@@ -364,39 +299,192 @@ export function createBoardScene(options: {
 		return entry;
 	}
 
-	/**
-	 * Rebuild the batched far layer.
-	 *
-	 * Draws only what is on screen, in document order. Batching the whole document
-	 * would defeat the point: a Graphics holding every plate uploads and draws all
-	 * of them every frame, so the per-frame cost would track the board's size —
-	 * exactly what the far layer exists to avoid. Iteration order follows `items`
-	 * so plates stack the way the document says.
-	 */
-	function rebuildFarLayer(
-		items: BoardItem[],
-		context: BoardRenderContext,
-		visibleIds: Set<string> | null,
-		pinnedIds: Set<string>,
-	) {
-		farLayer.clear();
-		for (const item of items) {
-			if (visibleIds !== null && !visibleIds.has(item.id)) continue;
-			// Pinned items are live containers, so drawing them here would double them.
-			if (pinnedIds.has(item.id)) continue;
-			const renderer = getRenderer(item, context);
-			renderer.renderFar?.(farLayer, item, context);
+	// Double-buffered: a pass paints the hidden layer, then swaps it in.
+	let farFront = createFarLayer();
+	let farBack = createFarLayer();
+	let farPainted = false;
+	let farCovered: ReadonlySet<string> = new Set();
+	let farInput: SceneSyncInput | null = null;
+	let farRunning = false;
+	let farQueued = false;
+	let farFrame = 0;
+
+	function createFarLayer() {
+		const layer = new Graphics({ label: "board-far-layer" });
+		layer.zIndex = Z_FAR_LAYER;
+		layer.visible = false;
+		world.addChild(layer);
+		return layer;
+	}
+
+	function requestFarPass(signature: string) {
+		farSig = signature;
+		if (farRunning) farQueued = true;
+		else runFarPass();
+	}
+
+	function runFarPass() {
+		if (!farInput) return;
+		farRunning = true;
+		farQueued = false;
+		const { context, getItem, pinnedIds } = farInput;
+		const ids = visibleFacts(farInput).orderedIds;
+		const target = farPainted ? farBack : farFront;
+		const painted = new Set<string>();
+		target.clear();
+		if (target === farFront) farCovered = painted;
+		let index = 0;
+		const step = () => {
+			farFrame = 0;
+			const end = Math.min(ids.length, index + FAR_PASS_BATCH);
+			for (; index < end; index += 1) {
+				const id = ids[index] as string;
+				if (pinnedIds.has(id)) continue;
+				const item = getItem(id);
+				if (!item) continue;
+				getRenderer(item, context).renderFar?.(target, item, context);
+				painted.add(id);
+			}
+			if (index < ids.length) {
+				farFrame = requestAnimationFrame(step);
+				if (target === farFront) options.onFarLayerFrame?.();
+				return;
+			}
+			if (target === farBack) {
+				farBack = farFront;
+				farFront = target;
+				farBack.visible = false;
+				farBack.clear();
+				farCovered = painted;
+			}
+			farFront.visible = farActive;
+			farPainted = true;
+			farRunning = false;
+			options.onFarLayerFrame?.();
+			if (farQueued) runFarPass();
+		};
+		step();
+	}
+
+	function resetFarLayer() {
+		cancelAnimationFrame(farFrame);
+		farFrame = 0;
+		farRunning = false;
+		farQueued = false;
+		farInput = null;
+		farPainted = false;
+		farCovered = new Set();
+		farSig = null;
+		farFront.clear();
+		farBack.clear();
+	}
+
+	function syncLiveStrokes(input: SceneSyncInput) {
+		const { strokes, context, getItem } = input;
+		const live = new Set<string>();
+		for (const stroke of strokes) {
+			if (stroke.points.length === 0 || getItem(stroke.id)) continue;
+			let entry = liveStrokes.get(stroke.id);
+			if (
+				entry &&
+				(entry.template.style.stroke !== stroke.color ||
+					entry.template.style.strokeWidth !== stroke.size)
+			) {
+				removeLiveStroke(stroke.id, context);
+				entry = undefined;
+			}
+			const item = entry
+				? liveStrokeItem(stroke, entry.template)
+				: createLiveStroke(stroke, input);
+			if (!item) continue;
+			live.add(stroke.id);
+			entry = liveStrokes.get(stroke.id);
+			entry?.renderer.update(entry.container, item, context);
+		}
+		for (const id of liveStrokes.keys()) {
+			if (!live.has(id)) removeLiveStroke(id, context);
 		}
 	}
 
-	/** Whether an item is drawn by the far layer rather than a container. */
-	function isFarDrawn(item: BoardItem, context: BoardRenderContext): boolean {
-		return Boolean(getRenderer(item, context).renderFar);
+	function liveStrokeItem(
+		stroke: BoardLiveStroke,
+		template: BoardDrawItem,
+	): SceneItem<BoardDrawItem> {
+		return {
+			...template,
+			id: stroke.id,
+			props: { points: stroke.points },
+			frame: { ...drawPointsBounds(stroke.points, stroke.size), rotation: 0 },
+		};
+	}
+
+	function createLiveStroke(
+		stroke: BoardLiveStroke,
+		input: SceneSyncInput,
+	): SceneItem<BoardDrawItem> | null {
+		const parsed = parseBoardItem({
+			type: "draw",
+			style: { stroke: stroke.color, strokeWidth: stroke.size },
+			props: { points: stroke.points.slice(0, 1) },
+		});
+		if (!parsed.ok || parsed.item.type !== "draw") return null;
+		const template = parsed.item as BoardDrawItem;
+		const item = liveStrokeItem(stroke, template);
+		const renderer = getRenderer(item, input.context);
+		const container = renderer.create(item, input.context);
+		container.zIndex = Z_LIVE_STROKE;
+		world.addChild(container);
+		liveStrokes.set(stroke.id, { container, renderer, template });
+		return item;
+	}
+
+	function removeLiveStroke(id: string, context: BoardRenderContext) {
+		const entry = liveStrokes.get(id);
+		if (!entry) return;
+		liveStrokes.delete(id);
+		world.removeChild(entry.container);
+		entry.renderer.destroy?.(entry.container, context);
+	}
+
+	let visibleMemo: {
+		ids: Set<string> | null;
+		structureVersion: number;
+		signature: number;
+		orderedIds: string[];
+		unbatched: Set<string>;
+	} | null = null;
+	function visibleFacts(input: SceneSyncInput) {
+		const { items, visibleIds, structureVersion, context, getItem } = input;
+		if (
+			visibleMemo?.ids === visibleIds &&
+			visibleMemo.structureVersion === structureVersion
+		)
+			return visibleMemo;
+		const orderedIds =
+			visibleIds === null
+				? items.map((item) => item.id)
+				: [...visibleIds].sort(
+						(a, b) => (orderById.get(a) ?? 0) - (orderById.get(b) ?? 0),
+					);
+		const unbatched = new Set<string>();
+		for (const id of orderedIds) {
+			const item = getItem(id);
+			if (item && !getRenderer(item, context).renderFar) unbatched.add(id);
+		}
+		visibleMemo = {
+			ids: visibleIds,
+			structureVersion,
+			signature: visibleIds === null ? 0 : idSetSignature(visibleIds),
+			orderedIds,
+			unbatched,
+		};
+		return visibleMemo;
 	}
 
 	function sync(input: SceneSyncInput) {
 		const {
 			items,
+			scene,
 			context,
 			getItem,
 			visibleIds,
@@ -407,62 +495,6 @@ export function createBoardScene(options: {
 			gestureActive,
 		} = input;
 
-		// Connections are redrawn every sync rather than diffed: their geometry is
-		// derived from node frames, so any drag invalidates them anyway, and the whole
-		// set is one batched Graphics. Resolution skips relations whose endpoints are
-		// off-screen because `getItem` returns null for them.
-		const connections = input.connections ?? EMPTY_CONNECTIONS;
-		if (connections.length > 0 || connectionsDrawn) {
-			connectionLayer.sync({
-				connections,
-				getFrame: (id) => getItem(id)?.frame,
-				colors: context.colors,
-				colorScheme: context.colorScheme,
-				zoom: context.zoom,
-				...(input.selectedConnectionIds
-					? { selectedIds: input.selectedConnectionIds }
-					: {}),
-				hoveredId: input.hoveredConnectionId ?? null,
-				...(input.connectionSkipIds
-					? { skipIds: input.connectionSkipIds }
-					: {}),
-			});
-			connectionsDrawn = connections.length > 0;
-		}
-
-		// Decide the LOD for this frame. Hysteresis around the threshold keeps a
-		// board hovering near the limit from flipping modes every frame.
-		const visibleCount = visibleIds === null ? items.length : visibleIds.size;
-		const nextFarActive = farActive
-			? visibleCount > FAR_LAYER_EXIT
-			: visibleCount > FAR_LAYER_ENTER;
-		const farModeChanged = nextFarActive !== farActive;
-		farActive = nextFarActive;
-		farLayer.visible = farActive;
-
-		// The batch covers the visible set, so it rebuilds when that set's membership
-		// changes — which, because the cull rect is margin-expanded, is once every
-		// margin crossed rather than every pan frame. During a gesture only pinned
-		// items move and pinned items are never batched, so the rebuild is skipped.
-		if (farActive) {
-			const nextFarSig = [
-				structureVersion,
-				geometryVersion,
-				globalSig,
-				idSetSignature(pinnedIds),
-				visibleIds === null ? "all" : idSetSignature(visibleIds),
-			].join("|");
-			if (nextFarSig !== farSig && !gestureActive) {
-				rebuildFarLayer(items, context, visibleIds, pinnedIds);
-				farSig = nextFarSig;
-			}
-		} else if (farModeChanged) {
-			farLayer.clear();
-			farSig = null;
-		}
-
-		// Structure pass: only when membership/order actually changed. This is
-		// what keeps a pan, hover or drag off the O(n) path.
 		const structureChanged = structureVersion !== lastStructureVersion;
 		if (structureChanged) {
 			lastStructureVersion = structureVersion;
@@ -473,20 +505,47 @@ export function createBoardScene(options: {
 			orderById = new Map(items.map((item, index) => [item.id, index]));
 		}
 
-		// Appearance pass over the visible set only — never over `items`. `wanted` is
-		// the set of ids that must exist as live containers this frame.
-		const wanted = new Set<string>(pinnedIds);
-		if (visibleIds === null) {
-			for (const item of items) {
-				if (!farActive || !isFarDrawn(item, context)) wanted.add(item.id);
+		const visibleCount = visibleIds === null ? items.length : visibleIds.size;
+		const nextFarActive = farActive
+			? visibleCount > FAR_LAYER_EXIT
+			: visibleCount > FAR_LAYER_ENTER;
+		const farModeChanged = nextFarActive !== farActive;
+		farActive = nextFarActive;
+		farFront.visible = farActive;
+
+		if (farActive) {
+			farInput = input;
+			const nextFarSig = [
+				structureVersion,
+				geometryVersion,
+				globalSig,
+				idSetSignature(pinnedIds),
+				visibleIds === null ? "all" : visibleFacts(input).signature,
+			].join("|");
+			if (farSig === null || (nextFarSig !== farSig && !gestureActive)) {
+				requestFarPass(nextFarSig);
 			}
+		} else if (farModeChanged) {
+			resetFarLayer();
+		}
+
+		const wanted = new Set<string>(pinnedIds);
+		if (farActive) {
+			const { orderedIds, unbatched } = visibleFacts(input);
+			for (const id of unbatched) wanted.add(id);
+			let budget = FAR_LIVE_LIMIT;
+			for (const id of orderedIds) {
+				if (budget === 0) break;
+				if (farCovered.has(id) || wanted.has(id)) continue;
+				wanted.add(id);
+				budget -= 1;
+			}
+		} else if (visibleIds === null) {
+			for (const item of items) wanted.add(item.id);
 		} else {
 			for (const id of visibleIds) wanted.add(id);
 		}
 
-		// Any change to the live set means the display list gained or lost children,
-		// so document z-order has to be re-applied: a card materialised mid-pan is
-		// appended at the end and would otherwise sit above its neighbours.
 		let liveSetChanged = false;
 
 		for (const [id, entry] of [...cards]) {
@@ -499,38 +558,26 @@ export function createBoardScene(options: {
 		for (const id of wanted) {
 			const item = getItem(id);
 			if (!item) continue;
-			// In far mode a batched card only materialises when it is pinned.
-			if (farActive && !pinnedIds.has(id) && isFarDrawn(item, context)) {
-				const existing = cards.get(id);
-				if (existing) {
-					recycle(id, existing, context, false);
-					liveSetChanged = true;
-				}
-				continue;
-			}
-
 			let entry = cards.get(id);
 			const renderer = getRenderer(item, context);
 			if (entry && entry.renderer.id !== renderer.id) {
-				// The item changed shape type; drop the stale container outright
-				// rather than pooling it under the wrong renderer.
 				world.removeChild(entry.container);
 				entry.renderer.destroy?.(entry.container, context);
 				recycle(id, entry, context, true);
 				entry = undefined;
 			}
 			if (!entry) {
-				materialize(item, context, globalSig);
+				materialize(item, context, globalSig, scene);
 				liveSetChanged = true;
 				continue;
 			}
 
-			// A live card only re-renders when something it depends on changed.
 			const selected = context.selectedIds.has(id);
 			const hovered = context.hoveredId === id;
 			const resizing = context.resizingIds.has(id);
 			const changed =
 				item !== entry.item ||
+				entry.renderer.animated ||
 				selected !== entry.selected ||
 				hovered !== entry.hovered ||
 				resizing !== entry.resizing ||
@@ -541,22 +588,17 @@ export function createBoardScene(options: {
 			entry.resizing = resizing;
 			entry.globalSig = globalSig;
 			setHeldKey(context, id, context.assetKey(item));
-			if (changed) entry.renderer.update(entry.container, item, context);
+			if (changed) {
+				entry.renderer.update(entry.container, item, context);
+				entry.container.alpha = scene.opacity(id);
+			}
 		}
+		if (structureChanged || liveSetChanged) syncClips(scene);
 
-		// Z-order: only the materialised subset needs ordering, and only when that
-		// subset actually changed.
 		if (structureChanged || farModeChanged || liveSetChanged) applyChildOrder();
+		syncLiveStrokes(input);
 	}
 
-	/**
-	 * Apply document z-order to the materialised containers.
-	 *
-	 * Each card carries its document position as a `zIndex` and Pixi sorts once per
-	 * dirty frame. The earlier approach (`setChildIndex` per card) spliced the
-	 * child array once per card, which is quadratic in the live count and showed up
-	 * as soon as a pan materialised cards every frame.
-	 */
 	function applyChildOrder() {
 		for (const [id, entry] of cards) {
 			entry.container.zIndex = orderById.get(id) ?? 0;
@@ -579,7 +621,8 @@ export function createBoardScene(options: {
 			arrowEndpoints,
 			ports,
 			hoveredPort,
-			connectionDraft,
+			arrowDraft,
+			bindTarget,
 		} = input;
 		const inv = 1 / zoom;
 		const brand = palette.brand;
@@ -593,21 +636,20 @@ export function createBoardScene(options: {
 				.stroke({ color: brand, width: inv, alpha: 0.7 });
 		}
 
-		// The relation being dragged, and the node it would land on. Both are drawn
-		// before the early return below, because a drag can start from a hovered node
-		// that was never selected — there is no selection transform to gate on.
-		if (connectionDraft) {
-			const { from, to, size, targetFrame } = connectionDraft;
-			if (targetFrame) {
-				overlay
-					.rect(
-						targetFrame.x,
-						targetFrame.y,
-						targetFrame.width,
-						targetFrame.height,
-					)
-					.stroke({ color: brand, width: 2 * inv, alpha: 0.9 });
-			}
+		if (bindTarget)
+			traceFrame(overlay, bindTarget).stroke({
+				color: brand,
+				width: 2 * inv,
+				alpha: 0.9,
+			});
+		if (arrowDraft) {
+			const { from, to, size, targetFrame } = arrowDraft;
+			if (targetFrame)
+				traceFrame(overlay, targetFrame).stroke({
+					color: brand,
+					width: 2 * inv,
+					alpha: 0.9,
+				});
 			overlay
 				.moveTo(from.x, from.y)
 				.lineTo(to.x, to.y)
@@ -617,13 +659,9 @@ export function createBoardScene(options: {
 					alpha: 0.85,
 					cap: "round",
 				});
-			// A dot at the loose end reads as "this is where it will attach",
-			// which a bare line end does not.
 			overlay.circle(to.x, to.y, 3.5 * inv).fill({ color: brand, alpha: 0.95 });
 		}
 
-		// Ports are the only affordance for creating a relation, so they are drawn
-		// whenever the editor says they are live — hover or selection, either tool.
 		if (ports && ports.length > 0) {
 			for (const port of ports) {
 				const hovered =
@@ -647,7 +685,6 @@ export function createBoardScene(options: {
 		});
 		if (!controls) return;
 
-		// Arrow endpoints (or other custom handles) take priority over box chrome.
 		if (arrowEndpoints && arrowEndpoints.length > 0) {
 			const r = 5 * inv;
 			for (const point of arrowEndpoints) {
@@ -713,21 +750,25 @@ export function createBoardScene(options: {
 		for (const key of heldKeys.values()) context.releaseTexture(key);
 		heldKeys.clear();
 		orderById = new Map();
-		connectionLayer.destroy();
-		connectionsDrawn = false;
-		farLayer.clear();
-		farSig = null;
+		for (const entry of clips.values()) entry.group.destroy({ children: true });
+		clips.clear();
+		animatedIds.clear();
+		for (const id of [...liveStrokes.keys()]) removeLiveStroke(id, context);
+		resetFarLayer();
 		farActive = false;
+		visibleMemo = null;
 		lastStructureVersion = -1;
 	}
 
 	return {
 		sync,
-		getNode: (nodeId) => {
-			const entry = cards.get(nodeId);
+		getNode: (itemId) => {
+			const entry = cards.get(itemId);
 			return entry ? { item: entry.item, container: entry.container } : null;
 		},
-		resolvedConnection: connectionLayer.resolved,
+		get animated() {
+			return animatedIds.size > 0;
+		},
 		drawOverlay,
 		destroy,
 	};

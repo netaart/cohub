@@ -95,6 +95,14 @@ function readEntries(userUuid: string): RecentSpaceEntry[] {
 	}
 }
 
+type VisitListener = (entry: RecentSpaceEntry) => void;
+const visitListeners = new Set<VisitListener>();
+
+export function onRecentSpaceVisit(listener: VisitListener): () => void {
+	visitListeners.add(listener);
+	return () => visitListeners.delete(listener);
+}
+
 export function setRecentSpace(
 	userUuid: string,
 	spaceId: string,
@@ -113,6 +121,7 @@ export function setRecentSpace(
 			(entry) => entry.spaceId !== trimmedSpaceId,
 		),
 	]);
+	for (const listener of [...visitListeners]) listener(nextEntry);
 }
 
 export function getRecentSpaces(userUuid: string): RecentSpaceEntry[] {

@@ -68,3 +68,36 @@ test("enqueue uses the created turn space instead of the request space", async (
     errorMessage: "queue unavailable",
   });
 });
+
+test("local harness prompts still expand platform prompt templates", async () => {
+  const turnMetas: Record<string, unknown>[] = [];
+  const turnContents: { userContent: unknown[] }[] = [];
+  const deps: SessionPromptDependencies = {
+    randomUUID: () => "message-id",
+    expandPromptTemplate: async () => ({
+      renderedText: "expanded template body",
+      template: { name: "plan", description: "Plan work", scope: "user" as const },
+      args: ["feature-x"],
+      rawInput: "/plan feature-x",
+    }),
+    createSessionTurn: async (input) => {
+      turnMetas.push(input.meta);
+      turnContents.push({ userContent: input.userContent });
+      return { id: "turn-id", spaceId: "space-1" };
+    },
+    enqueueSpacePrompt: async () => undefined,
+    failSessionTurn: async () => undefined,
+    validateLocalHarness: async () => undefined,
+  };
+
+  await submitSessionPrompt(deps, {
+    ...createInput(null),
+    content: [{ type: "text", text: "/plan feature-x" }],
+    harness: "pi",
+  });
+
+  assert.equal((turnMetas[0]?.promptTemplate as Record<string, unknown> | null | undefined)?.name, "plan");
+  const text = (turnContents[0]?.userContent[0] as { type: string; text?: string } | undefined);
+  assert.equal(text?.type, "text");
+  assert.equal(text?.text, "expanded template body");
+});

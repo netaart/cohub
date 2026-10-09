@@ -8,6 +8,7 @@ import {
   parseAppSurfaceRequest,
   type AppComposerChip,
 } from "@cohub/protocol/app-surface";
+import { parseAppRuntimeAnnounce } from "@cohub/protocol/app-runtime";
 export type AppSurfaceHandlerContext = {
   /** The UI command this handler must complete. */
   commandId: string;
@@ -52,6 +53,8 @@ export class AppSurfaceApi {
   private listening = false;
   private allowedOrigins: string[] | null = null;
   private trustedOrigin: string | null | undefined;
+  /** The chip on show, so it can be announced again. */
+  private chip: AppComposerChip | null = null;
 
   allowHostOrigins(origins: string[]): void {
     this.allowedOrigins = origins
@@ -90,12 +93,15 @@ export class AppSurfaceApi {
   setComposerChip(chip: AppComposerChip): void {
     const message = parseAppComposerChipSet(buildAppComposerChipSet(chip));
     if (!message) throw new Error("Invalid App composer chip");
+    this.chip = message.chip;
+    this.start();
     this.post(message);
   }
 
   clearComposerChip(key: string): void {
     const message = parseAppComposerChipClear(buildAppComposerChipClear(key));
     if (!message) throw new Error("Invalid App composer chip key");
+    if (this.chip?.key === message.key) this.chip = null;
     this.post(message);
   }
 
@@ -128,6 +134,12 @@ export class AppSurfaceApi {
   private readonly onMessage = (event: MessageEvent) => {
     if (typeof window === "undefined" || event.source !== window.parent) return;
     if (!this.isTrusted(event.origin)) return;
+    // A reloaded frame forgot what this document announced; say it again.
+    if (parseAppRuntimeAnnounce(event.data)) {
+      if (this.handlers.size > 0) this.announce();
+      if (this.chip) this.post(buildAppComposerChipSet(this.chip));
+      return;
+    }
     const request = parseAppSurfaceRequest(event.data);
     if (!request) return;
     const commandId = request.commandId;

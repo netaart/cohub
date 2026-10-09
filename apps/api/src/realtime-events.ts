@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { sessionMessages } from "@cohub/db";
 import type { RealtimeMessageRecord, RealtimeSessionRecord, RealtimeTaskRecord, RealtimeTurnRecord, SpacePresenceSnapshot } from "@cohub/protocol/realtime";
-import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnRecord } from "@cohub/protocol/model";
+import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime";
+import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnIssue, SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { dispatchRealtimeEvent } from "./channels.js";
 import { buildResourceLabelSnapshot, type LabelResourceType } from "@cohub/core/labels/resource-events";
+import { createLogger } from "@cohub/infra/logging";
+import { readSessionActiveTurn, readSessionParticipantUserUuids, resolveSessionAudienceRooms, sessionActiveTurnEvent } from "@cohub/core/sessions";
 import { db } from "./db/index.js";
+
+const logger = createLogger({ serviceName: "cohub-api" });
 
 const toIsoOrNull = (value: Date | string | null | undefined) => {
   if (!value) return null;
@@ -38,7 +43,7 @@ const pickRealtimeMessageMeta = (meta: Record<string, unknown> | null | undefine
   return Object.keys(picked).length > 0 ? picked : null;
 };
 
-export const toRealtimeSessionRecord = (session: SessionRecord | {
+type RealtimeSessionInput = SessionRecord | {
   id: string;
   spaceId: string;
   userUuid?: string | null;
@@ -52,7 +57,12 @@ export const toRealtimeSessionRecord = (session: SessionRecord | {
   createdAt: Date | string | null;
   updatedAt: Date | string | null;
   activeTurn?: SessionActiveTurn | null;
-}): RealtimeSessionRecord => ({
+  activeTurnSequence?: number;
+  lastTurnIssue?: SessionTurnIssue | null;
+  meta?: unknown;
+};
+
+export const toRealtimeSessionRecord = (session: RealtimeSessionInput): RealtimeSessionRecord => ({
   id: session.id,
   spaceId: session.spaceId,
   userUuid: session.userUuid ?? null,
@@ -62,12 +72,19 @@ export const toRealtimeSessionRecord = (session: SessionRecord | {
   ...(session.activeTurn !== undefined
     ? { activeTurn: session.activeTurn }
     : {}),
+  ...(session.activeTurnSequence !== undefined
+    ? { activeTurnSequence: session.activeTurnSequence }
+    : {}),
+  ...(session.lastTurnIssue !== undefined
+    ? { lastTurnIssue: session.lastTurnIssue }
+    : {}),
   externalSessionId: session.externalSessionId,
   latestMessageText: session.latestMessageText ?? null,
   lastMessageAt: toIsoOrNull(session.lastMessageAt),
   lastMessageId: session.lastMessageId,
   createdAt: toIso(session.createdAt),
   updatedAt: toIso(session.updatedAt),
+  ...("meta" in session ? { participantUserUuids: readSessionParticipantUserUuids(session.meta) } : {}),
 });
 
 export const messageRecordFromRow = (message: typeof sessionMessages.$inferSelect): MessageRecord => ({
@@ -166,7 +183,14 @@ export const toRealtimeTaskRecord = (task: {
   updatedAt: toIso(task.updatedAt),
 });
 
-export async function dispatchSessionCreated(session: Parameters<typeof toRealtimeSessionRecord>[0]) {
+async function sessionEventRooms(session: RealtimeSessionInput) {
+  return resolveSessionAudienceRooms(db, session).catch((error) => {
+    logger.warn("[Realtime] failed to resolve session audience", { sessionId: session.id, error });
+    return [getRealtimeSpaceRoom(session.spaceId)];
+  });
+}
+
+export async function dispatchSessionCreated(session: RealtimeSessionInput) {
   const realtimeSession = toRealtimeSessionRecord(session);
   await dispatchRealtimeEvent({
     id: randomUUID(),
@@ -175,16 +199,21 @@ export async function dispatchSessionCreated(session: Parameters<typeof toRealti
     type: "session.created",
     spaceId: realtimeSession.spaceId,
     sessionId: realtimeSession.id,
+    rooms: await sessionEventRooms(session),
     payload: { session: realtimeSession },
   });
 }
 
 export async function dispatchSessionUpdated(input: {
-  session: Parameters<typeof toRealtimeSessionRecord>[0];
+  session: RealtimeSessionInput;
   changed: string[];
 }) {
   if (input.changed.length === 0) return;
-  const realtimeSession = toRealtimeSessionRecord(input.session);
+  const [active, rooms] = await Promise.all([
+    readSessionActiveTurn(db, input.session.id),
+    sessionEventRooms(input.session),
+  ]);
+  const realtimeSession = toRealtimeSessionRecord({ ...input.session, ...active });
   await dispatchRealtimeEvent({
     id: randomUUID(),
     timestamp: Date.now(),
@@ -192,8 +221,14 @@ export async function dispatchSessionUpdated(input: {
     type: "session.updated",
     spaceId: realtimeSession.spaceId,
     sessionId: realtimeSession.id,
+    rooms,
     payload: { session: realtimeSession, changed: input.changed },
   });
+}
+
+export async function dispatchSessionActiveTurn(input: { spaceId: string; turn: SessionTurnRecord }) {
+  const event = sessionActiveTurnEvent(input);
+  if (event) await dispatchRealtimeEvent({ id: randomUUID(), timestamp: Date.now(), ...event });
 }
 
 export async function dispatchTurnCreated(input: {

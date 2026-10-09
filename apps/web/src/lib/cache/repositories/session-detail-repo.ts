@@ -1,3 +1,4 @@
+import { sanitizeSessionRecordStats } from "@cohub/protocol/model";
 import type { SessionRecord } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
@@ -6,6 +7,7 @@ import {
 import {
 	idbDelete,
 	idbGet,
+	idbGetByIndex,
 	idbPut,
 	type SessionDetailCacheRecord,
 } from "$lib/cache/db";
@@ -41,11 +43,22 @@ function toSnapshot(
 	source: CacheSource,
 ): SessionDetailSnapshot {
 	return {
-		session: record.session,
+		session: sanitizeSessionRecordStats(record.session),
 		updatedAt: record.updatedAt,
 		stale: Date.now() - record.updatedAt >= SESSION_DETAIL_TTL_MS,
 		source,
 	};
+}
+
+function remember(record: SessionDetailCacheRecord) {
+	const touched = {
+		...record,
+		session: sanitizeSessionRecordStats(record.session),
+		lastAccessedAt: Date.now(),
+	};
+	memory.set(record.key, touched);
+	void idbPut("session_details", touched).catch(() => undefined);
+	return touched;
 }
 
 async function readRecord(spaceId: string, sessionId: string) {
@@ -55,10 +68,7 @@ async function readRecord(spaceId: string, sessionId: string) {
 	if (cached) return { record: cached, source: "memory" as CacheSource };
 	const record = await idbGet<SessionDetailCacheRecord>("session_details", key);
 	if (!record) return null;
-	const touched = { ...record, lastAccessedAt: Date.now() };
-	memory.set(key, touched);
-	void idbPut("session_details", touched).catch(() => undefined);
-	return { record: touched, source: "indexeddb" as CacheSource };
+	return { record: remember(record), source: "indexeddb" as CacheSource };
 }
 
 async function writeRecord(
@@ -66,6 +76,7 @@ async function writeRecord(
 	session: SessionRecord,
 	options?: { broadcast?: boolean; source?: CacheSource; updatedAt?: number },
 ) {
+	session = sanitizeSessionRecordStats(session);
 	const userKey = getCacheUserKey();
 	const key = sessionDetailKey(userKey, spaceId, session.id);
 	const now = Date.now();
@@ -139,6 +150,23 @@ export const sessionDetailRepo = {
 		ensureBroadcastSubscription();
 		const result = await readRecord(spaceId, sessionId);
 		return result ? toSnapshot(result.record, result.source) : null;
+	},
+
+	async find(sessionId: string) {
+		ensureBroadcastSubscription();
+		const record = await idbGetByIndex<SessionDetailCacheRecord>(
+			"session_details",
+			"by_user_session",
+			[getCacheUserKey(), sessionId],
+		);
+		if (!record) return null;
+		const cached = memory.get(record.key);
+		return {
+			spaceId: record.spaceId,
+			...(cached
+				? toSnapshot(cached, "memory")
+				: toSnapshot(remember(record), "indexeddb")),
+		};
 	},
 
 	async getMany(spaceId: string, sessionIds: string[]) {

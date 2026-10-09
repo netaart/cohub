@@ -31,7 +31,7 @@ const compactionTokensBeforeOf = (message: RuntimeContextMessage): number => {
 const projectRow = (row: RuntimeContextMessage, options: ContextProjectionOptions): AgentMessage[] => {
   if (row.meta?.messageKind === "generation_result" && !["completed", "failed"].includes(String(row.meta.generationStatus))) {
     // Do not advance the resume marker over a mutable placeholder.
-    throw new Error("Generation result is not settled / 生成结果尚未确认");
+    throw new Error("Generation result is not settled");
   }
   return row.meta?.generationTaskId
     ? [projectGenerationSessionMessage({ ...row, meta: row.meta ?? {}, provider: row.provider ?? null, model: row.model ?? null, createdAt: new Date(String(row.meta?.createdAt ?? 0)) })]
@@ -80,7 +80,7 @@ export function syncCloudContext(manager: SessionManager, context: RuntimeContex
   // Project and validate the whole missing tail before touching the live projection.
   const pending = region.slice(after + 1).map((row) => ({ row, messages: projectRow(row, options) }));
   // Anchor the boundary at the first kept row that has (or will have) a native entry. A first row
-  // without one (dropped URL image, system note) simply does not become the anchor, so a boundary can
+  // without one (a system note) simply does not become the anchor, so a boundary can
   // never be missing, fail late, or leave a half-written tail behind.
   let anchor = region.slice(0, after + 1).map((row) => entryIdByMessageId.get(row.id)).find((id): id is string => Boolean(id)) ?? null;
   let changed = false;

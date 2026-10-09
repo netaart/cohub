@@ -56,6 +56,7 @@ export type ModelTaskModelConfigOverride = {
   contextWindow?: number;
   maxTokens?: number;
   requestProfile?: ModelDef["requestProfile"];
+  imageUrlInput?: boolean;
   headers?: Record<string, string>;
   compat?: unknown;
 };
@@ -208,6 +209,7 @@ function resolveTask(
     cost,
     compat: task.model?.compat ?? catalogModel?.compat ?? providerConfig?.compat,
     requestProfile: task.model?.requestProfile ?? catalogModel?.requestProfile ?? providerConfig?.requestProfile,
+    imageUrlInput: task.model?.imageUrlInput ?? catalogModel?.imageUrlInput ?? providerConfig?.imageUrlInput,
   };
 
   if (typeof model.api !== "string" || typeof model.baseUrl !== "string") {

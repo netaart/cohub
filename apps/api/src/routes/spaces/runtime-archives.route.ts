@@ -13,7 +13,7 @@ import { config } from "../../config.js";
 import { createPresignedGetObjectUrl, createPresignedPutObjectUrl } from "../../object-presign.js";
 import { headTurnObject } from "../../turn-object-storage.js";
 import { redisCommandClient } from "../../redis.js";
-import { consumeSpaceUploadQuota, SpaceUploadRateLimitError } from "../../space-upload-storage.js";
+import { consumeUploadQuota, UploadRateLimitError } from "../../upload-quota.js";
 import { dispatchTurnUpdated } from "../../session-output.js";
 import { getSessionTurnById } from "../../session-turns.js";
 
@@ -75,9 +75,14 @@ router.post("/prepare", async (c) => {
   const index = parsed.data;
   const turn = await validateOwner(spaceId, user.uuid, index);
   if (turn.harnessIndex && digest(turn.harnessIndex) !== digest(index)) fail(409, "Archive already finalized");
-  try { await consumeSpaceUploadQuota(user.uuid, Math.max(1, index.segments.length)); }
+  try {
+    await consumeUploadQuota(redisCommandClient, user.uuid, {
+      entryCount: Math.max(1, index.segments.length),
+      totalBytes: index.segments.reduce((sum, segment) => sum + segment.sizeBytes, 0),
+    });
+  }
   catch (error) {
-    if (!(error instanceof SpaceUploadRateLimitError)) throw error;
+    if (!(error instanceof UploadRateLimitError)) throw error;
     c.header("Retry-After", String(error.retryAfterSeconds));
     return c.json({ message: "Archive upload rate limited", retryAfterSeconds: error.retryAfterSeconds }, 429);
   }

@@ -34,8 +34,7 @@ const TERMINAL_TURN_STATUSES = new Set([
 	"cancelled",
 ]);
 
-/** Process-wide: only one host schedules list refresh / tail reconcile side-effects per session. */
-const sharedRefreshSessionsInFlight = new Map<string, Promise<void>>();
+/** Process-wide: only one host schedules tail reconcile side-effects per session. */
 const sharedReconcileSideEffectInFlight = new Map<string, Promise<void>>();
 /** Process-wide finalized fallback + snapshot recovery (dual-host safe). */
 const sharedFinalizedFallbackTimers = new Map<
@@ -519,17 +518,6 @@ export function createSessionGenerationRealtimeController(options: {
 						}
 					});
 					sharedReconcileSideEffectInFlight.set(reconcileKey, run);
-				}
-			}
-			if (generationEffect.shouldRefreshSessions) {
-				const refreshKey = `${options.getSpaceId()}:${sessionId}`;
-				if (!sharedRefreshSessionsInFlight.has(refreshKey)) {
-					const run = options.refreshSessionsList(true).finally(() => {
-						if (sharedRefreshSessionsInFlight.get(refreshKey) === run) {
-							sharedRefreshSessionsInFlight.delete(refreshKey);
-						}
-					});
-					sharedRefreshSessionsInFlight.set(refreshKey, run);
 				}
 			}
 			if (

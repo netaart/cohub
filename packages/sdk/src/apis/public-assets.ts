@@ -1,6 +1,11 @@
 import type { HttpTransport } from "../transport.js";
 
-export type PublicAssetPurpose = "user_avatar" | "space_avatar" | "chat_attachment" | "app_source";
+export type PublicAssetPurpose =
+  | "user_avatar"
+  | "space_avatar"
+  | "chat_attachment"
+  | "app_source"
+  | "generation_input";
 export type PublicAssetUploadProtocol = "presigned_put_v1";
 /** Preprocessed chat images. General chat files and avatars may use any mime string. */
 export type PublicAssetMimeType = "image/webp" | "image/jpeg";
@@ -61,6 +66,9 @@ export type UploadChatAttachmentInput = {
   onProgress?: (progress: PublicAssetUploadProgress) => void;
   signal?: AbortSignal;
 };
+
+/** A local generation input (image, video, or audio); same shape as a chat attachment. */
+export type UploadGenerationInputInput = UploadChatAttachmentInput;
 
 /** @deprecated Prefer UploadChatAttachmentInput — images are a special case of chat attachments. */
 export type UploadChatImageAttachmentInput = UploadChatAttachmentInput & {
@@ -220,6 +228,11 @@ export class PublicAssetsApi {
       onProgress: input.onProgress,
       signal: input.signal,
     });
+  }
+
+  /** Durable, unlisted URL for a local generation input (image, video, or audio). */
+  uploadGenerationInput(input: UploadGenerationInputInput) {
+    return this.upload({ ...input, purpose: "generation_input" });
   }
 
   /** Preprocessed chat image (webp/jpeg). Same durable path as uploadChatAttachment. */

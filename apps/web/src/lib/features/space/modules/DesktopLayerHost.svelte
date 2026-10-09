@@ -37,21 +37,11 @@ const {
 }: Props = $props();
 
 /**
- * Each surface hands its host up on mount and `null` on unmount. Disposers are
- * kept here so a remount never leaves a stale invoker pointing at a detached
- * frame — the same contract AppWindow follows.
+ * Each surface registers on mount; the disposer removes only that registration.
  */
-const surfaceDisposers = new Map<string, () => void>();
-
-function registerSurface(appId: string, host: AppSurfaceHost | null) {
-	surfaceDisposers.get(appId)?.();
-	surfaceDisposers.delete(appId);
-	if (!host) return;
-	surfaceDisposers.set(
-		appId,
-		surfaces.register({ appId, surface: "overlay" }, (input) =>
-			host.call(input),
-		),
+function registerSurface(appId: string, host: AppSurfaceHost) {
+	return surfaces.register({ id: appId, surface: "overlay" }, (input) =>
+		host.call(input),
 	);
 }
 

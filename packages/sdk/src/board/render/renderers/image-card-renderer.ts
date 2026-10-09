@@ -1,5 +1,6 @@
+import type { BoardSceneItem, SceneItem } from "../../core/scene.js";
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
-import type { BoardImageItem, BoardItem } from "@cohub/protocol/board-document";
+import type { BoardImageItem, } from "@cohub/protocol";
 import { positionShell } from "./base-card-renderer.js";
 import type {
 	BoardCardRenderer,
@@ -17,14 +18,6 @@ type ImageParts = {
 const partsByContainer = new WeakMap<Container, ImageParts>();
 const RADIUS = 2;
 
-/**
- * Lay the sprite out inside the frame.
- *
- * The frame normally already matches the image's pixel aspect (see the editor's
- * media size adoption), so this fills it exactly. Until that correction lands
- * for a freshly dropped file, `contain` keeps the whole image visible rather
- * than cropping it — the brief letterbox is self-correcting.
- */
 function layoutContain(sprite: Sprite, width: number, height: number) {
 	const texture = sprite.texture;
 	const tw = texture.width;
@@ -39,7 +32,7 @@ function layoutContain(sprite: Sprite, width: number, height: number) {
 
 function sync(
 	container: Container,
-	item: BoardImageItem,
+	item: SceneItem<BoardImageItem>,
 	context: BoardRenderContext,
 ) {
 	const parts = partsByContainer.get(container);
@@ -52,8 +45,6 @@ function sync(
 	const texture = key ? context.getTexture(key) : null;
 	const failed = Boolean(key && !texture && context.hasError(key));
 	const texId = texture ? `${texture.width}x${texture.height}` : "none";
-	// The cache key is part of the signature so a pooled container adopted by a
-	// different image always swaps its texture, even at an identical frame size.
 	const sig = [
 		key ?? "",
 		width,
@@ -84,7 +75,6 @@ function sync(
 				width: 1,
 				alpha: 0.9,
 			});
-		// Subtle loading / broken mark.
 		const cx = width / 2;
 		const cy = height / 2;
 		if (failed) {
@@ -102,8 +92,6 @@ function sync(
 	}
 	parts.placeholder.visible = !texture;
 
-	// Selection outline hugs the visible pixels, not the frame, so handles never
-	// float in letterbox bands while a size correction is still pending.
 	if (selected || hovered) {
 		const hasPixels = Boolean(texture) && parts.sprite.width > 0;
 		const ox = hasPixels ? parts.sprite.x : 0;
@@ -126,7 +114,6 @@ export const imageCardRenderer: BoardCardRenderer = {
 		const root = new Container();
 		const sprite = new Sprite(Texture.EMPTY);
 		const placeholder = new Graphics();
-		// Clip content to the frame.
 		const mask = new Graphics();
 		const maskBox = () => {
 			mask.clear();
@@ -147,7 +134,6 @@ export const imageCardRenderer: BoardCardRenderer = {
 		if (item.type !== "image") return;
 		const parts = partsByContainer.get(container);
 		if (!parts) return;
-		// Keep mask sized to the current frame.
 		const mask = parts.root.children.find(
 			(child) => child !== parts.sprite && child !== parts.placeholder,
 		) as Graphics | undefined;
@@ -159,8 +145,6 @@ export const imageCardRenderer: BoardCardRenderer = {
 		}
 		sync(container, item, context);
 	},
-	// Far LOD: a neutral plate. Sampling the real texture here would mean one
-	// draw call per distinct image, defeating the batch.
 	renderFar: (graphics, item, context) => {
 		drawFarPlate(graphics, item.frame, {
 			fill: context.palette.hover,
@@ -173,7 +157,6 @@ export const imageCardRenderer: BoardCardRenderer = {
 	},
 };
 
-/** Helper kept for type narrowing in tests. */
-export function isImageItem(item: BoardItem): item is BoardImageItem {
+export function isImageItem(item: BoardSceneItem): item is SceneItem<BoardImageItem> {
 	return item.type === "image";
 }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Screen sharing rides on the device Runtime, which needs Android 11. -->
+    <bool name="display_control_enabled">false</bool>
+</resources>

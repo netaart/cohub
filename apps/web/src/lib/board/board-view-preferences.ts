@@ -4,9 +4,9 @@ import {
 	normalizeViewport,
 } from "@neta-art/cohub/board";
 
-const STORAGE_PREFIX = "cohub:board:view-states";
-const STORAGE_VERSION = 1;
-const MAX_STATES = 100;
+
+const STORAGE_PREFIX = "cohub:board:view";
+const MAX_ENTRIES = 200;
 
 type BoardSurfaceSize = { width: number; height: number };
 
@@ -17,17 +17,8 @@ export type BoardViewPreference = {
 	updatedAt: number;
 };
 
-type StoredBoardViewPreferences = {
-	version: typeof STORAGE_VERSION;
-	states: Record<string, BoardViewPreference>;
-};
-
 function storageKey(userKey: string) {
-	return `${STORAGE_PREFIX}:${encodeURIComponent(userKey)}:v${STORAGE_VERSION}`;
-}
-
-function stateKey(spaceId: string, boardId: string) {
-	return [spaceId, boardId].map(encodeURIComponent).join(":");
+	return `${STORAGE_PREFIX}:${encodeURIComponent(userKey)}`;
 }
 
 function browserStorage(): Storage | null {
@@ -53,8 +44,7 @@ function parsePreference(value: unknown): BoardViewPreference | null {
 	if (
 		!Number.isFinite(record.centerX) ||
 		!Number.isFinite(record.centerY) ||
-		!Number.isFinite(record.zoom) ||
-		!Number.isFinite(record.updatedAt)
+		!Number.isFinite(record.zoom)
 	) {
 		return null;
 	}
@@ -62,30 +52,31 @@ function parsePreference(value: unknown): BoardViewPreference | null {
 		centerX: record.centerX as number,
 		centerY: record.centerY as number,
 		zoom: clampZoom(record.zoom as number),
-		updatedAt: Math.max(0, record.updatedAt as number),
+		updatedAt:
+			typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt)
+				? Math.max(0, record.updatedAt)
+				: 0,
 	};
 }
 
-function readStoredPreferences(
-	userKey: string,
-	storage: Storage,
-): StoredBoardViewPreferences {
+function readAll(userKey: string, storage: Storage): Record<string, BoardViewPreference> {
+	const entries: Record<string, BoardViewPreference> = {};
 	try {
 		const raw = storage.getItem(storageKey(userKey));
-		if (!raw) return { version: STORAGE_VERSION, states: {} };
-		const parsed = JSON.parse(raw) as Partial<StoredBoardViewPreferences>;
-		if (parsed.version !== STORAGE_VERSION || !parsed.states) {
-			return { version: STORAGE_VERSION, states: {} };
+		const parsed = raw ? JSON.parse(raw) : null;
+		if (!parsed || typeof parsed !== "object") return entries;
+		for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+			const entry = parsePreference(value);
+			if (entry) entries[key] = entry;
 		}
-		const states: Record<string, BoardViewPreference> = {};
-		for (const [key, value] of Object.entries(parsed.states)) {
-			const preference = parsePreference(value);
-			if (preference) states[key] = preference;
-		}
-		return { version: STORAGE_VERSION, states };
 	} catch {
-		return { version: STORAGE_VERSION, states: {} };
+		return {};
 	}
+	return entries;
+}
+
+function entryKey(spaceId: string, boardId: string) {
+	return `${spaceId}:${boardId}`;
 }
 
 export function boardViewPreferenceFromCamera(
@@ -124,11 +115,7 @@ export function readBoardViewPreference(
 	storage = browserStorage(),
 ): BoardViewPreference | null {
 	if (!storage) return null;
-	return (
-		readStoredPreferences(userKey, storage).states[
-			stateKey(spaceId, boardId)
-		] ?? null
-	);
+	return readAll(userKey, storage)[entryKey(spaceId, boardId)] ?? null;
 }
 
 export function writeBoardViewPreference(
@@ -142,14 +129,12 @@ export function writeBoardViewPreference(
 	const parsed = parsePreference(preference);
 	if (!parsed) return;
 	try {
-		const stored = readStoredPreferences(userKey, storage);
-		stored.states[stateKey(spaceId, boardId)] = parsed;
-		const entries = Object.entries(stored.states).sort(
-			([, a], [, b]) => b.updatedAt - a.updatedAt,
-		);
-		stored.states = Object.fromEntries(entries.slice(0, MAX_STATES));
-		storage.setItem(storageKey(userKey), JSON.stringify(stored));
+		const entries = readAll(userKey, storage);
+		entries[entryKey(spaceId, boardId)] = parsed;
+		const trimmed = Object.entries(entries)
+			.sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
+			.slice(0, MAX_ENTRIES);
+		storage.setItem(storageKey(userKey), JSON.stringify(Object.fromEntries(trimmed)));
 	} catch {
-		// View preferences are best-effort and must never block Board interaction.
 	}
 }

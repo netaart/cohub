@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/protocol"
+	"github.com/cohub/apps/sandbox/rpc"
 )
 
 // connectionSession is one attached peer (agent or relay) talking the
@@ -134,7 +136,13 @@ func (s *Server) writeLoop(session *connectionSession) {
 			return
 		case payload := <-session.sendCh:
 			if err := session.conn.Write(session.ctx, websocket.MessageText, payload); err != nil {
-				s.logger.Warn("failed to write websocket message", slog.String("connectionId", session.id), slog.String("identity", session.identity), slog.String("error", err.Error()))
+				// A peer that vanished mid-handshake or a normal teardown is routine, not a fault.
+				var closeErr websocket.CloseError
+				if session.ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.As(err, &closeErr) {
+					s.logger.Debug("websocket write after teardown", slog.String("connectionId", session.id), slog.String("identity", session.identity), slog.String("error", err.Error()))
+				} else {
+					s.logger.Warn("failed to write websocket message", slog.String("connectionId", session.id), slog.String("identity", session.identity), slog.String("error", err.Error()))
+				}
 				session.cancel()
 				return
 			}
@@ -221,6 +229,10 @@ func (s *Server) sendHeartbeat(session *connectionSession, includeSnapshot bool)
 			ProcessStart:       true,
 			ProcessStartArgv:   true,
 			ProcessAbort:       true,
+			ProcessRg:          rpc.HasRipgrep(),
+			ProcessFd:          rpc.HasFd(),
+			Display:            true,
+			RTC:                true,
 		}
 		message.Filesystem = &protocol.SandboxFilesystem{
 			DefaultCwd: s.cfg.WorkspaceDir,

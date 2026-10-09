@@ -72,12 +72,15 @@ cohub -s <spaceId> spaces invites revoke <code> --yes
 cohub -s <spaceId> run -- git status
 ```
 
-Many space-scoped commands need a target Space. Without an explicit target, commands
-also use the Space remembered for the current directory before falling back to Home:
+Space-scoped commands use `-s`, then `COHUB_SPACE_ID`, then the Space remembered for
+the current directory. `<space>` is a Space ID, a slug you own such as `home`, or
+`username/slug`. Only `prompt`, `completion`, `generate`, `apps`, and `public` fall
+back to your Home Space; other commands exit with an error when no target is given:
 
 ```bash
 cohub -s <spaceId> spaces prompt "message" --json
 COHUB_SPACE_ID=<spaceId> cohub spaces prompt "message" --json
+cohub -s home spaces files ls
 ```
 
 ## Local Runtime
@@ -85,26 +88,21 @@ COHUB_SPACE_ID=<spaceId> cohub spaces prompt "message" --json
 Connect one local workspace to a Space and select Pi or Codex per turn.
 
 To keep using native terminals with ordinary Cohub Chats / Turns:
-使用原生终端，并同步到普通 Cohub Chat / Turn：
 
 ```bash
 cohub runtime up -d --harness pi --harness codex
-cohub runtime attach --harness pi --harness codex
-# Reload Pi / restart Codex and approve its hook trust prompt.
-# 重载 Pi / 重启 Codex，并审核 Hook 信任提示。
-cohub runtime detach --harness pi --harness codex # Pause; retain data / 暂停，保留数据
+# Answer the native sync consent (default yes), then reload Pi / restart Codex
+# and approve its hook trust prompt.
+cohub runtime detach --harness pi --harness codex # Pause; retain data
 ```
 
-`attach` explicitly authorizes this project's opened conversation history and raw native archives.
-The Runtime Supervisor is the single local Daemon: Pi / Codex integrations use its private IPC,
+`up` installs native sync by default after one explicit consent (default yes); declining or a
+capability failure keeps the Runtime running without it, and `up` is idempotent. The Runtime
+Supervisor is the single local Daemon: Pi / Codex integrations use its private IPC,
 while native Turn events use the existing Runtime WebSocket. Configuration is backed up, existing
 Runtime bindings are reused, and competing continuations fork at complete Turns without blocking native work. Requires Pi 0.85.1+ or Codex with stable
 Hooks enabled. User-level integrations remain inert outside opted-in directories. See
-[boundaries and privacy](../../docs/local-runtime.md#native-clients--原生客户端).
-
-`attach` 明确授权上传当前项目打开的对话历史与原生归档；复用现有绑定，配置修改前备份。
-冲突时按完整 Turn 分支，不阻塞本地执行。用户级集成在未授权目录中不会采集数据。
-
+[boundaries and privacy](../../docs/local-runtime.md#native-clients).
 
 ```bash
 cohub runtime up ./project --harness pi --harness codex
@@ -116,6 +114,13 @@ cohub runtime up -d
 cohub runtime down
 cohub runtime up -n --name another-project
 ```
+
+On macOS and Linux X11, a new Runtime offers screen sharing by default. The prompt
+explains that collaborators and agents can see and control the screen; Enter accepts,
+and `n` declines. Use `--no-display` to skip sharing, or `--display xvfb[:WIDTHxHEIGHT]`
+for a virtual screen. `--yes` also authorizes default screen sharing. Headless and
+Wayland-only Linux sessions skip the default offer; an existing Runtime keeps its
+screen configuration unless explicitly overridden (configuration changes require a restart).
 
 Runtime diagnostics stay as redacted JSONL under the local Runtime state directory and
 are never uploaded automatically. Use `runtime logs --json` to export a failure report;
@@ -141,10 +146,6 @@ code 2 means it remains in the background trying to connect. `status --json` inc
 local process and remote component status. `down` retains all data and requires `--yes`
 when executions remain unconfirmed. `logs --level warn --follow` shows sensitive events;
 foreground startup prints these automatically. Runtime commands never fall back to Home.
-
-普通使用只需 `cohub runtime up`，首次提示新建，后续优先复用。`-n` 是 `--new` 的简写，
-`--name` 单独指定名称。`-d` 后台运行并返回链接、PID 和日志位置；`down` 停止但保留所有数据。
-断网及临时凭证错误自动重试；断连不代表任务已停止，也不会自动重跑工具。
 
 ## Chats and prompts
 
@@ -187,6 +188,7 @@ Scheduling rules:
 cohub -s <spaceId> spaces sessions ls --json
 cohub -s <spaceId> spaces sessions create "<title>" --json
 cohub -s <spaceId> spaces sessions get <sessionId> --json
+cohub -s <spaceId> spaces sessions files <sessionId> --json
 cohub -s <spaceId> spaces sessions rename <sessionId> "<new title>"
 ```
 
@@ -230,57 +232,63 @@ cohub -s <spaceId> spaces activity 365 --json
 
 ## Boards
 
-Board targets accept a Board ID or a `.board` path. Every command supports `-h` and `--json`:
+A Board is one JSON document with three parts — `board` settings, an `items` map,
+and an `animations` map. Board targets accept a Board ID or a `.board` path. Every
+command supports `-h`, and the global `--json` makes the output machine-readable:
 
 ```bash
 cohub boards -h
-cohub -s <spaceId> boards inspect boards/plan.board --json
-cohub -s <spaceId> boards items list <boardId>
-cohub -s <spaceId> boards connections list <boardId>
-cohub -s <spaceId> boards capabilities <boardId>
+cohub -s <spaceId> boards get boards/plan.board --json
+cohub -s <spaceId> boards get <boardId> --only items
+cohub -s <spaceId> boards get <boardId> --only board
+cohub -s <spaceId> boards schema
+cohub -s <spaceId> boards history <boardId> --json
 cohub -s <spaceId> boards watch <boardId> --json
 ```
 
-Use targeted reads for large Boards:
+Use the filters so a large Board is not read whole:
 
 ```bash
-cohub -s <spaceId> boards items get <boardId> <itemId> --json
-cohub -s <spaceId> boards connections get <boardId> <connectionId> --json
-cohub -s <spaceId> boards effects get <boardId> <effectId> --json
-cohub -s <spaceId> boards compositions get <boardId> <compositionId> --json
+cohub -s <spaceId> boards get <boardId> --items title,note
+cohub -s <spaceId> boards get <boardId> --within s1
+cohub -s <spaceId> boards get <boardId> --rect 0,0,1600,900
 ```
 
-Create semantic JSON from an example, then apply it to one resource:
+Start from an example and write it with `apply`, a JSON Merge Patch where fields
+merge, `null` deletes, and unmentioned fields stay:
 
 ```bash
-cohub boards examples item text > item.json
-cohub -s <spaceId> boards items create <boardId> --input item.json
+cohub boards examples workflow > seed.json
+cohub -s <spaceId> boards create boards/plan.board --title "Plan" -i seed.json
 
-cohub boards examples composition fade > intro.json
-cohub -s <spaceId> boards compositions apply <boardId> --input intro.json
+cohub -s <spaceId> boards apply <boardId> '{"items":{"title":{"props":{"text":"Updated"}}}}'
+cohub -s <spaceId> boards apply <boardId> -i changes.json
 ```
 
-Apply related changes atomically with one request. The batch contains semantic commands, not a full Board snapshot:
-
-```json
-{"commands":[
-  {"type":"item.patch","itemId":"title","patch":{"props":{"text":"Updated"}}},
-  {"type":"connection.create","connection":{"id":"title-agent","source":{"itemId":"title"},"target":{"itemId":"agent"}}}
-]}
-```
+Group a whole change into one patch so it lands as one version. `--replace` makes
+the document equal to the patch instead of merging; `--cascade` also deletes
+children and the tracks targeting a deleted item:
 
 ```bash
-cohub boards examples batch basic > changes.json
-cohub -s <spaceId> boards batch <boardId> --input changes.json --dry-run
-cohub -s <spaceId> boards batch <boardId> --input changes.json
+cohub -s <spaceId> boards apply <boardId> -i changes.json --dry-run
+cohub -s <spaceId> boards apply <boardId> -i changes.json --base-version 12 --mutation-id deploy-1
 ```
 
-Use `--base-version` and `--mutation-id` for controlled, retry-safe scripts. Use `--dry-run` to validate without writing. Playback is grouped under `playback`:
+Use `--base-version` and `--mutation-id` for controlled, retry-safe scripts, and
+`--dry-run` to validate without writing. `boards preset` prints a preset motion as
+tracks — an apply-ready patch with `--animation`, bare tracks without it:
 
 ```bash
-cohub -s <spaceId> boards playback play <boardId> <compositionId>
-cohub -s <spaceId> boards playback seek <boardId> <playbackId> 400
-cohub -s <spaceId> boards playback stop <boardId> <playbackId>
+cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub boards apply <boardId> -i -
+cohub -s <spaceId> boards preset float --targets ship > idle-tracks.json
+```
+
+Playback commands sit on `boards` directly:
+
+```bash
+cohub -s <spaceId> boards play <boardId> <animationId> --at 2.5s
+cohub -s <spaceId> boards seek <boardId> 12.5s
+cohub -s <spaceId> boards stop <boardId>
 ```
 
 ## Search
@@ -357,11 +365,31 @@ Pass generation parameters with `--param key=value` or `--parameters '<json>'`.
 ```bash
 cohub -s <spaceId> spaces files ls [path] --json
 cohub -s <spaceId> spaces files cat <path>
+cohub -s <spaceId> spaces files cat <path> > <local-file>
 cohub -s <spaceId> spaces files write <path> -c "<content>"
 cohub -s <spaceId> spaces files upload <files...> --dir <dir>
+cohub spaces files cp [-r] [-n] [-p] <source>... <destination>
 cohub -s <spaceId> spaces files mv <from> <to>
 cohub -s <spaceId> spaces files rm <path>
 ```
+
+`cat` streams raw bytes, so redirecting it saves binary files intact.
+
+`cp` works like `scp` with `cp` semantics: the last path is the destination,
+directories need `-r`, existing files are overwritten and directories merged
+(`-n` keeps existing files, `-p` keeps modification times). `<space>:<path>`
+addresses a Space by id, `username/slug`, or the slug of a Space you own. Bare
+paths address the current Space when one is declared with `-s` or
+`COHUB_SPACE_ID` (as inside a Cohub sandbox) and local files otherwise;
+absolute paths outside `/workspace` are always local:
+
+```bash
+cohub spaces files cp -r alice/templates:starter ./starter    # download
+cohub spaces files cp report.pdf <spaceId>:inbox/             # upload
+cohub -s <spaceId> spaces files cp -r other:docs docs         # Space to Space
+```
+
+Copies between Spaces run server-side and never pass file content through the CLI.
 
 `upload` places each file under `--dir`; a directory argument contributes its
 contents directly (like `aws s3 cp dir remote:path`), so `upload dist --dir apps/demo`

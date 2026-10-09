@@ -1,6 +1,6 @@
 import type {
 	BoardAwarenessGesture,
-	BoardAwarenessNodePreview,
+	BoardAwarenessItemPreview,
 	BoardAwarenessStateUpdate,
 	BoardAwarenessUpdate,
 	BoardAwarenessViewport,
@@ -12,7 +12,10 @@ import {
 	BOARD_AWARENESS_WORLD_EXTENT_LIMIT,
 } from "@cohub/protocol/realtime";
 import type { BoardAwarenessUpdatedEvent } from "@neta-art/cohub";
-import type { BoardFrame, BoardItem } from "@neta-art/cohub/board";
+import type {
+	BoardFrame,
+	BoardSceneItem as BoardItem,
+} from "@neta-art/cohub/board";
 import { selectionBounds } from "@neta-art/cohub/board";
 import type { BoardEditor, BoardInteraction } from "$lib/board/editor.svelte";
 
@@ -26,9 +29,6 @@ const PEER_TTL_MS = 10_000;
 const ENDED_GESTURE_TTL_MS = 12_000;
 const MAX_PREVIEW_NODES = 64;
 
-// Sequence ordering belongs to the websocket connection, which can outlive a
-// BoardPanel. Keep one allocator for the page so a remounted controller never
-// restarts below the final updates from its predecessor.
 let localAwarenessSequence = 0;
 
 function nextLocalAwarenessSequence(): number {
@@ -41,7 +41,7 @@ export type RemoteBoardGesture =
 	| {
 			kind: "draw";
 			id: string;
-			nodeId: string;
+			itemId: string;
 			color: string;
 			size: number;
 			from: 0;
@@ -167,23 +167,11 @@ function viewportChanged(
 	);
 }
 
-function previewForItem(item: BoardItem): BoardAwarenessNodePreview {
-	return {
-		nodeId: item.id,
-		frame: { ...item.frame },
-		...(item.type === "arrow"
-			? {
-					arrow: {
-						start: { ...item.start },
-						end: { ...item.end },
-						bend: item.bend,
-					},
-				}
-			: {}),
-	};
+function previewForItem(item: BoardItem): BoardAwarenessItemPreview {
+	return { itemId: item.id, frame: { ...item.frame } };
 }
 
-function interactionNodeIds(interaction: BoardInteraction): string[] {
+function interactionItemIds(interaction: BoardInteraction): string[] {
 	switch (interaction.type) {
 		case "translating":
 		case "resizing":
@@ -195,11 +183,6 @@ function interactionNodeIds(interaction: BoardInteraction): string[] {
 		case "creatingArrow":
 		case "creatingBox":
 			return [interaction.id];
-		// Connection gestures create no node, so they contribute no node ids; their
-		// liveness is carried by the gesture itself.
-		case "creatingConnection":
-		case "draggingConnectionEnd":
-			return [];
 		default:
 			return [];
 	}
@@ -211,7 +194,7 @@ function gestureFromEditor(editor: BoardEditor): BoardAwarenessGesture | null {
 		return {
 			kind: "draw",
 			id: interaction.id,
-			nodeId: interaction.id,
+			itemId: interaction.id,
 			color: interaction.color,
 			size: interaction.size,
 			from: 0,
@@ -222,9 +205,11 @@ function gestureFromEditor(editor: BoardEditor): BoardAwarenessGesture | null {
 		return {
 			kind: "arrow",
 			id: interaction.id,
-			nodeId: interaction.id,
+			itemId: interaction.id,
 			start: interaction.start,
 			current: interaction.current,
+			startItemId: interaction.startItemId,
+			endItemId: interaction.targetItemId,
 			color: interaction.color,
 			size: interaction.size,
 		};
@@ -233,12 +218,12 @@ function gestureFromEditor(editor: BoardEditor): BoardAwarenessGesture | null {
 		return {
 			kind: "box",
 			id: interaction.id,
-			nodeId: interaction.id,
+			itemId: interaction.id,
 			shape: interaction.kind,
 			start: interaction.start,
 			current: interaction.current,
 			color: interaction.color,
-			geo: interaction.geo,
+			geometry: interaction.geometry,
 		};
 	}
 	if (
@@ -247,9 +232,9 @@ function gestureFromEditor(editor: BoardEditor): BoardAwarenessGesture | null {
 		interaction.type === "rotating" ||
 		interaction.type === "draggingArrowHandle"
 	) {
-		const ids = interactionNodeIds(interaction);
+		const ids = interactionItemIds(interaction);
 		const allFrames: BoardFrame[] = [];
-		const nodes: BoardAwarenessNodePreview[] = [];
+		const nodes: BoardAwarenessItemPreview[] = [];
 		for (const id of ids) {
 			const item = editor.itemById(id);
 			if (!item) continue;
@@ -271,7 +256,7 @@ function gestureFromEditor(editor: BoardEditor): BoardAwarenessGesture | null {
 					? `gesture_${interaction.arrowId}`
 					: `gesture_${ids.length}_${ids.slice(0, 3).join("_").slice(0, 100)}`,
 			mode,
-			nodes,
+			items: nodes,
 			bounds: frameFromBounds(selectionBounds(allFrames)),
 		};
 	}
@@ -289,40 +274,10 @@ function sameFrame(a: BoardFrame, b: BoardFrame): boolean {
 }
 
 function previewMatchesItem(
-	preview: BoardAwarenessNodePreview,
+	preview: BoardAwarenessItemPreview,
 	item: BoardItem | undefined,
 ): boolean {
-	if (!item || !sameFrame(preview.frame, item.frame)) return false;
-	if (!preview.arrow) return true;
-	if (item.type !== "arrow") return false;
-	return (
-		item.bend === preview.arrow.bend &&
-		JSON.stringify(item.start) === JSON.stringify(preview.arrow.start) &&
-		JSON.stringify(item.end) === JSON.stringify(preview.arrow.end)
-	);
-}
-
-const COLLABORATION_COLOR_FALLBACKS = [
-	0xe8450e, 0x2563eb, 0x16a34a, 0xe11d48, 0xd97706, 0x7c3aed,
-] as const;
-
-export function collaborationColorIndex(actorId: string): number {
-	let hash = 0;
-	for (let index = 0; index < actorId.length; index += 1) {
-		hash = (hash * 31 + actorId.charCodeAt(index)) | 0;
-	}
-	return Math.abs(hash) % COLLABORATION_COLOR_FALLBACKS.length;
-}
-
-export function collaborationColorToken(actorId: string): string {
-	return `--board-collaboration-${collaborationColorIndex(actorId) + 1}`;
-}
-
-export function collaborationColor(actorId: string): number {
-	return (
-		COLLABORATION_COLOR_FALLBACKS[collaborationColorIndex(actorId)] ??
-		COLLABORATION_COLOR_FALLBACKS[0]
-	);
+	return Boolean(item && sameFrame(preview.frame, item.frame));
 }
 
 export function createBoardAwarenessController(options: ControllerOptions) {
@@ -453,16 +408,13 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 		if (!next) {
 			if (!activeGesture) return;
 			flushGesture();
-			const nodeIds = interactionNodeIds(editor.interaction);
 			emit({
 				type: "gesture.end",
 				gestureId: activeGesture.id,
-				resultingNodeIds:
+				resultingItemIds:
 					activeGesture.kind === "transform"
-						? activeGesture.nodes.map((node) => node.nodeId)
-						: "nodeId" in activeGesture
-							? [activeGesture.nodeId]
-							: nodeIds,
+						? activeGesture.items.map((item) => item.itemId)
+						: [activeGesture.itemId],
 			});
 			activeGesture = null;
 			pendingGesture = null;
@@ -477,7 +429,6 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 			sentDrawPoints = 0;
 		}
 		pendingGesture = next;
-		// Preserve the complete raw stroke locally; only each wire chunk is capped.
 		if (next.kind === "draw" && editor.interaction.type === "drawing") {
 			pendingGesture = { ...next, points: editor.interaction.points };
 		}
@@ -540,10 +491,8 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 				) {
 					peer.gesture = { ...gesture, from: 0, points: [...gesture.points] };
 				} else if (gesture.from === current.points.length) {
-					peer.gesture = {
-						...current,
-						points: [...current.points, ...gesture.points],
-					};
+					current.points.push(...gesture.points);
+					peer.gesture = { ...current };
 				}
 			} else {
 				peer.gesture = gesture;
@@ -559,23 +508,22 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 		options.onChange();
 	}
 
-	function reconcile(items: BoardItem[]) {
+	function reconcile(items: readonly BoardItem[]) {
+		const waiting = [...peers.values()].some(
+			(peer) => peer.gesture && peer.gestureEndedAt != null,
+		);
+		if (!waiting) return;
 		const itemsById = new Map(items.map((item) => [item.id, item]));
 		let changed = false;
 		for (const peer of peers.values()) {
 			if (!peer.gesture || peer.gestureEndedAt == null) continue;
 			const gesture = peer.gesture;
-			// A connection gesture is settled by the relation appearing, which the
-			// item list cannot show, so it is retired on its end signal alone rather
-			// than being held open waiting for a node that will never arrive.
 			const applied =
 				gesture.kind === "transform"
-					? gesture.nodes.every((preview) =>
-							previewMatchesItem(preview, itemsById.get(preview.nodeId)),
+					? gesture.items.every((preview) =>
+							previewMatchesItem(preview, itemsById.get(preview.itemId)),
 						)
-					: gesture.kind === "connection"
-						? true
-						: itemsById.has(gesture.nodeId);
+					: itemsById.has(gesture.itemId);
 			if (!applied) continue;
 			peer.gesture = null;
 			peer.gestureEndedAt = null;

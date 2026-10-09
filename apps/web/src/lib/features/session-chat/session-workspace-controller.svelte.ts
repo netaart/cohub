@@ -55,7 +55,7 @@ export function createSessionWorkspaceController() {
 		sessionStateById = {
 			...sessionStateById,
 			[session.id]: {
-				session,
+				session: mergeSessionRecord(existingSession, session),
 				turns: existing?.turns ?? [],
 				loading: existing?.loading ?? false,
 				loaded: existing?.loaded ?? false,

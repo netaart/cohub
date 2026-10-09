@@ -1,6 +1,7 @@
+import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { BoardAuthoringItemSchema, SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
+import { SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
 import type {
   PublicFileCreateUploadInput,
   PublicFileCreateUploadResponse,
@@ -18,6 +19,7 @@ import {
 } from "@cohub/protocol/realtime/types";
 import type { BoardAwarenessUpdate } from "@cohub/protocol/realtime";
 import { ensureRealtimeConnected } from "../realtime.js";
+import { SpaceDisplaysApi } from "./displays.js";
 import type { WebsocketClient, WebsocketEventPayload } from "../websocket.js";
 import { HttpError, type HttpTransport, type Fetch } from "../transport.js";
 import {
@@ -49,6 +51,7 @@ import type {
   StoredIntermediateMessage,
   StoredToolCall,
   TurnIntermediateMessagesFile,
+  SessionFilesResponse,
   SessionRecord,
   SpaceAccessPolicy,
   SpaceCheckpointDetailResponse,
@@ -65,6 +68,10 @@ import type {
   SpaceEnvInput,
   SpaceFsCompleteUploadInput,
   SpaceFsCompleteUploadResponse,
+  SpaceFsCopyInput,
+  SpaceFsCopyResponse,
+  SpaceFsCopyResult,
+  SpaceFsCopyStats,
   SpaceFsCreateUploadInput,
   SpaceFsCreateUploadResponse,
   SpaceFsFileResponse,
@@ -86,6 +93,8 @@ import type {
   SpaceModListItem,
   SpaceMember,
   SpaceRecord,
+  SpaceListOptions,
+  SpaceListPage,
   SpaceRole,
   SpaceSessionsResponse,
   SpaceTurnAuthorFilter,
@@ -95,17 +104,16 @@ import type {
   SpaceConfigInput,
   SpaceConfigResponse,
   SpaceConfigUpdateResponse,
-  BoardAuthoringReadInput,
-  BoardAuthoringSnapshot,
-  BoardCapabilities,
+  BoardApplyInput,
+  BoardApplyResult,
   BoardCreateInput,
-  BoardMutationReceipt,
+  BoardHistoryInput,
+  BoardHistoryPage,
+  BoardPatch,
   BoardPlaybackCommand,
   BoardPlaybackSnapshot,
-  BoardSemanticMutation,
-  BoardSummary,
-  BoardTransactionsPage,
-  BoardTransactionsReadInput,
+  BoardReadInput,
+  BoardReadResult,
   ChannelConfig,
   ChannelHealth,
 } from "../types.js";
@@ -245,21 +253,31 @@ const getPersistedMessageTurnId = (event: WebsocketEventPayload) => {
   return typeof meta?.turnId === "string" ? meta.turnId : null;
 };
 
+export type SpaceListFilter = "recent" | "all" | "mine" | "pinned" | "archived";
+
 export class SpacesApi {
   constructor(private readonly transport: HttpTransport) {}
 
-  list(customFetch?: Fetch) {
-    return this.transport.request<SpaceRecord[]>("/api/spaces", {
-      method: "GET",
-      fetch: customFetch,
-    });
+  list(options?: SpaceListOptions, customFetch?: Fetch): Promise<SpaceListPage>;
+  list(customFetch: Fetch): Promise<SpaceListPage>;
+  list(optionsOrFetch: SpaceListOptions | Fetch = {}, customFetch?: Fetch): Promise<SpaceListPage> {
+    // The SDK is published, so keep the legacy `list(customFetch)` call shape working.
+    const options = typeof optionsOrFetch === "function" ? {} : optionsOrFetch;
+    const fetch = typeof optionsOrFetch === "function" ? optionsOrFetch : customFetch;
+    const params = new URLSearchParams();
+    params.set("filter", options.filter ?? "recent");
+    if (options.limit) params.set("limit", String(options.limit));
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.query) params.set("q", options.query);
+    if (options.name) params.set("name", options.name);
+    for (const recent of options.recentSpaces ?? []) {
+      params.append("recentSpaceId", recent.id);
+      params.append("recentSpaceAt", new Date(recent.timestamp).toISOString());
+    }
+    return this.transport.request<SpaceListPage>(`/api/spaces?${params}`, { fetch });
   }
 
-  /**
-   * Resolve the user's default space (owned/member home, else most recent).
-   * When the account has no accessible space, the API creates a blank Home
-   * space (`slug=home`) and returns it.
-   */
+  /** Landing Space within the user's own Spaces; use `ensureHome()` for a write target. */
   getDefault(customFetch?: Fetch) {
     return this.transport.request<SpaceDefaultResponse>("/api/spaces/default", {
       method: "GET",
@@ -278,6 +296,21 @@ export class SpacesApi {
       `/api/spaces/by-slug/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`,
       { fetch: customFetch },
     );
+  }
+
+  getOwnedBySlug(slug: string, customFetch?: Fetch) {
+    return this.transport.request<SpaceRecord>(
+      `/api/me/spaces/by-slug/${encodeURIComponent(slug)}`,
+      { fetch: customFetch },
+    );
+  }
+
+  /** The account's own Home Space, created on first use. */
+  ensureHome(customFetch?: Fetch) {
+    return this.transport.request<SpaceRecord>("/api/me/spaces/home", {
+      method: "POST",
+      fetch: customFetch,
+    });
   }
 
   create(
@@ -304,6 +337,24 @@ export type ResolveSpaceFileUrlOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   fetch?: Fetch;
+};
+
+export type OpenSpaceFileOptions = {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  fetch?: Fetch;
+};
+
+export type SpaceFileStream = {
+  response: Response;
+  filename: string;
+  mimeType: string;
+};
+
+export type WaitForSpaceFsCopyOptions = {
+  pollMs?: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: SpaceFsCopyStats) => void;
 };
 
 function inlineFileDataUrl(file: SpaceFsFileResponse) {
@@ -420,7 +471,7 @@ export class SpaceFilesApi {
 
   read(path: string, customFetch?: Fetch, signal?: AbortSignal) {
     const params = new URLSearchParams({ path });
-    return this.transport.request<SpaceFsFileResponse | SpaceFsPreparingFile>(
+    return this.transport.requestRevalidated<SpaceFsFileResponse | SpaceFsPreparingFile>(
       `/api/spaces/${this.spaceId}/fs/file?${params.toString()}`,
       { fetch: customFetch, signal },
     );
@@ -501,33 +552,34 @@ export class SpaceFilesApi {
     );
   }
 
-	async download(path: string, customFetch?: Fetch) {
-		const params = new URLSearchParams({ path });
-		const raw = await this.transport.raw(
-			`/api/spaces/${this.spaceId}/fs/download?${params.toString()}`,
-			{ fetch: customFetch },
-		);
-		if (raw.response.status === 202) {
-			throw new HttpError(
-				"File is being prepared. Please retry shortly.",
-				202,
-				await raw.json().catch(() => null),
-			);
-		}
-		const blob = await raw.blob();
-		const filename =
-			getFilenameFromContentDisposition(
-				raw.response.headers.get("content-disposition"),
-			) ??
-			path.split("/").pop() ??
-			"download";
-		const mimeType =
-			raw.response.headers.get("content-type") ??
-			blob.type ??
-			"application/octet-stream";
+  async open(path: string, options: OpenSpaceFileOptions = {}): Promise<SpaceFileStream> {
+    const params = new URLSearchParams({ path });
+    const deadlineAt = Date.now() + Math.max(0, options.timeoutMs ?? 60_000);
+    while (true) {
+      const raw = await this.transport.raw(
+        `/api/spaces/${this.spaceId}/fs/download?${params.toString()}`,
+        { fetch: options.fetch, signal: options.signal },
+      );
+      const { response } = raw;
+      if (response.status !== 202) {
+        return {
+          response,
+          filename: getFilenameFromContentDisposition(response.headers.get("content-disposition")) ?? path.split("/").pop() ?? "download",
+          mimeType: response.headers.get("content-type") ?? "application/octet-stream",
+        };
+      }
+      const body = await raw.json().catch(() => null) as { retryAfterMs?: unknown } | null;
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) throw new HttpError("File is being prepared. Please retry shortly.", 202, body);
+      const retryAfterMs = typeof body?.retryAfterMs === "number" ? body.retryAfterMs : 2_000;
+      await waitForSpaceFileRetry(Math.min(Math.max(250, Math.min(retryAfterMs, 2_000)), remainingMs), options.signal);
+    }
+  }
 
-		return { blob, filename, mimeType };
-	}
+  async download(path: string, customFetch?: Fetch) {
+    const { response, filename, mimeType } = await this.open(path, { fetch: customFetch });
+    return { blob: await response.blob(), filename, mimeType };
+  }
 
   write(input: SpaceFsWriteFileInput) {
     return this.transport.request<{ ok: true; path: string; size: number; mtimeMs: number }>(
@@ -538,6 +590,37 @@ export class SpaceFilesApi {
         body: JSON.stringify(input),
       },
     );
+  }
+
+  copy(input: SpaceFsCopyInput) {
+    return this.transport.request<SpaceFsCopyResponse>(
+      `/api/spaces/${this.spaceId}/fs/copy`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  getCopy(copyId: string, options: { waitMs?: number; signal?: AbortSignal } = {}) {
+    const params = new URLSearchParams();
+    if (options.waitMs) params.set("waitMs", String(options.waitMs));
+    const query = params.toString();
+    return this.transport.request<SpaceFsCopyResponse>(
+      `/api/spaces/${this.spaceId}/fs/copies/${encodeURIComponent(copyId)}${query ? `?${query}` : ""}`,
+      { signal: options.signal },
+    );
+  }
+
+  async waitForCopy(copy: SpaceFsCopyResponse, options: WaitForSpaceFsCopyOptions = {}): Promise<SpaceFsCopyResult> {
+    let current = copy;
+    while (current.status !== "completed" || !current.result) {
+      if (current.progress) options.onProgress?.(current.progress);
+      options.signal?.throwIfAborted();
+      current = await this.getCopy(current.copyId, { waitMs: options.pollMs ?? 5_000, signal: options.signal });
+    }
+    return current.result;
   }
 
   createDir(path: string, mutationId?: string) {
@@ -948,6 +1031,22 @@ export class SessionClient {
       {
         fetch: customFetch,
       },
+    );
+  }
+
+  async stats(options: { signal?: AbortSignal } = {}): Promise<{ stats: SessionStats }> {
+    const response = await this.transport.request<{ stats: unknown }>(`/api/sessions/${this.id}/stats`, options);
+    const stats = readSessionStats({ stats: response.stats });
+    if (!stats) throw new Error("Invalid session statistics");
+    return { stats };
+  }
+
+  /** Space files changed by this session's agent write/edit tool calls. */
+  files(options: { limit?: number; signal?: AbortSignal } = {}) {
+    const query = options.limit ? `?limit=${options.limit}` : "";
+    return this.transport.request<SessionFilesResponse>(
+      `/api/sessions/${this.id}/files${query}`,
+      { signal: options.signal },
     );
   }
 
@@ -1823,72 +1922,100 @@ class BoardRealtimeClient {
 
 export class BoardClient {
   readonly realtime: BoardRealtimeClient;
-  private readonly boards: SpaceBoardsApi;
 
   constructor(
     readonly spaceId: string,
     readonly id: string,
-    transport: HttpTransport,
+    private readonly transport: HttpTransport,
     private readonly websocketClient: WebsocketClient | null,
   ) {
-    this.boards = new SpaceBoardsApi(transport, spaceId, websocketClient);
     this.realtime = new BoardRealtimeClient(websocketClient, spaceId, id);
   }
 
-  capabilities(customFetch?: Fetch) {
-    return this.boards.capabilities(this.id, customFetch);
+  private get path() {
+    return `/api/spaces/${this.spaceId}/boards/${this.id}`;
   }
 
-  summary(customFetch?: Fetch) {
-    return this.boards.summary(this.id, customFetch);
+  /** Read the Board, or part of it. Every value is complete, defaults included. */
+  get(input: BoardReadInput = {}, customFetch?: Fetch) {
+    const params = new URLSearchParams();
+    if (input.only?.length) params.set("only", input.only.join(","));
+    if (input.rect) params.set("rect", [input.rect.x, input.rect.y, input.rect.width, input.rect.height].join(","));
+    if (input.within) params.set("within", input.within);
+    if (input.items?.length) params.set("items", input.items.join(","));
+    if (input.animations?.length) params.set("animations", input.animations.join(","));
+    if (input.limit !== undefined) params.set("limit", String(input.limit));
+    if (input.cursor) params.set("cursor", input.cursor);
+    const query = params.toString();
+    return this.transport.request<BoardReadResult>(`${this.path}${query ? `?${query}` : ""}`, { fetch: customFetch });
   }
 
-  authoring(input: BoardAuthoringReadInput = {}, customFetch?: Fetch) {
-    return this.boards.authoring(this.id, input, customFetch);
-  }
-
-  /** Read-only transaction log, newest first; the first page carries the current rows. */
-  transactions(input: BoardTransactionsReadInput = {}, customFetch?: Fetch) {
-    return this.boards.transactions(this.id, input, customFetch);
-  }
-
-  mutateSemantic(
-    input: Omit<BoardSemanticMutation, "mutationId" | "dryRun"> & {
-      mutationId?: string;
-      dryRun?: boolean;
-    },
-  ) {
-    return this.boards.mutateSemantic(this.id, {
-      ...input,
-      mutationId: input.mutationId ?? randomBoardId(),
-      dryRun: input.dryRun ?? false,
+  /** Merge a patch into the Board: fields merge, `null` deletes. */
+  apply(patch: BoardPatch, options: Omit<BoardApplyInput, "patch"> = {}) {
+    return this.transport.request<BoardApplyResult>(`${this.path}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...options, patch, mutationId: options.mutationId ?? randomBoardId() }),
     });
+  }
+
+  /** Transactions newest first, each with the before/after state of what it changed. */
+  history(input: BoardHistoryInput = {}, customFetch?: Fetch) {
+    const params = new URLSearchParams();
+    if (input.before !== undefined) params.set("before", String(input.before));
+    if (input.limit !== undefined) params.set("limit", String(input.limit));
+    const query = params.toString();
+    return this.transport.request<BoardHistoryPage>(`${this.path}/history${query ? `?${query}` : ""}`, { fetch: customFetch });
+  }
+
+  /** Return the Board to an earlier version as a new write. */
+  restore(version: number) {
+    return this.transport.request<BoardApplyResult>(`${this.path}/restore`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version }),
+    });
+  }
+
+  private playback(command: BoardPlaybackCommand) {
+    return this.transport
+      .request<{ playback: BoardPlaybackSnapshot | null }>(`${this.path}/playback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(command),
+      })
+      .then((response) => response.playback);
+  }
+
+  /** Shared playback: every viewer follows the same clock. */
+  play(animationId: string, options: { position?: number; timeScale?: number; seed?: string } = {}) {
+    return this.playback({ commandId: randomBoardId(), type: "play", animationId, ...options });
+  }
+
+  pause() {
+    return this.playback({ commandId: randomBoardId(), type: "pause" });
+  }
+
+  resume() {
+    return this.playback({ commandId: randomBoardId(), type: "resume" });
+  }
+
+  seek(position: number) {
+    return this.playback({ commandId: randomBoardId(), type: "seek", position });
+  }
+
+  /** Continue past the marker a presentation is holding at. */
+  next() {
+    return this.playback({ commandId: randomBoardId(), type: "next" });
+  }
+
+  stop() {
+    return this.playback({ commandId: randomBoardId(), type: "stop" });
   }
 
   updateAwareness(seq: number, update: BoardAwarenessUpdate) {
     if (!this.websocketClient) return Promise.resolve();
-    return this.websocketClient.updateBoardAwareness({
-      spaceId: this.spaceId,
-      boardId: this.id,
-      seq,
-      update,
-    });
-  }
-
-  play(command: Omit<Extract<BoardPlaybackCommand, { type: "play" }>, "shared"> & { shared?: true }) {
-    return this.boards.play(this.id, command);
-  }
-
-  pause(command: Extract<BoardPlaybackCommand, { type: "pause" }>) {
-    return this.boards.pause(this.id, command);
-  }
-
-  seek(command: Extract<BoardPlaybackCommand, { type: "seek" }>) {
-    return this.boards.seek(this.id, command);
-  }
-
-  stop(command: Extract<BoardPlaybackCommand, { type: "stop" }>) {
-    return this.boards.stop(this.id, command);
+    return this.websocketClient.updateBoardAwareness({ spaceId: this.spaceId, boardId: this.id, seq, update });
   }
 
   subscribe(handlers: BoardSubscriptionHandlers) {
@@ -1905,12 +2032,8 @@ export class BoardClient {
       | ((event: BoardAwarenessUpdatedEvent) => void)
       | ((event: BoardPlaybackChangedEvent) => void),
   ) {
-    if (type === "changed") {
-      return this.realtime.on("changed", handler as (event: BoardChangedEvent) => void);
-    }
-    if (type === "awareness") {
-      return this.realtime.on("awareness", handler as (event: BoardAwarenessUpdatedEvent) => void);
-    }
+    if (type === "changed") return this.realtime.on("changed", handler as (event: BoardChangedEvent) => void);
+    if (type === "awareness") return this.realtime.on("awareness", handler as (event: BoardAwarenessUpdatedEvent) => void);
     return this.realtime.on("playback", handler as (event: BoardPlaybackChangedEvent) => void);
   }
 }
@@ -1926,101 +2049,14 @@ export class SpaceBoardsApi {
     return new BoardClient(this.spaceId, boardId, this.transport, this.websocketClient);
   }
 
-  async create(input: BoardCreateInput) {
-    for (const item of input.items ?? []) BoardAuthoringItemSchema.parse(item);
-    return this.transport.request<BoardAuthoringSnapshot>(
-      `/api/spaces/${this.spaceId}/boards`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      },
-    );
+  /** Create a `.board` file and its Board, optionally with an initial document. */
+  create(input: BoardCreateInput) {
+    return this.transport.request<BoardReadResult>(`/api/spaces/${this.spaceId}/boards`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
   }
-
-  authoring(boardId: string, input: BoardAuthoringReadInput = {}, customFetch?: Fetch) {
-    if (input.include?.length === 0) throw new Error("Board authoring include must not be empty.");
-    const params = new URLSearchParams();
-    for (const section of input.include ?? []) params.append("include", section);
-    if (input.itemIds?.length) params.set("itemIds", input.itemIds.join(","));
-    if (input.connectionIds?.length) params.set("connectionIds", input.connectionIds.join(","));
-    if (input.effectIds?.length) params.set("effectIds", input.effectIds.join(","));
-    if (input.compositionIds?.length) params.set("compositionIds", input.compositionIds.join(","));
-    if (input.viewport) params.set("viewport", JSON.stringify(input.viewport));
-    const query = params.toString();
-    return this.transport.request<BoardAuthoringSnapshot>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/authoring${query ? `?${query}` : ""}`,
-      { fetch: customFetch },
-    );
-  }
-
-  mutateSemantic(boardId: string, mutation: BoardSemanticMutation) {
-    return this.transport.request<BoardMutationReceipt>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/mutations`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mutation),
-      },
-    );
-  }
-
-  summary(boardId: string, customFetch?: Fetch) {
-    return this.transport.request<BoardSummary>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/summary`,
-      { fetch: customFetch },
-    );
-  }
-
-  capabilities(boardId: string, customFetch?: Fetch) {
-    return this.transport.request<BoardCapabilities>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/capabilities`,
-      { fetch: customFetch },
-    );
-  }
-
-  transactions(boardId: string, input: BoardTransactionsReadInput = {}, customFetch?: Fetch) {
-    const params = new URLSearchParams();
-    if (input.before !== undefined) params.set("before", String(input.before));
-    if (input.limit !== undefined) params.set("limit", String(input.limit));
-    if (input.snapshot !== undefined) params.set("snapshot", String(input.snapshot));
-    const query = params.toString();
-    return this.transport.request<BoardTransactionsPage>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/transactions${query ? `?${query}` : ""}`,
-      { fetch: customFetch },
-    );
-  }
-
-  private playback(boardId: string, command: BoardPlaybackCommand) {
-    return this.transport.request<BoardPlaybackSnapshot>(
-      `/api/spaces/${this.spaceId}/boards/${boardId}/playback`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(command),
-      },
-    );
-  }
-
-  play(
-    boardId: string,
-    command: Omit<Extract<BoardPlaybackCommand, { type: "play" }>, "shared"> & { shared?: true },
-  ) {
-    return this.playback(boardId, command);
-  }
-
-  pause(boardId: string, command: Extract<BoardPlaybackCommand, { type: "pause" }>) {
-    return this.playback(boardId, command);
-  }
-
-  seek(boardId: string, command: Extract<BoardPlaybackCommand, { type: "seek" }>) {
-    return this.playback(boardId, command);
-  }
-
-  stop(boardId: string, command: Extract<BoardPlaybackCommand, { type: "stop" }>) {
-    return this.playback(boardId, command);
-  }
-
 }
 
 export class SpaceCheckpointFilesApi {
@@ -2208,6 +2244,7 @@ export class SpaceClient {
   readonly webhooks: SpaceWebhooksApi;
   readonly env: SpaceEnvApi;
   readonly sandbox: SpaceSandboxApi;
+  readonly displays: SpaceDisplaysApi;
   readonly invitations: SpaceInvitationsApi;
   readonly labels: SpaceLabelsApi;
   readonly boards: SpaceBoardsApi;
@@ -2233,6 +2270,7 @@ export class SpaceClient {
     this.webhooks = new SpaceWebhooksApi(transport, id);
     this.env = new SpaceEnvApi(transport, id);
     this.sandbox = new SpaceSandboxApi(transport, id);
+    this.displays = new SpaceDisplaysApi(transport, id);
     this.invitations = new SpaceInvitationsApi(transport, id);
     this.labels = new SpaceLabelsApi(transport, id);
     this.boards = new SpaceBoardsApi(transport, id, websocketClient);

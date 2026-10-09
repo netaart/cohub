@@ -8,7 +8,6 @@ import type { ModelsConfig } from "@cohub/infra/config-runtime/models";
 import { CohubModelRegistry } from "../runtime/model-registry.js";
 import { SessionManager } from "../runtime/local-session-manager.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "../runtime/pi-models-adapter.js";
-import { applyRequestProfile } from "../runtime/request-profile.js";
 
 process.env.TEST_CODEX_API_KEY = "test-key";
 
@@ -59,7 +58,7 @@ try {
     models,
     model,
     context,
-    applyRequestProfile(model, { sessionId, threadId }),
+    { sessionId, threadId },
   );
   for await (const event of stream) {
     if (event.type === "done" || event.type === "error") break;

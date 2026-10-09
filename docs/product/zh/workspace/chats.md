@@ -22,6 +22,19 @@ Chat 是 Space 内的对话上下文。在 CLI / API 中，它是 **session**。
 | Composer | 输入、模型、附件、slash 工具 |
 | Header / actions | 重命名、分享 / 访问、相关工具 |
 
+## 侧栏
+
+右侧栏把 Chat 的产出放在手边。
+
+| Tab | 内容 |
+| --- | --- |
+| 本对话 | 这个 Chat 生成的媒体（含实时进度）和改动的文件 |
+| 文件 | Space 文件树，本对话改动过的文件带有圆点标记 |
+| 媒体 | Space 内全部生成结果，可按类型筛选 |
+| 应用 | 已安装的 Apps |
+
+改动的文件来自 Agent 的 write / edit 工具调用。shell 命令写入的文件不会归属到 Chat。CLI 可用 `cohub spaces sessions files <sessionId>` 查看同样的数据。
+
 ## Composer
 
 Composer 是你驱动 Agent 的入口。

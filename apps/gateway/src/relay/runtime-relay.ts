@@ -42,6 +42,23 @@ export function createRuntimeRecoveryLifecycle(input: { enqueue: (spaceId: strin
 
 const secretsEqual = (left: unknown, right: string) => typeof left === "string" && right.length > 0 && Buffer.byteLength(left) === Buffer.byteLength(right) && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 
+/** Closes with 4400; any other error is a server fault and closes with a retryable 1011. */
+class RuntimeProtocolError extends Error {
+  constructor(message: string, readonly issues?: string) { super(issues ? `${message}: ${issues}` : message); this.name = "RuntimeProtocolError"; }
+}
+
+const parseFrame = (data: string): unknown => {
+  try { return JSON.parse(data); } catch { throw new RuntimeProtocolError("Malformed JSON"); }
+};
+
+const summarizeIssues = (issues: readonly { path: readonly PropertyKey[]; message: string }[]) =>
+  issues.slice(0, 3).map((issue) => `${issue.path.map(String).join(".") || "(root)"} ${issue.message}`).join("; ");
+
+const nativeRequestId = (raw: unknown) => {
+  const frame = raw as { type?: unknown; requestId?: unknown } | null;
+  return frame?.type === "runtime.native" && isUuid(frame.requestId) ? frame.requestId : null;
+};
+
 export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
   const registrations = new Map<string, { socket: WebSocket; record: RuntimeRegistration; peers: Map<string, WebSocket> }>();
   const send = (socket: WebSocket, frame: unknown) => {
@@ -69,16 +86,6 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       if (!current || closed || ticking) return;
       ticking = true;
       try {
-        if (Date.now() - lastHeartbeat > interval * 3) {
-          logger.warn("runtime.control.heartbeat_timeout", {
-            spaceId: current.spaceId,
-            runtimeId: current.record.runtimeId,
-            connectionId: current.record.connectionId,
-            heartbeatAgeMs: Date.now() - lastHeartbeat,
-          });
-          socket.terminate();
-          return;
-        }
         if (Date.now() - authorizedAt >= 60_000) {
           const auth = await deps.authorize(token, current.spaceId);
           if (!auth.ok) {
@@ -98,12 +105,32 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           socket.close(4409, "Runtime lease lost");
           return;
         }
-        send(socket, { type: "runtime.heartbeat" });
       } finally { ticking = false; }
     }
+    // Liveness is decoupled from lease I/O: heartbeats go out from their own loop, so a
+    // slow authorize or Redis renew can never starve the client into a timeout. The
+    // heartbeat-timeout check still guards against a dead transport.
     const heartbeat = setInterval(() => {
+      if (!current || closed) return;
+      if (Date.now() - lastHeartbeat > interval * 3) {
+        logger.warn("runtime.control.heartbeat_timeout", {
+          spaceId: current.spaceId,
+          runtimeId: current.record.runtimeId,
+          connectionId: current.record.connectionId,
+          heartbeatAgeMs: Date.now() - lastHeartbeat,
+        });
+        socket.terminate();
+        return;
+      }
+      try {
+        send(socket, { type: "runtime.heartbeat" });
+      } catch (error) {
+        logger.warn("runtime.control.heartbeat_send_failed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId, error });
+      }
+    }, interval);
+    const lease = setInterval(() => {
       void tick().catch((error) => {
-        logger.error("runtime.control.heartbeat_failed", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, error });
+        logger.error("runtime.control.lease_tick_failed", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, error });
         socket.close(1011, "Runtime lease unavailable");
       });
     }, interval);
@@ -113,9 +140,20 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       if (queuedBytes > RUNTIME_MAX_FRAME_BYTES * 2) { socket.terminate(); return; }
       chain = chain.then(async () => {
         if (closed) return;
-        const frame = runtimeClientFrameSchema.parse(JSON.parse(data.toString()));
+        const raw = parseFrame(data.toString());
+        const parsed = runtimeClientFrameSchema.safeParse(raw);
+        if (!parsed.success) {
+          const issues = summarizeIssues(parsed.error.issues);
+          const requestId = current ? nativeRequestId(raw) : null;
+          if (!requestId) throw new RuntimeProtocolError("Invalid Runtime frame", issues);
+          // One bad native request fails alone; the connection stays.
+          logger.warn("runtime.control.native_frame_rejected", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, requestId, issues });
+          send(socket, { type: "runtime.native.result", requestId, error: `Invalid runtime.native frame: ${issues}` });
+          return;
+        }
+        const frame = parsed.data;
         if (frame.type === "runtime.hello") {
-          if (current) throw new Error("Runtime already registered");
+          if (current) throw new RuntimeProtocolError("Runtime already registered");
           const auth = await deps.authorize(frame.token, frame.spaceId);
           if (!auth.ok) {
             logger.warn("runtime.control.authorization_rejected", { spaceId: frame.spaceId, status: auth.status, runtimeId: advertisedRuntimeId });
@@ -144,7 +182,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           });
           send(socket, { type: "runtime.ready", connectionId });
         } else {
-          if (!current) throw new Error("Runtime is not registered");
+          if (!current) throw new RuntimeProtocolError("Runtime is not registered");
           if (frame.type === "runtime.auth") {
             const auth = await deps.authorize(frame.token, current.spaceId);
             if (!auth.ok) {
@@ -162,8 +200,8 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             logger.debug("runtime.control.auth_refreshed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           } else if (frame.type === "runtime.heartbeat") lastHeartbeat = Date.now();
           else if (frame.type === "runtime.native") {
-            if (!deps.nativeEvent) throw new Error("Native runtime events are unavailable");
             try {
+              if (!deps.nativeEvent) throw new Error("Native runtime events are unavailable");
               const result = await deps.nativeEvent(current.spaceId, current.record.ownerUserId, frame.requestId, frame.event);
               send(socket, { type: "runtime.native.result", requestId: frame.requestId, result });
             } catch (error) {
@@ -181,8 +219,14 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           }
         }
       }).catch((error) => {
-        logger.warn("runtime.control.protocol_error", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, error });
-        socket.close(4400, "Invalid Runtime frame");
+        const context = { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId };
+        if (error instanceof RuntimeProtocolError) {
+          logger.warn("runtime.control.protocol_error", { ...context, ...(error.issues ? { issues: error.issues } : {}), error });
+          socket.close(4400, "Invalid Runtime frame");
+          return;
+        }
+        logger.error("runtime.control.frame_failed", { ...context, error });
+        socket.close(1011, "Runtime relay unavailable");
       }).finally(() => { queuedBytes -= bytes; });
     });
     socket.on("error", (error) => {
@@ -190,7 +234,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       socket.terminate();
     });
     socket.once("close", (code, reason) => {
-      closed = true; clearTimeout(handshake); clearInterval(heartbeat);
+      closed = true; clearTimeout(handshake); clearInterval(heartbeat); clearInterval(lease);
       if (!current) {
         logger.debug("runtime.control.closed", { code, reason: reason.toString(), durationMs: Date.now() - connectedAt });
         return;
@@ -297,5 +341,18 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       }
     });
   }
-  return { control, peer };
+  /**
+   * Forward a stop request to the Space's Runtime if it is connected here. The Runtime ignores Turns it
+   * is not watching, so every stop can be forwarded without knowing which Turns are native.
+   */
+  function stop(input: { spaceId: string; sessionId: string; turnId: string }): boolean {
+    const registration = registrations.get(input.spaceId);
+    if (!registration) return false;
+    try { send(registration.socket, { type: "runtime.native.stop", ...input }); return true; }
+    catch (error) {
+      logger.warn("runtime.native.stop_failed", { spaceId: input.spaceId, turnId: input.turnId, error });
+      return false;
+    }
+  }
+  return { control, peer, stop };
 }

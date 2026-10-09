@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ModelsConfig } from "@cohub/infra/config-runtime/models";
+import { applyRequestProfile, type ProfiledModel } from "@cohub/model-runtime/request-profile";
 import { CohubModelRegistry } from "../runtime/model-registry.js";
-import { applyRequestProfile, type ProfiledModel } from "../runtime/request-profile.js";
 
 const config: ModelsConfig = {
   providers: {
@@ -44,6 +44,8 @@ assert.deepEqual(options.headers, {
   "Session-Id": "override",
   "X-Request": "request",
 });
+// The profile hint is consumed, not forwarded to the provider.
+assert.equal("threadId" in options, false);
 
 const alternateCompatModel = {
   ...model,

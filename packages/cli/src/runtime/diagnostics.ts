@@ -93,6 +93,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function redactUrl(value: string): string {
   try {
     const url = new URL(value);
+    // Redaction must not rewrite the string when there is nothing to hide;
+    // URL.toString() re-encodes (e.g. quotes from wrapped log lines) and
+    // makes healthy URLs look corrupted.
+    const sensitive = [...url.searchParams.keys()].some((key) => SENSITIVE_KEY.test(key));
+    if (!sensitive) return value;
     for (const key of [...url.searchParams.keys()]) {
       if (SENSITIVE_KEY.test(key)) url.searchParams.set(key, "[REDACTED]");
     }
@@ -108,7 +113,8 @@ export function redactDiagnosticString(value: string): string {
     : value;
   return shortened
     .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [REDACTED]")
-    .replace(/\b(rediss?|https?|wss?):\/\/[^\s]+/gi, (url) => redactUrl(url))
+    // Trailing quotes/brackets from wrapped log lines are not part of the URL.
+    .replace(/\b(rediss?|https?|wss?):\/\/[^\s"'<>]+/gi, (url) => redactUrl(url))
     .replace(/\b(authorization|password|secret|token|access[_-]?key|refresh[_-]?token)([\s:=]+)([^\s,;]+)/gi, "$1$2[REDACTED]");
 }
 

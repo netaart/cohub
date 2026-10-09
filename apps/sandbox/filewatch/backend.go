@@ -64,12 +64,20 @@ func startPlatformBackend(root string, logger *slog.Logger, ignored []string) (e
 	return newScannerBackend(root, logger, ignored)
 }
 
+// Staged uploads and copies are reported only at their installed path.
+const stagingPrefix = ".cohub-upload."
+
 func isIgnoredPath(rel string, ignored []string) bool {
 	rel = strings.Trim(rel, "/")
 	if rel == "" {
 		return false
 	}
 	segments := strings.Split(rel, "/")
+	for _, segment := range segments {
+		if strings.HasPrefix(segment, stagingPrefix) {
+			return true
+		}
+	}
 	for _, item := range ignored {
 		item = strings.Trim(item, "/")
 		if item == "" {

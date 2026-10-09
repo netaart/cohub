@@ -70,22 +70,6 @@ test("keeps the pinch focus stable while scaling", () => {
 	assert.equal(state.panY, 0);
 });
 
-test("does not turn a desktop mouse drag into a gallery swipe", () => {
-	const { stage } = createSurface();
-	let state = { zoom: 1, panX: 0, panY: 0 };
-	let swipeCount = 0;
-	const gesture = createImageGestureHandlers({
-		getState: () => state,
-		setState: (next) => (state = next),
-		onSwipe: () => swipeCount++,
-	});
-
-	gesture.onPointerDown(pointer(stage, 1, 40, 80, "mouse"));
-	gesture.onPointerUp(pointer(stage, 1, 120, 80, "mouse"));
-
-	assert.equal(swipeCount, 0);
-});
-
 test("pans a zoomed image and clamps it to the stage bounds", () => {
 	const { stage } = createSurface();
 	let state = { zoom: 2, panX: 0, panY: 0 };

@@ -67,13 +67,7 @@ export function planGenerationReconcile(input: {
 	// Cached records without the hint cannot clear or restore generation.
 	if (activeTurn === undefined) return keep;
 	if (activeTurn) {
-		if (!isLiveTurnStatus(activeTurn.status)) {
-			// Clear an idle-output pending state left on the queued turn (e.g. a
-			// legacy snapshot). A live turn's output is never touched here.
-			const stalePending =
-				current?.turnId === activeTurn.id && current.status === "pending";
-			return { reset: stalePending, resumeTurnId: null };
-		}
+		if (!isLiveTurnStatus(activeTurn.status)) return keep;
 		return {
 			reset: Boolean(
 				current &&

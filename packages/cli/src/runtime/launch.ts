@@ -8,24 +8,52 @@ import { discoverHarnesses, installedHarnesses } from "./harness.js";
 import type { Command } from "commander";
 import { requireAccessToken } from "../auth.js";
 import { createClient } from "../client.js";
-import { currentIdentityKey, explicitSpace } from "../space.js";
+import { currentIdentityKey, explicitSpace, resolveSpaceRef } from "../space.js";
 import { canonicalRuntimeRoot, getRuntimeSpaceBinding, resolveRuntimeSpace } from "./space-binding.js";
-import { requestRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
+import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
+import { ensureNativeSync, repairIntegrations } from "./native/attach.js";
 import type { RuntimeDiagnostic } from "./diagnostics.js";
 import { createDiagnosticConsole, printRuntimeSummary, runtimeWebUrl, type RuntimeSummary } from "./presentation.js";
 import { runRuntime, type RuntimeLaunch } from "./supervisor.js";
 
-export type RuntimeUpOptions = { space?: string; new?: boolean; name?: string; harness: string[]; pi?: string; codex?: string; yes?: boolean; json?: boolean; detach?: boolean; verbose?: boolean };
+export type RuntimeUpOptions = { space?: string; new?: boolean; name?: string; harness: string[]; pi?: string; codex?: string; display?: string | boolean; yes?: boolean; json?: boolean; detach?: boolean; verbose?: boolean };
 export const resolveLocalSpaceName = (root: string, name?: string) => name?.trim() || basename(root) || "local-space";
 export function parseRuntimeHarnesses(values: string[]): ("pi" | "codex")[] {
   const names = values.flatMap((value) => value.split(",")).map((name) => name.trim()).filter(Boolean);
-  if (names.some((name) => !isLocalHarness(name))) throw new Error("Harness must be pi or codex / Harness 必须是 pi 或 codex");
+  if (names.some((name) => !isLocalHarness(name))) throw new Error("Harness must be pi or codex");
   return [...new Set(names.length ? names : ["pi"])] as ("pi" | "codex")[];
 }
 
+export function parseRuntimeDisplay(
+  value: string | boolean | undefined,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (value === false) return undefined;
+  if (value === undefined && platform !== "darwin" && (platform !== "linux" || !env.DISPLAY)) return undefined;
+  const spec = value === undefined || value === true ? "auto" : value.trim();
+  if (!/^(auto|macos|x11(:[\w.:-]+)?|xvfb(:\d{3,4}x\d{3,4})?)$/.test(spec)) {
+    throw new Error("Display must be auto, macos, x11[:display] or xvfb[:WIDTHxHEIGHT]");
+  }
+  if (platform === "linux" && spec === "auto" && !env.DISPLAY) {
+    throw new Error(env.WAYLAND_DISPLAY
+      ? "Wayland sessions cannot be shared yet: log in with an X11 session, or use --display xvfb for a virtual screen"
+      : "No X11 session to share (DISPLAY is unset): use --display xvfb for a virtual screen");
+  }
+  return spec;
+}
+
+const isVirtualDisplay = (spec: string) => spec.startsWith("xvfb");
+
+async function requestedRuntimeSpace(program: Command, target?: string): Promise<string | null> {
+  const ref = target?.trim() || explicitSpace(program);
+  return ref ? resolveSpaceRef(ref) : null;
+}
+
 export async function resolveRuntimeTarget(program: Command, target?: string) {
-  const spaceId = target?.trim() || explicitSpace(program) || (await getRuntimeSpaceBinding(process.cwd(), currentIdentityKey()))?.spaceId;
-  if (!spaceId) throw new Error("No directory binding. Use --space <id> or runtime up / 此目录未绑定 Space，请使用 --space <id> 或 runtime up");
+  const spaceId = await requestedRuntimeSpace(program, target)
+    ?? (await getRuntimeSpaceBinding(process.cwd(), currentIdentityKey()))?.spaceId;
+  if (!spaceId) throw new Error("No directory binding. Use --space <space> or runtime up");
   return spaceId;
 }
 
@@ -45,11 +73,11 @@ export async function startBackgroundRuntime(config: RuntimeLaunch): Promise<Run
       setImmediate(() => { if (child.connected) child.disconnect(); child.unref(); });
       if (error) reject(error);
       else if (last) resolve(last);
-      else reject(new Error("Runtime did not start / Runtime 未启动"));
+      else reject(new Error("Runtime did not start"));
     };
-    const timeout = setTimeout(() => finish(last ? undefined : new Error("Runtime startup timed out / Runtime 启动超时")), 30_000);
+    const timeout = setTimeout(() => finish(last ? undefined : new Error("Runtime startup timed out")), 30_000);
     child.on("error", (error) => finish(error));
-    child.on("exit", (code) => finish(new Error(`Runtime exited (${code}) / Runtime 已退出`)));
+    child.on("exit", (code) => finish(new Error(`Runtime exited (${code})`)));
     child.on("message", (message: { type?: string; status?: RuntimeSummary; error?: string; event?: RuntimeDiagnostic }) => {
       if (message.type === "status" && message.status) {
         last = message.status;
@@ -63,54 +91,69 @@ export async function startBackgroundRuntime(config: RuntimeLaunch): Promise<Run
 
 export async function runtimeUp(program: Command, dir: string | undefined, options: RuntimeUpOptions) {
   const requestedRoot = resolve(dir ?? process.cwd());
-  if (!(await stat(requestedRoot)).isDirectory()) throw new Error("Workspace is not a directory / 工作区不是目录");
+  if (!(await stat(requestedRoot)).isDirectory()) throw new Error("Workspace is not a directory");
   const root = await canonicalRuntimeRoot(requestedRoot);
-  const requested = options.space?.trim() || explicitSpace(program);
-  if (options.new && requested) throw new Error("--new cannot be combined with --space or COHUB_SPACE_ID / --new 不能与显式 Space 同时使用");
-  if (options.name && requested) throw new Error("--name only applies to a new Space / --name 仅用于新建 Space");
+  const requestedRef = options.space?.trim() || explicitSpace(program);
+  if (options.new && requestedRef) throw new Error("--new cannot be combined with --space or COHUB_SPACE_ID");
+  if (options.name && requestedRef) throw new Error("--name only applies to a new Space");
+  const requested = await requestedRuntimeSpace(program, options.space);
   const identity = currentIdentityKey();
-  if (!identity) { await requireAccessToken(); throw new Error("Cannot identify the signed-in account / 无法识别当前登录账号"); }
+  if (!identity) { await requireAccessToken(); throw new Error("Cannot identify the signed-in account"); }
   const binding = await getRuntimeSpaceBinding(root, identity);
   const existingId = requested || binding?.spaceId;
   let harnesses = parseRuntimeHarnesses(options.harness);
+  let display = options.display === undefined ? undefined : parseRuntimeDisplay(options.display);
   if (existingId && !options.new) {
     const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, existingId));
     if (existing) {
-      if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || options.pi || options.codex) {
-        throw new Error("Runtime is running with a different configuration. Use down first / Runtime 正使用不同配置运行，请先 down");
+      if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || options.pi || options.codex || options.display !== undefined && display !== existing.display) {
+        throw new Error("Runtime is running with a different configuration. Use down first");
       }
+      // `up` is the single idempotent entry: a reused instance adopts its running
+      // Harnesses (unless explicitly overridden) and completes native sync setup.
+      const native = await ensureNativeSync({ root, spaceId: existing.spaceId, identity, harnesses: options.harness.length ? harnesses : parseRuntimeHarnesses(existing.harnesses), yes: options.yes, executables: { pi: options.pi, codex: options.codex } });
+      // The running Runtime applies consent given now without restarting.
+      const directory = runtimeInstanceDirectory(identity, existing.spaceId);
+      await controlRuntimeInstance(directory, "reload").catch(() => undefined);
+      if (native.importHistory) await controlRuntimeInstance(directory, "import", { command: "start" }, 60_000).catch(() => undefined);
       printRuntimeSummary(existing, options.json, true);
       return;
     }
   }
+  display = parseRuntimeDisplay(options.display);
   if (!options.harness.length) harnesses = await installedHarnesses(root, options);
-  if (!harnesses.length) throw new Error("Install and sign in to Pi or Codex, or pass --harness / 请安装并登录 Pi 或 Codex，或显式指定 --harness");
+  if (!harnesses.length) throw new Error("Install and sign in to Pi or Codex, or pass --harness");
   let createNew = Boolean(options.new);
   let name = resolveLocalSpaceName(root, options.name);
   if (!options.yes) {
-    if (!process.stdin.isTTY) throw new Error("Use --yes to authorize local execution / 请使用 --yes 授权本地执行");
+    if (!process.stdin.isTTY) throw new Error("Use --yes to authorize local execution");
     const rl = createInterface({ input: process.stdin, output: process.stderr });
     try {
       if (!requested && binding) {
-        process.stderr.write(`\nLinked Space / 已关联 Space\n  ${runtimeWebUrl(binding.spaceId)}\n`);
-        const answer = (await rl.question("Reuse this Space? [Y/n, q to cancel] / 复用此 Space？[Y/n，q 取消] ")).trim().toLowerCase();
+        process.stderr.write(`\nLinked Space\n  ${runtimeWebUrl(binding.spaceId)}\n`);
+        const answer = (await rl.question("Reuse this Space? [Y/n, q to cancel] ")).trim().toLowerCase();
         if (answer === "q") return;
         createNew = answer === "n" || answer === "no";
       } else if (!requested) {
-        const answer = (await rl.question("Create a new Space? [Y/n] / 创建新 Space？[Y/n] ")).trim().toLowerCase();
+        const answer = (await rl.question("Create a new Space? [Y/n] ")).trim().toLowerCase();
         if (answer && answer !== "y" && answer !== "yes") return;
       }
       if (binding && createNew && !options.name) name = `${name}-${randomUUID().slice(0, 6)}`;
-      if (!requested && (!binding || createNew)) name = (await rl.question(`Space name / Space 名称 [${name}]: `)).trim() || name;
-      process.stderr.write(`\nDirectory / 目录  ${root}\n${requested ? `Space / 空间  ${runtimeWebUrl(requested)}\n` : ""}`);
-      const answer = await rl.question("Collaborators can execute as your OS user, beyond this folder. Allow? [y/N] / 协作者可使用你的系统身份执行命令，不限于此目录。允许？[y/N] ");
-      if (!/^y(es)?$/i.test(answer.trim())) return;
+      if (!requested && (!binding || createNew)) name = (await rl.question(`Space name [${name}]: `)).trim() || name;
+      process.stderr.write(`\nDirectory  ${root}\n${requested ? `Space  ${runtimeWebUrl(requested)}\n` : ""}`);
+      const answer = await rl.question("Collaborators can execute as your OS user, beyond this folder. Allow? [Y/n] ");
+      if (/^n(o)?$/i.test(answer.trim())) return;
+      if (display && !isVirtualDisplay(display)) {
+        const share = await rl.question("Collaborators and agents can see and control this screen. Share it? [Y/n] ");
+        if (!/^(y(es)?)?$/i.test(share.trim())) display = undefined;
+      }
     } finally { rl.close(); }
   }
   if (options.yes && createNew && binding && !options.name) name = `${name}-${randomUUID().slice(0, 6)}`;
   if (createNew && binding && await requestRuntimeInstance(runtimeInstanceDirectory(identity, binding.spaceId))) {
-    throw new Error("Stop the existing Runtime before rebinding this directory / 请先停止此目录的 Runtime，再创建新绑定");
+    throw new Error("Stop the existing Runtime before rebinding this directory");
   }
+  await repairIntegrations(options.pi);
   // Fail local preflight before creating remote state; the worker reuses this catalog.
   const capabilities = await discoverHarnesses(harnesses, options, root);
   const client = createClient();
@@ -120,13 +163,15 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
     createSpace: async () => (await client.spaces.create({ name, config: { sandbox: { provider: "local" } } })).space.id,
     validateSpace: async (id) => {
       const sandbox = (await client.space(id).sandbox.get()).sandbox;
-      if (sandbox?.provider !== "local") throw new Error("Space does not have a local Runtime / 此 Space 不是本地 Runtime");
+      if (sandbox?.provider !== "local") throw new Error("Space does not have a local Runtime");
     },
   });
-  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables: { pi: options.pi, codex: options.codex }, background: Boolean(options.detach), verbose: options.verbose };
+  // Consent (or --yes) precedes any user-level integration install; failure never blocks startup.
+  const native = await ensureNativeSync({ root, spaceId, identity, harnesses, yes: options.yes, executables: { pi: options.pi, codex: options.codex } });
+  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables: { pi: options.pi, codex: options.codex }, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory, display };
   const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
   if (existing) {
-    if (existing.root !== root) throw new Error("This Space is running in another directory / 此 Space 已在另一目录运行");
+    if (existing.root !== root) throw new Error("This Space is running in another directory");
     printRuntimeSummary(existing, options.json, true); return;
   }
   if (options.detach) {
@@ -137,7 +182,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
     let announced = false;
     await runRuntime(config, (status) => {
       if (!announced && status.state === "ready") { announced = true; printRuntimeSummary(status, options.json, source === "binding"); }
-      else if (!announced && status.state === "starting" && !options.json) process.stderr.write(`Connecting / 正在连接\n  ${runtimeWebUrl(spaceId)}\n  Logs / 日志  ${status.diagnosticsPath}\n`);
+      else if (!announced && status.state === "starting" && !options.json) process.stderr.write(`Connecting\n  ${runtimeWebUrl(spaceId)}\n  Logs  ${status.diagnosticsPath}\n`);
     });
   }
 }

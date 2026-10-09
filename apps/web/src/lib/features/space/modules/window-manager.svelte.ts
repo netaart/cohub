@@ -1,3 +1,4 @@
+import { appWindowKey, parseAppWindowKey } from "./app-window-key";
 import {
 	alignWindowNavigation,
 	beginWindowNavigation,
@@ -7,7 +8,11 @@ import {
 	windowRefsEqual,
 } from "./window-navigation";
 import type { WindowKind, WindowRef } from "./window-route";
-import { isValidAppKey, isValidPortKey } from "./window-route";
+import {
+	isValidAppKey,
+	isValidDisplayKey,
+	isValidPortKey,
+} from "./window-route";
 import type { WorkspaceAppOpenContext } from "./workspace-app-context";
 
 type FileTabLike = {
@@ -26,9 +31,16 @@ type PortTabLike = {
 	url: string;
 };
 
+type DisplayTabLike = {
+	display: string;
+};
+
 type AppTabLike = {
-	appId: string;
+	/** The window key: an App id, or an App id bound to a file. */
+	key: string;
 	loading: boolean;
+	/** Unsaved work lives in the App document; unmounting it would lose it. */
+	windowState?: { dirty: boolean };
 };
 
 type WindowManagerOptions = {
@@ -39,7 +51,9 @@ type WindowManagerOptions = {
 	getPortTabs: () => PortTabLike[];
 	getActivePort: () => string | null;
 	getAppTabs: () => AppTabLike[];
-	getActiveAppId: () => string | null;
+	getActiveAppKey: () => string | null;
+	getDisplayTabs: () => DisplayTabLike[];
+	getActiveDisplay: () => string | null;
 	openFile: (
 		path: string,
 		options?: { preserveHistory?: boolean; position?: unknown },
@@ -63,8 +77,11 @@ type WindowManagerOptions = {
 		launch?: { search?: string; hash?: string } | null;
 		openContext: WorkspaceAppOpenContext;
 	}) => void;
-	activateApp: (appId: string) => void;
-	closeApp: (appId?: string | null) => void;
+	activateApp: (key: string) => void;
+	closeApp: (key?: string | null) => void;
+	openDisplay: (display: string) => void;
+	activateDisplay: (display: string) => void;
+	closeDisplay: (display?: string | null) => void;
 	getPortEndpointUrl: (port: string) => string | null | undefined;
 	syncUrl: (ref: WindowRef | null, replace?: boolean) => void;
 	onBudgetCleanup?: () => void;
@@ -96,7 +113,7 @@ function isDirtyFileTab(tab: FileTabLike) {
 }
 
 /**
- * Single active-tab coordinator over file/board/port/app domain controllers.
+ * Single active-tab coordinator over file/board/port/app/display domain controllers.
  * Owns: the active preview ref, access order, budget, URL sync, open/close.
  * Does not own: file drafts, board docs, port endpoints (domain controllers do).
  *
@@ -154,26 +171,28 @@ export function createWindowManager(options: WindowManagerOptions) {
 
 	/**
 	 * App tabs whose surface should stay mounted while they are inactive. The
-	 * active App is always kept (an empty stage is worse than one extra iframe);
-	 * remaining slots go to the most recently used others. Untouched tabs rank
-	 * as more recently opened first.
+	 * active App and dirty Apps are always kept; remaining slots go to the most
+	 * recently used others.
 	 */
-	function retainedAppIds(): ReadonlySet<string> {
-		const ids = options.getAppTabs().map((tab) => tab.appId);
-		if (ids.length <= appKeepAliveLimit) return new Set(ids);
-		const active = options.getActiveAppId();
-		const ranked = ids
-			.map((appId, index) => ({
-				appId,
+	function retainedAppKeys(): ReadonlySet<string> {
+		const tabs = options.getAppTabs();
+		const keys = tabs.map((tab) => tab.key);
+		if (keys.length <= appKeepAliveLimit) return new Set(keys);
+		const active = options.getActiveAppKey();
+		const ranked = keys
+			.map((key, index) => ({
+				key,
 				index,
-				lastAccessed: accessedAt[tabId("app", appId)] ?? 0,
+				lastAccessed: accessedAt[tabId("app", key)] ?? 0,
 			}))
 			.sort((a, b) => b.lastAccessed - a.lastAccessed || b.index - a.index);
-		const kept = new Set<string>();
-		if (active && ids.includes(active)) kept.add(active);
+		const kept = new Set<string>(
+			tabs.filter((tab) => tab.windowState?.dirty).map((tab) => tab.key),
+		);
+		if (active && keys.includes(active)) kept.add(active);
 		for (const item of ranked) {
 			if (kept.size >= appKeepAliveLimit) break;
-			kept.add(item.appId);
+			kept.add(item.key);
 		}
 		return kept;
 	}
@@ -186,7 +205,9 @@ export function createWindowManager(options: WindowManagerOptions) {
 			return options.getBoardTabs().some((tab) => tab.path === key);
 		if (kind === "port")
 			return options.getPortTabs().some((tab) => tab.port === key);
-		return options.getAppTabs().some((tab) => tab.appId === key);
+		if (kind === "display")
+			return options.getDisplayTabs().some((tab) => tab.display === key);
+		return options.getAppTabs().some((tab) => tab.key === key);
 	}
 
 	/** Every domain's currently mounted surface, as preview refs. */
@@ -198,8 +219,10 @@ export function createWindowManager(options: WindowManagerOptions) {
 		if (boardPath) refs.push({ kind: "board", key: boardPath });
 		const port = options.getActivePort();
 		if (port) refs.push({ kind: "port", key: port });
-		const appId = options.getActiveAppId();
-		if (appId) refs.push({ kind: "app", key: appId });
+		const appKey = options.getActiveAppKey();
+		if (appKey) refs.push({ kind: "app", key: appKey });
+		const display = options.getActiveDisplay();
+		if (display) refs.push({ kind: "display", key: display });
 		return refs;
 	}
 
@@ -274,10 +297,16 @@ export function createWindowManager(options: WindowManagerOptions) {
 			})),
 			...options.getAppTabs().map((tab) => ({
 				kind: "app" as const,
-				key: tab.appId,
+				key: tab.key,
 				// An embedded Work costs about as much as a port preview.
 				weight: 3,
-				protected: tab.loading,
+				protected: tab.loading || tab.windowState?.dirty === true,
+			})),
+			...options.getDisplayTabs().map((tab) => ({
+				kind: "display" as const,
+				key: tab.display,
+				weight: 4,
+				protected: false,
 			})),
 		];
 		let total = candidates.reduce((sum, tab) => sum + tab.weight, 0);
@@ -325,6 +354,7 @@ export function createWindowManager(options: WindowManagerOptions) {
 			if (kind === "file") options.closeFile(key, skipConfirm);
 			else if (kind === "board") options.closeBoard(key);
 			else if (kind === "port") options.closePort(key);
+			else if (kind === "display") options.closeDisplay(key);
 			else options.closeApp(key);
 		});
 	}
@@ -417,8 +447,8 @@ export function createWindowManager(options: WindowManagerOptions) {
 	}
 
 	/**
-	 * Show an App preview. Idempotent by App id: repeating re-activates the
-	 * existing tab and refreshes its launch state.
+	 * Show an App preview. Idempotent by window key: repeating re-activates the
+	 * existing tab and refreshes its launch state. A file opens its own window.
 	 */
 	function openApp(
 		input: {
@@ -429,10 +459,11 @@ export function createWindowManager(options: WindowManagerOptions) {
 		},
 		opts: { syncUrl?: boolean; source?: WindowNavigationSource } = {},
 	) {
-		if (!isValidAppKey(input.appId)) return;
+		const key = appWindowKey(input.appId, input.openContext.file?.path);
+		if (!isValidAppKey(key)) return;
 		const syncUrl = opts.syncUrl ?? true;
 		const hadPreview = Boolean(currentRef());
-		const ref = { kind: "app" as const, key: input.appId };
+		const ref = { kind: "app" as const, key };
 		beginNavigation(ref, opts.source ?? (syncUrl ? "user" : "route"));
 		commitActive(ref);
 		options.openApp(input);
@@ -444,14 +475,39 @@ export function createWindowManager(options: WindowManagerOptions) {
 		}
 	}
 
+	function openDisplay(
+		display: string,
+		opts: { syncUrl?: boolean; source?: WindowNavigationSource } = {},
+	) {
+		if (!isValidDisplayKey(display)) return;
+		const syncUrl = opts.syncUrl ?? true;
+		const hadPreview = Boolean(currentRef());
+		const ref = { kind: "display" as const, key: display };
+		beginNavigation(ref, opts.source ?? (syncUrl ? "user" : "route"));
+		commitActive(ref);
+		if (hasTab("display", display)) options.activateDisplay(display);
+		else options.openDisplay(display);
+		if (syncUrl) options.syncUrl(ref, hadPreview);
+		enforceBudget();
+		if (syncUrl) {
+			const current = currentRef();
+			if (current) options.syncUrl(current, true);
+		}
+	}
+
+	function activateInDomain(kind: WindowKind, key: string) {
+		if (kind === "file") options.activateFile(key);
+		else if (kind === "board") options.activateBoard(key);
+		else if (kind === "port") options.activatePort(key);
+		else if (kind === "display") options.activateDisplay(key);
+		else options.activateApp(key);
+	}
+
 	function activate(kind: WindowKind, key: string, syncUrl = true) {
 		const ref = { kind, key };
 		beginNavigation(ref, syncUrl ? "user" : "route");
 		commitActive(ref);
-		if (kind === "file") options.activateFile(key);
-		else if (kind === "board") options.activateBoard(key);
-		else if (kind === "port") options.activatePort(key);
-		else options.activateApp(key);
+		activateInDomain(kind, key);
 		if (syncUrl) options.syncUrl(ref, true);
 	}
 
@@ -465,6 +521,20 @@ export function createWindowManager(options: WindowManagerOptions) {
 		const ref = reconcileActive();
 		beginNavigation(ref, "user");
 		options.syncUrl(ref, true);
+	}
+
+	/** A tab got a new key (its file moved); keep its order, active ref, and URL. */
+	function renameTab(kind: WindowKind, fromKey: string, toKey: string) {
+		const from = tabId(kind, fromKey);
+		if (from in accessedAt) {
+			const { [from]: order, ...rest } = accessedAt;
+			accessedAt = { ...rest, [tabId(kind, toKey)]: order };
+		}
+		if (!windowRefsEqual(activeRef, { kind, key: fromKey })) return;
+		activeRef = { kind, key: toKey };
+		if (suspended) return;
+		navigation = alignWindowNavigation(navigation, activeRef);
+		options.syncUrl(activeRef, true);
 	}
 
 	/**
@@ -508,7 +578,10 @@ export function createWindowManager(options: WindowManagerOptions) {
 				options.closePort(tab.port);
 			}
 			for (const tab of [...options.getAppTabs()]) {
-				options.closeApp(tab.appId);
+				options.closeApp(tab.key);
+			}
+			for (const tab of [...options.getDisplayTabs()]) {
+				options.closeDisplay(tab.display);
 			}
 		});
 		if (syncUrl) options.syncUrl(null, true);
@@ -545,10 +618,7 @@ export function createWindowManager(options: WindowManagerOptions) {
 		if (hasTab(ref.kind, ref.key)) {
 			beginNavigation(ref, "route");
 			commitActive(ref);
-			if (ref.kind === "file") options.activateFile(ref.key);
-			else if (ref.kind === "board") options.activateBoard(ref.key);
-			else if (ref.kind === "port") options.activatePort(ref.key);
-			else options.activateApp(ref.key);
+			activateInDomain(ref.kind, ref.key);
 			return { ok: true as const };
 		}
 		if (ref.kind === "file") {
@@ -559,9 +629,21 @@ export function createWindowManager(options: WindowManagerOptions) {
 			void openBoard(ref.key, { syncUrl: false, source: "route" });
 			return { ok: true as const };
 		}
+		if (ref.kind === "display") {
+			openDisplay(ref.key, { syncUrl: false, source: "route" });
+			return { ok: true as const };
+		}
 		if (ref.kind === "app") {
+			const target = parseAppWindowKey(ref.key);
+			if (!target) return { ok: true as const };
 			openApp(
-				{ appId: ref.key, openContext: { source: "route" } },
+				{
+					appId: target.appId,
+					openContext: {
+						source: "route",
+						...(target.path ? { file: { path: target.path } } : {}),
+					},
+				},
 				{ syncUrl: false, source: "route" },
 			);
 			return { ok: true as const };
@@ -614,11 +696,13 @@ export function createWindowManager(options: WindowManagerOptions) {
 		currentRef,
 		touch,
 		tabClosed,
-		retainedAppIds,
+		retainedAppKeys,
+		renameTab,
 		openFile,
 		openBoard,
 		openPort,
 		openApp,
+		openDisplay,
 		activate,
 		close,
 		closeActive,

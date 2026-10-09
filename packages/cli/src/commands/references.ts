@@ -7,7 +7,7 @@ import {
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
+import { formatLocalDateTime, table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
 
 const RESOURCE_TYPES = new Set<ReferenceQueryableType>([
   "turn",
@@ -22,6 +22,7 @@ const REFERENCE_KINDS = new Set<ReferenceKind>([
   "mod",
   "mention",
   "tool_call",
+  "turn_trigger",
   "agent_tool_file_read",
   "agent_tool_file_write",
   "agent_tool_file_edit",
@@ -75,6 +76,7 @@ function clampNumber(value: string | undefined, fallback: number, min: number, m
 const KINDS_HELP = `Kinds:
   structural:  session_fork, space_fork, checkpoint_fork, mod
   content:     mention, tool_call
+  causality:   turn_trigger
   file access: agent_tool_file_read, agent_tool_file_write, agent_tool_file_edit,
                agent_tool_file_ls, agent_tool_file_find, agent_tool_file_grep`;
 
@@ -102,6 +104,7 @@ ${KINDS_HELP}
 
 Examples:
   cohub references query turn:<uuid> --kinds agent_tool_file_read,agent_tool_file_write
+  cohub references query turn:<uuid> --direction out --kinds turn_trigger
   cohub references query session:<uuid> --json
   cohub references query checkpoint:<uuid> --direction out
   cohub references query space:<uuid> --direction in --kinds mention,tool_call
@@ -129,7 +132,7 @@ Examples:
           source: `${r.sourceType}:${r.sourceId.slice(0, 8)}`,
           target: formatTarget(r.targetType, r.targetId),
           count: r.count,
-          lastSeen: r.updatedAt.slice(0, 10),
+          lastSeen: formatLocalDateTime(r.updatedAt).slice(0, 10),
         }));
         table(rows, [
           { key: "kind", label: "Kind" },

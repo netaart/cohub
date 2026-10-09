@@ -1,5 +1,9 @@
 <script lang="ts">
-import type { InstalledApp, SpaceInstalledApps } from "@cohub/protocol";
+import {
+	type InstalledApp,
+	type SpaceInstalledApps,
+	setInstalledAppEnabled,
+} from "@cohub/protocol";
 import { AlertCircle, Box, Loader2, PackageOpen, Trash2 } from "lucide-svelte";
 import { onMount } from "svelte";
 import { setCohubResourceDragData } from "$lib/drag/cohub-resource-drag";
@@ -92,12 +96,9 @@ async function persist(
 }
 
 function setEnabled(app: InstalledApp, enabled: boolean) {
-	void persist(`toggle:${app.id}`, (document) => ({
-		...document,
-		apps: document.apps.map((item) =>
-			item.id === app.id ? { ...item, enabled } : item,
-		),
-	}));
+	void persist(`toggle:${app.id}`, (document) =>
+		setInstalledAppEnabled(document, app.id, enabled),
+	);
 }
 
 function uninstall(app: InstalledApp) {

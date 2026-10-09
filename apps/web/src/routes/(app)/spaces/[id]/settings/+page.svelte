@@ -1041,15 +1041,6 @@ function getMemberDisplayName(member: SpaceMember): string {
 	return member.profile?.displayName?.trim() || m.space_user({}, { locale });
 }
 
-function getInitials(name: string): string {
-	const words = name.trim().split(/\s+/).filter(Boolean);
-	const initials = words
-		.slice(0, 2)
-		.map((word) => word[0]?.toUpperCase() ?? "")
-		.join("");
-	return initials || "U";
-}
-
 function getMemberRoleIcon(role: SpaceRole) {
 	if (role === "host") return "👑";
 	return null;
@@ -1714,7 +1705,7 @@ $effect(() => {
 							<div class="flex w-16 shrink-0 flex-col items-center gap-1.5">
 								{#if canEditSpaceProfile}
 									<label class="group relative h-14 w-14 cursor-pointer overflow-hidden rounded-full border border-border-subtle bg-bg-hover-strong transition-colors hover:border-brand/50 focus-within:border-brand/50" title={m.space_change_avatar({}, { locale })} aria-label={m.space_change_avatar({}, { locale })}>
-										<SpaceAvatar name={space?.name || space?.title || spaceId} profile={space?.publicProfile} size="lg" class="h-full w-full rounded-full border-0 shadow-none" />
+										<SpaceAvatar name={space?.name || space?.title || spaceId} profile={space?.publicProfile} seed={spaceId} size="lg" class="h-full w-full rounded-full border-0" />
 										<span class="absolute inset-0 flex items-center justify-center bg-overlay-scrim-strong opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
 											{#if spaceAvatarUploading}<Loader2 class="h-4 w-4 animate-spin text-overlay-control-text" />{:else}<Upload class="h-4 w-4 text-overlay-control-text" />{/if}
 										</span>
@@ -1729,7 +1720,7 @@ $effect(() => {
 										<UploadProgress class="w-12 rounded-full" value={spaceAvatarUploadStage === "uploading" ? spaceAvatarUploadProgress : null} label={m.space_avatar_progress({}, { locale })} />
 									{/if}
 								{:else}
-									<SpaceAvatar name={space?.name || space?.title || spaceId} profile={space?.publicProfile} size="lg" class="h-14 w-14 rounded-full" />
+									<SpaceAvatar name={space?.name || space?.title || spaceId} profile={space?.publicProfile} seed={spaceId} size="lg" class="h-14 w-14 rounded-full" />
 								{/if}
 							</div>
 
@@ -1835,7 +1826,7 @@ $effect(() => {
 								<div class="divide-y divide-border-subtle">
 									{#each members as member (member.userId)}
 										<div class="flex items-center gap-3 px-3 py-2.5">
-											<UserAvatar name={getMemberDisplayName(member)} avatarUrl={member.profile?.avatarUrl} size="sm" />
+											<UserAvatar name={getMemberDisplayName(member)} avatarUrl={member.profile?.avatarUrl} seed={member.userId} size="sm" />
 											<div class="min-w-0 flex-1">
 												<div class="flex items-center gap-1.5">
 													<span class="truncate text-[13px] font-medium text-text-primary">{getMemberDisplayName(member)}</span>

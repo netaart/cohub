@@ -7,7 +7,7 @@ import {
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
+import { error, formatLocalDateTime, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
 
 type JsonOption = { json?: boolean };
 
@@ -107,7 +107,7 @@ function printOrder(order: AppCommerceOrder): void {
     { key: "status", label: "Status" },
     { key: "amount", label: "Amount" },
     { key: "paid", label: "Paid" },
-    { key: "created", label: "Created" },
+    { key: "created", label: "Created", format: formatLocalDateTime },
     { key: "paidAt", label: "Paid At" },
   ]);
 }

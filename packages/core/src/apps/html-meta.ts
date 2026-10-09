@@ -1,5 +1,7 @@
 /** Lightweight HTML head parsing for App page presentation fields. */
 
+import { APP_FILE_HANDLERS_META_NAME, parseAppFileHandlers } from "@cohub/protocol";
+
 export type HtmlPageMeta = {
   title: string | null;
   description: string | null;
@@ -12,6 +14,8 @@ export type HtmlPageMeta = {
   themeColor: string | null;
   /** Preferred desktop surface from `<meta name="cohub:surface">`. */
   surface: AppSurfaceRole | null;
+  /** File extensions the App opens, from `<meta name="cohub:file-handlers">`. */
+  fileHandlers: string[];
 };
 
 export type AppSurfaceRole = "window" | "overlay";
@@ -159,8 +163,11 @@ const surfaceValue = (head: string): AppSurfaceRole | null => {
   return SURFACE_ROLES.includes(content as AppSurfaceRole) ? (content as AppSurfaceRole) : null;
 };
 
+const fileHandlersValue = (head: string): string[] =>
+  parseAppFileHandlers(metaContent(head, [APP_FILE_HANDLERS_META_NAME]));
+
 /**
- * Extract title / description / icon / image / lang / theme-color / surface from HTML without executing it.
+ * Extract title / description / icon / image / lang / theme-color / surface / file handlers from HTML without executing it.
  * Prefers document title and standard meta / link tags.
  */
 export function extractHtmlPageMeta(html: string): HtmlPageMeta {
@@ -180,6 +187,7 @@ export function extractHtmlPageMeta(html: string): HtmlPageMeta {
     lang,
     themeColor: themeColorValue(head),
     surface: surfaceValue(head),
+    fileHandlers: fileHandlersValue(head),
   };
 }
 
@@ -248,5 +256,6 @@ export function emptyHtmlPageMeta(): HtmlPageMeta {
        lang: null,
     themeColor: null,
     surface: null,
+    fileHandlers: [],
   };
 }

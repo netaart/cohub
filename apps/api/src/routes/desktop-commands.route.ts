@@ -15,6 +15,7 @@ import { getAppSessionPrincipal, useAuth } from "../lib/middleware.js";
 import { getRequestSource } from "../lib/request-source.js";
 import { canAppSessionSettleDesktopCommand } from "../desktop-command-auth.js";
 import {
+  acceptDesktopCommand,
   createDesktopCommand,
   getDesktopCommand,
   settleDesktopCommand,
@@ -97,6 +98,24 @@ router.get("/:commandId", async (c) => {
     return c.json({ message: "desktop command not found" }, 404);
   }
   return c.json({ command: record });
+});
+
+router.post("/:commandId/accept", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const commandId = parseDesktopCommandId(c.req.param("commandId"));
+  // Only the host tab runs commands; App sessions just report results.
+  if (!commandId || getAppSessionPrincipal(c)) return c.json({ message: "desktop command not found" }, 404);
+
+  const acceptance = await acceptDesktopCommand({
+    commandId,
+    actorUserId: user.uuid,
+    clientId: getRequestSource(c)?.clientId ?? null,
+  });
+  if (acceptance.ok) return c.json({ accepted: acceptance.accepted, command: acceptance.record });
+  return acceptance.reason === "forbidden"
+    ? c.json({ message: "forbidden" }, 403)
+    : c.json({ message: "desktop command not found" }, 404);
 });
 
 router.post("/:commandId/result", limitBody, async (c) => {

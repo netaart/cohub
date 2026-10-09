@@ -3,6 +3,7 @@ import {
 	ArrowDownToLine,
 	ArrowUpToLine,
 	BoxSelect,
+	Clapperboard,
 	Copy,
 	ExternalLink,
 	History,
@@ -28,28 +29,29 @@ const {
 	onOpenTask,
 	onRegenerateTask,
 	onAddToGeneration,
-	regeneratingNodeId = null,
+	regeneratingItemId = null,
 	onExport,
 	onReplay,
+	onAnimate,
+	sheet = false,
 }: {
 	editor: BoardEditor;
 	position: { x: number; y: number };
 	onClose: () => void;
 	onOpenFile?: (path: string) => void | Promise<void>;
 	onOpenTask?: (taskRunId: string) => void;
-	onRegenerateTask?: (nodeId: string) => void;
+	onRegenerateTask?: (itemId: string) => void;
 	onAddToGeneration?: () => void;
-	regeneratingNodeId?: string | null;
-	/** Opens the export dialog; absent until the stage can render one. */
+	regeneratingItemId?: string | null;
 	onExport?: () => void;
-	/** Opens the replay view; absent in view mode. */
 	onReplay?: () => void;
+	onAnimate?: () => void;
+	sheet?: boolean;
 } = $props();
 
 const locale = $derived(getLocale());
 
 let menu: HTMLDivElement | null = $state(null);
-// The menu is recreated each time it opens, so capture the opening position once.
 let left = $state(untrack(() => position.x));
 let top = $state(untrack(() => position.y));
 
@@ -63,18 +65,25 @@ const canGenerate = $derived(
 const singleText = $derived(
 	editor.selectedItems.length === 1 && editor.selectedItems[0]?.type === "text",
 );
-/** The single selected file card, if that is what the selection is. */
 const singleFile = $derived.by(() => {
 	if (editor.selectedItems.length !== 1) return null;
 	const item = editor.selectedItems[0];
-	return item?.type === "file" ? item : null;
+	return item?.type === "file" ? (item.props as { src: string }) : null;
 });
 
-/** The single selected task node, if that is what the selection is. */
 const singleTask = $derived.by(() => {
 	if (editor.selectedItems.length !== 1) return null;
 	const item = editor.selectedItems[0];
-	return item?.type === "task" ? item : null;
+	if (item?.type !== "task") return null;
+	const props = item.props as {
+		taskRunId: string;
+		snapshot: { taskType: string };
+	};
+	return {
+		id: item.id,
+		taskRunId: props.taskRunId,
+		taskType: props.snapshot.taskType,
+	};
 });
 
 type MenuAction = {
@@ -101,14 +110,14 @@ const actions = $derived.by<MenuAction[]>(() => {
 			icon: LayoutDashboard,
 			run: () => onOpenTask(task.taskRunId),
 		});
-	if (task?.snapshot.taskType === "generation" && onRegenerateTask)
+	if (task?.taskType === "generation" && onRegenerateTask)
 		list.push({
 			label:
-				regeneratingNodeId === task.id
+				regeneratingItemId === task.id
 					? m.board_regenerating_ellipsis({}, { locale })
 					: m.board_regenerate({}, { locale }),
 			icon: RefreshCw,
-			disabled: regeneratingNodeId !== null,
+			disabled: regeneratingItemId !== null,
 			run: () => onRegenerateTask(task.id),
 		});
 	if (file && onOpenFile)
@@ -116,7 +125,7 @@ const actions = $derived.by<MenuAction[]>(() => {
 			label: m.board_open_file({}, { locale }),
 			icon: ExternalLink,
 			run: () => {
-				void onOpenFile(file.ref.path);
+				void onOpenFile(file.src);
 			},
 		});
 	if (singleText)
@@ -170,6 +179,12 @@ const actions = $derived.by<MenuAction[]>(() => {
 			icon: ImageDown,
 			run: onExport,
 		});
+	if (onAnimate)
+		list.push({
+			label: m.board_animate({}, { locale }),
+			icon: Clapperboard,
+			run: onAnimate,
+		});
 	if (onReplay)
 		list.push({
 			label: m.board_replay({}, { locale }),
@@ -196,7 +211,7 @@ function handleKeydown(event: KeyboardEvent) {
 onMount(() => {
 	document.addEventListener("pointerdown", handlePointerDown, true);
 	document.addEventListener("keydown", handleKeydown);
-	if (menu) {
+	if (!sheet && menu) {
 		const rect = menu.getBoundingClientRect();
 		left = Math.min(position.x, window.innerWidth - rect.width - 8);
 		top = Math.min(position.y, window.innerHeight - rect.height - 8);
@@ -209,12 +224,17 @@ onDestroy(() => {
 });
 </script>
 
+{#if sheet}
+	<div class="ctx-scrim" role="presentation" onclick={onClose}></div>
+{/if}
+
 <div
 	bind:this={menu}
 	use:portal
 	class="board-context-menu"
-	style:left="{left}px"
-	style:top="{top}px"
+	class:board-context-menu--sheet={sheet}
+	style:left={sheet ? undefined : `${left}px`}
+	style:top={sheet ? undefined : `${top}px`}
 	role="menu"
 	tabindex="-1"
 	oncontextmenu={(event) => event.preventDefault()}
@@ -244,6 +264,32 @@ onDestroy(() => {
 		background: var(--bg-elevated);
 		padding: 4px;
 		box-shadow: 0 12px 28px color-mix(in srgb, var(--overlay-scrim-strong) 18%, transparent);
+	}
+
+	.ctx-scrim {
+		position: fixed;
+		inset: 0;
+		z-index: 129;
+		background: color-mix(in srgb, var(--overlay-scrim-strong) 32%, transparent);
+	}
+
+	.board-context-menu--sheet {
+		right: 8px;
+		bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+		left: 8px;
+		min-width: 0;
+		border-radius: 14px;
+		padding: 6px;
+	}
+	.board-context-menu--sheet .ctx-item {
+		min-height: 46px;
+		border-radius: 10px;
+		padding: 10px 12px;
+		font-size: 14px;
+	}
+	.board-context-menu--sheet .ctx-item :global(svg) {
+		width: 16px;
+		height: 16px;
 	}
 
 	.ctx-item {

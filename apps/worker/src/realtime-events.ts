@@ -1,6 +1,8 @@
+import { createSessionSnapshotScheduler, publishSessionSnapshot } from "@cohub/core/sessions";
+import { isSettledStatsTurn } from "@cohub/protocol/model";
+import { db } from "./db.js";
 import { randomUUID } from "node:crypto";
-import { REALTIME_OUTBOUND_CHANNEL, type RealtimeSessionRecord, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
-import type { spaceSessions } from "@cohub/db";
+import { REALTIME_OUTBOUND_CHANNEL, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
 import type { SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { redisCommandClient } from "./redis.js";
@@ -101,32 +103,15 @@ async function publishTaskEvent(input: {
 export const dispatchTaskCreated = (task: Parameters<typeof toRealtimeTaskRecord>[0]) =>
   publishTaskEvent({ type: "task.created", task });
 
-export const dispatchTaskUpdated = (input: {
+export const dispatchTaskUpdated = async (input: {
   task: Parameters<typeof toRealtimeTaskRecord>[0];
   changed: string[];
-}) => publishTaskEvent({ type: "task.updated", task: input.task, changed: input.changed });
-
-export async function dispatchSessionUpdated(input: { session: typeof spaceSessions.$inferSelect; changed: string[] }) {
-  const session: RealtimeSessionRecord = {
-    id: input.session.id,
-    spaceId: input.session.spaceId,
-    userUuid: input.session.userUuid ?? null,
-    title: input.session.title,
-    source: input.session.source,
-    status: input.session.status,
-    externalSessionId: input.session.externalSessionId,
-    latestMessageText: input.session.latestMessageText ?? null,
-    lastMessageAt: toIsoOrNull(input.session.lastMessageAt),
-    lastMessageId: input.session.lastMessageId,
-    createdAt: toIso(input.session.createdAt),
-    updatedAt: toIso(input.session.updatedAt),
-  };
-  await redisCommandClient.publish(REALTIME_OUTBOUND_CHANNEL, JSON.stringify({
-    id: randomUUID(), timestamp: Date.now(), domain: "session", type: "session.updated",
-    spaceId: session.spaceId, sessionId: session.id,
-    payload: { session, changed: input.changed },
-  }));
-}
+}) => {
+  if (input.task.sessionId && input.task.taskType === "generation" && ["completed", "failed"].includes(input.task.status)) {
+    void scheduleSessionSnapshot(input.task.sessionId);
+  }
+  await publishTaskEvent({ type: "task.updated", task: input.task, changed: input.changed });
+};
 
 async function dispatchTurnEvent(input: {
   type: "session.turn.created" | "session.turn.updated";
@@ -150,5 +135,12 @@ async function dispatchTurnEvent(input: {
 export const dispatchTurnCreated = (input: { spaceId: string; turn: SessionTurnRecord }) =>
   dispatchTurnEvent({ type: "session.turn.created", ...input });
 
-export const dispatchTurnUpdated = (input: { spaceId: string; turn: SessionTurnRecord }) =>
-  dispatchTurnEvent({ type: "session.turn.updated", ...input });
+export const scheduleSessionSnapshot = createSessionSnapshotScheduler(
+  (sessionId, fromSequence) => publishSessionSnapshot(db, sessionId, (event) => redisCommandClient.publish(REALTIME_OUTBOUND_CHANNEL, JSON.stringify(event)), fromSequence),
+  (error, sessionId) => console.warn("[Realtime] failed to publish session snapshot", { sessionId, error }),
+);
+
+export async function dispatchTurnUpdated(input: { spaceId: string; turn: SessionTurnRecord }) {
+  if (isSettledStatsTurn(input.turn)) void scheduleSessionSnapshot(input.turn.sessionId, input.turn.sequence);
+  await dispatchTurnEvent({ type: "session.turn.updated", ...input });
+}

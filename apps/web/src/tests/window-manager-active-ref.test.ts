@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { appWindowKey } from "../lib/features/space/modules/app-window-key.ts";
 import { createWindowManager } from "../lib/features/space/modules/window-manager.svelte.ts";
 
 (globalThis as unknown as { $state: <T>(value: T) => T }).$state = <T>(
@@ -13,21 +14,26 @@ const APP_B = "22222222-2222-4222-8222-222222222222";
 const APP_C = "33333333-3333-4333-8333-333333333333";
 const APP_D = "44444444-4444-4444-8444-444444444444";
 
-type Ref = { kind: "file" | "board" | "port" | "app"; key: string };
+type Ref = { kind: "file" | "board" | "port" | "app" | "display"; key: string };
 
 /**
  * A harness with all four domains mounted, so cross-domain fallback and
  * out-of-band closes can be exercised the way the page wires them.
  */
-function createHarness(options: { appKeepAliveLimit?: number } = {}) {
+function createHarness(
+	options: { appKeepAliveLimit?: number; weightLimit?: number } = {},
+) {
 	let filePaths: string[] = [];
 	let activeFilePath: string | null = null;
 	let boardPaths: string[] = [];
 	let activeBoardPath: string | null = null;
 	let ports: string[] = [];
 	let activePort: string | null = null;
-	let appIds: string[] = [];
-	let activeAppId: string | null = null;
+	let appKeys: string[] = [];
+	let activeAppKey: string | null = null;
+	let displays: string[] = [];
+	let activeDisplay: string | null = null;
+	const dirtyApps = new Set<string>();
 	let boardOpenCount = 0;
 	const urls: Array<Ref | null> = [];
 	const appInvocations: Array<unknown> = [];
@@ -43,8 +49,27 @@ function createHarness(options: { appKeepAliveLimit?: number } = {}) {
 		getActiveBoardPath: () => activeBoardPath,
 		getPortTabs: () => ports.map((port) => ({ port, url: "http://x" })),
 		getActivePort: () => activePort,
-		getAppTabs: () => appIds.map((appId) => ({ appId, loading: false })),
-		getActiveAppId: () => activeAppId,
+		getAppTabs: () =>
+			appKeys.map((key) => ({
+				key,
+				loading: false,
+				windowState: { dirty: dirtyApps.has(key) },
+			})),
+		getActiveAppKey: () => activeAppKey,
+		getDisplayTabs: () => displays.map((display) => ({ display })),
+		getActiveDisplay: () => activeDisplay,
+		openDisplay: (display) => {
+			if (!displays.includes(display)) displays = [...displays, display];
+			activeDisplay = display;
+		},
+		activateDisplay: (display) => {
+			activeDisplay = display;
+		},
+		closeDisplay: (display) => {
+			if (!display) return;
+			displays = drop(displays, display);
+			if (activeDisplay === display) activeDisplay = displays.at(-1) ?? null;
+		},
 		openFile: async (path) => {
 			if (!filePaths.includes(path)) filePaths = [...filePaths, path];
 			activeFilePath = path;
@@ -84,23 +109,24 @@ function createHarness(options: { appKeepAliveLimit?: number } = {}) {
 			if (activePort === port) activePort = ports.at(-1) ?? null;
 		},
 		openApp: (input) => {
-			if (!appIds.includes(input.appId)) appIds = [...appIds, input.appId];
+			const key = appWindowKey(input.appId, input.openContext.file?.path);
+			if (!appKeys.includes(key)) appKeys = [...appKeys, key];
 			appInvocations.push(input.openContext);
-			activeAppId = input.appId;
+			activeAppKey = key;
 		},
-		activateApp: (appId) => {
-			activeAppId = appId;
+		activateApp: (key) => {
+			activeAppKey = key;
 		},
-		closeApp: (appId) => {
-			if (!appId) return;
-			appIds = drop(appIds, appId);
-			if (activeAppId === appId) activeAppId = appIds.at(-1) ?? null;
+		closeApp: (key) => {
+			if (!key) return;
+			appKeys = drop(appKeys, key);
+			if (activeAppKey === key) activeAppKey = appKeys.at(-1) ?? null;
 		},
 		getPortEndpointUrl: () => "http://x",
 		syncUrl: (ref) => {
 			urls.push(ref);
 		},
-		weightLimit: 100,
+		weightLimit: options.weightLimit ?? 100,
 		appKeepAliveLimit: options.appKeepAliveLimit,
 	});
 
@@ -112,9 +138,17 @@ function createHarness(options: { appKeepAliveLimit?: number } = {}) {
 			files: filePaths.length,
 			boards: boardPaths.length,
 			ports: ports.length,
-			apps: appIds.length,
+			apps: appKeys.length,
+			displays: displays.length,
 		}),
 		boardOpenCount: () => boardOpenCount,
+		/** An App reporting unsaved work, as its window state would. */
+		markDirty: (appId: string) => dirtyApps.add(appId),
+		/** An App window rekeyed by its domain after its file moved. */
+		renameApp: (from: string, to: string) => {
+			appKeys = appKeys.map((key) => (key === from ? to : key));
+			if (activeAppKey === from) activeAppKey = to;
+		},
 		/** Simulate a domain closing a tab on its own schedule. */
 		closeFileOutOfBand: (path: string) => {
 			filePaths = drop(filePaths, path);
@@ -230,7 +264,13 @@ test("compact session navigation suspends tabs without disposing runtimes", asyn
 	assert.equal(controller.suspended, true);
 	assert.equal(controller.currentRef(), null);
 	assert.equal(controller.activeKind, null);
-	assert.deepEqual(counts(), { files: 1, boards: 1, ports: 1, apps: 1 });
+	assert.deepEqual(counts(), {
+		files: 1,
+		boards: 1,
+		ports: 1,
+		apps: 1,
+		displays: 0,
+	});
 
 	controller.applyRoute({ kind: "board", key: "plans/main.board" });
 	assert.equal(controller.suspended, false);
@@ -254,14 +294,14 @@ test("only the most recently used Apps stay mounted in the background", () => {
 	open(APP_B);
 	open(APP_C);
 	assert.deepEqual(
-		[...controller.retainedAppIds()].sort(),
+		[...controller.retainedAppKeys()].sort(),
 		[APP_A, APP_B, APP_C].sort(),
 		"every App fits while there is room",
 	);
 
 	open(APP_D);
 	assert.deepEqual(
-		[...controller.retainedAppIds()].sort(),
+		[...controller.retainedAppKeys()].sort(),
 		[APP_B, APP_C, APP_D].sort(),
 		"the least recently used App falls out of the mounted set",
 	);
@@ -269,7 +309,7 @@ test("only the most recently used Apps stay mounted in the background", () => {
 	// Re-activating the dropped App makes it newest again and evicts the LRU.
 	controller.activate("app", APP_A);
 	assert.deepEqual(
-		[...controller.retainedAppIds()].sort(),
+		[...controller.retainedAppKeys()].sort(),
 		[APP_A, APP_C, APP_D].sort(),
 	);
 });
@@ -278,14 +318,36 @@ test("the active App is always retained, even with a keep-alive window of 1", ()
 	const { controller } = createHarness({ appKeepAliveLimit: 1 });
 	controller.openApp({ appId: APP_A, openContext: { source: "user" } });
 	controller.openApp({ appId: APP_B, openContext: { source: "user" } });
-	assert.deepEqual([...controller.retainedAppIds()], [APP_B]);
+	assert.deepEqual([...controller.retainedAppKeys()], [APP_B]);
 
 	controller.activate("app", APP_A);
 	assert.deepEqual(
-		[...controller.retainedAppIds()],
+		[...controller.retainedAppKeys()],
 		[APP_A],
 		"activating an App must keep its surface mounted",
 	);
+});
+
+test("Apps with unsaved work stay mounted beyond the keep-alive window", () => {
+	const { controller, markDirty } = createHarness({ appKeepAliveLimit: 1 });
+	controller.openApp({ appId: APP_A, openContext: { source: "user" } });
+	markDirty(APP_A);
+	controller.openApp({ appId: APP_B, openContext: { source: "user" } });
+	assert.deepEqual(
+		[...controller.retainedAppKeys()].sort(),
+		[APP_A, APP_B].sort(),
+		"unmounting a dirty App would discard its work",
+	);
+});
+
+test("the tab budget never closes an App with unsaved work", () => {
+	const { controller, counts, markDirty } = createHarness({ weightLimit: 6 });
+	controller.openApp({ appId: APP_A, openContext: { source: "user" } });
+	markDirty(APP_A);
+	controller.openApp({ appId: APP_B, openContext: { source: "user" } });
+	controller.openApp({ appId: APP_C, openContext: { source: "user" } });
+	assert.equal(counts().apps, 2, "the budget closes a clean App instead");
+	assert.deepEqual([...controller.retainedAppKeys()].includes(APP_A), true);
 });
 
 test("closeAll drops every domain tab and the active ref", async () => {
@@ -297,10 +359,17 @@ test("closeAll drops every domain tab and the active ref", async () => {
 		appId: WORK_ID,
 		openContext: { source: "user" },
 	});
+	controller.openDisplay("screen");
 
 	controller.closeAll();
 
-	assert.deepEqual(counts(), { files: 0, boards: 0, ports: 0, apps: 0 });
+	assert.deepEqual(counts(), {
+		files: 0,
+		boards: 0,
+		ports: 0,
+		apps: 0,
+		displays: 0,
+	});
 	assert.equal(controller.currentRef(), null);
 });
 
@@ -430,7 +499,7 @@ test("panels open only once their tab is the committed active surface", () => {
 	for (const [source, activeAssignment] of [
 		[board, "activeBoardPath = path"],
 		[port, "activePort = port"],
-		[app, "activeAppId = input.appId"],
+		[app, "activeKey = key"],
 	] as const) {
 		const activeAt = source.indexOf(activeAssignment);
 		const openPanelAt = source.indexOf("options.onOpenPanel?.()");
@@ -456,12 +525,63 @@ test("workspace App tabs keep recent surfaces mounted while inactive", () => {
 		"utf8",
 	);
 
-	// One AppWindow per retained tab, keyed by App id, so switching tabs cannot
-	// reuse a single instance and destroy the inactive iframe.
-	assert.match(domain, /\{#each retainedAppTabs as tab \(tab\.appId\)\}/);
+	assert.match(domain, /\{#each retainedAppTabs as tab \(tab\.id\)\}/);
 	assert.match(domain, /active=\{isActiveApp\}/);
 	// Only the visible tab mounts the shared header; background tabs must not
 	// render duplicate chrome.
 	assert.match(window, /\{#if active\}\s*<PreviewHeader/);
 	assert.equal(window.match(/<PreviewHeader/g)?.length, 1);
+});
+
+test("a file window deep link restores the App with its file", () => {
+	const { controller, appInvocations } = createHarness();
+	controller.applyRoute({ kind: "app", key: `${APP_A}:plans/a.board` });
+	assert.deepEqual(appInvocations.at(-1), {
+		source: "route",
+		file: { path: "plans/a.board" },
+	});
+	assert.deepEqual(controller.currentRef(), {
+		kind: "app",
+		key: `${APP_A}:plans/a.board`,
+	});
+});
+
+test("a renamed active file window stays active and rewrites the URL", async () => {
+	const { controller, urls, renameApp } = createHarness();
+	await controller.openFile("docs/a.md");
+	controller.openApp({
+		appId: APP_A,
+		openContext: { source: "user", file: { path: "plans/a.board" } },
+	});
+	const from = `${APP_A}:plans/a.board`;
+	const to = `${APP_A}:archive/a.board`;
+	renameApp(from, to);
+	controller.renameTab("app", from, to);
+	assert.deepEqual(urls.at(-1), { kind: "app", key: to });
+	assert.deepEqual(
+		controller.currentRef(),
+		{ kind: "app", key: to },
+		"the older file tab must not take over",
+	);
+});
+
+test("a display window opens once, routes like any window and falls back on close", async () => {
+	const { controller, urls, counts } = createHarness();
+	await controller.openFile("docs/a.md");
+	controller.openDisplay("screen");
+	controller.openDisplay("screen");
+	assert.equal(counts().displays, 1, "re-opening activates the existing tab");
+	assert.deepEqual(controller.currentRef(), { kind: "display", key: "screen" });
+	assert.deepEqual(urls.at(-1), { kind: "display", key: "screen" });
+
+	controller.openDisplay("../etc");
+	assert.equal(counts().displays, 1, "invalid display ids never open");
+
+	controller.close("display", "screen");
+	assert.deepEqual(controller.currentRef(), { kind: "file", key: "docs/a.md" });
+
+	assert.deepEqual(controller.applyRoute({ kind: "display", key: "screen" }), {
+		ok: true,
+	});
+	assert.deepEqual(controller.currentRef(), { kind: "display", key: "screen" });
 });

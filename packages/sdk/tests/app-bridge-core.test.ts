@@ -90,7 +90,7 @@ afterEach(() => {
 const initialFetch = globalThis.fetch;
 beforeEach(() => {
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces") ? jsonResponse([]) : jsonResponse({})) as typeof fetch;
+		isSpaceList(String(url)) ? spacePage([]) : jsonResponse({})) as typeof fetch;
 });
 
 // --- Tests ------------------------------------------------------------------
@@ -145,6 +145,26 @@ test("context message replies with app, viewer, and invocation metadata", async 
 	});
 });
 
+test("context carries the host locale, appearance, window visibility, and opened file", async () => {
+	const tokens = { "bg-primary": "#101213" };
+	const config = makeConfig({
+		invocation: { surface: "app", source: "user", spaceId: "space_1", file: { path: "boards/a.board" }, id: "open-1" },
+		getLocale: () => "zh-CN",
+		getAppearance: () => ({ colorScheme: "dark", theme: "dark", tokens, reducedMotion: false }),
+		getWindow: () => ({ visible: false }),
+	});
+	const core = createAppBridgeCore(config);
+	await core.handleMessage(messageEvent({ type: "cohub.app.context", requestId: "r1" }));
+
+	const context = config.replies[0]?.payload.context as Record<string, unknown>;
+	assert.equal(context.locale, "zh-CN");
+	assert.deepEqual(context.appearance, { colorScheme: "dark", theme: "dark", tokens, reducedMotion: false });
+	assert.notEqual((context.appearance as { tokens: unknown }).tokens, tokens);
+	assert.deepEqual(context.window, { visible: false });
+	assert.deepEqual((context.invocation as Record<string, unknown>).file, { path: "boards/a.board" });
+	assert.equal((context.invocation as Record<string, unknown>).id, "open-1");
+});
+
 test("legacy work context replies with the projected work context", async () => {
 	const config = makeConfig();
 	const core = createAppBridgeCore(config);
@@ -191,8 +211,8 @@ test("legacy work token reuses the current app session path", async () => {
 test("legacy work authorize and purchase replies preserve their protocol", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([])
+		isSpaceList(String(url))
+			? spacePage([])
 			: new Response("server error", { status: 500 })) as typeof fetch;
 	try {
 		const config = makeConfig({ viewerUuid: "viewer-uuid" });
@@ -493,7 +513,7 @@ test("authorize opens consent dialog for non-owner without prior grant", async (
 	assert.equal(state.pendingAuth?.reason, "need to read prompts");
 });
 
-test("Shell Space read-only scopes are authorized without opening the dialog", async () => {
+test("Shell Space read-only scopes renew without opening the dialog for any App", async () => {
 	const originalFetch = globalThis.fetch;
 	const requests: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = [];
 	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
@@ -535,12 +555,10 @@ test("Shell Space read-only scopes are authorized without opening the dialog", a
 		assert.equal(config.replies.length, 1);
 		assert.equal(config.replies[0]?.payload.token, "shell-token");
 		assert.deepEqual(config.replies[0]?.payload.space, { id: "shell-space", name: "Shell Space" });
-		// Deciding to skip the dialog is Host-side; the request itself stays an
-		// ordinary authorize call. `silent` tells the server it may only renew a
-		// live grant, so a revoked consent can never come back without the dialog.
 		assert.equal(requests.length, 1);
 		assert.match(requests[0]?.url ?? "", /\/api\/apps\/work_123\/authorize$/);
 		assert.equal(requests[0]?.body.silent, true);
+		assert.equal(requests[0]?.body.consent, undefined);
 		assert.equal(requests[0]?.body.spaceId, "shell-space");
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -581,7 +599,7 @@ test("Shell silent path falls back to the dialog when the grant was revoked", as
 	globalThis.fetch = (async (url: unknown) =>
 		String(url).endsWith("/authorize")
 			? new Response(JSON.stringify({ message: "grant was revoked; viewer consent is required again", code: "consent_required" }), { status: 403 })
-			: jsonResponse([])) as typeof fetch;
+			: spacePage([])) as typeof fetch;
 	try {
 		const config = makeConfig({
 			shell: {
@@ -609,7 +627,7 @@ test("Shell auto-authorization does not cover other targets or side-effect scope
 	const urls: string[] = [];
 	globalThis.fetch = (async (url: unknown) => {
 		urls.push(String(url));
-		if (String(url).endsWith("/api/spaces")) return jsonResponse([{ id: "shell-space", name: "Shell Space" }]);
+		if (isSpaceList(String(url))) return spacePage([{ id: "shell-space", name: "Shell Space" }]);
 		return jsonResponse({ token: "should-not-authorize" });
 	}) as typeof fetch;
 	try {
@@ -653,14 +671,127 @@ test("Shell auto-authorization does not cover other targets or side-effect scope
 const jsonResponse = (body: unknown) =>
 	new Response(JSON.stringify(body), { status: 200 });
 
+const spacePage = (items: unknown[], pageInfo: { hasMore: boolean; nextCursor: string | null } = { hasMore: false, nextCursor: null }) =>
+	jsonResponse({ items, pageInfo });
+
+const isSpaceList = (url: unknown) => new URL(String(url)).pathname === "/api/spaces";
+
+const workspaceShell = (spaceId: string) => ({
+	surface: "workspace" as const,
+	space: { id: spaceId, name: "Shell Space" },
+	session: null,
+	turn: null,
+});
+
+/** Records `/authorize` bodies and grants whatever was requested. */
+function mockHostConsent() {
+	const bodies: Array<Record<string, unknown>> = [];
+	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+		if (!String(url).endsWith("/authorize")) return spacePage([]);
+		const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+		bodies.push(body);
+		return jsonResponse({
+			token: "host-token",
+			grant: { id: "grant-host", spaceId: body.spaceId, scopes: body.scopes, expiresAt: null },
+		});
+	}) as typeof fetch;
+	return bodies;
+}
+
+const editRequest = (requestId: string) =>
+	messageEvent({ type: "cohub.app.authorize", requestId, scopes: ["file.view", "file.edit"] });
+
+test("Shell grants file.edit without a dialog to an App its Space installed", async () => {
+	const bodies = mockHostConsent();
+	const checked: string[] = [];
+	const config = makeConfig({
+		shell: workspaceShell("shell-space"),
+		isInstalledIn: (spaceId) => {
+			checked.push(spaceId);
+			return true;
+		},
+	});
+	const core = createAppBridgeCore(config);
+
+	await core.handleMessage(editRequest("installed-edit"));
+
+	assert.equal(core.getState().authOpen, false);
+	assert.deepEqual(checked, ["shell-space"]);
+	assert.equal(bodies[0]?.consent, "host");
+	assert.equal(bodies[0]?.spaceId, "shell-space");
+});
+
+test("Shell asks before granting file.edit to an App its Space does not trust", async () => {
+	for (const isInstalledIn of [undefined, () => false, () => Promise.reject(new Error("offline"))]) {
+		const bodies = mockHostConsent();
+		const config = makeConfig({ shell: workspaceShell("shell-space"), isInstalledIn });
+		const core = createAppBridgeCore(config);
+
+		await core.handleMessage(editRequest("untrusted-edit"));
+
+		assert.equal(core.getState().authOpen, true);
+		assert.equal(bodies.length, 0);
+	}
+});
+
+test("a trusted App gets Host consent for read-only scopes on a first visit", async () => {
+	const bodies = mockHostConsent();
+	const config = makeConfig({ shell: workspaceShell("shell-space"), isInstalledIn: () => true });
+	const core = createAppBridgeCore(config);
+
+	await core.handleMessage(
+		messageEvent({ type: "cohub.app.authorize", requestId: "trusted-read", scopes: ["file.view"] }),
+	);
+
+	assert.equal(core.getState().authOpen, false);
+	assert.deepEqual(bodies, [{ scopes: ["file.view"], spaceId: "shell-space", silent: true, consent: "host" }]);
+});
+
+test("an untrusted App's first visit falls back to the dialog", async () => {
+	const originalFetch = globalThis.fetch;
+	const bodies: Array<Record<string, unknown>> = [];
+	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+		if (!String(url).endsWith("/authorize")) return spacePage([]);
+		bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+		return new Response(JSON.stringify({ message: "grant is no longer active; viewer consent is required again", code: "consent_required" }), { status: 403 });
+	}) as typeof fetch;
+	try {
+		const config = makeConfig({ shell: workspaceShell("shell-space"), isInstalledIn: () => false });
+		const core = createAppBridgeCore(config);
+
+		await core.handleMessage(
+			messageEvent({ type: "cohub.app.authorize", requestId: "untrusted-read", scopes: ["file.view"] }),
+		);
+
+		assert.deepEqual(bodies, [{ scopes: ["file.view"], spaceId: "shell-space", silent: true }]);
+		assert.equal(core.getState().authOpen, true);
+		assert.equal(config.replies.length, 0);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("Shell never consents to scopes beyond its ceiling, even for a trusted App", async () => {
+	const bodies = mockHostConsent();
+	const config = makeConfig({ shell: workspaceShell("shell-space"), isInstalledIn: () => true });
+	const core = createAppBridgeCore(config);
+
+	await core.handleMessage(
+		messageEvent({ type: "cohub.app.authorize", requestId: "prompt", scopes: ["file.edit", "session.prompt.fullaccess"] }),
+	);
+
+	assert.equal(core.getState().authOpen, true);
+	assert.equal(bodies.length, 0);
+});
+
 test("selectSpace opens the picker with the viewer's spaces loaded by the host", async () => {
 	const originalFetch = globalThis.fetch;
 	const fetchedUrls: string[] = [];
 	globalThis.fetch = (async (url: unknown) => {
 		const target = String(url);
 		fetchedUrls.push(target);
-		if (target.endsWith("/api/spaces")) {
-			return jsonResponse([
+		if (isSpaceList(target)) {
+			return spacePage([
 				{ id: "space-a", name: "Alpha" },
 				{ id: "space-b", name: null },
 			]);
@@ -682,7 +813,7 @@ test("selectSpace opens the picker with the viewer's spaces loaded by the host",
 		);
 
 		// The host — not the app — loads the space list.
-		assert.deepEqual(fetchedUrls, ["https://api.test/api/spaces"]);
+		assert.deepEqual(fetchedUrls, ["https://api.test/api/spaces?limit=100"]);
 		const state = core.getState();
 		assert.equal(state.authOpen, true);
 		assert.equal(state.pendingAuth?.selectSpace, true);
@@ -697,7 +828,7 @@ test("selectSpace opens the picker with the viewer's spaces loaded by the host",
 		assert.equal(config.replies[0].payload.token, "picked-token");
 		assert.deepEqual(config.replies[0].payload.space, { id: "space-a", name: "Alpha" });
 		assert.deepEqual(fetchedUrls, [
-			"https://api.test/api/spaces",
+			"https://api.test/api/spaces?limit=100",
 			"https://api.test/api/apps/work_123/authorize",
 		]);
 	} finally {
@@ -713,7 +844,7 @@ test("selectSpace refreshes an expired user token before loading spaces", async 
 		const token = String(new Headers(init?.headers).get("Authorization") ?? "").replace("Bearer ", "");
 		requests.push(token);
 		if (token === "stale-user-token") return new Response("unauthorized", { status: 401 });
-		return jsonResponse([{ id: "space-a", name: "Alpha" }]);
+		return spacePage([{ id: "space-a", name: "Alpha" }]);
 	}) as typeof fetch;
 	try {
 		const config = makeConfig({
@@ -746,7 +877,7 @@ test("selectSpace with no accessible Space keeps the dialog open with an error",
 	const core = createAppBridgeCore(config);
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces") ? jsonResponse([]) : jsonResponse({})) as typeof fetch;
+		isSpaceList(String(url)) ? spacePage([]) : jsonResponse({})) as typeof fetch;
 	try {
 		await core.handleMessage(
 			messageEvent({
@@ -779,8 +910,8 @@ test("selectSpace re-authorizes silently against the last picked space", async (
 	};
 	globalThis.localStorage = storageMock(store);
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: null }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: null }])
 			: jsonResponse({ token: "silent-token" })) as typeof fetch;
 	try {
 		const config = makeConfig();
@@ -822,8 +953,8 @@ test("selectSpace does not silently reuse a last picked Space the viewer lost", 
 	const urls: string[] = [];
 	globalThis.fetch = (async (url: unknown) => {
 		urls.push(String(url));
-		return String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		return isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: jsonResponse({ token: "silent-token" });
 	}) as typeof fetch;
 	try {
@@ -951,8 +1082,8 @@ test("silent reuse sends silent: true; dialog confirm does not", async () => {
 	const originalFetch = globalThis.fetch;
 	const bodies: Array<Record<string, unknown>> = [];
 	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
-		if (String(url).endsWith("/api/spaces")) {
-			return jsonResponse([{ id: "space-a", name: "Alpha" }]);
+		if (isSpaceList(String(url))) {
+			return spacePage([{ id: "space-a", name: "Alpha" }]);
 		}
 		bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
 		return jsonResponse({ token: "tok" });
@@ -1021,7 +1152,7 @@ test("silent renewal in the invocation Space skips the Space list", async () => 
 		assert.equal(core.getState().authOpen, false);
 		assert.equal(config.replies[0]?.payload.token, "silent-token");
 		// The known target is renewed without loading the Space list at all.
-		assert.equal(urls.some((url) => url.endsWith("/api/spaces")), false);
+		assert.equal(urls.some((url) => isSpaceList(url)), false);
 	} finally {
 		globalThis.fetch = originalFetch;
 		globalThis.localStorage = originalLocalStorage;
@@ -1041,8 +1172,8 @@ test("transient silent authorization failures preserve cache and return a retrya
 	globalThis.localStorage = storageMock(store);
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: new Response(JSON.stringify({ message: "temporarily unavailable" }), {
 					status: 503,
 				})) as typeof fetch;
@@ -1078,8 +1209,8 @@ test("definitive silent authorization failures clear cache and ask again", async
 	globalThis.localStorage = storageMock(store);
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: new Response(JSON.stringify({ message: "grant revoked" }), {
 					status: 403,
 				})) as typeof fetch;
@@ -1114,8 +1245,8 @@ test("alwaysAsk skips silent reuse and opens the consent dialog", async () => {
 	globalThis.localStorage = storageMock(store);
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: jsonResponse({ token: "silent-token" })) as typeof fetch;
 	try {
 		const config = makeConfig();
@@ -1162,8 +1293,8 @@ test("a legacy home-space grant is not reused for an implicit request", async ()
 	const urls: string[] = [];
 	globalThis.fetch = (async (url: unknown) => {
 		urls.push(String(url));
-		return String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		return isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: jsonResponse({ token: "silent-token" });
 	}) as typeof fetch;
 	try {
@@ -1222,7 +1353,7 @@ test("account-level scopes silently reuse a grant made on any Space", async () =
 		// No Space list, no dialog, and the silent call targets the grant's Space.
 		assert.equal(core.getState().authOpen, false);
 		assert.equal(config.replies[0]?.payload.token, "silent-token");
-		assert.equal(urls.some((url) => url.endsWith("/api/spaces")), false);
+		assert.equal(urls.some((url) => isSpaceList(url)), false);
 		assert.equal(authorizeBody?.spaceId, "space-other");
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -1336,8 +1467,8 @@ test("a stale access token during silent renewal refreshes instead of dropping t
 	let forcedRefresh = false;
 	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
 		const target = String(url);
-		if (target.endsWith("/api/spaces")) {
-			return jsonResponse([{ id: "space-a", name: "Alpha" }]);
+		if (isSpaceList(target)) {
+			return spacePage([{ id: "space-a", name: "Alpha" }]);
 		}
 		const auth = String(new Headers(init?.headers).get("Authorization") ?? "");
 		if (auth.includes("stale-token")) {
@@ -1381,8 +1512,8 @@ test("a persistent 401 never clears a valid grant cache", async () => {
 	globalThis.localStorage = storageMock(store);
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: new Response("unauthorized", { status: 401 })) as typeof fetch;
 	try {
 		const config = makeConfig({
@@ -1449,8 +1580,8 @@ test("authorize for a specific space surfaces the space on the dialog", async ()
 	globalThis.fetch = (async (url: unknown) => {
 		const target = String(url);
 		fetchedUrls.push(target);
-		if (target.endsWith("/api/spaces")) {
-			return jsonResponse([
+		if (isSpaceList(target)) {
+			return spacePage([
 				{ id: "space-2", name: "Target Space" },
 				{ id: "space-9", name: "Other Space" },
 			]);
@@ -1473,7 +1604,7 @@ test("authorize for a specific space surfaces the space on the dialog", async ()
 
 		// The host loads the viewer's Spaces; the target's name comes from that
 		// list, so no separate per-Space lookup is needed.
-		assert.deepEqual(fetchedUrls, ["https://api.test/api/spaces"]);
+		assert.deepEqual(fetchedUrls, ["https://api.test/api/spaces?limit=100"]);
 		const state = core.getState();
 		assert.equal(state.authOpen, true);
 		assert.equal(state.pendingAuth?.spaceId, "space-2");
@@ -1494,8 +1625,8 @@ test("space-bound authorize loads the viewer's spaces so it can be changed", asy
 	const authorizeBodies: unknown[] = [];
 	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
 		const target = String(url);
-		if (target.endsWith("/api/spaces")) {
-			return jsonResponse([
+		if (isSpaceList(target)) {
+			return spacePage([
 				{ id: "space-a", name: "Alpha" },
 				{ id: "space-b", name: "Beta" },
 			]);
@@ -1552,7 +1683,7 @@ test("account-only authorize never loads Spaces", async () => {
 			}),
 		);
 
-		assert.equal(urls.some((url) => url.endsWith("/api/spaces")), false);
+		assert.equal(urls.some((url) => isSpaceList(url)), false);
 		assert.equal(core.getState().pendingAuth?.spaces, undefined);
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -1563,8 +1694,8 @@ test("resolves the default target from the invocation Space", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) => {
 		const target = String(url);
-		if (target.endsWith("/api/spaces")) {
-			return jsonResponse([
+		if (isSpaceList(target)) {
+			return spacePage([
 				{ id: "space-a", name: "Alpha" },
 				{ id: "space-b", name: "Beta" },
 			]);
@@ -1595,8 +1726,8 @@ test("resolves the default target from the invocation Space", async () => {
 test("a single accessible Space selects without offering a change", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "only-space", name: "Only" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "only-space", name: "Only" }])
 			: jsonResponse({})) as typeof fetch;
 	try {
 		const config = makeConfig({ viewerUuid: "some-other-viewer" });
@@ -1613,18 +1744,16 @@ test("a single accessible Space selects without offering a change", async () => 
 	}
 });
 
-test("an empty Space list falls back to the viewer's default Home", async () => {
+test("an empty Space list falls back to the viewer's own Home", async () => {
 	const originalFetch = globalThis.fetch;
-	const urls: string[] = [];
-	globalThis.fetch = (async (url: unknown) => {
+	const requests: string[] = [];
+	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
 		const target = String(url);
-		urls.push(target);
-		if (target.endsWith("/api/spaces/default")) {
-			return jsonResponse({
-				space: { id: "home-space", name: "Home", userUuid: "viewer-uuid" },
-			});
+		requests.push(`${init?.method ?? "GET"} ${target}`);
+		if (target.endsWith("/api/me/spaces/home")) {
+			return jsonResponse({ id: "home-space", name: "Home", userUuid: "viewer-uuid" });
 		}
-		if (target.endsWith("/api/spaces")) return jsonResponse([]);
+		if (isSpaceList(target)) return spacePage([]);
 		return jsonResponse({});
 	}) as typeof fetch;
 	try {
@@ -1642,7 +1771,29 @@ test("an empty Space list falls back to the viewer's default Home", async () => 
 		assert.deepEqual(pending?.spaces, [
 			{ id: "home-space", name: "Home", ownerUserUuid: "viewer-uuid" },
 		]);
-		assert.ok(urls.some((url) => url.endsWith("/api/spaces/default")));
+		assert.ok(requests.some((request) => request.startsWith("POST ") && request.endsWith("/api/me/spaces/home")));
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("named Spaces are looked up and only owned or joined ones qualify", async () => {
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = (async (url: unknown) => {
+		const target = String(url);
+		if (isSpaceList(target)) return spacePage([{ id: "space-1", name: "Recent" }], { hasMore: true, nextCursor: "next" });
+		if (target.endsWith("/space-member")) return jsonResponse({ id: "space-member", name: "Joined", relation: "member" });
+		if (target.endsWith("/space-public")) return jsonResponse({ id: "space-public", name: "Public", relation: "public" });
+		return jsonResponse({});
+	}) as typeof fetch;
+	try {
+		for (const [spaceId, selected] of [["space-member", "space-member"], ["space-public", "space-1"]]) {
+			const core = createAppBridgeCore(makeConfig({ viewerUuid: "some-other-viewer" }));
+			await core.handleMessage(
+				messageEvent({ type: "cohub.app.authorize", requestId: "r1", scopes: ["file.view"], spaceId }),
+			);
+			assert.equal(core.getState().selectedSpaceId, selected);
+		}
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
@@ -1652,8 +1803,8 @@ test("an inaccessible explicit Space is replaced with a viewer-controlled one", 
 	const originalFetch = globalThis.fetch;
 	const diagnostics: Record<string, unknown>[] = [];
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([
+		isSpaceList(String(url))
+			? spacePage([
 					{ id: "space-a", name: "Alpha" },
 					{ id: "space-b", name: "Beta" },
 				])
@@ -1728,11 +1879,11 @@ test("concurrent identical authorize requests join instead of overwriting", asyn
 	let spacesCalls = 0;
 	globalThis.fetch = (async (url: unknown) => {
 		const target = String(url);
-		if (target.endsWith("/api/spaces")) {
+		if (isSpaceList(target)) {
 			spacesCalls += 1;
 			// Hold the first load open so the second request arrives mid-flight.
 			await new Promise((resolve) => setTimeout(resolve, 5));
-			return jsonResponse([{ id: "space-a", name: "Alpha" }]);
+			return spacePage([{ id: "space-a", name: "Alpha" }]);
 		}
 		if (target.endsWith("/authorize")) {
 			return jsonResponse({ token: "tok", grant: { spaceId: "space-a", scopes: ["file.view"] } });
@@ -1779,8 +1930,8 @@ test("a replaced silent authorization does not clear the newer request", async (
 	const originalFetch = globalThis.fetch;
 	const holds: Array<() => void> = [];
 	globalThis.fetch = (async (url: unknown) => {
-		if (String(url).endsWith("/api/spaces")) {
-			return jsonResponse([{ id: "space-a", name: "Alpha" }]);
+		if (isSpaceList(String(url))) {
+			return spacePage([{ id: "space-a", name: "Alpha" }]);
 		}
 		await new Promise<void>((resolve) => holds.push(resolve));
 		return jsonResponse({ token: "silent-token" });
@@ -1824,8 +1975,8 @@ test("a replaced silent authorization does not clear the newer request", async (
 test("repeating an inaccessible target request joins the open dialog", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: jsonResponse({})) as typeof fetch;
 	try {
 		const config = makeConfig({ viewerUuid: "some-other-viewer" });
@@ -1857,8 +2008,8 @@ test("a pinned explicit target ignores a different confirm pick", async () => {
 	let authorizeBody: Record<string, unknown> | null = null;
 	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
 		const target = String(url);
-		if (target.endsWith("/api/spaces")) {
-			return jsonResponse([
+		if (isSpaceList(target)) {
+			return spacePage([
 				{ id: "space-a", name: "Alpha" },
 				{ id: "space-b", name: "Beta" },
 			]);
@@ -1893,8 +2044,8 @@ test("a throwing state callback still answers joined requests", async () => {
 	const originalFetch = globalThis.fetch;
 	const originalLocalStorage = globalThis.localStorage;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: jsonResponse({})) as typeof fetch;
 	try {
 		let releaseViewer: (() => void) | null = null;
@@ -1941,8 +2092,8 @@ test("confirmAuth rejects a target outside the loaded candidates", async () => {
 	const urls: string[] = [];
 	globalThis.fetch = (async (url: unknown) => {
 		urls.push(String(url));
-		return String(url).endsWith("/api/spaces")
-			? jsonResponse([
+		return isSpaceList(String(url))
+			? spacePage([
 					{ id: "space-a", name: "Alpha" },
 					{ id: "space-b", name: "Beta" },
 				])
@@ -1967,8 +2118,8 @@ test("confirmAuth rejects a target outside the loaded candidates", async () => {
 test("an accessible explicit target cannot be changed by the viewer", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([
+		isSpaceList(String(url))
+			? spacePage([
 					{ id: "space-a", name: "Alpha" },
 					{ id: "space-b", name: "Beta" },
 				])
@@ -1997,8 +2148,8 @@ test("an accessible explicit target cannot be changed by the viewer", async () =
 test("a throwing diagnostic transport never breaks authorization", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: jsonResponse({})) as typeof fetch;
 	try {
 		const config = makeConfig({
@@ -2028,8 +2179,8 @@ test("an error after the dialog reservation answers every joined request", async
 	const originalFetch = globalThis.fetch;
 	const originalLocalStorage = globalThis.localStorage;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: jsonResponse({})) as typeof fetch;
 	try {
 		let releaseViewer: (() => void) | null = null;
@@ -2072,8 +2223,8 @@ test("an error after the dialog reservation answers every joined request", async
 test("selectSpace only accepts a loaded candidate", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([
+		isSpaceList(String(url))
+			? spacePage([
 					{ id: "space-a", name: "Alpha" },
 					{ id: "space-b", name: "Beta" },
 				])
@@ -2099,8 +2250,8 @@ test("an app-config grant failure stays opaque to the viewer but logs a diagnost
 	const diagnostics: Record<string, unknown>[] = [];
 	globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
 		const target = String(url);
-		if (target.endsWith("/api/spaces")) {
-			return jsonResponse([{ id: "space-a", name: "Alpha" }]);
+		if (isSpaceList(target)) {
+			return spacePage([{ id: "space-a", name: "Alpha" }]);
 		}
 		if (target.endsWith("/authorize")) {
 			assert.equal(JSON.parse(String(init?.body)).spaceId, "space-a");
@@ -2234,9 +2385,9 @@ test("confirmAuth uses the server's canonical grant Space for replies and cache"
 	globalThis.localStorage = storageMock(store);
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = ((url: string, init: RequestInit) => {
-		if (url.endsWith("/api/spaces")) {
+		if (isSpaceList(url)) {
 			return Promise.resolve(
-				new Response(JSON.stringify([{ id: "space_1", name: null }]), { status: 200 }),
+				spacePage([{ id: "space_1", name: null }]),
 			);
 		}
 		if (url.endsWith("/authorize")) {
@@ -2931,8 +3082,8 @@ test("dismissing a pending dialog notifies so the UI closes before silent auth",
 	};
 	globalThis.localStorage = storageMock(store);
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-a", name: "Alpha" }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-a", name: "Alpha" }])
 			: jsonResponse({ token: "silent-token" })) as typeof fetch;
 	try {
 		const config = makeConfig();
@@ -2974,8 +3125,8 @@ test("dismissing a pending dialog notifies so the UI closes before silent auth",
 test("an identical authorize joins the open dialog and shares its answer", async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: unknown) =>
-		String(url).endsWith("/api/spaces")
-			? jsonResponse([{ id: "space-2", name: null }])
+		isSpaceList(String(url))
+			? spacePage([{ id: "space-2", name: null }])
 			: jsonResponse({ token: "granted-token", grant: { spaceId: "space-2", scopes: ["file.view"] } })) as typeof fetch;
 	try {
 		const config = makeConfig();

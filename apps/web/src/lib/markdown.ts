@@ -1,3 +1,4 @@
+import { imageVariantUrl, mediaPreviewCandidates } from "@neta-art/cohub/media";
 import DOMPurify from "isomorphic-dompurify";
 import { marked, type Token, type Tokens } from "marked";
 import remend from "remend";
@@ -259,6 +260,9 @@ function getMediaTypeFromHref(href: string): MarkdownMediaType | null {
 	}
 }
 
+/** Wider than any message column, so a variant renders at the original's size. */
+const MARKDOWN_IMAGE_WIDTH = 1536;
+
 function renderMediaPreviewHtml(input: {
 	href: string;
 	title?: string | null;
@@ -277,8 +281,29 @@ function renderMediaPreviewHtml(input: {
 	}
 
 	const ariaLabel = label ? escapeHtml(label) : "Video preview";
-	return `<figure class="markdown-media markdown-video"><video controls playsinline preload="metadata" src="${src}" aria-label="${ariaLabel}"${title}></video>${caption}</figure>`;
+	// With a CDN still as the poster, nothing streams until the user plays.
+	const [poster] = mediaPreviewCandidates(
+		{ type: "video", url: input.href },
+		{ size: MARKDOWN_IMAGE_WIDTH },
+	);
+	const frame = poster
+		? `preload="none" poster="${escapeHtml(poster)}"`
+		: `preload="metadata"`;
+	return `<figure class="markdown-media markdown-video"><video controls playsinline ${frame} src="${src}" aria-label="${ariaLabel}"${title}></video>${caption}</figure>`;
 }
+
+// CDN images render as width-bounded WebP; the original stays reachable for
+// the viewer and downloads through `data-original-src`.
+marked.use({
+	renderer: {
+		image({ href, title, text }) {
+			const variant = imageVariantUrl(href, MARKDOWN_IMAGE_WIDTH, "width");
+			if (!variant) return false;
+			const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+			return `<img src="${escapeHtml(variant)}" alt="${escapeHtml(text)}"${titleAttr} data-original-src="${escapeHtml(href)}">`;
+		},
+	},
+});
 
 function getStandaloneMediaToken(token: Token) {
 	if (token.type !== "paragraph" || !("tokens" in token)) return null;

@@ -10,6 +10,7 @@ import { cors } from "hono/cors";
 import { httpInstrumentationMiddleware } from "@hono/otel";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { isLocalHarness } from "@cohub/protocol/runtime";
+import { sanitizeSessionStatsEvent } from "@cohub/protocol/model";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type {
   RealtimeCompactFrame,
@@ -48,8 +49,8 @@ import {
 } from "./board-awareness-admission.js";
 import { markChannelDegraded, touchChannelOutbound } from "./channel-health.js";
 import { handleAsrWebSocketConnection } from "./asr/session.js";
-import { handleRelayControlConnection, handleRelayDataConnection, handleRelayPeerConnection } from "./relay/index.js";
-import { closeRuntimeRelay, handleRuntimeConnection, handleRuntimePeer } from "./relay/runtime.js";
+import { handleRelayControlConnection, handleRelayDataConnection, handleRelayDataForwardConnection, handleRelayPeerConnection } from "./relay/index.js";
+import { closeRuntimeRelay, handleRuntimeConnection, handleRuntimePeer, startRuntimeStopSubscriber } from "./relay/runtime.js";
 import {
   createPubSubRedisClient,
   redisCommandClient,
@@ -713,7 +714,7 @@ const resolveRealtimeRoomsForEnvelope = (payload: GatewayWsBroadcastPayload): Re
 };
 
 async function fanOutBroadcastToLocalSockets(payload: GatewayWsBroadcastPayload) {
-  const envelope = payload as RealtimeEnvelope;
+  const envelope = sanitizeSessionStatsEvent(payload as RealtimeEnvelope);
   const deliveredConnectionIds = new Set<string>();
 
   const deliverConnection = (connectionId: string) => {
@@ -810,6 +811,7 @@ async function main() {
 
   startWsConnectionSweeper();
   await startSpaceOutputSubscriber();
+  await startRuntimeStopSubscriber();
 
   const reconcileRetryDelaysMs = [1_000, 3_000, 10_000, 30_000];
   let reconcileInFlight = false;
@@ -988,6 +990,17 @@ async function main() {
       }
       relayPeerWss.handleUpgrade(request, socket, head, (websocket) => {
         handleRelayPeerConnection(websocket, request, spaceId);
+      });
+      return;
+    }
+
+    // Cross-replica forward of a runner data dial toward the pod holding the
+    // pending peer. Same upgrade surface as the data route; the worker-secret
+    // gate lives in the handler itself.
+    const forwardChannel = /^\/internal\/sandbox-relay-forward\/([0-9a-f-]{36})$/.exec(pathname)?.[1];
+    if (forwardChannel) {
+      relayDataWss.handleUpgrade(request, socket, head, (websocket) => {
+        handleRelayDataForwardConnection(websocket, request);
       });
       return;
     }

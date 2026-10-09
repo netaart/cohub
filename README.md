@@ -35,6 +35,8 @@ Cohub is developed inside Cohub. The core dev workflow — specs, agent runs, re
 
 **Web** — open [cohub.live](https://cohub.live) and sign in.
 
+**App** — iOS and Android: [cohub-mobile.bangwu.me](https://cohub-mobile.bangwu.me/).
+
 **CLI** —
 
 ```bash
@@ -46,11 +48,11 @@ cohub auth login
 
 ## Docs
 
-Product docs: [cohub.live/docs](https://cohub.live/docs) · [中文](https://cohub.live/docs/zh)
+Product docs: [cohub.live/docs](https://cohub.live/docs) · [中文](https://cohub.live/zh/docs)
 
 Source of truth: `docs/product/en/` · `docs/product/zh/`
 
-Engineering notes: [self-hosting](docs/self-hosting.md) · [agent-sandbox-runtime](docs/agent-sandbox-runtime.md) · [app-authorization](docs/app-authorization.md) · [app-commerce](docs/app-commerce-guide.md) · [generations](docs/generations.md) · [space-hooks](docs/space-hooks.md)
+Engineering notes: [self-hosting](docs/self-hosting.md) · [agent-sandbox-runtime](docs/agent-sandbox-runtime.md) · [generations](docs/generations.md) · [space-hooks](docs/space-hooks.md) · [native-host-bridge](docs/native-host-bridge.md) · [displays](docs/displays.md)
 
 Changelog: [CHANGELOG.md](CHANGELOG.md)
 

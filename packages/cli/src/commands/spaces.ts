@@ -1,22 +1,25 @@
-import { randomUUID } from "node:crypto";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import { resolveCohubEnvironment } from "@neta-art/cohub";
+import { readSentTurns, readSessionTurnOrigin, resolveCohubEnvironment } from "@neta-art/cohub";
 import type {
   CohubHttpClient,
   ContentBlock,
   CreateSpaceInput,
   LabelListItem,
   LabelResourceType,
+  SpaceListPage,
+  SpaceRecord,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset } from "../avatar.js";
 import { createClient } from "../client.js";
-import { putLocalFile } from "../http-put.js";
-import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs } from "../output.js";
+import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
 import { resolveSpace } from "../space.js";
+import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
+import { registerSpaceFileTransfer } from "./space-files.js";
 import { registerSpaceActivity } from "./space-activity.js";
+import { registerSpaceDisplays } from "./space-displays.js";
 import { registerSpaceInvitations } from "./space-invitations.js";
 import { registerSpaceTurns } from "./space-turns.js";
 import { registerSpaceWebhooks } from "./space-webhooks.js";
@@ -74,15 +77,6 @@ type CompletionOptions = {
   json?: boolean;
 };
 
-type UploadFile = {
-  id: string;
-  localPath: string;
-  relativePath: string;
-  name: string;
-  size: number;
-  mimeType: string | null;
-};
-
 type UploadOptions = {
   dir?: string;
   json?: boolean;
@@ -93,6 +87,8 @@ const defaultIdleTtlSeconds = cliEnv === "prod" ? 12 * 60 * 60 : 10 * 60;
 const SPACE_ROLES = ["host", "builder", "guest"] as const;
 const SANDBOX_SPEC_IDS = ["standard", "boost", "ultra"] as const;
 const LABEL_RESOURCE_TYPES = ["session", "checkpoint", "file"] as const;
+/** Table cell width for space descriptions; `--json` keeps the full value. */
+const SPACE_DESCRIPTION_COLUMN_WIDTH = 40;
 
 function parseInteger(value: string, name: string, options: { min?: number; max?: number } = {}): number {
   if (!/^-?\d+$/.test(value.trim())) return error(`Invalid ${name}`, `${name} must be an integer`);
@@ -179,7 +175,7 @@ const formatAutoDestroy = (policy: { mode: "idle"; ttlSeconds: number } | { mode
 
 const slashPath = (value: string) => value.split(sep).join("/");
 
-const walkUploadPath = async (localPath: string, root: string): Promise<UploadFile[]> => {
+const walkUploadPath = async (localPath: string, root: string): Promise<LocalUploadEntry[]> => {
   const info = await stat(localPath);
   const name = basename(localPath);
   const relativePath = slashPath(relative(root, localPath) || name);
@@ -191,22 +187,13 @@ const walkUploadPath = async (localPath: string, root: string): Promise<UploadFi
   }
   if (!info.isFile()) return [];
 
-  return [{
-    id: randomUploadEntryId(),
-    localPath,
-    relativePath,
-    name,
-    size: info.size,
-    mimeType: null,
-  }];
+  return [{ localPath, relativePath, size: info.size }];
 };
-
-const randomUploadEntryId = () => randomUUID();
 
 // Upload semantics: a file keeps its name, and a directory contributes its
 // contents directly under the target dir — like `aws s3 cp dir remote:path`
 // or `rclone copy`.
-export const planUploadInput = async (input: string): Promise<UploadFile[]> => {
+export const planUploadInput = async (input: string): Promise<LocalUploadEntry[]> => {
   const localPath = resolve(input);
   const info = await stat(localPath);
   if (!info.isDirectory()) return walkUploadPath(localPath, dirname(localPath));
@@ -215,7 +202,7 @@ export const planUploadInput = async (input: string): Promise<UploadFile[]> => {
   return nested.flat();
 };
 
-export async function collectUploadFiles(paths: string[]): Promise<UploadFile[]> {
+export async function collectUploadFiles(paths: string[]): Promise<LocalUploadEntry[]> {
   if (paths.length === 0) return error("No files provided", "Pass one or more local files or directories.");
   const files = (await Promise.all(paths.map(planUploadInput))).flat();
   if (files.length === 0) return error("No regular files found");
@@ -228,43 +215,13 @@ export async function collectUploadFiles(paths: string[]): Promise<UploadFile[]>
   return files;
 }
 
-async function putUploadEntry(entry: UploadFile, uploadUrl: string, headers?: Record<string, string>): Promise<void> {
-  await putLocalFile({
-    url: uploadUrl,
-    filePath: entry.localPath,
-    size: entry.size,
-    headers,
-    label: entry.relativePath,
-  });
-}
-
 async function uploadFiles(command: Command, paths: string[], opts: UploadOptions): Promise<void> {
   const spaceId = await resolveSpace(command);
   const client = createClient();
   try {
     const files = await collectUploadFiles(paths);
-    const plan = await client.space(spaceId).files.createUpload({
-      destination: { kind: "workspace", targetDir: opts.dir },
-      entries: files.map((file) => ({
-        id: file.id,
-        name: file.name,
-        relativePath: file.relativePath,
-        size: file.size,
-        mimeType: file.mimeType,
-      })),
-    });
-    const byId = new Map(files.map((file) => [file.id, file]));
-    for (const entry of plan.entries) {
-      const file = byId.get(entry.id);
-      if (!file) throw new Error(`Missing upload entry: ${entry.id}`);
-      // Remote downloadUrl entries have no uploadUrl; complete pulls them server-side.
-      if (!entry.uploadUrl) continue;
-      await putUploadEntry(file, entry.uploadUrl, entry.headers);
-    }
-    const result = await client.space(spaceId).files.completeUpload(plan.uploadId, {
-      entries: plan.entries.map((entry) => ({ id: entry.id })),
-    });
-    if (jsonRequested(opts)) return outJson({ ...result, uploadId: plan.uploadId, files: files.length });
+    const { uploaded, uploadIds } = await uploadLocalFiles(client.space(spaceId).files, files, { targetDir: opts.dir });
+    if (jsonRequested(opts)) return outJson({ ok: true, uploaded, uploadId: uploadIds[0], uploadIds, files: files.length });
     ok(`Uploaded ${files.length} file${files.length === 1 ? "" : "s"}`);
   } catch (e: unknown) {
     handleHttp(e);
@@ -309,7 +266,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
     return error("Invalid thinking level", "Use off|minimal|low|medium|high|xhigh|max");
   }
 
-  const spaceId = await resolveSpace(command);
+  const spaceId = await resolveSpace(command, { home: true });
   const client = createClient();
   try {
     const schedule = opts.delayMs
@@ -372,7 +329,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
 
 
 async function runCompletionCommand(command: Command, words: string[], opts: CompletionOptions) {
-  const spaceId = await resolveSpace(command);
+  const spaceId = await resolveSpace(command, { home: true });
   const content = words.join(" ").trim();
   if (!content && process.stdin.isTTY) {
     return error("Message required", "Pass content args or pipe via stdin");
@@ -518,9 +475,39 @@ export function registerSpaceCreate(
     });
 }
 
+function registerUserLabels(program: Command) {
+  const labels = program.command("labels").description("Manage personal labels");
+  labels.command("ls").description("List personal labels").option("--json", "Output as JSON").action(async (opts: { json?: boolean }) => {
+    const client = createClient();
+    try {
+      const result = await client.user.labels.list();
+      const flatten = (items: LabelListItem[], parent = ""): Array<Record<string, unknown>> => items.flatMap((item) => [
+        { id: item.id, ref: parent ? `${parent}/${item.name}` : item.name, source: item.source, rank: item.rank },
+        ...flatten(item.children ?? [], parent ? `${parent}/${item.name}` : item.name),
+      ]);
+      const rows = flatten(result.labels);
+      if (jsonRequested(opts)) return outJson(rows);
+      table(rows, [{ key: "ref", label: "Label" }, { key: "source", label: "Source" }, { key: "rank", label: "Rank" }]);
+    } catch (e: unknown) { handleHttp(e); }
+  });
+  labels.command("create <ref>").description("Create a personal label").action(async (ref: string) => {
+    try { await createClient().user.labels.create(ref); ok(`Created label: ${ref}`); } catch (e: unknown) { handleHttp(e); }
+  });
+  labels.command("rename <ref> <name>").description("Rename a personal label").action(async (ref: string, name: string) => {
+    try { await createClient().user.labels.update(ref, { name }); ok(`Renamed label: ${ref}`); } catch (e: unknown) { handleHttp(e); }
+  });
+  labels.command("rm <ref>").description("Delete a personal label").action(async (ref: string) => {
+    try { await createClient().user.labels.delete(ref); ok(`Deleted label: ${ref}`); } catch (e: unknown) { handleHttp(e); }
+  });
+  labels.command("reorder <refs...>").description("Set personal label order").action(async (refs: string[]) => {
+    try { await createClient().user.labels.reorder(refs); ok(`Reordered ${refs.length} label(s)`); } catch (e: unknown) { handleHttp(e); }
+  });
+}
+
 export function registerSpaces(program: Command): void {
   const spacesCmd = program.command("spaces").description("Space management");
   registerSpaceInvitations(spacesCmd);
+  registerUserLabels(program);
 
   // ── spaces ls ──
   spacesCmd
@@ -529,24 +516,32 @@ export function registerSpaces(program: Command): void {
     .description("List all spaces")
     .option("--mine", "Only spaces you own")
     .option("--pinned", "Only pinned spaces")
+    .option("--archived", "Only archived spaces")
     .option("--json", "Output as JSON")
-    .action(async (opts: { mine?: boolean; pinned?: boolean; json?: boolean }) => {
+    .action(async (opts: { mine?: boolean; pinned?: boolean; archived?: boolean; json?: boolean }) => {
       const client = createClient();
       try {
-        const [items, me] = await Promise.all([
-          client.spaces.list(),
-          opts.mine ? client.user.getMe() : Promise.resolve(null),
-        ]);
-        const myUuid = me?.uuid ?? null;
+        const items: SpaceRecord[] = [];
+        let cursor: string | null = null;
+        do {
+          const page: SpaceListPage = await client.spaces.list({
+            limit: 100,
+            cursor,
+            filter: opts.archived ? "archived" : opts.pinned ? "pinned" : opts.mine ? "mine" : "all",
+          });
+          items.push(...page.items);
+          cursor = page.pageInfo.nextCursor;
+        } while (cursor);
         const filtered = items.filter((item) => {
-          if (opts.mine && myUuid && item.userUuid !== myUuid) return false;
           if (opts.pinned && !item.isPinned) return false;
+          if (opts.archived && !item.isArchived) return false;
           return true;
         });
         if (jsonRequested(opts)) return outJson(filtered);
         table(filtered, [
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
+          { key: "description", label: "Description", format: (value) => truncateText(value, SPACE_DESCRIPTION_COLUMN_WIDTH) },
           { key: "isPinned", label: "Pinned" },
           { key: "createdAt", label: "Created" },
         ]);
@@ -554,6 +549,24 @@ export function registerSpaces(program: Command): void {
         handleHttp(e);
       }
     });
+
+  for (const archive of [true, false]) {
+    spacesCmd
+      .command(archive ? "archive <ids...>" : "unarchive <ids...>")
+      .description(archive ? "Archive spaces in your personal view" : "Restore archived spaces")
+      .option("--json", "Output as JSON")
+      .action(async (ids: string[], opts: { json?: boolean }) => {
+        const client = createClient();
+        try {
+          const chunks = Array.from({ length: Math.ceil(ids.length / 200) }, (_, index) => ids.slice(index * 200, (index + 1) * 200));
+          for (const chunk of chunks) await client.user.labels.patchResources(chunk, archive
+            ? { addLabelRefs: ["Archived"], removeLabelRefs: ["Pinned"] }
+            : { removeLabelRefs: ["Archived"] });
+          if (jsonRequested(opts)) return outJson({ ids, archived: archive });
+          ok(`${archive ? "Archived" : "Unarchived"} ${ids.length} space(s)`);
+        } catch (e: unknown) { handleHttp(e); }
+      });
+  }
 
   // ── spaces get ──
   spacesCmd
@@ -571,7 +584,7 @@ export function registerSpaces(program: Command): void {
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
           { key: "slug", label: "Slug" },
-          { key: "description", label: "Description" },
+          { key: "description", label: "Description", format: (value) => truncateText(value, SPACE_DESCRIPTION_COLUMN_WIDTH) },
           { key: "status", label: "Status" },
           { key: "createdAt", label: "Created" },
           ...(usage ? [
@@ -725,6 +738,7 @@ export function registerSpaces(program: Command): void {
 
   // ── spaces files ──
   registerFiles(spacesCmd);
+  registerSpaceDisplays(spacesCmd);
 
   // ── spaces sessions ──
   registerSessions(spacesCmd);
@@ -795,9 +809,9 @@ export function registerSpaces(program: Command): void {
         const usage = await client.space(spaceId).usage.get(parseInteger(days ?? "30", "days", { min: 1 }));
         if (jsonRequested(opts)) return outJson(usage);
         console.log("\n  Summary:");
-        table([usage.summary], [
+        table([usage.totals], [
           { key: "totalTokens", label: "Tokens" },
-          { key: "costTotal", label: "Cost ($)" },
+          ...(usage.totals.costTotal ? [{ key: "costTotal", label: "Cost ($)" }] : []),
           { key: "requestCount", label: "Requests" },
           { key: "successCount", label: "Success" },
           { key: "errorCount", label: "Errors" },
@@ -1251,23 +1265,7 @@ function registerFiles(spacesCmd: Command): void {
       }
     });
 
-  filesCmd
-    .command("cat <path>")
-    .description("Read file content")
-    .action(async (path: string) => {
-      const spaceId = await resolveSpace(spacesCmd);
-      const client = createClient();
-      try {
-        const file = await client.space(spaceId).files.read(path);
-        if (!("content" in file)) return error("File is being prepared. Please retry shortly.");
-        if (file.delivery === "url" && file.url) {
-          console.log(`[CDN] ${file.url}`);
-        }
-        console.log(file.content);
-      } catch (e: unknown) {
-        handleHttp(e);
-      }
-    });
+  registerSpaceFileTransfer(filesCmd, spacesCmd);
 
   filesCmd
     .command("write <path>")
@@ -1464,6 +1462,70 @@ function registerSessions(spacesCmd: Command): void {
     });
 
   sessionsCmd
+    .command("stats <id>")
+    .description("Session statistics for settled turns (including separate inherited history)")
+    .option("--json", "Output as JSON")
+    .action(async (id: string, opts: { json?: boolean }) => {
+      const spaceId = await resolveSpace(spacesCmd);
+      try {
+        const { stats } = await createClient().space(spaceId).session(id).stats();
+        if (jsonRequested(opts)) return outJson({ stats });
+        const own = stats.own;
+        const rows = [
+          { metric: "Turns", value: own.turns },
+          { metric: "Model calls", value: own.calls },
+          { metric: "Tool calls", value: own.toolCalls },
+          { metric: "Compactions", value: own.compactions },
+          { metric: "Tokens", value: own.usage?.totalTokens },
+          { metric: "Execution time (ms)", value: own.elapsedMs },
+          { metric: "Model time (ms)", value: own.modelMs == null ? null : Math.round(own.modelMs) },
+          { metric: "Model cost (USD)", value: own.modelCostUsd },
+          { metric: "Content generation cost (USD)", value: own.generationCostUsd },
+          { metric: "Inherited turns", value: stats.inherited.turns },
+        ].filter((row) => row.value != null);
+        table(rows, [{ key: "metric", label: "Metric" }, { key: "value", label: "Value" }]);
+        if (own.partial) console.log("Some execution details were not recorded.");
+      } catch (e: unknown) { handleHttp(e); }
+    });
+
+  sessionsCmd
+    .command("files <id>")
+    .description("List Space files changed by a session")
+    .option("--limit <n>", "Maximum files to list; the server caps it", "200")
+    .option("--json", "Output as JSON")
+    .action(async (id: string, opts: { limit: string; json?: boolean }) => {
+      const spaceId = await resolveSpace(spacesCmd);
+      const limit = Number.parseInt(opts.limit, 10);
+      if (!Number.isInteger(limit) || limit < 1) {
+        return error("Invalid limit", "--limit must be a positive integer");
+      }
+      const client = createClient();
+      try {
+        const result = await client.space(spaceId).session(id).files({ limit });
+        if (jsonRequested(opts)) return outJson(result);
+        if (result.files.length === 0) {
+          console.log("  (empty)");
+          return;
+        }
+        table(result.files.map((file) => ({
+          path: file.path,
+          change: file.lastKind,
+          count: file.changeCount,
+          turn: file.lastTurnSequence,
+          changedAt: file.lastChangedAt,
+        })), [
+          { key: "path", label: "Path" },
+          { key: "change", label: "Change" },
+          { key: "count", label: "Count" },
+          { key: "turn", label: "Turn" },
+          { key: "changedAt", label: "Changed" },
+        ]);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  sessionsCmd
     .command("rename <id> <name>")
     .description("Rename a session")
     .action(async (id: string, name: string) => {
@@ -1588,6 +1650,13 @@ function registerTurns(sessionsCmd: Command): void {
           { key: "stopReason", label: "Stop" },
           { key: "errorMessage", label: "Error" },
         ]);
+        const origin = readSessionTurnOrigin(result.turn.meta, spaceId);
+        if (origin) console.log(`\nOrigin (${origin.kind}): space=${origin.spaceId} session=${origin.sessionId} turn=${origin.turnId}${origin.toolCallId ? ` toolCall=${origin.toolCallId}` : ""}`);
+        const sent = readSentTurns(result.turn.meta);
+        if (sent.length > 0) {
+          console.log(`\nSent (${sent.length}):`);
+          for (const ref of sent) console.log(`  ${ref.spaceId ? `space=${ref.spaceId} ` : ""}session=${ref.sessionId} turn=${ref.turnId}${ref.toolCallId ? ` toolCall=${ref.toolCallId}` : ""}`);
+        }
         if (result.turn.userText) console.log(`\nUser:\n${result.turn.userText}`);
         if (result.turn.assistantText) console.log(`\nAssistant:\n${result.turn.assistantText}`);
       } catch (e: unknown) {

@@ -6,7 +6,7 @@
  * from the pointer drag controller — and never takes pointer events, so it
  * cannot interfere with the hit testing that resolves the drop target.
  */
-import { File as FileIcon, Folder, Layers } from "lucide-svelte";
+import { AppWindow, File as FileIcon, Folder, Layers } from "lucide-svelte";
 import {
 	POINTER_DRAG_SETTLE_MS,
 	pointerDrag,
@@ -45,6 +45,12 @@ const ghostStyle = $derived.by(() => {
 						<Layers class="h-3.5 w-3.5" />
 					{:else if firstItem.type === "dir"}
 						<Folder class="h-3.5 w-3.5" />
+					{:else if firstItem.type === "app"}
+						{#if firstItem.icon}
+							<img src={firstItem.icon} alt="" class="h-3.5 w-3.5 rounded-[3px] object-cover" decoding="async" />
+						{:else}
+							<AppWindow class="h-3.5 w-3.5" />
+						{/if}
 					{:else}
 						<FileIcon class="h-3.5 w-3.5" />
 					{/if}

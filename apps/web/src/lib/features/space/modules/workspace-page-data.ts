@@ -1,4 +1,4 @@
-import { readWindowFromSearch } from "./window-route";
+import { readWindowFromSearch, type WindowKind } from "./window-route";
 
 export type WorkspacePageView =
 	| "space"
@@ -10,7 +10,7 @@ export type WorkspacePageView =
 	| "task";
 
 type PreviewFields = {
-	windowKind: "file" | "board" | "port" | "app" | null;
+	windowKind: WindowKind | null;
 	windowKey: string | null;
 };
 

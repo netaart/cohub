@@ -1,21 +1,19 @@
 import { createLogger } from "@cohub/infra/logging";
-import type { PublicFileCreateUploadInput } from "@cohub/protocol";
+import { UPLOAD_MAX_BATCH_FILES, UPLOAD_MAX_FILE_BYTES, type PublicFileCreateUploadInput } from "@cohub/protocol";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { authzDenied, getExecutionPrincipal, requireValidId, useAuth } from "../../lib/middleware.js";
 import { hasPermission } from "../../permissions.js";
 import {
-  consumePublicFileUploadQuota,
   createPublicFileUpload,
   getPublicFileUrl,
   listPublicFiles,
-  MAX_PUBLIC_FILE_BYTES,
-  MAX_PUBLIC_UPLOAD_FILES,
   PublicFileConfigError,
-  PublicFileRateLimitError,
   PublicFileValidationError,
 } from "../../public-file-storage.js";
+import { consumeUploadQuota, UploadRateLimitError } from "../../upload-quota.js";
+import { redisCommandClient } from "../../redis.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
@@ -31,9 +29,9 @@ const uploadSchema = z.object({
   entries: z.array(z.object({
     id: z.string().min(1).max(80),
     relativePath: z.string().min(1).max(4096),
-    size: z.number().int().min(0).max(MAX_PUBLIC_FILE_BYTES),
+    size: z.number().int().min(0).max(UPLOAD_MAX_FILE_BYTES),
     mimeType: z.string().max(255).nullable().optional(),
-  }).strict()).min(1).max(MAX_PUBLIC_UPLOAD_FILES),
+  }).strict()).min(1).max(UPLOAD_MAX_BATCH_FILES),
 }).strict();
 
 const getSpaceId = (value: string | undefined) =>
@@ -53,9 +51,7 @@ router.post("/uploads", uploadBodyLimit, async (c) => {
     const plan = createPublicFileUpload(spaceId, parsed.data, {
       endpoint: getExecutionPrincipal(c) ? "internal" : "public",
     });
-    await consumePublicFileUploadQuota({
-      userId: user.uuid,
-      spaceId,
+    await consumeUploadQuota(redisCommandClient, user.uuid, {
       entryCount: parsed.data.entries.length,
       totalBytes: parsed.data.entries.reduce((sum, entry) => sum + entry.size, 0),
     });
@@ -64,8 +60,9 @@ router.post("/uploads", uploadBodyLimit, async (c) => {
     if (error instanceof PublicFileValidationError) {
       return c.json({ message: error.message }, 400);
     }
-    if (error instanceof PublicFileRateLimitError) {
-      return c.json({ message: error.message }, 429);
+    if (error instanceof UploadRateLimitError) {
+      c.header("Retry-After", String(error.retryAfterSeconds));
+      return c.json({ message: error.message, retryAfterSeconds: error.retryAfterSeconds }, 429);
     }
     if (error instanceof PublicFileConfigError) {
       logger.error("[public-files] storage is not configured", { error });

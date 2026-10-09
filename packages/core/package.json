@@ -92,6 +92,10 @@
       "types": "./dist/fs-cdn/index.d.ts",
       "default": "./dist/fs-cdn/index.js"
     },
+    "./space-fs": {
+      "types": "./dist/space-fs/index.d.ts",
+      "default": "./dist/space-fs/index.js"
+    },
     "./sandbox-lifecycle": {
       "types": "./dist/sandbox-lifecycle/index.d.ts",
       "default": "./dist/sandbox-lifecycle/index.js"
@@ -125,9 +129,11 @@
   "dependencies": {
     "@cohub/billing": "workspace:*",
     "@cohub/db": "workspace:*",
+    "@cohub/infra": "workspace:*",
     "@cohub/protocol": "workspace:*",
     "@cohub/sandbox-controller": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "ignore": "^7.0.8",
     "picomatch": "^4.0.7",
     "yaml": "^2.9.0"
   },

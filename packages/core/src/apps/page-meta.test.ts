@@ -168,3 +168,12 @@ assert.equal(
 assert.equal(appTitleFromMeta({ title: "A", name: "B" }, "fallback"), "A");
 assert.equal(appTitleFromMeta({ name: "B" }, "fallback"), "B");
 assert.equal(appTitleFromMeta(null, "fallback"), "fallback");
+
+const withHandlers = { ...extracted, fileHandlers: [".board"] };
+const handled = mergeAppPageMeta({}, withHandlers);
+assert.deepEqual(handled?.fileHandlers, [".board"]);
+assert.deepEqual((handled?.extracted as { fileHandlers?: string[] })?.fileHandlers, [".board"]);
+assert.deepEqual(mergeAppPageMeta(handled, { ...extracted, fileHandlers: [".board", ".md"] })?.fileHandlers, [".board", ".md"]);
+assert.equal(mergeAppPageMeta(handled, { ...extracted, fileHandlers: [] })?.fileHandlers, undefined);
+assert.deepEqual(mergeAppPageMeta({ ...handled, fileHandlers: ["MD"] }, { ...extracted, fileHandlers: [] })?.fileHandlers, [".md"]);
+assert.deepEqual(materializeHtmlPageMeta({ ...extracted, fileHandlers: undefined }, null, toPublicUrl).fileHandlers, []);

@@ -26,6 +26,12 @@ test("serializeBillingBlocked produces the standard 402 body", () => {
 	assert.equal(body.billing.netUsd, -5);
 	assert.equal(body.billing.hardNegativeLimitUsd, -1);
 	assert.equal(body.billing.conversion, conversion);
+
+	const withAction = serializeBillingBlocked(new BillingAccessBlockedError(decision), {
+		actionUrl: "https://cohub.live/settings/billing",
+	});
+	assert.equal(withAction.billing.conversion.primaryAction.href, "https://cohub.live/settings/billing");
+	assert.equal(body.billing.conversion.primaryAction.href, undefined);
 });
 
 test("serializeBillingBlocked includes a minimum balance when required", () => {

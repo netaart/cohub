@@ -356,6 +356,10 @@ export async function resolvePermissionAccess(
   };
 }
 
+export function canViewSpaceCost(user: AuthUserProfile | null, spaceId: string): Promise<boolean> {
+  return hasPermission(user, "member.view", { spaceId });
+}
+
 export async function getSessionSpaceId(sessionId: string): Promise<string | null> {
   return permissionStore.getSessionSpaceId(sessionId);
 }

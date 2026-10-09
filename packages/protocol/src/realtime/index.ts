@@ -10,7 +10,7 @@ export {
   BoardAwarenessDrawPointSchema,
   BoardAwarenessFrameSchema,
   BoardAwarenessGestureSchema,
-  BoardAwarenessNodePreviewSchema,
+  BoardAwarenessItemPreviewSchema,
   BoardAwarenessPointSchema,
   BoardAwarenessStateUpdateSchema,
   BoardAwarenessUpdateSchema,

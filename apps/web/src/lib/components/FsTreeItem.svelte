@@ -1,5 +1,6 @@
 <script lang="ts">
 import {
+	AppWindow,
 	ChevronDown,
 	Download,
 	File as FileIcon,
@@ -12,6 +13,7 @@ import {
 	Upload,
 } from "lucide-svelte";
 import FsTreeItem from "$lib/components/FsTreeItem.svelte";
+import { useFileTreeMarks } from "$lib/components/file-tree-marks";
 import {
 	COHUB_PATH_MIME,
 	getCohubResourceDragData,
@@ -50,6 +52,7 @@ const {
 	onUpload,
 	onInsertReference,
 	onPublishDirectory,
+	onOpenWith,
 	draggable = true,
 	touchDraggable = false,
 	showItemActions = true,
@@ -70,6 +73,7 @@ const {
 	onUpload?: (files: File[] | LocalUploadEntry[], targetDir: string) => void;
 	onInsertReference?: (path: string) => void;
 	onPublishDirectory?: (path: string) => void;
+	onOpenWith?: (node: SpaceFsNode) => void;
 	draggable?: boolean;
 	/** Enable the long-press drag gesture for touch and pen. */
 	touchDraggable?: boolean;
@@ -78,7 +82,12 @@ const {
 } = $props();
 
 const locale = $derived(getLocale());
+const fileTreeMarks = useFileTreeMarks();
 const indent = $derived(6 + depth * 14);
+const markLabel = $derived.by(() => {
+	const marks = fileTreeMarks();
+	return marks?.paths.has(node.path) ? marks.label : null;
+});
 const isActive = $derived(selectedPath === node.path);
 const isDir = $derived(node.type === "dir");
 let isDragOver = $state(false);
@@ -387,11 +396,14 @@ $effect(() => {
     {/if}
   </span>
   <span class="name">{node.name}</span>
+  {#if markLabel}
+    <span class="tree-mark" role="img" aria-label={markLabel} title={markLabel}></span>
+  {/if}
   {#if node.isLoading}
     <Loader2 class="h-3 w-3 shrink-0 animate-spin text-text-placeholder" aria-label={m.file_loading({}, { locale })} />
   {/if}
 
-  {#if showItemActions && (canWrite || (!isDir && onDownload))}
+  {#if showItemActions && (canWrite || (!isDir && (onDownload || onOpenWith)))}
     <span class="actions">
       {#if canWrite && onInsertReference}
         <button type="button" class="action" title={m.file_insert({}, { locale })} onclick={stop(() => onInsertReference(node.path))}><TextCursorInput class="w-3.5 h-3.5" /></button>
@@ -434,6 +446,10 @@ $effect(() => {
           </button>
           {#if menuOpen}
             <div class="dropdown" bind:this={menuEl}>
+              {#if onOpenWith}
+                <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onOpenWith(node))}><AppWindow class="w-3.5 h-3.5" /> {m.file_open_with({}, { locale })}</button>
+                <div class="dropdown-sep"></div>
+              {/if}
               {#if onDownload}
                 <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onDownload(node))}><Download class="w-3.5 h-3.5" /> {m.file_download({}, { locale })}</button>
                 {#if canWrite}
@@ -469,6 +485,7 @@ $effect(() => {
       {onUpload}
       {onInsertReference}
       {onPublishDirectory}
+      {onOpenWith}
       {draggable}
       {touchDraggable}
       {showItemActions}
@@ -567,6 +584,23 @@ $effect(() => {
   .tree-item:focus-within,
   .tree-item.selected {
     padding-right: 104px;
+  }
+
+  .tree-mark {
+    width: 5px;
+    height: 5px;
+    flex-shrink: 0;
+    margin-right: 4px;
+    border-radius: 999px;
+    background: var(--brand);
+    opacity: 0.85;
+  }
+
+  /* Row actions overlay the trailing edge; they take precedence. */
+  .tree-item:hover .tree-mark,
+  .tree-item:focus-within .tree-mark,
+  .tree-item.selected .tree-mark {
+    visibility: hidden;
   }
 
   .actions {

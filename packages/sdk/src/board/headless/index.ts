@@ -1,26 +1,30 @@
-/**
- * Headless board rendering for Node.
- *
- * PixiJS is a browser library, but v8 ships a Canvas2D backend
- * (`CanvasRenderer`) that needs no GPU context at all. Pointing it at
- * `@napi-rs/canvas` through Pixi's `DOMAdapter` gives Node the same renderers
- * the editor uses — so `cohub boards export` is not a second implementation of
- * how a board looks, it is the same one.
- *
- * `@napi-rs/canvas` is an optional dependency: it carries a large prebuilt Skia
- * binary and only image export needs it, so it is imported lazily and its
- * absence produces an actionable message rather than a crash at startup.
- */
 
-import type { BoardDocument } from "@cohub/protocol/board-document";
+import type { BoardDocument } from "@cohub/protocol";
 import { BOARD_TEXT_FONT_FAMILY } from "@cohub/protocol/board-constants";
-import type { Adapter, ICanvas, Renderer, Texture } from "pixi.js";
+import {
+  type Adapter,
+  CanvasGraphicsContextSystem,
+  CanvasGraphicsPipe,
+  CanvasRenderer,
+  CanvasRendererTextSystem,
+  CanvasTextPipe,
+  CanvasTextSystem,
+  DOMAdapter,
+  extensions,
+  GraphicsContextSystem,
+  GraphicsPipe,
+  type ICanvas,
+  ImageSource,
+  type Renderer,
+  Texture,
+} from "pixi.js";
 import { installBoardTextMeasurement } from "../render/text-measurement.js";
 import {
   type BoardExportOptions,
   type BoardExportResult,
   renderBoardExport,
 } from "../export/index.js";
+import type { BoardSketchHost } from "../render/renderers/board-renderer-registry.js";
 
 export type HeadlessCanvasModule = {
   createCanvas: (width: number, height: number) => unknown;
@@ -28,52 +32,45 @@ export type HeadlessCanvasModule = {
   GlobalFonts: {
     registerFromPath: (path: string, name?: string) => unknown;
     has: (name: string) => boolean;
+    setAlias?: (fontName: string, alias: string) => boolean;
   };
 };
 
+const SYSTEM_UI_FAMILIES = [
+  "Noto Sans",
+  "DejaVu Sans",
+  "Liberation Sans",
+  "FreeSans",
+  "Helvetica Neue",
+  "Arial",
+  "Segoe UI",
+];
+
+function aliasSystemUi(fonts: HeadlessCanvasModule["GlobalFonts"]): void {
+  if (!fonts.setAlias || fonts.has("system-ui")) return;
+  const family = SYSTEM_UI_FAMILIES.find((name) => fonts.has(name));
+  if (family) fonts.setAlias(family, "system-ui");
+}
+
 export type BoardHeadlessFont = {
-  /** Absolute path to a font file (woff2, ttf and otf all work). */
   path: string;
-  /** Family name renderers should ask for. Defaults to the board text family. */
   family?: string;
 };
 
 export type BoardHeadlessRendererOptions = {
-  /**
-   * Fonts to register before the first measurement. Board text asks for
-   * "Geist"; without a matching family the platform substitutes one, which
-   * changes glyph shapes and text metrics.
-   */
   fonts?: BoardHeadlessFont[];
-  /** Override the canvas module (tests, or a pre-imported instance). */
   canvasModule?: HeadlessCanvasModule;
 };
 
-/**
- * A decoded image, opaque to callers.
- *
- * Node consumers (the CLI) should not need PixiJS in their own type surface just
- * to hand textures back to the exporter, so the concrete `Texture` stays inside
- * this module.
- */
 export type BoardHeadlessTexture = { readonly __boardTexture: unique symbol };
 
 export type BoardHeadlessRenderer = {
   renderer: Renderer;
   canvasModule: HeadlessCanvasModule;
-  /** Decode image bytes into a texture the exporter accepts. */
   decodeImage: (bytes: Uint8Array, mimeType?: string) => Promise<BoardHeadlessTexture>;
   destroy: () => void;
 };
 
-/**
- * A minimal WebGL stand-in.
- *
- * `ParticleContainerPipe` builds a `GlProgram` when the renderer registers its
- * pipes, and that probes shader precision through a throwaway context — even
- * though the Canvas2D backend never draws with it. Returning a stub keeps
- * registration working; nothing here is ever used to render.
- */
 const WEBGL_PROBE_STUB = {
   getShaderPrecisionFormat: () => ({ precision: 1, rangeMin: 1, rangeMax: 1 }),
   getExtension: () => null,
@@ -95,7 +92,6 @@ async function loadCanvasModule(): Promise<HeadlessCanvasModule> {
   }
 }
 
-/** Node has no rAF; Pixi's scheduler only needs a callback pump. */
 function installAnimationFrameShim(): () => void {
   const globals = globalThis as {
     requestAnimationFrame?: (cb: (t: number) => void) => unknown;
@@ -108,7 +104,6 @@ function installAnimationFrameShim(): () => void {
       timers.delete(timer);
       cb(Date.now());
     }, 16);
-    // Unref so a pending frame can never keep the process alive after export.
     timer.unref?.();
     timers.add(timer);
     return timer;
@@ -125,37 +120,10 @@ function installAnimationFrameShim(): () => void {
   };
 }
 
-/**
- * Create a Canvas2D renderer backed by Skia.
- *
- * `skipExtensionImports` is essential: it stops Pixi from auto-loading its
- * browser environment bundle, which would pull in DOM-only pipes.
- */
 export async function createBoardHeadlessRenderer(
   options: BoardHeadlessRendererOptions = {},
 ): Promise<BoardHeadlessRenderer> {
   const canvasModule = options.canvasModule ?? (await loadCanvasModule());
-  const {
-    CanvasGraphicsContextSystem,
-    CanvasGraphicsPipe,
-    CanvasRenderer,
-    CanvasRendererTextSystem,
-    CanvasTextPipe,
-    CanvasTextSystem,
-    DOMAdapter,
-    extensions,
-    GraphicsContextSystem,
-    GraphicsPipe,
-    ImageSource,
-    Texture,
-  } = await import("pixi.js");
-
-  // Pixi's environment auto-detection would load its browser bundle here (its
-  // test always passes), which registers DOM pipes and fails on `document`. So
-  // `skipExtensionImports` is set below and the canvas-safe pipes for the shapes
-  // boards actually draw — graphics and text — are registered explicitly. They
-  // come from the package root rather than `pixi.js/graphics`, which ships no
-  // type declarations.
   extensions.add(
     CanvasGraphicsPipe,
     GraphicsPipe,
@@ -169,6 +137,7 @@ export async function createBoardHeadlessRenderer(
   for (const font of options.fonts ?? []) {
     canvasModule.GlobalFonts.registerFromPath(font.path, font.family ?? BOARD_TEXT_FONT_FAMILY);
   }
+  aliasSystemUi(canvasModule.GlobalFonts);
 
   function createCanvas(width = 1, height = 1) {
     const canvas = canvasModule.createCanvas(
@@ -199,14 +168,11 @@ export async function createBoardHeadlessRenderer(
     },
   };
   DOMAdapter.set(adapter);
-  // Route measurement through the adapter just installed; any cached context
-  // belongs to the previous environment.
   installBoardTextMeasurement();
 
   const restoreAnimationFrame = installAnimationFrameShim();
   const renderer = new CanvasRenderer();
   await renderer.init({
-    // Sized per export via the extract frame; this is just a valid initial view.
     width: 1,
     height: 1,
     backgroundAlpha: 0,
@@ -232,8 +198,6 @@ export async function createBoardHeadlessRenderer(
         image.onerror = (error) => reject(error);
         image.src = `data:${mimeType};base64,${base64}`;
       });
-      // `ImageSource.test` only recognises browser image types, so the source is
-      // constructed explicitly rather than through `Texture.from`.
       return new Texture({
         source: new ImageSource({
           resource: image as never,
@@ -252,7 +216,6 @@ export async function createBoardHeadlessRenderer(
 export type BoardHeadlessExportFormat = "png" | "jpeg" | "webp";
 
 export type BoardHeadlessExportOptions = Omit<BoardExportOptions, "textures" | "backgroundImage"> & {
-  /** Textures from `decodeImage`, keyed by image key. */
   textures?: Map<string, BoardHeadlessTexture>;
   backgroundImage?: {
     texture: BoardHeadlessTexture;
@@ -260,8 +223,8 @@ export type BoardHeadlessExportOptions = Omit<BoardExportOptions, "textures" | "
     position: "center" | "top" | "bottom" | "left" | "right";
     opacity: number;
   };
+  sketches?: BoardSketchHost;
   format?: BoardHeadlessExportFormat;
-  /** JPEG/WebP quality, 0–1. Ignored for PNG. */
   quality?: number;
 };
 
@@ -276,19 +239,21 @@ const MIME: Record<BoardHeadlessExportFormat, string> = {
   webp: "image/webp",
 };
 
+export { createBoardHeadlessSketchHost } from "./sketch.js";
+
 export function boardHeadlessMimeType(format: BoardHeadlessExportFormat): string {
   return MIME[format];
 }
 
-/** Render a document to encoded image bytes. Returns null for an empty region. */
 export function exportBoardImageBytes(
   headless: BoardHeadlessRenderer,
   document: BoardDocument,
   options: BoardHeadlessExportOptions = {},
 ): BoardHeadlessExportResult | null {
-  const { format = "png", quality = 0.92, textures, backgroundImage, ...rest } = options;
+  const { format = "png", quality = 0.92, textures, sketches, backgroundImage, ...rest } = options;
   const result = renderBoardExport(headless.renderer, document, {
     ...rest,
+    ...(sketches ? { sketches } : {}),
     ...(textures ? { textures: textures as unknown as Map<string, Texture> } : {}),
     ...(backgroundImage
       ? {

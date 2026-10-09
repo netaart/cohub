@@ -143,6 +143,7 @@ $effect(() => {
 					<UserAvatar
 						name={displayUserName(user.profile, user.userId)}
 						avatarUrl={user.profile.avatarUrl}
+						seed={user.userId}
 						size="xxs"
 						class="presence-avatar"
 					/>
@@ -156,6 +157,7 @@ $effect(() => {
 					<UserAvatar
 						name={displayUserName(firstUser.profile, firstUser.userId)}
 						avatarUrl={firstUser.profile.avatarUrl}
+						seed={firstUser.userId}
 						size="xxs"
 						class="border-bg-elevated"
 					/>
@@ -196,7 +198,7 @@ $effect(() => {
 						{@const userName = displayUserName(user.profile, user.userId)}
 						<div class="presence-row" role="listitem">
 							<div class="presence-row-static">
-								<UserAvatar name={userName} avatarUrl={user.profile.avatarUrl} size="sm" />
+								<UserAvatar name={userName} avatarUrl={user.profile.avatarUrl} seed={user.userId} size="sm" />
 								<div class="presence-row-body">
 									<div class="presence-row-name">{userName}</div>
 									<div class="presence-row-subtitle">

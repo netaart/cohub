@@ -5,12 +5,22 @@ import {
 	buildAppNavigationOpenResponse,
 	parseAppNavigationOpenMessage,
 } from "@cohub/protocol/app-navigation";
-import type { AppRuntimeConfigureRequest } from "@cohub/protocol/app-runtime";
+import type {
+	AppDropResource,
+	AppDropResourceType,
+	AppRuntimeConfigureRequest,
+	AppWindowState,
+} from "@cohub/protocol/app-runtime";
 import {
+	buildAppRuntimeAnnounce,
+	buildAppRuntimeDrag,
 	parseAppRuntimeCloseRequest,
 	parseAppRuntimeConfigureRequest,
+	parseAppRuntimeDropConfig,
+	parseAppRuntimeKey,
 	parseAppRuntimePointer,
 	parseAppRuntimeReady,
+	parseAppRuntimeWindowState,
 } from "@cohub/protocol/app-runtime";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import type {
@@ -30,14 +40,26 @@ import CohubBar, {
 	type CohubBarOwner,
 	type CohubBarSpace,
 } from "$lib/components/app/CohubBar.svelte";
+import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
+import type { PointerDropZone } from "$lib/drag/pointer-drag-core";
 import AppAuthorizeDialog from "$lib/features/app/AppAuthorizeDialog.svelte";
 import { createAppBridgeHost } from "$lib/features/app/bridge-host.svelte";
+import { hostAppearanceKey } from "$lib/features/app/host-appearance.svelte";
+import {
+	dropTypesOf,
+	hostResourceDrag,
+	pointerDragResources,
+	readTransferResources,
+	trackHostResourceDrags,
+} from "$lib/features/app/host-resource-drag.svelte";
 import {
 	type AppSurfaceHost,
 	createAppSurfaceHost,
 } from "$lib/features/app/surface-host";
+import { getLocale } from "$lib/i18n/locale.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { parseNewChatBackgroundAction } from "$lib/new-chat-background-bridge";
+import { m } from "$lib/paraglide/messages.js";
 import { emitSpaceConfigBackgroundAction } from "$lib/space-config";
 import { createSpaceWorkspaceAssetResolver } from "$lib/space-workspace-assets";
 import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
@@ -71,11 +93,15 @@ type Props = {
 	launchState?: AppLaunchState | null;
 	invocation?: AppRuntimeInvocationContext;
 	shell?: AppRuntimeShellContext;
+	/** Whether the host is showing this surface; hidden tabs stay mounted. */
+	visible?: boolean;
+	/** The App reported its tab title, save status, or unsaved work. */
+	onWindowState?: (state: AppWindowState) => void;
 	/**
 	 * Receives the surface RPC host once mounted, so a parent can invoke methods
-	 * the app registered. Only meaningful for embedded (web / port) apps.
+	 * the app registered. The returned release runs on unmount.
 	 */
-	onSurfaceHost?: (host: AppSurfaceHost | null) => void;
+	onSurfaceHost?: (host: AppSurfaceHost) => (() => void) | undefined;
 	onComposerChip?: (chip: AppComposerChip | null) => void;
 	onReady?: () => void;
 	/** The App asked to close the surface it runs in. */
@@ -107,6 +133,8 @@ const {
 	launchState = null,
 	invocation = undefined,
 	shell = undefined,
+	visible = true,
+	onWindowState = undefined,
 	onSurfaceHost = undefined,
 	onComposerChip = undefined,
 	onReady = undefined,
@@ -123,6 +151,15 @@ let runtimeReady = $state(false);
 let frameHasLoaded = $state(false);
 let readyReported = false;
 let contextSyncWarningReported = false;
+const CLEAN_WINDOW_STATE: AppWindowState = {
+	title: null,
+	status: "idle",
+	dirty: false,
+};
+/** Resource kinds the current App document accepts as drops. */
+let dropAccept = $state<AppDropResourceType[]>([]);
+let dropHovering = $state(false);
+let dragFrameRequest: number | null = null;
 /** Native file surfaces size their media from the shared compact signal. */
 const isMobile = $derived(useCompactShell());
 
@@ -234,6 +271,7 @@ $effect(() => {
 	void iframeSrc;
 	runtimeReady = false;
 	frameHasLoaded = false;
+	dropAccept = [];
 	surfaceHost?.reset();
 });
 
@@ -255,6 +293,7 @@ const host = untrack(() =>
 		getInvocation: () => invocation,
 		shell,
 		getShell: () => shell,
+		getWindow: () => ({ visible }),
 		notify: (payload) => {
 			// Only a ready runtime can receive unsolicited context updates. The
 			// iframe may have navigated without changing iframeSrc.
@@ -271,6 +310,9 @@ const host = untrack(() =>
 $effect(() => {
 	void invocation;
 	void shell;
+	void visible;
+	void getLocale();
+	void hostAppearanceKey();
 	pushSurfaceContext();
 });
 
@@ -304,6 +346,121 @@ function pushSurfaceContext() {
 	);
 }
 
+/** Replays an unhandled App chord on the frame, only while the viewer is using it. */
+function replayKey(key: NonNullable<ReturnType<typeof parseAppRuntimeKey>>) {
+	if (!frame || document.activeElement !== frame) return;
+	if (navigator.userActivation && !navigator.userActivation.isActive) return;
+	frame.dispatchEvent(
+		new KeyboardEvent("keydown", {
+			key: key.key,
+			code: key.code,
+			altKey: key.altKey,
+			ctrlKey: key.ctrlKey,
+			metaKey: key.metaKey,
+			shiftKey: key.shiftKey,
+			bubbles: true,
+			cancelable: true,
+		}),
+	);
+}
+
+// --- Drops: the frame swallows drag events, so the host proxies them. ---
+
+const acceptedResources = (resources: readonly AppDropResource[]) =>
+	resources.filter((resource) => dropAccept.includes(resource.type));
+const showDropProxy = $derived(
+	shouldRenderFrame &&
+		hostResourceDrag.resources !== null &&
+		acceptedResources(hostResourceDrag.resources).length > 0,
+);
+
+function framePoint(clientX: number, clientY: number) {
+	const rect = frame?.getBoundingClientRect();
+	return { x: clientX - (rect?.left ?? 0), y: clientY - (rect?.top ?? 0) };
+}
+
+function cancelDragFrame() {
+	if (dragFrameRequest === null) return;
+	cancelAnimationFrame(dragFrameRequest);
+	dragFrameRequest = null;
+}
+
+function postDrop(
+	point: { x: number; y: number },
+	resources: readonly AppDropResource[],
+) {
+	const accepted = acceptedResources(resources);
+	if (accepted.length === 0) return;
+	postFrameMessage(
+		buildAppRuntimeDrag({
+			phase: "drop",
+			...point,
+			types: dropTypesOf(accepted),
+			resources: accepted,
+		}),
+	);
+}
+
+function onProxyDragOver(event: DragEvent) {
+	event.preventDefault();
+	if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+	dropHovering = true;
+	const point = framePoint(event.clientX, event.clientY);
+	cancelDragFrame();
+	// One message per frame; dragover fires far more often than that.
+	dragFrameRequest = requestAnimationFrame(() => {
+		dragFrameRequest = null;
+		const resources = hostResourceDrag.resources ?? [];
+		postFrameMessage(
+			buildAppRuntimeDrag({
+				phase: "over",
+				...point,
+				types: dropTypesOf(acceptedResources(resources)),
+			}),
+		);
+	});
+}
+
+function onProxyDragLeave() {
+	cancelDragFrame();
+	dropHovering = false;
+	postFrameMessage(
+		buildAppRuntimeDrag({ phase: "leave", x: 0, y: 0, types: [] }),
+	);
+}
+
+// A drag that ends elsewhere removes the proxy without a `dragleave`.
+$effect(() => {
+	if (!showDropProxy && dropHovering) untrack(onProxyDragLeave);
+});
+
+function onProxyDrop(event: DragEvent) {
+	event.preventDefault();
+	cancelDragFrame();
+	dropHovering = false;
+	postDrop(
+		framePoint(event.clientX, event.clientY),
+		readTransferResources(event.dataTransfer) ??
+			hostResourceDrag.resources ??
+			[],
+	);
+}
+
+const touchDropZone = $derived<PointerDropZone>({
+	resolve: (payload) =>
+		acceptedResources(pointerDragResources(payload)).length > 0
+			? {
+					label: m.app_drop_intent({ name: appTitle }, { locale: getLocale() }),
+					effect: "copy",
+				}
+			: null,
+	drop: (payload, point) =>
+		postDrop(
+			framePoint(point.clientX, point.clientY),
+			pointerDragResources(payload),
+		),
+});
+
 async function onFrameMessage(event: MessageEvent) {
 	if (event.source !== frame?.contentWindow) return;
 	if (!frameOrigin || event.origin !== frameOrigin) return;
@@ -319,6 +476,25 @@ async function onFrameMessage(event: MessageEvent) {
 	const pointer = parseAppRuntimePointer(event.data);
 	if (pointer) {
 		onPointerState?.({ x: pointer.x, y: pointer.y, down: pointer.down });
+		return;
+	}
+	const windowState = parseAppRuntimeWindowState(event.data);
+	if (windowState) {
+		onWindowState?.({
+			title: windowState.title,
+			status: windowState.status,
+			dirty: windowState.dirty,
+		});
+		return;
+	}
+	const key = parseAppRuntimeKey(event.data);
+	if (key) {
+		replayKey(key);
+		return;
+	}
+	const dropConfig = parseAppRuntimeDropConfig(event.data);
+	if (dropConfig) {
+		dropAccept = dropConfig.accept;
 		return;
 	}
 	const navigation = parseAppNavigationOpenMessage(event.data);
@@ -365,16 +541,20 @@ async function onFrameMessage(event: MessageEvent) {
 }
 
 onMount(() => {
+	trackHostResourceDrags();
 	window.addEventListener("message", onFrameMessage);
 	bridgeReady = true;
 	if (nativeContent) queueMicrotask(reportReady);
-	onSurfaceHost?.(surfaceHost);
+	const releaseSurfaceHost = surfaceHost
+		? onSurfaceHost?.(surfaceHost)
+		: undefined;
 	return () => {
 		window.removeEventListener("message", onFrameMessage);
+		cancelDragFrame();
 		// Release own resources even if the consumer's unregister throws, so a
 		// faulty listener cannot leak this frame's bridge.
 		try {
-			onSurfaceHost?.(null);
+			releaseSurfaceHost?.();
 		} finally {
 			surfaceHost?.dispose();
 		}
@@ -413,18 +593,33 @@ onMount(() => {
 			allow={framePermissions}
 			allowtransparency={mode === "overlay" ? true : undefined}
 			src={iframeSrc}
+			use:pointerDropZone={touchDropZone}
 			onload={() => {
-				// load only marks the document as visually ready. Context waits for
-				// the new document's runtime handshake.
-				// Any App can announce ready before its initial load event. Preserve
-				// that handshake; later in-frame navigations must announce again.
+				// The first document may say ready before load; later ones announce again.
 				const isFirstLoad = !frameHasLoaded;
 				frameHasLoaded = true;
 				if (!isFirstLoad) runtimeReady = false;
+				// Forget what the document announced, then ask it to announce again:
+				// its scripts may have run before this load event.
+				dropAccept = [];
+				onWindowState?.(CLEAN_WINDOW_STATE);
 				surfaceHost?.reset();
+				postFrameMessage(buildAppRuntimeAnnounce());
 				reportReady();
 			}}
 		></iframe>
+		{#if showDropProxy}
+			<!-- Catches the host drag above the frame and hands it to the App. -->
+			<div
+				class="app-drop-proxy"
+				class:hovering={dropHovering}
+				role="presentation"
+				ondragenter={onProxyDragOver}
+				ondragover={onProxyDragOver}
+				ondragleave={onProxyDragLeave}
+				ondrop={onProxyDrop}
+			></div>
+		{/if}
 	{:else if !hasFrameSource}
 		<div class="empty-state">App asset is unavailable.</div>
 	{/if}
@@ -506,6 +701,16 @@ onMount(() => {
 		border: 0;
 		background: var(--bg-primary);
 		user-select: none;
+	}
+
+	.app-drop-proxy {
+		position: absolute;
+		inset: 0;
+		z-index: 1;
+	}
+
+	.app-drop-proxy.hovering {
+		box-shadow: inset 0 0 0 2px var(--brand-border);
 	}
 
 	/* Native surfaces own their own scrolling and chrome. */

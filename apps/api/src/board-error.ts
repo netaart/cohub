@@ -1,8 +1,7 @@
 import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import type { BoardDiagnostic } from "@cohub/protocol";
-import { BoardItemValidationError } from "@cohub/core/board";
-import { BoardServiceError } from "./board-ops.js";
+import { BoardError } from "@cohub/core/board";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
@@ -27,20 +26,12 @@ export function boardInputDiagnostics(
 }
 
 export function boardErrorResponse(error: unknown): BoardErrorResponse {
-  if (error instanceof BoardServiceError) {
+  if (error instanceof BoardError) {
     return {
       status: error.status,
-      code: error.code ?? "BOARD_OPERATION_INVALID",
+      code: error.code,
       message: error.message,
-      ...(error.diagnostics?.length ? { diagnostics: error.diagnostics } : {}),
-    };
-  }
-  if (error instanceof BoardItemValidationError) {
-    return {
-      status: 400,
-      code: "INVALID_BOARD_ITEM",
-      message: error.message,
-      diagnostics: error.diagnostics,
+      ...(error.diagnostics.length ? { diagnostics: error.diagnostics.slice(0, 32) } : {}),
     };
   }
   if (

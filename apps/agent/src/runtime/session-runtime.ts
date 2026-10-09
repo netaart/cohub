@@ -1,17 +1,20 @@
-import type { Agent, AgentEvent, AgentMessage, AgentTool, StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Agent, AgentEvent, AgentMessage, AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 import { Agent as PiAgent } from "@earendil-works/pi-agent-core";
-import { clampThinkingLevel, createAssistantMessageEventStream, type Api, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type ImageContent, type Model, type SimpleStreamOptions, isContextOverflow, isRetryableAssistantError, type AssistantMessage } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type Api, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type ImageContent, type Model, type SimpleStreamOptions, type TranscriptContext, isContextOverflow, isRetryableAssistantError, toToolDeclaration, type AssistantMessage } from "@earendil-works/pi-ai";
 import { context, trace, type Span } from "@opentelemetry/api";
+import { sumStatsUsage } from "@cohub/protocol/model";
+import { IMAGE_URL_MIME_TYPE, imageUrlContent, type Usage } from "@cohub/protocol/core";
+import { createRequestMetric, persistRequestMetric, recordRetryWait } from "../metrics.js";
 import { logger } from "../logger.js";
 import { sendOutput } from "../redis.js";
 import type { SessionManager } from "./local-session-manager.js";
 import type { CohubModel, CohubModelRegistry } from "./model-registry.js";
+import { normalizeThinkingLevel, resolveInitialThinkingLevel, resolveThinkingLevelForModel } from "./thinking-level.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "./pi-models-adapter.js";
 import { buildCohubSystemPrompt } from "./system-prompt-builder.js";
 import { recordLlmUsage, startLlmRoundSpan, getAgentTracer } from "@cohub/infra/tracing/agent";
 import { getCurrentToolExecutionContext, runWithToolExecutionContext, type ToolExecutionContext } from "../tool-context.js";
 import { isToolFailureDetails } from "./tools/index.js";
-import { applyRequestProfile } from "./request-profile.js";
 import { mergeHeaders } from "@cohub/infra/config-runtime/models";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import { ModelUnavailableError } from "@cohub/core/sessions";
@@ -60,19 +63,6 @@ const COMPACTION_SUMMARY_PREFIX = "The conversation history before this point wa
 const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
-function normalizeThinkingLevel(level: string | null | undefined): ThinkingLevel | undefined {
-  return level && THINKING_LEVELS.has(level as ThinkingLevel) ? level as ThinkingLevel : undefined;
-}
-
-function resolveThinkingLevelForModel(model: CohubModel, requested?: string | null): ThinkingLevel {
-  const fallback = normalizeThinkingLevel(model.defaultThinkingLevel) ?? (model.reasoning ? "high" : "off");
-  const level = normalizeThinkingLevel(requested) ?? fallback;
-  if (!model.reasoning) return "off";
-  return clampThinkingLevel(model, level) as ThinkingLevel;
-}
-
 const COHUB_RETRYABLE_ERROR_OVERRIDE_PATTERN = /\b400\b.*(?:upstream(?:_error)?:?\s*upstream request failed|upstream response failed.*(?:bad_response_status_code|stage["']?\s*[:=]\s*["']?upstream_response))/i;
 const COHUB_NON_RETRYABLE_ERROR_PATTERN = /insufficient[_ ](?:user[_ ])?quota|quota exceeded|out of budget|billing|余额不足|额度不足|invalid (?:request|url)|content[_ ]filter|request (?:is )?too large|payload too large/i;
 const COHUB_MODEL_UNAVAILABLE_PATTERN = /model (?:is )?(?:(?:not )?available|unavailable)|requested model is not available/i;
@@ -219,6 +209,8 @@ export type CreateCohubAgentSessionOptions = {
   spaceMods?: SpaceModListItem[];
   imageToTextConfig?: ImageToTextConfig | null;
   model?: Model<Api>;
+  /** Latest thinking level the user explicitly selected; read only when the session file lost its record. */
+  loadSelectedThinkingLevel?: () => Promise<string | null>;
 };
 
 function extractTextFromToolResultContent(content: unknown): string {
@@ -306,7 +298,7 @@ function collectOmittableHistoryImageBlocks(messages: unknown[]) {
       : null;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
-      if (!isLlmImageBlock(block)) continue;
+      if (!isLlmImageBlock(block) || block.mimeType === IMAGE_URL_MIME_TYPE) continue;
       images.push({ block, bytes: block.data.length + Buffer.byteLength(block.mimeType, "utf8") });
     }
   }
@@ -347,6 +339,7 @@ function toLlmImageContent(block: Record<string, unknown>): ImageContent | null 
       : typeof block.media_type === "string" && block.media_type.trim()
         ? block.media_type.trim()
         : "application/octet-stream";
+    if (mimeType === IMAGE_URL_MIME_TYPE) return imageUrlContent(directData);
     if (!isSupportedLlmImageMimeType(mimeType)) return null;
     return {
       type: "image",
@@ -358,7 +351,7 @@ function toLlmImageContent(block: Record<string, unknown>): ImageContent | null 
   const source = block.source && typeof block.source === "object" && !Array.isArray(block.source)
     ? block.source as Record<string, unknown>
     : null;
-
+  if (source?.type === "url" && typeof source.url === "string" && source.url.trim()) return imageUrlContent(source.url.trim());
   if (source?.type !== "base64" || typeof source.data !== "string" || !source.data.trim()) {
     return null;
   }
@@ -487,7 +480,7 @@ function shouldIncludeUserSkills(userId: string | null, spaceOwnerUserId: string
 type WrapAssistantMessageStreamOptions = {
   model: Model<Api>;
   signal?: AbortSignal;
-  onEvent?: (event: AssistantMessageEvent) => void;
+  onEvent?: (event: AssistantMessageEvent) => void | Promise<void>;
   onFailure?: (error: unknown) => void;
 };
 
@@ -498,7 +491,7 @@ export function wrapAssistantMessageStream(
   const wrapped = createAssistantMessageEventStream();
   let latestPartial: AssistantMessage | undefined;
 
-  const pushFailure = (error: unknown) => {
+  const pushFailure = async (error: unknown) => {
     options.onFailure?.(error);
     const reason: "aborted" | "error" = options.signal?.aborted ? "aborted" : "error";
     const fallback: AssistantMessage = {
@@ -524,18 +517,21 @@ export function wrapAssistantMessageStream(
       errorMessage: error instanceof Error ? error.message : String(error),
       timestamp: Date.now(),
     };
-    wrapped.push({ type: "error", reason, error: failure });
+    const event: AssistantMessageEvent = { type: "error", reason, error: failure };
+    await options.onEvent?.(event);
+    wrapped.push(event);
   };
 
   void (async () => {
     try {
       for await (const event of stream) {
         if ("partial" in event) latestPartial = event.partial;
-        options.onEvent?.(event);
+        const observed = options.onEvent?.(event);
+        if (observed) await observed;
         wrapped.push(event);
       }
     } catch (error) {
-      pushFailure(error);
+      await pushFailure(error);
     }
   })().catch(pushFailure);
 
@@ -551,11 +547,39 @@ function attachImageToTextCalls(message: AssistantMessage, calls: Awaited<Return
   record.meta = { ...meta, imageToText: { schemaVersion: 1, calls } };
 }
 
-function createStreamFn(getRuntime: () => { modelRegistry: CohubModelRegistry; imageToTextConfig: ImageToTextConfig | null; sessionManager: SessionManager; userId: string | null; threadId: string }): StreamFn {
+type StreamRuntime = {
+  modelRegistry: CohubModelRegistry;
+  imageToTextConfig: ImageToTextConfig | null;
+  sessionManager: SessionManager;
+  userId: string | null;
+  threadId: string;
+  systemPrompt: string;
+  tools: ToolLike[];
+};
+
+/**
+ * Pi (0.86+) carries the system prompt and tool declarations as transcript
+ * system messages, while Cohub rebuilds the transcript from its session file
+ * (no system messages) on every round and after compaction. The prompt and
+ * tools are Cohub runtime state, so they are declared here, at the one exit
+ * every agent request passes, instead of being kept alive in the transcript.
+ * `toLlmMessages` already drops pi's transcript system messages; the filter
+ * guarantees the declared prompt and tools are the only ones sent.
+ */
+function toRequestContext(ctx: TranscriptContext, runtime: StreamRuntime): Context {
+  return {
+    systemPrompt: runtime.systemPrompt,
+    tools: runtime.tools.map(toToolDeclaration),
+    messages: ctx.messages.filter((message) => message.role !== "system"),
+  };
+}
+
+function createStreamFn(getRuntime: () => StreamRuntime, shouldOmit: (message: AssistantMessage) => boolean): StreamFn {
   const tracer = getAgentTracer();
 
-  return async (model: Model<Api>, ctx: Context, options?: SimpleStreamOptions) => {
+  return async (model: Model<Api>, transcript: TranscriptContext, options?: SimpleStreamOptions) => {
     const runtime = getRuntime();
+    const ctx = toRequestContext(transcript, runtime);
     const toolCtx = getCurrentToolExecutionContext();
     const round = (toolCtx?.llmRound ?? 0) + 1;
     if (toolCtx) {
@@ -623,9 +647,10 @@ function createStreamFn(getRuntime: () => { modelRegistry: CohubModelRegistry; i
           });
         }
         const models = createModelsFromRegistry(runtime.modelRegistry, model);
-        const requestOptions = applyRequestProfile(model as CohubModel, {
+        const requestOptions = {
           ...options,
           threadId: runtime.threadId,
+          imageInputCache: toolCtx?.imageInputCache,
           headers: model.provider === "cohub"
             ? mergeHeaders(streamHeaders, {
                 "x-litellm-track-extra": JSON.stringify({
@@ -637,15 +662,50 @@ function createStreamFn(getRuntime: () => { modelRegistry: CohubModelRegistry; i
                 }),
               })
             : streamHeaders,
-        });
-        const stream = streamSimpleWithModels(models, model, requestContext, requestOptions);
+        };
+        const receipt = createRequestMetric(model.provider, model.id);
+        if (prepared.calls.length) receipt.imageToText = {
+          calls: prepared.calls.length,
+          durationMs: prepared.calls.reduce((sum, call) => sum + call.durationMs, 0),
+          usage: prepared.calls.reduce<Usage | null>((total, call) => sumStatsUsage(total, call.usage), null),
+          unknownUsageCalls: prepared.calls.filter((call) => call.usage == null).length,
+        };
+        await persistRequestMetric(toolCtx?.turnId, receipt);
+        receipt.startedAt = Date.now();
+        const requestStarted = performance.now();
+        let ended = false;
+        const finishReceipt = async (message: AssistantMessage, status: "completed" | "failed" | "interrupted") => {
+          if (ended) return;
+          ended = true;
+          receipt.completedAt = Date.now();
+          receipt.durationMs = Math.max(0, performance.now() - requestStarted);
+          receipt.status = status;
+          // Error fallbacks often contain synthetic zero usage, not a provider report.
+          receipt.usage = status === "completed" || (message.usage?.totalTokens ?? 0) > 0 ? message.usage : null;
+          receipt.omitted = shouldOmit(message);
+          if (receipt.firstTokenMs != null) receipt.outputDurationMs = Math.max(0, receipt.durationMs - receipt.firstTokenMs);
+          const record = message as unknown as Record<string, unknown>;
+          record.meta = { ...((record.meta as Record<string, unknown>) ?? {}), llmTiming: receipt };
+          await persistRequestMetric(toolCtx?.turnId, receipt);
+        };
+        let stream: ReturnType<typeof streamSimpleWithModels>;
+        try {
+          stream = streamSimpleWithModels(models, model, requestContext, requestOptions);
+        } catch (error) {
+          receipt.completedAt = Date.now();
+          receipt.durationMs = Math.max(0, performance.now() - requestStarted);
+          receipt.status = options?.signal?.aborted ? "interrupted" : "failed";
+          await persistRequestMetric(toolCtx?.turnId, receipt);
+          throw error;
+        }
 
         return wrapAssistantMessageStream(stream, {
           model,
           signal: options?.signal,
           onFailure: (error) => llmRound.fail(error),
           onEvent: (event) => {
-            if (event.type !== "start") {
+            if ((event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") && event.delta.length > 0) {
+              receipt.firstTokenMs ??= Math.max(0, performance.now() - requestStarted);
               llmRound.markFirstToken();
             }
             if (event.type === "done") {
@@ -659,6 +719,7 @@ function createStreamFn(getRuntime: () => { modelRegistry: CohubModelRegistry; i
                 cost: event.message.usage?.cost?.total,
               });
               llmRound.finish({ finishReason: event.reason, outcome: "ok" });
+              return finishReceipt(event.message, "completed");
             } else if (event.type === "error") {
               attachImageToTextCalls(event.error, prepared.calls);
               recordLlmUsage(llmRound.span, {
@@ -670,6 +731,7 @@ function createStreamFn(getRuntime: () => { modelRegistry: CohubModelRegistry; i
                 cost: event.error.usage?.cost?.total,
               });
               llmRound.finish({ finishReason: event.reason, outcome: event.reason === "aborted" ? "aborted" : "error" });
+              return finishReceipt(event.error, event.reason === "aborted" ? "interrupted" : "failed");
             }
           },
         });
@@ -710,29 +772,34 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
   let runtimeModelRegistry = options.modelRegistry;
   let runtimeImageToTextConfig = options.imageToTextConfig ?? null;
   let runtimeTools = options.tools;
+  let runtimeSystemPrompt = "";
   let systemPromptStateKey: string | null = null;
   const sessionAffinity = options.sessionManager.getSessionAffinity();
-  const getRuntime = () => ({
+  const getRuntime = (): StreamRuntime => ({
     modelRegistry: runtimeModelRegistry,
     imageToTextConfig: runtimeImageToTextConfig,
     sessionManager: options.sessionManager,
     userId: runtimeUserId,
     threadId: sessionAffinity.threadId,
+    systemPrompt: runtimeSystemPrompt,
+    tools: runtimeTools,
   });
   const model = options.model ?? (sessionContext.model ? runtimeModelRegistry.find(sessionContext.model.provider, sessionContext.model.modelId) : undefined) ?? runtimeModelRegistry.getDefault();
   if (!model) {
     throw new Error("No model available. Check platform models.json");
   }
 
-  const initialThinkingLevel = resolveThinkingLevelForModel(
-    model,
-    sessionContext.messages.length > 0 ? sessionContext.thinkingLevel : undefined,
-  );
+  const resumed = sessionContext.messages.length > 0;
+  const initialThinkingLevel = await resolveInitialThinkingLevel(model, {
+    recorded: sessionContext.thinkingLevel,
+    resumed,
+    loadSelected: options.loadSelectedThinkingLevel,
+  });
 
-  if (sessionContext.messages.length === 0) {
-    options.sessionManager.appendModelChange(model.provider, model.id);
-    options.sessionManager.appendThinkingLevelChange(initialThinkingLevel);
-  }
+  if (!resumed) options.sessionManager.appendModelChange(model.provider, model.id);
+  // Record the level whenever the file has none (new session or lost record),
+  // so later loads and compactions carry it instead of resolving it again.
+  if (!normalizeThinkingLevel(sessionContext.thinkingLevel)) options.sessionManager.appendThinkingLevelChange(initialThinkingLevel);
 
   const systemPromptStateKeyFor = (userId: string | null, spaceOwnerUserId: string | null, tools: ToolLike[]) => `${userId ?? ""}\0${shouldIncludeUserSkills(userId, spaceOwnerUserId) ? "user-skills" : "no-user-skills"}\0${toolsStateKey(tools)}`;
 
@@ -749,12 +816,11 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
     });
   };
 
-  const systemPrompt = await buildSystemPromptForTools(runtimeTools);
+  runtimeSystemPrompt = await buildSystemPromptForTools(runtimeTools);
   systemPromptStateKey = systemPromptStateKeyFor(runtimeUserId, runtimeSpaceOwnerUserId, runtimeTools);
 
   const agent = new PiAgent({
     initialState: {
-      systemPrompt,
       model,
       thinkingLevel: initialThinkingLevel,
       tools: runtimeTools as never,
@@ -763,7 +829,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
     steeringMode: "all",
     sessionId: sessionAffinity.sessionId,
     convertToLlm: toLlmMessages,
-    streamFn: createStreamFn(getRuntime),
+    streamFn: createStreamFn(getRuntime, (message) => getAssistantRetryOutcome(message, retryAttempt).shouldRetry),
     getApiKey: (provider: string) => runtimeModelRegistry.getApiKey(provider),
     async afterToolCall({ result }) {
       if (isToolFailureDetails(result.details)) return { isError: true };
@@ -783,7 +849,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
     }
     const nextSystemPrompt = await buildSystemPromptForTools(tools);
     runtimeTools = tools;
-    agent.state.systemPrompt = nextSystemPrompt;
+    runtimeSystemPrompt = nextSystemPrompt;
     systemPromptStateKey = nextKey;
     agent.state.tools = tools as never;
   };
@@ -824,7 +890,9 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
         retryPending = false;
         retryInProgress = true;
 
+        const waitStarted = performance.now();
         if (delayMs > 0) await sleep(delayMs);
+        await recordRetryWait(contextSnapshot?.turnId, Math.max(0, performance.now() - waitStarted));
         if (retryCancelled) {
           clearRetryState();
           return;
@@ -1008,7 +1076,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
 
       const nextKey = systemPromptStateKeyFor(nextUserId, nextSpaceOwnerUserId, runtimeTools);
       const nextSystemPrompt = systemPromptStateKey === nextKey
-        ? agent.state.systemPrompt
+        ? runtimeSystemPrompt
         : await buildSystemPromptForTools(runtimeTools, { userId: nextUserId, spaceOwnerUserId: nextSpaceOwnerUserId });
       const shouldChangeModel = target.provider !== currentModel.provider || target.id !== currentModel.id;
       const hasRequestedThinkingLevel = input.requestedThinkingLevel !== undefined && input.requestedThinkingLevel !== null;
@@ -1022,7 +1090,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       runtimeSpaceOwnerUserId = nextSpaceOwnerUserId;
       runtimeModelRegistry = input.modelRegistry;
       runtimeImageToTextConfig = input.imageToTextConfig ?? null;
-      agent.state.systemPrompt = nextSystemPrompt;
+      runtimeSystemPrompt = nextSystemPrompt;
       systemPromptStateKey = nextKey;
       const shouldChangeThinkingLevel = nextThinkingLevel !== agent.state.thinkingLevel;
       if (shouldChangeModel) {

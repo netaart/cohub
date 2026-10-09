@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { BoardPatch, BoardPlaybackCommand, BoardPlaybackSnapshot } from "@cohub/protocol";
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppRuntimeShellContext } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
@@ -6,12 +7,7 @@ import type {
 	BoardAutomationActivity,
 	BoardCollaboratorProfile,
 } from "$lib/board/board-activity";
-import {
-	type BoardCommitHandler,
-	type BoardRuntimeData,
-	type BoardRuntimeViewState,
-	resolveBoardRuntime,
-} from "$lib/board/runtime/board-runtime";
+import { type BoardRuntimeViewState, cohubPixiRuntime } from "$lib/board/runtime/board-runtime";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import PreviewHeader from "./PreviewHeader.svelte";
@@ -23,7 +19,7 @@ type InlineBoardPanelState = {
 	path: string;
 	boardId: string | null;
 	document: BoardDocument | null;
-	runtime: BoardRuntimeData | null;
+	playback: BoardPlaybackSnapshot | null;
 	loading: boolean;
 	saving: boolean;
 	error: string | null;
@@ -48,13 +44,8 @@ type Props = {
 	collaborators?: Map<string, BoardCollaboratorProfile>;
 	activities?: BoardAutomationActivity[];
 	onOpenActivity?: (activity: BoardAutomationActivity) => void | Promise<void>;
-	onCommit: (
-		boardId: string,
-		path: string,
-		document: Parameters<BoardCommitHandler>[0],
-		before: Parameters<BoardCommitHandler>[1],
-		commands: Parameters<BoardCommitHandler>[2],
-	) => void | Promise<void>;
+	onCommit: (boardId: string, patch: BoardPatch) => void | Promise<void>;
+	onPlayback: (boardId: string, command: BoardPlaybackCommand) => Promise<BoardPlaybackSnapshot | null>;
 	onRetrySave: (boardId: string) => void | Promise<void>;
 	onActivateWindow: (kind: Window["kind"], key: string) => void;
 	onCloseWindow: (kind: Window["kind"], key: string) => void;
@@ -78,6 +69,7 @@ let {
 	activities = [],
 	onOpenActivity,
 	onCommit,
+	onPlayback,
 	onRetrySave,
 	onActivateWindow,
 	onCloseWindow,
@@ -92,8 +84,7 @@ const immersive = $derived(chrome.immersive);
 let boardRuntimeLoadAttempt = $state(0);
 const boardRuntimeModulePromise = $derived.by(() => {
 	boardRuntimeLoadAttempt;
-	if (!board.document) throw new Error("Board data is unavailable.");
-	return resolveBoardRuntime(board.document).load();
+	return cohubPixiRuntime.load();
 });
 </script>
 
@@ -114,7 +105,7 @@ const boardRuntimeModulePromise = $derived.by(() => {
 		<div class="flex flex-1 items-center justify-center text-xs text-text-tertiary">{m.common_loading({}, { locale })}</div>
 	{:else if board.error}
 		<div class="m-4 rounded-lg border border-error-soft/30 bg-error-bg p-4 text-sm text-error-soft">{board.error}</div>
-	{:else if board.boardId && board.document && board.runtime}
+	{:else if board.boardId && board.document}
 		{#await boardRuntimeModulePromise}
 			<div class="flex flex-1 items-center justify-center text-xs text-text-tertiary">{m.common_loading({}, { locale })}</div>
 		{:then boardRuntimeModule}
@@ -125,7 +116,7 @@ const boardRuntimeModulePromise = $derived.by(() => {
 						path={board.path}
 						boardId={board.boardId}
 						document={board.document}
-						runtime={board.runtime}
+						playback={board.playback}
 						spaceId={spaceId}
 						shell={shell}
 						onNavigationOpen={onNavigationOpen}
@@ -136,7 +127,8 @@ const boardRuntimeModulePromise = $derived.by(() => {
 						{activities}
 						{onOpenActivity}
 						syncError={board.saveError}
-						onCommit={(document, before, commands) => onCommit(board.boardId as string, board.path, document, before, commands)}
+						onCommit={(patch) => onCommit(board.boardId as string, patch)}
+						onPlayback={(command) => onPlayback(board.boardId as string, command)}
 						onRetrySync={() => onRetrySave(board.boardId as string)}
 						{onViewStateChange}
 						{onOpenFile}

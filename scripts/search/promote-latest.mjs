@@ -5,13 +5,13 @@ import { join } from "node:path";
 
 function requiredEnv(name) {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`Missing ${name} / 缺少 ${name}`);
+  if (!value) throw new Error(`Missing ${name}`);
   return value;
 }
 
 function versionParts(version) {
   if (typeof version !== "string" || !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(version)) {
-    throw new Error(`Invalid search release version / 搜索版本无效: ${JSON.stringify(version)}`);
+    throw new Error(`Invalid search release version: ${JSON.stringify(version)}`);
   }
   return version.slice(1).split(".").map(BigInt);
 }
@@ -35,11 +35,11 @@ function promoteLatest() {
       const current = versionParts(currentVersion);
       const difference = incoming.findIndex((part, index) => part !== current[index]);
       if (difference === -1 || incoming[difference] < current[difference]) {
-        console.log(`Keep latest ${currentVersion}; skip ${version} / 保留当前版本，跳过本次更新`);
+        console.log(`Keep latest ${currentVersion}; skip ${version}`);
         return;
       }
     } else if (!result.stderr.includes("(NoSuchKey)")) {
-      throw new Error(`Read latest release failed / 读取当前版本失败: ${result.stderr.trim()}`);
+      throw new Error(`Read latest release failed: ${result.stderr.trim()}`);
     }
 
     writeFileSync(pointer, `${JSON.stringify({ version })}\n`);
@@ -49,7 +49,7 @@ function promoteLatest() {
       "--content-type", "application/json",
       "--cache-control", "no-cache, max-age=0",
     ], { stdio: "inherit" });
-    console.log(`Promoted search ${version} / 搜索版本已更新`);
+    console.log(`Promoted search ${version}`);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

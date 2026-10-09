@@ -84,9 +84,6 @@ const appFormSubmitting = $derived(appDetailController.formSubmitting);
 const appFormError = $derived(appDetailController.formError);
 const appCopiedId = $derived(appDetailController.copiedId);
 const appCopiedPublicRoute = $derived(appDetailController.copiedPublicRoute);
-const standaloneUrl = $derived(appDetailController.standaloneUrl);
-let copiedStandaloneUrl = $state(false);
-let copiedStandaloneTimer: ReturnType<typeof setTimeout> | null = null;
 const appVersions = $derived(appDetailController.versions);
 const appVersionsLoading = $derived(appDetailController.versionsLoading);
 const appVersionsError = $derived(appDetailController.versionsError);
@@ -133,26 +130,8 @@ onMount(() => {
 		window.removeEventListener(APPS_CHANGED_EVENT, handleWorksChanged);
 });
 
-async function copyStandaloneUrl() {
-	if (!standaloneUrl) return;
-	try {
-		await navigator.clipboard.writeText(standaloneUrl);
-		copiedStandaloneUrl = true;
-		if (copiedStandaloneTimer) clearTimeout(copiedStandaloneTimer);
-		copiedStandaloneTimer = setTimeout(() => {
-			copiedStandaloneUrl = false;
-			copiedStandaloneTimer = null;
-		}, 1500);
-	} catch (cause) {
-		appDetailController.setError(
-			cause instanceof Error ? cause.message : "Failed to copy standalone URL",
-		);
-	}
-}
-
 onDestroy(() => {
 	appDetailController.dispose();
-	if (copiedStandaloneTimer) clearTimeout(copiedStandaloneTimer);
 });
 </script>
 
@@ -370,24 +349,14 @@ onDestroy(() => {
             </section>
           </div>
           <aside class="space-y-5 text-[13px]">
-            {#if (publicRoute && appDetail.status === 'published') || standaloneUrl}
+            {#if publicRoute && appDetail.status === 'published'}
               <div class="space-y-2">
-                {#if publicRoute && appDetail.status === 'published'}
-                  <button type="button" class="group flex w-full min-w-0 items-center gap-2 rounded-[6px] bg-bg-elevated/30 px-3 py-2 text-left transition-colors hover:bg-bg-hover" onclick={() => void appDetailController.copyPublicRoute(publicRoute)} title={appCopiedPublicRoute ? m.app_view_url_copied({}, { locale }) : m.app_view_copy_url({}, { locale })} aria-label={appCopiedPublicRoute ? m.app_view_url_copied({}, { locale }) : m.app_view_copy_url({}, { locale })}>
-                    <span class="min-w-0 flex-1 font-mono text-[12px] text-text-secondary break-all">{page.url.origin}{publicRoute}</span>
-                    <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] border border-border-subtle bg-bg-elevated text-text-tertiary transition-colors group-hover:border-border-default group-hover:text-text-primary">
-                      {#if appCopiedPublicRoute}<Check class="h-3.5 w-3.5 text-success-soft" />{:else}<Copy class="h-3.5 w-3.5" />{/if}
-                    </span>
-                  </button>
-                {/if}
-                {#if standaloneUrl}
-                  <button type="button" class="group flex w-full min-w-0 items-center gap-2 rounded-[6px] bg-bg-elevated/30 px-3 py-2 text-left transition-colors hover:bg-bg-hover" onclick={() => void copyStandaloneUrl()} title={copiedStandaloneUrl ? m.app_view_url_copied({}, { locale }) : m.app_view_copy_url({}, { locale })} aria-label={copiedStandaloneUrl ? m.app_view_url_copied({}, { locale }) : m.app_view_copy_url({}, { locale })}>
-                    <span class="min-w-0 flex-1 font-mono text-[12px] text-text-tertiary break-all">{standaloneUrl}</span>
-                    <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] border border-border-subtle bg-bg-elevated text-text-tertiary transition-colors group-hover:border-border-default group-hover:text-text-primary">
-                      {#if copiedStandaloneUrl}<Check class="h-3.5 w-3.5 text-success-soft" />{:else}<Copy class="h-3.5 w-3.5" />{/if}
-                    </span>
-                  </button>
-                {/if}
+                <button type="button" class="group flex w-full min-w-0 items-center gap-2 rounded-[6px] bg-bg-elevated/30 px-3 py-2 text-left transition-colors hover:bg-bg-hover" onclick={() => void appDetailController.copyPublicRoute(publicRoute)} title={appCopiedPublicRoute ? m.app_view_url_copied({}, { locale }) : m.app_view_copy_url({}, { locale })} aria-label={appCopiedPublicRoute ? m.app_view_url_copied({}, { locale }) : m.app_view_copy_url({}, { locale })}>
+                  <span class="min-w-0 flex-1 font-mono text-[12px] text-text-secondary break-all">{page.url.origin}{publicRoute}</span>
+                  <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] border border-border-subtle bg-bg-elevated text-text-tertiary transition-colors group-hover:border-border-default group-hover:text-text-primary">
+                    {#if appCopiedPublicRoute}<Check class="h-3.5 w-3.5 text-success-soft" />{:else}<Copy class="h-3.5 w-3.5" />{/if}
+                  </span>
+                </button>
               </div>
               <div class="h-px bg-border-subtle/70"></div>
             {/if}

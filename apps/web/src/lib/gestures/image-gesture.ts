@@ -10,8 +10,15 @@ export type ImageGestureOptions = {
 	minZoom?: number;
 	maxZoom?: number;
 	onDraggingChange?: (dragging: boolean) => void;
-	onSwipe?: (deltaX: number, deltaY: number) => void;
 };
+
+export const IMAGE_MIN_ZOOM = 0.25;
+export const IMAGE_MAX_ZOOM = 4;
+export const IMAGE_ZOOM_STEP = 0.25;
+
+export function clampImageZoom(value: number) {
+	return Math.min(IMAGE_MAX_ZOOM, Math.max(IMAGE_MIN_ZOOM, value));
+}
 
 type Point = { clientX: number; clientY: number };
 
@@ -48,8 +55,8 @@ function midpoint(a: Point, b: Point): Point {
  * preview state local or persist it with the active file tab.
  */
 export function createImageGestureHandlers(options: ImageGestureOptions) {
-	const minZoom = options.minZoom ?? 0.25;
-	const maxZoom = options.maxZoom ?? 4;
+	const minZoom = options.minZoom ?? IMAGE_MIN_ZOOM;
+	const maxZoom = options.maxZoom ?? IMAGE_MAX_ZOOM;
 	const pointers = new Map<number, ActivePointer>();
 	let pinchStart: {
 		distance: number;
@@ -65,7 +72,6 @@ export function createImageGestureHandlers(options: ImageGestureOptions) {
 		panX: number;
 		panY: number;
 	} | null = null;
-	let gestureStart: Point | null = null;
 	let gestureState: ImageGestureState | null = null;
 	let activeImage: HTMLImageElement | null = null;
 	let gestureLayout: GestureLayout | null = null;
@@ -163,13 +169,9 @@ export function createImageGestureHandlers(options: ImageGestureOptions) {
 			clientY: event.clientY,
 		});
 
-		if (pointers.size === 1) {
-			gestureStart = { clientX: event.clientX, clientY: event.clientY };
-			gestureState = options.getState();
-		}
+		if (pointers.size === 1) gestureState = options.getState();
 
 		if (pointers.size === 2) {
-			gestureStart = null;
 			if (event.cancelable) event.preventDefault();
 			const [first, second] = [...pointers.values()];
 			if (!first || !second) return;
@@ -261,8 +263,7 @@ export function createImageGestureHandlers(options: ImageGestureOptions) {
 		renderVisual(gestureState);
 	}
 
-	function finishPointer(event: PointerEvent, allowSwipe: boolean) {
-		const start = gestureStart;
+	function onPointerUp(event: PointerEvent) {
 		clearPointer(event.pointerId, event.currentTarget);
 		if (pointers.size === 1 && (gestureState ?? options.getState()).zoom > 1) {
 			const remaining = [...pointers.values()][0];
@@ -281,37 +282,11 @@ export function createImageGestureHandlers(options: ImageGestureOptions) {
 				return;
 			}
 		}
-		if (pointers.size === 0) {
-			const swipePointer =
-				event.pointerType === "touch" || event.pointerType === "pen";
-			if (
-				allowSwipe &&
-				swipePointer &&
-				start &&
-				(gestureState ?? options.getState()).zoom <= 1
-			) {
-				const deltaX = event.clientX - start.clientX;
-				const deltaY = event.clientY - start.clientY;
-				if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
-					options.onSwipe?.(deltaX, deltaY);
-				}
-			}
-			gestureStart = null;
-			end();
-		}
-	}
-
-	function onPointerUp(event: PointerEvent) {
-		finishPointer(event, true);
-	}
-
-	function onPointerCancel(event: PointerEvent) {
-		finishPointer(event, false);
+		if (pointers.size === 0) end();
 	}
 
 	function reset() {
 		pointers.clear();
-		gestureStart = null;
 		gestureState = null;
 		if (activeImage) {
 			const state = options.getState();
@@ -325,5 +300,11 @@ export function createImageGestureHandlers(options: ImageGestureOptions) {
 		setDragging(false);
 	}
 
-	return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, reset };
+	return {
+		onPointerDown,
+		onPointerMove,
+		onPointerUp,
+		onPointerCancel: onPointerUp,
+		reset,
+	};
 }

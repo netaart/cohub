@@ -62,6 +62,26 @@ export function appDisplayTitle(
 }
 
 /**
+ * Effective app icon URL for lists and chrome.
+ *
+ * The stored ref is already materialized to an absolute URL at publish time,
+ * so a list response can render it with no extra fetch. Relative refs from
+ * older publishes stay unresolved unless a `contentUrl` is supplied, in which
+ * case they resolve against the published package like the public shell does.
+ * Returns null when no usable source exists, so callers can fall back to a
+ * generated tile.
+ */
+export function appIconUrl(
+	meta: AppMeta | null | undefined,
+	contentUrl?: string | null,
+) {
+	return resolveMediaRef(
+		isRecord(meta) && typeof meta.icon === "string" ? meta.icon : null,
+		contentUrl ?? null,
+	);
+}
+
+/**
  * Aligns with `presentation.hideCohubBar` (Pro+):
  * minimal host branding on public share meta as well as the on-page bar.
  */

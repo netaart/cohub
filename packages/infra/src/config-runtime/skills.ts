@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
+import { isLocalHarness } from "@cohub/protocol/runtime";
 import { createLogger } from "../logging/index.js";
 
 const logger = createLogger({ serviceName: "cohub-skills" });
@@ -17,6 +18,48 @@ export const SKILL_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const SAFE_REDIS_KEY_SEGMENT_REGEX = /^[0-9a-zA-Z_-]+$/;
 
 export type SkillScope = "platform" | "mod" | "user" | "project";
+
+/** Canonical sandbox workspace root; native Harnesses run with it as cwd. */
+export const SANDBOX_WORKSPACE_ROOT = "/workspace";
+
+/** Where a turn's skills execute. Cloud sandboxes mount platform/user/Mod
+ * skill directories read-only; local sandboxes and native Harnesses reach
+ * workspace files only. `unverified_sandbox` marks a provider lookup failure
+ * and fails closed to workspace files. */
+export type SkillExecutionTarget = "cloud_sandbox" | "local_sandbox" | "native_harness" | "unverified_sandbox";
+
+/** Skills whose files exist on the executing target. Unreachable scopes are
+ * filtered before expansion so they never surface as broken locations. */
+export function reachableSkillScopes(target: SkillExecutionTarget): SkillScope[] {
+  switch (target) {
+    case "cloud_sandbox":
+      return ["platform", "mod", "user", "project"];
+    case "local_sandbox":
+    case "native_harness":
+    case "unverified_sandbox":
+      return ["project"];
+  }
+}
+
+/** Native Harnesses run with the workspace as cwd, so workspace skills use
+ * workspace-relative locations instead of sandbox-absolute paths. */
+export function nativeHarnessSkillLocation(skill: {
+  sandboxFilePath: string;
+  sandboxBaseDir: string;
+}, workspaceRoot = SANDBOX_WORKSPACE_ROOT): { filePath: string; baseDir: string } {
+  const stripRoot = (value: string): string => {
+    if (value === workspaceRoot) return ".";
+    if (value.startsWith(`${workspaceRoot}/`)) return value.slice(workspaceRoot.length + 1);
+    return value;
+  };
+  return { filePath: stripRoot(skill.sandboxFilePath), baseDir: stripRoot(skill.sandboxBaseDir) };
+}
+
+/** Lookup failure message for a skill the platform knows but whose scope the
+ * executing target cannot reach. */
+export function unreachableSkillMessage(name: string, scope: SkillScope): string {
+  return `Skill ${name} (${scope} scope) is not available in this execution environment`;
+}
 
 export type SkillCatalogSource = {
   type: "mod";
@@ -260,20 +303,30 @@ export function escapeXmlAttr(value: string): string {
     .replaceAll("\r", " ");
 }
 
+/**
+ * Render a `/skill:` expansion block.
+ *
+ * `location` overrides the skill's sandbox-absolute paths. Native Harnesses
+ * (Pi/Codex) run with the workspace as cwd, so workspace-relative paths are
+ * resolvable there without a sandbox mount.
+ */
 export function formatSkillExpansion(input: {
   name: string;
   sandboxFilePath: string;
   sandboxBaseDir: string;
   content: string;
   argsText?: string;
+  location?: { filePath: string; baseDir: string };
 }): string {
   if (!isValidSkillName(input.name)) {
     throw new Error(`Invalid skill name: ${input.name}`);
   }
+  const filePath = input.location?.filePath ?? input.sandboxFilePath;
+  const baseDir = input.location?.baseDir ?? input.sandboxBaseDir;
   const body = stripSkillFrontmatter(input.content).trim().slice(0, MAX_SKILL_CONTENT_CHARS);
   const block = [
-    `<skill name="${escapeXmlAttr(input.name)}" location="${escapeXmlAttr(input.sandboxFilePath)}">`,
-    `References are relative to ${input.sandboxBaseDir}.`,
+    `<skill name="${escapeXmlAttr(input.name)}" location="${escapeXmlAttr(filePath)}">`,
+    `References are relative to ${baseDir}.`,
     "",
     body,
     "</skill>",
@@ -433,4 +486,159 @@ export async function getDirectoryRevision(dir: string, checkpointMetaPath?: str
     }
   }
   return `${dir}:missing`;
+}
+
+/** Provider lookup injected by api/worker. `null` means no sandbox record
+ * exists (cloud spaces create theirs lazily) and resolves to the cloud
+ * default; rejections mean the lookup itself failed and fail closed. */
+export type SandboxProviderLookup = (spaceId: string) => Promise<"cloud" | "local" | null>;
+
+/**
+ * Resolve where a turn's skills execute. Native Harnesses (Pi/Codex) run on
+ * the user's machine; Cohub turns run in the space's sandbox, whose provider
+ * decides whether platform/user/Mod skill directories are mounted. A failed
+ * provider lookup fails closed (workspace files only), never wide open.
+ */
+export async function resolveSkillExecutionTarget(input: {
+  harness?: string | null;
+  spaceId?: string | null;
+  getSandboxProvider?: SandboxProviderLookup;
+}): Promise<SkillExecutionTarget> {
+  if (isLocalHarness(input.harness)) return "native_harness";
+  if (!input.spaceId) return "cloud_sandbox";
+  if (!input.getSandboxProvider) return "unverified_sandbox";
+  try {
+    // A missing record is the cloud default (cloud spaces register lazily);
+    // only a failed lookup fails closed.
+    const provider = await input.getSandboxProvider(input.spaceId);
+    return provider === "local" ? "local_sandbox" : "cloud_sandbox";
+  } catch {
+    return "unverified_sandbox";
+  }
+}
+
+/** Scope-config loader injected by api/worker; each loads one scope's skills. */
+export type SkillScopeLoader = {
+  platform: () => Promise<SkillsConfig | null>;
+  mod: (spaceId: string) => Promise<SkillsConfig | null>;
+  user: (userId: string) => Promise<SkillsConfig | null>;
+  project: (spaceId: string) => Promise<SkillsConfig | null>;
+};
+
+export type ExpandedSkillCommand = {
+  renderedText: string;
+  skill: {
+    name: string;
+    description: string;
+    scope: SkillScope;
+    source?: SkillCatalogSource;
+    sandboxFilePath: string;
+    sandboxBaseDir: string;
+  };
+  argsText: string;
+  rawInput: string;
+};
+
+export type SkillLoader = {
+  /** Target-respecting fetch: unreachable scopes are skipped. */
+  fetch(options: { userId?: string | null; spaceId?: string | null; harness?: string | null }): Promise<Skill[]>;
+  /** Reachability-ignoring scope lookup for diagnostics. */
+  findScope(skillName: string, options: { userId?: string | null; spaceId?: string | null }): Promise<SkillScope | null>;
+  /** Resolve a `/skill:name args` command once against one target: expand a
+   * reachable skill, pass unknown skills through on native Harnesses, and
+   * report known-but-unreachable skills explicitly otherwise. */
+  expand(text: string, options: { userId?: string | null; spaceId?: string | null; harness?: string | null }): Promise<ExpandedSkillCommand | null>;
+};
+
+/**
+ * One shared implementation of reachability-filtered skill loading for the
+ * API and worker. Scope IO stays injected; target resolution, scope gating,
+ * and `/skill:` expansion live here so both entry points behave identically.
+ */
+export function createSkillLoader(input: {
+  scopes: SkillScopeLoader;
+  getSandboxProvider?: SandboxProviderLookup;
+}): SkillLoader {
+  const loadScope = (scope: SkillScope, options: { userId?: string | null; spaceId?: string | null }): Promise<SkillsConfig | null> => {
+    switch (scope) {
+      case "platform": return input.scopes.platform();
+      case "mod": return options.spaceId ? input.scopes.mod(options.spaceId) : Promise.resolve(null);
+      case "user": return options.userId ? input.scopes.user(options.userId) : Promise.resolve(null);
+      case "project": return options.spaceId ? input.scopes.project(options.spaceId) : Promise.resolve(null);
+    }
+  };
+
+  const loadAll = (scopes: SkillScope[], options: { userId?: string | null; spaceId?: string | null }) =>
+    Promise.all(scopes.map((scope) => loadScope(scope, options)));
+
+  const resolveTarget = (options: { harness?: string | null; spaceId?: string | null }) =>
+    resolveSkillExecutionTarget({
+      harness: options.harness,
+      spaceId: options.spaceId,
+      getSandboxProvider: input.getSandboxProvider,
+    });
+
+  const fetchFor = async (target: SkillExecutionTarget, options: { userId?: string | null; spaceId?: string | null }) =>
+    mergeSkillsConfigs(...await loadAll(reachableSkillScopes(target), options)).skills;
+
+  const findScope = async (skillName: string, options: { userId?: string | null; spaceId?: string | null }) => {
+    const groups = await loadAll(["platform", "mod", "user", "project"], options);
+    return mergeSkillsConfigs(...groups).skills.find((skill) => skill.name === skillName)?.scope ?? null;
+  };
+
+  return {
+    async fetch(options) {
+      return fetchFor(await resolveTarget(options), options);
+    },
+    findScope,
+    async expand(text, options) {
+      const trimmed = text.trimStart();
+      if (!trimmed.startsWith("/skill:")) return null;
+
+      const rest = trimmed.slice("/skill:".length);
+      const spaceIndex = rest.search(/\s/);
+      const skillName = spaceIndex === -1 ? rest : rest.slice(0, spaceIndex);
+      const argsText = spaceIndex === -1 ? "" : rest.slice(spaceIndex + 1).trim();
+      if (!skillName) return null;
+      if (!isValidSkillName(skillName)) {
+        throw new Error(`Unknown skill: ${skillName}`);
+      }
+
+      // One target resolution drives both filtering and the location mode.
+      const target = await resolveTarget(options);
+      const skill = (await fetchFor(target, options)).find((item) => item.name === skillName);
+      if (!skill) {
+        // Cohub turns distinguish "known but unreachable here" from "unknown".
+        // Native Harnesses run with the user's own skill files, so a skill the
+        // platform does not know passes through verbatim instead of failing.
+        if (target === "native_harness") return null;
+        const known = await findScope(skillName, options);
+        if (known) throw new Error(unreachableSkillMessage(skillName, known));
+        throw new Error(`Unknown skill: ${skillName}`);
+      }
+
+      return {
+        renderedText: formatSkillExpansion({
+          name: skill.name,
+          sandboxFilePath: skill.sandboxFilePath,
+          sandboxBaseDir: skill.sandboxBaseDir,
+          content: skill.content,
+          argsText,
+          ...(target === "native_harness"
+            ? { location: nativeHarnessSkillLocation(skill) }
+            : {}),
+        }),
+        skill: {
+          name: skill.name,
+          description: skill.description,
+          scope: skill.scope,
+          ...(skill.source ? { source: skill.source } : {}),
+          sandboxFilePath: skill.sandboxFilePath,
+          sandboxBaseDir: skill.sandboxBaseDir,
+        },
+        argsText,
+        rawInput: text,
+      };
+    },
+  };
 }

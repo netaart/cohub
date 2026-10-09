@@ -1,4 +1,5 @@
 <script lang="ts">
+import { dismissOnBack } from "$lib/back-layers.svelte";
 import {
 	getDrawerOpenRatio,
 	MOBILE_DRAWER_MAX_WIDTH_VW,
@@ -67,6 +68,8 @@ function closeDrawer() {
 	uiState.mobileRightDrawerOpen = false;
 }
 
+dismissOnBack(() => uiState.mobileRightDrawerOpen, closeDrawer);
+
 let renderContent = $state(false);
 
 $effect(() => {
@@ -102,7 +105,7 @@ $effect(() => {
     style="width: {MOBILE_DRAWER_WIDTH_PX}px; max-width: {MOBILE_DRAWER_MAX_WIDTH_VW}vw; {panelStyle}"
   >
     {#if renderContent}
-      <div class="h-full border-l border-border-subtle bg-bg-primary" class:pointer-events-auto={interactive}>
+      <div class="safe-area-top h-full border-l border-border-subtle bg-bg-primary" class:pointer-events-auto={interactive}>
         {@render children()}
       </div>
     {/if}

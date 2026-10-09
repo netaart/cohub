@@ -26,13 +26,10 @@ function makeItem(input: {
 		type: input.type,
 		id: `item-${nextId}`,
 		spaceId: `space-${nextId}`,
-		sessionId: input.type === "space" ? null : `session-${nextId}`,
-		turnId: input.type === "turn" ? `turn-${nextId}` : null,
-		sequence: null,
+		sessionId: input.type === "chat" ? `session-${nextId}` : null,
 		title: input.title,
 		excerpt: null,
 		spaceName: null,
-		sessionTitle: null,
 		matchedField: "title",
 		href: "#",
 		score: input.score,
@@ -51,14 +48,14 @@ function makeItem(input: {
 
 test("personal results outrank foreign results even with lower scores", () => {
 	const mine = makeItem({
-		type: "session",
+		type: "chat",
 		title: "我需要你帮我写介绍视频文案",
 		score: 0.5,
 		viewerRelation: "creator",
 		viewerTier: 0,
 	});
 	const foreign = makeItem({
-		type: "session",
+		type: "chat",
 		title: "视频",
 		score: 0.95,
 		viewerRelation: "unrelated",
@@ -71,21 +68,21 @@ test("personal results outrank foreign results even with lower scores", () => {
 
 test("creator and participant share tier 0; unknown defaults to tier 1", () => {
 	const creator = makeItem({
-		type: "session",
+		type: "chat",
 		title: "creator",
 		score: 0.4,
 		viewerRelation: "creator",
 		viewerTier: 0,
 	});
 	const participant = makeItem({
-		type: "session",
+		type: "chat",
 		title: "participant",
 		score: 0.41,
 		viewerRelation: "participant",
 		viewerTier: 0,
 	});
 	const unknown = makeItem({
-		type: "session",
+		type: "chat",
 		title: "unknown",
 		score: 0.42,
 	});
@@ -98,7 +95,7 @@ test("creator and participant share tier 0; unknown defaults to tier 1", () => {
 
 test("long queries let strong exact matches bypass the tier", () => {
 	const mineWeak = makeItem({
-		type: "session",
+		type: "chat",
 		title: "mine weak match",
 		score: 0.5,
 		textScore: 0.5,
@@ -106,7 +103,7 @@ test("long queries let strong exact matches bypass the tier", () => {
 		viewerTier: 0,
 	});
 	const foreignExact = makeItem({
-		type: "session",
+		type: "chat",
 		title: "exact foreign title",
 		score: 0.6,
 		textScore: 0.95,
@@ -123,17 +120,15 @@ test("long queries let strong exact matches bypass the tier", () => {
 
 test("merge keeps remote viewer tier over local derivation", () => {
 	const localItem = makeItem({
-		type: "session",
+		type: "chat",
 		title: "视频",
 		score: 0.6,
 	});
 	const remote: GlobalSearchResult = {
-		type: "session",
+		type: "chat",
 		id: localItem.id,
 		spaceId: localItem.spaceId,
 		sessionId: localItem.sessionId,
-		turnId: null,
-		sequence: null,
 		title: localItem.title,
 		matchedField: "title",
 		href: "#",
@@ -152,14 +147,12 @@ test("merge keeps remote viewer tier over local derivation", () => {
 	assert.equal(merged[0]?.viewerTier, 0);
 });
 
-test("merged personal session beats unrelated session with higher score", () => {
+test("merged personal chat beats unrelated chat with higher score", () => {
 	const mine: GlobalSearchResult = {
-		type: "session",
+		type: "chat",
 		id: "mine",
 		spaceId: "s1",
 		sessionId: "mine",
-		turnId: null,
-		sequence: null,
 		title: "我的视频文案会话",
 		matchedField: "title",
 		href: "#",
@@ -173,12 +166,10 @@ test("merged personal session beats unrelated session with higher score", () => 
 		source: "remote",
 	};
 	const foreign: GlobalSearchResult = {
-		type: "session",
+		type: "chat",
 		id: "foreign",
 		spaceId: "s2",
 		sessionId: "foreign",
-		turnId: null,
-		sequence: null,
 		title: "视频",
 		matchedField: "title",
 		href: "#",
@@ -250,20 +241,20 @@ test("local Recent activity ignores invalid viewer timestamps", () => {
 
 test("withLocalCommands preserves tier ordering for search results", () => {
 	const mine = makeItem({
-		type: "session",
+		type: "chat",
 		title: "mine",
 		score: 0.5,
 		viewerRelation: "creator",
 		viewerTier: 0,
 	});
 	const foreign = makeItem({
-		type: "turn",
-		title: "foreign turn",
+		type: "chat",
+		title: "foreign chat",
 		score: 0.9,
 		viewerRelation: "unrelated",
 		viewerTier: 2,
 	});
 	const result = withLocalCommands([foreign, mine], [], 30);
 	assert.equal(result[0]?.title, "mine");
-	assert.equal(result[1]?.title, "foreign turn");
+	assert.equal(result[1]?.title, "foreign chat");
 });

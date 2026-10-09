@@ -14,8 +14,8 @@ function setup(viewer: string | null = "viewer") {
   let logins = 0;
   globalThis.fetch = (async (url, init) => {
     requests.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    return Response.json(String(url).endsWith("/api/spaces")
-      ? [{ id: "viewer-space", name: "My Space" }]
+    return Response.json(new URL(String(url)).pathname === "/api/spaces"
+      ? { items: [{ id: "viewer-space", name: "My Space" }], pageInfo: { hasMore: false, nextCursor: null } }
       : { token: "token", grant });
   }) as typeof fetch;
   const core = createAppBridgeCore({

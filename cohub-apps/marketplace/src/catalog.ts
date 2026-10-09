@@ -53,20 +53,28 @@ export const MarketplaceCatalogSchema = z.object({
   apps: z.array(MarketplaceEntrySchema).max(10_000),
 });
 
+const MAX_FILE_HANDLERS = 32;
+const EXTENSION = /^\.[a-z0-9][a-z0-9_-]{0,31}$/;
+
+// Installed-App records are loose: fields this App does not know yet survive a
+// write, so an older Marketplace never erases what a newer Cohub recorded.
 const InstalledSourceSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("marketplace"), catalog: z.union([z.literal(CATALOG_ID), HttpUrl]), appId: z.string().trim().min(1).max(255) }),
-  z.object({ type: z.literal("url"), url: HttpUrl }),
+  z.looseObject({ type: z.literal("marketplace"), catalog: z.union([z.literal(CATALOG_ID), HttpUrl]), appId: z.string().trim().min(1).max(255) }),
+  z.looseObject({ type: z.literal("url"), url: HttpUrl }),
 ]);
-const InstalledAppSchema = z.object({
+const InstalledAppSchema = z.looseObject({
   id: AppId,
   ref: AppRef,
   url: HttpUrl,
   enabled: z.boolean(),
   source: InstalledSourceSchema,
-  snapshot: z.object({ name: z.string().trim().min(1).max(120), description: OptionalText, icon: OptionalIcon, publisher: z.string().trim().min(1).max(120).optional(), keywords: Keywords }),
+  snapshot: z.looseObject({ name: z.string().trim().min(1).max(120), description: OptionalText, icon: OptionalIcon, publisher: z.string().trim().min(1).max(120).optional(), keywords: Keywords }),
   installedAt: z.string().datetime({ offset: true }),
+  /** File extensions this App opens by default in the Space. */
+  // Lenient on read: one bad record must not break every installed App.
+  opens: z.unknown().transform((value) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [])).optional(),
 });
-export const ManifestSchema = z.object({ format: z.literal("cohub.space-apps"), version: z.literal(1), apps: z.array(InstalledAppSchema).max(1_000) });
+export const ManifestSchema = z.looseObject({ format: z.literal("cohub.space-apps"), version: z.literal(1), apps: z.array(InstalledAppSchema).max(1_000) });
 
 export type MarketplaceEntry = z.infer<typeof MarketplaceEntrySchema>;
 export type Manifest = z.infer<typeof ManifestSchema>;
@@ -85,7 +93,20 @@ export function emptyManifest(): Manifest {
   return { format: "cohub.space-apps", version: 1, apps: [] };
 }
 
-export function toInstalledApp(app: MarketplaceEntry, installedAt = new Date().toISOString()): InstalledApp {
+/** Declared extensions no enabled App holds; installing never replaces a default. */
+export function unclaimedFileHandlers(manifest: Manifest, declared: unknown): string[] {
+  if (!Array.isArray(declared)) return [];
+  // A disabled App does not keep an extension from a new one.
+  const held = new Set(manifest.apps.flatMap((app) => (app.enabled ? (app.opens ?? []) : [])));
+  // Same normalization as Cohub: `Board` and `.board` are the same extension.
+  const extensions = declared
+    .map((value) => (typeof value === "string" ? value.trim().toLowerCase() : ""))
+    .map((value) => (value.startsWith(".") ? value : `.${value}`))
+    .filter((value) => EXTENSION.test(value));
+  return [...new Set(extensions)].filter((extension) => !held.has(extension)).slice(0, MAX_FILE_HANDLERS);
+}
+
+export function toInstalledApp(app: MarketplaceEntry, installedAt = new Date().toISOString(), opens: string[] = []): InstalledApp {
   return {
     id: app.id,
     ref: app.ref,
@@ -94,6 +115,7 @@ export function toInstalledApp(app: MarketplaceEntry, installedAt = new Date().t
     source: { type: "marketplace", catalog: CATALOG_ID, appId: app.id },
     snapshot: { name: app.name, ...(app.description ? { description: app.description } : {}), ...(app.icon ? { icon: app.icon } : {}), ...(app.publisher ? { publisher: app.publisher } : {}), ...(app.keywords ? { keywords: app.keywords } : {}) },
     installedAt,
+    ...(opens.length > 0 ? { opens } : {}),
   };
 }
 

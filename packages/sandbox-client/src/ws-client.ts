@@ -116,11 +116,13 @@ type PendingOperation = {
   onEvent?: (event: RpcEventPayload) => void;
 };
 
+export type SandboxBroadcast = { sandboxId: string; timestamp: number };
+
 type SandboxStatusHooks = {
   onHeartbeat?: (message: SandboxHeartbeat) => void | Promise<void>;
   onAttached?: (input: { spaceId: string; sandboxId: string; connectionId: string }) => void | Promise<void>;
-  onFsChanged?: (payload: SpaceFsChangedPayload) => void | Promise<void>;
-  onPortsChanged?: (payload: SpacePortsChangedPayload) => void | Promise<void>;
+  onFsChanged?: (payload: SpaceFsChangedPayload, broadcast: SandboxBroadcast) => void | Promise<void>;
+  onPortsChanged?: (payload: SpacePortsChangedPayload, broadcast: SandboxBroadcast) => void | Promise<void>;
   onDisconnected?: (input: { spaceId: string; reason?: string }) => void | Promise<void>;
   onConnectionError?: (input: { spaceId: string; error: Error }) => void | Promise<void>;
   onRefreshWsUrl?: (input: { spaceId: string; currentWsUrl: string; error?: Error }) => string | null | Promise<string | null>;
@@ -682,24 +684,25 @@ async function connectOnce(registration: SandboxClientRegistration, run: Sandbox
           return;
         }
 
-        const typedMessage = message as AgentSandboxMessage | { type: "fs.changed"; payload: { resync: boolean; changes: SpaceFsChangedPayload["changes"]; seq: number } } | { type: "ports.changed"; payload: { resync: boolean; ports: SpacePortsChangedPayload["ports"]; seq: number } };
-        if (typedMessage.type === "fs.changed") {
+        if (message.type === "fs.changed") {
+          const { payload } = message;
           callHookSafely(registration.spaceId, "onFsChanged", () => registration.hooks?.onFsChanged?.({
-            source: typedMessage.payload.resync && typedMessage.payload.changes.length === 0 ? "sandbox-watch-started" : "sandbox-watch",
-            seq: typedMessage.payload.seq,
-            resync: typedMessage.payload.resync,
-            changes: typedMessage.payload.changes,
-          }));
+            source: payload.resync && payload.changes.length === 0 ? "sandbox-watch-started" : "sandbox-watch",
+            seq: payload.seq,
+            resync: payload.resync,
+            changes: payload.changes,
+          }, { sandboxId: message.sandboxId, timestamp: message.timestamp }));
           return;
         }
 
-        if (typedMessage.type === "ports.changed") {
+        if (message.type === "ports.changed") {
+          const { payload } = message;
           callHookSafely(registration.spaceId, "onPortsChanged", () => registration.hooks?.onPortsChanged?.({
-            source: typedMessage.payload.resync && typedMessage.payload.ports.length === 0 ? "sandbox-port-watch-started" : "sandbox-port-watch",
-            seq: typedMessage.payload.seq,
-            resync: typedMessage.payload.resync,
-            ports: typedMessage.payload.ports,
-          }));
+            source: payload.resync && payload.ports.length === 0 ? "sandbox-port-watch-started" : "sandbox-port-watch",
+            seq: payload.seq,
+            resync: payload.resync,
+            ports: payload.ports,
+          }, { sandboxId: message.sandboxId, timestamp: message.timestamp }));
           return;
         }
 

@@ -1,6 +1,7 @@
 import {
 	type AppAuthorizeRequest,
 	type AppBridgeAuthorizationContext,
+	type AppBridgeCore,
 	type AppBridgeCoreApp,
 	type AppRuntimeCheckoutState,
 	type AppRuntimeInvocationContext,
@@ -14,6 +15,9 @@ import {
 	reportAttributedAppPromotionEvent,
 } from "$lib/app-promotion";
 import { getAuthToken, signInWithRedirectPath } from "$lib/auth";
+import { readInstalledApps } from "$lib/features/app/app-center";
+import { readHostAppearance } from "$lib/features/app/host-appearance.svelte";
+import { getLocale } from "$lib/i18n/locale.svelte";
 import { authStore } from "$lib/stores/auth.svelte";
 
 /**
@@ -49,6 +53,8 @@ export type AppBridgeHostConfig = {
 	shell?: AppRuntimeShellContext;
 	/** Reads the latest shell context without recreating the app surface. */
 	getShell?: () => AppRuntimeShellContext | undefined;
+	/** Reads whether this surface is showing; omitted means always visible. */
+	getWindow?: () => { visible: boolean };
 	/** Sends an unsolicited event to the app runtime. */
 	notify?: (payload: Record<string, unknown>) => void;
 	/** Sends a reply payload back to the app runtime. */
@@ -74,7 +80,7 @@ export type AppBridgeHost = {
 		invocation?: AppRuntimeInvocationContext,
 	) => Promise<void>;
 	/** Selects the target Space in the consent dialog. */
-	setSelectedSpace: (spaceId: string) => void;
+	setSelectedSpace: AppBridgeCore["setSelectedSpace"];
 	/** Confirm/cancel handlers for the authorize dialog. */
 	confirmAuth: (pickedSpaceId?: string) => Promise<void>;
 	cancelAuth: () => void;
@@ -97,6 +103,17 @@ export function createAppBridgeHost(
 		getInvocation: config.getInvocation,
 		shell: config.shell,
 		getShell: config.getShell,
+		// Served from cache. Realtime changes to `.cohub/apps.json` invalidate it,
+		// so an uninstall stops new dialog-free grants right away.
+		isInstalledIn: async (spaceId) => {
+			const { document } = await readInstalledApps(spaceId);
+			return document.apps.some(
+				(app) => app.id === config.app.id && app.enabled,
+			);
+		},
+		getLocale,
+		getAppearance: readHostAppearance,
+		getWindow: config.getWindow,
 		notify: config.notify,
 		apiOrigin: PUBLIC_API_ORIGIN ?? "",
 		reply: config.reply,

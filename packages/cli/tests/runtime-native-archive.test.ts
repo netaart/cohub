@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { importNativeArchive } from "../src/runtime/native-archive.js";
+import { importNativeArchive } from "../src/runtime/native/archive.js";
 
 for (const harness of ["pi", "codex"] as const) test(`${harness} import changes only a working-copy header and preserves opaque history bytes`, async () => {
   const root = await mkdtemp(join(tmpdir(), "native-import-"));
@@ -24,5 +24,17 @@ for (const harness of ["pi", "codex"] as const) test(`${harness} import changes 
     await assert.rejects(importNativeArchive({ source, target, harness, nativeSessionId, id, cwd: root }), /EEXIST/);
     assert.deepEqual(await readFile(target), working);
     assert.equal((await readdir(root)).some((name) => name.endsWith(".importing")), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("codex import refuses an archive whose history_base reference it cannot satisfy", async () => {
+  const root = await mkdtemp(join(tmpdir(), "native-import-"));
+  try {
+    const source = join(root, "raw"), target = join(root, "working");
+    const nativeSessionId = randomUUID(), id = randomUUID();
+    const header = { type: "session_meta", payload: { id: nativeSessionId, cwd: "/old", history_mode: "paginated", history_base: { thread_id: randomUUID(), end_ordinal_exclusive: 4, end_byte_offset: 120 } } };
+    const tail = Buffer.from('{ "type": "event_msg", "payload": { "text": "leaf" } }\n');
+    await writeFile(source, Buffer.concat([Buffer.from(`${JSON.stringify(header)}\n`), tail]));
+    await assert.rejects(importNativeArchive({ source, target, harness: "codex", nativeSessionId, id, cwd: root }), /references history it does not carry/, "a leaf archive without its ancestor must not silently truncate history");
   } finally { await rm(root, { recursive: true, force: true }); }
 });

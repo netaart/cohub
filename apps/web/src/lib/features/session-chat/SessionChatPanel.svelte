@@ -25,6 +25,7 @@ import SessionModelSelectorDialog from "$lib/features/space/modules/SessionModel
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { provideMarkdownWorkspaceAsset } from "$lib/markdown-asset-context";
 import { m } from "$lib/paraglide/messages.js";
+import { provideSessionRelations } from "$lib/session-relations-context";
 import type { NewChatBackgroundConfig } from "$lib/space-config";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
@@ -74,6 +75,7 @@ const locale = $derived(getLocale());
 // Chat markdown resolves workspace-relative images and media to workspace
 // files. Provide it once here instead of threading it through the timeline.
 provideMarkdownWorkspaceAsset(untrack(() => host.resolveWorkspaceAsset));
+provideSessionRelations(untrack(() => host.relations));
 
 const access = $derived(host.access);
 const activeSessionState = $derived(host.activeSessionState);
@@ -373,44 +375,46 @@ async function handleDraftDrop(event: DragEvent) {
 			class:chat-chrome--overlay={hasCustomPage}
 		>
 			{#if followupQueue.length > 0}
-				<div
-					class="mx-auto w-full max-w-4xl border-t border-chat-panel-border/70 px-4 py-2 sm:px-6"
-					class:bg-chat-panel={!hasCustomPage}
-				>
+				<div class="px-4 sm:px-6">
 					<div
-						class="mb-1 flex items-center gap-2 text-[11px] text-text-placeholder"
+						class="mx-auto w-full max-w-[var(--chat-content-max-width)] border-t border-chat-panel-border/70 px-[var(--chat-msg-inset)] py-2"
+						class:bg-chat-panel={!hasCustomPage}
 					>
-						<span class="font-medium text-text-secondary">{m.chat_followup({}, { locale })}</span>
-						<span>{m.chat_queued({ count: followupQueue.length }, { locale })}</span>
-					</div>
-					<div
-						class="max-h-[min(22dvh,9rem)] space-y-1 overflow-y-auto overscroll-contain pr-1 sm:max-h-[min(28vh,12rem)]"
-					>
-						{#each followupQueue as turn (turn.id)}
-							<div
-								class="group flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-text-tertiary hover:bg-bg-hover/60"
-							>
-								<div class="min-w-0 flex-1 truncate">
-									{host.turnPreviewText(turn)}
+						<div
+							class="mb-1 flex items-center gap-2 text-[11px] text-text-placeholder"
+						>
+							<span class="font-medium text-text-secondary">{m.chat_followup({}, { locale })}</span>
+							<span>{m.chat_queued({ count: followupQueue.length }, { locale })}</span>
+						</div>
+						<div
+							class="max-h-[min(22dvh,9rem)] space-y-1 overflow-y-auto overscroll-contain pr-1 sm:max-h-[min(28vh,12rem)]"
+						>
+							{#each followupQueue as turn (turn.id)}
+								<div
+									class="group flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] text-text-tertiary hover:bg-bg-hover/60"
+								>
+									<div class="min-w-0 flex-1 truncate">
+										{host.turnPreviewText(turn)}
+									</div>
+									<button
+										type="button"
+										class="shrink-0 rounded px-1.5 py-1 text-text-secondary hover:bg-bg-surface hover:text-text-primary disabled:cursor-default disabled:opacity-50"
+										disabled={host.pendingFollowupActionIds.has(turn.id)}
+										onclick={() => {
+											void host.handleSteerFollowup(turn.id);
+										}}>{m.chat_steer_now({}, { locale })}</button
+									>
+									<button
+										type="button"
+										class="shrink-0 rounded px-1.5 py-1 text-text-placeholder hover:bg-bg-surface hover:text-text-secondary disabled:cursor-default disabled:opacity-50"
+										disabled={host.pendingFollowupActionIds.has(turn.id)}
+										onclick={() => {
+											void host.handleCancelFollowup(turn.id);
+										}}>{m.common_cancel({}, { locale })}</button
+									>
 								</div>
-								<button
-									type="button"
-									class="shrink-0 rounded px-1.5 py-1 text-text-secondary hover:bg-bg-surface hover:text-text-primary disabled:cursor-default disabled:opacity-50"
-									disabled={host.pendingFollowupActionIds.has(turn.id)}
-									onclick={() => {
-										void host.handleSteerFollowup(turn.id);
-									}}>{m.chat_steer_now({}, { locale })}</button
-								>
-								<button
-									type="button"
-									class="shrink-0 rounded px-1.5 py-1 text-text-placeholder hover:bg-bg-surface hover:text-text-secondary disabled:cursor-default disabled:opacity-50"
-									disabled={host.pendingFollowupActionIds.has(turn.id)}
-									onclick={() => {
-										void host.handleCancelFollowup(turn.id);
-									}}>{m.common_cancel({}, { locale })}</button
-								>
-							</div>
-						{/each}
+							{/each}
+						</div>
 					</div>
 				</div>
 			{/if}

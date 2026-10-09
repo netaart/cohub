@@ -5,7 +5,7 @@ import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve 
 import { performance } from "node:perf_hooks";
 import { context, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { createLogger } from "@cohub/infra/logging";
-import { BOARD_EXTENSION, BOARD_MIME_TYPE } from "@cohub/protocol";
+import { BOARD_EXTENSION, BOARD_MIME_TYPE, INLINE_UPLOAD_MAX_FILE_BYTES, INLINE_UPLOAD_MAX_FILES } from "@cohub/protocol";
 import { getTracer } from "@cohub/infra/tracing/propagator";
 import {
   buildPreparingFile,
@@ -19,7 +19,7 @@ import {
 } from "./space-fs-cdn-cache.js";
 import { FS_CDN_READ_MANY_WAIT_TIMEOUT_MS, FS_CDN_READ_WAIT_TIMEOUT_MS } from "./space-fs-cdn-constants.js";
 import { config } from "./config.js";
-import { createSpaceGitignoreFilter, type SpaceFsVisibility } from "./space-fs-ignore.js";
+import { createSpaceGitignoreFilter, isSpaceFsStagingName, type SpaceFsVisibility } from "@cohub/core/space-fs";
 import {
   matchesSpaceFsVersion,
   type SpaceFsEntry,
@@ -40,8 +40,6 @@ const MAX_BATCH_READ_FILES = 50;
 const MAX_BATCH_READ_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_BATCH_READ_CONCURRENCY = 8;
 const MAX_DIR_ENTRIES = 1000;
-const MAX_UPLOAD_SIZE = 50 * 1024 * 1024;
-const MAX_UPLOAD_COUNT = 20;
 const MAX_PATH_CHARS = 4096;
 const MAX_PATH_DEPTH = 64;
 const SPACE_REAL_ROOT_CACHE_TTL_MS = 30_000;
@@ -645,7 +643,7 @@ export async function listSpaceDirectory(
       "Read directory entry names; slow when the directory is large or the backing volume is under IO pressure.",
       async () => {
         try {
-          return await readdir(target);
+          return (await readdir(target)).filter((name) => !isSpaceFsStagingName(name));
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             throw new SpaceFsError(404, "path_not_found", "File or directory not found.");
@@ -1342,14 +1340,14 @@ function prepareDirectUploadCandidates(
 ): { candidates: DirectUploadCandidate[]; errors: SpaceFsUploadResponse["errors"] } {
   const candidates: DirectUploadCandidate[] = [];
   const errors: SpaceFsUploadResponse["errors"] = [];
-  for (const file of files.slice(0, MAX_UPLOAD_COUNT)) {
+  for (const file of files.slice(0, INLINE_UPLOAD_MAX_FILES)) {
     const safeName = sanitizeFileName(file.name);
     if (!safeName) {
       errors.push({ name: file.name, code: "name_invalid", message: "invalid file name" });
       continue;
     }
-    if (file.size > MAX_UPLOAD_SIZE) {
-      errors.push({ name: safeName, code: "file_too_large", message: "file exceeds 50MB limit" });
+    if (file.size > INLINE_UPLOAD_MAX_FILE_BYTES) {
+      errors.push({ name: safeName, code: "file_too_large", message: `file exceeds ${INLINE_UPLOAD_MAX_FILE_BYTES / (1024 * 1024)}MB limit` });
       continue;
     }
     candidates.push({

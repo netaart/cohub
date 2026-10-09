@@ -25,7 +25,17 @@ export type BillingErrorBody = {
 };
 
 /** Serializes a blocked usage-gate error into the standard 402 body. */
-export function serializeBillingBlocked(error: BillingAccessBlockedError): BillingErrorBody {
+export function serializeBillingBlocked(
+  error: BillingAccessBlockedError,
+  options?: { actionUrl?: string | null },
+): BillingErrorBody {
+  const actionUrl = options?.actionUrl?.trim();
+  const conversion = actionUrl
+    ? {
+        ...error.decision.conversion,
+        primaryAction: { ...error.decision.conversion.primaryAction, href: actionUrl },
+      }
+    : error.decision.conversion;
   return {
     code: error.code,
     message: error.message,
@@ -35,7 +45,7 @@ export function serializeBillingBlocked(error: BillingAccessBlockedError): Billi
       ...("minimumBalanceUsd" in error.decision
         ? { minimumBalanceUsd: error.decision.minimumBalanceUsd }
         : { hardNegativeLimitUsd: error.decision.hardNegativeLimitUsd }),
-      conversion: error.decision.conversion,
+      conversion,
     },
   };
 }

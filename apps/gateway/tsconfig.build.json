@@ -37,6 +37,12 @@
       "@cohub/infra/logging": [
         "../../packages/infra/dist/logging/index.d.ts"
       ],
+      "@cohub/infra/safe-fetch": [
+        "../../packages/infra/dist/safe-fetch/index.d.ts"
+      ],
+      "@cohub/media": [
+        "../../packages/media/dist/index.d.ts"
+      ],
       "@cohub/infra/tracing": [
         "../../packages/infra/dist/tracing/index.d.ts"
       ],

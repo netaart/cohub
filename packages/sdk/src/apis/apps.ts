@@ -22,6 +22,7 @@ export type AppExtractedPageMeta = {
   lang?: string | null;
   themeColor?: string | null;
   surface?: "window" | "overlay" | null;
+  fileHandlers?: string[];
   sourcePath?: string | null;
   extractedAt?: string | null;
 };
@@ -43,6 +44,8 @@ export type AppMeta = Record<string, unknown> & {
   /** CSS color from meta theme-color. */
   themeColor?: string;
   presentation?: AppPresentationMeta;
+  /** File extensions the App opens (`[".board"]`), from `<meta name="cohub:file-handlers">`. */
+  fileHandlers?: string[];
   extracted?: AppExtractedPageMeta;
   source?: RequestSource;
 };
@@ -172,8 +175,6 @@ export type AppDetailResponse = {
   /** Member who published this App, which may differ from the Space owner. */
   publisher: PublicUserProfile;
   publicUrl: string | null;
-  /** Direct standalone URL. Unlike publicUrl, this page has no Cohub shell. */
-  standaloneUrl?: string | null;
   content: AppContent | null;
   /** Version whose content is served; the current version when omitted. */
   version?: PublicAppVersionSummary | null;
@@ -343,7 +344,7 @@ export class AppsApi {
   }
 
   create(input: AppCreateInput) {
-    return this.transport.request<{ app: AppRecord; standaloneUrl?: string | null }>("/api/apps", {
+    return this.transport.request<{ app: AppRecord }>("/api/apps", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
@@ -351,7 +352,7 @@ export class AppsApi {
   }
 
   update(id: string, input: AppUpdateInput) {
-    return this.transport.request<{ app: AppRecord; standaloneUrl?: string | null }>(`/api/apps/${id}`, {
+    return this.transport.request<{ app: AppRecord }>(`/api/apps/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
@@ -438,7 +439,7 @@ export class AppsApi {
   }
 
   publishVersion(appId: string, input?: { meta?: AppMeta | null }) {
-    return this.transport.request<{ app: AppRecord; standaloneUrl?: string | null; version: AppVersionRecord }>(`/api/apps/${appId}/versions`, {
+    return this.transport.request<{ app: AppRecord; version: AppVersionRecord }>(`/api/apps/${appId}/versions`, {
       method: "POST",
       headers: input ? { "Content-Type": "application/json" } : undefined,
       body: input ? JSON.stringify(input) : undefined,

@@ -112,6 +112,7 @@ cohub spaces sessions ls
 cohub -s <spaceId> spaces sessions ls
 cohub spaces sessions create "<title>"
 cohub spaces sessions get <sessionId>
+cohub spaces sessions files <sessionId>          # Space files the Chat changed
 cohub spaces sessions rename <sessionId> "<new title>"
 ```
 
@@ -132,13 +133,20 @@ cohub spaces sessions -h
 
 Prefer file tools for normal inspection and edits. For cross-space work, prefer file tools with `space_id` when supported; otherwise use CLI with `-s <spaceId>`.
 
-Use CLI file commands when tools are unavailable, or for platform-side upload, move, rename, delete, or diff.
+Use CLI file commands when tools are unavailable, or for platform-side upload, copy, move, rename, delete, or diff.
+
+To copy files, use `spaces files cp`; it works like `scp`. Inside a sandbox, bare paths are the current Space, `<space>:<path>` is another Space, and absolute paths outside `/workspace` (such as `/tmp`) are local. Copies between Spaces never leave Cohub storage. Never copy by reading content and writing it back.
 
 ```bash
 cohub spaces files ls [path]
 cohub -s <spaceId> spaces files ls [path]
 cohub spaces files cat <path>
+cohub spaces files cat <path> > <local-file>
 cohub spaces files write <path> -c "<content>"
+# cp: the last path is the destination; <space>:<path> names another Space (id, username/slug, or own slug).
+cohub spaces files cp <source>... <destination>
+cohub spaces files cp -r <spaceId>:<dir> <destination>
+cohub spaces files cp /tmp/chart.png assets/
 # Upload lands FILE(s) under --dir; a DIR contributes its contents (no extra level).
 cohub spaces files upload <files...> --dir <dir>
 cohub spaces files mkdir <path>
@@ -154,6 +162,26 @@ Confirm before deleting files or directories.
 ```bash
 cohub spaces files -h
 ```
+
+## Displays
+
+A Space's machine can share a screen: the user's phone or computer, or a virtual screen in the sandbox. Prefer elements over pixels where `ls` lists `tree`: refs name exactly one element, and one that changed since is refused. Coordinates are pixels of your latest `capture`.
+
+```bash
+cohub spaces displays ls                       # abilities; "Virtual screen: available" means `start` works
+cohub spaces displays start                    # virtual screen; GUI programs started afterwards draw on it
+cohub spaces displays capture -o /tmp/screen.jpg   # then `read` the image
+cohub spaces displays tree                     # e3.12 button "Send" (980,2210 120x80)
+cohub spaces displays tap e3.12 --screenshot /tmp/after.jpg
+cohub spaces displays type "hello" --into e3.4 # replaces the field's text
+cohub spaces displays tap <x> <y>              # --count 2 double-clicks, --button secondary right-clicks
+cohub spaces displays swipe <x1> <y1> <x2> <y2>
+cohub spaces displays type "<text>"            # into the focused field
+cohub spaces displays key Control+a            # shortcuts need a desktop
+cohub spaces displays press back               # system buttons a phone lists
+```
+
+Look before acting and after each step (`--screenshot`, or a new `tree`; refs to an element that moved or changed are refused). If nothing is shared, ask the user to share their phone from its Runtime menu or their computer with `cohub runtime up --display`, or start a virtual screen yourself when one is available. If a display `needs` a permission, tell the user which one to grant.
 
 ## Labels
 
@@ -262,7 +290,7 @@ Use Cohub search for product-level discovery. Use file tools for workspace file 
 ```bash
 cohub search "query"
 cohub search "query" --space-id <spaceId>
-cohub search "query" --types turn,session,space
+cohub search "query" --types chat,space
 cohub search --types label --label-ref Bug
 ```
 

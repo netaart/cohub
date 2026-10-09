@@ -51,9 +51,10 @@ test("runtime context waits for the embedded document handshake", () => {
 		/if \(!runtimeReady\) return;\s+postFrameMessage\(payload\)/,
 	);
 	assert.match(source, /parseAppRuntimeReady\(event\.data\)/);
+	assert.match(source, /if \(!isFirstLoad\) runtimeReady = false;/);
 	assert.match(
 		source,
-		/runtimeReady = false;\s+surfaceHost\?\.reset\(\);\s+reportReady\(\);/,
+		/surfaceHost\?\.reset\(\);\s+postFrameMessage\(buildAppRuntimeAnnounce\(\)\);\s+reportReady\(\);/,
 	);
 });
 
@@ -180,10 +181,14 @@ test("unregistering an App surface never reads the preview it is leaving", () =>
 	assert.match(previewSource, /onComposerChip=\{handleComposerChip\}/);
 	assert.doesNotMatch(previewSource, /onSurfaceHost=\{\(host\) =>/);
 	assert.doesNotMatch(previewSource, /onComposerChip=\{\(chip\) =>/);
-	assert.match(previewSource, /let surfaceAppId: string | null = null/);
+	assert.match(previewSource, /let surfaceKey: string \| null = null/);
 	assert.match(
 		previewSource,
-		/function handleSurfaceHost\([\s\S]{0,240}?if \(surfaceAppId\) onRegisterSurface\(surfaceAppId, host\)/,
+		/function handleSurfaceHost\([^)]*\) \{\s*surfaceHost = host;\s*return \(\) => \{\s*if \(surfaceHost === host\) surfaceHost = null;\s*\};\s*\}/,
+	);
+	assert.match(
+		previewSource,
+		/const key = preview\.key;[\s\S]{0,160}?return \(\) => onRegisterSurface\(key, null\);/,
 	);
 });
 
@@ -191,7 +196,7 @@ test("a surface releases its bridge even if the consumer's unregister throws", (
 	// Otherwise one faulty listener leaks the frame's message bridge.
 	assert.match(
 		source,
-		/try \{\s*onSurfaceHost\?\.\(null\);\s*\} finally \{\s*surfaceHost\?\.dispose\(\);\s*\}/,
+		/try \{\s*releaseSurfaceHost\?\.\(\);\s*\} finally \{\s*surfaceHost\?\.dispose\(\);\s*\}/,
 	);
 });
 

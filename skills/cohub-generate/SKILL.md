@@ -54,7 +54,7 @@ cohub generate "restyle this image" \
   --param size=1024x1024
 ```
 
-Supported inputs: `--image`, `--video`, and `--audio`, each repeatable and accepting the source types declared by the model.
+Supported inputs: `--image`, `--video`, and `--audio`, each repeatable. Pass a URL or a local path; local files upload to an unlisted public URL first, so tasks store a reference instead of inline data. For files that must stay private, add `--inline` to keep them inside the task.
 
 When a model requires input roles, prefix the path or URL:
 
@@ -86,6 +86,15 @@ cohub generate "cinematic drone shot over misty mountains" \
   --param resolution=720p \
   --param ratio=16:9
 ```
+
+Results print their media facts when available, and videos their last frame:
+
+```text
+video 720×1280 · 11.0s: https://…/clip.mp4
+  last frame: https://…/last.webp
+```
+
+With `--json`, the same facts are in `outputMedia` (`index` matches `output`).
 
 Other useful flags:
 
@@ -122,6 +131,14 @@ Animate a still image:
 cohub generate "<motion prompt>" \
   --model <model> \
   --image first_frame=./still.png
+```
+
+Continue a clip: pass its last frame as the next clip's first frame:
+
+```bash
+cohub generate "<next shot>" \
+  --model <model> \
+  --image first_frame=<last frame URL>
 ```
 
 Edit or restyle with a reference image:

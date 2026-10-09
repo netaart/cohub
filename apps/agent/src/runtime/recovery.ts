@@ -34,7 +34,7 @@ async function recordConfirmedStop(input: { spaceId: string; turn: typeof sessio
   lock.signal.throwIfAborted();
   await persistAssistantMessage({ spaceId: input.spaceId, spaceSessionId: turn.sessionId, turnId: turn.id, userMessageId, userId: turn.userUuid,
     idempotencyKey: `runtime-resolution:${turn.id}`, messageOrdinal: 100_000,
-    event: { message: { role: "assistant", content: [{ type: "system_note", note_type: "info", text: "Runtime stopped by confirmation; prior effects remain unknown. Do not replay. / 已确认 Runtime 停止，此前执行影响仍未知，请勿重跑。" }], stopReason: "aborted", meta: { runtime: "local", harness: input.harness, runtimeResolution: true, messageKind: "assistant_final" } } },
+    event: { message: { role: "assistant", content: [{ type: "system_note", note_type: "info", text: "Runtime stopped by confirmation; prior effects remain unknown. Do not replay." }], stopReason: "aborted", meta: { runtime: "local", harness: input.harness, runtimeResolution: true, messageKind: "assistant_final" } } },
   });
   return true;
 }

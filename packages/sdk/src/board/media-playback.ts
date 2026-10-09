@@ -1,10 +1,8 @@
-import type { BoardItem } from "@cohub/protocol/board-document";
+import type { BoardSceneItem, } from "./core/scene.js";
 import { rankedTaskArtifacts } from "./task.js";
 
 export type BoardAssetSource = {
-	/** Displayable preview URL for a workspace-file reference. */
 	resolveFileUrl: (path: string) => Promise<string | null>;
-	/** Streamable URL for audio/video. Never return an inline data URL. */
 	resolvePlaybackUrl?: (path: string) => Promise<string | null>;
 };
 
@@ -14,7 +12,6 @@ export type BoardPlayableMedia = {
 	title: string;
 	durationMs?: number;
 	resolveUrl: () => Promise<string | null>;
-	/** Drop a failed or expired resolved URL without affecting other media. */
 	invalidateUrl: () => void;
 };
 
@@ -56,19 +53,19 @@ function cachedUrl(key: string, resolve: () => Promise<string | null>) {
 }
 
 export function playableBoardMediaList(
-	item: BoardItem | null,
+	item: BoardSceneItem | null,
 	assetSource: BoardAssetSource,
 ): BoardPlayableMedia[] {
 	if (item?.type === "video" || item?.type === "audio") {
-		const path = item.ref.path;
-		const version = item.snapshot?.mtimeMs ?? "unknown";
+		const path = item.props.src;
+		const version = item.props.snapshot?.mtimeMs ?? "unknown";
 		const cacheKey = `${sourceId(assetSource)}:${item.type}:file:${path}:${version}`;
-		const durationMs = item.type === "audio" ? item.snapshot?.durationMs : undefined;
+		const durationMs = item.type === "audio" ? item.props.snapshot?.durationMs : undefined;
 		return [
 			{
 				id: item.id,
 				kind: item.type,
-				title: item.snapshot?.title ?? path.split("/").pop() ?? item.type,
+				title: item.props.snapshot?.title ?? path.split("/").pop() ?? item.type,
 				...(durationMs ? { durationMs } : {}),
 				resolveUrl: () =>
 					cachedUrl(cacheKey, () =>
@@ -79,14 +76,14 @@ export function playableBoardMediaList(
 		];
 	}
 	if (item?.type !== "task") return [];
-	return rankedTaskArtifacts(item.snapshot.artifacts)
+	return rankedTaskArtifacts(item.props.snapshot.artifacts)
 		.filter(
 			(artifact) => artifact.type === "video" || artifact.type === "audio",
 		)
 		.map((artifact) => ({
 			id: artifact.id,
 			kind: artifact.type,
-			title: artifact.title ?? item.snapshot.title,
+			title: artifact.title ?? item.props.snapshot.title,
 			...(artifact.durationMs ? { durationMs: artifact.durationMs } : {}),
 			resolveUrl: () => Promise.resolve(artifact.url),
 			invalidateUrl: () => {},
@@ -94,7 +91,7 @@ export function playableBoardMediaList(
 }
 
 export function playableBoardMedia(
-	item: BoardItem | null,
+	item: BoardSceneItem | null,
 	assetSource: BoardAssetSource,
 	artifactId?: string | null,
 ): BoardPlayableMedia | null {

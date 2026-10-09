@@ -1,7 +1,7 @@
 import type { SpaceCommerceBenefit, SpaceCommerceOrder, SpaceCommerceProduct } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
+import { error, formatLocalDateTime, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
 import { resolveSpace } from "../space.js";
 
 const PRODUCT_STATUSES = ["draft", "active"] as const;
@@ -203,7 +203,7 @@ function printOrders(orders: SpaceCommerceOrder[]): void {
     { key: "product", label: "Product" },
     { key: "status", label: "Status" },
     { key: "amount", label: "Amount" },
-    { key: "created", label: "Created" },
+    { key: "created", label: "Created", format: formatLocalDateTime },
   ]);
 }
 

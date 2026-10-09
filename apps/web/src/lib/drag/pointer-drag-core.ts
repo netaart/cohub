@@ -42,7 +42,10 @@ export type PointerDragItem = {
 	icon?: string;
 };
 
-export type PointerDragOrigin = "space-file-tree" | "apps-sidebar";
+export type PointerDragOrigin =
+	| "space-file-tree"
+	| "apps-sidebar"
+	| "side-panel";
 
 export type PointerDragPayload = {
 	origin: PointerDragOrigin;

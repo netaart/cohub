@@ -21,25 +21,27 @@ function alive(pid: number) {
 async function readRecord(directory: string): Promise<InstanceRecord | null> {
   try {
     const value = JSON.parse(await readFile(join(directory, "owner.json"), "utf8")) as InstanceRecord;
-    if (!Number.isSafeInteger(value.pid) || typeof value.nonce !== "string" || typeof value.socket !== "string") throw new Error("Invalid Runtime instance record / Runtime 实例记录无效");
+    if (!Number.isSafeInteger(value.pid) || typeof value.nonce !== "string" || typeof value.socket !== "string") throw new Error("Invalid Runtime instance record");
     return value;
   } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
 }
 
-function request(record: InstanceRecord, action: "status" | "stop", force = false): Promise<RuntimeSummary> {
+type Response = { status: RuntimeSummary; result?: unknown };
+
+function request(record: InstanceRecord, action: string, payload: Record<string, unknown>, timeoutMs: number): Promise<Response> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(record.socket);
-    const timer = setTimeout(() => { socket.destroy(); reject(new Error("Runtime control timed out / Runtime 控制连接超时")); }, 3000);
+    const timer = setTimeout(() => { socket.destroy(); reject(new Error("Runtime control timed out")); }, timeoutMs);
     let buffer = "";
     let settled = false;
-    const finish = (error?: Error, value?: RuntimeSummary) => {
+    const finish = (error?: Error, value?: Response) => {
       if (settled) return;
       settled = true; clearTimeout(timer); socket.destroy();
       if (error) reject(error); else if (value) resolve(value);
     };
-    socket.on("connect", () => socket.write(`${JSON.stringify({ nonce: record.nonce, action, force })}\n`));
+    socket.on("connect", () => socket.write(`${JSON.stringify({ ...payload, nonce: record.nonce, action })}\n`));
     socket.on("error", (error) => finish(error));
-    socket.on("close", () => finish(new Error("Runtime control closed / Runtime 控制连接已关闭")));
+    socket.on("close", () => finish(new Error("Runtime control closed")));
     socket.on("data", (chunk) => {
       buffer += chunk.toString();
       if (buffer.length > 64 * 1024) { finish(new Error("Runtime response too large")); return; }
@@ -47,17 +49,22 @@ function request(record: InstanceRecord, action: "status" | "stop", force = fals
       try {
         const response = JSON.parse(buffer.slice(0, buffer.indexOf("\n")));
         if (response.error) finish(new Error(response.error));
-        else if (response.nonce !== record.nonce || response.status?.pid !== record.pid) finish(new Error("Runtime identity changed / Runtime 身份已变化"));
-        else finish(undefined, response.status);
+        else if (response.nonce !== record.nonce || response.status?.pid !== record.pid) finish(new Error("Runtime identity changed"));
+        else finish(undefined, { status: response.status, result: response.result });
       } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
     });
   });
 }
 
 export async function requestRuntimeInstance(directory: string, action: "status" | "stop" = "status", force = false) {
+  return (await controlRuntimeInstance(directory, action, { force }))?.status ?? null;
+}
+
+/** Send a control action to the running Runtime; `null` when none runs. */
+export async function controlRuntimeInstance(directory: string, action: string, payload: Record<string, unknown> = {}, timeoutMs = 3000): Promise<Response | null> {
   const record = await readRecord(directory);
   if (!record || !alive(record.pid)) return null;
-  try { return await request(record, action, force); }
+  try { return await request(record, action, payload, timeoutMs); }
   catch (error) {
     // A reused PID is not proof of ownership. Missing/refused endpoints cannot
     // belong to a serving Runtime; timeouts and permission errors remain uncertain.
@@ -67,10 +74,10 @@ export async function requestRuntimeInstance(directory: string, action: "status"
 }
 
 /** Private local IPC is both the single-instance guard and the control surface. */
-export async function ownRuntimeInstance(directory: string, status: () => RuntimeSummary, stop: (force: boolean) => Promise<void>) {
+export async function ownRuntimeInstance(directory: string, status: () => RuntimeSummary, stop: (force: boolean) => Promise<void>, control: (action: string, message: Record<string, unknown>) => Promise<unknown> = async () => { throw new Error("Unknown Runtime control request"); }) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   return withRuntimeSpaceBindingsLock(async () => {
-    if (await requestRuntimeInstance(directory)) throw new Error("Runtime already running; use status / Runtime 已在运行，请使用 status");
+    if (await requestRuntimeInstance(directory)) throw new Error("Runtime already running; use status");
     const socketPath = process.platform === "win32"
       ? `\\\\.\\pipe\\cohub-${createHash("sha256").update(directory).digest("hex").slice(0, 24)}`
       : join(directory, "control.sock");
@@ -88,12 +95,15 @@ export async function ownRuntimeInstance(directory: string, status: () => Runtim
         if (input.length > 4096) { socket.destroy(); return; }
         if (!input.includes("\n")) return;
         socket.removeAllListeners("data");
+        // The request arrived; answering it may take longer than an idle client is allowed.
+        socket.setTimeout(0);
         void (async () => {
           const message = JSON.parse(input.slice(0, input.indexOf("\n")));
           if (message.nonce !== record.nonce) { socket.destroy(); return; }
+          let result: unknown;
           if (message.action === "stop") await stop(message.force === true);
-          else if (message.action !== "status") throw new Error("Unknown Runtime control request");
-          socket.end(`${JSON.stringify({ nonce: record.nonce, status: status() })}\n`);
+          else if (message.action !== "status") result = await control(String(message.action), message);
+          socket.end(`${JSON.stringify({ nonce: record.nonce, status: status(), ...(result === undefined ? {} : { result }) })}\n`);
         })().catch((error) => socket.end(`${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`));
       });
     });

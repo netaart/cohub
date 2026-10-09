@@ -1,5 +1,193 @@
 # @neta-art/cohub-cli
 
+## 9.1.0
+
+### Minor Changes
+
+- f75595e: `cohub runtime up` offers screen sharing by default on macOS and Linux X11: press Enter to accept, `--no-display` opts out, and `--yes` authorizes it along with local execution and native sync. Headless and Wayland-only sessions skip the offer, and reusing a running Runtime keeps its current screen configuration unless you override it. The pinned sandboxd binary moves to `v2.61.1`.
+  
+  The Board commands are refined for the v3 document model. `boards get` replaces `boards inspect`, `--only` now accepts `board` alongside `items` and `animations` and always keeps the version metadata, and `boards preset` emits bare `tracks` by default, wrapping them in an animation only when `--animation` is passed. `boards export` renames `--background` to `--paper`. The Board authoring guide moves to `skills/cohub-board/SKILL.md`, and the CLI README and developer docs are rewritten around the document-as-JSON model.
+  
+  `cohub runtime up` 在 macOS 和 Linux X11 上默认提供屏幕共享：回车接受，`--no-display` 关闭，`--yes` 连同本地执行与原生同步一并授权。无桌面和仅 Wayland 的会话会跳过该询问；复用运行中的 Runtime 时，除非显式覆盖，否则保留当前屏幕配置。内置的 sandboxd 版本升级到 `v2.61.1`。
+  
+  Board 命令围绕 v3 文档模型做了打磨。`boards inspect` 由 `boards get` 取代；`--only` 现支持 `board`，与 `items`、`animations` 并列，且始终保留版本元数据；`boards preset` 默认输出裸 `tracks`，仅在传入 `--animation` 时才包成动画。`boards export` 将 `--background` 重命名为 `--paper`。Board 编写指南迁移到 `skills/cohub-board/SKILL.md`，CLI README 与开发者文档围绕「文档即 JSON」的模型重写。
+
+## 9.0.0
+
+### Major Changes
+
+- 6f2310b: Board v3 replaces the v2 node, connection, composition and clip APIs with one document containing `board`, `items` and `animations`. The SDK's Board exports now expose the v3 model, layout and patch types instead of the old document, connection and mutation helpers. Migrate Board writes to `apply()` with JSON Merge Patch (`null` deletes; unmentioned fields stay), and author animations as property tracks with keyframes. The CLI replaces the old Board domain commands with `cohub boards get`, `apply`, `history`, `schema` and `preset`, plus timeline playback commands; existing Board scripts must be updated. The server migration archives each Board's complete v2 state in a migration transaction before converting it and dropping the old tables. That data migration does not preserve compatibility with v2 SDK calls or CLI scripts.
+  
+  Board v3 将 v2 的 node、connection、composition 和 clip API 替换为包含 `board`、`items` 和 `animations` 的统一文档。SDK 的 Board 导出改为 v3 的 model、layout 和 patch 类型，不再提供旧的 document、connection 和 mutation 辅助接口。Board 写入请迁移到 `apply()`，使用 JSON Merge Patch（`null` 删除字段，未提及的字段保持不变）；动画改为使用带关键帧的属性轨道。CLI 用 `cohub boards get`、`apply`、`history`、`schema`、`preset` 和时间线播放命令替换旧的 Board 领域命令，既有 Board 脚本需要同步升级。服务端迁移会先将每个 Board 的完整 v2 状态归档到迁移事务，再转换数据并删除旧表；数据迁移不意味着兼容 v2 SDK 调用或 CLI 脚本。
+
+### Minor Changes
+
+- 163b9b1: Search merges sessions and turns into chats. `GlobalSearchType` is now `chat | space | label`: a `chat` result is one session, titled like the chat lists, with `titleHighlights`, its best-matching user message as `hit` (`turnId`, `sequence`, `excerpt`, `highlights`), and `matchCount` for the title plus every matching message. `turnId`, `sequence`, and `sessionTitle` are gone from results, and `search.query()` drops `groupTurns`. Chats are searched in Spaces the viewer owns or belongs to plus chats they created or joined elsewhere; pass `spaceId` to search every chat they may view in one Space. Queries shorter than three characters match chat titles unless scoped to a Space. `cohub search --types` accepts `chat,space,label`, and chat rows show the matching message.
+  
+  搜索把 session 和回合合并为对话。`GlobalSearchType` 改为 `chat | space | label`：一条 `chat` 结果对应一个 session，标题与对话列表一致，附带 `titleHighlights`、命中度最高的用户消息 `hit`（`turnId`、`sequence`、`excerpt`、`highlights`），以及包含标题在内的匹配数 `matchCount`。结果中移除了 `turnId`、`sequence` 和 `sessionTitle`，`search.query()` 不再支持 `groupTurns`。对话默认在用户拥有或所属的 Space 中搜索，并包含用户在其他 Space 创建或参与的对话；传入 `spaceId` 可搜索该 Space 中用户有权查看的全部对话。少于三个字符的查询只匹配对话标题，指定 Space 时除外。`cohub search --types` 接受 `chat,space,label`，对话行显示命中的消息。
+- c033f85: Displays report who watches them: `DisplayInfo.viewers` lists each viewer's `userId` and whether they `control` the screen, live on the Runtime status and on an open `DisplayConnection`. Watching, stills and element trees now take `sandbox.view`; steering a screen, scripted input and virtual screens take `command.execute`, so builders and their agents can use them. `space.displays.connect(id, { control: false })` opens a watch-only view. A person's live input comes first: scripted input in flight is cancelled and new input waits two seconds, failing with `display_preempted`. `space.displays.tree(id, { actionable: true })` returns only the elements that take an action. The CLI adds `cohub spaces displays tree --actionable`, a Watching column in `ls`, and prints the display's web link after `start`.
+  
+  Displays 会报告谁在查看：`DisplayInfo.viewers` 列出每位查看者的 `userId` 以及是否可以 `control` 这块屏幕，Runtime 状态和已打开的 `DisplayConnection` 都会实时更新。查看画面、截图和读取控件树改为需要 `sandbox.view`；操作屏幕、脚本输入和虚拟屏改为需要 `command.execute`，Builder 和他们的 Agent 也能使用。`space.displays.connect(id, { control: false })` 打开只读画面。人的实时操作优先：正在执行的脚本输入会被取消，之后两秒内的新输入以 `display_preempted` 失败。`space.displays.tree(id, { actionable: true })` 只返回可操作的控件。CLI 新增 `cohub spaces displays tree --actionable`，`ls` 增加「Watching」一列，`start` 后会输出这块屏幕的 Web 链接。
+- 48dcf2f: Displays: screens a Space's machine shares — a phone from the Android app, or a computer from `cohub runtime up --display` (macOS, Linux X11, or a virtual `xvfb` screen). `space.displays` lists them (`list()`), takes stills (`capture(id, { format, quality, maxSize })`), sends input (`input(id, events)`) and opens live WebRTC views: `space.displays.connect(id, { control })` resolves a `DisplayConnection` whose `stream` plays in a `<video>`, with `sendInput()`, `requestKeyframe()`, `pause()` / `resume()` (stop the video while nobody watches and restart it on a key frame, keeping the connection), `stats()` (direct or relay and its protocol, round trip, fps, bitrate, jitter buffer and decode time per frame, packets lost, freezes), `state` and `close()`. Input coordinates are normalized to the display; `compileDisplayActions(actions, width, height)` turns tap (with `count` and `button`), long press, swipe, scroll, type, key (including shortcuts such as `Control+a`), system and wait actions in pixels of an image into one scheduled batch. A display reports whether it is a `desktop` (mouse and keyboard), which `system` buttons it has, which permissions it still `needs`, and whether it has an element `tree`: `space.displays.tree(id)` reads its interface as elements, and `element` input events (or a `ref` on tap, long press, type and scroll actions) act on them. `startVirtual()` / `stopVirtual()` run a sandbox's virtual screen where `list()` reports one. `RuntimeStatus.displays` reports what the Runtime shares. The host bridge adds the `display` capability (`display.status`, `display.share`, `display.stop`, `display.openControlSettings`, `display.changed`). The CLI adds `cohub spaces displays ls | capture | tap | long-press | swipe | scroll | type | key | press | act`, `tree`, `start` and `stop`, refs on `tap`, `long-press`, `type --into` and `scroll --in`, `--screenshot` after any action, coordinates in the latest screenshot's pixels, `runtime up --display [screen]`, and `runtime status` lists shared displays.
+  
+  新增 Displays：Space 所在机器共享的屏幕——Android 应用共享的手机屏幕，或 `cohub runtime up --display` 共享的电脑屏幕（macOS、Linux X11，或 `xvfb` 虚拟屏）。`space.displays` 可列出屏幕（`list()`）、截图（`capture(id, { format, quality, maxSize })`）、发送输入（`input(id, events)`），并通过 WebRTC 打开实时画面：`space.displays.connect(id, { control })` 返回 `DisplayConnection`，其 `stream` 可直接在 `<video>` 中播放，并提供 `sendInput()`、`requestKeyframe()`、`pause()` / `resume()`（无人观看时停止画面、保留连接，恢复时从关键帧重新开始）、`stats()`（直连或中继及其协议、往返时延、帧率、码率、每帧抖动缓冲与解码耗时、丢包、卡顿）、`state` 和 `close()`。输入坐标按屏幕归一化；`compileDisplayActions(actions, width, height)` 把以图片像素表示的点按（支持 `count` 与 `button`）、长按、滑动、滚动、输入、按键（包括 `Control+a` 这样的快捷键）、系统键和等待动作编译为一个按时间线执行的输入批次。屏幕会说明自己是否为 `desktop`（鼠标与键盘输入）、有哪些 `system` 系统按键、还 `needs` 哪些权限，以及是否支持控件 `tree`：`space.displays.tree(id)` 以控件形式读取界面，`element` 输入事件（或在点按、长按、输入、滚动动作上带 `ref`）直接操作控件。`startVirtual()` / `stopVirtual()` 在 `list()` 报告可用时启停沙箱的虚拟屏幕。`RuntimeStatus.displays` 报告 Runtime 共享的屏幕。宿主桥新增 `display` 能力（`display.status`、`display.share`、`display.stop`、`display.openControlSettings`、`display.changed`）。CLI 新增 `cohub spaces displays ls | capture | tap | long-press | swipe | scroll | type | key | press | act` 、`tree`、`start`、`stop`，`tap`、`long-press`、`type --into`、`scroll --in` 支持控件引用，任意操作可加 `--screenshot`，坐标默认按最近一次截图的像素，以及 `runtime up --display [screen]`；`runtime status` 会列出共享的屏幕。
+- 7f73921: Add `cohub spaces files cp`, an scp-style copy with `cp` semantics (`-r`, `-n`, `-p`): `<space>:<path>` names a Space by id, `username/slug`, or own slug; bare paths are the current Space when `-s` or `COHUB_SPACE_ID` declares one and local files otherwise. Copies between Spaces run server-side without passing content through the CLI; local files are uploaded or downloaded. `spaces files upload` now uploads in parallel and splits large uploads into batches. `cohub spaces files cat` now streams raw bytes, so `cat <path> > file` saves binary files intact. The SDK adds `files.copy()`, `files.getCopy()`, `files.waitForCopy()`, `files.open()`, `parseSpaceRef()` and the upload limit constants.
+  
+  新增 `cohub spaces files cp`，用法和 `scp` 一致、语义和 `cp` 一致（支持 `-r`、`-n`、`-p`）：`<space>:<path>` 可以用 ID、`username/slug` 或自己 Space 的 slug 指向某个 Space；用 `-s` 或 `COHUB_SPACE_ID` 声明了当前 Space 时，不带前缀的路径指当前 Space，否则指本地文件。Space 之间的拷贝在服务端完成，文件内容不经过 CLI；本地文件走上传或下载。`spaces files upload` 改为并发上传，并会把大批量上传自动分批。`cohub spaces files cat` 改为直接输出原始字节，`cat <path> > file` 可以完整保存二进制文件。SDK 新增 `files.copy()`、`files.getCopy()`、`files.waitForCopy()`、`files.open()`、`parseSpaceRef()` 和上传限额常量。
+- b2af94e: Space commands no longer fall back to Home when no target is given. Only commands that start new work — `prompt`, `completion`, `generate`, `apps`, and `public` — still use Home; everything else, such as `spaces files`, `run`, `checkpoints`, `mods`, and `members`, needs `-s`, `COHUB_SPACE_ID`, or a directory bound with `cohub runtime up`, and otherwise exits with an error. `-s` and `COHUB_SPACE_ID` now accept a Space ID, a slug you own such as `home`, or `username/slug`, so `cohub -s home spaces files ls` targets Home explicitly. The Home fallback now always resolves the account's own Home: the earlier lookup could pick another user's Home you are a member of, or your most recent Space, and the old `default-space.json` cache is discarded. The SDK adds `spaces.ensureHome()` (`POST /api/me/spaces/home`), which returns the account's own Home and creates it on first use, and exports `HOME_SPACE_SLUG`. `spaces.getDefault()` stays as the landing default and only returns Spaces you own: your Home, else your most recent Space, else a newly created Home. `parseSpaceRef()` reads 32-character short IDs as IDs and returns every ID in canonical hyphenated form.
+  
+  没有指定目标时，Space 命令不再回退到 Home。只有 `prompt`、`completion`、`generate`、`apps`、`public` 这类开启新工作的命令仍会使用 Home；其余命令（比如 `spaces files`、`run`、`checkpoints`、`mods`、`members`）需要 `-s`、`COHUB_SPACE_ID`，或用 `cohub runtime up` 绑定过的目录，否则直接报错。`-s` 和 `COHUB_SPACE_ID` 现在可以填 Space ID、自己 Space 的 slug（比如 `home`），或 `username/slug`，所以 `cohub -s home spaces files ls` 就能明确指向 Home。回退时现在一定解析到账号自己的 Home：之前的查询可能选中你作为成员加入的别人的 Home，或者你最近使用的 Space；旧的 `default-space.json` 缓存会被丢弃。SDK 新增 `spaces.ensureHome()`（对应 `POST /api/me/spaces/home`），返回账号自己的 Home，第一次调用时会自动创建；同时导出 `HOME_SPACE_SLUG`。`spaces.getDefault()` 继续作为进入应用时的默认落点，现在只返回你自己的 Space：优先是 Home，其次是你最近使用的 Space，都没有时新建 Home。`parseSpaceRef()` 会把 32 位短 ID 识别为 ID，并统一返回带连字符的标准格式。
+- 0460ef2: Turns record which Turn prompted them, and callers record whom they prompted. A Turn created by a prompt from another Turn — including across Spaces, and including scheduled prompts, background task notifications, and hooks — keeps its immediate caller in `meta.origin`; read it with `readSessionTurnOrigin(meta)` (`SessionTurnOrigin`: `kind`, `spaceId`, `sessionId`, `turnId`, optional `toolCallId` and `depth`). A caller Turn lists the Turns it prompted in `meta.messagesSent`, read with `readSentTurns(meta)`; each `SentTurnRef` carries the child's `spaceId`, `sessionId`, `turnId`, and the `toolCallId` that sent it, and the caller's watchers receive a `session.turn.updated` as each child is created. `cohub references query turn:<id> --kinds turn_trigger` follows these edges in either direction, and `cohub spaces sessions turns get` prints the Turn's origin and the Turns it sent.
+  
+  Turn 现在会记录是哪个 Turn 触发了自己，发起方也会记录自己触发了谁。由其他 Turn 发起的 Turn（包括跨 Space 的调用，以及定时任务、后台任务通知和 hook）会在 `meta.origin` 中保存直接发起方，可用 `readSessionTurnOrigin(meta)` 读取（`SessionTurnOrigin`：`kind`、`spaceId`、`sessionId`、`turnId`，以及可选的 `toolCallId` 和 `depth`）。发起方 Turn 在 `meta.messagesSent` 中列出它触发的 Turn，可用 `readSentTurns(meta)` 读取；每条 `SentTurnRef` 带有被触发方的 `spaceId`、`sessionId`、`turnId`，以及发出它的 `toolCallId`。每创建一个被触发的 Turn，正在查看发起方的客户端都会收到 `session.turn.updated`。`cohub references query turn:<id> --kinds turn_trigger` 可双向查询这些关系，`cohub spaces sessions turns get` 会输出 Turn 的发起方和它触发的 Turn。
+- 3ef6c78: Usage responses carry `totals`, one figure for LLM and generation together: `totalTokens`, `requestCount`, `successCount`, `errorCount`, and `costTotal`. `space.usage.get()`, `space.activity.get()`, and `user.getActivity()` all return it; `summary` stays LLM only. Space activity zeroes `totals.costTotal` for viewers who cannot see cost. `cohub me activity`, `cohub spaces usage`, and `cohub spaces activity` now report these totals, so requests and cost include generation calls, and a Space whose only spend is generation still shows its cost.
+  
+  用量响应新增 `totals`，把 LLM 与生成调用合并为一组数据：`totalTokens`、`requestCount`、`successCount`、`errorCount` 和 `costTotal`。`space.usage.get()`、`space.activity.get()` 和 `user.getActivity()` 都会返回它；`summary` 仍只统计 LLM。对无权查看费用的成员，Space activity 中的 `totals.costTotal` 为 0。`cohub me activity`、`cohub spaces usage` 和 `cohub spaces activity` 改为输出这组合计，请求数与费用都包含生成调用，只有生成费用的 Space 也能正常显示费用。
+
+### Patch Changes
+
+- 74b11c3: `cohub spaces usage` hides the Cost column when cost is not visible to you. Space usage and Space activity now report cost only to viewers with `member.view`.
+  
+  `cohub spaces usage` 在你无权查看费用时不再显示 Cost 列。Space usage 和 Space activity 只向拥有 `member.view` 权限的用户返回费用。
+- 9d2bc61: `spaces.list()` now returns a paginated page. `GET /api/spaces` with query parameters returns `{ items, pageInfo }`, and `spaces.list()` accepts `{ limit, cursor, filter, query, name, recentSpaces }` with `filter` one of `recent`, `all`, `mine`, `pinned`, or `archived`; it always sends `filter`, defaulting to `recent`. The previous `list(fetch)` call shape still works, but the resolved value is now `SpaceListPage`, so callers that expected `SpaceRecord[]` must read `page.items`. Listing a very large account no longer ships every Space in one response. For clients built before pagination, a bare `GET /api/spaces` with no query parameters still returns an array, now capped at the 100 most recently active Spaces, archived ones included, latest activity first, and marked with a `Deprecation` header; it will be removed in a later release.
+  
+  `spaces.list()` 现在返回分页结果。带查询参数的 `GET /api/spaces` 返回 `{ items, pageInfo }`；`spaces.list()` 接受 `{ limit, cursor, filter, query, name, recentSpaces }`，`filter` 可取 `recent`、`all`、`mine`、`pinned`、`archived`，并且总会带上 `filter`，默认 `recent`。旧的 `list(fetch)` 调用形式仍可用，但返回值变为 `SpaceListPage`，原先期望 `SpaceRecord[]` 的调用方需要读取 `page.items`。Space 数量很大的账号不再在一次响应里返回全部数据。为兼容分页之前的客户端，不带任何查询参数的 `GET /api/spaces` 仍返回数组：最多包含最近活跃的 100 个 Space（含已归档），按最近活动排序，并带有 `Deprecation` 响应头，后续版本会移除。
+- Updated dependencies [b2af94e]
+- Updated dependencies [80c10e4]
+- Updated dependencies [6f2310b]
+- Updated dependencies [163b9b1]
+- Updated dependencies [4b0686b]
+- Updated dependencies [65b9d84]
+- Updated dependencies [c033f85]
+- Updated dependencies [48dcf2f]
+- Updated dependencies [ef084ae]
+- Updated dependencies [7b1e3c9]
+- Updated dependencies [996ade9]
+- Updated dependencies [b6aceb7]
+- Updated dependencies [127af6c]
+- Updated dependencies [e0b8a9b]
+- Updated dependencies [f75e5e7]
+- Updated dependencies [f76accd]
+- Updated dependencies [4d342ee]
+- Updated dependencies [7f73921]
+- Updated dependencies [9013550]
+- Updated dependencies [b2af94e]
+- Updated dependencies [d94a259]
+- Updated dependencies [9d2bc61]
+- Updated dependencies [0460ef2]
+- Updated dependencies [3ef6c78]
+- Updated dependencies [806f4d3]
+  - @neta-art/cohub@9.0.0
+
+## 8.4.1
+
+### Patch Changes
+
+- 780e81a: A lighter, faster CLI. The Board renderer and PixiJS are bundled into `boards export` and load only when exporting, and sharp loads only for image uploads, so the install shrinks from about 156 MB to 70 MB and every command starts about 0.2 s faster. Self-update now checks the registry first and reinstalls only for a newer release, instead of reinstalling every 6 hours, which briefly removed the `cohub` bin while other commands ran; the last check is recorded in `~/.cache/cohub-cli/self-update.json`. `boards export` now renders with Geist like the web app: the font files ship with the CLI (about 100 KB) instead of being looked up in a package it never installed, and symbols Geist lacks, such as subscripts and superscripts, fall back to a host sans instead of drawing as boxes.
+  
+  CLI 更轻更快。Board 渲染器和 PixiJS 打包进 `boards export`，只在导出时加载；sharp 只在上传图片时加载。安装体积从约 156 MB 降到 70 MB，每条命令启动快约 0.2 秒。自更新先查询 registry，只有新版本才重装，不再每 6 小时无条件重装（重装期间 `cohub` 命令会短暂消失，影响同时运行的命令）；最近一次检查记录在 `~/.cache/cohub-cli/self-update.json`。`boards export` 现在和网页一样用 Geist 渲染：字体文件随 CLI 一起发布（约 100 KB），不再去一个从未安装的包里查找；Geist 没有的符号（如上下标）会回退到系统无衬线字体，不再显示成方框。
+- 329b5df: `cohub desktop open` fails fast when the desktop that started the chat is gone. The target tab now accepts a command before running it; one nobody accepts within 10 seconds (closed, asleep, or offline) settles as `no_active_client` instead of waiting out the timeout, and a tab that wakes up later never opens it. A plain open waits up to 30 seconds by default, an App `--call` still waits up to 10 minutes. SDK: `desktop.accept()`, `defaultDesktopCommandTimeoutMs()`, `DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS`, and `DESKTOP_COMMAND_OPEN_TIMEOUT_MS`; `desktop.run()` and `desktop.wait()` pick the default from the command.
+  
+  发起 Chat 的桌面不在时，`cohub desktop open` 会很快失败。目标标签页先接收命令再执行；10 秒内没有标签页接收（已关闭、睡眠或离线）就结算为 `no_active_client`，不再等满超时，之后才醒来的标签页也不会再打开它。普通打开默认最多等 30 秒，App 的 `--call` 仍最多等 10 分钟。SDK 新增 `desktop.accept()`、`defaultDesktopCommandTimeoutMs()`、`DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS` 和 `DESKTOP_COMMAND_OPEN_TIMEOUT_MS`；`desktop.run()` 和 `desktop.wait()` 按命令选择默认等待时长。
+- Updated dependencies [780e81a]
+- Updated dependencies [329b5df]
+- Updated dependencies [73211f9]
+  - @neta-art/cohub@8.24.0
+
+## 8.4.0
+
+### Minor Changes
+
+- 574bfe8: Lighter media delivery for generation results.
+  
+  - SDK: `mediaPreviewCandidates()`, `imageVariantUrl()`, and `videoFrameUrl()` derive CDN image variants and video stills for OSS-backed hosts, in priority order with the original as fallback. `probeMediaInfo()` reads dimensions, duration, frame count, and first/last frames from OSS meta headers, then `image/info`. `publicAssets.uploadGenerationInput()` uploads a local generation input to an unlisted public URL.
+  - CLI: `cohub generate` uploads local `--image`/`--video`/`--audio` files instead of inlining base64 (inline stays the fallback), and prints each output's size, duration, and last frame; `--json` adds them as `outputMedia`.
+  - Task list views (`tasks.list`, `tasks.getMany`) no longer carry inline generation inputs; such blocks are marked `deferredBase64` and the full run stays available from `tasks.get`.
+- 414397b: Add generation task views and session file listings.
+  
+  - SDK: `toGenerationTaskView()` projects a generation Task Run into display-ready outputs (prompt, model, cover-folded media), with `generationOutputSource()` for inline payloads. `space(id).session(id).files()` lists Space files a session's Agent wrote or edited.
+  - CLI: `cohub spaces sessions files <sessionId>` lists Space files a session's Agent wrote or edited.
+
+### Patch Changes
+
+- Updated dependencies [d23129c]
+- Updated dependencies [d23129c]
+- Updated dependencies [574bfe8]
+- Updated dependencies [574bfe8]
+- Updated dependencies [d23129c]
+- Updated dependencies [414397b]
+  - @neta-art/cohub@8.23.0
+
+## 8.3.1
+
+### Patch Changes
+
+- 58d2262: Fix `cohub runtime up` failing with `Cannot find module …/native-pi-extension.js` after upgrading from CLI 8.0–8.2: before any harness starts, the legacy Pi extension is replaced and legacy Codex hooks are removed. 修复从 CLI 8.0–8.2 升级后 `cohub runtime up` 因旧版 Pi 扩展启动失败的问题：启动任何 Harness 前自动替换旧 Pi 扩展并移除旧 Codex Hooks。
+
+## 8.3.0
+
+### Minor Changes
+
+- c276360: Local Runtime native sessions, rebuilt around the harnesses' own files and control interfaces. Pi and Codex session files are now the only durable record: the Runtime watches them (the bound folder and its subdirectories, unless one is bound to a Space of its own), sends new Turns over its WebSocket, and after a restart asks the server which Turns it already has instead of keeping local delivery receipts. Codex's internal threads and spawned sub-agents are skipped. Pi is driven through a self-contained extension (`cohub runtime attach --harness pi`, or on `runtime up`), so the web streams, stops and continues terminal Pi sessions; Codex 0.156+ uses its shared app-server on consent, so web and terminal drive the same live thread, falling back to a private app-server with read-only terminal sync. Codex hooks and the Pi capture extension are removed. `runtime import` keeps its options but now runs inside the Runtime: newest first, four at a time (`--concurrency` up to 8), Ctrl-C pauses and running it again resumes. Persistence is event-driven and separate from the live preview: a transcript is parsed only when a Turn begins or ends, previews send only changed messages, stops are pushed to the Runtime instead of polled, and a connected Pi's tools see the current Turn in `COHUB_TURN_ID`. The SDK exports the new `ingest` / `known` / `status` native event schemas and the `runtime.native.stop` frame in place of `start` / `complete` / `heartbeat`. 本地 Runtime 原生会话改为以 Pi / Codex 自身的会话文件为唯一记录，服务端为唯一账本，不再有本地回执；Pi 通过扩展、Codex 通过官方共享 app-server 接入，Web 可实时查看、停止并继续终端会话；`runtime import` 在 Runtime 内执行，最近优先、可暂停与续传。
+
+### Patch Changes
+
+- Updated dependencies [58ec12e]
+- Updated dependencies [c276360]
+- Updated dependencies [589c62c]
+  - @neta-art/cohub@8.22.0
+
+## 8.2.0
+
+### Minor Changes
+
+- 1ee9519: Follow Codex paginated rollout lineage during native sync and import
+  
+  Codex keeps one logical conversation across several rollout files: each rollover or fork writes a fresh rollout that references an immutable prefix of its parent through `session_meta.history_base`. Cohub previously rejected those files and bound sync to a single file, so imported history stopped following the conversation once Codex rolled over.
+  
+  - Native Codex transcripts now resolve the full `history_base` chain (active or archived, plain or `.zst`) and parse it as one conversation with exact `end_ordinal_exclusive` / `end_byte_offset` boundaries.
+  - Turn receipts record their source rollout file and merged order, so archives are captured from the file that actually holds each Turn's bytes; the leaf binding follows the newest rollout while the ancestor stays untouched.
+  - `cohub runtime import` skips ancestor rollouts and imports each stitched conversation once from its leaf file.
+  
+  Managed Runtime sessions that rolled over keep their settled cloud Turns as a continuation boundary, and a leaf archive whose ancestor it does not carry refuses to restore (rebuilding from durable Session history instead). Missing ancestors, cyclic references, cross-project lineages, and boundaries that are not at a completed Turn fail explicitly without touching original files.
+
+## 8.1.1
+
+### Patch Changes
+
+- 40db2c9: Stop warning about `Cohub sync pending: ENOENT … realpath` before a native transcript exists. Pi and Codex create their session files lazily, so a capture request for a not-yet-written transcript (or for a workspace that was removed) is now treated as nothing-to-capture instead of a sync failure, and the daemon reports it as a skip rather than an error. Runtime import records that race as skipped instead of failed. Remove the fixed-interval native sync scans: Pi now relies on lifecycle events, while Runtime reconciliation is event-driven with bounded retries after failures or reconnects. Bilingual summary: 修复原生会话文件尚未写入时误报 `Cohub sync pending: ENOENT … realpath` 的问题——Pi 与 Codex 都是延迟创建会话文件，因此对尚未生成的 transcript（或已被删除的工作区）的采集请求现在视为「暂无可同步内容」而非同步失败，daemon 也会以 skip 而非 error 返回；Runtime import 遇到该竞态时会记录为 skipped 而不是 failed。同时移除固定间隔的 native sync 扫描：Pi 改用生命周期事件触发，Runtime reconciliation 改为事件驱动，仅在失败或重连后进行有上限的重试。
+
+## 8.1.0
+
+### Minor Changes
+
+- d84afb3: Merge `cohub runtime attach` into `runtime up`: native chat sync is now installed by default after one explicit consent (default yes), with all interactive prompts defaulting to yes. `up` is idempotent — an already-enabled configuration is skipped silently, and after `detach` the next `up` asks again — while declining or a capability failure keeps the Runtime running without native sync. `runtime status` now reports native sync enablement (`nativeSync`) and per-Harness pending Turns/archives. The standalone `attach` command is removed. Add `cohub runtime import` to safely discover and import existing Pi/Codex conversations for the bound project while preserving original timestamps and local transcripts.
+  
+  `cohub runtime attach` 并入 `runtime up`：原生对话同步默认在单独确认一次（默认 yes）后安装，所有交互询问默认 yes。`up` 幂等——已启用则静默跳过，`detach` 后下次再询问；拒绝或能力不满足时 Runtime 照常运行。`runtime status` 新增原生同步开关（`nativeSync`）与各 Harness 的待同步 Turn / 归档明细，并移除独立的 `attach` 命令。新增 `cohub runtime import`，可安全发现并导入当前绑定项目已有的 Pi/Codex 对话，同时保留原始时间与本地 transcript。
+
+### Patch Changes
+
+- 9c3ce38: Bundle `sandboxd` `v2.55.0`, keeping the same compatible runner protocol while aligning the CLI download with the `v2.55` platform release.
+  
+  内置 `sandboxd` 升级至 `v2.55.0`，保持兼容的 runner 协议不变，并让 CLI 下载版本与 `v2.55` 平台版本对齐。
+- 979e172: Fix diagnostics URL redaction: healthy URLs stay byte-identical instead of being re-encoded (the trailing `"` from wrapped log lines no longer becomes `%22`), and the matcher no longer swallows quotes or angle brackets. Bilingual summary: 修复诊断日志的 URL 脱敏——无敏感参数的 URL 保持原样（不再把日志换行携带的 `"` 重编码成 `%22`），匹配也不再吞掉引号与尖括号。
+- Updated dependencies [886f6b1]
+  - @neta-art/cohub@8.21.1
+
+## 8.0.1
+
+### Patch Changes
+
+- eecee2b: Process-group cleanup treats EPERM on an emptied group as the normal end state on every platform, probes Windows trees through leader liveness, backs off snapshot polling, and never lets a cleanup failure mask a finished native result. A completed native Turn whose receipt was lost is rebuilt from native bytes on recovery, and serve-path archive uploads resume through the Space transport again.
+  
+  进程组清理在所有平台将空组的 EPERM 视为正常终态，Windows 通过组长存活性确认进程树，轮询快照退避，且清理失败不再掩盖已完成的原生结果；回执丢失但原生侧已完成的 Turn 会从原生字节重建结果，serve 路径的归档上传恢复经由 Space 传输层落地。
+- 1aa68f2: Runtime reconnects retake their own lease deterministically (same runtimeId replaces the stale entry instead of waiting out the TTL) and control-plane heartbeats are decoupled from lease I/O, so a slow authorize or Redis renew can never starve the client into a timeout.
+  
+  Runtime 重连可确定性接管自己的租约（同一 runtimeId 直接替换过期条目而非等待 TTL），控制面心跳与租约 I/O 解耦，慢速 authorize 或 Redis 续租不会再让客户端活活饿到超时。
+- 3e0fe28: Bundle `sandboxd` `v2.54.1`, a diagnostics-only follow-up that keeps the same wire protocol: relay data-channel pairing now outlives the runner's dial timeout, sandbox dial failures distinguish a timeout from an explicit rejection, and teardown-time websocket write failures log at debug instead of warn. No new capability is required, so older binaries stay usable through the compatibility readiness/restart path.
+  
+  内置 `sandboxd` 升级至 `v2.54.1`——保持同一线协议的纯诊断增强：中继数据通道配对不再受运行器拨号超时限制，sandbox 拨号失败可区分超时与显式拒绝，拆除阶段的 websocket 写失败由 warn 降为 debug。不引入新能力，较旧二进制仍走兼容的就绪检查／重启路径。
+
 ## 8.0.0
 
 ### Major Changes

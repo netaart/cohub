@@ -19,37 +19,17 @@
       "types": "./dist/board-constants.d.ts",
       "default": "./dist/board-constants.js"
     },
-    "./board-connection": {
-      "types": "./dist/board-connection.d.ts",
-      "default": "./dist/board-connection.js"
+    "./board-model": {
+      "types": "./dist/board-model.d.ts",
+      "default": "./dist/board-model.js"
     },
-    "./board-authoring": {
-      "types": "./dist/board-authoring.d.ts",
-      "default": "./dist/board-authoring.js"
+    "./board-layout": {
+      "types": "./dist/board-layout.d.ts",
+      "default": "./dist/board-layout.js"
     },
-    "./board-capability-registry": {
-      "types": "./dist/board-capability-registry.d.ts",
-      "default": "./dist/board-capability-registry.js"
-    },
-    "./board-codec": {
-      "types": "./dist/board-codec.d.ts",
-      "default": "./dist/board-codec.js"
-    },
-    "./board-composition": {
-      "types": "./dist/board-composition.d.ts",
-      "default": "./dist/board-composition.js"
-    },
-    "./board-document": {
-      "types": "./dist/board-document.d.ts",
-      "default": "./dist/board-document.js"
-    },
-    "./board-geometry": {
-      "types": "./dist/board-geometry.d.ts",
-      "default": "./dist/board-geometry.js"
-    },
-    "./board-order": {
-      "types": "./dist/board-order.d.ts",
-      "default": "./dist/board-order.js"
+    "./board-patch": {
+      "types": "./dist/board-patch.d.ts",
+      "default": "./dist/board-patch.js"
     },
     "./model": {
       "types": "./dist/model/session.d.ts",
@@ -78,6 +58,10 @@
     "./ports": {
       "types": "./dist/ports/index.d.ts",
       "default": "./dist/ports/index.js"
+    },
+    "./display": {
+      "types": "./dist/display/index.d.ts",
+      "default": "./dist/display/index.js"
     },
     "./search": {
       "types": "./dist/search/index.d.ts",
@@ -151,6 +135,10 @@
       "types": "./dist/navigation.d.ts",
       "default": "./dist/navigation.js"
     },
+    "./host-bridge": {
+      "types": "./dist/host-bridge.d.ts",
+      "default": "./dist/host-bridge.js"
+    },
     "./public-identifiers": {
       "types": "./dist/public-identifiers.d.ts",
       "default": "./dist/public-identifiers.js"
@@ -162,6 +150,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "generate:display": "tsx scripts/display-vocabulary.ts",
     "test": "node ../../scripts/test/run.mjs --test-isolation=none '*.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

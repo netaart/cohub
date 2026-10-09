@@ -1,14 +1,15 @@
 import { Container, Graphics, RenderTexture, TilingSprite, type Application } from "pixi.js";
-import type { BoardDocument, BoardViewport } from "@cohub/protocol/board-document";
+import type { BoardSettings } from "@cohub/protocol";
+import type { BoardViewport } from "../geometry.js";
 import type { BoardRenderPalette } from "./renderers/board-renderer-registry.js";
 import { parseBoardCssColor } from "./css-color.js";
 
 export type BoardBackgroundContext = {
 	app: Application;
-	document: BoardDocument;
+	settings: BoardSettings;
 	viewport: BoardViewport;
+	colorScheme: "dark" | "light";
 	palette: BoardRenderPalette;
-	/** The host renders an image backdrop below the transparent Pixi canvas. */
 	hasImageBackground?: boolean;
 };
 
@@ -53,13 +54,12 @@ function buildGridTexture(
 }
 
 function sync(parts: GridParts, context: BoardBackgroundContext) {
-	const { app, document, viewport, palette } = context;
+	const { app, settings, viewport, palette } = context;
 	const width = app.screen.width;
 	const height = app.screen.height;
-	const declaredBackground = document.appearance.background;
-	const bgColor = declaredBackground.color
-		? (parseBoardCssColor(declaredBackground.color) ?? palette.bg)
-		: palette.bg;
+	const declared = settings.background.color;
+	const cssColor = typeof declared === "object" ? declared[context.colorScheme] : declared;
+	const bgColor = cssColor ? (parseBoardCssColor(cssColor) ?? palette.bg) : palette.bg;
 	const bgAlpha = context.hasImageBackground ? 0 : 1;
 
 	if (
@@ -76,10 +76,10 @@ function sync(parts: GridParts, context: BoardBackgroundContext) {
 		parts.lastBgAlpha = bgAlpha;
 	}
 
-	const visible = document.appearance.grid?.visible === true;
-	const size = Math.max(4, document.appearance.grid?.size ?? 24);
-	const opacity = document.appearance.grid?.opacity ?? 0.12;
-	const kind = document.appearance.background?.kind === "grid" ? "grid" : "dots";
+	const kind = settings.background.kind === "grid" ? "grid" : "dots";
+	const visible = settings.grid?.visible === true;
+	const size = Math.max(4, settings.grid?.size ?? 24);
+	const opacity = 0.12;
 	const key = `${kind}|${size}|${palette.border}|${opacity}`;
 
 	if (!visible) {

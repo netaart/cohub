@@ -348,7 +348,7 @@ export async function resolveRuntimeSpace(input: {
 
     const existing = findRuntimeSpaceBinding(file, { root, key: bindingKey });
     if (input.newSpace && (existing?.spaceId ?? null) !== (input.expectedSpaceId ?? null)) {
-      throw new RuntimeSpaceBindingsError("Directory binding changed; run up again / 目录绑定已变化，请重新运行 up");
+      throw new RuntimeSpaceBindingsError("Directory binding changed; run up again");
     }
     if (existing && !input.newSpace) {
       await input.validateSpace?.(existing.spaceId);
@@ -361,11 +361,11 @@ export async function resolveRuntimeSpace(input: {
     try {
       receipt = JSON.parse(await readFile(receiptPath, "utf8"));
       if (!receipt || !nonEmptyString(receipt.operationId) || receipt.spaceId !== undefined && !nonEmptyString(receipt.spaceId)) {
-        throw new RuntimeSpaceBindingsError(`Invalid creation receipt; original retained / 创建回执无效，原始信息已保留: ${receiptPath}`);
+        throw new RuntimeSpaceBindingsError(`Invalid creation receipt; original retained: ${receiptPath}`);
       }
     } catch (error) { if (!missing(error)) throw error; }
     if (receipt && !receipt.spaceId) throw new RuntimeSpaceBindingsError(
-      `A previous Space creation has an unknown outcome. Check your Spaces and use --space <id> / 上次创建结果未知，请检查 Space 后使用 --space <id>。${receiptPath}`,
+      `A previous Space creation has an unknown outcome. Check your Spaces and use --space <id>. ${receiptPath}`,
     );
     if (!receipt) {
       receipt = { operationId: randomUUID() };

@@ -130,16 +130,6 @@ test("a queued active turn never resumes or replaces live generation", () => {
 		}),
 		{ reset: false, resumeTurnId: null },
 	);
-	// A legacy pending state pinned to the queued turn is cleared.
-	assert.deepEqual(
-		planGenerationReconcile({
-			current: { status: "pending", turnId: "turn-queued" },
-			activeTurn: { id: "turn-queued", status: "queued" },
-			authoritative: true,
-			requestStartedAt: 100,
-		}),
-		{ reset: true, resumeTurnId: null },
-	);
 });
 
 test("a live active turn resets the previous turn and resumes itself", () => {

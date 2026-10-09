@@ -21,9 +21,10 @@ export type AppSurfaceInvoker = (input: {
 }) => Promise<AppSurfaceCallOutcome>;
 
 /** One App can be mounted by several hosts at once (a tab and an overlay). */
-export type AppSurfaceKey = { appId: string; surface: "app" | "overlay" };
+/** `id` is the App id for an overlay and the window key for a tab. */
+export type AppSurfaceKey = { id: string; surface: "app" | "overlay" };
 
-const keyOf = ({ appId, surface }: AppSurfaceKey) => `${surface}:${appId}`;
+const keyOf = ({ id, surface }: AppSurfaceKey) => `${surface}:${id}`;
 
 /** What a host must know about one App surface to call into it. */
 export type AppSurfaceCallTarget = {
@@ -88,7 +89,7 @@ export function createAppSurfaceRegistry() {
 	}
 
 	/**
-	 * Calls `method` on the surface for `appId`. `getTarget` is read after
+	 * Calls `method` on the surface `key` names. `getTarget` is read after
 	 * `settled` resolves so a call issued right after opening waits for the
 	 * detail fetch instead of racing it; returning `null` means the surface is
 	 * gone.

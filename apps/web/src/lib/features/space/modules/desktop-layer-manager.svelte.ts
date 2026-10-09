@@ -124,7 +124,7 @@ export function createDesktopLayerManager(options: DesktopLayerManagerOptions) {
 	function closeOverlay(appId: string) {
 		overlays = overlays.filter((overlay) => overlay.appId !== appId);
 		detailSettled.delete(appId);
-		options.surfaces.unregister({ appId, surface: "overlay" });
+		options.surfaces.unregister({ id: appId, surface: "overlay" });
 	}
 
 	function dismissAll() {
@@ -139,7 +139,7 @@ export function createDesktopLayerManager(options: DesktopLayerManagerOptions) {
 		commandId: string;
 	}) {
 		return options.surfaces.call({
-			key: { appId: input.appId, surface: "overlay" },
+			key: { id: input.appId, surface: "overlay" },
 			method: input.method,
 			input: input.input,
 			commandId: input.commandId,

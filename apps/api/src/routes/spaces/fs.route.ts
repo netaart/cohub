@@ -1,12 +1,16 @@
 // In production, /api/spaces/:id/fs/* is routed by the gateway to the
 // fs-api deployment. See deploy/fs-api/manifests/httproute.tmpl.yaml.
+import { randomUUID } from "node:crypto";
 import { createLogger } from "@cohub/infra/logging";
-import { Hono } from "hono";
+import { buildSpaceFsCopyId, isValidSpaceFsCopyId, type SpaceFsCopyJobSource, type SpaceFsVisibility } from "@cohub/core/space-fs";
+import { isUuid } from "@cohub/protocol/identifiers";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { readFile } from "node:fs/promises";
 import { ensureFsCdnManifest, shouldUseFsCdnForMeta } from "../../space-fs-cdn-cache.js";
 import { FS_CDN_DOWNLOAD_WAIT_TIMEOUT_MS } from "../../space-fs-cdn-constants.js";
 import { getOptionalAuth, useAuth, requireValidId, authzDenied } from "../../lib/middleware.js";
+import { jsonWithEtag } from "../../lib/json-etag.js";
 import { hasPermission } from "../../permissions.js";
 import { getSpacePendingDiffFile, getSpacePendingDiffSummary } from "../../checkpoint-pending-diff.js";
 import { checkpointFsJsonError } from "../../checkpoint-fs.js";
@@ -14,6 +18,7 @@ import {
   assertSafeRelativePath,
   createSpaceDirectory,
   deleteSpaceNode,
+  isLocalSpace,
   listSpaceDirectory,
   moveSpaceNode,
   readSpaceFile,
@@ -28,25 +33,22 @@ import {
 } from "../../space-fs-backend.js";
 import { buildCreatedDirectoryChanges, buildFileMutationChanges } from "../../space-fs-change.js";
 import { dispatchSpaceFsChanged } from "../../space-events.js";
-import type { SpaceFsVisibility } from "../../space-fs-ignore.js";
 import {
   beginSpaceUploadComplete,
   buildSpaceUploadObjectKey,
   cancelSpaceUploadComplete,
-  consumeSpaceUploadQuota,
   createPresignedGetUrl,
   createPresignedPutUrl,
   createSpaceUploadId,
   deleteSpaceUploadManifest,
   getSpaceUploadManifest,
-  MAX_SPACE_UPLOAD_FILE_BYTES,
-  MAX_SPACE_UPLOAD_FILES,
-  MAX_SPACE_UPLOAD_TOTAL_BYTES,
   saveSpaceUploadManifest,
-  SpaceUploadRateLimitError,
   type SpaceUploadDestination,
   type SpaceUploadManifestEntry,
 } from "../../space-upload-storage.js";
+import { consumeUploadQuota, UploadRateLimitError } from "../../upload-quota.js";
+import { getSpaceFsCopy, startSpaceFsCopy, type SpaceFsCopyState } from "../../space-fs-copy-queue.js";
+import { redisCommandClient } from "../../redis.js";
 import {
   enqueueSandboxUploadFilesJob,
   SandboxUploadConflictError,
@@ -54,7 +56,15 @@ import {
   SandboxUploadUnsupportedError,
 } from "../../sandbox-bash-queue.js";
 import { isAllowedPublicAssetDownloadUrl } from "../../public-asset-storage.js";
+import {
+  INLINE_WRITE_MAX_BYTES,
+  UPLOAD_MAX_BATCH_BYTES,
+  UPLOAD_MAX_BATCH_FILES,
+  UPLOAD_MAX_FILE_BYTES,
+} from "@cohub/protocol";
 import type {
+  SpaceFsCopyOptions,
+  SpaceFsCopySource,
   SpaceFsCreateUploadInput,
   SpaceFsCompleteUploadInput,
 } from "@cohub/protocol/fs";
@@ -63,9 +73,7 @@ import type {
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
 
-/** Inline text writes are capped at the same limit as inline reads. */
-const MAX_INLINE_WRITE_BYTES = 10 * 1024 * 1024;
-const MAX_INLINE_WRITE_REQUEST_BYTES = Math.ceil(MAX_INLINE_WRITE_BYTES * 4 / 3) + 256 * 1024;
+const MAX_INLINE_WRITE_REQUEST_BYTES = Math.ceil(INLINE_WRITE_MAX_BYTES * 4 / 3) + 256 * 1024;
 const UPLOAD_TARGET_STAT_CONCURRENCY = 8;
 
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>) {
@@ -143,6 +151,60 @@ async function resolveFileViewVisibility(user: ReturnType<typeof getOptionalAuth
   return null;
 }
 
+const MAX_COPY_SOURCES = 1000;
+
+type CopyRequest = {
+  sources: SpaceFsCopySource[];
+  destination: string;
+  options: SpaceFsCopyOptions;
+  mutationId?: string;
+};
+
+function normalizeCopyPath(value: string) {
+  const path = assertSafeRelativePath(value, { allowEmpty: true }).replace(/\/+$/, "");
+  return path === "." ? "" : path;
+}
+
+function parseCopyRequest(body: unknown): CopyRequest {
+  const invalid = (message: string) => new SpaceFsError(400, "copy_invalid", message);
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw invalid("sources and destination are required");
+  const input = body as Record<string, unknown>;
+  if (!Array.isArray(input.sources) || input.sources.length === 0) throw invalid("sources are required");
+  if (input.sources.length > MAX_COPY_SOURCES) throw invalid(`at most ${MAX_COPY_SOURCES} sources per copy`);
+  if (typeof input.destination !== "string") throw invalid("destination is required");
+  if (!isValidMutationId(input.mutationId)) throw invalid("mutationId is invalid");
+  for (const flag of ["recursive", "noClobber", "preserveTimestamps"] as const) {
+    if (input[flag] !== undefined && typeof input[flag] !== "boolean") throw invalid(`${flag} must be a boolean`);
+  }
+  const sources = input.sources.map((source) => {
+    const item = source as Partial<SpaceFsCopySource> | null;
+    if (!item || typeof item.spaceId !== "string" || !isUuid(item.spaceId) || typeof item.path !== "string") {
+      throw invalid("each source needs a space id and a path");
+    }
+    return { spaceId: item.spaceId, path: normalizeCopyPath(item.path) };
+  });
+  return {
+    sources,
+    destination: normalizeCopyPath(input.destination),
+    options: {
+      recursive: input.recursive === true,
+      noClobber: input.noClobber === true,
+      preserveTimestamps: input.preserveTimestamps === true,
+    },
+    mutationId: input.mutationId as string | undefined,
+  };
+}
+
+function copyStateResponse(c: Context, copyId: string, state: SpaceFsCopyState) {
+  if (state.status !== "finished") {
+    return c.json({ copyId, status: state.status, ...(state.progress ? { progress: state.progress } : {}) }, 202);
+  }
+  if (!state.outcome.ok) {
+    return c.json({ copyId, code: state.outcome.code, message: state.outcome.message }, state.outcome.status as never);
+  }
+  return c.json({ copyId, status: "completed", result: state.outcome.result });
+}
+
 router.get("/tree", async (c) => {
   const user = getOptionalAuth(c);
   const spaceId = c.req.param("id");
@@ -170,7 +232,7 @@ router.get("/file", async (c) => {
   try {
     const result = await readSpaceFile(spaceId, path, { visibility });
     if (!("content" in result)) return c.json(result, 202);
-    return c.json(result);
+    return result.delivery === "url" ? c.json(result) : jsonWithEtag(c, result);
   } catch (error) {
     const { status, body } = spaceFsJsonError(error);
     return c.json(body, status as never);
@@ -253,14 +315,14 @@ router.put("/file", bodyLimit({
   // ignores whitespace, so a huge whitespace-only string would otherwise
   // bypass the decoded-size check and reach Redis in full.
   const rawBytes = Buffer.byteLength(body.content, "utf8");
-  if (rawBytes > MAX_INLINE_WRITE_BYTES * 2) {
+  if (rawBytes > INLINE_WRITE_MAX_BYTES * 2) {
     return c.json({ message: "file exceeds 10MB limit" }, 413);
   }
   const writeBytes =
     body.encoding === "base64"
       ? Buffer.from(body.content, "base64").length
       : rawBytes;
-  if (writeBytes > MAX_INLINE_WRITE_BYTES) {
+  if (writeBytes > INLINE_WRITE_MAX_BYTES) {
     return c.json({ message: "file exceeds 10MB limit" }, 413);
   }
   if (
@@ -381,6 +443,62 @@ router.post("/move", async (c) => {
   }
 });
 
+// Staged on the shared volume by the system worker, installed by the target sandbox.
+router.post("/copy", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const spaceId = c.req.param("id");
+  if (!spaceId || !requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
+  if (!(await hasPermission(user, "file.edit", { spaceId }))) return authzDenied(c);
+
+  let request: CopyRequest;
+  try {
+    request = parseCopyRequest(await c.req.json<unknown>().catch(() => null));
+  } catch (error) {
+    const { status, body } = spaceFsJsonError(error);
+    return c.json(body, status as never);
+  }
+
+  const visibilities = new Map<string, SpaceFsVisibility>();
+  for (const sourceSpaceId of new Set(request.sources.map((source) => source.spaceId))) {
+    const visibility = await resolveFileViewVisibility(user, sourceSpaceId);
+    if (!visibility) return authzDenied(c);
+    visibilities.set(sourceSpaceId, visibility);
+  }
+  const providers = await Promise.all([spaceId, ...visibilities.keys()].map(isLocalSpace));
+  if (providers.some(Boolean)) {
+    return c.json({ code: "copy_unsupported", message: "copying files with local spaces is not supported yet" }, 400);
+  }
+
+  const sources: SpaceFsCopyJobSource[] = request.sources.map((source) => ({
+    ...source,
+    visibility: visibilities.get(source.spaceId) as SpaceFsVisibility,
+  }));
+  const job = { actorUserId: user.uuid, targetSpaceId: spaceId, sources, destination: request.destination, options: request.options };
+  const copyId = buildSpaceFsCopyId({ ...job, mutationId: request.mutationId ?? randomUUID() });
+  try {
+    return copyStateResponse(c, copyId, await startSpaceFsCopy({ ...job, copyId }));
+  } catch (error) {
+    logger.error("[space-fs] failed to start copy", error, { spaceId, copyId, sources: sources.length });
+    return c.json({ code: "copy_failed", message: "failed to copy files" }, 500);
+  }
+});
+
+router.get("/copies/:copyId", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const spaceId = c.req.param("id");
+  const copyId = c.req.param("copyId");
+  if (!spaceId || !requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
+  if (!copyId || !isValidSpaceFsCopyId(copyId)) return c.json({ code: "copy_not_found", message: "copy not found" }, 404);
+  if (!(await hasPermission(user, "file.edit", { spaceId }))) return authzDenied(c);
+
+  const waitMs = Number(c.req.query("waitMs") ?? 0);
+  const state = await getSpaceFsCopy({ targetSpaceId: spaceId, copyId, actorUserId: user.uuid }, Number.isFinite(waitMs) ? waitMs : 0);
+  if (!state) return c.json({ code: "copy_not_found", message: "copy not found" }, 404);
+  return copyStateResponse(c, copyId, state);
+});
+
 router.get("/download", async (c) => {
   const user = getOptionalAuth(c);
   const spaceId = c.req.param("id");
@@ -432,7 +550,7 @@ router.post("/uploads", async (c) => {
 
   const body = await c.req.json<SpaceFsCreateUploadInput>().catch(() => null);
   if (!body?.entries?.length) return c.json({ message: "entries are required" }, 400);
-  if (body.entries.length > MAX_SPACE_UPLOAD_FILES) return c.json({ message: "too many files" }, 413);
+  if (body.entries.length > UPLOAD_MAX_BATCH_FILES) return c.json({ message: "too many files" }, 413);
 
   const uploadId = createSpaceUploadId();
   const seenIds = new Set<string>();
@@ -453,7 +571,7 @@ router.post("/uploads", async (c) => {
       if (typeof entry.relativePath !== "string" || entry.relativePath.length === 0 || entry.relativePath.length > 4096) {
         return c.json({ message: "invalid upload path" }, 400);
       }
-      if (!Number.isSafeInteger(entry.size) || entry.size < 0 || entry.size > MAX_SPACE_UPLOAD_FILE_BYTES) {
+      if (!Number.isSafeInteger(entry.size) || entry.size < 0 || entry.size > UPLOAD_MAX_FILE_BYTES) {
         return c.json({ message: "file too large" }, 413);
       }
       if (entry.mimeType != null && (typeof entry.mimeType !== "string" || entry.mimeType.length > 255)) {
@@ -467,7 +585,7 @@ router.post("/uploads", async (c) => {
         return c.json({ message: "invalid download url" }, 400);
       }
       totalBytes += entry.size;
-      if (totalBytes > MAX_SPACE_UPLOAD_TOTAL_BYTES) return c.json({ message: "upload too large" }, 413);
+      if (totalBytes > UPLOAD_MAX_BATCH_BYTES) return c.json({ message: "upload too large" }, 413);
       const relativePath = normalizeUploadRelativePath(entry.relativePath || entry.name);
       if (seenPaths.has(relativePath)) return c.json({ message: "duplicate upload path" }, 400);
       seenPaths.add(relativePath);
@@ -497,8 +615,8 @@ router.post("/uploads", async (c) => {
       }
     }
 
-    // Charge quota only after full validation so bad requests cannot consume tokens.
-    await consumeSpaceUploadQuota(user.uuid, entries.length);
+    // Charge quota only after full validation so bad requests cannot consume the window.
+    await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: entries.length, totalBytes });
 
     const planned = entries.map((entry) => {
       if (entry.downloadUrl) {
@@ -519,7 +637,7 @@ router.post("/uploads", async (c) => {
     });
     return c.json({ uploadId, expiresAt, entries: planned });
   } catch (error) {
-    if (error instanceof SpaceUploadRateLimitError) {
+    if (error instanceof UploadRateLimitError) {
       c.header("Retry-After", String(error.retryAfterSeconds));
       return c.json({ message: error.message, retryAfterSeconds: error.retryAfterSeconds }, 429);
     }

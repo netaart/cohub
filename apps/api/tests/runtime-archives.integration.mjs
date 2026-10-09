@@ -25,7 +25,8 @@ mock.module("../src/lib/middleware.js", { exports: {
 } });
 mock.module("../src/permissions.js", { exports: { hasPermission: async (user) => user.uuid !== "denied" } });
 mock.module("../src/redis.js", { exports: { redisCommandClient: { set: async (key, value) => tickets.set(key, value), get: async (key) => tickets.get(key) } } });
-mock.module("../src/space-upload-storage.js", { exports: { consumeSpaceUploadQuota: async () => {}, SpaceUploadRateLimitError: class extends Error {} } });
+mock.module("../src/space-upload-storage.js", { exports: {} });
+mock.module("../src/upload-quota.js", { exports: { consumeUploadQuota: async () => {}, UploadRateLimitError: class extends Error {} } });
 mock.module("../src/turn-object-storage.js", { exports: { headTurnObject: async (key) => objects.get(key) ?? {} } });
 mock.module("../src/session-output.js", { exports: { dispatchTurnUpdated: async () => {} } });
 mock.module("../src/session-turns.js", { exports: { getSessionTurnById: async () => null } });

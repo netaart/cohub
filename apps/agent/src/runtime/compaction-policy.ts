@@ -14,10 +14,10 @@ const RESERVE_TOKENS_RATIO = 0.25;
 // Some provider proxies tokenize inline base64 image payloads as raw text
 // instead of charging vision tokens (observed ratio on the cohub proxy is
 // ~1.97 chars/token). Accounting for compaction must not follow that billing
-// quirk: images are bounded at ingestion (see image-normalizer: <=1984px
-// webp), so a resized image costs a predictable amount under vision billing.
-// Count every image block as a flat token estimate instead of its raw base64
-// length — same approach as pi (1.2k tokens/image) and codex (~1.8k
+// quirk: images are bounded at ingestion (see @cohub/media normalizeImage:
+// <=1984px), so a resized image costs a predictable amount under vision billing.
+// Count every image block, inline or URL, as a flat token estimate instead of
+// its payload length — same approach as pi (1.2k tokens/image) and codex (~1.8k
 // tokens/image). 1984px is 16 vision tiles ≈ 2.8k tokens.
 export const FLAT_IMAGE_TOKEN_ESTIMATE = 2_800;
 const TEXT_CHARS_PER_TOKEN = 4;

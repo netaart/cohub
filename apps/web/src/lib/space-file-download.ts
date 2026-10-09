@@ -1,22 +1,12 @@
 import type { SpaceFsFileResponse } from "@neta-art/cohub";
 import { PUBLIC_API_ORIGIN } from "$env/static/public";
+import { triggerBlobDownload, triggerUrlDownload } from "$lib/browser-download";
 import { sdk } from "$lib/sdk";
 
 export function buildSpaceFileDownloadUrl(spaceId: string, path: string) {
 	const directUrl = sdk.space(spaceId).files.getDownloadUrl(path);
 	const baseUrl = PUBLIC_API_ORIGIN ?? "";
 	return `${baseUrl}${directUrl}`;
-}
-
-function triggerBlobDownload(blob: Blob, filename: string) {
-	const objectUrl = URL.createObjectURL(blob);
-	const link = document.createElement("a");
-	link.href = objectUrl;
-	link.download = filename;
-	document.body.appendChild(link);
-	link.click();
-	link.remove();
-	setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
 }
 
 function base64ToBlob(content: string, mimeType: string) {
@@ -26,18 +16,6 @@ function base64ToBlob(content: string, mimeType: string) {
 		bytes[index] = binary.charCodeAt(index);
 	}
 	return new Blob([bytes], { type: mimeType });
-}
-
-function triggerUrlDownload(url: string, filename: string) {
-	const link = document.createElement("a");
-	link.href = url;
-	link.download = filename;
-	link.target = "_blank";
-	link.rel = "noopener noreferrer";
-	link.referrerPolicy = "no-referrer";
-	document.body.appendChild(link);
-	link.click();
-	link.remove();
 }
 
 export async function downloadFileResponse(

@@ -4,6 +4,7 @@ import type { RealtimePatchOperation } from "@cohub/protocol/realtime";
 import { redisCommandClient } from "./redis.js";
 import { dispatchRealtimeEvent } from "./channels.js";
 import { getSessionStreamSnapshotKey, type SessionStreamSnapshot } from "./session-stream-snapshot.js";
+import { mergeNativeProgress, nativeProgressSnapshot } from "./native-progress-snapshot.js";
 
 const bindingKey = (turnId: string) => `runtime:native-turn:${turnId}`;
 type CachedBinding = NativeTurnBinding & { spaceId: string; ownerUserId: string; userMessageId: string };
@@ -46,16 +47,6 @@ export async function adoptNativeStreamSnapshot(spaceId: string, sessionId: stri
   );
 }
 
-export function nativeProgressSnapshot(identity: { spaceId: string; sessionId: string; turnId: string; userMessageId: string }, progress: NativeTurnProgress): SessionStreamSnapshot {
-  const messages = progress.messages.map((message, messageOrdinal) => ({
-    messageId: `turn:${identity.turnId}:assistant:${messageOrdinal}`, messageOrdinal,
-    content: message.content.map((block, streamIndex) => ({ ...block, _meta: { ...block._meta, streamIndex } })),
-  }));
-  return { version: 2, spaceId: identity.spaceId, sessionId: identity.sessionId, turnId: identity.turnId, anchorUserMessageId: identity.userMessageId,
-    seq: progress.revision, current: { ...(messages.at(-1) ?? { messageId: null, messageOrdinal: null, content: [] }), appendPath: null },
-    intermediateMessages: messages.slice(0, -1), updatedAt: Date.now() };
-}
-
 /** Fast path: progress is ephemeral Redis/realtime state, never a DB write. */
 export async function publishNativeProgress(spaceId: string, userId: string, sessionId: string, turnId: string, progress: NativeTurnProgress) {
   const raw = await redisCommandClient.get(bindingKey(turnId));
@@ -66,7 +57,12 @@ export async function publishNativeProgress(spaceId: string, userId: string, ses
   if (binding.spaceId !== spaceId || binding.ownerUserId !== userId || binding.sessionId !== sessionId) return { accepted: false };
 
   const key = getSessionStreamSnapshotKey(spaceId, sessionId);
-  const snapshot = nativeProgressSnapshot({ spaceId, sessionId, turnId, userMessageId: binding.userMessageId }, progress);
+  const identity = { spaceId, sessionId, turnId, userMessageId: binding.userMessageId };
+  // Only the changed tail travels; earlier messages come from the snapshot this Turn already has.
+  const stored = progress.from ? await redisCommandClient.get(key) : null;
+  const merged = mergeNativeProgress(stored ? JSON.parse(stored) as SessionStreamSnapshot : null, identity, progress);
+  if (!merged) return { accepted: false, resync: true };
+  const { snapshot, changed } = merged;
   // Atomic compare-and-set: a stale Turn or a lower revision can never replace current streaming state.
   const claim = await redisCommandClient.eval(
     `local current = redis.call('GET', KEYS[1])
@@ -80,8 +76,7 @@ export async function publishNativeProgress(spaceId: string, userId: string, ses
     1, key, JSON.stringify(snapshot), turnId, String(progress.revision), "3600",
   );
   if (!claim) return { accepted: false };
-  for (const message of [...snapshot.intermediateMessages, snapshot.current]) {
-    if (message.messageOrdinal === null) continue;
+  for (const message of changed) {
     const ops: RealtimePatchOperation[] = [
       { o: "replace", p: "/message/status", v: "streaming" },
       { o: "merge", p: "/message/metadata", v: { is_complete: false, turnId, anchorUserMessageId: snapshot.anchorUserMessageId } },

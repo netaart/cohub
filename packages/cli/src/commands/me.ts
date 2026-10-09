@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { handleHttp, json as outJson, jsonRequested, table } from "../output.js";
+import { formatLocalDateTime, handleHttp, json as outJson, jsonRequested, table } from "../output.js";
 
 function parseInteger(value: string, name: string, min: number): number {
   const parsed = Number.parseInt(value, 10);
@@ -73,8 +73,8 @@ export function registerMe(program: Command): void {
           to: opts.to,
         });
         if (jsonRequested(opts)) return outJson(activity);
-        console.log(`\n  ${activity.range.from} → ${activity.range.to}`);
-        table([activity.summary], [
+        console.log(`\n  ${formatLocalDateTime(activity.range.from)} → ${formatLocalDateTime(activity.range.to)}`);
+        table([activity.totals], [
           { key: "totalTokens", label: "Tokens" },
           { key: "costTotal", label: "Cost ($)" },
           { key: "requestCount", label: "Requests" },

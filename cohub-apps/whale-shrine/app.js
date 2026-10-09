@@ -2,24 +2,24 @@
  * 課金殿 — The Whale Shrine
  *
  * A Cohub App where viewers pay $5 to summon an echo into the void.
- * Payment via App commerce (credit consumption), writing via a direct
- * `!` shell-command prompt (deterministic, no LLM), display via file reads.
+ * Payment via App commerce (credit consumption), writing via an owner-funded
+ * App Action (no viewer grant, no LLM), display via file reads.
  */
 
 // ─── Config ──────────────────────────────────────────────────────────────
 
 const CONFIG = {
   SDK_URL: "https://esm.sh/@neta-art/cohub?bundle&target=es2022",
-  /** Space-root-relative path for files.read() and shell commands. */
+  /** Space-root-relative path for files.read() and the App Action write. */
   DATA_PATH: "cohub-apps/whale-shrine/data/shouts.jsonl",
   /** App-root-relative path for standalone preview fetch(). */
   PREVIEW_DATA_PATH: "data/shouts.jsonl",
-  /** Space-root-relative path for the shell script (!-command). */
-  SCRIPT_PATH: "cohub-apps/whale-shrine/post-shout.mjs",
+  /** App Action name (file stem under .cohub/actions/). */
+  ACTION_NAME: "post-shout",
   PRODUCT_KEY: "burn_one_offering",
   POST_PRICE_USD: 5,
-  POLL_INTERVAL_MS: 700,
-  POLL_TIMEOUT_MS: 18_000,
+  POLL_INTERVAL_MS: 1000,
+  POLL_TIMEOUT_MS: 60_000,
   PENDING_KEY: "whale-shrine:pending",
 };
 
@@ -60,13 +60,6 @@ const $ = (id) => document.getElementById(id);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // ─── Utilities ────────────────────────────────────────────────────────────
-
-function b64(str) {
-  const bytes = new TextEncoder().encode(str);
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin);
-}
 
 function escapeHtml(str) {
   const d = document.createElement("div");
@@ -247,24 +240,16 @@ async function summon(shout) {
       return;
     }
 
-    // Auth + post via direct shell command. The target is the Space the App is
-    // running in, and the grant is incremental: it adds prompt access without
-    // dropping the Space read scope the App already holds.
-    const consent = await state.cohub.auth.authorize({
-      target: { kind: "space", spaceId: state.homeSpaceId },
-      scopes: ["session.prompt.fullaccess"],
-      reason: "Record your echo.",
-    });
-    if (consent.status !== "granted") throw new Error("Summon needs your permission to post your echo.");
-    await state.space.prompt({
-      accessMode: "full_access",
-      intent: "followup",
-      title: "Whale Shrine",
-      content: [{ type: "text", text: `!node ${CONFIG.SCRIPT_PATH} ${b64(JSON.stringify(shout))}` }],
+    // Post via an owner-funded App Action: the write runs as the App owner in
+    // the home Space sandbox. No viewer grant, no prompt access needed — the
+    // viewer already paid through the consumed credit.
+    const queued = await state.cohub.app.actions.run({
+      action: CONFIG.ACTION_NAME,
+      input: { shout, dataPath: CONFIG.DATA_PATH },
     });
 
-    // Poll until the echo appears
-    const appeared = await pollForShout(shout.id);
+    // Poll the Task Run until it completes
+    const appeared = await waitForAction(queued.taskRunId, shout.id);
     if (!appeared) throw new Error("Echo delayed — refresh later.");
 
     // Celebrate
@@ -281,17 +266,30 @@ async function summon(shout) {
   }
 }
 
-async function pollForShout(shoutId) {
+/**
+ * Wait for the App Action's Task Run to reach a terminal state, then confirm
+ * the echo is readable. Returns true when the shout is on the wall.
+ */
+async function waitForAction(taskRunId, shoutId) {
   const deadline = Date.now() + CONFIG.POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, CONFIG.POLL_INTERVAL_MS));
     try {
-      const file = await state.space.files.read(CONFIG.DATA_PATH);
-      if ("content" in file && file.content.split("\n").some((l) => { try { return JSON.parse(l).id === shoutId; } catch { return false; } })) {
-        await loadShouts();
-        return true;
+      const detail = await state.cohub.tasks.get(taskRunId);
+      if (detail.run.status === "failed") {
+        throw new Error(detail.run.errorMessage || "App Action failed.");
       }
-    } catch { /* file might not exist yet */ }
+      if (detail.run.status === "completed") {
+        const output = detail.run.result?.output;
+        if (typeof output === "string" && output.includes('"status":"error"')) {
+          throw new Error(`App Action rejected the echo: ${output}`);
+        }
+        await loadShouts();
+        return state.shouts.some((s) => s.id === shoutId);
+      }
+    } catch (err) {
+      if (err?.message?.startsWith("App Action")) throw err;
+    }
   }
   return false;
 }

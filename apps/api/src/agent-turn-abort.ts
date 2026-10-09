@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { AGENT_TURN_ABORT_CHANNEL } from "@cohub/protocol";
 import { redisCommandClient } from "./redis.js";
 
-export const AGENT_TURN_ABORT_CHANNEL = "pubsub:agent:turn_abort";
 export const getAgentTurnAbortKey = (turnId: string) => `agent:turn:${turnId}:abort`;
 
 export type AgentTurnAbortEvent = {

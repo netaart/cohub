@@ -11,6 +11,8 @@
       "@cohub/db": ["../db/src/index.ts"],
       "@cohub/db/schema": ["../db/src/index.ts"],
       "@cohub/db/schema-v2": ["../db/src/schema-v2.ts"],
+      "@cohub/infra": ["../infra/src/index.ts"],
+      "@cohub/infra/config-runtime/skills": ["../infra/src/config-runtime/skills.ts"],
       "@cohub/protocol": ["../protocol/src/index.ts"],
       "@cohub/protocol/core": ["../protocol/src/core/index.ts"],
       "@cohub/protocol/provenance": ["../protocol/src/provenance.ts"],

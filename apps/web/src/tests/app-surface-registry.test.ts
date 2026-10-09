@@ -6,7 +6,7 @@ import {
 	createAppSurfaceRegistry,
 } from "$lib/features/app/surface-registry";
 
-const APP = { appId: "app-1", surface: "overlay" as const };
+const APP = { id: "app-1", surface: "overlay" as const };
 const invocation = { surface: "overlay" as const, spaceId: "space-1" };
 
 function webTarget(): AppSurfaceCallTarget {
@@ -117,18 +117,28 @@ test("unregister only removes the invoker it was given", () => {
 	const disposeFirst = registry.register(APP, first);
 	registry.register(APP, second);
 	disposeFirst();
-	return registry.waitFor(APP, 5).then((invoker) => assert.equal(invoker, second));
+	return registry
+		.waitFor(APP, 5)
+		.then((invoker) => assert.equal(invoker, second));
 });
 
 test("the same App mounted as a tab and as an overlay keeps two independent surfaces", async () => {
 	const registry = createAppSurfaceRegistry();
 	const tab = recordingInvoker();
 	const overlay = recordingInvoker();
-	registry.register({ appId: "app-1", surface: "app" }, tab.invoker);
-	registry.register({ appId: "app-1", surface: "overlay" }, overlay.invoker);
-	await registry.call({ key: APP, method: "m", commandId: "c", getTarget: webTarget });
+	registry.register({ id: "app-1", surface: "app" }, tab.invoker);
+	registry.register({ id: "app-1", surface: "overlay" }, overlay.invoker);
+	await registry.call({
+		key: APP,
+		method: "m",
+		commandId: "c",
+		getTarget: webTarget,
+	});
 	assert.equal(tab.calls.length, 0);
 	assert.equal(overlay.calls.length, 1);
-	registry.unregister({ appId: "app-1", surface: "overlay" });
-	assert.equal(await registry.waitFor({ appId: "app-1", surface: "app" }, 5), tab.invoker);
+	registry.unregister({ id: "app-1", surface: "overlay" });
+	assert.equal(
+		await registry.waitFor({ id: "app-1", surface: "app" }, 5),
+		tab.invoker,
+	);
 });

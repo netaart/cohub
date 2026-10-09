@@ -9,6 +9,7 @@ import { config } from "./config.js";
 import type { PromptTemplateService } from "./prompt-templates.js";
 import type { SkillService } from "./skills.js";
 import { dispatchLabelAssignmentsUpdated } from "./label-events.js";
+import { enqueueReferences } from "./reference-index-queue.js";
 import { dispatchTurnCreated, dispatchTurnUpdated } from "./realtime-events.js";
 
 const AGENT_TURN_JOB_NAME = "agent_turns";
@@ -47,6 +48,7 @@ export function getSessionDomainServices(input: {
 }) {
   return createSessionServices({
     db,
+    enqueueReferences,
     redis: redisCommandClient,
     promptTemplateService: input.promptTemplateService,
     skillService: input.skillService,
@@ -57,6 +59,7 @@ export function getSessionDomainServices(input: {
     onSessionTurnUpdated: dispatchTurnUpdated,
     onSessionParticipantsUpdated: async ({ spaceId, sessionId, userUuids }) => {
       const affectedLabelIds = await assignSessionParticipantSystemLabels({ db, spaceId, sessionId, userUuids });
+      if (affectedLabelIds.length === 0) return;
       await dispatchLabelAssignmentsUpdated({
         spaceId,
         resourceType: "session",

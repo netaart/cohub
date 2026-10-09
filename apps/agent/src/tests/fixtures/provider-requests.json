@@ -1,0 +1,408 @@
+{
+  "anthropic-messages claude-opus-5-5": {
+    "url": "https://upstream.test/v1/v1/messages?beta=true",
+    "headers": {
+      "accept": "application/json",
+      "anthropic-beta": "claude-code-20250219",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "user-agent": "claude-cli/2.1.280",
+      "x-api-key": "sk-test",
+      "x-app": "cli",
+      "x-stainless-lang": "js",
+      "x-stainless-runtime": "node",
+      "x-trace": "1"
+    },
+    "body": {
+      "model": "claude-opus-5-5",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "hi"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "calling"
+            },
+            {
+              "type": "tool_use",
+              "id": "call_1",
+              "name": "echo",
+              "input": {
+                "text": "x"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "call_1",
+              "content": "x",
+              "is_error": false
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "again",
+              "cache_control": {
+                "type": "ephemeral"
+              }
+            }
+          ]
+        }
+      ],
+      "max_tokens": 16384,
+      "stream": true,
+      "system": [
+        {
+          "type": "text",
+          "text": "You are Claude Code, Anthropic's official CLI for Claude."
+        },
+        {
+          "type": "text",
+          "text": "SYSTEM PROMPT",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "echo",
+          "description": "Echo the input",
+          "eager_input_streaming": true,
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "text"
+            ]
+          },
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ],
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "output_config": {
+        "effort": "high"
+      }
+    }
+  },
+  "openai-completions deepseek-flash": {
+    "url": "https://upstream.test/v1/chat/completions",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "Bearer sk-test",
+      "content-type": "application/json",
+      "user-agent": "pi (<host>)",
+      "x-stainless-lang": "js",
+      "x-stainless-runtime": "node",
+      "x-trace": "1"
+    },
+    "body": {
+      "model": "deepseek-flash",
+      "messages": [
+        {
+          "role": "system",
+          "content": "SYSTEM PROMPT"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "hi"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": "calling",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "echo",
+                "arguments": "{\"text\":\"x\"}"
+              }
+            }
+          ],
+          "reasoning_content": ""
+        },
+        {
+          "role": "tool",
+          "content": "x",
+          "tool_call_id": "call_1"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "again"
+            }
+          ]
+        }
+      ],
+      "stream": true,
+      "stream_options": {
+        "include_usage": true
+      },
+      "store": false,
+      "max_completion_tokens": 16384,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "echo",
+            "description": "Echo the input",
+            "parameters": {
+              "type": "object",
+              "required": [
+                "text"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "thinking": {
+        "type": "enabled"
+      },
+      "reasoning_effort": "high"
+    }
+  },
+  "openai-responses gpt-5.6-sol": {
+    "url": "https://upstream.test/v1/responses",
+    "headers": {
+      "accept": "application/json",
+      "authorization": "Bearer sk-test",
+      "content-type": "application/json",
+      "originator": "codex_cli_rs",
+      "session-id": "session-1",
+      "thread-id": "session-1",
+      "user-agent": "codex_cli_rs/test",
+      "x-client-request-id": "session-1",
+      "x-stainless-lang": "js",
+      "x-stainless-runtime": "node",
+      "x-trace": "1"
+    },
+    "body": {
+      "model": "gpt-5.6-sol",
+      "input": [
+        {
+          "role": "developer",
+          "content": "SYSTEM PROMPT"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "hi"
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "calling",
+              "annotations": []
+            }
+          ],
+          "status": "completed",
+          "id": "msg_pi_1"
+        },
+        {
+          "type": "function_call",
+          "call_id": "call_1",
+          "name": "echo",
+          "arguments": "{\"text\":\"x\"}"
+        },
+        {
+          "type": "function_call_output",
+          "call_id": "call_1",
+          "output": "x"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "again"
+            }
+          ]
+        }
+      ],
+      "stream": true,
+      "prompt_cache_key": "session-1",
+      "store": false,
+      "max_output_tokens": 16384,
+      "tools": [
+        {
+          "type": "function",
+          "name": "echo",
+          "description": "Echo the input",
+          "parameters": {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "count": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      ],
+      "reasoning": {
+        "effort": "high",
+        "summary": "auto"
+      },
+      "include": [
+        "reasoning.encrypted_content"
+      ]
+    }
+  },
+  "google-generative-ai gemini-3.8-flash": {
+    "url": "https://upstream.test/v1/models/gemini-3.8-flash:streamGenerateContent?alt=sse",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "pi (<host>)",
+      "x-goog-api-key": "sk-test",
+      "x-trace": "1"
+    },
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "hi"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "calling"
+            },
+            {
+              "functionCall": {
+                "args": {
+                  "text": "x"
+                },
+                "id": "call_1",
+                "name": "echo"
+              }
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "name": "echo",
+                "response": {
+                  "output": "x"
+                },
+                "id": "call_1"
+              }
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "again"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "systemInstruction": {
+        "parts": [
+          {
+            "text": "SYSTEM PROMPT"
+          }
+        ],
+        "role": "user"
+      },
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "echo",
+              "description": "Echo the input",
+              "parametersJsonSchema": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "generationConfig": {
+        "maxOutputTokens": 16384,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingLevel": "HIGH"
+        }
+      }
+    }
+  }
+}

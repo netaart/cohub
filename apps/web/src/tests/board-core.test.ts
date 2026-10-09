@@ -1,552 +1,171 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-	anchorToWorld,
-	arrowBounds,
-	BoardDocumentSchema,
-	BoardItemSchema,
-	buildStrokeOutline,
-	computeDrawBounds,
-	distanceToArrow,
-	distanceToStroke,
-	isUnknownItem,
-	parseBoardItemLoose,
-	resolveArrow,
-	shapeBounds,
-	shapeCapabilities,
-	shapeHitTest,
-	simplifyDrawIndices,
-	translateArrow,
-	unknownRealType,
-	worldToAnchor,
-} from "@neta-art/cohub/board";
-import {
-	createEmptyBoardDocument,
-	parseBoardDocument,
-	serializeBoardDocument,
-} from "../lib/board/board-document.ts";
+import { layoutBoardText, shapeCapabilities, shapeHitTest, worldPoint } from "@neta-art/cohub/board";
 import {
 	createArrowBoardItem,
 	createDrawBoardItem,
-	createGeoBoardItem,
+	createShapeBoardItem,
 	createTextBoardItem,
-	createVideoBoardItem,
-	duplicateBoardItem,
 	mediaFrameSize,
 } from "../lib/board/board-items.ts";
-import { computeSnap } from "../lib/board/core/snapping.ts";
+import { materializeClipboard, remapItems } from "../lib/board/core/clipboard.ts";
+import { diffBoardEdits, routeBoardEdits } from "../lib/board/core/document-edits.ts";
 import "../lib/board/core/shapes.ts";
-import type {
-	BoardArrowItem,
-	BoardDrawItem,
-	BoardFrame,
-	BoardGeoItem,
-} from "@neta-art/cohub/board";
-import { worldPoint } from "@neta-art/cohub/board";
-import { resolveBoardRuntime } from "../lib/board/runtime/board-runtime.ts";
+import { computeSnap } from "../lib/board/core/snapping.ts";
+import { boardDocument, sceneItem } from "./board/fixtures.ts";
 
-const frame: BoardFrame = { x: 0, y: 0, width: 100, height: 100, rotation: 0 };
-
-// ─── Schema: forward-compatible parsing ─────────────────────────────
-
-test("parseBoardItemLoose validates a known geo item", () => {
-	const item = parseBoardItemLoose({
-		id: "g1",
-		type: "geo",
-		geo: "rectangle",
-		text: "hi",
-		color: "blue",
-		frame,
-	});
-	assert.equal(item.type, "geo");
-	assert.equal(isUnknownItem(item), false);
-});
-
-test("parseBoardItemLoose preserves an unknown shape type losslessly", () => {
-	const raw = {
-		id: "x1",
-		type: "hologram",
-		frame,
-		intensity: 0.9,
-		nested: { a: 1 },
-	};
-	const item = parseBoardItemLoose(raw);
-	assert.equal(isUnknownItem(item), true);
-	if (isUnknownItem(item)) {
-		assert.equal(unknownRealType(item), "hologram");
-		assert.equal(item.raw.intensity, 0.9);
-		assert.deepEqual(item.raw.nested, { a: 1 });
-	}
-});
-
-test("a malformed known item degrades to unknown instead of throwing", () => {
-	// image without a valid ref should not throw the whole document.
-	const item = parseBoardItemLoose({ id: "r1", type: "image", frame });
-	assert.equal(isUnknownItem(item), true);
-});
-
-test("BoardDocumentSchema keeps unknown items through a parse round-trip", () => {
-	const doc = BoardDocumentSchema.parse({
-		kind: "cohub.board",
-		version: 1,
-		viewport: { x: 0, y: 0, zoom: 1 },
-		items: [
-			{ id: "t1", type: "text", text: "ok", frame },
-			{ id: "x1", type: "future-shape", frame, custom: 42 },
-		],
-	});
-	assert.equal(doc.items.length, 2);
-	const unknown = doc.items[1];
-	assert.equal(isUnknownItem(unknown), true);
-	if (isUnknownItem(unknown))
-		assert.equal(unknownRealType(unknown), "future-shape");
-});
-
-test("serializing an unknown item merges the current frame/id over raw", () => {
-	const unknown = parseBoardItemLoose({
-		id: "x1",
-		type: "hologram",
-		frame,
-		intensity: 0.5,
-	});
-	const doc = createEmptyBoardDocument();
-	// Simulate a move + duplicate-style id change applied to the item (not raw).
-	const moved = {
-		...unknown,
-		id: "x1-copy",
-		frame: { x: 500, y: 500, width: 100, height: 100, rotation: 0 },
-	} as typeof unknown;
-	const withItem = { ...doc, items: [moved] };
-	const reparsed = parseBoardDocument(serializeBoardDocument(withItem));
-	assert.ok(reparsed.ok);
-	if (!reparsed.ok) return;
-	const item = reparsed.document.items[0];
-	assert.equal(isUnknownItem(item), true);
-	if (isUnknownItem(item)) {
-		// New id/position survive; the real type and custom field are preserved.
-		assert.equal(item.id, "x1-copy");
-		assert.equal(item.frame.x, 500);
-		assert.equal(unknownRealType(item), "hologram");
-		assert.equal(item.raw.intensity, 0.5);
-	}
-});
-
-// ─── Draw geometry ──────────────────────────────────────────────────
-
-test("computeDrawBounds pads by stroke width", () => {
-	const bounds = computeDrawBounds(
-		[
-			{ x: 0, y: 0, p: 0.5 },
-			{ x: 10, y: 0, p: 0.5 },
-		],
-		4,
-	);
-	assert.ok(bounds.x < 0);
-	assert.ok(bounds.width > 10);
-});
-
-test("simplifyDrawIndices keeps endpoints and removes collinear points", () => {
-	const points = [
-		{ x: 0, y: 0, p: 0.5 },
-		{ x: 5, y: 0, p: 0.5 },
-		{ x: 10, y: 0, p: 0.5 },
-		{ x: 10, y: 10, p: 0.5 },
-	];
-	const indices = simplifyDrawIndices(points, 0.1);
-	assert.equal(indices[0], 0);
-	assert.equal(indices[indices.length - 1], 3);
-	assert.ok(indices.length < points.length);
-});
-
-test("buildStrokeOutline produces a closed ribbon", () => {
-	const outline = buildStrokeOutline(
-		[
-			{ x: 0, y: 0, p: 0.5 },
-			{ x: 10, y: 0, p: 0.5 },
-		],
-		4,
-	);
-	assert.ok(outline.length >= 4);
-});
-
-test("distanceToStroke is small near the line and large far away", () => {
-	const points = [
-		{ x: 0, y: 0, p: 0.5 },
-		{ x: 10, y: 0, p: 0.5 },
-	];
-	assert.ok(distanceToStroke(points, worldPoint(5, 0.5)) < 1);
-	assert.ok(distanceToStroke(points, worldPoint(5, 50)) > 40);
-});
-
-// ─── Arrow bindings ─────────────────────────────────────────────────
-
-test("anchorToWorld and worldToAnchor are inverse on an unrotated frame", () => {
-	const f: BoardFrame = {
-		x: 100,
-		y: 100,
-		width: 200,
-		height: 100,
-		rotation: 0,
-	};
-	const world = anchorToWorld(f, 0.25, 0.5);
-	assert.equal(world.x, 150);
-	assert.equal(world.y, 150);
-	const anchor = worldToAnchor(f, world);
-	assert.ok(Math.abs(anchor.nx - 0.25) < 1e-9);
-	assert.ok(Math.abs(anchor.ny - 0.5) < 1e-9);
-});
-
-test("anchorToWorld respects frame rotation", () => {
-	const f: BoardFrame = { x: 0, y: 0, width: 100, height: 100, rotation: 90 };
-	// Anchor at right-center (1, 0.5) rotates to bottom-center.
-	const world = anchorToWorld(f, 1, 0.5);
-	assert.ok(Math.abs(world.x - 50) < 1e-6);
-	assert.ok(Math.abs(world.y - 100) < 1e-6);
-});
-
-test("resolveArrow computes a straight control point when bend is 0", () => {
-	const arrow: BoardArrowItem = {
-		id: "a1",
-		type: "arrow",
-		frame,
-		start: { x: 0, y: 0 },
-		end: { x: 100, y: 0 },
-		bend: 0,
-		color: "brand",
-		size: 3,
-		arrowStart: false,
-		arrowEnd: true,
-		label: "",
-	};
-	const resolved = resolveArrow(arrow);
-	assert.equal(resolved.control.x, 50);
-	assert.equal(resolved.control.y, 0);
-});
-
-test("arrowBounds returns a finite box (regression: maxY init)", () => {
-	const arrow: BoardArrowItem = {
-		id: "a1",
-		type: "arrow",
-		frame,
-		start: { x: 0, y: 0 },
-		end: { x: 100, y: 40 },
-		bend: 0,
-		color: "brand",
-		size: 3,
-		arrowStart: false,
-		arrowEnd: true,
-		label: "",
-	};
-	const bounds = arrowBounds(arrow);
-	assert.ok(Number.isFinite(bounds.width));
-	assert.ok(Number.isFinite(bounds.height));
-	assert.ok(bounds.height >= 40);
-});
-
-test("distanceToArrow is small near the line", () => {
-	const arrow: BoardArrowItem = {
-		id: "a1",
-		type: "arrow",
-		frame,
-		start: { x: 0, y: 0 },
-		end: { x: 100, y: 0 },
-		bend: 0,
-		color: "brand",
-		size: 3,
-		arrowStart: false,
-		arrowEnd: true,
-		label: "",
-	};
-	assert.ok(distanceToArrow(arrow, worldPoint(50, 2)) < 5);
-	assert.ok(distanceToArrow(arrow, worldPoint(50, 80)) > 50);
-});
+// ─── Snapping ───────────────────────────────────────────────────────
 
 test("computeSnap snaps a near-aligned edge and emits a guide", () => {
-	const moving = { x: 102, y: 0, width: 50, height: 50 };
-	const target = { x: 0, y: 0, width: 100, height: 50 };
-	const result = computeSnap(moving, [target], { threshold: 8 });
-	// moving.x (102) snaps to target right edge (100): dx = -2.
+	const result = computeSnap({ x: 102, y: 0, width: 50, height: 50 }, [{ x: 0, y: 0, width: 100, height: 50 }], { threshold: 8 });
 	assert.equal(result.dx, -2);
-	assert.equal(
-		result.guides.some((g) => g.axis === "x" && g.at === 100),
-		true,
-	);
+	assert.ok(result.guides.some((guide) => guide.axis === "x" && guide.at === 100));
 });
 
-test("computeSnap returns zero delta beyond the threshold", () => {
-	const moving = { x: 200, y: 0, width: 50, height: 50 };
-	const target = { x: 0, y: 0, width: 100, height: 50 };
-	const result = computeSnap(moving, [target], { threshold: 8 });
-	assert.equal(result.dx, 0);
-	assert.equal(result.dy, 0);
-});
-
-test("computeSnap snaps to grid when enabled", () => {
-	const moving = { x: 33, y: 0, width: 10, height: 10 };
-	const result = computeSnap(moving, [], { threshold: 8, gridSize: 32 });
-	// 33 rounds to 32.
-	assert.equal(result.dx, -1);
+test("computeSnap leaves far rects alone and snaps to the grid", () => {
+	const far = computeSnap({ x: 200, y: 0, width: 50, height: 50 }, [{ x: 0, y: 0, width: 100, height: 50 }], { threshold: 8 });
+	assert.deepEqual([far.dx, far.dy], [0, 0]);
+	assert.equal(computeSnap({ x: 33, y: 0, width: 10, height: 10 }, [], { threshold: 8, gridSize: 32 }).dx, -1);
 });
 
 // ─── Shape definitions ──────────────────────────────────────────────
 
-test("geo ellipse hit test rejects corners", () => {
-	const geo: BoardGeoItem = {
-		id: "g1",
-		type: "geo",
-		geo: "ellipse",
-		text: "",
-		color: "brand",
-		fillOpacity: 0.12,
-		frame: { x: 0, y: 0, width: 100, height: 100, rotation: 0 },
-	};
-	// Center hits, corner (outside the ellipse) misses.
-	assert.equal(shapeHitTest(geo, worldPoint(50, 50)), true);
-	assert.equal(shapeHitTest(geo, worldPoint(2, 2)), false);
+test("an ellipse hits its center and misses its corners", () => {
+	const ellipse = sceneItem("e", { type: "shape", size: { width: 100, height: 100 }, props: { geometry: "ellipse" } });
+	assert.equal(shapeHitTest(ellipse, worldPoint(50, 50)), true);
+	assert.equal(shapeHitTest(ellipse, worldPoint(2, 2)), false);
 });
 
-test("draw hit test is true near the stroke and false far away", () => {
-	const draw: BoardDrawItem = {
-		id: "d1",
-		type: "draw",
-		points: [
-			{ x: 0, y: 0, p: 0.5 },
-			{ x: 100, y: 0, p: 0.5 },
-		],
-		color: "brand",
-		size: 4,
-		frame: { x: 0, y: 0, width: 100, height: 4, rotation: 0 },
-	};
-	assert.equal(shapeHitTest(draw, worldPoint(50, 2)), true);
+test("a stroke hits near its ink only", () => {
+	const draw = sceneItem("d", { type: "draw", style: { strokeWidth: 4 }, props: { points: [{ x: 0, y: 0 }, { x: 100, y: 0 }] } });
+	assert.equal(shapeHitTest(draw, worldPoint(50, 1)), true);
 	assert.equal(shapeHitTest(draw, worldPoint(50, 60)), false);
 });
 
-test("text is editable and draw scales its geometry", () => {
-	assert.equal(
-		shapeCapabilities({ id: "t", type: "text", text: "", frame } as never)
-			.canEdit,
-		true,
-	);
-	const draw: BoardDrawItem = {
-		id: "d",
-		type: "draw",
-		points: [],
-		color: "brand",
-		size: 4,
-		frame,
-	};
-	// A stroke resizes by scaling its points and width, so the box stays hugged
-	// to the ink and the aspect can never be distorted.
-	assert.equal(shapeCapabilities(draw).canResize, true);
-	assert.equal(shapeCapabilities(draw).aspectLocked, true);
+test("content-scaling items lock their aspect; containers do not", () => {
+	const locked = (item: Record<string, unknown>) => shapeCapabilities(sceneItem("x", item)).aspectLocked;
+	assert.equal(locked({ type: "text", props: { text: "Hi" } }), true);
+	assert.equal(locked({ type: "image", size: { width: 10, height: 10 }, props: { src: "a.png" } }), true);
+	assert.equal(locked({ type: "draw", props: { points: [{ x: 0, y: 0 }] } }), true);
+	assert.equal(locked({ type: "shape" }), false);
+	assert.equal(locked({ type: "frame" }), false);
+	assert.equal(shapeCapabilities(sceneItem("t", { type: "text", props: { text: "" } })).canEdit, true);
 });
 
-test("content-scaling shapes lock their aspect; container shapes do not", () => {
-	const aspectLockedFor = (item: unknown) =>
-		shapeCapabilities(item as never).aspectLocked;
-	// Text scales one font size; media has fixed pixel aspect — both must never
-	// letterbox or distort.
-	assert.equal(
-		aspectLockedFor({ id: "t", type: "text", text: "", frame }),
-		true,
-	);
-	assert.equal(
-		aspectLockedFor({
-			id: "i",
-			type: "image",
-			ref: { kind: "space-file", path: "a.png" },
-			frame,
-		}),
-		true,
-	);
-	assert.equal(
-		aspectLockedFor({
-			id: "v",
-			type: "video",
-			ref: { kind: "space-file", path: "a.mp4" },
-			frame,
-		}),
-		true,
-	);
-	// Containers reflow their contents, so free resize is the intuitive default.
-	assert.equal(
-		aspectLockedFor({
-			id: "g",
-			type: "geo",
-			geo: "rectangle",
-			text: "",
-			frame,
-		}),
-		false,
-	);
-	assert.equal(
-		aspectLockedFor({ id: "f", type: "frame", label: "Frame", frame }),
-		false,
-	);
+// ─── Factories ──────────────────────────────────────────────────────
+
+test("factories write only what differs from the schema defaults", () => {
+	const text = createTextBoardItem("Hello", 10, 20, "neutral", "t").item;
+	assert.deepEqual(text.position, { x: 10, y: 20 });
+	assert.deepEqual(text.style, {});
+	const shape = createShapeBoardItem("diamond", 0, 0, "rose", "s").item;
+	assert.equal(shape.type === "shape" && shape.props.geometry, "diamond");
+	assert.equal(shape.style.stroke, "rose");
 });
 
-test("shapeBounds falls back to frame bounds for box shapes", () => {
-	const bounds = shapeBounds({
-		id: "t",
-		type: "text",
-		text: "",
-		frame,
-	} as never);
-	assert.equal(bounds.width, 100);
+test("a text item is as large as its measured layout", () => {
+	const item = sceneItem("t", createTextBoardItem("Hello", 0, 0).item as never);
+	const layout = layoutBoardText(item.props as never);
+	assert.equal(item.frame.width, layout.width);
+	assert.equal(item.frame.height, layout.height);
 });
 
-// Helper re-export guard: ensure the empty document constructor works.
-test("createEmptyBoardDocument yields an empty document", () => {
-	const doc = createEmptyBoardDocument();
-	assert.equal(doc.items.length, 0);
+test("strokes and arrows store their points relative to their position", () => {
+	const draw = createDrawBoardItem([{ x: 10, y: 20, p: 0.5 }, { x: 30, y: 60, p: 0.5 }], "brand").item;
+	assert.deepEqual(draw.position, { x: 10, y: 20 });
+	assert.deepEqual(draw.type === "draw" && draw.props.points.at(-1), { x: 20, y: 40, p: 0.5 });
+	const arrow = createArrowBoardItem({ x: 100, y: 100 }, { x: 150, y: 80 }, "brand").item;
+	assert.deepEqual(arrow.position, { x: 100, y: 100 });
+	assert.deepEqual(arrow.type === "arrow" && arrow.props.end, { x: 50, y: -20 });
+	const bound = createArrowBoardItem({ x: 0, y: 0 }, { item: "target" }, "brand").item;
+	assert.deepEqual(bound.type === "arrow" && bound.props.end, { item: "target", anchor: "auto" });
 });
 
-test("runtime resolution follows the persisted semantic model", () => {
-	const runtime = resolveBoardRuntime(createEmptyBoardDocument());
-	assert.equal(runtime.id, "cohub-pixi");
-	assert.equal(runtime.modelKind, "cohub.board");
+test("mediaFrameSize keeps the natural aspect and falls back when unknown", () => {
+	assert.deepEqual(mediaFrameSize(1920, 1080, 480), { width: 480, height: 270 });
+	assert.deepEqual(mediaFrameSize(null, null, 480, { width: 320, height: 180 }), { width: 320, height: 180 });
 });
 
-// ─── Item creation helpers ───────────────────────────────────────
+// ─── Clipboard ──────────────────────────────────────────────────────
 
-test("createTextBoardItem uses the shared readable default style", () => {
-	const item = createTextBoardItem("Hello", 10, 20);
-	assert.equal(item.type, "text");
-	if (item.type !== "text") return;
-	assert.equal(item.color, "neutral");
-	assert.equal(item.fontSize, 24);
-	assert.equal(item.frame.x, 10);
-	assert.equal(item.frame.y, 20);
-	assert.equal(item.frame.height, 32);
-});
-
-test("createTextBoardItem measures an explicit tool style", () => {
-	const item = createTextBoardItem("Hello", 0, 0, "rose", 32);
-	assert.equal(item.type, "text");
-	if (item.type !== "text") return;
-	assert.equal(item.color, "rose");
-	assert.equal(item.fontSize, 32);
-	assert.ok(item.frame.width > 0);
-	assert.ok(item.frame.height > 32);
-});
-
-test("createGeoBoardItem carries the chosen geometry", () => {
-	const item = createGeoBoardItem("ellipse", 0, 0, "blue");
-	assert.equal(item.type, "geo");
-	if (item.type === "geo") {
-		assert.equal(item.geo, "ellipse");
-		assert.equal(item.color, "blue");
-	}
-});
-
-test("createDrawBoardItem stores points relative to the bounds frame", () => {
-	const world = [
-		{ x: 100, y: 100, p: 0.5 },
-		{ x: 150, y: 120, p: 0.5 },
-	];
-	const item = createDrawBoardItem(world, "brand", 4);
-	assert.equal(item.type, "draw");
-	if (item.type === "draw") {
-		// Frame origin is near the first point (minus stroke padding); local
-		// points are small offsets from it.
-		assert.ok(item.frame.x < 100);
-		assert.ok(item.points[0].x < 10);
-		assert.ok(item.points[0].y < 10);
-	}
-});
-
-test("scaling a stroke keeps its bounds proportional to the frame", () => {
-	const item = createDrawBoardItem(
-		[
-			{ x: 100, y: 100, p: 0.5 },
-			{ x: 150, y: 120, p: 0.5 },
-		],
-		"brand",
-		4,
-	);
-	assert.equal(item.type, "draw");
-	if (item.type !== "draw") return;
-	const scale = 2;
-	// This mirrors the editor's resize bake: points and width scale together.
-	const scaledPoints = item.points.map((point) => ({
-		x: point.x * scale,
-		y: point.y * scale,
-		p: point.p,
-	}));
-	const before = computeDrawBounds(item.points, item.size);
-	const after = computeDrawBounds(scaledPoints, item.size * scale);
-	// Uniform scale: bounds grow by exactly the same factor on both axes, so the
-	// selection box stays hugged to the ink.
-	assert.ok(Math.abs(after.width - before.width * scale) < 1e-6);
-	assert.ok(Math.abs(after.height - before.height * scale) < 1e-6);
-});
-
-test("mediaFrameSize preserves natural aspect and falls back per media kind", () => {
-	const wide = mediaFrameSize(1920, 1080);
-	assert.ok(Math.abs(wide.width / wide.height - 16 / 9) < 1e-6);
-	// Bounded by the max edge rather than upscaled.
-	assert.equal(wide.width, 480);
-	// Smaller-than-max images keep their intrinsic size.
-	assert.deepEqual(mediaFrameSize(120, 90), { width: 120, height: 90 });
-	// Unknown dimensions use the caller's fallback (video defaults to 16:9).
-	assert.deepEqual(mediaFrameSize(null, null), { width: 320, height: 200 });
-	assert.deepEqual(
-		mediaFrameSize(null, null, 480, { width: 320, height: 180 }),
-		{
-			width: 320,
-			height: 180,
+test("remapping keeps internal parents and bindings and releases the rest", () => {
+	const document = boardDocument({
+		items: {
+			frame: { type: "frame", size: { width: 400, height: 300 } },
+			card: { type: "shape", parent: "frame", position: { x: 10, y: 10 } },
+			outside: { type: "shape", position: { x: 600, y: 0 } },
+			link: { type: "arrow", props: { start: { item: "card" }, end: { item: "outside" } } },
 		},
-	);
+	});
+	const { outside: _outside, ...copied } = document.items;
+	const idMap = new Map(Object.keys(copied).map((id) => [id, `${id}-copy`]));
+	const result = remapItems(copied, idMap, undefined, () => ({ x: 7, y: 8 }));
+	assert.equal(result["card-copy"]?.parent, "frame-copy");
+	const link = result["link-copy"];
+	assert.ok(link?.type === "arrow");
+	assert.deepEqual(link.props.start, { item: "card-copy", anchor: "auto" });
+	assert.deepEqual(link.props.end, { x: 7, y: 8 });
 });
 
-test("createVideoBoardItem defaults to a 16:9 frame when size is unknown", () => {
-	const item = createVideoBoardItem("clip.mp4", 0, 0);
-	assert.ok(Math.abs(item.frame.width / item.frame.height - 16 / 9) < 1e-6);
+test("pasting shifts roots only, so children keep their frame offsets", () => {
+	const document = boardDocument({
+		items: {
+			frame: { type: "frame", position: { x: 100, y: 100 } },
+			card: { type: "shape", parent: "frame", position: { x: 10, y: 10 } },
+		},
+	});
+	const pasted = Object.values(materializeClipboard({ kind: "cohub.board.clipboard", version: 3, items: document.items, origin: { x: 0, y: 0 } } as never, { x: 50, y: 0 }));
+	assert.deepEqual(pasted.find((item) => item.type === "frame")?.position, { x: 150, y: 100 });
+	assert.deepEqual(pasted.find((item) => item.type === "shape")?.position, { x: 10, y: 10 });
 });
 
-test("createArrowBoardItem builds a frame spanning both endpoints", () => {
-	const item = createArrowBoardItem({ x: 0, y: 0 }, { x: 100, y: 50 }, "brand");
-	assert.equal(item.type, "arrow");
-	if (item.type === "arrow") {
-		assert.deepEqual(item.start, { x: 0, y: 0 });
-		assert.deepEqual(item.end, { x: 100, y: 50 });
-		assert.ok(item.frame.width >= 100);
-		assert.ok(item.frame.height >= 50);
-		assert.equal(item.arrowEnd, true);
-		assert.equal(item.size, 2.5);
-	}
+// ─── Document edits ─────────────────────────────────────────────────
+
+const animated = () =>
+	boardDocument({
+		items: { box: { type: "shape", position: { x: 0, y: 0 } } },
+		animations: {
+			intro: {
+				duration: 1000,
+				tracks: { move: { target: "box", property: "position", keyframes: [{ at: 0, value: { x: 0, y: 0 } }, { at: 1000, value: { x: 100, y: 0 } }] } },
+			},
+		},
+	});
+
+test("without a playhead, the draft is the new item", () => {
+	const base = animated();
+	const moved = { ...base.items.box, position: { x: 40, y: 40 } } as never;
+	const next = routeBoardEdits({ base, evaluated: new Map(), draft: new Map([["box", moved]]), playhead: null, recording: false });
+	assert.deepEqual(next.items.box?.position, { x: 40, y: 40 });
+	assert.equal(next.animations, base.animations);
 });
 
-test("translateArrow moves both endpoints and refreshes the frame", () => {
-	const arrow: BoardArrowItem = {
-		id: "a1",
-		type: "arrow",
-		frame,
-		start: { x: 0, y: 0 },
-		end: { x: 100, y: 0 },
-		bend: 0,
-		color: "brand",
-		size: 3,
-		arrowStart: false,
-		arrowEnd: true,
-		label: "",
-	};
-	const moved = translateArrow(arrow, 100, 50);
-	assert.deepEqual(moved.start, { x: 100, y: 50 });
-	assert.deepEqual(moved.end, { x: 200, y: 50 });
-	// The frame follows the geometry, so culling and hit testing stay correct.
-	assert.ok(moved.frame.x <= 100);
-	assert.ok(moved.frame.y <= 50);
+test("at the playhead, animated properties become keyframes and the rest edit the item", () => {
+	const base = animated();
+	const shown = { ...base.items.box, position: { x: 50, y: 0 } } as never;
+	const edited = { ...base.items.box, position: { x: 50, y: 30 }, opacity: 0.5 } as never;
+	const next = routeBoardEdits({ base, evaluated: new Map([["box", shown]]), draft: new Map([["box", edited]]), playhead: { animationId: "intro", time: 500 }, recording: false });
+	assert.deepEqual(next.items.box?.position, { x: 0, y: 0 });
+	assert.equal(next.items.box?.opacity, 0.5);
+	assert.deepEqual(next.animations.intro?.tracks.move?.keyframes.map((entry) => entry.at), [0, 500, 1000]);
 });
 
-test("duplicating an arrow offsets its endpoints (no overlap)", () => {
-	const arrow = createArrowBoardItem({ x: 0, y: 0 }, { x: 100, y: 0 }, "brand");
-	const copy = duplicateBoardItem(arrow);
-	assert.notEqual(copy.id, arrow.id);
-	if (copy.type === "arrow" && arrow.type === "arrow") {
-		assert.ok(copy.start.x > arrow.start.x);
-		assert.ok(copy.end.x > arrow.end.x);
-	}
+test("recording keyframes a property that had no track, from its stored value", () => {
+	const base = animated();
+	const edited = { ...base.items.box, rotation: 45 } as never;
+	const next = routeBoardEdits({ base, evaluated: new Map(), draft: new Map([["box", edited]]), playhead: { animationId: "intro", time: 1500 }, recording: true });
+	assert.equal(next.items.box?.rotation, 0);
+	const track = next.animations.intro?.tracks["box-rotation"];
+	assert.deepEqual(track?.keyframes, [{ at: 0, value: 0 }, { at: 1500, value: 45 }]);
+	assert.equal(next.animations.intro?.duration, 1500);
 });
 
-export { BoardItemSchema };
+test("diffs are minimal merge patches that round-trip creation and deletion", () => {
+	const base = animated();
+	const moved = { ...base, items: { ...base.items, box: { ...base.items.box, position: { x: 5, y: 0 } } as never } };
+	assert.deepEqual(diffBoardEdits(base, moved, ["box"]), { items: { box: { position: { x: 5 } } } });
+	const removed = { ...base, items: {} };
+	assert.deepEqual(diffBoardEdits(base, removed, ["box"]), { items: { box: null } });
+	const restored = diffBoardEdits(removed, base, ["box"]);
+	assert.equal(restored.items?.box && "type" in restored.items.box && restored.items.box.type, "shape");
+});

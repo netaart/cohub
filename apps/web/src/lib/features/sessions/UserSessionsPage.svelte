@@ -1,25 +1,28 @@
 <script lang="ts">
-import type {
-	SessionRecord,
-	SpaceRecord,
-	UserSessionListItem,
-	UserSessionSourceKey,
+import {
+	HttpError,
+	type SessionRecord,
+	type SpaceRecord,
+	type UserSessionListItem,
 } from "@neta-art/cohub";
 import { onDestroy, onMount, untrack } from "svelte";
 import { goto } from "$app/navigation";
-import { resolveAppEntryRoute } from "$lib/app-entry";
 import {
 	createSessionChatHost,
 	subscribeSpaceChannel,
 } from "$lib/features/session-chat";
+import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
+import {
+	chatsInbox,
+	openNewChatSpacePicker,
+} from "$lib/features/sessions/chats-inbox.svelte";
 import SessionConversationPanel from "$lib/features/sessions/SessionConversationPanel.svelte";
-import UserSessionsList from "$lib/features/sessions/UserSessionsList.svelte";
-import { createUserSessionListController } from "$lib/features/sessions/user-session-list-controller.svelte";
 import {
 	type WindowRef,
 	withWindowParam,
 } from "$lib/features/space/modules/window-route";
-import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
+import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
+import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { sdk } from "$lib/sdk";
 import {
 	buildSessionsRoute,
@@ -34,11 +37,12 @@ import {
 	getLastUserSessionId,
 	setLastUserSessionId,
 } from "$lib/stores/last-user-session";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
+import { forgetCachedSession } from "$lib/stores/session-detail-cache";
+import { getCachedSpaceList } from "$lib/stores/space-list-cache";
 import {
-	fetchSpaceListWithCache,
-	getCachedSpaceList,
-} from "$lib/stores/space-list-cache";
+	cacheSpaceRecordSoon,
+	getCachedSpaceRecord,
+} from "$lib/stores/space-record-cache";
 import {
 	type ResolveWorkspaceAsset,
 	WorkspaceAssetAccessError,
@@ -56,17 +60,8 @@ const {
 	};
 } = $props();
 
-// Scheduled prompts and channel bots flood the cross-space inbox; default to
-// human web chats so the list opens on real conversations.
-const DEFAULT_SOURCE_KEYS: readonly UserSessionSourceKey[] = ["web"];
-const list = createUserSessionListController({ source: DEFAULT_SOURCE_KEYS });
-
-let sourceFilter = $state<readonly UserSessionSourceKey[]>(DEFAULT_SOURCE_KEYS);
-
-function setSourceFilter(next: UserSessionSourceKey[]) {
-	sourceFilter = next;
-	void list.setSource(next);
-}
+const list = chatsInbox;
+const isDesktop = $derived(!useCompactShell());
 
 /** Mutable space identity for host environment ports (set before syncContext). */
 const spaceBox = { current: "" as string };
@@ -154,23 +149,18 @@ const sessionChat = createSessionChatHost({
 			});
 		},
 		toNewSession: async () => {
-			await handleNewChat();
+			await list.newChat();
 		},
 	},
 	getConnectionState: () => connectionBox.current,
 	hasSpace: () => Boolean(spaceBox.current),
 });
 
-let isDesktop = $state(true);
-let viewportReady = $state(false);
 /** Resolved space for the active /sessions/new draft (null off that route). */
 let draftSpace = $state<SpaceRecord | null>(null);
 let draftSpaceLookupSeq = 0;
 /** Skip one desktop auto-restore after bouncing from a bad /sessions/new URL. */
 let suppressNextAutoOpen = false;
-let openingNewChat = false;
-let unsubscribeCache: (() => void) | null = null;
-let unsubscribeRealtime: (() => void) | null = null;
 let openSeq = 0;
 /** Session ids that failed to open this page visit — skip on auto-select. */
 const failedOpenIds = new Set<string>();
@@ -186,13 +176,13 @@ const routeTurnSequence = $derived.by(() => {
 		? Math.floor(sequence)
 		: null;
 });
+let routeSeed = $state<UserSessionListItem | null>(null);
 const activeSeed = $derived(
-	routeSessionId ? list.findById(routeSessionId) : null,
+	routeSessionId
+		? (list.findById(routeSessionId) ??
+				(routeSeed?.id === routeSessionId ? routeSeed : null))
+		: null,
 );
-
-function updateViewport() {
-	isDesktop = window.innerWidth >= DESKTOP_SHELL_MIN_WIDTH_PX;
-}
 
 function isCurrentOpen(seq: number, sessionId: string | null) {
 	return seq === openSeq && (data.sessionId ?? null) === sessionId;
@@ -255,22 +245,14 @@ function clearChatSession() {
 	});
 }
 
-function openNewChatSpacePicker() {
-	window.dispatchEvent(
-		new CustomEvent("cohub:open-command-palette", {
-			detail: {
-				title: "New chat in…",
-				query: "a: ",
-				placeholder: "Search spaces…",
-				refreshSpaces: true,
-				intent: "new-chat",
-			},
-		}),
-	);
-}
-
-function resolveSpaceFromCache(spaceId: string): SpaceRecord | null {
-	return getCachedSpaceList()?.find((space) => space.id === spaceId) ?? null;
+async function resolveSpaceFromCache(
+	spaceId: string,
+): Promise<SpaceRecord | null> {
+	const listed =
+		spacesInbox.find(spaceId) ??
+		getCachedSpaceList()?.find((space) => space.id === spaceId);
+	if (listed) return listed;
+	return (await getCachedSpaceRecord(spaceId).catch(() => null))?.space ?? null;
 }
 
 function clearDraftSpace() {
@@ -284,20 +266,19 @@ function clearDraftSpace() {
  */
 async function ensureDraftSpace(spaceId: string): Promise<SpaceRecord | null> {
 	if (draftSpace?.id === spaceId) return draftSpace;
-	const cached = resolveSpaceFromCache(spaceId);
+	const seq = ++draftSpaceLookupSeq;
+	const cached = await resolveSpaceFromCache(spaceId);
+	if (seq !== draftSpaceLookupSeq) return null;
 	if (cached) {
 		draftSpace = cached;
 		return cached;
 	}
-	const seq = ++draftSpaceLookupSeq;
 	try {
-		const spaces = await fetchSpaceListWithCache(
-			async () => await sdk.spaces.list(),
-		);
+		const space = await sdk.space(spaceId).get();
 		if (seq !== draftSpaceLookupSeq) return null;
-		const found = spaces.find((space) => space.id === spaceId) ?? null;
-		draftSpace = found;
-		return found;
+		cacheSpaceRecordSoon(space);
+		draftSpace = space;
+		return space;
 	} catch (error) {
 		if (seq !== draftSpaceLookupSeq) return null;
 		console.warn("[sessions] failed to resolve draft space", error);
@@ -314,17 +295,6 @@ async function bounceNewChatToPicker() {
 	openNewChatSpacePicker();
 }
 
-async function selectSession(session: UserSessionListItem) {
-	if (!isDesktop) {
-		await goto(buildSpaceSessionRoute(session.spaceId, session.id));
-		return;
-	}
-	await goto(buildUserSessionRoute(session.id), {
-		keepFocus: true,
-		noScroll: true,
-	});
-}
-
 async function openRouteSession(sessionId: string | null) {
 	const seq = ++openSeq;
 	if (!sessionId) {
@@ -333,9 +303,9 @@ async function openRouteSession(sessionId: string | null) {
 	}
 
 	if (!isDesktop) {
-		const known = list.findById(sessionId);
+		const known = await list.findLocal(sessionId);
+		if (!isCurrentOpen(seq, sessionId)) return;
 		if (known) {
-			if (!isCurrentOpen(seq, sessionId)) return;
 			await goto(buildSpaceSessionRoute(known.spaceId, sessionId), {
 				replaceState: true,
 			});
@@ -356,82 +326,87 @@ async function openRouteSession(sessionId: string | null) {
 	}
 
 	const turnSequence = routeTurnSequence;
-	const known = list.findById(sessionId);
+	const known = await list.findLocal(sessionId);
+	if (!isCurrentOpen(seq, sessionId)) return;
 	if (known) {
-		if (!isCurrentOpen(seq, sessionId)) return;
+		// Cache-only records may be stale; check before opening upserts it.
+		const unlisted = !list.findById(sessionId);
+		routeSeed = known;
 		await openChatSession({
 			spaceId: known.spaceId,
 			sessionId: known.id,
 			session: known,
 			turnSequence,
 		});
+		if (unlisted) void confirmCachedSession(seq, known);
 		return;
 	}
 
 	try {
-		const detail = await sdk.user.getSession(sessionId);
-		if (!isCurrentOpen(seq, sessionId)) return;
-		list.upsertSession({
-			...detail.session,
-			space: {
-				id: detail.space.id,
-				name: detail.space.name ?? detail.space.title ?? "Space",
-				slug: detail.space.slug ?? null,
-				publicProfile: detail.space.publicProfile ?? null,
-			},
-		});
-		if (!isCurrentOpen(seq, sessionId)) return;
+		const seed = await adoptServerSession(seq, sessionId);
+		if (!seed) return;
 		await openChatSession({
-			spaceId: detail.session.spaceId,
-			sessionId: detail.session.id,
-			session: detail.session,
+			spaceId: seed.spaceId,
+			sessionId: seed.id,
+			session: seed,
 			turnSequence,
 		});
 	} catch (error) {
 		if (!isCurrentOpen(seq, sessionId)) return;
-		console.warn("[sessions] failed to open session", error);
-		failedOpenIds.add(sessionId);
-		// Drop a stale remembered id so the next auto-select can fall back.
-		const userUuid = authStore.userUuid;
-		if (userUuid) clearLastUserSessionId(userUuid);
-		const fallback =
-			list.sessions.find(
-				(session) => session.id !== sessionId && !failedOpenIds.has(session.id),
-			) ?? null;
-		if (fallback) {
-			await goto(buildUserSessionRoute(fallback.id), {
-				replaceState: true,
-				keepFocus: true,
-				noScroll: true,
-			});
-			return;
-		}
-		await goto(buildSessionsRoute(), { replaceState: true });
+		await leaveFailedSession(sessionId, error);
 	}
 }
 
-async function handleNewChat() {
-	if (openingNewChat) return;
-	openingNewChat = true;
-	try {
-		// Prefer cached list so the picker opens instantly; refresh inside palette.
-		const cached = getCachedSpaceList();
-		if (cached?.length) {
-			openNewChatSpacePicker();
-			return;
-		}
+async function adoptServerSession(seq: number, sessionId: string) {
+	const detail = await sdk.user.getSession(sessionId);
+	if (!isCurrentOpen(seq, sessionId)) return null;
+	routeSeed = {
+		...detail.session,
+		space: {
+			id: detail.space.id,
+			name: detail.space.name ?? detail.space.title ?? "Space",
+			slug: detail.space.slug ?? null,
+			publicProfile: detail.space.publicProfile ?? null,
+		},
+	};
+	list.upsertSession(routeSeed);
+	return routeSeed;
+}
 
-		// No local spaces: GET /default resolves (and ensures Home for empty accounts).
-		// Avoid an extra list() RTT on cold empty accounts.
-		const dest = await resolveAppEntryRoute();
-		if (dest) {
-			await goto(dest);
-			return;
-		}
-		openNewChatSpacePicker();
-	} finally {
-		openingNewChat = false;
+async function confirmCachedSession(seq: number, cached: SessionRecord) {
+	try {
+		await adoptServerSession(seq, cached.id);
+	} catch (error) {
+		// Only a definite 403/404 drops local data.
+		const gone =
+			error instanceof HttpError &&
+			(error.status === 403 || error.status === 404);
+		if (!gone) return;
+		void forgetCachedSession(cached.spaceId, cached.id).catch(() => undefined);
+		if (isCurrentOpen(seq, cached.id))
+			await leaveFailedSession(cached.id, error);
 	}
+}
+
+async function leaveFailedSession(sessionId: string, error: unknown) {
+	console.warn("[sessions] failed to open session", error);
+	failedOpenIds.add(sessionId);
+	// Drop a stale remembered id so the next auto-select can fall back.
+	const userUuid = authStore.userUuid;
+	if (userUuid) clearLastUserSessionId(userUuid);
+	const fallback =
+		list.sessions.find(
+			(session) => session.id !== sessionId && !failedOpenIds.has(session.id),
+		) ?? null;
+	if (fallback) {
+		await goto(buildUserSessionRoute(fallback.id), {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true,
+		});
+		return;
+	}
+	await goto(buildSessionsRoute(), { replaceState: true });
 }
 
 function handleChangeDraftSpace() {
@@ -532,7 +507,7 @@ $effect(() => {
 // Never steal focus from an explicit new-chat draft.
 // Mobile keeps the list route; never redirect away from the inbox there.
 $effect(() => {
-	if (!viewportReady || !isDesktop) return;
+	if (!isDesktop) return;
 	if (routeIsNew || routeSessionId) return;
 	if (suppressNextAutoOpen) {
 		suppressNextAutoOpen = false;
@@ -567,13 +542,7 @@ $effect(() => {
 });
 
 onMount(() => {
-	updateViewport();
-	viewportReady = true;
-	window.addEventListener("resize", updateViewport);
-	unsubscribeCache = list.subscribeCache();
-	unsubscribeRealtime = list.subscribeRealtime();
-	void list.hydrateFromCache().then(() => list.refresh());
-	void modelsCatalogStore.load().catch(() => undefined);
+	const releaseInbox = list.retain();
 
 	// Real transport lifecycle (same signals Space uses via spaceRealtime).
 	const disposeConnection = sdk.onConnection((snapshot) => {
@@ -593,24 +562,17 @@ onMount(() => {
 	});
 
 	const onVisible = () => {
-		if (document.visibilityState === "visible") {
-			void list.refresh({ force: true });
-			sessionChat.onVisibilityChanged(true);
-		} else {
-			sessionChat.onVisibilityChanged(false);
-		}
+		sessionChat.onVisibilityChanged(document.visibilityState === "visible");
 	};
 	document.addEventListener("visibilitychange", onVisible);
 	return () => {
-		window.removeEventListener("resize", updateViewport);
 		document.removeEventListener("visibilitychange", onVisible);
 		disposeConnection?.();
+		releaseInbox();
 	};
 });
 
 onDestroy(() => {
-	unsubscribeCache?.();
-	unsubscribeRealtime?.();
 	sessionChat.dispose();
 });
 </script>
@@ -620,35 +582,9 @@ onDestroy(() => {
 </svelte:head>
 
 <div class="flex h-full min-h-0 w-full overflow-hidden bg-bg-primary">
-	{#if isDesktop || !routeIsNew}
-		<div
-			class="min-h-0 shrink-0 overflow-hidden border-r border-border-subtle"
-			class:w-full={!isDesktop}
-			class:w-[320px]={isDesktop}
-			class:max-w-[360px]={isDesktop}
-		>
-			<UserSessionsList
-				sessions={list.sessions}
-				{sourceFilter}
-				onSourceFilterChange={setSourceFilter}
-				activeSessionId={isDesktop ? (routeIsNew ? null : routeSessionId) : null}
-				loading={list.loading}
-				loadingMore={list.loadingMore}
-				refreshing={list.refreshing}
-				error={list.error}
-				hasMore={list.pageInfo.hasMore}
-				{isDesktop}
-				modelsCatalog={modelsCatalogStore.items ?? null}
-				onSelect={(session) => {
-					void selectSession(session);
-				}}
-				onLoadMore={() => {
-					void list.loadMore();
-				}}
-				onNewChat={() => {
-					void handleNewChat();
-				}}
-			/>
+	{#if !isDesktop && !routeIsNew}
+		<div class="min-h-0 w-full overflow-hidden">
+			<ChatsPane variant="page" />
 		</div>
 	{/if}
 
@@ -657,6 +593,7 @@ onDestroy(() => {
 			<SessionConversationPanel
 				host={sessionChat}
 				seed={activeSeed}
+				pending={Boolean(routeSessionId) || list.view.loading}
 				isNewDraft={routeIsNew}
 				{draftSpace}
 				onChangeSpace={handleChangeDraftSpace}

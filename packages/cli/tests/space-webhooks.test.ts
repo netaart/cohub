@@ -43,12 +43,12 @@ test("spaces webhooks url prints the trigger URL for the selected space", async 
 		return true;
 	}) as typeof process.stdout.write;
 	try {
-		await program.parseAsync(["node", "cohub", "-s", "space-1", "spaces", "webhooks", "url", "mail"]);
+		await program.parseAsync(["node", "cohub", "-s", "7c9e6679-7425-40de-944b-e07fc1f90ae7", "spaces", "webhooks", "url", "mail"]);
 	} finally {
 		process.stdout.write = originalWrite;
 	}
 
-	assert.match(chunks.join(""), /\/api\/spaces\/space-1\/webhooks\/mail\n$/);
+	assert.match(chunks.join(""), /\/api\/spaces\/7c9e6679-7425-40de-944b-e07fc1f90ae7\/webhooks\/mail\n$/);
 });
 
 test("spaces webhooks trigger forwards the JSON body and secret", async () => {
@@ -72,11 +72,11 @@ test("spaces webhooks trigger forwards the JSON body and secret", async () => {
 	});
 
 	await program.parseAsync([
-		"node", "cohub", "-s", "space-1", "spaces", "webhooks", "trigger", "mail",
+		"node", "cohub", "-s", "7c9e6679-7425-40de-944b-e07fc1f90ae7", "spaces", "webhooks", "trigger", "mail",
 		"--body", '{"from":"a@b.c"}', "--secret", "wh_1",
 	]);
 
-	assert.equal(sent[0]?.path, "/api/spaces/space-1/webhooks/mail");
+	assert.equal(sent[0]?.path, "/api/spaces/7c9e6679-7425-40de-944b-e07fc1f90ae7/webhooks/mail");
 	assert.equal(sent[0]?.init?.body, '{"from":"a@b.c"}');
 	assert.deepEqual(sent[0]?.init?.headers, { secret: "wh_1" });
 });

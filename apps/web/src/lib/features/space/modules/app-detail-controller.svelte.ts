@@ -63,7 +63,6 @@ export function createAppDetailController(options: {
 	onDetailLoaded?: (app: AppRecord | null) => void;
 }) {
 	let detail = $state<AppRecord | null>(null);
-	let standaloneUrl = $state<string | null>(null);
 	let loading = $state(false);
 	let error = $state("");
 	let actionInProgress = $state(false);
@@ -154,10 +153,8 @@ export function createAppDetailController(options: {
 		loading = true;
 		error = "";
 		try {
-			const { app, standaloneUrl: resolvedStandaloneUrl } =
-				await sdk.apps.get(appId);
+			const { app } = await sdk.apps.get(appId);
 			if (!isCurrentRequest()) return;
-			standaloneUrl = resolvedStandaloneUrl ?? null;
 			if (isNewerAppSnapshot(detail, app)) {
 				detail = app;
 				notify(app);
@@ -169,7 +166,6 @@ export function createAppDetailController(options: {
 		} catch (cause) {
 			if (!isCurrentRequest()) return;
 			detail = null;
-			standaloneUrl = null;
 			notify(null);
 			error = cause instanceof Error ? cause.message : "Failed to load app";
 		} finally {
@@ -225,17 +221,12 @@ export function createAppDetailController(options: {
 		publishError = "";
 		publishSubmitting = true;
 		try {
-			const {
-				app,
-				standaloneUrl: resolvedStandaloneUrl,
-				version,
-			} = await sdk.apps.publishVersion(detail.id);
-			standaloneUrl = resolvedStandaloneUrl ?? null;
+			const { app, version } = await sdk.apps.publishVersion(detail.id);
 			detail = app;
 			notify(app);
 			syncFormFromDetail();
 			await loadVersions(app.id);
-			notifyAppsUpdated({ app, version, standaloneUrl });
+			notifyAppsUpdated({ app, version });
 		} catch (cause) {
 			publishError =
 				cause instanceof Error ? cause.message : "Failed to publish version";
@@ -282,23 +273,19 @@ export function createAppDetailController(options: {
 		try {
 			let app: AppRecord;
 			let version: AppVersionRecord | undefined;
-			let resolvedStandaloneUrl: string | null | undefined;
 			if (status === "published") {
 				const result = await sdk.apps.publishVersion(detail.id);
 				app = result.app;
-				resolvedStandaloneUrl = result.standaloneUrl;
 				version = result.version;
 			} else {
 				const result = await sdk.apps.update(detail.id, { status });
 				app = result.app;
-				resolvedStandaloneUrl = result.standaloneUrl;
 			}
-			standaloneUrl = resolvedStandaloneUrl ?? null;
 			detail = app;
 			notify(app);
 			syncFormFromDetail();
 			void loadVersions(app.id);
-			notifyAppsUpdated({ app, version, standaloneUrl });
+			notifyAppsUpdated({ app, version });
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : "Failed to update app";
 			void loadDetail(detail.id);
@@ -326,7 +313,6 @@ export function createAppDetailController(options: {
 			await sdk.apps.delete(deletedAppId);
 			deleted = true;
 			detail = null;
-			standaloneUrl = null;
 			notify(null);
 			notifyAppsUpdated({ deletedAppId });
 			await goto(buildSpaceLandingRoute(options.getSpaceId()), {
@@ -358,32 +344,28 @@ export function createAppDetailController(options: {
 		try {
 			const shouldRelease =
 				formStatus === "published" && detail.status !== "published";
-			const { app: savedApp, standaloneUrl: updatedStandaloneUrl } =
-				await sdk.apps.update(detail.id, {
-					slug: formSlug.trim(),
-					status: shouldRelease ? detail.status : formStatus,
-					visibility: formVisibility,
-					targetType: formTargetType,
-					targetRef: formTargetRef.trim(),
-					appScopes: selectedScopeList(formScopes, APP_SCOPE_OPTIONS),
-					meta: buildAppMeta(detail.meta, formHideCohubBar),
-				});
+			const { app: savedApp } = await sdk.apps.update(detail.id, {
+				slug: formSlug.trim(),
+				status: shouldRelease ? detail.status : formStatus,
+				visibility: formVisibility,
+				targetType: formTargetType,
+				targetRef: formTargetRef.trim(),
+				appScopes: selectedScopeList(formScopes, APP_SCOPE_OPTIONS),
+				meta: buildAppMeta(detail.meta, formHideCohubBar),
+			});
 			let app = savedApp;
 			let version: AppVersionRecord | undefined;
-			let resolvedStandaloneUrl = updatedStandaloneUrl;
 			if (shouldRelease) {
 				const result = await sdk.apps.publishVersion(savedApp.id);
 				app = result.app;
-				resolvedStandaloneUrl = result.standaloneUrl;
 				version = result.version;
 			}
 			detail = app;
-			standaloneUrl = resolvedStandaloneUrl ?? null;
 			notify(app);
 			editMode = false;
 			syncFormFromDetail();
 			void loadVersions(app.id);
-			notifyAppsUpdated({ app, version, standaloneUrl });
+			notifyAppsUpdated({ app, version });
 		} catch (cause) {
 			formError = cause instanceof Error ? cause.message : "Failed to save app";
 		} finally {
@@ -397,14 +379,11 @@ export function createAppDetailController(options: {
 		if (!appId) return;
 		if (change.deletedAppId === appId) {
 			detail = null;
-			standaloneUrl = null;
 			notify(null);
 			return;
 		}
 		if (!change.app || change.app.id !== appId) return;
 		if (isNewerAppSnapshot(detail, change.app)) {
-			if ("standaloneUrl" in change)
-				standaloneUrl = change.standaloneUrl ?? null;
 			detail = change.app;
 			notify(change.app);
 			if (!editMode && !formSubmitting) syncFormFromDetail();
@@ -435,7 +414,6 @@ export function createAppDetailController(options: {
 		hideCohubBarLoading = false;
 		publishError = "";
 		copiedPublicRoute = false;
-		standaloneUrl = null;
 	}
 
 	function syncRoute() {
@@ -462,9 +440,6 @@ export function createAppDetailController(options: {
 	return {
 		get detail() {
 			return detail;
-		},
-		get standaloneUrl() {
-			return standaloneUrl;
 		},
 		setError,
 		get loading() {

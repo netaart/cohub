@@ -1,13 +1,14 @@
 import { isUuid, type GlobalSearchResult, type GlobalSearchType } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
+import { formatLocalDateTime, table, json as outJson, jsonRequested, error, handleHttp, truncateText, type Row } from "../output.js";
 
 const DEFAULT_LIMIT = 20;
 const MAX_TITLE_LENGTH = 72;
 const MAX_CONTEXT_LENGTH = 42;
+const MAX_MATCH_LENGTH = 60;
 
-const SEARCH_TYPES = new Set<GlobalSearchType>(["turn", "session", "space", "label"]);
+const SEARCH_TYPES = new Set<GlobalSearchType>(["chat", "space", "label"]);
 
 type SearchCliOptions = {
   limit?: string;
@@ -23,17 +24,17 @@ function clampLimit(value: string | undefined): number {
   return Math.min(Math.max(Math.floor(parsed), 1), 50);
 }
 
-function truncate(value: string | null | undefined, maxLength: number): string {
-  const text = (value ?? "").replace(/\s+/g, " ").trim();
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
-}
-
 function contextFor(item: GlobalSearchResult): string {
   const owner = item.ownerProfile;
   if (owner?.username) return `@${owner.username}`;
   if (owner?.displayName) return owner.displayName;
-  return item.href;
+  if (item.type === "label") return item.labelRef ?? "";
+  return item.spaceName ?? "";
+}
+
+function matchFor(item: GlobalSearchResult): string {
+  if (item.hit) return item.hit.excerpt;
+  return item.matchedField;
 }
 
 function parseTypes(value: string | undefined): GlobalSearchType[] | undefined {
@@ -57,10 +58,10 @@ function parseSearchInput(opts: SearchCliOptions) {
 function rowsFor(items: GlobalSearchResult[]): Row[] {
   return items.map((item) => ({
     type: item.type,
-    title: truncate(item.title, MAX_TITLE_LENGTH),
-    context: truncate(contextFor(item), MAX_CONTEXT_LENGTH),
-    match: item.matchedField,
-    updated: item.updatedAt ? item.updatedAt.slice(0, 10) : "",
+    title: truncateText(item.title || "New chat", MAX_TITLE_LENGTH),
+    context: truncateText(contextFor(item), MAX_CONTEXT_LENGTH),
+    match: truncateText(matchFor(item), MAX_MATCH_LENGTH),
+    updated: item.updatedAt ? formatLocalDateTime(item.updatedAt).slice(0, 10) : "",
     href: item.href,
   }));
 }
@@ -68,10 +69,10 @@ function rowsFor(items: GlobalSearchResult[]): Row[] {
 export function registerSearch(program: Command): void {
   program
     .command("search")
-    .description("Search spaces, chats, turns, and label items")
+    .description("Search spaces, chats, and label items")
     .argument("[query]", "Search query")
     .option("--limit <n>", "Maximum results, 1-50", String(DEFAULT_LIMIT))
-    .option("--types <types>", "Comma-separated result types: turn,session,space,label")
+    .option("--types <types>", "Comma-separated result types: chat,space,label")
     .option("--space-id <id>", "Limit search to a space")
     .option("--label-ref <ref>", "Search items under an exact label ref")
     .option("--json", "Output as JSON")
@@ -80,7 +81,7 @@ export function registerSearch(program: Command): void {
 Examples:
   cohub search "release notes"
   cohub search "failing tests" --limit 10
-  cohub search "bug" --types turn,session --space-id <spaceId>
+  cohub search "bug" --types chat --space-id <spaceId>
   cohub search --types label --label-ref bug
   cohub search "login" --types label --label-ref bug
   cohub search "design review" --json

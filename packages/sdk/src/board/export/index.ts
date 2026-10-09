@@ -1,16 +1,7 @@
-/**
- * Board → image, driven by the editor's own renderers.
- *
- * The browser passes the renderer it already has; the CLI passes a headless one
- * (see `../headless`). Both go through this function, so a PNG produced on a
- * laptop and one produced in CI are the same picture.
- *
- * Deciding *what* to capture and *how large* it may be is pure geometry and
- * lives in `@neta-art/cohub/board` (`planBoardExport`, `selectBoardExportAssets`),
- * so a caller that only needs an export plan does not need PixiJS at all.
- */
 
-import type { BoardDocument, BoardItem } from "@cohub/protocol/board-document";
+import type { BoardDocument } from "@cohub/protocol";
+import { boardDocumentAt } from "../animation.js";
+import { type BoardSceneItem, buildBoardScene } from "../core/scene.js";
 import { type ICanvas, Rectangle, type Renderer, type Texture } from "pixi.js";
 import { parseBoardCssColor } from "../render/css-color.js";
 import type { BoardShapeColors } from "../core/palette.js";
@@ -25,10 +16,10 @@ import {
   type BoardRenderPalette,
   defaultBoardPalette,
 } from "../render/index.js";
+import { ensureBoardTextMeasurement } from "../render/text-measurement.js";
+import type { BoardSketchHost } from "../render/renderers/board-renderer-registry.js";
 import { createBoardExportScene } from "./scene.js";
 
-// Re-exported for ergonomics: an export caller should not have to reach into a
-// second entry just to name the region it is already passing.
 export type {
   BoardExportPlan,
   BoardExportPlanInput,
@@ -37,24 +28,20 @@ export type {
 export { createBoardExportScene } from "./scene.js";
 export type { BoardExportScene, BoardExportSceneInput } from "./scene.js";
 
-/** Paper behind the content: the theme's page color, or none at all. */
 export type BoardExportBackground = "paper" | "transparent" | number;
 
 export type BoardExportOptions = {
   region?: BoardExportRegion;
-  /** Output pixels per world unit. Defaults to 2. */
+  at?: { animation?: string; time: number };
   scale?: number;
-  /** World-space padding. Frame and rect regions default to 0, others to 32. */
   padding?: number;
   colorScheme?: "dark" | "light";
-  /** Defaults to "paper" — a transparent PNG surprises people who paste it. */
   background?: BoardExportBackground;
   palette?: Partial<BoardRenderPalette>;
   colors?: BoardShapeColors;
-  /** Resolved textures by preview key; unresolved keys become placeholders. */
   textures?: Map<string, Texture>;
-  /** Preview-key strategy supplied by the host; defaults to still images only. */
-  assetKey?: (item: BoardItem) => string | null;
+  sketches?: BoardSketchHost;
+  assetKey?: (item: BoardSceneItem) => string | null;
   backgroundImage?: {
     texture: Texture;
     fit: "cover" | "contain" | "repeat";
@@ -80,28 +67,26 @@ function resolveBackground(
   background: BoardExportBackground | undefined,
   palette: BoardRenderPalette,
   document: BoardDocument,
+  colorScheme: "dark" | "light",
 ): number | null {
   if (background === "transparent") return null;
   if (typeof background === "number") return background;
-  const declared = document.appearance.background.color;
-  return declared ? (parseBoardCssColor(declared) ?? palette.bg) : palette.bg;
+  const declared = document.board.background.color;
+  const css = typeof declared === "object" ? declared[colorScheme] : declared;
+  return css ? (parseBoardCssColor(css) ?? palette.bg) : palette.bg;
 }
 
-/**
- * Capture a board region as a canvas.
- *
- * Returns null when the region is empty — an empty selection is a no-op, not a
- * failure. The scene is always destroyed, so a throwing renderer cannot leak
- * GPU resources.
- */
 export function renderBoardExport(
   renderer: Renderer,
   input: BoardDocument,
   options: BoardExportOptions = {},
 ): BoardExportResult | null {
-  const document = normalizeBoardDocument(input);
+  ensureBoardTextMeasurement();
+  const base = normalizeBoardDocument(input);
+  const document = options.at ? boardDocumentAt(base, options.at.animation ?? null, options.at.time).document : base;
+  const scene = buildBoardScene(document);
   const plan = planBoardExport({
-    document,
+    scene,
     region: options.region ?? { kind: "all" },
     scale: options.scale,
     padding: options.padding,
@@ -112,26 +97,26 @@ export function renderBoardExport(
 
   const colorScheme = options.colorScheme ?? "dark";
   const palette = { ...defaultBoardPalette(colorScheme), ...options.palette };
-  const scene = createBoardExportScene({
-    document,
+  const exportScene = createBoardExportScene({
+    settings: document.board,
+    scene,
     items: plan.items,
-    connections: plan.connections,
+    time: options.at?.time ?? 0,
     world: plan.world,
     scale: plan.scale,
     colorScheme,
     palette,
     colors: options.colors,
     textures: options.textures,
+    sketches: options.sketches,
     assetKey: options.assetKey,
-    background: resolveBackground(options.background, palette, document),
+    background: resolveBackground(options.background, palette, document, colorScheme),
     backgroundImage: options.backgroundImage,
   });
 
   try {
-    // The scene is already laid out in output pixels, so the frame is the plan's
-    // size at resolution 1 — no second scaling step to keep in sync.
     const canvas = renderer.extract.canvas({
-      target: scene.root,
+      target: exportScene.root,
       frame: new Rectangle(0, 0, plan.width, plan.height),
       resolution: 1,
       antialias: true,
@@ -146,19 +131,18 @@ export function renderBoardExport(
         applied: plan.scale,
       });
     }
-    if (scene.missingImageKeys.length > 0) {
-      warnings.push({ kind: "images-missing", keys: scene.missingImageKeys });
+    if (exportScene.missingImageKeys.length > 0) {
+      warnings.push({ kind: "images-missing", keys: exportScene.missingImageKeys });
     }
     if (plan.items.length > BOARD_EXPORT_ITEM_WARN_THRESHOLD) {
       warnings.push({ kind: "many-items", count: plan.items.length });
     }
     return { canvas, plan, warnings };
   } finally {
-    scene.destroy();
+    exportScene.destroy();
   }
 }
 
-/** Human-readable form of a warning, shared by the CLI and the web UI. */
 export function describeBoardExportWarning(warning: BoardExportWarning): string {
   switch (warning.kind) {
     case "scale-clamped":

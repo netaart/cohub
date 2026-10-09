@@ -1,5 +1,6 @@
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
 import type { AppRecord, AppVersionRecord } from "@neta-art/cohub";
+import { sortAppsByRecentUpdate } from "$lib/app-sort";
 
 export const APPS_CHANGED_EVENT = "cohub:apps-changed";
 export const INSTALLED_APPS_CHANGED_EVENT = "cohub:installed-apps-changed";
@@ -7,7 +8,6 @@ export const INSTALLED_APPS_CHANGED_EVENT = "cohub:installed-apps-changed";
 export type AppVersionPublishedPayload = {
 	app: AppRecord;
 	version: AppVersionRecord;
-	standaloneUrl?: string | null;
 	previousVersionId: string | null;
 };
 
@@ -15,7 +15,6 @@ export type AppsChangedDetail = {
 	spaceId: string;
 	app?: AppRecord;
 	version?: AppVersionRecord;
-	standaloneUrl?: string | null;
 	deletedAppId?: string;
 };
 
@@ -45,10 +44,6 @@ export function parseAppVersionPublished(
 	return {
 		app: app as AppRecord,
 		version: version as AppVersionRecord,
-		...(typeof event.payload.standaloneUrl === "string" ||
-		event.payload.standaloneUrl === null
-			? { standaloneUrl: event.payload.standaloneUrl }
-			: {}),
 		previousVersionId:
 			typeof event.payload.previousVersionId === "string"
 				? event.payload.previousVersionId
@@ -77,11 +72,14 @@ export function isNewerAppSnapshot(
 
 export function upsertAppSnapshot(apps: AppRecord[], next: AppRecord) {
 	const index = apps.findIndex((app) => app.id === next.id);
-	if (index < 0) return [...apps, next];
-	if (!isNewerAppSnapshot(apps[index], next)) return apps;
+	if (index >= 0 && !isNewerAppSnapshot(apps[index], next)) return apps;
 	const updated = [...apps];
-	updated[index] = next;
-	return updated;
+	if (index < 0) updated.push(next);
+	else updated[index] = next;
+	// The list is served newest-updated-first, so a fresh snapshot has to take
+	// its sorted place: an edit floats the app to the top rather than leaving
+	// it stranded where it used to sit.
+	return sortAppsByRecentUpdate(updated);
 }
 
 export function upsertAppVersion(

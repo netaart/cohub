@@ -4,6 +4,7 @@ import "./sandbox-idle-check/index.js";
 import "./sandbox-idle-reaper/index.js";
 import "./session-message-postprocess/index.js";
 import "./session-title-generate/index.js";
+import "./space-fs-copy/index.js";
 import "./space-hook-dispatch/index.js";
 import "./app-publish-asset/index.js";
 import "./app-view-stats-flush/index.js";

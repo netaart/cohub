@@ -34,11 +34,19 @@ export async function getSessionRuntimeTurn(spaceId: string, sessionId: string) 
   return turn && isLocalHarness(harness) ? { ...turn, harness } : null;
 }
 
+/** A native Turn whose Runtime is gone asks for attention quickly; a silent one on a live Runtime, later. */
+const NATIVE_DISCONNECTED_ATTENTION_MS = 45_000;
+const NATIVE_QUIET_ATTENTION_MS = 30 * 60_000;
+
 export async function getSessionRuntimeRecovery(spaceId: string, sessionId: string) {
   let turn = await getSessionRuntimeTurn(spaceId, sessionId);
   if (turn && isNativeClientTurn(turn.meta) && readRuntimeRecovery(turn.meta)?.state === "executing") {
-    const observedAt = (turn.meta as { nativeSync?: { observedAt?: string } }).nativeSync?.observedAt;
-    if (!observedAt || Date.now() - Date.parse(observedAt) > 45_000) {
+    const { observedAt, controllable } = (turn.meta as { nativeSync?: { observedAt?: string; controllable?: boolean } }).nativeSync ?? {};
+    // A native Turn is alive while its owner's Runtime holds the Space's lease.
+    const registration = await getRuntimeRegistration(spaceId);
+    const connected = registration?.ownerUserId === readRuntimeRecovery(turn.meta)?.ownerUserId;
+    const quietMs = !connected ? NATIVE_DISCONNECTED_ATTENTION_MS : controllable ? Number.POSITIVE_INFINITY : NATIVE_QUIET_ATTENTION_MS;
+    if (!observedAt || Date.now() - Date.parse(observedAt) > quietMs) {
       const [updated] = await db.update(sessionTurns).set({ meta: sql`jsonb_set(${sessionTurns.meta}, '{runtimeRecovery,state}', '"attention"'::jsonb)` })
         .where(and(eq(sessionTurns.id, turn.id), inArray(sessionTurns.status, ["running", "abort_requested"]), sql`${sessionTurns.meta}->'runtimeRecovery'->>'state' = 'executing'`, sql`${sessionTurns.meta}->'nativeSync'->>'observedAt' is not distinct from ${observedAt ?? null}`)).returning();
       if (updated) turn = { ...updated, harness: turn.harness };

@@ -11,6 +11,8 @@ import DragGhostLayer from "$lib/components/DragGhostLayer.svelte";
 import HelpPanel from "$lib/components/HelpPanel.svelte";
 import MediaLightbox from "$lib/components/MediaLightbox.svelte";
 import MobileSidebarDrawer from "$lib/components/MobileSidebarDrawer.svelte";
+import MobileTabBar from "$lib/components/MobileTabBar.svelte";
+import { mediaLightbox } from "$lib/components/media-lightbox";
 import Sidebar from "$lib/components/Sidebar.svelte";
 import TurnNotificationStack from "$lib/components/TurnNotificationStack.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
@@ -32,9 +34,13 @@ import {
 	shouldStartDrawerGesture,
 	shouldStartRightDrawerGesture,
 } from "$lib/gestures/drawer-swipe";
+import { markHostReady } from "$lib/host-bridge";
+import { installHostDownloads } from "$lib/host-files";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
+import { startLiveLists } from "$lib/lists/live-lists";
+import { resolveAppArea, shouldHideMobileTabBar } from "$lib/mobile-nav";
 import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion.svelte";
 import {
 	beginMobileSessionViewTransition,
@@ -42,6 +48,7 @@ import {
 } from "$lib/navigation-transition";
 import { m } from "$lib/paraglide/messages.js";
 import { activateSpaceStyle, deactivateSpaceStyle } from "$lib/space-style";
+import "$lib/theme.svelte";
 import { authStore } from "$lib/stores/auth.svelte";
 import { initSpacePinRealtime } from "$lib/stores/space-pins.svelte";
 import { turnNotifications } from "$lib/stores/turn-notifications.svelte";
@@ -69,9 +76,8 @@ onNavigate((navigation) => {
 });
 
 const currentPath = $derived(page.url.pathname);
-const sidebarMode = $derived(
-	currentPath.startsWith("/settings") ? "settings" : "space",
-);
+const showMobileTabBar = $derived(!shouldHideMobileTabBar(currentPath));
+const sidebarArea = $derived(resolveAppArea(currentPath));
 // Per-space layout prefs (sidebar width/collapsed). Workspace space only —
 // never sessions-inbox draft targets (those use newChatSpaceId, not spaceId).
 const currentLayoutSpaceId = $derived(
@@ -231,8 +237,8 @@ function findTrackedTouch(touches: TouchList) {
 function handleTouchStart(e: TouchEvent) {
 	if (window.innerWidth >= DESKTOP_SHELL_MIN_WIDTH_PX || activeTouchId !== null)
 		return;
-	// A resource drag owns the pointer; the drawer must not also swipe.
-	if (pointerDrag.active) return;
+	// A resource drag or the lightbox owns the pointer; drawers must not swipe.
+	if (pointerDrag.active || mediaLightbox.open) return;
 	const touch = e.changedTouches[0];
 	if (!touch) return;
 
@@ -566,30 +572,37 @@ onMount(() => {
 	}
 
 	let stopDesktopCommands: (() => void) | null = null;
+	let stopLiveLists: (() => void) | null = null;
 	const stopViewportOffsetGuard = installViewportOffsetGuard();
+
+	const stopHostDownloads = installHostDownloads();
 
 	void authStore.ensureLoaded().finally(() => {
 		authReady = true;
+		markHostReady();
 		scheduleCacheCleanup();
 		if (authStore.isAuthenticated) {
 			turnNotifications.start();
 			// Listen in the shell, not a page, so delivery never depends on route.
 			stopDesktopCommands = startDesktopCommandListener();
+			stopLiveLists = startLiveLists();
 		}
 		initSpacePinRealtime();
 	});
 
 	// Register PWA Service Worker (conservative update: closes all tabs to activate)
 	if ("serviceWorker" in navigator) {
-		window.addEventListener("load", () => {
-			void navigator.serviceWorker.register("/sw.js");
-		});
+		const register = () => void navigator.serviceWorker.register("/sw.js");
+		if (document.readyState === "complete") register();
+		else window.addEventListener("load", register, { once: true });
 	}
 
 	return () => {
 		delete window.cohubDisableVConsole;
 		delete window.cohubEnableVConsole;
 		stopDesktopCommands?.();
+		stopLiveLists?.();
+		stopHostDownloads();
 		stopViewportOffsetGuard();
 		turnNotifications.stop();
 		vConsoleRequestId += 1;
@@ -610,11 +623,11 @@ onMount(() => {
 </svelte:head>
 
 {#if !authReady}
-  <main class="app-shell h-full text-text-primary">
+  <main class="app-shell safe-area-top h-full text-text-primary">
     <CenteredLoading label={m.shell_loading({}, { locale })} size="page" />
   </main>
 {:else}
-  <div class="app-shell h-full min-h-0 overflow-hidden flex flex-col lg:flex-row text-text-primary font-sans text-[13px] leading-[1.6]">
+  <div class="app-shell safe-area-top h-full min-h-0 overflow-hidden flex flex-col lg:flex-row text-text-primary font-sans text-[13px] leading-[1.6] {showMobileTabBar ? 'max-lg:[--safe-area-bottom:0px]' : ''}">
     <!-- Desktop sidebar — hidden on mobile -->
     <!-- z-30 keeps collapsed rail flyouts above main workspace stacking contexts.
          Width-only panel-shell: the icon rail stays interactive (no --collapsed). -->
@@ -627,7 +640,7 @@ onMount(() => {
         class="panel-shell-inner relative {leftSidebarContentCollapsed ? 'overflow-visible' : 'overflow-hidden'} {!leftSidebarContentCollapsed ? 'border-r border-[color:var(--sidebar-border)]' : ''}"
         style={`width: ${leftSidebarInnerWidth}px`}
       >
-        <Sidebar mode={sidebarMode} collapsed={leftSidebarContentCollapsed} />
+        <Sidebar area={sidebarArea} collapsed={leftSidebarContentCollapsed} />
         {#if !leftSidebarContentCollapsed}
           <button
             type="button"
@@ -648,6 +661,10 @@ onMount(() => {
         {@render children?.()}
       </div>
     </main>
+
+    {#if showMobileTabBar}
+      <MobileTabBar />
+    {/if}
   </div>
 
   <!-- Mobile left drawer — outside flex container to avoid stacking context issues -->
@@ -655,7 +672,6 @@ onMount(() => {
     dragOffsetPx={dragOffsetPx}
     {isDragging}
     {isDrawerVisible}
-    mode={sidebarMode}
   />
 
   <!-- Global media lightbox -->
