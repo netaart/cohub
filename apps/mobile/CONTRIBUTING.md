@@ -2,6 +2,8 @@
 
 ## Local checks
 
+The app lives in `apps/mobile` of the Cohub monorepo but is a standalone npm project outside the pnpm workspace. Run these from `apps/mobile`:
+
 ```bash
 npm ci
 npm run check
@@ -15,20 +17,20 @@ npm run native:ios
 
 Native dependency upgrades require a new APK/TestFlight baseline before shipping compatible OTA updates. Do not skip fingerprint validation to serve an upgrade to older binaries.
 
-PR titles and commits use Conventional Commits:
+PR titles and commits use Conventional Commits. Scope app commits by area, or `mobile` when there is none:
 
 ```text
 feat(chat): add turn retry
 fix(auth): restore expired sessions
-ci: tighten release validation
+ci(mobile): tighten release validation
 ```
 
-`feat` creates a minor release, `fix` creates a patch release, and `!` or a `BREAKING CHANGE:` footer creates a major release.
+The commit type picks the release-notes section; `chore` commits stay out of the notes. The version is chosen when cutting a release, not derived from commits.
 
 ## Pull requests
 
-Keep changes focused. CI must pass Quality and the bundle jobs on the pull request. Native debug builds are a manual `Native CI` workflow, not a PR check. Do not commit `.env`, native signing files, generated `ios/` or `android/` directories, or Expo credentials.
+Keep changes focused. `Mobile CI` must pass Quality and the bundle jobs on pull requests that touch `apps/mobile`. Native debug builds are a manual `Mobile Native CI` workflow, not a PR check. Do not commit `.env`, native signing files, generated `ios/` or `android/` directories, or Expo credentials.
 
 ## Releases
 
-See [docs/releasing.md](docs/releasing.md). Merging the Release Please PR creates the GitHub Release and changelog. It does not build APKs. JS-only changes publish as production OTA when they land on `main`. Run Native Release when Expo SDK, native dependencies, or native configuration change. iOS builds and store submissions remain manual.
+See [docs/releasing.md](docs/releasing.md). JS-only changes publish as production OTA when they land on `main`. A native release bumps the version, then pushes a `cohub-mobile-vX.Y.Z` tag, which builds the signed APKs and the TestFlight build and creates the GitHub Release.

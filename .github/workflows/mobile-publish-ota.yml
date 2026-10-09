@@ -116,8 +116,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/native-apk"
-          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[].tagName' | while read -r candidate; do
-            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Eq '^cohub-v.+-android-arm64-v8a\.apk$'; then
+          # The monorepo's release list is dominated by service releases; walk app tags, newest
+          # version first. A just-pushed tag has no release yet, so a failed view is skipped.
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/cohub-mobile-v" --jq '.[].ref | ltrimstr("refs/tags/")' | sort -rV | while read -r candidate; do
+            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -Eq '^cohub-v.+-android-arm64-v8a\.apk$'; then
               printf '%s\n' "$candidate"
               break
             fi
@@ -206,8 +208,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/native-ipa"
-          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[].tagName' | while read -r candidate; do
-            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fxq 'cohub-ios-native-fingerprint.txt'; then
+          # Same app-tag walk as the Android runtime lookup.
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/cohub-mobile-v" --jq '.[].ref | ltrimstr("refs/tags/")' | sort -rV | while read -r candidate; do
+            if gh release view "$candidate" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -Fxq 'cohub-ios-native-fingerprint.txt'; then
               printf '%s\n' "$candidate"
               break
             fi

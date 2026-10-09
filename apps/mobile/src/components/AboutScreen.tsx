@@ -14,9 +14,10 @@ import { useTranslation } from "@/src/i18n";
 import { useAppTheme, typography } from "@/src/theme";
 import type { IconName } from "@/src/icons";
 
-const REPOSITORY_URL = "https://github.com/markbang/cohub-mobile";
-const RELEASES_URL = `${REPOSITORY_URL}/releases`;
-const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`;
+const REPOSITORY_URL = "https://github.com/netaart/cohub/tree/main/apps/mobile";
+// The monorepo's release list also carries the services' releases.
+const RELEASES_URL = "https://github.com/netaart/cohub/releases?q=cohub-mobile";
+const LICENSE_URL = "https://github.com/netaart/cohub/blob/main/apps/mobile/LICENSE";
 const COHUB_URL = "https://cohub.live";
 
 export function AboutScreen() {

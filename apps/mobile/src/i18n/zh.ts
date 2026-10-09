@@ -498,7 +498,7 @@ export const zh: Record<TranslationKey, string> = {
   "about.section.legal": "法律",
   "about.row.version": "版本",
   "about.row.source": "源代码",
-  "about.row.sourceDetail": "github.com/markbang/cohub-mobile",
+  "about.row.sourceDetail": "github.com/netaart/cohub",
   "about.row.releases": "发布说明",
   "about.row.releasesDetail": "查看已发布的版本",
   "about.row.website": "Cohub 网站",

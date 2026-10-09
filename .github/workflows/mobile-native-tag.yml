@@ -2,7 +2,8 @@ name: Mobile Native Tag Release
 
 on:
   push:
-    tags: ["v*"]
+    # The monorepo's vX.Y.Z tags release the Cohub services, not the app.
+    tags: ["cohub-mobile-v*"]
 
 permissions:
   contents: read
@@ -47,8 +48,8 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Native releases require a stable vX.Y.Z tag, received: $RELEASE_TAG"
+          if [[ ! "$RELEASE_TAG" =~ ^cohub-mobile-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Native releases require a stable cohub-mobile-vX.Y.Z tag, received: $RELEASE_TAG"
             exit 1
           fi
           git fetch --no-tags origin main
@@ -67,10 +68,15 @@ jobs:
           RELEASE_TAG: ${{ steps.target.outputs.tag }}
         run: |
           set -euo pipefail
-          tags=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[].tag_name')
-          if ! grep -Fxq -- "$RELEASE_TAG" <<< "$tags"; then
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$RELEASE_TAG" --generate-notes
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists."
+            exit 0
           fi
+          # Generated notes would list every monorepo PR; these cover apps/mobile commits only.
+          node scripts/release-notes.mjs "$RELEASE_TAG" > "$RUNNER_TEMP/release-notes.md"
+          # An app release must not replace the services' release as the repository's Latest.
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false \
+            --title "Cohub Mobile ${RELEASE_TAG#cohub-mobile-}" --notes-file "$RUNNER_TEMP/release-notes.md"
 
   android:
     name: Android signed APKs
@@ -147,7 +153,8 @@ jobs:
               armeabi-v7a|arm64-v8a|x86|x86_64) ;;
               *) echo "Unexpected Android APK name: $(basename "$apk")"; exit 1 ;;
             esac
-            release_apk="cohub-${RELEASE_TAG}-android-${abi}.apk"
+            # Keep the cohub-vX.Y.Z APK names that Yaota and the landing page match.
+            release_apk="cohub-${RELEASE_TAG#cohub-mobile-}-android-${abi}.apk"
             cp "$apk" "$release_apk"
             gh release upload "$RELEASE_TAG" "$release_apk" --repo "$GITHUB_REPOSITORY" --clobber
           done
@@ -169,6 +176,6 @@ jobs:
           export RELEASE_NOTES=$(RELEASE_JSON="$release_json" node -e 'process.stdout.write(JSON.parse(process.env.RELEASE_JSON).body || "")')
           export RELEASE_URL=$(RELEASE_JSON="$release_json" node -e 'process.stdout.write(JSON.parse(process.env.RELEASE_JSON).url || "")')
           shopt -s nullglob
-          files=(cohub-"$RELEASE_TAG"-android-*.apk)
+          files=(cohub-"${RELEASE_TAG#cohub-mobile-}"-android-*.apk)
           test "${#files[@]}" -eq 4 || { echo "Expected four renamed APKs before Yaota upload, found ${#files[@]}"; exit 1; }
           node --experimental-strip-types scripts/publish-yaota-apks.mjs "${files[@]}"

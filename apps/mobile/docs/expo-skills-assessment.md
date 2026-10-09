@@ -30,7 +30,7 @@ All recommendations require the project-specific boundaries below; these are tec
 - `expo-project-structure`, `expo-web-to-native`, `expo-brownfield`: target new projects or migration scenarios, not current mobile maintenance.
 - `expo-dom`: not needed for the current origin-constrained published Work WebView. DOM components are a separate architectural choice, not a drop-in replacement.
 - `expo-app-clip`, experimental `expo-migrate-module`: add only for an explicit App Clip or native module migration task.
-- All `eas-*` skills: defer until adopting the corresponding EAS service. Current build and release ownership remains in GitHub Actions and Release Please.
+- All `eas-*` skills: defer until adopting the corresponding EAS service. Current build and release ownership remains in GitHub Actions.
 - [expo-dev-client][dev-client]: the concept is relevant, but the current instructions center on EAS profiles, including remote version ownership. Even its local build examples use `eas build --local`; current repository scripts are the appropriate workflow.
 - `expo-skill-feedback`: not needed for application development. Do not send project information or enable telemetry without explicit permission.
 

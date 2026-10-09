@@ -1,8 +1,7 @@
 # Cohub Mobile
 
-[![CI](https://github.com/markbang/cohub-mobile/actions/workflows/ci.yml/badge.svg)](https://github.com/markbang/cohub-mobile/actions/workflows/ci.yml)
-[![Security](https://github.com/markbang/cohub-mobile/actions/workflows/security.yml/badge.svg)](https://github.com/markbang/cohub-mobile/actions/workflows/security.yml)
-[![Release](https://github.com/markbang/cohub-mobile/actions/workflows/release-please.yml/badge.svg)](https://github.com/markbang/cohub-mobile/actions/workflows/release-please.yml)
+[![Mobile CI](https://github.com/netaart/cohub/actions/workflows/mobile-ci.yml/badge.svg)](https://github.com/netaart/cohub/actions/workflows/mobile-ci.yml)
+[![Mobile Security](https://github.com/netaart/cohub/actions/workflows/mobile-security.yml/badge.svg)](https://github.com/netaart/cohub/actions/workflows/mobile-security.yml)
 
 A native iOS and Android client for Cohub, built with React Native and Expo.
 
@@ -18,7 +17,7 @@ A native iOS and Android client for Cohub, built with React Native and Expo.
 
 | Platform | Link |
 |----------|------|
-| **Android** | [Download APK](https://cohub.live/bangwu/cohub-mobile/w/download) · [all builds](https://github.com/markbang/cohub-mobile/releases) |
+| **Android** | [Download APK](https://cohub.live/bangwu/cohub-mobile/w/download) · [all builds](https://github.com/netaart/cohub/releases?q=cohub-mobile) |
 | **iOS** | [Join the TestFlight beta](https://testflight.apple.com/join/KWhztpkP) |
 
 Android builds are published per ABI to the Yaota distribution origin, which is what the in-app updater reads. The [download page](https://cohub.live/bangwu/cohub-mobile/w/download) resolves the newest `arm64-v8a` build, and falls back to GitHub Releases if the catalog is unreachable.

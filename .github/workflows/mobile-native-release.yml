@@ -24,7 +24,7 @@ on:
         type: string
         default: internal
       release_tag:
-        description: Required vX.Y.Z tag for distribution and production builds
+        description: Required cohub-mobile-vX.Y.Z tag for distribution and production builds
         required: true
         type: string
     secrets:
@@ -72,7 +72,7 @@ on:
         options: [internal, production]
         default: internal
       release_tag:
-        description: Required for distribution and production, for example v1.2.0
+        description: Required for distribution and production, for example cohub-mobile-v1.2.0
         required: true
         type: string
       distribute_only:
@@ -135,8 +135,8 @@ jobs:
             echo "The distribution profile cannot submit to a store. Use production after configuring store credentials."
             exit 1
           fi
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Release builds require a stable release tag such as v1.2.0. The ref input is ignored."
+          if [[ ! "$RELEASE_TAG" =~ ^cohub-mobile-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release builds require a stable release tag such as cohub-mobile-v1.2.0. The ref input is ignored."
             exit 1
           fi
           git fetch --no-tags origin main

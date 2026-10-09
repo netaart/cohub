@@ -21,7 +21,10 @@ import { join } from "node:path";
  * expo-updates only downloads an update newer than its own embedded bundle.
  */
 
-const DEFAULT_REPOSITORY = "markbang/cohub-mobile";
+const DEFAULT_REPOSITORY = "netaart/cohub";
+// The monorepo also releases its services under vX.Y.Z; only app tags carry APKs.
+const TAG_PREFIX = "cohub-mobile-v";
+const APP_TAG = /^cohub-mobile-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const FINGERPRINT_ASSET = "cohub-android-native-fingerprint.txt";
 const CANDIDATE_LIMIT = 12;
 const ABIS = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"];
@@ -87,14 +90,29 @@ function computeSourceFingerprint() {
   return parseFingerprint(parsed.hash, "The current commit's Android source fingerprint");
 }
 
+/** App tags from `git/matching-refs`, newest version first. */
+export function newestAppTags(refs, limit) {
+  const version = (tag) => APP_TAG.exec(tag).slice(1).map(Number);
+  return refs
+    .map((ref) => ref.replace(/^refs\/tags\//, ""))
+    .filter((tag) => APP_TAG.test(tag))
+    .sort((a, b) => {
+      const [x, y] = [version(a), version(b)];
+      return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+    })
+    .slice(0, limit);
+}
+
 function listReleases(repository) {
-  const raw = run("gh", [
-    "release", "list", "--repo", repository,
-    "--exclude-drafts", "--exclude-pre-releases",
-    "--limit", String(CANDIDATE_LIMIT),
-    "--json", "tagName,publishedAt",
-  ]);
-  return JSON.parse(raw).sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+  const refs = JSON.parse(run("gh", ["api", `repos/${repository}/git/matching-refs/tags/${TAG_PREFIX}`, "--jq", "[.[].ref]"]));
+  return newestAppTags(refs, CANDIDATE_LIMIT).flatMap((tag) => {
+    const result = spawnSync("gh", ["release", "view", tag, "--repo", repository, "--json", "tagName,publishedAt,isDraft,isPrerelease"], { encoding: "utf8" });
+    // A pushed tag has no release until Mobile Native Tag Release creates one.
+    if (result.status !== 0 && /release not found/i.test(result.stderr)) return [];
+    if (result.status !== 0) throw new Error(`gh release view ${tag} failed: ${result.stderr.trim()}`);
+    const release = JSON.parse(result.stdout);
+    return release.isDraft || release.isPrerelease ? [] : [{ tagName: release.tagName, publishedAt: release.publishedAt }];
+  });
 }
 
 function releaseAssets(repository, tag) {

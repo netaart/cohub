@@ -25,7 +25,7 @@ export function parseArgs(argv) {
   const options = {
     abi: "x86_64",
     serial: null,
-    repository: "markbang/cohub-mobile",
+    repository: "netaart/cohub",
     flows: [...DEFAULT_FLOWS],
     otaWaitMs: DEFAULT_OTA_WAIT_MS,
     skipInstall: false,

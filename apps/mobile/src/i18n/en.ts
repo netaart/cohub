@@ -522,7 +522,7 @@ export const en = {
   "about.section.legal": "Legal",
   "about.row.version": "Version",
   "about.row.source": "Source code",
-  "about.row.sourceDetail": "github.com/markbang/cohub-mobile",
+  "about.row.sourceDetail": "github.com/netaart/cohub",
   "about.row.releases": "Release notes",
   "about.row.releasesDetail": "View published versions",
   "about.row.website": "Cohub website",

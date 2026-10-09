@@ -1,5 +1,7 @@
 # Changelog
 
+Releases after 2.2.14 are published as `cohub-mobile-vX.Y.Z` [GitHub Releases](https://github.com/netaart/cohub/releases?q=cohub-mobile) in the Cohub monorepo. This file is no longer updated; the links below point to the original repository.
+
 ## [2.2.14](https://github.com/markbang/cohub-mobile/compare/v2.2.13...v2.2.14) (2026-09-18)
 
 

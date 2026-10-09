@@ -20,6 +20,8 @@ import {
   isTransientOtaFailure,
   OTA_PUBLISH_ATTEMPTS,
 } from "./ota-publish.mjs";
+import { parseAppTag, parseCommits, renderReleaseNotes } from "./release-notes.mjs";
+import { newestAppTags } from "./e2e/resolve-golden.mjs";
 
 const YAML = createRequire(import.meta.url)("yaml");
 
@@ -228,7 +230,7 @@ const taggedRelease = workflow("mobile-native-tag.yml");
 assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /gh release upload/, "GitHub Release must still attach APKs");
 assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /publish-yaota-apks/, "Native Tag Release must publish the same APKs to Yaota");
 assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /OTA_SERVER/);
-assert.deepEqual(taggedRelease.on.push.tags, ["v*"]);
+assert.deepEqual(taggedRelease.on.push.tags, ["cohub-mobile-v*"], "The monorepo's vX.Y.Z tags release the services, not the app");
 assert.deepEqual(Object.keys(taggedRelease.on), ["push"], "Only a tag push starts automatic native release; release events must not duplicate it");
 assert.equal(taggedRelease.concurrency["cancel-in-progress"], false);
 assert.match(taggedRelease.concurrency.group, /github.ref/);
@@ -237,6 +239,9 @@ const prepareSteps = JSON.stringify(taggedRelease.jobs.prepare.steps);
 assert.match(prepareSteps, /--is-ancestor/);
 assert.match(prepareSteps, /--require-native-tag/);
 assert.match(prepareSteps, /--verify-tag/);
+assert.match(prepareSteps, /--latest=false/, "An app release must not become the repository's Latest release");
+assert.match(prepareSteps, /scripts\/release-notes\.mjs/);
+assert.equal(prepareSteps.includes("--generate-notes"), false, "Generated notes would list every monorepo PR");
 assert.match(prepareSteps, /GITHUB_SHA/);
 assert.equal(taggedRelease.jobs.prepare.permissions.contents, "write");
 const validateTag = taggedRelease.jobs.prepare.steps.find((step) => step.id === "target");
@@ -263,38 +268,38 @@ try {
   git("add", ".");
   git("commit", "-m", "test: release fixture");
   const releaseSha = git("rev-parse", "HEAD");
-  git("tag", "-a", "v1.2.3", "-m", "test release");
-  git("tag", "v1.2.4");
+  git("tag", "-a", "cohub-mobile-v1.2.3", "-m", "test release");
+  git("tag", "cohub-mobile-v1.2.4");
   git("push", "origin", "main", "--tags");
   const runTag = (tag, sha = releaseSha) => spawnSync("bash", ["-e", "-c", validateTag.run], {
     cwd: checkout, encoding: "utf8", env: { ...process.env, RELEASE_TAG: tag, GITHUB_SHA: sha, GITHUB_OUTPUT: join(tagFixture, "output") },
   });
-  let result = runTag("v1.2.3");
+  let result = runTag("cohub-mobile-v1.2.3");
   assert.equal(result.status, 0, result.stderr);
-  assert.match(readFileSync(join(tagFixture, "output"), "utf8"), /tag=v1.2.3/);
-  result = runTag("v1.2.3", git("rev-parse", "v1.2.3"));
+  assert.match(readFileSync(join(tagFixture, "output"), "utf8"), /tag=cohub-mobile-v1.2.3/);
+  result = runTag("cohub-mobile-v1.2.3", git("rev-parse", "cohub-mobile-v1.2.3"));
   assert.equal(result.status, 0, result.stderr);
-  for (const tag of ["v01.2.3", "v1.2.3-beta.1", "v1.2", "v1.2.3;echo unsafe"]) {
+  for (const tag of ["v1.2.3", "cohub-mobile-v01.2.3", "cohub-mobile-v1.2.3-beta.1", "cohub-mobile-v1.2", "cohub-mobile-v1.2.3;echo unsafe"]) {
     result = runTag(tag);
     assert.notEqual(result.status, 0);
-    assert.match(result.stdout, /stable vX.Y.Z/);
+    assert.match(result.stdout, /stable cohub-mobile-vX.Y.Z/);
   }
-  result = runTag("v1.2.4");
+  result = runTag("cohub-mobile-v1.2.4");
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Tag mismatch/);
   git("checkout", "main");
   git("commit", "--allow-empty", "-m", "test: newer main");
   const newerSha = git("rev-parse", "HEAD");
   git("push", "origin", "main");
-  result = runTag("v1.2.3", newerSha);
+  result = runTag("cohub-mobile-v1.2.3", newerSha);
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /Tag moved/);
   git("checkout", "-b", "unmerged");
   git("commit", "--allow-empty", "-m", "test: unmerged release");
   const unmergedSha = git("rev-parse", "HEAD");
-  git("tag", "v1.2.6");
-  git("push", "origin", "v1.2.6");
-  result = runTag("v1.2.6", unmergedSha);
+  git("tag", "cohub-mobile-v1.2.6");
+  git("push", "origin", "cohub-mobile-v1.2.6");
+  result = runTag("cohub-mobile-v1.2.6", unmergedSha);
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /reachable from origin\/main/);
 } finally {
@@ -320,15 +325,79 @@ assert.equal(taggedRelease.jobs.ios.with.submit, true);
 assert.equal(taggedRelease.jobs.ios.permissions.contents, "write");
 assert.deepEqual(taggedRelease.jobs["publish-android"].needs, ["prepare", "android"]);
 assert.match(JSON.stringify(taggedRelease.jobs["publish-android"].steps), /cohub-android-native-fingerprint.txt/);
-const releasePlease = parse(".github/workflows/release-please.yml");
-assert.deepEqual(Object.keys(releasePlease.jobs), ["release"], "Release Please owns metadata, not a second native build path");
-const releaseStep = releasePlease.jobs.release.steps.find((step) => step.id === "release");
-assert.equal(releaseStep.with.token, "${{ secrets.RELEASE_PLEASE_TOKEN }}", "GITHUB_TOKEN-created tags do not trigger downstream push workflows");
-assert.match(releasePlease.jobs.release.steps[0].run, /RELEASE_PLEASE_TOKEN is required/);
 const publishApkStep = taggedRelease.jobs["publish-android"].steps.find((step) => step.name === "Upload formal APKs to GitHub Release");
 assert.ok(publishApkStep, "The release workflow must attach formal Android APKs to the GitHub Release");
 assert.match(publishApkStep.run, /find build\/release/, "Artifact downloads keep their directory layout, so the publish step must locate APKs recursively");
 assert.equal(publishApkStep.run.includes("build/release/*.apk"), false, "A flat glob misses APKs nested under android/app/build/outputs");
+assert.match(publishApkStep.run, /cohub-\$\{RELEASE_TAG#cohub-mobile-\}-android-/, "APK names stay cohub-vX.Y.Z for Yaota and the landing page");
+for (const platform of ["android", "ios"]) {
+  assert.match(JSON.stringify(ota.jobs[platform].steps), /matching-refs\/tags\/cohub-mobile-v/, `${platform} OTA must resolve its runtime from app releases only`);
+}
+
+// Release notes replace Release Please and cover app commits only.
+assert.deepEqual(parseAppTag("cohub-mobile-v2.3.0"), { tag: "cohub-mobile-v2.3.0", version: "2.3.0" });
+for (const tag of ["v2.3.0", "cohub-mobile-v2.3", "cohub-mobile-v02.3.0"]) assert.throws(() => parseAppTag(tag), /cohub-mobile-vX\.Y\.Z/);
+const record = (sha, subject, body = "") => `${sha}\x1f${subject}\x1f${body}\x1e\n`;
+const notesCommits = parseCommits([
+  record("a".repeat(40), "fix(composer): keep the caret in view"),
+  record("b".repeat(40), "feat(mobile): add the Spaces tab"),
+  record("c".repeat(40), "Merge branch 'main'"),
+  record("d".repeat(40), "chore(mobile): bump expo"),
+  record("e".repeat(40), "feat(chat)!: change the turn layout"),
+  record("f".repeat(40), "fix(auth): rotate tokens", "BREAKING CHANGE: sign in again."),
+].join(""));
+assert.equal(notesCommits.length, 5, "Non-conventional subjects are left out");
+const notes = renderReleaseNotes({ repository: "netaart/cohub", previousTag: "cohub-mobile-v2.2.14", tag: "cohub-mobile-v2.2.15", date: "2026-10-09", commits: notesCommits });
+assert.ok(notes.startsWith("## [2.2.15](https://github.com/netaart/cohub/compare/cohub-mobile-v2.2.14...cohub-mobile-v2.2.15) (2026-10-09)\n"));
+assert.ok(notes.indexOf("### ⚠ BREAKING CHANGES") < notes.indexOf("### Features"));
+assert.ok(notes.indexOf("### Features") < notes.indexOf("### Fixes"));
+assert.match(notes, /\* add the Spaces tab \(\[bbbbbbb\]\(https:\/\/github\.com\/netaart\/cohub\/commit\/b{40}\)\)/, "The app scope adds nothing inside app notes");
+const features = notes.slice(notes.indexOf("### Features"), notes.indexOf("### Fixes"));
+assert.ok(features.indexOf("* add the Spaces tab") < features.indexOf("* **chat:** change the turn layout"), "Entries sort by scope like Release Please");
+assert.match(notes.slice(0, notes.indexOf("### Features")), /\*\*auth:\*\* rotate tokens/, "A BREAKING CHANGE footer marks the commit as breaking");
+assert.equal(notes.includes("bump expo"), false, "chore commits stay out of user-facing notes");
+assert.equal(notes.includes("Merge branch"), false);
+// Run the CLI on a repository where service commits and tags interleave with app ones.
+const notesFixture = mkdtempSync(join(tmpdir(), "cohub-release-notes-"));
+try {
+  const git = (...args) => execFileSync("git", args, { cwd: notesFixture, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const commit = (path, subject) => {
+    mkdirSync(join(notesFixture, path, ".."), { recursive: true });
+    writeFileSync(join(notesFixture, path), subject);
+    git("add", ".");
+    git("commit", "-m", subject);
+  };
+  git("init", "-b", "main");
+  git("config", "user.name", "Release Test");
+  git("config", "user.email", "release-test@example.invalid");
+  commit("apps/mobile/app.txt", "feat(chat): first release");
+  git("tag", "cohub-mobile-v1.0.0");
+  commit("apps/web/page.txt", "feat(web): a service change");
+  git("tag", "v9.0.0");
+  commit("apps/mobile/app.txt", "fix(composer): an app fix");
+  commit("apps/mobile/app.txt", "chore(mobile): release 1.0.1");
+  git("tag", "cohub-mobile-v1.0.1");
+  const cli = spawnSync(process.execPath, [fileURLToPath(new URL("./release-notes.mjs", import.meta.url)), "cohub-mobile-v1.0.1"], {
+    cwd: join(notesFixture, "apps/mobile"), encoding: "utf8", env: { ...process.env, GITHUB_REPOSITORY: "netaart/cohub" },
+  });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.match(cli.stdout, /compare\/cohub-mobile-v1\.0\.0\.\.\.cohub-mobile-v1\.0\.1\)/, "The range starts at the previous app tag, not a service tag");
+  assert.match(cli.stdout, /\*\*composer:\*\* an app fix/);
+  assert.equal(cli.stdout.includes("a service change"), false, "Commits outside apps/mobile stay out");
+  const first = spawnSync(process.execPath, [fileURLToPath(new URL("./release-notes.mjs", import.meta.url)), "cohub-mobile-v1.0.0"], {
+    cwd: join(notesFixture, "apps/mobile"), encoding: "utf8", env: { ...process.env, GITHUB_REPOSITORY: "netaart/cohub" },
+  });
+  assert.notEqual(first.status, 0);
+  assert.match(first.stderr, /No cohub-mobile-v\* tag precedes cohub-mobile-v1\.0\.0/);
+} finally {
+  rmSync(notesFixture, { recursive: true, force: true });
+}
+
+// E2E picks its golden APK among app tags, ignoring the services' vX.Y.Z tags.
+assert.deepEqual(
+  newestAppTags(["refs/tags/cohub-mobile-v2.2.9", "refs/tags/cohub-mobile-v2.10.0", "refs/tags/cohub-mobile-v2.2.14", "refs/tags/cohub-mobile-v2.3.0-rc.1"], 2),
+  ["cohub-mobile-v2.10.0", "cohub-mobile-v2.2.14"],
+);
 
 assert.equal(OTA_CLI_REVISION.length, 40);
 

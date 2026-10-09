@@ -65,7 +65,7 @@ export function isAllowedAndroidUpdateUrl(origin: string, value: string) {
 
 export function githubReleaseUrl(version: string) {
   if (!VERSION.test(version)) throw new Error("The update has an invalid release version. Check for updates again.");
-  return `https://github.com/markbang/cohub-mobile/releases/tag/v${version}`;
+  return `https://github.com/netaart/cohub/releases/tag/cohub-mobile-v${version}`;
 }
 
 export function validateAndroidUpdateAsset(asset: AndroidUpdateAsset, origin: string): {
