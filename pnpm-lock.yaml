@@ -197,8 +197,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0
       '@neta-art/generation':
-        specifier: ^0.1.30
-        version: 0.1.30
+        specifier: ^0.1.33
+        version: 0.1.33
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -588,8 +588,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0
       '@neta-art/generation':
-        specifier: ^0.1.30
-        version: 0.1.30
+        specifier: ^0.1.33
+        version: 0.1.33
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -678,8 +678,8 @@ importers:
         specifier: workspace:*
         version: link:../sdk
       '@neta-art/generation':
-        specifier: ^0.1.30
-        version: 0.1.30
+        specifier: ^0.1.33
+        version: 0.1.33
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -788,8 +788,8 @@ importers:
         specifier: ^2.1.0
         version: 2.1.0(@opentelemetry/api@1.9.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@5.20260918.1)(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.1)(kysely@0.28.17)(postgres@3.4.9))
       '@neta-art/generation':
-        specifier: ^0.1.30
-        version: 0.1.30
+        specifier: ^0.1.33
+        version: 0.1.33
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -875,8 +875,8 @@ importers:
   packages/protocol:
     dependencies:
       '@neta-art/generation':
-        specifier: ^0.1.30
-        version: 0.1.30
+        specifier: ^0.1.33
+        version: 0.1.33
       zod:
         specifier: ^4.5.4
         version: 4.5.4
@@ -3243,8 +3243,8 @@ packages:
     os: [linux]
     libc: [glibc]
 
-  '@neta-art/generation@0.1.30':
-    resolution: {integrity: sha512-4N1NJ6RVhwcLqBVcR0LJgK3/pOJtG2qNTINppS4ugmImJQwuEoq1wJftUmJnkRM0r5YbiIqWAR7P8Bth2iAPPw==}
+  '@neta-art/generation@0.1.33':
+    resolution: {integrity: sha512-OjeB9/PnpQ9YiL2rmku8vX1FailcUpDyDZkg5MetZch1zpTudfwWgy22l4aEb2tTPhx9rqG8eOPpDXh9KRsWLQ==}
     engines: {node: '>=20.0.0'}
     hasBin: true
 
@@ -4290,67 +4290,79 @@ packages:
     resolution: {integrity: sha512-C/0zV5IhgVdYhGJTwrY0v8dknxlhiKwtVJkMUaexu9/QvRmzlV4vfU3hZlUSgqc2BxQHntL1mCVbDq8j0FRFDw==}
     cpu: [arm64]
     os: [android]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-darwin-arm64@0.8.7':
     resolution: {integrity: sha512-/u+REDMI4a0/lsJXTM4c53/w31OGZLOReZIyg62uhgLs0kc8NHsj/nOcxTdlQjq5gi0zhdkccD9LaLTXcdzPvw==}
     cpu: [arm64]
     os: [darwin]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-darwin-x64@0.8.7':
     resolution: {integrity: sha512-sMMzFOwCo4WXR+/6zIBThOocSC50iIIZZdfiIDbaLvj0Ax/rWt/iavyfEAqajyvzydLyCqR/ZItdLWSRlu1umw==}
     cpu: [x64]
     os: [darwin]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-freebsd-x64@0.8.7':
     resolution: {integrity: sha512-MpdpKXix9P+Y1rKgjvcNeNtGjXeL1CmttNhYINrWls8kRpm4xM/oBGTmn6w7to8lAlwj5jm8q03dQPl5mRv4Qw==}
     cpu: [x64]
     os: [freebsd]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm-gnu@0.8.7':
     resolution: {integrity: sha512-rr1srFLlPAmC1vtxfc9C1YLDe3iH09YjfSeeIidBqKhzx1MATjOAq4mjlRUOnhr/L27MotWIYOFKwVsd5JZFOg==}
     cpu: [arm]
     os: [linux]
     libc: [glibc]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm-musl@0.8.7':
     resolution: {integrity: sha512-eAufXh8qBRpiSO6ueaMDL+yyoXIGLhpUce72YbcACtZU2qhExwBIJyEtQf5kH2Ki0X2aqkSjSfog4OPtKXan3Q==}
     cpu: [arm]
     os: [linux]
     libc: [musl]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm64-gnu@0.8.7':
     resolution: {integrity: sha512-gw4w6wPoHObBrdIC4duVWLmJOvpdE25j5D7yrM5mACNlK4klRz/lv8hK+ssQk9EJHBgZjSaqZIJVFgqNYbfv7A==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-arm64-musl@0.8.7':
     resolution: {integrity: sha512-L68N6Y4XkqcIaKo3Ra88JEvBEH4AHff44A4INcrxeVWZ8CZtu2tCpfVxe3hR8qQQMcvBSQlDn24KpkCKEhVvfA==}
     cpu: [arm64]
     os: [linux]
     libc: [musl]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-x64-gnu@0.8.7':
     resolution: {integrity: sha512-dzyAbltJmf3Cqlb8HcFuYIf5Yn0fl1vTr3XJ9HiVNNvOlhqPSArOqtw9vI1p6/VTXTjrMLXlU+s+/kNHiIy/Cw==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-linux-x64-musl@0.8.7':
     resolution: {integrity: sha512-Otw4MH3404q0Bbvl+YTdW9aoUV5vXmUw8260bWvt1XlaoIX/ceSgI4ygheRDMfBPoHt6FDayQaO9OLVUZAgkFA==}
     cpu: [x64]
     os: [linux]
     libc: [musl]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-win32-arm64@0.8.7':
     resolution: {integrity: sha512-qo/jyrzryiBuKEsFiuWaBCBe3tRMynQ0qFWFgOEjcCMQeZfBm+wKiVEUEFXXLc7bh8YezguAWp0Mtnhq4ARNyA==}
     cpu: [arm64]
     os: [win32]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-codegen/binding-win32-x64@0.8.7':
     resolution: {integrity: sha512-D5lDsVDx6m00E6bWySlWdH72Ca4TPSaphDqB6QjU6MpuNLIJqoGoatYyq2rOmBE8Zv/kunot/o58KGL03P3eiA==}
     cpu: [x64]
     os: [win32]
+    deprecated: yuku-codegen is pure JavaScript since 0.14
 
   '@yuku-parser/binding-android-arm64@0.8.7':
     resolution: {integrity: sha512-eGKYiUDX7Y0V7tDTmg+JTVnXnjMqfXXsorZ+EDf5kxwchQ3Or1HS14MzI2fw+jFhHR85fCWt+mtX33Yao73hIQ==}
@@ -8551,7 +8563,7 @@ snapshots:
     dependencies:
       '@cohub/protocol': file:packages/protocol
       '@kubiks/otel-drizzle': 2.1.0(@opentelemetry/api@1.9.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@5.20260918.1)(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.1)(kysely@0.28.17)(postgres@3.4.9))
-      '@neta-art/generation': 0.1.30
+      '@neta-art/generation': 0.1.33
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/exporter-trace-otlp-proto': 0.222.0(@opentelemetry/api@1.9.1)
       '@opentelemetry/instrumentation': 0.222.0(@opentelemetry/api@1.9.1)
@@ -8574,7 +8586,7 @@ snapshots:
 
   '@cohub/protocol@file:packages/protocol':
     dependencies:
-      '@neta-art/generation': 0.1.30
+      '@neta-art/generation': 0.1.33
       zod: 4.5.4
 
   '@cspotcode/source-map-support@0.8.1':
@@ -9563,7 +9575,7 @@ snapshots:
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
-  '@neta-art/generation@0.1.30':
+  '@neta-art/generation@0.1.33':
     dependencies:
       yaml: 2.9.0
 
