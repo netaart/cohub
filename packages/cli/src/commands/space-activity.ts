@@ -102,15 +102,12 @@ export function toAppRankingRows(apps: SpaceActivityAppRanking[]): Row[] {
 	}));
 }
 
-function hasCost(activity: SpaceActivityResponse): boolean {
-	return activity.summary.costTotal !== 0;
-}
-
 export function printActivityReport(activity: SpaceActivityResponse): void {
-	const showCost = hasCost(activity);
+	const { totals } = activity;
+	const showCost = totals.costTotal !== 0;
 
 	console.log(`\n  Summary (last ${activity.days} days):`);
-	table([activity.summary], [
+	table([totals], [
 		{ key: "totalTokens", label: "Tokens", format: formatNumber },
 		{ key: "requestCount", label: "Requests", format: formatNumber },
 		...(showCost ? [{ key: "costTotal", label: "Cost", format: formatCost }] : []),

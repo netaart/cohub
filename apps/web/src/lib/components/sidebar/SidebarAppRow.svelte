@@ -40,8 +40,8 @@ const title = $derived(appDisplayTitle(app.meta, app.slug));
 	}}
 	title={title}
 >
-	<!-- The icon spans both text lines: 16px title + 12px slug = 28px (`md`). -->
-	<AppIcon meta={app.meta} slug={app.slug} size="md" />
+	<!-- The icon spans both text lines: 16px title + 12px slug = 28px (`sm`). -->
+	<AppIcon meta={app.meta} slug={app.slug} seed={app.id} size="sm" />
 	<span class="min-w-0 flex-1">
 		<span class="block truncate leading-4">{title}</span>
 		<span class="block truncate font-mono text-[10px] font-normal leading-3 text-text-placeholder">{app.slug}</span>

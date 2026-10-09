@@ -42,7 +42,6 @@ function remoteSearchToSuggestion(
 		...item,
 		excerpt: item.excerpt ?? null,
 		spaceName: item.spaceName ?? null,
-		sessionTitle: item.sessionTitle ?? null,
 		viewerRelation: item.viewerRelation ?? null,
 		viewerTier: item.effectiveTier ?? undefined,
 		source: "remote",
@@ -59,13 +58,9 @@ async function searchRecentSpaceDefaults(options?: {
 		viewerUserUuid: options?.viewerUserUuid,
 	});
 	const snapshot = getPaletteOverviewSnapshot().data;
-	const hasSnapshotItems = Boolean(
-		snapshot?.spaces.length || snapshot?.recentSessions.length,
-	);
-	const overview =
-		snapshot && hasSnapshotItems
-			? mergeLocalOverviewIntoSnapshot(snapshot, localOverview)
-			: localOverview;
+	const overview = snapshot?.spaces.length
+		? mergeLocalOverviewIntoSnapshot(snapshot, localOverview)
+		: localOverview;
 	return getCommandPaletteDefaultItems({
 		query: "",
 		resourceTypes: ["space"],

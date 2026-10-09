@@ -116,7 +116,9 @@ export const normalizeRequestSource = (
   const spaceId = asUuid(record.spaceId);
   const sessionId = asUuid(record.sessionId);
   const turnId = asUuid(record.turnId);
-  const toolCallId = asUuid(record.toolCallId);
+  // Harness tool-call ids are opaque (e.g. call_*, toolu_*), not necessarily UUIDs.
+  const toolCallId = asNonEmpty(record.toolCallId);
+  const validToolCallId = toolCallId && toolCallId.length <= 255 ? toolCallId : undefined;
   const clientId = asClientId(record.clientId);
   const sandboxVersion = asSandboxVersion(record.sandboxVersion);
   const via = asVia(record.via);
@@ -124,7 +126,7 @@ export const normalizeRequestSource = (
     ...(spaceId ? { spaceId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(turnId ? { turnId } : {}),
-    ...(toolCallId ? { toolCallId } : {}),
+    ...(validToolCallId ? { toolCallId: validToolCallId } : {}),
     ...(clientId ? { clientId } : {}),
     ...(sandboxVersion ? { sandboxVersion } : {}),
     ...(via ? { via } : {}),

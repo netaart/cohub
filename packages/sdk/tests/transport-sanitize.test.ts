@@ -58,7 +58,7 @@ test("HttpTransport Authorization header uses sanitized tokens", async () => {
 	await client.spaces.list();
 	assert.equal(calls.length, 1);
 	assert.equal(calls[0]?.auth, "Bearer good.token");
-	assert.equal(calls[0]?.url, "https://api.example.com/api/spaces");
+	assert.equal(calls[0]?.url, "https://api.example.com/api/spaces?filter=recent");
 	assert.ok(HttpError);
 });
 

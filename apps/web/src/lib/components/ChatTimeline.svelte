@@ -189,7 +189,7 @@ $effect(() => {
 	data-session-id={sessionId ?? undefined}
 	class="chat-timeline-scroll relative flex-1 min-h-0 overflow-y-auto bg-bg-content px-4 sm:px-6"
 >
-	<div class={`mx-auto max-w-4xl flex flex-col [&>*]:mt-2 pt-6 pb-6`}>
+	<div class={`mx-auto max-w-[var(--chat-content-max-width)] flex flex-col [&>*]:mt-2 pt-6 pb-6`}>
 		{#if loading && timeline.length === 0}
 			<div class="flex min-h-[42vh] items-center justify-center gap-2 text-[12px] text-text-tertiary">
 				<Loader2 class="h-4 w-4 animate-spin" aria-label={m.chat_loading_turns({}, { locale })} />
@@ -243,11 +243,13 @@ $effect(() => {
 						: item.phase === 'starting_generation'
 							? m.chat_starting_generation({}, { locale })
 							: m.chat_starting_agent({}, { locale })}
-					<div class="px-2 py-1">
+					<div class="py-1">
 						<GenerationRuntimeStatusRow label={footerLabel} compact />
 					</div>
 				{:else if item.kind === 'tool'}
-					<ToolExecutionCard tool={item.tool} {onOpenFile} />
+					<div class="px-[var(--chat-msg-inset)]">
+						<ToolExecutionCard tool={item.tool} {onOpenFile} />
+					</div>
 				{:else if item.kind === 'compact'}
 					<CompactionDivider turn={item.turn} />
 				{/if}

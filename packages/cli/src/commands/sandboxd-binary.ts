@@ -7,29 +7,8 @@ import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-// The sandboxd binary version is pinned independently of the CLI package: it
-// only needs to change when apps/sandbox changes, and the agent-sandbox wire
-// protocol ("1") guarantees backward compatibility.
-//
-// IMPORTANT: this must point at a tag whose CDN artifacts have already been
-// published by .github/workflows/sandbox-binaries-build.yml. Only bump it AFTER
-// that tag's publish-cdn job has succeeded, otherwise `runtime up` 404s on the
-// default download.
-//
-// v2.54.0 is the first published tag with the private managed Runtime control
-// pipe (`COHUB_RUNTIME_MANAGED` over fd 3), so `runtime up` reads connection
-// state from the daemon instead of polling the API every five seconds. It also
-// carries the optional workspace-search runner download. v2.53.1 already has
-// the native FSEvents backends and the `runtimeId` control frame, and older
-// releases stay usable through the compatibility readiness/restart path.
-//
-// v2.54.1 keeps the same wire protocol and adds relay diagnostics: data-channel
-// pairing outlives the runner's dial timeout, dial failures distinguish a
-// timeout from an explicit rejection, and teardown-time websocket write
-// failures log at debug instead of warn. v2.55.0 republishes that compatible
-// runner alongside the matching platform release; no new runner capability is
-// required.
-export const SANDBOXD_VERSION = "v2.55.0";
+// Pin only after all platform artifacts are published to the public CDN.
+export const SANDBOXD_VERSION = "v2.61.1";
 
 const BINARY_NAME = "cohub-sandboxd";
 

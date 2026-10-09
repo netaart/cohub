@@ -1,6 +1,6 @@
 import { error } from "@sveltejs/kit";
 import { loadPublicAppDetail } from "$lib/server/public-api";
-import { setPublicPageCache } from "$lib/server/public-cache";
+import { setPublicAppPageCache } from "$lib/server/public-cache";
 import type { PageServerLoad } from "./$types";
 
 /** Read `?cohub_v=` as a version number; ignore anything malformed. */
@@ -31,7 +31,7 @@ export const load: PageServerLoad = async ({
 	if (result.ok) {
 		// This loader fetches the API anonymously, so the rendered document can only
 		// ever reflect anonymous-visible data — app visibility alone governs caching.
-		setPublicPageCache(setHeaders, {
+		setPublicAppPageCache(setHeaders, {
 			private: (result.detail.app.visibility ?? "public") === "space",
 		});
 		const app = result.detail.app;
@@ -60,7 +60,7 @@ export const load: PageServerLoad = async ({
 		error(404, "App not found");
 	}
 
-	setPublicPageCache(setHeaders, { private: true });
+	setPublicAppPageCache(setHeaders, { private: true });
 	return {
 		mode: "client" as const,
 		pathname: url.pathname,

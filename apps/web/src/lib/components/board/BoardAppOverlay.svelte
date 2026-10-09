@@ -4,8 +4,8 @@ import type {
 	AppDetailResponse,
 	AppRuntimeShellContext,
 } from "@neta-art/cohub";
-import { pointToWorld, screenPoint } from "@neta-art/cohub/board";
 import { onDestroy, untrack } from "svelte";
+import { toBoardPointerEvent } from "$lib/board/board-pointer";
 import type { BoardEditor, BoardPointerEvent } from "$lib/board/editor.svelte";
 import AppSurface from "$lib/components/app/AppSurface.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
@@ -148,27 +148,11 @@ function styleFor(app: OverlayApp) {
 }
 
 function toPointerEvent(event: PointerEvent): BoardPointerEvent {
-	const rect = overlayHost?.getBoundingClientRect() ?? new DOMRect();
-	const screen = screenPoint(
-		event.clientX - rect.left,
-		event.clientY - rect.top,
+	return toBoardPointerEvent(
+		event,
+		overlayHost?.getBoundingClientRect() ?? new DOMRect(),
+		editor.camera,
 	);
-	return {
-		pointerId: event.pointerId,
-		screen,
-		world: pointToWorld(screen, editor.camera),
-		shiftKey: event.shiftKey,
-		metaKey: event.metaKey,
-		ctrlKey: event.ctrlKey,
-		altKey: event.altKey,
-		button: event.button,
-		buttons: event.buttons,
-		pointerType: event.pointerType,
-		cancelled:
-			event.type === "pointercancel" || event.type === "lostpointercapture",
-		pressure:
-			event.pointerType === "pen" && event.pressure > 0 ? event.pressure : 0.5,
-	};
 }
 
 function handleBarPointerDown(event: PointerEvent) {

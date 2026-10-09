@@ -10,8 +10,8 @@ import {
 	Play,
 	X,
 } from "lucide-svelte";
+import { identityColor } from "$lib/avatar-identity";
 import type { BoardCollaboratorProfile } from "$lib/board/board-activity";
-import { collaborationColorToken } from "$lib/board/board-awareness";
 import {
 	BOARD_REPLAY_SPEEDS,
 	type BoardReplaySpeed,
@@ -133,7 +133,6 @@ function handleTrackPointerUp(event: PointerEvent) {
 	track?.releasePointerCapture(event.pointerId);
 }
 
-/** Position of each entry's tick along the track. */
 function tickLeft(entryIndex: number): string {
 	return `${((entryIndex + 1) / entries.length) * 100}%`;
 }
@@ -153,12 +152,13 @@ function tickLeft(entryIndex: number): string {
 					<UserAvatar
 						name={profiles.get(current.actorId)?.displayName ?? current.actorId}
 						avatarUrl={profiles.get(current.actorId)?.avatarUrl ?? null}
+						seed={current.actorId}
 						size="xxs"
 					/>
 				{:else}
 					<span
 						class="replay-actor-dot"
-						style:background={`var(${collaborationColorToken(current.actorId)})`}
+						style:background={identityColor(current.actorId)}
 					></span>
 				{/if}
 				<span class="replay-actor">{actorName(current)}</span>
@@ -200,7 +200,6 @@ function tickLeft(entryIndex: number): string {
 		</button>
 	</div>
 
-	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 	<div
 		bind:this={track}
 		class="replay-track"
@@ -223,9 +222,8 @@ function tickLeft(entryIndex: number): string {
 			<span
 				class="replay-tick"
 				class:replay-tick--past={entry.version <= version}
-				class:replay-tick--quiet={!entry.visual}
 				style:left={tickLeft(entryIndex)}
-				style:--tick-color={`var(${collaborationColorToken(entry.actorId)})`}
+				style:--tick-color={identityColor(entry.actorId)}
 			></span>
 		{/each}
 		<div class="replay-thumb" style:left={`${fraction * 100}%`}></div>
@@ -394,7 +392,6 @@ function tickLeft(entryIndex: number): string {
 	.replay-link:disabled { color: var(--text-tertiary); text-decoration: none; }
 	.replay-link--failed { color: var(--error-soft); }
 
-	/* ─── Track ─────────────────────────────────────────────── */
 	.replay-track {
 		position: relative;
 		height: 22px;
@@ -440,7 +437,6 @@ function tickLeft(entryIndex: number): string {
 		pointer-events: none;
 	}
 	.replay-tick--past { opacity: 0.85; }
-	.replay-tick--quiet { height: 5px; }
 
 	.replay-thumb {
 		position: absolute;
@@ -456,7 +452,6 @@ function tickLeft(entryIndex: number): string {
 		pointer-events: none;
 	}
 
-	/* ─── Controls ──────────────────────────────────────────── */
 	.replay-controls {
 		display: flex;
 		align-items: center;

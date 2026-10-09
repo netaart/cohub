@@ -1,6 +1,6 @@
 {
   "name": "@neta-art/cohub",
-  "version": "8.23.0",
+  "version": "9.0.0",
   "description": "Cohub SDK for spaces, sessions, boards, and realtime agent collaboration.",
   "license": "Apache-2.0",
   "private": false,
@@ -48,6 +48,10 @@
         "types": "./dist/space-picker.d.ts",
         "import": "./dist/space-picker.js"
       },
+      "./host-bridge": {
+        "types": "./dist/host-bridge.d.ts",
+        "import": "./dist/host-bridge.js"
+      },
       "./media": {
         "types": "./dist/media.d.ts",
         "import": "./dist/media.js"
@@ -55,6 +59,10 @@
       "./board": {
         "types": "./dist/board/index.d.ts",
         "import": "./dist/board/index.js"
+      },
+      "./board/player": {
+        "types": "./dist/board/runtime/board-player.d.ts",
+        "import": "./dist/board/runtime/board-player.js"
       },
       "./board/render": {
         "types": "./dist/board/render/index.d.ts",
@@ -96,6 +104,10 @@
       "types": "./src/space-picker.ts",
       "import": "./src/space-picker.ts"
     },
+    "./host-bridge": {
+      "types": "./src/host-bridge.ts",
+      "import": "./src/host-bridge.ts"
+    },
     "./media": {
       "types": "./src/media.ts",
       "import": "./src/media.ts"
@@ -103,6 +115,10 @@
     "./board": {
       "types": "./src/board/index.ts",
       "import": "./src/board/index.ts"
+    },
+    "./board/player": {
+      "types": "./src/board/runtime/board-player.ts",
+      "import": "./src/board/runtime/board-player.ts"
     },
     "./board/render": {
       "types": "./src/board/render/index.ts",

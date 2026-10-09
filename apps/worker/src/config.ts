@@ -2,9 +2,6 @@ export interface WorkerConfig {
   redisUrl: string;
   bullmqRedisUrl: string;
   databaseUrl: string;
-  giteaBaseUrl?: string;
-  giteaToken?: string;
-  giteaOrg: string;
   workerSecret: string;
   appEncryptionKey: string;
   spaceStorageRoot: string;
@@ -48,16 +45,6 @@ export interface WorkerConfig {
 
 const env = (process.env.ENV === "prod" ? "prod" : "dev") as "dev" | "prod";
 
-type GiteaConfig = Pick<WorkerConfig, "giteaBaseUrl" | "giteaToken" | "giteaOrg">;
-
-export const resolveGiteaConfig = (
-  source: Record<string, string | undefined> = process.env,
-): GiteaConfig => ({
-  giteaBaseUrl: source.GITEA_BASE_URL?.trim().replace(/\/+$/, "") || undefined,
-  giteaToken: source.GITEA_TOKEN?.trim() || undefined,
-  giteaOrg: source.GITEA_ORG?.trim() || "cohub-spaces",
-});
-
 const assertRedisUrl = (value: string, envName: string) => {
   if (!value) throw new Error(`Missing required env: ${envName}`);
   try {
@@ -74,7 +61,6 @@ export const config: WorkerConfig = {
   redisUrl: process.env.REDIS_URL ?? "",
   bullmqRedisUrl: process.env.BULLMQ_REDIS_URL ?? "",
   databaseUrl: process.env.DATABASE_URL ?? "",
-  ...resolveGiteaConfig(),
   workerSecret: process.env.WORKER_SECRET ?? "",
   appEncryptionKey: process.env.APP_ENCRYPTION_KEY ?? "",
   spaceStorageRoot: process.env.SPACE_STORAGE_ROOT ?? "",
@@ -119,9 +105,6 @@ export const assertRequiredConfig = (value: WorkerConfig = config) => {
   assertRedisUrl(value.redisUrl, "REDIS_URL");
   assertRedisUrl(value.bullmqRedisUrl, "BULLMQ_REDIS_URL");
   if (!value.databaseUrl) throw new Error("Missing required env: DATABASE_URL");
-  if (Boolean(value.giteaBaseUrl) !== Boolean(value.giteaToken)) {
-    throw new Error("GITEA_BASE_URL and GITEA_TOKEN must be configured together");
-  }
   if (!value.workerSecret) throw new Error("Missing required env: WORKER_SECRET");
   if (!value.appEncryptionKey) throw new Error("Missing required env: APP_ENCRYPTION_KEY");
   if (!value.spaceStorageRoot) throw new Error("Missing required env: SPACE_STORAGE_ROOT");

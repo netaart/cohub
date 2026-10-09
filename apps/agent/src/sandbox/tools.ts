@@ -51,6 +51,7 @@ import {
   SANDBOX_WORKSPACE_PATH,
 } from "../runtime/paths.js";
 import { getCurrentSessionExecutionAuth } from "../runtime/session-execution-auth.js";
+import { runsExecutableDirectly } from "../sandbox-executables.js";
 import { getCurrentToolExecutionContext, runWithToolExecutionContext, type TurnTelemetryMetrics } from "../tool-context.js";
 import { resolveSpaceFileVisibility } from "../runtime/cross-space-query-access.js";
 import { createWorkspaceVisibilityFilter, type AgentFileVisibility, type AgentWorkspaceVisibilityFilter } from "../runtime/workspace-visibility.js";
@@ -816,7 +817,7 @@ function createRemoteFindOperations(): FindOperations {
         logger.debug(`[Tool:find] pattern=${pattern} path=${path}`);
 
         const connection = await getCurrentConnection();
-        if (connection.capabilities?.processStartArgv) {
+        if (runsExecutableDirectly(connection.capabilities, "processFd")) {
           const argv = buildFdFindArgv({ pattern, path, limit: options.limit, ignore: options.ignore });
           const stderrChunks: string[] = [];
           const matches: string[] = [];
@@ -1078,7 +1079,7 @@ function createRemoteGrepTool() {
         await assertSandboxPathVisible(searchPath.startsWith("/") ? searchPath : `${SANDBOX_WORKSPACE_PATH}/${searchPath}`, { isDirectory: true });
       }
       try {
-        if (connection.capabilities?.processStartArgv) {
+        if (runsExecutableDirectly(connection.capabilities, "processRg")) {
           const collector = createRgJsonGrepCollector({ searchPath: grepInput.path, limit: effectiveLimit });
           const stderrChunks: string[] = [];
           const updates = createThrottledTextToolUpdate(onUpdate, { maxChars: DEFAULT_MAX_BYTES });

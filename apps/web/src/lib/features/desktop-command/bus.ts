@@ -17,6 +17,11 @@ export type DesktopCommandOutcome =
 			error?: { code: string; message: string };
 	  };
 
+type TerminalDesktopCommandOutcome = Exclude<
+	DesktopCommandOutcome,
+	{ status: "pending" }
+>;
+
 export type DesktopCommandContext = {
 	commandId: string;
 	source: DesktopCommandDispatchedPayload["source"];
@@ -27,7 +32,7 @@ export type DesktopCommandHost = (
 	context: DesktopCommandContext,
 ) => Promise<DesktopCommandOutcome>;
 
-const HOST_UNAVAILABLE: DesktopCommandOutcome = {
+const HOST_UNAVAILABLE: TerminalDesktopCommandOutcome = {
 	status: "desktop_host_unavailable",
 	error: {
 		code: "desktop_host_unavailable",
@@ -43,34 +48,35 @@ let host: DesktopCommandHost | null = null;
  * twice, and the outcome is kept so a failed upload can be re-reported. In memory
  * by design: delivery is at-least-once, so callable methods should be repeatable.
  */
-type TerminalDesktopCommandOutcome = Exclude<
-	DesktopCommandOutcome,
-	{ status: "pending" }
->;
-type HandledEntry = {
-	outcome: TerminalDesktopCommandOutcome | null;
-	reported: boolean;
-	accepted: boolean;
-};
+type HandledEntry =
+	| { state: "running" | "delegated" | "dropped" }
+	| {
+			state: "done";
+			outcome: TerminalDesktopCommandOutcome;
+			reported: boolean;
+	  };
 const handled = new Map<string, HandledEntry>();
 
 const HANDLED_MAX = 200;
 const HANDLED_KEEP = 100;
 const UNREPORTED_MAX = 50;
-const REPORT_ATTEMPTS = 3;
-let reportRetryMs = 400;
+const ATTEMPTS = 3;
+let retryMs = 400;
+
+const isUnreported = (entry: HandledEntry) =>
+	entry.state === "done" && !entry.reported;
 
 /** A running command is never evicted, or a redelivery would run it again. */
 function evictBounded() {
 	let unreported = 0;
 	for (const entry of handled.values()) {
-		if (entry.outcome && !entry.reported) unreported += 1;
+		if (isUnreported(entry)) unreported += 1;
 	}
 
 	for (const [id, entry] of handled) {
 		if (handled.size <= HANDLED_KEEP && unreported <= UNREPORTED_MAX) return;
-		if (!entry.outcome && !entry.accepted) continue;
-		if (entry.outcome && !entry.reported) {
+		if (entry.state === "running") continue;
+		if (isUnreported(entry)) {
 			if (unreported <= UNREPORTED_MAX) continue;
 			unreported -= 1;
 		}
@@ -78,7 +84,7 @@ function evictBounded() {
 	}
 }
 
-function rememberBounded(commandId: string, entry: HandledEntry) {
+function remember(commandId: string, entry: HandledEntry) {
 	handled.set(commandId, entry);
 	if (handled.size > HANDLED_MAX) evictBounded();
 }
@@ -97,20 +103,28 @@ function isForThisClient(payload: DesktopCommandDispatchedPayload): boolean {
 	return Boolean(clientId && payload.targetClientId === clientId);
 }
 
-export type DesktopCommandReporter = (
-	commandId: string,
-	body: {
-		status: TerminalDesktopCommandOutcome["status"];
-		error: { code: string; message: string } | null;
-	},
-) => Promise<unknown>;
+export type DesktopCommandTransport = {
+	accept: (commandId: string) => Promise<{ accepted: boolean }>;
+	report: (
+		commandId: string,
+		body: {
+			status: TerminalDesktopCommandOutcome["status"];
+			error: { code: string; message: string } | null;
+		},
+	) => Promise<unknown>;
+};
 
-let reporter: DesktopCommandReporter | null = null;
+const sdkTransport: DesktopCommandTransport = {
+	accept: async (commandId) => (await loadSdk()).desktop.accept(commandId),
+	report: async (commandId, body) =>
+		(await loadSdk()).desktop.reportResult(commandId, body),
+};
+let transport = sdkTransport;
 
-export function __setDesktopCommandReporterForTests(
-	next: DesktopCommandReporter | null,
+export function __setDesktopCommandTransportForTests(
+	next: DesktopCommandTransport | null,
 ) {
-	reporter = next;
+	transport = next ?? sdkTransport;
 }
 
 export function getHandledSizeForTests(): number {
@@ -121,69 +135,61 @@ export function __resetDesktopCommandBusForTests(
 	options: { retryMs?: number } = {},
 ) {
 	handled.clear();
-	reportRetryMs = options.retryMs ?? 400;
+	host = null;
+	retryMs = options.retryMs ?? 400;
 }
 
-async function uploadResult(
-	commandId: string,
-	body: Parameters<DesktopCommandReporter>[1],
-): Promise<unknown> {
-	if (reporter) return reporter(commandId, body);
-	const sdk = await loadSdk();
-	return sdk.desktop.reportResult(commandId, body);
+/** Network errors, timeouts, rate limits, and 5xx may pass; other statuses are final. */
+const isRetryable = (error: unknown) => {
+	const status = (error as { status?: unknown } | null)?.status;
+	return (
+		typeof status !== "number" ||
+		status === 408 ||
+		status === 429 ||
+		status >= 500
+	);
+};
+
+async function withRetry<T>(
+	label: string,
+	run: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; retryable: boolean }> {
+	for (let attempt = 1; ; attempt += 1) {
+		try {
+			return { ok: true, value: await run() };
+		} catch (error) {
+			const retryable = isRetryable(error);
+			if (!retryable || attempt === ATTEMPTS) {
+				console.warn(`[desktop-command] failed to ${label}`, error);
+				return { ok: false, retryable };
+			}
+			await new Promise((resolve) => setTimeout(resolve, retryMs * attempt));
+		}
+	}
 }
 
 async function report(
 	commandId: string,
 	outcome: TerminalDesktopCommandOutcome,
-): Promise<boolean> {
-	for (let attempt = 1; attempt <= REPORT_ATTEMPTS; attempt += 1) {
-		try {
-			await uploadResult(commandId, {
-				status: outcome.status,
-				error: outcome.error ?? null,
-			});
-			return true;
-		} catch (error) {
-			if (attempt === REPORT_ATTEMPTS) {
-				console.warn("[desktop-command] failed to report result", error);
-				return false;
-			}
-			await new Promise((resolve) =>
-				setTimeout(resolve, reportRetryMs * attempt),
-			);
-		}
-	}
-	return false;
+): Promise<void> {
+	const sent = await withRetry("report result", () =>
+		transport.report(commandId, {
+			status: outcome.status,
+			error: outcome.error ?? null,
+		}),
+	);
+	remember(commandId, { state: "done", outcome, reported: sent.ok });
 }
 
-export async function handleDesktopCommand(
-	payload: DesktopCommandDispatchedPayload,
-): Promise<void> {
-	const seen = handled.get(payload.commandId);
-	if (seen) {
-		if (seen.outcome && !seen.reported) {
-			seen.reported = await report(payload.commandId, seen.outcome);
-		}
-		return;
-	}
-	const entry: HandledEntry = {
-		outcome: null,
-		reported: false,
-		accepted: false,
-	};
-	rememberBounded(payload.commandId, entry);
-
-	let outcome: DesktopCommandOutcome;
+async function run(
+	command: DesktopCommand,
+	context: DesktopCommandContext,
+	serve: DesktopCommandHost,
+): Promise<DesktopCommandOutcome> {
 	try {
-		outcome = host
-			? await host(payload.command, {
-					commandId: payload.commandId,
-					source: payload.source,
-				})
-			: HOST_UNAVAILABLE;
+		return await serve(command, context);
 	} catch (error) {
-		outcome = {
+		return {
 			status: "rejected",
 			error: {
 				code: "host_failed",
@@ -191,14 +197,48 @@ export async function handleDesktopCommand(
 			},
 		};
 	}
+}
 
-	if (outcome.status === "pending") {
-		// The Work acknowledged delivery and will settle this command directly.
-		entry.accepted = true;
+export async function handleDesktopCommand(
+	payload: DesktopCommandDispatchedPayload,
+): Promise<void> {
+	const { commandId } = payload;
+	const seen = handled.get(commandId);
+	if (seen) {
+		if (seen.state === "done" && !seen.reported) {
+			await report(commandId, seen.outcome);
+		}
 		return;
 	}
-	entry.outcome = outcome;
-	entry.reported = await report(payload.commandId, outcome);
+	remember(commandId, { state: "running" });
+
+	const serve = host;
+	if (!serve) return report(commandId, HOST_UNAVAILABLE);
+
+	// A command that expired while the tab slept must not open a window.
+	const accepted = await withRetry("accept command", () =>
+		transport.accept(commandId),
+	);
+	if (!accepted.ok && accepted.retryable) {
+		handled.delete(commandId);
+		return;
+	}
+	if (!accepted.ok || !accepted.value.accepted) {
+		remember(commandId, { state: "dropped" });
+		return;
+	}
+
+	const outcome = await run(
+		payload.command,
+		{ commandId, source: payload.source },
+		serve,
+	);
+	// `pending`: the App settles the command itself.
+	if (outcome.status === "pending") {
+		remember(commandId, { state: "delegated" });
+		return;
+	}
+	await report(commandId, outcome);
 }
 
 function parsePayload(value: unknown): DesktopCommandDispatchedPayload | null {

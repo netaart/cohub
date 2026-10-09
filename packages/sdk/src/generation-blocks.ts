@@ -1,4 +1,4 @@
-import { normalizeBoardRemoteUrl } from "@cohub/protocol/board-document";
+import { normalizeBoardRemoteUrl } from "@cohub/protocol";
 import type { TaskRunRecord } from "./types.js";
 
 /** Tolerant readers for generation payloads, shared by every task projection. */

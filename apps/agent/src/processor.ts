@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { UnrecoverableError, type Job } from "bullmq";
-import type { ContentBlock } from "@cohub/protocol/core";
+import { imageBlockToPi, type ContentBlock, type PiImageContent } from "@cohub/protocol/core";
 import { ModelUnavailableError } from "@cohub/core/sessions";
-import type { ImageContent } from "@earendil-works/pi-ai";
-import { readPublicAssetImageUrl } from "./public-asset-storage.js";
-import { imageOmittedText, normalizeAgentImage, normalizeContentBlocksImages } from "./image-normalizer.js";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { context, trace } from "@opentelemetry/api";
 import { getActiveTraceIdentifiers, getOrCreateRequestId, setRequestContextAttributes } from "@cohub/infra/tracing";
@@ -24,6 +21,7 @@ import { clearCurrentSessionExecutionAuth, setCurrentSessionExecutionAuth } from
 import { resolveSpaceFileVisibility } from "./runtime/cross-space-query-access.js";
 import { normalizeGenerationPolicy } from "@cohub/protocol/generation";
 import { runWithToolExecutionContext } from "./tool-context.js";
+import { createImageInputCache } from "@cohub/model-runtime/image-content";
 import { loadOrCreateSessionHandle, ensurePendingUserMessage, hasSessionUserMessage, removePendingUserMessage, resetStreamState, drainStreamStateBeforeReset, persistInterruptedAssistantSnapshot, refreshSessionHandleFileSignature, type SessionHandle } from "./session.js";
 import { claimNextTurnBatch, buildUserMessagesForBatch, enqueueNextRunnableTurn, resolveBatchAccessMode, type ClaimedTurnBatch } from "./batch.js";
 import { acquireSessionLock } from "./session-lock.js";
@@ -137,46 +135,14 @@ async function getModelRegistryForUser(userId: string | null | undefined) {
   return registry;
 }
 
-function contentBlockToBase64ImageContent(block: ContentBlock): ImageContent | null {
-  if (block.type !== "image" || block.source.type !== "base64") return null;
-  return {
-    type: "image",
-    data: block.source.data.replace(/^data:[^;,]+;base64,/, ""),
-    mimeType: block.source.media_type || "application/octet-stream",
-  };
-}
+type AgentUserContent = { type: "text"; text: string } | PiImageContent;
 
-async function fetchUrlImageContent(url: string): Promise<ImageContent | null> {
-  const publicAsset = await readPublicAssetImageUrl(url).catch(() => null);
-  if (!publicAsset) return null;
-  const normalized = await normalizeAgentImage({
-    data: publicAsset.data,
-    mimeType: publicAsset.mimeType,
-    sourceKind: "public_asset",
-    originalSource: "url",
-    originalUrl: url,
+function contentToAgentMessage(content: ContentBlock[], meta: Record<string, unknown> | null): AgentMessage {
+  const agentContent = content.flatMap((block): AgentUserContent[] => {
+    if (block.type === "text") return [{ type: "text", text: block.text }];
+    const image = block.type === "image" ? imageBlockToPi(block) : null;
+    return image ? [image] : [];
   });
-  return normalized ? { type: "image", data: normalized.data, mimeType: normalized.mimeType } : null;
-}
-
-async function contentBlockToImageContent(block: ContentBlock): Promise<ImageContent | null> {
-  if (block.type !== "image") return null;
-  if (block.source.type === "base64") return contentBlockToBase64ImageContent(block);
-  return fetchUrlImageContent(block.source.url).catch(() => null);
-}
-
-async function contentBlockToAgentContent(block: ContentBlock): Promise<{ type: "text"; text: string } | ImageContent | null> {
-  if (block.type === "text") return { type: "text", text: block.text };
-  if (block.type === "image") {
-    const image = await contentBlockToImageContent(block);
-    return image ?? { type: "text", text: imageOmittedText("image could not be loaded") };
-  }
-  return null;
-}
-
-async function contentToAgentMessage(content: ContentBlock[], meta: Record<string, unknown> | null): Promise<AgentMessage> {
-  const resolved = await Promise.all(content.map(contentBlockToAgentContent));
-  const agentContent = resolved.filter((block): block is { type: "text"; text: string } | ImageContent => Boolean(block));
   return {
     role: "user",
     content: agentContent.length > 0 ? agentContent : [{ type: "text", text: "" }],
@@ -338,8 +304,8 @@ async function appendAndPersistUserMessage(input: {
   user: TurnUserMessage;
   meta: Record<string, unknown>;
 }) {
-  const content = await normalizeContentBlocksImages(input.user.content, { readUrlImage: readPublicAssetImageUrl });
-  const message = await contentToAgentMessage(content, input.meta);
+  const content = input.user.content;
+  const message = contentToAgentMessage(content, input.meta);
   const startedAt = new Date().toISOString();
   input.handle.session.agent.state.messages.push(message);
   const entryId = input.handle.sessionManager.appendMessage(message);
@@ -947,7 +913,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
         provider: activeHandle.session.agent.state.model.provider,
         id: activeHandle.session.agent.state.model.id,
       };
-      const rawTurnUserMessages: TurnUserMessage[] = buildUserMessagesForBatch(batch)
+      const turnUserMessages: TurnUserMessage[] = buildUserMessagesForBatch(batch)
         .filter((item) => Boolean(item.userMessageId))
         .map((item) => ({
           turnId: item.turnId,
@@ -956,10 +922,6 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
           content: item.content,
           meta: item.meta,
         }));
-      const turnUserMessages = await Promise.all(rawTurnUserMessages.map(async (item) => ({
-        ...item,
-        content: await normalizeContentBlocksImages(item.content, { readUrlImage: readPublicAssetImageUrl }),
-      })));
       for (const item of turnUserMessages) {
         const meta = normalizeTurnUserMeta(item);
         ensurePendingUserMessage(activeHandle, {
@@ -1005,9 +967,9 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
       await drainStreamStateBeforeReset(activeHandle);
       resetStreamState(activeHandle);
 
-      const messages = await Promise.all(turnUserMessages
+      const messages = turnUserMessages
         .filter((item) => !hasSessionUserMessage(activeHandle, item.userMessageId))
-        .map((item) => contentToAgentMessage(item.content, normalizeTurnUserMeta(item))));
+        .map((item) => contentToAgentMessage(item.content, normalizeTurnUserMeta(item)));
 
       const directShellItem = accessMode === "full_access" && turnUserMessages.length === 1 ? turnUserMessages[0] : null;
       const directShellCommand = directShellItem ? getShellCommandBlock(directShellItem.content) : null;
@@ -1117,6 +1079,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
           spaceEnv,
           env: promptEnv,
           abortSignal: abortController.signal,
+          imageInputCache: createImageInputCache(),
         }, async () => {
           try {
             if (abortController.signal.aborted) throw new Error("aborted");

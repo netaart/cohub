@@ -17,10 +17,32 @@ export { CohubHttpClient, createHttpClient } from "./http.js";
 export { BillingApi } from "./apis/billing.js";
 export { CohubClient, createCohubClient } from "./client.js";
 export { WebsocketClient, createWebsocketClient } from "./websocket.js";
+export type { WebsocketClientState } from "./websocket.js";
 export { VoiceApi, VoiceInputClient, createVoiceInputClient } from "./voice-input.js";
 export { UsersApi } from "./apis/users.js";
 export { AppsApi } from "./apis/apps.js";
 export { DesktopCommandsApi } from "./apis/desktop-commands.js";
+export { SpaceDisplaysApi } from "./apis/displays.js";
+export { DisplayConnection, connectDisplay } from "./display-session.js";
+export type { ConnectDisplayOptions, DisplayConnectionState, DisplayConnectionStats } from "./display-session.js";
+export { compileDisplayActions, DISPLAY_ACTION_TYPES, DISPLAY_ELEMENT_REF_PATTERN, DISPLAY_SYSTEM_ACTIONS, DisplayActionError, normalizeDisplayPoint } from "@cohub/protocol";
+export type {
+  DisplayAction,
+  DisplayCapture,
+  DisplayCaptureParams,
+  DisplayElement,
+  DisplayInfo,
+  DisplayInputEvent,
+  DisplayList,
+  DisplaySession,
+  DisplaySystemAction,
+  DisplayTree,
+  DisplayTreeParams,
+  DisplayViewer,
+  DisplayVirtualStart,
+  RtcIceServer,
+  RtcIceServers,
+} from "@cohub/protocol";
 export type { CreateDesktopCommandInput, WaitForDesktopCommandOptions } from "./apis/desktop-commands.js";
 export { AppSurfaceApi } from "./app-surface.js";
 export type { AppSurfaceHandler, AppSurfaceHandlerContext } from "./app-surface.js";
@@ -32,6 +54,10 @@ export {
 } from "./app-ref.js";
 export type { ParsedAppRef, AppPublicRef } from "./app-ref.js";
 export { isUuid } from "@cohub/protocol/identifiers";
+export { parseSpaceRef } from "./space-ref.js";
+export { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
+export { UPLOAD_MAX_BATCH_BYTES, UPLOAD_MAX_BATCH_FILES, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
+export type { SpaceRef } from "./space-ref.js";
 export { AppCommerceApi } from "./apis/app-commerce.js";
 export { AppRealtimeApi, AppRoom } from "./apis/app-realtime.js";
 export { ReferencesApi } from "./apis/references.js";
@@ -51,7 +77,7 @@ export type { AppAppearance, AppAppearanceToken, AppWindowStatus } from "@cohub/
 export type { AppEmbedAttachOptions, AppEmbedHandle, AppEmbedShell } from "./app-embed.js";
 export type { AppNavigationCall, AppNavigationLaunch, AppNavigationOpenMessage, AppNavigationOpenResponse, AppNavigationTarget } from "@cohub/protocol/app-navigation";
 export { createAppBridgeCore } from "./app-bridge-core.js";
-export type { AppBridgeAuthorizationContext, AppBridgeCore, AppBridgeCoreConfig, AppBridgeCoreApp, AppBridgeDialogState, AppBridgeDiagnostic, AppAuthorizeRequest, AppCheckoutStarted, AppPurchaseRequest, AppBridgeGetAccessToken, AppBridgeGetViewerUuid, AppBridgeRequestSignIn, AppPromotionAttributionContext } from "./app-bridge-core.js";
+export type { AppBridgeAuthorizationContext, AppBridgeCore, AppBridgeCoreConfig, AppBridgeCoreApp, AppBridgeDialogState, AppBridgeDiagnostic, AppAuthorizeRequest, AppAuthorizeSpaceOption, AppCheckoutStarted, AppPurchaseRequest, AppBridgeGetAccessToken, AppBridgeGetViewerUuid, AppBridgeRequestSignIn, AppPromotionAttributionContext } from "./app-bridge-core.js";
 export { normalizeSpacePickerQuery, orderSpacePickerItems, filterSpacePickerItems, selectSpacePickerItems } from "./space-picker.js";
 export type { SpacePickerFilter, SpacePickerItem, SpacePickerOptions } from "./space-picker.js";
 export { clearGrantedAppScopes, hasGrantedAppScopes, setGrantedAppScopes } from "./app-grant-cache.js";
@@ -86,6 +112,8 @@ export {
   requestSourceToHeaders,
   resolveRequestSourceChannel,
 } from "@cohub/protocol/provenance";
+export { normalizeSessionTurnOrigin, readSentTurns, readSessionTurnOrigin } from "@cohub/protocol/model";
+export type { SentTurnRef, SessionTurnOrigin, SessionTurnOriginKind } from "@cohub/protocol/model";
 export type { RequestSource, RequestSourceVia } from "@cohub/protocol/provenance";
 export {
   GenerationPolicyError,
@@ -162,7 +190,7 @@ export {
 } from "./generation-task.js";
 export type {
   BoardAwarenessGesture,
-  BoardAwarenessNodePreview,
+  BoardAwarenessItemPreview,
   BoardAwarenessStateUpdate,
   BoardAwarenessUpdate,
   ChannelEnvelope,
@@ -180,13 +208,17 @@ export type {
   BoardEventName,
   BoardPlaybackChangedEvent,
   BoardSubscriptionHandlers,
+  OpenSpaceFileOptions,
   SessionEventName,
   SessionSubscriptionHandlers,
   SpaceChannelBindingRecord,
   SpaceEventName,
+  SpaceFileStream,
   SpaceTurnListOptions,
+  WaitForSpaceFsCopyOptions,
   WebSocketConnectionState,
 } from "./apis/spaces.js";
+export type { SpaceListOptions, SpaceListPage } from "./types.js";
 export type {
   RealtimeRoomDescriptor,
   RealtimeRoomEvent,
@@ -207,30 +239,14 @@ export {
 } from "./apis/spaces.js";
 export type { SpaceWebhookListItem, SpaceWebhookTriggerResponse } from "@cohub/protocol";
 export {
-  BOARD_COLOR_IDS,
-  BOARD_GEO_KINDS,
+  BOARD_COLOR_TOKENS,
+  BOARD_ITEM_TYPES,
+  BoardPatchSchema,
+  BoardTrackSchema,
+  BoardAnimationSchema,
+  parseBoardDocument,
+  parseBoardItem,
 } from "@cohub/protocol";
-export type {
-  BoardColorId,
-  BoardGeoKind,
-} from "@cohub/protocol";
-export {
-  BOARD_ANIMATION_CHANNEL_CAPABILITIES,
-  BoardAnimationSpecSchema,
-  BoardAuthoringItemSchema,
-  BoardCompositionInputSchema,
-  BoardCompositionSchema,
-  BoardDealParamsSchema,
-  BoardEffectInputSchema,
-  BoardEffectSchema,
-  BoardItemPatchSchema,
-  BoardSemanticCommandSchema,
-  parseBoardEffectInput,
-  BoardPlaybackPolicySchema,
-  parseBoardCompositionInput,
-  parseBoardPlaybackPolicy,
-} from "@cohub/protocol";
-export * from "./board/animation.js";
 export type { CreatePublicAssetUploadInput, CreatePublicAssetUploadResponse, PublicAssetMimeType, PublicAssetPurpose, PublicAssetUploadProgress, PublicAssetUploadProtocol, UploadAppSourceInput, UploadChatAttachmentInput, UploadChatImageAttachmentInput, UploadGenerationInputInput, UploadPublicAssetInput } from "./apis/public-assets.js";
 export type { AppActionRunResponse, AppAuthorizeResponse, AppContent, AppContentDownload, AppCreateInput, AppDetailResponse, AppExtractedPageMeta, AppGetResponse, AppMeta, AppPresentationMeta, AppPromotionCreateInput, AppPromotionEventResponse, AppPromotionProvider, AppPromotionProviderStatus, AppPromotionRecord, AppPromotionStatsResponse, AppPublicOwnerRecord, AppPublicSpaceRecord, AppRecord, AppResolveResponse, AppSessionResponse, AppStatus, AppTargetType, AppUpdateInput, AppVersionRecord, AppViewerGrantRecord, AppViewSource, AppViewStatsResponse, AppVisibility, PublicAppVersionSummary } from "./apis/apps.js";
 export type {
@@ -251,11 +267,14 @@ export type {
   AppVersionSource,
 } from "@cohub/protocol";
 export {
+  defaultDesktopCommandTimeoutMs,
   isTerminalDesktopCommandStatus,
   isDesktopCallMethod,
   parseDesktopCommand,
   resolveOpenSurface,
+  DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS,
   DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS,
+  DESKTOP_COMMAND_OPEN_TIMEOUT_MS,
   DESKTOP_COMMAND_MAX_TIMEOUT_MS,
   DESKTOP_COMMAND_PAYLOAD_MAX_BYTES,
   DESKTOP_COMMAND_PENDING_TTL_SECONDS,

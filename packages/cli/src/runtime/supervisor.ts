@@ -29,6 +29,7 @@ export type RuntimeLaunch = {
   verbose?: boolean;
   /** Start importing earlier conversations as soon as the Runtime is connected. */
   importHistory?: boolean;
+  display?: string;
 };
 
 export function sandboxOutputLevel(value: unknown, stream: "stdout" | "stderr"): RuntimeDiagnosticLevel {
@@ -62,6 +63,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   let status: RuntimeSummary = {
     spaceId: config.spaceId, root: config.root, runtimeId: diagnostics.runtimeId,
     pid: process.pid, harnesses: config.harnesses, background: config.background,
+    ...(config.display ? { display: config.display } : {}),
     state: "starting", harnessConnected: false, workspaceConnected: false,
     diagnosticsPath: diagnostics.directory,
   };
@@ -123,7 +125,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
           signal.throwIfAborted();
           const bridge = spawn(binary, ["--local", "--space", config.spaceId, "--root", config.root, "--relay", process.env.COHUB_RELAY_URL?.trim() || relay.toString()], {
             stdio: ["pipe", "pipe", "pipe", "pipe"],
-            env: { ...process.env, COHUB_RELAY_TOKEN: initialToken, COHUB_RUNTIME_ID: status.runtimeId, COHUB_LOG_FORMAT: "json", COHUB_RUNTIME_MANAGED: "1" },
+            env: { ...process.env, COHUB_RELAY_TOKEN: initialToken, COHUB_RUNTIME_ID: status.runtimeId, COHUB_LOG_FORMAT: "json", COHUB_RUNTIME_MANAGED: "1", COHUB_DISPLAY: config.display ?? "" },
           });
           bridge.stdin?.on("error", () => undefined);
           const closed = new Promise<void>((resolve) => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+import { dismissOnBack } from "$lib/back-layers.svelte";
 import Sidebar from "$lib/components/Sidebar.svelte";
 import {
 	getDrawerOpenRatio,
@@ -17,12 +18,10 @@ const {
 	dragOffsetPx = 0,
 	isDragging = false,
 	isDrawerVisible = false,
-	mode = "space",
 }: {
 	dragOffsetPx?: number;
 	isDragging?: boolean;
 	isDrawerVisible?: boolean;
-	mode?: "space" | "settings";
 } = $props();
 
 const TRANSITION_CSS = `transform ${DURATION_DRAWER_IN}ms ${EASE_OUT}`;
@@ -59,6 +58,8 @@ function closeDrawer() {
 	uiState.mobileDrawerOpen = false;
 }
 
+dismissOnBack(() => uiState.mobileDrawerOpen, closeDrawer);
+
 let renderContent = $state(false);
 
 $effect(() => {
@@ -94,8 +95,8 @@ $effect(() => {
     style="width: {MOBILE_DRAWER_WIDTH_PX}px; max-width: {MOBILE_DRAWER_MAX_WIDTH_VW}vw; {panelStyle}"
   >
     {#if renderContent}
-      <div class="h-full border-r border-border-subtle bg-bg-primary" class:pointer-events-auto={interactive}>
-        <Sidebar isMobile mode={mode} onClose={closeDrawer} />
+      <div class="safe-area-top h-full border-r border-border-subtle bg-bg-primary" class:pointer-events-auto={interactive}>
+        <Sidebar isMobile area="spaces" onClose={closeDrawer} />
       </div>
     {/if}
   </div>

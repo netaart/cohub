@@ -12,6 +12,7 @@ declare global {
 		// interface PageData {}
 		interface PageState {
 			workspacePreview?: string | null;
+			commandPalette?: import("$lib/command-palette/open").CommandPaletteHistoryEntry;
 		}
 		// interface Platform {}
 	}

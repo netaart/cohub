@@ -1,12 +1,12 @@
 <script lang="ts">
+import { boardSnapshotPatch } from "@cohub/protocol";
 import type { AppBoardArtifactManifest, WorkContent } from "@neta-art/cohub";
-import { boardAuthoringSnapshotToDocument } from "@neta-art/cohub/board";
+import { parseBoardDocument } from "@neta-art/cohub/board";
 import { createAppBoardAssetSource } from "$lib/board/board-asset-source";
-import {
-	boardRuntimeDataFromAuthoring,
-	resolveBoardRuntime,
-} from "$lib/board/runtime/board-runtime";
+import { cohubPixiRuntime } from "$lib/board/runtime/board-runtime";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
+import { getLocale } from "$lib/i18n/locale.svelte";
+import { m } from "$lib/paraglide/messages.js";
 
 const {
 	content,
@@ -25,22 +25,27 @@ let loaded = $state<LoadedBoard | null>(null);
 let error = $state<string | null>(null);
 
 const manifest = $derived(loaded?.url === content.url ? loaded.manifest : null);
-// The published snapshot is the whole document: no Space, no realtime, no reads.
-const board = $derived.by(() => {
+const locale = $derived(getLocale());
+const parsed = $derived.by(() => {
 	if (!manifest) return null;
-	const snapshot = manifest.snapshot;
+	try {
+		return parseBoardDocument(boardSnapshotPatch(manifest.snapshot));
+	} catch {
+		return { ok: false as const };
+	}
+});
+// Published snapshots remain immutable; only their in-memory document is upgraded.
+const board = $derived.by(() => {
+	if (!manifest || !parsed?.ok) return null;
 	return {
-		document: boardAuthoringSnapshotToDocument(snapshot),
-		runtime: boardRuntimeDataFromAuthoring(snapshot),
+		document: parsed.document,
 		assetSource: createAppBoardAssetSource({
 			manifestUrl: content.url,
 			assets: manifest.assets,
 		}),
 	};
 });
-const runtimeModule = $derived.by(() =>
-	board ? resolveBoardRuntime(board.document).load() : null,
-);
+const runtimeModule = $derived(board ? cohubPixiRuntime.load() : null);
 
 $effect(() => {
 	const url = content.url;
@@ -54,7 +59,7 @@ $effect(() => {
 		})
 		.then((value) => {
 			if (cancelled) return;
-			if (value?.kind !== "cohub.work.board" || !value.snapshot?.board) {
+			if (value?.kind !== "cohub.work.board" || !value.snapshot?.items) {
 				throw new Error("Board artifact is invalid.");
 			}
 			loaded = { url, manifest: value };
@@ -70,13 +75,13 @@ $effect(() => {
 </script>
 
 <div class="work-board-surface">
-	{#if error}
-		<div class="board-message error">{error}</div>
+	{#if error || parsed?.ok === false}
+		<div class="board-message error" role="alert">{m.board_failed_load({}, { locale })}</div>
 	{:else if !board || !runtimeModule}
-		<CenteredLoading label="Loading board…" size="page" />
+		<CenteredLoading label={m.common_loading({}, { locale })} size="page" />
 	{:else}
 		{#await runtimeModule}
-			<CenteredLoading label="Loading board…" size="page" />
+			<CenteredLoading label={m.common_loading({}, { locale })} size="page" />
 		{:then module}
 			{@const BoardRuntime = module.default}
 			{#key content.url}
@@ -85,14 +90,14 @@ $effect(() => {
 					path={content.path}
 					boardId={content.boardId}
 					document={board.document}
-					runtime={board.runtime}
-					spaceId={manifest?.snapshot.board.spaceId ?? ""}
+					playback={null}
+					spaceId={`app:${content.boardId}`}
 					assetSource={board.assetSource}
 					{isMobile}
 				/>
 			{/key}
 		{:catch}
-			<div class="board-message error">Board failed to load.</div>
+			<div class="board-message error" role="alert">{m.board_failed_load({}, { locale })}</div>
 		{/await}
 	{/if}
 </div>

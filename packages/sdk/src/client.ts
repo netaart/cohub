@@ -21,7 +21,7 @@ import { PublicInviteApi } from "./apis/invitations.js";
 import { ReferralsApi } from "./apis/referrals.js";
 import { HttpTransport, type CohubClientOptions } from "./transport.js";
 import { ensureRealtimeConnected } from "./realtime.js";
-import { createWebsocketClient, type WebsocketEventPayload } from "./websocket.js";
+import { createWebsocketClient, type WebsocketClientState, type WebsocketEventPayload } from "./websocket.js";
 import { VoiceApi } from "./voice-input.js";
 import { AppSurfaceApi } from "./app-surface.js";
 import { attachAppEmbed } from "./app-embed.js";
@@ -308,6 +308,11 @@ export class CohubClient {
   onUserEvent(handler: (event: WebsocketEventPayload) => void): () => void {
     ensureRealtimeConnected(this.websocketClient);
     return this.websocketClient.on("event", handler);
+  }
+
+  /** Current realtime transport state; pair with {@link onConnection} for changes. */
+  get connectionState(): WebsocketClientState {
+    return this.websocketClient.state;
   }
 
   onConnection(

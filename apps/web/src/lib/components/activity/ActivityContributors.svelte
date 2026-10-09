@@ -1,15 +1,14 @@
 <script lang="ts">
 import type { SpaceActivityContributor } from "@neta-art/cohub";
+import { formatCompact, formatCost } from "$lib/activity";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { formatCompactAbsoluteTime } from "$lib/time-format";
-import { formatCompact, formatCost } from "$lib/user-activity";
 
 type Props = {
 	items: SpaceActivityContributor[];
 	memberCount: number;
-	/** Cost reads as commercial data — hide it for non space managers. */
 	showCost: boolean;
 };
 
@@ -37,6 +36,7 @@ const displayName = (contributor: SpaceActivityContributor) =>
 					<UserAvatar
 						name={displayName(contributor)}
 						avatarUrl={contributor.profile?.avatarUrl ?? null}
+						seed={contributor.userUuid}
 						size="xs"
 					/>
 					<span class="max-w-36 truncate text-[12px] text-text-secondary">{displayName(contributor)}</span>

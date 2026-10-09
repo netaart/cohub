@@ -5,8 +5,8 @@ import { recordJobFailure } from "@cohub/infra/bullmq";
 import { getAgentTracer, wrapToolCall } from "@cohub/infra/tracing/agent";
 import { SandboxRpcError, type SandboxConnection } from "@cohub/sandbox-client";
 import { createSandboxCodingTools, tracedRpc } from "./sandbox/tools.js";
+import { connectAtomicInstallSandbox } from "./sandbox-atomic-install.js";
 import {
-  SANDBOX_UPLOAD_UNSUPPORTED_MESSAGE,
   sandboxUploadUnsupportedErrorMessage,
   supportsAtomicUpload,
 } from "./sandbox-upload-capabilities.js";
@@ -14,7 +14,7 @@ import { runWithToolExecutionContext } from "./tool-context.js";
 import { logger } from "./logger.js";
 import { AGENT_SANDBOX_BASH_ATOMIC_JOB_NAME, type AgentSandboxBashUploadJobData } from "./queue.js";
 import { loadSpaceEnvSnapshot } from "./runtime/env-cache.js";
-import { ensureSandboxConnection, recoverSandboxForUpgrade } from "./sandbox-pool.js";
+import { ensureSandboxConnection } from "./sandbox-pool.js";
 
 const SCRIPT_PATH = new URL("./jobs/sandbox-bash/upload-files.sh", import.meta.url);
 const tools = createSandboxCodingTools();
@@ -208,27 +208,8 @@ function throwSandboxUploadUnsupported(): never {
 }
 
 async function ensureAtomicUploadConnection(spaceId: string) {
-  let connection = await ensureSandboxConnection(spaceId);
-  if (supportsAtomicUpload(connection.capabilities)) return connection;
-
-  logger.warn("[SandboxBash] sandbox lacks atomic upload capabilities; requesting upgrade", { spaceId });
-  const recovery = await recoverSandboxForUpgrade(
-    spaceId,
-    "upload_requires_atomic_materialization",
-  );
-  if ((recovery.throttled && !recovery.recovering) || (!recovery.ok && !recovery.recovering)) {
-    throwSandboxUploadUnsupported();
-  }
-
-  connection = await ensureSandboxConnection(spaceId, { timeoutMs: 180_000 });
-  if (!supportsAtomicUpload(connection.capabilities)) {
-    logger.error("[SandboxBash] sandbox upgrade did not provide atomic upload capabilities", {
-      spaceId,
-      message: SANDBOX_UPLOAD_UNSUPPORTED_MESSAGE,
-    });
-    throwSandboxUploadUnsupported();
-  }
-  return connection;
+  return await connectAtomicInstallSandbox(spaceId, "upload_requires_atomic_materialization")
+    ?? throwSandboxUploadUnsupported();
 }
 
 async function materializeAtomicUpload(data: AgentSandboxBashUploadJobData, output: string): Promise<UploadedFile[]> {

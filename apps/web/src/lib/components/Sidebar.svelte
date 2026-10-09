@@ -6,7 +6,6 @@ import type {
 	CronJobRecord,
 	LabelAssignmentListItem,
 	LabelListItem,
-	SessionForkRecord,
 	SessionRecord,
 	SpaceRecord,
 	TaskRunRecord,
@@ -30,8 +29,6 @@ import {
 	Loader2,
 	LogOut,
 	MessageSquare,
-	Network,
-	NotebookPen,
 	PanelLeftClose,
 	PanelLeftOpen,
 	Pencil,
@@ -51,20 +48,30 @@ import { page } from "$app/state";
 import { floatNear } from "$lib/actions/portal";
 import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
 import { sortAppsByRecentUpdate } from "$lib/app-sort";
-import { logtoClient } from "$lib/auth";
+import { signOut } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
+import { removeLegacyLocalStorage } from "$lib/cache/cleanup";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
-import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
+import type { SessionListForkRecord } from "$lib/cache/db";
+import { getCacheUserKey } from "$lib/cache/keys";
+import { openCommandPalette } from "$lib/command-palette/open";
 import { clearCachedPaletteOverview } from "$lib/command-palette/palette-overview";
+import { APP_AREA_ICONS, appAreaLabel } from "$lib/components/app-area";
 import ChannelProviderIcon from "$lib/components/ChannelProviderIcon.svelte";
 import NewLabelPopover from "$lib/components/NewLabelPopover.svelte";
+import SessionRow, {
+	type SessionRowTree,
+} from "$lib/components/SessionRow.svelte";
 import SidebarFlyout from "$lib/components/SidebarFlyout.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import {
+	SETTINGS_SECTION_ICONS,
+	settingsSectionLabel,
+} from "$lib/components/settings-section";
 import SidebarAppRow from "$lib/components/sidebar/SidebarAppRow.svelte";
 import SidebarCheckpointRow from "$lib/components/sidebar/SidebarCheckpointRow.svelte";
 import SidebarFallbackResourceRow from "$lib/components/sidebar/SidebarFallbackResourceRow.svelte";
 import SidebarFileRow from "$lib/components/sidebar/SidebarFileRow.svelte";
-import SidebarSessionRow from "$lib/components/sidebar/SidebarSessionRow.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { downloadCohubDebugBundle } from "$lib/debugger";
 import {
@@ -82,8 +89,12 @@ import {
 	createAppMutationBuffer,
 	upsertAppSnapshot,
 } from "$lib/features/app/app-realtime";
+import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
+import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
+import { clearAccountSnapshots } from "$lib/features/settings/account-snapshots";
 import { appActionName } from "$lib/features/space/modules/task-run-utils";
 import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
+import SpacesViewsNav from "$lib/features/spaces/SpacesViewsNav.svelte";
 import { extractGenerationPromptPreview } from "$lib/generation-task-media";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -94,17 +105,35 @@ import {
 	type ResourceLabelMutationResult,
 	removeResourceFromLabel,
 } from "$lib/labels/resource-label-actions";
-import { formatResourceMentionTextForDisplay } from "$lib/mentions/resource";
+import { useCompactShell } from "$lib/layout/compact-shell.svelte";
+import {
+	type AppArea,
+	appAreaHref,
+	DESKTOP_APP_AREAS,
+	isAppAreaPage,
+	resolveAppArea,
+} from "$lib/mobile-nav";
 import { m } from "$lib/paraglide/messages.js";
+import { createRefreshCoordinator } from "$lib/refresh-coordinator";
 import { sdk } from "$lib/sdk";
+import {
+	buildSessionForkTree,
+	getSessionListTitle,
+	getSessionTreeTitle,
+	normalizeSessionText,
+	type SessionForkEdge,
+	type SessionTreeItem,
+} from "$lib/session-fork-tree";
 import {
 	mergeSessionRecord,
 	mergeSessionRecords,
 } from "$lib/session-record-merge";
+import { sortSessionsByRecentActivity } from "$lib/session-sort";
 import {
-	getSessionSortTime,
-	sortSessionsByRecentActivity,
-} from "$lib/session-sort";
+	resolveSettingsSection,
+	SETTINGS_SECTIONS,
+	settingsSectionHref,
+} from "$lib/settings-nav";
 import {
 	buildSessionsRoute,
 	buildSpaceActivityRoute,
@@ -172,6 +201,7 @@ import {
 	getLabelDisplayTitle,
 	getLabelRefById,
 	getLabelUserProfile,
+	getSessionUserUuidFromLabel,
 	hydrateChannelLabelsForLabels,
 	hydrateUserProfilesForLabels,
 	isSessionChannelLabel,
@@ -182,13 +212,7 @@ import {
 	onSpaceLabelsCacheUpdated,
 	onUserLabelProfilesUpdated,
 } from "$lib/stores/space-labels";
-import {
-	clearAllCachedSpaceLists,
-	fetchSpaceListWithCache,
-	getCachedSpaceList,
-	getCachedSpaceListMeta,
-	onSpaceListCacheUpdated,
-} from "$lib/stores/space-list-cache";
+import { clearAllCachedSpaceLists } from "$lib/stores/space-list-cache";
 import {
 	cacheSpaceRecordSoon,
 	getCachedSpaceRecord,
@@ -202,18 +226,17 @@ import {
 } from "$lib/stores/task-runs-cache";
 import { uiState } from "$lib/stores/ui.svelte";
 import { formatCompactAbsoluteTime } from "$lib/time-format";
-import { clearActivityCache } from "$lib/user-activity";
 import { resolveWorkspaceRouteContext } from "$lib/workspace-route";
 
 const {
 	isMobile = false,
 	onClose,
-	mode = "space",
+	area = "spaces",
 	collapsed = false,
 }: {
 	isMobile?: boolean;
 	onClose?: () => void;
-	mode?: "space" | "settings";
+	area?: AppArea;
 	collapsed?: boolean;
 } = $props();
 
@@ -229,37 +252,14 @@ let expandedUserMenuAnchorEl: HTMLDivElement | null = $state(null);
 let helpMenuAnchorEl: HTMLDivElement | null = $state(null);
 let showUserMenu = $state(false);
 let showHelpMenu = $state(false);
-// Hydrate synchronously from the local cache so a freshly mounted sidebar
-// (e.g. the mobile drawer, which unmounts on close) can resolve the current
-// space on first paint instead of flashing the empty "Select a space" state
-// while loadSpaces() awaits auth + IndexedDB + network. Only use a non-guest
-// partition when identity is already known; otherwise start empty.
-let spaces = $state<SpaceRecord[]>(
-	canUseUserScopedCache() ? (getCachedSpaceList() ?? []) : [],
-);
+let spaces = $state<SpaceRecord[]>([]);
 let sessions = $state<SessionRecord[]>([]);
-type SessionForkSidebarRecord = Partial<SessionForkRecord> & {
-	childSessionId: string;
-	parentSessionId?: string | null;
-	depth: number;
-	anchorSequence?: number | null;
-	createdAt?: string;
-	firstUserTextAfterFork?: string | null;
-	parentTitle?: string | null;
+type SidebarSessionItem = SessionTreeItem & {
+	title: string;
+	tooltip: string | undefined;
+	tree: SessionRowTree;
 };
-type SidebarSessionItem = {
-	session: SessionRecord;
-	depth: number;
-	visualDepth: number;
-	isFork: boolean;
-	parentVisible: boolean;
-	isLastVisibleChild: boolean;
-	fork: SessionForkSidebarRecord | null;
-	displayTitle: string;
-	titleText: string | undefined;
-	ariaLabel: string;
-};
-let sessionForks = $state<SessionForkSidebarRecord[]>([]);
+let sessionForks = $state<SessionListForkRecord[]>([]);
 let checkpoints = $state<CheckpointRecord[]>([]);
 let labels = $state<LabelListItem[]>([]);
 let labelItemsBySpace = $state<
@@ -281,6 +281,23 @@ let expandedLabelIdsBySpace = $state<Record<string, Set<string>>>({});
 let loadingLabelIdsBySpace = $state<Record<string, Set<string>>>({});
 /** Per space+label load tokens so stale finally blocks cannot clear a newer load. */
 const labelItemsLoadTokens = new Map<string, number>();
+const labelItemsRefresh = createRefreshCoordinator<{
+	spaceId: string;
+	labelId: string;
+	labelRef: string;
+}>({
+	keyOf: ({ spaceId, labelId }) => labelItemsLoadKey(spaceId, labelId),
+	isCurrent: ({ spaceId }) => spaceId === currentSpaceId,
+	refresh: async ({ spaceId, labelId, labelRef }) => {
+		const result = await fetchLabelItemsFirstPageFresh(
+			spaceId,
+			labelId,
+			labelRef,
+		);
+		if (spaceId === currentSpaceId)
+			applyLabelItemsPage(spaceId, labelId, result);
+	},
+});
 /** Hard stop so a hung await never leaves label rows on Loading… forever. */
 const LABEL_ITEMS_LOADING_WATCHDOG_MS = 8_000;
 const labelItemsLoadingWatchdogs = new Map<
@@ -313,7 +330,6 @@ let checkpointsPageInfo = $state<{
 let billingCredit = $state<BillingCreditStatus | null>(null);
 let billingCreditLoading = $state(false);
 let billingCreditError = $state<string | null>(null);
-let refreshingSpaces = $state(false);
 let billingCreditUserId = $state<string | null>(null);
 let billingConfigured = $state<boolean | null>(null);
 let billingSubscriptionName = $state<string | null>(null);
@@ -382,8 +398,10 @@ let loadingAppsSpaceId = $state<string | null>(null);
 let refreshingApps = $state(false);
 
 const currentPath = $derived(page.url.pathname);
-const isSessionsRoute = $derived(
-	currentPath === "/sessions" || currentPath.startsWith("/sessions/"),
+const activeInboxSessionId = $derived(
+	area === "chats" && typeof page.data.sessionId === "string"
+		? page.data.sessionId
+		: null,
 );
 const workspaceRoute = $derived(
 	resolveWorkspaceRouteContext({
@@ -393,7 +411,18 @@ const workspaceRoute = $derived(
 		params: { id: page.params.id },
 	}),
 );
-const currentSpaceId = $derived(workspaceRoute.spaceId);
+const routeSpaceId = $derived(workspaceRoute.spaceId);
+const shown = $derived(isMobile || !useCompactShell());
+const spacesHome = $derived(area === "spaces" && !routeSpaceId && !isMobile);
+const fallbackSpaceId = $derived.by(() => {
+	if (area !== "spaces" || routeSpaceId || !isMobile) return null;
+	void currentPath;
+	const userUuid = authStore.userUuid;
+	return userUuid ? (getRecentSpace(userUuid)?.spaceId ?? null) : null;
+});
+const currentSpaceId = $derived(
+	area === "spaces" ? (routeSpaceId ?? fallbackSpaceId) : null,
+);
 const activeSessionId = $derived(workspaceRoute.sessionId);
 const activeAppId = $derived(workspaceRoute.appId);
 const activeCheckpointId = $derived(workspaceRoute.checkpointId);
@@ -438,19 +467,10 @@ const sessionsById = $derived.by(
 	() => new Map(sessions.map((session) => [session.id, session])),
 );
 const labelSessionsById = $derived.by(() => {
-	const byId = new Map<string, SessionRecord>();
-	const preferRicher = (
-		existing: SessionRecord | undefined,
-		incoming: SessionRecord,
-	) => {
-		if (!existing) return incoming;
-		if (sessionIsRicher(incoming, existing)) return incoming;
-		if (sessionIsRicher(existing, incoming)) return existing;
-		return mergeSessionRecord(existing, incoming);
-	};
-	for (const session of sessions) byId.set(session.id, session);
-	for (const session of Object.values(currentLabelSessionDetails)) {
-		byId.set(session.id, preferRicher(byId.get(session.id), session));
+	const byId = new Map(sessionsById);
+	for (const detail of Object.values(currentLabelSessionDetails)) {
+		const listed = sessionsById.get(detail.id);
+		byId.set(detail.id, listed ? mergeSessionRecord(detail, listed) : detail);
 	}
 	return byId;
 });
@@ -569,44 +589,14 @@ async function refreshBillingPlan() {
 	return billingPlanRequest;
 }
 
-const baseSettingsTabs = $derived([
-	{
-		id: "general",
-		label: m.nav_general({}, { locale }),
-		icon: Settings,
-		href: "/settings/general",
-	},
-	{
-		id: "activity",
-		label: m.nav_activity({}, { locale }),
-		icon: Activity,
-		href: "/settings/activity",
-	},
-	{
-		id: "referrals",
-		label: m.nav_referrals({}, { locale }),
-		icon: Gift,
-		href: "/settings/referrals",
-	},
-	{
-		id: "billing",
-		label: m.nav_billing({}, { locale }),
-		icon: CreditCard,
-		href: "/settings/billing",
-	},
-	{
-		id: "rules",
-		label: m.nav_user_rules({}, { locale }),
-		icon: NotebookPen,
-		href: "/settings/rules",
-	},
-	{
-		id: "channels",
-		label: m.nav_channels({}, { locale }),
-		icon: Network,
-		href: "/settings/channels",
-	},
-]);
+const baseSettingsTabs = $derived(
+	SETTINGS_SECTIONS.map((id) => ({
+		id,
+		label: settingsSectionLabel(id, locale),
+		icon: SETTINGS_SECTION_ICONS[id],
+		href: settingsSectionHref(id),
+	})),
+);
 const settingsTabs = $derived(
 	baseSettingsTabs.filter(
 		(tab) => tab.id !== "billing" || billingConfigured !== false,
@@ -641,10 +631,7 @@ const settingsReturnTo = $derived.by(() => {
 	}
 });
 
-const activeSettingsTab = $derived.by(() => {
-	const tab = settingsTabs.find((tab) => currentPath.startsWith(tab.href));
-	return tab?.id ?? null;
-});
+const activeSettingsTab = $derived(resolveSettingsSection(currentPath));
 
 function getTaskRunBadge(status: TaskRunRecord["status"]) {
 	if (status === "completed") {
@@ -835,20 +822,6 @@ function mergeSpaceIntoSidebarList(space: SpaceRecord) {
 	spaces = [merged, ...spaces.filter((item) => item.id !== space.id)];
 }
 
-function mergeSpaceListWithCurrent(nextSpaces: SpaceRecord[]) {
-	const current = currentSpaceId
-		? spaces.find((space) => space.id === currentSpaceId)
-		: null;
-	const merged = nextSpaces.map((space) =>
-		space.id === currentSpaceId
-			? mergeDefinedSpaceRecordFields(space, current)
-			: space,
-	);
-	if (!current || nextSpaces.some((space) => space.id === current.id))
-		return merged;
-	return [current, ...merged];
-}
-
 const currentSpaceRefreshes = new Map<string, Promise<void>>();
 
 async function loadCurrentSpaceFromUrl(
@@ -908,49 +881,6 @@ function mergeSessionSnapshotForDisplay(
 	return sortSessionsByRecentActivity(
 		mergeSessionRecords([...currentSessions, ...nextSessions]),
 	);
-}
-
-async function loadSpaces(force = false) {
-	await authStore.ensureLoaded();
-	const requestedSpaceId = currentSpaceId;
-
-	// The current URL is the source of truth for the selected space. Load it
-	// directly first so guest-access spaces still render even if the broader
-	// space list does not include them (or becomes paginated later).
-	await loadCurrentSpaceFromUrl(requestedSpaceId);
-
-	if (!authStore.isAuthenticated) {
-		return;
-	}
-
-	if (!force) {
-		const cached = getCachedSpaceList();
-		if (cached && cached.length > 0) {
-			spaces = mergeSpaceListWithCurrent(cached);
-		}
-	}
-
-	const cacheMeta = getCachedSpaceListMeta();
-	const shouldFetch = force || !cacheMeta || cacheMeta.isStale;
-	if (!shouldFetch) return;
-
-	refreshingSpaces = spaces.length > 0;
-	try {
-		const listedSpaces = await fetchSpaceListWithCache(
-			async () => await sdk.spaces.list(),
-			{ force },
-		);
-		spaces = mergeSpaceListWithCurrent(listedSpaces);
-	} catch (error) {
-		if (await handleUnauthorizedError(error)) {
-			return;
-		}
-		console.warn("[sidebar] Failed to load spaces", error);
-	} finally {
-		refreshingSpaces = false;
-	}
-
-	await loadCurrentSpaceFromUrl(requestedSpaceId);
 }
 
 function isSessionsNetworkEnabled(spaceId: string) {
@@ -1456,7 +1386,7 @@ function patchLabelItems(
 	};
 }
 
-function sessionForkSignature(fork: SessionForkSidebarRecord) {
+function sessionForkSignature(fork: SessionListForkRecord) {
 	return [
 		fork.childSessionId,
 		fork.parentSessionId ?? "",
@@ -1468,8 +1398,8 @@ function sessionForkSignature(fork: SessionForkSidebarRecord) {
 }
 
 function mergeSessionForks(
-	current: SessionForkSidebarRecord[],
-	incoming: SessionForkSidebarRecord[] | null | undefined,
+	current: SessionListForkRecord[],
+	incoming: SessionListForkRecord[] | null | undefined,
 ) {
 	// Empty / missing incoming is "unknown", not "clear all". Partial cache and
 	// label-page pages must never wipe forks already absorbed from another source.
@@ -1493,16 +1423,14 @@ function mergeSessionForks(
 	return changed ? Array.from(byChild.values()) : current;
 }
 
-function applySessionForks(
-	forks: SessionForkSidebarRecord[] | null | undefined,
-) {
+function applySessionForks(forks: SessionListForkRecord[] | null | undefined) {
 	const next = mergeSessionForks(sessionForks, forks);
 	if (next === sessionForks) return;
 	sessionForks = next;
 }
 
 function absorbLabelItemForks(
-	forks: SessionForkSidebarRecord[] | null | undefined,
+	forks: SessionListForkRecord[] | null | undefined,
 ) {
 	applySessionForks(forks);
 }
@@ -1598,7 +1526,7 @@ function applyLabelItemsPage(
 		items?: LabelAssignmentListItem[] | null;
 		pageInfo: { hasMore: boolean; nextCursor: string | null };
 		sessions?: SessionRecord[] | null;
-		forks?: SessionForkSidebarRecord[] | null;
+		forks?: SessionListForkRecord[] | null;
 	},
 	options?: { append?: boolean },
 ) {
@@ -1677,13 +1605,10 @@ async function loadLabelItems(
 			return;
 		}
 
-		const result = await fetchLabelItemsFirstPageFresh(
-			spaceId,
-			labelId,
-			labelRef,
+		await labelItemsRefresh.refresh(
+			{ spaceId, labelId, labelRef },
+			{ ensureFresh: force },
 		);
-		if (spaceId !== currentSpaceId) return;
-		applyLabelItemsPage(spaceId, labelId, result);
 	} catch (error) {
 		console.warn("[sidebar] Failed to load label items", {
 			spaceId,
@@ -1740,11 +1665,20 @@ function didSessionActivityChange(
 	);
 }
 
-function refreshExpandedSessionActivityLabels(spaceId: string) {
+function refreshExpandedSessionActivityLabels(
+	spaceId: string,
+	sessionIds: string[],
+) {
 	const expanded = expandedLabelIdsBySpace[spaceId];
 	if (!expanded || spaceId !== currentSpaceId) return;
 	for (const label of flattenLabels(labels)) {
 		if (!expanded.has(label.id) || !isSessionActivityLabel(label)) continue;
+		const listed = new Set(
+			(labelItemsBySpace[spaceId]?.[label.id] ?? [])
+				.filter((item) => item.resourceType === "session")
+				.map((item) => item.resourceRef),
+		);
+		if (sessionIds.every((sessionId) => listed.has(sessionId))) continue;
 		void loadLabelItems(label.id, { force: true });
 	}
 }
@@ -1907,7 +1841,7 @@ function scrollSidebarLabelIntoView(labelId: string, attempt = 0) {
 }
 
 function focusOwnSessionUserLabel() {
-	if (mode !== "space" || !currentSpaceId) return false;
+	if (area !== "spaces" || !currentSpaceId) return false;
 	const ownLabel = findOwnSessionUserLabel();
 	if (!ownLabel) return false;
 	const userRoot = findSessionUserRootLabel(labels);
@@ -2437,12 +2371,20 @@ async function handleNavigate(
 ) {
 	onClose?.();
 	const targetHref =
-		options?.keepSettingsReturn && mode === "settings"
+		options?.keepSettingsReturn && area === "account"
 			? withSettingsReturn(href)
 			: href;
 	await goto(targetHref, {
 		replaceState: options?.replaceState,
 	});
+}
+
+function openArea(event: MouseEvent, target: AppArea) {
+	if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
+		return;
+	event.preventDefault();
+	if (target === "account") openSettings();
+	else void handleNavigate(appAreaHref(target));
 }
 
 function openSettings() {
@@ -2454,14 +2396,14 @@ function openSettings() {
 function openBillingSettings() {
 	showUserMenu = false;
 	void handleNavigate(withSettingsReturn("/settings/billing"), {
-		replaceState: mode === "settings",
+		replaceState: area === "account",
 	});
 }
 
 function openReferralsSettings() {
 	showUserMenu = false;
 	void handleNavigate(withSettingsReturn("/settings/referrals"), {
-		replaceState: mode === "settings",
+		replaceState: area === "account",
 	});
 }
 
@@ -2485,23 +2427,14 @@ function openHelpPanel() {
 	window.dispatchEvent(new CustomEvent("cohub:open-help-panel"));
 }
 
-function openCommandPalette() {
+function openSearch() {
 	onClose?.();
-	window.dispatchEvent(new CustomEvent("cohub:open-command-palette"));
+	openCommandPalette();
 }
 
 function openSpacePalette() {
 	onClose?.();
-	window.dispatchEvent(
-		new CustomEvent("cohub:open-command-palette", {
-			detail: {
-				title: m.sidebar_switch_space_title({}, { locale }),
-				query: "a: ",
-				placeholder: m.sidebar_search_spaces({}, { locale }),
-				refreshSpaces: true,
-			},
-		}),
-	);
+	openCommandPalette({ lens: "space" });
 }
 
 function mainRouteWithWindow(pathname: string) {
@@ -2618,7 +2551,7 @@ function insertPathReference(path: string) {
 
 function startRenameSession(session: SessionRecord) {
 	renamingSessionId = session.id;
-	renameTitleValue = session.title ?? getSessionTitle(session, 0);
+	renameTitleValue = session.title ?? sessionTitle(session);
 	void tick().then(() => {
 		renameInputElement?.focus();
 		renameInputElement?.select();
@@ -2658,7 +2591,7 @@ async function submitRenameSession(session: SessionRecord) {
 		cancelRenameSession();
 		return;
 	}
-	if (trimmed === (session.title ?? getSessionTitle(session, 0))) {
+	if (trimmed === (session.title ?? sessionTitle(session))) {
 		cancelRenameSession();
 		return;
 	}
@@ -2826,177 +2759,33 @@ function handleLabelRenameKeydown(event: KeyboardEvent, label: LabelListItem) {
 	}
 }
 
-function normalizeSessionDisplayText(value: string | null | undefined) {
-	return formatResourceMentionTextForDisplay(value ?? "")
-		.replace(/\s+/g, " ")
-		.replace(/^[:\-\s]+/, "")
-		.trim();
+function sessionTitle(session: SessionRecord) {
+	return getSessionListTitle(session) ?? m.sidebar_new_chat({}, { locale });
 }
 
-function getSessionTitle(session: SessionRecord, _index: number) {
-	const candidates = [session.title, session.latestMessageText];
-	for (const candidate of candidates) {
-		const normalized = normalizeSessionDisplayText(candidate);
-		if (normalized) return normalized.slice(0, 36);
-	}
-	return m.sidebar_new_chat({}, { locale });
-}
-
-function isLikelyDefaultForkTitle(
-	session: SessionRecord,
-	fork: SessionForkSidebarRecord | null,
-) {
-	if (!fork) return false;
-	const childTitle = normalizeSessionDisplayText(session.title);
-	if (!childTitle) return true;
-	const parentTitle = normalizeSessionDisplayText(fork.parentTitle);
-	return Boolean(parentTitle && childTitle === parentTitle);
-}
-
-function buildForkTitle(
-	session: SessionRecord,
-	fork: SessionForkSidebarRecord | null,
-) {
-	const forkText = normalizeSessionDisplayText(fork?.firstUserTextAfterFork);
-	if (forkText && isLikelyDefaultForkTitle(session, fork))
-		return forkText.slice(0, 48);
-	return getSessionTitle(session, 0);
-}
-
-function getSessionRowStyle(item: SidebarSessionItem) {
-	if (!item.isFork)
-		return isMobile
-			? "-webkit-touch-callout: none; user-select: none;"
-			: undefined;
-	const depth = isMobile ? Math.min(item.visualDepth, 1) : item.visualDepth;
-	const indent = Math.min(depth, 3) * (isMobile ? 10 : 12);
-	const base = `--fork-indent: ${indent}px;`;
-	return isMobile
-		? `${base} -webkit-touch-callout: none; user-select: none;`
-		: base;
-}
-
-function getSessionActiveTime(session: SessionRecord) {
-	return getSessionSortTime(session);
+function forkTooltip(fork: SessionForkEdge) {
+	const parent = normalizeSessionText(fork.parentTitle);
+	const source = parent
+		? m.sidebar_forked_from({ title: parent }, { locale })
+		: m.sidebar_forked_from_chat({}, { locale });
+	return fork.anchorSequence
+		? `${source} at turn #${fork.anchorSequence}`
+		: source;
 }
 
 function buildSidebarSessionItems(
 	sessionList: SessionRecord[],
 ): SidebarSessionItem[] {
-	const sessionById = new Map(
-		sessionList.map((session) => [session.id, session]),
-	);
-	const forkByChildId = new Map(
-		sessionForks.map((fork) => [fork.childSessionId, fork]),
-	);
-	const childrenByParentId = new Map<string, SessionRecord[]>();
-	const childIndexById = new Map<string, number>();
-	const childCountByParentId = new Map<string, number>();
-
-	for (const session of sessionList) {
-		const fork = forkByChildId.get(session.id);
-		if (!fork?.parentSessionId || !sessionById.has(fork.parentSessionId))
-			continue;
-		const siblings = childrenByParentId.get(fork.parentSessionId) ?? [];
-		siblings.push(session);
-		childrenByParentId.set(fork.parentSessionId, siblings);
-	}
-
-	const groupActiveTime = new Map<string, number>();
-	const getGroupActiveTime = (
-		session: SessionRecord,
-		seen = new Set<string>(),
-	) => {
-		const cachedActiveTime = groupActiveTime.get(session.id);
-		if (cachedActiveTime !== undefined) return cachedActiveTime;
-		if (seen.has(session.id)) return getSessionActiveTime(session);
-		seen.add(session.id);
-		let activeTime = getSessionActiveTime(session);
-		for (const child of childrenByParentId.get(session.id) ?? []) {
-			activeTime = Math.max(activeTime, getGroupActiveTime(child, seen));
-		}
-		seen.delete(session.id);
-		groupActiveTime.set(session.id, activeTime);
-		return activeTime;
-	};
-
-	const compareSessions = (a: SessionRecord, b: SessionRecord) => {
-		const activeDelta = getGroupActiveTime(b) - getGroupActiveTime(a);
-		if (activeDelta !== 0) return activeDelta;
-		return b.id.localeCompare(a.id);
-	};
-
-	for (const [parentId, children] of childrenByParentId) {
-		const sortedChildren = children.sort(compareSessions);
-		childCountByParentId.set(parentId, sortedChildren.length);
-		sortedChildren.forEach((child, index) => {
-			childIndexById.set(child.id, index);
-		});
-	}
-
-	const roots = sessionList
-		.filter((session) => {
-			const fork = forkByChildId.get(session.id);
-			return !fork?.parentSessionId || !sessionById.has(fork.parentSessionId);
-		})
-		.sort(compareSessions);
-
-	const items: SidebarSessionItem[] = [];
-	const appendSession = (
-		session: SessionRecord,
-		visualDepth: number,
-		seen = new Set<string>(),
-	) => {
-		if (seen.has(session.id)) return;
-		seen.add(session.id);
-		const fork = forkByChildId.get(session.id) ?? null;
-		const parentVisible = Boolean(
-			fork?.parentSessionId && sessionById.has(fork.parentSessionId),
-		);
-		const connectedFork = parentVisible ? fork : null;
-		const displayTitle = connectedFork
-			? buildForkTitle(session, connectedFork)
-			: getSessionTitle(session, 0);
-		const source = connectedFork?.parentTitle
-			? m.sidebar_forked_from(
-					{ title: normalizeSessionDisplayText(connectedFork.parentTitle) },
-					{ locale },
-				)
-			: m.sidebar_forked_from_chat({}, { locale });
-		const turn = connectedFork?.anchorSequence
-			? ` at turn #${connectedFork.anchorSequence}`
-			: "";
-		const tooltip = connectedFork ? `${source}${turn}` : undefined;
-		const childIndex = childIndexById.get(session.id);
-		const childCount = fork?.parentSessionId
-			? childCountByParentId.get(fork.parentSessionId)
-			: undefined;
-		const isLastVisibleChild = Boolean(
-			connectedFork &&
-				childIndex !== undefined &&
-				childCount !== undefined &&
-				childIndex === childCount - 1,
-		);
-		items.push({
-			session,
-			depth: connectedFork?.depth ?? 0,
-			visualDepth: connectedFork ? visualDepth : 0,
-			isFork: Boolean(connectedFork),
-			parentVisible,
-			isLastVisibleChild,
-			fork: connectedFork,
-			displayTitle,
-			titleText: tooltip,
-			ariaLabel: tooltip ? `${displayTitle}, ${tooltip}` : displayTitle,
-		});
-
-		const children = childrenByParentId.get(session.id) ?? [];
-		for (const child of children) appendSession(child, visualDepth + 1, seen);
-		seen.delete(session.id);
-	};
-
-	for (const root of roots) appendSession(root, 0);
-	return items;
+	return buildSessionForkTree(sessionList, sessionForks).map((item) => ({
+		...item,
+		title: getSessionTreeTitle(item) ?? m.sidebar_new_chat({}, { locale }),
+		tooltip: item.fork ? forkTooltip(item.fork) : undefined,
+		tree: {
+			depth: item.visualDepth,
+			last: item.isLastChild,
+			hasChildren: item.hasChildren,
+		},
+	}));
 }
 
 function buildLabelSessionItems(items: LabelAssignmentListItem[]) {
@@ -3044,19 +2833,16 @@ async function handleLogout() {
 	clearAllCachedSpaceLists();
 	clearCachedPaletteOverview();
 	clearTaskRunsMemoryCache();
+	clearAccountSnapshots();
+	removeLegacyLocalStorage();
 	await clearAllIndexedDbCache().catch((error) => {
 		console.warn("[sidebar] Failed to clear IndexedDB cache", error);
 	});
 	const userUuid = authStore.userUuid;
-	if (userUuid) clearActivityCache(userUuid);
 	if (userUuid) clearRecentSpace(userUuid);
 	if (userUuid) clearGrantedAppScopes(userUuid);
 	authStore.reset();
-	try {
-		await logtoClient.signOut(`${window.location.origin}/`);
-	} catch (error) {
-		console.error("[sidebar] Failed to sign out", error);
-	}
+	await signOut();
 }
 
 function saveDebugLog() {
@@ -3076,8 +2862,10 @@ function handleGlobalSidebarKeydown(event: KeyboardEvent) {
 		!event.altKey &&
 		key === "o";
 	if (isNewChatShortcut) {
+		if (area === "account") return;
 		event.preventDefault();
-		void handleCreateNewSession();
+		if (area === "chats") void chatsInbox.newChat();
+		else void handleCreateNewSession();
 		return;
 	}
 	const isOwnChatsShortcut =
@@ -3086,7 +2874,7 @@ function handleGlobalSidebarKeydown(event: KeyboardEvent) {
 		!event.altKey &&
 		key === "u";
 	if (!isOwnChatsShortcut) return;
-	if (mode !== "space" || !currentSpaceId) return;
+	if (area !== "spaces" || !currentSpaceId) return;
 	event.preventDefault();
 	focusOwnSessionUserLabelOrFallback();
 }
@@ -3095,102 +2883,77 @@ onMount(() => {
 	void modelsCatalogStore.load().catch((error) => {
 		console.error("Failed to load models catalog:", error);
 	});
-	let offSpaceListCacheUpdated = () => {};
-	let offSessionListCacheUpdated = () => {};
-	let offSpaceLabelsCacheUpdated = () => {};
-	let offUserLabelProfilesUpdated = () => {};
-	let offChannelLabelDisplayNamesUpdated = () => {};
-	let offTaskRunsCacheUpdated = () => {};
-	if (mode === "space") {
-		offSpaceListCacheUpdated = onSpaceListCacheUpdated(
-			({ spaces: nextSpaces }) => {
-				if (!authStore.isAuthenticated) return;
-				spaces = mergeSpaceListWithCurrent(nextSpaces);
-			},
-		);
-		offSessionListCacheUpdated = onSessionListCacheUpdated(
-			({ spaceId, sessions: nextSessions, forks, pageInfo }) => {
-				if (spaceId !== currentSpaceId) return;
-				const previousSessionsById = new Map(
-					sessions.map((session) => [session.id, session]),
-				);
-				const shouldPreserveLoadedPageInfo =
-					sessions.length > nextSessions.length;
-				let shouldRefreshActivityLabels = false;
-				sessions = mergeSessionSnapshotForDisplay(sessions, nextSessions);
-				for (const session of nextSessions) {
-					const previous = previousSessionsById.get(session.id);
-					if (!previous) {
-						optimisticPrependWebAppLabelSession(spaceId, session);
-						continue;
-					}
-					if (didSessionActivityChange(previous, session)) {
-						shouldRefreshActivityLabels = true;
-					}
+	const offSessionListCacheUpdated = onSessionListCacheUpdated(
+		({ spaceId, sessions: nextSessions, forks, pageInfo }) => {
+			if (spaceId !== currentSpaceId) return;
+			const previousSessionsById = new Map(
+				sessions.map((session) => [session.id, session]),
+			);
+			const shouldPreserveLoadedPageInfo =
+				sessions.length > nextSessions.length;
+			const activeSessionIds: string[] = [];
+			sessions = mergeSessionSnapshotForDisplay(sessions, nextSessions);
+			for (const session of nextSessions) {
+				const previous = previousSessionsById.get(session.id);
+				if (!previous) {
+					optimisticPrependWebAppLabelSession(spaceId, session);
+					continue;
 				}
-				if (shouldRefreshActivityLabels)
-					refreshExpandedSessionActivityLabels(spaceId);
-				applySessionForks(forks);
-				if (pageInfo && !shouldPreserveLoadedPageInfo)
-					sessionsPageInfo = pageInfo;
-				exhaustedFallbackSessionCursor = null;
-			},
-		);
-		offSpaceLabelsCacheUpdated = onSpaceLabelsCacheUpdated(
-			({ spaceId, labels: nextLabels }) => {
-				if (spaceId !== currentSpaceId) return;
-				labels = nextLabels;
-				pruneExpandedLabelIds(spaceId, nextLabels);
-				hydrateSystemLabelDisplays(nextLabels);
-			},
-		);
-		offUserLabelProfilesUpdated = onUserLabelProfilesUpdated(() => {
-			userLabelProfileVersion += 1;
-		});
-		offChannelLabelDisplayNamesUpdated = onChannelLabelDisplayNamesUpdated(
-			() => {
-				channelLabelDisplayVersion += 1;
-			},
-		);
-		hydrateSystemLabelDisplays(labels);
-		offTaskRunsCacheUpdated = onTaskRunsCacheUpdated(({ spaceId, runs }) => {
+				if (didSessionActivityChange(previous, session))
+					activeSessionIds.push(session.id);
+			}
+			if (activeSessionIds.length > 0)
+				refreshExpandedSessionActivityLabels(spaceId, activeSessionIds);
+			applySessionForks(forks);
+			if (pageInfo && !shouldPreserveLoadedPageInfo)
+				sessionsPageInfo = pageInfo;
+			exhaustedFallbackSessionCursor = null;
+		},
+	);
+	const offSpaceLabelsCacheUpdated = onSpaceLabelsCacheUpdated(
+		({ spaceId, labels: nextLabels }) => {
+			if (spaceId !== currentSpaceId) return;
+			labels = nextLabels;
+			pruneExpandedLabelIds(spaceId, nextLabels);
+			hydrateSystemLabelDisplays(nextLabels);
+		},
+	);
+	const offUserLabelProfilesUpdated = onUserLabelProfilesUpdated(() => {
+		userLabelProfileVersion += 1;
+	});
+	const offChannelLabelDisplayNamesUpdated = onChannelLabelDisplayNamesUpdated(
+		() => {
+			channelLabelDisplayVersion += 1;
+		},
+	);
+	hydrateSystemLabelDisplays(labels);
+	const offTaskRunsCacheUpdated = onTaskRunsCacheUpdated(
+		({ spaceId, runs }) => {
 			if (spaceId !== currentSpaceId) return;
 			tasks = runs;
-		});
-		// Desktop sidebar owns space shortcuts (⌘O / ⌘⇧U). Mobile has no keyboard surface.
-		if (!isMobile) {
-			window.addEventListener("keydown", handleGlobalSidebarKeydown);
-		}
-		window.addEventListener(
-			APPS_CHANGED_EVENT,
-			handleWorksChanged as EventListener,
-		);
-		void (async () => {
-			await loadSpaces();
-			hydrateSystemLabelDisplays(labels);
-
-			window.addEventListener(
-				"cohub:space-created",
-				handleSpaceCreated as EventListener,
-			);
-			window.addEventListener(
-				"cohub:checkpoints-updated",
-				handleCheckpointsUpdated as EventListener,
-			);
-			window.addEventListener(
-				"cohub:cronjobs-updated",
-				handleCronjobsUpdated as EventListener,
-			);
-			window.addEventListener(
-				"cohub:label-assignments-updated",
-				handleLabelAssignmentsUpdated as EventListener,
-			);
-		})();
+		},
+	);
+	if (!isMobile) {
+		window.addEventListener("keydown", handleGlobalSidebarKeydown);
 	}
+	window.addEventListener(
+		APPS_CHANGED_EVENT,
+		handleWorksChanged as EventListener,
+	);
+	void loadCurrentSpaceFromUrl();
 
-	function handleSpaceCreated() {
-		void loadSpaces(true);
-	}
+	window.addEventListener(
+		"cohub:checkpoints-updated",
+		handleCheckpointsUpdated as EventListener,
+	);
+	window.addEventListener(
+		"cohub:cronjobs-updated",
+		handleCronjobsUpdated as EventListener,
+	);
+	window.addEventListener(
+		"cohub:label-assignments-updated",
+		handleLabelAssignmentsUpdated as EventListener,
+	);
 
 	function handleCheckpointsUpdated(e: Event) {
 		const custom = e as CustomEvent;
@@ -3241,43 +3004,36 @@ onMount(() => {
 	document.addEventListener("click", handleClickOutside);
 
 	return () => {
-		offSpaceListCacheUpdated();
 		offSessionListCacheUpdated();
 		offSpaceLabelsCacheUpdated();
 		offUserLabelProfilesUpdated();
 		offChannelLabelDisplayNamesUpdated();
 		offTaskRunsCacheUpdated();
 		document.removeEventListener("click", handleClickOutside);
-		if (mode === "space") {
-			if (!isMobile) {
-				window.removeEventListener("keydown", handleGlobalSidebarKeydown);
-			}
-			window.removeEventListener(
-				APPS_CHANGED_EVENT,
-				handleWorksChanged as EventListener,
-			);
-			window.removeEventListener(
-				"cohub:space-created",
-				handleSpaceCreated as EventListener,
-			);
-			window.removeEventListener(
-				"cohub:checkpoints-updated",
-				handleCheckpointsUpdated as EventListener,
-			);
-			window.removeEventListener(
-				"cohub:cronjobs-updated",
-				handleCronjobsUpdated as EventListener,
-			);
-			window.removeEventListener(
-				"cohub:label-assignments-updated",
-				handleLabelAssignmentsUpdated as EventListener,
-			);
+		if (!isMobile) {
+			window.removeEventListener("keydown", handleGlobalSidebarKeydown);
 		}
+		window.removeEventListener(
+			APPS_CHANGED_EVENT,
+			handleWorksChanged as EventListener,
+		);
+		window.removeEventListener(
+			"cohub:checkpoints-updated",
+			handleCheckpointsUpdated as EventListener,
+		);
+		window.removeEventListener(
+			"cohub:cronjobs-updated",
+			handleCronjobsUpdated as EventListener,
+		);
+		window.removeEventListener(
+			"cohub:label-assignments-updated",
+			handleLabelAssignmentsUpdated as EventListener,
+		);
 	};
 });
 
-// Always load the space addressed by the current URL directly. The global
-// space list is only a switcher data source and may omit guest-access spaces.
+// Load only the space addressed by the current URL. The global space list is
+// owned by the picker and management page, not the workspace sidebar.
 $effect(() => {
 	const userId = authStore.userUuid;
 	if (!authStore.isAuthenticated || !userId) {
@@ -3295,7 +3051,7 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (mode !== "space") return;
+	if (area !== "spaces") return;
 	const id = currentSpaceId;
 	if (!id) return;
 
@@ -3305,7 +3061,7 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (mode !== "space") return;
+	if (area !== "spaces") return;
 	const id = currentSpaceId;
 	if (id) {
 		sessions = [];
@@ -3398,12 +3154,13 @@ $effect(() => {
 // refetch on the next palette open. Cross-device recency is picked up by the
 // freshness window and the focus/visibility revalidation instead.
 $effect(() => {
-	if (mode !== "space") return;
+	if (area !== "spaces") return;
 	const userUuid = authStore.userUuid;
-	if (!userUuid || !currentSpaceId) return;
+	const spaceId = routeSpaceId;
+	if (!userUuid || !spaceId) return;
 	untrack(() => {
 		const sessionId = activeSession?.id ?? null;
-		setRecentSpace(userUuid, currentSpaceId, sessionId);
+		setRecentSpace(userUuid, spaceId, sessionId);
 	});
 });
 </script>
@@ -3450,29 +3207,26 @@ $effect(() => {
 					{#if item.resourceType === "session" && labelSessionsById.get(item.resourceRef)}
 						{@const session = labelSessionsById.get(item.resourceRef)!}
 						{@const sessionItem = labelSessionItemById.get(session.id)}
-						<SidebarSessionRow
+						<SessionRow
 							{session}
-							title={sessionItem?.displayTitle ?? getSessionTitle(session, 0)}
+							title={sessionItem?.title ?? sessionTitle(session)}
 							href={buildPreferredSessionRoute(currentSpaceId!, session.id)}
+							density="dense"
 							active={isActive}
 							{isMobile}
 							modelsCatalog={modelsCatalog ?? undefined}
 							renaming={renamingSessionId === session.id}
 							renameValue={renameTitleValue}
 							renameSaving={renameSaving}
-							rowState={sessionItem
-								? {
-										isFork: sessionItem.isFork,
-										isLastVisibleChild: sessionItem.isLastVisibleChild,
-										style: getSessionRowStyle(sessionItem),
-										titleText: sessionItem.titleText || undefined,
-										ariaLabel: sessionItem.ariaLabel,
-									}
-								: undefined}
+							tree={sessionItem?.tree}
+							tooltip={sessionItem?.tooltip}
 							draggable={itemDraggable}
 							removeLabelTitle={canRemoveItem ? labelRemoveTitle : undefined}
 							removeLabelDisabled={labelDropBusyId === label.id}
-							onNavigate={(target) => void handleNavigateToSession(target.id)}
+							onNavigate={(event, target) => {
+								event.preventDefault();
+								void handleNavigateToSession(target.id);
+							}}
 							onDoubleClick={handleSessionRowDoubleClick}
 							onInsert={insertPathReference}
 							onRename={startRenameSession}
@@ -3575,7 +3329,7 @@ $effect(() => {
 				{@const labelProfile = getReactiveLabelUserProfile(label)}
 				{@const labelChannel = getReactiveLabelChannelInfo(label)}
 				{#if labelProfile || isSessionUserLabel(label)}
-					<UserAvatar name={getReactiveLabelDisplayName(label)} avatarUrl={labelProfile?.avatarUrl} size="xxs" class="border-0 bg-bg-elevated" />
+					<UserAvatar name={getReactiveLabelDisplayName(label)} avatarUrl={labelProfile?.avatarUrl} seed={getSessionUserUuidFromLabel(label)} size="xxs" class="border-0" />
 				{:else if labelChannel || isSessionChannelLabel(label)}
 					<ChannelProviderIcon provider={labelChannel?.provider} size="xxs" />
 				{/if}
@@ -3633,7 +3387,7 @@ $effect(() => {
 						{@const childProfile = getReactiveLabelUserProfile(child)}
 						{@const childChannel = getReactiveLabelChannelInfo(child)}
 						{#if childProfile || isSessionUserLabel(child)}
-							<UserAvatar name={getReactiveLabelDisplayName(child)} avatarUrl={childProfile?.avatarUrl} size="xxs" class="border-0 bg-bg-elevated" />
+							<UserAvatar name={getReactiveLabelDisplayName(child)} avatarUrl={childProfile?.avatarUrl} seed={getSessionUserUuidFromLabel(child)} size="xxs" class="border-0" />
 						{:else if childChannel || isSessionChannelLabel(child)}
 							<ChannelProviderIcon provider={childChannel?.provider} size="xxs" />
 						{/if}
@@ -3787,10 +3541,11 @@ $effect(() => {
 			{#each chatItems as item (item.session.id)}
 				{@const session = item.session}
 				{@const isActive = activeSession?.id === session.id}
-				<SidebarSessionRow
+				<SessionRow
 					{session}
-					title={item.displayTitle}
+					title={item.title}
 					href={buildPreferredSessionRoute(currentSpaceId!, session.id)}
+					density="dense"
 					active={isActive}
 					{isMobile}
 					modelsCatalog={modelsCatalog ?? undefined}
@@ -3798,15 +3553,13 @@ $effect(() => {
 					renaming={renamingSessionId === session.id}
 					renameValue={renameTitleValue}
 					renameSaving={renameSaving}
-					rowState={{
-						isFork: item.isFork,
-						isLastVisibleChild: item.isLastVisibleChild,
-						style: getSessionRowStyle(item),
-						titleText: item.titleText || undefined,
-						ariaLabel: item.ariaLabel,
-					}}
+					tree={item.tree}
+					tooltip={item.tooltip}
 					draggable={!isMobile}
-					onNavigate={(target) => scheduleSessionRowNavigate(target.id)}
+					onNavigate={(event, target) => {
+						event.preventDefault();
+						scheduleSessionRowNavigate(target.id);
+					}}
 					onDoubleClick={handleSessionRowDoubleClick}
 					onInsert={insertPathReference}
 					onRename={startRenameSession}
@@ -3910,7 +3663,7 @@ $effect(() => {
 {/snippet}
 
 {#if collapsed && !isMobile}
-  <aside class="h-screen w-[52px] shrink-0 overflow-visible bg-[var(--sidebar-bg)]">
+  <aside class="list-compact h-screen w-[52px] shrink-0 overflow-visible bg-[var(--sidebar-bg)]">
     <div class="flex h-full flex-col items-center overflow-visible border-r border-border-subtle/70 px-2 py-2">
       <a
         href="/"
@@ -3932,28 +3685,35 @@ $effect(() => {
       <button
         type="button"
         class="mt-1 flex h-8 w-8 items-center justify-center rounded-[6px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
-        onclick={openCommandPalette}
+        onclick={openSearch}
         aria-label={m.sidebar_search_everywhere({}, { locale })}
         title={m.sidebar_search_everywhere_shortcut({}, { locale })}
       >
         <Search class="h-4 w-4" />
       </button>
-      <a
-        href={buildSessionsRoute()}
-        class="mt-1 flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {isSessionsRoute ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
-        aria-label={m.sidebar_chats({}, { locale })}
-        title={m.sidebar_chats({}, { locale })}
-        onclick={(event) => {
-          event.preventDefault();
-          void handleNavigate(buildSessionsRoute());
-        }}
-      >
-        <MessageSquare class="h-4 w-4" />
-      </a>
+      <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
+      <nav class="mt-2 flex flex-col items-center gap-1" aria-label={m.nav_tabs_aria({}, { locale })}>
+        {#each DESKTOP_APP_AREAS as item (item)}
+          {@const Icon = APP_AREA_ICONS[item]}
+          {@const current = isAppAreaPage(item, currentPath)}
+          <a
+            href={appAreaHref(item)}
+            class="flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {current ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+            aria-label={appAreaLabel(item, locale)}
+            aria-current={current ? "page" : undefined}
+            title={appAreaLabel(item, locale)}
+            onclick={(event) => openArea(event, item)}
+          >
+            <Icon class="h-4 w-4" />
+          </a>
+        {/each}
+      </nav>
 
       <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
 
-      {#if mode === "space"}
+      {#if spacesHome}
+        <SpacesViewsNav variant="rail" />
+      {:else if area === "spaces"}
         <div class="mt-2 flex w-full flex-col items-center gap-1">
           <button
             type="button"
@@ -3963,7 +3723,7 @@ $effect(() => {
             title={currentSpace ? currentSpace.name || currentSpace.title || currentSpace.id : m.sidebar_select_space({}, { locale })}
           >
             {#if currentSpace}
-              <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} size="sm" />
+              <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} seed={currentSpace.id} size="sm" />
             {:else}
               <FolderKanban class="h-4 w-4" />
             {/if}
@@ -4069,8 +3829,10 @@ $effect(() => {
         {:else}
           <div class="flex-1"></div>
         {/if}
+      {:else if area === "chats"}
+        <div class="flex-1"></div>
       {:else}
-        <nav class="mt-3 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
+        <nav class="scrollbar-quiet mt-3 flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
           <button type="button" class="rail-button text-text-tertiary" onclick={returnFromSettings} aria-label={m.nav_back({}, { locale })} title={m.nav_back({}, { locale })}>
             <ArrowLeft class="h-4 w-4" />
           </button>
@@ -4127,7 +3889,7 @@ $effect(() => {
               </div>
             {/if}
             <a href="/settings/referrals" class="rail-menu-item" onclick={(e) => { e.preventDefault(); openReferralsSettings(); }}><Gift class="h-3.5 w-3.5" /><span>{m.nav_referrals({}, { locale })}</span></a>
-            {#if mode === "space"}
+            {#if area !== "account"}
               <a href="/settings" class="rail-menu-item" onclick={(e) => { e.preventDefault(); openSettings(); }}><Settings class="h-3.5 w-3.5" /><span>{m.nav_settings({}, { locale })}</span></a>
             {:else}
               <a href={settingsReturnTo} class="rail-menu-item" onclick={(e) => { e.preventDefault(); showUserMenu = false; returnFromSettings(); }}><FolderKanban class="h-3.5 w-3.5" /><span>{m.nav_spaces({}, { locale })}</span></a>
@@ -4141,12 +3903,13 @@ $effect(() => {
         <button
           type="button"
           data-user-menu
-          class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-bg-hover-strong transition-colors duration-100 hover:bg-bg-hover"
+          class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-bg-hover-strong transition-[background-color,box-shadow] duration-100 hover:bg-bg-hover {area === 'account' ? 'ring-2 ring-border-strong ring-offset-2 ring-offset-[var(--sidebar-bg)]' : ''}"
           onclick={() => { showUserMenu = !showUserMenu; }}
           aria-label={userDisplayName}
+          aria-current={area === "account" ? "page" : undefined}
           title={userDisplayName}
         >
-          <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="md" class="h-full w-full border-0" />
+          <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} seed={authStore.userUuid} size="md" class="h-full w-full border-0" />
         </button>
       </div>
     </div>
@@ -4154,40 +3917,61 @@ $effect(() => {
 {:else}
 <aside
   bind:this={sidebarRootEl}
-  class="{isMobile ? 'h-full w-full' : 'h-screen w-full'} flex flex-col bg-[var(--sidebar-bg)]"
+  class="list-compact {isMobile ? 'h-full w-full' : 'h-screen w-full'} flex flex-col bg-[var(--sidebar-bg)]"
 >
   <!-- Brand Header -->
-  <div class="flex h-[48px] shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3">
-    <a href="/" class="flex min-w-0 items-center gap-2 group" aria-label="Cohub">
-      <div class="w-7 h-7 bg-brand rounded-[6px] flex items-center justify-center font-bold text-[11px] text-brand-contrast-fg group-hover:bg-brand-hover transition-colors shrink-0">
+  <div class="@container flex h-[48px] shrink-0 items-center gap-2 border-b border-border-subtle px-3">
+    <a href="/" class="group flex min-w-0 items-center gap-2" aria-label={m.sidebar_cohub_home({}, { locale })} title={m.sidebar_home({}, { locale })}>
+      <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-brand text-[11px] font-bold text-brand-contrast-fg transition-colors group-hover:bg-brand-hover">
         C
       </div>
-      <span class="font-semibold text-[13px] text-text-primary tracking-tight truncate">Cohub</span>
+      <span class="truncate text-[13px] font-semibold tracking-tight text-text-primary @max-[232px]:hidden">Cohub</span>
     </a>
-    <div class="flex shrink-0 items-center gap-1">
+    <div class="ml-auto flex shrink-0 items-center gap-1">
+      {#if !isMobile}
+        <nav class="mr-1 flex items-center gap-0.5" aria-label={m.nav_tabs_aria({}, { locale })}>
+          {#each DESKTOP_APP_AREAS as item (item)}
+            {@const Icon = APP_AREA_ICONS[item]}
+            {@const current = isAppAreaPage(item, currentPath)}
+            <a
+              href={appAreaHref(item)}
+              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] transition-colors duration-100 {current ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+              aria-label={appAreaLabel(item, locale)}
+              aria-current={current ? "page" : undefined}
+              title={appAreaLabel(item, locale)}
+              onclick={(event) => openArea(event, item)}
+            >
+              <Icon class="h-3.5 w-3.5" />
+            </a>
+          {/each}
+        </nav>
+      {/if}
       <button
         type="button"
-        class="group/search flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] bg-bg-surface px-2 text-[11px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
-        onclick={openCommandPalette}
+        class="group/search flex h-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary {isMobile ? 'w-7' : 'gap-1.5 bg-bg-surface px-2'}"
+        onclick={openSearch}
         title={m.sidebar_search_everywhere_shortcut({}, { locale })}
         aria-label={m.sidebar_search_everywhere({}, { locale })}
       >
-        <Search class="h-3.5 w-3.5 text-text-placeholder transition-colors group-hover/search:text-brand" />
-        <span class="hidden font-mono tracking-[0.02em] sm:inline">⌘K</span>
+        <Search class="h-3.5 w-3.5 transition-colors group-hover/search:text-brand {isMobile ? '' : 'text-text-placeholder'}" />
+        {#if !isMobile}
+          <span class="font-mono text-[11px] tracking-[0.02em]" aria-hidden="true">⌘K</span>
+        {/if}
       </button>
-      <a
-        href={buildSessionsRoute()}
-        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] transition-colors duration-100 {isSessionsRoute ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
-        title={m.sidebar_chats({}, { locale })}
-        aria-label={m.sidebar_chats({}, { locale })}
-        onclick={(event) => {
-          event.preventDefault();
-          void handleNavigate(buildSessionsRoute());
-        }}
-      >
-        <MessageSquare class="h-3.5 w-3.5" />
-      </a>
-      {#if !isMobile}
+      {#if isMobile}
+        <a
+          href={buildSessionsRoute()}
+          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] transition-colors duration-100 {resolveAppArea(currentPath) === 'chats' ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+          aria-label={appAreaLabel('chats', locale)}
+          title={appAreaLabel('chats', locale)}
+          onclick={(event) => {
+            event.preventDefault();
+            void handleNavigate(buildSessionsRoute());
+          }}
+        >
+          <MessageSquare class="h-3.5 w-3.5" />
+        </a>
+      {:else}
         <button
           type="button"
           class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
@@ -4201,7 +3985,9 @@ $effect(() => {
     </div>
   </div>
 
-  {#if mode === "space"}
+  {#if spacesHome}
+    <SpacesViewsNav variant="list" />
+  {:else if area === "spaces"}
     <!-- Space Switcher -->
     <div class="px-1.5 py-1 shrink-0 border-b border-border-subtle">
       <button
@@ -4210,9 +3996,9 @@ $effect(() => {
         onclick={openSpacePalette}
       >
         {#if currentSpace}
-          <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} size="sm" />
+          <SpaceAvatar name={currentSpace.name || currentSpace.title || currentSpace.id} profile={currentSpace.publicProfile} seed={currentSpace.id} size="sm" />
           <span class="flex-1 text-[13px] font-medium text-text-primary truncate text-left">{currentSpace.name || currentSpace.title || currentSpace.id.slice(0, 12)}</span>
-          {@render syncSpinner(refreshingSpaces)}
+          {@render syncSpinner(false)}
         {:else}
           <span class="flex-1 text-[13px] text-text-placeholder truncate text-left">{m.sidebar_select_space({}, { locale })}</span>
         {/if}
@@ -4275,7 +4061,7 @@ $effect(() => {
 
     <!-- Sessions / Checkpoints -->
     {#if currentSpace}
-      <div class="flex-1 overflow-y-auto px-1.5 pb-2 pt-1 min-h-0">
+      <div class="scrollbar-quiet flex-1 overflow-y-auto px-1.5 pb-2 pt-1 min-h-0">
         {#if loadingSessions && sessions.length === 0 && loadingCheckpoints && checkpoints.length === 0}
           {@render sidebarEmptyState(m.common_loading({}, { locale }), true)}
         {:else}
@@ -4529,12 +4315,18 @@ $effect(() => {
         {/if}
       </div>
     {:else}
-      <div class="flex-1 overflow-y-auto px-1.5 pb-2 pt-1 min-h-0">
+      <div class="scrollbar-quiet flex-1 overflow-y-auto px-1.5 pb-2 pt-1 min-h-0">
         <div class="px-1 py-6 text-[12px] text-text-placeholder text-center">
           {m.sidebar_select_space_for_chats({}, { locale })}
         </div>
       </div>
     {/if}
+  {:else if area === "chats"}
+    <div class="min-h-0 flex-1">
+      {#if shown}
+        <ChatsPane variant="sidebar" activeSessionId={activeInboxSessionId} />
+      {/if}
+    </div>
   {:else}
     <div class="px-1.5 pt-2 pb-1">
       <button
@@ -4546,7 +4338,7 @@ $effect(() => {
         <span class="truncate">{m.nav_back({}, { locale })}</span>
       </button>
     </div>
-    <nav class="flex-1 overflow-y-auto px-1.5 py-2 space-y-[2px]">
+    <nav class="scrollbar-quiet flex-1 overflow-y-auto px-1.5 py-2 space-y-[2px]">
       {#each settingsTabs as tab (tab.id)}
         {@const isActive = activeSettingsTab === tab.id}
         <a
@@ -4616,7 +4408,7 @@ $effect(() => {
           <Gift class="w-3.5 h-3.5" />
           <span>{m.nav_referrals({}, { locale })}</span>
         </a>
-        {#if mode === "space"}
+        {#if area !== "account"}
           <a
             href="/settings"
             class="flex items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
@@ -4666,10 +4458,11 @@ $effect(() => {
       <button
         type="button"
         data-user-menu
-        class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-[6px] rounded-[5px] hover:bg-bg-hover transition-colors duration-100 cursor-pointer"
+        class="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-[6px] rounded-[5px] transition-colors duration-100 cursor-pointer {area === 'account' ? 'bg-bg-active' : 'hover:bg-bg-hover'}"
+        aria-current={area === "account" ? "page" : undefined}
         onclick={() => { showHelpMenu = false; showUserMenu = !showUserMenu; }}
       >
-        <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} size="xs" class="h-[22px] w-[22px] border-0" />
+        <UserAvatar name={userDisplayName} avatarUrl={authStore.profile?.avatarUrl} seed={authStore.userUuid} size="xs" class="h-[22px] w-[22px] border-0" />
         <div class="flex-1 min-w-0 text-left">
           <p class="text-[12px] text-text-secondary truncate">{userDisplayName}</p>
         </div>

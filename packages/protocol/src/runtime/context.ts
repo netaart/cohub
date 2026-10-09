@@ -1,4 +1,5 @@
 import type { ContentBlock } from "../core/content.js";
+import { imageBlockToPi } from "../core/image.js";
 import type { RuntimeContextMessage } from "./index.js";
 
 const createEmptyUsage = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
@@ -12,16 +13,12 @@ export type ContextProjectionOptions = {
 
 /**
  * Project one block as itself, or drop it. Nothing is ever rewritten into prompt text.
- * URL images, system notes and unknown blocks have no native representation here; the
- * durable copy stays in the database and is not faked into the model's input.
+ * Remote images stay URLs for the model runtime to resolve; system notes and unknown blocks
+ * have no native representation here, and the durable copy stays in the database.
  */
-function projectBlock(block: ContentBlock): Record<string, unknown> | null {
+function projectBlock(block: ContentBlock, remoteImages = true): Record<string, unknown> | null {
   if (block.type === "text") return { type: "text", text: block.text };
-  if (block.type === "image") {
-    return block.source.type === "base64"
-      ? { type: "image", data: block.source.data, mimeType: block.source.media_type }
-      : null;
-  }
+  if (block.type === "image") return remoteImages || block.source.type === "base64" ? imageBlockToPi(block) : null;
   if (block.type === "thinking") {
     return { type: "thinking", thinking: block.thinking, ...(block.signature ? { thinkingSignature: block.signature } : {}) };
   }
@@ -29,7 +26,7 @@ function projectBlock(block: ContentBlock): Record<string, unknown> | null {
 }
 
 const projectContent = (content: ContentBlock[]) =>
-  content.map(projectBlock).filter((block): block is Record<string, unknown> => block !== null);
+  content.map((block) => projectBlock(block)).filter((block): block is Record<string, unknown> => block !== null);
 
 const isCompaction = (message: RuntimeContextMessage) =>
   message.role === "system" && message.content.some((block) => block.type === "system_note" && block.note_type === "compacted");
@@ -82,7 +79,7 @@ export function contextToPiMessages(messages: RuntimeContextMessage[], options: 
     const content = message.content.flatMap((block): Record<string, unknown>[] => {
       if (block.type === "tool_result") return [];
       if (block.type === "tool_use") return [{ type: "toolCall", id: block.id, name: block.name, arguments: block.input }];
-      const projected = projectBlock(block);
+      const projected = projectBlock(block, false);
       return projected ? [projected] : [];
     });
     if (content.length) result.push({

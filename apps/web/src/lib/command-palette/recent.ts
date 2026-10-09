@@ -1,11 +1,20 @@
 import { goto } from "$app/navigation";
 import { getCacheUserKey } from "$lib/cache/keys";
-import type { CommandPaletteItem } from "./types";
+import { chatHref } from "./chat-items";
+import { commandItemKey } from "./merge-results";
+import type { CommandPaletteItem, CommandPaletteItemType } from "./types";
 
 const STORAGE_PREFIX = "cohub:command-palette:recent";
 const MAX_RECENT = 30;
 
 type StoredRecent = CommandPaletteItem & { openedAt: number };
+
+const RECENT_TYPES = new Set<CommandPaletteItemType>([
+	"chat",
+	"space",
+	"label",
+	"command",
+]);
 
 function storageKey() {
 	return `${STORAGE_PREFIX}:${encodeURIComponent(getCacheUserKey())}`;
@@ -22,9 +31,15 @@ function safeParse(value: string | null): StoredRecent[] {
 }
 
 function compactForStorage(item: CommandPaletteItem): CommandPaletteItem {
+	const {
+		hit: _hit,
+		titleHighlights: _titleHighlights,
+		matchCount: _matchCount,
+		...rest
+	} = item;
 	return {
-		...item,
-		excerpt: item.type === "turn" ? null : item.excerpt,
+		...rest,
+		...(item.type === "chat" ? { href: chatHref(item.spaceId, item.id) } : {}),
 		source: item.source === "recent" ? "local" : item.source,
 	};
 }
@@ -33,6 +48,7 @@ export function getRecentCommandItems(): CommandPaletteItem[] {
 	if (typeof localStorage === "undefined") return [];
 	try {
 		return safeParse(localStorage.getItem(storageKey()))
+			.filter((item) => RECENT_TYPES.has(item.type))
 			.sort((a, b) => b.openedAt - a.openedAt)
 			.slice(0, MAX_RECENT)
 			.map(({ openedAt: _openedAt, ...item }) => ({
@@ -47,11 +63,10 @@ export function getRecentCommandItems(): CommandPaletteItem[] {
 export function rememberCommandItem(item: CommandPaletteItem) {
 	if (typeof localStorage === "undefined") return;
 	try {
-		const key = `${item.type}:${item.id || item.turnId || item.sessionId || item.spaceId}`;
+		const key = commandItemKey(item);
 		const current = safeParse(localStorage.getItem(storageKey())).filter(
 			(existing) =>
-				`${existing.type}:${existing.id || existing.turnId || existing.sessionId || existing.spaceId}` !==
-				key,
+				RECENT_TYPES.has(existing.type) && commandItemKey(existing) !== key,
 		);
 		const next: StoredRecent[] = [
 			{ ...compactForStorage(item), openedAt: Date.now() },

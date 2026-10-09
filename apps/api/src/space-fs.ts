@@ -19,7 +19,7 @@ import {
 } from "./space-fs-cdn-cache.js";
 import { FS_CDN_READ_MANY_WAIT_TIMEOUT_MS, FS_CDN_READ_WAIT_TIMEOUT_MS } from "./space-fs-cdn-constants.js";
 import { config } from "./config.js";
-import { createSpaceGitignoreFilter, type SpaceFsVisibility } from "./space-fs-ignore.js";
+import { createSpaceGitignoreFilter, isSpaceFsStagingName, type SpaceFsVisibility } from "@cohub/core/space-fs";
 import {
   matchesSpaceFsVersion,
   type SpaceFsEntry,
@@ -643,7 +643,7 @@ export async function listSpaceDirectory(
       "Read directory entry names; slow when the directory is large or the backing volume is under IO pressure.",
       async () => {
         try {
-          return await readdir(target);
+          return (await readdir(target)).filter((name) => !isSpaceFsStagingName(name));
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") {
             throw new SpaceFsError(404, "path_not_found", "File or directory not found.");

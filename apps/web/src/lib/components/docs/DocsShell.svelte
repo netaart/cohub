@@ -98,7 +98,7 @@ onMount(() => {
 	<PublicContentShell sidebarLabel={ui.docsLabel} sidebar={desktopSidebar}>
 		<div class="min-w-0 flex-1">
 			<div
-				class="sticky top-12 z-20 flex items-center gap-2 border-b border-border-subtle bg-bg-primary/90 px-4 py-2 backdrop-blur-md lg:hidden"
+				class="sticky top-[var(--public-header-height)] z-20 flex items-center gap-2 border-b border-border-subtle bg-bg-primary/90 px-4 py-2 backdrop-blur-md lg:hidden"
 			>
 				<button
 					type="button"

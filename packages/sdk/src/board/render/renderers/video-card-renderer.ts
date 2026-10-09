@@ -1,5 +1,6 @@
+import type { BoardSceneItem, SceneItem } from "../../core/scene.js";
 import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
-import type { BoardItem, BoardVideoItem } from "@cohub/protocol/board-document";
+import type { BoardVideoItem } from "@cohub/protocol";
 import { Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import {
 	syncTextResolution,
@@ -40,7 +41,7 @@ function layoutContain(sprite: Sprite, width: number, height: number) {
 
 function sync(
 	container: Container,
-	item: BoardVideoItem,
+	item: SceneItem<BoardVideoItem>,
 	context: BoardRenderContext,
 ) {
 	const parts = partsByContainer.get(container);
@@ -51,7 +52,7 @@ function sync(
 	const hovered = context.hoveredId === item.id;
 	const resizing = context.resizingIds.has(item.id);
 	const title =
-		item.snapshot?.title ?? item.ref.path.split("/").pop() ?? "Video";
+		item.props.snapshot?.title ?? item.props.src.split("/").pop() ?? "Video";
 	const key = context.assetKey(item);
 	const texture = key ? context.getTexture(key) : null;
 	const failed = Boolean(key && !texture && context.hasError(key));
@@ -70,6 +71,7 @@ function sync(
 		hovered,
 		failed,
 		title,
+		item.props.time ?? 0,
 		parts.label.height,
 		context.palette.surface,
 		context.palette.brand,
@@ -171,7 +173,6 @@ export const videoCardRenderer: BoardCardRenderer = {
 	update: (container, item, context) => {
 		if (item.type === "video") sync(container, item, context);
 	},
-	// Far LOD stays batched; sampling distinct textures would defeat the batch.
 	renderFar: (graphics, item, context) => {
 		drawFarPlate(graphics, item.frame, {
 			fill: context.palette.surface,
@@ -186,6 +187,6 @@ export const videoCardRenderer: BoardCardRenderer = {
 	},
 };
 
-export function isVideoItem(item: BoardItem): item is BoardVideoItem {
+export function isVideoItem(item: BoardSceneItem): item is SceneItem<BoardVideoItem> {
 	return item.type === "video";
 }

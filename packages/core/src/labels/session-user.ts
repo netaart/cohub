@@ -200,6 +200,8 @@ export async function assignSessionParticipantSystemLabels(input: SessionUserLab
       meta: { kind: "session_participant", userUuid: userUuidByLabelId.get(label.id) },
     }));
 
-  if (rows.length > 0) await input.db.insert(labelAssignments).values(rows).onConflictDoNothing();
-  return labelIds;
+  if (rows.length === 0) return [];
+  const inserted = await input.db.insert(labelAssignments).values(rows).onConflictDoNothing()
+    .returning({ labelId: labelAssignments.labelId });
+  return inserted.map((row) => row.labelId);
 }

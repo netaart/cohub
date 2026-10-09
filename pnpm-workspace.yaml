@@ -1,3 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+catalog:
+  "@earendil-works/pi-agent-core": 0.87.1
+  "@earendil-works/pi-ai": 0.87.1

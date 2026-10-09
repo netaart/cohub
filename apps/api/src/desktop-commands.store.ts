@@ -8,6 +8,8 @@ import {
   type DesktopCommandRecord,
   DESKTOP_COMMAND_PENDING_TTL_SECONDS,
   DESKTOP_COMMAND_TERMINAL_TTL_SECONDS,
+  DESKTOP_UNREACHABLE_ERROR,
+  isDesktopCommandAcceptOverdue,
 } from "@cohub/protocol/desktop-command";
 
 export type DesktopCommandStoreClient = {
@@ -53,6 +55,26 @@ if record['settledAt'] and record['settledAt'] ~= cjson.null then
 end
 redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])
 return {1, ARGV[3]}
+`;
+
+/**
+ * Accept and expiry race; the script lets exactly one leave the unaccepted state.
+ * Returns `{ code, record }`: 1 written, 0 already settled, 2 already accepted, -1 missing.
+ */
+const TRANSITION_UNACCEPTED_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return {-1, ''}
+end
+local record = cjson.decode(raw)
+if record['settledAt'] and record['settledAt'] ~= cjson.null then
+  return {0, raw}
+end
+if record['acceptedAt'] and record['acceptedAt'] ~= cjson.null then
+  return {2, raw}
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+return {1, ARGV[1]}
 `;
 
 export type DesktopCommandSettleReason = "not_found" | "forbidden" | "already_settled";
@@ -147,4 +169,69 @@ export async function settleDesktopCommandRecord(
   }
   if (result.code === -2) return { ok: false, reason: "forbidden" };
   return { ok: false, reason: "not_found" };
+}
+
+/** Write `next` only while the command is still pending and unaccepted; returns the stored record. */
+async function transitionUnaccepted(
+  client: DesktopCommandStoreClient,
+  next: DesktopCommandRecord,
+): Promise<DesktopCommandRecord | null> {
+  const result = readScriptResult(
+    await client.eval(
+      TRANSITION_UNACCEPTED_SCRIPT,
+      1,
+      getDesktopCommandKey(next.commandId),
+      JSON.stringify(next),
+      String(next.settledAt ? DESKTOP_COMMAND_TERMINAL_TTL_SECONDS : DESKTOP_COMMAND_PENDING_TTL_SECONDS),
+    ),
+  );
+  return result.record;
+}
+
+/** Expiry is a function of the clock, so it is applied lazily on read. */
+async function expireIfUnreachable(
+  client: DesktopCommandStoreClient,
+  record: DesktopCommandRecord,
+  now: number,
+): Promise<DesktopCommandRecord> {
+  if (!isDesktopCommandAcceptOverdue(record, now)) return record;
+  const expired = await transitionUnaccepted(client, {
+    ...record,
+    status: "no_active_client",
+    error: DESKTOP_UNREACHABLE_ERROR,
+    settledAt: new Date(now).toISOString(),
+  });
+  return expired ?? record;
+}
+
+export async function readCurrentDesktopCommand(
+  client: DesktopCommandStoreClient,
+  commandId: string,
+  now = Date.now(),
+): Promise<DesktopCommandRecord | null> {
+  const record = await readDesktopCommand(client, commandId);
+  return record ? expireIfUnreachable(client, record, now) : null;
+}
+
+export type DesktopCommandAcceptOutcome =
+  | { ok: true; accepted: boolean; record: DesktopCommandRecord }
+  | { ok: false; reason: "not_found" | "forbidden" };
+
+/** Idempotent; a command that already expired is refused, so a late tab opens nothing. */
+export async function acceptDesktopCommandRecord(
+  client: DesktopCommandStoreClient,
+  input: { commandId: string; actorUserId: string; clientId: string | null },
+  now = Date.now(),
+): Promise<DesktopCommandAcceptOutcome> {
+  const current = await readDesktopCommand(client, input.commandId);
+  if (!current) return { ok: false, reason: "not_found" };
+  if (current.actorUserId !== input.actorUserId || current.targetClientId !== input.clientId) {
+    return { ok: false, reason: "forbidden" };
+  }
+  const record = await expireIfUnreachable(client, current, now);
+  const stored = record.settledAt || record.acceptedAt
+    ? record
+    : await transitionUnaccepted(client, { ...record, acceptedAt: new Date(now).toISOString() });
+  if (!stored) return { ok: false, reason: "not_found" };
+  return { ok: true, accepted: !stored.settledAt, record: stored };
 }

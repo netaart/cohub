@@ -2,32 +2,11 @@ import type { GlobalSearchResult } from "@neta-art/cohub";
 import { sortCommandItems } from "./score";
 import type { CommandPaletteItem } from "./types";
 
-function keyFor(
-	item: Pick<
-		CommandPaletteItem,
-		"type" | "spaceId" | "sessionId" | "turnId" | "id"
-	>,
-) {
-	if (item.type === "turn") return `turn:${item.turnId ?? item.id}`;
-	if (item.type === "session") return `session:${item.sessionId ?? item.id}`;
-	if (item.type === "label") return `label:${item.id}`;
-	if (item.type === "command") return `command:${item.id}`;
-	return `space:${item.spaceId}`;
-}
+type CommandItemKeySource = Pick<CommandPaletteItem, "type" | "id">;
 
-export function commandItemKey(
-	item: Pick<
-		CommandPaletteItem,
-		"type" | "spaceId" | "sessionId" | "turnId" | "id"
-	>,
-) {
-	return keyFor(item);
+export function commandItemKey(item: CommandItemKeySource) {
+	return `${item.type}:${item.id}`;
 }
-
-type CommandItemKeySource = Pick<
-	CommandPaletteItem,
-	"type" | "spaceId" | "sessionId" | "turnId" | "id"
->;
 
 /**
  * True when two lists resolve to the same ordered keys. The palette result
@@ -41,7 +20,8 @@ export function sameCommandItemSequence(
 ) {
 	if (left.length !== right.length) return false;
 	for (let index = 0; index < left.length; index += 1) {
-		if (keyFor(left[index]) !== keyFor(right[index])) return false;
+		if (commandItemKey(left[index]) !== commandItemKey(right[index]))
+			return false;
 	}
 	return true;
 }
@@ -51,7 +31,6 @@ function remoteToItem(item: GlobalSearchResult): CommandPaletteItem {
 		...item,
 		excerpt: item.excerpt ?? null,
 		spaceName: item.spaceName ?? null,
-		sessionTitle: item.sessionTitle ?? null,
 		viewerRelation: item.viewerRelation ?? null,
 		viewerTier: item.effectiveTier ?? undefined,
 		source: "remote",
@@ -66,19 +45,30 @@ export function mergeCommandResults(input: {
 	longQuery?: boolean;
 }) {
 	const byKey = new Map<string, CommandPaletteItem>();
-	for (const item of input.local) byKey.set(keyFor(item), item);
+	for (const item of input.local) byKey.set(commandItemKey(item), item);
 	for (const remoteResult of input.remote) {
 		const item = remoteToItem(remoteResult);
-		const key = keyFor(item);
+		const key = commandItemKey(item);
 		const existing = byKey.get(key);
 		if (!existing) {
 			byKey.set(key, item);
 			continue;
 		}
 		// Remote knows the viewer relation authoritatively; keep its tier.
+		const keepLocalHit = !item.hit && Boolean(existing.hit);
 		byKey.set(key, {
 			...existing,
 			...item,
+			...(keepLocalHit
+				? {
+						hit: existing.hit,
+						href: existing.href,
+						matchCount: Math.max(
+							item.matchCount ?? 0,
+							existing.matchCount ?? 0,
+						),
+					}
+				: {}),
 			source: "local+remote",
 			localScore: existing.localScore ?? existing.score,
 			remoteScore: item.score,

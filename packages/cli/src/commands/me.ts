@@ -74,7 +74,7 @@ export function registerMe(program: Command): void {
         });
         if (jsonRequested(opts)) return outJson(activity);
         console.log(`\n  ${formatLocalDateTime(activity.range.from)} → ${formatLocalDateTime(activity.range.to)}`);
-        table([activity.summary], [
+        table([activity.totals], [
           { key: "totalTokens", label: "Tokens" },
           { key: "costTotal", label: "Cost ($)" },
           { key: "requestCount", label: "Requests" },

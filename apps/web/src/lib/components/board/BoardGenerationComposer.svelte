@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
-import type { BoardItem } from "@neta-art/cohub/board";
+import type { BoardSceneItem } from "@neta-art/cohub/board";
 import { featuredTaskArtifact, worldPoint } from "@neta-art/cohub/board";
 import {
 	AudioLines,
@@ -145,17 +145,17 @@ function mediaIcon(type: BoardGenerationMediaType) {
 	return Image;
 }
 
-function itemMediaType(item: BoardItem): BoardGenerationMediaType | null {
+function itemMediaType(item: BoardSceneItem): BoardGenerationMediaType | null {
 	if (item.type === "image" || item.type === "video" || item.type === "audio")
 		return item.type;
 	if (item.type === "file") {
-		const mimeType = item.snapshot?.mimeType ?? "";
+		const mimeType = item.props.snapshot?.mimeType ?? "";
 		if (mimeType.startsWith("image/")) return "image";
 		if (mimeType.startsWith("video/")) return "video";
 		if (mimeType.startsWith("audio/")) return "audio";
 	}
 	if (item.type === "task") {
-		const type = featuredTaskArtifact(item.snapshot.artifacts)?.type;
+		const type = featuredTaskArtifact(item.props.snapshot.artifacts)?.type;
 		return type === "image" || type === "video" || type === "audio"
 			? type
 			: null;
@@ -163,7 +163,7 @@ function itemMediaType(item: BoardItem): BoardGenerationMediaType | null {
 	return null;
 }
 
-function itemLabel(item: BoardItem): string {
+function itemLabel(item: BoardSceneItem): string {
 	if (
 		item.type === "image" ||
 		item.type === "video" ||
@@ -171,15 +171,15 @@ function itemLabel(item: BoardItem): string {
 		item.type === "file"
 	) {
 		return (
-			item.snapshot?.title ?? item.ref.path.split("/").pop() ?? item.ref.path
+			item.props.snapshot?.title ?? item.props.src.split("/").pop() ?? item.props.src
 		);
 	}
-	if (item.type === "task") return item.snapshot.title;
+	if (item.type === "task") return item.props.snapshot.title;
 	return m.board_reference({}, { locale });
 }
 
 async function resolveItemReference(
-	item: BoardItem,
+	item: BoardSceneItem,
 ): Promise<BoardGenerationReference | null> {
 	const type = itemMediaType(item);
 	if (!type) return null;
@@ -190,9 +190,9 @@ async function resolveItemReference(
 		item.type === "audio" ||
 		item.type === "file"
 	) {
-		rawUrl = await assetSource.resolveFileUrl(item.ref.path);
+		rawUrl = await assetSource.resolveFileUrl(item.props.src);
 	} else if (item.type === "task") {
-		const artifact = featuredTaskArtifact(item.snapshot.artifacts);
+		const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);
 		rawUrl = artifact?.type === "text" ? null : artifact?.url;
 	}
 	const url = rawUrl ? normalizeGenerationReferenceUrl(rawUrl) : null;
@@ -386,7 +386,7 @@ async function submit() {
 		const sourcePort = referencePortForKind(reference.type);
 		return [
 			{
-				nodeId: item.id,
+				itemId: item.id,
 				kind: reference.type,
 				sourcePortId:
 					item.type === "task"
@@ -402,7 +402,7 @@ async function submit() {
 		version: 1,
 		boardId,
 		sources: sources.map((source) => ({
-			nodeId: source.nodeId,
+			itemId: source.itemId,
 			kind: source.kind,
 			sourcePortId: source.sourcePortId,
 			targetPortId: source.targetPortId,
@@ -429,7 +429,6 @@ async function submit() {
 		return;
 	}
 
-	// Creation is the irreversible boundary: never offer another submit after it.
 	startedTaskRunId = taskRunId;
 	const currentUserKey = getCacheUserKey();
 	if (currentUserKey !== submittingUserKey) {

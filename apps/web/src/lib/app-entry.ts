@@ -32,8 +32,7 @@ function rememberSpace(space: SpaceRecord) {
 
 /**
  * Resolve where an authenticated user should land.
- * Prefers local recent/cache, then GET /api/spaces/default (which ensures Home
- * when the account has no accessible space).
+ * Prefers local recent/cache, then GET /api/spaces/default.
  */
 export async function resolveAppEntryRoute(): Promise<string | null> {
 	const userKey = authStore.userUuid;

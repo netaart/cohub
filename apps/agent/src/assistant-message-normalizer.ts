@@ -68,7 +68,10 @@ const normalizeToolResultBlocks = (blocks: unknown[], context: string): Normaliz
       warnInvalidContentBlock(context)(issue);
     },
   });
-  if (issues.length === 0) return { content: textFromBlocks(content) ?? content, isError: false };
+  if (issues.length === 0) {
+    const hosted = content.filter((block) => block.type !== "image" || block.source.type === "url");
+    return { content: hosted.some((block) => block.type === "image") ? hosted : textFromBlocks(content) ?? content, isError: false };
+  }
   const message = `Tool result content error: ${issues.map((issue) => issue.message).join("; ")}`;
   return { content: message, isError: true, errorMessage: message };
 };

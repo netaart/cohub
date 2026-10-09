@@ -41,16 +41,10 @@ const waitForStaleGitLock = async (cwd: string) => {
   }
 };
 
-type GitCommandOptions = {
-  env?: NodeJS.ProcessEnv;
-  redact?: readonly string[];
-};
-
-const spawnGitWithOutput = async (args: string[], cwd: string, options: GitCommandOptions) => {
+const spawnGitWithOutput = async (args: string[], cwd: string) => {
   return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn("git", ["-c", `safe.directory=${cwd}`, ...args], {
       cwd,
-      env: options.env ? { ...process.env, ...options.env } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -64,21 +58,16 @@ const spawnGitWithOutput = async (args: string[], cwd: string, options: GitComma
     });
     child.on("error", reject);
     child.on("close", (code) => {
-      for (const secret of options.redact ?? []) {
-        if (!secret) continue;
-        stdout = stdout.replaceAll(secret, "***");
-        stderr = stderr.replaceAll(secret, "***");
-      }
       if (code === 0) return resolve({ stdout, stderr });
       reject(new Error(redactBasicAuthUrls(stderr.trim() || `git ${args[0]} exited with non-zero status ${code}`)));
     });
   });
 };
 
-export const runGitWithOutput = async (args: string[], cwd: string, options: GitCommandOptions = {}) => {
+export const runGitWithOutput = async (args: string[], cwd: string) => {
   await cleanStaleGitLock(cwd);
   try {
-    return await spawnGitWithOutput(args, cwd, options);
+    return await spawnGitWithOutput(args, cwd);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!isGitIndexLockError(message)) throw error;
@@ -86,12 +75,12 @@ export const runGitWithOutput = async (args: string[], cwd: string, options: Git
     await waitForStaleGitLock(cwd);
     const removed = await cleanStaleGitLock(cwd);
     if (!removed) throw error;
-    return spawnGitWithOutput(args, cwd, options);
+    return spawnGitWithOutput(args, cwd);
   }
 };
 
-export const runGit = async (args: string[], cwd: string, options: GitCommandOptions = {}) => {
-  await runGitWithOutput(args, cwd, options);
+export const runGit = async (args: string[], cwd: string) => {
+  await runGitWithOutput(args, cwd);
 };
 
 export const ensureGitRepo = async (repoDir: string, branch = "main") => {

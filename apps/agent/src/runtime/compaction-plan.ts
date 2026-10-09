@@ -1,3 +1,4 @@
+import type { AgentMessage, Entry } from "@earendil-works/pi-agent-core";
 import type { ContextCompactionScope } from "@cohub/protocol/model";
 
 type CompactionPreparationLike = {
@@ -10,6 +11,19 @@ export function getCompactionSummaryMessageCount(
   preparation: CompactionPreparationLike,
 ): number {
   return preparation.messagesToSummarize.length + preparation.turnPrefixMessages.length;
+}
+
+/**
+ * Id of the entry whose message starts the retained tail. Pi's plan carries the
+ * retained messages themselves (the same objects as the entries'), not entry ids.
+ */
+export function findFirstKeptEntryId(
+  entries: readonly Entry[],
+  retainedTail: readonly AgentMessage[],
+): string | undefined {
+  const first = retainedTail[0];
+  if (!first) return undefined;
+  return entries.find((entry) => entry.type === "message" && entry.message === first)?.id;
 }
 
 export function resolveCompactionScope(

@@ -3,9 +3,8 @@ import type { CommandPaletteItem, CommandPaletteItemType } from "./types";
 const TYPE_PRIORITY: Record<CommandPaletteItemType, number> = {
 	command: 1,
 	space: 0.88,
-	session: 0.74,
+	chat: 0.74,
 	label: 0.72,
-	turn: 0.66,
 };
 
 const FIELD_WEIGHT: Record<string, number> = {
@@ -78,10 +77,22 @@ export function scoreCommandItem(input: {
 	const textScore =
 		Math.max(primaryScore, secondaryScore) *
 		(FIELD_WEIGHT[input.matchedField] ?? 0.8);
+	return blendCommandScore({ ...input, textScore });
+}
+
+export function blendCommandScore(input: {
+	type: CommandPaletteItemType;
+	textScore: number;
+	updatedAt?: string | null;
+}) {
 	const fresh = recencyScore(input.updatedAt);
 	const typePriorityScore = TYPE_PRIORITY[input.type];
-	const score = textScore * 0.76 + fresh * 0.18 + typePriorityScore * 0.06;
-	return { score, textScore, recencyScore: fresh, typePriorityScore };
+	return {
+		score: input.textScore * 0.76 + fresh * 0.18 + typePriorityScore * 0.06,
+		textScore: input.textScore,
+		recencyScore: fresh,
+		typePriorityScore,
+	};
 }
 
 export function sortCommandItems(

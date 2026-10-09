@@ -11,6 +11,7 @@
  */
 
 import { untrack } from "svelte";
+import { haptic } from "$lib/haptics";
 import {
 	autoscrollStep,
 	describePointerDragPayload,
@@ -53,15 +54,6 @@ let suppressClickUntil = 0;
 
 function shouldSuppressClick() {
 	return Date.now() < suppressClickUntil;
-}
-
-/** Short haptic tick; silently ignored where unsupported. */
-function vibrate(pattern: number | number[]) {
-	try {
-		navigator.vibrate?.(pattern);
-	} catch {
-		// Vibration is a nicety, never a requirement.
-	}
 }
 
 function prefersReducedMotion() {
@@ -161,7 +153,7 @@ function resolveTargetAt(clientX: number, clientY: number) {
 	const nextElement = picked?.candidate.element ?? null;
 	// Tick only when the target actually changes, so the haptic marks a
 	// boundary crossing rather than buzzing continuously.
-	if (nextElement !== pointerDrag.targetElement && nextElement) vibrate(8);
+	if (nextElement !== pointerDrag.targetElement && nextElement) haptic("tick");
 	pointerDrag.targetElement = nextElement;
 	pointerDrag.intent = picked?.intent ?? null;
 }
@@ -356,7 +348,7 @@ function finishDrag(
 
 	const committed = Boolean(commit && zone && intent && point);
 	if (committed && zone && point) {
-		vibrate([12, 24, 12]);
+		haptic("confirm");
 		zone.drop(drag.payload, point);
 		pointerDrag.announcement = `${describePointerDragPayload(drag.payload)} — ${intent?.label ?? "dropped"}`;
 		pointerDrag.committedOutsideSurface = retracted;
@@ -438,7 +430,7 @@ export function pointerDragSource(
 		pointerDrag.settling = false;
 		pointerDrag.retracted = false;
 		pointerDrag.announcement = `Picked up ${describePointerDragPayload(payload)}`;
-		vibrate(14);
+		haptic("longPress");
 		document.body.classList.add("pointer-dragging");
 		// Events live on the window rather than a captured node: the source row can
 		// slide away with its drawer mid-drag, and the window sees every move

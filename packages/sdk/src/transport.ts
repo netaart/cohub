@@ -2,6 +2,7 @@ import type { RequestSource } from "@cohub/protocol/provenance";
 import { requestSourceToHeaders } from "@cohub/protocol/provenance";
 import type { CohubEnvironment } from "./environment.js";
 import { resolveApiBaseUrl } from "./environment.js";
+import { readRevalidationEntry, revalidationEnabled, writeRevalidationEntry } from "./revalidation-cache.js";
 import type { WebsocketClientOptions } from "./websocket.js";
 import type { VoiceInputCreateOptions } from "./voice-input.js";
 import type { AppRuntimeModeConfig } from "./app-runtime.js";
@@ -20,6 +21,8 @@ const responseBodyForError = async (response: Response) => {
     ? await response.json().catch(() => null)
     : await response.text().catch(() => response.statusText);
 };
+
+const isFailure = (response: Response) => !response.ok && response.status !== 304;
 
 const messageFromErrorBody = (body: unknown, fallback: string) => {
   if (typeof body === "string") return body.trim() || fallback;
@@ -361,7 +364,7 @@ export class HttpTransport {
           throw error;
         }
         if (retryResponse.status !== 401) {
-          if (!retryResponse.ok) {
+          if (isFailure(retryResponse)) {
             const body = await responseBodyForError(retryResponse);
             throw new HttpError(
               messageFromErrorBody(body, retryResponse.statusText),
@@ -396,7 +399,7 @@ export class HttpTransport {
       throw error;
     }
 
-    if (!response.ok) {
+    if (isFailure(response)) {
       const body = await responseBodyForError(response);
       throw new HttpError(
         messageFromErrorBody(body, response.statusText),
@@ -416,6 +419,19 @@ export class HttpTransport {
     }
 
     return response.json() as Promise<T>;
+  }
+
+  async requestRevalidated<T>(path: string, init?: RequestInitWithFetch): Promise<T> {
+    if (!revalidationEnabled) return this.request<T>(path, init);
+    const key = joinApiUrl(this.baseUrl, path);
+    const cached = readRevalidationEntry(key);
+    const headers = new Headers(init?.headers);
+    if (cached) headers.set("If-None-Match", cached.etag);
+    const response = await this.send(path, { ...init, headers });
+    if (response.status === 304 && cached) return JSON.parse(cached.body) as T;
+    const body = await response.text();
+    writeRevalidationEntry(key, response.headers.get("etag"), body);
+    return JSON.parse(body) as T;
   }
 
   async raw(path: string, init?: RequestInitWithFetch): Promise<RawHttpResponse> {

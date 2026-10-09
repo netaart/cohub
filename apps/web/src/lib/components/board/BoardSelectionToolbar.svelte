@@ -28,25 +28,19 @@ const {
 	editor,
 	onRegenerateTask,
 	onAddToGeneration,
-	regeneratingNodeId = null,
+	regeneratingItemId = null,
 }: {
 	editor: BoardEditor;
-	onRegenerateTask?: (nodeId: string) => void;
+	onRegenerateTask?: (itemId: string) => void;
 	onAddToGeneration?: () => void;
-	regeneratingNodeId?: string | null;
+	regeneratingItemId?: string | null;
 } = $props();
 
 const locale = $derived(getLocale());
 
 const visible = $derived(
 	editor.selection.length > 0 &&
-		/**
-		 * A connection has no frame, so `editor.bounds` is null when only a relation
-		 * is selected. `BoardConnectionToolbar` handles that case; this toolbar only
-		 * deals with nodes.
-		 */
 		editor.selection.some((id) => editor.itemById(id) !== null) &&
-		// Direct-pointer Hand taps can safely select without enabling canvas edits.
 		(editor.tool === "select" ||
 			(editor.tool === "hand" && canTapSelectWithHand(editor.pointerType))) &&
 		editor.interaction.type !== "brushing" &&
@@ -66,7 +60,7 @@ const canGenerate = $derived(
 const generationTask = $derived.by(() => {
 	if (editor.selectedItems.length !== 1) return null;
 	const item = editor.selectedItems[0];
-	return item?.type === "task" && item.snapshot.taskType === "generation"
+	return item?.type === "task" && (item.props as { snapshot: { taskType: string } }).snapshot.taskType === "generation"
 		? item
 		: null;
 });
@@ -75,29 +69,21 @@ const position = $derived.by(() => {
 	const bounds = editor.bounds;
 	if (!bounds) return null;
 	const camera = editor.camera;
-	// Keep the toolbar near the selection, clamped away from the top edge.
 	const left = (bounds.x + bounds.width / 2) * camera.zoom + camera.x;
 	const top = Math.max(36, bounds.y * camera.zoom + camera.y);
 	return { left, top };
 });
 
-/**
- * The selection's color state for the palette:
- * - `undefined` — no color-bearing shape selected (hide the palette);
- * - a color id — every color-bearing shape shares it (highlight that swatch);
- * - `null` — mixed colors (no highlight).
- */
 const currentColor = $derived.by<string | null | undefined>(() => {
-	const colors = editor.selectedItems
-		.filter(
-			(item) =>
-				item.type === "text" ||
-				item.type === "geo" ||
-				item.type === "draw" ||
-				item.type === "arrow" ||
-				item.type === "frame",
-		)
-		.map((item) => ("color" in item ? item.color : null));
+	const colors = editor.selectedItems.flatMap((item) => {
+		const { fill, stroke } = item.style;
+		const id = (value: unknown, fallback: string) => (typeof value === "string" ? value : value === undefined ? fallback : null);
+		if (item.type === "text" || item.type === "effect") return [id(fill, "neutral")];
+		if (item.type === "shape") return [id(stroke ?? fill, "brand")];
+		if (item.type === "draw" || item.type === "arrow") return [id(stroke, "brand")];
+		if (item.type === "frame") return [id(stroke ?? fill, "neutral")];
+		return [];
+	});
 	if (colors.length === 0) return undefined;
 	return colors.every((color) => color === colors[0])
 		? (colors[0] ?? null)
@@ -147,12 +133,12 @@ const currentColor = $derived.by<string | null | undefined>(() => {
 			<button
 				type="button"
 				class="sel-btn"
-				title={regeneratingNodeId === generationTask.id ? m.board_regenerating({}, { locale }) : m.board_regenerate({}, { locale })}
-				aria-label={regeneratingNodeId === generationTask.id ? m.board_regenerating({}, { locale }) : m.board_regenerate_task({}, { locale })}
-				disabled={regeneratingNodeId !== null}
+				title={regeneratingItemId === generationTask.id ? m.board_regenerating({}, { locale }) : m.board_regenerate({}, { locale })}
+				aria-label={regeneratingItemId === generationTask.id ? m.board_regenerating({}, { locale }) : m.board_regenerate_task({}, { locale })}
+				disabled={regeneratingItemId !== null}
 				onclick={() => onRegenerateTask(generationTask.id)}
 			>
-				{#if regeneratingNodeId === generationTask.id}
+				{#if regeneratingItemId === generationTask.id}
 					<LoaderCircle class="h-3.5 w-3.5 animate-spin" />
 				{:else}
 					<RefreshCw class="h-3.5 w-3.5" />
@@ -285,9 +271,7 @@ const currentColor = $derived.by<string | null | undefined>(() => {
 
 	@media (pointer: coarse) {
 		.board-selection-toolbar {
-			/* Leave room for the bottom tool dock + home indicator. */
 			max-width: calc(100% - 20px);
-			/* Prefer above selection; if near bottom the stage already clamps top. */
 		}
 		.sel-btn { width: 36px; height: 36px; }
 		.swatch { width: 22px; height: 22px; }

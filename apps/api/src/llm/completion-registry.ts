@@ -10,6 +10,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 export type RuntimeLlmModel = Model<Api> & {
   defaultThinkingLevel?: ModelDef["defaultThinkingLevel"];
   requestProfile?: ModelDef["requestProfile"];
+  imageUrlInput?: boolean;
   /** Discovery hint: hidden models stay resolvable by id but never become implicit defaults. */
   hidden?: boolean;
 };
@@ -63,6 +64,7 @@ export class CompletionModelRegistry {
           contextWindow: modelDef.contextWindow ?? 128000,
           maxTokens: modelDef.maxTokens ?? 16384,
           requestProfile: modelDef.requestProfile ?? providerConfig.requestProfile,
+          imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,
           headers: mergeHeaders(providerConfig.headers, modelDef.headers),
           compat: (modelDef.compat ?? providerConfig.compat) as Model<Api>["compat"],
           hidden: modelDef.hidden === true,

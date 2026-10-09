@@ -15,6 +15,9 @@
 - `fs.search`（可选的 Tantivy 候选文件搜索）
 - `process.start`
 - `process.abort`
+- `display.list` / `display.capture` / `display.input`（显示，见 `docs/displays.md`；`COHUB_DISPLAY` 选择来源：
+  `auto` 本机屏幕、`xvfb[:WxH]` 虚拟屏、`unix:<path>` Android 应用、`test` 测试图案）
+- `rtc.open` / `rtc.close`（WebRTC 观看会话，仅 API 身份可调用）
 
 sandbox 只保证工作目录挂载可用，不再负责 clone repo 或初始化 workspace 内容。
 这些内容初始化流程统一由 worker 完成，再通过共享 PVC 暴露给 sandbox。

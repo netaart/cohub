@@ -1,0 +1,396 @@
+package live.cohub.android.host
+
+import android.annotation.SuppressLint
+import android.net.Uri
+import android.webkit.WebView
+import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebMessageCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import live.cohub.android.auth.AuthSession
+import live.cohub.android.display.DeviceDisplay
+import live.cohub.android.files.FileSaver
+import live.cohub.android.runtime.DeviceRuntime
+import live.cohub.android.runtime.FolderUnavailable
+import live.cohub.android.runtime.RuntimeInstance
+import live.cohub.android.runtime.toJson
+import java.util.UUID
+
+/**
+ * Answers `cohub.host.v1` requests from the web surface.
+ *
+ * Uses `WebViewCompat.addWebMessageListener` rather than a `@JavascriptInterface`
+ * object: it is confined to the Cohub origin, whereas a JavaScript interface is
+ * reachable from any script the WebView ever loads.
+ *
+ * Lint's `RequiresFeature` check cannot follow the guard from [attach] into the
+ * reply helpers, so it is suppressed at class level.
+ */
+@SuppressLint("RequiresFeature")
+class HostBridge(
+    private val scope: CoroutineScope,
+    private val auth: AuthSession,
+    private val actions: HostActions,
+    private val runtime: DeviceRuntime? = null,
+    private val files: FileSaver? = null,
+    private val display: DeviceDisplay? = null,
+) {
+    private val supportedMethods = BASE_METHODS +
+        (if (runtime != null) RUNTIME_METHODS else emptySet()) +
+        (if (runtime != null && display != null) DISPLAY_METHODS else emptySet()) +
+        (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE) else emptySet())
+
+    @Volatile
+    private var replyProxy: JavaScriptReplyProxy? = null
+
+    /** Returns false when this device's WebView cannot host a bridge. */
+    fun attach(webView: WebView, allowedOrigin: Uri): Boolean {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return false
+        attachListener(webView, allowedOrigin)
+        return true
+    }
+
+    private fun attachListener(webView: WebView, allowedOrigin: Uri) {
+        WebViewCompat.addWebMessageListener(
+            webView,
+            HostProtocol.GLOBAL,
+            setOf(allowedOrigin.toString()),
+            object : WebViewCompat.WebMessageListener {
+                override fun onPostMessage(
+                    view: WebView,
+                    message: WebMessageCompat,
+                    sourceOrigin: Uri,
+                    isMainFrame: Boolean,
+                    proxy: JavaScriptReplyProxy,
+                ) {
+                    // Only the top-level Cohub surface may drive native behaviour.
+                    if (!isMainFrame) return
+                    replyProxy = proxy
+                    message.data?.let { handle(it, proxy) }
+                }
+            },
+        )
+    }
+
+    private fun handle(data: String, proxy: JavaScriptReplyProxy) {
+        val message = runCatching { Json.parseToJsonElement(data) as? JsonObject }.getOrNull() ?: return
+        if (message["type"]?.jsonPrimitive?.contentOrNull != "request") return
+        val id = message["id"]?.jsonPrimitive?.contentOrNull ?: return
+        val method = message["method"]?.jsonPrimitive?.contentOrNull ?: return
+        val params = message["params"] as? JsonObject ?: JsonObject(emptyMap())
+
+        // Unknown methods answer `unsupported` rather than staying silent, so the
+        // web side falls back to its browser path instead of waiting.
+        if (method !in supportedMethods) {
+            replyError(proxy, id, HostProtocol.Errors.UNSUPPORTED, "Unsupported method: $method")
+            return
+        }
+
+        scope.launch {
+            runCatching {
+                auth.load()
+                dispatch(method, id, params)
+            }
+                .onSuccess { result -> reply(proxy, id, result) }
+                .onFailure { error ->
+                    val code = if (error is CancellationSignal) {
+                        HostProtocol.Errors.CANCELED
+                    } else {
+                        HostProtocol.Errors.FAILED
+                    }
+                    replyError(proxy, id, code, error.message ?: "Host call failed")
+                }
+        }
+    }
+
+    private suspend fun dispatch(method: String, id: String, params: JsonObject): JsonElement = when (method) {
+        HostProtocol.Methods.HOST_DESCRIBE -> buildJsonObject {
+            put("version", HostProtocol.VERSION)
+            put("platform", HostProtocol.PLATFORM)
+            put("hostId", actions.hostId())
+            put(
+                "capabilities",
+                buildJsonArray {
+                    HostCapabilities.advertised(runtime = runtime != null && display != null, files = files != null)
+                        .forEach { add(JsonPrimitive(it)) }
+                },
+            )
+        }
+
+        HostProtocol.Methods.AUTH_GET_ACCESS_TOKEN -> {
+            // Booleans arrive typed, not stringified.
+            val forceRefresh = params["forceRefresh"]?.jsonPrimitive?.booleanOrNull == true
+            auth.accessToken(forceRefresh)?.let(::JsonPrimitive) ?: JsonPrimitive(null as String?)
+        }
+
+        HostProtocol.Methods.AUTH_GET_SESSION_VERSION -> JsonPrimitive(auth.sessionVersion())
+
+        HostProtocol.Methods.AUTH_GET_SESSION -> {
+            val identity = auth.status()
+            buildJsonObject {
+                put("authenticated", identity.authenticated)
+                put("userUuid", identity.userUuid)
+                put("subject", identity.subject)
+                // ID token claims never cross the bridge; the web side uses /api/me.
+                put("email", null as String?)
+            }
+        }
+
+        HostProtocol.Methods.AUTH_SIGN_IN -> {
+            actions.startSignIn(params["redirectPath"]?.jsonPrimitive?.contentOrNull)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.AUTH_SIGN_OUT -> {
+            actions.signOut()
+            emit(HostProtocol.Events.AUTH_SIGNED_OUT)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.SHARE_TEXT -> {
+            val text = params["text"]?.jsonPrimitive?.contentOrNull
+                ?: throw IllegalArgumentException("share.text requires text")
+            actions.shareText(text, params["title"]?.jsonPrimitive?.contentOrNull)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.NAVIGATION_OPEN_PATH -> {
+            val path = params["path"]?.jsonPrimitive?.contentOrNull
+                ?: throw IllegalArgumentException("navigation.openPath requires path")
+            actions.openPath(path)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.CACHE_CLEAR -> {
+            actions.clearCache(params["scope"]?.jsonPrimitive?.contentOrNull ?: "all")
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.APPEARANCE_SET -> {
+            val color = params["backgroundColor"]?.jsonPrimitive?.contentOrNull?.let(HostProtocol::parseColor)
+                ?: throw IllegalArgumentException("appearance.set requires a #rrggbb backgroundColor")
+            actions.setAppearance(color)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.APP_READY -> {
+            actions.appReady()
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.HAPTICS_PERFORM -> {
+            val kind = HostProtocol.Haptic.of(params.string("kind"))
+                ?: throw IllegalArgumentException("haptics.perform requires a known kind")
+            JsonPrimitive(actions.performHaptic(kind))
+        }
+
+        HostProtocol.Methods.FILES_SAVE -> {
+            val saver = files ?: throw IllegalStateException("This device cannot save files")
+            val name = params.string("name") ?: throw IllegalArgumentException("files.save requires a name")
+            val mimeType = params.string("mimeType")
+            val url = params.string("url")
+            val data = params.string("data")
+            when {
+                url != null && data == null -> {
+                    require(url.startsWith("https://")) { "files.save only downloads https URLs" }
+                    saver.saveUrl(url, name, mimeType)
+                }
+                data != null && url == null -> saver.saveBase64(data, name, mimeType)
+                else -> throw IllegalArgumentException("files.save requires exactly one of url or data")
+            }
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.NAVIGATION_INTERCEPT_BACK -> {
+            val enabled = params["enabled"]?.jsonPrimitive?.booleanOrNull
+                ?: throw IllegalArgumentException("navigation.interceptBack requires enabled")
+            actions.interceptBack(enabled)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.SHORTCUTS_PUSH -> {
+            val id = params.string("id")?.takeIf { it.length <= 128 }
+                ?: throw IllegalArgumentException("shortcuts.push requires an id")
+            val label = params.string("label")?.trim()?.takeIf { it.isNotEmpty() && it.length <= 64 }
+                ?: throw IllegalArgumentException("shortcuts.push requires a label")
+            val path = params.string("path")?.takeIf { it.startsWith("/") && !it.startsWith("//") }
+                ?: throw IllegalArgumentException("shortcuts.push requires an in-app path")
+            actions.pushShortcut(id, label, path)
+            JsonPrimitive(true)
+        }
+
+        HostProtocol.Methods.RUNTIME_LIST -> requireRuntime().instances.value.toJson()
+
+        HostProtocol.Methods.RUNTIME_BROWSE -> {
+            requireStorageAccess()
+            try {
+                requireRuntime().browse(params["path"]?.jsonPrimitive?.contentOrNull).toJson()
+            } catch (error: FolderUnavailable) {
+                throw IllegalArgumentException("Folder unavailable: ${error.message}")
+            }
+        }
+
+        HostProtocol.Methods.RUNTIME_START -> {
+            val spaceId = requireSpaceId(params)
+            val root = params["root"]?.jsonPrimitive?.contentOrNull
+                ?: throw IllegalArgumentException("runtime.start requires a folder")
+            requireStorageAccess()
+            val refused = requireRuntime().start(spaceId, root)
+            JsonObject(requireRuntime().instances.value.toJson() + ("refused" to JsonPrimitive(refused)))
+        }
+
+        HostProtocol.Methods.RUNTIME_STOP -> {
+            requireRuntime().stop(requireSpaceId(params))
+            requireRuntime().instances.value.toJson()
+        }
+
+        HostProtocol.Methods.DISPLAY_STATUS -> requireDisplay().status.value.toJson()
+
+        HostProtocol.Methods.DISPLAY_SHARE -> {
+            val spaceId = requireSpaceId(params)
+            val serving = requireRuntime().instances.value.any { it.spaceId == spaceId && isRunning(it.state) }
+            if (!serving) throw IllegalStateException("This device does not serve that Space")
+            val grant = actions.requestScreenCapture() ?: throw CancellationSignal("Screen capture was not granted")
+            requireDisplay().awaitShare(spaceId) { actions.startSharing(spaceId, grant) }.toJson()
+        }
+
+        HostProtocol.Methods.DISPLAY_STOP -> {
+            requireDisplay().stop()
+            requireDisplay().status.value.toJson()
+        }
+
+        HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS -> JsonPrimitive(actions.openControlSettings())
+
+        else -> throw IllegalArgumentException("Unhandled method: $method")
+    }
+
+    private fun requireDisplay(): DeviceDisplay = display ?: throw IllegalStateException("This device cannot share its screen")
+
+    private fun isRunning(state: RuntimeInstance.State) =
+        state == RuntimeInstance.State.READY || state == RuntimeInstance.State.CONNECTING
+
+    private fun requireRuntime(): DeviceRuntime = runtime ?: throw IllegalStateException("This device cannot serve a Space")
+
+    private suspend fun requireStorageAccess() {
+        if (!actions.prepareRuntime()) throw CancellationSignal("All files access was not granted")
+    }
+
+    private fun requireSpaceId(params: JsonObject): String =
+        params["spaceId"]?.jsonPrimitive?.contentOrNull?.takeIf { runCatching { UUID.fromString(it) }.isSuccess }
+            ?: throw IllegalArgumentException("A Space id is required")
+
+    /** Push a host event; dropped when no page is attached. */
+    fun emit(name: String, payload: JsonElement? = null) {
+        val proxy = replyProxy ?: return
+        proxy.postMessage(
+            buildJsonObject {
+                put("type", "event")
+                put("name", name)
+                if (payload != null) put("payload", payload)
+            }.toString(),
+        )
+    }
+
+    private fun reply(proxy: JavaScriptReplyProxy, id: String, result: JsonElement) {
+        proxy.postMessage(
+            buildJsonObject {
+                put("type", "response")
+                put("id", id)
+                put("result", result)
+            }.toString(),
+        )
+    }
+
+    private fun replyError(proxy: JavaScriptReplyProxy, id: String, code: String, message: String) {
+        proxy.postMessage(
+            buildJsonObject {
+                put("type", "response")
+                put("id", id)
+                put(
+                    "error",
+                    buildJsonObject {
+                        put("code", code)
+                        put("message", message)
+                    },
+                )
+            }.toString(),
+        )
+    }
+
+    private companion object {
+        val DISPLAY_METHODS = setOf(
+            HostProtocol.Methods.DISPLAY_STATUS,
+            HostProtocol.Methods.DISPLAY_SHARE,
+            HostProtocol.Methods.DISPLAY_STOP,
+            HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS,
+        )
+        val RUNTIME_METHODS = setOf(
+            HostProtocol.Methods.RUNTIME_LIST,
+            HostProtocol.Methods.RUNTIME_BROWSE,
+            HostProtocol.Methods.RUNTIME_START,
+            HostProtocol.Methods.RUNTIME_STOP,
+        )
+        val BASE_METHODS = setOf(
+            HostProtocol.Methods.HOST_DESCRIBE,
+            HostProtocol.Methods.AUTH_GET_ACCESS_TOKEN,
+            HostProtocol.Methods.AUTH_GET_SESSION_VERSION,
+            HostProtocol.Methods.AUTH_GET_SESSION,
+            HostProtocol.Methods.AUTH_SIGN_IN,
+            HostProtocol.Methods.AUTH_SIGN_OUT,
+            HostProtocol.Methods.SHARE_TEXT,
+            HostProtocol.Methods.NAVIGATION_OPEN_PATH,
+            HostProtocol.Methods.CACHE_CLEAR,
+            HostProtocol.Methods.APPEARANCE_SET,
+            HostProtocol.Methods.APP_READY,
+            HostProtocol.Methods.HAPTICS_PERFORM,
+            HostProtocol.Methods.NAVIGATION_INTERCEPT_BACK,
+            HostProtocol.Methods.SHORTCUTS_PUSH,
+        )
+    }
+}
+
+private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
+
+/** Raised when the user or platform aborts a native surface; maps to `canceled`. */
+class CancellationSignal(message: String) : Exception(message)
+
+/** Native effects the bridge may request; an interface keeps it testable. */
+interface HostActions {
+    fun hostId(): String
+    fun startSignIn(redirectPath: String?)
+    suspend fun signOut()
+    fun shareText(text: String, title: String?)
+    fun openPath(path: String)
+    suspend fun clearCache(scope: String)
+    fun setAppearance(backgroundColor: Int)
+
+    fun appReady()
+
+    fun performHaptic(kind: HostProtocol.Haptic): Boolean
+
+    fun interceptBack(enabled: Boolean)
+
+    fun pushShortcut(id: String, label: String, path: String)
+
+    suspend fun prepareRuntime(): Boolean
+
+    suspend fun requestScreenCapture(): ScreenCaptureGrant?
+
+    fun startSharing(spaceId: String, grant: ScreenCaptureGrant)
+
+    fun openControlSettings(): Boolean
+}
+
+class ScreenCaptureGrant(val resultCode: Int, val data: android.content.Intent)

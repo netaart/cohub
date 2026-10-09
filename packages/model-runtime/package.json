@@ -15,6 +15,14 @@
     "./pi-models-adapter": {
       "types": "./dist/pi-models-adapter.d.ts",
       "default": "./dist/pi-models-adapter.js"
+    },
+    "./request-profile": {
+      "types": "./dist/request-profile/index.d.ts",
+      "default": "./dist/request-profile/index.js"
+    },
+    "./request-profile/claude-code": {
+      "types": "./dist/request-profile/claude-code.d.ts",
+      "default": "./dist/request-profile/claude-code.js"
     }
   },
   "scripts": {
@@ -22,8 +30,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@cohub/infra": "workspace:*",
     "@cohub/protocol": "workspace:*",
-    "@earendil-works/pi-ai": "0.81.1"
+    "@earendil-works/pi-ai": "catalog:"
   },
   "devDependencies": {
     "@types/node": "26.4.0",

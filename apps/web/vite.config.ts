@@ -130,6 +130,31 @@ export default defineConfig(({ mode }) => {
 					navigateFallback: undefined,
 					runtimeCaching: [
 						{
+							// Last copy of each page for offline launches; never auth returns.
+							urlPattern: ({ request, url }) =>
+								request.mode === "navigate" &&
+								!/^\/(?:callback|app-auth|mobile)(?:\/|$)/.test(url.pathname),
+							handler: "NetworkFirst",
+							options: {
+								cacheName: "pages",
+								networkTimeoutSeconds: 3,
+								cacheableResponse: { statuses: [200] },
+								expiration: {
+									maxEntries: 64,
+									maxAgeSeconds: 60 * 60 * 24 * 30,
+								},
+								plugins: [
+									{
+										cacheKeyWillBeUsed: async ({ request }) => {
+											const url = new URL(request.url);
+											url.search = "";
+											return url.href;
+										},
+									},
+								],
+							},
+						},
+						{
 							urlPattern: ({ url }) =>
 								url.pathname.startsWith("/_app/immutable/"),
 							handler: "CacheFirst",

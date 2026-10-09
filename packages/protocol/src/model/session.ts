@@ -1,5 +1,10 @@
+export * from "./metrics.js";
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
+export { normalizeSessionTurnOrigin, readSessionTurnOrigin, turnEventRequestSource } from "../turn-origin.js";
+export type { SessionTurnOrigin, SessionTurnOriginKind } from "../turn-origin.js";
+export { normalizeSentTurnRef, readSentTurns } from "../sent-turns.js";
+export type { SentTurnRef } from "../sent-turns.js";
 
 export type SessionForkRecord = {
   id: string;
@@ -137,11 +142,20 @@ export type SessionUserProfile = {
 
 export type SessionActiveTurn = {
   id: string;
+  sequence: number;
   status: "queued" | "running" | "abort_requested";
   provider: string | null;
   model: string | null;
   startedAt: string | null;
   anchorUserMessageId: string | null;
+};
+
+export type SessionTurnIssue = {
+  turnId: string;
+  sequence: number;
+  status: "failed" | "interrupted";
+  reason: string | null;
+  errorMessage: string | null;
 };
 
 export type SessionRecord = {
@@ -155,6 +169,8 @@ export type SessionRecord = {
   source: string | null;
   status: string | null;
   activeTurn?: SessionActiveTurn | null;
+  activeTurnSequence?: number;
+  lastTurnIssue?: SessionTurnIssue | null;
   externalSessionId: string | null;
   meta: Record<string, unknown> | null;
   latestMessageText: string | null;

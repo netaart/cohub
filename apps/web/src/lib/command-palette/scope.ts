@@ -10,19 +10,10 @@ export type CommandPaletteSearchPlan = {
 };
 
 const REMOTE_TYPES = new Set<CommandPaletteResourceType>([
-	"turn",
-	"session",
+	"chat",
 	"space",
 	"label",
 ]);
-
-const TYPE_LABELS: Record<CommandPaletteResourceType, string> = {
-	turn: "Turns",
-	session: "Sessions",
-	space: "Spaces",
-	label: "Labels",
-	command: "Commands",
-};
 
 export function allowsResourceType(
 	plan: Pick<CommandPaletteSearchPlan, "resourceTypes">,
@@ -39,12 +30,4 @@ export function getRemoteResourceTypes(
 		REMOTE_TYPES.has(type),
 	) as RemoteCommandPaletteResourceType[];
 	return types.length > 0 ? types : [];
-}
-
-export function typeLabelFor(
-	resourceTypes: CommandPaletteResourceType[] | undefined,
-) {
-	return resourceTypes?.length
-		? resourceTypes.map((type) => TYPE_LABELS[type]).join(" + ")
-		: null;
 }

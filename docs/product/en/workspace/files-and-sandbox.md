@@ -117,6 +117,31 @@ Bindings are scoped by directory, account, and environment, and stored in
 `~/.config/cohub/runtime-spaces.json`. This is useful when you want Cohub Agents
 against a local working tree. See [CLI](/docs/developers/cli).
 
+## Share a phone screen
+
+When the Cohub Android app serves a Space, it can also share the phone's screen with it. Open the
+Space's Runtime menu on the phone and choose **Share screen**; Android asks for permission each
+time. Builders and hosts then see the screen live from **Screens → View**, on the web or another
+device, and the Space's Agents can take screenshots of it and read its controls. Avatars beside a
+screen show who is watching; a ring marks those who can steer it.
+
+To let people and Agents tap, swipe and type on the phone, choose **Allow control** and enable Cohub
+in Accessibility settings. Control only works while the screen is shared. Whenever a person
+touches the screen, an Agent working on it waits, then looks again before going on. Stop sharing
+from the Runtime menu or the notification at any time.
+
+## Virtual screens
+
+A cloud sandbox can run a virtual screen. Choose the screen button in the Space header, then
+**Start virtual screen**: programs started in the sandbox from then on show on it — a browser an
+Agent opens, for example — and you can watch and steer them live. Stop it from the same place; it
+also ends when the sandbox stops. A sandbox created before virtual screens existed asks to be
+updated with **Force recovery** in the Space settings.
+
+This is how to watch an Agent at work in a browser and take over when it needs you — to sign in, for
+example: ask it to use the virtual screen, open the screen from the link it gives you, and type
+yourself. What you type goes to the screen, not to the chat.
+
 ## Practical tips
 
 - Keep publishable outputs in stable paths

@@ -4,6 +4,7 @@ export {
   type TracingOptions,
 } from "./provider.js";
 export { initDrizzleTracing } from "./db.js";
+export { serviceNameFromEnv } from "./service-name.js";
 export {
   injectTrace,
   extractTrace,

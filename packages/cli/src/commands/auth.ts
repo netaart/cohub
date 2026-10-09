@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { authSource, loginWithDeviceFlow, readAuthSession, refreshAccessToken, requestDeviceCode, revokeAndClearAuthSession, verifyDeviceCode } from "../auth.js";
-import { clearDefaultSpaceCache } from "../space.js";
+import { clearHomeSpaceCache } from "../space.js";
 import { createClient } from "../client.js";
 import { table, json as outJson, jsonRequested, ok, error, spinner, handleHttp } from "../output.js";
 
@@ -80,7 +80,7 @@ export function registerAuth(program: Command): void {
     .description("Clear stored Logto session")
     .action(async () => {
       await revokeAndClearAuthSession();
-      clearDefaultSpaceCache();
+      clearHomeSpaceCache();
       if (process.env.COHUB_EXECUTION_TOKEN?.trim()) {
         ok("Local session cleared. COHUB_EXECUTION_TOKEN is still set.");
       } else {

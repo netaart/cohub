@@ -253,6 +253,19 @@ for await (const event of space.streamCompletion({ messages, maxTokens: 160 })) 
 }
 ```
 
+`content` may also be a plain string. Images use the Cohub/Anthropic shape or the
+OpenAI Chat (`image_url`) and Responses (`input_image`) shapes; a URL is passed to
+the model as-is, so it must be publicly reachable, and `data:` URLs are sent inline.
+
+```ts
+await space.completion({
+  messages: [{ role: "user", content: [
+    { type: "text", text: "What is in this picture?" },
+    { type: "image_url", image_url: { url: "https://example.com/cat.webp" } },
+  ] }],
+});
+```
+
 ### Generation (image / video / audio)
 
 ```ts

@@ -1,6 +1,7 @@
 import { createLogger } from "@cohub/infra/logging";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Usage } from "@cohub/protocol/core";
+import { sanitizeSessionRecordStats } from "@cohub/protocol/model";
 import type { PersistMessageInput, RegisterSessionInput, SessionTurnRecord, UpdateSessionInfoInput } from "@cohub/protocol/model";
 import type { ModelThinkingLevel } from "@cohub/protocol";
 import { getOrCreateRequestId } from "@cohub/infra/tracing";
@@ -14,6 +15,7 @@ import {
   deriveSessionFallbackTitle,
   initializeSessionParticipantsMeta,
   normalizeSessionTitle,
+  readSessionActiveTurns,
   readSessionParticipantUserUuids,
   readSessionTitleSource,
   resolveMessageTurnId,
@@ -40,7 +42,6 @@ import { fallbackPublicUserProfile, getProfilesByUuids } from "./user-profiles.j
 import { enqueueSessionMessagePostprocess } from "./session-message-postprocess-queue.js";
 import { enqueueSessionTitleGeneration } from "./session-title-queue.js";
 import { touchSpaceActivity } from "./space-activity.js";
-import { pickActiveTurns } from "./session-active-turns.js";
 import { sessionListSourceCondition } from "./session-source-filter.js";
 import {
   decodeSessionListCursor,
@@ -182,7 +183,7 @@ export const getSpaceById = async (spaceId: string) => {
 
 export const getSpaceSessionById = async (spaceSessionId: string) => {
   const [session] = await db.select().from(spaceSessions).where(eq(spaceSessions.id, spaceSessionId)).limit(1);
-  return session ?? null;
+  return session ? sanitizeSessionRecordStats(session) : null;
 };
 
 export const getSessionMessageById = async (spaceSessionId: string, messageId: string) => {
@@ -208,13 +209,14 @@ const normalizeRequiredUserUuid = (userUuid: string | null | undefined) => {
   return normalized;
 };
 
-async function assignSessionUserLabelsAndDispatch(input: { spaceId: string; sessionId: string; userUuids: string[] }) {
+export async function assignSessionUserLabelsAndDispatch(input: { spaceId: string; sessionId: string; userUuids: string[] }) {
   const affectedLabelIds = await assignSessionParticipantSystemLabels({
     db,
     spaceId: input.spaceId,
     sessionId: input.sessionId,
     userUuids: input.userUuids,
   });
+  if (affectedLabelIds.length === 0) return;
   await dispatchLabelAssignmentsUpdated({
     spaceId: input.spaceId,
     resourceType: "session",
@@ -287,7 +289,7 @@ export const registerSpaceSession = async (input: RegisterSessionInput) => {
       const [existing] = await db.select().from(spaceSessions).where(eq(spaceSessions.id, input.sessionId)).limit(1);
       if (existing) {
         await ensureRootSessionTurnSegment(existing.id);
-        return existing;
+        return sanitizeSessionRecordStats(existing);
       }
     }
     throw error;
@@ -303,10 +305,11 @@ export const hydrateSessionParticipantProfiles = async <T extends typeof spaceSe
 
   const profiles = await getProfilesByUuids([...allUserUuids]);
   return sessions.map((session) => {
-    const participantUserUuids = readSessionParticipantUserUuids(session.meta);
-    const userUuid = session.userUuid?.trim() || null;
+    const safeSession = sanitizeSessionRecordStats(session);
+    const participantUserUuids = readSessionParticipantUserUuids(safeSession.meta);
+    const userUuid = safeSession.userUuid?.trim() || null;
     return {
-      ...session,
+      ...safeSession,
       userUuid,
       userProfile: userUuid ? profiles.get(userUuid) ?? fallbackPublicUserProfile(userUuid) : null,
       participantUserUuids,
@@ -350,29 +353,12 @@ const sessionListOrderBy = [
   desc(spaceSessions.id),
 ] as const;
 
-const ACTIVE_TURN_STATUSES = ["queued", "running", "abort_requested"] as const;
-
-export async function attachActiveTurns<T extends { id: string }>(sessions: T[]) {
-  if (sessions.length === 0) return pickActiveTurns(sessions, []);
-
-  const rows = await db
-    .select({
-      sessionId: sessionTurns.sessionId,
-      id: sessionTurns.id,
-      status: sessionTurns.status,
-      provider: sessionTurns.provider,
-      model: sessionTurns.model,
-      startedAt: sessionTurns.startedAt,
-      meta: sessionTurns.meta,
-    })
-    .from(sessionTurns)
-    .where(and(
-      inArray(sessionTurns.sessionId, sessions.map((session) => session.id)),
-      inArray(sessionTurns.status, [...ACTIVE_TURN_STATUSES]),
-    ))
-    .orderBy(asc(sessionTurns.sessionId), desc(sessionTurns.sequence));
-
-  return pickActiveTurns(sessions, rows);
+export async function attachActiveTurns<T extends { id: string; meta?: unknown }>(sessions: T[]) {
+  const states = await readSessionActiveTurns(db, sessions.map((session) => session.id));
+  return sessions.map((session) => ({
+    ...sanitizeSessionRecordStats(session),
+    ...(states.get(session.id) ?? { activeTurn: null, lastTurnIssue: null }),
+  }));
 }
 
 export const listSpaceSessions = async (
@@ -766,6 +752,7 @@ export const persistMessageNode = async (input: PersistMessageInput & { message:
 };
 
 export const updateSpaceSessionInfo = async (input: UpdateSessionInfoInput) => {
+  if (input.meta && Object.hasOwn(input.meta, "stats")) throw new Error("Session stats are server-managed");
   const changed: string[] = [];
   const refreshed = await db.transaction(async (tx) => {
     const [session] = await tx.select().from(spaceSessions)

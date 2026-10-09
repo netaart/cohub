@@ -1,7 +1,8 @@
 import { createLogger } from "@cohub/infra/logging";
 import { Hono } from "hono";
 import { hasPermission } from "../permissions.js";
-import { authzDenied, requireValidId, useAuth } from "../lib/middleware.js";
+import { authzDenied, getExecutionPrincipal, requireValidId, useAuth } from "../lib/middleware.js";
+import { PublicFileConfigError } from "../public-file-storage.js";
 import {
   createPublicAssetUploadPlan,
   isPublicAssetPurpose,
@@ -37,6 +38,12 @@ router.post("/uploads", async (c) => {
     if (body.purpose === "app_source" && !body.sessionId) return c.json({ message: "sessionId is required" }, 400);
   }
 
+  const execution = getExecutionPrincipal(c);
+  if (body.purpose === "session_image") {
+    if (!execution || execution.spaceId !== body.spaceId) return authzDenied(c);
+    if (body.sessionId && execution.sessionId && execution.sessionId !== body.sessionId) return authzDenied(c);
+  }
+
   // chat_attachment and generation_input are user-scoped: authenticated is enough.
   // Optional spaceId/sessionId are association hints only and do not gate upload.
 
@@ -48,8 +55,11 @@ router.post("/uploads", async (c) => {
       spaceId: body.spaceId,
       sessionId: body.sessionId,
       file: body.file,
+      endpoint: execution ? "internal" : "public",
     });
-    await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: 1, totalBytes: body.file.size });
+    if (body.purpose !== "session_image") {
+      await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: 1, totalBytes: body.file.size });
+    }
     return c.json(plan);
   } catch (error) {
     if (error instanceof UploadRateLimitError) {
@@ -60,7 +70,7 @@ router.post("/uploads", async (c) => {
       const status = error.message.startsWith("too many") ? 429 : 400;
       return c.json({ message: error.message }, status as never);
     }
-    if (error instanceof PublicAssetConfigError || error instanceof UserUploadConfigError) {
+    if (error instanceof PublicAssetConfigError || error instanceof PublicFileConfigError || error instanceof UserUploadConfigError) {
       logger.error("[public-assets] upload storage is not configured", error.message);
       return c.json({ message: "public asset storage is not configured" }, 500);
     }

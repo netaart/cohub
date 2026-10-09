@@ -38,6 +38,8 @@ test("parseModelsConfig validates known provider and model fields", () => {
     { models: [{ id: "model", contextWindow: 0 }] },
     { models: [{ id: "model", maxTokens: 1.5 }] },
     { models: [{ id: "model", compat: [] }] },
+    { requestProfile: "claude", models: [{ id: "model" }] },
+    { models: [{ id: "model", requestProfile: "claude" }] },
   ];
 
   for (const provider of invalidProviders) {
@@ -59,6 +61,17 @@ test("parseModelsConfig keeps valid provider-specific extensions", () => {
     },
   }));
   assert.equal(parsed.providers.cohub?.models?.[0]?.routingTier, "fast");
+});
+
+test("parseModelsConfig accepts every request profile", () => {
+  const parsed = parseModelsConfig(JSON.stringify({
+    providers: {
+      claude: { requestProfile: "claude-code", models: [{ id: "claude-opus-5-5" }] },
+      codex: { models: [{ id: "gpt-5.6-sol", requestProfile: "codex" }] },
+    },
+  }));
+  assert.equal(parsed.providers.claude?.requestProfile, "claude-code");
+  assert.equal(parsed.providers.codex?.models?.[0]?.requestProfile, "codex");
 });
 
 test("isRuntimeModelAvailable honors user model overrides", () => {

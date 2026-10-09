@@ -80,7 +80,7 @@ export function syncCloudContext(manager: SessionManager, context: RuntimeContex
   // Project and validate the whole missing tail before touching the live projection.
   const pending = region.slice(after + 1).map((row) => ({ row, messages: projectRow(row, options) }));
   // Anchor the boundary at the first kept row that has (or will have) a native entry. A first row
-  // without one (dropped URL image, system note) simply does not become the anchor, so a boundary can
+  // without one (a system note) simply does not become the anchor, so a boundary can
   // never be missing, fail late, or leave a half-written tail behind.
   let anchor = region.slice(0, after + 1).map((row) => entryIdByMessageId.get(row.id)).find((id): id is string => Boolean(id)) ?? null;
   let changed = false;

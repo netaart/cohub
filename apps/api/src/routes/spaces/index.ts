@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { maybeEnqueueCrossSpaceReference } from "../../lib/cross-space-reference.js";
-import spacesRouter from "./spaces.route.js";
+import spacesRouter, { meSpacesRouter } from "./spaces.route.js";
 import fsRouter from "./fs.route.js";
 import membersRouter from "./members.route.js";
 import accessRouter from "./access.route.js";
@@ -17,6 +17,7 @@ import commerceRouter from "./commerce.route.js";
 import completionsRouter from "./completions.route.js";
 import publicFilesRouter from "./public-files.route.js";
 import webhooksRouter from "./webhooks.route.js";
+import displaysRouter from "./displays.route.js";
 
 const router = new Hono();
 
@@ -54,5 +55,7 @@ router.route("/", previewSessionRouter);
 router.route("/", startupRouter);
 router.route("/", commerceRouter);
 router.route("/", webhooksRouter);
+router.route("/", displaysRouter);
 
+export { meSpacesRouter };
 export default router;

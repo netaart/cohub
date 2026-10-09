@@ -152,3 +152,38 @@ test("board creation forwards its mutation id", async () => {
     mutationId: "mutation-board",
   });
 });
+
+test("space file reads revalidate a cached body by ETag", async () => {
+  const file = {
+    path: "manifest.json",
+    name: "manifest.json",
+    size: 2,
+    mimeType: "application/json",
+    mtimeMs: 1,
+    kind: "text",
+    encoding: "utf-8",
+    content: "{}",
+    delivery: "inline",
+  };
+  const sentTags: Array<string | null> = [];
+  const fetch: Fetch = async (_input, init) => {
+    const ifNoneMatch = new Headers(init?.headers).get("If-None-Match");
+    sentTags.push(ifNoneMatch);
+    if (ifNoneMatch === '"v1"') return new Response(null, { status: 304, headers: { ETag: '"v1"' } });
+    return new Response(JSON.stringify(file), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ETag: '"v1"' },
+    });
+  };
+  const files = new CohubHttpClient({ baseUrl: "https://api.example.test", fetch })
+    .space("space-revalidate")
+    .files;
+
+  const first = await files.read("manifest.json");
+  const second = await files.read("manifest.json");
+
+  assert.deepEqual(sentTags, [null, '"v1"']);
+  assert.deepEqual(first, file);
+  assert.deepEqual(second, file);
+  assert.notEqual(first, second);
+});

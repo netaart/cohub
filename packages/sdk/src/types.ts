@@ -1,3 +1,4 @@
+export type { SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type {
   SessionBindingRecord as ProtocolSessionBindingRecord,
   SessionRecord as ProtocolSessionRecord,
@@ -40,49 +41,38 @@ import type {
   PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
 import type { MessageRecord } from "@cohub/protocol/model";
-import type { ModelThinkingLevel } from "@cohub/protocol";
+import type { ModelThinkingLevel, SearchTextRange } from "@cohub/protocol";
+
+export type { SearchTextRange } from "@cohub/protocol";
 
 export type {
-  BoardAssetRef,
-  BoardAuthoringItem,
-  BoardAuthoringReadInput,
-  BoardAuthoringSnapshot,
-  BoardCapabilities,
-  BoardCapability,
-  BoardCameraFocus,
-  BoardCameraFocusParams,
-  BoardCameraState,
-  BoardProceduralClip,
-  BoardCoordinateSpace,
+  BoardAnimation,
+  BoardAnimationHeader,
+  BoardApplyInput,
+  BoardApplyResult,
+  BoardChangeSummary,
+  BoardColor,
   BoardCreateInput,
+  BoardDelta,
   BoardDiagnostic,
-  BoardEffect,
-  BoardEffectInput,
-  BoardAnimationSpec,
-  BoardDealParams,
-  BoardAnimationTarget,
-  BoardCompositionPlayback,
-  BoardEasing,
+  BoardDocument,
+  BoardHistoryInput,
+  BoardHistoryPage,
+  BoardItem,
+  BoardKeyframe,
   BoardManifest,
-  BoardItemPatch,
-  BoardMutationReceipt,
+  BoardMarker,
+  BoardPatch,
   BoardPlaybackCommand,
-  BoardPlaybackPolicy,
   BoardPlaybackSnapshot,
+  BoardReadInput,
+  BoardReadResult,
   BoardRecord,
-  BoardRenderCost,
-  BoardComposition,
-  BoardSemanticCommand,
-  BoardSemanticMutation,
-  BoardSummary,
-  BoardTimeline,
-  BoardTimelineMarker,
+  BoardSettings,
+  BoardSnapshot,
+  BoardStyle,
   BoardTrack,
-  BoardTransactionOperation,
   BoardTransactionRecord,
-  BoardTransactionsPage,
-  BoardTransactionsReadInput,
-  BoardValidationResult,
   SpaceStartupResponse,
 } from "@cohub/protocol";
 
@@ -778,6 +768,16 @@ export type SpaceFsUploadProgress = {
   currentPath?: string;
   errors: SpaceFsUploadError[];
 };
+export type {
+  SpaceFsCopyError,
+  SpaceFsCopyInput,
+  SpaceFsCopyOptions,
+  SpaceFsCopyResponse,
+  SpaceFsCopyResult,
+  SpaceFsCopySource,
+  SpaceFsCopyStats,
+  SpaceFsCopyStatus,
+} from "@cohub/protocol/fs";
 
 
 export type SessionBindingRecord = ProtocolSessionBindingRecord;
@@ -859,7 +859,6 @@ export type SpaceRecord = {
   name: string | null;
   slug: string | null;
   description: string | null;
-  storageRepoName?: string | null;
   baseCheckpointId?: string | null;
   headCheckpointId?: string | null;
   title: string | null;
@@ -878,8 +877,29 @@ export type SpaceRecord = {
   access?: SpaceAccess;
   accessLevel?: "minimal";
   ownerProfile?: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
-  /** Whether the viewer has pinned this space (only present in list responses). */
+  /** User-private label state returned by paginated account listings. */
   isPinned?: boolean;
+  isArchived?: boolean;
+  relation?: "owner" | "member" | "public";
+  joinedAt?: string;
+  /** Recent listings only: the viewer's latest session message, visit, or joining. */
+  personalActivityAt?: string;
+};
+
+export type SpaceListFilter = "recent" | "all" | "mine" | "pinned" | "archived";
+
+export type SpaceListOptions = {
+  limit?: number;
+  cursor?: string | null;
+  filter?: SpaceListFilter;
+  query?: string;
+  name?: string;
+  recentSpaces?: readonly { id: string; timestamp: number }[];
+};
+
+export type SpaceListPage = {
+  items: SpaceRecord[];
+  pageInfo: { nextCursor: string | null; hasMore: boolean };
 };
 
 export type SpaceConfigInput = {
@@ -1096,21 +1116,28 @@ export type SpaceChannelBindingInput = {
   config?: ChannelConfig | null;
 };
 
-export type GlobalSearchType = "turn" | "session" | "space" | "label";
+export type GlobalSearchType = "chat" | "space" | "label";
 
 export type GlobalSearchViewerRelation = "creator" | "participant" | "unrelated";
+
+export type GlobalSearchChatHit = {
+  turnId: string;
+  sequence: number;
+  excerpt: string;
+  highlights: SearchTextRange[];
+};
 
 export type GlobalSearchResult = {
   type: GlobalSearchType;
   id: string;
   spaceId: string;
   sessionId: string | null;
-  turnId: string | null;
-  sequence: number | null;
   title: string;
+  titleHighlights?: SearchTextRange[];
   excerpt?: string | null;
+  hit?: GlobalSearchChatHit | null;
+  matchCount?: number;
   spaceName?: string | null;
-  sessionTitle?: string | null;
   ownerProfile?: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
   spaceProfile?: SpacePublicProfile | null;
   matchedField: "userText" | "title" | "name" | "description" | "labelName" | "labelItemContent";
@@ -1146,25 +1173,15 @@ export type PaletteOverviewSpace = {
   ownerProfile: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
   spaceProfile: SpacePublicProfile | null;
   isPinned: boolean;
+  isArchived?: boolean;
   relation: PaletteOverviewSpaceRelation;
   lastParticipatedAt: string | null;
-  updatedAt: string | null;
-};
-
-export type PaletteOverviewSession = {
-  id: string;
-  spaceId: string;
-  spaceName: string | null;
-  title: string | null;
-  viewerRelation: "creator" | "participant";
-  lastMessageAt: string | null;
   updatedAt: string | null;
 };
 
 export type PaletteOverviewResponse = {
   generatedAt: string;
   spaces: PaletteOverviewSpace[];
-  recentSessions: PaletteOverviewSession[];
   /** Present when the server could not produce a complete overview. */
   degraded?: boolean;
 };
@@ -1176,12 +1193,19 @@ export type CreateSpaceSessionInput = {
   labelRefs?: string[];
 };
 
+/**
+ * Fork edge returned alongside a session page. `parentSessionId` and
+ * `parentTitle` are null when the parent is not visible to the viewer.
+ */
+export type SessionListFork = Omit<SessionForkRecord, "parentSessionId"> & {
+  parentSessionId: string | null;
+  firstUserTextAfterFork?: string | null;
+  parentTitle?: string | null;
+};
+
 export type SpaceSessionsResponse = {
   sessions: SessionRecord[];
-  forks?: Array<SessionForkRecord & {
-    firstUserTextAfterFork?: string | null;
-    parentTitle?: string | null;
-  }>;
+  forks?: SessionListFork[];
   pageInfo?: {
     hasMore: boolean;
     nextCursor: string | null;
@@ -1220,6 +1244,8 @@ export type UserSessionSourceKey =
 
 export type UserSessionsResponse = {
   sessions: UserSessionListItem[];
+  /** Fork edges for page sessions; only present with `includeForks`. */
+  forks?: SessionListFork[];
   pageInfo?: {
     hasMore: boolean;
     nextCursor: string | null;
@@ -1278,7 +1304,9 @@ export type CreateSpacePromptResponse =
 
 export type {
   CompletionAssistantMessage,
+  CompletionImageInput,
   CompletionMessage,
+  CompletionMessageInput,
   CompletionMessageRole,
   CompletionThinkingLevel,
   CompletionUsage,
@@ -1531,10 +1559,7 @@ export type LabelAssignmentPageInfo = {
 };
 
 /** Optional hydrated session previews for label item pages (avoids N+1 session detail fetches). */
-export type LabelItemsSessionFork = SessionForkRecord & {
-  firstUserTextAfterFork?: string | null;
-  parentTitle?: string | null;
-};
+export type LabelItemsSessionFork = SessionListFork;
 
 export type LabelItemsResponse = {
   items: LabelAssignmentListItem[];
@@ -1721,11 +1746,21 @@ export type GenerationUsageBlock = {
   summary: GenerationUsageSummary;
 };
 
+/** LLM + generation combined. */
+export type UsageTotals = {
+  totalTokens: number;
+  requestCount: number;
+  successCount: number;
+  errorCount: number;
+  costTotal: number;
+};
+
 export type SpaceUsageResponse = {
   hourly: SpaceUsageHourlyStat[];
   summary: SpaceUsageSummary;
   /** Generation rollups (image / video / music). Optional for older servers. */
   generation?: GenerationUsageBlock;
+  totals: UsageTotals;
   days: number;
 };
 
@@ -1918,6 +1953,7 @@ export type ReferenceKind =
   | "mod"
   | "mention"
   | "tool_call"
+  | "turn_trigger"
   | "agent_tool_file_read"
   | "agent_tool_file_write"
   | "agent_tool_file_edit"

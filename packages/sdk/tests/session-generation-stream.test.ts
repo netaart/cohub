@@ -313,3 +313,143 @@ test("generation subscriptions can seed from a snapshot and replay buffered patc
 	});
 	assert.equal(states.at(-1)?.text, "hello world");
 });
+
+const ordinalPatch = (ordinal: number, seq: number, text: string, turnId = "turn-1") => {
+	const envelope = createPatchEnvelope({
+		id: `${turnId}:${ordinal}:${seq}`,
+		seq,
+		baseSeq: seq - 1,
+		text,
+		messageId: `turn:${turnId}:assistant:${ordinal}`,
+		messageOrdinal: ordinal,
+	});
+	return { ...envelope, payload: { ...envelope.payload, turnId } };
+};
+
+const createGenerationClient = (
+	fetchStreamSnapshot?: ConstructorParameters<typeof SessionGenerationStreamClient>[3],
+) => {
+	const websocket = new WebsocketClient({
+		url: "ws://localhost",
+		getAccessToken: () => "token",
+	});
+	websocket.state = "open";
+	const emit = (
+		websocket as unknown as { emit(type: "event", event: ChannelEnvelope): void }
+	).emit.bind(websocket);
+	return {
+		emit,
+		generation: new SessionGenerationStreamClient(
+			websocket,
+			"space-1",
+			"session-1",
+			fetchStreamSnapshot,
+		),
+	};
+};
+
+test("late events for another round or Turn do not stall the live stream", () => {
+	const { emit, generation } = createGenerationClient();
+	const texts: string[] = [];
+	const outOfSync: string[] = [];
+	const stop = generation.subscribe({
+		state: (event) => {
+			const block = event.state.contentBlocks[0];
+			texts.push(block?.type === "text" ? block.text : "");
+		},
+		outOfSync: (event) => outOfSync.push(event.reason),
+	});
+	// Round 0 is committed only after round 1 has started streaming.
+	emit("event", ordinalPatch(0, 1, "first"));
+	emit("event", ordinalPatch(1, 1, "second"));
+	emit("event", {
+		id: "persisted:0",
+		timestamp: Date.now(),
+		domain: "session",
+		type: "session.message.persisted",
+		spaceId: "space-1",
+		sessionId: "session-1",
+		payload: {
+			message: {
+				id: "db-0",
+				sessionId: "session-1",
+				role: "assistant",
+				content: [{ type: "text", text: "first" }],
+				meta: { messageKind: "assistant_intermediate", turnId: "turn-1", messageOrdinal: 0 },
+			},
+		},
+	});
+	emit("event", ordinalPatch(1, 2, "second, continued"));
+	assert.deepEqual(texts, ["first", "second", "second, continued"]);
+
+	// Turn 1 finalizes after Turn 2 has started streaming.
+	emit("event", ordinalPatch(0, 1, "next turn", "turn-2"));
+	emit("event", {
+		id: "finalized:turn-1",
+		timestamp: Date.now(),
+		domain: "session",
+		type: "session.turn.finalized",
+		spaceId: "space-1",
+		sessionId: "session-1",
+		payload: { turn: { id: "turn-1", sessionId: "session-1", status: "interrupted" } },
+	});
+	emit("event", ordinalPatch(0, 2, "next turn, continued", "turn-2"));
+	stop();
+
+	assert.deepEqual(outOfSync, []);
+	assert.equal(texts.at(-1), "next turn, continued");
+});
+
+test("a patch that no longer applies resyncs from the snapshot once per message", async () => {
+	let fetches = 0;
+	const { emit, generation } = createGenerationClient(async () => {
+		fetches += 1;
+		return createSnapshot();
+	});
+	const outOfSync: string[] = [];
+	const stop = generation.subscribe({
+		outOfSync: (event) => outOfSync.push(event.reason),
+	});
+	// Joined mid-message: the snapshot covers seq 12, so seq 13 leaves no gap.
+	emit("event", ordinalPatch(1, 12, "missed"));
+	emit("event", ordinalPatch(1, 13, "continued"));
+	await delay(0);
+	assert.equal(fetches, 1);
+	assert.deepEqual(outOfSync, []);
+
+	// A repeat mismatch on the same message is reported instead of refetched.
+	emit("event", ordinalPatch(1, 20, "gone"));
+	await delay(0);
+	assert.equal(fetches, 1);
+	assert.deepEqual(outOfSync, ["version_mismatch"]);
+
+	// A resync without a usable snapshot reports the patch that triggered it.
+	stop();
+	const fallback = createGenerationClient(async () => ({ snapshot: null }));
+	const reported: string[] = [];
+	const stopFallback = fallback.generation.subscribe({
+		outOfSync: (event) => reported.push(event.reason),
+	});
+	fallback.emit("event", ordinalPatch(1, 12, "missed"));
+	await delay(0);
+	stopFallback();
+	assert.deepEqual(reported, ["version_mismatch"]);
+});
+
+test("events replayed after a recovery stay buffered while a nested resync runs", async () => {
+	const resynced = createSnapshot();
+	resynced.snapshot.seq = 21;
+	const { emit, generation } = createGenerationClient(async () => resynced);
+	const outOfSync: string[] = [];
+	const stop = generation.subscribe(
+		{ outOfSync: (event) => outOfSync.push(event.reason) },
+		{ initialSnapshot: createSnapshot().snapshot },
+	);
+	// Buffered while the initial snapshot seeds; seq 21 is the keyframe the resync keeps.
+	emit("event", ordinalPatch(1, 20, "gap"));
+	emit("event", ordinalPatch(1, 21, "recovered"));
+	await delay(0);
+	stop();
+
+	assert.deepEqual(outOfSync, []);
+});

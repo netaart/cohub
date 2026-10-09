@@ -1,6 +1,7 @@
 import os from "node:os";
 import { trace } from "@opentelemetry/api";
 import { getCurrentRequestId } from "../tracing/request-context.js";
+import { serviceNameFromEnv } from "../tracing/service-name.js";
 
 export type LogLevel = "silent" | "error" | "warn" | "info" | "debug" | "trace";
 
@@ -157,7 +158,7 @@ function writeLine(_level: LogLevel, entry: Record<string, unknown>) {
 
 export function createLogger(options: LoggerOptions): Logger {
   const configuredLevel = normalizeLogLevel(process.env.LOG_LEVEL, options.defaultLevel ?? "info");
-  const serviceName = options.serviceName;
+  const serviceName = serviceNameFromEnv(options.serviceName);
   const environment = options.environment ?? process.env.ENV ?? "dev";
   const version = options.version ?? process.env.IMAGE_TAG ?? "latest";
   const hostname = process.env.POD_NAME ?? process.env.HOSTNAME ?? os.hostname();

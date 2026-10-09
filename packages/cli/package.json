@@ -1,6 +1,6 @@
 {
   "name": "@neta-art/cohub-cli",
-  "version": "8.4.0",
+  "version": "9.1.0",
   "description": "CLI for Cohub — spaces, sessions, and agent collaboration.",
   "type": "module",
   "engines": {
@@ -18,9 +18,10 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsdown",
     "verify:sandboxd": "node --import tsx scripts/verify-sandboxd-release.ts",
-    "prepublishOnly": "pnpm verify:sandboxd",
+    "verify:board-kernel": "node --import tsx scripts/verify-board-kernel.ts",
+    "prepublishOnly": "pnpm verify:board-kernel && pnpm verify:sandboxd",
     "test": "node ../../scripts/test/run.mjs 'tests/**/*.test.ts'",
     "test:runtime": "node --import tsx --test tests/runtime-*.integration.ts",
     "test:runtime:native": "node --import tsx tests/runtime-native.smoke.ts",
@@ -30,7 +31,6 @@
     "@neta-art/cohub": "workspace:*",
     "@neta-art/generation": "^0.1.30",
     "commander": "^15.0.0",
-    "pixi.js": "^8.20.1",
     "sharp": "^0.35.4",
     "ws": "^8.21.3"
   },
@@ -38,8 +38,12 @@
     "access": "public"
   },
   "devDependencies": {
+    "@fontsource/geist": "^5.3.0",
+    "@fontsource/geist-mono": "^5.3.0",
     "@types/node": "^26.4.0",
     "@types/ws": "^8.18.1",
+    "pixi.js": "^8.20.1",
+    "tsdown": "^0.22.14",
     "typescript": "^7.0.2"
   },
   "optionalDependencies": {

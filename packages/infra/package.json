@@ -75,6 +75,10 @@
     "./logging": {
       "types": "./dist/logging/index.d.ts",
       "default": "./dist/logging/index.js"
+    },
+    "./safe-fetch": {
+      "types": "./dist/safe-fetch/index.d.ts",
+      "default": "./dist/safe-fetch/index.js"
     }
   },
   "types": "./dist/index.d.ts",

@@ -1,3 +1,4 @@
+import { collectToolMetrics } from "@cohub/protocol/model";
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { hasPermission } from "./permissions.js";
@@ -299,7 +300,7 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
       errorMessage: final?.errorMessage ?? null, finalUsage: final?.usage ?? null, totalUsage,
       summary: { text: final?.text ?? null, finishReason: input.status },
       completedAt, durationMs: Math.min(2_147_483_647, Math.max(0, completedAt.getTime() - (turn.startedAt?.getTime() ?? completedAt.getTime()))), updatedAt: new Date(),
-      meta: { ...meta, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
+      meta: { ...meta, metrics: { ...record(meta.metrics), version: 1, tools: collectToolMetrics(messages.map((message) => message.content)) }, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
     }).where(and(eq(sessionTurns.id, turnId), runtimeResolutionOpen, inArray(sessionTurns.status, ["running", "abort_requested"]))).returning();
     if (!next) conflict("Execution was resolved");
     return { changed: true, turn: next, messages, projection: { latestMessageText: final?.text ?? turn.userText, lastMessageId: final?.id, completedAt } };

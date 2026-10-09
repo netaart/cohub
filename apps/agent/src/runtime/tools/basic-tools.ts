@@ -3,7 +3,7 @@ import { MAX_RUN_COMMAND_TIMEOUT_SECONDS } from "@cohub/core/commands";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
 import { createThrottledTextToolUpdate, tailText } from "./tool-stream-update.js";
-import { normalizeAgentToolImageContent } from "../../image-normalizer.js";
+import { prepareToolImage } from "../../session-images.js";
 
 export interface ReadOperations {
   readFile: (absolutePath: string) => Promise<Buffer>;
@@ -479,7 +479,7 @@ export function createReadTool(cwd: string, options: { operations: ReadOperation
       const mimeType = options.operations.detectImageMimeType ? await options.operations.detectImageMimeType(absolutePath) : null;
       if (mimeType) {
         const buffer = await options.operations.readFile(absolutePath);
-        const image = await normalizeAgentToolImageContent({ data: buffer, mimeType, label: params.path });
+        const image = await prepareToolImage({ data: buffer, mimeType, label: params.path });
         return {
           content: [
             { type: "text", text: `Read image file [${mimeType}]` },
