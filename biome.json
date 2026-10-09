@@ -13,7 +13,8 @@
       "!**/dist",
       "!**/.wrangler",
       "!**/.pnpm-store",
-      "!**/output"
+      "!**/output",
+      "!apps/mobile"
     ]
   },
   "assist": { "actions": { "source": { "organizeImports": "off" } } },

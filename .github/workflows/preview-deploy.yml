@@ -18,6 +18,9 @@ on:
       # changesets 机器人同步 Version Packages PR 时只改 .changeset/*.md（已在上方忽略）
       # 和 package.json，补上 package.json 以免每次 push main 都产生无意义的 preview run
       - '**/package.json'
+      # The mobile app has its own workflows (mobile-*.yml).
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-*.yml'
 
 concurrency:
   group: preview-${{ github.event.pull_request.number }}

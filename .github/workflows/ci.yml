@@ -11,6 +11,9 @@ on:
       - '.changeset/**'
       - '**/CHANGELOG.md'
       - '**/package.json'
+      # The mobile app has its own workflows (mobile-*.yml).
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-*.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

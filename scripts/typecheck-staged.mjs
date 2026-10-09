@@ -10,7 +10,8 @@
 //   fall back to a full `pnpm -r typecheck`.
 // - A removed workspace (delete of a dir that no longer has a package.json) also falls back
 //   to a full typecheck: its consumers can no longer be resolved via the workspace graph.
-// - Staged changes outside all of the above (docs, assets, workflows, ...) skip typecheck.
+// - Staged changes outside all of the above (docs, assets, workflows, ...) skip typecheck,
+//   as do standalone projects outside the pnpm workspace (apps/mobile).
 //
 // Usage: node scripts/typecheck-staged.mjs [--dry-run]
 
@@ -28,6 +29,9 @@ const FORCE_FULL_PREFIXES = [
   "scripts/",
   ".husky/",
 ];
+
+// Standalone npm projects excluded from the pnpm workspace; their own CI runs their checks.
+const NON_WORKSPACE_DIRS = new Set(["apps/mobile"]);
 
 const dryRun = process.argv.includes("--dry-run");
 
@@ -73,6 +77,7 @@ async function main() {
     const match = file.match(/^(apps|packages)\/([^/]+)(?:\/|$)/);
     if (!match) continue;
     const dir = `${match[1]}/${match[2]}`;
+    if (NON_WORKSPACE_DIRS.has(dir)) continue;
     if (fs.existsSync(path.join(repoRoot, dir, "package.json"))) {
       affected.add(dir);
     } else if (status === "D") {

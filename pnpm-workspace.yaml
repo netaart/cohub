@@ -1,5 +1,7 @@
 packages:
   - "apps/*"
+  # Standalone npm project: Metro, autolinking, and its OTA fingerprint depend on its own node_modules.
+  - "!apps/mobile"
   - "packages/*"
 
 catalog:
