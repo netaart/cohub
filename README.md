@@ -35,6 +35,8 @@ Cohub is developed inside Cohub. The core dev workflow — specs, agent runs, re
 
 **Web** — open [cohub.live](https://cohub.live) and sign in.
 
+**App** — iOS and Android: [cohub-mobile.bangwu.me](https://cohub-mobile.bangwu.me/).
+
 **CLI** —
 
 ```bash
