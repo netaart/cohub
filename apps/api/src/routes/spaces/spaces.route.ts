@@ -1,4 +1,3 @@
-import { readWorkspaceUsages } from "../../workspace-usage.js";
 import { BillingAccessBlockedError, COHUB_BILLING_FEATURES, billingOperations } from "@cohub/billing";
 import { DEFAULT_SANDBOX_SPEC_ID, SANDBOX_SPECS, getSandboxSpecRank, isSandboxSpecId, type SandboxSpecId } from "@cohub/sandbox-controller";
 import { createLogger } from "@cohub/infra/logging";
@@ -18,6 +17,7 @@ import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/
 import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
 import { hostPromptImages } from "../../session-images.js";
+import { readWorkspaceUsage } from "../../workspace-usage.js";
 import { useAuth, getOptionalAuth, getAppSessionPrincipal, requireValidId, buildSpaceListItems, authzDenied, getSpacePublicProfile, normalizePublicAvatarUrl } from "../../lib/middleware.js";
 import { config } from "../../config.js";
 import { scheduleSandboxAutoDestroy } from "../../sandbox-idle-scheduler.js";
@@ -1029,8 +1029,7 @@ function stripSpaceEnv(meta: unknown): Record<string, unknown> | null {
 }
 
 function stripSensitiveSpaceFields(item: Record<string, unknown>): Record<string, unknown> {
-  const { storageRepoName, sandboxStatus, workspaceUsage, access, meta, ...rest } = item;
-  void workspaceUsage;
+  const { storageRepoName, sandboxStatus, access, meta, ...rest } = item;
   void storageRepoName;
   void sandboxStatus;
   void access;
@@ -1062,14 +1061,14 @@ async function resolveSpaceRelation(space: SpaceRow, user: AuthUser | null): Pro
 }
 
 async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user: AuthUser | null) {
-  const [sandbox, access, relation] = await Promise.all([
+  const [sandbox, access, relation, workspaceUsage] = await Promise.all([
     getSpaceSandboxBySpaceId(space.id),
     resolvePermissionAccess(user, { spaceId: space.id }),
     resolveSpaceRelation(space, user),
+    readWorkspaceUsage(space.id),
   ]);
   const profileMap = await getProfilesByUuids([space.userUuid]);
   const ownerProfile = profileMap.get(space.userUuid) ?? fallbackPublicUserProfile(space.userUuid);
-  const usages = await readWorkspaceUsages(sandbox?.provider === "local" ? [] : [space.id]);
 
   return {
     ...space,
@@ -1077,7 +1076,7 @@ async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user
     publicProfile: getSpacePublicProfile(space),
     sandboxStatus: sandbox?.status ?? null,
     sandbox: attachSandboxPublicEndpoints(sandbox),
-    workspaceUsage: sandbox?.provider === "local" ? null : usages.get(space.id),
+    workspaceUsage: sandbox?.provider === "local" ? null : workspaceUsage,
     access,
     relation,
     ownerProfile,

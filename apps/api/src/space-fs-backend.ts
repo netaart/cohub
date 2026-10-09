@@ -6,9 +6,9 @@ import { isSandboxDialable } from "@cohub/sandbox-controller";
 import type { AgentSandboxFsMutationOperation } from "@cohub/infra/agent-queue";
 import { enqueueSandboxFsMutationJob, SandboxFsMutationTimeoutError } from "./sandbox-fs-mutation-queue.js";
 import { SpaceFsError, assertSafeRelativePath } from "./space-fs.js";
-import { config } from "./config.js";
-import { redisCommandClient } from "./redis.js";
 import { withWorkspaceUsageWrite } from "@cohub/infra/workspace-usage";
+import { config } from "./config.js";
+import { redisBestEffortCommandClient } from "./redis.js";
 
 // Provider-aware facade over the space filesystem. Cloud spaces read/write the
 // shared PVC directly (the existing implementation); local spaces are served
@@ -21,9 +21,6 @@ import { withWorkspaceUsageWrite } from "@cohub/infra/workspace-usage";
 
 const PROVIDER_CACHE_TTL_MS = 30_000;
 const providerCache = new Map<string, { provider: "cloud" | "local"; expiresAt: number }>();
-
-const withCloudWorkspaceWrite = <T>(spaceId: string, write: () => Promise<T>) =>
-  withWorkspaceUsageWrite(redisCommandClient, config.env, spaceId, write);
 
 export async function isLocalSpace(spaceId: string): Promise<boolean> {
   const now = Date.now();
@@ -127,6 +124,16 @@ function asApiEventOutcome<T extends object>(result: T): ApiEventOutcome<T> {
   return { ...result, executedBy: "api" };
 }
 
+// Direct volume writes mark the workspace for a usage scan. Writes through a
+// running sandbox need no marker: running workspaces are always recalibrated.
+const withDirectUsageMarker = <T>(spaceId: string, write: () => Promise<T>) =>
+  withWorkspaceUsageWrite(redisBestEffortCommandClient, config.env, spaceId, write);
+
+/** Writes straight to the workspace volume, which only happens while no sandbox is dialable. */
+async function runDirectMutation<T extends object>(spaceId: string, mutate: () => Promise<T>): Promise<ApiEventOutcome<T>> {
+  return asApiEventOutcome(await withDirectUsageMarker(spaceId, mutate));
+}
+
 export async function listSpaceDirectory(spaceId: string, path?: string, options?: Visibility) {
   return (await isLocalSpace(spaceId))
     ? remote.listSpaceDirectory(spaceId, path, options)
@@ -162,9 +169,9 @@ export async function writeSpaceFile(
   }
   if (await isCloudSandboxDialable(spaceId)) {
     const { mutationId, ...mutation } = input;
-    return asSandboxOutcome(await withCloudWorkspaceWrite(spaceId, () => runCloudSandboxMutation(spaceId, { operation: "write", ...mutation }, mutationId)));
+    return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "write", ...mutation }, mutationId));
   }
-  return asApiEventOutcome(await withCloudWorkspaceWrite(spaceId, () => direct.writeSpaceFile(spaceId, input)));
+  return runDirectMutation(spaceId, () => direct.writeSpaceFile(spaceId, input));
 }
 
 export async function createSpaceFileExclusive(
@@ -176,9 +183,9 @@ export async function createSpaceFileExclusive(
   }
   if (await isCloudSandboxDialable(spaceId)) {
     const { mutationId, ...mutation } = input;
-    return asSandboxOutcome(await withCloudWorkspaceWrite(spaceId, () => runCloudSandboxMutation(spaceId, { operation: "write", ...mutation, exclusive: true }, mutationId)));
+    return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "write", ...mutation, exclusive: true }, mutationId));
   }
-  return asApiEventOutcome(await withCloudWorkspaceWrite(spaceId, () => direct.createSpaceFileExclusive(spaceId, input)));
+  return runDirectMutation(spaceId, () => direct.createSpaceFileExclusive(spaceId, input));
 }
 
 export async function createSpaceDirectory(
@@ -190,9 +197,9 @@ export async function createSpaceDirectory(
     return asApiEventOutcome(await remote.createSpaceDirectory(spaceId, path));
   }
   if (await isCloudSandboxDialable(spaceId)) {
-    return asSandboxOutcome(await withCloudWorkspaceWrite(spaceId, () => runCloudSandboxMutation(spaceId, { operation: "mkdir", path }, mutationId)));
+    return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "mkdir", path }, mutationId));
   }
-  return asApiEventOutcome(await withCloudWorkspaceWrite(spaceId, () => direct.createSpaceDirectory(spaceId, path)));
+  return runDirectMutation(spaceId, () => direct.createSpaceDirectory(spaceId, path));
 }
 
 export async function deleteSpaceNode(
@@ -205,9 +212,9 @@ export async function deleteSpaceNode(
     return asApiEventOutcome(await remote.deleteSpaceNode(spaceId, path, recursive));
   }
   if (await isCloudSandboxDialable(spaceId)) {
-    return asSandboxOutcome(await withCloudWorkspaceWrite(spaceId, () => runCloudSandboxMutation(spaceId, { operation: "delete", path, recursive }, mutationId)));
+    return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "delete", path, recursive }, mutationId));
   }
-  return asApiEventOutcome(await withCloudWorkspaceWrite(spaceId, () => direct.deleteSpaceNode(spaceId, path, recursive)));
+  return runDirectMutation(spaceId, () => direct.deleteSpaceNode(spaceId, path, recursive));
 }
 
 export async function moveSpaceNode(
@@ -219,15 +226,15 @@ export async function moveSpaceNode(
     return asApiEventOutcome(await remote.moveSpaceNode(spaceId, move));
   }
   if (await isCloudSandboxDialable(spaceId)) {
-    return asSandboxOutcome(await withCloudWorkspaceWrite(spaceId, () => runCloudSandboxMutation(spaceId, { operation: "move", fromPath: move.fromPath, toPath: move.toPath }, mutationId)));
+    return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "move", fromPath: move.fromPath, toPath: move.toPath }, mutationId));
   }
-  return asApiEventOutcome(await withCloudWorkspaceWrite(spaceId, () => direct.moveSpaceNode(spaceId, move)));
+  return runDirectMutation(spaceId, () => direct.moveSpaceNode(spaceId, move));
 }
 
 export async function uploadSpaceFiles(spaceId: string, files: File[], targetDir: string) {
   return (await isLocalSpace(spaceId))
     ? remote.uploadSpaceFiles(spaceId, files, targetDir)
-    : withCloudWorkspaceWrite(spaceId, () => direct.uploadSpaceFiles(spaceId, files, targetDir));
+    : withDirectUsageMarker(spaceId, () => direct.uploadSpaceFiles(spaceId, files, targetDir));
 }
 
 /**

@@ -1,4 +1,5 @@
 // KEYS: workspace hash, due set, global scan slots. Tokens fence stale workers.
+// ARGV: spaceId, token, now, lease ms, slot count, min scan interval ms.
 export const CLAIM_SCAN = `
 local now = tonumber(ARGV[3])
 redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', now)
@@ -6,7 +7,7 @@ local lease = tonumber(redis.call('HGET', KEYS[1], 'leaseUntil') or '0')
 if lease > now then return {'busy'} end
 local lastScan = tonumber(redis.call('HGET', KEYS[1], 'lastScanAt') or redis.call('HGET', KEYS[1], 'measuredAt') or '0')
 local cooldownUntil = 0
-if lastScan > 0 then cooldownUntil = lastScan + tonumber(redis.call('HGET', KEYS[1], 'minScanIntervalMs') or ARGV[6]) end
+if lastScan > 0 then cooldownUntil = lastScan + tonumber(ARGV[6]) end
 local notBefore = tonumber(redis.call('HGET', KEYS[1], 'notBeforeAt') or '0')
 local nextAt = math.max(cooldownUntil, notBefore)
 if nextAt > now then
@@ -28,6 +29,8 @@ redis.call('HSET', KEYS[1], 'leaseUntil', ARGV[2])
 redis.call('ZADD', KEYS[2], ARGV[2], ARGV[1])
 return 1
 `;
+// KEYS: workspace hash, due set, global scan slots.
+// ARGV: spaceId, token, revision, now, bytes, error, min scan interval ms, quiet ms.
 export const FINISH_SCAN = `
 if redis.call('HGET', KEYS[1], 'scanToken') ~= ARGV[2] then return 0 end
 local score = tonumber(redis.call('ZSCORE', KEYS[3], ARGV[2]) or '0')
@@ -66,6 +69,7 @@ return 1
 `;
 // A bounded pending window prevents thousands of delayed scans competing with
 // ordinary system jobs. Expiry repairs dispatcher/worker crashes and lost queues.
+// KEYS: due set, pending set. ARGV: now, batch size, pending ms, redispatch ms.
 export const RESERVE_DUE = `
 redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[1])
 local capacity = math.max(0, tonumber(ARGV[2]) - redis.call('ZCARD', KEYS[2]))
@@ -75,8 +79,8 @@ local ids = {}
 for _, id in ipairs(candidates) do
   if #ids >= capacity then break end
   if not redis.call('ZSCORE', KEYS[2], id) then
-    redis.call('ZADD', KEYS[1], tonumber(ARGV[1]) + 300000, id)
-    redis.call('ZADD', KEYS[2], tonumber(ARGV[1]) + 600000, id)
+    redis.call('ZADD', KEYS[1], tonumber(ARGV[1]) + tonumber(ARGV[4]), id)
+    redis.call('ZADD', KEYS[2], tonumber(ARGV[1]) + tonumber(ARGV[3]), id)
     table.insert(ids, id)
   end
 end

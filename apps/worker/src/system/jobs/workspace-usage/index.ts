@@ -3,16 +3,41 @@ import { asc, eq, gt } from "drizzle-orm";
 import { DelayedError, type Job } from "bullmq";
 import { spaceSandboxes, spaces } from "@cohub/db";
 import { COHUB_SYSTEM_QUEUE, createBullmqQueue } from "@cohub/infra/bullmq";
-import { RECONCILE_USAGE_SCRIPT, reconcileUsageArgs, usageKey, usageDueKey, usagePrefix, parseWorkspaceUsage } from "@cohub/infra/workspace-usage";
-import { WORKSPACE_USAGE_DISPATCH_JOB, WORKSPACE_USAGE_SCAN_JOB, WORKSPACE_USAGE_UPDATED_EVENT } from "@cohub/protocol";
+import { createLogger } from "@cohub/infra/logging";
+import {
+  RECONCILE_USAGE_SCRIPT,
+  USAGE_CLEAN_RECALIBRATION_MS,
+  USAGE_MIN_SCAN_INTERVAL_MS,
+  USAGE_QUIET_MS,
+  parseWorkspaceUsage,
+  reconcileUsageArgs,
+  usageDueKey,
+  usageKey,
+  usagePrefix,
+} from "@cohub/infra/workspace-usage";
+import { isUuidLike, WORKSPACE_USAGE_DISPATCH_JOB, WORKSPACE_USAGE_SCAN_JOB, WORKSPACE_USAGE_UPDATED_EVENT } from "@cohub/protocol";
 import { config } from "../../../config.js";
 import { db } from "../../../db.js";
 import { redisCommandClient as redis } from "../../../redis.js";
 import { publishSpaceEvent } from "../../../space-events.js";
 import { registerSystemJob } from "../../registry.js";
-import { usagePolicy } from "./policy.js";
 import { resolveWorkspaceScanPath, scanWorkspaceUsage } from "./pdu.js";
 import { CLAIM_SCAN, RENEW_SCAN, FINISH_SCAN, RESERVE_DUE } from "./scripts.js";
+
+const logger = createLogger({ serviceName: "cohub-worker" });
+
+// Fixed NAS protection policy, documented in docs/workspace-usage.md.
+const SCAN_SLOTS = 1;
+const PDU_THREADS = 1;
+const SCAN_TIMEOUT_MS = 5 * 60_000;
+// Reserved scans beyond the free slots only wait for one, so the window stays small.
+const DISPATCH_BATCH = 4;
+const INVENTORY_PAGE = 200;
+const LEASE_MS = 90_000;
+// A reserved scan that never ran is reserved again after REDISPATCH_MS and
+// stops counting against the batch after PENDING_TTL_MS.
+const PENDING_TTL_MS = 10 * 60_000;
+const REDISPATCH_MS = 5 * 60_000;
 
 const queue = createBullmqQueue(COHUB_SYSTEM_QUEUE, {
   redisUrl: config.bullmqRedisUrl, telemetryServiceName: "cohub-workspace-usage",
@@ -22,9 +47,18 @@ const dueKey = usageDueKey(config.env);
 const slotsKey = `${prefix}:slots`;
 const pendingKey = `${prefix}:pending`;
 const cursorKey = `${prefix}:cursor`;
-const leaseMs = 90_000;
 
-async function reconcileSpace(spaceId: string, minScanIntervalMs: number) {
+/**
+ * Records a failed or abandoned scan attempt: the last complete measurement
+ * stays, dirty stays set, and the next attempt waits for the backoff and the
+ * minimum interval instead of retrying every dispatch.
+ */
+export async function recordScanFailure(input: { key: string; dueKey: string; slotsKey: string; spaceId: string; token: string; revision: string }) {
+  return redis.eval(FINISH_SCAN, 3, input.key, input.dueKey, input.slotsKey,
+    input.spaceId, input.token, input.revision, Date.now(), "", "scan_failed", USAGE_MIN_SCAN_INTERVAL_MS, USAGE_QUIET_MS);
+}
+
+async function reconcileSpace(spaceId: string) {
   const [row] = await db.select({ id: spaces.id, sandbox: spaceSandboxes }).from(spaces)
     .leftJoin(spaceSandboxes, eq(spaceSandboxes.spaceId, spaces.id)).where(eq(spaces.id, spaceId)).limit(1);
   if (!row) {
@@ -32,27 +66,26 @@ async function reconcileSpace(spaceId: string, minScanIntervalMs: number) {
     await redis.zrem(dueKey, spaceId);
     return false;
   }
-  await redis.eval(RECONCILE_USAGE_SCRIPT, 2, ...reconcileUsageArgs(config.env, spaceId, row.sandbox, minScanIntervalMs));
+  await redis.eval(RECONCILE_USAGE_SCRIPT, 2, ...reconcileUsageArgs(config.env, spaceId, row.sandbox));
   return row.sandbox?.provider !== "local";
 }
 
 registerSystemJob(WORKSPACE_USAGE_DISPATCH_JOB, async () => {
-  const policy = usagePolicy();
   // This bounded inventory repairs missing/evicted Redis records without touching NAS.
   // Cursor is only a hint: repeating a page after a crash is safe.
   const cursor = await redis.get(cursorKey);
   const page = await db.select({ id: spaces.id, sandbox: spaceSandboxes }).from(spaces)
     .leftJoin(spaceSandboxes, eq(spaceSandboxes.spaceId, spaces.id))
-    .where(cursor ? gt(spaces.id, cursor) : undefined).orderBy(asc(spaces.id)).limit(200);
+    .where(cursor ? gt(spaces.id, cursor) : undefined).orderBy(asc(spaces.id)).limit(INVENTORY_PAGE);
   const pipeline = redis.pipeline();
-  for (const row of page) pipeline.eval(RECONCILE_USAGE_SCRIPT, 2, ...reconcileUsageArgs(config.env, row.id, row.sandbox, policy.minScanIntervalMs));
+  for (const row of page) pipeline.eval(RECONCILE_USAGE_SCRIPT, 2, ...reconcileUsageArgs(config.env, row.id, row.sandbox));
   const results = await pipeline.exec();
   for (const result of results ?? []) if (result[0]) throw result[0];
   const lastId = page.at(-1)?.id;
-  if (page.length < 200 || !lastId) await redis.del(cursorKey);
+  if (page.length < INVENTORY_PAGE || !lastId) await redis.del(cursorKey);
   else await redis.set(cursorKey, lastId);
 
-  const ids = await redis.eval(RESERVE_DUE, 2, dueKey, pendingKey, Date.now(), policy.batchSize) as string[];
+  const ids = await redis.eval(RESERVE_DUE, 2, dueKey, pendingKey, Date.now(), DISPATCH_BATCH, PENDING_TTL_MS, REDISPATCH_MS) as string[];
   for (const spaceId of ids) {
     // Simple deduplication lasts through waiting/active/delayed; the due set is
     // retained so enqueue failures and Redis/worker restarts are recoverable.
@@ -67,22 +100,23 @@ registerSystemJob(WORKSPACE_USAGE_DISPATCH_JOB, async () => {
 });
 
 async function processUsageScan(job: Job<{ spaceId: string }>) {
-  const policy = usagePolicy();
   const spaceId = job.data?.spaceId;
-  if (!spaceId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(spaceId)) throw new Error("Invalid space ID / Space ID 无效");
-  await redis.zadd(pendingKey, Date.now() + 600_000, spaceId);
-  if (!await reconcileSpace(spaceId, policy.minScanIntervalMs)) return { skipped: "local_or_deleted" };
+  if (!isUuidLike(spaceId)) throw new Error("workspace usage scan job has no valid spaceId");
+  await redis.zadd(pendingKey, Date.now() + PENDING_TTL_MS, spaceId);
+  if (!await reconcileSpace(spaceId)) return { skipped: "local_or_deleted" };
   const key = usageKey(config.env, spaceId);
   const state = await redis.hgetall(key);
-  if (state.dirty === "0" && state.running !== "1" && state.bytes !== undefined) return { skipped: "unchanged" };
-  const path = await resolveWorkspaceScanPath(config.spaceStorageRoot, spaceId);
+  const lastScanAt = Number(state.lastScanAt ?? state.measuredAt ?? 0);
+  if (state.dirty === "0" && state.running !== "1" && state.bytes !== undefined && Date.now() < lastScanAt + USAGE_CLEAN_RECALIBRATION_MS) {
+    return { skipped: "unchanged" };
+  }
   const token = randomUUID();
   const claim = await redis.eval(CLAIM_SCAN, 3, key, dueKey, slotsKey,
-    spaceId, token, Date.now(), leaseMs, policy.concurrency, policy.minScanIntervalMs) as [string, string?] | null;
+    spaceId, token, Date.now(), LEASE_MS, SCAN_SLOTS, USAGE_MIN_SCAN_INTERVAL_MS) as [string, string?] | null;
   if (claim?.[0] === "cooldown") return { skipped: "cooldown" };
   if (claim?.[0] !== "claimed" || !claim[1]) {
     // Release this ordinary system task's worker slot while the NAS is busy.
-    if (!job.token) throw new Error("Missing job token / 任务令牌缺失");
+    if (!job.token) throw new Error("workspace usage scan job has no token");
     await job.moveToDelayed(Date.now() + 30_000 + Math.floor(Math.random() * 15_000), job.token);
     throw new DelayedError();
   }
@@ -95,28 +129,29 @@ async function processUsageScan(job: Job<{ spaceId: string }>) {
     if (renewing || abort.signal.aborted) return;
     renewing = true;
     try {
-      const ok = await redis.eval(RENEW_SCAN, 2, key, slotsKey, token, Date.now() + leaseMs, Date.now());
+      const ok = await redis.eval(RENEW_SCAN, 2, key, slotsKey, token, Date.now() + LEASE_MS, Date.now());
       if (ok !== 1) abort.abort();
       else renewedAt = Date.now();
-      await redis.zadd(pendingKey, Date.now() + 600_000, spaceId);
+      await redis.zadd(pendingKey, Date.now() + PENDING_TTL_MS, spaceId);
     } catch { abort.abort(); } finally { renewing = false; }
   }, 15_000);
   heartbeat.unref();
   try {
-    const bytes = await scanWorkspaceUsage({ path, threads: policy.threads, timeoutMs: policy.timeoutMs, signal: abort.signal });
-    if (!await reconcileSpace(spaceId, policy.minScanIntervalMs)) return { skipped: "local_or_deleted" };
-    if (abort.signal.aborted) throw new Error("Scan lease lost / 扫描租约失效");
+    // Resolved under the claim so a missing workspace backs off like a failed scan.
+    const path = await resolveWorkspaceScanPath(config.spaceStorageRoot, spaceId);
+    const bytes = await scanWorkspaceUsage({ path, threads: PDU_THREADS, timeoutMs: SCAN_TIMEOUT_MS, signal: abort.signal });
+    if (!await reconcileSpace(spaceId)) return { skipped: "local_or_deleted" };
+    if (abort.signal.aborted) throw new Error("workspace scan lease lost");
     const committed = await redis.eval(FINISH_SCAN, 3, key, dueKey, slotsKey,
-      spaceId, token, revision, Date.now(), bytes, "", policy.minScanIntervalMs, 300_000);
-    if (committed !== 1) throw new Error("Scan lease lost / 扫描租约失效");
+      spaceId, token, revision, Date.now(), bytes, "", USAGE_MIN_SCAN_INTERVAL_MS, USAGE_QUIET_MS);
+    if (committed !== 1) throw new Error("workspace scan lease lost");
     const usage = parseWorkspaceUsage(await redis.hgetall(key));
     await publishSpaceEvent({ type: WORKSPACE_USAGE_UPDATED_EVENT, spaceId, payload: { workspaceUsage: usage } })
-      .catch((error) => console.error("Workspace usage event failed / 空间统计事件发送失败", error));
+      .catch((error) => logger.warn(`[WorkspaceUsage] failed to publish usage update spaceId=${spaceId}`, error));
     return { spaceId, ...usage };
   } catch (error) {
     // A partial result must never replace the last complete measurement.
-    await redis.eval(FINISH_SCAN, 3, key, dueKey, slotsKey,
-      spaceId, token, revision, Date.now(), "", "scan_failed", policy.minScanIntervalMs, 300_000).catch(() => undefined);
+    await recordScanFailure({ key, dueKey, slotsKey, spaceId, token, revision }).catch(() => undefined);
     throw error;
   } finally {
     clearInterval(heartbeat);

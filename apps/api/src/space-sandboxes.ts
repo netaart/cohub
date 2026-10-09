@@ -1,4 +1,4 @@
-import { markWorkspaceUsage } from "@cohub/infra/workspace-usage";
+import { markWorkspaceRuntime } from "@cohub/infra/workspace-usage";
 import { asc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { billingOperations, COHUB_BILLING_FEATURES } from "@cohub/billing";
 import {
@@ -20,7 +20,7 @@ import { k8sCoreApi } from "./k8s.js";
 import { renderSandboxPodTemplate } from "./sandbox-template.js";
 import { deleteSandboxPublicNetwork, getSandboxPublicEndpoints, reconcileSandboxPublicNetwork } from "./sandbox-public-network.js";
 import { createSandboxReportToken, hashSandboxReportToken } from "./crypto.js";
-import { redisCommandClient } from "./redis.js";
+import { redisBestEffortCommandClient, redisCommandClient } from "./redis.js";
 import { publishSandboxLifecycleEvent } from "./sandbox-events.js";
 import { scheduleSandboxAutoDestroy } from "./sandbox-idle-scheduler.js";
 import type { SpaceSandboxRuntimeStatus, SpaceSandboxStatus, SpaceSandboxStopReason } from "./lib/sandbox/types.js";
@@ -514,7 +514,7 @@ export const reconcileSpaceSandbox = async (input: {
     },
   });
 
-  await markWorkspaceUsage(redisCommandClient, config.env, input.spaceId, 0, true);
+  await markWorkspaceRuntime(redisBestEffortCommandClient, config.env, input.spaceId, true);
 
   const pod = renderSandboxPodTemplate({
     SPACE_ID: input.spaceId,
