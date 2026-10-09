@@ -19,6 +19,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: __APP_NAME__
+        cohub.live/sandbox-control-client: "true"
     spec:
       terminationGracePeriodSeconds: __TERMINATION_GRACE_PERIOD_SECONDS__
       serviceAccountName: __APP_NAME__

@@ -8,6 +8,7 @@ require (
 	github.com/fsnotify/fsevents v0.2.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/godbus/dbus/v5 v5.1.0
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/jezek/xgb v1.3.1
 	github.com/pion/interceptor v0.1.49

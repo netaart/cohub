@@ -20,30 +20,32 @@ import (
 // agent-sandbox protocol over a websocket, regardless of how the underlying
 // connection was established (accepted listener conn or dialed-out conn).
 type connectionSession struct {
-	id          string
-	spaceID     string
-	identity    string
-	attached    bool
-	ctx         context.Context
-	cancel      context.CancelFunc
-	conn        *websocket.Conn
-	sendCh      chan []byte
-	connectedAt time.Time
+	authenticatedIdentity string
+	id                    string
+	spaceID               string
+	identity              string
+	attached              bool
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	conn                  *websocket.Conn
+	sendCh                chan []byte
+	connectedAt           time.Time
 }
 
 // serveSession owns the full lifecycle of a single protocol connection:
 // registration, write/heartbeat loops, and the read/dispatch loop. It blocks
 // until the connection is closed and always cleans up after itself.
-func (s *Server) serveSession(parentCtx context.Context, conn *websocket.Conn, remote string) {
+func (s *Server) serveSession(parentCtx context.Context, conn *websocket.Conn, remote string, authenticatedIdentity string) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	session := &connectionSession{
-		id:          uuid.NewString(),
-		spaceID:     s.cfg.SpaceID,
-		ctx:         ctx,
-		cancel:      cancel,
-		conn:        conn,
-		sendCh:      make(chan []byte, 256),
-		connectedAt: time.Now(),
+		authenticatedIdentity: authenticatedIdentity,
+		id:                    uuid.NewString(),
+		spaceID:               s.cfg.SpaceID,
+		ctx:                   ctx,
+		cancel:                cancel,
+		conn:                  conn,
+		sendCh:                make(chan []byte, 256),
+		connectedAt:           time.Now(),
 	}
 	defer cancel()
 	defer conn.Close(websocket.StatusNormalClosure, "closing")
@@ -100,6 +102,10 @@ func (s *Server) serveSession(parentCtx context.Context, conn *websocket.Conn, r
 
 func (s *Server) handleSessionAttach(session *connectionSession, attach protocol.SessionAttach) {
 	identity := attach.Identity
+	if session.authenticatedIdentity != "" && identity != session.authenticatedIdentity {
+		_ = session.conn.Close(websocket.StatusPolicyViolation, "Caller identity mismatch")
+		return
+	}
 	if identity == "" {
 		s.logger.Warn("session.attach missing identity", slog.String("connectionId", session.id))
 		return

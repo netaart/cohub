@@ -21,6 +21,7 @@
   "dependencies": {
     "@cohub/infra": "workspace:*",
     "@cohub/protocol": "workspace:*",
+    "jose": "^6.2.10",
     "ws": "^8.21.3"
   },
   "devDependencies": {

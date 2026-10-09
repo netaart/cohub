@@ -17,6 +17,7 @@ spec:
     metadata:
       labels:
         app: {{APP_NAME}}
+        cohub.live/sandbox-control-client: "true"
     spec:
       terminationGracePeriodSeconds: {{TERMINATION_GRACE_PERIOD_SECONDS}}
       imagePullSecrets:

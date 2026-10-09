@@ -6,6 +6,7 @@ import {
   getSandboxPromptRecoveryReason,
 } from "@cohub/sandbox-controller";
 import {
+  createSandboxConnectionHeaders,
   disconnectSandboxWsClient,
   hasPendingSandboxRequests,
   isSandboxConnectRetryable,
@@ -253,23 +254,6 @@ function touchSandboxConnection(spaceId: string) {
   scheduleIdleEviction(entry);
 }
 
-/**
- * Cluster-internal relay peer endpoints (local sandboxes) require the shared
- * worker secret. Cloud sandbox pod endpoints do not. We key off the relay path
- * so the same pool transparently serves both providers.
- */
-function relayAuthHeaders(wsUrl: string): Record<string, string> | undefined {
-  try {
-    const { pathname } = new URL(wsUrl);
-    if (pathname.startsWith("/internal/sandbox-relay/") && env.WORKER_SECRET) {
-      return { "x-worker-secret": env.WORKER_SECRET };
-    }
-  } catch {
-    // ignore malformed url; resolution already validated it
-  }
-  return undefined;
-}
-
 async function connectSandboxOnce(spaceId: string, options?: { timeoutMs?: number }): Promise<SandboxConnection> {
   touchSandboxConnection(spaceId);
   const wsUrl = await resolveSandboxWsUrlOnce(spaceId);
@@ -277,7 +261,7 @@ async function connectSandboxOnce(spaceId: string, options?: { timeoutMs?: numbe
     spaceId,
     wsUrl,
     identity: env.AGENT_INSTANCE_ID,
-    headers: relayAuthHeaders(wsUrl),
+    headers: (endpoint) => createSandboxConnectionHeaders({ wsUrl: endpoint, spaceId, identity: env.AGENT_INSTANCE_ID, workerSecret: env.WORKER_SECRET }),
     hooks: {
       onHeartbeat: (message) => syncSandboxHeartbeat(spaceId, message),
       onFsChanged: (payload, broadcast) => {

@@ -1,3 +1,4 @@
+import { getSandboxControlPublicKey } from "@cohub/sandbox-client";
 import { asc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { billingOperations, COHUB_BILLING_FEATURES } from "@cohub/billing";
 import {
@@ -428,6 +429,7 @@ export const reconcileSpaceSandbox = async (input: {
   mode: "ensure" | "replace";
   reason: "space_created" | "manual_recreate" | "auto_recover" | "auto_resume" | "space_mods_changed";
 }) => {
+  const controlPublicKey = getSandboxControlPublicKey();
   const podName = `sandbox-${input.spaceId}`;
   const existingSandbox = await getSpaceSandboxBySpaceId(input.spaceId);
   const existingMeta = asMetaObject(existingSandbox?.meta);
@@ -574,6 +576,7 @@ export const reconcileSpaceSandbox = async (input: {
             ? `https://public.cohub.run/s/${input.spaceId}`
             : `https://public.cohub.run/dev/s/${input.spaceId}`,
       },
+      { name: "SANDBOX_CONTROL_PUBLIC_KEY", value: controlPublicKey },
       { name: "SANDBOX_REPORT_TOKEN", value: reportToken },
     ];
   }

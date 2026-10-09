@@ -905,6 +905,9 @@ importers:
       '@cohub/protocol':
         specifier: workspace:*
         version: link:../protocol
+      jose:
+        specifier: ^6.2.10
+        version: 6.2.10
       ws:
         specifier: ^8.21.3
         version: 8.21.3
