@@ -206,7 +206,7 @@ cohub spaces displays press back              # 手机会列出它支持的系�
 
 ### Boards
 
-Board 是一个 JSON 文档，包含三个集合——`board` 设置、`items` 和 `animations`——所有命令都支持 Board ID 或 `.board` 路径。`get` 按资源范围读取，查询单个 item 不会加载整个 Board：
+Board 是一个 JSON 文档，包含三部分——`board` 设置、以 id 为键的 `items` map 和 `animations` map——所有命令都支持 Board ID 或 `.board` 路径。`get` 按资源范围读取，查询单个 item 不会加载整个 Board：
 
 ```bash
 cohub -s <spaceId> boards get boards/plan.board --json

@@ -232,8 +232,8 @@ cohub -s <spaceId> spaces activity 365 --json
 
 ## Boards
 
-A Board is one JSON document with three collections — `board` settings, `items`,
-and `animations`. Board targets accept a Board ID or a `.board` path. Every
+A Board is one JSON document with three parts — `board` settings, an `items` map,
+and an `animations` map. Board targets accept a Board ID or a `.board` path. Every
 command supports `-h`, and the global `--json` makes the output machine-readable:
 
 ```bash

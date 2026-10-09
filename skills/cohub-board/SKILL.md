@@ -1,17 +1,31 @@
 ---
 name: cohub-board
-description: Create, edit, and export Cohub Boards — a free-form JSON document of items, settings, and animations. Use for any Board authoring task.
+description: Create, edit, animate, play back, and export Cohub Boards — a free-form JSON document of items, settings, and animations. Use for any Board authoring task.
 ---
 
 # Cohub Boards
 
-A Board is one JSON document: `board` settings, an `items` collection, and an
-`animations` collection. Authoring is writing that JSON — `apply` merges a patch
-into the document and lands it as one version. Anything the desktop editor can
-express, a patch can express.
+A Board is one JSON document: `board` settings, an `items` map, and an
+`animations` map. Authoring is writing that JSON — `apply` merges a patch of the
+same shape into the document and lands it as one version. Anything the desktop
+editor can express, a patch can express.
+
+```json
+{"board":{"background":{"kind":"grid"}},
+ "items":{
+   "title":{"type":"text","position":{"x":80,"y":60},"props":{"text":"Plan","fontSize":48}},
+   "hero":{"type":"shape","position":{"x":80,"y":160},"size":{"width":240,"height":120},"props":{"geometry":"rounded","text":"Ship"}}},
+ "animations":{
+   "intro":{"duration":1200,"tracks":{
+     "title-in":{"target":"title","property":"opacity","keyframes":[{"at":0,"value":0},{"at":600,"value":1}]}}}}}
+```
+
+`items` and `animations` are objects keyed by id, not arrays — you name every item
+you write. A patch has the same shape as the document, so `apply` only touches the
+ids it mentions.
 
 Use the Cohub CLI; it targets the current Space by default (`-s <spaceId>` only for
-another Space). Add `--json` when chaining commands. Requires CLI 9.0.0+ — if Board
+another Space). Add `--json` when chaining commands. Requires CLI 9.1.0+ — if Board
 subcommands are missing, run `npm install -g @neta-art/cohub-cli`.
 
 ## Read, write, verify
@@ -21,7 +35,7 @@ Every command takes a Board ID or a `.board` path. Read with `get`, write with
 
 ```bash
 cohub boards get <board> --only board          # settings only
-cohub boards get <board> --within s1           # one frame and its children
+cohub boards get <board> --within s1           # frame s1 and its children
 cohub boards get <board> --rect 0,0,1600,900   # a region
 
 cohub boards apply <board> '{"items":{"title":{"props":{"text":"New title"}}}}'
@@ -60,16 +74,17 @@ An item is placed by `position` / `size`, colored by `style`, and described by
 - Colors are theme-aware palette tokens (`cohub boards schema` lists them), any CSS
   color, or `{ "light": …, "dark": … }`.
 
-Geometry follows the item type; stroke items carry no `position` / `size`:
+Geometry follows the item type; `draw` and `arrow` carry no `position` / `size`:
 
 | Item | Geometry |
 |---|---|
-| `text` `shape` `frame` media `task` `effect` | `position` + `size`; per-type defaults — omit what you don't mean to set |
+| `text` `shape` `frame` `image` `video` `audio` `file` `task` `effect` | `position` + `size`; per-type defaults — omit what you don't mean to set |
 | `draw` | `points` are world-space; the frame follows the stroke |
 | `arrow` | `start` / `end` are world-space; the frame covers the `bend` curve |
 
-Media references a Space file by `src`; a `src` that is missing or not a relative
-Space path keeps the item as `legacy.<type>` instead of rendering it.
+Media items (`image`, `video`, `audio`, `file`) reference a Space file by `src`; a
+`src` that is missing or not a relative Space path keeps the item as `legacy.<type>`
+instead of rendering it.
 
 ## Board settings
 
@@ -85,7 +100,7 @@ of the fields and their values are in `cohub boards schema board`:
 
 ## Animation
 
-An animation is one timeline in the `animations` collection: an optional `duration`
+An animation is one timeline in the `animations` map: an optional `duration`
 plus `tracks`, each driving one property of one target by JSON path (`position`,
 `opacity`, `style.fill`, `props.text`, …). The header fields are `duration`,
 `play` (`manual`, `auto`, `always`), `end` (`hold` or `reset`), `delay`, `loop`
@@ -128,7 +143,9 @@ Playback moves every viewer together; a marker with `pause: true` holds until `n
 
 ```bash
 cohub boards play <board> <animation> --at 2.5s
-cohub boards pause <board> · resume · stop
+cohub boards pause <board>
+cohub boards resume <board>
+cohub boards stop <board>
 cohub boards seek <board> 12.5s
 cohub boards watch <board>    # stream changes and playback while you work
 ```

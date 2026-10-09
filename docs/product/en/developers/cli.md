@@ -228,7 +228,7 @@ does.
 
 ### Boards
 
-A Board is one JSON document with three collections — `board` settings, `items`, and `animations` — and every command accepts a Board ID or a `.board` path. `get` is resource-scoped, so reading one item does not load the whole Board:
+A Board is one JSON document with three parts — `board` settings, an `items` map, and an `animations` map — and every command accepts a Board ID or a `.board` path. `get` is resource-scoped, so reading one item does not load the whole Board:
 
 ```bash
 cohub -s <spaceId> boards get boards/plan.board --json
