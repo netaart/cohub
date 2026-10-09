@@ -4,7 +4,7 @@
 
 The app lives in `apps/mobile` of the [Cohub monorepo](https://github.com/netaart/cohub). One workflow, `Mobile CI` (`.github/workflows/mobile-ci.yml` at the repository root), builds and releases it, running every step from `apps/mobile`. The repository does not require Expo Application Services (EAS) for builds.
 
-1. Pull requests and `main` pushes that touch `apps/mobile` run Quality, Audit, and Android/iOS bundle exports in parallel.
+1. Pull requests and `main` pushes that touch `apps/mobile` run Quality and Android/iOS bundle exports in parallel.
 2. A `main` push also publishes production OTA, then runs the Android device E2E against it.
 3. Pushing a stable `cohub-mobile-vX.Y.Z` tag runs the release jobs. They create the GitHub Release with notes from the app's commits, attaches signed Android APKs, and uploads a signed iOS IPA to TestFlight. Both platforms record their OTA fingerprints.
 

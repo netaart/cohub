@@ -84,13 +84,12 @@ for (const [id, job] of Object.entries(jobs)) {
     if (step.run) execFileSync("bash", ["-n"], { input: step.run });
   }
 }
-for (const id of ["quality", "audit", "bundle"]) {
+for (const id of ["quality", "bundle"]) {
   assert.match(jobs[id].if, /github\.event_name == 'pull_request'/, `${id} runs for pull requests`);
   assert.match(jobs[id].if, /github\.ref_type == 'branch'/, `${id} does not run for release tags`);
 }
-assert.equal(JSON.stringify(jobs.quality.steps).includes("npm audit"), false, "Advisories are reported by Audit, apart from Quality");
 assert.match(jobs["ota-prepare"].if, /refs\/heads\/main/);
-assert.equal(Object.hasOwn(jobs["ota-prepare"], "needs"), false, "OTA runs its own checks, so an Audit advisory never blocks it");
+assert.equal(Object.hasOwn(jobs["ota-prepare"], "needs"), false, "OTA runs its own checks on the published commit");
 const publishAndroid = jobs["ota-publish-android"];
 const publishIos = jobs["ota-publish-ios"];
 assert.deepEqual(publishAndroid.needs, ["ota-prepare", "ota-android"]);

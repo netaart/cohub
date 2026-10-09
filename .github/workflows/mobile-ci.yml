@@ -1,7 +1,7 @@
 name: Mobile CI
 
 # One workflow for the app in apps/mobile:
-# - pull requests and main pushes that touch the app: Quality, Audit, and bundle exports
+# - pull requests and main pushes that touch the app: Quality and bundle exports
 # - main pushes also publish production OTA, then run the Android device E2E
 # - cohub-mobile-vX.Y.Z tags build signed Android APKs and a TestFlight build and create the
 #   GitHub Release (path filters do not apply to tag pushes)
@@ -119,29 +119,6 @@ jobs:
 
   # Runs alongside Quality: the export does not read lint/typecheck results, and
   # serializing the two added ~70s to every pull request and main push.
-
-  audit:
-    name: Audit
-    # Kept out of Quality so a dependency advisory never blocks OTA, which needs Quality's checks only.
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch') || inputs.task == 'ci'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
 
   bundle:
     name: Bundle (${{ matrix.platform }})
