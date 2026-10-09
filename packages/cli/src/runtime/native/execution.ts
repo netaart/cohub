@@ -1,6 +1,7 @@
 import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
 import { imageForPi, type HarnessOptions } from "../harness.js";
 import { JsonRpcProcess, record, RpcProcessClosedError, type JsonRecord } from "../json-rpc.js";
+import { describeError } from "../../network-error.js";
 import { ProcessCleanupUncertainError } from "../process-group.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
 import { serializeDiagnosticError, type RuntimeDiagnosticContext, type RuntimeDiagnostics } from "../diagnostics.js";
@@ -164,7 +165,7 @@ async function runPi(executor: Executor, turn: Turn, context?: RuntimeDiagnostic
       if (host) await closeHost(host, null).catch(() => undefined);
       throw error;
     }
-    message = { ...message, stopReason: signal.aborted ? "aborted" : "error", errorMessage: signal.aborted ? null : error instanceof Error ? error.message : String(error) };
+    message = { ...message, stopReason: signal.aborted ? "aborted" : "error", errorMessage: signal.aborted ? null : describeError(error) };
   }
   return { session, resume: prepared.resume, message, host };
 }
@@ -279,7 +280,7 @@ async function runCodex(executor: Executor, turn: Turn, context?: RuntimeDiagnos
       if (host) await closeHost(host, null).catch(() => undefined);
       throw error;
     }
-    message = { ...message, stopReason: signal.aborted ? "aborted" : "error", errorMessage: signal.aborted ? null : error instanceof Error ? error.message : String(error) };
+    message = { ...message, stopReason: signal.aborted ? "aborted" : "error", errorMessage: signal.aborted ? null : describeError(error) };
   }
   return { session, resume: prepared.resume, message, host };
 }
