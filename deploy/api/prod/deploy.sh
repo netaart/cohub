@@ -212,6 +212,7 @@ render_template "$MANIFESTS_DIR/configmap.tmpl.yaml" rendered/configmap.yaml
 render_template "$MANIFESTS_DIR/deployment.tmpl.yaml" rendered/deployment.yaml
 render_template "$MANIFESTS_DIR/service.tmpl.yaml" rendered/service.yaml
 
+kubectl apply -k "$SCRIPT_DIR/../../sandbox-network/prod"
 kubectl apply -f rendered/configmap.yaml
 kubectl apply -f rendered/service.yaml
 kubectl apply -f rbac.yaml
