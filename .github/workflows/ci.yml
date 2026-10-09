@@ -94,17 +94,17 @@ jobs:
           PUBLIC_MARKETPLACE_APP_ID=899432b9-7976-4bd1-a7b9-b9b83ea11f32
           EOF
 
+      - name: Test queue authentication with Redis
+        working-directory: packages/infra
+        env:
+          BULLMQ_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: node --import tsx --test src/bullmq/authenticated-queue.test.ts src/bullmq/authenticated-queue.integration.ts
+
       - name: Build
         run: pnpm build
 
       - name: Typecheck
         run: pnpm typecheck
-
-      - name: Test queue authentication with Redis
-        working-directory: packages/infra
-        env:
-          BULLMQ_TEST_REDIS_URL: redis://127.0.0.1:6379
-        run: node --import tsx --test src/bullmq/authenticated-queue.integration.ts
 
       - name: Test
         run: pnpm test
