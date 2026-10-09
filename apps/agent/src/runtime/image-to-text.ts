@@ -1,8 +1,5 @@
 import type { Usage } from "@cohub/protocol/core";
-import {
-  resolveModelTaskApiKey,
-  type ImageToTextConfig,
-} from "@cohub/infra/config-runtime/model-tasks";
+import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import type {
   Api,
   Context,
@@ -92,7 +89,7 @@ function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTex
 }
 
 function createStandaloneRegistry(config: ImageToTextConfig, model: Model<Api>) {
-  const apiKey = resolveModelTaskApiKey(config.model.apiKey);
+  const apiKey = config.model.apiKey;
   return {
     getAvailable: () => [model],
     getApiKey: (provider: string) => provider === model.provider ? apiKey : undefined,

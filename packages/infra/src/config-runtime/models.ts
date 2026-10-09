@@ -237,35 +237,67 @@ export function parseCachedModelsConfig(rawText: string): CachedModelsConfig | n
   };
 }
 
-export function mergeModelsConfigs(...configs: Array<ModelsConfig | null | undefined>): ModelsConfig {
-  const providers: Record<string, ProviderConfig> = {};
-
-  for (const config of configs) {
-    if (!config) continue;
-    for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
-      const existing = providers[provider] ?? {};
-      const mergedModels = new Map<string, ModelDef>();
-
-      for (const model of existing.models ?? []) {
-        if (model.id) mergedModels.set(model.id, model);
-      }
-      for (const model of providerConfig.models ?? []) {
-        if (model.id) mergedModels.set(model.id, model);
-      }
-
-      providers[provider] = {
-        ...existing,
+export function mergeModelsConfigs(
+  platform?: ModelsConfig | null,
+  ...userConfigs: Array<ModelsConfig | null | undefined>
+): ModelsConfig {
+  // A provider owns both its credentials and its request destination. Never
+  // inherit either half across config sources.
+  const providers = new Map<string, ProviderConfig>(Object.entries(platform?.providers ?? {}));
+  for (const config of userConfigs) {
+    for (const [provider, providerConfig] of Object.entries(config?.providers ?? {})) {
+      // Keep the replacement even when no user model is runnable. Falling back
+      // to the platform provider would restore its credentials unexpectedly.
+      providers.set(provider, {
         ...providerConfig,
-        headers: {
-          ...(existing.headers ?? {}),
-          ...(providerConfig.headers ?? {}),
-        },
-        models: [...mergedModels.values()],
-      };
+        models: providerConfig.models?.filter((model) => hasUserModelCredentials({
+          api: model.api ?? providerConfig.api, apiKey: providerConfig.apiKey,
+        })),
+      });
     }
   }
+  return { providers: Object.fromEntries(providers) };
+}
 
-  return { providers };
+/** Resolve only trusted platform values, before applying any user configuration. */
+export function resolvePlatformModelApiKey(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return process.env[value]?.trim() || value;
+}
+
+/** Runtime-only copy. Cache and discovery paths must keep the unresolved config. */
+export function resolvePlatformModelsConfig(config: ModelsConfig | null | undefined): ModelsConfig {
+  return {
+    providers: Object.fromEntries(Object.entries(config?.providers ?? {}).map(([provider, value]) => [
+      provider,
+      { ...value, apiKey: resolvePlatformModelApiKey(value.apiKey) },
+    ])),
+  };
+}
+
+// These adapters use explicit API keys. Cloud adapters with ambient service
+// credentials (for example Bedrock/Vertex) are platform-only.
+const USER_MODEL_APIS = new Set([
+  "anthropic-messages", "azure-openai-responses", "google-generative-ai",
+  "mistral-conversations", "openai-codex-responses", "openai-completions",
+  "openai-responses", "pi-messages",
+]);
+
+function hasUserModelCredentials(model: { api?: string; apiKey?: string }): boolean {
+  return Boolean(model.apiKey?.trim() && model.api && USER_MODEL_APIS.has(model.api));
+}
+
+export function assertUserModelCredentials(model: { api?: string; apiKey?: string }) {
+  if (!hasUserModelCredentials(model)) {
+    throw new Error("User models require an explicit API key and an API-key-based adapter");
+  }
+}
+
+export function resolveRuntimeModelsConfig(input: {
+  platform?: ModelsConfig | null;
+  user?: ModelsConfig | null;
+}): ModelsConfig {
+  return mergeModelsConfigs(resolvePlatformModelsConfig(input.platform), input.user);
 }
 
 export function flattenModelsCatalog(config: ModelsConfig | null | undefined): ModelCatalogEntry[] {

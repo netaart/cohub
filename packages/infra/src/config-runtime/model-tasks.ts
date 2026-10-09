@@ -1,15 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  assertUserModelCredentials,
   createCachedModelsConfig,
   getUserModelsRedisKey,
   isModelDefinition,
   mergeHeaders,
-  mergeModelsConfigs,
   MODELS_CACHE_TTL_SEC,
   parseCachedModelsConfig,
   parseModelsConfig,
   PLATFORM_MODELS_REDIS_KEY,
+  resolvePlatformModelApiKey,
+  resolvePlatformModelsConfig,
   type CachedModelsConfig,
   type ModelCost,
   type ModelDef,
@@ -159,31 +161,63 @@ export function getUserModelTasksRedisKey(userId: string): string {
   return `${USER_MODEL_TASKS_REDIS_KEY_PREFIX}:${trimmed}`;
 }
 
-function mergeTask(
-  platform: ModelTaskConfigOverride | undefined,
-  user: ModelTaskConfigOverride | undefined,
-): ModelTaskConfigOverride | null {
-  if (!platform && !user) return null;
-  const model = platform?.model || user?.model
-    ? {
-        ...(platform?.model ?? {}),
-        ...(user?.model ?? {}),
-        cost: platform?.model?.cost || user?.model?.cost
-          ? { ...(platform?.model?.cost ?? {}), ...(user?.model?.cost ?? {}) }
-          : undefined,
-        headers: mergeHeaders(platform?.model?.headers, user?.model?.headers),
+const USER_PLATFORM_MODEL_FIELDS = new Set([
+  "provider", "id", "name", "reasoning", "defaultThinkingLevel", "thinkingLevelMap",
+  "hidden", "input", "cost", "contextWindow", "maxTokens",
+]);
+
+/** Select platform models without allowing user input to redirect their credentials. */
+export function resolveModelTasksConfig(input: {
+  platformTasks?: ModelTasksConfigOverride | null;
+  userTasks?: ModelTasksConfigOverride | null;
+  platformModels?: ModelsConfig | null;
+  userModels?: ModelsConfig | null;
+}): ModelTasksConfig {
+  const platformModels = resolvePlatformModelsConfig(input.platformModels);
+  const result: ModelTasksConfig = {};
+  for (const name of TASK_NAMES) {
+    const platform = input.platformTasks?.[name];
+    const user = input.userTasks?.[name];
+    if ((!platform && !user) || (user?.enabled ?? platform?.enabled) === false) continue;
+
+    let task: ModelTaskConfig;
+    if (user?.model) {
+      // Replacing the task model also replaces platform task credentials,
+      // headers and endpoint overrides. Users may select a trusted catalog
+      // model, but must define their own provider for a different transport.
+      const provider = user.model.provider?.trim() ?? "";
+      const usesPlatformProvider = Object.hasOwn(platformModels.providers, provider)
+        && !Object.hasOwn(input.userModels?.providers ?? {}, provider);
+      if (usesPlatformProvider) {
+        if (Object.keys(user.model).some((key) => !USER_PLATFORM_MODEL_FIELDS.has(key))) {
+          throw new Error("User model tasks cannot override platform model connection settings");
+        }
+        if (!platformModels.providers[provider]?.models?.some((model) => model.id === user.model?.id?.trim())) {
+          throw new Error("User model tasks must select a configured platform model");
+        }
       }
-    : undefined;
-  const merged = { ...(platform ?? {}), ...(user ?? {}), ...(model ? { model } : {}) };
-  return merged.enabled === false ? null : merged;
+      const models = usesPlatformProvider ? platformModels : input.userModels ?? { providers: {} };
+      task = resolveTask(name, { ...platform, ...user, model: user.model }, models);
+      if (!usesPlatformProvider) assertUserModelCredentials(task.model);
+    } else {
+      // Prompt/enabled overrides retain the platform model as one trusted unit,
+      // even if a user catalog shadows the same provider name.
+      const model = platform?.model && {
+        ...platform.model,
+        apiKey: resolvePlatformModelApiKey(platform.model.apiKey),
+      };
+      task = resolveTask(name, { ...platform, ...user, model }, platformModels);
+    }
+    result[name] = task;
+  }
+  return result;
 }
 
 function resolveTask(
   name: ModelTaskName,
-  task: ModelTaskConfigOverride | null,
+  task: ModelTaskConfigOverride,
   models: ModelsConfig,
-): ModelTaskConfig | null {
-  if (!task) return null;
+): ModelTaskConfig {
   const provider = task.model?.provider?.trim();
   const id = task.model?.id?.trim();
   const prompt = task.prompt?.trim();
@@ -218,7 +252,7 @@ function resolveTask(
   if (name === "imageToText" && !model.input?.includes("image")) {
     throw new Error("Image-to-text task requires an image-capable model");
   }
-  return { enabled: true, model: model as ModelTaskModelConfig, prompt };
+  return { enabled: true, model: { ...model, api: model.api, baseUrl: model.baseUrl }, prompt };
 }
 
 type RedisLike = {
@@ -297,19 +331,14 @@ export function createModelTasksConfigLoader(input: {
         ? loadModels(join(input.platformConfigRoot, "users", normalizedUserId, ".cohub/models.json"), getUserModelsRedisKey(normalizedUserId))
         : null,
     ]);
-    const models = mergeModelsConfigs(platformModels.content, userModels?.content);
-    const result: ResolvedModelTasksConfig = {
+    return {
+      ...resolveModelTasksConfig({
+        platformTasks: platformTasks.content,
+        userTasks: userTasks?.content,
+        platformModels: platformModels.content,
+        userModels: userModels?.content,
+      }),
       revision: [platformTasks.rev, userTasks?.rev, platformModels.rev, userModels?.rev].filter(Boolean).join("/"),
     };
-    for (const name of TASK_NAMES) {
-      const task = resolveTask(name, mergeTask(platformTasks.content?.[name], userTasks?.content?.[name]), models);
-      if (task) result[name] = task;
-    }
-    return result;
   };
-}
-
-export function resolveModelTaskApiKey(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  return process.env[value]?.trim() || value.trim() || undefined;
 }
