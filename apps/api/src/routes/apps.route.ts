@@ -80,8 +80,8 @@ const APP_STATUSES = new Set(["published", "disabled"]);
 const APP_VISIBILITIES = new Set(["public", "space"]);
 const TARGET_TYPES = new Set(["file", "directory", "port"]);
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9_-]{0,78}[a-z0-9])?$/;
-/** Public app payloads are safe to edge/browser cache briefly. */
-const PUBLIC_APP_HTTP_CACHE = "public, max-age=60, stale-while-revalidate=300";
+/** Revalidate so a publish shows on the next load; version content is immutable. */
+const PUBLIC_APP_HTTP_CACHE = "public, no-cache";
 const PRIVATE_APP_HTTP_CACHE = "private, no-store";
 const SANDBOX_PUBLIC_PORT_SET = new Set<number>(SANDBOX_PUBLIC_PORTS as readonly number[]);
 const appActionBodyLimit = bodyLimit({

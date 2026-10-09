@@ -4,6 +4,7 @@ import {
 	buildStrokeOutline,
 	buildStrokeRibbonGeometry,
 	computeDrawBounds,
+	createStrokeRibbonBuilder,
 	sampleRadius,
 } from "../../src/board/core/draw-geometry.js";
 
@@ -64,5 +65,18 @@ test("a single sample remains a compact round dot", () => {
 	assert.equal(outline.length, 8);
 	for (const sample of outline) {
 		assert.ok(Math.abs(Math.hypot(sample.x - point.x, sample.y - point.y) - radius) < 1e-6);
+	}
+});
+
+test("a growing stroke builds exactly what a full build would", () => {
+	const points: Array<{ x: number; y: number; p: number }> = [];
+	const builder = createStrokeRibbonBuilder(6);
+	for (let index = 0; index < 120; index += 1) {
+		const angle = index < 60 ? index / 10 : index * 2.1;
+		points.push({ x: index * 3 + Math.cos(angle) * 20, y: Math.sin(angle) * 20, p: 0.2 + (index % 7) / 10 });
+		const grown = builder.build(points);
+		const full = createStrokeRibbonBuilder(6).build(points);
+		assert.deepEqual([...grown.positions], [...full.positions]);
+		assert.deepEqual([...grown.indices], [...full.indices]);
 	}
 });

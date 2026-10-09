@@ -1,4 +1,9 @@
 import type { SessionTurnRecord } from "@cohub/protocol/model";
+import {
+	buildSearchExcerpt,
+	findSearchMatches,
+	toSearchDisplayText,
+} from "@cohub/protocol/search";
 import type {
 	LabelAssignmentListItem,
 	LabelListItem,
@@ -18,14 +23,21 @@ import { getCacheUserKey } from "$lib/cache/keys";
 import { getSpacePublicProfile } from "$lib/space-profile";
 import { buildSpaceLandingRoute } from "$lib/space-routes";
 import { getCachedSpaceList } from "$lib/stores/space-list-cache";
+import { chatHref, chatTitle } from "./chat-items";
 import { commandItemKey } from "./merge-results";
 import { allowsResourceType, type CommandPaletteSearchPlan } from "./scope";
-import { scoreCommandItem, sortCommandItems, textMatchScore } from "./score";
+import {
+	blendCommandScore,
+	scoreCommandItem,
+	sortCommandItems,
+	textMatchScore,
+} from "./score";
 import type { CommandPaletteItem, CommandPaletteViewerRelation } from "./types";
 
 const LOCAL_LIMIT = 40;
 const LOCAL_SESSION_LIST_SCAN_LIMIT = 120;
 const LOCAL_TURN_RECORD_SCAN_LIMIT = 80;
+const MESSAGE_WEIGHT = 0.85;
 
 function viewerRelationForSession(
 	session:
@@ -41,7 +53,7 @@ function viewerRelationForSession(
 	return "unrelated";
 }
 
-export function viewerTierForRelation(
+function viewerTierForRelation(
 	relation: CommandPaletteViewerRelation | null | undefined,
 ) {
 	if (relation === "creator" || relation === "participant") return 0;
@@ -49,33 +61,21 @@ export function viewerTierForRelation(
 	return 1;
 }
 
-function hrefFor(
-	item: Pick<
-		CommandPaletteItem,
-		| "type"
-		| "spaceId"
-		| "sessionId"
-		| "sequence"
-		| "labelResourceType"
-		| "labelResourceRef"
-	>,
-) {
-	if (item.type === "space") return buildSpaceLandingRoute(item.spaceId);
-	if (item.type === "session")
-		return `/spaces/${item.spaceId}/sessions/${item.sessionId}`;
-	if (item.type === "label") {
-		if (item.labelResourceType === "session")
-			return `/spaces/${item.spaceId}/sessions/${item.labelResourceRef}`;
-		if (item.labelResourceType === "checkpoint")
-			return `/spaces/${item.spaceId}/checkpoints/${item.labelResourceRef}`;
-		if (item.labelResourceType === "file")
-			return `/spaces/${item.spaceId}/files/${(item.labelResourceRef ?? "")
-				.split("/")
-				.map(encodeURIComponent)
-				.join("/")}`;
-		return buildSpaceLandingRoute(item.spaceId);
-	}
-	return `/spaces/${item.spaceId}/sessions/${item.sessionId}?turn=${item.sequence}`;
+function labelHref(input: {
+	spaceId: string;
+	labelResourceType: string;
+	labelResourceRef: string;
+}) {
+	if (input.labelResourceType === "session")
+		return `/spaces/${input.spaceId}/sessions/${input.labelResourceRef}`;
+	if (input.labelResourceType === "checkpoint")
+		return `/spaces/${input.spaceId}/checkpoints/${input.labelResourceRef}`;
+	if (input.labelResourceType === "file")
+		return `/spaces/${input.spaceId}/files/${input.labelResourceRef
+			.split("/")
+			.map(encodeURIComponent)
+			.join("/")}`;
+	return buildSpaceLandingRoute(input.spaceId);
 }
 
 function compactText(value: string | null | undefined, limit: number) {
@@ -118,14 +118,11 @@ function spaceToItem(
 		id: space.id,
 		spaceId: space.id,
 		sessionId: null,
-		turnId: null,
-		sequence: null,
 		title: space.name ?? "Untitled space",
 		excerpt: compactText(space.description, 220),
 		spaceName: space.name ?? null,
 		ownerProfile: space.ownerProfile ?? null,
 		spaceProfile: getSpacePublicProfile(space),
-		sessionTitle: null,
 		matchedField,
 		href: buildSpaceLandingRoute(space.id),
 		updatedAt: activityAt,
@@ -138,43 +135,96 @@ function spaceToItem(
 	};
 }
 
-function sessionToItem(input: {
-	session: SessionRecord;
-	spaceName: string | null;
+type ChatMatch = {
+	sessionId: string;
+	spaceId: string;
+	session: SessionRecord | null;
+	titleScore: number | null;
+	best: { turn: SessionTurnRecord; score: number } | null;
+	messageMatches: number;
+};
+
+function chatMatchFor(
+	matches: Map<string, ChatMatch>,
+	sessionId: string,
+	spaceId: string,
+	session: SessionRecord | null,
+) {
+	const existing = matches.get(sessionId);
+	if (existing) {
+		existing.session ??= session;
+		return existing;
+	}
+	const created: ChatMatch = {
+		sessionId,
+		spaceId,
+		session,
+		titleScore: null,
+		best: null,
+		messageMatches: 0,
+	};
+	matches.set(sessionId, created);
+	return created;
+}
+
+function chatToItem(input: {
+	match: ChatMatch;
+	space: SpaceRecord | undefined;
 	query: string;
 	viewerUserUuid?: string | null;
-}): CommandPaletteItem | null {
-	const title = input.session.title || "Untitled session";
-	if (textMatchScore(title, input.query) <= 0) return null;
+}): CommandPaletteItem {
+	const { match, query } = input;
+	const ownTitle = toSearchDisplayText(match.session?.title);
+	const excerpt = match.best
+		? buildSearchExcerpt(match.best.turn.userText, query)
+		: null;
+	const hit =
+		match.best && excerpt
+			? {
+					turnId: match.best.turn.id,
+					sequence: match.best.turn.sequence,
+					excerpt: excerpt.text,
+					highlights: excerpt.highlights,
+				}
+			: null;
+	const matchCount = match.messageMatches + (match.titleScore === null ? 0 : 1);
+	const messageScore = (match.best?.score ?? 0) * MESSAGE_WEIGHT;
 	const updatedAt =
-		input.session.lastMessageAt ??
-		input.session.updatedAt ??
-		input.session.createdAt ??
+		match.session?.lastMessageAt ??
+		match.session?.updatedAt ??
+		match.best?.turn.updatedAt ??
+		match.best?.turn.createdAt ??
 		null;
-	const scored = scoreCommandItem({
-		type: "session",
-		query: input.query,
-		primary: title,
-		matchedField: "title",
+	const scored = blendCommandScore({
+		type: "chat",
+		textScore: Math.min(
+			1,
+			Math.max(match.titleScore ?? 0, messageScore) +
+				Math.min(0.05, (matchCount - 1) * 0.01),
+		),
 		updatedAt,
 	});
 	const viewerRelation = viewerRelationForSession(
-		input.session,
+		match.session,
 		input.viewerUserUuid,
 	);
+	const titleHighlights =
+		match.titleScore === null ? [] : findSearchMatches(ownTitle, query);
 	return {
-		type: "session",
-		id: input.session.id,
-		spaceId: input.session.spaceId,
-		sessionId: input.session.id,
-		turnId: null,
-		sequence: null,
-		title,
+		type: "chat",
+		id: match.sessionId,
+		spaceId: match.spaceId,
+		sessionId: match.sessionId,
+		title: chatTitle(match.session),
+		...(titleHighlights.length > 0 ? { titleHighlights } : {}),
 		excerpt: null,
-		spaceName: input.spaceName,
-		sessionTitle: title,
-		matchedField: "title",
-		href: `/spaces/${input.session.spaceId}/sessions/${input.session.id}`,
+		hit,
+		matchCount,
+		spaceName: input.space?.name ?? null,
+		spaceProfile: input.space ? getSpacePublicProfile(input.space) : null,
+		matchedField:
+			(match.titleScore ?? 0) >= messageScore ? "title" : "userText",
+		href: chatHref(match.spaceId, match.sessionId, hit?.sequence),
 		updatedAt,
 		source: "local",
 		localScore: scored.score,
@@ -182,6 +232,11 @@ function sessionToItem(input: {
 		viewerTier: viewerTierForRelation(viewerRelation),
 		...scored,
 	};
+}
+
+function containmentScore(text: string | null | undefined, query: string) {
+	if (!text || findSearchMatches(text, query, 1).length === 0) return null;
+	return Math.max(0.74, textMatchScore(text, query));
 }
 
 type LabelWithRef = LabelListItem & { ref: string };
@@ -248,88 +303,32 @@ function labelAssignmentToItem(input: {
 				recencyScore: 0.5,
 				typePriorityScore: 0.72,
 			};
-	const partial = {
-		type: "label" as const,
-		spaceId: input.assignment.scopeId,
-		sessionId:
-			input.assignment.resourceType === "session"
-				? input.assignment.resourceRef
-				: null,
-		sequence: null,
-		labelResourceType: input.assignment.resourceType,
-		labelResourceRef: input.assignment.resourceRef,
-	};
+	const { scopeId: spaceId, resourceType, resourceRef } = input.assignment;
 	return {
-		...partial,
+		type: "label",
 		id: input.assignment.id,
-		turnId: null,
-		title: input.assignment.resource?.title ?? input.assignment.resourceRef,
+		spaceId,
+		sessionId: resourceType === "session" ? resourceRef : null,
+		title: input.assignment.resource?.title ?? resourceRef,
 		excerpt: compactText(
-			input.assignment.resource?.subtitle ?? input.assignment.resourceRef,
+			input.assignment.resource?.subtitle ?? resourceRef,
 			220,
 		),
 		spaceName: input.spaceName,
 		spaceProfile: input.spaceProfile ?? null,
-		sessionTitle:
-			input.assignment.resourceType === "session"
-				? (input.assignment.resource?.title ?? null)
-				: null,
 		matchedField: query ? "labelItemContent" : "labelName",
-		href: hrefFor(partial),
+		href: labelHref({
+			spaceId,
+			labelResourceType: resourceType,
+			labelResourceRef: resourceRef,
+		}),
 		updatedAt,
 		source: "local",
 		localScore: scored.score,
 		labelRef: input.label.ref,
 		labelName: input.label.name,
-		...scored,
-	};
-}
-
-function turnToItem(input: {
-	turn: SessionTurnRecord;
-	session: SessionRecord | null;
-	spaceId: string;
-	spaceName: string | null;
-	query: string;
-	viewerUserUuid?: string | null;
-}): CommandPaletteItem | null {
-	const text = input.turn.userText ?? "";
-	if (textMatchScore(text, input.query) <= 0) return null;
-	const updatedAt = input.turn.updatedAt ?? input.turn.createdAt ?? null;
-	const scored = scoreCommandItem({
-		type: "turn",
-		query: input.query,
-		primary: text,
-		matchedField: "userText",
-		updatedAt,
-	});
-	const viewerRelation = viewerRelationForSession(
-		input.session,
-		input.viewerUserUuid,
-	);
-	return {
-		type: "turn",
-		id: input.turn.id,
-		spaceId: input.spaceId,
-		sessionId: input.turn.sessionId,
-		turnId: input.turn.id,
-		sequence: input.turn.sequence,
-		title: compactText(text, 140) ?? "User message",
-		excerpt: compactText(text, 260),
-		spaceName: input.spaceName,
-		sessionTitle: input.session?.title ?? null,
-		matchedField: "userText",
-		href: hrefFor({
-			type: "turn",
-			spaceId: input.spaceId,
-			sessionId: input.turn.sessionId,
-			sequence: input.turn.sequence,
-		}),
-		updatedAt,
-		source: "local",
-		localScore: scored.score,
-		viewerRelation,
-		viewerTier: viewerTierForRelation(viewerRelation),
+		labelResourceType: resourceType,
+		labelResourceRef: resourceRef,
 		...scored,
 	};
 }
@@ -361,8 +360,8 @@ export async function searchLocalCommandItems(
 	const labelRef = normalizeLabelRef(plan.labelRef);
 	if (normalized.length < 2 && !(includeLabels && labelRef)) return [];
 	const includeSpaces = allowsResourceType(plan, "space");
-	const includeSessions = allowsResourceType(plan, "session");
-	const includeTurns = allowsResourceType(plan, "turn");
+	const includeChats =
+		allowsResourceType(plan, "chat") && normalized.length >= 2;
 	const userKey = getCacheUserKey();
 	const viewerUserUuid = options?.viewerUserUuid ?? null;
 	const spacesById = new Map<string, SpaceRecord>();
@@ -391,38 +390,80 @@ export async function searchLocalCommandItems(
 		}
 	}
 
-	const sessionLists = await idbGetSomeByIndex<SessionListCacheRecord>(
-		"session_lists",
-		"by_updated_at",
-		IDBKeyRange.lowerBound(0),
-		{
-			limit: LOCAL_SESSION_LIST_SCAN_LIMIT,
-			direction: "prev",
-			filter: (record) => record.userKey === userKey,
-		},
-	);
-	shouldAbort(options?.signal);
-	const sessionsById = new Map<string, SessionRecord>();
-	let processed = 0;
-	for (const record of sessionLists) {
-		if (record.userKey !== userKey) continue;
-		const spaceName = spacesById.get(record.spaceId)?.name ?? null;
-		for (const session of record.sessions) {
-			sessionsById.set(session.id, session);
-			if (includeSessions) {
-				const item = sessionToItem({
-					session,
-					spaceName,
-					query: normalized,
-					viewerUserUuid,
-				});
-				if (item) items.push(item);
+	if (includeChats) {
+		const matches = new Map<string, ChatMatch>();
+		const sessionLists = await idbGetSomeByIndex<SessionListCacheRecord>(
+			"session_lists",
+			"by_updated_at",
+			IDBKeyRange.lowerBound(0),
+			{
+				limit: LOCAL_SESSION_LIST_SCAN_LIMIT,
+				direction: "prev",
+				filter: (record) => record.userKey === userKey,
+			},
+		);
+		shouldAbort(options?.signal);
+		const sessionsById = new Map<string, SessionRecord>();
+		for (const record of sessionLists) {
+			for (const session of record.sessions)
+				sessionsById.set(session.id, session);
+		}
+		for (const session of sessionsById.values()) {
+			const titleScore = containmentScore(
+				toSearchDisplayText(session.title),
+				normalized,
+			);
+			if (titleScore === null) continue;
+			chatMatchFor(matches, session.id, session.spaceId, session).titleScore =
+				titleScore;
+		}
+
+		const turnRecords = await idbGetSomeByIndex<SessionTurnsCacheRecord>(
+			"session_turns",
+			"by_last_accessed",
+			IDBKeyRange.lowerBound(0),
+			{
+				limit: LOCAL_TURN_RECORD_SCAN_LIMIT,
+				direction: "prev",
+				filter: (record) => record.userKey === userKey,
+			},
+		);
+		shouldAbort(options?.signal);
+		let processed = 0;
+		for (const record of turnRecords) {
+			for (const turn of record.turns) {
+				const score = containmentScore(turn.userText, normalized);
+				if (score === null) continue;
+				const match = chatMatchFor(
+					matches,
+					record.sessionId,
+					record.spaceId,
+					record.session ?? sessionsById.get(record.sessionId) ?? null,
+				);
+				match.messageMatches += 1;
+				if (
+					!match.best ||
+					score > match.best.score ||
+					(score === match.best.score &&
+						turn.sequence > match.best.turn.sequence)
+				)
+					match.best = { turn, score };
+			}
+			processed += 1;
+			if (processed % 6 === 0) {
+				shouldAbort(options?.signal);
+				await yieldToUi();
 			}
 		}
-		processed += 1;
-		if (processed % 10 === 0) {
-			shouldAbort(options?.signal);
-			await yieldToUi();
+		for (const match of matches.values()) {
+			items.push(
+				chatToItem({
+					match,
+					space: spacesById.get(match.spaceId),
+					query: normalized,
+					viewerUserUuid,
+				}),
+			);
 		}
 	}
 
@@ -474,76 +515,11 @@ export async function searchLocalCommandItems(
 		}
 	}
 
-	if (!includeTurns) {
-		const byKey = new Map<string, CommandPaletteItem>();
-		for (const item of items) {
-			const key = commandItemKey(item);
-			const existing = byKey.get(key);
-			if (!existing || item.score > existing.score) byKey.set(key, item);
-		}
-		return sortCommandItems([...byKey.values()]).slice(0, LOCAL_LIMIT);
-	}
-
-	const turnRecords = await idbGetSomeByIndex<SessionTurnsCacheRecord>(
-		"session_turns",
-		"by_last_accessed",
-		IDBKeyRange.lowerBound(0),
-		{
-			limit: LOCAL_TURN_RECORD_SCAN_LIMIT,
-			direction: "prev",
-			filter: (record) => record.userKey === userKey,
-		},
-	);
-	shouldAbort(options?.signal);
-	processed = 0;
-	for (const record of turnRecords) {
-		if (record.userKey !== userKey) continue;
-		const spaceName = spacesById.get(record.spaceId)?.name ?? null;
-		const session =
-			record.session ?? sessionsById.get(record.sessionId) ?? null;
-		for (const turn of record.turns) {
-			const item = turnToItem({
-				turn,
-				session,
-				spaceId: record.spaceId,
-				spaceName,
-				query: normalized,
-				viewerUserUuid,
-			});
-			if (item) items.push(item);
-		}
-		processed += 1;
-		if (processed % 6 === 0) {
-			shouldAbort(options?.signal);
-			await yieldToUi();
-		}
-	}
-
-	const explicitTurnOnly =
-		options?.resourceTypes?.length === 1 && options.resourceTypes[0] === "turn";
 	const byKey = new Map<string, CommandPaletteItem>();
-	for (const item of explicitTurnOnly
-		? items
-		: aggregateTurnsBySession(items)) {
+	for (const item of items) {
 		const key = commandItemKey(item);
 		const existing = byKey.get(key);
 		if (!existing || item.score > existing.score) byKey.set(key, item);
 	}
 	return sortCommandItems([...byKey.values()]).slice(0, LOCAL_LIMIT);
-}
-
-/** Keep one best-scoring turn per session unless the user asked for raw turns. */
-function aggregateTurnsBySession(items: CommandPaletteItem[]) {
-	const bestBySession = new Map<string, CommandPaletteItem>();
-	const rest: CommandPaletteItem[] = [];
-	for (const item of items) {
-		if (item.type !== "turn" || !item.sessionId) {
-			rest.push(item);
-			continue;
-		}
-		const existing = bestBySession.get(item.sessionId);
-		if (!existing || item.score > existing.score)
-			bestBySession.set(item.sessionId, item);
-	}
-	return [...rest, ...bestBySession.values()];
 }

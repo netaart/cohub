@@ -1,5 +1,7 @@
 <script lang="ts">
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-svelte";
+import ImageBlocks from "$lib/components/ImageBlocks.svelte";
+import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
 import ToolInputDetail from "$lib/components/ToolInputDetail.svelte";
 import ToolOutputDetail from "$lib/components/ToolOutputDetail.svelte";
 import {
@@ -15,6 +17,8 @@ import {
 } from "$lib/format-duration";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import { NO_SENT_SESSIONS } from "$lib/sent-turns";
+import { useSessionRelations } from "$lib/session-relations-context";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type Props = {
@@ -117,6 +121,10 @@ const statusLabel = $derived(
 );
 const inputSummary = $derived(summarizeToolInput(tool.name, tool.input));
 const detailIdPrefix = $derived(`tool-call-${sanitizeToolDomId(tool.id)}`);
+const relations = useSessionRelations();
+const sentSessions = $derived(
+	relations?.sentByToolCall(tool.id) ?? NO_SENT_SESSIONS,
+);
 
 $effect(() => {
 	if (
@@ -145,7 +153,7 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 <div class="group/tool rounded-md">
 	<button
 		type="button"
-		class={`relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 pl-0 pr-1 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35 ${isRunning ? 'tool-call-running' : ''}`}
+		class={`relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 px-0 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35 ${isRunning ? 'tool-call-running' : ''}`}
 		onclick={toggle}
 	>
 		<span class="h-1.5 w-1.5 shrink-0 rounded-full transition-[background-color,box-shadow,opacity,transform] duration-200 {statusDotMap[tool.status]} {isRunning ? 'tool-call-dot' : ''}"></span>
@@ -196,7 +204,12 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 					{#if showResult}
 						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2">
 							<div class="pt-[3px] font-mono text-[10px] uppercase leading-none tracking-wide select-none {tool.status === 'failed' ? 'text-status-error' : 'text-text-placeholder'}">{resultLabel}</div>
-							<ToolOutputDetail value={visibleResult} failed={tool.status === 'failed'} partial={tool.resultPartial} idPrefix={detailIdPrefix} />
+							<div class="min-w-0 space-y-2">
+								<ToolOutputDetail value={visibleResult} failed={tool.status === 'failed'} partial={tool.resultPartial} idPrefix={detailIdPrefix} />
+								{#if tool.resultImages}
+									<ImageBlocks blocks={tool.resultImages} />
+								{/if}
+							</div>
 						</div>
 					{:else if tool.resultOmitted}
 						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2">
@@ -207,6 +220,27 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2">
 							<div class="pt-[3px] font-mono text-[10px] uppercase leading-none tracking-wide text-text-placeholder select-none">{m.tool_out({}, { locale })}</div>
 							<div class="text-[12px] leading-snug text-text-placeholder">{runningPhase === 'drafting' ? m.tool_receiving_call({}, { locale }) : m.tool_running_verb({ verb: runningVerb }, { locale })}</div>
+						</div>
+					{/if}
+					{#if sentSessions.length > 0}
+						<div class="grid grid-cols-[1.75rem_minmax(0,1fr)] items-start gap-2 max-sm:grid-cols-[1.25rem_minmax(0,1fr)] max-sm:gap-1.5">
+							<div class="pt-[3px] font-mono text-[10px] uppercase leading-none tracking-wide text-text-placeholder select-none">{m.tool_to({}, { locale })}</div>
+							<div class="flex min-w-0 flex-col items-start gap-0.5">
+								{#each sentSessions as session (`${session.spaceId}:${session.sessionId}`)}
+									<RelatedSessionLink ref={session} class="flex min-h-[18px] max-w-full min-w-0 items-center gap-1.5 text-[12px] leading-snug text-text-secondary underline-offset-2 transition-colors [&[href]]:hover:text-text-primary [&[href]]:hover:underline [&[href]]:hover:decoration-brand/35">
+										{#snippet children({ label, status })}
+											{#if status === "loading"}
+												<span class="h-2.5 w-28 rounded-[3px] bg-bg-surface" aria-hidden="true"></span>
+											{:else}
+												<span class="min-w-0 truncate {status === 'unavailable' ? 'text-text-placeholder' : ''}">{label}</span>
+											{/if}
+											{#if session.count > 1}
+												<span class="shrink-0 tabular-nums text-text-placeholder">×{session.count}</span>
+											{/if}
+										{/snippet}
+									</RelatedSessionLink>
+								{/each}
+							</div>
 						</div>
 					{/if}
 				</div>

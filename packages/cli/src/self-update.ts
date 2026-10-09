@@ -16,7 +16,11 @@ const PACKAGE_PATH = new URL("../package.json", import.meta.url);
 export type CliSelfUpdateResult = "current" | "updated" | "updated-by-peer";
 
 type UpdateState = {
-  lastUpdatedAt?: string;
+  checkedAt?: string;
+  installedVersion?: string;
+  latestVersion?: string;
+  result?: CliSelfUpdateResult | "failed";
+  error?: string;
 };
 
 const parsePositiveIntEnv = (name: string, fallback: number) => {
@@ -49,9 +53,9 @@ const readState = (): UpdateState => {
   }
 };
 
-const writeState = () => {
+const writeState = (state: Omit<UpdateState, "checkedAt">) => {
   mkdirSync(dirname(STATE_PATH), { recursive: true });
-  writeFileSync(STATE_PATH, `${JSON.stringify({ lastUpdatedAt: new Date().toISOString() }, null, 2)}\n`);
+  writeFileSync(STATE_PATH, `${JSON.stringify({ checkedAt: new Date().toISOString(), ...state }, null, 2)}\n`);
 };
 
 const readInstalledVersion = (): string | undefined => {
@@ -63,17 +67,33 @@ const readInstalledVersion = (): string | undefined => {
   }
 };
 
+const parseVersion = (value: string) => {
+  const match = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(value.trim());
+  if (!match) return null;
+  const core: [number, number, number] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  return { core, prerelease: Boolean(match[4]) };
+};
+
+export function isNewerVersion(candidate: string, installed: string | undefined): boolean {
+  const next = parseVersion(candidate);
+  if (!next) return false;
+  const current = installed === undefined ? null : parseVersion(installed);
+  if (!current) return true;
+  const [major, minor, patch] = next.core;
+  const [installedMajor, installedMinor, installedPatch] = current.core;
+  const delta = major - installedMajor || minor - installedMinor || patch - installedPatch;
+  return delta === 0 ? current.prerelease && !next.prerelease : delta > 0;
+}
+
 export function resolveSelfUpdateResult(beforeVersion: string | undefined, afterVersion: string | undefined, updatedByPeer: boolean): CliSelfUpdateResult {
   if (beforeVersion !== undefined && beforeVersion === afterVersion) return "current";
   return updatedByPeer ? "updated-by-peer" : "updated";
 }
 
 export const isCliSelfUpdateDue = (): boolean => {
-  const state = readState();
-  if (!state.lastUpdatedAt) return true;
-  const lastUpdatedAt = Date.parse(state.lastUpdatedAt);
-  if (!Number.isFinite(lastUpdatedAt)) return true;
-  return Date.now() - lastUpdatedAt >= getIntervalMs();
+  const checkedAt = Date.parse(readState().checkedAt ?? "");
+  if (!Number.isFinite(checkedAt)) return true;
+  return Date.now() - checkedAt >= getIntervalMs();
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -111,9 +131,9 @@ const releaseLock = () => {
   rmSync(LOCK_PATH, { recursive: true, force: true });
 };
 
-const runNpmUpdate = (timeoutMs: number) => {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn("npm", ["install", "-g", `${PACKAGE_NAME}@latest`, "--silent"], {
+const runNpm = (args: string[], timeoutMs: number) => {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn("npm", args, {
       stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
@@ -137,15 +157,15 @@ const runNpmUpdate = (timeoutMs: number) => {
 
     child.on("close", (code, signal) => {
       clearTimeout(timer);
+      const stdout = Buffer.concat(stdoutChunks).toString().trim();
       if (code === 0) {
-        resolve();
+        resolve(stdout);
         return;
       }
 
-      const stdout = Buffer.concat(stdoutChunks).toString().trim();
       const stderr = Buffer.concat(stderrChunks).toString().trim();
       const detail = [stderr, stdout].filter(Boolean).join("\n");
-      reject(new Error(`npm install -g ${PACKAGE_NAME}@latest failed${signal ? ` (${signal})` : code !== null ? ` (exit ${code})` : ""}${detail ? `:\n${detail}` : ""}`));
+      reject(new Error(`npm ${args.join(" ")} failed${signal ? ` (${signal})` : code !== null ? ` (exit ${code})` : ""}${detail ? `:\n${detail}` : ""}`));
     });
   });
 };
@@ -180,9 +200,28 @@ export async function ensureCliSelfUpdated(): Promise<CliSelfUpdateResult> {
       return resolveSelfUpdateResult(beforeVersion, readInstalledVersion(), true);
     }
 
-    await runNpmUpdate(timeoutMs);
-    writeState();
-    return resolveSelfUpdateResult(beforeVersion, readInstalledVersion(), false);
+    // Reinstalling briefly removes the `cohub` bin, so only do it for a newer release.
+    let latestVersion: string | undefined;
+    try {
+      latestVersion = await runNpm(["view", `${PACKAGE_NAME}@latest`, "version"], timeoutMs);
+      if (!isNewerVersion(latestVersion, beforeVersion)) {
+        writeState({ installedVersion: beforeVersion, latestVersion, result: "current" });
+        return "current";
+      }
+      await runNpm(["install", "-g", `${PACKAGE_NAME}@${latestVersion}`, "--silent"], timeoutMs);
+    } catch (error) {
+      writeState({
+        installedVersion: beforeVersion,
+        latestVersion,
+        result: "failed",
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+      });
+      throw error;
+    }
+    const afterVersion = readInstalledVersion();
+    const result = resolveSelfUpdateResult(beforeVersion, afterVersion, false);
+    writeState({ installedVersion: afterVersion, latestVersion, result });
+    return result;
   } finally {
     releaseLock();
   }

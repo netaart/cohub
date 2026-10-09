@@ -81,6 +81,23 @@ const stop = session.subscribe({
 stop();
 ```
 
+## Account-wide updates
+
+`client.onUserEvent()` delivers events for the signed-in account without joining a Space: `session.created` and `session.updated` for every Chat you created or take part in (with `participantUserUuids`), and `space.list.changed` when a Space you belong to changes. Keep a cached Chat or Space list current from these events instead of polling, and re-fetch only after the connection was lost:
+
+```ts
+let wasOpen = client.connectionState === "open";
+client.onConnection(({ state }) => {
+  if (state === "open" && !wasOpen) void refetchLists();
+  wasOpen = state === "open";
+});
+client.onUserEvent((event) => {
+  if (event.type === "session.updated") applySession(event.payload.session);
+});
+```
+
+`client.spaces.list()` items include `personalActivityAt`, the viewer's own latest activity in the Space, which the list is sorted by first.
+
 ## Apps
 
 Create and manage Apps through `client.apps`, including publish, update, versions, and lookups by slug.

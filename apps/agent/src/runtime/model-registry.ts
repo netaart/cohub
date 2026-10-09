@@ -11,6 +11,7 @@ import {
 export type CohubModel<TApi extends Api = Api> = Model<TApi> & {
   defaultThinkingLevel?: ModelThinkingLevel;
   requestProfile?: ModelRequestProfile;
+  imageUrlInput?: boolean;
 };
 
 function resolveApiKey(value: string | undefined): string | undefined {
@@ -73,6 +74,7 @@ export class CohubModelRegistry {
           contextWindow: modelDef.contextWindow ?? 128000,
           maxTokens: modelDef.maxTokens ?? 16384,
           requestProfile: modelDef.requestProfile ?? providerConfig.requestProfile,
+          imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,
           headers: mergeHeaders(providerConfig.headers, modelDef.headers),
           compat: (modelDef.compat ?? providerConfig.compat) as Model<Api>["compat"],
         } as CohubModel);

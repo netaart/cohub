@@ -16,6 +16,7 @@ import {
 } from "lucide-svelte";
 import { untrack } from "svelte";
 import { innerHeight, innerWidth } from "svelte/reactivity/window";
+import { dismissOnBack } from "$lib/back-layers.svelte";
 import AudioPlayer from "$lib/components/AudioPlayer.svelte";
 import ImageViewer from "$lib/components/ImageViewer.svelte";
 import MediaImage from "$lib/components/MediaImage.svelte";
@@ -277,6 +278,11 @@ $effect(() => {
 		swipe.reset();
 	};
 });
+
+dismissOnBack(
+	() => mediaLightbox.open,
+	() => mediaLightbox.close(),
+);
 
 // Focus the dialog while open and hand focus back on close.
 $effect(() => {

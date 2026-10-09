@@ -206,6 +206,17 @@ for await (const event of space.streamCompletion({ messages, maxTokens: 160 })) 
 }
 ```
 
+`content` 也可以直接是字符串。图片支持 Cohub / Anthropic 格式，以及 OpenAI Chat（`image_url`）和 Responses（`input_image`）格式；URL 会原样交给模型，需要公网可访问，`data:` URL 则以内联方式发送。
+
+```ts
+await space.completion({
+  messages: [{ role: "user", content: [
+    { type: "text", text: "图里有什么？" },
+    { type: "image_url", image_url: { url: "https://example.com/cat.webp" } },
+  ] }],
+});
+```
+
 ### Generation（图片 / 视频 / 音频）
 
 ```ts

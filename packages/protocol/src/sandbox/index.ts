@@ -1,3 +1,5 @@
+import type { DisplayCapture, DisplayCaptureParams, DisplayInputBatch, DisplayList, DisplayTree, DisplayTreeParams, DisplayVirtualStart, RtcIceServer } from "../display/index.js";
+
 export const AGENT_SANDBOX_PROTOCOL_VERSION = "1" as const;
 
 export { SYSTEM_ENV_KEYS, SYSTEM_ENV_KEY_SET, SPACE_ENV_REDIS_KEY } from "./constants.js";
@@ -28,6 +30,14 @@ export const RPC_METHODS = [
   "fs.reconcile",
   "process.start",
   "process.abort",
+  "display.list",
+  "display.capture",
+  "display.input",
+  "display.tree",
+  "display.start",
+  "display.stop",
+  "rtc.open",
+  "rtc.close",
 ] as const;
 
 export type FsChange = {
@@ -88,6 +98,8 @@ export const RPC_ERROR_CODES = [
   "IO_ERROR",
   "INTERNAL_ERROR",
   "SEARCH_UNAVAILABLE",
+  "UNAVAILABLE",
+  "BUSY",
 ] as const;
 
 export type RpcErrorCode = (typeof RPC_ERROR_CODES)[number];
@@ -141,6 +153,10 @@ export type SandboxCapabilities = {
   /** process.start supports argv exec mode (no shell). */
   processStartArgv?: boolean;
   processAbort: boolean;
+  processRg?: boolean;
+  processFd?: boolean;
+  display?: boolean;
+  rtc?: boolean;
 };
 
 export type SandboxFilesystemRoot = {
@@ -487,6 +503,19 @@ export type ProcessAbortResult = {
   aborted: boolean;
 };
 
+export type DisplayRpcCaptureParams = DisplayCaptureParams & { display: string };
+export type DisplayRpcInputParams = DisplayInputBatch & { display: string };
+export type DisplayRpcTreeParams = DisplayTreeParams & { display: string };
+
+export type RtcOpenParams = {
+  sessionId: string;
+  display: string;
+  offer: string;
+  iceServers: RtcIceServer[];
+  control: boolean;
+  userId?: string;
+};
+
 export type RpcRequestMap = {
   "fs.read": {
     params: FsReadParams;
@@ -543,6 +572,38 @@ export type RpcRequestMap = {
   "process.abort": {
     params: ProcessAbortParams;
     result: ProcessAbortResult;
+  };
+  "display.list": {
+    params: Record<string, never>;
+    result: DisplayList;
+  };
+  "display.capture": {
+    params: DisplayRpcCaptureParams;
+    result: DisplayCapture;
+  };
+  "display.input": {
+    params: DisplayRpcInputParams;
+    result: { applied: number };
+  };
+  "display.tree": {
+    params: DisplayRpcTreeParams;
+    result: DisplayTree;
+  };
+  "display.start": {
+    params: DisplayVirtualStart;
+    result: DisplayList;
+  };
+  "display.stop": {
+    params: Record<string, never>;
+    result: DisplayList;
+  };
+  "rtc.open": {
+    params: RtcOpenParams;
+    result: { answer: string };
+  };
+  "rtc.close": {
+    params: { sessionId: string; userId?: string };
+    result: { closed: boolean };
   };
 };
 

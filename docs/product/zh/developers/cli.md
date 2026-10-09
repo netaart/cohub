@@ -38,16 +38,19 @@ ENV=dev cohub spaces ls
 
 | Flag | 作用 |
 | --- | --- |
-| `-s, --space <id>` | 指定 space-scoped 命令的目标 Space |
+| `-s, --space <space>` | 指定 space-scoped 命令的目标 Space |
 | `--json` | 机器可读输出 |
 | `-h, --help` | 命令帮助 |
 
-很多工作流需要 Space。未显式指定时，CLI 会先使用当前目录已记住的 Space，再回退到 Home Space：
+很多工作流需要 Space。CLI 依次使用 `-s`、`COHUB_SPACE_ID`，以及 `cohub runtime up` 为当前目录记住的 Space。`<space>` 可以是 Space ID、自己 Space 的 slug（比如 `home`），或 `username/slug`：
 
 ```bash
 cohub -s <spaceId> spaces get
+cohub -s home spaces files ls
 COHUB_SPACE_ID=<spaceId> cohub spaces get
 ```
+
+`prompt`、`completion`、`generate`、`apps` 和 `public` 这类开启新工作的命令，在没有任何目标时会回退到你的 Home Space。其余 Space 命令会读取或修改 Space 里已有的内容，没有目标时直接报错，不会替你猜。
 
 ## 术语
 
@@ -94,10 +97,17 @@ cohub -s <spaceId> run -- git status
 ```bash
 cohub -s <spaceId> spaces files ls
 cohub -s <spaceId> spaces files cat README.md
+cohub -s <spaceId> spaces files cat logo.png > logo.png
 cohub -s <spaceId> spaces files write notes.md --stdin < notes.md
 cohub -s <spaceId> spaces files upload ./src
+cohub -s <spaceId> spaces files cp -r <otherSpaceId>:assets assets
 cohub -s <spaceId> spaces files diff
 ```
+
+`cp` 的用法和 `scp` 一致：最后一个路径是目标，`<space>:<path>` 指向某个 Space，`<space>` 可以是
+ID、`username/slug`，或你名下 Space 的 slug。用 `-s` 或 `COHUB_SPACE_ID` 声明了当前 Space 时，
+不带前缀的路径指当前 Space，否则指本地文件，所以同一个命令就能上传、下载或在 Space 之间拷贝。
+Space 之间的拷贝在服务端完成，文件内容不经过 CLI。
 
 `upload` 把文件直接落在 `--dir` 下；目录入参的内容会直接展开（不多一层目录名），例如
 `upload dist --dir apps/demo` 的结果是 `apps/demo/index.html`，而不是 `apps/demo/dist/index.html`。
@@ -158,6 +168,10 @@ cohub runtime down
 
 # 可选：请求新建 Space（-n 是 --new，不再是 --name）
 cohub runtime up -n --name another-project
+
+# 可选：共享这台电脑的屏幕（会先询问，默认否），或在无界面的 Linux 上启动一块虚拟屏
+cohub runtime up --display
+cohub runtime up --display xvfb:1920x1080
 ```
 
 绑定按本地目录、账号和环境隔离，保存在 `~/.config/cohub/runtime-spaces.json`。
@@ -166,32 +180,61 @@ cohub runtime up -n --name another-project
 `--yes` 用于非交互执行授权。`down` 保留所有数据，存在未确认执行时需加 `--yes`。
 断网会自动重连，但不会自动重跑模型或工具；断连不代表任务已经停止。
 
+### Displays
+
+Space 所在机器共享的屏幕：Android 应用共享的手机、`cohub runtime up --display` 共享的电脑，或沙箱的虚拟屏幕。坐标是最近一次 `capture` 截图上的像素（或 `--size` 指定的尺寸）；屏幕支持控件树时，用 `tree` 给出的引用更精确：
+
+```bash
+cohub spaces displays ls
+cohub spaces displays start                   # 可用时启动虚拟屏幕；stop 停止
+cohub spaces displays capture -o screen.jpg   # 默认最长边 1280
+cohub spaces displays tree                    # e3.12 button "Send" (980,2210 120x80)
+cohub spaces displays tree --actionable       # 只列出可操作的控件
+cohub spaces displays tap e3.12 --screenshot  # 操作后保存截图
+cohub spaces displays type "hello" --into e3.4
+cohub spaces displays tap 540 1200
+cohub spaces displays swipe 288 1000 288 300
+cohub spaces displays tap 300 200 --count 2   # 双击；--button secondary 为右键
+cohub spaces displays type "hello"
+cohub spaces displays key Control+a
+cohub spaces displays press back              # 手机会列出它支持的系统按键
+```
+
+在 macOS 上，运行 Runtime 的终端需要「屏幕录制」权限，操作屏幕还需要「辅助功能」权限（系统设置 → 隐私与安全性）。Linux 需要 X11 会话，暂不支持 Wayland。
+
+`act` 从 `--actions` 或 stdin 读取 JSON 动作数组，按同一时间线执行。有人在操作屏幕时，动作会以 `display_preempted` 停止，先重新看一眼屏幕再继续。查看画面、`capture` 和 `tree` 需要沙箱的查看权限；操作屏幕和 `start` / `stop` 需要执行命令的权限。
+
 ### Boards
 
-Board 命令支持 Board ID 或 `.board` 路径。读取按资源范围执行，查询单个 item 不会加载整个 Board。
+Board 是一个 JSON 文档，包含三部分——`board` 设置、以 id 为键的 `items` map 和 `animations` map——所有命令都支持 Board ID 或 `.board` 路径。`get` 按资源范围读取，查询单个 item 不会加载整个 Board：
 
 ```bash
-cohub -s <spaceId> boards inspect boards/plan.board --json
-cohub -s <spaceId> boards items list <boardId>
-cohub -s <spaceId> boards items get <boardId> <itemId> --json
-cohub -s <spaceId> boards connections list <boardId>
-cohub -s <spaceId> boards effects get <boardId> <effectId> --json
-cohub -s <spaceId> boards compositions get <boardId> <compositionId> --json
+cohub -s <spaceId> boards get boards/plan.board --json
+cohub -s <spaceId> boards get <boardId> --only board
+cohub -s <spaceId> boards get <boardId> --only items
+cohub -s <spaceId> boards get <boardId> --items title,note
+cohub -s <spaceId> boards get <boardId> --within s1
 ```
 
-使用 `boards examples` 生成 JSON 模板，使用 `boards capabilities --json` 查看支持的 schema。多个变更可以通过 semantic command batch 原子提交：
+`apply` 是唯一的写入方式：对文档应用 JSON Merge Patch，字段合并、`null` 删除、未提及的字段保持不变。`--replace` 让文档等于 patch 而非合并。`--dry-run` 校验但不写入，`--base-version` / `--mutation-id` 用于控制重试。
 
 ```bash
-cohub boards examples item text > item.json
-cohub -s <spaceId> boards items create <boardId> --input item.json
-cohub boards examples batch basic > changes.json
-cohub -s <spaceId> boards batch <boardId> --input changes.json --dry-run
-cohub -s <spaceId> boards batch <boardId> --input changes.json
+cohub -s <spaceId> boards apply <boardId> '{"items":{"title":{"props":{"text":"New title"}}}}'
+cohub -s <spaceId> boards apply <boardId> -i patch.json --dry-run
+cohub -s <spaceId> boards apply <boardId> -i - < changes.json
 ```
 
-batch 文件包含 `commands` 数组，可以组合 item、connection、effect、composition 和 Board patch，不需要包含完整 Board 快照。需要严格控制重试时使用 `--base-version` 和 `--mutation-id`。
+`boards schema` 是各字段的权威说明；`boards preset` 会把预设动效输出为轨迹——带 `--animation` 时是一份可直接 `apply` 的 patch，不带时是纯 `tracks`：
 
-播放命令统一位于 `boards playback` 下；图片渲染仍使用 `boards export`。
+```bash
+cohub -s <spaceId> boards schema                 # 单位、item 类型、颜色、可动画属性
+cohub -s <spaceId> boards schema arrow           # 指定一个 target
+cohub -s <spaceId> boards examples lesson > lesson.json
+cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub boards apply <boardId> -i -
+cohub -s <spaceId> boards preset float --targets ship   # 纯 tracks，可自行折进动画
+```
+
+`boards history` 列出历史版本或恢复到某个版本。时间线播放使用 `boards` 顶层命令（`play`、`pause`、`resume`、`seek`、`next`、`stop`），图片和视频渲染仍使用 `boards export`，`boards watch` 会流式输出变更与播放状态。
 
 ### Search 与 models
 
@@ -201,6 +244,8 @@ cohub models ls
 cohub models ls --model-type multimodal
 cohub generate "A calm lake at sunrise" --model <model> --output lake.png
 ```
+
+`search` 可搜索 Space、对话（按标题或对话中发送的消息）和标签条目。`--types chat,space,label` 用于限定结果类型，`--space-id` 可搜索某个 Space 中你有权查看的全部对话；对话行会显示命中的消息。
 
 `models ls` 会展示每个 LLM 的百万 token 成本（如 `$3 /M input · $15 /M output`），并隐藏标记为 `hidden` 的模型。`models ls --model-type multimodal` 会展示每个生成模型的单位价格（如 `$0.04 / image`、`$0.10–$0.50 / second`）；`--json` 返回原始 `pricing` 对象（`unit`、`amount` 或 `min`/`max`、可选 `note`）。
 

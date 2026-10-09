@@ -27,7 +27,7 @@ const locale = $derived(getLocale());
 
 let mediaEl: HTMLMediaElement | null = $state(null);
 let activeMediaId = $state<string | null>(null);
-let activeNodeId: string | null = null;
+let activeItemId: string | null = null;
 let src = $state<string | null>(null);
 let loading = $state(false);
 let error = $state<string | null>(null);
@@ -61,8 +61,8 @@ const layout = $derived.by(() => {
 });
 
 $effect(() => {
-	if (playingId === activeNodeId) return;
-	activeNodeId = playingId;
+	if (playingId === activeItemId) return;
+	activeItemId = playingId;
 	activeMediaId = null;
 });
 
@@ -126,15 +126,29 @@ $effect(() => {
 	if (!element || !url || !active) return;
 	queueMicrotask(() => {
 		element.focus({ preventScroll: true });
-		void element.play().catch(() => {
-			// Native controls remain available when autoplay policy requires a second tap.
-		});
+		void element.play().catch(() => {});
 	});
 	return () => {
 		element.pause();
 		element.removeAttribute("src");
 		element.load();
 	};
+});
+
+$effect(() => {
+	const element = mediaEl;
+	const time =
+		item?.type === "video" || item?.type === "audio"
+			? item.props.time
+			: undefined;
+	if (!element || time === undefined || !Number.isFinite(time)) return;
+	const seek = () => {
+		if (Math.abs(element.currentTime - time / 1000) < 0.05) return;
+		if (element.readyState >= 1) element.currentTime = Math.max(0, time / 1000);
+	};
+	seek();
+	element.addEventListener("loadedmetadata", seek);
+	return () => element.removeEventListener("loadedmetadata", seek);
 });
 
 onMount(() => {
@@ -173,13 +187,14 @@ function stopPropagation(event: Event) {
 </script>
 
 {#if item && media && layout}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class:board-audio-player={media.kind === "audio"}
 		class:board-video-player={media.kind === "video"}
 		class="board-media-player"
+		role="dialog"
+		tabindex="-1"
+		aria-label={media.title}
 		style:left="{layout.left}px"
-		style:top="{layout.top}px"
 		style:width="{layout.width}px"
 		style:height="{layout.height}px"
 		style:transform="rotate({layout.rotation}deg)"
@@ -225,7 +240,6 @@ function stopPropagation(event: Event) {
 		{#if src}
 			{#key `${playingId}:${media.id}:${src}`}
 				{#if media.kind === "video"}
-					<!-- svelte-ignore a11y_media_has_caption -->
 					<video
 						bind:this={mediaEl}
 						class="board-video-el"
@@ -236,10 +250,11 @@ function stopPropagation(event: Event) {
 						aria-label={media.title}
 						onended={handleEnded}
 						onerror={handleMediaError}
-					></video>
+					>
+						<track kind="captions" src="data:text/vtt,WEBVTT" srclang="en" label="Captions" />
+					</video>
 				{:else}
 					<div class="board-audio-content">
-						<!-- svelte-ignore a11y_media_has_caption -->
 						<audio
 							bind:this={mediaEl}
 							class="board-audio-el"

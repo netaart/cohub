@@ -1,29 +1,48 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 
 import type {
+  BoardApplyResult,
   BoardCreateInput,
+  BoardPatch,
   BoardPlaybackSnapshot,
-  BoardSummary,
+  BoardReadInput,
 } from "@neta-art/cohub";
-import type { BoardExportRegion } from "@neta-art/cohub/board";
+import {
+  BOARD_PRESET_NAMES,
+  BOARD_SCHEMA_TARGETS,
+  type BoardExportRegion,
+  boardJsonSchema,
+  boardPresetTracks,
+  boardSchemaOverview,
+  isBoardPresetName,
+  listBoardPresets,
+} from "@neta-art/cohub/board";
+import type { BoardHeadlessExportFormat } from "@neta-art/cohub/board/headless";
 import type { Command } from "commander";
 import {
   BOARD_CREATE_INPUT_MAX_BYTES,
+  BOARD_TRANSACTION_INPUT_MAX_BYTES,
   parseBoardJsonObject,
   readBoardJsonObject,
   resolveBoardId,
   writeBoardOutput,
 } from "../board-command-support.js";
-import { BOARD_EXPORT_FORMATS, formatFromPath, runBoardExport } from "../board-export.js";
-import { registerBoardDomainCommands } from "./board-domain.js";
+import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
 import { resolveSpace } from "../space.js";
+import { registerBoardExampleCommands } from "./boards/examples.js";
 
 type JsonOptions = { json?: boolean };
-type PlaybackOptions = JsonOptions & { commandId?: string };
 
 export const parseJsonObject = parseBoardJsonObject;
+
+function withJson(command: Command): Command {
+  return command.option("--json", "Output as JSON");
+}
 
 function parseNumber(value: string, name: string, options: { min?: number; max?: number; integer?: boolean } = {}): number {
   if (!value.trim()) throw new Error(`${name} must be a finite number`);
@@ -35,207 +54,224 @@ function parseNumber(value: string, name: string, options: { min?: number; max?:
   return parsed;
 }
 
-export function parseViewport(value?: string): { x: number; y: number; width: number; height: number } | undefined {
-  if (!value) return undefined;
+export function parseRect(value: string, name = "--rect"): { x: number; y: number; width: number; height: number } {
   const parts = value.split(",").map((part) => part.trim());
-  if (parts.length !== 4) throw new Error("viewport must be x,y,width,height");
-  const [xValue, yValue, widthValue, heightValue] = parts;
-  if (xValue === undefined || yValue === undefined || widthValue === undefined || heightValue === undefined) {
-    throw new Error("viewport must be x,y,width,height");
-  }
-  const x = parseNumber(xValue, "viewport x");
-  const y = parseNumber(yValue, "viewport y");
-  const width = parseNumber(widthValue, "viewport width");
-  const height = parseNumber(heightValue, "viewport height");
-  if (width <= 0 || height <= 0) throw new Error("viewport width and height must be greater than zero");
+  if (parts.length !== 4) throw new Error(`${name} must be x,y,width,height`);
+  const [x, y, width, height] = parts.map((part, index) => parseNumber(part, `${name} ${["x", "y", "width", "height"][index]}`)) as [number, number, number, number];
+  if (width <= 0 || height <= 0) throw new Error(`${name} width and height must be greater than zero`);
   return { x, y, width, height };
 }
 
-export function showCreated(
-  result: { board: { id: string; title: string; version: number } },
-  path: string,
-): void {
-  table([{ path, ...result.board }], [
-    { key: "path", label: "Path" },
-    { key: "id", label: "ID" },
-    { key: "title", label: "Title" },
-    { key: "version", label: "Version" },
-  ]);
+function list(value: string | undefined): string[] | undefined {
+  const entries = value?.split(",").map((entry) => entry.trim()).filter(Boolean);
+  return entries?.length ? entries : undefined;
 }
 
-function showSummary(result: BoardSummary): void {
-  const background = result.board.metadata.appearance as
-    | { background?: { kind?: string } }
-    | undefined;
-  table([{
-    id: result.board.id,
-    title: result.board.title,
-    version: result.board.version,
-    ...result.counts,
-    background: background?.background?.kind ?? "default",
-    updatedAt: result.board.updatedAt,
-  }], [
-    { key: "id", label: "ID" },
-    { key: "title", label: "TITLE" },
-    { key: "version", label: "VERSION" },
-    { key: "items", label: "ITEMS" },
-    { key: "connections", label: "CONNECTIONS" },
-    { key: "effects", label: "EFFECTS" },
-    { key: "compositions", label: "COMPOSITIONS" },
-    { key: "background", label: "BACKGROUND" },
-    { key: "updatedAt", label: "UPDATED" },
-  ]);
+async function boardClient(boards: Command, target: string) {
+  const spaceId = await resolveSpace(boards);
+  return createClient().space(spaceId).board(await resolveBoardId(spaceId, target));
 }
 
-function showPlayback(result: BoardPlaybackSnapshot): void {
-  table([result], [
-    { key: "playbackId", label: "Playback ID" },
-    { key: "compositionId", label: "Composition" },
+/** A patch from an inline argument, a file, or stdin (`-`). */
+async function readPatch(inline: string | undefined, input: string | undefined, maxBytes: number): Promise<BoardPatch> {
+  if (inline !== undefined && input !== undefined) throw new Error("Pass the patch inline or with --input, not both.");
+  if (inline !== undefined) return parseBoardJsonObject(inline, "patch") as BoardPatch;
+  if (input !== undefined) return (await readBoardJsonObject(input, maxBytes)) as BoardPatch;
+  throw new Error("Pass a patch inline or with --input <file|->.");
+}
+
+function describeChanges(result: BoardApplyResult): string {
+  const parts = [
+    result.changed.board ? "board" : null,
+    result.changed.items.length ? `${result.changed.items.length} item${result.changed.items.length === 1 ? "" : "s"}` : null,
+    result.changed.animations.length ? `${result.changed.animations.length} animation${result.changed.animations.length === 1 ? "" : "s"}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "nothing";
+}
+
+function showApplied(result: BoardApplyResult): void {
+  if (result.status === "validated") ok(`Valid: would change ${describeChanges(result)}`);
+  else if (result.status === "unchanged") ok(`Unchanged at version ${result.version}`);
+  else ok(`Applied version ${result.version}${result.replayed ? " (replayed)" : ""}: ${describeChanges(result)}`);
+  for (const diagnostic of result.diagnostics) console.log(`  ! ${diagnostic.path}: ${diagnostic.message}`);
+}
+
+function showPlayback(playback: BoardPlaybackSnapshot | null): void {
+  if (!playback) {
+    ok("Stopped");
+    return;
+  }
+  table([{ ...playback, position: formatBoardTime(Math.round(playback.position)) }], [
+    { key: "animationId", label: "Animation" },
     { key: "status", label: "Status" },
     { key: "position", label: "Position" },
-    { key: "timeScale", label: "Time Scale" },
+    { key: "timeScale", label: "Speed" },
   ]);
 }
 
-function withJson(command: Command): Command {
-  return command.option("--json", "Output as JSON");
-}
-
-function capabilityUnits(schema: Record<string, unknown> | undefined): string {
-  const params = schema?.params;
-  if (!params || typeof params !== "object" || Array.isArray(params)) return "";
-  return Object.entries(params).flatMap(([field, value]) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-    const meta = value as { coordinateSpace?: unknown; unit?: unknown };
-    const detail = [meta.coordinateSpace, meta.unit]
-      .filter((item): item is string => typeof item === "string")
-      .join("/");
-    return detail ? [`${field}:${detail}`] : [];
-  }).join(", ");
-}
-
-function commandId(options: PlaybackOptions): string {
-  return options.commandId?.trim() || randomUUID();
-}
+// ─── Export ──────────────────────────────────────────────────────────────────
 
 type ExportOptions = JsonOptions & {
   out?: string;
+  at?: string;
+  animation?: string;
   scale?: string;
   padding?: string;
   frame?: string;
   items?: string;
   rect?: string;
   theme?: string;
-  background?: string;
+  paper?: string;
   format?: string;
   quality?: string;
   images?: boolean;
+  fps?: string;
   force?: boolean;
 };
 
-/**
- * Resolve the mutually exclusive region flags.
- *
- * Selecting more than one is rejected rather than silently ranked: "why did
- * --items win over --frame" is a worse experience than being told to pick one.
- */
+/** One region flag at most: being told to pick beats guessing which one wins. */
 function parseExportRegion(options: ExportOptions): BoardExportRegion {
-  const chosen = [
-    options.frame ? "--frame" : null,
-    options.items ? "--items" : null,
-    options.rect ? "--rect" : null,
-  ].filter(Boolean);
-  if (chosen.length > 1) {
-    throw new Error(`Pick one region: ${chosen.join(", ")} cannot be combined`);
-  }
+  const chosen = [options.frame && "--frame", options.items && "--items", options.rect && "--rect"].filter(Boolean);
+  if (chosen.length > 1) throw new Error(`Pick one region: ${chosen.join(", ")} cannot be combined.`);
   if (options.frame) return { kind: "frame", id: options.frame };
   if (options.items) {
-    const ids = options.items.split(",").map((id) => id.trim()).filter(Boolean);
-    if (ids.length === 0) throw new Error("--items needs at least one node id");
+    const ids = list(options.items);
+    if (!ids) throw new Error("--items needs at least one item id.");
     return { kind: "items", ids };
   }
-  if (options.rect) {
-    const rect = parseViewport(options.rect);
-    if (!rect) throw new Error("--rect must be x,y,width,height");
-    return { kind: "rect", rect };
-  }
+  if (options.rect) return { kind: "rect", rect: parseRect(options.rect) };
   return { kind: "all" };
 }
 
-function parseExportFormat(options: ExportOptions, outPath: string) {
+const BOARD_EXPORT_FORMATS: BoardHeadlessExportFormat[] = ["png", "jpeg", "webp"];
+const BOARD_VIDEO_FORMATS = ["mp4", "webm"] as const;
+
+type BoardVideoExportFormat = (typeof BOARD_VIDEO_FORMATS)[number];
+
+function videoFormatFromPath(path: string): BoardVideoExportFormat | null {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".webm") ? "webm" : lower.endsWith(".mp4") ? "mp4" : null;
+}
+
+
+function formatFromPath(path: string): BoardHeadlessExportFormat {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "jpeg";
+  if (lower.endsWith(".webp")) return "webp";
+  return "png";
+}
+
+function parseExportFormat(options: ExportOptions, outPath: string): BoardHeadlessExportFormat {
   if (!options.format) return formatFromPath(outPath);
-  const format = options.format.toLowerCase();
-  if (!BOARD_EXPORT_FORMATS.includes(format as (typeof BOARD_EXPORT_FORMATS)[number])) {
-    throw new Error(`Unknown format "${options.format}"; use ${BOARD_EXPORT_FORMATS.join(", ")}`);
-  }
-  return format as (typeof BOARD_EXPORT_FORMATS)[number];
+  const format = options.format.toLowerCase() as BoardHeadlessExportFormat;
+  if (!BOARD_EXPORT_FORMATS.includes(format)) throw new Error(`--format must be one of ${BOARD_EXPORT_FORMATS.join(", ")}.`);
+  return format;
 }
 
-function parseColorMode(value: string | undefined): "dark" | "light" {
-  if (!value || value === "dark") return "dark";
-  if (value === "light") return "light";
-  throw new Error('--theme must be "dark" or "light"');
+function parseChoice<T extends string>(value: string | undefined, name: string, choices: readonly T[]): T {
+  const chosen = (value ?? choices[0]) as T;
+  if (!choices.includes(chosen)) throw new Error(`${name} must be ${choices.join(" or ")}.`);
+  return chosen;
 }
 
-function parseBackground(value: string | undefined): "paper" | "transparent" {
-  if (!value || value === "paper") return "paper";
-  if (value === "transparent") return "transparent";
-  throw new Error('--background must be "paper" or "transparent"');
+/** `frames/%04d.png` → `frames/0012.png`; a sequence needs a `%d` placeholder. */
+export function framePath(pattern: string, index: number): string {
+  return pattern.replace(/%(0?)(\d*)d/, (_match, zero: string, width: string) => String(index).padStart(Number(width || 0), zero ? "0" : " "));
 }
 
 function registerExportCommand(boards: Command): void {
   withJson(boards.command("export <board>")
-    .description("Render a Board to an image (board id or .board path)")
-    .requiredOption("-o, --out <file>", "Output file; extension selects the format")
-    .option("--scale <factor>", "Output pixels per world unit", "2")
-    .option("--padding <units>", "World-space padding around the content")
-    .option("--frame <node-id>", "Export a single frame as a page")
-    .option("--items <ids>", "Comma-separated node ids to export")
+    .description("Render a Board to an image, or an animation to a frame sequence")
+    .requiredOption("-o, --out <file>", "Output file; the extension picks the format. Sequences need %d, e.g. frames/%04d.png")
+    .option("--at <time>", "A moment (12.5s) or a range start:end:step (0:10s:100ms)")
+    .option("--animation <id>", "Animation the --at times refer to")
+    .option("--frame <item-id>", "Export one frame as a page")
+    .option("--items <ids>", "Comma-separated item ids")
     .option("--rect <rect>", "World rect as x,y,width,height")
+    .option("--scale <factor>", "Output pixels per board unit", "2")
+    .option("--padding <units>", "Padding around the content in board units")
     .option("--theme <mode>", "dark or light", "dark")
-    .option("--background <mode>", "paper or transparent", "paper")
-    .option("--format <format>", `Override format (${BOARD_EXPORT_FORMATS.join(", ")})`)
+    .option("--paper <mode>", "Output paper: paper or transparent", "paper")
+    .option("--format <format>", `Override the format (${BOARD_EXPORT_FORMATS.join(", ")}, ${BOARD_VIDEO_FORMATS.join(", ")})`)
     .option("--quality <q>", "JPEG/WebP quality from 0 to 1", "0.92")
-    .option("--no-images", "Skip image downloads and draw placeholders")
-    .option("--force", "Replace an existing output file"))
-    .action(async (board: string, options: ExportOptions) => {
+    .option("--fps <rate>", "Video frame rate; defaults to the --at step")
+    .option("--no-images", "Draw placeholders instead of downloading images")
+    .option("--force", "Replace existing output files"))
+    .addHelpText("after", `
+Examples:
+  cohub boards export plan.board -o plan.png
+  cohub boards export plan.board --frame s2 -o slide-2.png
+  cohub boards export plan.board --animation lecture --at 4.5s -o moment.png
+  cohub boards export plan.board --animation lecture --at 0:6s:40ms -o frames/%04d.png`)
+    .action(async (target: string, options: ExportOptions) => {
       try {
-        const out = options.out;
-        if (!out) throw new Error("--out is required");
+        const out = options.out as string;
+        const times = options.at ? parseBoardTimes(options.at) : undefined;
+        const pathVideoFormat = videoFormatFromPath(out);
+        const requestedFormat = options.format?.toLowerCase();
+        if (requestedFormat && ![...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].includes(requestedFormat as BoardHeadlessExportFormat | BoardVideoExportFormat)) throw new Error(`--format must be one of ${[...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].join(", ")}.`);
+        const videoFormat = requestedFormat
+          ? BOARD_VIDEO_FORMATS.includes(requestedFormat as BoardVideoExportFormat) ? requestedFormat as BoardVideoExportFormat : null
+          : pathVideoFormat;
+        const sequence = (times?.length ?? 0) > 1;
+        if (sequence && !videoFormat && !/%0?\d*d/.test(out)) throw new Error("A range needs %d in --out, e.g. frames/%04d.png.");
+        if (videoFormat) {
+          if (!times || times.length < 2) throw new Error("Video export needs an --at range.");
+          const step = (times[1] as number) - (times[0] as number);
+          const fps = options.fps ? parseNumber(options.fps, "--fps", { min: 0.01, max: 240 }) : 1000 / step;
+          if (existsSync(out) && !options.force) throw new Error(`${out} already exists; use --force to replace it.`);
+          await mkdir(dirname(out), { recursive: true });
+          const { runBoardVideoExport } = await import("../board-export.js");
+          const result = await runBoardVideoExport({
+            spaceId: await resolveSpace(boards),
+            target,
+            region: parseExportRegion(options),
+            times,
+            ...(options.animation ? { animation: options.animation } : {}),
+            scale: parseNumber(options.scale ?? "2", "--scale", { min: 0.01, max: 16 }),
+            ...(options.padding === undefined ? {} : { padding: parseNumber(options.padding, "--padding", { min: 0 }) }),
+            colorScheme: parseChoice(options.theme, "--theme", ["dark", "light"] as const),
+            background: parseChoice(options.paper, "--paper", ["paper", "transparent"] as const),
+            format: videoFormat,
+            fps,
+            output: out,
+            quality: parseNumber(options.quality ?? "0.92", "--quality", { min: 0, max: 1 }),
+            withImages: options.images !== false,
+          });
+          if (jsonRequested(options)) return outJson({ file: out, ...result });
+          ok(`Exported ${result.width}×${result.height} ${videoFormat.toUpperCase()} to ${out}`);
+          for (const warning of result.warnings) console.log(`  ! ${warning}`);
+          return;
+        }
+        const { runBoardExport } = await import("../board-export.js");
         const result = await runBoardExport({
           spaceId: await resolveSpace(boards),
-          target: board,
+          target,
           region: parseExportRegion(options),
-          scale: parseNumber(options.scale ?? "2", "scale", { min: 0.01, max: 16 }),
-          ...(options.padding === undefined
-            ? {}
-            : { padding: parseNumber(options.padding, "padding", { min: 0 }) }),
-          colorScheme: parseColorMode(options.theme),
-          background: parseBackground(options.background),
+          ...(times ? { times } : {}),
+          ...(options.animation ? { animation: options.animation } : {}),
+          scale: parseNumber(options.scale ?? "2", "--scale", { min: 0.01, max: 16 }),
+          ...(options.padding === undefined ? {} : { padding: parseNumber(options.padding, "--padding", { min: 0 }) }),
+          colorScheme: parseChoice(options.theme, "--theme", ["dark", "light"] as const),
+          background: parseChoice(options.paper, "--paper", ["paper", "transparent"] as const),
           format: parseExportFormat(options, out),
-          quality: parseNumber(options.quality ?? "0.92", "quality", { min: 0, max: 1 }),
+          quality: parseNumber(options.quality ?? "0.92", "--quality", { min: 0, max: 1 }),
           withImages: options.images !== false,
         });
-        if (!result) {
-          return error(
-            "Nothing to export",
-            "The selected region contains no items.",
-          );
+        if (!result) return error("Nothing to export: the region contains no items.");
+        const written: Array<{ path: string; time: number | null; width: number; height: number; bytes: number }> = [];
+        for (const [index, frame] of result.frames.entries()) {
+          const path = sequence ? framePath(out, index) : out;
+          await mkdir(dirname(path), { recursive: true });
+          await writeBoardOutput(path, frame.bytes, Boolean(options.force));
+          written.push({ path, time: frame.time, width: frame.width, height: frame.height, bytes: frame.bytes.length });
         }
-        await writeBoardOutput(out, result.bytes, Boolean(options.force));
-        if (jsonRequested(options)) {
-          return outJson({
-            path: out,
-            width: result.width,
-            height: result.height,
-            scale: result.scale,
-            items: result.itemCount,
-            format: result.format,
-            bytes: result.bytes.length,
-            warnings: result.warnings,
-          });
+        if (jsonRequested(options)) return outJson({ files: written, warnings: result.warnings });
+        const first = result.frames[0];
+        if (first) {
+          const what = sequence ? `${written.length} frames` : (first.format ?? "png").toUpperCase();
+          ok(`Exported ${first.width}×${first.height} ${what} to ${sequence ? dirname(out) || "." : out}`);
         }
-        ok(`Exported ${result.width}×${result.height} ${result.format.toUpperCase()} to ${out}`);
         for (const warning of result.warnings) console.log(`  ! ${warning}`);
       } catch (cause) {
         handleHttp(cause);
@@ -243,214 +279,229 @@ function registerExportCommand(boards: Command): void {
     });
 }
 
+// ─── Commands ────────────────────────────────────────────────────────────────
+
 export function registerBoards(program: Command): Command {
   const boards = program
     .command("boards")
-    .description("Inspect and update Boards by ID or .board path")
-    .hook("preAction", async () => { await resolveSpace(boards); });
+    .description("Read, write, animate and export Boards (by id or .board path)")
+    .addHelpText("after", `
+A Board is one JSON document: { board, items, animations }.
+  get      read it
+  apply    write it with a JSON Merge Patch; null deletes
+  schema   the schema of any part, and what tracks can animate
+  preset   tracks for a preset motion, ready to apply
+  history  list versions, or restore one
+  export   render an image, a frame sequence or a video
+  examples starter documents
+Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
 
   withJson(boards.command("create <path>")
-    .description("Create a Board")
+    .description("Create a Board file, optionally with an initial document")
     .option("--title <title>", "Board title")
-    .option("--mutation-id <id>", "Stable id for safe retries")
-    .option("-i, --input <file>", "Semantic Board seed JSON; use - for stdin")
+    .option("-i, --input <file>", "Initial document JSON; - for stdin")
+    .option("--mutation-id <id>", "Stable id for safe retries"))
     .addHelpText("after", `
-Create an empty Board, or provide items, connections, effects, compositions, and metadata in --input.
-Generate an editable seed:
-  cohub boards examples create > board.json
-  cohub boards create plan.board -i board.json`))
+  cohub boards examples lesson > lesson.json
+  cohub boards create lesson.board -i lesson.json`)
     .action(async (path: string, options: JsonOptions & { title?: string; input?: string; mutationId?: string }) => {
       try {
-        const content = options.input
-          ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES)
-          : {};
-        if ("path" in content || "title" in content) {
-          throw new Error("create input must not contain path or title; use the command argument and --title");
-        }
-        const input = {
-          ...content,
+        const document = options.input ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES) : undefined;
+        const input: BoardCreateInput = {
           path,
-          mutationId:
-            options.mutationId ??
-            (typeof content.mutationId === "string" ? content.mutationId : randomUUID()),
+          mutationId: options.mutationId ?? randomUUID(),
           ...(options.title ? { title: options.title } : {}),
-        } as BoardCreateInput;
+          ...(document ? { document: document as BoardCreateInput["document"] } : {}),
+        };
         const result = await createClient().space(await resolveSpace(boards)).boards.create(input);
-        if (jsonRequested(options)) return outJson({ ...result, path });
-        ok(`Board created: ${path}`);
-        showCreated(result, path);
-      } catch (cause) {
-        handleHttp(cause);
-      }
-    });
-
-  withJson(boards.command("inspect <board>")
-    .alias("get")
-    .description("Show Board metadata and semantic resource counts")
-    .addHelpText("after", `
-Inspect resources with:
-  cohub boards items list <board> --json
-  cohub boards connections list <board> --json
-  cohub boards effects list <board> --json
-  cohub boards compositions list <board> --json
-Apply multiple changes atomically:
-  cohub boards batch <board> --input changes.json --dry-run`))
-    .action(async (target: string, options: JsonOptions) => {
-      try {
-        const spaceId = await resolveSpace(boards);
-        const boardId = await resolveBoardId(spaceId, target);
-        const result = await createClient().space(spaceId).board(boardId).summary();
-        if (jsonRequested(options)) return outJson(result);
-        showSummary(result);
-      } catch (cause) {
-        handleHttp(cause);
-      }
-    });
-
-  withJson(boards.command("capabilities <board>")
-    .description("Show authoring schemas and runtime capabilities")
-    .addHelpText("after", `
-Use --json for complete Item, patch, mutation, effect, Composition, and create JSON Schemas.
-Coordinates:
-  draw points and arrow start/end points are world-space.
-  Position and size are optional; Board geometry derives the persisted frame automatically.
-Use boards examples for editable starter JSON.`))
-    .action(async (target: string, options: JsonOptions) => {
-      try {
-        const spaceId = await resolveSpace(boards);
-        const boardId = await resolveBoardId(spaceId, target);
-        const result = await createClient().space(spaceId).board(boardId).capabilities();
-        if (jsonRequested(options)) return outJson(result);
-        table(result.capabilities.map((capability) => ({
-          ...capability,
-          renderers: capability.renderers?.join(", ") ?? "",
-          coordinates: capabilityUnits(capability.schema),
-        })), [
-          { key: "kind", label: "Kind" },
+        if (jsonRequested(options)) return outJson({ path, id: result.id, title: result.title, version: result.version });
+        ok(`Created ${path}`);
+        table([{ path, id: result.id, title: result.title, version: result.version }], [
+          { key: "path", label: "Path" },
           { key: "id", label: "ID" },
+          { key: "title", label: "Title" },
           { key: "version", label: "Version" },
-          { key: "renderers", label: "Renderers" },
-          { key: "coordinates", label: "Coordinates / units" },
-          { key: "digest", label: "Digest" },
-        ]);
-        console.log();
-        table([{
-          types: result.items.types.join(", "),
-          colors: result.items.colors.join(", "),
-          shapes: result.items.shapes.join(", "),
-          drawPoints: result.items.coordinates.drawPoints,
-          arrowEndpoints: result.items.coordinates.arrowEndpoints,
-        }], [
-          { key: "types", label: "Item types" },
-          { key: "colors", label: "Colors" },
-          { key: "shapes", label: "Shapes" },
-          { key: "drawPoints", label: "Draw points" },
-          { key: "arrowEndpoints", label: "Arrow endpoints" },
         ]);
       } catch (cause) {
         handleHttp(cause);
       }
     });
 
-  registerBoardDomainCommands(boards);
+  boards.command("get <board>")
+    .description("Print the Board document as JSON")
+    .option("--only <sections>", "board, items, animations (comma-separated)")
+    .option("--items <ids>", "Only these items")
+    .option("--within <frame-id>", "A frame and everything inside it")
+    .option("--rect <rect>", "Items intersecting x,y,width,height")
+    .option("--animations <ids>", "Only these animations")
+    .option("--limit <n>", "Page size for items")
+    .option("--cursor <cursor>", "Continue from a previous page's next")
+    .addHelpText("after", `
+  cohub boards get plan.board
+  cohub boards get plan.board --within s2
+  cohub boards get plan.board --only board`)
+    .action(async (target: string, options: { only?: string; items?: string; within?: string; rect?: string; animations?: string; limit?: string; cursor?: string }) => {
+      try {
+        const only = list(options.only);
+        if (only?.some((section) => section !== "board" && section !== "items" && section !== "animations")) throw new Error("--only takes board, items, animations, or a combination.");
+        const sections = only ? new Set(only) : null;
+        const input: BoardReadInput = {
+          ...(only ? { only: only.filter((section): section is NonNullable<BoardReadInput["only"]>[number] => section !== "board") as BoardReadInput["only"] } : {}),
+          ...(list(options.items) ? { items: list(options.items) } : {}),
+          ...(options.within ? { within: options.within } : {}),
+          ...(options.rect ? { rect: parseRect(options.rect) } : {}),
+          ...(list(options.animations) ? { animations: list(options.animations) } : {}),
+          ...(options.limit ? { limit: parseNumber(options.limit, "--limit", { min: 1, integer: true }) } : {}),
+          ...(options.cursor ? { cursor: options.cursor } : {}),
+        };
+        const result = await (await boardClient(boards, target)).get(input);
+        if (!sections) return outJson(result);
+        outJson({
+          id: result.id,
+          title: result.title,
+          version: result.version,
+          updatedAt: result.updatedAt,
+          playback: result.playback,
+          ...(sections.has("board") ? { board: result.board } : {}),
+          ...(sections.has("items") && result.items ? { items: result.items } : {}),
+          ...(sections.has("animations") && result.animations ? { animations: result.animations } : {}),
+          ...(result.next ? { next: result.next } : {}),
+        });
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
+
+  withJson(boards.command("apply <board> [patch]")
+    .description("Merge a patch into the Board: fields merge, null deletes")
+    .option("-i, --input <file>", "Patch JSON; - for stdin")
+    .option("--replace", "Make the document equal to the input instead of merging")
+    .option("--cascade", "Also delete children and tracks of deleted items")
+    .option("--dry-run", "Validate without writing")
+    .option("--base-version <n>", "Fail if the Board moved past this version")
+    .option("--mutation-id <id>", "Stable id; retries never apply twice"))
+    .addHelpText("after", `
+  cohub boards apply plan.board '{"items":{"t1":{"type":"text","props":{"text":"Hi","fontSize":48}}}}'
+  cohub boards apply plan.board '{"items":{"t1":{"position":{"x":200}}}}'
+  cohub boards apply plan.board '{"items":{"t1":null}}'
+  cohub boards preset rise --targets a,b --animation intro | cohub boards apply plan.board -i -`)
+    .action(async (target: string, inline: string | undefined, options: JsonOptions & { input?: string; replace?: boolean; cascade?: boolean; dryRun?: boolean; baseVersion?: string; mutationId?: string }) => {
+      try {
+        const patch = await readPatch(inline, options.input, BOARD_TRANSACTION_INPUT_MAX_BYTES);
+        const result = await (await boardClient(boards, target)).apply(patch, {
+          ...(options.replace ? { replace: true } : {}),
+          ...(options.cascade ? { cascade: true } : {}),
+          ...(options.dryRun ? { dryRun: true } : {}),
+          ...(options.baseVersion === undefined ? {} : { baseVersion: parseNumber(options.baseVersion, "--base-version", { min: 0, integer: true }) }),
+          ...(options.mutationId ? { mutationId: options.mutationId } : {}),
+        });
+        if (jsonRequested(options)) return outJson(result);
+        showApplied(result);
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
+
+  withJson(boards.command("history <board>")
+    .description("List Board versions, or restore one")
+    .option("--before <version>", "Versions older than this")
+    .option("--limit <n>", "Number of versions", "20")
+    .option("--restore <version>", "Return the Board to this version as a new write"))
+    .action(async (target: string, options: JsonOptions & { before?: string; limit?: string; restore?: string }) => {
+      try {
+        const board = await boardClient(boards, target);
+        if (options.restore !== undefined) {
+          const result = await board.restore(parseNumber(options.restore, "--restore", { min: 0, integer: true }));
+          if (jsonRequested(options)) return outJson(result);
+          return showApplied(result);
+        }
+        const page = await board.history({
+          ...(options.before ? { before: parseNumber(options.before, "--before", { min: 1, integer: true }) } : {}),
+          limit: parseNumber(options.limit ?? "20", "--limit", { min: 1, max: 500, integer: true }),
+        });
+        if (jsonRequested(options)) return outJson(page);
+        table(page.transactions.map((transaction) => ({
+          version: transaction.version,
+          at: transaction.createdAt,
+          actor: transaction.source?.via ?? transaction.actorId,
+          items: Object.keys(transaction.after?.items ?? {}).length,
+          animations: new Set([...Object.keys(transaction.after?.animations ?? {}), ...Object.keys(transaction.after?.tracks ?? {})]).size,
+        })), [
+          { key: "version", label: "Version" },
+          { key: "at", label: "At" },
+          { key: "actor", label: "By" },
+          { key: "items", label: "Items" },
+          { key: "animations", label: "Animations" },
+        ]);
+        if (page.nextBefore) console.log(`  More: --before ${page.nextBefore}`);
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
+
+  boards.command("schema [target]")
+    .description("Print JSON Schema for a part of a Board")
+    .addHelpText("after", `
+With a target: one item type, or animation, track, or camera.
+Targets: ${BOARD_SCHEMA_TARGETS.join(", ")}
+Without a target: units, item types, colors and every animatable property.`)
+    .action((target?: string) => {
+      try {
+        if (!target) return outJson({ ...boardSchemaOverview(), presets: listBoardPresets() });
+        const schema = boardJsonSchema(target);
+        if (!schema) throw new Error(`Unknown target ${target}; expected ${BOARD_SCHEMA_TARGETS.join(", ")}.`);
+        outJson(schema);
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
+
+  boards.command("preset <name>")
+    .description("Print tracks for a preset motion as a patch for apply")
+    .requiredOption("--targets <ids>", "Comma-separated item ids")
+    .option("--animation <id>", "Wrap the tracks in this animation; omit to get bare tracks")
+    .option("--at <time>", "Start of the first target", "0")
+    .option("--stagger <time>", "Delay added per target", "0")
+    .option("--duration <time>", "Length of each target's motion")
+    .option("--ease <ease>", "CSS easing, e.g. ease-out or cubic-bezier(.2,.8,.2,1)")
+    .addHelpText("after", `
+Presets: ${BOARD_PRESET_NAMES.join(", ")}
+  cohub boards preset rise --targets a,b,c --animation intro --stagger 120ms | cohub boards apply plan.board -i -
+  cohub boards preset float --targets ship | jq -c '{animations:{idle:.}}' | cohub boards apply plan.board -i -`)
+    .action((name: string, options: { targets: string; animation?: string; at: string; stagger: string; duration?: string; ease?: string }) => {
+      try {
+        if (!isBoardPresetName(name)) throw new Error(`Unknown preset ${name}; expected ${BOARD_PRESET_NAMES.join(", ")}.`);
+        const targets = list(options.targets);
+        if (!targets) throw new Error("--targets needs at least one item id.");
+        const tracks = boardPresetTracks(name, {
+          targets,
+          at: parseBoardTime(options.at, "--at"),
+          stagger: parseBoardTime(options.stagger, "--stagger"),
+          ...(options.duration ? { duration: parseBoardTime(options.duration, "--duration") } : {}),
+          ...(options.ease ? { ease: options.ease } : {}),
+        });
+        outJson(options.animation ? { animations: { [options.animation]: { tracks } } } : { tracks });
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
+
+  registerBoardExampleCommands(boards);
   registerExportCommand(boards);
-
-  const playback = boards.command("playback").description("Control shared Board playback");
-
-  withJson(playback.command("play <board> <composition-id>")
-    .description("Start shared playback")
-    .option("--position <time>", "Initial position in milliseconds")
-    .option("--time-scale <scale>", "Playback speed from 0 to 4")
-    .option("--seed <seed>", "Deterministic playback seed")
-    .option("--command-id <id>", "Idempotency command ID"))
-    .action(async (target: string, compositionId: string, options: PlaybackOptions & { position?: string; timeScale?: string; seed?: string }) => {
-      try {
-        const spaceId = await resolveSpace(boards);
-        const boardId = await resolveBoardId(spaceId, target);
-        const result = await createClient().space(spaceId).board(boardId).play({
-          commandId: commandId(options),
-          type: "play",
-          compositionId,
-          shared: true,
-          ...(options.position === undefined ? {} : { position: parseNumber(options.position, "position", { min: 0 }) }),
-          ...(options.timeScale === undefined ? {} : { timeScale: parseNumber(options.timeScale, "timeScale", { min: Number.EPSILON, max: 4 }) }),
-          ...(options.seed ? { seed: options.seed } : {}),
-        });
-        if (jsonRequested(options)) return outJson(result);
-        showPlayback(result);
-      } catch (cause) {
-        handleHttp(cause);
-      }
-    });
-
-  const playbackAction = (type: "pause" | "stop") => async (
-    target: string,
-    playbackId: string,
-    options: PlaybackOptions,
-  ) => {
-    try {
-      const spaceId = await resolveSpace(boards);
-      const boardId = await resolveBoardId(spaceId, target);
-      const board = createClient().space(spaceId).board(boardId);
-      const id = commandId(options);
-      const result = type === "pause"
-        ? await board.pause({ commandId: id, type: "pause", playbackId })
-        : await board.stop({ commandId: id, type: "stop", playbackId });
-      if (jsonRequested(options)) return outJson(result);
-      showPlayback(result);
-    } catch (cause) {
-      handleHttp(cause);
-    }
-  };
-
-  withJson(playback.command("pause <board> <playback-id>")
-    .description("Pause playback")
-    .option("--command-id <id>", "Idempotency command ID"))
-    .action(playbackAction("pause"));
-
-  withJson(playback.command("seek <board> <playback-id> <position>")
-    .description("Seek playback")
-    .option("--command-id <id>", "Idempotency command ID"))
-    .action(async (target: string, playbackId: string, position: string, options: PlaybackOptions) => {
-      try {
-        const spaceId = await resolveSpace(boards);
-        const boardId = await resolveBoardId(spaceId, target);
-        const result = await createClient().space(spaceId).board(boardId).seek({
-          commandId: commandId(options),
-          type: "seek",
-          playbackId,
-          position: parseNumber(position, "position", { min: 0 }),
-        });
-        if (jsonRequested(options)) return outJson(result);
-        showPlayback(result);
-      } catch (cause) {
-        handleHttp(cause);
-      }
-    });
-
-  withJson(playback.command("stop <board> <playback-id>")
-    .description("Stop playback")
-    .option("--command-id <id>", "Idempotency command ID"))
-    .action(playbackAction("stop"));
+  registerPlaybackCommands(boards);
 
   withJson(boards.command("watch <board>")
-    .description("Stream Board events"))
+    .description("Stream Board changes and playback as they happen"))
     .action(async (target: string, options: JsonOptions) => {
       try {
         const spaceId = await resolveSpace(boards);
         const boardId = await resolveBoardId(spaceId, target);
         const client = createRealtimeClient();
         const board = client.space(spaceId).board(boardId);
-        if (!jsonRequested(options)) process.stderr.write(`Listening for Board ${boardId} events...\n`);
+        if (!jsonRequested(options)) process.stderr.write(`Watching Board ${boardId}…\n`);
         const offConnection = client.onConnection((state) => {
-          if (jsonRequested(options)) {
-            process.stdout.write(`${JSON.stringify({ type: "connection", ...state })}\n`);
-          } else {
-            const detail = state.state === "reconnecting" && state.attempt
-              ? ` (attempt ${state.attempt})`
-              : "";
-            process.stderr.write(`${state.state}${detail}\n`);
-          }
+          if (jsonRequested(options)) process.stdout.write(`${JSON.stringify({ type: "connection", ...state })}\n`);
+          else process.stderr.write(`${state.state}${state.state === "reconnecting" && state.attempt ? ` (attempt ${state.attempt})` : ""}\n`);
         });
         const offBoard = board.subscribe({
           event(event) {
@@ -459,11 +510,11 @@ Use boards examples for editable starter JSON.`))
               return;
             }
             if (event.type === "board.changed") {
-              process.stdout.write(`version ${event.payload.version}  mutation ${event.payload.mutationId}\n`);
+              const { changed } = event.payload;
+              process.stdout.write(`version ${event.payload.version}  ${[changed.board ? "board" : "", ...changed.items, ...changed.animations].filter(Boolean).join(", ")}\n`);
             } else if (event.type === "board.playback.changed") {
-              process.stdout.write(`${event.payload.status}  composition ${event.payload.compositionId}  position ${event.payload.position}\n`);
-            } else if (event.type === "board.awareness.updated") {
-              process.stdout.write(`awareness ${event.payload.actorName}  ${event.payload.update.type}\n`);
+              const { playback } = event.payload;
+              process.stdout.write(playback ? `${playback.status}  ${playback.animationId}  ${formatBoardTime(Math.round(playback.position))}\n` : "stopped\n");
             }
           },
         });
@@ -478,4 +529,35 @@ Use boards examples for editable starter JSON.`))
     });
 
   return boards;
+}
+
+function registerPlaybackCommands(boards: Command): void {
+  const run = async (target: string, options: JsonOptions, command: (board: Awaited<ReturnType<typeof boardClient>>) => Promise<BoardPlaybackSnapshot | null>) => {
+    try {
+      const playback = await command(await boardClient(boards, target));
+      if (jsonRequested(options)) return outJson({ playback });
+      showPlayback(playback);
+    } catch (cause) {
+      handleHttp(cause);
+    }
+  };
+
+  withJson(boards.command("play <board> <animation>")
+    .description("Play an animation for everyone viewing the Board")
+    .option("--at <time>", "Start position, e.g. 2.5s")
+    .option("--speed <factor>", "Playback speed, up to 4")
+    .option("--seed <seed>", "Seed for procedural effects"))
+    .action((target: string, animation: string, options: JsonOptions & { at?: string; speed?: string; seed?: string }) =>
+      run(target, options, (board) => board.play(animation, {
+        ...(options.at ? { position: parseBoardTime(options.at, "--at") } : {}),
+        ...(options.speed ? { timeScale: parseNumber(options.speed, "--speed", { min: Number.EPSILON, max: 4 }) } : {}),
+        ...(options.seed ? { seed: options.seed } : {}),
+      })));
+
+  withJson(boards.command("pause <board>").description("Pause playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.pause()));
+  withJson(boards.command("resume <board>").description("Resume paused playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.resume()));
+  withJson(boards.command("seek <board> <time>").description("Move the playhead, e.g. 12.5s"))
+    .action((target: string, time: string, options: JsonOptions) => run(target, options, (board) => board.seek(parseBoardTime(time))));
+  withJson(boards.command("next <board>").description("Continue past the marker a presentation holds at")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.next()));
+  withJson(boards.command("stop <board>").description("Stop playback")).action((target: string, options: JsonOptions) => run(target, options, (board) => board.stop()));
 }

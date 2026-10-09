@@ -8,6 +8,7 @@ export const AGENT_SANDBOX_BASH_JOB_NAME = "sandbox_bash" as const;
 export const AGENT_SANDBOX_BASH_ATOMIC_JOB_NAME = "sandbox_bash_atomic" as const;
 export const AGENT_RUN_COMMAND_JOB_NAME = "run_command" as const;
 export const AGENT_SANDBOX_FS_MUTATION_JOB_NAME = "sandbox_fs_mutation" as const;
+export const AGENT_SANDBOX_FS_INSTALL_JOB_NAME = "sandbox_fs_install" as const;
 export const AGENT_RUNTIME_RECOVERY_JOB_NAME = "runtime_recovery" as const;
 export type AgentRuntimeRecoveryJobData = {
   spaceId: string;
@@ -93,7 +94,7 @@ export type AgentRunCommandJobResult = {
   content: Array<Record<string, unknown>>;
 };
 
-export type AgentBashJobData = AgentSandboxBashUploadJobData | AgentRunCommandJobData | AgentSandboxFsMutationJobData;
+export type AgentBashJobData = AgentSandboxBashUploadJobData | AgentRunCommandJobData | AgentSandboxFsMutationJobData | AgentSandboxFsInstallJobData;
 
 export function createAgentTurnsQueue<DataType = AgentBashJobData, ResultType = unknown>(redisUrl: string, telemetryServiceName: string) {
   return createBullmqQueue<DataType, ResultType>(COHUB_AGENT_TURNS_QUEUE, {
@@ -241,6 +242,40 @@ export function enqueueAgentSandboxFsMutationJob(queue: Queue, input: AgentSandb
     // Completed write payloads are redacted by the worker, so this retention
     // window preserves idempotency without retaining file content in Redis.
     ...sandboxFsMutationJobRetention,
+    ...options,
+  });
+}
+
+export type AgentSandboxFsInstallEntry = {
+  path: string;
+  stagingPath: string;
+  kind: "file" | "tree";
+  expected?: { size: number; mtimeMs: number };
+};
+
+export type AgentSandboxFsInstallJobData = {
+  spaceId: string;
+  installId: string;
+  entries: AgentSandboxFsInstallEntry[];
+  requestId?: string | null;
+  trace?: Record<string, unknown>;
+};
+
+export type AgentSandboxFsInstallEntryResult =
+  | { path: string; ok: true }
+  | { path: string; ok: false; code: "path_exists" | "file_conflict" | "install_failed"; message: string };
+
+export type AgentSandboxFsInstallJobResult =
+  | { ok: true; results: AgentSandboxFsInstallEntryResult[] }
+  | { ok: false; status: number; code: string; message: string };
+
+export const buildAgentSandboxFsInstallJobId = (installId: string) => `sandbox-fs-install-${installId}`;
+
+export function enqueueAgentSandboxFsInstallJob(queue: Queue, input: AgentSandboxFsInstallJobData, options: JobsOptions = {}) {
+  return queue.add(AGENT_SANDBOX_FS_INSTALL_JOB_NAME, input, {
+    jobId: buildAgentSandboxFsInstallJobId(input.installId),
+    attempts: 1,
+    ...defaultJobRetention,
     ...options,
   });
 }

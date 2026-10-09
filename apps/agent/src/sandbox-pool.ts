@@ -280,11 +280,11 @@ async function connectSandboxOnce(spaceId: string, options?: { timeoutMs?: numbe
     headers: relayAuthHeaders(wsUrl),
     hooks: {
       onHeartbeat: (message) => syncSandboxHeartbeat(spaceId, message),
-      onFsChanged: (payload) => {
-        void sendSpaceFsChanged(spaceId, payload);
+      onFsChanged: (payload, broadcast) => {
+        void sendSpaceFsChanged(spaceId, payload, broadcast);
       },
-      onPortsChanged: (payload) => {
-        void sendSpacePortsChanged(spaceId, payload);
+      onPortsChanged: (payload, broadcast) => {
+        void sendSpacePortsChanged(spaceId, payload, broadcast);
       },
       onDisconnected: ({ reason }) => syncSandboxConnectionState({
         spaceId,

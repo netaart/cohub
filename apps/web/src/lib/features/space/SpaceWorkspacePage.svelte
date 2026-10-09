@@ -38,7 +38,7 @@ import type {
 	BoardAutomationActivity,
 	BoardCollaboratorProfile,
 } from "$lib/board/board-activity";
-import { invalidateFilePreview } from "$lib/board/board-file-preview-source";
+import { invalidateFilePreviews } from "$lib/board/board-file-preview-source";
 import { spaceFsRepo } from "$lib/cache/repositories/space-fs-repo";
 import { spaceRecordRepo } from "$lib/cache/repositories/space-record-repo";
 import {
@@ -89,6 +89,7 @@ import {
 	subscribeSpaceChannel,
 } from "$lib/features/session-chat";
 import SessionChatPanel from "$lib/features/session-chat/SessionChatPanel.svelte";
+import { pushHostShortcut } from "$lib/host-bridge";
 import { getLocale } from "$lib/i18n/locale.svelte";
 // SettingsOverlay removed — settings merged inline into detail page
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -115,6 +116,7 @@ import {
 	buildSpaceCheckpointRoute,
 	buildSpaceCronjobRoute,
 	buildSpaceNewSessionRoute,
+	buildSpaceRootRoute,
 	buildSpaceSessionRoute,
 	buildSpaceTaskRoute,
 } from "$lib/space-routes";
@@ -146,6 +148,7 @@ import { appWindowKey } from "./modules/app-window-key";
 import { createBoardWindowController } from "./modules/board-window-controller.svelte";
 import DesktopLayerHost from "./modules/DesktopLayerHost.svelte";
 import { createDesktopLayerManager } from "./modules/desktop-layer-manager.svelte";
+import { createDisplayWindowController } from "./modules/display-window-controller.svelte";
 import { createFileWorkspaceController } from "./modules/file-workspace-controller.svelte";
 import { classifyInlineFileFsChange } from "./modules/file-workspace-utils";
 import {
@@ -209,6 +212,7 @@ import {
 	type PublishedAppOpenInput,
 } from "./modules/workspace-app-open";
 import { createWorkspaceLayoutController } from "./modules/workspace-layout-controller.svelte";
+import { cachedRuntimeStatus } from "./runtime-status.svelte";
 import { createWorkspaceSidePanelController } from "./side-panel/workspace-side-panel-controller.svelte";
 import { displayUserName, fallbackUserName } from "./space-utils";
 
@@ -438,6 +442,26 @@ const portPreview = createPortPreviewController({
 	onPortClosed: (port) => windowManager.tabClosed("port", port),
 	onBeforeOpenPort: () => {},
 });
+const displayWindows = createDisplayWindowController({
+	onOpenPanel: () => {
+		if (uiState.filesColumnHidden) uiState.setFilesColumnHidden(false);
+		ensurePreviewPanelFits();
+	},
+	onClosePanel: () => {
+		queueMicrotask(() => {
+			if (!activeWindowKind) closePreviewFocusMode();
+		});
+	},
+	onDisplayClosed: (display) => windowManager.tabClosed("display", display),
+});
+const displayNames = $derived(
+	Object.fromEntries(
+		(cachedRuntimeStatus(spaceId)?.displays ?? []).map((item) => [
+			item.id,
+			item.name || item.id,
+		]),
+	),
+);
 async function openMessageUrl(href: string, event: MouseEvent) {
 	try {
 		const url = new URL(href, page.url.href);
@@ -559,6 +583,16 @@ async function resolveDefaultFileApp(path: string) {
 // File opens consult the installed Apps; warm the cache so the first stays instant.
 $effect(() => {
 	if (spaceId) void readInstalledApps(spaceId).catch(() => {});
+});
+
+$effect(() => {
+	const label = (space?.name || space?.title)?.trim();
+	if (!space || !label) return;
+	pushHostShortcut({
+		id: `space:${space.id}`,
+		label,
+		path: buildSpaceRootRoute(space.id),
+	});
 });
 
 let openWith = $state<{
@@ -946,6 +980,8 @@ const windowManager = createWindowManager({
 	getActivePort: () => portPreview.activePort,
 	getAppTabs: () => appPreview.previews,
 	getActiveAppKey: () => appPreview.activeKey,
+	getDisplayTabs: () => displayWindows.tabs,
+	getActiveDisplay: () => displayWindows.active,
 	openFile: (path, optionsArg) =>
 		fileWorkspace.openInlineFile(path, optionsArg as never),
 	activateFile: (path) => fileWorkspace.activateInlineFile(path),
@@ -962,6 +998,9 @@ const windowManager = createWindowManager({
 	openApp: (input) => appPreview.openApp(input),
 	activateApp: (key) => appPreview.activateApp(key),
 	closeApp: (key) => appPreview.closeApp(key ?? undefined),
+	openDisplay: (display) => displayWindows.open(display),
+	activateDisplay: (display) => displayWindows.activate(display),
+	closeDisplay: (display) => displayWindows.close(display ?? undefined),
 	getPortEndpointUrl: (port) => previewEndpoints[port]?.url,
 	syncUrl: (ref, replace = true) => syncPreviewQuery(ref, replace),
 	onBudgetCleanup: () => {
@@ -1168,7 +1207,6 @@ const immersiveFilesInset = $derived(
 
 let workspaceWidthTick = $state(0);
 let pageMounted = $state(false);
-let spaceFsEventTail = Promise.resolve();
 let spaceFsEventGeneration = 0;
 let lastSandboxFsSeq: number | null = null;
 const spaceFsRefreshCoordinator = createSpaceFsRefreshCoordinator(
@@ -1728,11 +1766,11 @@ function normalizeSandboxFsPayload(
 }
 
 function enqueueSpaceFsChanged(payload: ChannelEnvelope) {
-	const eventPayload = payload.payload as SpaceFsChangedPayload;
+	const rawPayload = payload.payload as SpaceFsChangedPayload;
 	const eventSpaceId = payload.spaceId ?? spaceId;
 	const installedAppsChanged =
-		eventPayload.resync ||
-		eventPayload.changes?.some(
+		rawPayload.resync ||
+		rawPayload.changes?.some(
 			(change) =>
 				change.path === SPACE_INSTALLED_APPS_PATH ||
 				change.oldPath === SPACE_INSTALLED_APPS_PATH,
@@ -1745,46 +1783,27 @@ function enqueueSpaceFsChanged(payload: ChannelEnvelope) {
 			void readInstalledApps(eventSpaceId).catch(() => {});
 	}
 
+	if (eventSpaceId !== spaceId) return;
+	const eventPayload = normalizeSandboxFsPayload(rawPayload);
+	if (!eventPayload) return;
 	const generation = spaceFsEventGeneration;
 	const sourceKey = activeFsSourceKey;
-	const prepared = spaceFsEventTail
-		.catch(() => undefined)
-		.then(async () => {
+	void spaceFsRepo
+		.invalidateFsChanged(eventSpaceId, eventPayload)
+		.then(({ refreshDirs }) => {
 			if (generation !== spaceFsEventGeneration || eventSpaceId !== spaceId)
-				return null;
-			const eventPayload = normalizeSandboxFsPayload(
-				payload.payload as SpaceFsChangedPayload,
-			);
-			if (!eventPayload) return null;
-			const { refreshDirs } = await spaceFsRepo.invalidateFsChanged(
-				eventSpaceId,
-				eventPayload,
-			);
-			return { eventPayload, refreshDirs };
-		});
-	spaceFsEventTail = prepared.then(
-		() => undefined,
-		(error) => {
-			console.error("[files] Failed to invalidate filesystem cache", error);
-		},
-	);
-	void prepared
-		.then((result) => {
-			if (
-				!result ||
-				generation !== spaceFsEventGeneration ||
-				eventSpaceId !== spaceId
-			)
 				return;
 			scheduleSpaceFsRefresh({
-				eventPayload: result.eventPayload,
-				dirs: result.refreshDirs,
+				eventPayload,
+				dirs: refreshDirs,
 				eventSpaceId,
 				sourceKey,
 				generation,
 			});
 		})
-		.catch(() => undefined);
+		.catch((error) => {
+			console.error("[files] Failed to apply filesystem change", error);
+		});
 }
 
 function isCurrentSpaceFsRefresh(batch: SpaceFsRefreshBatch) {
@@ -1809,16 +1828,7 @@ function scheduleSpaceFsRefresh(input: {
 	if (eventPayload.resync || spaceConfigChanged(eventPayload.changes))
 		refreshSpaceConfig(eventSpaceId);
 
-	for (const change of eventPayload.changes ?? []) {
-		const meta = {
-			size: change.size,
-			mtimeMs: change.mtimeMs,
-			removed: change.kind === "delete",
-		};
-		if (change.path) invalidateFilePreview(eventSpaceId, change.path, meta);
-		if (change.oldPath)
-			invalidateFilePreview(eventSpaceId, change.oldPath, { removed: true });
-	}
+	invalidateFilePreviews(eventSpaceId, eventPayload.changes ?? []);
 
 	const batch: SpaceFsRefreshBatch = {
 		eventSpaceId,
@@ -1846,9 +1856,8 @@ function scheduleSpaceFsRefresh(input: {
 		}
 		if (
 			change.path &&
-			(change.kind === "create" ||
-				change.kind === "modify" ||
-				change.kind === "rename")
+			change.kind !== "delete" &&
+			boardPreview.hasBoard(change.path)
 		)
 			batch.boardManifestPaths.add(change.path);
 
@@ -2362,12 +2371,15 @@ function closeInlineBoard() {
 }
 async function commitInlineBoard(
 	boardId: string,
-	path: string,
-	document: BoardDocument,
-	before: BoardDocument,
-	commands: import("@neta-art/cohub").BoardSemanticCommand[],
+	patch: import("@cohub/protocol").BoardPatch,
 ) {
-	await boardPreview.commitBoard(boardId, path, document, before, commands);
+	await boardPreview.commitBoard(boardId, patch);
+}
+function playInlineBoard(
+	boardId: string,
+	command: import("@cohub/protocol").BoardPlaybackCommand,
+) {
+	return boardPreview.playBoard(boardId, command);
 }
 async function retryInlineBoardSave(boardId: string) {
 	await boardPreview.retryBoardSave(boardId);
@@ -2869,7 +2881,6 @@ onMount(() => {
 });
 function resetSpaceScopedState(currentSpaceId: string) {
 	spaceFsEventGeneration += 1;
-	spaceFsEventTail = Promise.resolve();
 	spaceFsRefreshCoordinator.reset();
 	lastSandboxFsSeq = null;
 	if (danmakuCatchupTimer) clearTimeout(danmakuCatchupTimer);
@@ -3058,6 +3069,7 @@ $effect(() => {
 				for (const tab of [...portPreview.previews])
 					portPreview.closePort(tab.port);
 				appPreview.closeAll();
+				displayWindows.closeAll();
 			});
 			appliedPreviewContextKey = contextKey;
 		}
@@ -3142,6 +3154,11 @@ const spaceFileDomainProps = $derived.by<
 	retainedAppKeys,
 	activeInlineAppKey,
 	appShell,
+	displayTabs: displayWindows.tabs,
+	activeDisplay: displayWindows.active,
+	displayNames,
+	canControlDisplays: hasAccessPermission("command.execute"),
+	onlineUsers,
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,
@@ -3201,6 +3218,10 @@ const spaceFileDomainProps = $derived.by<
 	onCloseInlineBoardTab: closeInlineBoardTab,
 	onActivateInlinePort: activateInlinePortTab,
 	onCloseInlinePortTab: closeInlinePortTab,
+	onActivateDisplay: (display: string) =>
+		windowManager.activate("display", display),
+	onCloseDisplayTab: (display: string) =>
+		windowManager.close("display", display),
 	onActivateInlineApp: activateInlineAppTab,
 	onCloseInlineAppTab: closeInlineAppTab,
 	onRetryInlineApp: retryInlineApp,
@@ -3220,6 +3241,7 @@ const spaceFileDomainProps = $derived.by<
 	onReloadInlineFile: reloadInlineFile,
 	onOpenInlinePort: openInlinePort,
 	onCommitInlineBoard: commitInlineBoard,
+	onPlayInlineBoard: playInlineBoard,
 	onRetryInlineBoardSave: retryInlineBoardSave,
 	onBeginPreviewPanelResize: beginPreviewPanelResize,
 	onTogglePreviewFocusMode: togglePreviewFocusMode,
@@ -3295,6 +3317,10 @@ const resourceActionState = $derived({
 });
 const headerActions = {
 	openShareModal: (id: string) => sessionChat.openShareModal(id),
+	openDisplay: (displayId: string) => {
+		if (filesColumnHidden) previewLayout.setFilesColumnHidden(false);
+		windowManager.openDisplay(displayId);
+	},
 	startSessionRename,
 	cancelSessionRename,
 	submitSessionRename,
@@ -3332,6 +3358,7 @@ const headerActions = {
 		<UserIdentity
 			name={displayUserName(profile, userUuid)}
 			avatarUrl={profile?.avatarUrl}
+			seed={userUuid}
 			username={profile?.username}
 			title={userTitle(profile, userUuid)}
 			size="xxs"
@@ -3779,7 +3806,7 @@ const headerActions = {
   :global(.port-ready-toast) {
     position: fixed;
     left: 50%;
-    top: 58px;
+    top: calc(58px + env(safe-area-inset-top, 0px));
     z-index: var(--z-fullscreen);
     display: flex;
     max-width: min(680px, calc(100vw - 24px));

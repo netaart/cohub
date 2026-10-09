@@ -1,33 +1,56 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
-import type { PaletteOverviewResponse } from "@neta-art/cohub";
+import type { PaletteOverviewResponse, SpaceRecord } from "@neta-art/cohub";
 import {
 	CornerDownRight,
-	FolderKanban,
 	Loader2,
-	MessageSquare,
-	Pin,
-	Plus,
 	Search,
-	Tag,
+	Settings2,
 	TerminalSquare,
+	X,
 } from "lucide-svelte";
-import { onMount, tick } from "svelte";
-import { goto } from "$app/navigation";
+import { onMount, tick, untrack } from "svelte";
+import { MediaQuery, SvelteMap } from "svelte/reactivity";
+import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
 import { page } from "$app/state";
+import { getCacheUserKey } from "$lib/cache/keys";
+import {
+	getCachedSpacePage,
+	setCachedSpacePage,
+} from "$lib/cache/space-list-page-cache";
 import {
 	resolveLocalCommandItems,
+	settingsCommandSection,
 	withLocalCommands,
 } from "$lib/command-palette/commands";
 import {
 	getCommandPaletteDefaultItems,
 	getLocalPaletteOverview,
+	spaceRecordToCommandItem,
 } from "$lib/command-palette/default-items";
+import {
+	absorbLensPrefix,
+	buildSearchPlan,
+	COMMAND_PALETTE_LENSES,
+	type CommandPaletteLens,
+	lensOf,
+} from "$lib/command-palette/lens";
+import {
+	commandLensLabel,
+	commandLensPlaceholder,
+} from "$lib/command-palette/lens-copy";
 import { searchLocalCommandItems } from "$lib/command-palette/local-search";
 import {
+	commandItemKey,
 	mergeCommandResults,
 	sameCommandItemSequence,
 } from "$lib/command-palette/merge-results";
+import {
+	type CommandPaletteHistoryEntry,
+	type CommandPaletteIntent,
+	OPEN_COMMAND_PALETTE_EVENT,
+	type OpenCommandPaletteDetail,
+} from "$lib/command-palette/open";
 import {
 	getPaletteOverviewSnapshot,
 	revalidatePaletteOverview,
@@ -40,15 +63,25 @@ import {
 	openCommandItem,
 	rememberCommandItem,
 } from "$lib/command-palette/recent";
-import { searchRemoteCommandItems } from "$lib/command-palette/remote-search";
 import {
-	getRemoteResourceTypes,
-	typeLabelFor,
-} from "$lib/command-palette/scope";
+	clearRecentQueries,
+	getRecentQueries,
+	type RecentQuery,
+	rememberRecentQuery,
+} from "$lib/command-palette/recent-queries";
+import { searchRemoteCommandItems } from "$lib/command-palette/remote-search";
+import { getRemoteResourceTypes } from "$lib/command-palette/scope";
 import type { CommandPaletteItem } from "$lib/command-palette/types";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import CommandPaletteLensBar from "$lib/components/command-palette/CommandPaletteLensBar.svelte";
+import CommandPaletteRecentQueries from "$lib/components/command-palette/CommandPaletteRecentQueries.svelte";
+import CommandPaletteResultRow from "$lib/components/command-palette/CommandPaletteResultRow.svelte";
+import FilterBar from "$lib/components/list-page/FilterBar.svelte";
+import FilterChip from "$lib/components/list-page/FilterChip.svelte";
+import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
+import SwipePager from "$lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
+import { settingsSectionLabel } from "$lib/components/settings-section";
 import ToolCallList from "$lib/components/ToolCallList.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
@@ -56,11 +89,7 @@ import { sdk } from "$lib/sdk";
 import { filterSpacePickerItems } from "$lib/space-picker-model";
 import { buildUserNewSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
-import {
-	fetchSpaceListWithCache,
-	getCachedSpaceListMeta,
-	onSpaceListCacheUpdated,
-} from "$lib/stores/space-list-cache";
+import { getRecentSpaces } from "$lib/stores/recent-space";
 import {
 	getCachedSpaceFilterPref,
 	type SpaceFilterPref,
@@ -80,12 +109,21 @@ function syncPinStateInItems(spaceId: string, isPinned: boolean) {
 	localItems = patch(localItems);
 }
 
+function togglePin(item: CommandPaletteItem) {
+	const wasPinned = item.isPinned ?? false;
+	syncPinStateInItems(item.spaceId, !wasPinned);
+	void toggleSpacePin(item.spaceId).catch((error) => {
+		console.warn("[command-palette] pin toggle failed", error);
+		syncPinStateInItems(item.spaceId, wasPinned);
+	});
+}
+
 const MIN_QUERY_LENGTH = 2;
 const locale = $derived(getLocale());
 const RESULT_LIMIT = 30;
 const DEBOUNCE_MS = 180;
 const POINTER_HOVER_ARM_MS = 220;
-const SPACE_LIST_REFRESH_MIN_INTERVAL_MS = 15_000;
+const fullScreen = new MediaQuery("max-width: 640px");
 
 /**
  * Land a rebuilt default list without a redundant render. The result list is
@@ -98,26 +136,15 @@ function applyDefaultItems(next: CommandPaletteItem[]) {
 	defaultItems = next;
 }
 
-function defaultPlaceholder() {
-	return m.command_placeholder({}, { locale });
-}
-
-type CommandPaletteIntent = "navigate" | "new-chat";
-
-type OpenCommandPaletteDetail = {
-	query?: string;
-	placeholder?: string;
-	title?: string;
-	refreshSpaces?: boolean;
-	/** Controls where space items navigate. Default: open space landing. */
-	intent?: CommandPaletteIntent;
-};
-
 let open = $state(false);
+let lens = $state<CommandPaletteLens>("all");
+/** What the landing page showed mid-swipe, held until its own results arrive. */
+let seed = $state<CommandPaletteItem[] | null>(null);
+const lensSnapshots = new SvelteMap<string, CommandPaletteItem[]>();
 let query = $state("");
-let title = $state("");
-let placeholder = $state("");
 let openIntent = $state<CommandPaletteIntent>("navigate");
+let historyBacked = false;
+let recentQueries = $state<RecentQuery[]>([]);
 let inputEl = $state<HTMLInputElement | null>(null);
 let resultsEl = $state<HTMLDivElement | null>(null);
 let activeIndex = $state(0);
@@ -133,16 +160,14 @@ let localDone = $state(true);
 let remoteDone = $state(true);
 let defaultDone = $state(true);
 let legacyDefaultDone = $state(true);
-let refreshingSpaces = $state(false);
 let remoteError = $state<string | null>(null);
+let archivedItems = $state<CommandPaletteItem[]>([]);
+let archivedDone = $state(true);
+let archivedToken = 0;
 let debounceTimer: number | null = null;
 let localController: AbortController | null = null;
 let remoteController: AbortController | null = null;
 let searchToken = 0;
-let spaceListRefreshToken = 0;
-let activeSpaceListRefreshId = 0;
-let forceSpaceRefreshForNextSearch = false;
-let lastForcedSpaceListRefreshAt = 0;
 let runMode = $state(false);
 let runCommand = $state("");
 let runTaskId = $state<string | null>(null);
@@ -153,10 +178,9 @@ let runStatus = $state<"idle" | "queued" | "running" | "done" | "failed">(
 );
 let runError = $state("");
 let runPollTimer: number | null = null;
+let scheduledSearchKey: string | null = null;
 
-// Space picker filter (All / Mine / Pinned) — shown when the palette operates
-// in space-selection mode (query starts with `a:` or intent is new-chat).
-type SpaceFilter = SpaceFilterPref;
+type SpaceFilter = SpaceFilterPref | "archived";
 let spaceFilter = $state<SpaceFilter>("all");
 
 // Pagination for Space Picker mode: load larger page sizes (e.g. 50 items per page)
@@ -182,6 +206,7 @@ function handleResultsScroll(event: Event) {
 // Space filter reset on change
 $effect(() => {
 	spaceFilter;
+	lens;
 	query;
 	open;
 	spaceDisplayLimit = SPACE_PAGE_SIZE;
@@ -192,21 +217,39 @@ const currentSpaceId = $derived.by(() => {
 	const id = match?.[1] ?? null;
 	return id === "new" ? null : id;
 });
-const parsedQuery = $derived(parseCommandPaletteQuery(query));
-const searchPlan = $derived({
-	query: parsedQuery.query,
-	resourceTypes: parsedQuery.resourceTypes,
-	labelRef: parsedQuery.labelRef,
-});
+const searchPlan = $derived(buildSearchPlan(lens, query));
+const activeLens = $derived(lensOf(searchPlan.resourceTypes));
 const trimmedQuery = $derived(searchPlan.query.trim());
 const hasLabelScope = $derived(
 	Boolean(searchPlan.labelRef && searchPlan.resourceTypes?.includes("label")),
 );
-const typeLabel = $derived(typeLabelFor(searchPlan.resourceTypes));
+const typeLabel = $derived(
+	searchPlan.resourceTypes?.length
+		? searchPlan.resourceTypes
+				.map((type) => commandLensLabel(type, locale))
+				.join(" + ")
+		: null,
+);
+const title = $derived(
+	runMode
+		? m.command_run_title({}, { locale })
+		: openIntent === "new-chat"
+			? m.chats_new_chat_in({}, { locale })
+			: m.command_title({}, { locale }),
+);
+const placeholder = $derived(
+	runMode
+		? m.command_run_placeholder({}, { locale })
+		: commandLensPlaceholder(activeLens ?? "all", locale),
+);
+const showLensBar = $derived(!runMode && openIntent !== "new-chat");
 const isSpacePickerMode = $derived(
 	openIntent === "new-chat" ||
 		(searchPlan.resourceTypes?.length === 1 &&
 			searchPlan.resourceTypes[0] === "space"),
+);
+const hasRecentQueries = $derived(
+	!runMode && !query.trim() && recentQueries.length > 0,
 );
 const resultLimit = $derived(
 	isSpacePickerMode ? SPACE_PAGE_SIZE : RESULT_LIMIT,
@@ -217,11 +260,33 @@ const recentItems = $derived.by(() => {
 	return items.filter((item) => searchPlan.resourceTypes?.includes(item.type));
 });
 // Local commands are always resolved synchronously — never blocked by network/IDB.
-const localCommands = $derived(resolveLocalCommandItems(searchPlan));
+function localizedCommandTitle(item: CommandPaletteItem) {
+	if (item.id === "manage-spaces") return m.spaces_manage({}, { locale });
+	const section = settingsCommandSection(item);
+	return section ? settingsSectionLabel(section, locale) : null;
+}
+
+function localizedCommandExcerpt(item: CommandPaletteItem) {
+	if (item.id === "manage-spaces")
+		return m.spaces_search_placeholder({}, { locale });
+	return settingsCommandSection(item) ? m.nav_settings({}, { locale }) : null;
+}
+
+const localCommands = $derived(
+	resolveLocalCommandItems(searchPlan, localizedCommandTitle).map((item) => ({
+		...item,
+		title: localizedCommandTitle(item) ?? item.title,
+		excerpt: localizedCommandExcerpt(item) ?? item.excerpt,
+	})),
+);
 const myUserUuid = $derived(authStore.userUuid);
 const filteredSpaceItems = $derived.by(() => {
-	if (!isSpacePickerMode || spaceFilter === "all" || spaceFilter === "recent")
-		return null;
+	if (!isSpacePickerMode || spaceFilter === "archived") return null;
+	const pickerFilter = spaceFilter;
+	if (pickerFilter === "all" || pickerFilter === "recent") {
+		return (items: CommandPaletteItem[]) =>
+			items.filter((item) => item.type !== "space" || !item.isArchived);
+	}
 	return (items: CommandPaletteItem[]) =>
 		items.filter(
 			(item) =>
@@ -233,21 +298,20 @@ const filteredSpaceItems = $derived.by(() => {
 							name: item.spaceName,
 							ownerUserUuid: item.ownerProfile?.userUuid,
 							isPinned: item.isPinned,
+							isArchived: item.isArchived,
 						},
 					],
-					spaceFilter,
+					pickerFilter,
 					"",
 					myUserUuid,
 				).length > 0,
 		);
 });
 const mergedItemsRaw = $derived.by(() => {
+	if (isSpacePickerMode && spaceFilter === "archived") return archivedItems;
 	// Long, specific queries let strong matches bypass the personal-relevance tier.
 	const isLongQuery = trimmedQuery.length >= 12;
-	// Only the space picker "Recent" tab uses the overview-backed list. The
-	// plain palette default list and every other picker tab stay on the local
-	// legacy derivation, which reads the same IndexedDB caches the old default
-	// list used (no overview snapshot, no overview refetch).
+	// Only the space picker "Recent" tab uses the overview-backed list.
 	const useOverviewDefaults = isSpacePickerMode && spaceFilter === "recent";
 	const defaultSource = useOverviewDefaults
 		? defaultItems.length > 0
@@ -293,26 +357,43 @@ const mergedItems = $derived.by(() => {
 	return mergedItemsRaw;
 });
 const isSearching = $derived(
-	!localDone || !remoteDone || !defaultDone || !legacyDefaultDone,
+	!localDone ||
+		!remoteDone ||
+		!defaultDone ||
+		!legacyDefaultDone ||
+		!archivedDone,
 );
+const lensSettled = $derived(
+	trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope
+		? defaultDone && legacyDefaultDone
+		: localDone,
+);
+const pending = $derived(seed !== null && !lensSettled);
 const renderedItems = $derived(
-	mergedItems.length > 0 || !isSearching ? mergedItems : settledItems,
+	pending && seed
+		? seed
+		: mergedItems.length > 0 || !isSearching
+			? mergedItems
+			: settledItems,
 );
+const swipeable = $derived(
+	fullScreen.current && showLensBar && activeLens !== null,
+);
+const lensIndex = $derived(
+	activeLens ? COMMAND_PALETTE_LENSES.indexOf(activeLens) : 0,
+);
+const lensTabs = new SwipeTabs(() => ({
+	index: lensIndex,
+	enabled: swipeable,
+}));
+const lensPosition = $derived(activeLens ? lensTabs.position : null);
 const showingSettledItems = $derived(
 	isSearching && mergedItems.length === 0 && settledItems.length > 0,
-);
-const showingSpaceRefreshStatus = $derived(
-	refreshingSpaces &&
-		Boolean(searchPlan.resourceTypes?.includes("space")) &&
-		trimmedQuery.length < MIN_QUERY_LENGTH &&
-		!hasLabelScope,
 );
 const runBlocks = $derived(runResult ?? runProgress ?? []);
 const statusText = $derived.by(() => {
 	const label = typeLabel ?? m.command_type_default({}, { locale });
 	if (trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope) {
-		if (showingSpaceRefreshStatus)
-			return m.command_status_syncing({ label }, { locale });
 		return renderedItems.length > 0
 			? m.command_status_filter({ label }, { locale })
 			: m.command_status_search_initial(
@@ -335,13 +416,6 @@ const statusText = $derived.by(() => {
 		? m.command_status_done({ label, count }, { locale })
 		: m.command_status_done_many({ label, count }, { locale });
 });
-
-function profileFor(item: CommandPaletteItem) {
-	if (item.type !== "space") return null;
-	return item.ownerProfile?.userUuid && item.ownerProfile.displayName
-		? item.ownerProfile
-		: null;
-}
 
 function armPointerHover() {
 	suppressPointerHover = true;
@@ -368,7 +442,8 @@ function remoteSearchSpaceId(
 }
 
 function handleCommandInput(event: Event) {
-	const value = (event.currentTarget as HTMLInputElement).value;
+	const input = event.currentTarget as HTMLInputElement;
+	const value = input.value;
 	if (runMode) {
 		runCommand = value;
 		if (runStatus !== "running" && runStatus !== "queued") {
@@ -380,18 +455,150 @@ function handleCommandInput(event: Event) {
 		}
 		return;
 	}
-	query = value;
-	// Searching should search the full Space set; Recent remains the empty-query
-	// default view and is still available as an explicit filter.
-	if (value.trim() && isSpacePickerMode) spaceFilter = "all";
+	const next =
+		openIntent === "new-chat"
+			? { lens, input: value }
+			: absorbLensPrefix(lens, value);
+	// Set the DOM value directly: `query` may not change (`s:` → "").
+	if (next.input !== value) input.value = next.input;
+	query = next.input;
+	if (next.lens !== lens) selectLens(next.lens);
+	widenSpaceFilter();
 }
 
-const SPACE_FILTER_KEYS: SpaceFilter[] = ["recent", "all", "mine", "pinned"];
+function widenSpaceFilter() {
+	if (query.trim() && isSpacePickerMode && spaceFilter !== "archived")
+		spaceFilter = "all";
+}
+
+function selectLens(next: CommandPaletteLens) {
+	const parsed = parseCommandPaletteQuery(query);
+	if (parsed.explicitTypeFilter) query = parsed.query;
+	if (next === "space" && lens !== "space")
+		spaceFilter = getCachedSpaceFilterPref();
+	if (next !== activeLens) {
+		seed = previewFor(next) ?? [];
+		settledItems = seed;
+		localDone = false;
+		legacyDefaultDone = false;
+	}
+	lens = next;
+	activeIndex = 0;
+	refocusInput();
+}
+
+function snapshotKey(target: CommandPaletteLens) {
+	return `${target === "space" ? spaceFilter : ""}:${target}\n${query}`;
+}
+
+function previewFor(target: CommandPaletteLens) {
+	const snapshot = lensSnapshots.get(snapshotKey(target));
+	if (snapshot) return snapshot;
+	if (activeLens !== "all" || target === "all") return null;
+	if (target === "space" && spaceFilter !== "all") return null;
+	return renderedItems.filter((item) => item.type === target);
+}
+
+function bindResults(node: HTMLDivElement) {
+	resultsEl = node;
+	return () => {
+		if (resultsEl === node) resultsEl = null;
+	};
+}
+
+function refocusInput() {
+	if (!fullScreen.current) inputEl?.focus();
+}
+
+function clearInput() {
+	if (runMode) runCommand = "";
+	else query = "";
+	activeIndex = 0;
+	inputEl?.focus();
+}
+
+function pickRecentQuery(entry: RecentQuery) {
+	selectLens(entry.lens);
+	query = entry.query;
+	widenSpaceFilter();
+}
+
+function forgetRecentQueries() {
+	clearRecentQueries(getCacheUserKey());
+	recentQueries = [];
+	refocusInput();
+}
+
+function dismissKeyboard() {
+	if (document.activeElement === inputEl) inputEl?.blur();
+}
+
+const SPACE_FILTER_KEYS: SpaceFilter[] = [
+	"recent",
+	"all",
+	"mine",
+	"pinned",
+	"archived",
+];
 
 function selectSpaceFilter(next: SpaceFilter) {
 	spaceFilter = next;
-	setCachedSpaceFilterPref(next);
+	if (next !== "archived") setCachedSpaceFilterPref(next);
 	activeIndex = 0;
+}
+
+function spaceFilterLabel(key: SpaceFilter) {
+	switch (key) {
+		case "recent":
+			return m.command_recent({}, { locale });
+		case "all":
+			return m.command_all({}, { locale });
+		case "mine":
+			return m.command_mine({}, { locale });
+		case "pinned":
+			return m.command_pinned({}, { locale });
+		case "archived":
+			return m.spaces_archived({}, { locale });
+	}
+}
+
+function loadArchivedSpaces(searchQuery: string) {
+	const token = ++archivedToken;
+	archivedDone = false;
+	const q = searchQuery.trim();
+	const toItems = (spaces: SpaceRecord[]) =>
+		spaces
+			.filter((space) => space.isArchived)
+			.map((space, rank) =>
+				spaceRecordToCommandItem(space, rank, currentSpaceId),
+			);
+	void getCachedSpacePage("archived", q)
+		.then((cached) => {
+			if (token === archivedToken && cached)
+				archivedItems = toItems(cached.items);
+		})
+		.catch(() => undefined);
+	const timer = window.setTimeout(
+		() => {
+			if (token !== archivedToken) return;
+			void sdk.spaces
+				.list({ limit: SPACE_PAGE_SIZE, filter: "archived", query: q })
+				.then((page) => {
+					if (token !== archivedToken) return;
+					archivedItems = toItems(page.items);
+					void setCachedSpacePage("archived", q, page).catch(() => undefined);
+				})
+				.catch((error) => {
+					if (token === archivedToken)
+						console.warn("[command-palette] archived spaces failed", error);
+				})
+				.finally(() => {
+					if (token === archivedToken) archivedDone = true;
+				});
+		},
+		q ? DEBOUNCE_MS : 0,
+	);
+	return () => window.clearTimeout(timer);
 }
 
 function handleSpaceFilterKeydown(event: KeyboardEvent, current: SpaceFilter) {
@@ -417,52 +624,6 @@ function handleSpaceFilterKeydown(event: KeyboardEvent, current: SpaceFilter) {
 	);
 }
 
-function typeMeta(type: CommandPaletteItem["type"]) {
-	if (type === "turn") return { className: "turn", icon: MessageSquare };
-	if (type === "session") return { className: "session", icon: TerminalSquare };
-	if (type === "label") return { className: "label", icon: Tag };
-	if (type === "command") return { className: "command", icon: Plus };
-	return { className: "space", icon: FolderKanban };
-}
-
-function contextFor(item: CommandPaletteItem) {
-	if (item.type === "command")
-		return item.excerpt ?? m.command_ctx_command({}, { locale });
-	if (item.type === "space")
-		return item.excerpt ?? m.command_ctx_space({}, { locale });
-	if (item.type === "label")
-		return `${m.command_ctx_label({ label: item.labelRef ?? item.labelName ?? "Label" }, { locale })}${item.spaceName ? ` · ${item.spaceName}` : ""}`;
-	if (item.type === "session")
-		return item.spaceName ?? m.command_ctx_session({}, { locale });
-	return `${item.spaceName ?? "Space"}${item.sessionTitle ? ` / ${item.sessionTitle}` : ""} · ${m.command_ctx_turn({ n: item.sequence ?? "?" }, { locale })}`;
-}
-
-function itemTimestamp(item: CommandPaletteItem) {
-	if (!item.updatedAt) return null;
-	const date = new Date(item.updatedAt);
-	const time = date.getTime();
-	if (!Number.isFinite(time)) return null;
-
-	const now = new Date();
-	const isSameLocalDay =
-		date.getFullYear() === now.getFullYear() &&
-		date.getMonth() === now.getMonth() &&
-		date.getDate() === now.getDate();
-	const pad = (value: number) => String(value).padStart(2, "0");
-	const dateLabel = `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}`;
-	const timeLabel = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-	const timezoneLabel = new Intl.DateTimeFormat(undefined, {
-		timeZoneName: "short",
-	})
-		.formatToParts(date)
-		.find((part) => part.type === "timeZoneName")?.value;
-
-	return {
-		label: isSameLocalDay ? timeLabel : dateLabel,
-		title: `${dateLabel} ${timeLabel}${timezoneLabel ? ` ${timezoneLabel}` : ""}`,
-	};
-}
-
 function resetRunState() {
 	runMode = false;
 	runCommand = "";
@@ -475,34 +636,97 @@ function resetRunState() {
 	runPollTimer = null;
 }
 
-function openPalette(detail?: OpenCommandPaletteDetail) {
-	title = detail?.title ?? m.command_title({}, { locale });
-	placeholder = detail?.placeholder ?? defaultPlaceholder();
-	query = detail?.query ?? "";
+const SPACE_WARM_TTL_MS = 60_000;
+let lastSpaceWarmAt = 0;
+
+function warmSpacePickerCache() {
+	const auth = authStore.userUuid;
+	if (!auth) return;
+	const now = Date.now();
+	if (now - lastSpaceWarmAt < SPACE_WARM_TTL_MS) return;
+	lastSpaceWarmAt = now;
+	void sdk.spaces
+		.list({
+			limit: 50,
+			filter: "all",
+			recentSpaces: getRecentSpaces(auth).map((entry) => ({
+				id: entry.spaceId,
+				timestamp: entry.timestamp,
+			})),
+		})
+		.then((page) => setCachedSpacePage("all", "", page))
+		.catch(() => {
+			lastSpaceWarmAt = 0;
+		});
+}
+
+function openPalette(detail?: OpenCommandPaletteDetail, restored = false) {
 	openIntent = detail?.intent ?? "navigate";
+	const initial = absorbLensPrefix(detail?.lens ?? "all", detail?.query ?? "");
+	lens = openIntent === "new-chat" ? "space" : initial.lens;
+	query = initial.input;
 	spaceFilter = getCachedSpaceFilterPref();
-	forceSpaceRefreshForNextSearch = Boolean(detail?.refreshSpaces);
+	widenSpaceFilter();
+	recentQueries = getRecentQueries(getCacheUserKey());
 	activeIndex = 0;
 	armPointerHover();
 	resetRunState();
 	open = true;
-	void tick().then(() => inputEl?.focus());
+	historyBacked = restored || fullScreen.current;
+	if (historyBacked && !restored) writeHistoryEntry();
+	if (!restored || !fullScreen.current)
+		void tick().then(() => inputEl?.focus());
+	warmSpacePickerCache();
+}
+
+function writeHistoryEntry() {
+	const commandPalette: CommandPaletteHistoryEntry = {
+		lens,
+		query,
+		intent: openIntent,
+	};
+	const state = { ...page.state, commandPalette };
+	if (page.state.commandPalette) replaceState("", state);
+	else pushState("", state);
 }
 
 function closePalette() {
+	if (historyBacked && page.state.commandPalette) history.back();
+	teardownPalette();
+}
+
+function teardownPalette() {
 	open = false;
+	historyBacked = false;
+	lens = "all";
 	query = "";
-	title = m.command_title({}, { locale });
-	placeholder = defaultPlaceholder();
 	openIntent = "navigate";
 	spaceFilter = getCachedSpaceFilterPref();
 	activeIndex = 0;
 	settledItems = [];
-	refreshingSpaces = false;
+	archivedItems = [];
+	seed = null;
+	lensSnapshots.clear();
 	searchToken += 1;
+	scheduledSearchKey = null;
 	localController?.abort();
 	remoteController?.abort();
 	resetRunState();
+}
+
+async function leavePalette(navigate: () => Promise<unknown>) {
+	if (openIntent === "navigate" && query.trim().length >= MIN_QUERY_LENGTH)
+		recentQueries = rememberRecentQuery(getCacheUserKey(), { lens, query });
+	if (historyBacked && page.state.commandPalette) writeHistoryEntry();
+	await navigate();
+	closePalette();
+}
+
+function openSpacesManager(event: MouseEvent) {
+	if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey)
+		return;
+	event.preventDefault();
+	void leavePalette(() => goto("/spaces"));
 }
 
 function resetSearch(options?: { clearDefaultLists?: boolean }) {
@@ -527,56 +751,19 @@ function resetSearch(options?: { clearDefaultLists?: boolean }) {
 	activeIndex = 0;
 }
 
-async function refreshSpaceListForDefaultItems(
-	token: number,
-	options?: { force?: boolean },
-) {
-	let force = Boolean(options?.force);
-	if (force) {
-		const now = Date.now();
-		if (
-			now - lastForcedSpaceListRefreshAt <
-			SPACE_LIST_REFRESH_MIN_INTERVAL_MS
-		) {
-			force = false;
-		} else {
-			lastForcedSpaceListRefreshAt = now;
-		}
-	}
-
-	if (!force) {
-		const cacheMeta = getCachedSpaceListMeta();
-		if (cacheMeta && !cacheMeta.isStale) return;
-	}
-
-	try {
-		const refreshId = ++activeSpaceListRefreshId;
-		refreshingSpaces = true;
-		try {
-			await fetchSpaceListWithCache(async () => await sdk.spaces.list(), {
-				force,
-			});
-		} finally {
-			if (activeSpaceListRefreshId === refreshId) refreshingSpaces = false;
-		}
-	} catch (error) {
-		console.warn("[command-palette] space list refresh failed", error);
-		return;
-	}
-
-	if (token !== searchToken || !open || runMode) return;
-	if (trimmedQuery.length >= MIN_QUERY_LENGTH) return;
-	spaceListRefreshToken += 1;
+function searchScheduleKey(plan: typeof searchPlan, spaceId: string | null) {
+	return `${openIntent}:${spaceId ?? ""}:${spaceFilter}:${plan.resourceTypes?.join(",") ?? ""}:${plan.labelRef ?? ""}:${plan.query}`;
 }
 
 function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
+	const scheduleKey = searchScheduleKey(plan, spaceId);
+	if (scheduledSearchKey === scheduleKey) return;
+	scheduledSearchKey = scheduleKey;
 	const q = plan.query.trim();
 	const isLabelScope = Boolean(
 		plan.labelRef && plan.resourceTypes?.includes("label"),
 	);
 	const token = ++searchToken;
-	const forceSpaceRefresh = forceSpaceRefreshForNextSearch;
-	forceSpaceRefreshForNextSearch = false;
 	if (q.length < MIN_QUERY_LENGTH && !isLabelScope) {
 		// Keep previous default/resource items while reloading so the list does not
 		// flash empty. Both tab lists survive the switch (see resetSearch): the
@@ -595,33 +782,18 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 				viewerUserUuid: myUserUuid,
 				paletteOverview: overview,
 			});
-		// Only the space picker "Recent" tab consumes the overview payload. The
-		// plain palette default list (no query, no `a:`) and the other picker
-		// tabs stay on the pre-overview local derivation, which reads the same
-		// IndexedDB / space-list caches as before — no overview snapshot, no
-		// overview refetch, no snapshot-driven re-sort.
 		const useOverviewDefaults = isSpacePickerMode && spaceFilter === "recent";
-		// The space list cache feeds both paths; keep it fresh (the helper checks
-		// its own staleness unless forced).
-		void refreshSpaceListForDefaultItems(token, { force: forceSpaceRefresh });
 		if (useOverviewDefaults) {
-			// First frame = last server payload (the cached overview snapshot)
-			// folded with local caches: device visits and viewer-authored turns
-			// re-rank it, and newly cached spaces/sessions are merged in. The
-			// frame therefore tracks what the refetched response will say, so the
-			// swap-in does not visibly re-sort the list. Only when no snapshot
-			// exists at all does the frame fall back to a purely local synthesis.
+			// First frame: the cached snapshot folded with local caches, so the
+			// refetched response swaps in without re-sorting.
 			const snapshot = getPaletteOverviewSnapshot();
 			const snapshotData = snapshot.data;
-			const hasSnapshotItems = Boolean(
-				snapshotData?.spaces.length || snapshotData?.recentSessions.length,
-			);
 			void getLocalPaletteOverview({
 				signal: defaultSignal,
 				viewerUserUuid: myUserUuid,
 			})
 				.then((local) =>
-					snapshotData && hasSnapshotItems
+					snapshotData?.spaces.length
 						? mergeLocalOverviewIntoSnapshot(snapshotData, local)
 						: local,
 				)
@@ -637,12 +809,7 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 				.finally(() => {
 					if (token === searchToken) defaultDone = true;
 				});
-			// Detached from the search signal: the refetch survives tab/query changes
-			// (aborting it here previously delayed the correct list by a full
-			// re-request cycle). Revalidation is throttled and skipped while the
-			// snapshot is fresh — viewer activity is folded in locally at render
-			// time, so most opens land here with nothing to fetch. The fresh server
-			// response is authoritative and replaces the merged frame in place.
+			// Detached from the search signal so the refetch survives tab changes.
 			void revalidatePaletteOverview().then((fresh) => {
 				if (!fresh || token !== searchToken) return;
 				return buildDefaults(fresh)
@@ -704,17 +871,12 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 	}
 
 	debounceTimer = window.setTimeout(() => {
-		// Explicit `t:` lens keeps raw turn rows; otherwise the server groups
-		// turns per session (one best turn each).
-		const explicitTurnOnly =
-			plan.resourceTypes?.length === 1 && plan.resourceTypes[0] === "turn";
 		void searchRemoteCommandItems(q, {
 			signal: remoteController?.signal,
 			limit: RESULT_LIMIT,
 			types: remoteResourceTypes,
 			spaceId: remoteSearchSpaceId(spaceId, remoteResourceTypes),
 			labelRef: plan.labelRef,
-			groupTurns: !explicitTurnOnly,
 		})
 			.then((items) => {
 				if (token !== searchToken) return;
@@ -734,8 +896,6 @@ function scheduleSearch(plan: typeof searchPlan, spaceId: string | null) {
 
 function openRunCommandMode() {
 	runMode = true;
-	title = m.command_run_title({}, { locale });
-	placeholder = m.command_run_placeholder({}, { locale });
 	runCommand = "";
 	runTaskId = null;
 	runProgress = null;
@@ -812,24 +972,24 @@ async function activate(item: CommandPaletteItem | undefined) {
 	// New-chat intent: only space (or create-space) actions are valid.
 	if (openIntent === "new-chat") {
 		if (item.type === "space" && item.spaceId) {
+			const spaceId = item.spaceId;
 			rememberCommandItem(item);
-			closePalette();
-			await goto(buildUserNewSessionRoute(item.spaceId), {
-				keepFocus: true,
-				noScroll: true,
-			});
+			await leavePalette(() =>
+				goto(buildUserNewSessionRoute(spaceId), {
+					keepFocus: true,
+					noScroll: true,
+				}),
+			);
 			return;
 		}
 		if (item.type === "command" && item.id === "new-space") {
-			await openCommandItem(item);
-			closePalette();
+			await leavePalette(() => openCommandItem(item));
 			return;
 		}
-		// Ignore sessions/labels/turns — keep palette open for a real space pick.
+		// Ignore chats and labels — keep the palette open for a real space pick.
 		return;
 	}
-	await openCommandItem(item);
-	closePalette();
+	await leavePalette(() => openCommandItem(item));
 }
 
 function moveActive(delta: number) {
@@ -861,8 +1021,6 @@ function handlePaletteKeydown(event: KeyboardEvent) {
 			}
 			if (runCommand.trim()) {
 				runMode = false;
-				title = m.command_title({}, { locale });
-				placeholder = defaultPlaceholder();
 				runStatus = "idle";
 				return;
 			}
@@ -871,8 +1029,7 @@ function handlePaletteKeydown(event: KeyboardEvent) {
 		return;
 	}
 	if (isComposingKeyboardEvent(event)) return;
-	if ((event.target as HTMLElement | null)?.getAttribute("role") === "tab")
-		return;
+	if ((event.target as HTMLElement | null)?.closest("button, a")) return;
 	if (runMode) {
 		if (event.key === "Enter") {
 			event.preventDefault();
@@ -923,13 +1080,34 @@ function handleOpenPaletteEvent(event: Event) {
 
 $effect(() => {
 	if (!open || runMode) return;
-	spaceListRefreshToken;
-	spaceFilter;
+	if (isSpacePickerMode && spaceFilter === "archived") {
+		if (archivedItems.length > 0) archivedItems = [];
+		if (!archivedDone) archivedDone = true;
+		return;
+	}
 	scheduleSearch(searchPlan, currentSpaceId);
 });
 
 $effect(() => {
+	if (!open || runMode || !isSpacePickerMode || spaceFilter !== "archived") {
+		archivedToken += 1;
+		if (!archivedDone) archivedDone = true;
+		return;
+	}
+	return loadArchivedSpaces(searchPlan.query);
+});
+
+$effect(() => {
 	if (mergedItems.length > 0 || !isSearching) settledItems = mergedItems;
+});
+
+$effect(() => {
+	if (seed && lensSettled) seed = null;
+});
+
+$effect(() => {
+	if (!open || runMode || !activeLens || seed || isSearching) return;
+	lensSnapshots.set(snapshotKey(activeLens), mergedItems);
 });
 
 $effect(() => {
@@ -943,14 +1121,22 @@ $effect(() => {
 	void scrollActiveIntoView();
 });
 
+$effect(() => {
+	const entry = page.state.commandPalette;
+	untrack(() => {
+		if (entry && !open) openPalette(entry, true);
+		else if (!entry && open && historyBacked) teardownPalette();
+	});
+});
+
+afterNavigate(({ type }) => {
+	if (type === "popstate" && open && !page.state.commandPalette)
+		teardownPalette();
+});
+
 onMount(() => {
 	window.addEventListener("keydown", handleGlobalKeydown, { capture: true });
-	window.addEventListener("cohub:open-command-palette", handleOpenPaletteEvent);
-	// Refresh space items when the space list cache changes (e.g. pin toggle)
-	// so the palette reflects the new isPinned state immediately.
-	const offSpaceListCache = onSpaceListCacheUpdated(() => {
-		if (open && !runMode) spaceListRefreshToken += 1;
-	});
+	window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, handleOpenPaletteEvent);
 	// Warm the overview when the app returns to the foreground, so the Recent
 	// tab opens from cache instead of fetching. Cross-device activity is the
 	// one signal the local caches cannot fold in at render time.
@@ -968,10 +1154,9 @@ onMount(() => {
 			capture: true,
 		});
 		window.removeEventListener(
-			"cohub:open-command-palette",
+			OPEN_COMMAND_PALETTE_EVENT,
 			handleOpenPaletteEvent,
 		);
-		offSpaceListCache();
 		localController?.abort();
 		remoteController?.abort();
 		if (debounceTimer != null) window.clearTimeout(debounceTimer);
@@ -980,49 +1165,107 @@ onMount(() => {
 });
 </script>
 
+{#snippet spaceManageLink()}
+	<a href="/spaces" class="space-manage-link" title={m.spaces_manage({}, { locale })} aria-label={m.spaces_manage({}, { locale })} onclick={openSpacesManager}>
+		<Settings2 class="h-3.5 w-3.5" />
+		<span>{m.spaces_manage({}, { locale })}</span>
+	</a>
+{/snippet}
+
+{#snippet spaceFilterRow()}
+	<FilterBar label={m.command_filter_spaces({}, { locale })} role="tablist" activeKey={spaceFilter} trailing={spaceManageLink}>
+		{#each SPACE_FILTER_KEYS as key (key)}
+			<FilterChip
+				id={`command-space-filter-${key}`}
+				tone="neutral"
+				label={spaceFilterLabel(key)}
+				active={spaceFilter === key}
+				aria-controls="command-palette-results"
+				tabindex={spaceFilter === key ? 0 : -1}
+				onclick={() => selectSpaceFilter(key)}
+				onkeydown={(event) => handleSpaceFilterKeydown(event, key)}
+			/>
+		{/each}
+	</FilterBar>
+{/snippet}
+
+{#snippet emptyState(active: boolean)}
+	{@const picker = active && isSpacePickerMode}
+	{@const idle = trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope}
+	<div class="command-empty">
+		<div class="command-empty-mark"><CornerDownRight class="h-4 w-4" /></div>
+		<div>
+			<div class="text-[13px] font-medium text-text-secondary">
+				{#if picker && spaceFilter === "recent"}
+					{m.command_no_recent({}, { locale })}
+				{:else if picker && spaceFilter === "pinned"}
+					{m.command_no_pinned({}, { locale })}
+				{:else if picker && spaceFilter === "mine"}
+					{m.command_no_owned({}, { locale })}
+				{:else if picker && spaceFilter === "archived"}
+					{m.spaces_empty_archived({}, { locale })}
+				{:else if idle}
+					{m.command_lens_ready({}, { locale })}
+				{:else}
+					{m.command_no_matching({}, { locale })}
+				{/if}
+			</div>
+			<div class="mt-1 text-[12px] text-text-tertiary">
+				{#if picker && spaceFilter === "recent"}
+					{m.command_recent_hint({}, { locale })}
+				{:else if picker && spaceFilter === "pinned"}
+					{m.command_pin_hint({}, { locale })}
+				{:else if picker && spaceFilter === "archived"}
+					{m.spaces_empty_archived_hint({}, { locale })}
+				{:else if idle}
+					{m.command_try_filters({}, { locale })}
+				{:else}
+					{m.command_try_other({}, { locale })}
+				{/if}
+			</div>
+		</div>
+	</div>
+{/snippet}
+
 {#if open}
 	<div class="command-palette-root" role="presentation" onmousedown={(event) => { if (event.target === event.currentTarget) closePalette(); }}>
 		<div class="command-palette" role="dialog" aria-modal="true" aria-label={title} tabindex="-1" onkeydown={handlePaletteKeydown}>
-			<div class="command-input-row">
-				{#if runMode}
-					<TerminalSquare class="h-4 w-4 text-brand" />
-				{:else}
-					<Search class="h-4 w-4 text-text-tertiary" />
-				{/if}
-				<input
-					bind:this={inputEl}
-					value={runMode ? runCommand : query}
-					class="command-input"
-					placeholder={placeholder}
-					autocomplete="off"
-					spellcheck="false"
-					oninput={handleCommandInput}
-				/>
-				{#if runMode}
-					<div class="command-shortcut">↵ {m.command_run({}, { locale })}</div>
-				{:else}
-					<div class="command-shortcut">⌘K</div>
+			<div class="command-header">
+				<div class="command-input-row">
+					<div class="command-field">
+						{#if runMode}
+							<TerminalSquare class="h-4 w-4 shrink-0 text-brand" />
+						{:else}
+							<Search class="h-4 w-4 shrink-0 text-text-tertiary" />
+						{/if}
+						<input
+							bind:this={inputEl}
+							value={runMode ? runCommand : query}
+							class="command-input"
+							{placeholder}
+							autocomplete="off"
+							spellcheck="false"
+							enterkeyhint={runMode ? "go" : "search"}
+							oninput={handleCommandInput}
+						/>
+						{#if runMode ? runCommand : query}
+							<button type="button" class="command-clear" aria-label={m.command_clear_query({}, { locale })} title={m.command_clear_query({}, { locale })} onclick={clearInput}>
+								<X class="h-3.5 w-3.5" />
+							</button>
+						{/if}
+					</div>
+					{#if runMode}
+						<div class="command-shortcut">↵ {m.command_run({}, { locale })}</div>
+					{:else}
+						<div class="command-shortcut">⌘K</div>
+					{/if}
+					<button type="button" class="command-cancel" onclick={closePalette}>{m.common_cancel({}, { locale })}</button>
+				</div>
+
+				{#if showLensBar}
+					<CommandPaletteLensBar lens={activeLens} position={lensPosition} glide={lensTabs.glide} onSelect={selectLens} />
 				{/if}
 			</div>
-
-			{#if isSpacePickerMode && !runMode}
-				<div class="space-filter-bar" role="tablist" aria-orientation="horizontal" aria-label={m.command_filter_spaces({}, { locale })}>
-					{#each [{ key: "recent", label: m.command_recent({}, { locale }) }, { key: "all", label: m.command_all({}, { locale }) }, { key: "mine", label: m.command_mine({}, { locale }) }, { key: "pinned", label: m.command_pinned({}, { locale }) }] as filter}
-						<button
-							id={`command-space-filter-${filter.key}`}
-							type="button"
-							class="space-filter-btn"
-							class:active={spaceFilter === filter.key}
-							role="tab"
-							aria-selected={spaceFilter === filter.key}
-							aria-controls="command-palette-results"
-							tabindex={spaceFilter === filter.key ? 0 : -1}
-							onclick={() => selectSpaceFilter(filter.key as SpaceFilter)}
-							onkeydown={(event) => handleSpaceFilterKeydown(event, filter.key as SpaceFilter)}
-						>{filter.label}</button>
-					{/each}
-				</div>
-			{/if}
 
 			{#if runMode}
 				<div bind:this={resultsEl} class="command-results command-runner">
@@ -1055,126 +1298,78 @@ onMount(() => {
 					{/if}
 				</div>
 			{:else}
-				<div id="command-palette-results" bind:this={resultsEl} class:searching={showingSettledItems} class="command-results" role="listbox" aria-label={m.command_search_results({}, { locale })} onscroll={handleResultsScroll}>
-					{#if renderedItems.length === 0}
-						<div class="command-empty">
-							<div class="command-empty-mark"><CornerDownRight class="h-4 w-4" /></div>
-							<div>
-								<div class="text-[13px] font-medium text-text-secondary">
-									{#if isSpacePickerMode && spaceFilter === "recent"}
-										{m.command_no_recent({}, { locale })}
-									{:else if isSpacePickerMode && spaceFilter === "pinned"}
-										{m.command_no_pinned({}, { locale })}
-									{:else if isSpacePickerMode && spaceFilter === "mine"}
-										{m.command_no_owned({}, { locale })}
-									{:else if trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope}
-										{m.command_lens_ready({}, { locale })}
-									{:else}
-										{m.command_no_matching({}, { locale })}
-									{/if}
+				<SwipePager
+					keys={COMMAND_PALETTE_LENSES}
+					index={lensIndex}
+					enabled={swipeable}
+					onChange={(index) => selectLens(COMMAND_PALETTE_LENSES[index] ?? "all")}
+					onPosition={lensTabs.track}
+				>
+					{#snippet page(index, active)}
+						{@const pageLens = COMMAND_PALETTE_LENSES[index] ?? "all"}
+						{@const items = active ? renderedItems : previewFor(pageLens)}
+						<div
+							class="command-results scrollbar-quiet"
+							onscroll={active ? handleResultsScroll : undefined}
+							{@attach active ? bindResults : undefined}
+						>
+							{#if swipeable ? pageLens === "space" : isSpacePickerMode}
+								<div class="command-subbar">{@render spaceFilterRow()}</div>
+							{:else if hasRecentQueries}
+								<div class="command-subbar">
+									<CommandPaletteRecentQueries queries={recentQueries} onPick={pickRecentQuery} onClear={forgetRecentQueries} />
 								</div>
-								<div class="mt-1 text-[12px] text-text-tertiary">
-									{#if isSpacePickerMode && spaceFilter === "recent"}
-										{m.command_recent_hint({}, { locale })}
-									{:else if isSpacePickerMode && spaceFilter === "pinned"}
-										{m.command_pin_hint({}, { locale })}
-									{:else if trimmedQuery.length < MIN_QUERY_LENGTH && !hasLabelScope}
-										{m.command_try_filters({}, { locale })}
-									{:else}
-										{m.command_try_other({}, { locale })}
-									{/if}
-								</div>
-							</div>
-						</div>
-					{:else}
-						{#each renderedItems as item, index (`${item.type}:${item.id || item.turnId || item.sessionId || item.spaceId}`)}
-							{@const meta = typeMeta(item.type)}
-							{@const Icon = meta.icon}
-							{@const profile = profileFor(item)}
-							{@const timestamp = itemTimestamp(item)}
+							{/if}
 							<div
-								class:active={index === activeIndex}
-								class="command-result"
-								onpointermove={() => handleResultPointerMove(index)}
-								role="option"
-								aria-selected={index === activeIndex}
+								class:searching={active && (pending || showingSettledItems)}
+								class="command-list"
+								id={active ? "command-palette-results" : undefined}
+								role="listbox"
 								tabindex="-1"
+								aria-label={m.command_search_results({}, { locale })}
+								ontouchmove={dismissKeyboard}
 							>
-								<button
-									type="button"
-									class="command-result-main"
-									onclick={() => void activate(item)}
-								>
-									{#if item.type === "space"}
-										<SpaceAvatar name={item.title || item.spaceName || item.spaceId} profile={item.spaceProfile} size="sm" />
-									{:else}
-										<div class={`command-type-mark ${meta.className}`} aria-label={item.type}>
-											<Icon class="h-3.5 w-3.5" />
+								{#if !items || (active && items.length === 0 && isSearching)}
+									<ListRowSkeleton density="compact" rows={6} label={m.common_loading({}, { locale })} />
+								{:else if items.length === 0}
+									{@render emptyState(active)}
+								{:else}
+									{#each items as item, itemIndex (commandItemKey(item))}
+										<CommandPaletteResultRow
+											{item}
+											active={active && itemIndex === activeIndex}
+											pinnable={active && isSpacePickerMode && item.type === "space" && !item.isArchived}
+											onActivate={() => void activate(item)}
+											onHover={() => handleResultPointerMove(itemIndex)}
+											onTogglePin={() => togglePin(item)}
+										/>
+									{/each}
+									{#if active && isSpacePickerMode && mergedItemsRaw.length > spaceDisplayLimit}
+										<div class="flex items-center justify-center py-2 text-[11px] text-text-tertiary">
+											<span>{m.command_showing({ shown: spaceDisplayLimit, total: mergedItemsRaw.length }, { locale })}</span>
 										</div>
 									{/if}
-									<div class="min-w-0 flex-1 text-left">
-										<div class="flex min-w-0 items-center gap-2">
-											<span class="truncate text-[13px] font-medium text-text-primary">{item.title}</span>
-										</div>
-										<div class="command-context-row">
-											{#if profile}
-												<span class="command-profile" title={profile.displayName}>
-													<UserAvatar name={profile.displayName} avatarUrl={profile.avatarUrl} size="xxs" class="border-0 bg-bg-primary text-[8px]" />
-													<span class="truncate">{profile.displayName}</span>
-												</span>
-												<span class="command-context-separator">·</span>
-											{/if}
-											<span class="command-context" title={contextFor(item)}>{contextFor(item)}</span>
-											{#if timestamp}
-												<span class="command-context-separator">·</span>
-												<time class="command-time" datetime={item.updatedAt ?? undefined} title={timestamp.title}>{timestamp.label}</time>
-											{/if}
-										</div>
-									</div>
-									<div class="command-enter">↵</div>
-								</button>
-								{#if isSpacePickerMode && item.type === "space"}
-									<button
-										type="button"
-										class="command-pin-btn"
-										class:pinned={item.isPinned}
-										title={item.isPinned ? m.command_unpin({}, { locale }) : m.command_pin({}, { locale })}
-										aria-label={item.isPinned ? m.command_unpin_item({ title: item.title }, { locale }) : m.command_pin_item({ title: item.title }, { locale })}
-										onclick={(e) => {
-									e.stopPropagation();
-									const wasPinned = item.isPinned ?? false;
-									syncPinStateInItems(item.spaceId, !wasPinned);
-									void toggleSpacePin(item.spaceId).catch((err) => {
-										console.warn("[palette] pin toggle failed", err);
-										syncPinStateInItems(item.spaceId, wasPinned);
-									});
-								}}
-									>
-										<Pin class="h-3.5 w-3.5" />
-									</button>
 								{/if}
 							</div>
-						{/each}
-						{#if isSpacePickerMode && mergedItemsRaw.length > spaceDisplayLimit}
-							<div class="flex items-center justify-center py-2 text-[11px] text-text-tertiary">
-								<span>{m.command_showing({ shown: spaceDisplayLimit, total: mergedItemsRaw.length }, { locale })}</span>
-							</div>
-						{/if}
-					{/if}
-				</div>
+						</div>
+					{/snippet}
+				</SwipePager>
 			{/if}
 
 			<div class="command-footer">
-				<div class:error={Boolean(runError)} class="command-status" role="status" aria-live="polite">
+				<div class:error={Boolean(runMode ? runError : remoteError)} class="command-status" role="status" aria-live="polite">
 					{#if runMode}
 						{#if runStatus === "queued" || runStatus === "running"}<Loader2 class="h-3 w-3 animate-spin text-brand" />{/if}
 						<span>{runError || (runStatus === "done" ? m.command_done({ id: runTaskId ?? "" }, { locale }) : runStatus === "running" ? m.command_running({}, { locale }) : runStatus === "queued" ? m.command_queued({}, { locale }) : currentSpaceId ? m.command_press_run({}, { locale }) : m.command_open_space({}, { locale }))}</span>
 					{:else}
-						{#if isSearching || showingSpaceRefreshStatus}<Loader2 class="h-3 w-3 animate-spin text-brand" />{/if}
+						{#if isSearching}<Loader2 class="h-3 w-3 animate-spin text-brand" />{/if}
 						<span>{statusText}</span>
 					{/if}
 				</div>
-				<div class="hidden items-center gap-2 sm:flex"><span>↑↓</span><span>C-n/p</span><span>{m.command_navigate({}, { locale })}</span><span>↵</span><span>{m.command_open_verb({}, { locale })}</span><span>esc</span><span>{m.command_close({}, { locale })}</span></div>
+				<div class="command-keys">
+					<span>↑↓</span><span>C-n/p</span><span>{m.command_navigate({}, { locale })}</span>
+					<span>↵</span><span>{m.command_open_verb({}, { locale })}</span><span>esc</span><span>{m.command_close({}, { locale })}</span>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -1193,6 +1388,8 @@ onMount(() => {
 	}
 
 	.command-palette {
+		--palette-x: 16px;
+		--palette-bg: color-mix(in oklch, var(--bg-surface) 94%, var(--brand-900) 6%);
 		width: min(720px, calc(100vw - 32px));
 		max-height: min(640px, calc(100vh - 96px));
 		display: flex;
@@ -1200,18 +1397,31 @@ onMount(() => {
 		overflow: hidden;
 		border: 1px solid color-mix(in oklch, var(--border-primary) 72%, var(--brand) 8%);
 		border-radius: 14px;
-		background: color-mix(in oklch, var(--bg-surface) 94%, var(--brand-900) 6%);
+		background: var(--palette-bg);
 		box-shadow: 0 24px 80px color-mix(in oklch, var(--neutral-100) 74%, transparent), 0 0 0 1px color-mix(in oklch, var(--neutral-0) 4%, transparent) inset;
 		animation: command-enter 140ms cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	.command-header {
+		flex-shrink: 0;
+		--list-gutter-x: calc(var(--palette-x) - var(--list-row-pad-x));
+		border-bottom: 1px solid var(--border-subtle);
+		background: color-mix(in oklch, var(--bg-primary) 30%, transparent);
 	}
 
 	.command-input-row {
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		padding: 14px 16px;
-		border-bottom: 1px solid var(--border-subtle);
-		background: color-mix(in oklch, var(--bg-primary) 30%, transparent);
+		padding: 14px var(--palette-x) 8px;
+	}
+
+	.command-field {
+		display: flex;
+		min-width: 0;
+		flex: 1;
+		align-items: center;
+		gap: 12px;
 	}
 
 	.command-input {
@@ -1227,8 +1437,47 @@ onMount(() => {
 
 	.command-input::placeholder { color: var(--text-placeholder); }
 
+	.command-clear {
+		display: grid;
+		place-items: center;
+		flex: 0 0 auto;
+		width: 22px;
+		height: 22px;
+		border: 0;
+		border-radius: 999px;
+		background: var(--bg-hover);
+		color: var(--text-tertiary);
+		cursor: pointer;
+		transition: color 90ms cubic-bezier(0.25, 1, 0.5, 1);
+	}
+
+	.command-clear:hover { color: var(--text-primary); }
+
+	.command-clear:focus-visible,
+	.command-cancel:focus-visible,
+	.space-manage-link:focus-visible {
+		outline: 2px solid color-mix(in oklch, var(--brand) 42%, transparent);
+		outline-offset: -2px;
+	}
+
+	.command-cancel {
+		display: none;
+		flex: 0 0 auto;
+		align-items: center;
+		min-height: 44px;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		padding: 0 6px;
+		color: var(--text-secondary);
+		font-size: 14px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+
+	.command-cancel:active { color: var(--text-primary); }
+
 	.command-shortcut,
-	.command-enter,
 	.command-footer {
 		font-family: var(--font-mono);
 		letter-spacing: 0.02em;
@@ -1243,195 +1492,38 @@ onMount(() => {
 	}
 
 	.command-results {
+		--list-gutter-x: calc(var(--palette-x) - 8px - var(--list-row-pad-x));
+		flex: 1 1 auto;
+		min-height: 0;
 		overflow-y: auto;
 		padding: 8px;
+	}
+
+	.command-subbar {
+		position: sticky;
+		top: -8px;
+		z-index: 1;
+		margin-top: -8px;
+		background: var(--palette-bg);
+	}
+
+	/* FilterBar height (h-11 / lg:h-9) */
+	.command-results:has(> .command-subbar) {
+		scroll-padding-top: 44px;
+	}
+
+	@media (min-width: 1024px) {
+		.command-results:has(> .command-subbar) {
+			scroll-padding-top: 36px;
+		}
+	}
+
+	.command-list {
 		transition: opacity 120ms cubic-bezier(0.25, 1, 0.5, 1);
 	}
 
-	.command-results.searching {
+	.command-list.searching {
 		opacity: 0.72;
-	}
-
-	.command-result {
-		position: relative;
-		display: flex;
-		width: 100%;
-		align-items: center;
-		gap: 4px;
-		border: 0;
-		border-radius: 9px;
-		background: transparent;
-		padding: 6px 6px;
-		color: inherit;
-		transition: background-color 90ms cubic-bezier(0.25, 1, 0.5, 1), transform 90ms cubic-bezier(0.25, 1, 0.5, 1);
-	}
-
-	.command-result-main {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		min-width: 0;
-		flex: 1;
-		border: 0;
-		background: transparent;
-		color: inherit;
-		padding: 4px 4px;
-		border-radius: 7px;
-		cursor: pointer;
-	}
-
-	.command-result-main:focus-visible {
-		outline: 2px solid color-mix(in oklch, var(--brand) 42%, transparent);
-		outline-offset: -2px;
-	}
-
-	.command-pin-btn {
-		display: grid;
-		place-items: center;
-		flex: 0 0 auto;
-		width: 28px;
-		height: 28px;
-		border: 0;
-		border-radius: 7px;
-		background: transparent;
-		color: var(--text-tertiary);
-		opacity: 0;
-		cursor: pointer;
-		transition: opacity 90ms cubic-bezier(0.25, 1, 0.5, 1), background-color 90ms cubic-bezier(0.25, 1, 0.5, 1), color 90ms cubic-bezier(0.25, 1, 0.5, 1);
-	}
-
-	.command-pin-btn:focus-visible {
-		opacity: 1;
-		outline: 2px solid color-mix(in oklch, var(--brand) 42%, transparent);
-		outline-offset: -2px;
-	}
-
-	.command-pin-btn.pinned {
-		opacity: 1;
-		color: var(--brand);
-	}
-
-	.command-pin-btn:hover {
-		opacity: 1;
-		background: var(--bg-hover);
-		color: var(--brand);
-	}
-
-	.command-pin-btn:active {
-		transform: scale(0.92);
-	}
-
-	.command-result.active .command-pin-btn { opacity: 1; }
-	.command-result.active .command-pin-btn:not(.pinned) { color: var(--text-tertiary); }
-
-	.command-result::before {
-		content: "";
-		position: absolute;
-		left: 0;
-		top: 8px;
-		bottom: 8px;
-		width: 2px;
-		border-radius: 999px;
-		background: transparent;
-	}
-
-	.command-result.active { background: color-mix(in oklch, var(--brand-bg) 56%, var(--bg-hover) 44%); }
-	.command-result.active::before { background: var(--brand); }
-	.command-result.active .command-enter {
-		opacity: 1;
-	}
-	.command-result.active .command-time { color: var(--text-secondary); }
-	.command-result.active .command-type-mark { border-color: color-mix(in oklch, currentColor 36%, transparent); }
-
-	.command-type-mark {
-		display: grid;
-		place-items: center;
-		width: 28px;
-		height: 28px;
-		border: 1px solid color-mix(in oklch, currentColor 18%, transparent);
-		border-radius: 7px;
-		background: color-mix(in oklch, currentColor 10%, var(--bg-primary) 90%);
-		color: var(--text-tertiary);
-	}
-
-	.command-type-mark.space {
-		color: var(--brand);
-		background: color-mix(in oklch, var(--brand) 12%, var(--bg-primary) 88%);
-	}
-
-	.command-type-mark.session {
-		color: color-mix(in oklch, var(--text-secondary) 82%, var(--brand) 18%);
-		background: color-mix(in oklch, var(--text-secondary) 8%, var(--bg-primary) 92%);
-	}
-
-	.command-type-mark.turn {
-		color: color-mix(in oklch, var(--text-tertiary) 72%, var(--brand) 28%);
-		background: color-mix(in oklch, var(--text-tertiary) 7%, var(--bg-primary) 93%);
-	}
-
-	.command-type-mark.label {
-		color: color-mix(in oklch, var(--brand) 76%, var(--text-secondary) 24%);
-		background: color-mix(in oklch, var(--brand) 9%, var(--bg-primary) 91%);
-	}
-
-	.command-type-mark.command {
-		color: var(--brand);
-		background: color-mix(in oklch, var(--brand) 10%, var(--bg-primary) 90%);
-	}
-
-	.command-context-row {
-		margin-top: 2px;
-		display: flex;
-		min-width: 0;
-		align-items: center;
-		gap: 6px;
-		color: var(--text-tertiary);
-		font-size: 12px;
-		line-height: 1.35;
-	}
-
-	.command-profile {
-		display: inline-flex;
-		min-width: 0;
-		max-width: min(190px, 42%);
-		flex-shrink: 0;
-		align-items: center;
-		gap: 5px;
-		color: color-mix(in oklch, var(--text-secondary) 86%, var(--brand) 14%);
-	}
-
-	.command-context {
-		min-width: 0;
-		flex: 0 1 auto;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.command-context-separator {
-		flex: 0 0 auto;
-		color: var(--text-placeholder);
-	}
-
-	.command-time {
-		flex: 0 0 auto;
-		color: var(--text-placeholder);
-		font-family: var(--font-mono);
-		font-size: 10px;
-		font-variant-numeric: tabular-nums;
-		letter-spacing: 0.01em;
-		line-height: 1;
-		white-space: nowrap;
-	}
-
-	.command-enter {
-		width: 12px;
-		flex: 0 0 auto;
-		opacity: 0;
-		color: var(--brand);
-		font-size: 13px;
-		line-height: 1;
-		text-align: right;
 	}
 
 	.command-empty {
@@ -1462,34 +1554,28 @@ onMount(() => {
 		font-size: 10px;
 	}
 
-	.space-filter-bar {
+	.command-keys {
 		display: flex;
-		gap: 2px;
-		padding: 6px 8px;
-		border-bottom: 1px solid var(--border-subtle);
+		flex-shrink: 0;
+		align-items: center;
+		gap: 8px;
 	}
 
-	.space-filter-btn {
-		min-height: 36px;
-		border: 0;
+	.space-manage-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		height: 28px;
 		border-radius: 6px;
-		background: transparent;
-		padding: 4px 12px;
-		color: var(--text-tertiary);
-		font-size: 12px;
-		font-weight: 500;
-		cursor: pointer;
+		padding: 0 var(--list-row-pad-x);
+		color: var(--text-placeholder);
+		font-size: 11px;
 		transition: background-color 90ms, color 90ms;
 	}
 
-	.space-filter-btn:hover {
+	.space-manage-link:hover {
 		background: var(--bg-hover);
 		color: var(--text-secondary);
-	}
-
-	.space-filter-btn.active {
-		background: color-mix(in oklch, var(--brand) 12%, var(--bg-primary) 88%);
-		color: var(--brand);
 	}
 
 	.command-status {
@@ -1516,76 +1602,99 @@ onMount(() => {
 
 	@media (max-width: 640px) {
 		.command-palette-root {
-			align-items: flex-end;
+			align-items: stretch;
 			padding: 0;
-			background: var(--overlay-scrim);
+			background: var(--bg-primary);
 		}
 
 		.command-palette {
-			width: 100vw;
-			max-height: min(82svh, 680px);
-			border-right: 0;
-			border-bottom: 0;
-			border-left: 0;
-			border-radius: 16px 16px 0 0;
-			animation-name: command-sheet-enter;
+			--palette-x: 18px;
+			--palette-bg: var(--bg-primary);
+			width: 100%;
+			max-height: none;
+			padding-top: env(safe-area-inset-top, 0px);
+			border: 0;
+			border-radius: 0;
+			box-shadow: none;
+			animation: command-screen-enter 160ms cubic-bezier(0.16, 1, 0.3, 1);
 		}
 
-		.command-palette::before {
-			content: "";
-			align-self: center;
-			width: 36px;
-			height: 4px;
-			margin-top: 8px;
-			border-radius: 999px;
-			background: var(--border-primary);
+		.command-header {
+			background: transparent;
 		}
 
 		.command-input-row {
-			padding: 12px 14px 13px;
+			gap: 4px;
+			padding: 6px 6px 2px 10px;
 		}
 
-		.command-shortcut,
-		.command-enter {
+		.command-field {
+			height: 38px;
+			gap: 8px;
+			border-radius: 10px;
+			background: var(--bg-surface);
+			padding: 0 6px 0 10px;
+		}
+
+		/* 16px keeps iOS from zooming into the focused field. */
+		.command-input {
+			font-size: 16px;
+		}
+
+		.command-clear {
+			width: 28px;
+			height: 28px;
+			background: transparent;
+		}
+
+		.command-shortcut {
 			display: none;
 		}
 
-		.command-result {
-			min-height: 58px;
-			gap: 6px;
-			padding: 8px 8px;
+		.command-cancel {
+			display: inline-flex;
 		}
 
-		.space-filter-btn {
-			min-height: 44px;
+		.command-results {
+			flex: 1;
+			overscroll-behavior: contain;
+			padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 		}
 
-		.command-type-mark {
+		.space-manage-link {
 			width: 32px;
 			height: 32px;
+			justify-content: center;
+			border-radius: 7px;
+			padding: 0;
 		}
 
-		.command-pin-btn,
-		.command-pin-btn:not(.pinned) {
-			width: 44px;
-			height: 44px;
-			opacity: 1;
+		.space-manage-link span {
+			display: none;
 		}
 
 		.command-footer {
-			padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+			display: none;
+			padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+		}
+
+		.command-footer:has(.command-status.error) {
+			display: flex;
+		}
+
+		.command-keys {
+			display: none;
 		}
 	}
 
-	@keyframes command-sheet-enter {
-		from { opacity: 0; transform: translateY(14px); }
+	@keyframes command-screen-enter {
+		from { opacity: 0; transform: translateY(8px); }
 		to { opacity: 1; transform: translateY(0); }
 	}
 
 	@media (prefers-reduced-motion: reduce) {
 		.command-palette,
-		.command-results,
-		.command-result {
+		.command-list {
 			animation: none;
 			transition: none;
 		}

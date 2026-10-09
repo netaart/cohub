@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { AVATAR_MAX_FILE_BYTES, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 import { config } from "./config.js";
+import { createPresignedPutObjectUrl } from "./object-presign.js";
+import { buildPublicAssetCdnUrl, requirePublicAssetOssStorage } from "./public-file-storage.js";
 import {
   buildChatAttachmentPublicUrl,
   createUserUploadPutUrl,
@@ -14,6 +16,7 @@ export const PUBLIC_ASSET_PURPOSES = [
   "chat_attachment",
   "app_source",
   "generation_input",
+  "session_image",
 ] as const;
 export type PublicAssetPurpose = (typeof PUBLIC_ASSET_PURPOSES)[number];
 
@@ -144,6 +147,12 @@ const normalizeChatMimeType = (mimeType: unknown) => {
   return value;
 };
 
+const normalizeSessionImageMimeType = (mimeType: unknown) => {
+  const value = normalizeChatMimeType(mimeType);
+  if (!value.startsWith("image/")) throw new PublicAssetValidationError("session images must be raster images");
+  return value;
+};
+
 /** Generation inputs are media a provider fetches by URL; active types were already neutralized. */
 const normalizeGenerationInputMimeType = (mimeType: unknown) => {
   const value = normalizeChatMimeType(mimeType);
@@ -156,6 +165,7 @@ const normalizeGenerationInputMimeType = (mimeType: unknown) => {
 const normalizeUploadMimeType = (purpose: PublicAssetPurpose, mimeType: string) => {
   if (purpose === "chat_attachment") return normalizeChatMimeType(mimeType);
   if (purpose === "generation_input") return normalizeGenerationInputMimeType(mimeType);
+  if (purpose === "session_image") return normalizeSessionImageMimeType(mimeType);
   return mimeType;
 };
 
@@ -186,6 +196,11 @@ export const buildPublicAssetObjectKey = (input: {
     }
     if (!input.spaceId) throw new PublicAssetValidationError("spaceId is required for space avatar uploads");
     return `${envPrefix()}avatars/spaces/${input.spaceId}/${assetId}.${extension}`;
+  }
+  if (input.purpose === "session_image") {
+    if (!input.spaceId) throw new PublicAssetValidationError("spaceId is required for session images");
+    const subtype = input.mimeType.slice("image/".length).replace(/[^a-z0-9]/g, "").slice(0, 16);
+    return `${envPrefix()}session-images/${input.spaceId}/${randomUUID()}.${IMAGE_EXTENSIONS[input.mimeType] ?? (subtype || "img")}`;
   }
   if (input.purpose === "app_source") {
     if (!input.sessionId) throw new PublicAssetValidationError("sessionId is required for app source uploads");
@@ -257,13 +272,13 @@ export const assertPublicAssetUploadFile = (input: {
   if (!file || typeof file !== "object") throw new PublicAssetValidationError("file is required");
   if (!Number.isSafeInteger(file.size) || file.size <= 0) throw new PublicAssetValidationError("invalid file size");
 
-  if (input.purpose === "chat_attachment" || input.purpose === "app_source" || input.purpose === "generation_input") {
+  if (input.purpose === "chat_attachment" || input.purpose === "app_source" || input.purpose === "generation_input" || input.purpose === "session_image") {
     normalizeUploadMimeType(input.purpose, file.mimeType);
     if (file.filename != null && (typeof file.filename !== "string" || file.filename.length > 255)) {
       throw new PublicAssetValidationError("invalid filename");
     }
     if (file.size > UPLOAD_MAX_FILE_BYTES) {
-      throw new PublicAssetValidationError(`${input.purpose === "generation_input" ? "generation input" : "chat attachment"} is too large`);
+      throw new PublicAssetValidationError(`${input.purpose.replace("_", " ")} is too large`);
     }
     return;
   }
@@ -275,9 +290,9 @@ export const assertPublicAssetUploadFile = (input: {
 };
 
 /**
- * Attachments download under their name. Avatars and generation inputs are
- * served inline: they render as images and providers fetch inputs by URL; the
- * input's extension still comes from its filename via the object key.
+ * Attachments download under their name. Avatars, generation inputs and session
+ * images are served inline: they render as images and providers fetch them by
+ * URL; an input's extension still comes from its filename via the object key.
  */
 const servesAsAttachment = (purpose: PublicAssetPurpose) =>
   purpose === "chat_attachment" || purpose === "app_source";
@@ -288,6 +303,32 @@ type PublicAssetPlanInput = {
   spaceId?: string;
   sessionId?: string;
   file: CreatePublicAssetUploadInput["file"];
+  endpoint?: "internal" | "public";
+};
+
+const signPutUrl = (input: PublicAssetPlanInput, objectKey: string, mimeType: string) => {
+  if (input.purpose === "session_image") {
+    const storage = requirePublicAssetOssStorage();
+    const signed = createPresignedPutObjectUrl(
+      input.endpoint === "internal" ? { ...storage, publicEndpoint: storage.endpoint } : storage,
+      objectKey,
+      mimeType,
+      IMMUTABLE_PUBLIC_CACHE_CONTROL,
+      undefined,
+      { contentLength: input.file.size },
+    );
+    return { ...signed, publicUrl: buildPublicAssetCdnUrl(objectKey) };
+  }
+  const signed = createUserUploadPutUrl({
+    kind: "chat_attachment",
+    objectKey,
+    contentType: mimeType,
+    cacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
+    ...(servesAsAttachment(input.purpose)
+      ? { contentDisposition: chatAttachmentContentDisposition(input.file.filename) }
+      : {}),
+  });
+  return { ...signed, publicUrl: buildChatAttachmentPublicUrl(objectKey) };
 };
 
 const createPutPlan = (input: PublicAssetPlanInput): CreateInternalPublicAssetUploadResponse => {
@@ -301,21 +342,13 @@ const createPutPlan = (input: PublicAssetPlanInput): CreateInternalPublicAssetUp
     mimeType,
     filename: input.file.filename,
   });
-  const signed = createUserUploadPutUrl({
-    kind: "chat_attachment",
-    objectKey,
-    contentType: mimeType,
-    cacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
-    ...(servesAsAttachment(input.purpose)
-      ? { contentDisposition: chatAttachmentContentDisposition(input.file.filename) }
-      : {}),
-  });
+  const signed = signPutUrl(input, objectKey, mimeType);
   return {
     expiresAt: signed.expiresAt,
     asset: {
       purpose: input.purpose,
       objectKey,
-      publicUrl: buildChatAttachmentPublicUrl(objectKey),
+      publicUrl: signed.publicUrl,
       uploadMethod: "PUT",
       uploadUrl: signed.uploadUrl,
       uploadHeaders: signed.headers,

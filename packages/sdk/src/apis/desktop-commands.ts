@@ -1,7 +1,7 @@
 import type { HttpTransport } from "../transport.js";
 import {
+  defaultDesktopCommandTimeoutMs,
   isTerminalDesktopCommandStatus,
-  DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS,
   DESKTOP_COMMAND_MAX_TIMEOUT_MS,
   type DesktopCommand,
   type DesktopCommandError,
@@ -52,14 +52,13 @@ export type WaitForUiCommandOptions = WaitForDesktopCommandOptions;
 
 const DEFAULT_POLL_INTERVAL_MS = 300;
 
-const resolveTimeoutMs = (timeoutMs: number | undefined): number => {
-  const value = timeoutMs ?? DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS;
-  if (!Number.isFinite(value) || value <= 0 || value > DESKTOP_COMMAND_MAX_TIMEOUT_MS) {
+const assertTimeoutMs = (timeoutMs: number | undefined): void => {
+  if (timeoutMs === undefined) return;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > DESKTOP_COMMAND_MAX_TIMEOUT_MS) {
     throw new RangeError(
       `timeoutMs must be between 1 and ${DESKTOP_COMMAND_MAX_TIMEOUT_MS} milliseconds`,
     );
   }
-  return value;
 };
 
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -99,6 +98,14 @@ export class DesktopCommandsApi {
     );
   }
 
+  /** The target desktop accepts before running; `accepted: false` means drop it. */
+  accept(commandId: string) {
+    return this.transport.request<{ accepted: boolean; command: DesktopCommandRecord }>(
+      `/api/desktop/commands/${encodeURIComponent(commandId)}/accept`,
+      { method: "POST" },
+    );
+  }
+
   reportResult(
     commandId: string,
     input: { status: DesktopCommandStatus; result?: unknown; error?: DesktopCommandError | null },
@@ -117,6 +124,7 @@ export class DesktopCommandsApi {
     input: CreateDesktopCommandInput,
     options: WaitForDesktopCommandOptions = {},
   ): Promise<DesktopCommandRecord> {
+    assertTimeoutMs(options.timeoutMs);
     const { command } = await this.create(input);
     if (isTerminalDesktopCommandStatus(command.status)) return command;
     return this.wait(command.commandId, options);
@@ -126,10 +134,11 @@ export class DesktopCommandsApi {
     commandId: string,
     options: WaitForDesktopCommandOptions = {},
   ): Promise<DesktopCommandRecord> {
-    const timeoutMs = resolveTimeoutMs(options.timeoutMs);
+    assertTimeoutMs(options.timeoutMs);
+    const startedAt = Date.now();
     const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
-    const deadline = Date.now() + timeoutMs;
     let latest = (await this.get(commandId)).command;
+    const deadline = startedAt + (options.timeoutMs ?? defaultDesktopCommandTimeoutMs(latest.command));
 
     while (!isTerminalDesktopCommandStatus(latest.status)) {
       const remaining = deadline - Date.now();

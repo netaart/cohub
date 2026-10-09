@@ -25,8 +25,6 @@
 html,
 body {
 	height: 100%;
-	scrollbar-width: thin;
-	scrollbar-color: var(--scrollbar-thumb) transparent;
 	background-color: var(--bg-primary);
 	color: var(--text-primary);
 	font-family: var(--font-sans);
@@ -181,22 +179,31 @@ body.sidebar-resizing .panel-shell-fade {
 	transition: none;
 }
 
-*::-webkit-scrollbar {
-	width: 6px;
-	height: 6px;
-}
+/* Touch devices keep their native, auto-hiding scroll indicators. */
+@media (hover: hover) {
+	html,
+	body {
+		scrollbar-width: thin;
+		scrollbar-color: var(--scrollbar-thumb) transparent;
+	}
 
-*::-webkit-scrollbar-track {
-	background: transparent;
-}
+	*::-webkit-scrollbar {
+		width: 6px;
+		height: 6px;
+	}
 
-*::-webkit-scrollbar-thumb {
-	background: var(--scrollbar-thumb);
-	border-radius: 999px;
-}
+	*::-webkit-scrollbar-track {
+		background: transparent;
+	}
 
-*::-webkit-scrollbar-thumb:hover {
-	background: var(--scrollbar-thumb-hover);
+	*::-webkit-scrollbar-thumb {
+		background: var(--scrollbar-thumb);
+		border-radius: 999px;
+	}
+
+	*::-webkit-scrollbar-thumb:hover {
+		background: var(--scrollbar-thumb-hover);
+	}
 }
 
 ::selection {
@@ -220,16 +227,93 @@ body.sidebar-resizing .panel-shell-fade {
 	}
 }
 
-/* Safe area padding for notched devices and Android gesture navigation. */
-@supports (padding: max(0px)) {
-	.safe-top {
-		padding-top: max(0.75rem, env(safe-area-inset-top));
+/* `safe-area-top` consumes the inset for descendants; fixed overlays use env() directly. */
+:root {
+	--safe-area-top: env(safe-area-inset-top, 0px);
+	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
+	--public-header-height: calc(3rem + env(safe-area-inset-top, 0px));
+}
+
+@utility safe-area-top {
+	padding-top: env(safe-area-inset-top, 0px);
+	--safe-area-top: 0px;
+}
+
+.pb-safe {
+	padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* Components layer so call-site utilities still override avatar colors. */
+@layer components {
+	.avatar {
+		border: 1px solid var(--border-subtle);
+		background-color: var(--bg-elevated);
+		color: var(--text-tertiary);
 	}
-	.safe-bottom {
-		padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+
+	.avatar[data-toned] {
+		border-color: color-mix(in oklab, var(--avatar-tone) 24%, transparent);
+		background-color: color-mix(
+			in oklab,
+			var(--avatar-tone) 16%,
+			var(--bg-primary)
+		);
+		color: var(--avatar-tone);
 	}
-	.pb-safe {
-		padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@utility scrollbar-quiet {
+	@media (hover: hover) {
+		scrollbar-width: thin;
+		scrollbar-color: transparent transparent;
+		transition: scrollbar-color 200ms;
+
+		&:hover,
+		&:has(:focus-visible) {
+			scrollbar-color: var(--scrollbar-thumb) transparent;
+		}
+
+		&::-webkit-scrollbar-thumb {
+			background: transparent;
+		}
+
+		&:hover::-webkit-scrollbar-thumb,
+		&:has(:focus-visible)::-webkit-scrollbar-thumb {
+			background: var(--scrollbar-thumb);
+		}
+
+		&::-webkit-scrollbar-thumb:hover {
+			background: var(--scrollbar-thumb-hover);
+		}
+	}
+}
+
+@utility header-action {
+	display: inline-flex;
+	flex: 0 0 auto;
+	height: 32px;
+	min-width: 32px;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	border-radius: 7px;
+	padding: 0 8px;
+	color: var(--text-tertiary);
+	white-space: nowrap;
+	cursor: pointer;
+	transition:
+		background-color 120ms ease,
+		color 120ms ease;
+
+	&:hover,
+	&[aria-expanded="true"] {
+		background: var(--bg-hover);
+		color: var(--text-secondary);
+	}
+
+	&:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
 	}
 }
 

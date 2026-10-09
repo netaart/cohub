@@ -1,7 +1,5 @@
-import type { SessionTurnRecord } from "@cohub/protocol/model";
 import type {
 	PaletteOverviewResponse,
-	PaletteOverviewSession,
 	PaletteOverviewSpace,
 	SessionRecord,
 	SpaceRecord,
@@ -18,6 +16,7 @@ import { getSpacePublicProfile } from "$lib/space-profile";
 import { buildSpaceLandingRoute } from "$lib/space-routes";
 import { getRecentSpaces } from "$lib/stores/recent-space";
 import { getCachedSpaceList } from "$lib/stores/space-list-cache";
+import { chatHref, chatTitle } from "./chat-items";
 import { commandItemKey } from "./merge-results";
 import { buildLocalPaletteOverview } from "./palette-overview-local";
 import { getViewerTurnActivityBySpace } from "./personal-activity";
@@ -147,31 +146,19 @@ async function getLocalSpaces(
 	return [...spacesById.values()];
 }
 
-/**
- * Overview-shaped synthesis from local caches (IndexedDB + localStorage).
- *
- * Backs the palette's first frame when the cached overview snapshot is stale:
- * same ordering semantics as the server payload (viewer activity),
- * so the list no longer re-sorts from an "all"-ordered fallback once the
- * refetched overview lands.
- */
+/** Overview-shaped synthesis from local caches, used before the server payload lands. */
 export async function getLocalPaletteOverview(options?: {
 	signal?: AbortSignal;
 	viewerUserUuid?: string | null;
 }): Promise<PaletteOverviewResponse> {
 	const userKey = getCacheUserKey();
-	const [spaces, sessionLists, turnRecords] = await Promise.all([
+	const [spaces, turnRecords] = await Promise.all([
 		getLocalSpaces(userKey, options),
-		getUserSessionLists(userKey, options),
 		getRecentTurnRecords(userKey, options),
 	]);
 	shouldAbort(options?.signal);
 	return buildLocalPaletteOverview({
 		spaces,
-		sessionLists: sessionLists.map((record) => ({
-			spaceId: record.spaceId,
-			sessions: record.sessions,
-		})),
 		turnRecords,
 		viewerUserUuid: options?.viewerUserUuid ?? null,
 	});
@@ -194,15 +181,11 @@ function defaultScore(rank: number, updatedAt: string | null | undefined) {
 	};
 }
 
-/** Overview space: rank mirrors the personal-activity order. */
 function overviewSpaceToItem(
 	space: PaletteOverviewSpace,
 	rank: number,
 	personalActivityAt?: string | null,
 ): CommandPaletteItem {
-	// The displayed timestamp is the same folded personal activity time used
-	// for ordering (visits + viewer-owned sessions + server participation),
-	// falling back to the server timestamps for spaces with no viewer activity.
 	const displayUpdatedAt =
 		personalActivityAt ?? space.lastParticipatedAt ?? space.updatedAt;
 	const score = defaultScore(rank, displayUpdatedAt);
@@ -211,55 +194,24 @@ function overviewSpaceToItem(
 		id: space.id,
 		spaceId: space.id,
 		sessionId: null,
-		turnId: null,
-		sequence: null,
 		title: space.name ?? "Untitled space",
 		excerpt: compactText(space.description, 220),
 		spaceName: space.name ?? null,
 		ownerProfile: space.ownerProfile ?? null,
 		spaceProfile: space.spaceProfile ?? null,
-		sessionTitle: null,
 		matchedField: "name",
 		href: buildSpaceLandingRoute(space.id),
 		updatedAt: displayUpdatedAt,
 		source: "default",
 		localScore: score.score,
 		isPinned: space.isPinned,
+		isArchived: space.isArchived,
 		typePriorityScore: 0.88,
 		...score,
 	};
 }
 
-/** Recently creator/participant session from the overview payload. */
-function overviewSessionToItem(
-	session: PaletteOverviewSession,
-	rank: number,
-): CommandPaletteItem {
-	const title = session.title || "Untitled session";
-	const updatedAt = session.updatedAt;
-	const score = defaultScore(rank, updatedAt);
-	return {
-		type: "session",
-		id: session.id,
-		spaceId: session.spaceId,
-		sessionId: session.id,
-		turnId: null,
-		sequence: null,
-		title,
-		excerpt: null,
-		spaceName: session.spaceName ?? null,
-		sessionTitle: title,
-		matchedField: "title",
-		href: `/spaces/${session.spaceId}/sessions/${session.id}`,
-		updatedAt,
-		source: "default",
-		localScore: score.score,
-		typePriorityScore: 0.74,
-		...score,
-	};
-}
-
-function spaceToDefaultItem(
+export function spaceRecordToCommandItem(
 	space: SpaceRecord,
 	rank: number,
 	currentSpaceId?: string | null,
@@ -272,20 +224,18 @@ function spaceToDefaultItem(
 		id: space.id,
 		spaceId: space.id,
 		sessionId: null,
-		turnId: null,
-		sequence: null,
 		title: space.name ?? "Untitled space",
 		excerpt: compactText(space.description, 220),
 		spaceName: space.name ?? null,
 		ownerProfile: space.ownerProfile ?? null,
 		spaceProfile: getSpacePublicProfile(space),
-		sessionTitle: null,
 		matchedField: "name",
 		href: buildSpaceLandingRoute(space.id),
 		updatedAt,
 		source: "default",
 		localScore: score.score,
 		isPinned: space.isPinned ?? false,
+		isArchived: space.isArchived ?? false,
 		typePriorityScore: currentSpaceId === space.id ? 0.93 : 0.88,
 		...score,
 	};
@@ -293,63 +243,26 @@ function spaceToDefaultItem(
 
 function sessionToDefaultItem(
 	session: SessionRecord,
-	spaceName: string | null,
+	space: SpaceRecord | undefined,
 	rank: number,
 ): CommandPaletteItem {
-	const title = session.title || "Untitled session";
-	const updatedAt =
-		session.lastMessageAt ?? session.updatedAt ?? session.createdAt ?? null;
+	const updatedAt = sessionActivityAt(session);
 	const score = defaultScore(rank, updatedAt);
 	return {
-		type: "session",
+		type: "chat",
 		id: session.id,
 		spaceId: session.spaceId,
 		sessionId: session.id,
-		turnId: null,
-		sequence: null,
-		title,
+		title: chatTitle(session),
 		excerpt: null,
-		spaceName,
-		sessionTitle: title,
+		spaceName: space?.name ?? null,
+		spaceProfile: space ? getSpacePublicProfile(space) : null,
 		matchedField: "title",
-		href: `/spaces/${session.spaceId}/sessions/${session.id}`,
+		href: chatHref(session.spaceId, session.id),
 		updatedAt,
 		source: "default",
 		localScore: score.score,
 		typePriorityScore: 0.74,
-		...score,
-	};
-}
-
-function turnToDefaultItem(input: {
-	turn: SessionTurnRecord;
-	session: SessionRecord | null;
-	spaceId: string;
-	spaceName: string | null;
-	rank: number;
-}): CommandPaletteItem | null {
-	const text = input.turn.userText ?? "";
-	const title = compactText(text, 140);
-	if (!title) return null;
-	const updatedAt = input.turn.updatedAt ?? input.turn.createdAt ?? null;
-	const score = defaultScore(input.rank, updatedAt);
-	return {
-		type: "turn",
-		id: input.turn.id,
-		spaceId: input.spaceId,
-		sessionId: input.turn.sessionId,
-		turnId: input.turn.id,
-		sequence: input.turn.sequence,
-		title,
-		excerpt: compactText(text, 260),
-		spaceName: input.spaceName,
-		sessionTitle: input.session?.title ?? null,
-		matchedField: "userText",
-		href: `/spaces/${input.spaceId}/sessions/${input.turn.sessionId}?turn=${input.turn.sequence}`,
-		updatedAt,
-		source: "default",
-		localScore: score.score,
-		typePriorityScore: 0.66,
 		...score,
 	};
 }
@@ -363,7 +276,6 @@ async function yieldToUi() {
 	await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 }
 
-/** Overview path: server-ranked spaces + recent personal sessions + local turns. */
 async function buildOverviewDefaultItems(
 	plan: CommandPaletteSearchPlan & {
 		currentSpaceId?: string | null;
@@ -374,30 +286,15 @@ async function buildOverviewDefaultItems(
 ): Promise<CommandPaletteItem[]> {
 	shouldAbort(plan.signal);
 	const userKey = getCacheUserKey();
-	const spaceNameById = new Map(
-		overview.spaces.map((space) => [space.id, space.name ?? null]),
-	);
 	const items: CommandPaletteItem[] = [];
-	let recentTurnRecords: SessionTurnsCacheRecord[] | null = null;
-	const getRecentTurns = async () => {
-		if (recentTurnRecords) return recentTurnRecords;
-		recentTurnRecords = await getRecentTurnRecords(userKey, {
-			signal: plan.signal,
-		});
-		return recentTurnRecords;
-	};
 
 	if (allowsResourceType(plan, "space")) {
-		// Fold device-local personal signals into the server ranking:
-		//  1. recent-space visits (opening a space floats it to the top), and
-		//  2. activity of turns authored by the viewer from the local turn cache
-		//     (other participants never count).
 		const recentActivityBySpace = new Map(
 			getRecentSpaces(userKey).map((entry) => [entry.spaceId, entry.timestamp]),
 		);
 		const viewerSessionActivityBySpace = plan.viewerUserUuid
 			? getViewerTurnActivityBySpace(
-					await getRecentTurns(),
+					await getRecentTurnRecords(userKey, { signal: plan.signal }),
 					plan.viewerUserUuid,
 				)
 			: new Map<string, string>();
@@ -407,9 +304,7 @@ async function buildOverviewDefaultItems(
 				timestampValue(recentActivityBySpace.get(space.id)),
 				isoTimestampValue(viewerSessionActivityBySpace.get(space.id)),
 			);
-		// Strictly personal-activity ordering. No pinned tier, no score, no
-		// relation tie-breaks — a just-opened space must sit above anything I
-		// last touched earlier.
+		// Strictly by personal activity: a just-opened space goes to the top.
 		[...overview.spaces]
 			.sort((a, b) => personalActivityMs(b) - personalActivityMs(a))
 			.forEach((space, index) => {
@@ -424,51 +319,7 @@ async function buildOverviewDefaultItems(
 			});
 	}
 
-	if (allowsResourceType(plan, "session")) {
-		overview.recentSessions.forEach((session, rank) => {
-			items.push(overviewSessionToItem(session, rank));
-		});
-	}
-
-	if (allowsResourceType(plan, "turn")) {
-		await yieldToUi();
-		shouldAbort(plan.signal);
-		const turnRecords = await getRecentTurns();
-		let rank = 0;
-		for (const record of [...turnRecords].sort(
-			(a, b) => b.lastAccessedAt - a.lastAccessedAt,
-		)) {
-			const session = record.session ?? null;
-			const turns = [...record.turns].sort(
-				(a, b) =>
-					timeValue(b.updatedAt ?? b.createdAt) -
-					timeValue(a.updatedAt ?? a.createdAt),
-			);
-			for (const turn of turns) {
-				const item = turnToDefaultItem({
-					turn,
-					session,
-					spaceId: record.spaceId,
-					spaceName: spaceNameById.get(record.spaceId) ?? null,
-					rank,
-				});
-				if (item) items.push(item);
-				rank += 1;
-				if (rank >= DEFAULT_LIMIT) break;
-			}
-			if (rank >= DEFAULT_LIMIT) break;
-		}
-	}
-
-	// Preserve insertion order: spaces (personal activity desc),
-	// then recent sessions, then turns. No re-scoring — the ordering above is
-	// already the product intent for this list.
-	const byKey = new Map<string, CommandPaletteItem>();
-	for (const item of items) {
-		const key = commandItemKey(item);
-		if (!byKey.has(key)) byKey.set(key, item);
-	}
-	return [...byKey.values()].slice(0, defaultItemsLimit(plan));
+	return items.slice(0, defaultItemsLimit(plan));
 }
 
 export async function getCommandPaletteDefaultItems(
@@ -476,7 +327,6 @@ export async function getCommandPaletteDefaultItems(
 		currentSpaceId?: string | null;
 		signal?: AbortSignal;
 		viewerUserUuid?: string | null;
-		/** Server-side palette overview — preferred over local-only derivation. */
 		paletteOverview?: PaletteOverviewResponse | null;
 	},
 ): Promise<CommandPaletteItem[]> {
@@ -485,10 +335,9 @@ export async function getCommandPaletteDefaultItems(
 		return buildOverviewDefaultItems(plan, plan.paletteOverview);
 	}
 	const userKey = getCacheUserKey();
-	const [localSpaces, sessionListRecords, turnRecords] = await Promise.all([
+	const [localSpaces, sessionListRecords] = await Promise.all([
 		getLocalSpaces(userKey, { signal: plan.signal }),
 		getUserSessionLists(userKey, { signal: plan.signal }),
-		getRecentTurnRecords(userKey, { signal: plan.signal }),
 	]);
 	shouldAbort(plan.signal);
 	const spacesById = new Map(localSpaces.map((space) => [space.id, space]));
@@ -529,7 +378,7 @@ export async function getCommandPaletteDefaultItems(
 				effectiveActivityTime(space),
 			);
 			items.push(
-				spaceToDefaultItem(
+				spaceRecordToCommandItem(
 					space,
 					rank,
 					plan.currentSpaceId,
@@ -539,63 +388,25 @@ export async function getCommandPaletteDefaultItems(
 		});
 	}
 
-	if (allowsResourceType(plan, "session") || allowsResourceType(plan, "turn")) {
+	if (allowsResourceType(plan, "chat")) {
 		await yieldToUi();
 		shouldAbort(plan.signal);
-		const sessionLists = sessionListRecords;
 		const sessionsById = new Map<string, SessionRecord>();
-		for (const record of sessionLists) {
+		for (const record of sessionListRecords) {
 			for (const session of record.sessions)
 				sessionsById.set(session.id, session);
 		}
-		if (allowsResourceType(plan, "session")) {
-			[...sessionsById.values()]
-				.sort(
-					(a, b) =>
-						timeValue(b.lastMessageAt ?? b.updatedAt ?? b.createdAt) -
-						timeValue(a.lastMessageAt ?? a.updatedAt ?? a.createdAt),
-				)
-				.slice(0, DEFAULT_LIMIT)
-				.forEach((session, rank) => {
-					items.push(
-						sessionToDefaultItem(
-							session,
-							spacesById.get(session.spaceId)?.name ?? null,
-							rank,
-						),
-					);
-				});
-		}
-
-		if (allowsResourceType(plan, "turn")) {
-			await yieldToUi();
-			shouldAbort(plan.signal);
-			let rank = 0;
-			for (const record of [...turnRecords].sort(
-				(a, b) => b.lastAccessedAt - a.lastAccessedAt,
-			)) {
-				const session =
-					record.session ?? sessionsById.get(record.sessionId) ?? null;
-				const turns = [...record.turns].sort(
-					(a, b) =>
-						timeValue(b.updatedAt ?? b.createdAt) -
-						timeValue(a.updatedAt ?? a.createdAt),
+		[...sessionsById.values()]
+			.sort(
+				(a, b) =>
+					timeValue(sessionActivityAt(b)) - timeValue(sessionActivityAt(a)),
+			)
+			.slice(0, DEFAULT_LIMIT)
+			.forEach((session, rank) => {
+				items.push(
+					sessionToDefaultItem(session, spacesById.get(session.spaceId), rank),
 				);
-				for (const turn of turns) {
-					const item = turnToDefaultItem({
-						turn,
-						session,
-						spaceId: record.spaceId,
-						spaceName: spacesById.get(record.spaceId)?.name ?? null,
-						rank,
-					});
-					if (item) items.push(item);
-					rank += 1;
-					if (rank >= DEFAULT_LIMIT) break;
-				}
-				if (rank >= DEFAULT_LIMIT) break;
-			}
-		}
+			});
 	}
 
 	// Local commands are injected synchronously by the palette UI so they never

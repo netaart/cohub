@@ -7,13 +7,15 @@ import {
   type DesktopSurface,
   parseAppRef,
   resolveOpenSurface,
+  DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS,
   DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS,
   DESKTOP_COMMAND_MAX_TIMEOUT_MS,
+  DESKTOP_COMMAND_OPEN_TIMEOUT_MS,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok } from "../output.js";
-import { resolveBoundSpace } from "../space.js";
+import { explicitSpace, failSpaceTarget, resolveBoundSpace, resolveSpaceRef } from "../space.js";
 import { getAppByRef } from "../app-ref.js";
 
 export { resolveOpenSurface };
@@ -33,23 +35,13 @@ type OpenTarget =
       surface?: DesktopSurface;
     };
 
-/**
- * Optional disambiguation for file:// vs app://. Unlike ordinary
- * Space-scoped commands, an unbound directory must not fall back to Home:
- * the plain target should remain eligible for App resolution.
- */
+/** Never falls back to Home, so a plain target stays eligible for App resolution. */
 export async function resolveOptionalSpaceId(
   command: Command,
   options: { cwd?: string; bindingsPath?: string } = {},
 ): Promise<string | undefined> {
-  let current: Command | null = command;
-  while (current) {
-    const opts = current.opts() as Record<string, unknown>;
-    if (typeof opts.space === "string" && opts.space.trim()) return opts.space.trim();
-    current = current.parent ?? null;
-  }
-  const fromEnvironment = process.env.COHUB_SPACE_ID?.trim();
-  if (fromEnvironment) return fromEnvironment;
+  const explicit = explicitSpace(command);
+  if (explicit) return resolveSpaceRef(explicit).catch(failSpaceTarget);
   return (await resolveBoundSpace(options)) ?? undefined;
 }
 
@@ -109,8 +101,8 @@ function readCallInput(opts: OpenOptions): unknown {
   }
 }
 
-function parseTimeout(value: string | undefined): number {
-  if (!value) return DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS;
+function parseTimeout(value: string | undefined): number | undefined {
+  if (!value) return undefined;
   const parsed = Math.floor(Number(value));
   if (!Number.isFinite(parsed) || parsed <= 0 || parsed > DESKTOP_COMMAND_MAX_TIMEOUT_MS) {
     return error(
@@ -257,6 +249,8 @@ Notes:
     scheme is still accepted.
   - A plain target checks the explicit Space or current directory Runtime binding for a file before resolving an app; it does not fall back to Home.
   - Opening a window is idempotent; repeating it re-activates the same tab.
+  - A desktop that does not respond within ${DESKTOP_COMMAND_ACCEPT_TIMEOUT_MS / 1_000} seconds (closed, asleep, or
+    offline) fails fast with no_active_client instead of waiting out the timeout.
   - --as picks the surface: window (a preview tab) or overlay (a transparent
     layer above the workspace). Without it, an App published with
     <meta name="cohub:surface" content="overlay"> opens as an overlay.
@@ -277,7 +271,7 @@ function registerOpen(parent: Command, deprecated: boolean): void {
     .option("--as <surface>", "Surface role for app targets: window (default) or overlay")
     .option(
       "--timeout-ms <ms>",
-      `How long to wait for the desktop (default: ${DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS}; max: ${DESKTOP_COMMAND_MAX_TIMEOUT_MS})`,
+      `How long to wait for the desktop (default: ${DESKTOP_COMMAND_OPEN_TIMEOUT_MS}, or ${DESKTOP_COMMAND_DEFAULT_TIMEOUT_MS} with --call; max: ${DESKTOP_COMMAND_MAX_TIMEOUT_MS})`,
     )
     .option("--json", "Output as JSON")
     .action(async (target: string, opts: OpenOptions, thisCommand: Command) => {

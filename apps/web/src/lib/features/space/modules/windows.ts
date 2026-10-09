@@ -1,10 +1,11 @@
 import type { AppWindowState } from "@cohub/protocol/app-runtime";
 import { isBoardFile } from "$lib/board/board-file";
 import { parseAppWindowKey } from "./app-window-key";
+import type { WindowKind } from "./window-route";
 import type { WindowSyncStatus } from "./window-sync-status";
 
 export type Window = {
-	kind: "file" | "board" | "port" | "app";
+	kind: WindowKind;
 	key: string;
 	label: string;
 	title: string;

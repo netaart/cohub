@@ -1,8 +1,7 @@
 import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
 import { Container, Graphics, Text } from "pixi.js";
-import { parseBoardCssColor } from "../css-color.js";
+import type { BoardFrame } from "@cohub/protocol";
 import { getBoardResolution } from "../text-resolution.js";
-import type { BoardItem } from "@cohub/protocol/board-document";
 import type { BoardRenderPalette } from "./board-renderer-registry.js";
 
 export const CARD_RADIUS = 10;
@@ -13,26 +12,6 @@ const TEXT_OPTIONS = {
 	resolution: getBoardResolution(),
 	roundPixels: true,
 } as const;
-
-export function emphasisColor(
-	item: BoardItem,
-	palette: BoardRenderPalette,
-): number {
-	if (item.style?.accentColor) {
-		const normalized = parseBoardCssColor(item.style.accentColor);
-		if (normalized != null) return normalized;
-	}
-	switch (item.style?.emphasis) {
-		case "rare":
-			return palette.rare;
-		case "epic":
-			return palette.epic;
-		case "legendary":
-			return palette.legendary;
-		default:
-			return palette.brand;
-	}
-}
 
 export function createLabel(text: string, style: Record<string, unknown>) {
 	return new Text({ ...TEXT_OPTIONS, text, style });
@@ -48,11 +27,8 @@ export type CardShellState = {
 };
 
 export type CardShell = {
-	/** Root container positioned by the item frame. */
 	root: Container;
-	/** Masked container for renderer-specific content. */
 	content: Container;
-	/** Rectangle (local coords) available for content. */
 	contentRect: () => { x: number; y: number; width: number; height: number };
 	update: (
 		state: CardShellState,
@@ -62,11 +38,6 @@ export type CardShell = {
 	destroy: () => void;
 };
 
-/**
- * Shared card chrome: rounded background, selection/hover border, optional
- * footer with title, and a masked content region. Tracks the last rendered
- * state so unchanged attributes are not redrawn.
- */
 export function createCardShell(): CardShell {
 	const root = new Container();
 	const background = new Graphics();
@@ -82,9 +53,6 @@ export function createCardShell(): CardShell {
 	});
 
 	content.mask = mask;
-	// The mask must live in the display tree so its world transform tracks the
-	// card; otherwise Pixi clips against an untransformed (identity) shape once
-	// the card moves or rotates. Mask objects are not rendered as color.
 	root.addChild(background, mask, content, footerBg, title);
 
 	let last: (CardShellState & { footer: boolean; paletteKey: string }) | null =
@@ -194,12 +162,7 @@ export function createCardShell(): CardShell {
 	};
 }
 
-/**
- * Position a shell root at an item frame. The container pivots around its
- * center so that Pixi's rotation matches the geometry model (which treats
- * `frame.rotation` as a rotation about the frame center).
- */
-export function positionShell(root: Container, item: BoardItem) {
+export function positionShell(root: Container, item: { frame: BoardFrame }) {
 	const { x, y, width, height, rotation } = item.frame;
 	root.pivot.set(width / 2, height / 2);
 	root.x = x + width / 2;

@@ -10,6 +10,7 @@ import { cors } from "hono/cors";
 import { httpInstrumentationMiddleware } from "@hono/otel";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { isLocalHarness } from "@cohub/protocol/runtime";
+import { sanitizeSessionStatsEvent } from "@cohub/protocol/model";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type {
   RealtimeCompactFrame,
@@ -713,7 +714,7 @@ const resolveRealtimeRoomsForEnvelope = (payload: GatewayWsBroadcastPayload): Re
 };
 
 async function fanOutBroadcastToLocalSockets(payload: GatewayWsBroadcastPayload) {
-  const envelope = payload as RealtimeEnvelope;
+  const envelope = sanitizeSessionStatsEvent(payload as RealtimeEnvelope);
   const deliveredConnectionIds = new Set<string>();
 
   const deliverConnection = (connectionId: string) => {

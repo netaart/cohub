@@ -1,3 +1,8 @@
+export * from "./active-turn.js";
+export * from "./stats.js";
+export * from "./snapshot.js";
+export * from "./snapshot-scheduler.js";
+export * from "./interrupted-turn.js";
 export * from "./compaction.js";
 export * from "./content.js";
 export * from "./image-to-text.js";
@@ -7,6 +12,8 @@ export * from "./prompt-auth.js";
 export * from "./prompt-template.js";
 export * from "./prompt-env.js";
 export * from "./service.js";
+export * from "./session-audience.js";
 export * from "./session-meta.js";
 export * from "./session-title.js";
+export * from "./turn-origin.js";
 export * from "./runtime-recovery.js";

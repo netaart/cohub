@@ -1512,12 +1512,8 @@ export function createFileWorkspaceController(
 		const fileName = ensureBoardExtension(name);
 		const path = parentPath ? `${parentPath}/${fileName}` : fileName;
 		try {
-			await sdk.space(options.getSpaceId()).boards.create({
-				path,
-				title: fileName,
-				mutationId: crypto.randomUUID(),
-				items: [],
-			});
+			// The title follows the file name; the server derives it from the path.
+			await sdk.space(options.getSpaceId()).boards.create({ path, mutationId: crypto.randomUUID() });
 			await patchFsDirectory(parentPath, (entries) => [
 				...entries,
 				buildFsEntry(path, "file"),

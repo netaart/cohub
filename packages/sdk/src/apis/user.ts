@@ -1,5 +1,5 @@
 import { HttpError, type HttpTransport, type Fetch } from "../transport.js";
-import type { LabelAssignmentRecord, LabelResourceType, MeResponse, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse, UserSessionSourceKey } from "../types.js";
+import type { LabelAssignmentRecord, LabelListItem, LabelResourceType, MeResponse, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse, UserSessionSourceKey } from "../types.js";
 
 const usageDate = (value: string | Date) => value instanceof Date ? value.toISOString() : value;
 
@@ -38,13 +38,14 @@ export class UserApi {
     });
   }
 
-  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null } | Fetch, customFetch?: Fetch) {
+  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null; includeForks?: boolean } | Fetch, customFetch?: Fetch) {
     const options = typeof optionsOrFetch === "function" ? undefined : optionsOrFetch;
     const fetch = typeof optionsOrFetch === "function" ? optionsOrFetch : customFetch;
     const params = new URLSearchParams();
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     if (options?.cursor) params.set("cursor", options.cursor);
     if (options?.source?.length) params.set("source", options.source.join(","));
+    if (options?.includeForks) params.set("includeForks", "1");
     const query = params.toString();
     return this.transport.request<UserSessionsResponse>(
       `/api/me/sessions${query ? `?${query}` : ""}`,
@@ -105,6 +106,34 @@ export class UserApi {
 /** User-scoped labels — same label/assignment model as space labels, but private to the viewer. */
 export class UserLabelsApi {
   constructor(private readonly transport: HttpTransport) {}
+
+  list() {
+    return this.transport.request<{ labels: LabelListItem[] }>("/api/me/labels");
+  }
+
+  create(labelRef: string) {
+    return this.transport.request<{ labels: LabelListItem[] }>("/api/me/labels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labelRef }) });
+  }
+
+  resolve(labelRefs: string[]) {
+    return this.transport.request<{ labels: LabelListItem[] }>("/api/me/labels/resolve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labelRefs }) });
+  }
+
+  update(labelRef: string, input: { name?: string; parentRef?: string | null; rank?: number }) {
+    return this.transport.request<{ label: LabelListItem }>("/api/me/labels/by-ref", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labelRef, ...input }) });
+  }
+
+  delete(labelRef: string) {
+    return this.transport.request<{ ok: true }>(`/api/me/labels/by-ref?${new URLSearchParams({ ref: labelRef })}`, { method: "DELETE" });
+  }
+
+  reorder(labelRefs: string[]) {
+    return this.transport.request<{ labels: LabelListItem[] }>("/api/me/labels/reorder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labelRefs }) });
+  }
+
+  patchResources(resourceRefs: string[], input: { addLabelRefs?: string[]; removeLabelRefs?: string[] }) {
+    return this.transport.request<{ resourceRefs: string[]; affectedLabelIds: string[] }>("/api/me/resources/space/labels/batch", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceRefs, ...input }) });
+  }
 
   getResourceLabels(resourceType: LabelResourceType, resourceRef: string) {
     const params = new URLSearchParams({ resourceRef });

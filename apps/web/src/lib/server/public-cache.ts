@@ -3,6 +3,9 @@
 export const PUBLIC_PAGE_CACHE_CONTROL =
 	"public, max-age=60, stale-while-revalidate=300";
 
+/** Revalidate so a publish shows on the next load. */
+export const PUBLIC_APP_PAGE_CACHE_CONTROL = "public, no-cache";
+
 export const PRIVATE_NO_STORE_CACHE_CONTROL = "private, no-store";
 
 export const PUBLIC_NOT_FOUND_CACHE_CONTROL =
@@ -10,15 +13,14 @@ export const PUBLIC_NOT_FOUND_CACHE_CONTROL =
 
 type SetHeaders = (headers: Record<string, string>) => void;
 
-/** HTML / document responses for public share surfaces. */
-export function setPublicPageCache(
+export function setPublicAppPageCache(
 	setHeaders: SetHeaders,
 	options?: { private?: boolean },
 ) {
 	setHeaders({
 		"cache-control": options?.private
 			? PRIVATE_NO_STORE_CACHE_CONTROL
-			: PUBLIC_PAGE_CACHE_CONTROL,
+			: PUBLIC_APP_PAGE_CACHE_CONTROL,
 	});
 }
 

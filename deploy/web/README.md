@@ -24,7 +24,11 @@ SvelteKit adapter 生成的 Worker。
 | 产物 | 生成方式 |
 |------|---------|
 | `.svelte-kit/cloudflare/_worker.js` | SvelteKit adapter |
-| `.svelte-kit/cloudflare/worker-entry-env.js` | `scripts/generate-worker-entry-env.mjs`，用 Vite 的 `loadEnv` 取 `PUBLIC_*` 值 |
+| `.svelte-kit/cloudflare/worker-entry-deps.js` | `scripts/generate-worker-entry-deps.mjs`，用 Vite 的 `loadEnv` 取 `PUBLIC_*` 值，并列出 adapter 不认识的构建产物 |
+
+开启 `run_worker_first` 后，adapter 只返回它清单里的静态资产（`static/`、预渲染页面、`_app/`）。
+vite-plugin-pwa 构建时生成的 `sw.js`、`workbox-*.js`、`manifest.webmanifest` 不在其中，由入口直接从
+`ASSETS` 返回，否则会 404。
 
 入口是独立域名唯一的解析点：`vite dev`（SvelteKit dev server）与 `pnpm preview`（`wrangler dev`）都不经它，
 所以这两个命令下独立域名不可用；验证请用已部署的 dev Worker。

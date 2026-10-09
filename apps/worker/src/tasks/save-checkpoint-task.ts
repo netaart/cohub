@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import type { Job } from "bullmq";
 import type { TaskPayload } from "@cohub/protocol/task";
 import { normalizeRequestSource } from "@cohub/protocol/provenance";
+import { CONFIG_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 import { checkpoints, spaces } from "@cohub/db";
 import { checkpointForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "../reference-index-queue.js";
@@ -32,7 +33,6 @@ import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PA
 import { syncSystemRepo, type CheckpointAsset } from "../checkpoint/repo-sync.js";
 import { saveCheckpointWithLock, type SaveCheckpointInput, type SaveCheckpointResult } from "../checkpoint/save.js";
 import { hashFile, scanWorkspace, type ScannedFile } from "../checkpoint/scan.js";
-import { isGiteaMirrorEnabled, mirrorRepositoryToGitea } from "../gitea.js";
 
 const SAVE_VERSION = 2;
 
@@ -253,7 +253,6 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
       sourceTaskRunId: input.sourceTaskRunId ?? null,
       savedBy: input.userId ?? null,
       ...(input.requestSource ? { requestSource: input.requestSource } : {}),
-      mirror: { status: "queued" },
     },
     createdAt,
   }).returning());
@@ -275,22 +274,8 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
   await timeIt(timings, "updateCheckpointBoardMeta", () => updateCheckpointMeta(db, checkpoint.id, { board: { snapshotCount: boardSnapshots.count }, timings }));
   await timeIt(timings, "updateSpaceHead", () => db.update(spaces).set({ headCheckpointId: checkpoint.id, updatedAt: new Date() }).where(eq(spaces.id, spaceId)));
 
-  if (isGiteaMirrorEnabled()) await progress("mirror_repository");
-  const mirrorMeta = await timeIt(timings, "mirrorRepository", async () => {
-    if (!isGiteaMirrorEnabled()) return { provider: "none" as const, status: "disabled" as const };
-    try {
-      await mirrorRepositoryToGitea(dirs.repoDir, space.storageRepoName, branch);
-      return { provider: "gitea" as const, status: "pushed" as const, pushedAt: new Date().toISOString() };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[save_checkpoint] failed to mirror repo for space=${spaceId} checkpoint=${checkpoint.id}:`, error);
-      return { provider: "gitea" as const, status: "failed" as const, error: message };
-    }
-  });
-  await timeIt(timings, "updateMirrorMeta", () => updateCheckpointMeta(db, checkpoint.id, { mirror: mirrorMeta, timings }));
-
   let publishedUserConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
-  if (space.name === "config") {
+  if (space.slug === CONFIG_SPACE_SLUG) {
     publishedUserConfig = await timeIt(timings, "publishUserConfig", () => publishUserConfigFromWorkspace({ userId: space.userUuid, spaceId: space.id, checkpointId: checkpoint.id, workspaceDir: dirs.latestDir }));
     await publishModelsCacheFromFile({ modelsPath: join(publishedUserConfig.targetDir, ".cohub", "models.json"), scope: "user", userId: space.userUuid, sourceCheckpointId: checkpoint.id }).catch((error) => recordPublishWarning({ scope: "user", target: "models_cache", message: formatErrorMessage(error) }, error));
     await publishModelTasksCacheFromFile({ configPath: join(publishedUserConfig.targetDir, ".cohub", "model-tasks.json"), scope: "user", userId: space.userUuid, sourceCheckpointId: checkpoint.id }).catch((error) => recordPublishWarning({ scope: "user", target: "model_tasks_cache", message: formatErrorMessage(error) }, error));

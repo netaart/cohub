@@ -4,8 +4,7 @@ import {
 	syncTextResolution,
 	textResolutionForZoom,
 } from "../text-resolution.js";
-import type { BoardUnknownItem } from "@cohub/protocol/board-document";
-import { unknownRealType } from "@cohub/protocol/board-document";
+import type { BoardSceneItem } from "../../core/scene.js";
 import { positionShell } from "./base-card-renderer.js";
 import type {
 	BoardCardRenderer,
@@ -26,14 +25,9 @@ type UnknownParts = {
 
 const partsByContainer = new WeakMap<Container, UnknownParts>();
 
-/**
- * Neutral placeholder for shape types this client does not recognise. The shape
- * stays fully interactive (select/move/resize via the generic box definition) and
- * its data is preserved elsewhere — this is only its display.
- */
 function sync(
 	container: Container,
-	item: BoardUnknownItem,
+	item: BoardSceneItem,
 	context: BoardRenderContext,
 ) {
 	const parts = partsByContainer.get(container);
@@ -41,7 +35,7 @@ function sync(
 	positionShell(parts.root, item);
 	const { width, height } = item.frame;
 	const selected = context.selectedIds.has(item.id);
-	const realType = unknownRealType(item);
+	const realType = item.type;
 	syncTextResolution(parts.label, parts, context.zoom);
 	const visualSig = [
 		width,
@@ -64,7 +58,6 @@ function sync(
 				width: selected ? 2 : 1,
 				alpha: 0.8,
 			});
-		// Dashed hint that this content is not natively rendered.
 		parts.box.roundRect(6, 6, width - 12, height - 12, RADIUS - 4).stroke({
 			color: context.palette.muted,
 			width: 1,
@@ -83,7 +76,7 @@ function sync(
 
 export const unknownCardRenderer: BoardCardRenderer = {
 	id: "unknown-card",
-	canRender: (item) => "raw" in item,
+	canRender: () => true,
 	create: (item, context) => {
 		const root = new Container();
 		const box = new Graphics();
@@ -104,14 +97,12 @@ export const unknownCardRenderer: BoardCardRenderer = {
 			textSig: "",
 			resolution,
 		});
-		if ("raw" in item) sync(root, item as BoardUnknownItem, context);
+		sync(root, item, context);
 		return root;
 	},
 	update: (container, item, context) => {
-		if ("raw" in item) sync(container, item as BoardUnknownItem, context);
+		sync(container, item, context);
 	},
-	// Far LOD: a neutral plate. An unrecognised node still occupies space, and being
-	// in the batch is what keeps it in document order.
 	renderFar: (graphics, item, context) => {
 		drawFarPlate(graphics, item.frame, {
 			fill: context.palette.muted,

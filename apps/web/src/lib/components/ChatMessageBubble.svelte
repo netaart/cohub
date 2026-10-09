@@ -1,5 +1,11 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
+import {
+	collectToolMetrics,
+	readTurnMetrics,
+	readTurnStats,
+	requestMetricSchema,
+} from "@cohub/protocol/model";
 import { resolveHarness } from "@neta-art/cohub";
 import {
 	Archive,
@@ -11,6 +17,12 @@ import {
 	TriangleAlert,
 } from "lucide-svelte";
 import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
+import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
+import StatsContent from "$lib/components/StatsContent.svelte";
+import StatsGroup, {
+	type StatsGroupItem,
+} from "$lib/components/StatsGroup.svelte";
+import StatsPopover from "$lib/components/StatsPopover.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import {
 	formatDurationDetail,
@@ -18,8 +30,11 @@ import {
 	isDisplayableDurationMs,
 } from "$lib/format-duration";
 import {
+	formatInputTokens,
 	formatTokenCount,
+	formatUsageBreakdown,
 	formatUsageCost,
+	getContextUsagePercent,
 	getDisplayInputTokens,
 	getUsageCostTotal,
 } from "$lib/format-usage";
@@ -33,6 +48,7 @@ import {
 	type ModelCatalogItem,
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import { readSentFrom } from "$lib/sent-turns";
 import type { ChatMessage } from "$lib/session-tree";
 import {
 	formatCompactAbsoluteTime,
@@ -172,20 +188,25 @@ const backgroundTaskDetail = $derived(
 		: m.chat_bg_bash_task({}, { locale }),
 );
 
+const sentFrom = $derived(
+	message.role === "user" ? readSentFrom(message.meta?.turn) : null,
+);
+
 const messageContainerClass = $derived(
 	message.role === "user"
-		? "ml-auto max-w-[var(--chat-user-message-max-width)]"
-		: "",
+		? "ml-auto grid w-fit max-w-[var(--chat-user-message-max-width)]"
+		: "w-full",
 );
 
 const messageBubbleClass = $derived.by(() => {
-	const base = "px-2 py-2 text-[14px] leading-[1.7]";
+	const base = "px-[var(--chat-msg-inset)] py-2 text-[14px] leading-[1.7]";
 	if (message.role === "user") {
+		const user = `${base} justify-self-end`;
 		if (isCancelledBeforeDispatch)
-			return `${base} rounded-xl rounded-br-md bg-bg-hover/60 text-text-tertiary`;
+			return `${user} rounded-xl rounded-br-md bg-bg-hover/60 text-text-tertiary`;
 		if (isBackgroundTaskUserMessage)
-			return `${base} rounded-xl rounded-br-md border border-border-subtle/70 bg-bg-hover/45 text-text-secondary`;
-		return `${base} rounded-[var(--chat-user-message-radius)] rounded-br-[var(--chat-user-message-tail-radius)] bg-[var(--chat-user-message-bg)] text-[var(--chat-user-message-fg)]`;
+			return `${user} rounded-xl rounded-br-md border border-border-subtle/70 bg-bg-hover/45 text-text-secondary`;
+		return `${user} rounded-[var(--chat-user-message-radius)] rounded-br-[var(--chat-user-message-tail-radius)] bg-[var(--chat-user-message-bg)] text-[var(--chat-user-message-fg)]`;
 	}
 	if (message.role === "assistant") {
 		return assistantErrorMessage
@@ -317,6 +338,37 @@ const archiveLabel = $derived(
 				: "",
 );
 
+const footerStats = $derived.by(() => {
+	if (message.meta?.turn) return readTurnStats(message.meta.turn);
+	const receipt = requestMetricSchema.safeParse(message.meta?.llmTiming);
+	const stats = readTurnStats({
+		status: "completed",
+		totalUsage: message.meta?.usage,
+		durationMs: message.meta?.durationMs,
+		meta: {
+			metrics: {
+				version: 1,
+				tools: collectToolMetrics([message.content]),
+				...(receipt.success
+					? {
+							requests: {
+								[receipt.data.id]: { ...receipt.data, omitted: false },
+							},
+						}
+					: {}),
+			},
+		},
+	});
+	return { ...stats, turns: 0 };
+});
+const footerRequests = $derived.by(() => {
+	if (message.meta?.turn) {
+		const metrics = readTurnMetrics(message.meta.turn.meta);
+		return metrics ? Object.values(metrics.requests ?? {}) : [];
+	}
+	const receipt = requestMetricSchema.safeParse(message.meta?.llmTiming);
+	return receipt.success ? [receipt.data] : [];
+});
 const hasDuration = $derived.by(() => {
 	const durationMs = message.meta?.durationMs;
 	return (
@@ -374,29 +426,12 @@ const visibleCost = $derived(
 		: null,
 );
 
-const displayInputTokens = $derived.by(() =>
-	getDisplayInputTokens(message.meta?.usage),
-);
-
-const cachedInputTokens = $derived.by(
-	() => message.meta?.usage?.cacheRead ?? 0,
-);
-
 const tokenDisplay = $derived.by(() => {
 	const u = message.meta?.usage;
 	if (!u) return "";
 	// Cost stays in hover detail only; outer bar keeps the existing token-first layout.
-	const parts: string[] = [];
-	if (displayInputTokens > 0) {
-		const inputLabel = `↑${formatTokenCount(displayInputTokens)}`;
-		parts.push(
-			cachedInputTokens > 0
-				? `${inputLabel} (${m.chat_cached({ count: formatTokenCount(cachedInputTokens) }, { locale })})`
-				: inputLabel,
-		);
-	}
-	if (u.output) parts.push(`↓${formatTokenCount(u.output)}`);
-	if (parts.length > 0) return parts.join(" ");
+	const breakdown = formatUsageBreakdown(u, locale);
+	if (breakdown) return breakdown;
 	if (u.totalTokens)
 		return m.chat_tokens(
 			{ count: formatTokenCount(u.totalTokens) },
@@ -420,21 +455,8 @@ const tokenDetailText = $derived.by(() => {
 	const u = message.meta?.usage;
 	if (!u) return "";
 	const parts: string[] = [];
-	if (displayInputTokens > 0) {
-		parts.push(
-			cachedInputTokens > 0
-				? m.chat_input_label(
-						{
-							value: `${formatTokenCount(displayInputTokens)} (${formatTokenCount(cachedInputTokens)} cached)`,
-						},
-						{ locale },
-					)
-				: m.chat_input_label(
-						{ value: formatTokenCount(displayInputTokens) },
-						{ locale },
-					),
-		);
-	}
+	const input = formatInputTokens(u, locale);
+	if (input) parts.push(m.chat_input_label({ value: input }, { locale }));
 	if (u.output)
 		parts.push(
 			m.chat_output_label({ value: formatTokenCount(u.output) }, { locale }),
@@ -473,12 +495,46 @@ const modelContextWindow = $derived.by(() => {
 		: null;
 });
 
-const inputContextPercent = $derived.by(() => {
-	if (!displayInputTokens || !modelContextWindow) return null;
-	return Math.max(
-		0,
-		Math.min(100, (displayInputTokens / modelContextWindow) * 100),
-	);
+const inputContextPercent = $derived(
+	getContextUsagePercent(message.meta?.usage, modelContextWindow),
+);
+
+const finalResponseItems = $derived.by((): StatsGroupItem[] => {
+	if (!message.meta?.turn || isDirectGeneration) return [];
+	const u = message.meta.usage;
+	const input = getDisplayInputTokens(u);
+	const items: StatsGroupItem[] = [];
+	if (input > 0)
+		items.push({
+			key: "input",
+			label: m.stats_input({}, { locale }),
+			value: formatTokenCount(input),
+		});
+	if (u?.cacheRead)
+		items.push({
+			key: "cache",
+			label: m.stats_cache_tokens({}, { locale }),
+			value: formatTokenCount(u.cacheRead),
+		});
+	if (u?.output)
+		items.push({
+			key: "output",
+			label: m.stats_output({}, { locale }),
+			value: formatTokenCount(u.output),
+		});
+	if (inputContextPercent != null)
+		items.push({
+			key: "context",
+			label: m.stats_context_usage({}, { locale }),
+			value: `${Math.round(inputContextPercent)}%`,
+		});
+	if (hasDuration)
+		items.push({
+			key: "duration",
+			label: m.stats_response_time({}, { locale }),
+			value: durationDisplay,
+		});
+	return items;
 });
 
 function getTokenDisplayClass(percent: number | null) {
@@ -525,9 +581,8 @@ function handleCopy() {
     {onOpenUrl}
   />
 {:else}
-  <div class={`w-full ${messageContainerClass}`}>
+  <div class={`min-w-0 ${messageContainerClass}`}>
     <div class={messageBubbleClass}>
-
       <MessageContentFlow
         content={message.content?.length ? message.content : [{ type: 'text', text: message.text }]}
         {isUserMessage}
@@ -549,12 +604,11 @@ function handleCopy() {
           <div class="mt-1">{assistantErrorMessage}</div>
         </div>
       {/if}
-
     </div>
 
     {#if (message.role === 'assistant' && (message.meta?.model || hasUsage || hasDuration || timeDisplay || harnessLabel)) || (message.role === 'user' && timeDisplay)}
       <!-- Meta bar: copy | identity/model | tokens | time -->
-      <div class="mt-1 flex items-center gap-1 px-2 text-[11px] text-text-placeholder/50 select-none">
+      <div class="mt-1 flex items-center gap-1 px-[var(--chat-msg-inset)] text-[11px] text-text-placeholder/50 select-none">
         <!-- Copy button -->
         <button
           type="button"
@@ -586,6 +640,22 @@ function handleCopy() {
         {/if}
 
         {#if message.role === 'user'}
+          {#if sentFrom}
+            <RelatedSessionLink
+              ref={sentFrom}
+              class="inline-flex min-w-0 max-w-48 shrink items-center gap-1 text-text-placeholder/70 transition-colors [&[href]]:hover:text-text-secondary"
+            >
+              {#snippet children({ title })}
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/50"
+                ></span>
+                <span class="min-w-0 truncate font-medium"
+                  >{title
+                    ? m.sent_from({ title }, { locale })
+                    : m.sent_from_chat({}, { locale })}</span
+                >
+              {/snippet}
+            </RelatedSessionLink>
+          {/if}
           {#if isBackgroundTaskUserMessage}
             <span class="inline-flex min-w-0 items-center gap-1.5 cursor-default text-text-placeholder/70" title={backgroundTaskDetail}>
               <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-text-placeholder/55"></span>
@@ -596,11 +666,11 @@ function handleCopy() {
             <UserIdentity
               name={userDisplayName}
               avatarUrl={message.authorProfile?.avatarUrl}
+              seed={message.authorProfile?.userUuid ?? message.authorUuid}
               username={message.authorProfile?.username}
               title={userDisplayName}
               size="xxs"
               class="text-inherit"
-              avatarClass="border-0 bg-brand/15 text-brand"
             />
           {/if}
           {#if isCancelledBeforeDispatch}
@@ -633,17 +703,21 @@ function handleCopy() {
             </span>
           {/if}
 
-          <!-- Tokens -->
-          {#if hasUsage && tokenDisplay}
-            <span class={getTokenDisplayClass(inputContextPercent)} title={tokenDetailText}>
-              {tokenDisplay}
-            </span>
-          {/if}
-
-          {#if hasDuration}
-            <span class="shrink-0 tabular-nums cursor-default text-text-placeholder/65" title={durationDetailText}>
-              {durationDisplay}
-            </span>
+          {#if !isStreaming && (hasUsage || hasDuration || message.meta?.turn)}
+            <StatsPopover title={message.meta?.turn ? m.stats_turn({}, { locale }) : m.stats_call({}, { locale })} triggerClass="shrink-0">
+              {#snippet trigger()}
+                {#if hasUsage && tokenDisplay}<span class={getTokenDisplayClass(inputContextPercent)}>{tokenDisplay}</span>{/if}
+                {#if hasDuration}<span class="shrink-0 whitespace-nowrap tabular-nums text-text-placeholder/65">{durationDisplay}</span>{/if}
+                {#if !tokenDisplay && !hasDuration}<span class="text-text-placeholder/65">{m.stats_turn({}, { locale })}</span>{/if}
+              {/snippet}
+              {#if finalResponseItems.length}
+                <StatsGroup title={m.stats_final_response({}, { locale })} items={finalResponseItems} class="mb-4 border-b border-border-subtle pb-3" />
+              {/if}
+              <StatsContent stats={footerStats} scope="turn" requests={footerRequests} />
+            </StatsPopover>
+          {:else}
+            {#if hasUsage && tokenDisplay}<span class={getTokenDisplayClass(inputContextPercent)} title={tokenDetailText}>{tokenDisplay}</span>{/if}
+            {#if hasDuration}<span class="shrink-0 tabular-nums text-text-placeholder/65" title={durationDetailText}>{durationDisplay}</span>{/if}
           {/if}
 
           {#if visibleCost}

@@ -1,10 +1,12 @@
 import type { CommandPaletteResourceType } from "./types";
 
 const TYPE_ALIASES = new Map<string, CommandPaletteResourceType>([
-	["turn", "turn"],
-	["turns", "turn"],
-	["session", "session"],
-	["sessions", "session"],
+	["chat", "chat"],
+	["chats", "chat"],
+	["session", "chat"],
+	["sessions", "chat"],
+	["turn", "chat"],
+	["turns", "chat"],
 	["space", "space"],
 	["spaces", "space"],
 	["label", "label"],
@@ -14,8 +16,8 @@ const TYPE_ALIASES = new Map<string, CommandPaletteResourceType>([
 ]);
 
 const SHORT_PREFIX_TYPES = new Map<string, CommandPaletteResourceType>([
-	["t", "turn"],
-	["s", "session"],
+	["s", "chat"],
+	["t", "chat"],
 	["a", "space"],
 	["l", "label"],
 	["c", "command"],
@@ -41,7 +43,7 @@ function normalizeLabelRef(value: string) {
 		.join("/");
 }
 
-function parseLabelScope(value: string) {
+export function parseLabelScope(value: string) {
 	const trimmed = value.trim();
 	if (!trimmed) return null;
 	const [labelRef = "", ...rest] = trimmed.split(/\s+/);
@@ -63,6 +65,28 @@ function parseTypeList(value: string) {
 		types.push(type);
 	}
 	return uniqueTypes(types);
+}
+
+export type TypePrefix = {
+	type: CommandPaletteResourceType;
+	rest: string;
+};
+
+export function takeTypePrefix(input: string): TypePrefix | null {
+	const short = /^\s*([tsacl]):\s*/i.exec(input);
+	if (short) {
+		const type = SHORT_PREFIX_TYPES.get((short[1] ?? "").toLowerCase());
+		return type ? { type, rest: input.slice(short[0].length) } : null;
+	}
+	const long = /^\s*type:(\S+)\s+/i.exec(input);
+	if (long) {
+		const types = parseTypeList(long[1] ?? "");
+		return types?.length === 1 && types[0]
+			? { type: types[0], rest: input.slice(long[0].length) }
+			: null;
+	}
+	const label = /^\s*label:(?=\S+\s)/i.exec(input);
+	return label ? { type: "label", rest: input.slice(label[0].length) } : null;
 }
 
 export function parseCommandPaletteQuery(

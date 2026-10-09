@@ -125,6 +125,7 @@ test("stripActivityCost zeroes every cost surface while keeping the shape", () =
       ],
       summary: { costTotal: 1, requestCount: 1, successCount: 1, errorCount: 0 },
     },
+    totals: { totalTokens: 10, requestCount: 2, successCount: 2, errorCount: 0, costTotal: 2 },
     rankings: {
       llmModels: [
         { provider: "anthropic", model: "claude", totalTokens: 10, requestCount: 1, costTotal: 1 },

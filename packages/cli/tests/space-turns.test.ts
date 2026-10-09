@@ -160,7 +160,7 @@ test("spaces turns ls forwards parsed options to the selected space", async () =
       "node",
       "cohub",
       "-s",
-      "space-1",
+      "7c9e6679-7425-40de-944b-e07fc1f90ae7",
       "spaces",
       "turns",
       "ls",
@@ -173,7 +173,7 @@ test("spaces turns ls forwards parsed options to the selected space", async () =
     console.log = originalLog;
   }
 
-  assert.equal(calledSpaceId, "space-1");
+  assert.equal(calledSpaceId, "7c9e6679-7425-40de-944b-e07fc1f90ae7");
   assert.equal(calledOptions, null);
   assert.match(logs.join("\n"), /next cursor: 6/);
   assert.match(turns.helpInformation(), /Browse turns across the space/);

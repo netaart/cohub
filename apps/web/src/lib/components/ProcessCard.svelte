@@ -7,15 +7,18 @@ import type {
 } from "@cohub/protocol/model";
 import { ChevronDown, ChevronRight, Loader2, RotateCw } from "lucide-svelte";
 import IntermediateMessageBubble from "$lib/components/IntermediateMessageBubble.svelte";
+import SentTurnsChip from "$lib/components/SentTurnsChip.svelte";
+import SentTurnsList from "$lib/components/SentTurnsList.svelte";
 import {
 	formatDurationDetail,
 	formatDurationMs,
 	isDisplayableDurationMs,
 } from "$lib/format-duration";
 import {
+	formatInputTokens,
 	formatTokenCount,
+	formatUsageBreakdown,
 	formatUsageCost,
-	getDisplayInputTokens,
 	getUsageCostTotal,
 	getUsageTotalTokens,
 	sumUsages,
@@ -23,6 +26,8 @@ import {
 import { getLocale } from "$lib/i18n/locale.svelte";
 import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import { NO_SENT_SESSIONS } from "$lib/sent-turns";
+import { useSessionRelations } from "$lib/session-relations-context";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type IntermediateLoadState =
@@ -250,26 +255,16 @@ const intermediateUsage = $derived.by(() => {
 	if (effectiveMessages.length === 0) return null;
 	return sumUsages(effectiveMessages.map((message) => message.usage));
 });
-const usageInputTokens = $derived(getDisplayInputTokens(intermediateUsage));
-const usageCachedTokens = $derived(intermediateUsage?.cacheRead ?? 0);
+const usageInputLabel = $derived(formatInputTokens(intermediateUsage, locale));
 const usageOutputTokens = $derived(intermediateUsage?.output ?? 0);
 const usageTokens = $derived(getUsageTotalTokens(intermediateUsage));
 const usageCostTotal = $derived(getUsageCostTotal(intermediateUsage));
 const usageCostLabel = $derived(
 	usageCostTotal == null ? "" : formatUsageCost(usageCostTotal, locale),
 );
-const usageBreakdownLabel = $derived.by(() => {
-	if (usageInputTokens <= 0 && usageOutputTokens <= 0) return "";
-	const inputLabel =
-		usageInputTokens > 0 ? `↑${formatTokenCount(usageInputTokens)}` : "";
-	const cachedLabel =
-		usageCachedTokens > 0
-			? `(${m.chat_cached({ count: formatTokenCount(usageCachedTokens) }, { locale })})`
-			: "";
-	const outputLabel =
-		usageOutputTokens > 0 ? `↓${formatTokenCount(usageOutputTokens)}` : "";
-	return [inputLabel, cachedLabel, outputLabel].filter(Boolean).join(" ");
-});
+const usageBreakdownLabel = $derived(
+	formatUsageBreakdown(intermediateUsage, locale),
+);
 const intermediateDurationMs = $derived.by(() => {
 	if (!useLiveMetrics) return summary?.durationMs ?? null;
 	const durations = effectiveMessages
@@ -296,21 +291,8 @@ const durationTitle = $derived(
 const usageTitle = $derived.by(() => {
 	if (!intermediateUsage && !durationTitle && !compactionDetailLabel) return "";
 	const parts: string[] = [];
-	if (usageInputTokens > 0) {
-		parts.push(
-			usageCachedTokens > 0
-				? m.chat_input_label(
-						{
-							value: `${formatTokenCount(usageInputTokens)} (${formatTokenCount(usageCachedTokens)} cached)`,
-						},
-						{ locale },
-					)
-				: m.chat_input_label(
-						{ value: formatTokenCount(usageInputTokens) },
-						{ locale },
-					),
-		);
-	}
+	if (usageInputLabel)
+		parts.push(m.chat_input_label({ value: usageInputLabel }, { locale }));
 	if (usageOutputTokens > 0)
 		parts.push(
 			m.chat_output_label(
@@ -368,26 +350,38 @@ const summaryLabel = $derived(
 			? m.process_running({}, { locale })
 			: m.process_title({}, { locale })),
 );
+
+const relations = useSessionRelations();
+const sentSessions = $derived(
+	relations?.sentByTurn(turn.id) ?? NO_SENT_SESSIONS,
+);
 </script>
 
 {#if !expanded}
-	<button type="button" class="flex w-full items-center gap-2 px-2 py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md disabled:cursor-wait disabled:opacity-75" disabled={isLoading} onclick={() => void toggle()} title={usageTitle || undefined}>
+	<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md disabled:cursor-wait disabled:opacity-75" disabled={isLoading} onclick={() => void toggle()} title={usageTitle || undefined}>
 		{#if isLoading}<Loader2 class="w-3.5 h-3.5 text-text-tertiary shrink-0 animate-spin" />{:else}<ChevronRight class="w-3.5 h-3.5 text-text-tertiary shrink-0" />{/if}
 		<span class="text-[13px] text-text-tertiary tabular-nums">{summaryLabel}</span>
+		{#if sentSessions.length > 0}
+			<SentTurnsChip count={sentSessions.length} />
+		{/if}
 	</button>
 {:else}
 	<div class="flex flex-col gap-0">
-		<button type="button" class="flex w-full items-center gap-2 px-2 py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md" onclick={() => void toggle()} title={usageTitle || undefined}>
+		<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md" onclick={() => void toggle()} title={usageTitle || undefined}>
 			<ChevronDown class="w-3.5 h-3.5 text-text-tertiary shrink-0" />
 			<span class="text-[13px] text-text-tertiary tabular-nums">{summaryLabel}</span>
+			{#if sentSessions.length > 0}
+				<SentTurnsChip count={sentSessions.length} />
+			{/if}
 		</button>
+		<SentTurnsList sessions={sentSessions} />
 		<div class="flex flex-col gap-2">
 			{#if loadError}
-				<button type="button" class="mx-2 rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 text-left text-[12px] text-status-error hover:bg-status-error/10" onclick={() => void ensureLoaded()}>
+				<button type="button" class="mx-[var(--chat-msg-inset)] rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 text-left text-[12px] text-status-error hover:bg-status-error/10" onclick={() => void ensureLoaded()}>
 					{loadError} · {m.process_click_retry({}, { locale })}
 				</button>
 			{:else if isSyncing && expandedMessages.length === 0}
-				<button type="button" class="mx-2 flex items-center gap-2 rounded-md border border-border-subtle/80 bg-bg-surface px-3 py-2 text-left text-[12px] text-text-tertiary hover:bg-bg-hover/60" onclick={() => void requestIntermediateSync(true)}>
+				<button type="button" class="mx-[var(--chat-msg-inset)] flex items-center gap-2 rounded-md border border-border-subtle/80 bg-bg-surface px-3 py-2 text-left text-[12px] text-text-tertiary hover:bg-bg-hover/60" onclick={() => void requestIntermediateSync(true)}>
 					<RotateCw class="h-3.5 w-3.5 shrink-0" />
 					<span>{m.process_syncing_steps({}, { locale })}</span>
 				</button>
@@ -396,7 +390,7 @@ const summaryLabel = $derived(
 				<IntermediateMessageBubble message={msg} streaming={streaming} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: msg }) : undefined} {onOpenFile} {onOpenUrl} />
 			{/each}
 		</div>
-		<button type="button" class="flex items-center gap-1.5 px-2 py-1.5 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer text-text-placeholder hover:text-text-tertiary rounded-md self-start" onclick={() => void toggle()}>
+		<button type="button" class="flex items-center gap-1.5 px-[var(--chat-msg-inset)] py-1.5 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer text-text-placeholder hover:text-text-tertiary rounded-md self-start" onclick={() => void toggle()}>
 			<ChevronRight class="w-3 h-3" />
 			<span class="text-[11px]">{m.common_collapse({}, { locale })}</span>
 		</button>

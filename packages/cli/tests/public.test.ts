@@ -24,7 +24,7 @@ async function createFixture() {
 }
 
 function publicUrl(path: string) {
-  return `https://cdn.example/p/space-1/${path.split("/").map(encodeURIComponent).join("/")}`;
+  return `https://cdn.example/p/7c9e6679-7425-40de-944b-e07fc1f90ae7/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 function createUploadClient() {
@@ -81,7 +81,7 @@ test("public upload declares explicit overwrites and prints only the entry URL",
               id: entry.id,
               path: entry.relativePath,
               uploadUrl: `https://upload.example/${entry.id}`,
-              publicUrl: `https://public.example/p/space-1/${entry.relativePath}`,
+              publicUrl: `https://public.example/p/7c9e6679-7425-40de-944b-e07fc1f90ae7/${entry.relativePath}`,
               headers: { "content-type": entry.mimeType ?? "application/octet-stream" },
             })),
           };
@@ -109,7 +109,7 @@ test("public upload declares explicit overwrites and prints only the entry URL",
     return true;
   }) as typeof process.stderr.write;
   try {
-    await program.parseAsync(["node", "cohub", "-s", "space-1", "public", "upload", dist, "demo", "--overwrite"]);
+    await program.parseAsync(["node", "cohub", "-s", "7c9e6679-7425-40de-944b-e07fc1f90ae7", "public", "upload", dist, "demo", "--overwrite"]);
   } finally {
     console.log = originalLog;
     process.stderr.write = originalWrite;
@@ -117,7 +117,7 @@ test("public upload declares explicit overwrites and prints only the entry URL",
 
   assert.equal(received?.overwrite, true);
   assert.equal(uploadedPaths.at(-1), "demo/index.html");
-  assert.deepEqual(logs, ["https://public.example/p/space-1/demo/index.html"]);
+  assert.deepEqual(logs, ["https://public.example/p/7c9e6679-7425-40de-944b-e07fc1f90ae7/demo/index.html"]);
   assert.equal(errors.join(""), "Overwrite enabled for demo/\n");
 });
 
@@ -134,14 +134,14 @@ test("public upload prints the CDN prefix for a directory without an entry file"
   const originalLog = console.log;
   console.log = (...values: unknown[]) => logs.push(values.join(" "));
   try {
-    await program.parseAsync(["node", "cohub", "-s", "space-1", "public", "upload", dist, "demo files"]);
+    await program.parseAsync(["node", "cohub", "-s", "7c9e6679-7425-40de-944b-e07fc1f90ae7", "public", "upload", dist, "demo files"]);
   } finally {
     console.log = originalLog;
   }
 
   assert.deepEqual(logs, [
     "Uploaded 1 file to demo files/",
-    "URL prefix: https://cdn.example/p/space-1/demo%20files/",
+    "URL prefix: https://cdn.example/p/7c9e6679-7425-40de-944b-e07fc1f90ae7/demo%20files/",
   ]);
 });
 
@@ -159,7 +159,7 @@ test("public upload JSON combines one URL prefix with the complete file manifest
   process.argv = [...process.argv, "--json"];
   console.log = (...values: unknown[]) => logs.push(values.join(" "));
   try {
-    await program.parseAsync(["node", "cohub", "-s", "space-1", "public", "upload", dist, "demo"]);
+    await program.parseAsync(["node", "cohub", "-s", "7c9e6679-7425-40de-944b-e07fc1f90ae7", "public", "upload", dist, "demo"]);
   } finally {
     process.argv = originalArgv;
     console.log = originalLog;
@@ -168,7 +168,7 @@ test("public upload JSON combines one URL prefix with the complete file manifest
   assert.equal(logs.length, 1);
   assert.deepEqual(JSON.parse(logs[0] as string), {
     destination: "demo/",
-    urlPrefix: "https://cdn.example/p/space-1/",
+    urlPrefix: "https://cdn.example/p/7c9e6679-7425-40de-944b-e07fc1f90ae7/",
     files: [
       {
         path: "demo/assets/demo.mp4",
@@ -213,7 +213,7 @@ test("public ls follows pagination without exposing cursors", async () => {
   const originalLog = console.log;
   console.log = (...values: unknown[]) => logs.push(values.join(" "));
   try {
-    await program.parseAsync(["node", "cohub", "-s", "space-1", "public", "ls", "demo"]);
+    await program.parseAsync(["node", "cohub", "-s", "7c9e6679-7425-40de-944b-e07fc1f90ae7", "public", "ls", "demo"]);
   } finally {
     console.log = originalLog;
   }

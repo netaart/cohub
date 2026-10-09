@@ -47,8 +47,8 @@ function navClass(active: boolean): string {
 
 <header
 	class={sticky
-		? "sticky top-0 z-30 h-12 border-b border-border-subtle bg-bg-primary/80 backdrop-blur-md"
-		: "h-12 border-b border-border-subtle"}
+		? "safe-area-top sticky top-0 z-30 h-[var(--public-header-height)] border-b border-border-subtle bg-bg-primary/80 backdrop-blur-md"
+		: "safe-area-top h-[var(--public-header-height)] border-b border-border-subtle"}
 >
 	<div class="flex h-full w-full items-center justify-between gap-3 px-3">
 		<a href={zh ? "/zh" : "/"} class="group inline-flex shrink-0 items-center gap-2" aria-label={m.head_home_aria({}, { locale: zh ? "zh-CN" : "en" })}>

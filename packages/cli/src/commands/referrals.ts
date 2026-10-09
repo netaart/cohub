@@ -1,10 +1,10 @@
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
+import { webUrl } from "../web.js";
 
 function referralUrl(code: string) {
-  const origin = process.env.COHUB_WEB_URL?.replace(/\/+$/, "") ?? "https://cohub.live";
-  return `${origin}/referrals/${code}`;
+  return webUrl(`/referrals/${code}`);
 }
 
 async function confirmRotate(opts: { yes?: boolean }): Promise<void> {

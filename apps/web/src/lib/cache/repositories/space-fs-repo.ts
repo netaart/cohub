@@ -103,35 +103,56 @@ function requestValue<T>(request: IDBRequest<T>) {
 	});
 }
 
-function deleteMatchingRecords(
+function deleteIndexRange(
 	store: IDBObjectStore,
-	userKey: string,
-	spaceId: string,
-	dirs: Set<string>,
-	subtrees: Set<string>,
+	indexName: string,
+	range: IDBKeyRange,
 ) {
 	return new Promise<void>((resolve, reject) => {
-		const request = store
-			.index("by_user_space")
-			.openCursor(IDBKeyRange.only([userKey, spaceId]));
+		const request = store.index(indexName).openKeyCursor(range);
 		request.onsuccess = () => {
 			const cursor = request.result;
 			if (!cursor) {
 				resolve();
 				return;
 			}
-			const record = cursor.value as SpaceFsDirCacheRecord;
-			const inSubtree = Array.from(subtrees).some(
-				(prefix) =>
-					!prefix ||
-					record.dirPath === prefix ||
-					record.dirPath.startsWith(`${prefix}/`),
-			);
-			if (dirs.has(record.dirPath) || inSubtree) cursor.delete();
+			store.delete(cursor.primaryKey);
 			cursor.continue();
 		};
 		request.onerror = () => reject(request.error);
 	});
+}
+
+async function deleteMatchingRecords(
+	store: IDBObjectStore,
+	userKey: string,
+	spaceId: string,
+	dirs: Set<string>,
+	subtrees: Set<string>,
+) {
+	if (subtrees.has(""))
+		return deleteIndexRange(
+			store,
+			"by_user_space",
+			IDBKeyRange.only([userKey, spaceId]),
+		);
+	for (const dir of dirs) store.delete(spaceFsDirKey(userKey, spaceId, dir));
+	await Promise.all(
+		Array.from(subtrees, (prefix) => {
+			store.delete(spaceFsDirKey(userKey, spaceId, prefix));
+			// Every dirPath below `prefix/` sorts within [`prefix/`, `prefix0`).
+			return deleteIndexRange(
+				store,
+				"by_user_space_dir",
+				IDBKeyRange.bound(
+					[userKey, spaceId, `${prefix}/`],
+					[userKey, spaceId, `${prefix}0`],
+					false,
+					true,
+				),
+			);
+		}),
+	);
 }
 
 async function readRecord(spaceId: string, dirPath: string) {
@@ -244,14 +265,56 @@ function ensureBroadcastSubscription() {
 	});
 }
 
-async function invalidateRecords(
+type PendingInvalidation = {
+	dirs: Set<string>;
+	subtrees: Set<string>;
+	epoch: Promise<number>;
+};
+
+const pendingInvalidations = new Map<string, PendingInvalidation>();
+const invalidationTails = new Map<string, Promise<unknown>>();
+
+// Targets queued while a transaction runs merge into the next one, in order.
+function invalidateRecords(
+	spaceId: string,
+	dirs: Set<string>,
+	subtrees: Set<string>,
+): Promise<number> {
+	if (dirs.size === 0 && subtrees.size === 0) return readEpoch(spaceId);
+	const userKey = getCacheUserKey();
+	const laneKey = spaceFsEpochKey(userKey, spaceId);
+	const pending = pendingInvalidations.get(laneKey);
+	if (pending) {
+		for (const dir of dirs) pending.dirs.add(dir);
+		for (const subtree of subtrees) pending.subtrees.add(subtree);
+		return pending.epoch;
+	}
+	const previous = invalidationTails.get(laneKey) ?? Promise.resolve();
+	const batch: PendingInvalidation = {
+		dirs: new Set(dirs),
+		subtrees: new Set(subtrees),
+		epoch: previous.then(() => {
+			pendingInvalidations.delete(laneKey);
+			return commitInvalidation(userKey, spaceId, batch.dirs, batch.subtrees);
+		}),
+	};
+	pendingInvalidations.set(laneKey, batch);
+	const tail = batch.epoch.catch(() => undefined);
+	invalidationTails.set(laneKey, tail);
+	void tail.then(() => {
+		if (invalidationTails.get(laneKey) === tail)
+			invalidationTails.delete(laneKey);
+	});
+	return batch.epoch;
+}
+
+async function commitInvalidation(
+	userKey: string,
 	spaceId: string,
 	dirs: Set<string>,
 	subtrees: Set<string>,
 ) {
-	if (dirs.size === 0 && subtrees.size === 0) return readEpoch(spaceId);
 	ensureBroadcastSubscription();
-	const userKey = getCacheUserKey();
 	const epochKey = spaceFsEpochKey(userKey, spaceId);
 	const fallbackEpoch = (epochs.get(epochKey) ?? 0) + 1;
 	const result = await idbRunTransaction(

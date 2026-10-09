@@ -1,3 +1,5 @@
+export * from "./text-match.js";
+
 /** Family names are provider-owned strings. Keep only the active family as a
  * constant; new families should not require a protocol-package release. */
 export const WORKSPACE_CANDIDATE_INDEX_FAMILY = "workspace.candidates";

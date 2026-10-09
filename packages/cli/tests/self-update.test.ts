@@ -4,7 +4,14 @@ import { constants } from "node:os";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { exitCodeForChild } from "../src/launcher.js";
-import { resolveSelfUpdateResult } from "../src/self-update.js";
+import { isNewerVersion, resolveSelfUpdateResult } from "../src/self-update.js";
+
+test("self-update reinstalls only for a strictly newer release", () => {
+  assert.equal(isNewerVersion("8.4.0", "8.4.0"), false);
+  assert.equal(isNewerVersion("8.3.9", "8.4.0"), false);
+  assert.equal(isNewerVersion("8.10.0", "8.9.0"), true);
+  assert.equal(isNewerVersion("not a version", "8.4.0"), false);
+});
 
 test("self-update only relaunches when the installed version changes", () => {
   assert.equal(resolveSelfUpdateResult("3.8.1", "3.8.1", false), "current");

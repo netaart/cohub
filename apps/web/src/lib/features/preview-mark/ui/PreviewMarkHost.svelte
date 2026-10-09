@@ -640,6 +640,8 @@ onDestroy(() => {
 		max-height: 100%;
 		flex-direction: column;
 		overflow: hidden;
+		padding-top: env(safe-area-inset-top, 0px);
+		--safe-area-top: 0px;
 		background: var(--bg-content);
 		outline: none;
 	}
@@ -648,6 +650,7 @@ onDestroy(() => {
 			width: min(960px, 100%);
 			height: min(800px, 100%);
 			max-height: min(90dvh, 100%);
+			padding-top: 0;
 			border: 1px solid var(--border-subtle);
 			border-radius: 10px;
 			box-shadow: 0 24px 64px

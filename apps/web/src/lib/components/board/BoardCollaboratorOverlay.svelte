@@ -1,14 +1,12 @@
 <script lang="ts">
 import type { BoardViewport } from "@neta-art/cohub/board";
 import { Bot, Check, Scan, Smartphone, Terminal } from "lucide-svelte";
+import { identityColor } from "$lib/avatar-identity";
 import type {
 	BoardAutomationActivity,
 	BoardCollaboratorProfile,
 } from "$lib/board/board-activity";
-import {
-	collaborationColorToken,
-	type RemoteBoardAwarenessPeer,
-} from "$lib/board/board-awareness";
+import type { RemoteBoardAwarenessPeer } from "$lib/board/board-awareness";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { getModelDisplayName } from "$lib/model-catalog";
@@ -23,7 +21,6 @@ type Props = {
 	surface: { width: number; height: number };
 	cursorVisibleMs: number;
 	isMobile: boolean;
-	/** Only Agent activity bound to a chat turn is actionable. */
 	onOpenActivity?: (activity: BoardAutomationActivity) => void;
 };
 
@@ -40,7 +37,6 @@ let {
 
 const locale = $derived(getLocale());
 
-/** Touch has no hover: hold the released contact long enough to be understood. */
 const TOUCH_HOLD_MS = 1_500;
 const TOUCH_FADE_MS = 250;
 const CURSOR_LABEL_MS = 2_500;
@@ -48,27 +44,8 @@ const EDGE_INSET = 14;
 
 let now = $state(Date.now());
 
-/** Coarse enough for a fade and a label flip; fine enough to look immediate. */
 const TICK_MS = 100;
 
-/**
- * Only cursors are time-driven, and only briefly.
- *
- * The fades themselves are CSS transitions, so this clock exists for the few
- * discrete moments the *model* changes: a released touch finishing its fade, the
- * name label timing out, a peer going stale. Automation markers are excluded
- * outright — the controller expires those on its own timer and removes them from
- * the list, so ticking for them would be pure overhead.
- */
-/**
- * When the cursor model next changes on its own.
- *
- * Only genuinely transient things belong here: a released touch finishing its
- * fade, and a name label timing out. The 5s visibility cutoff is deliberately
- * *not* included — heartbeats re-arm it every 2s, so counting it would keep this
- * timer alive for as long as anyone has a cursor. The controller already prunes
- * on its own 1s interval, which is what retires a peer that went quiet.
- */
 const pendingCursorDeadline = $derived.by(() => {
 	let deadline = 0;
 	for (const peer of peers) {
@@ -87,8 +64,6 @@ const pendingCursorDeadline = $derived.by(() => {
 });
 
 $effect(() => {
-	// Read the deadline (tracked) but not `now` (untracked), so the timer is
-	// rebuilt when peer state changes — not on every one of its own ticks.
 	const deadline = pendingCursorDeadline;
 	if (deadline <= Date.now()) return;
 	const timer = setInterval(() => {
@@ -116,7 +91,7 @@ function avatarUrl(actorId: string) {
 function cursorAction(peer: RemoteBoardAwarenessPeer): string | null {
 	const gesture = peer.gesture;
 	if (gesture?.kind === "draw") return m.collab_drawing({}, { locale });
-	if (gesture?.kind === "connection")
+	if (gesture?.kind === "arrow" && gesture.startItemId)
 		return m.collab_connecting({}, { locale });
 	if (gesture?.kind === "arrow" || gesture?.kind === "box")
 		return m.collab_creating({}, { locale });
@@ -138,7 +113,6 @@ $effect(() => {
 	void modelsCatalogStore.load().catch(() => undefined);
 });
 
-/** One honest location per human: input first, then the mobile viewport. */
 const cursors = $derived.by(() => {
 	return peers.flatMap((peer) => {
 		if (now - peer.lastSeenAt > cursorVisibleMs) return [];
@@ -185,10 +159,11 @@ const cursors = $derived.by(() => {
 		return [
 			{
 				key: peer.connectionId,
+				actorId: peer.actorId,
 				name: displayName(peer.actorId, peer.actorName),
 				action,
 				avatar: avatarUrl(peer.actorId),
-				color: `var(${collaborationColorToken(peer.actorId)})`,
+				color: identityColor(peer.actorId),
 				pointerType: cursor?.pointerType ?? null,
 				viewportMode,
 				mobile,
@@ -213,13 +188,6 @@ const cursors = $derived.by(() => {
 	});
 });
 
-/**
- * CLI / Agent markers.
- *
- * These have no pointer, so they are anchored to the top-left of whatever the
- * transaction touched and deliberately shaped differently from a human cursor —
- * automation should not masquerade as a person.
- */
 const automation = $derived.by(() => {
 	return activities.flatMap((activity) => {
 		const screen = toScreen(activity.focus);
@@ -232,7 +200,6 @@ const automation = $derived.by(() => {
 			Math.max(surface.height - EDGE_INSET, EDGE_INSET),
 		);
 		const name = displayName(activity.actorId, "Someone");
-		// Only an agent turn has somewhere to navigate to.
 		const actionable =
 			activity.kind === "agent" && Boolean(activity.source.sessionId);
 		const modelName = activity.model
@@ -256,7 +223,7 @@ const automation = $derived.by(() => {
 				title: actionable
 					? `${label} \u2014 ${m.collab_open_chat({}, { locale })}`
 					: label,
-				color: `var(${collaborationColorToken(activity.actorId)})`,
+				color: identityColor(activity.actorId),
 				avatar: avatarUrl(activity.actorId),
 				name,
 				actionable,
@@ -270,6 +237,7 @@ const automation = $derived.by(() => {
 </script>
 
 {#snippet ActivityBody(marker: {
+	activity: BoardAutomationActivity;
 	kind: "cli" | "agent";
 	label: string;
 	name: string;
@@ -291,7 +259,7 @@ const automation = $derived.by(() => {
 		{/if}
 	</span>
 	<span class="collab-activity-label">{marker.label}</span>
-	<UserAvatar name={marker.name} avatarUrl={marker.avatar} size="xxs" class="collab-activity-avatar" />
+	<UserAvatar name={marker.name} avatarUrl={marker.avatar} seed={marker.activity.actorId} size="xxs" class="collab-activity-avatar" />
 {/snippet}
 
 <div class="collab-overlay">
@@ -325,7 +293,7 @@ const automation = $derived.by(() => {
 
 			<span class="collab-tag">
 				<span class="collab-avatar-wrap">
-					<UserAvatar name={cursor.name} avatarUrl={cursor.avatar} size="xs" class="collab-avatar" />
+					<UserAvatar name={cursor.name} avatarUrl={cursor.avatar} seed={cursor.actorId} size="xs" class="collab-avatar" />
 					{#if cursor.mobile}
 						<span class="collab-badge"><Smartphone class="h-2 w-2" /></span>
 					{/if}
@@ -365,8 +333,6 @@ const automation = $derived.by(() => {
 </div>
 
 <style>
-	/* Screen-space layer above the canvas. Never intercepts board input: only the
-	   agent chip opts back in via pointer-events. */
 	.collab-overlay {
 		position: absolute;
 		inset: 0;
@@ -386,8 +352,6 @@ const automation = $derived.by(() => {
 		will-change: transform;
 	}
 
-	/* Network updates are throttled, so smooth between samples. Transform only,
-	   to stay off the layout/paint path. */
 	.collab-cursor {
 		transition: transform 90ms linear, opacity 160ms ease-out;
 	}
@@ -410,8 +374,6 @@ const automation = $derived.by(() => {
 		filter: drop-shadow(0 1px 2px var(--shadow-medium));
 	}
 
-	/* Touch gets a contact ring rather than an arrow — a fingertip is an area,
-	   not a point, and the ring keeps the content under it readable. */
 	.collab-touch-ring {
 		position: relative;
 		display: block;
@@ -436,8 +398,6 @@ const automation = $derived.by(() => {
 		background: var(--collab-color);
 	}
 
-	/* Lifted finger: drop the solid centre so the ring reads as "last touch"
-	   rather than "still pressing". */
 	.collab-touch-ring--released::after {
 		opacity: 0;
 	}
@@ -486,8 +446,6 @@ const automation = $derived.by(() => {
 		box-shadow: 0 0 0 1.5px var(--collab-color);
 	}
 
-	/* Small device hint on the avatar, so "who" and "on what" read as one unit
-	   instead of adding another floating label. */
 	.collab-badge {
 		position: absolute;
 		right: -3px;
@@ -517,8 +475,6 @@ const automation = $derived.by(() => {
 		line-height: 1.5;
 	}
 
-	/* Automation is intentionally chip-shaped, not cursor-shaped: it has no
-	   pointer, and pretending otherwise would misrepresent what happened. */
 	.collab-activity {
 		transition:
 			transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -570,7 +526,6 @@ const automation = $derived.by(() => {
 		color: var(--collab-color);
 	}
 
-	/* Agent-via-CLI reads as one idea: bot with a terminal corner mark. */
 	.collab-activity-corner {
 		position: absolute;
 		right: -3px;

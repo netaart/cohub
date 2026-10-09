@@ -64,6 +64,8 @@ $effect(() => {
 		z-index: 50;
 		width: 100%;
 		height: 100%;
+		padding-top: env(safe-area-inset-top, 0px);
+		--safe-area-top: 0px;
 	}
 
 	.workspace-preview-pane--closed {
@@ -74,6 +76,7 @@ $effect(() => {
 		.workspace-preview-pane {
 			position: relative;
 			z-index: auto;
+			padding-top: 0;
 			width: var(--workspace-preview-width, 480px);
 			flex-shrink: 0;
 			border-left-width: 1px;

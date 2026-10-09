@@ -1,4 +1,5 @@
 import { triggerBlobDownload, triggerUrlDownload } from "$lib/browser-download";
+import { hostSavesFiles } from "$lib/host-files";
 
 export type DownloadableMedia = {
 	src: string;
@@ -63,6 +64,10 @@ export function mediaFilename(media: DownloadableMedia): string {
  */
 export async function downloadMedia(media: DownloadableMedia) {
 	const filename = mediaFilename(media);
+	if (hostSavesFiles() && /^https:/i.test(media.src)) {
+		triggerUrlDownload(media.src, filename);
+		return;
+	}
 	try {
 		const response = await fetch(media.src, { cache: "no-store" });
 		if (!response.ok) throw new Error(`HTTP ${response.status}`);

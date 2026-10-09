@@ -12,7 +12,7 @@ import { cors } from "hono/cors";
 import { getCookie } from "hono/cookie";
 import { httpInstrumentationMiddleware } from "@hono/otel";
 
-import { applyTraceResponseHeaders, getActiveTraceIdentifiers, getOrCreateRequestId, runWithRequestTraceContext, setRequestContextAttributes } from "@cohub/infra/tracing";
+import { applyTraceResponseHeaders, getActiveTraceIdentifiers, getOrCreateRequestId, runWithRequestTraceContext, serviceNameFromEnv, setRequestContextAttributes } from "@cohub/infra/tracing";
 import { verifyUserAccessToken } from "@cohub/identity";
 
 import { getTokenFromRequest, type AuthUserProfile, consumeExecutionAuthFromToken, type ExecutionAuthPrincipal } from "./auth.js";
@@ -47,7 +47,7 @@ const app = new Hono<{
 app.use(
   "*",
   httpInstrumentationMiddleware({
-    serviceName: "cohub-api",
+    serviceName: serviceNameFromEnv("cohub-api"),
     serviceVersion: process.env.IMAGE_TAG ?? "latest",
   }),
 );

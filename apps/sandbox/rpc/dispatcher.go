@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -19,9 +20,11 @@ import (
 	"github.com/google/uuid"
 	ignore "github.com/sabhiram/go-gitignore"
 
+	"github.com/cohub/apps/sandbox/display"
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/process"
 	"github.com/cohub/apps/sandbox/protocol"
+	"github.com/cohub/apps/sandbox/rtc"
 	"github.com/cohub/apps/sandbox/search"
 )
 
@@ -39,6 +42,9 @@ type Dispatcher struct {
 	gitignoreMu    sync.Mutex
 	gitignoreCache *gitignoreCacheEntry
 	searchManager  *search.Manager
+	displays       *display.Hub
+	sessions       *rtc.Manager
+	virtual        *display.Virtual
 }
 
 type gitignoreMatcher struct {
@@ -162,6 +168,8 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
 		return accepted, d.complete(request, accepted.OpID, d.handleProcessAbort(request))
+	case "display.list", "display.capture", "display.input", "display.tree", "display.start", "display.stop", "rtc.open", "rtc.close":
+		return accepted, d.complete(request, accepted.OpID, d.handleDisplay(request, ownerIdentity))
 	default:
 		return accepted, d.failed(request, accepted.OpID, "UNSUPPORTED_METHOD", fmt.Sprintf("unsupported method: %s", request.Method))
 	}
@@ -891,6 +899,14 @@ func (d *Dispatcher) handleFSFind(request protocol.RPCRequest) interface{} {
 		limit = 1000
 	}
 
+	if !HasFd() {
+		matches, err := nativeFind(resolved.path, params, d.cfg.WorkspaceDir, limit)
+		if err != nil {
+			return d.failed(request, "", "IO_ERROR", err.Error())
+		}
+		return findResult(resolved.path, matches, limit)
+	}
+
 	args := []string{"--color=never"}
 	switch params.Mode {
 	case "glob":
@@ -944,13 +960,16 @@ func (d *Dispatcher) handleFSFind(request protocol.RPCRequest) interface{} {
 			matches = append(matches, filepath.ToSlash(relativePath))
 		}
 	}
+	return findResult(resolved.path, matches, limit)
+}
+
+func findResult(path string, matches []string, limit int) map[string]interface{} {
 	truncated := len(matches) > limit
 	if truncated {
 		matches = matches[:limit]
 	}
-
 	return map[string]interface{}{
-		"path":      resolved.path,
+		"path":      path,
 		"matches":   matches,
 		"truncated": truncated,
 	}
@@ -1090,6 +1109,18 @@ func (d *Dispatcher) handleFSGrep(request protocol.RPCRequest) interface{} {
 		limit = 100
 	}
 
+	if !HasRipgrep() {
+		displayRoot := strings.TrimSpace(params.Path)
+		if displayRoot == "" {
+			displayRoot = "."
+		}
+		lines, err := nativeGrep(resolved.path, displayRoot, params, d.cfg.WorkspaceDir, limit)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return d.failed(request, "", "IO_ERROR", err.Error())
+		}
+		return grepResult(resolved.path, lines, limit)
+	}
+
 	args := []string{"--line-number", "--color=never"}
 	if params.Hidden {
 		args = append(args, "--hidden")
@@ -1182,13 +1213,19 @@ func (d *Dispatcher) handleFSGrep(request protocol.RPCRequest) interface{} {
 		}
 		lines = append(lines, line)
 	}
+	return grepResult(resolved.path, lines, limit)
+}
+
+func grepResult(path string, lines []string, limit int) map[string]interface{} {
+	if lines == nil {
+		lines = []string{}
+	}
 	truncated := len(lines) > limit
 	if truncated {
 		lines = lines[:limit]
 	}
-
 	return map[string]interface{}{
-		"path":      resolved.path,
+		"path":      path,
 		"lines":     lines,
 		"truncated": truncated,
 	}

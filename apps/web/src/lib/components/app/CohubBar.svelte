@@ -19,6 +19,7 @@ export type CohubBarSpace = {
 };
 
 export type CohubBarOwner = {
+	userUuid?: string | null;
 	username: string | null;
 	displayName: string;
 	avatarUrl?: string | null;
@@ -75,7 +76,7 @@ const totalViewsTitle = $derived(
   controls hidden under the bar. See `AppSurface` for the height contract.
 -->
 <header
-	class="cohub-bar relative z-40 flex shrink-0 items-center gap-3 border-b border-border-subtle bg-bg-primary px-3 text-[11px] text-text-tertiary sm:px-4"
+	class="relative z-40 flex min-h-12 shrink-0 items-center gap-3 border-b border-border-subtle bg-bg-primary px-3 text-[11px] text-text-tertiary sm:px-4"
 >
 	<div class="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
 		<a
@@ -97,8 +98,8 @@ const totalViewsTitle = $derived(
 			<SpaceAvatar
 				name={spaceName}
 				profile={space?.publicProfile}
+				seed={space?.id}
 				size="xs"
-				class="translate-y-0"
 			/>
 			<span class="min-w-0 truncate font-medium leading-none text-text-secondary"
 				>{spaceName}</span
@@ -137,22 +138,10 @@ const totalViewsTitle = $derived(
 			name={publisherName}
 			avatarUrl={publisherAvatarUrl}
 			username={publisher?.username}
+			seed={publisher?.userUuid}
 			size="xs"
 			class="min-w-0 text-text-secondary"
-			avatarClass="h-5 w-5 rounded-full bg-bg-elevated text-[8px]"
 			nameClass="hidden max-w-32 truncate font-medium leading-none sm:inline"
 		/>
 	</div>
 </header>
-
-<style>
-	/*
-	 * The bar owns the top safe area (notch / status bar): it grows instead of
-	 * pushing its own content under the inset, and the App below absorbs the
-	 * difference because the surface is a flex column.
-	 */
-	.cohub-bar {
-		padding-top: env(safe-area-inset-top, 0px);
-		min-height: calc(3rem + env(safe-area-inset-top, 0px));
-	}
-</style>

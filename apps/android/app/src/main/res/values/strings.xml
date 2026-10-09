@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sign_in_failed">Couldn\'t complete sign-in. Please try again.</string>
+    <string name="no_app_for_link">No app can open this link.</string>
+    <string name="bridge_unavailable">This device\'s WebView is out of date; native features are unavailable.</string>
+    <string name="web_view_recovering">The page crashed and is reloading.</string>
+    <string name="file_saved">Saved to %1$s</string>
+    <string name="file_save_failed">Couldn\'t save the file.</string>
+    <string name="runtime_channel">Local Runtime</string>
+    <string name="runtime_title">Cohub is connected to this device</string>
+    <plurals name="runtime_ready">
+        <item quantity="one">Agents can work in %d folder.</item>
+        <item quantity="other">Agents can work in %d folders.</item>
+    </plurals>
+    <string name="runtime_connecting">Connecting…</string>
+    <string name="runtime_disconnect">Disconnect all</string>
+    <string name="display_sharing">Sharing this screen with a Space</string>
+    <string name="display_sharing_control">Sharing this screen; the Space can control it</string>
+    <string name="display_stop">Stop sharing</string>
+    <string name="display_control_restricted">Tap ⋮ and choose Allow restricted settings, then turn on Cohub in Accessibility.</string>
+    <string name="display_control_description">Lets a Space you share this screen with read the controls on it, and tap, swipe and type. It only works while you share the screen, and only on what you can see.</string>
+</resources>

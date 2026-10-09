@@ -45,6 +45,9 @@ CI (`.github/workflows/sandbox-binaries-build.yml`) cross-compiles common platfo
 - Each platform produces `cohub-sandboxd_<version>_<os>_<arch>.tar.gz` + `.sha256`, plus an aggregated `SHA256SUMS.txt`
 - The version is injected via `-ldflags -X main.buildVersion=<tag>`; inside containers the `COHUB_SANDBOX_VERSION` env var takes precedence and the legacy `IMAGE_VERSION` is accepted
 - Windows is not supported yet (process group management depends on Unix syscalls; platform support to follow)
+- Android is built by the app's Gradle build, not this workflow: `:app:buildSandboxd` cross-compiles
+  `apps/sandbox` with Go and the NDK (cgo, for bionic's resolver) into the APK's native library
+  directory, the one place an app may execute its own binaries. See [Local Runtime](local-runtime.md#android-device--android-设备)
 - Artifacts are attached to the GitHub Release (private repo, internal downloads only) and uploaded to the public CDN `https://public.cohub.live/sandboxd/<version>/` (the CLI download source)
 
 ### Managed download (CLI)
@@ -57,6 +60,22 @@ public CDN for the current `os/arch`, verifies `.sha256`, and caches it under
 - `COHUB_SANDBOXD_BIN` overrides the binary path (local `go build` / offline / self-built)
 - `COHUB_SANDBOXD_CDN_BASE_URL` overrides the download source (staging / self-hosted)
 - Concurrent `up` runs use an atomic mkdir lock to avoid duplicate downloads; a checksum mismatch is rejected outright
+
+### Managed control pipe
+
+Under a supervisor (`COHUB_RUNTIME_MANAGED=1`) refreshed tokens arrive as JSON lines on stdin and
+lifecycle events (`hello`, `connected`, `disconnected`) leave on fd 3; `COHUB_RUNTIME_CONTROL_FD`
+selects another descriptor (the Android app uses 2, stderr). Logs always stay on stdout.
+
+### Optional executables
+
+The sandbox needs nothing beyond a POSIX system. String commands run with `bash` where it is installed
+and `sh` otherwise. `fd` and `rg` only accelerate `fs.find` / `fs.grep`: without them the sandbox walks
+the tree itself with the same defaults (`.gitignore` / `.ignore` files including nested and ancestor ones,
+hidden files, `.git` skipped, symlinks not followed, unreadable directories skipped, binary files skipped,
+fd's smart case, ripgrep's `--glob`, context and `--json` events). Parity tests run both against the real
+tools when they are installed. The heartbeat reports `processRg` / `processFd`, and the agent runs them
+through `process.start` only when present; older sandboxes omit the flags and ship both.
 
 ## Current transport mode
 
@@ -148,8 +167,8 @@ pnpm dev
 - `edit` -> agent-side diff + remote read/write
 - `bash` -> `process.start` / `process.abort`
 - `ls` -> `fs.stat` + `fs.ls`
-- `find` -> `fs.stat` + `fs.find`
-- `grep` -> `fs.grep`
+- `find` -> `process.start` (`fd`) when `processFd`, otherwise `fs.find`
+- `grep` -> `process.start` (`rg`) when `processRg`, otherwise `fs.grep`
 
 ## Web/API filesystem (local sandbox, M4)
 

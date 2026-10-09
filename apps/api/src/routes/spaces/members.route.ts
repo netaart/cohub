@@ -9,6 +9,7 @@ import { isRoleLowerThan } from "@cohub/core/permissions";
 import { hasPermission, getRoleForSpaceUser } from "../../permissions.js";
 import { getSpaceById } from "../../space-sessions.js";
 import { fallbackPublicUserProfile } from "../../user-profiles.js";
+import { dispatchSpaceListChanged } from "../../space-list-events.js";
 import { createLogger } from "@cohub/infra/logging";
 
 
@@ -124,6 +125,7 @@ router.put("/", async (c) => {
   });
 
   cleanupGatewayBindings(spaceChannelIdsToUnbind);
+  await dispatchSpaceListChanged(spaceId, [targetUserId]);
 
   return c.json(member);
 });
@@ -165,6 +167,7 @@ router.delete("/", async (c) => {
     return spaceChannelIds;
   });
   cleanupGatewayBindings(spaceChannelIdsToUnbind);
+  await dispatchSpaceListChanged(spaceId, [targetUserId]);
 
   return c.json({ ok: true });
 });

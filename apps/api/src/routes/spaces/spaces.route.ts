@@ -4,8 +4,9 @@ import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { fileWatcherStatusSchema, getDefaultSpaceModsForEnv, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
+  HOME_SPACE_SLUG,
   parseSpaceSlug,
   validatePublicIdentifierAssignment,
 } from "@cohub/protocol/public-identifiers";
@@ -13,17 +14,9 @@ import { normalizeGenerationPolicy, type GenerationContentBlock } from "@cohub/p
 import * as cronParser from "cron-parser";
 import { db } from "../../db/index.js";
 import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/postgres-error.js";
-import {
-  userChannels,
-  spaceChannels,
-  spaces,
-  taskRuns,
-  spaceSessions,
-  spaceMembers,
-  userProfiles,
-  sessionTurns,
-} from "@cohub/db";
+import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
+import { hostPromptImages } from "../../session-images.js";
 import { useAuth, getOptionalAuth, getAppSessionPrincipal, requireValidId, buildSpaceListItems, authzDenied, getSpacePublicProfile, normalizePublicAvatarUrl } from "../../lib/middleware.js";
 import { config } from "../../config.js";
 import { scheduleSandboxAutoDestroy } from "../../sandbox-idle-scheduler.js";
@@ -59,10 +52,11 @@ import { syncSpaceChannelConfigCache, getSpaceChannelsBySpaceId, bindSpaceChanne
 import { fallbackBoundChannelHealth, getChannelHealthMap } from "../../channel-health.js";
 import { createCronJob, enqueueTask } from "../../tasks.js";
 import { RUN_COMMAND_TASK_TYPE } from "@cohub/core/commands";
+import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
-import { assignLabelsToSession, getPinnedSpaceIds, parseLabelRefs, resolveLabelPaths, resolveOrCreateLabelPaths } from "@cohub/core/labels";
+import { assignLabelsToSession, parseLabelRefs, resolveLabelPaths, resolveOrCreateLabelPaths } from "@cohub/core/labels";
 import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
-import { hasPermission, getSpaceMemberRole, filterSessionsByPermission, resolvePermissionAccess, asAccountIdentity, listAccessibleSpaceIds } from "../../permissions.js";
+import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, resolvePermissionAccess } from "../../permissions.js";
 import { checkpoints } from "@cohub/db";
 import { LogtoUserRequiredError } from "../../user-profiles.js";
 import {
@@ -73,9 +67,11 @@ import {
 import { checkpointFsJsonError, listCheckpointDirectory, readCheckpointFile } from "../../checkpoint-fs.js";
 import type { AuthUser } from "../../lib/middleware.js";
 import { submitSessionPrompt } from "../../session-prompts.js";
+import { dispatchSpaceListChanged } from "../../space-list-events.js";
+import { decodeSpaceListCursor, isSpaceListFilter, listLegacySpaces, listMemberSpaces, listRecentSpaces, parseSpaceVisits, type SpaceListRow } from "../../space-list.js";
 import { getRuntimeRegistration, getSessionRuntimeRecovery, confirmRuntimeStopped } from "../../runtime.js";
 import runtimeArchivesRouter from "./runtime-archives.route.js";
-import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError } from "@cohub/core/sessions";
+import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, PromptEnvValidationError, resolveSessionTurnOrigin } from "@cohub/core/sessions";
 import { delegatedPromptAuthFromAppSession, promptAuthContextFromAppSession } from "../../prompt-auth-context.js";
 import { buildSessionTurnResponse } from "../../session-turn-response.js";
 import { getSessionTurnById, hydrateTurnAuthorProfiles } from "../../session-turns.js";
@@ -84,7 +80,8 @@ import { dispatchTurnUpdated } from "../../session-output.js";
 import { enqueueAgentTurnJob } from "../../agent-turn-queue.js";
 import { requestAgentTurnAbort } from "../../agent-turn-abort.js";
 import { dispatchLabelAssignmentsUpdated } from "../../realtime-events.js";
-import { listSessionForksForSessions, redactSessionForksForViewer } from "../../session-forks.js";
+import { listSessionForksForSessions } from "../../session-forks.js";
+import { redactSessionForksForViewer } from "../../session-fork-visibility.js";
 import { fallbackPublicUserProfile, getProfilesByUuids } from "../../user-profiles.js";
 import { SYSTEM_ENV_KEY_SET } from "@cohub/protocol/sandbox";
 import { prepareSpaceModInserts, spaceModErrorResponse, type CreateSpaceModInput } from "../../space-mods.js";
@@ -208,16 +205,17 @@ async function promoteQueuedTurnToSteer(input: {
       updatedAt: now,
     }).where(eq(sessionTurns.id, target.id));
 
-    const [activeTurn] = await tx.select({ id: sessionTurns.id, status: sessionTurns.status, meta: sessionTurns.meta }).from(sessionTurns).where(and(eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"]))).orderBy(desc(sessionTurns.sequence)).limit(1);
+    const [activeTurn] = await tx.select({ id: sessionTurns.id, status: sessionTurns.status }).from(sessionTurns).where(and(eq(sessionTurns.sessionId, input.sessionId), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"]))).orderBy(desc(sessionTurns.sequence)).limit(1);
     if (activeTurn && activeTurn.id !== target.id) {
+      // Merge, not rewrite: the row is unlocked and children may append `messagesSent`.
+      const abortMeta = sanitizeMeta({
+        abortRequestedAt: now.toISOString(),
+        continuedByTurnId: target.id,
+        abortActorUserId: input.actorUserId,
+      });
       await tx.update(sessionTurns).set({
         status: "abort_requested",
-        meta: sanitizeMeta({
-          ...readMetaRecord(activeTurn.meta),
-          abortRequestedAt: now.toISOString(),
-          continuedByTurnId: target.id,
-          abortActorUserId: input.actorUserId,
-        }),
+        meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(abortMeta)}::jsonb`,
         updatedAt: now,
       }).where(and(eq(sessionTurns.id, activeTurn.id), eq(sessionTurns.executionKind, "agent"), inArray(sessionTurns.status, ["running", "abort_requested"])));
     }
@@ -344,7 +342,6 @@ const DEFAULT_SPACE_SANDBOX_AUTO_DESTROY: SpaceSandboxAutoDestroyPolicy = {
 const MIN_SPACE_SANDBOX_AUTO_DESTROY_TTL_SECONDS = 60;
 const MAX_SPACE_SANDBOX_AUTO_DESTROY_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SPACE_DESCRIPTION_LENGTH = 10_000;
-const HOME_SPACE_SLUG = "home";
 const HOME_SPACE_NAME = "Home";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -374,20 +371,6 @@ const uniqueViolationConstraint = (error: unknown): string | null =>
   isPostgresUniqueViolation(error) ? getPostgresErrorConstraint(error) : null;
 
 type SpaceRow = typeof spaces.$inferSelect;
-
-function compareSpaceActivityDesc(left: SpaceRow, right: SpaceRow): number {
-  const leftActivity = left.lastActivityAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  const rightActivity = right.lastActivityAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  if (leftActivity !== rightActivity) return rightActivity - leftActivity;
-
-  const leftCreated = left.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  const rightCreated = right.createdAt?.getTime() ?? Number.NEGATIVE_INFINITY;
-  return rightCreated - leftCreated;
-}
-
-function selectMostRecentSpace(candidates: Array<SpaceRow | null | undefined>): SpaceRow | null {
-  return candidates.filter((space): space is SpaceRow => Boolean(space)).sort(compareSpaceActivityDesc)[0] ?? null;
-}
 
 const readSpaceConfig = (space: typeof spaces.$inferSelect) => {
   const meta = isRecord(space.meta) ? space.meta : {};
@@ -586,71 +569,34 @@ async function findOwnedHomeSpace(userUuid: string): Promise<SpaceRow | null> {
   return ownedHome ?? null;
 }
 
-async function findOwnedRecentSpace(userUuid: string): Promise<SpaceRow | null> {
-  const [ownedRecent] = await db
+async function findLandingSpace(userUuid: string): Promise<SpaceRow | null> {
+  const home = await findOwnedHomeSpace(userUuid);
+  if (home) return home;
+  const [recent] = await db
     .select()
     .from(spaces)
     .where(eq(spaces.userUuid, userUuid))
-    .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, desc(spaces.createdAt))
+    .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, sql`${spaces.createdAt} desc nulls last`)
     .limit(1);
-  return ownedRecent ?? null;
-}
-
-/** After a unique conflict, prefer the real home slug, then any owned space. */
-async function resolveHomeEnsureConflict(userUuid: string, reason: string): Promise<SpaceRow | null> {
-  const home = await findOwnedHomeSpace(userUuid);
-  if (home) return home;
-  const recent = await findOwnedRecentSpace(userUuid);
-  if (recent) {
-    logger.warn("[DefaultSpace] home ensure conflict without slug=home", {
-      userUuid,
-      reason,
-      spaceId: recent.id,
-      name: recent.name,
-      slug: recent.slug,
-    });
-  }
-  return recent;
-}
-
-async function findDefaultSpaceCandidate(userUuid: string): Promise<SpaceRow | null> {
-  // Hot path: most accounts already have a home space.
-  const [[ownedHome], [memberHome]] = await Promise.all([
-    db
-      .select()
-      .from(spaces)
-      .where(and(eq(spaces.userUuid, userUuid), eq(spaces.slug, HOME_SPACE_SLUG)))
-      .limit(1),
-    db
-      .select({ space: spaces })
-      .from(spaceMembers)
-      .innerJoin(spaces, eq(spaces.id, spaceMembers.spaceId))
-      .where(and(eq(spaceMembers.userId, userUuid), eq(spaces.slug, HOME_SPACE_SLUG)))
-      .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, desc(spaces.createdAt))
-      .limit(1),
-  ]);
-  const homeSpace = selectMostRecentSpace([ownedHome, memberHome?.space]);
-  if (homeSpace) return homeSpace;
-
-  const [[ownedRecent], [memberRecent]] = await Promise.all([
-    db
-      .select()
-      .from(spaces)
-      .where(eq(spaces.userUuid, userUuid))
-      .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, desc(spaces.createdAt))
-      .limit(1),
-    db
-      .select({ space: spaces })
-      .from(spaceMembers)
-      .innerJoin(spaces, eq(spaces.id, spaceMembers.spaceId))
-      .where(eq(spaceMembers.userId, userUuid))
-      .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, desc(spaces.createdAt))
-      .limit(1),
-  ]);
-  return selectMostRecentSpace([ownedRecent, memberRecent?.space]);
+  return recent ?? null;
 }
 
 type PreparedHomeMods = Awaited<ReturnType<typeof prepareSpaceModInserts>>;
+
+type HomeEnsureProvenance = {
+  source: "default_ensure" | "home_ensure";
+  appId?: string | null;
+};
+
+const homeEnsureMeta = (c: Context, provenance: HomeEnsureProvenance): Record<string, unknown> => {
+  const via = getRequestSource(c)?.via;
+  const meta = {
+    createdSource: provenance.source,
+    ...(via ? { createdVia: via } : {}),
+    ...(provenance.appId ? { createdByAppId: provenance.appId } : {}),
+  };
+  return applyRequestSourceToMeta(c, meta) ?? meta;
+};
 
 const HOME_BOOTSTRAP: SpaceBootstrapSource = { type: "blank" };
 
@@ -667,6 +613,7 @@ async function insertHomeSpaceRecord(
   user: AuthUser,
   preparedModValues: PreparedHomeMods,
   bootstrapSource: SpaceBootstrapSource,
+  meta: Record<string, unknown>,
 ): Promise<SpaceRow> {
   const { space } = await createOwnedSpace({
     user,
@@ -680,20 +627,26 @@ async function insertHomeSpaceRecord(
     },
     extraEnv: [],
     mods: preparedModValues,
-    meta: { createdSource: "default_ensure" },
+    meta,
   });
   return space;
 }
 
-/**
- * Create the first-time Home space for a user. Idempotent under concurrency:
- * unique conflicts re-select the winner instead of failing the entry path.
- * Bootstraps from `HOME_BOOTSTRAP_CHECKPOINT_ID` when set, else blank.
- */
-async function ensureHomeSpace(user: AuthUser): Promise<SpaceRow | null> {
+const isHomeUniqueConflict = (error: unknown) => {
+  const constraint = uniqueViolationConstraint(error);
+  return Boolean(constraint?.includes("user_slug") || constraint?.includes("user_name"));
+};
+
+type EnsuredHome = { space: SpaceRow; created: boolean };
+
+/** Returns null when another owned Space already uses the Home name. */
+async function createHomeSpace(
+  c: Context,
+  user: AuthUser,
+  provenance: HomeEnsureProvenance,
+): Promise<EnsuredHome | null> {
   const bootstrapSource = resolveHomeBootstrap();
-  // Caller only invokes this when no accessible space was found. Concurrent
-  // ensures rely on (userUuid, slug|name) unique indexes + re-select.
+  const meta = homeEnsureMeta(c, provenance);
   const createMods = getDefaultSpaceModsForEnv(config.env);
   // spaceId is remapped at insert; placeholder only for prepare validation.
   const preparedModValues = await prepareSpaceModInserts({
@@ -703,7 +656,7 @@ async function ensureHomeSpace(user: AuthUser): Promise<SpaceRow | null> {
     existing: [],
   }).catch((error) => {
     const response = spaceModErrorResponse(error);
-    logger.warn("[DefaultSpace] failed to prepare home mods; creating without mods", {
+    logger.warn("[HomeSpace] failed to prepare home mods; creating without mods", {
       userUuid: user.uuid,
       message: response?.message ?? (error instanceof Error ? error.message : String(error)),
       status: response?.status,
@@ -711,40 +664,32 @@ async function ensureHomeSpace(user: AuthUser): Promise<SpaceRow | null> {
     return [] as PreparedHomeMods;
   });
 
-  let space: SpaceRow | undefined;
+  const existingHome = async () => {
+    const space = await findOwnedHomeSpace(user.uuid);
+    if (!space) logger.warn("[HomeSpace] home name is taken by another Space", { userUuid: user.uuid, source: provenance.source });
+    return space ? { space, created: false } : null;
+  };
+
+  let space: SpaceRow;
   try {
-    space = await insertHomeSpaceRecord(user, preparedModValues, bootstrapSource);
+    space = await insertHomeSpaceRecord(user, preparedModValues, bootstrapSource, meta);
   } catch (error) {
-    const constraint = uniqueViolationConstraint(error);
-    if (constraint?.includes("user_slug") || constraint?.includes("user_name")) {
-      return resolveHomeEnsureConflict(
-        user.uuid,
-        constraint.includes("user_slug") ? "slug_conflict" : "name_conflict",
-      );
-    }
+    if (isHomeUniqueConflict(error)) return existingHome();
     const modResponse = spaceModErrorResponse(error);
-    if (modResponse) {
-      // First attempt rolled back. Retry once without mods so first-time users
-      // still get an entry target.
-      logger.warn("[DefaultSpace] home mod insert failed; retrying without mods", {
-        userUuid: user.uuid,
-        message: modResponse.message,
-      });
-      try {
-        space = await insertHomeSpaceRecord(user, [], bootstrapSource);
-      } catch (retryError) {
-        const retryConstraint = uniqueViolationConstraint(retryError);
-        if (retryConstraint?.includes("user_slug") || retryConstraint?.includes("user_name")) {
-          return resolveHomeEnsureConflict(user.uuid, "retry_unique_conflict");
-        }
-        throw retryError;
-      }
-    } else {
-      throw error;
+    if (!modResponse) throw error;
+    // Retry once without mods.
+    logger.warn("[HomeSpace] home mod insert failed; retrying without mods", {
+      userUuid: user.uuid,
+      message: modResponse.message,
+    });
+    try {
+      space = await insertHomeSpaceRecord(user, [], bootstrapSource, meta);
+    } catch (retryError) {
+      if (isHomeUniqueConflict(retryError)) return existingHome();
+      throw retryError;
     }
   }
 
-  if (!space) return resolveHomeEnsureConflict(user.uuid, "missing_space");
   const provisioned = await provisionCreatedSpace({
     user,
     space,
@@ -756,7 +701,44 @@ async function ensureHomeSpace(user: AuthUser): Promise<SpaceRow | null> {
     },
     onBootstrapFailure: "soft",
   });
-  return provisioned.space;
+  await dispatchSpaceListChanged(provisioned.space.id);
+  return { space: provisioned.space, created: true };
+}
+
+async function ensureHomeSpace(
+  c: Context,
+  user: AuthUser,
+  provenance: HomeEnsureProvenance,
+): Promise<EnsuredHome | Response> {
+  if (!(await hasPermission(user, "space.create", { spaceId: "" }))) return authzDenied(c);
+  let ensured: EnsuredHome | null;
+  try {
+    ensured = await createHomeSpace(c, user, provenance);
+  } catch (error) {
+    if (error instanceof LogtoUserRequiredError) return c.json({ message: error.message }, 403);
+    throw error;
+  }
+  return ensured ?? c.json({
+    code: "home_space_name_taken",
+    message: `Another Space is named ${HOME_SPACE_NAME}. Set its slug to ${HOME_SPACE_SLUG} to make it your Home Space.`,
+  }, 409);
+}
+
+async function toSpaceListItems(rows: SpaceListRow[], viewerUuid: string, options: { personalActivity: boolean }) {
+  const sandboxRows = rows.length ? await db.select({ spaceId: spaceSandboxes.spaceId, status: spaceSandboxes.status }).from(spaceSandboxes).where(inArray(spaceSandboxes.spaceId, rows.map((r) => r.id))) : [];
+  const sandboxBySpace = new Map(sandboxRows.map((r) => [r.spaceId, r.status]));
+  return rows.map((row) => ({
+    id: row.id, userUuid: row.user_uuid, name: row.name, slug: row.slug, description: row.description,
+    createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(),
+    title: null, status: null, meta: null,
+    lastActivityAt: row.last_activity_at ? new Date(row.last_activity_at).toISOString() : null,
+    publicProfile: { avatarUrl: normalizePublicAvatarUrl(row.avatar_url) },
+    ownerProfile: { userUuid: row.user_uuid, username: row.owner_username, displayName: row.owner_display_name, avatarUrl: normalizePublicAvatarUrl(row.owner_avatar_url) },
+    sandboxStatus: sandboxBySpace.get(row.id) ?? null, isPinned: row.is_pinned, isArchived: row.is_archived,
+    relation: row.user_uuid === viewerUuid ? "owner" : "member",
+    joinedAt: new Date(row.joined_at).toISOString(),
+    ...(options.personalActivity ? { personalActivityAt: new Date(row.sort_at).toISOString() } : {}),
+  }));
 }
 
 router.get("/", async (c) => {
@@ -766,24 +748,30 @@ router.get("/", async (c) => {
   const identity = asAccountIdentity(user);
   if (!identity) return authzDenied(c);
 
-  // Account list: owned/member by viewer uuid, independent of work space scopes.
-  const spaceIds = await listAccessibleSpaceIds(identity.uuid);
-  if (spaceIds.length === 0) return c.json([]);
+  // Legacy clients send a bare request and expect an array.
+  if (!new URL(c.req.url).search) {
+    c.header("Deprecation", "true");
+    return c.json(await toSpaceListItems(await listLegacySpaces(identity.uuid), identity.uuid, { personalActivity: false }));
+  }
 
-  const spaceList = await db
-    .select()
-    .from(spaces)
-    .where(inArray(spaces.id, spaceIds))
-    .orderBy(sql`${spaces.lastActivityAt} desc nulls last`, desc(spaces.createdAt));
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50) || 50, 1), 100);
+  const filter = c.req.query("filter") ?? "recent";
+  if (!isSpaceListFilter(filter)) return c.json({ message: "invalid filter" }, 400);
+  const query = (c.req.query("q") ?? "").trim().slice(0, 120);
+  const exactName = c.req.query("name")?.trim().slice(0, 255) ?? "";
+  const cursor = decodeSpaceListCursor(c.req.query("cursor"));
+  if (cursor === false) return c.json({ message: "invalid cursor" }, 400);
 
-  const items = await buildSpaceListItems(spaceList);
-  const pinnedSpaceIds = await getPinnedSpaceIds(db, identity.uuid);
-  const itemsWithPins = items.map((item) => ({
-    ...item,
-    isPinned: pinnedSpaceIds.has(item.id),
-  }));
-  const appSession = getAppSessionPrincipal(c);
-  return c.json(appSession ? itemsWithPins.map(stripSensitiveSpaceFields) : itemsWithPins);
+  const recent = filter === "recent" && !query && !exactName;
+  const { rows, nextCursor } = recent
+    ? {
+        rows: await listRecentSpaces(identity.uuid, parseSpaceVisits(c.req.queries("recentSpaceId") ?? [], c.req.queries("recentSpaceAt") ?? []), limit),
+        nextCursor: null,
+      }
+    : await listMemberSpaces({ userUuid: identity.uuid, filter: filter === "recent" ? "all" : filter, query, exactName, cursor, limit });
+
+  const items = await toSpaceListItems(rows, identity.uuid, { personalActivity: recent });
+  return c.json({ items, pageInfo: { hasMore: nextCursor !== null, nextCursor } });
 });
 
 router.get("/default", async (c) => {
@@ -793,13 +781,12 @@ router.get("/default", async (c) => {
   const identity = asAccountIdentity(user);
   if (!identity) return authzDenied(c);
 
-  // Prefer existing home / recent space.
-  let space = await findDefaultSpaceCandidate(identity.uuid);
-  if (!space) {
-    space = await ensureHomeSpace(user);
-  }
+  const landing = await findLandingSpace(identity.uuid);
+  if (landing) return c.json({ space: await buildSpaceResponse(c, landing, user) });
 
-  return c.json({ space: space ? await buildSpaceResponse(c, space, user) : null });
+  const ensured = await ensureHomeSpace(c, user, { source: "default_ensure" });
+  if (ensured instanceof Response) return ensured;
+  return c.json({ space: await buildSpaceResponse(c, ensured.space, user) });
 });
 
 // ── POST /api/spaces ─────────────────────────────────────────────────────────
@@ -979,6 +966,7 @@ router.post("/", async (c) => {
   }
 
   if (!space) return c.json({ message: "failed to create space" }, 500);
+  await dispatchSpaceListChanged(space.id);
 
   if (insertedChannels.length > 0) {
     await Promise.all(
@@ -1032,6 +1020,13 @@ router.post("/", async (c) => {
  * lists the viewer's spaces. All omitted fields are already optional in the
  * SDK type, so the response stays type-compatible.
  */
+function stripSpaceEnv(meta: unknown): Record<string, unknown> | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const { extraEnv, ...safeMeta } = meta as Record<string, unknown>;
+  void extraEnv;
+  return safeMeta;
+}
+
 function stripSensitiveSpaceFields(item: Record<string, unknown>): Record<string, unknown> {
   const { storageRepoName, sandboxStatus, access, meta, ...rest } = item;
   void storageRepoName;
@@ -1046,18 +1041,29 @@ function stripSensitiveSpaceFields(item: Record<string, unknown>): Record<string
   return rest;
 }
 
-async function buildSpaceResponse(c: Context, space: SpaceRow, user: AuthUser) {
-  if (!getAppSessionPrincipal(c)) return serializeSpaceForResponse(space, user);
+async function buildSpaceResponse(c: Context, space: SpaceRow, user: AuthUser | null) {
+  const response = await serializeSpaceForResponse(space, user);
+  if (!(await hasPermission(user, "space.edit", { spaceId: space.id }))) {
+    response.meta = stripSpaceEnv(response.meta);
+  }
+  if (!getAppSessionPrincipal(c)) return response;
   const [item] = await buildSpaceListItems([space]);
-  return item ? stripSensitiveSpaceFields(item) : null;
+  return item ? stripSensitiveSpaceFields({ ...item, meta: response.meta }) : response;
 }
 
 // ── GET /api/spaces/:id ──────────────────────────────────────────────────────
 
+async function resolveSpaceRelation(space: SpaceRow, user: AuthUser | null): Promise<"owner" | "member" | "public"> {
+  if (!user?.uuid) return "public";
+  if (space.userUuid === user.uuid) return "owner";
+  return (await getSpaceMemberRole(space.id, user.uuid)) ? "member" : "public";
+}
+
 async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user: AuthUser | null) {
-  const [sandbox, access] = await Promise.all([
+  const [sandbox, access, relation] = await Promise.all([
     getSpaceSandboxBySpaceId(space.id),
     resolvePermissionAccess(user, { spaceId: space.id }),
+    resolveSpaceRelation(space, user),
   ]);
   const profileMap = await getProfilesByUuids([space.userUuid]);
   const ownerProfile = profileMap.get(space.userUuid) ?? fallbackPublicUserProfile(space.userUuid);
@@ -1069,6 +1075,7 @@ async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user
     sandboxStatus: sandbox?.status ?? null,
     sandbox: attachSandboxPublicEndpoints(sandbox),
     access,
+    relation,
     ownerProfile,
   };
 }
@@ -1113,7 +1120,7 @@ router.get("/:id", async (c) => {
   if (!space) return c.json({ message: "space not found" }, 404);
 
   if (await hasPermission(user, "space.view", { spaceId })) {
-    return c.json(await serializeSpaceForResponse(space, user));
+    return c.json(await buildSpaceResponse(c, space, user));
   }
 
   // Fallback: only session-level access — keep the response intentionally tiny.
@@ -1149,7 +1156,7 @@ router.get("/by-slug/:username/:slug", async (c) => {
   if (!space) return c.json({ message: "space not found" }, 404);
 
   if (await hasPermission(user, "space.view", { spaceId: space.id })) {
-    return c.json(await serializeSpaceForResponse(space, user));
+    return c.json(await buildSpaceResponse(c, space, user));
   }
 
   return c.json({
@@ -1158,6 +1165,48 @@ router.get("/by-slug/:username/:slug", async (c) => {
     slug: space.slug,
     accessLevel: "minimal" as const,
   });
+});
+
+// ── GET /api/me/spaces/by-slug/:slug ───────────────────────────────────────
+
+export const meSpacesRouter = new Hono();
+
+meSpacesRouter.get("/spaces/by-slug/:slug", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  if (!(await hasPermission(user, "user.space.list", { spaceId: "" }))) return authzDenied(c);
+  const identity = asAccountIdentity(user);
+  if (!identity) return authzDenied(c);
+
+  const slug = parseSpaceSlug(c.req.param("slug"));
+  if (!slug) return c.json({ message: "space not found" }, 404);
+
+  const [space] = await db
+    .select()
+    .from(spaces)
+    .where(and(eq(spaces.userUuid, identity.uuid), eq(spaces.slug, slug)))
+    .limit(1);
+  if (!space) return c.json({ message: "space not found" }, 404);
+  return c.json(await buildSpaceResponse(c, space, user));
+});
+
+// ── POST /api/me/spaces/home ─────────────────────────────────────────────────
+
+meSpacesRouter.post("/spaces/home", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  if (!(await hasPermission(user, "user.space.list", { spaceId: "" }))) return authzDenied(c);
+  const identity = asAccountIdentity(user);
+  if (!identity) return authzDenied(c);
+
+  const home = await findOwnedHomeSpace(identity.uuid);
+  if (home) return c.json(await buildSpaceResponse(c, home, user));
+
+  const body = await c.req.json<{ appId?: unknown }>().catch(() => null);
+  const appId = typeof body?.appId === "string" && requireValidId(body.appId) ? body.appId : null;
+  const ensured = await ensureHomeSpace(c, user, { source: "home_ensure", appId });
+  if (ensured instanceof Response) return ensured;
+  return c.json(await buildSpaceResponse(c, ensured.space, user), ensured.created ? 201 : 200);
 });
 
 // ── PATCH /api/spaces/:id (rename / slug) ───────────────────────────────────
@@ -1217,6 +1266,7 @@ router.patch("/:id", async (c) => {
       .returning();
 
     const result = updated ?? space;
+    await dispatchSpaceListChanged(spaceId);
     return c.json({ space: await serializeSpaceForResponse(result, user) });
   } catch (error) {
     const constraint = uniqueViolationConstraint(error);
@@ -1280,6 +1330,7 @@ router.patch("/:id/profile", async (c) => {
     .returning();
 
   const result = updated ?? space;
+  await dispatchSpaceListChanged(spaceId);
   return c.json({ space: await serializeSpaceForResponse(result, user) });
 });
 
@@ -1297,17 +1348,6 @@ router.post("/:id/checkpoints", async (c) => {
 
   const body = await c.req.json<{ description?: string }>().catch(() => null);
   const description = body?.description?.trim() || null;
-
-  if (space.name === "config") {
-    const duplicateConfigSpaces = await db
-      .select({ id: spaces.id })
-      .from(spaces)
-      .where(and(eq(spaces.userUuid, space.userUuid), eq(spaces.name, "config")))
-      .limit(2);
-    if (duplicateConfigSpaces.length > 1) {
-      return c.json({ message: "multiple config spaces found for this user" }, 409);
-    }
-  }
 
   const existingSave = await db
     .select({ id: taskRuns.id })
@@ -1820,8 +1860,13 @@ router.get("/:id/runtime", async (c) => {
   const [sandbox, registration] = await Promise.all([
     getSpaceSandboxBySpaceId(spaceId), getRuntimeRegistration(spaceId),
   ]);
-  const rawWatcher = sandbox?.provider === "local" && registration
-    ? await redisCommandClient.get(`sandbox:watcher:${spaceId}`).catch(() => null) : null;
+  const local = sandbox?.provider === "local" && Boolean(registration);
+  const [rawWatcher, rawDisplays] = local
+    ? await Promise.all([
+      redisCommandClient.get(`sandbox:watcher:${spaceId}`).catch(() => null),
+      redisCommandClient.get(runtimeDisplaysKey(spaceId)).catch(() => null),
+    ])
+    : [null, null];
   let fileWatcher = null;
   if (rawWatcher) {
     try {
@@ -1829,9 +1874,16 @@ router.get("/:id/runtime", async (c) => {
       if (parsed.success) fileWatcher = parsed.data;
     } catch { /* Invalid telemetry never affects Runtime availability. */ }
   }
+  let displays = null;
+  if (rawDisplays) {
+    try {
+      const parsed = displaysSnapshotSchema.safeParse(JSON.parse(rawDisplays));
+      if (parsed.success) displays = parsed.data.displays;
+    } catch { /* A malformed snapshot only hides displays. */ }
+  }
   const rawWorkspace = registration ? await redisCommandClient.get(runtimeWorkspaceKey(spaceId)) : null;
   const workspace = runtimeWorkspaceStatus(registration?.runtimeId, rawWorkspace);
-  return c.json({ kind: sandbox?.provider ?? "cloud", online: Boolean(registration), runtimeId: registration?.runtimeId ?? null, capabilities: registration?.capabilities ?? null, fileWatcher: workspace.online ? fileWatcher : null, workspace, observedAt: new Date().toISOString() });
+  return c.json({ kind: sandbox?.provider ?? "cloud", online: Boolean(registration), runtimeId: registration?.runtimeId ?? null, capabilities: registration?.capabilities ?? null, fileWatcher: workspace.online ? fileWatcher : null, displays: workspace.online ? displays : null, workspace, observedAt: new Date().toISOString() });
 });
 
 router.get("/:id/sessions/:sessionId/runtime", async (c) => {
@@ -1986,12 +2038,22 @@ router.post("/:id/prompt", async (c) => {
     throw error;
   }
 
-  const content = body.content;
+  let content: ContentBlock[];
+  try {
+    content = await hostPromptImages(normalizeContentBlocks(body.content), { userUuid: user.uuid, spaceId, sessionId });
+  } catch (error) {
+    return c.json({ message: error instanceof Error ? error.message : String(error) }, 400);
+  }
   const clientMessageId = body.clientMessageId?.trim() || crypto.randomUUID();
   const source = resolveSessionSourceFromRequest(c, typeof body.source === "string" ? body.source : null);
+  const requestSource = getRequestSource(c);
+  const origin = await resolveSessionTurnOrigin(db, requestSource, mode === "immediate" ? "prompt" : "scheduled_prompt",
+    (scope) => hasPermission(user, "session.view", scope));
+  const provenance = { ...(requestSource ? { requestSource } : {}), ...(origin ? { origin } : {}) };
 
   const scheduledAuth = await getScheduledPromptAuthContext(c, spaceId, user.uuid);
   const taskData = {
+    ...provenance,
     content,
     clientMessageId,
     ...(generationPolicy ? { generationPolicy } : {}),
@@ -2017,7 +2079,7 @@ router.post("/:id/prompt", async (c) => {
         title: body.title ?? null,
         source,
         externalSessionId: null,
-        meta: { createdBy: "api_space_prompt" },
+        meta: { createdBy: "api_space_prompt", ...provenance },
       });
       createdPromptSession = promptSession;
       sessionId = promptSession.id;
@@ -2042,7 +2104,9 @@ router.post("/:id/prompt", async (c) => {
         clientMessageId,
         content,
         source,
-        sourceClientId: getRequestSource(c)?.clientId ?? null,
+        requestSource,
+        origin,
+        sourceClientId: requestSource?.clientId ?? null,
         model: requestedModel,
         provider: requestedProvider,
         harness: body.harness ?? null,
@@ -2233,6 +2297,9 @@ router.post("/:id/sessions", async (c) => {
   }
 
   const source = resolveSessionSourceFromRequest(c, body.source);
+  const requestSource = getRequestSource(c);
+  const origin = await resolveSessionTurnOrigin(db, requestSource, "prompt",
+    (scope) => hasPermission(user, "session.view", scope));
   const session = await createInitialSpaceSession({
     spaceId: space.id,
     sessionId: crypto.randomUUID(),
@@ -2240,7 +2307,7 @@ router.post("/:id/sessions", async (c) => {
     title: body.title ?? null,
     source,
     externalSessionId: null,
-    meta: { createdBy: "api_space_session_create" },
+    meta: { createdBy: "api_space_session_create", ...(requestSource ? { requestSource } : {}), ...(origin ? { origin } : {}) },
   });
 
   if (userLabelIds.length > 0) {

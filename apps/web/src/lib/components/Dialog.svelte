@@ -1,6 +1,7 @@
 <script lang="ts">
 import { X } from "lucide-svelte";
 import { fade, scale, slide } from "svelte/transition";
+import { dismissOnBack } from "$lib/back-layers.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import {
 	DURATION_MODAL_IN,
@@ -44,6 +45,10 @@ const {
 } = $props();
 
 const locale = $derived(getLocale());
+dismissOnBack(
+	() => open,
+	() => onClose(),
+);
 const TRANSITION_IN = { duration: DURATION_MODAL_IN, easing: svelteEaseOut };
 const TRANSITION_OUT = { duration: DURATION_MODAL_OUT, easing: svelteEaseIn };
 const SCALE_TRANSITION_IN = { ...TRANSITION_IN, start: 0.95 };

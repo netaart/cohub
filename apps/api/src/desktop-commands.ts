@@ -11,9 +11,11 @@ import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { dispatchRealtimeEvent } from "./channels.js";
 import { redisCommandClient } from "./redis.js";
 import {
+  acceptDesktopCommandRecord,
   claimDesktopCommand,
-  readDesktopCommand,
+  readCurrentDesktopCommand,
   settleDesktopCommandRecord,
+  type DesktopCommandAcceptOutcome,
   type DesktopCommandSettleOutcome,
   type DesktopCommandStoreClient,
 } from "./desktop-commands.store.js";
@@ -39,7 +41,15 @@ async function dispatch(record: DesktopCommandRecord): Promise<void> {
 }
 
 export async function getDesktopCommand(commandId: string): Promise<DesktopCommandRecord | null> {
-  return readDesktopCommand(store(), commandId);
+  return readCurrentDesktopCommand(store(), commandId);
+}
+
+export function acceptDesktopCommand(input: {
+  commandId: string;
+  actorUserId: string;
+  clientId: string | null;
+}): Promise<DesktopCommandAcceptOutcome> {
+  return acceptDesktopCommandRecord(store(), input);
 }
 
 export class DesktopCommandOwnershipError extends Error {
@@ -75,6 +85,7 @@ export async function createDesktopCommand(input: {
         }
       : null,
     createdAt: now,
+    acceptedAt: null,
     settledAt: settledWithoutTarget ? now : null,
   };
 

@@ -1,12 +1,14 @@
 import {
+  BACKGROUND_CONTEXT,
   calculateContextTokens,
   compact,
   DEFAULT_COMPACTION_SETTINGS,
   estimateTokens,
   prepareCompaction,
   shouldCompact,
+  withAbortSignal,
 } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, RetryPolicy, Usage } from "@earendil-works/pi-ai";
 import { logger } from "../logger.js";
 import type { SessionHandle } from "../session.js";
 import { persistCompactionEvent } from "../persistence.js";
@@ -20,6 +22,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createModelsFromCohubRegistry } from "./pi-models-adapter.js";
 import { estimateProxyContextTokens, resolveReserveTokens } from "./compaction-policy.js";
 import {
+  findFirstKeptEntryId,
   getCompactionSummaryMessageCount,
   resolveCompactionScope,
   validateCompactionEffect,
@@ -91,7 +94,7 @@ function getContextTokenBudget(messages: AgentMessage[]): { accurateTokens: numb
   return null;
 }
 
-const COMPACTION_RETRY_POLICY: NonNullable<Parameters<typeof compact>[6]> = {
+const COMPACTION_RETRY_POLICY: RetryPolicy = {
   enabled: true,
   maxRetries: 1,
   baseDelayMs: 1_000,
@@ -134,9 +137,10 @@ async function compactWithRetry(
     countedModels,
     model,
     undefined,
-    abortSignal,
     undefined,
     COMPACTION_RETRY_POLICY,
+    undefined,
+    abortSignal ? withAbortSignal(abortSignal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT,
   );
 
   return { result, attemptCount: 1, providerCalls };
@@ -213,7 +217,7 @@ export async function maybeAutoCompact(
       // The transform hook runs between LLM rounds, so every branch entry here
       // is settled and the completed prefix of the active turn is safe to compact.
       await handle.persistenceChain;
-      const branchEntries = handle.sessionManager.getBranchEntries() as Parameters<typeof prepareCompaction>[0];
+      const branchEntries = handle.sessionManager.getCompactionEntries();
       const preparationResult = prepareCompaction(branchEntries, settings);
       if (!preparationResult.ok) {
         span.setAttribute("agent.compaction.error", preparationResult.error.message);
@@ -230,6 +234,12 @@ export async function maybeAutoCompact(
       const summarizedMessageCount = getCompactionSummaryMessageCount(preparation);
       if (summarizedMessageCount === 0) {
         return { compacted: false, reason: "nothing_to_summarize" };
+      }
+      const firstKeptEntryId = findFirstKeptEntryId(branchEntries, preparation.retainedTail);
+      if (!firstKeptEntryId) {
+        span.setAttribute("agent.compaction.error", "missing_first_kept_entry_id");
+        logger.warn(`[Compaction] missing firstKeptEntryId sessionId=${handle.sessionId}`);
+        return { compacted: false, reason: "missing_first_kept_entry_id" };
       }
 
       span.setAttribute("agent.compaction.tokens_before", preparation.tokensBefore);
@@ -251,13 +261,6 @@ export async function maybeAutoCompact(
         return { compacted: false, reason: `compact_failed: ${compactAttempt.result.error.message}` };
       }
       const result = compactAttempt.result.value;
-      if (!result.firstKeptEntryId) {
-        span.setAttribute("agent.compaction.error", "missing_first_kept_entry_id");
-        logger.warn(`[Compaction] missing firstKeptEntryId sessionId=${handle.sessionId}`);
-        return { compacted: false, reason: "missing_first_kept_entry_id" };
-      }
-
-      const firstKeptEntryId = result.firstKeptEntryId;
       const estimatedTokensAfter = estimateProxyContextTokens([
         {
           role: "compactionSummary",
@@ -265,7 +268,7 @@ export async function maybeAutoCompact(
           tokensBefore: result.tokensBefore,
           timestamp: Date.now(),
         } as AgentMessage,
-        ...(result.retainedTail ?? []),
+        ...result.retainedTail,
       ]);
       span.setAttribute("agent.compaction.estimated_tokens_after", estimatedTokensAfter);
       span.setAttribute("agent.compaction.attempt_count", compactAttempt.attemptCount);

@@ -3,14 +3,14 @@ import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import * as schema from "@cohub/db";
 import { getOptionalAuth, requireValidId, authzDenied } from "../../lib/middleware.js";
-import { hasPermission } from "../../permissions.js";
+import { canViewSpaceCost, hasPermission } from "../../permissions.js";
 import { createLogger } from "@cohub/infra/logging";
 import {
-  aggregateGenerationUsageRows,
-  aggregateUsageRows,
+  aggregateUsage,
   buildUsageDateRange,
   GENERATION_USAGE_SELECT_COLUMNS,
   resolveUsageDays,
+  stripUsageCost,
   USAGE_SELECT_COLUMNS,
   type GenerationUsageRow,
   type UsageRow,
@@ -34,8 +34,9 @@ router.get("/", async (c) => {
 
   let rows: UsageRow[];
   let generationRows: GenerationUsageRow[];
+  let includeCost: boolean;
   try {
-    [rows, generationRows] = await Promise.all([
+    [rows, generationRows, includeCost] = await Promise.all([
       db
         .select(USAGE_SELECT_COLUMNS)
         .from(schema.tokenUsageStatsHourly)
@@ -58,20 +59,15 @@ router.get("/", async (c) => {
           ),
         )
         .orderBy(desc(schema.generationUsageStatsHourly.bucketStartAt)),
+      canViewSpaceCost(user, spaceId),
     ]);
   } catch (error) {
     logger.error("[usage] DB query failed", error);
     return c.json({ message: "failed to load usage data" }, 500);
   }
 
-  const { hourly, summary } = aggregateUsageRows(rows);
-  const generation = aggregateGenerationUsageRows(generationRows);
-  return c.json({
-    hourly,
-    summary,
-    generation,
-    days,
-  });
+  const usage = aggregateUsage(rows, generationRows);
+  return c.json({ ...(includeCost ? usage : stripUsageCost(usage)), days });
 });
 
 export default router;

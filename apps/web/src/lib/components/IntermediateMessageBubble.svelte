@@ -62,6 +62,7 @@ const chatMessage = $derived({
 		model: message.model,
 		provider: message.provider,
 		usage: message.usage,
+		llmTiming: message.meta?.llmTiming,
 		durationMs: message.durationMs,
 		stopReason: message.stopReason,
 		errorMessage: message.errorMessage,

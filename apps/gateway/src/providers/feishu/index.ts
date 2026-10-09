@@ -23,7 +23,7 @@ import {
   FEISHU_INBOUND_IMAGE_MAX_COUNT,
   readFeishuResourceBuffer,
 } from "./media.js";
-import { safeFetch } from "../../media/safe-fetch.js";
+import { safeFetch } from "@cohub/infra/safe-fetch";
 import { base64ToTempMediaFile, responseToTempMediaFile } from "../../media/temp-media-file.js";
 import {
   ensureImageMediaType,

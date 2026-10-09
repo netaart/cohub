@@ -41,8 +41,6 @@ READINESS_FAILURE_THRESHOLD: "3"
 # ========== API 配置 ==========
 LOGTO_ENDPOINT: "https://auth-dev.example.com"
 LOGTO_MANAGEMENT_API_RESOURCE: "https://default.logto.app/api"
-GITEA_BASE_URL: "https://gitea.example.com"
-GITEA_MANAGED_EMAIL_DOMAIN: "dev.example.com"
 WEB_ORIGIN: "https://dev.example.com"
 SANDBOX_IMAGE: "git.talesofai.com/talesofai/cohub-sandbox:latest"
 SPACE_STORAGE_ROOT: "/space-storage"

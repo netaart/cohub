@@ -1,0 +1,381 @@
+name: Android
+
+# dev: PRs and main build a dev APK, signed and published to the CDN when the
+# secrets are available. release: vX.Y.Z tags build the prod APK.
+on:
+  pull_request:
+    paths:
+      - 'apps/android/**'
+      - 'apps/sandbox/**'
+      - 'packages/protocol/src/host-bridge.ts'
+      - '.github/workflows/android.yml'
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+    paths:
+      - 'apps/android/**'
+      - 'apps/sandbox/**'
+      - 'packages/protocol/src/host-bridge.ts'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CDN_ORIGIN: https://public.cohub.live
+  OSS_BUCKET: cohub-public
+  OSS_ENDPOINT: https://oss-us-west-1.aliyuncs.com
+
+jobs:
+  dev:
+    name: Test, lint, assemble
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: apps/sandbox/go.sum
+
+      - name: Install NDK
+        run: |
+          set -euo pipefail
+          ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' app/build.gradle.kts)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
+
+      - name: Resolve build
+        id: build
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_DEV_KEYSTORE_BASE64 }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.PUBLIC_ASSET_OSS_ACCESS_KEY_ID }}
+        run: |
+          set -euo pipefail
+          sha="${HEAD_SHA::7}"
+          if [[ -n "$PR_NUMBER" ]]; then
+            channel="pr-${PR_NUMBER}"
+            cdn_dir="android/pr/${PR_NUMBER}"
+          else
+            channel="${GITHUB_REF_NAME//\//-}"
+            cdn_dir="android/${channel}"
+          fi
+
+          signed=false
+          if [[ -n "$KEYSTORE_BASE64" ]]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cohub-dev.p12"
+            echo "COHUB_ANDROID_KEYSTORE=$RUNNER_TEMP/cohub-dev.p12" >> "$GITHUB_ENV"
+            signed=true
+          fi
+
+          publish=false
+          if [[ "$signed" == true && -n "$OSS_ACCESS_KEY_ID" ]] &&
+             [[ -n "$PR_NUMBER" || "$GITHUB_REF" == refs/heads/main ]]; then
+            publish=true
+          fi
+
+          {
+            echo "sha=$sha"
+            echo "file=cohub-dev-${channel}-${sha}.apk"
+            echo "cdn_dir=$cdn_dir"
+            echo "signed=$signed"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Test, lint, assemble
+        env:
+          COHUB_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_DEV_KEYSTORE_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}
+          SHA: ${{ steps.build.outputs.sha }}
+        run: |
+          # AGP 9 only creates unit tests for the tested build type (debug by
+          # default), so :app:testReleaseUnitTest no longer exists.
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --continue \
+            -PcohubEnv=dev \
+            -PcohubVersionCode="$VERSION_CODE" \
+            -PcohubVersionSuffix="-dev.${VERSION_CODE}+${SHA}"
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          path: |
+            apps/android/app/build/reports/
+            apps/android/app/build/test-results/
+          retention-days: 7
+
+      - name: Collect APK
+        id: apk
+        env:
+          FILE: ${{ steps.build.outputs.file }}
+          SIGNED: ${{ steps.build.outputs.signed }}
+        run: |
+          set -euo pipefail
+          variant=debug
+          if [[ "$SIGNED" == true ]]; then variant=release; fi
+          out="app/build/outputs/apk/$variant"
+          mkdir -p dist
+          cp "$out/app-$variant.apk" "dist/$FILE"
+          {
+            echo "variant=$variant"
+            echo "application_id=$(jq -r '.applicationId' "$out/output-metadata.json")"
+            echo "version_name=$(jq -r '.elements[0].versionName' "$out/output-metadata.json")"
+            echo "version_code=$(jq -r '.elements[0].versionCode' "$out/output-metadata.json")"
+            echo "size=$(stat -c%s "dist/$FILE" | awk '{ printf "%.1f MB", $1 / 1048576 }')"
+            echo "sha256=$(sha256sum "dist/$FILE" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        id: artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.file }}
+          path: apps/android/dist/${{ steps.build.outputs.file }}
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 30 }}
+
+      - name: Render QR code
+        if: steps.build.outputs.publish == 'true'
+        env:
+          FILE: ${{ steps.build.outputs.file }}
+          CDN_DIR: ${{ steps.build.outputs.cdn_dir }}
+        run: |
+          pipx run segno==1.6.6 "$CDN_ORIGIN/$CDN_DIR/$FILE" \
+            --scale 6 --border 2 --output "dist/${FILE%.apk}.png"
+
+      - name: Publish to CDN
+        if: steps.build.outputs.publish == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.PUBLIC_ASSET_OSS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_ASSET_OSS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-west-1
+          FILE: ${{ steps.build.outputs.file }}
+          CDN_DIR: ${{ steps.build.outputs.cdn_dir }}
+        run: |
+          set -euo pipefail
+          # OSS rejects two aws-cli v2 defaults; see sandbox-binaries-build.yml.
+          aws configure set default.s3.addressing_style virtual
+          aws configure set default.request_checksum_calculation when_required
+          aws configure set default.response_checksum_validation when_required
+
+          put() {
+            aws s3 cp "dist/$1" "s3://$OSS_BUCKET/$CDN_DIR/$2" --endpoint-url "$OSS_ENDPOINT" \
+              --content-type "$3" --cache-control "$4"
+          }
+          immutable="public, max-age=31536000, immutable"
+          apk_type="application/vnd.android.package-archive"
+          put "$FILE" "$FILE" "$apk_type" "$immutable"
+          qr="${FILE%.apk}.png"
+          put "$qr" "$qr" image/png "$immutable"
+
+      - name: Summarize
+        env:
+          FILE: ${{ steps.build.outputs.file }}
+          CDN_DIR: ${{ steps.build.outputs.cdn_dir }}
+          PUBLISHED: ${{ steps.build.outputs.publish }}
+          SIGNED: ${{ steps.build.outputs.signed }}
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+          SHA: ${{ steps.build.outputs.sha }}
+          APPLICATION_ID: ${{ steps.apk.outputs.application_id }}
+          VERSION_NAME: ${{ steps.apk.outputs.version_name }}
+          VERSION_CODE: ${{ steps.apk.outputs.version_code }}
+          VARIANT: ${{ steps.apk.outputs.variant }}
+          SIZE: ${{ steps.apk.outputs.size }}
+          SHA256: ${{ steps.apk.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Android dev build"
+            echo
+            if [[ "$PUBLISHED" == true ]]; then
+              echo "<img align=\"right\" width=\"132\" src=\"$CDN_ORIGIN/$CDN_DIR/${FILE%.apk}.png\" alt=\"QR code for the APK\" />"
+              echo
+              echo "**[Download $FILE]($CDN_ORIGIN/$CDN_DIR/$FILE)** · $SIZE · scan to install"
+            else
+              echo "**[Download from workflow artifacts]($ARTIFACT_URL)** · $SIZE"
+            fi
+            echo
+            echo "- Version \`$VERSION_NAME\` ($VERSION_CODE) from \`$SHA\`"
+            echo "- \`$APPLICATION_ID\` · dev environment · $VARIANT build"
+            echo "- SHA-256 \`$SHA256\`"
+            if [[ "$SIGNED" != true ]]; then
+              echo
+              echo "> Signed with a throwaway debug key: it installs, but App Links (and so sign-in) need a same-repo build."
+            fi
+          } > "$RUNNER_TEMP/summary.md"
+          cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && steps.build.outputs.publish == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const marker = "<!-- cohub-android-build -->";
+            const body = `${marker}\n${fs.readFileSync(`${process.env.RUNNER_TEMP}/summary.md`, "utf8")}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+  release:
+    name: Release APK
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment: android-release
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: apps/sandbox/go.sum
+
+      - name: Install NDK
+        run: |
+          set -euo pipefail
+          ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' app/build.gradle.kts)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] ||
+             (( BASH_REMATCH[2] >= 1000 || BASH_REMATCH[3] >= 1000 )); then
+            echo "::error::Expected a stable release tag like v1.23.0, got $GITHUB_REF_NAME"
+            exit 1
+          fi
+          name="${GITHUB_REF_NAME#v}"
+          {
+            echo "name=$name"
+            echo "code=$(( BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 1000 + BASH_REMATCH[3] ))"
+            echo "file=cohub-${name}.apk"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "::error::ANDROID_RELEASE_KEYSTORE_BASE64 is missing from the android-release environment"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cohub-release.p12"
+          echo "COHUB_ANDROID_KEYSTORE=$RUNNER_TEMP/cohub-release.p12" >> "$GITHUB_ENV"
+
+      - name: Test, lint, assemble
+        env:
+          COHUB_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          # AGP 9 only creates unit tests for the tested build type, which
+          # defaults to debug: there is no :app:testReleaseUnitTest anymore.
+          # The tests are build-type agnostic, so run them once and lint the
+          # variant we actually ship.
+          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease \
+            -PcohubEnv=prod \
+            -PcohubVersionName="$VERSION_NAME" \
+            -PcohubVersionCode="$VERSION_CODE"
+
+      - name: Collect APK
+        env:
+          FILE: ${{ steps.version.outputs.file }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/$FILE"
+          (cd dist && sha256sum "$FILE" > "$FILE.sha256")
+
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            apps/android/dist/${{ steps.version.outputs.file }}
+            apps/android/dist/${{ steps.version.outputs.file }}.sha256
+          fail_on_unmatched_files: true
+
+      - name: Publish to CDN
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.PUBLIC_ASSET_OSS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_ASSET_OSS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-west-1
+          FILE: ${{ steps.version.outputs.file }}
+        run: |
+          set -euo pipefail
+          # OSS rejects two aws-cli v2 defaults; see sandbox-binaries-build.yml.
+          aws configure set default.s3.addressing_style virtual
+          aws configure set default.request_checksum_calculation when_required
+          aws configure set default.response_checksum_validation when_required
+
+          put() {
+            aws s3 cp "dist/$1" "s3://$OSS_BUCKET/android/release/$2" --endpoint-url "$OSS_ENDPOINT" \
+              --content-type "$3" --cache-control "$4"
+          }
+          immutable="public, max-age=31536000, immutable"
+          apk_type="application/vnd.android.package-archive"
+          put "$FILE" "$FILE" "$apk_type" "$immutable"
+          put "$FILE.sha256" "$FILE.sha256" text/plain "$immutable"
+          put "$FILE" latest.apk "$apk_type" no-cache
+
+          {
+            echo "### Android release"
+            echo
+            echo "**[$FILE]($CDN_ORIGIN/android/release/$FILE)** · \`live.cohub.android\` · prod"
+            echo
+            echo "Stable link: $CDN_ORIGIN/android/release/latest.apk"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -2,7 +2,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import { createLogger } from "@cohub/infra/logging";
-import { fileWatcherStatusSchema } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, type DisplaysSnapshot } from "@cohub/protocol";
 import { relayAuthClose } from "../local-sandbox-auth.js";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
@@ -20,6 +20,7 @@ export type RegisteredRunner = {
   receipt: string;
   authorizedAt: number;
   ownerUserId: string;
+  displays?: string;
 };
 
 // A cloud peer (agent, worker…) waiting for its data channel to be paired with
@@ -57,6 +58,7 @@ export type SandboxRelayDeps = {
   runtimeChanged: (spaceId: string) => Promise<void>;
   publishWatcherEvent: (spaceId: string, frameType: string, payload: unknown) => Promise<void>;
   storeWatcherStatus: (spaceId: string, status: unknown) => Promise<void>;
+  storeDisplays: (spaceId: string, snapshot: DisplaysSnapshot) => Promise<void>;
   /** Cluster-internal node id, for status reporting. */
   nodeId: string;
   /** Cluster registry routing a runner data dial back to the pod holding the pending peer. */
@@ -68,6 +70,7 @@ export type SandboxRelayDeps = {
 };
 
 const CONTROL_MAX_MESSAGE_BYTES = 1024 * 1024;
+const EMPTY_DISPLAYS = JSON.stringify({ displays: [] });
 // Beyond the runner's 15s dial timeout, so a slow-but-successful dial can still pair
 // instead of finding its peer already retired.
 const DATA_PAIR_TIMEOUT_MS = 20_000;
@@ -260,6 +263,16 @@ export function createSandboxRelay(deps: SandboxRelayDeps) {
         const parsed = fileWatcherStatusSchema.safeParse({ ...value, observedAt: new Date().toISOString() });
         if (!parsed.success) return;
         await deps.storeWatcherStatus(runner.spaceId, parsed.data).catch((error) => logger.warn("[Relay] watcher status unavailable", { error }));
+        return;
+      }
+
+      if (frame.type === "displays" && runner && runnersBySpace.get(runner.spaceId)?.socket === socket) {
+        const parsed = displaysSnapshotSchema.safeParse(frame.payload);
+        if (!parsed.success) return;
+        const encoded = JSON.stringify(parsed.data);
+        await deps.storeDisplays(runner.spaceId, parsed.data).catch((error) => logger.warn("[Relay] display snapshot unavailable", { error }));
+        if ((runner.displays ?? EMPTY_DISPLAYS) !== encoded) void deps.runtimeChanged(runner.spaceId).catch(() => undefined);
+        runner.displays = encoded;
         return;
       }
 

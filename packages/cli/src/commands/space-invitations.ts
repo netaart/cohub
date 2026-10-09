@@ -7,6 +7,7 @@ import {
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
+import { webUrl } from "../web.js";
 import {
   error,
   handleHttp,
@@ -94,13 +95,12 @@ function invitationUrl(
     spaceSlug: string | null;
   },
 ) {
-  const origin = process.env.COHUB_WEB_URL?.replace(/\/+$/, "") ?? "https://cohub.live";
-  return `${origin}${buildSpaceInvitePath({
+  return webUrl(buildSpaceInvitePath({
     spaceId: invitation.spaceId,
     ownerUsername: invitation.ownerUsername,
     spaceSlug: invitation.spaceSlug,
     inviteCode: invitation.token,
-  })}`;
+  }));
 }
 
 async function confirmRevoke(options: { yes?: boolean }): Promise<void> {

@@ -12,6 +12,7 @@ import {
   modReference,
   sessionForkReference,
   spaceForkReference,
+  turnTriggerReference,
   writeReferences,
   type ReferenceInput,
 } from "@cohub/core/references";
@@ -265,6 +266,7 @@ async function main() {
           userContent: schema.sessionTurns.userContent,
           userText: schema.sessionTurns.userText,
           assistantContent: schema.sessionTurns.assistantContent,
+          meta: schema.sessionTurns.meta,
           spaceId: schema.spaceSessions.spaceId,
         })
         .from(schema.sessionTurns)
@@ -312,6 +314,8 @@ async function main() {
 
       const refs: ReferenceInput[] = [];
       for (const row of rows) {
+        const trigger = turnTriggerReference(row);
+        if (trigger) refs.push(trigger);
         refs.push(
           ...extractTurnReferences({
             spaceId: row.spaceId,

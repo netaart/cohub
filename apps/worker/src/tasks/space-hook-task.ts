@@ -20,6 +20,8 @@ import {
   type SpaceHookDefinition,
   type SpaceHookRunResult,
 } from "@cohub/core/hooks";
+import { resolveSessionTurnOrigin } from "@cohub/core/sessions";
+import { turnEventRequestSource } from "@cohub/protocol/model";
 import { buildAppActionCommand } from "@cohub/core/apps";
 import { SPACE_HOOK_TASK_TYPE, type SpaceHookEventEnvelope } from "@cohub/protocol";
 import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
@@ -119,6 +121,8 @@ async function runPromptHook(input: {
 
   const startedAt = Date.now();
   const prompt = input.hook.prompt;
+  const requestSource = turnEventRequestSource(input.event);
+  const origin = await resolveSessionTurnOrigin(db, requestSource, "hook");
   let sessionId = prompt.sessionId?.trim() || asString(input.event.sessionId) || null;
 
   // Validate session belongs to this space to prevent cross-space injection.
@@ -144,6 +148,8 @@ async function runPromptHook(input: {
       source: "space_hook",
       title: prompt.title ?? `Hook ${input.hook.path}`,
       userUuid: input.userId,
+      requestSource,
+      origin,
     });
     sessionId = created.id;
     await assignSessionSourceSystemLabel({ db, spaceId: input.spaceId, sessionId, source: "space_hook" }).catch((error) => {
@@ -171,6 +177,8 @@ async function runPromptHook(input: {
         }),
       }],
       source: "space_hook",
+      requestSource,
+      origin,
       model: prompt.model ?? null,
       provider: prompt.provider ?? null,
       thinkingLevel: prompt.thinkingLevel ?? null,

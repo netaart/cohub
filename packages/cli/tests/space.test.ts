@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { Command } from "commander";
-import { explicitSpace, identityKeyFrom, readDefaultSpaceCache } from "../src/space.js";
+import { explicitSpace, identityKeyFrom, readHomeSpaceCache } from "../src/space.js";
 
 const DAY_MS = 86_400_000;
 const tempDirs: string[] = [];
@@ -28,7 +28,7 @@ function programWithSpace(space?: string): Command {
 async function cacheFile(value: unknown): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "cohub-space-"));
   tempDirs.push(dir);
-  const path = join(dir, "default-space.json");
+  const path = join(dir, "home-space.json");
   await writeFile(path, `${JSON.stringify(value)}\n`);
   return path;
 }
@@ -83,22 +83,22 @@ test("execution token does not fall back to a local Logto session", () => {
   assert.equal(identityKeyFrom({ env: "prod", executionToken: jwt({ sub: "exec-1" }), idToken: session }), "prod:exec-1");
 });
 
-test("default space cache returns a matching unexpired entry", async () => {
+test("home space cache returns a matching unexpired entry", async () => {
   const path = await cacheFile({ key: "prod:user-alice", spaceId: "space-1", cachedAt: Date.now() });
-  assert.equal(readDefaultSpaceCache(path, "prod:user-alice"), "space-1");
+  assert.equal(readHomeSpaceCache(path, "prod:user-alice"), "space-1");
 });
 
-test("default space cache isolates identities and drops expired or corrupt entries", async () => {
+test("home space cache isolates identities and drops expired or corrupt entries", async () => {
   const now = Date.now();
   const fresh = await cacheFile({ key: "prod:user-alice", spaceId: "space-1", cachedAt: now });
-  assert.equal(readDefaultSpaceCache(fresh, "prod:user-bob"), null);
+  assert.equal(readHomeSpaceCache(fresh, "prod:user-bob"), null);
 
   const expired = await cacheFile({ key: "prod:user-alice", spaceId: "space-1", cachedAt: now - DAY_MS - 1 });
-  assert.equal(readDefaultSpaceCache(expired, "prod:user-alice", now), null);
+  assert.equal(readHomeSpaceCache(expired, "prod:user-alice", now), null);
 
   const corrupt = await cacheFile("not-json");
-  assert.equal(readDefaultSpaceCache(corrupt, "prod:user-alice"), null);
+  assert.equal(readHomeSpaceCache(corrupt, "prod:user-alice"), null);
 
   const incomplete = await cacheFile({ key: "prod:user-alice", spaceId: 1, cachedAt: now });
-  assert.equal(readDefaultSpaceCache(incomplete, "prod:user-alice"), null);
+  assert.equal(readHomeSpaceCache(incomplete, "prod:user-alice"), null);
 });

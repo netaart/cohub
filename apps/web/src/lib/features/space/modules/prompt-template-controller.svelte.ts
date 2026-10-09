@@ -3,11 +3,11 @@ import {
 	readCachedPromptTemplates,
 	writeCachedPromptTemplates,
 } from "$lib/prompt-template-cache";
-import { sdk } from "$lib/sdk";
 import {
-	type CatalogRefreshOptions,
-	createCatalogRefreshCoordinator,
-} from "./catalog-refresh-coordinator";
+	createRefreshCoordinator,
+	type RefreshOptions,
+} from "$lib/refresh-coordinator";
+import { sdk } from "$lib/sdk";
 
 export type PromptQuickAction = {
 	name: string;
@@ -23,8 +23,8 @@ export function createPromptTemplateController(options: {
 	let items = $state<PromptTemplateCatalogEntry[]>([]);
 	let loaded = $state(false);
 	let loadedFor = $state<string | null>(null);
-	const refreshCoordinator = createCatalogRefreshCoordinator({
-		getSpaceId: options.getSpaceId,
+	const refreshCoordinator = createRefreshCoordinator<string>({
+		isCurrent: (targetSpaceId) => options.getSpaceId() === targetSpaceId,
 		refresh: async (targetSpaceId) => {
 			try {
 				const response = await sdk.prompts.list({ spaceId: targetSpaceId });
@@ -52,7 +52,7 @@ export function createPromptTemplateController(options: {
 		loadedFor = targetSpaceId;
 	}
 
-	async function load(loadOptions: CatalogRefreshOptions = {}) {
+	async function load(loadOptions: RefreshOptions = {}) {
 		const targetSpaceId = options.getSpaceId();
 		if (loadedFor !== targetSpaceId) restore(targetSpaceId);
 		await refreshCoordinator.refresh(targetSpaceId, loadOptions);

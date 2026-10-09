@@ -29,6 +29,7 @@ import {
 	getLabelDisplayTitle,
 	getLabelUserProfile,
 	getResourceLabels,
+	getSessionUserUuidFromLabel,
 	hydrateUserProfilesForLabels,
 	isSessionUserLabel,
 	onSpaceLabelsCacheUpdated,
@@ -296,7 +297,7 @@ $effect(() => {
 						<label class="label-row child" class:system={!canSelectLabel(child)} title={getReactiveLabelDisplayTitle(child)}>
 							<input type="checkbox" checked={selected.has(childRef)} disabled={!canSelectLabel(child)} onchange={() => toggleLabel(childRef)} />
 							{#if childProfile || isSessionUserLabel(child)}
-								<UserAvatar name={getReactiveLabelDisplayName(child)} avatarUrl={childProfile?.avatarUrl} size="xxs" class="border-0 bg-bg-elevated" />
+								<UserAvatar name={getReactiveLabelDisplayName(child)} avatarUrl={childProfile?.avatarUrl} seed={getSessionUserUuidFromLabel(child)} size="xxs" class="border-0" />
 							{/if}
 							<span class="truncate">{getReactiveLabelDisplayName(child)}</span>
 						</label>

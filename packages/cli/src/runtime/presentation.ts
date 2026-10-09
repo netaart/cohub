@@ -1,13 +1,12 @@
-import { resolveCohubEnvironment } from "@neta-art/cohub";
 import type { NativeConfig } from "./native/config.js";
 import type { NativeStatus } from "./native/daemon.js";
 import type { RuntimeDiagnostic, RuntimeDiagnosticLevel } from "./diagnostics.js";
+import { webUrl } from "../web.js";
 
 export const diagnosticLevels: RuntimeDiagnosticLevel[] = ["debug", "info", "warn", "error"];
 export const atLeastLevel = (level: RuntimeDiagnosticLevel, minimum: RuntimeDiagnosticLevel) =>
   diagnosticLevels.indexOf(level) >= diagnosticLevels.indexOf(minimum);
-export const runtimeWebUrl = (spaceId: string) =>
-  `https://${resolveCohubEnvironment() === "prod" ? "" : "dev."}cohub.live/spaces/${spaceId}`;
+export const runtimeWebUrl = (spaceId: string) => webUrl(`/spaces/${spaceId}`);
 
 const messages: Record<string, string> = {
   "runtime.ready": "Harness connected",
@@ -74,6 +73,7 @@ export type RuntimeSummary = {
   workspaceConnected: boolean;
   diagnosticsPath: string;
   background: boolean;
+  display?: string;
   native?: NativeStatus;
 };
 
@@ -88,6 +88,7 @@ export function printRuntimeSummary(summary: RuntimeSummary, json = false, reuse
     ["Directory", summary.root],
     ["Harness", summary.harnesses.join(" · ")],
     ["Mode", summary.background ? "Background" : "Foreground"],
+    ...(summary.display ? [["Screen", summary.display === "auto" ? "This computer" : summary.display]] : []),
     ["PID", String(summary.pid)],
     ["Logs", summary.diagnosticsPath],
   ];

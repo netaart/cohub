@@ -146,8 +146,8 @@ export async function parseRunCliOptions(
 export function printRunHelp(): void {
   process.stdout.write(`
 Usage:
-  cohub [-s <spaceId>] run [options] -- <shell command>
-  cohub [-s <spaceId>] run --command <shell command>
+  cohub [-s <space>] run [options] -- <shell command>
+  cohub [-s <space>] run --command <shell command>
 
 Options:
   -c, --command <command>  Shell command to execute in the space workspace
@@ -161,7 +161,7 @@ Examples:
   cohub -s <spaceId> run -- git status -sb
 
 Notes:
-  - Without -s or COHUB_SPACE_ID, the command uses the current directory Runtime binding, then Home.
+  - Without -s or COHUB_SPACE_ID, the command uses the current directory Runtime binding; it never falls back to Home.
   - Use --command for commands that contain leading flags, or use -- before the shell command.
   - The command runs in /workspace.
 `);

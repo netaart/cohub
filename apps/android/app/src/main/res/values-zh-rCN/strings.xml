@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="sign_in_failed">登录未完成，请重试。</string>
+    <string name="no_app_for_link">没有可以打开此链接的应用。</string>
+    <string name="bridge_unavailable">此设备的 WebView 版本过旧，原生功能不可用。</string>
+    <string name="web_view_recovering">页面崩溃了，正在重新加载。</string>
+    <string name="file_saved">已保存到 %1$s</string>
+    <string name="file_save_failed">文件保存失败。</string>
+    <string name="runtime_channel">本地 Runtime</string>
+    <string name="runtime_title">Cohub 已连接到此设备</string>
+    <plurals name="runtime_ready">
+        <item quantity="other">Agent 可以在 %d 个文件夹中工作。</item>
+    </plurals>
+    <string name="runtime_connecting">正在连接…</string>
+    <string name="runtime_disconnect">全部断开</string>
+    <string name="display_sharing">正在与 Space 共享此屏幕</string>
+    <string name="display_sharing_control">正在共享此屏幕，Space 可以操作它</string>
+    <string name="display_stop">停止共享</string>
+    <string name="display_control_restricted">点右上角 ⋮，选择「允许受限设置」，再到无障碍中开启 Cohub。</string>
+    <string name="display_control_description">允许你共享屏幕的 Space 读取屏幕上的控件，并点按、滑动和输入。仅在你共享屏幕期间生效，也只作用于你能看到的内容。</string>
+</resources>

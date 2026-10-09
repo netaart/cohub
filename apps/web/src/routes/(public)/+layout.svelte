@@ -1,8 +1,20 @@
 <script lang="ts">
 import "../../app.css";
+import { onMount } from "svelte";
 import { page } from "$app/state";
+import { markHostReady } from "$lib/host-bridge";
+import "$lib/theme.svelte";
 
 const { children } = $props();
+
+// The home page reports for itself once it picks marketing or the app.
+onMount(() => {
+	if (!isHomePath(page.url.pathname)) markHostReady();
+});
+
+function isHomePath(pathname: string) {
+	return pathname === "/" || pathname === "/zh";
+}
 
 /** Public App routes set icons via AppPageHead; others use shell defaults. */
 const isPublicAppPath = $derived.by(() => {
@@ -25,7 +37,7 @@ const isPublicAppPath = $derived.by(() => {
 		`html, body { height: 100% }` chain — never `dvh`, which lags in a
 		standalone PWA. `overflow-x-clip` on document pages is dropped here.
 	-->
-	<div class="h-full overflow-hidden bg-bg-primary text-text-primary">
+	<div class="safe-area-top h-full overflow-hidden bg-bg-primary text-text-primary">
 		{@render children?.()}
 	</div>
 {:else}

@@ -1,16 +1,13 @@
-import type { BoardItem } from "@cohub/protocol/board-document";
+import type { BoardSceneItem as BoardItem } from "./scene.js";
 
-/** Bound source textures independently from the final output bitmap budget. */
 export const BOARD_EXPORT_MAX_TEXTURES = 64;
 
 export type BoardExportAssetSelection = {
-  /** One representative item for each selected preview key. */
   items: BoardItem[];
   keys: string[];
   omittedKeys: string[];
 };
 
-/** Select a stable, document-ordered set of unique preview assets to load. */
 export function selectBoardExportAssets(
   items: BoardItem[],
   assetKey: (item: BoardItem) => string | null,

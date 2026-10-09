@@ -102,3 +102,28 @@ export function createRuntimeContextReader(database: ContextDatabase) {
     return result;
   };
 }
+
+/**
+ * The thinking level the user last selected explicitly (composer model picker),
+ * i.e. the newest settled `meta.requestedThinkingLevel` before `beforeSequence`,
+ * following fork segments from newest to oldest.
+ */
+export function createRequestedThinkingLevelReader(database: ContextDatabase) {
+  return async function load(input: { sessionId: string; beforeSequence?: number }): Promise<string | null> {
+    const segments = await database.select().from(sessionTurnSegments).where(eq(sessionTurnSegments.sessionId, input.sessionId)).orderBy(desc(sessionTurnSegments.ordinal));
+    const ranges = segments.length ? segments : [{ sourceSessionId: input.sessionId, fromSequence: 1, toSequence: null }];
+    const requested = sql<string | null>`${sessionTurns.meta}->>'requestedThinkingLevel'`;
+    for (const range of ranges) {
+      const [row] = await database.select({ level: requested }).from(sessionTurns)
+        .where(and(
+          eq(sessionTurns.sessionId, range.sourceSessionId), gte(sessionTurns.sequence, range.fromSequence),
+          range.toSequence == null ? undefined : lte(sessionTurns.sequence, range.toSequence),
+          input.beforeSequence == null ? undefined : lt(sessionTurns.sequence, input.beforeSequence),
+          ne(sessionTurns.status, "queued"), sql`${requested} is not null`,
+        ))
+        .orderBy(desc(sessionTurns.sequence)).limit(1);
+      if (row?.level) return row.level;
+    }
+    return null;
+  };
+}

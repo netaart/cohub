@@ -335,7 +335,7 @@ onMount(() => {
 			{:else}
 				<!-- Mobile: compact jump control (100+ versions can't be a chip strip) -->
 				<div
-					class="sticky top-12 z-20 -mx-5 mb-8 border-b border-border-subtle bg-bg-primary/90 backdrop-blur-md lg:hidden"
+					class="sticky top-[var(--public-header-height)] z-20 -mx-5 mb-8 border-b border-border-subtle bg-bg-primary/90 backdrop-blur-md lg:hidden"
 				>
 					<button
 						type="button"

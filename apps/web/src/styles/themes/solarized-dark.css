@@ -59,6 +59,7 @@
 	--bg-surface: var(--neutral-80);
 	--bg-surface-hover: var(--neutral-70);
 	--bg-elevated: var(--neutral-60);
+	--bg-subtle: color-mix(in srgb, var(--bg-elevated) 42%, transparent);
 	--bg-input: var(--neutral-95);
 	--bg-code: var(--neutral-100);
 	--bg-header-alt: var(--neutral-80);
@@ -73,7 +74,9 @@
 
 	/* Borders */
 	--border-primary: var(--neutral-60);
+	--border-default: var(--border-primary);
 	--border-subtle: var(--neutral-70);
+	--border-strong: var(--neutral-50);
 
 	/* Interactive states */
 	--bg-hover: oklch(24% 0.024 198 / 1);
@@ -176,8 +179,8 @@
 	--shadow-strong: oklch(0% 0 0 / 0.3);
 	--brand-ring: color-mix(in srgb, var(--brand) 28%, transparent);
 	--mask-opaque: black;
-	--avatar-placeholder-bg: var(--bg-hover-strong);
-	--avatar-placeholder-fg: var(--text-placeholder);
+	--identity-l: 74%;
+	--identity-c: 0.09;
 
 	/* App background */
 	--app-bg-image: none;
@@ -209,6 +212,8 @@
 	--chat-user-message-max-width: min(52rem, 100%);
 	--chat-user-message-radius: 0.75rem;
 	--chat-user-message-tail-radius: 0.375rem;
+	--chat-content-max-width: 56rem;
+	--chat-msg-inset: 0.5rem;
 	--chat-assistant-message-bg: transparent;
 	--chat-assistant-message-fg: var(--text-primary);
 	--chat-composer-bg: color-mix(in srgb, var(--bg-content) 92%, transparent);
@@ -228,7 +233,6 @@
 		transparent
 	);
 	--chat-composer-radius: 28px;
-	--chat-composer-max-width: 56rem;
 	--chat-composer-expanded-max-width: 64rem;
 	--chat-composer-placeholder: var(--text-placeholder);
 

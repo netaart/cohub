@@ -8,6 +8,15 @@ export type CompletionMessage = {
   content: ContentBlock[];
 };
 
+export type CompletionImageInput =
+  | { type: "image_url"; image_url: string | { url: string; detail?: string } }
+  | { type: "input_image"; image_url: string; detail?: string };
+
+export type CompletionMessageInput = {
+  role: CompletionMessageRole;
+  content: string | Array<ContentBlock | CompletionImageInput>;
+};
+
 /**
  * Unified thinking level across completions, session prompts, and model config.
  * `off` disables reasoning; `minimal`–`high` use provider defaults;
@@ -29,7 +38,7 @@ export type CreateSpaceCompletionInput = {
    */
   systemPromptPath?: string | null;
   /** Full conversation history controlled by the caller. */
-  messages: CompletionMessage[];
+  messages: CompletionMessageInput[];
   temperature?: number | null;
   maxTokens?: number | null;
   thinkingLevel?: CompletionThinkingLevel | null;

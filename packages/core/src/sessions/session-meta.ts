@@ -1,6 +1,14 @@
 const normalizeRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {};
 
+export const inheritSessionMetaForFork = (meta: unknown): Record<string, unknown> => {
+  const inherited = normalizeRecord(meta);
+  // Creation provenance belongs to the parent; the child has its own session_forks record.
+  delete inherited.origin;
+  delete inherited.requestSource;
+  return inherited;
+};
+
 export const MAX_SESSION_TITLE_LENGTH = 255;
 export type SessionTitleSource = "fallback" | "generated" | "user";
 
@@ -88,7 +96,12 @@ export const initializeSessionParticipantsMeta = (
   meta: unknown,
   userUuid: string,
   now = new Date(),
-): Record<string, unknown> => setSessionParticipantsMeta(meta, [userUuid], now);
+): Record<string, unknown> => {
+  const initial = normalizeRecord(meta);
+  // A new Session cannot inherit or accept a caller-supplied statistics projection.
+  delete initial.stats;
+  return setSessionParticipantsMeta(initial, [userUuid], now);
+};
 
 export const addSessionParticipantMeta = (
   meta: unknown,

@@ -24,7 +24,7 @@ const logger = createLogger({ serviceName: "cohub-api" });
 const PROVIDER_CACHE_TTL_MS = 30_000;
 const providerCache = new Map<string, { provider: "cloud" | "local"; expiresAt: number }>();
 
-async function isLocal(spaceId: string): Promise<boolean> {
+export async function isLocalSpace(spaceId: string): Promise<boolean> {
   const now = Date.now();
   const cached = providerCache.get(spaceId);
   if (cached && cached.expiresAt > now) return cached.provider === "local";
@@ -156,25 +156,25 @@ async function reconcileSandboxAfterDirectWrite(spaceId: string): Promise<void> 
 }
 
 export async function listSpaceDirectory(spaceId: string, path?: string, options?: Visibility) {
-  return (await isLocal(spaceId))
+  return (await isLocalSpace(spaceId))
     ? remote.listSpaceDirectory(spaceId, path, options)
     : direct.listSpaceDirectory(spaceId, path, options);
 }
 
 export async function readSpaceFile(spaceId: string, path: string, options?: Visibility) {
-  return (await isLocal(spaceId))
+  return (await isLocalSpace(spaceId))
     ? remote.readSpaceFile(spaceId, path, options)
     : direct.readSpaceFile(spaceId, path, options);
 }
 
 export async function statSpaceFileVersion(spaceId: string, path: string) {
-  return (await isLocal(spaceId))
+  return (await isLocalSpace(spaceId))
     ? remote.statSpaceFileVersion(spaceId, path)
     : direct.statSpaceFileVersion(spaceId, path);
 }
 
 export async function readSpaceFiles(spaceId: string, paths: string[], options?: Visibility) {
-  return (await isLocal(spaceId))
+  return (await isLocalSpace(spaceId))
     ? remote.readSpaceFiles(spaceId, paths, options)
     : direct.readSpaceFiles(spaceId, paths, options);
 }
@@ -183,7 +183,7 @@ export async function writeSpaceFile(
   spaceId: string,
   input: Parameters<typeof direct.writeSpaceFile>[1],
 ): Promise<ApiEventOutcome<Awaited<ReturnType<typeof direct.writeSpaceFile>>> | SandboxEventOutcome<SandboxWriteResult>> {
-  if (await isLocal(spaceId)) {
+  if (await isLocalSpace(spaceId)) {
     // The API relay connection does not forward watcher events, so the route
     // remains responsible for publishing the mutation event for local spaces.
     return asApiEventOutcome(await remote.writeSpaceFile(spaceId, input));
@@ -199,7 +199,7 @@ export async function createSpaceFileExclusive(
   spaceId: string,
   input: Parameters<typeof direct.createSpaceFileExclusive>[1],
 ): Promise<ApiEventOutcome<Awaited<ReturnType<typeof direct.createSpaceFileExclusive>>> | SandboxEventOutcome<SandboxWriteResult>> {
-  if (await isLocal(spaceId)) {
+  if (await isLocalSpace(spaceId)) {
     return asApiEventOutcome(await remote.createSpaceFileExclusive(spaceId, input));
   }
   if (await isCloudSandboxDialable(spaceId)) {
@@ -214,7 +214,7 @@ export async function createSpaceDirectory(
   path: string,
   mutationId?: string,
 ): Promise<ApiEventOutcome<Awaited<ReturnType<typeof direct.createSpaceDirectory>>> | SandboxEventOutcome<SandboxMkdirResult>> {
-  if (await isLocal(spaceId)) {
+  if (await isLocalSpace(spaceId)) {
     return asApiEventOutcome(await remote.createSpaceDirectory(spaceId, path));
   }
   if (await isCloudSandboxDialable(spaceId)) {
@@ -229,7 +229,7 @@ export async function deleteSpaceNode(
   recursive = false,
   mutationId?: string,
 ): Promise<ApiEventOutcome<Awaited<ReturnType<typeof direct.deleteSpaceNode>>> | SandboxEventOutcome<SandboxDeleteResult>> {
-  if (await isLocal(spaceId)) {
+  if (await isLocalSpace(spaceId)) {
     return asApiEventOutcome(await remote.deleteSpaceNode(spaceId, path, recursive));
   }
   if (await isCloudSandboxDialable(spaceId)) {
@@ -243,7 +243,7 @@ export async function moveSpaceNode(
   input: Parameters<typeof direct.moveSpaceNode>[1] & { mutationId?: string },
 ): Promise<ApiEventOutcome<Awaited<ReturnType<typeof direct.moveSpaceNode>>> | SandboxEventOutcome<SandboxMoveResult>> {
   const { mutationId, ...move } = input;
-  if (await isLocal(spaceId)) {
+  if (await isLocalSpace(spaceId)) {
     return asApiEventOutcome(await remote.moveSpaceNode(spaceId, move));
   }
   if (await isCloudSandboxDialable(spaceId)) {
@@ -257,7 +257,7 @@ export async function uploadSpaceFiles(
   files: File[],
   targetDir: string,
 ): Promise<ApiEventOutcome<SpaceFsUploadResponse> | SandboxEventOutcome<SpaceFsUploadResponse>> {
-  if (await isLocal(spaceId)) {
+  if (await isLocalSpace(spaceId)) {
     return asApiEventOutcome(await remote.uploadSpaceFiles(spaceId, files, targetDir));
   }
   if (await isCloudSandboxDialable(spaceId)) {
@@ -280,7 +280,7 @@ export type SpaceFileDownload =
   | { kind: "buffer"; name: string; mimeType: string | null; buffer: Buffer };
 
 export async function resolveSpaceFileDownload(spaceId: string, path: string, options?: Visibility): Promise<SpaceFileDownload> {
-  if (await isLocal(spaceId)) {
+  if (await isLocalSpace(spaceId)) {
     const file = await remote.downloadSpaceFile(spaceId, path, options);
     return { kind: "buffer", ...file };
   }

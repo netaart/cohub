@@ -14,7 +14,7 @@ const APP_B = "22222222-2222-4222-8222-222222222222";
 const APP_C = "33333333-3333-4333-8333-333333333333";
 const APP_D = "44444444-4444-4444-8444-444444444444";
 
-type Ref = { kind: "file" | "board" | "port" | "app"; key: string };
+type Ref = { kind: "file" | "board" | "port" | "app" | "display"; key: string };
 
 /**
  * A harness with all four domains mounted, so cross-domain fallback and
@@ -31,6 +31,8 @@ function createHarness(
 	let activePort: string | null = null;
 	let appKeys: string[] = [];
 	let activeAppKey: string | null = null;
+	let displays: string[] = [];
+	let activeDisplay: string | null = null;
 	const dirtyApps = new Set<string>();
 	let boardOpenCount = 0;
 	const urls: Array<Ref | null> = [];
@@ -54,6 +56,20 @@ function createHarness(
 				windowState: { dirty: dirtyApps.has(key) },
 			})),
 		getActiveAppKey: () => activeAppKey,
+		getDisplayTabs: () => displays.map((display) => ({ display })),
+		getActiveDisplay: () => activeDisplay,
+		openDisplay: (display) => {
+			if (!displays.includes(display)) displays = [...displays, display];
+			activeDisplay = display;
+		},
+		activateDisplay: (display) => {
+			activeDisplay = display;
+		},
+		closeDisplay: (display) => {
+			if (!display) return;
+			displays = drop(displays, display);
+			if (activeDisplay === display) activeDisplay = displays.at(-1) ?? null;
+		},
 		openFile: async (path) => {
 			if (!filePaths.includes(path)) filePaths = [...filePaths, path];
 			activeFilePath = path;
@@ -123,6 +139,7 @@ function createHarness(
 			boards: boardPaths.length,
 			ports: ports.length,
 			apps: appKeys.length,
+			displays: displays.length,
 		}),
 		boardOpenCount: () => boardOpenCount,
 		/** An App reporting unsaved work, as its window state would. */
@@ -247,7 +264,13 @@ test("compact session navigation suspends tabs without disposing runtimes", asyn
 	assert.equal(controller.suspended, true);
 	assert.equal(controller.currentRef(), null);
 	assert.equal(controller.activeKind, null);
-	assert.deepEqual(counts(), { files: 1, boards: 1, ports: 1, apps: 1 });
+	assert.deepEqual(counts(), {
+		files: 1,
+		boards: 1,
+		ports: 1,
+		apps: 1,
+		displays: 0,
+	});
 
 	controller.applyRoute({ kind: "board", key: "plans/main.board" });
 	assert.equal(controller.suspended, false);
@@ -336,10 +359,17 @@ test("closeAll drops every domain tab and the active ref", async () => {
 		appId: WORK_ID,
 		openContext: { source: "user" },
 	});
+	controller.openDisplay("screen");
 
 	controller.closeAll();
 
-	assert.deepEqual(counts(), { files: 0, boards: 0, ports: 0, apps: 0 });
+	assert.deepEqual(counts(), {
+		files: 0,
+		boards: 0,
+		ports: 0,
+		apps: 0,
+		displays: 0,
+	});
 	assert.equal(controller.currentRef(), null);
 });
 
@@ -533,4 +563,25 @@ test("a renamed active file window stays active and rewrites the URL", async () 
 		{ kind: "app", key: to },
 		"the older file tab must not take over",
 	);
+});
+
+test("a display window opens once, routes like any window and falls back on close", async () => {
+	const { controller, urls, counts } = createHarness();
+	await controller.openFile("docs/a.md");
+	controller.openDisplay("screen");
+	controller.openDisplay("screen");
+	assert.equal(counts().displays, 1, "re-opening activates the existing tab");
+	assert.deepEqual(controller.currentRef(), { kind: "display", key: "screen" });
+	assert.deepEqual(urls.at(-1), { kind: "display", key: "screen" });
+
+	controller.openDisplay("../etc");
+	assert.equal(counts().displays, 1, "invalid display ids never open");
+
+	controller.close("display", "screen");
+	assert.deepEqual(controller.currentRef(), { kind: "file", key: "docs/a.md" });
+
+	assert.deepEqual(controller.applyRoute({ kind: "display", key: "screen" }), {
+		ok: true,
+	});
+	assert.deepEqual(controller.currentRef(), { kind: "display", key: "screen" });
 });

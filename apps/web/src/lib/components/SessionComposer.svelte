@@ -606,7 +606,9 @@ function submitDraft() {
 		return;
 	}
 	onsubmit();
-	textareaEl?.blur();
+	// Keep typing on desktop; dismiss the keyboard on mobile.
+	if (isMobileComposerInput()) textareaEl?.blur();
+	else textareaEl?.focus({ preventScroll: true });
 	collapseComposer();
 }
 
@@ -1234,8 +1236,8 @@ $effect(() => {
 });
 </script>
 
-<div class="px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-4">
-	<div class={`relative mx-auto transition-[max-width] duration-200 ${isComposerExpanded ? 'max-w-[var(--chat-composer-expanded-max-width)]' : 'max-w-[var(--chat-composer-max-width)]'}`}>
+<div class="px-4 pb-[calc(0.75rem+var(--safe-area-bottom))] pt-2 sm:px-6 sm:pb-4">
+	<div class={`relative mx-auto transition-[max-width] duration-200 ${isComposerExpanded ? 'max-w-[var(--chat-composer-expanded-max-width)]' : 'max-w-[var(--chat-content-max-width)]'}`}>
 		{#if quickActions.length > 0}
 			<div class="mb-2">
 				<SessionChatQuickActions

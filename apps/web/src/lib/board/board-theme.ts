@@ -5,6 +5,11 @@ import {
 	buildFallbackShapeColors,
 } from "@neta-art/cohub/board";
 import type { BoardRenderPalette } from "@neta-art/cohub/board/render";
+import {
+	IDENTITY_TONE_COUNT,
+	identityToken,
+	identityTone,
+} from "$lib/avatar-identity";
 import type { BoardThemeBackground } from "$lib/board/board-theme-background";
 import { readCssColorNumber } from "$lib/board/core/css-color";
 import { getResolvedTheme, type ResolvedTheme } from "$lib/theme.svelte";
@@ -26,6 +31,7 @@ export type BoardThemeSnapshot = {
 	colorScheme: "dark" | "light";
 	palette: BoardRenderPalette;
 	colors: BoardShapeColors;
+	identity: readonly number[];
 	background: BoardThemeBackground | null;
 };
 
@@ -71,6 +77,20 @@ function readShapeColors(
 		};
 	}
 	return out;
+}
+
+function readIdentity(
+	host: Element | null | undefined,
+	fallback: number,
+): number[] {
+	return Array.from({ length: IDENTITY_TONE_COUNT }, (_, index) =>
+		cssNumber(host, identityToken(index + 1), fallback),
+	);
+}
+
+export function boardIdentityColor(theme: BoardThemeSnapshot, seed: string) {
+	const tone = identityTone(seed);
+	return (tone && theme.identity[tone - 1]) ?? theme.palette.muted;
 }
 
 function cssToken(host: Element | null | undefined, name: string): string {
@@ -141,12 +161,14 @@ export function resolveBoardTheme(
 ): BoardThemeSnapshot {
 	const id = getResolvedTheme();
 	const colorScheme = isDarkTheme(id) ? "dark" : "light";
+	const palette = readPalette(host);
 	return {
 		id,
 		key,
 		colorScheme,
-		palette: readPalette(host),
+		palette,
 		colors: readShapeColors(host, colorScheme),
+		identity: readIdentity(host, palette.brand),
 		background: readBackground(host),
 	};
 }

@@ -29,10 +29,6 @@ export function getCachedSpaceList(): SpaceRecord[] | null {
 	return cache.getCached(SPACE_LIST_SCOPE);
 }
 
-export function getCachedSpaceListMeta() {
-	return cache.getCachedMeta(SPACE_LIST_SCOPE);
-}
-
 export function setCachedSpaceList(spaces: SpaceRecord[]): SpaceRecord[] {
 	const next = cache.setCached(SPACE_LIST_SCOPE, spaces);
 	cacheSpaceRecordsSoon(next);
@@ -53,21 +49,4 @@ export function clearCachedSpaceList() {
 
 export function clearAllCachedSpaceLists() {
 	cache.clearAllForCurrentUser();
-}
-
-export function onSpaceListCacheUpdated(
-	handler: (event: { spaces: SpaceRecord[] }) => void,
-) {
-	return cache.onUpdated(({ data }) => {
-		handler({ spaces: data });
-	});
-}
-
-export async function fetchSpaceListWithCache(
-	fetcher: () => Promise<SpaceRecord[]>,
-	options?: { force?: boolean },
-): Promise<SpaceRecord[]> {
-	const spaces = await cache.fetchWithCache(SPACE_LIST_SCOPE, fetcher, options);
-	cacheSpaceRecordsSoon(spaces);
-	return spaces;
 }

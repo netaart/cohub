@@ -33,6 +33,9 @@ __IMAGE_PULL_SECRETS_BLOCK__
           ports:
             - containerPort: __CONTAINER_PORT__
               name: http
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: cohub-fs-api
           envFrom:
             - configMapRef:
                 name: __APP_NAME__-config

@@ -118,7 +118,7 @@ async function claimQueuedTurns(tx: Transaction, queued: TurnRow[]): Promise<Cla
   const merged = queued.slice(0, -1);
   const executionBatch = createExecutionBatch(queued);
 
-  const ownerMeta = { ...asRecord(owner.meta), executionBatch };
+  const ownerMeta = { ...asRecord(owner.meta), executionBatch, metrics: { ...asRecord(asRecord(owner.meta).metrics), version: 1, executionStartedAt: Date.now() } };
   const updatedRows = await tx.execute(sql`
     update v2.session_turns
     set status = 'running',

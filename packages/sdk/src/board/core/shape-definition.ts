@@ -1,16 +1,3 @@
-/**
- * ShapeDefinition protocol + registry.
- *
- * A ShapeDefinition describes everything the editor needs to *behave* correctly
- * around a shape — bounds, hit testing, handles, capabilities, snap targets —
- * with no knowledge of how the shape is drawn. The Pixi renderers are a separate
- * concern (board-renderer-registry). This separation is what lets us add a shape
- * by writing one definition + one renderer, and keeps geometry fully unit-testable
- * without a GPU.
- *
- * Definitions are looked up by `item.type`. Unknown types fall back to a generic
- * box definition so unrecognised shapes still select, move and resize.
- */
 
 import {
 	frameContainsPoint,
@@ -18,11 +5,7 @@ import {
 	type Rect,
 	type WorldPoint,
 } from "../geometry.js";
-import {
-	type BoardFrame,
-	type BoardItem,
-	isUnknownItem,
-} from "@cohub/protocol/board-document";
+import type { BoardSceneItem as BoardItem } from "./scene.js";
 import {
 	resizeModeForCapabilities,
 	type ShapeCapabilities,
@@ -32,19 +15,11 @@ import {
 } from "./shape-types.js";
 
 export type ShapeDefinition = {
-	/** The item type this definition handles. */
 	type: string;
 	capabilities: ShapeCapabilities;
-	/** Rotation-aware world bounds (culling, marquee). Defaults to itemBounds. */
 	getBounds?: (item: BoardItem) => Rect;
-	/** Exact world-space containment (hit testing). Defaults to rotated rect. */
 	hitTest?: (item: BoardItem, point: WorldPoint) => boolean;
-	/** Interaction handles in the shape's local space. Defaults to none. */
 	getHandles?: (item: BoardItem) => ShapeHandle[];
-	/**
-	 * Local-space geometry outline, used for precise hit tests and snapping.
-	 * Optional; box shapes rely on the frame directly.
-	 */
 	getGeometry?: (item: BoardItem) => ShapeGeometry;
 };
 
@@ -58,10 +33,6 @@ export function getShapeDefinition(type: string): ShapeDefinition | undefined {
 	return definitions.get(type);
 }
 
-/**
- * The generic fallback for unknown shape types: a plain movable/resizable box.
- * This guarantees a shape authored by a newer client is still interactive here.
- */
 export const unknownShapeDefinition: ShapeDefinition = {
 	type: "__unknown__",
 	capabilities: {
@@ -77,11 +48,9 @@ export const unknownShapeDefinition: ShapeDefinition = {
 };
 
 export function definitionForItem(item: BoardItem): ShapeDefinition {
-	if (isUnknownItem(item)) return unknownShapeDefinition;
 	return definitions.get(item.type) ?? unknownShapeDefinition;
 }
 
-// ─── Convenience accessors used by the editor ───────────────────────
 
 export function shapeBounds(item: BoardItem): Rect {
 	const definition = definitionForItem(item);
@@ -106,5 +75,3 @@ export function shapeCapabilities(item: BoardItem): ShapeCapabilities {
 export function shapeResizeMode(item: BoardItem): ShapeResizeMode {
 	return resizeModeForCapabilities(shapeCapabilities(item));
 }
-
-export type { BoardFrame };

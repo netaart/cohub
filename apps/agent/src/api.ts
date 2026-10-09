@@ -106,3 +106,28 @@ export async function getSpace(input: { spaceId: string }) {
     } | null;
   } | null>;
 }
+
+export async function createSessionImageUpload(input: { executionToken: string; spaceId: string; sessionId: string; size: number; mimeType: string }) {
+  const response = await fetch(`${INTERNAL_API_BASE_URL}/api/public-assets/uploads`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${input.executionToken}`,
+      ...buildTraceHeaders({ requestId: getCurrentRequestId() }),
+    },
+    body: JSON.stringify({
+      purpose: "session_image",
+      uploadProtocol: "presigned_put_v1",
+      spaceId: input.spaceId,
+      sessionId: input.sessionId,
+      file: { size: input.size, mimeType: input.mimeType },
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Session image upload plan failed ${response.status}: ${text}`);
+  }
+  const plan = await response.json() as { asset: { publicUrl: string; uploadUrl: string; uploadHeaders?: Record<string, string> } };
+  return plan.asset;
+}

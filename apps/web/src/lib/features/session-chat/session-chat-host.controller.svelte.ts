@@ -25,6 +25,7 @@ import { tick, untrack } from "svelte";
 import { classifyAccessError } from "$lib/access/access-state";
 import type { SessionListForkRecord } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
+import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
 import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
 import { shouldRefreshAgentCatalogs } from "$lib/cache/space-fs-invalidation";
 import { noteViewerActivity } from "$lib/command-palette/palette-overview";
@@ -59,7 +60,15 @@ import {
 	uploadChatAttachmentFile,
 	uploadChatAttachmentImage,
 } from "$lib/public-asset-images";
+import { createRelatedSessions } from "$lib/related-sessions";
 import { sdk } from "$lib/sdk";
+import {
+	buildSentTurnIndex,
+	EMPTY_SENT_TURNS,
+	NO_SENT_SESSIONS,
+} from "$lib/sent-turns";
+import { mergeSessionRecord } from "$lib/session-record-merge";
+import type { SessionRelations } from "$lib/session-relations-context";
 import { sortSessionsByRecentActivity } from "$lib/session-sort";
 import type { TimelineItem } from "$lib/session-tree";
 import { buildTurnTimelineItems } from "$lib/session-turn-render";
@@ -85,6 +94,7 @@ import {
 	sessionComposerDraftKey,
 	writeSessionComposerDraftText,
 } from "$lib/stores/session-composer-drafts";
+import { fetchSessionDetailWithCache } from "$lib/stores/session-detail-cache";
 import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
 import {
 	buildStreamingStoredIntermediateMessages,
@@ -298,6 +308,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		oldestCursor: undefined,
 	};
 	const EMPTY_TIMELINE: TimelineItem[] = [];
+	const EMPTY_TURNS: SessionTurnRecord[] = [];
 
 	const draftSessionState = $derived<SessionViewState | null>(
 		isDraftNewSessionRoute ? EMPTY_DRAFT_SESSION_STATE : null,
@@ -567,6 +578,40 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			? (turnIndexBySessionId[activeSessionId] ?? EMPTY_TURN_INDEX)
 			: EMPTY_TURN_INDEX,
 	);
+
+	let previousSentTurns = EMPTY_SENT_TURNS;
+	const sentTurns = $derived.by(() => {
+		previousSentTurns = buildSentTurnIndex(
+			activeSessionState?.turns ?? EMPTY_TURNS,
+			spaceId,
+			previousSentTurns,
+		);
+		return previousSentTurns;
+	});
+	const relatedSessions = createRelatedSessions({
+		live: (ref) =>
+			ref.spaceId === spaceId
+				? workspace.spaceSessions.find((item) => item.id === ref.sessionId)
+				: null,
+		load: (ref) =>
+			fetchSessionDetailWithCache(
+				ref.spaceId,
+				ref.sessionId,
+				async () =>
+					(await sdk.space(ref.spaceId).session(ref.sessionId).get()).session,
+			),
+		isUnavailable: (error) =>
+			error instanceof HttpError &&
+			(error.status === 403 || error.status === 404),
+	});
+	const relations: SessionRelations = {
+		sentByTurn: (turnId) =>
+			sentTurns.byCallerTurn.get(turnId) ?? NO_SENT_SESSIONS,
+		sentByToolCall: (toolCallId) =>
+			sentTurns.byToolCall.get(toolCallId) ?? NO_SENT_SESSIONS,
+		session: relatedSessions.get,
+		request: relatedSessions.request,
+	};
 	const activeSessionLastTurnModel = $derived.by(() =>
 		resolveLastAgentTurnModel(
 			mergeComposerTurnSources(
@@ -1625,7 +1670,19 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	}
 
 	function applySessionRealtimeRecord(session: SessionRecord) {
-		upsertSessionRecord(session);
+		const current = workspace.spaceSessions.find(
+			(item) => item.id === session.id,
+		);
+		upsertSessionRecord(mergeSessionRecord(current, session));
+		const merged = workspace.spaceSessions.find(
+			(item) => item.id === session.id,
+		);
+		if (merged)
+			void sessionDetailRepo
+				.set(spaceId, merged, { source: "network" })
+				.catch((error) =>
+					console.warn("[session-chat] failed to cache session update", error),
+				);
 	}
 
 	function applySessionsSnapshot(
@@ -4512,6 +4569,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		get timeline() {
 			return timeline;
 		},
+		relations,
 		get activeSessionIsRunning() {
 			return activeSessionIsRunning;
 		},

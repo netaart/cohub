@@ -53,7 +53,7 @@ test("spaces invites create prints the friendly invite URL", async () => {
   const spaces = program.command("spaces");
   let receivedInput: CreateInvitationInput | null = null;
   const listResponse: SpaceInvitationListResponse = {
-    spaceId: "space-1",
+    spaceId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
     ownerUsername: "alice",
     spaceSlug: "research",
     items: [],
@@ -70,7 +70,7 @@ test("spaces invites create prints the friendly invite URL", async () => {
               role: "builder",
               expiresAt: "2026-08-10T00:00:00.000Z",
               maxUses: null,
-              spaceId: "space-1",
+              spaceId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
               ownerUsername: "alice",
               spaceSlug: "research",
             };
@@ -90,7 +90,7 @@ test("spaces invites create prints the friendly invite URL", async () => {
       "node",
       "cohub",
       "-s",
-      "space-1",
+      "7c9e6679-7425-40de-944b-e07fc1f90ae7",
       "spaces",
       "invites",
       "create",

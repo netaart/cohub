@@ -22,7 +22,7 @@ const label = $derived(
 );
 </script>
 
-<div class={`inline-flex items-center gap-1.5 ${compact ? 'px-1.5 py-1' : 'px-2 py-1.5'} text-[12px] leading-none text-text-tertiary`}>
+<div class={`inline-flex items-center gap-1.5 px-[var(--chat-msg-inset)] ${compact ? 'py-1' : 'py-1.5'} text-[12px] leading-none text-text-tertiary`}>
 	<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70 motion-safe:animate-pulse"></span>
 	<span class="truncate tabular-nums">{label}</span>
 </div>

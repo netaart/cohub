@@ -11,8 +11,10 @@ import {
 	type SpaceFsDirCacheRecord,
 } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
+import type { ActivityCacheRecord } from "$lib/cache/repositories/activity-repo";
 
 const CLEANUP_STORAGE_KEY = "cohub:cache:last-cleanup-at:v1";
+const LEGACY_ACTIVITY_PREFIX = "cohub:activity:v1:";
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const MAX_ENTRIES = {
@@ -24,6 +26,7 @@ const MAX_ENTRIES = {
 	labelTrees: 500,
 	labelItems: 5000,
 	resourceLabels: 5000,
+	activity: 30,
 };
 
 function shouldRunCleanup() {
@@ -55,7 +58,8 @@ async function cleanupStore<
 		| "space_fs_dirs"
 		| "label_trees"
 		| "label_items"
-		| "resource_labels",
+		| "resource_labels"
+		| "activity",
 	maxEntries: number,
 ) {
 	const userKey = getCacheUserKey();
@@ -73,10 +77,22 @@ async function cleanupStore<
 	);
 }
 
+export function removeLegacyLocalStorage() {
+	try {
+		for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+			const key = localStorage.key(index);
+			if (key?.startsWith(LEGACY_ACTIVITY_PREFIX)) localStorage.removeItem(key);
+		}
+	} catch {
+		// ignore
+	}
+}
+
 export function scheduleCacheCleanup() {
 	if (typeof window === "undefined" || typeof indexedDB === "undefined") return;
 	if (!shouldRunCleanup()) return;
 	window.setTimeout(() => {
+		removeLegacyLocalStorage();
 		void Promise.all([
 			cleanupStore<SessionListCacheRecord>(
 				"session_lists",
@@ -107,6 +123,7 @@ export function scheduleCacheCleanup() {
 				"resource_labels",
 				MAX_ENTRIES.resourceLabels,
 			),
+			cleanupStore<ActivityCacheRecord>("activity", MAX_ENTRIES.activity),
 		])
 			.then(markCleanupDone)
 			.catch(() => undefined);

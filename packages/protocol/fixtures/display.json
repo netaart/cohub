@@ -1,0 +1,292 @@
+{
+ "$comment": "Cases sandboxd (Go) and the protocol (TS) must agree on; both test suites run them. Lengths count characters (code points), as zod does.",
+ "inputBatches": [
+  {
+   "name": "a tap, a shortcut and text",
+   "valid": true,
+   "events": [
+    {
+     "type": "pointer",
+     "action": "down",
+     "x": 0.5,
+     "y": 0.25,
+     "t": 0
+    },
+    {
+     "type": "pointer",
+     "action": "up",
+     "x": 0.5,
+     "y": 0.25,
+     "button": "primary",
+     "t": 60
+    },
+    {
+     "type": "key",
+     "action": "down",
+     "key": "Control",
+     "t": 200
+    },
+    {
+     "type": "key",
+     "action": "press",
+     "key": "a",
+     "t": 200
+    },
+    {
+     "type": "key",
+     "action": "up",
+     "key": "Control",
+     "t": 200
+    },
+    {
+     "type": "text",
+     "text": "你好 é\n",
+     "t": 350
+    },
+    {
+     "type": "scroll",
+     "x": 1,
+     "y": 0,
+     "dy": -0.5
+    },
+    {
+     "type": "system",
+     "action": "back"
+    },
+    {
+     "type": "element",
+     "ref": "e3.12",
+     "action": "setText",
+     "text": ""
+    },
+    {
+     "type": "element",
+     "ref": "e3.12",
+     "action": "click"
+    }
+   ]
+  },
+  {
+   "name": "an unknown button",
+   "valid": false,
+   "events": [
+    {
+     "type": "pointer",
+     "action": "down",
+     "x": 0.5,
+     "y": 0.5,
+     "button": "left"
+    }
+   ]
+  },
+  {
+   "name": "a point off the display",
+   "valid": false,
+   "events": [
+    {
+     "type": "pointer",
+     "action": "move",
+     "x": 1.01,
+     "y": 0.5
+    }
+   ]
+  },
+  {
+   "name": "a scroll without a delta",
+   "valid": false,
+   "events": [
+    {
+     "type": "scroll",
+     "x": 0.5,
+     "y": 0.5
+    }
+   ]
+  },
+  {
+   "name": "a scroll past the limit",
+   "valid": false,
+   "events": [
+    {
+     "type": "scroll",
+     "x": 0.5,
+     "y": 0.5,
+     "dy": 10.5
+    }
+   ]
+  },
+  {
+   "name": "a timeline that goes back",
+   "valid": false,
+   "events": [
+    {
+     "type": "text",
+     "text": "a",
+     "t": 20
+    },
+    {
+     "type": "text",
+     "text": "b",
+     "t": 10
+    }
+   ]
+  },
+  {
+   "name": "a timeline past a minute",
+   "valid": false,
+   "events": [
+    {
+     "type": "text",
+     "text": "a",
+     "t": 60001
+    }
+   ]
+  },
+  {
+   "name": "empty text",
+   "valid": false,
+   "events": [
+    {
+     "type": "text",
+     "text": ""
+    }
+   ]
+  },
+  {
+   "name": "setText without text",
+   "valid": false,
+   "events": [
+    {
+     "type": "element",
+     "ref": "e1.1",
+     "action": "setText"
+    }
+   ]
+  },
+  {
+   "name": "text for a click",
+   "valid": false,
+   "events": [
+    {
+     "type": "element",
+     "ref": "e1.1",
+     "action": "click",
+     "text": "x"
+    }
+   ]
+  },
+  {
+   "name": "a malformed ref",
+   "valid": false,
+   "events": [
+    {
+     "type": "element",
+     "ref": "e1",
+     "action": "click"
+    }
+   ]
+  },
+  {
+   "name": "an unknown system button",
+   "valid": false,
+   "events": [
+    {
+     "type": "system",
+     "action": "power"
+    }
+   ]
+  },
+  {
+   "name": "a key of 64 characters",
+   "valid": true,
+   "events": [
+    {
+     "type": "key",
+     "action": "press",
+     "key": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+    }
+   ]
+  },
+  {
+   "name": "a key of 65 characters",
+   "valid": false,
+   "events": [
+    {
+     "type": "key",
+     "action": "press",
+     "key": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+    }
+   ]
+  },
+  {
+   "name": "no events",
+   "valid": false,
+   "events": []
+  }
+ ],
+ "displays": [
+  {
+   "name": "names a newer machine adds are dropped",
+   "info": {
+    "id": "screen",
+    "name": "Pixel",
+    "width": 1080,
+    "height": 2400,
+    "stream": true,
+    "capture": true,
+    "input": true,
+    "system": [
+     "back",
+     "teleport",
+     "home"
+    ],
+    "needs": [
+     "telepathy",
+     "accessibility"
+    ]
+   },
+   "known": {
+    "system": [
+     "back",
+     "home"
+    ],
+    "needs": [
+     "accessibility"
+    ]
+   }
+  }
+ ],
+ "elements": [
+  {
+   "name": "unknown roles, states and actions",
+   "element": {
+    "ref": "e1.2",
+    "depth": 1,
+    "role": "hologram",
+    "name": "Go",
+    "bounds": [
+     0.1,
+     0.2,
+     0.3,
+     0.4
+    ],
+    "states": [
+     "focused",
+     "levitating"
+    ],
+    "actions": [
+     "teleport",
+     "click"
+    ]
+   },
+   "clean": {
+    "role": "other",
+    "states": [
+     "focused"
+    ],
+    "actions": [
+     "click"
+    ]
+   }
+  }
+ ]
+}

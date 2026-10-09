@@ -8,7 +8,7 @@ import { discoverHarnesses, installedHarnesses } from "./harness.js";
 import type { Command } from "commander";
 import { requireAccessToken } from "../auth.js";
 import { createClient } from "../client.js";
-import { currentIdentityKey, explicitSpace } from "../space.js";
+import { currentIdentityKey, explicitSpace, resolveSpaceRef } from "../space.js";
 import { canonicalRuntimeRoot, getRuntimeSpaceBinding, resolveRuntimeSpace } from "./space-binding.js";
 import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
 import { ensureNativeSync, repairIntegrations } from "./native/attach.js";
@@ -16,7 +16,7 @@ import type { RuntimeDiagnostic } from "./diagnostics.js";
 import { createDiagnosticConsole, printRuntimeSummary, runtimeWebUrl, type RuntimeSummary } from "./presentation.js";
 import { runRuntime, type RuntimeLaunch } from "./supervisor.js";
 
-export type RuntimeUpOptions = { space?: string; new?: boolean; name?: string; harness: string[]; pi?: string; codex?: string; yes?: boolean; json?: boolean; detach?: boolean; verbose?: boolean };
+export type RuntimeUpOptions = { space?: string; new?: boolean; name?: string; harness: string[]; pi?: string; codex?: string; display?: string | boolean; yes?: boolean; json?: boolean; detach?: boolean; verbose?: boolean };
 export const resolveLocalSpaceName = (root: string, name?: string) => name?.trim() || basename(root) || "local-space";
 export function parseRuntimeHarnesses(values: string[]): ("pi" | "codex")[] {
   const names = values.flatMap((value) => value.split(",")).map((name) => name.trim()).filter(Boolean);
@@ -24,9 +24,36 @@ export function parseRuntimeHarnesses(values: string[]): ("pi" | "codex")[] {
   return [...new Set(names.length ? names : ["pi"])] as ("pi" | "codex")[];
 }
 
+export function parseRuntimeDisplay(
+  value: string | boolean | undefined,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (value === false) return undefined;
+  if (value === undefined && platform !== "darwin" && (platform !== "linux" || !env.DISPLAY)) return undefined;
+  const spec = value === undefined || value === true ? "auto" : value.trim();
+  if (!/^(auto|macos|x11(:[\w.:-]+)?|xvfb(:\d{3,4}x\d{3,4})?)$/.test(spec)) {
+    throw new Error("Display must be auto, macos, x11[:display] or xvfb[:WIDTHxHEIGHT]");
+  }
+  if (platform === "linux" && spec === "auto" && !env.DISPLAY) {
+    throw new Error(env.WAYLAND_DISPLAY
+      ? "Wayland sessions cannot be shared yet: log in with an X11 session, or use --display xvfb for a virtual screen"
+      : "No X11 session to share (DISPLAY is unset): use --display xvfb for a virtual screen");
+  }
+  return spec;
+}
+
+const isVirtualDisplay = (spec: string) => spec.startsWith("xvfb");
+
+async function requestedRuntimeSpace(program: Command, target?: string): Promise<string | null> {
+  const ref = target?.trim() || explicitSpace(program);
+  return ref ? resolveSpaceRef(ref) : null;
+}
+
 export async function resolveRuntimeTarget(program: Command, target?: string) {
-  const spaceId = target?.trim() || explicitSpace(program) || (await getRuntimeSpaceBinding(process.cwd(), currentIdentityKey()))?.spaceId;
-  if (!spaceId) throw new Error("No directory binding. Use --space <id> or runtime up");
+  const spaceId = await requestedRuntimeSpace(program, target)
+    ?? (await getRuntimeSpaceBinding(process.cwd(), currentIdentityKey()))?.spaceId;
+  if (!spaceId) throw new Error("No directory binding. Use --space <space> or runtime up");
   return spaceId;
 }
 
@@ -66,18 +93,20 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   const requestedRoot = resolve(dir ?? process.cwd());
   if (!(await stat(requestedRoot)).isDirectory()) throw new Error("Workspace is not a directory");
   const root = await canonicalRuntimeRoot(requestedRoot);
-  const requested = options.space?.trim() || explicitSpace(program);
-  if (options.new && requested) throw new Error("--new cannot be combined with --space or COHUB_SPACE_ID");
-  if (options.name && requested) throw new Error("--name only applies to a new Space");
+  const requestedRef = options.space?.trim() || explicitSpace(program);
+  if (options.new && requestedRef) throw new Error("--new cannot be combined with --space or COHUB_SPACE_ID");
+  if (options.name && requestedRef) throw new Error("--name only applies to a new Space");
+  const requested = await requestedRuntimeSpace(program, options.space);
   const identity = currentIdentityKey();
   if (!identity) { await requireAccessToken(); throw new Error("Cannot identify the signed-in account"); }
   const binding = await getRuntimeSpaceBinding(root, identity);
   const existingId = requested || binding?.spaceId;
   let harnesses = parseRuntimeHarnesses(options.harness);
+  let display = options.display === undefined ? undefined : parseRuntimeDisplay(options.display);
   if (existingId && !options.new) {
     const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, existingId));
     if (existing) {
-      if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || options.pi || options.codex) {
+      if (existing.root !== root || options.harness.length && [...existing.harnesses].sort().join() !== [...harnesses].sort().join() || options.pi || options.codex || options.display !== undefined && display !== existing.display) {
         throw new Error("Runtime is running with a different configuration. Use down first");
       }
       // `up` is the single idempotent entry: a reused instance adopts its running
@@ -91,6 +120,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
       return;
     }
   }
+  display = parseRuntimeDisplay(options.display);
   if (!options.harness.length) harnesses = await installedHarnesses(root, options);
   if (!harnesses.length) throw new Error("Install and sign in to Pi or Codex, or pass --harness");
   let createNew = Boolean(options.new);
@@ -113,6 +143,10 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
       process.stderr.write(`\nDirectory  ${root}\n${requested ? `Space  ${runtimeWebUrl(requested)}\n` : ""}`);
       const answer = await rl.question("Collaborators can execute as your OS user, beyond this folder. Allow? [Y/n] ");
       if (/^n(o)?$/i.test(answer.trim())) return;
+      if (display && !isVirtualDisplay(display)) {
+        const share = await rl.question("Collaborators and agents can see and control this screen. Share it? [Y/n] ");
+        if (!/^(y(es)?)?$/i.test(share.trim())) display = undefined;
+      }
     } finally { rl.close(); }
   }
   if (options.yes && createNew && binding && !options.name) name = `${name}-${randomUUID().slice(0, 6)}`;
@@ -134,7 +168,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   });
   // Consent (or --yes) precedes any user-level integration install; failure never blocks startup.
   const native = await ensureNativeSync({ root, spaceId, identity, harnesses, yes: options.yes, executables: { pi: options.pi, codex: options.codex } });
-  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables: { pi: options.pi, codex: options.codex }, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory };
+  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables: { pi: options.pi, codex: options.codex }, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory, display };
   const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
   if (existing) {
     if (existing.root !== root) throw new Error("This Space is running in another directory");

@@ -1,24 +1,11 @@
-import type { BoardColorId } from "@cohub/protocol";
+import type { BoardColor, BoardColorToken } from "@cohub/protocol";
 
-export type { BoardColorId } from "@cohub/protocol";
+export type BoardColorId = BoardColorToken;
 
-/**
- * Board color palette — a small, named set of shape colors shared by text,
- * geo, draw and arrow shapes. Colors are stored by id in shape props (never
- * raw hex), so themes and space `.cohub/theme.css` can remap them via CSS
- * tokens while persisted data stays compact and forward-compatible.
- *
- * Concrete values are resolved from CSS variables at render time:
- *   --board-color-{id}-stroke | -fill | -label
- * with hard-coded light/dark tables as offline / export fallbacks.
- */
 
 export type BoardColorValue = {
-	/** Stroke / accent color (sRGB hex). */
 	stroke: number;
-	/** Translucent fill used behind shapes (sRGB hex). */
 	fill: number;
-	/** Readable label color on top of the fill. */
 	label: number;
 };
 
@@ -29,12 +16,6 @@ export type BoardColorEntry = {
 	light: BoardColorValue;
 };
 
-/**
- * Label color fallbacks mirror `--board-color-*-label`, which every theme maps
- * to `--text-primary`: labels sit on a *translucent* fill over the page, not on
- * a saturated swatch, so a tinted label would be dark-on-dark. Keeping these in
- * step with `theme.css` is what makes a headless export match the screen.
- */
 const LABEL_DARK = 0xf4f4f4;
 const LABEL_LIGHT = 0x18181b;
 
@@ -112,7 +93,6 @@ export function boardColorCssVar(
 	return `--board-color-${id}-${part}`;
 }
 
-/** Resolve a color id to concrete values for a color mode. Unknown → brand. */
 export function resolveBoardColor(
 	id: unknown,
 	mode: "dark" | "light",
@@ -120,13 +100,11 @@ export function resolveBoardColor(
 	const entry =
 		(isBoardColorId(id) ? COLOR_INDEX.get(id) : undefined) ??
 		COLOR_INDEX.get(DEFAULT_BOARD_COLOR);
-	// COLOR_INDEX always has the default, so this is non-null.
 	return (entry as BoardColorEntry)[mode];
 }
 
 export type BoardShapeColors = Record<BoardColorId, BoardColorValue>;
 
-/** Build a full shape-color table from hard-coded fallbacks (export / SSR). */
 export function buildFallbackShapeColors(
 	mode: "dark" | "light",
 ): BoardShapeColors {
@@ -137,10 +115,6 @@ export function buildFallbackShapeColors(
 	return out;
 }
 
-/**
- * Pick a concrete color from a live shape-color table, falling back to the
- * default brand entry when the id is unknown.
- */
 export function pickBoardColor(
 	colors: BoardShapeColors | null | undefined,
 	id: unknown,
@@ -149,4 +123,19 @@ export function pickBoardColor(
 	if (colors && isBoardColorId(id) && colors[id]) return colors[id];
 	if (colors) return colors[DEFAULT_BOARD_COLOR];
 	return resolveBoardColor(id, mode);
+}
+
+export function resolveItemColor(
+	color: BoardColor | undefined,
+	fallback: BoardColorId,
+	colors: BoardShapeColors | null | undefined,
+	mode: "dark" | "light",
+	parseCss: (value: string) => number | null,
+	part: keyof BoardColorValue = "stroke",
+): number {
+	const value = typeof color === "object" && color ? color[mode] : color;
+	if (value === undefined) return pickBoardColor(colors, fallback, mode)[part];
+	const token = value.trim().toLowerCase();
+	if (isBoardColorId(token)) return pickBoardColor(colors, token, mode)[part];
+	return parseCss(value) ?? pickBoardColor(colors, fallback, mode)[part];
 }

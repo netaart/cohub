@@ -272,6 +272,69 @@ try {
   const c3 = multiCompact.appendCompaction("s3", cm8, 100);
   await multiCompact.archiveAndRewrite(c3, cm8);
   assert.deepEqual(compactContextTexts(), ["summary", "m8", "m9"]);
+
+  // Compaction must keep the latest thinking/model settings even when they
+  // were recorded before firstKeptEntryId. Dropping them made the next cold
+  // start treat thinking as off.
+  const settingsCompactFile = join(sessionsDir, "settings-compact.jsonl");
+  const settingsCompact = SessionManager.create(root, sessionsDir);
+  settingsCompact.newSession({ id: "settings-compact" });
+  settingsCompact.setSessionFile(settingsCompactFile);
+  settingsCompact.appendModelChange("cohub", "claude-opus-5-5");
+  settingsCompact.appendThinkingLevelChange("high");
+  const settingsMsg = (text: string, role: "user" | "assistant") =>
+    settingsCompact.appendMessage({ role, content: [{ type: "text", text }], timestamp: Date.now() } as never);
+  settingsMsg("old-user", "user");
+  settingsMsg("old-assistant", "assistant");
+  const keptUser = settingsMsg("kept-user", "user");
+  settingsMsg("kept-assistant", "assistant");
+  assert.equal(settingsCompact.buildSessionContext().thinkingLevel, "high");
+  assert.deepEqual(settingsCompact.buildSessionContext().model, { provider: "cohub", modelId: "claude-opus-5-5" });
+  const settingsCompactId = settingsCompact.appendCompaction("summarized", keptUser, 100);
+  await settingsCompact.archiveAndRewrite(settingsCompactId, keptUser);
+  const compactedContext = settingsCompact.buildSessionContext();
+  assert.equal(compactedContext.thinkingLevel, "high");
+  assert.deepEqual(compactedContext.model, { provider: "cohub", modelId: "claude-opus-5-5" });
+  assert.deepEqual(compactedContext.messages.map((message) => {
+    const record = message as { role?: string; content?: Array<{ text?: string }> };
+    return record.role === "compactionSummary" ? "summary" : record.content?.[0]?.text;
+  }), ["summary", "kept-user", "kept-assistant"]);
+  await settingsCompact.flush();
+  const reopenedSettings = await SessionManager.open(settingsCompactFile, sessionsDir);
+  assert.equal(reopenedSettings.buildSessionContext().thinkingLevel, "high");
+  assert.deepEqual(reopenedSettings.buildSessionContext().model, { provider: "cohub", modelId: "claude-opus-5-5" });
+
+  settingsCompact.appendThinkingLevelChange("low");
+  const laterKept = settingsMsg("later-user", "user");
+  const secondCompactId = settingsCompact.appendCompaction("summarized-again", laterKept, 50);
+  await settingsCompact.archiveAndRewrite(secondCompactId, laterKept);
+  assert.equal(settingsCompact.buildSessionContext().thinkingLevel, "low");
+  // Pinned settings replace, never accumulate, across repeated rewrites.
+  const settingTypes = settingsCompact.getBranchEntries().map((entry) => entry.type).filter((type) => type !== "message");
+  assert.deepEqual(settingTypes, ["compaction", "model_change", "thinking_level_change"]);
+
+  // The model may be known only from an assistant message (e.g. files whose
+  // model_change was dropped by an older rewrite). The rewrite must keep the
+  // resolved model, not regress to an older model_change.
+  const assistantModel = SessionManager.create(root, sessionsDir);
+  assistantModel.newSession({ id: "assistant-model" });
+  assistantModel.setSessionFile(join(sessionsDir, "assistant-model.jsonl"));
+  assistantModel.appendModelChange("cohub", "old-model");
+  assistantModel.appendMessage({ role: "user", content: [{ type: "text", text: "u1" }], timestamp: Date.now() } as never);
+  assistantModel.appendMessage({ role: "assistant", provider: "cohub", model: "new-model", content: [{ type: "text", text: "a1" }], timestamp: Date.now() } as never);
+  const assistantModelKept = assistantModel.appendMessage({ role: "user", content: [{ type: "text", text: "u2" }], timestamp: Date.now() } as never);
+  const beforeRewrite = assistantModel.buildSessionContext();
+  const assistantModelCompactId = assistantModel.appendCompaction("s", assistantModelKept, 10);
+  await assistantModel.archiveAndRewrite(assistantModelCompactId, assistantModelKept);
+  const afterRewrite = assistantModel.buildSessionContext();
+  assert.deepEqual(afterRewrite.model, { provider: "cohub", modelId: "new-model" });
+  assert.deepEqual({ model: afterRewrite.model, thinkingLevel: afterRewrite.thinkingLevel }, { model: beforeRewrite.model, thinkingLevel: beforeRewrite.thinkingLevel });
+  assert.equal(afterRewrite.thinkingLevel, null);
+
+  const unrecorded = SessionManager.create(root, sessionsDir);
+  unrecorded.newSession({ id: "unrecorded" });
+  unrecorded.appendMessage({ role: "user", content: [{ type: "text", text: "hi" }], timestamp: Date.now() } as never);
+  assert.equal(unrecorded.buildSessionContext().thinkingLevel, null);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

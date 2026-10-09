@@ -46,6 +46,7 @@ export type ToolCallViewModel = {
 	durationMs?: number | null;
 	resultPartial?: boolean;
 	resultOmitted?: boolean;
+	resultImages?: Extract<ContentBlock, { type: "image" }>[];
 };
 
 export function summarizeToolInput(
@@ -413,6 +414,15 @@ function findToolResult(content: ContentBlock[], toolUseId: string) {
 	);
 }
 
+function toolResultImages(value: unknown) {
+	return Array.isArray(value)
+		? (value as ContentBlock[]).filter(
+				(block): block is Extract<ContentBlock, { type: "image" }> =>
+					block?.type === "image",
+			)
+		: [];
+}
+
 function timingDurationMs(value: unknown): number | null {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
 	const durationMs = (value as { durationMs?: unknown }).durationMs;
@@ -458,6 +468,13 @@ export function buildToolCallViewModels(input: {
 			: result?.type === "tool_result"
 				? stringifyToolValue(result.content)
 				: "";
+		const resultImages = toolResultImages(
+			fullTool?.result
+				? fullTool.result.content
+				: result?.type === "tool_result"
+					? result.content
+					: null,
+		);
 		const partialResult = stringifyToolValue(block._meta?.partialResult);
 		const resultPartial = Boolean(partialResult);
 		const durationMs =
@@ -480,6 +497,7 @@ export function buildToolCallViewModels(input: {
 			resultOmitted:
 				result?.type === "tool_result" &&
 				result._meta?.resultDetail === "omitted",
+			...(resultImages.length > 0 ? { resultImages } : {}),
 		};
 	});
 }

@@ -176,7 +176,7 @@ jobs:
             namespace: cohub-dev
           spec:
             activeDeadlineSeconds: 600
-            ttlSecondsAfterFinished: 300
+            ttlSecondsAfterFinished: 3600
             backoffLimit: 0
             template:
               spec:
@@ -266,7 +266,7 @@ jobs:
             namespace: cohub
           spec:
             activeDeadlineSeconds: 600
-            ttlSecondsAfterFinished: 300
+            ttlSecondsAfterFinished: 3600
             backoffLimit: 0
             template:
               spec:
@@ -352,7 +352,7 @@ jobs:
             namespace: cohub-dev
           spec:
             activeDeadlineSeconds: 600
-            ttlSecondsAfterFinished: 300
+            ttlSecondsAfterFinished: 3600
             backoffLimit: 0
             template:
               spec:
@@ -416,7 +416,7 @@ jobs:
             namespace: cohub
           spec:
             activeDeadlineSeconds: 600
-            ttlSecondsAfterFinished: 300
+            ttlSecondsAfterFinished: 3600
             backoffLimit: 0
             template:
               spec:

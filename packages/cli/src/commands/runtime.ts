@@ -15,7 +15,7 @@ import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirector
 import { atLeastLevel, diagnosticLevels, formatDiagnostic, formatImportProgress, formatNativeSync, printRuntimeSummary } from "../runtime/presentation.js";
 import { readRuntimeDiagnosticEvents, RuntimeDiagnosticReader, runtimeDiagnosticsDirectory, serializeDiagnosticError, type RuntimeDiagnosticLevel } from "../runtime/diagnostics.js";
 
-export { resolveLocalSpaceName, parseRuntimeHarnesses } from "../runtime/launch.js";
+export { resolveLocalSpaceName, parseRuntimeDisplay, parseRuntimeHarnesses } from "../runtime/launch.js";
 
 const reportFailure = (cause: unknown) => {
   process.stderr.write(`Runtime failed: ${serializeDiagnosticError(cause).message}\n`);
@@ -43,14 +43,16 @@ export function registerRuntime(program: Command) {
   const runtime = program.command("runtime").description("Connect a local workspace");
   runtime.command("up [dir]")
     .description("Connect local Harnesses and files")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("-n, --new", "Create a new Space")
     .option("--name <name>", "New Space name")
     .option("-d, --detach", "Run in the background")
     .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--pi <path>", "Pi executable")
     .option("--codex <path>", "Codex executable")
-    .option("-y, --yes", "Accept defaults and authorize local execution and native sync")
+    .option("--display [screen]", "Share a screen (default: auto when available), or xvfb[:WIDTHxHEIGHT] for a virtual one")
+    .option("--no-display", "Disable screen sharing and skip its confirmation")
+    .option("-y, --yes", "Accept defaults and authorize local execution, native sync, and screen sharing")
     .option("--verbose", "Show diagnostic details")
     .option("--json", "JSON output")
     .action(async (dir: string | undefined, options: RuntimeUpOptions) => {
@@ -60,7 +62,7 @@ export function registerRuntime(program: Command) {
 
   runtime.command("attach")
     .description("Connect native harnesses to Cohub: install the Pi extension")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--harness <name>", "Pi; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { harness: string[] }) => {
@@ -80,7 +82,7 @@ export function registerRuntime(program: Command) {
 
   runtime.command("detach")
     .description("Pause native sync; keep all data")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { harness: string[] }) => {
@@ -104,7 +106,7 @@ export function registerRuntime(program: Command) {
 
   runtime.command("import [dir]")
     .description("Import earlier local conversations, newest first")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--harness <name>", "Filter by harness; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--session <id>", "Filter by native session ID")
     .option("--concurrency <count>", `Conversations read in parallel, 1 to ${MAX_IMPORT_CONCURRENCY}`, String(DEFAULT_IMPORT_CONCURRENCY))
@@ -175,7 +177,7 @@ export function registerRuntime(program: Command) {
     });
 
   runtime.command("status").description("Local and server status")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--json", "JSON output")
     .action(async (options: TargetOptions) => {
       try {
@@ -197,13 +199,15 @@ export function registerRuntime(program: Command) {
           if (local) printRuntimeSummary(local);
           else process.stdout.write(`Local process  Not running\nSpace  ${spaceId}\nLogs  ${result.diagnosticsPath}\n`);
           process.stdout.write(`Server  ${remote.error ? `Unknown — ${remote.error}` : remote.value?.online ? "Harness connected" : "Offline"}\nArchives  ${pendingLocalArchives} pending · ${failedLocalArchives} failed\n`);
+          const displays = remote.value?.displays ?? [];
+          if (displays.length) process.stdout.write(`Displays  ${displays.map((display) => `${display.name || display.id} ${display.width}x${display.height}${display.needs?.length ? ` (needs ${display.needs.join(", ")})` : display.input ? "" : " (view only)"}`).join(" · ")}\n`);
           process.stdout.write(formatNativeSync(nativeSync.config, local?.native, nativeSync.error));
         }
       } catch (cause) { reportFailure(cause); }
     });
 
   runtime.command("down").description("Stop this local Runtime; retain all data")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("-y, --yes", "Stop even with unconfirmed executions")
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { yes?: boolean }) => {
@@ -231,7 +235,7 @@ export function registerRuntime(program: Command) {
     });
 
   runtime.command("logs").description("Read local Runtime diagnostics")
-    .option("-s, --space <id>", "Target Space")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("-l, --limit <count>", "Number of events", "100")
     .option("--level <level>", "Minimum level: debug, info, warn, error", "info")
     .option("-f, --follow", "Keep watching")

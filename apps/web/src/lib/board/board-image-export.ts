@@ -1,20 +1,12 @@
-/**
- * Board → image in the browser.
- *
- * The heavy lifting is shared with the CLI (`@neta-art/cohub/board/export`):
- * both build a scene from the same card renderers and extract a canvas. What is
- * web-specific lives here — reusing the live renderer and its already-resolved
- * theme colors and loaded textures, then turning the canvas into a download or
- * a clipboard image.
- */
 
 import type {
 	BoardDocument,
-	BoardItem,
+	BoardSceneItem,
 	BoardShapeColors,
 } from "@neta-art/cohub/board";
 import {
 	type BoardExportRegion,
+	buildBoardScene,
 	planBoardExport,
 	selectBoardExportAssets,
 } from "@neta-art/cohub/board";
@@ -136,29 +128,16 @@ const EXTENSION: Record<BoardImageFormat, string> = {
 	webp: "webp",
 };
 
-/**
- * What the live stage lends the exporter.
- *
- * Reusing the mounted renderer avoids standing up a second WebGL context (which
- * on some devices means losing the first one), and reusing the stage's resolved
- * theme means an export picks up a space's `theme.css` exactly as the screen
- * does. Everything is a getter so nothing outlives the stage.
- */
 export type BoardStageExportBridge = {
 	renderer: () => Renderer | null;
-	assetKey: (item: BoardItem) => string | null;
+	assetKey: (item: BoardSceneItem) => string | null;
 	theme: () => {
 		palette: BoardRenderPalette;
 		colors: BoardShapeColors;
 		colorScheme: "dark" | "light";
 	};
-	/**
-	 * Loads every media preview in `items`, then runs `use` while those textures are still
-	 * referenced. Scoped rather than returning a map so a texture cannot be evicted
-	 * between loading and drawing.
-	 */
 	withTextures: <T>(
-		items: BoardItem[],
+		items: BoardSceneItem[],
 		use: (textures: Map<string, Texture>) => T | Promise<T>,
 	) => Promise<T>;
 };
@@ -187,14 +166,6 @@ function describe(warnings: BoardExportWarning[]): string[] {
 	return warnings.map(describeBoardExportWarning);
 }
 
-/**
- * Render a region of the board to an image blob.
- *
- * Returns null when the region is empty, so callers can treat "nothing
- * selected" as a no-op instead of an error. Media previews outside the viewport
- * are fetched first: the editor only keeps nearby textures resident, and an
- * export that quietly dropped them would be worse than a slow one.
- */
 export async function exportBoardImage(
 	bridge: BoardStageExportBridge,
 	document: BoardDocument,
@@ -208,17 +179,17 @@ export async function exportBoardImage(
 	const { format = "png", quality = 0.92, ...exportOptions } = options;
 
 	const region: BoardExportRegion = exportOptions.region ?? { kind: "all" };
-	const plan = planBoardExport({ ...exportOptions, document, region });
+	const plan = planBoardExport({ ...exportOptions, scene: buildBoardScene(document), region });
 	if (!plan) return null;
 
 	const theme = bridge.theme();
 	const assets = selectBoardExportAssets(plan.items, bridge.assetKey);
 	const omittedKeys = new Set(assets.omittedKeys);
-	const cappedAssetKey = (item: BoardItem) => {
+	const cappedAssetKey = (item: BoardSceneItem) => {
 		const key = bridge.assetKey(item);
 		return key && omittedKeys.has(key) ? null : key;
 	};
-	const declaredBackground = document.appearance.background;
+	const declaredBackground = document.board.background;
 	const backgroundUrl =
 		exportOptions.background !== "transparent" &&
 		declaredBackground.kind === "image"
@@ -249,7 +220,7 @@ export async function exportBoardImage(
 					? {
 							texture: backgroundTexture.texture,
 							fit: declaredBackground.fit ?? "cover",
-							position: declaredBackground.position ?? "center",
+							position: "center",
 							opacity: declaredBackground.opacity ?? 1,
 						}
 					: undefined,
@@ -284,7 +255,6 @@ export async function exportBoardImage(
 	}
 }
 
-/** Filename for an export, with a sortable timestamp so repeats do not collide. */
 export function boardExportFilename(
 	title: string | null | undefined,
 	format: BoardImageFormat,
@@ -308,18 +278,9 @@ export function downloadBlob(blob: Blob, filename: string): void {
 	document.body.appendChild(anchor);
 	anchor.click();
 	anchor.remove();
-	// Revoke on the next task: revoking synchronously can cancel the download in
-	// some browsers.
 	setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-/**
- * Copy an image to the clipboard.
- *
- * Only PNG is universally accepted by `ClipboardItem`, so callers should pass a
- * PNG blob. Safari requires the `ClipboardItem` to be constructed with a promise
- * inside the same user gesture, hence the two attempts.
- */
 export async function copyImageToClipboard(blob: Blob): Promise<void> {
 	if (!("clipboard" in navigator) || !("write" in navigator.clipboard)) {
 		throw new Error("This browser cannot copy images to the clipboard.");

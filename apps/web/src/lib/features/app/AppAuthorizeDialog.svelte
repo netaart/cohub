@@ -1,8 +1,10 @@
 <script lang="ts">
 import type {
 	AppAuthorizeRequest,
+	AppAuthorizeSpaceOption,
 	Permission,
 	SpaceBootstrapSource,
+	SpaceRecord,
 } from "@neta-art/cohub";
 import {
 	AlertTriangle,
@@ -17,12 +19,10 @@ import Dialog from "$lib/components/Dialog.svelte";
 import { APP_SCOPE_OPTIONS } from "$lib/features/space/modules/app-utils";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
-import {
-	normalizeSpacePickerQuery,
-	type SpacePickerFilter,
-	selectSpacePickerItems,
-} from "$lib/space-picker-model";
+import { sdk } from "$lib/sdk";
+import type { SpacePickerFilter } from "$lib/space-picker-model";
 import { authStore } from "$lib/stores/auth.svelte";
+import { getRecentSpaces } from "$lib/stores/recent-space";
 
 const {
 	open,
@@ -45,7 +45,7 @@ const {
 	authorName?: string;
 	selectedSpaceId: string | null;
 	canChangeSpace: boolean;
-	onSelectSpace: (spaceId: string) => void;
+	onSelectSpace: (space: AppAuthorizeSpaceOption) => void;
 	onConfirm: (pickedSpaceId?: string) => void;
 	onCancel: () => void;
 } = $props();
@@ -127,6 +127,17 @@ const displayName = $derived(appName?.trim() || "this app");
 const SPACE_PICKER_INITIAL = 8;
 /** Rows added per scroll page. */
 const SPACE_PICKER_PAGE = 20;
+const SPACE_SEARCH_PAGE = 50;
+const SPACE_SEARCH_DEBOUNCE_MS = 200;
+
+type SpaceSearch = {
+	filter: SpacePickerFilter;
+	query: string;
+	items: AppAuthorizeSpaceOption[];
+	cursor: string | null;
+	hasMore: boolean;
+	failed: boolean;
+};
 
 // Picker selection is owned by the host bridge core; this dialog only renders
 // it. Picker step resets whenever a new request opens the dialog, and a single
@@ -142,6 +153,7 @@ $effect(() => {
 	const spaces = pending?.spaces ?? null;
 	spaceQuery = "";
 	spaceFilter = "recent";
+	spaceSearch = null;
 	pickerStep =
 		pending?.selectSpace && spaces?.length !== 1 ? "choose" : "review";
 	// A fresh request must not inherit a page reveal queued for the old one.
@@ -155,21 +167,110 @@ function handleSpaceQueryInput(event: Event) {
 	if (spaceQuery.trim()) spaceFilter = "all";
 }
 
+// "Recent" shows the bridge's preloaded page; other filters and queries search the server.
+const trimmedSpaceQuery = $derived(spaceQuery.trim());
+const searching = $derived(
+	spaceFilter !== "recent" || Boolean(trimmedSpaceQuery),
+);
+let spaceSearch = $state.raw<SpaceSearch | null>(null);
+const isCurrentSearch = (search: SpaceSearch | null) =>
+	search?.filter === spaceFilter && search.query === trimmedSpaceQuery;
+const searchSettled = $derived(!searching || isCurrentSearch(spaceSearch));
+const searchScope = $derived(
+	spaceSearch ? `${spaceSearch.filter}\u0000${spaceSearch.query}` : null,
+);
+
+const toSpaceOption = (space: SpaceRecord): AppAuthorizeSpaceOption => ({
+	id: space.id,
+	name: space.name || null,
+	ownerUserUuid: space.userUuid,
+	isPinned: space.isPinned,
+});
+
+async function searchSpaces(
+	filter: SpacePickerFilter,
+	query: string,
+	previous: SpaceSearch | null = null,
+): Promise<SpaceSearch> {
+	const page = await sdk.spaces.list({
+		limit: SPACE_SEARCH_PAGE,
+		cursor: previous?.cursor ?? null,
+		filter,
+		query,
+		recentSpaces: getRecentSpaces(authStore.userUuid ?? "").map((entry) => ({
+			id: entry.spaceId,
+			timestamp: entry.timestamp,
+		})),
+	});
+	const known = new Set(previous?.items.map((space) => space.id));
+	return {
+		filter,
+		query,
+		items: [
+			...(previous?.items ?? []),
+			...page.items.map(toSpaceOption).filter((space) => !known.has(space.id)),
+		],
+		cursor: page.pageInfo.nextCursor,
+		hasMore: page.pageInfo.hasMore,
+		failed: false,
+	};
+}
+
+$effect(() => {
+	if (!picking || !searching) return;
+	const filter = spaceFilter;
+	const query = trimmedSpaceQuery;
+	let stale = false;
+	const land = (search: SpaceSearch) => {
+		if (!stale && isCurrentSearch(search)) spaceSearch = search;
+	};
+	const timer = setTimeout(
+		() => {
+			searchSpaces(filter, query).then(land, () =>
+				land({
+					filter,
+					query,
+					items: [],
+					cursor: null,
+					hasMore: false,
+					failed: true,
+				}),
+			);
+		},
+		query ? SPACE_SEARCH_DEBOUNCE_MS : 0,
+	);
+	return () => {
+		stale = true;
+		clearTimeout(timer);
+	};
+});
+
+let loadingMoreSpaces = false;
+async function loadMoreSearchResults() {
+	const current = spaceSearch;
+	if (loadingMoreSpaces || !current?.hasMore || !isCurrentSearch(current))
+		return;
+	loadingMoreSpaces = true;
+	try {
+		const next = await searchSpaces(current.filter, current.query, current);
+		if (spaceSearch !== current) return;
+		spaceSearch = next;
+		loadMoreSpaces();
+	} catch {
+		// Retried on the next scroll.
+	} finally {
+		loadingMoreSpaces = false;
+	}
+}
+
 // Full ordered match set; the template windows it so the DOM stays bounded
 // even when the viewer has hundreds of Spaces.
-const spaceMatches = $derived.by(() => {
-	if (!spaceOptions) return null;
-	return selectSpacePickerItems(spaceOptions, {
-		filter: spaceFilter,
-		query: normalizeSpacePickerQuery(spaceQuery),
-		viewerUserUuid: authStore.userUuid,
-	});
-});
-const visibleSpaceOptions = $derived(
-	spaceMatches?.slice(0, spaceDisplayLimit) ?? null,
+const spaceMatches = $derived(
+	searching ? (spaceSearch?.items ?? []) : (spaceOptions ?? []),
 );
+const visibleSpaceOptions = $derived(spaceMatches.slice(0, spaceDisplayLimit));
 const spaceMoreCount = $derived(
-	spaceMatches ? Math.max(0, spaceMatches.length - spaceDisplayLimit) : 0,
+	Math.max(0, spaceMatches.length - spaceDisplayLimit),
 );
 
 /** Drops a queued page reveal, e.g. when the window is about to reset. */
@@ -192,7 +293,6 @@ function requestMoreSpaces() {
 }
 
 function loadMoreSpaces() {
-	if (!spaceMatches) return;
 	spaceDisplayLimit = Math.min(
 		spaceDisplayLimit + SPACE_PICKER_PAGE,
 		spaceMatches.length,
@@ -200,12 +300,12 @@ function loadMoreSpaces() {
 }
 
 function handleSpaceListScroll(event: Event) {
-	if (spaceMoreCount <= 0) return;
 	const el = event.currentTarget as HTMLElement | null;
 	// Ignore the programmatic reset scroll (scrollTop = 0).
 	if (!el || el.scrollTop <= 0) return;
-	if (el.scrollTop + el.clientHeight >= el.scrollHeight - 64)
-		requestMoreSpaces();
+	if (el.scrollTop + el.clientHeight < el.scrollHeight - 64) return;
+	if (spaceMoreCount > 0) requestMoreSpaces();
+	else if (searching) void loadMoreSearchResults();
 }
 
 function scrollSelectedIntoView() {
@@ -251,16 +351,17 @@ function resetSpaceWindow(matches: readonly { id: string }[]) {
 	}
 }
 
-// `spaceMatches` is the match scope: it changes on open/filter/query but not on
-// scroll, so this never fights the viewer's scrolling.
+// Resets on a new scope, never on scroll or an appended page.
 $effect(() => {
 	if (!picking) return;
-	const matches = spaceMatches;
-	if (!matches) return;
-	untrack(() => resetSpaceWindow(matches));
+	void (searching ? searchScope : spaceOptions);
+	untrack(() => resetSpaceWindow(spaceMatches));
 });
 
 const spaceEmptyCopy = $derived.by(() => {
+	if (!searchSettled) return null;
+	if (searching && spaceSearch?.failed)
+		return m.spaces_load_failed({}, { locale });
 	if (spaceQuery.trim()) return "No matching Spaces.";
 	if (spaceFilter === "pinned") return "No pinned Spaces.";
 	if (spaceFilter === "mine") return "No Spaces you own.";
@@ -278,8 +379,8 @@ const spaceLabel = $derived.by(() => {
 const displaySpaceName = $derived.by(() => {
 	const id = selectedSpaceId || pending?.spaceId || "";
 	if (!id) return spaceLabel;
-	const fromList = pending?.spaces
-		?.find((space) => space.id === id)
+	const fromList = [...(pending?.spaces ?? []), ...(spaceSearch?.items ?? [])]
+		.find((space) => space.id === id)
 		?.name?.trim();
 	if (fromList) return fromList;
 	if (id === pending?.spaceId) return pending?.spaceName?.trim() || id;
@@ -363,14 +464,14 @@ const scopeLabel = (scope: string) =>
 								<button type="button" class:active={spaceFilter === filter.key} aria-pressed={spaceFilter === filter.key} onclick={() => (spaceFilter = filter.key as SpacePickerFilter)}>{filter.label}</button>
 							{/each}
 						</div>
-						<div class="auth-space-list" role="radiogroup" aria-label="Choose a Space" bind:this={spaceListEl} onscroll={handleSpaceListScroll}>
-							{#each visibleSpaceOptions ?? [] as space (space.id)}
+						<div class="auth-space-list" class:auth-space-list-pending={!searchSettled} role="radiogroup" aria-label="Choose a Space" aria-busy={!searchSettled} bind:this={spaceListEl} onscroll={handleSpaceListScroll}>
+							{#each visibleSpaceOptions as space (space.id)}
 								<label class="auth-space-option" class:selected={selectedSpaceId === space.id}>
-									<input type="radio" name="auth-space" checked={selectedSpaceId === space.id} onchange={() => onSelectSpace(space.id)} />
+									<input type="radio" name="auth-space" checked={selectedSpaceId === space.id} onchange={() => onSelectSpace(space)} />
 									<span class="auth-space-option-name">{space.name || space.id}</span>
 								</label>
 							{/each}
-							{#if (visibleSpaceOptions?.length ?? 0) === 0}
+							{#if visibleSpaceOptions.length === 0 && spaceEmptyCopy}
 								<div class="auth-space-empty-list">{spaceEmptyCopy}</div>
 							{/if}
 						</div>
@@ -537,6 +638,11 @@ const scopeLabel = (scope: string) =>
 		border: 1px solid var(--border-subtle);
 		border-radius: 10px;
 		background: var(--bg-elevated);
+		transition: opacity 150ms ease;
+	}
+
+	.auth-space-list-pending {
+		opacity: 0.6;
 	}
 
 	.auth-space-empty-list {

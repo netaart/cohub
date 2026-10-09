@@ -27,11 +27,9 @@ import { createCohubAgentSession, type CohubAgentSession } from "./runtime/sessi
 import type { AgentTurnAbortEvent } from "./abort.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ContextProjectionOptions } from "@cohub/protocol";
-import { loadRuntimeContext } from "./runtime/context-store.js";
+import { loadRequestedThinkingLevel, loadRuntimeContext } from "./runtime/context-store.js";
 import { appendTerminalGenerationMessages } from "./generation-session-sync.js";
 import { syncCloudContext } from "./runtime/cloud-context.js";
-import { hydrateContextImages } from "./runtime/context-images.js";
-import { readPublicAssetImageUrl } from "./public-asset-storage.js";
 import type { createSandboxCodingTools } from "./sandbox/tools.js";
 import type { Permission } from "@cohub/core/permissions";
 import type { PromptAccessMode } from "@cohub/core/sessions";
@@ -1110,7 +1108,7 @@ export async function loadOrCreateSessionHandle(input: {
   const durableContext = cachedMarker?.revision === durableHead.revision && fileSignature
     && sameSessionFileSignature(cachedHandle?.sessionFileSignature ?? null, fileSignature)
     ? durableHead
-    : await hydrateContextImages(await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined }), readPublicAssetImageUrl);
+    : await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined });
 
   const spaceInfo = await getSpace({ spaceId: input.spaceId }).catch((error: unknown) => {
     logger.warn(`[Agent] Failed to load space info for ${input.spaceId}; falling back to platform config`, error);
@@ -1173,6 +1171,10 @@ export async function loadOrCreateSessionHandle(input: {
     tools: input.tools,
     spaceMods,
     ...(resolvedModel ? { model: resolvedModel } : {}),
+    loadSelectedThinkingLevel: () => loadRequestedThinkingLevel({ sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined }).catch((error: unknown) => {
+      logger.warn(`[Session] failed to load selected thinking level sessionId=${input.sessionId}; using the lowest supported level`, error);
+      return null;
+    }),
   });
 
   await session.reload();

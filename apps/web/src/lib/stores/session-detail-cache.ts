@@ -1,6 +1,7 @@
 import type { SessionRecord } from "@neta-art/cohub";
 import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
 import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
+import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
 
 const refreshInFlight = new Map<string, Promise<SessionRecord>>();
 
@@ -19,6 +20,32 @@ export async function getCachedSessionDetailSnapshot(
 ) {
 	if (!(await resolveCacheUserKey())) return null;
 	return sessionDetailRepo.get(spaceId, sessionId);
+}
+
+export async function findCachedSession(
+	sessionId: string,
+): Promise<{ spaceId: string; session: SessionRecord } | null> {
+	if (!(await resolveCacheUserKey())) return null;
+	const [detail, turns] = await Promise.all([
+		sessionDetailRepo.find(sessionId).catch(() => null),
+		sessionTurnsRepo.find(sessionId).catch(() => null),
+	]);
+	let newest: {
+		spaceId: string;
+		session: SessionRecord;
+		updatedAt: number;
+	} | null = detail;
+	if (turns?.session && (!newest || turns.updatedAt > newest.updatedAt))
+		newest = { ...turns, session: turns.session };
+	return newest ? { spaceId: newest.spaceId, session: newest.session } : null;
+}
+
+export async function forgetCachedSession(spaceId: string, sessionId: string) {
+	if (!(await resolveCacheUserKey())) return;
+	await Promise.all([
+		sessionDetailRepo.delete(spaceId, sessionId),
+		sessionTurnsRepo.clearSession(spaceId, sessionId),
+	]);
 }
 
 export async function getCachedSessionDetails(
