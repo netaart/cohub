@@ -194,18 +194,19 @@ const sentFrom = $derived(
 
 const messageContainerClass = $derived(
 	message.role === "user"
-		? "ml-auto w-fit max-w-[var(--chat-user-message-max-width)]"
+		? "ml-auto grid w-fit max-w-[var(--chat-user-message-max-width)]"
 		: "w-full",
 );
 
 const messageBubbleClass = $derived.by(() => {
 	const base = "px-[var(--chat-msg-inset)] py-2 text-[14px] leading-[1.7]";
 	if (message.role === "user") {
+		const user = `${base} justify-self-end`;
 		if (isCancelledBeforeDispatch)
-			return `${base} rounded-xl rounded-br-md bg-bg-hover/60 text-text-tertiary`;
+			return `${user} rounded-xl rounded-br-md bg-bg-hover/60 text-text-tertiary`;
 		if (isBackgroundTaskUserMessage)
-			return `${base} rounded-xl rounded-br-md border border-border-subtle/70 bg-bg-hover/45 text-text-secondary`;
-		return `${base} rounded-[var(--chat-user-message-radius)] rounded-br-[var(--chat-user-message-tail-radius)] bg-[var(--chat-user-message-bg)] text-[var(--chat-user-message-fg)]`;
+			return `${user} rounded-xl rounded-br-md border border-border-subtle/70 bg-bg-hover/45 text-text-secondary`;
+		return `${user} rounded-[var(--chat-user-message-radius)] rounded-br-[var(--chat-user-message-tail-radius)] bg-[var(--chat-user-message-bg)] text-[var(--chat-user-message-fg)]`;
 	}
 	if (message.role === "assistant") {
 		return assistantErrorMessage
