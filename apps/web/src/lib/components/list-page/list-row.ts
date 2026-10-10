@@ -3,7 +3,7 @@ export type ListRowDensity = "comfortable" | "compact" | "dense";
 export type FixedListRowDensity = Exclude<ListRowDensity, "dense">;
 
 export const LIST_ROW_HEIGHT = {
-	comfortable: 60,
+	comfortable: 58,
 	compact: 52,
 } as const satisfies Record<FixedListRowDensity, number>;
 

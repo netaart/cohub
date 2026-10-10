@@ -116,7 +116,7 @@
 	}
 
 	[data-density="comfortable"] {
-		--list-row-height: 60px;
+		--list-row-height: 58px;
 		--list-avatar-size: 44px;
 		--list-title-size: 16px;
 		--list-title-leading: 20px;
