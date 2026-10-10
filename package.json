@@ -1,10 +1,10 @@
 {
   "name": "cohub",
   "private": true,
-  "packageManager": "pnpm@10.32.1",
+  "packageManager": "pnpm@12.10.1",
   "engines": {
     "node": ">=24.0.0",
-    "pnpm": ">=10.0.0"
+    "pnpm": ">=12.0.0"
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -47,15 +47,5 @@
     "typescript": "7.0.2",
     "zod": "^4.6.5"
   },
-  "license": "Apache-2.0",
-  "pnpm": {
-    "peerDependencyRules": {
-      "allowedVersions": {
-        "typescript": "7"
-      }
-    },
-    "overrides": {
-      "ioredis": "^6.0.0"
-    }
-  }
+  "license": "Apache-2.0"
 }

@@ -2,6 +2,24 @@ packages:
   - "apps/*"
   - "packages/*"
 
+injectWorkspacePackages: true
+syncInjectedDepsAfterScripts:
+  - build
+# Allow newly published versions immediately (pnpm 11+ defaults to a 24h cooldown).
+minimumReleaseAge: 0
+allowBuilds:
+  esbuild: true
+  workerd: true
+  msgpackr-extract: true
+  core-js: false
+  protobufjs: false
+  "@google/genai": false
+overrides:
+  ioredis: ^6.0.0
+peerDependencyRules:
+  allowedVersions:
+    typescript: "7"
+
 catalog:
   "@earendil-works/pi-agent-core": 0.87.1
   "@earendil-works/pi-ai": 0.87.1

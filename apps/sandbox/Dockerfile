@@ -65,7 +65,7 @@ ENV PIP_USER=true
 ENV PATH="/home/node/.bun/bin:${NPM_CONFIG_PREFIX}/bin:/home/node/.local/bin:/home/node/go/bin:/home/node/.pnpm-global/bin:${PATH}"
 
 RUN curl -fsSL https://bun.sh/install | bash
-RUN npm install -g pnpm@10.32.1
+RUN npm install -g pnpm@12.10.1
 
 # Resolve the latest cohub-cli at install time (intentionally unpinned so the
 # image always tracks the npm "latest" dist-tag). Docker caches this layer by
