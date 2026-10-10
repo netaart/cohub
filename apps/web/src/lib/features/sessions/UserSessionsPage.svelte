@@ -2,35 +2,28 @@
 import {
 	HttpError,
 	type SessionRecord,
-	type SpaceRecord,
 	type UserSessionListItem,
 } from "@neta-art/cohub";
-import { onDestroy, onMount, untrack } from "svelte";
+import { onMount, untrack } from "svelte";
 import { goto } from "$app/navigation";
-import {
-	createSessionChatHost,
-	subscribeSpaceChannel,
-} from "$lib/features/session-chat";
 import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
 import {
 	chatsInbox,
 	openNewChatSpacePicker,
+	spaceSummaryOf,
 } from "$lib/features/sessions/chats-inbox.svelte";
-import SessionConversationPanel from "$lib/features/sessions/SessionConversationPanel.svelte";
-import {
-	type WindowRef,
-	withWindowParam,
-} from "$lib/features/space/modules/window-route";
-import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
+import { chatsWorkspaceScope } from "$lib/features/sessions/chats-workspace-scope";
+import SpaceWorkspacePage from "$lib/features/space/SpaceWorkspacePage.svelte";
+import { getLocale } from "$lib/i18n/locale.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
+import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import {
 	buildSessionsRoute,
+	buildSpaceNewSessionRoute,
 	buildSpaceSessionRoute,
 	buildUserSessionRoute,
-	buildUserSessionTurnRoute,
 } from "$lib/space-routes";
-import { createSpaceWorkspaceAssetResolver } from "$lib/space-workspace-assets";
 import { authStore } from "$lib/stores/auth.svelte";
 import {
 	clearLastUserSessionId,
@@ -38,16 +31,6 @@ import {
 	setLastUserSessionId,
 } from "$lib/stores/last-user-session";
 import { forgetCachedSession } from "$lib/stores/session-detail-cache";
-import { getCachedSpaceList } from "$lib/stores/space-list-cache";
-import {
-	cacheSpaceRecordSoon,
-	getCachedSpaceRecord,
-} from "$lib/stores/space-record-cache";
-import {
-	type ResolveWorkspaceAsset,
-	WorkspaceAssetAccessError,
-} from "$lib/workspace-assets";
-import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
 
 const {
 	data,
@@ -60,320 +43,96 @@ const {
 	};
 } = $props();
 
+const NEW_SESSION = "new";
+
 const list = chatsInbox;
+const locale = $derived(getLocale());
 const isDesktop = $derived(!useCompactShell());
-
-/** Mutable space identity for host environment ports (set before syncContext). */
-const spaceBox = { current: "" as string };
-type ConnectionState =
-	| "idle"
-	| "connecting"
-	| "reconnecting"
-	| "open"
-	| "closed"
-	| "error";
-
-const connectionBox: { current: ConnectionState } = { current: "idle" };
-let hasOpenedOnce = false;
-
-/**
- * Workspace asset resolver for the cross-space sessions page. The active space
- * changes with the selected session, so the resolver is rebuilt per space.
- */
-let workspaceAssetResolverKey = "";
-let workspaceAssetResolver: ResolveWorkspaceAsset | null = null;
-
-function chatWorkspaceAssetResolver(): ResolveWorkspaceAsset {
-	const spaceId = spaceBox.current;
-	if (!spaceId) throw new WorkspaceAssetAccessError();
-	if (spaceId !== workspaceAssetResolverKey) {
-		workspaceAssetResolverKey = spaceId;
-		workspaceAssetResolver = createSpaceWorkspaceAssetResolver(spaceId);
-	}
-	return workspaceAssetResolver as ResolveWorkspaceAsset;
-}
-
-function resolveOpenPathTarget(
-	target: string | WorkspaceFileLinkTarget,
-): string | null {
-	if (typeof target === "string") {
-		const trimmed = target.trim();
-		return trimmed || null;
-	}
-	if (target && typeof target === "object" && "path" in target) {
-		const path = String((target as { path?: unknown }).path ?? "").trim();
-		return path || null;
-	}
-	return null;
-}
-
-const sessionChat = createSessionChatHost({
-	openPath: async (target) => {
-		const spaceId = spaceBox.current;
-		const path = resolveOpenPathTarget(target);
-		const sessionId = sessionChat.activeSessionId;
-		if (!spaceId || !path || !sessionId) return;
-		const preview: WindowRef = { kind: "file", key: path };
-		const href = withWindowParam(
-			buildSpaceSessionRoute(spaceId, sessionId),
-			null,
-			preview,
-		);
-		await goto(href);
-	},
-	resolveWorkspaceAsset: (path, options) =>
-		chatWorkspaceAssetResolver()(path, options),
-	router: {
-		toSession: async (sessionId, opts) => {
-			// Mobile chats open in the space workspace; desktop stays on /sessions/:id.
-			if (!isDesktop && spaceBox.current) {
-				await goto(buildSpaceSessionRoute(spaceBox.current, sessionId), {
-					replaceState: opts?.replace ?? true,
-					keepFocus: true,
-					noScroll: true,
-				});
-				return;
-			}
-			await goto(buildUserSessionRoute(sessionId), {
-				replaceState: opts?.replace ?? true,
-				keepFocus: true,
-				noScroll: true,
-			});
-		},
-		toTurn: async (sessionId, sequence) => {
-			// Stay on /sessions/* — do not navigate into the space workspace.
-			await goto(buildUserSessionTurnRoute(sessionId, sequence), {
-				replaceState: true,
-				keepFocus: true,
-				noScroll: true,
-			});
-		},
-		toNewSession: async () => {
-			await list.newChat();
-		},
-	},
-	getConnectionState: () => connectionBox.current,
-	hasSpace: () => Boolean(spaceBox.current),
-});
-
-/** Resolved space for the active /sessions/new draft (null off that route). */
-let draftSpace = $state<SpaceRecord | null>(null);
-let draftSpaceLookupSeq = 0;
-/** Skip one desktop auto-restore after bouncing from a bad /sessions/new URL. */
-let suppressNextAutoOpen = false;
-let openSeq = 0;
-/** Session ids that failed to open this page visit — skip on auto-select. */
-const failedOpenIds = new Set<string>();
 
 const routeSessionId = $derived(data.sessionId ?? null);
 const routeIsNew = $derived(Boolean(data.isNew));
 const routeSpaceId = $derived(data.spaceId?.trim() || null);
-const routeTurnSequence = $derived.by(() => {
-	const value = data.turnSequence;
-	if (!value) return null;
-	const sequence = Number(value);
-	return Number.isFinite(sequence) && sequence > 0
-		? Math.floor(sequence)
-		: null;
-});
-let routeSeed = $state<UserSessionListItem | null>(null);
-const activeSeed = $derived(
-	routeSessionId
-		? (list.findById(routeSessionId) ??
-				(routeSeed?.id === routeSessionId ? routeSeed : null))
+
+let target = $state<{ spaceId: string; sessionId: string } | null>(null);
+let resolving = $state(false);
+let resolveSeq = 0;
+/** Skip one desktop auto-restore after bouncing from a bad /sessions/new URL. */
+let suppressNextAutoOpen = false;
+/** Session ids that failed to open this page visit — skip on auto-select. */
+const failedOpenIds = new Set<string>();
+
+const workspaceData = $derived(
+	target
+		? {
+				spaceId: target.spaceId,
+				view: "session" as const,
+				sessionId: target.sessionId,
+				turnSequence:
+					target.sessionId === routeSessionId
+						? (data.turnSequence ?? null)
+						: null,
+			}
 		: null,
 );
+const showEmpty = $derived(
+	!target && !resolving && !routeSessionId && !list.view.loading,
+);
 
-function isCurrentOpen(seq: number, sessionId: string | null) {
-	return seq === openSeq && (data.sessionId ?? null) === sessionId;
+function isCurrent(seq: number) {
+	return seq === resolveSeq;
 }
 
-function accessForSessions() {
-	return {
-		spaceLoadError: "",
-		spaceHasMinimalAccess: false,
-		canCreateSession: true,
-		bootstrapping: false,
-	};
-}
-
-async function openChatSession(input: {
-	spaceId: string;
-	sessionId: string;
-	session?: SessionRecord | null;
-	turnSequence?: number | null;
-}) {
-	const { spaceId, sessionId, session, turnSequence = null } = input;
-	spaceBox.current = spaceId;
-	sessionChat.enterSpace(spaceId);
-	if (session) {
-		sessionChat.upsertSessionRecord(session);
+function show(spaceId: string, sessionId: string) {
+	if (target?.spaceId !== spaceId || target.sessionId !== sessionId) {
+		target = { spaceId, sessionId };
 	}
-	sessionChat.syncContext({
-		spaceId,
-		route: { kind: "session", sessionId, turnSequence },
-		access: accessForSessions(),
-	});
+	resolving = false;
 }
 
-function openNewChatDraft(spaceId: string, opts?: { focus?: boolean }) {
-	const alreadyOpen =
-		spaceBox.current === spaceId && sessionChat.isNewSessionRoute;
-	spaceBox.current = spaceId;
-	sessionChat.enterSpace(spaceId);
-	sessionChat.syncContext({
-		spaceId,
-		route: { kind: "new" },
-		access: accessForSessions(),
-	});
-	// Focus only on first enter / space change — not on every effect re-run.
-	if (opts?.focus !== false && !alreadyOpen) {
-		requestAnimationFrame(() => {
-			window.dispatchEvent(new CustomEvent("cohub:composer-focus"));
-		});
-	}
+async function resolveSession(seq: number, sessionId: string) {
+	const spaceId =
+		list.findById(sessionId)?.spaceId ??
+		(await lookupSessionSpace(seq, sessionId));
+	if (!spaceId || !isCurrent(seq)) return;
+	if (isDesktop) show(spaceId, sessionId);
+	else await openInSpace(buildSpaceSessionRoute(spaceId, sessionId));
 }
 
-function clearChatSession() {
-	// Soft clear: keep space lease if any, only drop active session route.
-	// Host enterSpace("") is used when leaving the page entirely (dispose).
-	const spaceId = spaceBox.current;
-	sessionChat.syncContext({
-		spaceId: spaceId || "",
-		route: { kind: "none" },
-		access: accessForSessions(),
-	});
-}
-
-async function resolveSpaceFromCache(
-	spaceId: string,
-): Promise<SpaceRecord | null> {
-	const listed =
-		spacesInbox.find(spaceId) ??
-		getCachedSpaceList()?.find((space) => space.id === spaceId);
-	if (listed) return listed;
-	return (await getCachedSpaceRecord(spaceId).catch(() => null))?.space ?? null;
-}
-
-function clearDraftSpace() {
-	draftSpace = null;
-	draftSpaceLookupSeq += 1;
-}
-
-/**
- * Resolve draft space metadata. Returns null when the id is unknown so the
- * caller can bounce back to the picker instead of a hollow draft.
- */
-async function ensureDraftSpace(spaceId: string): Promise<SpaceRecord | null> {
-	if (draftSpace?.id === spaceId) return draftSpace;
-	const seq = ++draftSpaceLookupSeq;
-	const cached = await resolveSpaceFromCache(spaceId);
-	if (seq !== draftSpaceLookupSeq) return null;
+async function lookupSessionSpace(seq: number, sessionId: string) {
+	resolving = true;
+	const cached = await list.findLocal(sessionId);
+	if (!isCurrent(seq)) return null;
 	if (cached) {
-		draftSpace = cached;
-		return cached;
+		if (isDesktop) void confirmSession(seq, cached);
+		return cached.spaceId;
 	}
 	try {
-		const space = await sdk.space(spaceId).get();
-		if (seq !== draftSpaceLookupSeq) return null;
-		cacheSpaceRecordSoon(space);
-		draftSpace = space;
-		return space;
+		return (await adoptServerSession(seq, sessionId))?.spaceId ?? null;
 	} catch (error) {
-		if (seq !== draftSpaceLookupSeq) return null;
-		console.warn("[sessions] failed to resolve draft space", error);
+		if (isCurrent(seq)) await leaveFailedSession(sessionId, error);
 		return null;
 	}
 }
 
-/** Leave a bad /sessions/new URL without racing desktop auto-restore. */
-async function bounceNewChatToPicker() {
-	suppressNextAutoOpen = true;
-	clearDraftSpace();
-	clearChatSession();
-	await goto(buildSessionsRoute(), { replaceState: true });
-	openNewChatSpacePicker();
-}
-
-async function openRouteSession(sessionId: string | null) {
-	const seq = ++openSeq;
-	if (!sessionId) {
-		if (isCurrentOpen(seq, null)) clearChatSession();
-		return;
-	}
-
-	if (!isDesktop) {
-		const known = await list.findLocal(sessionId);
-		if (!isCurrentOpen(seq, sessionId)) return;
-		if (known) {
-			await goto(buildSpaceSessionRoute(known.spaceId, sessionId), {
-				replaceState: true,
-			});
-			return;
-		}
-		try {
-			const detail = await sdk.user.getSession(sessionId);
-			if (!isCurrentOpen(seq, sessionId)) return;
-			await goto(buildSpaceSessionRoute(detail.session.spaceId, sessionId), {
-				replaceState: true,
-			});
-		} catch (error) {
-			if (!isCurrentOpen(seq, sessionId)) return;
-			console.warn("[sessions] failed to resolve mobile session", error);
-			await goto(buildSessionsRoute(), { replaceState: true });
-		}
-		return;
-	}
-
-	const turnSequence = routeTurnSequence;
-	const known = await list.findLocal(sessionId);
-	if (!isCurrentOpen(seq, sessionId)) return;
-	if (known) {
-		// Cache-only records may be stale; check before opening upserts it.
-		const unlisted = !list.findById(sessionId);
-		routeSeed = known;
-		await openChatSession({
-			spaceId: known.spaceId,
-			sessionId: known.id,
-			session: known,
-			turnSequence,
-		});
-		if (unlisted) void confirmCachedSession(seq, known);
-		return;
-	}
-
-	try {
-		const seed = await adoptServerSession(seq, sessionId);
-		if (!seed) return;
-		await openChatSession({
-			spaceId: seed.spaceId,
-			sessionId: seed.id,
-			session: seed,
-			turnSequence,
-		});
-	} catch (error) {
-		if (!isCurrentOpen(seq, sessionId)) return;
-		await leaveFailedSession(sessionId, error);
-	}
+async function openInSpace(pathname: string) {
+	const search = new URLSearchParams(window.location.search);
+	search.delete("space");
+	const query = search.toString();
+	await goto(query ? `${pathname}?${query}` : pathname, { replaceState: true });
 }
 
 async function adoptServerSession(seq: number, sessionId: string) {
 	const detail = await sdk.user.getSession(sessionId);
-	if (!isCurrentOpen(seq, sessionId)) return null;
-	routeSeed = {
+	if (!isCurrent(seq)) return null;
+	const seed: UserSessionListItem = {
 		...detail.session,
-		space: {
-			id: detail.space.id,
-			name: detail.space.name ?? detail.space.title ?? "Space",
-			slug: detail.space.slug ?? null,
-			publicProfile: detail.space.publicProfile ?? null,
-		},
+		space: spaceSummaryOf(detail.space),
 	};
-	list.upsertSession(routeSeed);
-	return routeSeed;
+	list.upsertSession(seed);
+	return seed;
 }
 
-async function confirmCachedSession(seq: number, cached: SessionRecord) {
+async function confirmSession(seq: number, cached: SessionRecord) {
 	try {
 		await adoptServerSession(seq, cached.id);
 	} catch (error) {
@@ -383,118 +142,54 @@ async function confirmCachedSession(seq: number, cached: SessionRecord) {
 			(error.status === 403 || error.status === 404);
 		if (!gone) return;
 		void forgetCachedSession(cached.spaceId, cached.id).catch(() => undefined);
-		if (isCurrentOpen(seq, cached.id))
-			await leaveFailedSession(cached.id, error);
+		if (isCurrent(seq)) await leaveFailedSession(cached.id, error);
 	}
 }
 
 async function leaveFailedSession(sessionId: string, error: unknown) {
 	console.warn("[sessions] failed to open session", error);
 	failedOpenIds.add(sessionId);
+	resolving = false;
+	if (target?.sessionId === sessionId) target = null;
 	// Drop a stale remembered id so the next auto-select can fall back.
 	const userUuid = authStore.userUuid;
 	if (userUuid) clearLastUserSessionId(userUuid);
-	const fallback =
-		list.sessions.find(
-			(session) => session.id !== sessionId && !failedOpenIds.has(session.id),
-		) ?? null;
-	if (fallback) {
-		await goto(buildUserSessionRoute(fallback.id), {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true,
-		});
-		return;
-	}
-	await goto(buildSessionsRoute(), { replaceState: true });
+	const fallback = isDesktop
+		? (list.sessions.find(
+				(session) => session.id !== sessionId && !failedOpenIds.has(session.id),
+			) ?? null)
+		: null;
+	await goto(
+		fallback ? buildUserSessionRoute(fallback.id) : buildSessionsRoute(),
+		{ replaceState: true, keepFocus: true, noScroll: true },
+	);
 }
 
-function handleChangeDraftSpace() {
+async function bounceNewChatToPicker() {
+	suppressNextAutoOpen = true;
+	await goto(buildSessionsRoute(), { replaceState: true });
 	openNewChatSpacePicker();
 }
-
-// Keep the left list in sync when host mutates the active session record.
-// Untrack list reads/writes so upsertSession cannot re-enter this effect.
-$effect(() => {
-	const session = sessionChat.activeSession;
-	if (!session) return;
-	untrack(() => {
-		const existing = list.findById(session.id);
-		// Skip no-op writes (same title/updatedAt) to avoid churn.
-		if (
-			existing &&
-			existing.title === session.title &&
-			existing.updatedAt === session.updatedAt &&
-			existing.lastMessageId === session.lastMessageId &&
-			existing.activeTurnSequence === session.activeTurnSequence &&
-			existing.activeTurn?.id === session.activeTurn?.id &&
-			existing.activeTurn?.status === session.activeTurn?.status &&
-			existing.lastTurnIssue === session.lastTurnIssue
-		) {
-			return;
-		}
-		const draft =
-			draftSpace && draftSpace.id === session.spaceId ? draftSpace : null;
-		list.upsertSession({
-			...session,
-			space:
-				existing?.space ??
-				(draft
-					? {
-							id: draft.id,
-							name: draft.name ?? draft.title ?? "Space",
-							slug: draft.slug ?? null,
-							publicProfile: draft.publicProfile ?? null,
-						}
-					: null),
-		} as UserSessionListItem);
-	});
-});
 
 $effect(() => {
 	const isNew = routeIsNew;
 	const spaceId = routeSpaceId;
 	const sessionId = routeSessionId;
-	const turnSequence = routeTurnSequence;
-	// openRouteSession / syncContext read list state and write chat host state.
-	// Untrack to avoid effect_update_depth_exceeded.
+	// Resizing must not tear down an open workspace; only routes resolve.
 	untrack(() => {
+		const seq = ++resolveSeq;
 		if (isNew) {
-			if (!spaceId) {
-				// Missing ?space= — leave draft URL, suppress auto-open, re-pick.
-				void bounceNewChatToPicker();
-				return;
-			}
-			void (async () => {
-				const space = await ensureDraftSpace(spaceId);
-				// Route may have changed while the list was loading.
-				if (!routeIsNew || routeSpaceId !== spaceId) return;
-				if (!space) {
-					void bounceNewChatToPicker();
-					return;
-				}
-				openNewChatDraft(spaceId);
-			})();
+			if (!spaceId) void bounceNewChatToPicker();
+			else if (isDesktop) show(spaceId, NEW_SESSION);
+			else void openInSpace(buildSpaceNewSessionRoute(spaceId));
 			return;
 		}
-
-		// Left the draft route — drop draft meta so it cannot leak into later chats.
-		if (draftSpace) clearDraftSpace();
-
-		// Same session + turn-only URL change: re-sync turn without reopening.
-		if (
-			sessionId &&
-			sessionChat.activeSessionId === sessionId &&
-			spaceBox.current
-		) {
-			sessionChat.syncContext({
-				spaceId: spaceBox.current,
-				route: { kind: "session", sessionId, turnSequence },
-				access: accessForSessions(),
-			});
+		if (sessionId) {
+			void resolveSession(seq, sessionId);
 			return;
 		}
-		void openRouteSession(sessionId);
+		resolving = false;
+		if (!isDesktop) target = null;
 	});
 });
 
@@ -506,24 +201,18 @@ $effect(() => {
 	setLastUserSessionId(userUuid, sessionId);
 });
 
-// Desktop /sessions with no sessionId shows an empty right pane — auto-open the
-// last selected chat (fallback: most recent in list) so users skip a wasted click.
-// Never steal focus from an explicit new-chat draft.
-// Mobile keeps the list route; never redirect away from the inbox there.
 $effect(() => {
-	if (!isDesktop) return;
-	if (routeIsNew || routeSessionId) return;
+	if (!isDesktop || routeIsNew || routeSessionId) return;
 	if (suppressNextAutoOpen) {
 		suppressNextAutoOpen = false;
 		return;
 	}
 	const userUuid = authStore.userUuid;
 	const remembered = userUuid ? getLastUserSessionId(userUuid) : null;
-	const rememberedOk =
-		remembered && !failedOpenIds.has(remembered) ? remembered : null;
-	const first =
-		list.sessions.find((session) => !failedOpenIds.has(session.id)) ?? null;
-	const targetId = rememberedOk ?? first?.id ?? null;
+	const targetId =
+		(remembered && !failedOpenIds.has(remembered) ? remembered : null) ??
+		list.sessions.find((session) => !failedOpenIds.has(session.id))?.id ??
+		null;
 	if (!targetId) return;
 	untrack(() => {
 		void goto(buildUserSessionRoute(targetId), {
@@ -534,74 +223,30 @@ $effect(() => {
 	});
 });
 
-// One shared space room per active space (refcount with Space page if both open).
-// New-chat draft has no session yet — subscribe once the first session id lands.
-$effect(() => {
-	const spaceId = sessionChat.spaceId;
-	const sessionId = sessionChat.activeSessionId;
-	if (!spaceId || !sessionId) return;
-	return subscribeSpaceChannel(spaceId, (event) => {
-		void sessionChat.ingestRealtimeEnvelope(event);
-	});
-});
-
-onMount(() => {
-	const releaseInbox = list.retain();
-
-	// Real transport lifecycle (same signals Space uses via spaceRealtime).
-	const disposeConnection = sdk.onConnection((snapshot) => {
-		const state = (snapshot as { state?: ConnectionState }).state ?? "idle";
-		const previous = connectionBox.current;
-		connectionBox.current = state;
-		if (state === "open") {
-			sessionChat.onTransportOpen();
-			const recovered =
-				hasOpenedOnce &&
-				(previous === "reconnecting" ||
-					previous === "closed" ||
-					previous === "error");
-			hasOpenedOnce = true;
-			if (recovered) sessionChat.onConnectionRecovered();
-		}
-	});
-
-	const onVisible = () => {
-		sessionChat.onVisibilityChanged(document.visibilityState === "visible");
-	};
-	document.addEventListener("visibilitychange", onVisible);
-	return () => {
-		document.removeEventListener("visibilitychange", onVisible);
-		disposeConnection?.();
-		releaseInbox();
-	};
-});
-
-onDestroy(() => {
-	sessionChat.dispose();
-});
+onMount(() => list.retain());
 </script>
 
 <svelte:head>
-	<title>{routeIsNew ? "New chat · Cohub" : "Chats · Cohub"}</title>
+	{#if !workspaceData}<title>Chats · Cohub</title>{/if}
 </svelte:head>
 
-<div class="flex h-full min-h-0 w-full overflow-hidden bg-bg-primary">
-	{#if !isDesktop && !routeIsNew}
-		<div class="min-h-0 w-full overflow-hidden">
+{#if workspaceData}
+	<SpaceWorkspacePage data={workspaceData} scope={chatsWorkspaceScope} />
+{:else if !isDesktop}
+	<div class="h-full min-h-0 w-full overflow-hidden bg-bg-primary">
+		{#if !routeIsNew}
 			<ChatsPane variant="page" />
-		</div>
-	{/if}
-
-	{#if isDesktop || routeIsNew}
-		<div class="min-h-0 min-w-0 flex-1 overflow-hidden" class:w-full={!isDesktop}>
-			<SessionConversationPanel
-				host={sessionChat}
-				seed={activeSeed}
-				pending={Boolean(routeSessionId) || list.view.loading}
-				isNewDraft={routeIsNew}
-				{draftSpace}
-				onChangeSpace={handleChangeDraftSpace}
-			/>
-		</div>
-	{/if}
-</div>
+		{/if}
+	</div>
+{:else if showEmpty}
+	<div
+		class="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-chat-bg px-6 text-center"
+	>
+		<p class="text-[14px] text-text-secondary">{m.chat_select_chat({}, { locale })}</p>
+		<p class="text-[12px] text-text-placeholder">
+			{m.chat_no_selected_hint({}, { locale })}
+		</p>
+	</div>
+{:else}
+	<div class="h-full min-h-0 flex-1 bg-chat-bg"></div>
+{/if}

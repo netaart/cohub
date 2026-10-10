@@ -4841,6 +4841,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		onRequestIntermediateSync,
 		applyBackgroundComposerPayload,
 		openShareModal: (sessionId: string) => share.openFor(sessionId),
+		hasSession: (sessionId: string) => Boolean(sessionStateById[sessionId]),
 		openPath: (target: string | WorkspaceFileLinkTarget) =>
 			options.openPath(target),
 		resolveWorkspaceAsset: options.resolveWorkspaceAsset,

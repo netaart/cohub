@@ -2,10 +2,12 @@
 import type {
 	SessionRecord,
 	SpacePresenceUser,
+	SpacePublicProfile,
 	SpaceRecord,
 } from "@neta-art/cohub";
 import {
 	Check,
+	ChevronDown,
 	Gauge,
 	Globe,
 	ListTree,
@@ -64,6 +66,14 @@ export type SpaceWorkspaceHeaderContext = {
 	spaceHasMinimalAccess: boolean;
 	rightSidebarAvailable: boolean;
 	rightSidebarCollapsed: boolean;
+	/** Chats inbox only; a null `href` picks another Space for a draft. */
+	spaceIdentity: SpaceIdentity | null;
+};
+
+export type SpaceIdentity = {
+	name: string;
+	profile: SpacePublicProfile | null;
+	href: string | null;
 };
 
 export type SessionRenameState = {
@@ -89,6 +99,7 @@ export type SpaceWorkspaceHeaderActions = {
 	insertHeaderReference: () => void;
 	toggleRightSidebar: () => void | Promise<void>;
 	openDisplay: (displayId: string) => void;
+	pickSpace?: () => void;
 };
 
 type Props = {
@@ -112,7 +123,10 @@ $effect(() => {
 let sessionRenameFocused = $state(false);
 
 const spaceTitle = $derived(
-	context.space?.name || context.space?.title || context.spaceId,
+	context.space?.name ||
+		context.space?.title ||
+		context.spaceIdentity?.name ||
+		context.spaceId,
 );
 const showSessionTitle = $derived(
 	context.routeView === "session" &&
@@ -169,6 +183,22 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 	}
 }
 </script>
+
+{#snippet SpaceCrumb(identity: SpaceIdentity)}
+	{#if identity.href}
+		<a href={identity.href} class="space-crumb" title={m.chat_open_in_space({}, { locale })}>
+			<SpaceAvatar name={identity.name} profile={identity.profile} seed={context.spaceId} size="xs" />
+			<span class="truncate">{identity.name}</span>
+		</a>
+	{:else}
+		<button type="button" class="space-crumb" title={m.chat_change_space({}, { locale })} onclick={actions.pickSpace}>
+			<SpaceAvatar name={identity.name} profile={identity.profile} seed={context.spaceId} size="xs" />
+			<span class="truncate">{identity.name}</span>
+			<ChevronDown class="h-3 w-3 shrink-0 opacity-70" />
+		</button>
+	{/if}
+	<span class="shrink-0 text-text-placeholder" aria-hidden="true">/</span>
+{/snippet}
 
 {#snippet HeaderActions()}
 	<SpaceRuntimeStatus
@@ -287,14 +317,18 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 					<Menu class="w-5 h-5" />
 				</button>
 				{#if showSessionTitle}
-					<button
-						type="button"
-						class="inline-flex shrink-0 items-center text-text-primary transition-colors hover:text-text-secondary lg:hidden"
-						title={spaceTitle}
-						aria-label={m.space_header_open_space({}, { locale })}
-					>
-						<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} seed={context.spaceId} size="xs" />
-					</button>
+					{#if context.spaceIdentity}
+						{@render SpaceCrumb(context.spaceIdentity)}
+					{:else}
+						<button
+							type="button"
+							class="inline-flex shrink-0 items-center text-text-primary transition-colors hover:text-text-secondary lg:hidden"
+							title={spaceTitle}
+							aria-label={m.space_header_open_space({}, { locale })}
+						>
+							<SpaceAvatar name={spaceTitle} profile={context.space?.publicProfile} seed={context.spaceId} size="xs" />
+						</button>
+					{/if}
 					<div class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
 						{#if sessionRename.renaming && context.activeSession}
 							<input
@@ -321,9 +355,9 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 								type="button"
 								class="min-w-0 flex-1 truncate text-[13px] text-text-secondary transition-colors hover:text-text-primary"
 								onclick={context.activeSession ? actions.startSessionRename : undefined}
-								title={context.activeSession ? "Click to rename" : "New chat"}
+								title={context.activeSession ? "Click to rename" : m.chat_new_chat({}, { locale })}
 							>
-								{context.activeSession ? getSessionTitle(context.activeSession) : "New chat"}
+								{context.activeSession ? getSessionTitle(context.activeSession) : m.chat_new_chat({}, { locale })}
 							</button>
 							{#if context.activeSessionLoading && context.activeSessionLoaded}
 								<Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin text-text-placeholder" aria-label="Syncing" />
@@ -354,6 +388,25 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 	</ColumnHeader>
 
 <style>
+	.space-crumb {
+		display: inline-flex;
+		min-width: 0;
+		max-width: 16rem;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 6px;
+		margin-inline: -4px;
+		padding: 2px 4px;
+		border-radius: 5px;
+		font-size: 13px;
+		color: var(--text-primary);
+		transition: background-color 100ms;
+	}
+
+	.space-crumb:hover {
+		background: var(--bg-hover);
+	}
+
 	.header-action.is-shared {
 		color: var(--success-soft);
 	}

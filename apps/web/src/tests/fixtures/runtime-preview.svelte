@@ -113,6 +113,7 @@ const context: SpaceWorkspaceHeaderContext = {
 	spaceHasMinimalAccess: false,
 	rightSidebarAvailable: true,
 	rightSidebarCollapsed: true,
+	spaceIdentity: null,
 };
 const noop = () => {};
 </script>

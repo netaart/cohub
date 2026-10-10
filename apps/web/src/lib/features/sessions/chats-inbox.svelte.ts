@@ -89,6 +89,18 @@ function withSpace(
 	return sessions.map((session) => ({ ...session, space }));
 }
 
+function sameInboxRow(row: UserSessionListItem, session: SessionRecord) {
+	return (
+		row.title === session.title &&
+		row.updatedAt === session.updatedAt &&
+		row.lastMessageId === session.lastMessageId &&
+		row.activeTurnSequence === session.activeTurnSequence &&
+		row.activeTurn?.id === session.activeTurn?.id &&
+		row.activeTurn?.status === session.activeTurn?.status &&
+		row.lastTurnIssue === session.lastTurnIssue
+	);
+}
+
 export function spaceSummaryOf(space: SpaceRecord): UserSessionSpaceSummary {
 	return {
 		id: space.id,
@@ -268,6 +280,17 @@ class ChatsInbox {
 		this.#applySession(session, { settled: true, space: session.space });
 	}
 
+	syncSession(session: SessionRecord, space: SpaceRecord | null) {
+		const existing = this.findById(session.id);
+		if (existing && sameInboxRow(existing, session)) return;
+		this.upsertSession({
+			...session,
+			space:
+				existing?.space ??
+				(space?.id === session.spaceId ? spaceSummaryOf(space) : null),
+		} as UserSessionListItem);
+	}
+
 	loadMore() {
 		return this.list.loadMore(this.filter);
 	}
@@ -381,7 +404,7 @@ class ChatsInbox {
 			merge,
 			create: (filter) => {
 				const space =
-					filter.space ?? options.space ?? this.#spaceSummary(record.spaceId);
+					filter.space ?? options.space ?? this.spaceSummary(record.spaceId);
 				return space
 					? (mergeSessionRecord(undefined, {
 							...record,
@@ -394,7 +417,7 @@ class ChatsInbox {
 		this.list.apply(change);
 	}
 
-	#spaceSummary(spaceId: string): UserSessionSpaceSummary | null {
+	spaceSummary(spaceId: string): UserSessionSpaceSummary | null {
 		const space = spacesInbox.find(spaceId);
 		if (space) return spaceSummaryOf(space);
 		return (
@@ -405,7 +428,7 @@ class ChatsInbox {
 	}
 
 	async #cachedSpaceSummary(spaceId: string) {
-		const known = this.#spaceSummary(spaceId);
+		const known = this.spaceSummary(spaceId);
 		if (known) return known;
 		const cached = await getCachedSpaceRecord(spaceId).catch(() => null);
 		return cached ? spaceSummaryOf(cached.space) : null;

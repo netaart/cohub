@@ -1,8 +1,8 @@
 <script lang="ts">
 /**
  * Shared shell for /sessions, /sessions/new, /sessions/:id.
- * Keeps UserSessionsPage mounted across child navigations so the left list
- * does not remount (and jump) when opening/changing a new-chat draft.
+ * Keeps UserSessionsPage (and the Space workspace it hosts) mounted across
+ * child navigations, so switching chats never remounts windows or panels.
  */
 import type { Snippet } from "svelte";
 import { page } from "$app/state";
