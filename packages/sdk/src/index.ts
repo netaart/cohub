@@ -196,6 +196,8 @@ export type {
   ChannelEnvelope,
   LabelAssignmentsUpdatedEvent,
   RealtimeServerEvent,
+  RealtimeSessionFork,
+  SessionCreatedEvent,
 } from "@cohub/protocol/realtime";
 export type {
   RealtimeAppRecord,

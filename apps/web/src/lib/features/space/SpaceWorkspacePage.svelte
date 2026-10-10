@@ -395,6 +395,7 @@ const sessionChat = createSessionChatHost({
 			});
 		},
 	},
+	onSessionForked: (session, fork) => scope.onSessionForked?.(session, fork),
 	getConnectionState: () => connectionStateBox.current,
 	canManageSessionAccess: () => canManageSessionAccess,
 	hasSpace: () => Boolean(space),

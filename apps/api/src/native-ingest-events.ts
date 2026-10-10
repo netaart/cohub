@@ -17,7 +17,7 @@ const warn = (event: string) => (error: unknown) => logger.warn(`[NativeTurn] ${
  * Realtime and follow-up work for an ingest batch; it mirrors durable writes and never fails them.
  */
 export async function publishNativeIngest(spaceId: string, effects: NativeIngestEffects): Promise<void> {
-  const created = new Set(effects.createdSessions);
+  const created = new Map(effects.createdSessions.map((entry) => [entry.sessionId, entry]));
   const live = effects.turns.filter((turn) => !turn.imported);
   const settled = effects.turns.filter((turn) => turn.changed);
   const turnIds = [...new Set([...live, ...settled].map((turn) => turn.turnId))];
@@ -31,7 +31,8 @@ export async function publishNativeIngest(spaceId: string, effects: NativeIngest
 
   for (const sessionId of new Set(effects.turns.map((turn) => turn.sessionId))) {
     const session = await getSpaceSessionById(sessionId).catch(() => null);
-    if (session && created.has(sessionId)) await dispatchSessionCreated(session).catch(warn("session.created"));
+    const creation = created.get(sessionId);
+    if (session && creation) await dispatchSessionCreated(session, creation.fork).catch(warn("session.created"));
     for (const entry of live.filter((turn) => turn.sessionId === sessionId)) {
       const turn = await getSessionTurnById(sessionId, entry.turnId).catch(() => null);
       if (!turn) continue;

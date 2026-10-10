@@ -70,6 +70,10 @@ import {
 	EMPTY_SENT_TURNS,
 	NO_SENT_SESSIONS,
 } from "$lib/sent-turns";
+import {
+	mergeSessionForks,
+	readRealtimeSessionFork,
+} from "$lib/session-fork-tree";
 import { mergeSessionRecord } from "$lib/session-record-merge";
 import type { SessionRelations } from "$lib/session-relations-context";
 import { sortSessionsByRecentActivity } from "$lib/session-sort";
@@ -117,7 +121,6 @@ import {
 } from "$lib/stores/session-generation-state";
 import {
 	fetchSessionListWithCache,
-	getCachedSessionListSnapshot,
 	patchCachedSessionList,
 } from "$lib/stores/session-list-cache";
 import { unreadTracker } from "$lib/stores/session-state.svelte";
@@ -216,6 +219,10 @@ export type SessionChatHostOptions = SessionChatEnvironment & {
 		| "error";
 	canManageSessionAccess?: () => boolean;
 	hasSpace?: () => boolean;
+	onSessionForked?: (
+		session: SessionRecord,
+		fork: SessionListForkRecord,
+	) => void;
 };
 
 // Last host releases memory; persisted recovery snapshots stay.
@@ -1663,21 +1670,27 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 
 	function upsertSessionRecord(
 		session: SessionRecord,
-		options?: { cache?: boolean },
+		options?: { cache?: boolean; fork?: SessionListForkRecord | null },
 	) {
 		const nextSessions = workspace.upsertSessionRecord(session);
-		if (options?.cache !== false) {
-			void patchCachedSessionList(spaceId, () => nextSessions).catch(
-				() => undefined,
-			);
-		}
+		if (options?.cache === false) return;
+		const fork = options?.fork;
+		void patchCachedSessionList(
+			spaceId,
+			() => nextSessions,
+			undefined,
+			fork ? (forks) => mergeSessionForks(forks, [fork]) : undefined,
+		).catch(() => undefined);
 	}
 
-	function applySessionRealtimeRecord(session: SessionRecord) {
+	function applySessionRealtimeRecord(
+		session: SessionRecord,
+		fork: SessionListForkRecord | null,
+	) {
 		const current = workspace.spaceSessions.find(
 			(item) => item.id === session.id,
 		);
-		upsertSessionRecord(mergeSessionRecord(current, session));
+		upsertSessionRecord(mergeSessionRecord(current, session), { fork });
 		const merged = workspace.spaceSessions.find(
 			(item) => item.id === session.id,
 		);
@@ -1699,16 +1712,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 
 	async function syncForkResponseToSessionListCache(
 		session: SessionRecord,
-		fork: SessionListForkRecord | null | undefined,
+		fork: SessionListForkRecord,
 		parentSession?: SessionRecord | null,
 	) {
-		const snapshot = await getCachedSessionListSnapshot(spaceId).catch(
-			() => null,
-		);
-		const forkByChildId = new Map(
-			(snapshot?.forks ?? []).map((item) => [item.childSessionId, item]),
-		);
-		if (fork?.childSessionId) forkByChildId.set(fork.childSessionId, fork);
 		await patchCachedSessionList(
 			spaceId,
 			(current) => {
@@ -1717,7 +1723,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				return [session, ...base.filter((item) => item.id !== session.id)];
 			},
 			undefined,
-			Array.from(forkByChildId.values()),
+			(forks) => mergeSessionForks(forks, [fork]),
 		);
 	}
 
@@ -2606,13 +2612,15 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				.turn(turn.sourceTurnId ?? turn.id)
 				.fork();
 			if (disposed || spaceId !== opSpaceId) return;
+			const fork = response.fork as SessionListForkRecord;
+			options.onSessionForked?.(response.session, fork);
 			await sessionTurnsRepo
 				.clearSession(opSpaceId, response.session.id)
 				.catch(() => undefined);
 			if (disposed || spaceId !== opSpaceId) return;
 			await syncForkResponseToSessionListCache(
 				response.session,
-				response.fork as SessionListForkRecord,
+				fork,
 				parentSession,
 			).catch(() => undefined);
 			if (disposed || spaceId !== opSpaceId) return;
@@ -3987,7 +3995,13 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				payload.type === "session.updated"
 			) {
 				const session = payload.payload.session as SessionRecord | undefined;
-				if (session?.id) applySessionRealtimeRecord(session);
+				if (session?.id)
+					applySessionRealtimeRecord(
+						session,
+						payload.type === "session.created"
+							? readRealtimeSessionFork(payload.payload)
+							: null,
+					);
 				return;
 			}
 			const targetSessionId =

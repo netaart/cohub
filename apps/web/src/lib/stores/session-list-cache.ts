@@ -2,7 +2,10 @@ import type { SessionRecord } from "@neta-art/cohub";
 import type { SessionListForkRecord } from "$lib/cache/db";
 import { deleteCacheDatabase } from "$lib/cache/db";
 import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
-import { sessionListIndexRepo } from "$lib/cache/repositories/session-list-index-repo";
+import {
+	type SessionListForksPatch,
+	sessionListIndexRepo,
+} from "$lib/cache/repositories/session-list-index-repo";
 import {
 	DEFAULT_SESSION_LIST_PAGE_INFO,
 	type SessionListPageInfo,
@@ -63,7 +66,7 @@ export async function patchCachedSessionList(
 	spaceId: string,
 	updater: (sessions: SessionRecord[]) => SessionRecord[],
 	pageInfo?: SessionListPageInfo | null,
-	forks?: SessionListForkRecord[] | null,
+	forks?: SessionListForksPatch,
 ): Promise<SessionRecord[]> {
 	if (!(await resolveCacheUserKey())) {
 		const current =

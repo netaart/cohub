@@ -121,7 +121,9 @@ import {
 	buildSessionForkTree,
 	getSessionListTitle,
 	getSessionTreeTitle,
+	mergeSessionForks,
 	normalizeSessionText,
+	readRealtimeSessionFork,
 	type SessionForkEdge,
 	type SessionTreeItem,
 } from "$lib/session-fork-tree";
@@ -1007,12 +1009,7 @@ async function loadMoreSessionsForSpace(spaceId: string) {
 			hasMore: false,
 			nextCursor: null,
 		};
-		const forkByChildId = new Map(
-			sessionForks.map((fork) => [fork.childSessionId, fork]),
-		);
-		for (const fork of result.forks ?? [])
-			forkByChildId.set(fork.childSessionId, fork);
-		sessionForks = Array.from(forkByChildId.values());
+		applySessionForks(result.forks);
 		const mergedSessions = [...sessions, ...moreSessions];
 		sessions = mergedSessions;
 		void setCachedSessionList(
@@ -1394,43 +1391,6 @@ function patchLabelItems(
 			[labelId]: pageInfo,
 		},
 	};
-}
-
-function sessionForkSignature(fork: SessionListForkRecord) {
-	return [
-		fork.childSessionId,
-		fork.parentSessionId ?? "",
-		fork.depth ?? 0,
-		fork.anchorSequence ?? "",
-		fork.parentTitle ?? "",
-		fork.firstUserTextAfterFork ?? "",
-	].join("|");
-}
-
-function mergeSessionForks(
-	current: SessionListForkRecord[],
-	incoming: SessionListForkRecord[] | null | undefined,
-) {
-	// Empty / missing incoming is "unknown", not "clear all". Partial cache and
-	// label-page pages must never wipe forks already absorbed from another source.
-	if (!incoming?.length) return current;
-	const byChild = new Map(
-		current.map((fork) => [fork.childSessionId, fork] as const),
-	);
-	let changed = false;
-	for (const fork of incoming) {
-		if (!fork.childSessionId) continue;
-		const existing = byChild.get(fork.childSessionId);
-		const merged = existing ? { ...existing, ...fork } : fork;
-		if (
-			!existing ||
-			sessionForkSignature(existing) !== sessionForkSignature(merged)
-		) {
-			byChild.set(fork.childSessionId, merged);
-			changed = true;
-		}
-	}
-	return changed ? Array.from(byChild.values()) : current;
 }
 
 function applySessionForks(forks: SessionListForkRecord[] | null | undefined) {
@@ -2893,6 +2853,11 @@ onMount(() => {
 	// Navigation applies server state directly, without a mounted chat host.
 	const offSessionState = sdk.onUserEvent((event) => {
 		if (event.spaceId !== currentSpaceId) return;
+		const fork =
+			event.type === "session.created"
+				? readRealtimeSessionFork(event.payload)
+				: null;
+		if (fork) applySessionForks([fork]);
 		const turn = readSessionTurnState(event);
 		const record =
 			event.type === "session.updated" || event.type === "session.created"

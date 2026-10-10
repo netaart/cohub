@@ -28,12 +28,13 @@ export type LiveView<T, E> = {
 	readonly error: string | null;
 };
 
-export type LiveChange<F, T> = {
+export type LiveChange<F, T, E = never> = {
 	id: string;
 	fit(filter: F): LiveFit;
 	merge(existing: T): T;
 	create?(filter: F): T | null;
 	settled?: boolean;
+	extra?: E;
 };
 
 export type LiveListSource<F, T, E> = {
@@ -284,7 +285,7 @@ export class LiveList<F, T, E> {
 		}
 	}
 
-	apply(change: LiveChange<F, T>) {
+	apply(change: LiveChange<F, T, E>) {
 		const apply = (entry: Entry<F, T, E>) => this.#applyChange(entry, change);
 		this.#forEachEntry(apply);
 	}
@@ -309,7 +310,7 @@ export class LiveList<F, T, E> {
 
 	#applyChange(
 		entry: Entry<F, T, E>,
-		change: LiveChange<F, T>,
+		change: LiveChange<F, T, E>,
 	): Entry<F, T, E> {
 		const { id } = this.#source;
 		const compare = this.#source.compare(entry.filter);
@@ -329,6 +330,7 @@ export class LiveList<F, T, E> {
 					compare,
 					hasMore: entry.hasMore,
 				}),
+				extra: this.#withExtra(entry.extra, change),
 			};
 		}
 		if (fit === "out" || fit === "keep") return entry;
@@ -342,8 +344,15 @@ export class LiveList<F, T, E> {
 				compare,
 				hasMore: entry.hasMore,
 			}),
+			extra: this.#withExtra(entry.extra, change),
 			stale: entry.stale || !change.settled,
 		};
+	}
+
+	#withExtra(current: E, change: LiveChange<F, T, E>) {
+		return change.extra === undefined
+			? current
+			: this.#source.mergeExtra(current, change.extra);
 	}
 
 	#isLive(entry: Entry<F, T, E>) {

@@ -17,6 +17,10 @@ import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
 import { type LiveChange, LiveList } from "$lib/lists/live-list.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import {
+	mergeSessionForks,
+	readRealtimeSessionFork,
+} from "$lib/session-fork-tree";
 import { mergeSessionRecord } from "$lib/session-record-merge";
 import { compareSessionsByRecentActivity } from "$lib/session-sort";
 import {
@@ -75,13 +79,6 @@ function sourceSystemKey(source: UserSessionSourceKey) {
 	return `session-source:${source}`;
 }
 
-function mergeForks(current: Forks, incoming: Forks): Forks {
-	if (incoming.length === 0) return current;
-	const byChild = new Map(current.map((fork) => [fork.childSessionId, fork]));
-	for (const fork of incoming) byChild.set(fork.childSessionId, fork);
-	return [...byChild.values()];
-}
-
 function withSpace(
 	sessions: readonly SessionRecord[],
 	space: UserSessionSpaceSummary,
@@ -138,7 +135,7 @@ class ChatsInbox {
 		id: (session) => session.id,
 		compare: () => compareSessionsByRecentActivity,
 		emptyExtra: () => [],
-		mergeExtra: mergeForks,
+		mergeExtra: mergeSessionForks,
 		fetch: async (filter, cursor) => {
 			const page = await this.#fetchPage(filter, cursor);
 			return {
@@ -280,6 +277,10 @@ class ChatsInbox {
 		this.#applySession(session, { settled: true, space: session.space });
 	}
 
+	recordFork(session: SessionRecord, fork: SessionListForkRecord) {
+		this.#applySession(session, { settled: true, fork });
+	}
+
 	syncSession(session: SessionRecord, space: SpaceRecord | null) {
 		const existing = this.findById(session.id);
 		if (existing && sameInboxRow(existing, session)) return;
@@ -377,13 +378,21 @@ class ChatsInbox {
 		const record = readSessionRecord(
 			(event.payload as { session?: unknown }).session,
 		);
-		if (record)
-			this.#applySession(record, { settled: event.type === "session.created" });
+		if (!record) return;
+		const created = event.type === "session.created";
+		this.#applySession(record, {
+			settled: created,
+			fork: created ? readRealtimeSessionFork(event.payload) : null,
+		});
 	}
 
 	#applySession(
 		record: SessionEventRecord,
-		options: { settled: boolean; space?: UserSessionSpaceSummary | null },
+		options: {
+			settled: boolean;
+			space?: UserSessionSpaceSummary | null;
+			fork?: SessionListForkRecord | null;
+		},
 	) {
 		const viewer = authStore.userUuid ?? null;
 		const merge = (existing: UserSessionListItem) =>
@@ -398,7 +407,7 @@ class ChatsInbox {
 			}
 			return;
 		}
-		const change: LiveChange<ChatsFilter, UserSessionListItem> = {
+		const change: LiveChange<ChatsFilter, UserSessionListItem, Forks> = {
 			id: record.id,
 			fit: (filter) => sessionFit(record, filter, viewer),
 			merge,
@@ -413,6 +422,7 @@ class ChatsInbox {
 					: null;
 			},
 			settled: options.settled,
+			extra: options.fork ? [options.fork] : undefined,
 		};
 		this.list.apply(change);
 	}

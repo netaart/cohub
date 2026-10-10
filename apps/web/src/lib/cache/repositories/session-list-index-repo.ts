@@ -33,6 +33,11 @@ const listeners = new Set<
 >();
 let subscribedToBroadcast = false;
 
+export type SessionListForksPatch =
+	| SessionListForkRecord[]
+	| ((current: SessionListForkRecord[]) => SessionListForkRecord[])
+	| null;
+
 export type SessionListFetchResult = {
 	sessions: SessionRecord[];
 	forks?: SessionListForkRecord[] | null;
@@ -360,7 +365,7 @@ export const sessionListIndexRepo = {
 		spaceId: string,
 		updater: (sessions: SessionRecord[]) => SessionRecord[],
 		pageInfo?: SessionListPageInfo | null,
-		forks?: SessionListForkRecord[] | null,
+		forks?: SessionListForksPatch,
 	) {
 		const current = await readRecord(spaceId);
 		const currentSessions = current
@@ -368,11 +373,16 @@ export const sessionListIndexRepo = {
 			: [];
 		const updated = normalizeSessions(updater(currentSessions));
 		await sessionDetailRepo.setMany(spaceId, updated, { broadcast: false });
+		const currentForks = current?.record.forks;
 		const record = await writeRecord(
 			spaceId,
 			updated.map(toIndexItem),
 			pageInfo !== undefined ? pageInfo : current?.record.pageInfo,
-			forks !== undefined ? forks : current?.record.forks,
+			typeof forks === "function"
+				? forks(currentForks ?? [])
+				: forks !== undefined
+					? forks
+					: currentForks,
 		);
 		return toSnapshot(record, "indexeddb");
 	},

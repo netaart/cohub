@@ -3,6 +3,7 @@ import type {
 	SpaceRecord,
 	UserSessionSpaceSummary,
 } from "@neta-art/cohub";
+import type { SessionListForkRecord } from "$lib/cache/db";
 import {
 	buildSpaceNewSessionRoute,
 	buildSpaceSessionRoute,
@@ -23,6 +24,10 @@ export type WorkspaceScope = {
 		localSpaceOf?: (sessionId: string) => string | null,
 	) => string | null;
 	onActiveSession?: (session: SessionRecord, space: SpaceRecord | null) => void;
+	onSessionForked?: (
+		session: SessionRecord,
+		fork: SessionListForkRecord,
+	) => void;
 	pickSpace?: () => void;
 	knownSpace?: (spaceId: string) => UserSessionSpaceSummary | null;
 	knownSession?: (sessionId: string) => SessionRecord | null;
@@ -38,6 +43,7 @@ export const spaceWorkspaceScope: WorkspaceScope = {
 export function createChatsWorkspaceScope(input: {
 	spaceOfSession: (sessionId: string) => string | null;
 	onActiveSession?: WorkspaceScope["onActiveSession"];
+	onSessionForked?: WorkspaceScope["onSessionForked"];
 	pickSpace?: WorkspaceScope["pickSpace"];
 	knownSpace?: WorkspaceScope["knownSpace"];
 	knownSession?: WorkspaceScope["knownSession"];
@@ -55,6 +61,7 @@ export function createChatsWorkspaceScope(input: {
 			);
 		},
 		onActiveSession: input.onActiveSession,
+		onSessionForked: input.onSessionForked,
 		pickSpace: input.pickSpace,
 		knownSpace: input.knownSpace,
 		knownSession: input.knownSession,
