@@ -1,5 +1,14 @@
 # @neta-art/cohub-cli
 
+## 9.1.1
+
+### Patch Changes
+
+- 654a9bb: Fix local Runtime image attachments failing with `Invalid IP address: undefined`, and include the network reason in Runtime `fetch failed` errors.
+- Updated dependencies [3f9f043]
+- Updated dependencies [a4c7c0e]
+  - @neta-art/cohub@9.0.1
+
 ## 9.1.0
 
 ### Minor Changes
