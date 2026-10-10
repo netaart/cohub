@@ -217,10 +217,10 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 			title={context.isActiveSessionPublic ? "Session is public" : "Share session"}
 		>
 			{#if context.isActiveSessionPublic}
-				<Globe class="h-4 w-4 shrink-0" />
+				<Globe />
 				<span class="hidden text-[13px] font-medium lg:inline">Shared</span>
 			{:else}
-				<Share2 class="h-4 w-4 shrink-0" />
+				<Share2 />
 				<span class="hidden text-[13px] font-medium lg:inline">Share</span>
 			{/if}
 		</button>
@@ -240,7 +240,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 				aria-haspopup="menu"
 				aria-expanded={resourceActions.open}
 			>
-				<MoreHorizontal class="h-4 w-4 shrink-0" />
+				<MoreHorizontal />
 			</button>
 			{#if resourceActions.open && resourceActionsRootEl}
 				<div
@@ -297,9 +297,9 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 			aria-label={context.rightSidebarCollapsed ? m.side_panel_show({}, { locale }) : m.side_panel_hide({}, { locale })}
 		>
 			{#if context.rightSidebarCollapsed}
-				<PanelRightOpen class="h-4 w-4 shrink-0" />
+				<PanelRightOpen />
 			{:else}
-				<PanelRightClose class="h-4 w-4 shrink-0" />
+				<PanelRightClose />
 			{/if}
 		</button>
 	{/if}
@@ -310,11 +310,11 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 			<div class="flex min-w-0 items-center gap-1.5 overflow-hidden">
 				<button
 					type="button"
-					class="lg:hidden flex items-center justify-center w-9 h-9 -ml-0.5 rounded-[5px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors shrink-0"
+					class="header-action lg:hidden"
 					onclick={() => (uiState.mobileDrawerOpen = !uiState.mobileDrawerOpen)}
 					aria-label={m.space_header_toggle_nav({}, { locale })}
 				>
-					<Menu class="w-5 h-5" />
+					<Menu />
 				</button>
 				{#if showSessionTitle}
 					{#if context.spaceIdentity}

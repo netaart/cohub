@@ -325,7 +325,7 @@ $effect(() => {
 
 {#if status?.kind === "local"}
 	<button bind:this={trigger} type="button" class="header-action" data-tone={tone} aria-haspopup="dialog" aria-expanded={open} aria-label={`${m.runtime_title({}, { locale })} · ${label}`} title={`${m.runtime_title({}, { locale })} · ${label}`} onclick={() => open ? close() : void show()}>
-		<Monitor class="h-4 w-4 shrink-0" aria-hidden="true" />
+		<Monitor aria-hidden="true" />
 		<span class="hidden text-[13px] font-medium lg:inline">{m.runtime_local({}, { locale })}</span>
 		<span class="runtime-dot" aria-hidden="true"></span>
 		{#if tone === "attention" || tone === "offline"}<span class="runtime-label hidden lg:inline">{label}</span>{/if}
@@ -400,7 +400,7 @@ $effect(() => {
 	{/if}
 {:else if CLOUD_DISPLAY_ENTRY && status?.kind === "cloud" && canView && onOpenDisplay}
 	<button bind:this={trigger} type="button" class="header-action" aria-haspopup="dialog" aria-expanded={open} aria-label={m.virtual_display_title({}, { locale })} title={m.virtual_display_title({}, { locale })} onclick={() => open ? close() : void showVirtual()}>
-		<Monitor class="h-4 w-4 shrink-0" aria-hidden="true" />
+		<Monitor aria-hidden="true" />
 	</button>
 	{#if open}
 		<button type="button" class="runtime-backdrop" aria-hidden="true" tabindex="-1" use:portal onclick={close}></button>

@@ -116,12 +116,12 @@
 	}
 
 	[data-density="comfortable"] {
-		--list-row-height: 64px;
-		--list-avatar-size: 48px;
+		--list-row-height: 60px;
+		--list-avatar-size: 44px;
 		--list-title-size: 16px;
-		--list-title-leading: 22px;
+		--list-title-leading: 20px;
 		--list-subtitle-size: 14px;
-		--list-subtitle-leading: 20px;
+		--list-subtitle-leading: 18px;
 		--list-meta-size: 12px;
 		--list-subtitle-color: color-mix(
 			in oklab,

@@ -79,4 +79,10 @@ const stateClass = $derived(
 	.list-row-leading {
 		width: var(--list-avatar-size);
 	}
+
+	/* Avatar box follows the density token. */
+	.list-row-leading > :global(.avatar) {
+		width: var(--list-avatar-size);
+		height: var(--list-avatar-size);
+	}
 </style>

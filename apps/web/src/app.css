@@ -303,13 +303,13 @@ body.sidebar-resizing .panel-shell-fade {
 @utility header-action {
 	display: inline-flex;
 	flex: 0 0 auto;
-	height: 32px;
-	min-width: 32px;
+	height: 40px;
+	min-width: 40px;
 	align-items: center;
 	justify-content: center;
 	gap: 6px;
-	border-radius: 7px;
-	padding: 0 8px;
+	border-radius: 8px;
+	padding: 0 10px;
 	color: var(--text-tertiary);
 	white-space: nowrap;
 	cursor: pointer;
@@ -326,6 +326,24 @@ body.sidebar-resizing .panel-shell-fade {
 	&:focus-visible {
 		outline: 2px solid var(--brand);
 		outline-offset: 2px;
+	}
+
+	& > svg {
+		width: 20px;
+		height: 20px;
+		flex-shrink: 0;
+	}
+
+	@variant lg {
+		height: 32px;
+		min-width: 32px;
+		border-radius: 7px;
+		padding: 0 8px;
+
+		& > svg {
+			width: 16px;
+			height: 16px;
+		}
 	}
 }
 

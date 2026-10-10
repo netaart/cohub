@@ -43,6 +43,10 @@ const {
 		background: var(--bg-primary);
 	}
 
+	.column-header--list {
+		padding: 0 calc(var(--list-content-x) - 10px);
+	}
+
 	@media (min-width: 960px) {
 		.column-header {
 			height: 2.5rem;
