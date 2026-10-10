@@ -6,8 +6,8 @@ import { assignLabelsToSession } from "@cohub/core/labels";
 import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
 import { parsePromptEnv, type PromptAccessMode, type PromptAuthContext, type PromptEnv, type SubmitSessionPromptContext } from "@cohub/core/sessions";
 import { resolveDelegatedAppScopesAtUseTime } from "@cohub/core/apps";
-import type { Permission } from "@cohub/core/permissions";
-import { sanitizeTaskPromptAuth } from "./send-message-auth.js";
+import { createDrizzlePermissionStore, type Permission } from "@cohub/core/permissions";
+import { assertTaskPromptAccess, sanitizeTaskPromptAuth } from "./send-message-auth.js";
 import { normalizeSessionTurnOrigin, type SessionTurnIntent } from "@cohub/protocol/model";
 import { normalizeRequestSource } from "@cohub/protocol/provenance";
 import { getPromptTemplateService } from "../prompt-templates.js";
@@ -82,6 +82,10 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
     auth ?? null,
     { spaceId, userId, promptPermission },
     (reference) => resolveDelegatedAppScopesAtUseTime({ db, ...reference }),
+  );
+  await assertTaskPromptAccess(
+    { spaceId, sessionId: targetSessionId, userId, promptPermission, auth: sanitizedAuth },
+    createDrizzlePermissionStore(db),
   );
   const createdSession = targetSessionId ? null : await sessionPromptService.registerCronjobSession(spaceId, { source, title: title ?? null, userUuid: userId, origin, requestSource });
   const promptSessionId = targetSessionId ?? createdSession?.id;
