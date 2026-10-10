@@ -22,14 +22,24 @@ pub enum ContentKind {
     Binary,
     /// Nothing is indexed; rg must always scan the file.
     Unindexed,
+    /// A file with more than one hard link. A write through another name
+    /// changes it without an event for this path, so nothing is indexed and
+    /// rg always scans it.
+    Linked,
 }
 
 impl ContentKind {
+    /// rg must scan the file itself rather than trust its indexed text.
+    pub fn always_scanned(self) -> bool {
+        matches!(self, ContentKind::Unindexed | ContentKind::Linked)
+    }
+
     pub fn code(self) -> u64 {
         match self {
             ContentKind::Text => 0,
             ContentKind::Binary => 1,
             ContentKind::Unindexed => 2,
+            ContentKind::Linked => 3,
         }
     }
 
@@ -38,6 +48,7 @@ impl ContentKind {
             0 => Some(ContentKind::Text),
             1 => Some(ContentKind::Binary),
             2 => Some(ContentKind::Unindexed),
+            3 => Some(ContentKind::Linked),
             _ => None,
         }
     }

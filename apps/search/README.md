@@ -82,7 +82,9 @@ to walk. A plan has three lists:
   glob.
 - `walkFiles`: files rg must search through a directory walk. Files are
   indexed up to their first NUL byte, where rg's walk stops; files over
-  4 MiB without an early NUL and unreadable files are not indexed at all.
+  4 MiB without an early NUL, unreadable files, and files with more than one
+  hard link are not indexed at all. A write through another name of a linked
+  file produces no event for this name, so rg always reads it.
   With a whitelist `--glob`, rg also searches files ignore rules hide, so those
   are listed here too.
 - `dirs`: directories outside the watched domain.
@@ -107,7 +109,8 @@ reason instead of a plan.
 - `POST /paths/query` with `{ "pattern", "pathPrefix", "fullPath", "limit" }`
   returns `{ "matches", "truncated", "dirs" }` or `{ "fallback" }`
 
-Fallback reasons: `stale` (not verified by this process yet), `partial`
+Fallback reasons: `stale` (not verified by this process yet), `names` (a
+traversed file name is not UTF-8, so no plan can name it), `partial`
 (accepted work not applied, or a failed job awaiting a rescan), `rules`
 (`.rgignore`, `.fdignore`, `.git/info/exclude` or a global git excludes file
 present), `scope` (root is not an indexed directory), `pattern`, `glob` (a
@@ -121,9 +124,18 @@ The service default socket directory is private (`0700`) and the socket is
 Every accepted job gets a sequence number and jobs run in order; coverage is
 `complete` only when the newest accepted job has run, no failed job awaits a
 rescan, and this process has verified the index with a full reconcile.
-Incremental updates are coalesced for 500 ms before a Tantivy commit. The
-sandbox adds its own checks before it asks: its file watcher must be healthy
-and settled, and every batch it received must have been accepted here.
+Incremental updates are committed at most 500 ms after the first one arrives,
+however steadily writes continue. The sandbox adds its own checks before it
+asks: its file watcher must be healthy and settled, every batch it received
+must have been accepted here, and every write that bypassed the sandbox must
+be covered by a reconcile (see `apps/sandbox/README.md`).
+
+An update that creates, deletes or renames a path walks that path's whole
+subtree again, because the watcher reports a directory replaced at the same
+path as a single create. Name-excluded entries such as `build` are reported by
+the watcher as boundaries, never their contents, and stay in `dirs`. `.git`
+and `.cohub-upload.*` staging entries are never indexed; the agent excludes
+them from rg and fd after any user glob.
 
 Each file's document stores its path, size, mtime, ctime and content kind, so
 a reconcile compares the workspace with the committed index itself and reads

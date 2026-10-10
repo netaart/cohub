@@ -522,15 +522,17 @@ async fn index_worker(mut receiver: mpsc::Receiver<Job>, state: AppState) {
             }
             Job::Update(mut changes, mut last) => {
                 let mut escalation = None;
-                let mut deadline = Box::pin(sleep(UPDATE_DEBOUNCE));
+                let deadline = sleep(UPDATE_DEBOUNCE);
+                tokio::pin!(deadline);
                 loop {
                     tokio::select! {
                         _ = &mut deadline => break,
                         next = receiver.recv() => match next {
+                            // The deadline is not extended: steady writes must
+                            // still commit every UPDATE_DEBOUNCE.
                             Some(Job::Update(more, seq)) => {
                                 changes.extend(more);
                                 last = last.max(seq);
-                                deadline = Box::pin(sleep(UPDATE_DEBOUNCE));
                             }
                             Some(Job::Reconcile(seq)) => {
                                 last = last.max(seq);

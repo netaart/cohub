@@ -22,6 +22,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fmt, fs,
     io::{self, Read},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
@@ -39,7 +40,7 @@ use tantivy::{
 pub const INDEX_FAMILY: &str = "workspace.candidates";
 pub const PATH_INDEX_FAMILY: &str = "workspace.paths";
 pub const INDEX_SCHEMA_VERSION: u32 = 2;
-pub const INDEX_ANALYZER_VERSION: &str = "trigram-v2";
+pub const INDEX_ANALYZER_VERSION: &str = "trigram-v3";
 pub const MAX_INDEXED_FILE_BYTES: u64 = 4 * 1024 * 1024;
 pub const MAX_QUERY_LIMIT: usize = 5000;
 const INDEX_WRITER_MEMORY_BYTES: usize = 64 * 1024 * 1024;
@@ -98,6 +99,8 @@ pub struct PathQueryRequest {
 pub enum Fallback {
     /// The domain has not been verified by this process yet.
     Stale,
+    /// A path name in the workspace is not UTF-8, so a plan cannot name it.
+    Names,
     /// Accepted changes are not applied yet.
     Partial,
     /// The workspace has ignore rules the index does not mirror.
@@ -346,6 +349,10 @@ impl IndexStore {
 
         let mut removed = BTreeSet::new();
         let mut targets = BTreeSet::new();
+        // A created, deleted or renamed path can be a directory that replaced
+        // another one: the watcher folds a delete and a create of one path into
+        // a single create. Such paths are walked again completely.
+        let mut subtrees = BTreeSet::new();
         for change in changes {
             let path = normalize_relative_path(&change.path)?;
             if let Some(old_path) = change.old_path.as_deref() {
@@ -354,12 +361,18 @@ impl IndexStore {
             if change.kind == "delete" {
                 removed.insert(path.clone());
             }
+            if change.kind != "modify" || change.old_path.is_some() {
+                subtrees.insert(path.clone());
+            }
             targets.insert(path);
         }
-        let found = walk::observe_targets(&self.workspace, &self.names, &targets)?;
-        // Everything below a target that is no longer a directory is gone;
-        // directory targets keep their children, which arrive as their own
-        // changes.
+        let subtrees: BTreeSet<String> = compact_prefixes(subtrees).into_iter().collect();
+        let observation = walk::observe_targets(&self.workspace, &self.names, &targets, &subtrees)?;
+        let found = observation.found;
+        // A walked subtree is replaced by what the walk found. Everything below
+        // any other target that is no longer a directory is gone; directory
+        // targets keep their children, which arrive as their own changes.
+        removed.extend(subtrees.iter().cloned());
         for target in &targets {
             if !matches!(found.get(target), Some(Found::Entry(EntryKind::Dir, _))) {
                 removed.insert(target.clone());
@@ -368,14 +381,14 @@ impl IndexStore {
         let removed = compact_prefixes(removed);
         // A target the walk did not reach but that exists is hidden by ignore
         // rules; only entries of traversed directories matter to rg.
-        let mut hidden = BTreeMap::new();
+        let mut hidden_targets = BTreeMap::new();
         for target in &targets {
             if found.contains_key(target) {
                 continue;
             }
             if let Ok(metadata) = fs::symlink_metadata(self.workspace.join(target)) {
                 if metadata.is_file() || metadata.is_dir() {
-                    hidden.insert(target.clone(), metadata.is_dir());
+                    hidden_targets.insert(target.clone(), metadata.is_dir());
                 }
             }
         }
@@ -440,38 +453,55 @@ impl IndexStore {
         drop(writer);
         self.reload_reader()?;
 
-        let mut guard = self.domain.lock().expect("domain mutex poisoned");
-        let Some(domain) = guard.as_mut() else {
-            return Ok(());
-        };
-        let under_removed = |path: &String| removed.iter().any(|prefix| has_prefix(path, prefix));
-        domain.files.retain(|path, _| !under_removed(path));
-        domain.entries.retain(|path, _| !under_removed(path));
-        domain.excluded.retain(|path, _| !under_removed(path));
-        domain.unindexed.retain(|path| !under_removed(path));
-        domain.hidden.retain(|path, _| !under_removed(path));
-        for (path, is_dir) in hidden {
-            let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
-            if parent.is_empty() || domain.entries.get(parent) == Some(&EntryKind::Dir) {
-                domain.hidden.insert(path, is_dir);
+        {
+            let mut guard = self.domain.lock().expect("domain mutex poisoned");
+            let Some(domain) = guard.as_mut() else {
+                return Ok(());
+            };
+            let under_removed =
+                |path: &String| removed.iter().any(|prefix| has_prefix(path, prefix));
+            domain.files.retain(|path, _| !under_removed(path));
+            domain.entries.retain(|path, _| !under_removed(path));
+            domain.excluded.retain(|path, _| !under_removed(path));
+            domain.unindexed.retain(|path| !under_removed(path));
+            domain.hidden.retain(|path, _| !under_removed(path));
+            for (path, is_dir) in hidden_targets {
+                let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+                let traversed = |entries: &BTreeMap<String, EntryKind>| {
+                    entries.get(parent) == Some(&EntryKind::Dir)
+                };
+                if parent.is_empty()
+                    || traversed(&domain.entries)
+                    || matches!(found.get(parent), Some(Found::Entry(EntryKind::Dir, _)))
+                {
+                    domain.hidden.insert(path, is_dir);
+                }
             }
-        }
-        for (path, observed) in found {
-            domain.hidden.remove(&path);
-            match observed {
-                Found::Entry(kind, _) => {
-                    domain.entries.insert(path.clone(), kind);
-                    if let Some(meta) = added.get(&path) {
-                        if meta.kind == ContentKind::Unindexed {
-                            domain.unindexed.insert(path.clone());
+            for (path, observed) in found {
+                domain.hidden.remove(&path);
+                match observed {
+                    Found::Entry(kind, _) => {
+                        domain.entries.insert(path.clone(), kind);
+                        if let Some(meta) = added.get(&path) {
+                            if meta.kind.always_scanned() {
+                                domain.unindexed.insert(path.clone());
+                            }
+                            domain.files.insert(path, *meta);
                         }
-                        domain.files.insert(path, *meta);
+                    }
+                    Found::Excluded { dir } => {
+                        domain.excluded.insert(path, dir);
                     }
                 }
-                Found::Excluded { dir } => {
-                    domain.excluded.insert(path, dir);
-                }
             }
+            domain.hidden.extend(observation.hidden);
+            domain.rules.merge(observation.rules);
+        }
+        // Another name of a hard-linked file may still be indexed as text from
+        // before the link existed. Creating the link changed that file's ctime,
+        // so a reconcile finds and re-reads it.
+        if added.values().any(|meta| meta.kind == ContentKind::Linked) {
+            return self.reconcile();
         }
         Ok(())
     }
@@ -481,6 +511,9 @@ impl IndexStore {
         let Some(domain) = guard.as_ref() else {
             return Ok(QueryOutcome::Fallback(Fallback::Stale));
         };
+        if domain.rules.non_utf8_names {
+            return Ok(QueryOutcome::Fallback(Fallback::Names));
+        }
         if domain.rules.content_mismatch() || walk::global_excludes_present() {
             return Ok(QueryOutcome::Fallback(Fallback::Rules));
         }
@@ -567,7 +600,7 @@ impl IndexStore {
                 ContentKind::Text => plan.files.push(path),
                 ContentKind::Binary => plan.walk_files.push(path),
                 // Empty documents never match a trigram query.
-                ContentKind::Unindexed => continue,
+                ContentKind::Unindexed | ContentKind::Linked => continue,
             }
             if plan.len() > limit {
                 return Ok(QueryOutcome::Fallback(Fallback::Targets));
@@ -583,6 +616,9 @@ impl IndexStore {
         let Some(domain) = guard.as_ref() else {
             return Ok(PathOutcome::Fallback(Fallback::Stale));
         };
+        if domain.rules.non_utf8_names {
+            return Ok(PathOutcome::Fallback(Fallback::Names));
+        }
         if domain.rules.paths_mismatch() || walk::global_excludes_present() {
             return Ok(PathOutcome::Fallback(Fallback::Rules));
         }
@@ -614,13 +650,16 @@ impl IndexStore {
             }
         };
 
-        let mut matches: Vec<String> = descendants(&domain.entries, root.as_deref())
-            .map(|(path, _)| path)
-            .chain(descendants(&domain.excluded, root.as_deref()).map(|(path, _)| path))
-            .filter(|path| is_match(path))
-            .cloned()
-            .collect();
-        matches.sort();
+        // Both maps are sorted and disjoint, so merging them yields fd's sorted
+        // order and stops one entry past the limit.
+        let mut matches: Vec<String> = merge_sorted(
+            descendants(&domain.entries, root.as_deref()).map(|(path, _)| path),
+            descendants(&domain.excluded, root.as_deref()).map(|(path, _)| path),
+        )
+        .filter(|path| is_match(path))
+        .take(limit + 1)
+        .cloned()
+        .collect();
         let truncated = matches.len() > limit;
         matches.truncate(limit);
         let dirs = descendants(&domain.excluded, root.as_deref())
@@ -643,14 +682,10 @@ impl IndexStore {
         fingerprint: Fingerprint,
     ) -> Result<Option<(TantivyDocument, ContentKind)>> {
         let path = self.workspace.join(relative);
-        let prepared = match read_prepared(&path, fingerprint.size) {
-            Ok(prepared) => prepared,
+        let (text, kind) = match read_content(&path, fingerprint.size) {
+            Ok(content) => content,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(_) => None,
-        };
-        let (text, kind) = match prepared {
-            Some(prepared) => (prepared.text, prepared.kind),
-            None => (String::new(), ContentKind::Unindexed),
+            Err(_) => (String::new(), ContentKind::Unindexed),
         };
         let mut document = TantivyDocument::default();
         document.add_text(self.fields.path, relative);
@@ -750,25 +785,34 @@ fn build_schema() -> Schema {
     builder.build()
 }
 
-/// Reads what rg's directory walk can search. Files above the size cap are
-/// probed for an early NUL, which bounds what rg reports; otherwise they stay
-/// unindexed.
-fn read_prepared(path: &Path, size: u64) -> io::Result<Option<content::Prepared>> {
+/// Reads what rg's directory walk can search. Hard-linked files are never
+/// indexed. Files above the size cap are probed for an early NUL, which bounds
+/// what rg reports; otherwise they stay unindexed.
+fn read_content(path: &Path, size: u64) -> io::Result<(String, ContentKind)> {
+    let mut file = fs::File::open(path)?;
+    if file.metadata()?.nlink() > 1 {
+        return Ok((String::new(), ContentKind::Linked));
+    }
     if size <= MAX_INDEXED_FILE_BYTES {
-        return Ok(Some(content::prepare(&fs::read(path)?)));
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        let prepared = content::prepare(&bytes);
+        return Ok((prepared.text, prepared.kind));
     }
     let mut head = Vec::with_capacity(BINARY_PROBE_BYTES);
-    fs::File::open(path)?
-        .take(BINARY_PROBE_BYTES as u64)
+    file.take(BINARY_PROBE_BYTES as u64)
         .read_to_end(&mut head)?;
     let prepared = content::prepare(&head);
-    Ok((prepared.kind == ContentKind::Binary).then_some(prepared))
+    Ok(match prepared.kind {
+        ContentKind::Binary => (prepared.text, prepared.kind),
+        _ => (String::new(), ContentKind::Unindexed),
+    })
 }
 
 fn unindexed_paths(files: &HashMap<String, FileMeta>) -> BTreeSet<String> {
     files
         .iter()
-        .filter(|(_, meta)| meta.kind == ContentKind::Unindexed)
+        .filter(|(_, meta)| meta.kind.always_scanned())
         .map(|(path, _)| path.clone())
         .collect()
 }
@@ -823,6 +867,20 @@ fn glob_allows(globs: &Override, root: Option<&str>, path: &str, is_dir: bool) -
     !globs.matched(path, is_dir).is_ignore()
 }
 
+/// Merges two ascending iterators into one ascending iterator.
+fn merge_sorted<'a>(
+    left: impl Iterator<Item = &'a String>,
+    right: impl Iterator<Item = &'a String>,
+) -> impl Iterator<Item = &'a String> {
+    let mut left = left.peekable();
+    let mut right = right.peekable();
+    std::iter::from_fn(move || match (left.peek(), right.peek()) {
+        (Some(a), Some(b)) if b < a => right.next(),
+        (Some(_), _) => left.next(),
+        (None, _) => right.next(),
+    })
+}
+
 fn compact_prefixes(prefixes: BTreeSet<String>) -> Vec<String> {
     let mut compact: Vec<String> = Vec::with_capacity(prefixes.len());
     for prefix in prefixes {
@@ -834,12 +892,11 @@ fn compact_prefixes(prefixes: BTreeSet<String>) -> Vec<String> {
 }
 
 pub fn normalize_relative_path(path: &str) -> Result<String> {
-    let normalized = path.replace('\\', "/");
-    if Path::new(&normalized).is_absolute() {
+    if Path::new(path).is_absolute() {
         return Err(anyhow!("path must stay inside the workspace: {path}"));
     }
     let mut parts = Vec::new();
-    for part in normalized.split('/') {
+    for part in path.split('/') {
         match part {
             "" | "." => {}
             ".." => return Err(anyhow!("path must stay inside the workspace: {path}")),
@@ -853,7 +910,7 @@ pub fn normalize_relative_path(path: &str) -> Result<String> {
 }
 
 fn normalize_prefix(path: &str) -> Option<String> {
-    let normalized = path.replace('\\', "/").trim_matches('/').to_string();
+    let normalized = path.trim_matches('/').to_string();
     if normalized.is_empty() || normalized == "." {
         None
     } else {
@@ -1695,5 +1752,193 @@ mod tests {
                 .into_keys()
                 .collect()
         }
+    }
+
+    fn path_matches(store: &IndexStore, pattern: &str, limit: usize) -> (Vec<String>, bool) {
+        match store
+            .path_query(&PathQueryRequest {
+                pattern: pattern.to_string(),
+                path_prefix: String::new(),
+                full_path: false,
+                limit,
+            })
+            .expect("path query")
+        {
+            PathOutcome::Matches {
+                matches, truncated, ..
+            } => (matches, truncated),
+            PathOutcome::Fallback(fallback) => panic!("unexpected fallback {fallback:?}"),
+        }
+    }
+
+    #[test]
+    fn a_created_name_excluded_directory_is_walked_by_rg() {
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "NEEDLE\n");
+        let store = fixture.reconciled();
+        fixture.write("build/out.txt", "NEEDLE\n");
+        // The watcher reports the excluded entry itself, never its contents.
+        store
+            .apply_changes(&[change("build", "create")])
+            .expect("apply create");
+        let created = plan(&store, &request("NEEDLE"));
+        assert_eq!(created.files, strings(&["a.txt"]));
+        assert_eq!(created.dirs, strings(&["build"]));
+
+        fs::remove_dir_all(fixture.path("build")).expect("remove build");
+        store
+            .apply_changes(&[change("build", "delete")])
+            .expect("apply delete");
+        assert!(plan(&store, &request("NEEDLE")).dirs.is_empty());
+    }
+
+    #[test]
+    fn a_directory_replaced_at_the_same_path_drops_its_old_contents() {
+        let fixture = Fixture::new();
+        fixture.write("src/old.txt", "NEEDLE\n");
+        let store = fixture.reconciled();
+        let moved = TempDir::new().expect("moved tempdir");
+        fs::rename(fixture.path("src"), moved.path().join("src")).expect("move src away");
+        fixture.write("src/new.txt", "NEEDLE\n");
+        // The watcher folds the delete and the create of `src` into one create.
+        store
+            .apply_changes(&[change("src", "create")])
+            .expect("apply replacement");
+        assert_eq!(
+            plan(&store, &request("NEEDLE")).files,
+            strings(&["src/new.txt"])
+        );
+        assert_eq!(
+            path_matches(&store, "*.txt", 10).0,
+            strings(&["src/new.txt"])
+        );
+    }
+
+    #[test]
+    fn a_file_replaced_by_a_directory_leaves_no_file_document() {
+        let fixture = Fixture::new();
+        fixture.write("thing", "NEEDLE\n");
+        let store = fixture.reconciled();
+        fs::remove_file(fixture.path("thing")).expect("remove file");
+        fixture.write("thing/inner.txt", "other\n");
+        store
+            .apply_changes(&[change("thing", "create")])
+            .expect("apply replacement");
+        assert!(plan(&store, &request("NEEDLE")).files.is_empty());
+    }
+
+    #[test]
+    fn hard_linked_files_are_always_scanned() {
+        let fixture = Fixture::new();
+        fixture.write("original.txt", "old\n");
+        let store = fixture.reconciled();
+        fs::hard_link(fixture.path("original.txt"), fixture.path("hardlink.txt")).expect("link");
+        store
+            .apply_changes(&[change("hardlink.txt", "create")])
+            .expect("apply link");
+        fixture.write("original.txt", "NEEDLE\n");
+        // A write through one name reports only that name.
+        store
+            .apply_changes(&[change("original.txt", "modify")])
+            .expect("apply write");
+        let linked = plan(&store, &request("NEEDLE"));
+        assert!(linked.files.is_empty());
+        assert_eq!(
+            linked.walk_files,
+            strings(&["hardlink.txt", "original.txt"])
+        );
+    }
+
+    #[test]
+    fn backslashes_are_ordinary_name_characters() {
+        let fixture = Fixture::new();
+        fixture.write("a\\b.txt", "NEEDLE\n");
+        let store = fixture.reconciled();
+        assert_eq!(
+            plan(&store, &request("NEEDLE")).files,
+            strings(&["a\\b.txt"])
+        );
+        fixture.write("c\\d.txt", "NEEDLE\n");
+        store
+            .apply_changes(&[change("c\\d.txt", "create")])
+            .expect("apply create");
+        assert_eq!(
+            plan(&store, &request("NEEDLE")).files,
+            strings(&["a\\b.txt", "c\\d.txt"])
+        );
+    }
+
+    #[test]
+    fn non_utf8_names_disable_plans() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "NEEDLE\n");
+        fs::write(
+            fixture
+                .workspace
+                .path()
+                .join(OsStr::from_bytes(b"caf\xe9.txt")),
+            "NEEDLE\n",
+        )
+        .expect("write non-UTF-8 name");
+        let store = fixture.reconciled();
+        assert_eq!(fallback(&store, &request("NEEDLE")), Fallback::Names);
+        assert!(matches!(
+            store
+                .path_query(&PathQueryRequest {
+                    pattern: "*.txt".to_string(),
+                    path_prefix: String::new(),
+                    full_path: false,
+                    limit: 10,
+                })
+                .unwrap(),
+            PathOutcome::Fallback(Fallback::Names)
+        ));
+    }
+
+    #[test]
+    fn non_utf8_names_in_a_new_directory_disable_plans() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "NEEDLE\n");
+        let store = fixture.reconciled();
+        fixture.write("new/ok.txt", "NEEDLE\n");
+        fs::write(
+            fixture.path("new").join(OsStr::from_bytes(b"caf\xe9.txt")),
+            "NEEDLE\n",
+        )
+        .expect("write non-UTF-8 name");
+        store
+            .apply_changes(&[change("new", "create")])
+            .expect("apply create");
+        assert_eq!(fallback(&store, &request("NEEDLE")), Fallback::Names);
+    }
+
+    #[test]
+    fn staging_entries_are_never_indexed() {
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "NEEDLE\n");
+        fixture.write(".cohub-upload.copy-1-0/b.txt", "NEEDLE\n");
+        fixture.write(".cohub-upload.abc", "NEEDLE\n");
+        let store = fixture.reconciled();
+        let staged = plan(&store, &request("NEEDLE"));
+        assert_eq!(staged.files, strings(&["a.txt"]));
+        assert!(staged.walk_files.is_empty() && staged.dirs.is_empty());
+        assert_eq!(path_matches(&store, "*", 10).0, strings(&["a.txt"]));
+    }
+
+    #[test]
+    fn path_queries_stop_one_entry_past_the_limit() {
+        let fixture = Fixture::new();
+        for index in 0..5 {
+            fixture.write(&format!("f{index}.txt"), "x\n");
+        }
+        fixture.write("build/x", "x\n");
+        let store = fixture.reconciled();
+        assert_eq!(
+            path_matches(&store, "*", 3),
+            (strings(&["build", "f0.txt", "f1.txt"]), true)
+        );
+        assert!(!path_matches(&store, "*", 6).1);
     }
 }

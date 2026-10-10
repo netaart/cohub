@@ -17,11 +17,17 @@ use std::{
     fs,
     os::unix::fs::MetadataExt,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 pub const RG_IGNORE_FILE: &str = ".rgignore";
 pub const FD_IGNORE_FILE: &str = ".fdignore";
+/// Staged uploads and copies, which the file watcher never reports
+/// (`stagingPrefix` in apps/sandbox/filewatch/backend.go).
+const STAGING_PREFIX: &str = ".cohub-upload.";
 
 /// Entry names whose changes can alter which paths the walk yields.
 pub fn changes_walk_rules(relative: &str) -> bool {
@@ -43,13 +49,7 @@ impl NameRules {
     pub fn new(patterns: Vec<String>) -> Self {
         let mut patterns = patterns
             .into_iter()
-            .map(|pattern| {
-                pattern
-                    .replace('\\', "/")
-                    .trim_matches('/')
-                    .trim()
-                    .to_string()
-            })
+            .map(|pattern| pattern.trim_matches('/').trim().to_string())
             .filter(|pattern| {
                 !pattern.is_empty() && !Path::new(pattern).is_absolute() && !pattern.contains("..")
             })
@@ -107,10 +107,11 @@ fn is_default_excluded_name(name: &str) -> bool {
     )
 }
 
-/// The agent passes `--glob '!.git'` to rg and `--exclude .git` to fd, so
-/// `.git` entries are never visible to either tool.
+/// The agent excludes `.git` and staging entries from rg and fd after any
+/// user glob, so neither tool ever sees them.
 fn is_tool_excluded(relative: &str) -> bool {
-    relative.rsplit('/').next() == Some(".git")
+    let name = relative.rsplit('/').next().unwrap_or(relative);
+    name == ".git" || name.starts_with(STAGING_PREFIX)
 }
 
 pub fn has_prefix(path: &str, prefix: &str) -> bool {
@@ -155,6 +156,9 @@ pub struct RuleNotes {
     pub fd_ignore_files: bool,
     pub vcs_excludes: bool,
     pub global_excludes: bool,
+    /// A traversed name is not UTF-8. Plans and the wire protocol carry UTF-8
+    /// paths only, so such a workspace is never answered from the index.
+    pub non_utf8_names: bool,
 }
 
 impl RuleNotes {
@@ -164,6 +168,15 @@ impl RuleNotes {
 
     pub fn paths_mismatch(&self) -> bool {
         self.fd_ignore_files || self.vcs_excludes || self.global_excludes
+    }
+
+    /// Notes from a walk of part of the workspace only add to what is known.
+    pub fn merge(&mut self, other: RuleNotes) {
+        self.rg_ignore_files |= other.rg_ignore_files;
+        self.fd_ignore_files |= other.fd_ignore_files;
+        self.vcs_excludes |= other.vcs_excludes;
+        self.global_excludes |= other.global_excludes;
+        self.non_utf8_names |= other.non_utf8_names;
     }
 }
 
@@ -178,14 +191,21 @@ pub struct Observation {
 /// Walks the whole workspace.
 pub fn observe(workspace: &Path, names: &NameRules) -> Result<Observation> {
     let excluded = Arc::new(Mutex::new(BTreeMap::new()));
+    let non_utf8 = Arc::new(AtomicBool::new(false));
     let mut builder = walk_builder(workspace);
     {
         let workspace = workspace.to_path_buf();
         let names = names.clone();
         let excluded = excluded.clone();
+        let non_utf8 = non_utf8.clone();
         builder.filter_entry(move |entry| {
-            let Some(relative) = relative_path(&workspace, entry.path()) else {
-                return true;
+            let relative = match relative_path(&workspace, entry.path()) {
+                Relative::Root => return true,
+                Relative::NonUtf8 => {
+                    non_utf8.store(true, Ordering::Relaxed);
+                    return false;
+                }
+                Relative::Path(relative) => relative,
             };
             if is_tool_excluded(&relative) {
                 return false;
@@ -217,7 +237,7 @@ pub fn observe(workspace: &Path, names: &NameRules) -> Result<Observation> {
                 continue;
             }
         };
-        let Some(relative) = relative_path(workspace, entry.path()) else {
+        let Relative::Path(relative) = relative_path(workspace, entry.path()) else {
             continue;
         };
         if let Some(observed) = observe_entry(&entry) {
@@ -227,8 +247,10 @@ pub fn observe(workspace: &Path, names: &NameRules) -> Result<Observation> {
     found.extend(std::mem::take(
         &mut *excluded.lock().expect("excluded entries mutex poisoned"),
     ));
-    let (hidden, mut rules) = list_hidden(workspace, &found);
+    let traversed = std::iter::once(String::new()).chain(traversed_dirs(&found));
+    let (hidden, mut rules) = list_hidden(workspace, traversed.collect(), &found);
     rules.global_excludes = global_excludes_present();
+    rules.non_utf8_names |= non_utf8.load(Ordering::Relaxed);
     Ok(Observation {
         found,
         hidden,
@@ -236,19 +258,21 @@ pub fn observe(workspace: &Path, names: &NameRules) -> Result<Observation> {
     })
 }
 
+fn traversed_dirs(found: &BTreeMap<String, Found>) -> impl Iterator<Item = String> + '_ {
+    found
+        .iter()
+        .filter(|(_, observed)| matches!(observed, Found::Entry(EntryKind::Dir, _)))
+        .map(|(path, _)| path.clone())
+}
+
 /// Lists every traversed directory without ignore rules. rg reads `.rgignore`
 /// files and `.git` directories by name even when ignore rules hide them, so
 /// rule detection happens here rather than in the rule-applying walk.
 fn list_hidden(
     workspace: &Path,
+    traversed: Vec<String>,
     found: &BTreeMap<String, Found>,
 ) -> (BTreeMap<String, bool>, RuleNotes) {
-    let traversed = std::iter::once(String::new()).chain(
-        found
-            .iter()
-            .filter(|(_, observed)| matches!(observed, Found::Entry(EntryKind::Dir, _)))
-            .map(|(path, _)| path.clone()),
-    );
     let mut hidden = BTreeMap::new();
     let mut rules = RuleNotes::default();
     for dir in traversed {
@@ -258,6 +282,8 @@ fn list_hidden(
         for child in children.flatten() {
             let name = child.file_name();
             let Some(name) = name.to_str() else {
+                // A whitelist glob could still make rg search it.
+                rules.non_utf8_names = true;
                 continue;
             };
             let Ok(file_type) = child.file_type() else {
@@ -287,43 +313,68 @@ fn list_hidden(
     (hidden, rules)
 }
 
-/// Walks only the ancestors of `targets` and reports what the full walk would
-/// yield for each target. Missing targets are absent from the result.
+pub struct TargetObservation {
+    /// What the full walk would yield for each target and for every entry
+    /// below a subtree root. Missing paths are absent.
+    pub found: BTreeMap<String, Found>,
+    /// Rule-hidden entries of directories traversed below subtree roots.
+    pub hidden: BTreeMap<String, bool>,
+    pub rules: RuleNotes,
+}
+
+/// Walks only the ancestors of `targets` and `subtrees`, reports what the
+/// full walk would yield for each target, and walks each subtree completely.
 pub fn observe_targets(
     workspace: &Path,
     names: &NameRules,
     targets: &BTreeSet<String>,
-) -> Result<BTreeMap<String, Found>> {
+    subtrees: &BTreeSet<String>,
+) -> Result<TargetObservation> {
     let mut ancestors = BTreeSet::new();
-    for target in targets {
+    for target in targets.iter().chain(subtrees) {
         let mut current = target.as_str();
         while let Some((parent, _)) = current.rsplit_once('/') {
             ancestors.insert(parent.to_string());
             current = parent;
         }
     }
-    let targets = Arc::new(targets.clone());
+    let selected = {
+        let targets = targets.clone();
+        let subtrees = subtrees.clone();
+        move |relative: &str| {
+            targets.contains(relative) || subtrees.iter().any(|root| has_prefix(relative, root))
+        }
+    };
+    let selected = Arc::new(selected);
     let ancestors = Arc::new(ancestors);
     let excluded = Arc::new(Mutex::new(BTreeMap::new()));
+    let non_utf8 = Arc::new(AtomicBool::new(false));
     let mut builder = walk_builder(workspace);
     {
         let workspace = workspace.to_path_buf();
         let names = names.clone();
-        let targets = targets.clone();
+        let selected = selected.clone();
         let excluded = excluded.clone();
+        let non_utf8 = non_utf8.clone();
         builder.filter_entry(move |entry| {
-            let Some(relative) = relative_path(&workspace, entry.path()) else {
-                return true;
+            let relative = match relative_path(&workspace, entry.path()) {
+                Relative::Root => return true,
+                Relative::NonUtf8 => {
+                    // Only names inside a walked subtree are reached here.
+                    non_utf8.store(true, Ordering::Relaxed);
+                    return false;
+                }
+                Relative::Path(relative) => relative,
             };
-            let target = targets.contains(&relative);
-            if !target && !ancestors.contains(&relative) {
+            let selected = selected(&relative);
+            if !selected && !ancestors.contains(&relative) {
                 return false;
             }
             if is_tool_excluded(&relative) {
                 return false;
             }
             if names.excludes(&relative) {
-                if target {
+                if selected {
                     excluded
                         .lock()
                         .expect("excluded entries mutex poisoned")
@@ -347,10 +398,10 @@ pub fn observe_targets(
                 }
             },
         };
-        let Some(relative) = relative_path(workspace, entry.path()) else {
+        let Relative::Path(relative) = relative_path(workspace, entry.path()) else {
             continue;
         };
-        if !targets.contains(&relative) {
+        if !selected(&relative) {
             continue;
         }
         if let Some(observed) = observe_entry(&entry) {
@@ -360,7 +411,16 @@ pub fn observe_targets(
     found.extend(std::mem::take(
         &mut *excluded.lock().expect("excluded entries mutex poisoned"),
     ));
-    Ok(found)
+    let traversed = traversed_dirs(&found)
+        .filter(|dir| subtrees.iter().any(|root| has_prefix(dir, root)))
+        .collect();
+    let (hidden, mut rules) = list_hidden(workspace, traversed, &found);
+    rules.non_utf8_names |= non_utf8.load(Ordering::Relaxed);
+    Ok(TargetObservation {
+        found,
+        hidden,
+        rules,
+    })
 }
 
 fn walk_builder(workspace: &Path) -> WalkBuilder {
@@ -427,8 +487,8 @@ fn classify_walk_error(workspace: &Path, error: &ignore::Error) -> WalkError {
         return WalkError::Vanished;
     }
     match relative_path(workspace, path) {
-        Some(relative) => WalkError::Unreadable(relative),
-        None => WalkError::Fatal,
+        Relative::Path(relative) => WalkError::Unreadable(relative),
+        Relative::Root | Relative::NonUtf8 => WalkError::Fatal,
     }
 }
 
@@ -478,12 +538,27 @@ pub fn global_excludes_present() -> bool {
     error.is_some() || !rules.is_empty()
 }
 
-pub fn relative_path(workspace: &Path, path: &Path) -> Option<String> {
-    let relative = path.strip_prefix(workspace).ok()?;
+pub enum Relative {
+    /// The workspace itself, or a path outside it.
+    Root,
+    /// A name on the path is not UTF-8.
+    NonUtf8,
+    /// The workspace-relative path. Backslashes are ordinary name characters
+    /// on Unix and stay as they are.
+    Path(String),
+}
+
+pub fn relative_path(workspace: &Path, path: &Path) -> Relative {
+    let Ok(relative) = path.strip_prefix(workspace) else {
+        return Relative::Root;
+    };
     if relative.as_os_str().is_empty() {
-        return None;
+        return Relative::Root;
     }
-    Some(relative.to_string_lossy().replace('\\', "/"))
+    match relative.to_str() {
+        Some(relative) => Relative::Path(relative.to_string()),
+        None => Relative::NonUtf8,
+    }
 }
 
 /// Groups found entries into the domain's lookup structures.
