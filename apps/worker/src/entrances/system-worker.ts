@@ -4,7 +4,7 @@ import { configureBillingRuntime } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
 
 
-import { DelayedError, Queue, Worker, type Processor } from "bullmq";
+import { DelayedError, Worker, type Processor } from "bullmq";
 import {
   resolveQueueConcurrencyPerWorkerByName,
   attachWorkerEventLogger,
@@ -15,6 +15,9 @@ import {
   defaultJobRetention,
   getRedisHost,
   COHUB_SYSTEM_QUEUE,
+  createBullmqQueue,
+  authenticateQueueJob,
+  readQueueSigningKey,
 } from "@cohub/infra/bullmq";
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { getTracer, extractTrace } from "@cohub/infra/tracing/propagator";
@@ -50,11 +53,13 @@ configureBillingRuntime({
   redis: (await import("../redis.js")).redisCommandClient,
 });
 
+const signingKey = readQueueSigningKey();
 const connection = createBullmqRedisConnection(config.bullmqRedisUrl);
 
 const tracer = getTracer("cohub-system-worker");
 
 const processor: Processor = async (job) => {
+  authenticateQueueJob(job, signingKey);
   const handler = getSystemJobHandler(job.name);
   if (!handler) throw new Error(`No system handler registered for job: ${job.name}`);
 
@@ -99,7 +104,10 @@ const systemWorker = new Worker(COHUB_SYSTEM_QUEUE, processor, {
   telemetry: createQueueTelemetry("cohub-system-worker"),
 });
 
-const systemQueue = new Queue(COHUB_SYSTEM_QUEUE, { connection });
+const systemQueue = createBullmqQueue(COHUB_SYSTEM_QUEUE, {
+  redisUrl: config.bullmqRedisUrl,
+  telemetryServiceName: "cohub-system-worker",
+});
 
 attachWorkerEventLogger(systemWorker, {
   serviceName: "SystemWorker",

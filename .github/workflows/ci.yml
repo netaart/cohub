@@ -23,6 +23,12 @@ jobs:
   js-checks:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
     steps:
@@ -81,6 +87,18 @@ jobs:
           PUBLIC_LOGTO_API_RESOURCE=https://api.talesofai
           PUBLIC_MARKETPLACE_APP_ID=899432b9-7976-4bd1-a7b9-b9b83ea11f32
           EOF
+
+      - name: Check queue infrastructure
+        run: |
+          pnpm --filter @cohub/infra... build
+          pnpm --filter @cohub/infra typecheck
+          pnpm --filter @cohub/infra test
+
+      - name: Test queue authentication with Redis
+        working-directory: packages/infra
+        env:
+          BULLMQ_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: node --import tsx --test src/bullmq/authenticated-queue.test.ts src/bullmq/authenticated-queue.integration.ts
 
       - name: Build
         run: pnpm build

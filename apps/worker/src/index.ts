@@ -13,6 +13,9 @@ import {
   createBullmqRedisConnection,
   createQueueTelemetry,
   getRedisHost,
+  authenticateQueueJob,
+  readQueueSigningKey,
+  QueueAuthenticationError,
 } from "@cohub/infra/bullmq";
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { getTracer, extractTrace } from "@cohub/infra/tracing/propagator";
@@ -29,11 +32,13 @@ configureBillingRuntime({
   redis: (await import("./redis.js")).redisCommandClient,
 });
 
+const signingKey = readQueueSigningKey();
 const connection = createBullmqRedisConnection(config.bullmqRedisUrl);
 
 const tracer = getTracer("cohub-worker");
 
 const processor: Processor = async (job) => {
+  authenticateQueueJob(job, signingKey);
   const handler = getTaskHandler(job.name);
   if (!handler) {
     throw new Error(`No handler registered for task type: ${job.name}`);
@@ -74,7 +79,7 @@ attachWorkerEventLogger(taskWorker, {
 });
 
 taskWorker.on("failed", (job, error) => {
-  if (!job) return;
+  if (!job || error instanceof QueueAuthenticationError) return;
   void markTaskRunFailed(job, error).catch((updateError) => {
     logger.error("[Worker] failed to sync BullMQ failure to task_runs", updateError);
   });
