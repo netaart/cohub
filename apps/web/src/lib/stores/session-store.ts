@@ -64,10 +64,11 @@ async function completeProfiles(sessionId: string) {
 	const profileOf = (uuid: string) =>
 		profilesOf(current).find((profile) => profile.userUuid === uuid) ??
 		knownProfile(uuid);
+	// A partial fill would read as complete; leave gaps to the server.
+	if (!membersOf(current).every(profileOf)) return;
 	sessionStore.merge({
 		...current,
-		userProfile:
-			(current.userUuid && profileOf(current.userUuid)) || current.userProfile,
+		userProfile: current.userUuid ? profileOf(current.userUuid) : null,
 		participantProfiles: (current.participantUserUuids ?? []).flatMap(
 			(uuid) => profileOf(uuid) ?? [],
 		),
@@ -115,7 +116,10 @@ function connect() {
 		if (!record?.id || !record.spaceId) return;
 		void sessionStore
 			.applyRecord(record)
-			.then(() => completeProfiles(record.id));
+			.then(() => completeProfiles(record.id))
+			.catch((error: unknown) =>
+				console.warn("[session-store] realtime record failed", error),
+			);
 	});
 	const offRemote = sessionDetailRepo.onRemote((session) =>
 		sessionStore.mergeRemote(session),
