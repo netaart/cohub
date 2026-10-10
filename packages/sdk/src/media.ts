@@ -7,6 +7,10 @@
  * known to serve Aliyun OSS processing; any other URL is used as is.
  */
 
+import { mediaHost, OSS_PROCESS_PATTERN, ossProcessUrl } from "@cohub/protocol/core";
+
+export { ossProcessUrl };
+
 export type MediaType = "image" | "video" | "audio";
 /**
  * `cover` guarantees the short edge (square tiles), `contain` bounds the long
@@ -32,18 +36,6 @@ export type MediaInfo = {
 	bytes?: number;
 };
 
-type HostCapabilities = {
-	/** Serves `x-oss-process` image resize and video snapshot. */
-	process: true;
-	/** Writes `x-oss-meta-*` media headers (dimensions, duration, frames). */
-	metaHeaders: boolean;
-};
-
-const MEDIA_HOSTS: ReadonlyMap<string, HostCapabilities> = new Map([
-	["router-files.neta.art", { process: true, metaHeaders: true }],
-	["public.cohub.live", { process: true, metaHeaders: false }],
-]);
-
 /** Snapshots render at the requested width, upscaling small videos; cap it. */
 const VIDEO_FRAME_MAX_WIDTH = 768;
 
@@ -56,24 +48,9 @@ export function mediaVariantSize(pixels: number): MediaVariantSize {
 	return MEDIA_VARIANT_SIZES.find((size) => size >= pixels) ?? 1536;
 }
 
-function capabilities(url: string): HostCapabilities | undefined {
-	if (!/^https:\/\//i.test(url)) return undefined;
-	try {
-		return MEDIA_HOSTS.get(new URL(url).hostname);
-	} catch {
-		return undefined;
-	}
-}
-
-const OSS_PROCESS = /[?&]x-oss-process=/;
-
-/** Append an OSS process to `url`, keeping its query and hash. */
-export function ossProcessUrl(url: string, process: string): string {
-	if (/^(data|blob):/i.test(url) || OSS_PROCESS.test(url)) return url;
-	const hashIndex = url.indexOf("#");
-	const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
-	const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
-	return `${base}${base.includes("?") ? "&" : "?"}x-oss-process=${process}${hash}`;
+function ossHost(url: string) {
+	const host = mediaHost(url);
+	return host?.transform === "oss" ? host : undefined;
 }
 
 /**
@@ -85,7 +62,7 @@ export function imageVariantUrl(
 	size: MediaVariantSize,
 	fit: MediaFit = "contain",
 ): string | null {
-	if (!capabilities(url) || /\.gif$/i.test(new URL(url).pathname)) return null;
+	if (!ossHost(url) || /\.gif$/i.test(new URL(url).pathname)) return null;
 	return ossProcessUrl(
 		url,
 		`image/resize,${RESIZE[fit](size)}/quality,q_82/format,webp`,
@@ -97,7 +74,7 @@ export function videoFrameUrl(
 	url: string,
 	width: MediaVariantSize,
 ): string | null {
-	if (!capabilities(url)) return null;
+	if (!ossHost(url)) return null;
 	return ossProcessUrl(url, `video/snapshot,t_0,f_jpg,w_${width},m_fast`);
 }
 
@@ -218,7 +195,7 @@ async function probeHeaders(url: string, options: ProbeOptions) {
 
 async function probeImageInfo(url: string, options: ProbeOptions): Promise<MediaInfo> {
 	// A processed URL cannot take `image/info`; fetching it would download the image.
-	if (OSS_PROCESS.test(url)) return {};
+	if (OSS_PROCESS_PATTERN.test(url)) return {};
 	const fetcher = options.fetch ?? globalThis.fetch;
 	const response = await fetcher(ossProcessUrl(url, "image/info"), {
 		signal: options.signal,
@@ -241,7 +218,7 @@ export async function probeMediaInfo(
 	url: string,
 	options: ProbeOptions,
 ): Promise<MediaInfo> {
-	const host = capabilities(url);
+	const host = ossHost(url);
 	if (!host) return {};
 	let info: MediaInfo = {};
 	const attempt = async (strategy: () => Promise<MediaInfo>) => {

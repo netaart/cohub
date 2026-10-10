@@ -199,7 +199,7 @@ const REMOTE_IMAGE_MAX_BYTES = 32 * 1024 * 1024;
 
 export async function fetchRemoteImage(input: { url: string; maxBytes?: number; timeoutMs?: number; signal?: AbortSignal }) {
   const label = "Remote image";
-  const response = await safeFetch({ url: input.url, label, timeoutMs: input.timeoutMs, init: { signal: input.signal, headers: { Accept: "image/*" } } });
+  const response = await safeFetch({ url: input.url, label, timeoutMs: input.timeoutMs, init: { signal: input.signal, headers: { Accept: "image/webp,image/*" } } });
   if (!response.ok) throw new Error(`${label} download failed ${response.status}`);
   const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
   if (!mimeType.startsWith("image/") && mimeType !== "application/octet-stream") throw new Error(`${label} is not an image: ${mimeType}`);

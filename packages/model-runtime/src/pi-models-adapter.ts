@@ -17,7 +17,7 @@ import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { piMessagesApi } from "@earendil-works/pi-ai/api/pi-messages.lazy";
-import { withImageInputs } from "./image-content.js";
+import { withImageInputs, type ImageInputOptions } from "./image-content.js";
 import { withRequestProfiles } from "./request-profile/index.js";
 
 /** Auth + catalog surface shared by completion registries. */
@@ -161,7 +161,7 @@ export function streamSimpleWithModels(
   models: Models,
   model: Model<Api>,
   context: Parameters<Models["streamSimple"]>[1],
-  options?: SimpleStreamOptions & { threadId?: string },
+  options?: SimpleStreamOptions & ImageInputOptions & { threadId?: string },
 ) {
   return models.streamSimple(model, context, options);
 }

@@ -1,4 +1,4 @@
-import { IMAGE_UNAVAILABLE_TEXT, IMAGE_URL_MIME_TYPE, isImageUrlContent } from "@cohub/protocol/core";
+import { IMAGE_UNAVAILABLE_TEXT, IMAGE_URL_MIME_TYPE, imageUrlContent, isImageUrlContent, modelImageUrl } from "@cohub/protocol/core";
 import { fetchRemoteImage } from "@cohub/infra/safe-fetch";
 import { createLogger } from "@cohub/infra/logging";
 import {
@@ -82,7 +82,22 @@ export type ImageInputCache = Map<string, ImageContent | TextContent>;
 
 export const createImageInputCache = (): ImageInputCache => new Map();
 
-export type ImageInputOptions = { imageInputCache?: ImageInputCache };
+export type ImageInputOptions = {
+  imageInputCache?: ImageInputCache;
+  originalImageUrls?: boolean;
+};
+
+const mapImageUrls = (context: TranscriptContext, replace: (url: string) => ImageContent | TextContent): TranscriptContext => ({
+  ...context,
+  messages: context.messages.map((message) => {
+    const content = contentOf(message);
+    if (!content?.some(isImageUrlContent)) return message;
+    return { ...message, content: content.map((block) => isImageUrlContent(block) ? replace(block.data) : block) } as Message;
+  }),
+});
+
+const withModelImageUrls = (context: TranscriptContext): TranscriptContext =>
+  mapImageUrls(context, (url) => imageUrlContent(modelImageUrl(url)));
 
 export async function inlineImageUrls(
   context: TranscriptContext,
@@ -103,20 +118,16 @@ export async function inlineImageUrls(
       cache.set(url, image ? { type: "image", data: image.data.toString("base64"), mimeType: image.mimeType } : omittedImage());
     }
   }));
-  const messages = context.messages.map((message) => {
-    const content = contentOf(message);
-    if (!content?.some(isImageUrlContent)) return message;
-    return { ...message, content: content.map((block) => isImageUrlContent(block) ? cache.get(block.data) ?? omittedImage() : block) } as Message;
-  });
-  return { ...context, messages } as TranscriptContext;
+  return mapImageUrls(context, (url) => cache.get(url) ?? omittedImage());
 }
 
 export function withImageInputs(streams: ProviderStreams): ProviderStreams {
   const wrap = <O extends StreamOptions>(call: (model: Model<Api>, context: TranscriptContext, options?: O) => ReturnType<ProviderStreams["stream"]>) =>
-    (model: Model<Api>, context: TranscriptContext, rawOptions?: O) => {
-      const { imageInputCache, ...rest } = (rawOptions ?? {}) as O & ImageInputOptions;
+    (model: Model<Api>, rawContext: TranscriptContext, rawOptions?: O) => {
+      const { imageInputCache, originalImageUrls, ...rest } = (rawOptions ?? {}) as O & ImageInputOptions;
       const options = rawOptions ? rest as O : undefined;
-      if (!hasImageUrls(context.messages)) return call(model, context, options);
+      if (!hasImageUrls(rawContext.messages)) return call(model, rawContext, options);
+      const context = originalImageUrls ? rawContext : withModelImageUrls(rawContext);
       if (!acceptsImageUrls(model)) {
         return lazyStream(model, async () => call(model, await inlineImageUrls(context, { signal: options?.signal, cache: imageInputCache }), options));
       }
