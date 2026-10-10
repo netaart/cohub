@@ -13,7 +13,6 @@ export type SessionRowStatusKind =
 
 export type SessionRowStatus = {
 	kind: SessionRowStatusKind;
-	live: boolean;
 	label: string;
 	errorMessage: string | null;
 	startedAt: string | null;
@@ -40,7 +39,6 @@ export function getSessionRowStatus(
 					: m.session_activity_running({}, { locale });
 		return {
 			kind,
-			live: true,
 			label,
 			errorMessage: null,
 			startedAt: kind === "running" ? (turn.startedAt ?? null) : null,
@@ -57,7 +55,6 @@ export function getSessionRowStatus(
 	if (issue && issueKind) {
 		return {
 			kind: issueKind,
-			live: false,
 			label:
 				issueKind === "failed"
 					? m.session_activity_failed({}, { locale })
@@ -69,7 +66,6 @@ export function getSessionRowStatus(
 	if (unread) {
 		return {
 			kind: "unread",
-			live: false,
 			label: m.sidebar_unread({}, { locale }),
 			errorMessage: null,
 			startedAt: null,
@@ -77,7 +73,6 @@ export function getSessionRowStatus(
 	}
 	return {
 		kind: "idle",
-		live: false,
 		label: "",
 		errorMessage: null,
 		startedAt: null,

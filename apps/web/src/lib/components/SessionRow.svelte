@@ -118,13 +118,15 @@ type Glyph = {
 	soft?: boolean;
 };
 
-const GLYPHS: Record<Exclude<SessionRowStatusKind, "idle">, Glyph> = {
+const GLYPHS: Record<
+	Exclude<SessionRowStatusKind, "idle" | "unread">,
+	Glyph
+> = {
 	running: { shape: "dots", tone: "brand", motion: "active" },
 	queued: { shape: "dots", tone: "muted", soft: true },
 	stopping: { shape: "dots", tone: "muted", motion: "slow" },
 	failed: { shape: "ring", tone: "error" },
 	lost: { shape: "ring", tone: "warning", soft: true },
-	unread: { shape: "dot", tone: "brand", soft: true },
 };
 
 const locale = $derived(getLocale());
@@ -135,9 +137,10 @@ const isUnread = $derived(
 	unreadTracker.isUnread(session, session.lastMessageId),
 );
 const status = $derived(getSessionRowStatus(session, isUnread, locale));
-const glyph = $derived(status.kind === "idle" ? null : GLYPHS[status.kind]);
-const showStatusMeta = $derived(
-	status.kind !== "idle" && status.kind !== "unread",
+const glyph = $derived(
+	status.kind === "idle" || status.kind === "unread"
+		? null
+		: GLYPHS[status.kind],
 );
 const startedAtMs = $derived(
 	status.startedAt ? Date.parse(status.startedAt) : Number.NaN,
@@ -171,16 +174,16 @@ const hasMessages = $derived(
 const preview = $derived(
 	dense
 		? null
-		: (status.errorMessage ??
-				(sourceKey === "web"
-					? getSessionPreviewText(session)
-					: getSessionPreview(session, title))),
+		: sourceKey === "web"
+			? getSessionPreviewText(session)
+			: getSessionPreview(session, title),
 );
+const statusDetail = $derived(status.errorMessage ?? preview);
 const showSourceLine = $derived(
 	!dense && !preview && hasMessages && sourceKey !== "web",
 );
 const sourceBadge = $derived(
-	showSourceBadge && !status.live && !showSourceLine && sourceKey !== "web"
+	showSourceBadge && !showSourceLine && sourceKey !== "web"
 		? sourceName
 		: "",
 );
@@ -259,9 +262,9 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 	{/if}
 {/snippet}
 
-{#snippet statusGlyph()}
-	{#if glyph}
-		<StatusGlyph {...glyph} />
+{#snippet unreadDot()}
+	{#if status.kind === "unread"}
+		<StatusGlyph tone="brand" soft />
 	{/if}
 {/snippet}
 
@@ -270,11 +273,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		{#if sourceBadge}
 			<span class="max-w-20 truncate rounded-[3px] bg-bg-hover-strong px-1.5 py-px text-[10px] font-medium leading-none text-text-tertiary" title={sourceBadge}>{sourceBadge}</span>
 		{/if}
-		{#if showStatusMeta}
-			<span class="max-w-28 truncate {status.kind === 'failed' ? 'text-error-soft' : 'text-text-tertiary'}">{statusText}</span>
-		{:else}
-			{time}
-		{/if}
+		{time}
 	</span>
 {/snippet}
 
@@ -290,7 +289,12 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 {/snippet}
 
 {#snippet secondLine()}
-	{#if preview}
+	{#if glyph}
+		<span class="inline-flex items-center gap-1.5 align-top {status.kind === 'failed' ? 'text-error-soft' : 'text-text-tertiary'}">
+			<StatusGlyph {...glyph} class="[--status-glyph-size:5px]" />{statusText}
+		</span>
+		{#if statusDetail}<span title={statusDetail}> · {statusDetail}</span>{/if}
+	{:else if preview}
 		<span title={preview}>{preview}</span>
 	{:else if showSourceLine}
 		<span class="text-text-placeholder">{sourceName}</span>
@@ -349,7 +353,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		style={indentPx ? `--fork-indent: ${indentPx}px` : undefined}
 		aria-current={active ? "page" : undefined}
 		title={tooltip}
-		aria-label={[title, glyph ? status.label : null, tooltip].filter(Boolean).join(', ')}
+		aria-label={[title, status.label, tooltip].filter(Boolean).join(', ')}
 		draggable={!isMobile && draggable}
 		leading={avatar ? leading : undefined}
 		onclick={(event: MouseEvent) => onNavigate(event, session)}
@@ -359,10 +363,10 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 	>
 		<ListRowText
 			{title}
-			badge={statusGlyph}
+			badge={unreadDot}
 			{meta}
-			lead={participants.length > 0 ? people : undefined}
-			subtitle={dense ? undefined : secondLine}
+			lead={!glyph && participants.length > 0 ? people : undefined}
+			subtitle={dense && !glyph ? undefined : secondLine}
 		/>
 		{#snippet trailing()}
 			{#if actionCount > 0}

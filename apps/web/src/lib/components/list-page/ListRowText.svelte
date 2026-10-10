@@ -1,5 +1,7 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
+import { prefersReducedMotion } from "svelte/motion";
+import { slide } from "svelte/transition";
 
 const {
 	title,
@@ -29,7 +31,7 @@ const {
 		{/if}
 	</span>
 	{#if lead || subtitle}
-		<span class="list-row-subtitle flex min-w-0 items-center gap-2">
+		<span class="list-row-subtitle flex min-w-0 items-center gap-2" transition:slide={{ duration: prefersReducedMotion.current ? 0 : 180 }}>
 			{@render lead?.()}
 			{#if subtitle}
 				<span class="min-w-0 flex-1 truncate">{@render subtitle()}</span>
