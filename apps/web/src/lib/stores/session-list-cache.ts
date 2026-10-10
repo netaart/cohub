@@ -1,47 +1,43 @@
 import type { SessionRecord } from "@neta-art/cohub";
 import type { SessionListForkRecord } from "$lib/cache/db";
-import { deleteCacheDatabase } from "$lib/cache/db";
 import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
 import {
 	type SessionListForksPatch,
+	type SessionListIndexSnapshot,
 	sessionListIndexRepo,
 } from "$lib/cache/repositories/session-list-index-repo";
 import {
 	DEFAULT_SESSION_LIST_PAGE_INFO,
 	type SessionListPageInfo,
 } from "$lib/cache/types";
+import { mergeSessionForks } from "$lib/session-fork-tree";
+import { sessionStore } from "$lib/stores/session-store";
 
-async function resolveCacheUserKey() {
-	const userKey = await getCacheUserKeyAsync();
-	return canUseUserScopedCache(userKey) ? userKey : null;
+async function canUseCache() {
+	return canUseUserScopedCache(await getCacheUserKeyAsync());
 }
 
-export function getCachedSessionList(spaceId: string): SessionRecord[] | null {
-	void spaceId;
-	return null;
+function canonical<T extends { sessions: SessionRecord[] }>(snapshot: T): T {
+	return {
+		...snapshot,
+		sessions: sessionStore.seedAll(snapshot.sessions),
+	};
 }
 
-export function getCachedSessionListPageInfo(
+export async function getCachedSessionListSnapshot(
 	spaceId: string,
-): SessionListPageInfo | null {
-	void spaceId;
-	return null;
-}
-
-export function getCachedSessionListMeta(spaceId: string) {
-	void spaceId;
-	return null;
-}
-
-export async function getCachedSessionListSnapshot(spaceId: string) {
-	if (!(await resolveCacheUserKey())) return null;
-	return sessionListIndexRepo.getRecent(spaceId).catch((error) => {
-		console.warn("[session-list-cache] Failed to read cached sessions", {
-			spaceId,
-			error,
+): Promise<SessionListIndexSnapshot | null> {
+	if (!(await canUseCache())) return null;
+	const snapshot = await sessionListIndexRepo
+		.getRecent(spaceId)
+		.catch((error) => {
+			console.warn("[session-list-cache] Failed to read cached sessions", {
+				spaceId,
+				error,
+			});
+			return null;
 		});
-		return null;
-	});
+	return snapshot ? canonical(snapshot) : null;
 }
 
 export async function setCachedSessionList(
@@ -51,15 +47,18 @@ export async function setCachedSessionList(
 	forks?: SessionListForkRecord[] | null,
 	options?: { mode?: "replace" | "merge" },
 ): Promise<SessionRecord[]> {
-	if (!(await resolveCacheUserKey())) return sessions;
+	const records = sessionStore.mergeAll(sessions);
+	if (!(await canUseCache())) return records;
+	// Details land before the index so its previews never replace them.
+	await sessionStore.flush();
 	const snapshot = await sessionListIndexRepo.setRecent(
 		spaceId,
-		sessions,
+		records,
 		pageInfo,
 		forks,
 		options,
 	);
-	return snapshot.sessions;
+	return canonical(snapshot).sessions;
 }
 
 export async function patchCachedSessionList(
@@ -68,27 +67,40 @@ export async function patchCachedSessionList(
 	pageInfo?: SessionListPageInfo | null,
 	forks?: SessionListForksPatch,
 ): Promise<SessionRecord[]> {
-	if (!(await resolveCacheUserKey())) {
+	const update = (sessions: SessionRecord[]) =>
+		sessionStore.mergeAll(updater(sessionStore.seedAll(sessions)));
+	if (!(await canUseCache())) {
 		const current =
 			(await getCachedSessionListSnapshot(spaceId))?.sessions ?? [];
-		return updater(current);
+		return update(current);
 	}
+	await sessionStore.flush();
 	const snapshot = await sessionListIndexRepo.patchRecent(
 		spaceId,
-		updater,
+		update,
 		pageInfo,
 		forks,
 	);
-	return snapshot.sessions;
+	return canonical(snapshot).sessions;
 }
 
-export async function clearCachedSessionList(spaceId: string) {
-	if (!(await resolveCacheUserKey())) return;
-	await sessionListIndexRepo.deleteRecent(spaceId);
-}
-
-export async function clearAllCachedSessionLists() {
-	await deleteCacheDatabase();
+export async function listCachedSession(
+	spaceId: string,
+	session: SessionRecord,
+	fork?: SessionListForkRecord | null,
+) {
+	if (!(await canUseCache())) return;
+	if (!fork && (await sessionListIndexRepo.hasRecent(spaceId, session.id)))
+		return;
+	await patchCachedSessionList(
+		spaceId,
+		(current) =>
+			current.some((item) => item.id === session.id)
+				? current
+				: [session, ...current],
+		undefined,
+		fork ? (forks) => mergeSessionForks(forks, [fork]) : undefined,
+	);
 }
 
 export function onSessionListCacheUpdated(
@@ -99,132 +111,43 @@ export function onSessionListCacheUpdated(
 		pageInfo: SessionListPageInfo | null;
 	}) => void,
 ) {
-	const unsubscribers = new Map<string, () => void>();
-	// Compatibility event stream is now driven by repository broadcasts. Since the
-	// old API was global-by-space, expose a lightweight DOM bridge below.
-	const listener = (event: Event) => {
-		const custom = event as CustomEvent<{
-			spaceId: string;
-			sessions: SessionRecord[];
-			forks?: SessionListForkRecord[];
-			pageInfo: SessionListPageInfo;
-		}>;
-		if (!custom.detail?.spaceId) return;
+	return sessionListIndexRepo.subscribeAll((spaceId, snapshot) =>
 		handler({
-			...custom.detail,
-			forks: custom.detail.forks ?? [],
-			pageInfo: custom.detail.pageInfo,
-		});
-	};
-	if (typeof window !== "undefined")
-		window.addEventListener("cohub:session-list-cache-updated", listener);
-	return () => {
-		for (const unsubscribe of unsubscribers.values()) unsubscribe();
-		if (typeof window !== "undefined")
-			window.removeEventListener("cohub:session-list-cache-updated", listener);
-	};
+			spaceId,
+			sessions: sessionStore.seedAll(snapshot.sessions),
+			forks: snapshot.forks,
+			pageInfo: snapshot.pageInfo,
+		}),
+	);
 }
 
-type SessionListCacheFetchResult =
-	| SessionRecord[]
-	| {
-			sessions: SessionRecord[];
-			forks?: SessionListForkRecord[] | null;
-			pageInfo?: SessionListPageInfo | null;
-	  };
-
-function normalizeSessionListFetchResult(result: SessionListCacheFetchResult): {
+type SessionListFetchResult = {
 	sessions: SessionRecord[];
 	forks?: SessionListForkRecord[] | null;
 	pageInfo?: SessionListPageInfo | null;
-} {
-	return Array.isArray(result) ? { sessions: result } : result;
-}
+};
 
-const sessionListRefreshInFlight = new Map<string, Promise<SessionRecord[]>>();
+const refreshInFlight = new Map<string, Promise<SessionRecord[]>>();
 
-function refreshSessionListCache(
+export function refreshCachedSessionList(
 	spaceId: string,
-	fetcher: () => Promise<SessionListCacheFetchResult>,
-	onRefresh?: (sessions: SessionRecord[]) => void,
+	fetcher: () => Promise<SessionListFetchResult>,
 ): Promise<SessionRecord[]> {
-	const inFlight = sessionListRefreshInFlight.get(spaceId);
-	if (inFlight) {
-		return inFlight.then((sessions) => {
-			onRefresh?.(sessions);
-			return sessions;
-		});
-	}
-
+	const pending = refreshInFlight.get(spaceId);
+	if (pending) return pending;
 	const run = (async () => {
-		await getCacheUserKeyAsync();
-		const result = normalizeSessionListFetchResult(await fetcher());
-		const sessions = result.sessions;
-		if (!(await resolveCacheUserKey())) return sessions;
-		const snapshot = await sessionListIndexRepo.setRecent(
+		const result = await fetcher();
+		return setCachedSessionList(
 			spaceId,
-			sessions,
+			result.sessions,
 			result.pageInfo ?? DEFAULT_SESSION_LIST_PAGE_INFO,
 			result.forks,
 		);
-		onRefresh?.(snapshot.sessions);
-		return snapshot.sessions;
 	})().finally(() => {
-		if (sessionListRefreshInFlight.get(spaceId) === run) {
-			sessionListRefreshInFlight.delete(spaceId);
-		}
+		if (refreshInFlight.get(spaceId) === run) refreshInFlight.delete(spaceId);
 	});
-
-	sessionListRefreshInFlight.set(spaceId, run);
+	refreshInFlight.set(spaceId, run);
 	return run;
-}
-
-export async function fetchSessionListWithCache(
-	spaceId: string,
-	fetcher: () => Promise<SessionListCacheFetchResult>,
-	options?: {
-		force?: boolean;
-		onBackgroundRefresh?: (sessions: SessionRecord[]) => void;
-	},
-): Promise<SessionRecord[]> {
-	const cached = !options?.force
-		? await getCachedSessionListSnapshot(spaceId).catch(() => null)
-		: null;
-	if (cached) {
-		void refreshSessionListCache(
-			spaceId,
-			fetcher,
-			options?.onBackgroundRefresh,
-		).catch(() => undefined);
-		return cached.sessions;
-	}
-	return refreshSessionListCache(
-		spaceId,
-		fetcher,
-		options?.onBackgroundRefresh,
-	);
-}
-
-export async function fetchSessionListWithPageInfoCache(
-	spaceId: string,
-	fetcher: () => Promise<{
-		sessions: SessionRecord[];
-		pageInfo?: SessionListPageInfo;
-	}>,
-	_options?: { force?: boolean },
-): Promise<{ sessions: SessionRecord[]; pageInfo: SessionListPageInfo }> {
-	await getCacheUserKeyAsync();
-	const result = await fetcher();
-	const pageInfo = result.pageInfo ?? DEFAULT_SESSION_LIST_PAGE_INFO;
-	if (!(await resolveCacheUserKey())) {
-		return { sessions: result.sessions, pageInfo };
-	}
-	const snapshot = await sessionListIndexRepo.patchRecent(
-		spaceId,
-		() => result.sessions,
-		pageInfo,
-	);
-	return { sessions: snapshot.sessions, pageInfo: snapshot.pageInfo };
 }
 
 export type { SessionListPageInfo };

@@ -23,10 +23,6 @@ import {
 } from "$lib/session-fork-tree";
 import { mergeSessionRecord } from "$lib/session-record-merge";
 import { compareSessionsByRecentActivity } from "$lib/session-sort";
-import {
-	mergeSessionTurnState,
-	readSessionTurnState,
-} from "$lib/session-turn-state";
 import { getSpacePublicProfile } from "$lib/space-profile";
 import { buildUserNewSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -46,6 +42,7 @@ import {
 	getCachedSessionListSnapshot,
 	setCachedSessionList,
 } from "$lib/stores/session-list-cache";
+import { sessionStore, startSessionSync } from "$lib/stores/session-store";
 import {
 	fetchLabelItemsFirstPageFresh,
 	fetchSpaceLabels,
@@ -90,12 +87,27 @@ function sameInboxRow(row: UserSessionListItem, session: SessionRecord) {
 	return (
 		row.title === session.title &&
 		row.updatedAt === session.updatedAt &&
-		row.lastMessageId === session.lastMessageId &&
-		row.activeTurnSequence === session.activeTurnSequence &&
-		row.activeTurn?.id === session.activeTurn?.id &&
-		row.activeTurn?.status === session.activeTurn?.status &&
-		row.lastTurnIssue === session.lastTurnIssue
+		row.lastMessageId === session.lastMessageId
 	);
+}
+
+function sessionOf({ space: _space, ...session }: UserSessionListItem) {
+	return session as SessionRecord;
+}
+
+const liveRows = new WeakMap<
+	UserSessionListItem,
+	{ session: SessionRecord; row: UserSessionListItem }
+>();
+
+function liveRow(row: UserSessionListItem): UserSessionListItem {
+	const session = sessionStore.get(row.id);
+	if (!session) return row;
+	const cached = liveRows.get(row);
+	if (cached?.session === session) return cached.row;
+	const live = { ...session, space: row.space } as UserSessionListItem;
+	liveRows.set(row, { session, row: live });
+	return live;
 }
 
 export function spaceSummaryOf(space: SpaceRecord): UserSessionSpaceSummary {
@@ -138,6 +150,7 @@ class ChatsInbox {
 		mergeExtra: mergeSessionForks,
 		fetch: async (filter, cursor) => {
 			const page = await this.#fetchPage(filter, cursor);
+			sessionStore.mergeAll(page.sessions.map(sessionOf));
 			return {
 				items: page.sessions,
 				hasMore: page.pageInfo.hasMore,
@@ -147,6 +160,7 @@ class ChatsInbox {
 		},
 		read: async (filter) => {
 			const cached = await this.#readCachedPage(filter);
+			if (cached) sessionStore.seedAll(cached.sessions.map(sessionOf));
 			return cached
 				? {
 						items: cached.sessions,
@@ -198,6 +212,7 @@ class ChatsInbox {
 		if (this.#stop) return this.#stop;
 		this.list.start();
 		void this.#ensureUser();
+		const stopSessionSync = startSessionSync();
 		const stopEvents = sdk.onUserEvent((event) => this.#handleEvent(event));
 		const stopChips = $effect.root(() => {
 			$effect(() => {
@@ -206,6 +221,7 @@ class ChatsInbox {
 			});
 		});
 		this.#stop = () => {
+			stopSessionSync();
 			stopEvents();
 			stopChips();
 			this.#hide();
@@ -230,7 +246,7 @@ class ChatsInbox {
 	viewOf(filter: ChatsFilter): ChatsView {
 		const view = this.list.view(filter);
 		return {
-			sessions: view.items,
+			sessions: view.items.map(liveRow),
 			forks: view.extra,
 			loading: view.loading,
 			loadingMore: view.loadingMore,
@@ -255,7 +271,8 @@ class ChatsInbox {
 	}
 
 	findById(sessionId: string) {
-		return this.list.find(sessionId) ?? null;
+		const row = this.list.find(sessionId);
+		return row ? liveRow(row) : null;
 	}
 
 	async findLocal(sessionId: string): Promise<UserSessionListItem | null> {
@@ -274,6 +291,7 @@ class ChatsInbox {
 	}
 
 	upsertSession(session: UserSessionListItem) {
+		sessionStore.merge(sessionOf(session));
 		this.#applySession(session, { settled: true, space: session.space });
 	}
 
@@ -364,15 +382,6 @@ class ChatsInbox {
 	}
 
 	#handleEvent(event: ChannelEnvelope) {
-		const turn = readSessionTurnState(event);
-		if (turn?.sessionId) {
-			this.list.apply({
-				id: turn.sessionId,
-				fit: () => "keep",
-				merge: (session) => mergeSessionTurnState(session, turn),
-			});
-			return;
-		}
 		if (event.type !== "session.created" && event.type !== "session.updated")
 			return;
 		const record = readSessionRecord(

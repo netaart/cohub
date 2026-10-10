@@ -64,19 +64,17 @@ function hydrateFileItem(spaceId: string, item: LabelAssignmentListItem) {
 	);
 }
 
+type SessionLookup = (sessionId: string) => SessionRecord | undefined;
+
 export function hydrateLabelItems(
 	spaceId: string,
 	items: LabelAssignmentListItem[],
-	resources: { sessions?: SessionRecord[] },
+	session: SessionLookup,
 ) {
-	const sessionsById = new Map(
-		(resources.sessions ?? []).map((session) => [session.id, session]),
-	);
-
 	return items.map((item) => {
 		if (item.resourceType === "session") {
-			const session = sessionsById.get(item.resourceRef);
-			return session ? hydrateSessionItem(item, session) : item;
+			const record = session(item.resourceRef);
+			return record ? hydrateSessionItem(item, record) : item;
 		}
 		if (item.resourceType === "file") return hydrateFileItem(spaceId, item);
 		return item;
@@ -86,12 +84,12 @@ export function hydrateLabelItems(
 export function hydrateLabelItemsById(
 	spaceId: string,
 	itemsByLabelId: Record<string, LabelAssignmentListItem[]>,
-	resources: { sessions?: SessionRecord[] },
+	session: SessionLookup,
 ) {
 	return Object.fromEntries(
 		Object.entries(itemsByLabelId).map(([labelId, items]) => [
 			labelId,
-			hydrateLabelItems(spaceId, items, resources),
+			hydrateLabelItems(spaceId, items, session),
 		]),
 	);
 }

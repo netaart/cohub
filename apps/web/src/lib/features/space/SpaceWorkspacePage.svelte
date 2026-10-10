@@ -126,10 +126,7 @@ import {
 } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
-import {
-	getCachedSessionListSnapshot,
-	onSessionListCacheUpdated,
-} from "$lib/stores/session-list-cache";
+import { startSessionSync } from "$lib/stores/session-store";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import {
 	IMMERSIVE_CHAT_MAX,
@@ -1400,7 +1397,7 @@ const spaceRealtime = createSpaceRealtimeController({
 	onOnline: () => {
 		fileWorkspace.retryFailedInlineFiles();
 		if (wsConnectionState === "open") {
-			void sessionChat.refreshSessions(false);
+			void sessionChat.refreshSessions();
 			void boardPreview.reconcileOpenBoards();
 		}
 	},
@@ -2704,12 +2701,7 @@ onMount(() => {
 		appPreview.refreshIfOpen(detail.app.id);
 	};
 	window.addEventListener(APPS_CHANGED_EVENT, handleAppsChanged);
-	const offSessionListCacheUpdated = onSessionListCacheUpdated(
-		({ spaceId: updatedSpaceId, sessions }) => {
-			if (updatedSpaceId !== spaceId) return;
-			sessionChat.applySessionsSnapshot(sessions);
-		},
-	);
+	const stopSessionSync = startSessionSync();
 	const offSpaceConfigUpdated = subscribeSpaceConfig((config) => {
 		spaceConfig = config;
 	});
@@ -2847,7 +2839,7 @@ onMount(() => {
 			sessionChat.captureCurrentScrollAnchor(activeSessionId);
 		window.removeEventListener("keydown", handleSessionVimKeydown);
 		window.removeEventListener(APPS_CHANGED_EVENT, handleAppsChanged);
-		offSessionListCacheUpdated();
+		stopSessionSync();
 		offSpaceConfigUpdated();
 		offSpaceConfigBackgroundAction();
 		offDanmakuPrefs();
@@ -2941,14 +2933,10 @@ async function bootstrapSpace(currentSpaceId: string) {
 				.loadSessionState(routeSession)
 				.catch(() => undefined);
 		}
-		const [cachedSpace, cachedSnapshot] = await Promise.all([
-			withBootstrapCacheTimeout(spaceRecordRepo.getCached(currentSpaceId)),
-			withBootstrapCacheTimeout(getCachedSessionListSnapshot(currentSpaceId)),
-		]);
+		const cachedSpace = await withBootstrapCacheTimeout(
+			spaceRecordRepo.getCached(currentSpaceId),
+		);
 		if (spaceId !== currentSpaceId) return;
-		const cachedSessions = cachedSnapshot?.sessions;
-		if (cachedSessions && cachedSessions.length > 0)
-			sessionChat.seedSessions(cachedSessions);
 		if (cachedSpace?.space && !space) {
 			space = cachedSpace.space;
 			portPreview.setEndpoints(extractPublicEndpoints(cachedSpace.space));
@@ -2956,7 +2944,7 @@ async function bootstrapSpace(currentSpaceId: string) {
 			await spaceLoad;
 		}
 		if (spaceId !== currentSpaceId) return;
-		void sessionChat.refreshSessions(false);
+		void sessionChat.refreshSessions();
 		void loadPreviewEndpoints();
 		void loadFileTree();
 		if (routeSession) {

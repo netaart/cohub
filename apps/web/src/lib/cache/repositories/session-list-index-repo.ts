@@ -38,12 +38,6 @@ export type SessionListForksPatch =
 	| ((current: SessionListForkRecord[]) => SessionListForkRecord[])
 	| null;
 
-export type SessionListFetchResult = {
-	sessions: SessionRecord[];
-	forks?: SessionListForkRecord[] | null;
-	pageInfo?: SessionListPageInfo | null;
-};
-
 export type SessionListIndexSnapshot = {
 	items: SessionListIndexItem[];
 	sessions: SessionRecord[];
@@ -258,18 +252,6 @@ async function writeRecord(
 }
 
 function emit(spaceId: string, snapshot: SessionListIndexSnapshot) {
-	if (typeof window !== "undefined") {
-		window.dispatchEvent(
-			new CustomEvent("cohub:session-list-cache-updated", {
-				detail: {
-					spaceId,
-					sessions: snapshot.sessions,
-					forks: snapshot.forks,
-					pageInfo: snapshot.pageInfo,
-				},
-			}),
-		);
-	}
 	for (const listener of listeners) listener({ ...snapshot, spaceId });
 }
 
@@ -309,25 +291,11 @@ export const sessionListIndexRepo = {
 		return result ? await toSnapshot(result.record, result.source) : null;
 	},
 
-	async refreshRecent(
-		spaceId: string,
-		fetcher: () => Promise<SessionListFetchResult>,
-	) {
-		ensureBroadcastSubscription();
-		const [current, result] = await Promise.all([
-			readRecord(spaceId),
-			fetcher(),
-		]);
-		const sessions = normalizeSessions(result.sessions);
-		await sessionDetailRepo.setMany(spaceId, sessions, { broadcast: false });
-		const record = await writeRecord(
-			spaceId,
-			sessions.map(toIndexItem),
-			result.pageInfo ?? DEFAULT_SESSION_LIST_PAGE_INFO,
-			result.forks !== undefined ? result.forks : current?.record.forks,
-			{ completeness: "partial" },
+	async hasRecent(spaceId: string, sessionId: string) {
+		const result = await readRecord(spaceId);
+		return Boolean(
+			result?.record.items.some((item) => item.sessionId === sessionId),
 		);
-		return { ...(await toSnapshot(record, "network")), stale: false };
 	},
 
 	async setRecent(
@@ -339,7 +307,6 @@ export const sessionListIndexRepo = {
 	) {
 		const current = await readRecord(spaceId);
 		const normalized = normalizeSessions(sessions);
-		await sessionDetailRepo.setMany(spaceId, normalized, { broadcast: false });
 		const incoming = normalized.map(toIndexItem);
 		const merged =
 			options?.mode === "merge"
@@ -372,7 +339,6 @@ export const sessionListIndexRepo = {
 			? await hydrateSessions(spaceId, current.record.items)
 			: [];
 		const updated = normalizeSessions(updater(currentSessions));
-		await sessionDetailRepo.setMany(spaceId, updated, { broadcast: false });
 		const currentForks = current?.record.forks;
 		const record = await writeRecord(
 			spaceId,
@@ -402,19 +368,16 @@ export const sessionListIndexRepo = {
 		});
 	},
 
-	subscribe(
-		spaceId: string,
-		handler: (snapshot: SessionListIndexSnapshot) => void,
+	subscribeAll(
+		handler: (spaceId: string, snapshot: SessionListIndexSnapshot) => void,
 	) {
 		ensureBroadcastSubscription();
-		const listener = (
-			snapshot: SessionListIndexSnapshot & { spaceId: string },
-		) => {
-			if (snapshot.spaceId === spaceId) handler(snapshot);
-		};
+		const listener = ({
+			spaceId,
+			...snapshot
+		}: SessionListIndexSnapshot & { spaceId: string }) =>
+			handler(spaceId, snapshot);
 		listeners.add(listener);
 		return () => listeners.delete(listener);
 	},
 };
-
-export { normalizeSessions as normalizeSessionList };

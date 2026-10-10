@@ -1,8 +1,7 @@
 import type { SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
 import type { AccessState } from "$lib/access/access-state";
 import { createRequestDedupe } from "$lib/features/space/modules/request-dedupe";
-import { mergeSessionRecord } from "$lib/session-record-merge";
-import { sortSessionsByRecentActivity } from "$lib/session-sort";
+import { sessionStore } from "$lib/stores/session-store";
 
 export type SessionViewState = {
 	session: SessionRecord | undefined;
@@ -18,14 +17,42 @@ export type SessionViewState = {
 };
 
 export function createSessionWorkspaceController() {
-	let spaceSessions = $state<SessionRecord[]>([]);
-	let sessionStateById = $state<Record<string, SessionViewState>>({});
+	let rawSessionStateById = $state.raw<Record<string, SessionViewState>>({});
 	let activeSessionId = $state<string | null>(null);
 	let loadingSessionIds = $state<Record<string, boolean>>({});
 	let visibleInitialLoadingSessionIds = $state<Record<string, boolean>>({});
 	let preloadingSessionIds = $state.raw(new Set<string>());
 	const sessionLoadDedupe = createRequestDedupe();
 	const syncSessionNewerDedupe = createRequestDedupe();
+	const composed = new WeakMap<SessionViewState, SessionViewState>();
+
+	function withStoredSession(id: string, state: SessionViewState) {
+		const session = sessionStore.get(id);
+		if (!session || session === state.session) return state;
+		const cached = composed.get(state);
+		if (cached?.session === session) return cached;
+		const next = { ...state, session };
+		composed.set(state, next);
+		return next;
+	}
+
+	const sessionStateById = $derived.by(() => {
+		const states: Record<string, SessionViewState> = {};
+		for (const [id, state] of Object.entries(rawSessionStateById))
+			states[id] = withStoredSession(id, state);
+		return states;
+	});
+
+	function setSessionStates(next: Record<string, SessionViewState>) {
+		const previous = rawSessionStateById;
+		const current = sessionStateById;
+		for (const [id, state] of Object.entries(next)) {
+			if (state === previous[id] || state === current[id] || !state.session)
+				continue;
+			sessionStore.merge(state.session);
+		}
+		rawSessionStateById = next;
+	}
 
 	function initialSessionState(session?: SessionRecord): SessionViewState {
 		return {
@@ -42,112 +69,31 @@ export function createSessionWorkspaceController() {
 		};
 	}
 
-	function upsertSessionRecord(session: SessionRecord) {
-		const existingSession = spaceSessions.find(
-			(item) => item.id === session.id,
-		);
-		const nextSessions = sortSessionsByRecentActivity([
-			mergeSessionRecord(existingSession, session),
-			...spaceSessions.filter((item) => item.id !== session.id),
-		]);
-		spaceSessions = nextSessions;
-		const existing = sessionStateById[session.id];
-		sessionStateById = {
-			...sessionStateById,
-			[session.id]: {
-				session: mergeSessionRecord(existingSession, session),
-				turns: existing?.turns ?? [],
-				loading: existing?.loading ?? false,
-				loaded: existing?.loaded ?? false,
-				error: existing?.error ?? null,
-				hasMore: existing?.hasMore ?? true,
-				hasMoreNewer: existing?.hasMoreNewer ?? false,
-				loadingOlder: existing?.loadingOlder ?? false,
-				loadingNewer: existing?.loadingNewer ?? false,
-				oldestCursor: existing?.oldestCursor,
-			},
-		};
-		return nextSessions;
-	}
-
-	function applySessionRealtimeRecord(session: SessionRecord) {
-		upsertSessionRecord(session);
-	}
-
-	function applySessionsSnapshot(sessions: SessionRecord[]) {
-		const known = new Map(
-			spaceSessions.map((session) => [session.id, session]),
-		);
-		sessions = sessions.map((session) =>
-			mergeSessionRecord(known.get(session.id), session),
-		);
-		const activeSession = activeSessionId
-			? sessionStateById[activeSessionId]?.session
-			: undefined;
-		const nextSessions =
-			activeSession &&
-			!sessions.some((session) => session.id === activeSession.id)
-				? sortSessionsByRecentActivity([activeSession, ...sessions])
-				: sessions;
-		spaceSessions = nextSessions;
-		const nextState: Record<string, SessionViewState> = {};
-		for (const session of nextSessions) {
-			const existing = sessionStateById[session.id];
-			nextState[session.id] = {
-				session,
-				turns: existing?.turns ?? [],
-				loading: existing?.loading ?? false,
-				loaded: existing?.loaded ?? false,
-				error: existing?.error ?? null,
-				hasMore: existing?.hasMore ?? true,
-				hasMoreNewer: existing?.hasMoreNewer ?? false,
-				loadingOlder: existing?.loadingOlder ?? false,
-				loadingNewer: existing?.loadingNewer ?? false,
-				oldestCursor: existing?.oldestCursor,
-			};
-		}
-		if (
-			activeSessionId &&
-			sessionStateById[activeSessionId] &&
-			!nextState[activeSessionId]
-		) {
-			nextState[activeSessionId] = sessionStateById[activeSessionId];
-		}
-		sessionStateById = nextState;
-		return nextSessions;
-	}
-
-	function seedSessions(sessions: SessionRecord[]) {
-		return applySessionsSnapshot(sessions);
-	}
-
 	function prepareRouteSession(sessionId: string) {
 		const existing = sessionStateById[sessionId];
 		if (!existing) {
-			sessionStateById = {
+			setSessionStates({
 				...sessionStateById,
-				[sessionId]: initialSessionState(
-					spaceSessions.find((session) => session.id === sessionId),
-				),
-			};
+				[sessionId]: initialSessionState(sessionStore.get(sessionId)),
+			});
 		} else if (
 			!existing.loaded &&
 			!existing.loading &&
 			existing.turns.length === 0
 		) {
-			sessionStateById = {
+			setSessionStates({
 				...sessionStateById,
 				[sessionId]: {
 					...existing,
 					loading: true,
 				},
-			};
+			});
 		}
 		activeSessionId = sessionId;
 	}
 
 	function setSessionState(sessionId: string, state: SessionViewState) {
-		sessionStateById = { ...sessionStateById, [sessionId]: state };
+		setSessionStates({ ...sessionStateById, [sessionId]: state });
 	}
 
 	function patchSessionState(
@@ -186,8 +132,7 @@ export function createSessionWorkspaceController() {
 	}
 
 	function reset() {
-		spaceSessions = [];
-		sessionStateById = {};
+		rawSessionStateById = {};
 		activeSessionId = null;
 		loadingSessionIds = {};
 		visibleInitialLoadingSessionIds = {};
@@ -195,17 +140,11 @@ export function createSessionWorkspaceController() {
 	}
 
 	return {
-		get spaceSessions() {
-			return spaceSessions;
-		},
-		set spaceSessions(value: SessionRecord[]) {
-			spaceSessions = value;
-		},
 		get sessionStateById() {
 			return sessionStateById;
 		},
 		set sessionStateById(value: Record<string, SessionViewState>) {
-			sessionStateById = value;
+			setSessionStates(value);
 		},
 		get activeSessionId() {
 			return activeSessionId;
@@ -228,10 +167,6 @@ export function createSessionWorkspaceController() {
 		get preloadingSessionIds() {
 			return preloadingSessionIds;
 		},
-		upsertSessionRecord,
-		applySessionRealtimeRecord,
-		applySessionsSnapshot,
-		seedSessions,
 		prepareRouteSession,
 		setSessionState,
 		patchSessionState,

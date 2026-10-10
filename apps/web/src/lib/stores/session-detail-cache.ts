@@ -2,74 +2,56 @@ import type { SessionRecord } from "@neta-art/cohub";
 import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
 import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
 import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
+import { mergeSessionRecord } from "$lib/session-record-merge";
+import { sessionStore } from "$lib/stores/session-store";
 
 const refreshInFlight = new Map<string, Promise<SessionRecord>>();
 
-function cacheKey(spaceId: string, sessionId: string) {
-	return `${spaceId}:${sessionId}`;
-}
-
-async function resolveCacheUserKey() {
-	const userKey = await getCacheUserKeyAsync();
-	return canUseUserScopedCache(userKey) ? userKey : null;
-}
-
-export async function getCachedSessionDetailSnapshot(
-	spaceId: string,
-	sessionId: string,
-) {
-	if (!(await resolveCacheUserKey())) return null;
-	return sessionDetailRepo.get(spaceId, sessionId);
+async function canUseCache() {
+	return canUseUserScopedCache(await getCacheUserKeyAsync());
 }
 
 export async function findCachedSession(
 	sessionId: string,
 ): Promise<{ spaceId: string; session: SessionRecord } | null> {
-	if (!(await resolveCacheUserKey())) return null;
+	const known = sessionStore.get(sessionId);
+	if (known) return { spaceId: known.spaceId, session: known };
+	if (!(await canUseCache())) return null;
 	const [detail, turns] = await Promise.all([
 		sessionDetailRepo.find(sessionId).catch(() => null),
 		sessionTurnsRepo.find(sessionId).catch(() => null),
 	]);
-	let newest: {
-		spaceId: string;
-		session: SessionRecord;
-		updatedAt: number;
-	} | null = detail;
-	if (turns?.session && (!newest || turns.updatedAt > newest.updatedAt))
-		newest = { ...turns, session: turns.session };
-	return newest ? { spaceId: newest.spaceId, session: newest.session } : null;
+	const cached = [detail?.session, turns?.session].filter(
+		(session): session is SessionRecord => Boolean(session),
+	);
+	if (cached.length === 0) return null;
+	const session = sessionStore.seed(cached.reduce(mergeSessionRecord));
+	return { spaceId: session.spaceId, session };
 }
 
 export async function forgetCachedSession(spaceId: string, sessionId: string) {
-	if (!(await resolveCacheUserKey())) return;
+	sessionStore.forget(sessionId);
+	if (!(await canUseCache())) return;
 	await Promise.all([
 		sessionDetailRepo.delete(spaceId, sessionId),
 		sessionTurnsRepo.clearSession(spaceId, sessionId),
 	]);
 }
 
-export async function getCachedSessionDetails(
-	spaceId: string,
-	sessionIds: string[],
+function refreshSessionDetail(
+	sessionId: string,
+	fetcher: () => Promise<SessionRecord>,
 ) {
-	if (!(await resolveCacheUserKey())) return {};
-	return sessionDetailRepo.getMany(spaceId, sessionIds);
-}
-
-export async function setCachedSessionDetail(
-	spaceId: string,
-	session: SessionRecord,
-) {
-	if (!(await resolveCacheUserKey())) return null;
-	return sessionDetailRepo.set(spaceId, session);
-}
-
-export async function setCachedSessionDetails(
-	spaceId: string,
-	sessions: SessionRecord[],
-) {
-	if (!(await resolveCacheUserKey())) return [];
-	return sessionDetailRepo.setMany(spaceId, sessions);
+	const pending = refreshInFlight.get(sessionId);
+	if (pending) return pending;
+	const run = fetcher()
+		.then((session) => sessionStore.merge(session))
+		.finally(() => {
+			if (refreshInFlight.get(sessionId) === run)
+				refreshInFlight.delete(sessionId);
+		});
+	refreshInFlight.set(sessionId, run);
+	return run;
 }
 
 export async function fetchSessionDetailWithCache(
@@ -78,42 +60,13 @@ export async function fetchSessionDetailWithCache(
 	fetcher: () => Promise<SessionRecord>,
 	options?: { force?: boolean },
 ): Promise<SessionRecord> {
-	await getCacheUserKeyAsync();
-	const canCache = Boolean(await resolveCacheUserKey());
-	const cached =
-		canCache && !options?.force
-			? await sessionDetailRepo.get(spaceId, sessionId).catch(() => null)
-			: null;
-	if (cached) {
-		if (cached.stale) {
-			void sessionDetailRepo
-				.refresh(spaceId, sessionId, fetcher)
-				.catch(() => undefined);
-		}
-		return cached.session;
-	}
-
-	if (!canCache) return fetcher();
-
-	const key = cacheKey(spaceId, sessionId);
-	const pending = refreshInFlight.get(key);
-	if (pending) return pending;
-	const run = sessionDetailRepo
-		.refresh(spaceId, sessionId, fetcher)
-		.then((snapshot) => snapshot.session)
-		.finally(() => {
-			if (refreshInFlight.get(key) === run) refreshInFlight.delete(key);
-		});
-	refreshInFlight.set(key, run);
-	return run;
-}
-
-export function onSessionDetailCacheUpdated(
-	spaceId: string,
-	sessionId: string,
-	handler: (session: SessionRecord) => void,
-) {
-	return sessionDetailRepo.subscribe(spaceId, sessionId, (snapshot) => {
-		handler(snapshot.session);
-	});
+	if (options?.force || !(await canUseCache()))
+		return refreshSessionDetail(sessionId, fetcher);
+	const cached = await sessionDetailRepo
+		.get(spaceId, sessionId)
+		.catch(() => null);
+	if (!cached) return refreshSessionDetail(sessionId, fetcher);
+	if (cached.stale)
+		void refreshSessionDetail(sessionId, fetcher).catch(() => undefined);
+	return sessionStore.seed(cached.session);
 }

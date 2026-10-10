@@ -11,40 +11,74 @@ function hasOwn<T extends object, K extends PropertyKey>(
 	return Object.hasOwn(value, key);
 }
 
-function shouldApplyActiveTurn(
-	existing: SessionRecord | undefined | null,
-	incoming: Omit<SessionRecord, "meta"> & {
-		meta?: SessionRecord["meta"];
-		stats?: unknown;
-	},
+export type SessionRecordInput = Omit<SessionRecord, "meta"> & {
+	meta?: SessionRecord["meta"];
+	stats?: unknown;
+};
+
+type TurnState = Pick<
+	SessionRecord,
+	"activeTurn" | "activeTurnSequence" | "lastTurnIssue"
+>;
+type ActiveTurn = NonNullable<SessionRecord["activeTurn"]>;
+
+export const TURN_PHASE = { queued: 0, live: 1, settled: 2 } as const;
+
+export function turnPhase(status: string): number {
+	return status === "queued"
+		? TURN_PHASE.queued
+		: status === "running" || status === "abort_requested"
+			? TURN_PHASE.live
+			: TURN_PHASE.settled;
+}
+
+export function turnAdvances(
+	current: Pick<ActiveTurn, "status" | "updatedAt">,
+	next: { status: string; updatedAt?: string | null },
 ) {
-	if (
-		!hasOwn(incoming, "activeTurn") ||
-		!hasOwn(incoming, "activeTurnSequence")
-	) {
-		return (
-			hasOwn(incoming, "activeTurn") &&
-			incoming.activeTurn === null &&
-			existing?.activeTurnSequence === undefined
-		);
-	}
-	const existingTurnAt = existing?.activeTurn?.updatedAt;
-	const incomingTurnAt = incoming.activeTurn?.updatedAt;
-	if (
-		existingTurnAt &&
-		incomingTurnAt &&
-		Date.parse(incomingTurnAt) < Date.parse(existingTurnAt)
-	)
-		return false;
-	const existingUpdatedAt = existing?.updatedAt;
-	const incomingUpdatedAt = (incoming as { updatedAt?: unknown }).updatedAt;
-	if (
-		typeof existingUpdatedAt === "string" &&
-		typeof incomingUpdatedAt === "string" &&
-		Date.parse(incomingUpdatedAt) < Date.parse(existingUpdatedAt)
-	)
-		return false;
-	return true;
+	const from = turnPhase(current.status);
+	const to = turnPhase(next.status);
+	if (from !== to) return to > from;
+	return !(
+		Date.parse(next.updatedAt ?? "") < Date.parse(current.updatedAt ?? "")
+	);
+}
+
+function turnMark(state: Partial<TurnState>): [number, number] | null {
+	const turn = state.activeTurn;
+	if (turn) return [turn.sequence, turnPhase(turn.status)];
+	return state.activeTurnSequence == null
+		? null
+		: [state.activeTurnSequence, TURN_PHASE.settled];
+}
+
+// Turn state follows its own lifecycle, never the Session's `updatedAt`.
+function acceptsTurnState(
+	existing: SessionRecord | undefined | null,
+	incoming: SessionRecordInput,
+) {
+	if (!hasOwn(incoming, "activeTurn")) return false;
+	const current = existing ? turnMark(existing) : null;
+	if (!current) return true;
+	const next = turnMark(incoming);
+	if (!next) return false;
+	if (next[0] !== current[0]) return next[0] > current[0];
+	if (next[1] !== current[1]) return next[1] > current[1];
+	const known = existing?.activeTurn;
+	const received = incoming.activeTurn;
+	return !known || !received || known.id !== received.id
+		? true
+		: turnAdvances(known, received);
+}
+
+function readTurnState(source: Partial<TurnState>): Partial<TurnState> {
+	const state: Partial<TurnState> = {};
+	if (hasOwn(source, "activeTurn")) state.activeTurn = source.activeTurn;
+	if (hasOwn(source, "activeTurnSequence"))
+		state.activeTurnSequence = source.activeTurnSequence;
+	if (hasOwn(source, "lastTurnIssue"))
+		state.lastTurnIssue = source.lastTurnIssue;
+	return state;
 }
 
 function isOlderSnapshot(
@@ -83,10 +117,7 @@ function settleHydratedProfile<K extends HydratedProfileKey>(
  */
 export function mergeSessionRecord(
 	existing: SessionRecord | undefined | null,
-	incoming: Omit<SessionRecord, "meta"> & {
-		meta?: SessionRecord["meta"];
-		stats?: unknown;
-	},
+	incoming: SessionRecordInput,
 ): SessionRecord {
 	const received = readSessionStats(
 		incoming.stats ? { stats: incoming.stats } : incoming.meta,
@@ -97,39 +128,26 @@ export function mergeSessionRecord(
 			? received
 			: previous;
 	const meta = hasOwn(incoming, "meta") ? incoming.meta : existing?.meta;
-	const activeTurnAccepted = shouldApplyActiveTurn(existing, incoming);
 	const incomingIsOlder = Boolean(
 		existing && isOlderSnapshot(incoming, existing),
 	);
+	const turnState = acceptsTurnState(existing, incoming)
+		? readTurnState(incoming)
+		: existing
+			? readTurnState(existing)
+			: {};
 	const result: SessionRecord & { stats?: unknown } =
 		existing && incomingIsOlder
 			? {
 					...existing,
 					meta: stats ? { ...existing.meta, stats } : existing.meta,
-					...(hasOwn(incoming, "activeTurn") && activeTurnAccepted
-						? {
-								activeTurn: incoming.activeTurn,
-								activeTurnSequence: incoming.activeTurnSequence,
-								...(hasOwn(incoming, "lastTurnIssue")
-									? { lastTurnIssue: incoming.lastTurnIssue }
-									: {}),
-							}
-						: {}),
+					...turnState,
 				}
 			: {
 					...existing,
 					...incoming,
 					meta: stats ? { ...meta, stats } : (meta ?? null),
-					participantUserUuids: hasOwn(incoming, "participantUserUuids")
-						? incoming.participantUserUuids
-						: existing?.participantUserUuids,
-					...(hasOwn(incoming, "activeTurn") && !activeTurnAccepted
-						? {
-								activeTurn: existing?.activeTurn,
-								activeTurnSequence: existing?.activeTurnSequence,
-								lastTurnIssue: existing?.lastTurnIssue,
-							}
-						: {}),
+					...turnState,
 				};
 	for (const key of HYDRATED_PROFILE_KEYS) {
 		settleHydratedProfile(

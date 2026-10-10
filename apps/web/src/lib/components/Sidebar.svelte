@@ -106,7 +106,7 @@ import {
 	removeResourceFromLabel,
 } from "$lib/labels/resource-label-actions";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { sameData, shareItems } from "$lib/lists/live-list-core";
+import { sameData } from "$lib/lists/live-list-core";
 import {
 	type AppArea,
 	appAreaHref,
@@ -127,18 +127,7 @@ import {
 	type SessionForkEdge,
 	type SessionTreeItem,
 } from "$lib/session-fork-tree";
-import {
-	mergeSessionRecord,
-	mergeSessionRecords,
-} from "$lib/session-record-merge";
-import {
-	getSessionActivityAt,
-	sortSessionsByRecentActivity,
-} from "$lib/session-sort";
-import {
-	mergeSessionTurnState,
-	readSessionTurnState,
-} from "$lib/session-turn-state";
+import { sortSessionsByRecentActivity } from "$lib/session-sort";
 import {
 	resolveSettingsSection,
 	SETTINGS_SECTIONS,
@@ -167,18 +156,13 @@ import {
 	getRecentSpace,
 	setRecentSpace,
 } from "$lib/stores/recent-space";
+import { fetchSessionDetailWithCache } from "$lib/stores/session-detail-cache";
 import {
-	fetchSessionDetailWithCache,
-	getCachedSessionDetails,
-	setCachedSessionDetails,
-} from "$lib/stores/session-detail-cache";
-import {
-	clearAllCachedSessionLists,
 	getCachedSessionListSnapshot,
 	onSessionListCacheUpdated,
-	patchCachedSessionList,
 	setCachedSessionList,
 } from "$lib/stores/session-list-cache";
+import { sessionStore, startSessionSync } from "$lib/stores/session-store";
 import {
 	getCachedExpandedLabelIdsSnapshot,
 	setCachedExpandedLabelIds,
@@ -234,6 +218,7 @@ import {
 	setCachedTaskRuns,
 } from "$lib/stores/task-runs-cache";
 import { uiState } from "$lib/stores/ui.svelte";
+import { syncStatus } from "$lib/sync/sync-status.svelte";
 import { formatCompactAbsoluteTime } from "$lib/time-format";
 import { resolveWorkspaceRouteContext } from "$lib/workspace-route";
 
@@ -262,7 +247,7 @@ let helpMenuAnchorEl: HTMLDivElement | null = $state(null);
 let showUserMenu = $state(false);
 let showHelpMenu = $state(false);
 let spaces = $state<SpaceRecord[]>([]);
-let sessions = $state<SessionRecord[]>([]);
+let sessionIds = $state<string[]>([]);
 type SidebarSessionItem = SessionTreeItem & {
 	title: string;
 	tooltip: string | undefined;
@@ -276,10 +261,7 @@ let labelItemsBySpace = $state<
 >({});
 let userLabelProfileVersion = $state(0);
 let channelLabelDisplayVersion = $state(0);
-let labelSessionDetailsBySpace = $state<
-	Record<string, Record<string, SessionRecord>>
->({});
-let labelSessionDetailsLoadingBySpace = $state<Record<string, Set<string>>>({});
+const labelSessionWarmups = new Set<string>();
 let labelItemsPageInfoBySpace = $state<
 	Record<
 		string,
@@ -438,15 +420,14 @@ const activeCronjobId = $derived(workspaceRoute.cronjobId);
 const activeTaskId = $derived(workspaceRoute.taskId);
 const activeLabelResource = $derived(workspaceRoute.labelResource);
 
-const activeSession = $derived.by(() => {
-	if (!activeSessionId) return null;
-	return (
-		sessions.find((s) => s.id === activeSessionId) ??
-		(currentSpaceId
-			? (labelSessionDetailsBySpace[currentSpaceId]?.[activeSessionId] ?? null)
-			: null)
-	);
-});
+const sessions = $derived(
+	sortSessionsByRecentActivity(
+		sessionIds.flatMap((id) => sessionStore.get(id) ?? []),
+	),
+);
+const activeSession = $derived(
+	activeSessionId ? (sessionStore.get(activeSessionId) ?? null) : null,
+);
 const activeApp = $derived(apps.find((app) => app.id === activeAppId) ?? null);
 const activeCheckpoint = $derived(
 	checkpoints.find((checkpoint) => checkpoint.id === activeCheckpointId) ??
@@ -468,20 +449,6 @@ const canAssignLabels = $derived(
 const canManageLabels = $derived(
 	Boolean(currentSpace?.access?.permissions?.includes("space.label.manage")),
 );
-const currentLabelSessionDetails = $derived(
-	currentSpaceId ? (labelSessionDetailsBySpace[currentSpaceId] ?? {}) : {},
-);
-const sessionsById = $derived.by(
-	() => new Map(sessions.map((session) => [session.id, session])),
-);
-const labelSessionsById = $derived.by(() => {
-	const byId = new Map(sessionsById);
-	for (const detail of Object.values(currentLabelSessionDetails)) {
-		const listed = sessionsById.get(detail.id);
-		byId.set(detail.id, listed ? mergeSessionRecord(detail, listed) : detail);
-	}
-	return byId;
-});
 const checkpointsById = $derived.by(
 	() => new Map(checkpoints.map((checkpoint) => [checkpoint.id, checkpoint])),
 );
@@ -490,9 +457,7 @@ const currentLabelItemsById = $derived.by(() =>
 		? hydrateLabelItemsById(
 				currentSpaceId,
 				labelItemsBySpace[currentSpaceId] ?? {},
-				{
-					sessions: [...sessions, ...Object.values(currentLabelSessionDetails)],
-				},
+				(id) => sessionStore.get(id),
 			)
 		: {},
 );
@@ -881,18 +846,16 @@ function shouldShowLoadMoreSessions() {
 	);
 }
 
-function mergeSessionSnapshotForDisplay(
-	currentSessions: SessionRecord[],
-	nextSessions: SessionRecord[],
-) {
-	if (currentSessions.length === 0) return nextSessions;
-	return shareItems(
-		currentSessions,
-		sortSessionsByRecentActivity(
-			mergeSessionRecords([...currentSessions, ...nextSessions]),
-		),
-		(session) => session.id,
-	);
+function setSessionMembers(records: readonly SessionRecord[]) {
+	const ids = records.map((session) => session.id);
+	if (!sameData(ids, sessionIds)) sessionIds = ids;
+}
+
+function addSessionMembers(records: readonly SessionRecord[]) {
+	const known = new Set(sessionIds);
+	const added = records.filter((session) => !known.has(session.id));
+	if (added.length > 0)
+		sessionIds = [...sessionIds, ...added.map((session) => session.id)];
 }
 
 function isSessionsNetworkEnabled(spaceId: string) {
@@ -918,18 +881,13 @@ async function loadSessionsForSpace(
 	const allowNetwork = options?.network ?? isSessionsNetworkEnabled(spaceId);
 	if (!force && loadingSessions && loadingSessionsSpaceId === spaceId) return;
 
-	if (!force) {
-		const cached = await getCachedSessionListSnapshot(spaceId);
-		if (spaceId !== currentSpaceId) return;
-		if (cached && cached.sessions.length > 0) {
-			sessions = cached.sessions;
-			applySessionForks(cached.forks);
-			sessionsPageInfo = cached.pageInfo;
-		}
-	}
-
 	const cachedSnapshot = await getCachedSessionListSnapshot(spaceId);
 	if (spaceId !== currentSpaceId) return;
+	if (!force && cachedSnapshot && cachedSnapshot.sessions.length > 0) {
+		setSessionMembers(cachedSnapshot.sessions);
+		applySessionForks(cachedSnapshot.forks);
+		sessionsPageInfo = cachedSnapshot.pageInfo;
+	}
 
 	// All chats network load is deferred until All is expanded (or explicitly forced).
 	// Label rows get sessions/forks from labels/items; this keeps first paint lean.
@@ -956,7 +914,7 @@ async function loadSessionsForSpace(
 			includeForks: true,
 		});
 		if (spaceId !== currentSpaceId) return;
-		const nextSessions = result.sessions ?? [];
+		const nextSessions = sessionStore.mergeAll(result.sessions ?? []);
 		const nextPageInfo = result.pageInfo ?? {
 			hasMore: false,
 			nextCursor: null,
@@ -966,7 +924,7 @@ async function loadSessionsForSpace(
 		// Replacing caused fork indent/title to flicker when cache/list arrived after
 		// labels/items (or when a partial cache write broadcast empty forks).
 		applySessionForks(nextForks);
-		sessions = nextSessions;
+		setSessionMembers(nextSessions);
 		void setCachedSessionList(
 			spaceId,
 			nextSessions,
@@ -1004,14 +962,13 @@ async function loadMoreSessionsForSpace(spaceId: string) {
 		// A space switch resets `sessions`/`sessionsPageInfo`; drop this page unless
 		// the request still belongs to the space on screen.
 		if (spaceId !== currentSpaceId) return;
-		const moreSessions = result.sessions ?? [];
+		const moreSessions = sessionStore.mergeAll(result.sessions ?? []);
 		const nextPageInfo = result.pageInfo ?? {
 			hasMore: false,
 			nextCursor: null,
 		};
 		applySessionForks(result.forks);
-		const mergedSessions = [...sessions, ...moreSessions];
-		sessions = mergedSessions;
+		addSessionMembers(moreSessions);
 		void setCachedSessionList(
 			spaceId,
 			moreSessions,
@@ -1224,136 +1181,39 @@ function sessionNeedsParticipantHydration(
 	return false;
 }
 
-function sessionIsRicher(a: SessionRecord, b: SessionRecord) {
-	const aHydrated = !sessionNeedsParticipantHydration(a);
-	const bHydrated = !sessionNeedsParticipantHydration(b);
-	if (aHydrated !== bHydrated) return aHydrated;
-	return false;
-}
-
-async function warmLabelSessionDetails(spaceId: string, sessionIds: string[]) {
-	// Primary path is labels/items `sessions[]`. This only backfills rare gaps
-	// (legacy cache / older servers) without re-fetching already hydrated rows.
-	const uniqueIds = Array.from(new Set(sessionIds.filter(Boolean)));
-	if (uniqueIds.length === 0) return;
-
-	const inMemoryDetails = labelSessionDetailsBySpace[spaceId] ?? {};
-	const localHydrated = uniqueIds
-		.map(
-			(sessionId) => sessionsById.get(sessionId) ?? inMemoryDetails[sessionId],
-		)
-		.filter(
-			(session): session is SessionRecord =>
-				Boolean(session) && !sessionNeedsParticipantHydration(session),
-		);
-	if (localHydrated.length > 0) {
-		void setCachedSessionDetails(spaceId, localHydrated).catch(() => undefined);
-	}
-
-	const loading =
-		labelSessionDetailsLoadingBySpace[spaceId] ?? new Set<string>();
-	const missing = uniqueIds.filter((sessionId) => {
-		if (loading.has(sessionId)) return false;
-		const local =
-			sessionsById.get(sessionId) ?? inMemoryDetails[sessionId] ?? null;
-		return sessionNeedsParticipantHydration(local);
-	});
+async function warmLabelSessions(spaceId: string, ids: string[]) {
+	await sessionStore.hydrate(spaceId, ids);
+	if (spaceId !== currentSpaceId) return;
+	const missing = [...new Set(ids)].filter(
+		(id) =>
+			!labelSessionWarmups.has(id) &&
+			sessionNeedsParticipantHydration(sessionStore.get(id)),
+	);
 	if (missing.length === 0) return;
-
-	const cached = (await getCachedSessionDetails(spaceId, missing).catch(
-		() => ({}),
-	)) as Awaited<ReturnType<typeof getCachedSessionDetails>>;
-	const isCurrentSpace = () => spaceId === currentSpaceId;
-
-	const fromCache: SessionRecord[] = [];
-	const needNetwork: string[] = [];
-	for (const sessionId of missing) {
-		const snapshot = cached[sessionId];
-		if (snapshot && !sessionNeedsParticipantHydration(snapshot.session)) {
-			fromCache.push(snapshot.session);
-			continue;
-		}
-		needNetwork.push(sessionId);
-	}
-
-	if (fromCache.length > 0 && isCurrentSpace()) {
-		const currentDetails = labelSessionDetailsBySpace[spaceId] ?? {};
-		const nextDetails = { ...currentDetails };
-		for (const session of fromCache) {
-			nextDetails[session.id] = currentDetails[session.id]
-				? mergeSessionRecord(currentDetails[session.id], session)
-				: session;
-		}
-		labelSessionDetailsBySpace = {
-			...labelSessionDetailsBySpace,
-			[spaceId]: nextDetails,
-		};
-	}
-
-	if (needNetwork.length === 0) return;
-
-	labelSessionDetailsLoadingBySpace = {
-		...labelSessionDetailsLoadingBySpace,
-		[spaceId]: new Set([...loading, ...needNetwork]),
-	};
-
-	try {
-		const refreshed: SessionRecord[] = [];
-		const concurrency = 4;
-		let cursor = 0;
-		async function worker() {
-			while (cursor < needNetwork.length) {
-				const sessionId = needNetwork[cursor++];
-				if (!sessionId) continue;
-				try {
-					const session = await fetchSessionDetailWithCache(
-						spaceId,
-						sessionId,
-						async () =>
-							(await sdk.space(spaceId).session(sessionId).get()).session,
-						{
-							force: sessionNeedsParticipantHydration(
-								cached[sessionId]?.session,
-							),
-						},
-					);
-					if (!sessionNeedsParticipantHydration(session))
-						refreshed.push(session);
-				} catch (error) {
-					console.warn("[labels] Failed to warm session detail", {
-						spaceId,
-						sessionId,
-						error,
-					});
-				}
-			}
-		}
-		await Promise.all(
-			Array.from({ length: Math.min(concurrency, needNetwork.length) }, () =>
-				worker(),
-			),
+	for (const id of missing) labelSessionWarmups.add(id);
+	const warm = (sessionId: string) =>
+		fetchSessionDetailWithCache(
+			spaceId,
+			sessionId,
+			async () => (await sdk.space(spaceId).session(sessionId).get()).session,
+			{ force: true },
+		).catch((error) =>
+			console.warn("[labels] Failed to warm session detail", {
+				spaceId,
+				sessionId,
+				error,
+			}),
 		);
-		if (isCurrentSpace() && refreshed.length > 0) {
-			const currentDetails = labelSessionDetailsBySpace[spaceId] ?? {};
-			labelSessionDetailsBySpace = {
-				...labelSessionDetailsBySpace,
-				[spaceId]: {
-					...currentDetails,
-					...Object.fromEntries(
-						refreshed.map((session) => [session.id, session]),
-					),
-				},
-			};
-		}
+	const queue = [...missing];
+	const worker = async () => {
+		for (let id = queue.shift(); id; id = queue.shift()) await warm(id);
+	};
+	try {
+		await Promise.all(
+			Array.from({ length: Math.min(4, missing.length) }, worker),
+		);
 	} finally {
-		const latestLoading =
-			labelSessionDetailsLoadingBySpace[spaceId] ?? new Set<string>();
-		labelSessionDetailsLoadingBySpace = {
-			...labelSessionDetailsLoadingBySpace,
-			[spaceId]: new Set(
-				[...latestLoading].filter((id) => !needNetwork.includes(id)),
-			),
-		};
+		for (const id of missing) labelSessionWarmups.delete(id);
 	}
 }
 
@@ -1363,12 +1223,10 @@ function patchLabelItems(
 	items: LabelAssignmentListItem[],
 	pageInfo: { hasMore: boolean; nextCursor: string | null },
 ) {
-	const sessionItems = items.filter((item) => item.resourceType === "session");
-	if (sessionItems.length > 0)
-		void warmLabelSessionDetails(
-			spaceId,
-			sessionItems.map((item) => item.resourceRef),
-		);
+	const sessionRefs = items.flatMap((item) =>
+		item.resourceType === "session" ? [item.resourceRef] : [],
+	);
+	if (sessionRefs.length > 0) void warmLabelSessions(spaceId, sessionRefs);
 	const currentSpaceItems = labelItemsBySpace[spaceId] ?? {};
 	const currentItems = currentSpaceItems[labelId] ?? [];
 	const currentPageInfo = labelItemsPageInfoBySpace[spaceId]?.[labelId];
@@ -1397,36 +1255,6 @@ function applySessionForks(forks: SessionListForkRecord[] | null | undefined) {
 	const next = mergeSessionForks(sessionForks, forks);
 	if (next === sessionForks) return;
 	sessionForks = next;
-}
-
-function absorbLabelItemForks(
-	forks: SessionListForkRecord[] | null | undefined,
-) {
-	applySessionForks(forks);
-}
-
-function absorbLabelItemSessions(
-	spaceId: string,
-	sessions: SessionRecord[] | null | undefined,
-) {
-	if (!sessions?.length || spaceId !== currentSpaceId) return;
-	const currentDetails = labelSessionDetailsBySpace[spaceId] ?? {};
-	const nextDetails = { ...currentDetails };
-	const accepted: SessionRecord[] = [];
-	for (const session of sessions) {
-		const existing = nextDetails[session.id];
-		if (existing && sessionIsRicher(existing, session)) continue;
-		const merged = existing ? mergeSessionRecord(existing, session) : session;
-		nextDetails[session.id] = merged;
-		accepted.push(merged);
-	}
-	if (accepted.length === 0) return;
-	labelSessionDetailsBySpace = {
-		...labelSessionDetailsBySpace,
-		[spaceId]: nextDetails,
-	};
-	// Best-effort persistence only; in-memory rows already drive the list.
-	void setCachedSessionDetails(spaceId, accepted).catch(() => undefined);
 }
 
 function labelItemsLoadKey(spaceId: string, labelId: string) {
@@ -1500,8 +1328,8 @@ function applyLabelItemsPage(
 	},
 	options?: { append?: boolean },
 ) {
-	absorbLabelItemSessions(spaceId, page.sessions);
-	absorbLabelItemForks(page.forks);
+	sessionStore.mergeAll(page.sessions ?? []);
+	applySessionForks(page.forks);
 	const items = page.items ?? [];
 	if (options?.append) {
 		const latestItems = labelItemsBySpace[spaceId]?.[labelId] ?? [];
@@ -1621,18 +1449,27 @@ function isSessionActivityLabel(label: LabelListItem) {
 	);
 }
 
-function didSessionActivityChange(
-	previous: SessionRecord | undefined,
-	next: SessionRecord,
-) {
-	if (!previous) return true;
-	return (
-		previous.lastMessageAt !== next.lastMessageAt ||
-		previous.updatedAt !== next.updatedAt ||
-		previous.latestMessageText !== next.latestMessageText ||
-		previous.status !== next.status ||
-		previous.title !== next.title
-	);
+const seenSessionActivity = new Map<string, string>();
+
+$effect(() => {
+	const spaceId = currentSpaceId;
+	if (!spaceId) return;
+	const active = sessions.filter(noteSessionActivity).map(({ id }) => id);
+	if (active.length > 0)
+		untrack(() => refreshExpandedSessionActivityLabels(spaceId, active));
+});
+
+function noteSessionActivity(session: SessionRecord) {
+	const activity = [
+		session.lastMessageAt,
+		session.updatedAt,
+		session.latestMessageText,
+		session.status,
+		session.title,
+	].join("\u0000");
+	const previous = seenSessionActivity.get(session.id);
+	seenSessionActivity.set(session.id, activity);
+	return previous !== undefined && previous !== activity;
 }
 
 function refreshExpandedSessionActivityLabels(
@@ -2568,25 +2405,10 @@ async function submitRenameSession(session: SessionRecord) {
 	renameSaving = true;
 	try {
 		await sdk.space(currentSpaceId).session(session.id).rename(trimmed);
-		const renamedSession = { ...session, title: trimmed };
-		sessions = sessions.map((s) =>
-			s.id === session.id ? { ...s, title: trimmed } : s,
-		);
-		if (labelSessionDetailsBySpace[currentSpaceId]?.[session.id]) {
-			labelSessionDetailsBySpace = {
-				...labelSessionDetailsBySpace,
-				[currentSpaceId]: {
-					...labelSessionDetailsBySpace[currentSpaceId],
-					[session.id]: renamedSession,
-				},
-			};
-		}
-		void setCachedSessionDetails(currentSpaceId, [renamedSession]).catch(
-			() => undefined,
-		);
-		void patchCachedSessionList(currentSpaceId, (current) =>
-			current.map((s) => (s.id === session.id ? { ...s, title: trimmed } : s)),
-		).catch(() => undefined);
+		sessionStore.merge({
+			...(sessionStore.get(session.id) ?? session),
+			title: trimmed,
+		});
 	} catch {
 		// Silently fail
 	} finally {
@@ -2761,8 +2583,7 @@ function buildSidebarSessionItems(
 function buildLabelSessionItems(items: LabelAssignmentListItem[]) {
 	const labelSessions = items
 		.filter((item) => item.resourceType === "session")
-		.map((item) => labelSessionsById.get(item.resourceRef))
-		.filter((session): session is SessionRecord => Boolean(session));
+		.flatMap((item) => sessionStore.get(item.resourceRef) ?? []);
 	return buildSidebarSessionItems(labelSessions);
 }
 
@@ -2805,6 +2626,7 @@ async function handleLogout() {
 	clearTaskRunsMemoryCache();
 	clearAccountSnapshots();
 	removeLegacyLocalStorage();
+	sessionStore.reset();
 	await clearAllIndexedDbCache().catch((error) => {
 		console.warn("[sidebar] Failed to clear IndexedDB cache", error);
 	});
@@ -2850,71 +2672,27 @@ function handleGlobalSidebarKeydown(event: KeyboardEvent) {
 }
 
 onMount(() => {
-	// Navigation applies server state directly, without a mounted chat host.
-	const offSessionState = sdk.onUserEvent((event) => {
-		if (event.spaceId !== currentSpaceId) return;
-		const fork =
-			event.type === "session.created"
-				? readRealtimeSessionFork(event.payload)
-				: null;
+	const stopSessionSync = startSessionSync();
+	const offSessionForks = sdk.onUserEvent((event) => {
+		if (event.spaceId !== currentSpaceId || event.type !== "session.created")
+			return;
+		const fork = readRealtimeSessionFork(event.payload);
 		if (fork) applySessionForks([fork]);
-		const turn = readSessionTurnState(event);
-		const record =
-			event.type === "session.updated" || event.type === "session.created"
-				? (event.payload as { session?: SessionRecord }).session
-				: null;
-		const id = turn?.sessionId ?? record?.id;
-		if (!id || (record && record.spaceId !== currentSpaceId)) return;
-		const merge = (session: SessionRecord) =>
-			turn
-				? mergeSessionTurnState(session, turn)
-				: record
-					? mergeSessionRecord(session, record)
-					: session;
-		const listed = sessionsById.get(id);
-		if (listed) {
-			const next = merge(listed);
-			if (!sameData(listed, next)) {
-				const updated = sessions.map((session) =>
-					session.id === next.id ? next : session,
-				);
-				sessions =
-					getSessionActivityAt(listed) === getSessionActivityAt(next)
-						? updated
-						: sortSessionsByRecentActivity(updated);
-			}
-		}
-		const detail = currentLabelSessionDetails[id];
-		if (detail && currentSpaceId) {
-			const next = merge(detail);
-			if (!sameData(detail, next))
-				labelSessionDetailsBySpace = {
-					...labelSessionDetailsBySpace,
-					[currentSpaceId]: { ...currentLabelSessionDetails, [id]: next },
-				};
-		}
+	});
+	const offSyncGap = syncStatus.onGap(() => {
+		if (currentSpaceId) refreshExpandedLabelItems(currentSpaceId);
 	});
 	const offSessionListCacheUpdated = onSessionListCacheUpdated(
 		({ spaceId, sessions: nextSessions, forks, pageInfo }) => {
 			if (spaceId !== currentSpaceId) return;
-			const previousSessionsById = new Map(
-				sessions.map((session) => [session.id, session]),
-			);
 			const shouldPreserveLoadedPageInfo =
-				sessions.length > nextSessions.length;
-			const activeSessionIds: string[] = [];
-			sessions = mergeSessionSnapshotForDisplay(sessions, nextSessions);
+				sessionIds.length > nextSessions.length;
+			const known = new Set(sessionIds);
 			for (const session of nextSessions) {
-				const previous = previousSessionsById.get(session.id);
-				if (!previous) {
+				if (!known.has(session.id))
 					optimisticPrependWebAppLabelSession(spaceId, session);
-					continue;
-				}
-				if (didSessionActivityChange(previous, session))
-					activeSessionIds.push(session.id);
 			}
-			if (activeSessionIds.length > 0)
-				refreshExpandedSessionActivityLabels(spaceId, activeSessionIds);
+			addSessionMembers(nextSessions);
 			applySessionForks(forks);
 			if (pageInfo && !shouldPreserveLoadedPageInfo)
 				sessionsPageInfo = pageInfo;
@@ -3015,7 +2793,9 @@ onMount(() => {
 	document.addEventListener("click", handleClickOutside);
 
 	return () => {
-		offSessionState();
+		stopSessionSync();
+		offSessionForks();
+		offSyncGap();
 		offSessionListCacheUpdated();
 		offSpaceLabelsCacheUpdated();
 		offUserLabelProfilesUpdated();
@@ -3076,7 +2856,8 @@ $effect(() => {
 	if (area !== "spaces") return;
 	const id = currentSpaceId;
 	if (id) {
-		sessions = [];
+		sessionIds = [];
+		seenSessionActivity.clear();
 		sessionForks = [];
 		labels = [];
 		checkpoints = [];
@@ -3125,7 +2906,8 @@ $effect(() => {
 			void loadAppsForSpace(id, true);
 		});
 	} else {
-		sessions = [];
+		sessionIds = [];
+		seenSessionActivity.clear();
 		sessionForks = [];
 		labels = [];
 		sessionsPageInfo = { hasMore: false, nextCursor: null };
@@ -3216,8 +2998,8 @@ $effect(() => {
 					{@const itemDraggable = isDraggableLabelItem(item)}
 					{@const canRemoveItem = canEditLabelItems && item.source !== "system"}
 					{@const labelRemoveTitle = m.sidebar_remove_from_label({ label: getReactiveLabelDisplayName(label) }, { locale })}
-					{#if item.resourceType === "session" && labelSessionsById.get(item.resourceRef)}
-						{@const session = labelSessionsById.get(item.resourceRef)!}
+					{#if item.resourceType === "session" && sessionStore.get(item.resourceRef)}
+						{@const session = sessionStore.get(item.resourceRef)!}
 						{@const sessionItem = labelSessionItemById.get(session.id)}
 						<SessionRow
 							{session}

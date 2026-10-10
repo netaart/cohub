@@ -2,11 +2,11 @@
 import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
 import type { SessionRecord } from "@neta-art/cohub";
 import { onMount } from "svelte";
-import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
 import StatsContent from "$lib/components/StatsContent.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { sessionStore } from "$lib/stores/session-store";
 
 let { session }: { session: SessionRecord } = $props();
 const locale = $derived(getLocale());
@@ -26,16 +26,8 @@ async function refresh() {
 	loading = true;
 	failed = false;
 	try {
-		const local = await sessionDetailRepo
-			.get(current.spaceId, current.id)
-			.catch(() => null);
-		const localStats = readSessionStats(local?.session.meta);
-		if (
-			!controller.signal.aborted &&
-			session.id === current.id &&
-			localStats &&
-			(!stats || localStats.revision > stats.revision)
-		)
+		const localStats = readSessionStats(sessionStore.get(current.id)?.meta);
+		if (localStats && (!stats || localStats.revision > stats.revision))
 			fresh = localStats;
 		const { stats: received } = await sdk
 			.space(current.spaceId)
@@ -43,20 +35,11 @@ async function refresh() {
 			.stats({ signal: controller.signal });
 		if (controller.signal.aborted || session.id !== current.id) return;
 		fresh = received;
-		const existing =
-			(
-				await sessionDetailRepo
-					.get(current.spaceId, current.id)
-					.catch(() => null)
-			)?.session ?? current;
-		const previous = readSessionStats(existing.meta);
-		if (!previous || previous.revision <= received.revision) {
-			await sessionDetailRepo.set(
-				current.spaceId,
-				{ ...existing, meta: { ...existing.meta, stats: received } },
-				{ source: "network" },
-			);
-		}
+		const known = sessionStore.get(current.id) ?? current;
+		sessionStore.merge({
+			...known,
+			meta: { ...known.meta, stats: received },
+		});
 	} catch {
 		if (!controller.signal.aborted) failed = true;
 	} finally {
