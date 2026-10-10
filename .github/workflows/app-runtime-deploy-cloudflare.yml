@@ -46,7 +46,6 @@ permissions:
   contents: read
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   HUSKY: '0'
 
 jobs:
@@ -54,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Determine environment
         id: target
@@ -74,14 +73,11 @@ jobs:
             echo "environment=dev" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          node-version-file: .nvmrc
-          cache: 'pnpm'
+          cache: true
+          install: false
 
       - name: Configure Talesofai npm auth
         env:

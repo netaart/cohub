@@ -49,10 +49,10 @@ jobs:
             cgo: '1'
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: apps/sandbox/go.mod
           cache-dependency-path: apps/sandbox/go.sum
@@ -108,7 +108,7 @@ jobs:
           shasum -a 256 "${BASE}.tar.gz" > "${BASE}.tar.gz.sha256"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
@@ -125,7 +125,7 @@ jobs:
       contents: write
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -139,7 +139,7 @@ jobs:
           ls -la release
 
       - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             release/*.tar.gz
@@ -159,7 +159,7 @@ jobs:
       OSS_REGION: us-west-1
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 

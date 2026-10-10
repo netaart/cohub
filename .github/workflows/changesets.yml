@@ -24,13 +24,12 @@ jobs:
     env:
       GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
+      - uses: pnpm/setup@v3
         with:
-          node-version-file: .nvmrc
+          cache: true
+          install: false
 
       - name: Configure Talesofai npm auth
         run: |
@@ -44,23 +43,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Configure npm registry auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            printf '\n//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> ~/.npmrc
+          fi
+
       - name: Create Release Pull Request or Publish
         id: changesets
         # 注意：Version Packages PR 合并回 main 时（只改 package.json/CHANGELOG/.changeset）
         # 需要靠上面的 paths 命中才会跑到这里执行 publish，路径过滤不能改窄
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
-          version: pnpm version-packages
-          publish: pnpm release
-          commit: "chore: update versions"
-          title: "Version Packages"
+          version-script: pnpm version-packages
+          publish-script: pnpm release
+          commit-message: "chore: update versions"
+          pr-title: "Version Packages"
+          push-git-tags: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           HUSKY: 0
-
-      - name: Push package tags
-        # @changesets/cli v3 prints "Created git tags." instead of "New tag:", so
-        # changesets/action@v1 never parses them and leaves the tags unpushed.
-        # Push the tags the publish step created locally.
-        run: git push origin --tags
