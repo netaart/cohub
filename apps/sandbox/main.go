@@ -217,6 +217,9 @@ func buildRuntime(
 	}
 	if watcher, err := filewatch.Start(cfg.WorkspaceDir, logger, func(batch filewatch.Batch) {
 		searchManager.Apply(batch)
+		if !batch.Resync && len(batch.Changes) == 0 {
+			return
+		}
 		fsSink(protocol.FSChangedPayload{
 			Seq:     batch.Seq,
 			Resync:  batch.Resync,
@@ -349,14 +352,11 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 					"wsEndpoint":        sandboxWSEndpoint(cfg.PodIP),
 				},
 			}); reportErr != nil {
-				logger.Warn("failed to report sandbox ready; workspace search stays inactive", slog.String("error", reportErr.Error()))
-			} else {
-				// Until the API sees this report it writes to the workspace volume
-				// directly, unseen by the watcher. Indexing only afterwards means
-				// every such write finished before the activation reconcile, or
-				// finished once the API saw this sandbox and sent fs.reconcile.
-				searchManager.Activate()
+				logger.Warn("failed to report sandbox ready", slog.String("error", reportErr.Error()))
 			}
+			// Direct writes by the API or worker, before or after this point,
+			// reach the index through the write token of each query.
+			searchManager.Activate()
 		}
 	}()
 

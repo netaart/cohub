@@ -68,27 +68,17 @@ func TestSearchScopeMapsPathsToWorkspaceRelativeRoots(t *testing.T) {
 	}
 }
 
-func TestReconcileInvalidatesOnlyAnEnabledIndex(t *testing.T) {
+func TestIndexedSearchRequiresAWriteToken(t *testing.T) {
 	d := NewDispatcher(env.Config{WorkspaceDir: t.TempDir()}, process.NewManager(slog.Default()), slog.Default())
-	invalidated := func() interface{} {
-		t.Helper()
-		_, response := d.Handle(searchRequest(t, "fs.reconcile", struct{}{}), "")
-		completed, ok := response.(protocol.RPCCompleted)
-		if !ok {
-			t.Fatalf("fs.reconcile response = %#v", response)
-		}
-		return completed.Result.(map[string]interface{})["invalidated"]
-	}
-
-	if got := invalidated(); got != false {
-		t.Fatalf("without a manager invalidated = %v", got)
-	}
-	d.SetSearchManager(search.NewManager(env.Config{Mode: env.ModeListen, SearchEnabled: false}, slog.Default(), nil))
-	if got := invalidated(); got != false {
-		t.Fatalf("with a disabled manager invalidated = %v", got)
-	}
 	d.SetSearchManager(search.NewManager(env.Config{Mode: env.ModeListen, SearchEnabled: true}, slog.Default(), nil))
-	if got := invalidated(); got != true {
-		t.Fatalf("with an enabled manager invalidated = %v", got)
+	for _, request := range []protocol.RPCRequest{
+		searchRequest(t, "fs.search", fsSearchParams{Pattern: "needle"}),
+		searchRequest(t, "fs.pathSearch", fsPathSearchParams{Pattern: "*.ts", WriteToken: "no-generation"}),
+	} {
+		_, response := d.Handle(request, "")
+		failed, ok := response.(protocol.RPCFailed)
+		if !ok || failed.Error.Code != "BAD_REQUEST" {
+			t.Fatalf("%s without a valid write token = %#v", request.Method, response)
+		}
 	}
 }

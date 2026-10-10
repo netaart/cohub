@@ -53,6 +53,15 @@ type fakeSearch struct {
 	blockUpdates   chan struct{}
 	queries        atomic.Int32
 	reconciles     atomic.Int32
+
+	mu      sync.Mutex
+	updates [][]indexChange
+}
+
+func (s *fakeSearch) updateBodies() [][]indexChange {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([][]indexChange{}, s.updates...)
 }
 
 func startFakeSearch(t *testing.T, search *fakeSearch) string {
@@ -79,7 +88,14 @@ func startFakeSearch(t *testing.T, search *fakeSearch) string {
 		}
 		w.WriteHeader(http.StatusAccepted)
 	})
-	mux.HandleFunc("/index/update", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/index/update", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Changes []indexChange `json:"changes"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		search.mu.Lock()
+		search.updates = append(search.updates, body.Changes)
+		search.mu.Unlock()
 		if search.blockUpdates != nil {
 			<-search.blockUpdates
 		}
@@ -118,8 +134,12 @@ func startActivatedManager(t *testing.T, socket string, watch *fakeWatch) *Manag
 	})
 	manager.Activate()
 	waitFor(t, func() bool { return manager.processReady.Load() && manager.inflight.Load() == 0 })
+	waitFor(t, func() bool { return manager.coverWrites(testWrites) })
 	return manager
 }
+
+// testWrites is the write token the tests' queries carry.
+var testWrites = WriteToken{Epoch: "epoch-a", Gen: 3}
 
 func waitFor(t *testing.T, condition func() bool) {
 	t.Helper()
@@ -134,7 +154,12 @@ func waitFor(t *testing.T, condition func() bool) {
 
 func planFallback(t *testing.T, manager *Manager) string {
 	t.Helper()
-	plan, err := manager.Plan(context.Background(), PlanInput{Pattern: "needle", Limit: 10})
+	return planFallbackWith(t, manager, testWrites)
+}
+
+func planFallbackWith(t *testing.T, manager *Manager, writes WriteToken) string {
+	t.Helper()
+	plan, err := manager.Plan(context.Background(), PlanInput{WriteToken: writes, Pattern: "needle", Limit: 10})
 	if err != nil {
 		t.Fatalf("Plan() error: %v", err)
 	}
@@ -146,7 +171,7 @@ func TestPlanAnswersFromTheIndexOnlyWhenEveryChangeReachedIt(t *testing.T) {
 	watch := &fakeWatch{settled: true}
 	manager := startActivatedManager(t, startFakeSearch(t, search), watch)
 
-	plan, err := manager.Plan(context.Background(), PlanInput{Pattern: "needle", Limit: 10})
+	plan, err := manager.Plan(context.Background(), PlanInput{WriteToken: testWrites, Pattern: "needle", Limit: 10})
 	if err != nil || plan.Fallback != "" || len(plan.Files) != 1 || plan.Dirs[0] != "build" {
 		t.Fatalf("Plan() = %+v, %v", plan, err)
 	}
@@ -188,10 +213,11 @@ func TestLostBatchesKeepPlansOffTheIndexUntilAReconcile(t *testing.T) {
 	watch := &fakeWatch{settled: true}
 	manager := startActivatedManager(t, startFakeSearch(t, search), watch)
 	reconciles := search.reconciles.Load()
+	lost := manager.lostGen.Load()
 
 	search.failUpdates.Store(true)
 	manager.Apply(filewatch.Batch{Seq: 1, Changes: []filewatch.Change{{Path: "a.txt", Kind: "modify"}}})
-	waitFor(t, func() bool { return manager.lostGen.Load() > 0 })
+	waitFor(t, func() bool { return manager.lostGen.Load() > lost })
 	search.failUpdates.Store(false)
 	// The retry reconcile runs after a backoff; until then the loss shows.
 	if got := planFallback(t, manager); got == "" {
@@ -205,27 +231,67 @@ func TestLostBatchesKeepPlansOffTheIndexUntilAReconcile(t *testing.T) {
 	}
 }
 
-func TestInvalidatedIndexWaitsForAReconcileAcceptedAfterwards(t *testing.T) {
+func TestDirectWritesWaitForAReconcileAcceptedAfterTheirToken(t *testing.T) {
 	search := &fakeSearch{apiVersion: APIVersion}
 	watch := &fakeWatch{settled: true}
 	manager := startActivatedManager(t, startFakeSearch(t, search), watch)
 	reconciles := search.reconciles.Load()
 
+	// An older token from the same epoch is already covered.
+	if got := planFallbackWith(t, manager, WriteToken{Epoch: testWrites.Epoch, Gen: 1}); got != "" {
+		t.Fatalf("covered token fallback = %q", got)
+	}
+	newer := WriteToken{Epoch: testWrites.Epoch, Gen: testWrites.Gen + 1}
 	search.failReconciles.Store(true)
-	manager.Invalidate()
-	if got := planFallback(t, manager); got == "" {
-		t.Fatal("invalidated index answered a plan")
+	if got := planFallbackWith(t, manager, newer); got != FallbackWrites {
+		t.Fatalf("new direct write fallback = %q", got)
 	}
 	waitFor(t, func() bool { return search.reconciles.Load() > reconciles })
-	if got := planFallback(t, manager); got == "" {
+	if got := planFallbackWith(t, manager, newer); got == "" {
 		t.Fatal("index answered although no reconcile was accepted")
 	}
 	search.failReconciles.Store(false)
-	waitFor(t, func() bool {
-		return manager.coveredGen.Load() >= manager.lostGen.Load() && manager.processReady.Load() && manager.inflight.Load() == 0
+	waitFor(t, func() bool { return planFallbackWith(t, manager, newer) == "" })
+
+	// A lost write record restarts the epoch; nothing from the old one counts.
+	if got := planFallbackWith(t, manager, WriteToken{Epoch: "epoch-b", Gen: 0}); got != FallbackWrites {
+		t.Fatalf("new epoch fallback = %q", got)
+	}
+	waitFor(t, func() bool { return planFallbackWith(t, manager, WriteToken{Epoch: "epoch-b", Gen: 0}) == "" })
+	if got := planFallbackWith(t, manager, newer); got != FallbackWrites {
+		t.Fatalf("token from the previous epoch fallback = %q", got)
+	}
+}
+
+func TestParseWriteToken(t *testing.T) {
+	if got, ok := ParseWriteToken("4f6c:a:12"); !ok || got != (WriteToken{Epoch: "4f6c:a", Gen: 12}) {
+		t.Fatalf("ParseWriteToken = %+v, %v", got, ok)
+	}
+	for _, raw := range []string{"", ":3", "epoch", "epoch:", "epoch:-1", "epoch:x"} {
+		if _, ok := ParseWriteToken(raw); ok {
+			t.Fatalf("ParseWriteToken(%q) accepted", raw)
+		}
+	}
+}
+
+func TestBoundariesReachTheIndexAndNonUTF8PathsReconcile(t *testing.T) {
+	search := &fakeSearch{apiVersion: APIVersion}
+	manager := startActivatedManager(t, startFakeSearch(t, search), &fakeWatch{settled: true})
+
+	manager.Apply(filewatch.Batch{
+		Changes:    []filewatch.Change{{Path: "src/a.ts", Kind: "modify"}},
+		Boundaries: []filewatch.Change{{Path: "build", Kind: "create"}},
 	})
-	if got := planFallback(t, manager); got != "" {
-		t.Fatalf("fallback after the covering reconcile = %q", got)
+	waitFor(t, func() bool { return len(search.updateBodies()) == 1 })
+	if got := search.updateBodies()[0]; len(got) != 2 || got[0].Path != "src/a.ts" || got[1].Path != "build" {
+		t.Fatalf("update body = %+v", got)
+	}
+
+	reconciles := search.reconciles.Load()
+	manager.Apply(filewatch.Batch{Changes: []filewatch.Change{{Path: "caf\xe9.txt", Kind: "create"}}})
+	waitFor(t, func() bool { return search.reconciles.Load() > reconciles && manager.inflight.Load() == 0 })
+	if got := len(search.updateBodies()); got != 1 {
+		t.Fatalf("a non-UTF-8 path was sent as an update: %d updates", got)
 	}
 }
 
@@ -249,6 +315,7 @@ func TestMissingWatcherKeepsPlansOffTheIndex(t *testing.T) {
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)), func() Watch { return nil })
 	manager.processReady.Store(true)
 	manager.compatible.Store(true)
+	manager.coveredWrite = testWrites
 	if got := planFallback(t, manager); got != FallbackWatcher {
 		t.Fatalf("missing watcher fallback = %q", got)
 	}

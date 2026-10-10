@@ -12,9 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/filewatch"
@@ -34,6 +37,11 @@ const (
 	activationRetryMaxDelay  = 10 * time.Second
 	reconcileRetryBaseDelay  = 500 * time.Millisecond
 	reconcileRetryMaxDelay   = 10 * time.Second
+	// Another NFS client's write can stay invisible to this pod's directory
+	// and attribute caches (acdirmax defaults to 60s), so a reconcile right
+	// after a direct write can miss it. One more reconcile once the caches
+	// have expired picks it up.
+	directWriteRecheckDelay = 65 * time.Second
 )
 
 // Reasons the sandbox answers without consulting the index. cohub-search adds
@@ -42,7 +50,36 @@ const (
 	FallbackUnavailable = "unavailable"
 	FallbackWatcher     = "watcher"
 	FallbackPartial     = "partial"
+	// FallbackWrites means writes this sandbox did not perform, such as API
+	// writes to the shared volume, are not reconciled yet.
+	FallbackWrites = "writes"
 )
+
+// WriteToken identifies the direct workspace writes recorded so far. Writers
+// that bypass the sandbox bump Gen; Epoch changes whenever the record is
+// lost, so tokens from different epochs are never comparable.
+type WriteToken struct {
+	Epoch string
+	Gen   uint64
+}
+
+// ParseWriteToken reads the "<epoch>:<gen>" form the agent sends.
+func ParseWriteToken(raw string) (WriteToken, bool) {
+	separator := strings.LastIndexByte(raw, ':')
+	if separator <= 0 {
+		return WriteToken{}, false
+	}
+	gen, err := strconv.ParseUint(raw[separator+1:], 10, 64)
+	if err != nil {
+		return WriteToken{}, false
+	}
+	return WriteToken{Epoch: raw[:separator], Gen: gen}, true
+}
+
+// covers reports whether every write counted in want is counted in have.
+func (have WriteToken) covers(want WriteToken) bool {
+	return have.Epoch != "" && have.Epoch == want.Epoch && want.Gen <= have.Gen
+}
 
 // Watch is the file watcher state the index relies on to be authoritative.
 type Watch interface {
@@ -54,6 +91,7 @@ type Watch interface {
 }
 
 type PlanInput struct {
+	WriteToken   WriteToken
 	Pattern      string
 	FixedStrings bool
 	IgnoreCase   bool
@@ -72,6 +110,7 @@ type Plan struct {
 }
 
 type PathInput struct {
+	WriteToken WriteToken
 	Pattern    string
 	PathPrefix string
 	FullPath   bool
@@ -120,6 +159,14 @@ type Manager struct {
 	inflight   atomic.Int64
 	lostGen    atomic.Uint64
 	coveredGen atomic.Uint64
+
+	// Direct writes are covered once a reconcile accepted after their token
+	// arrived has run: coveredWrite is then advanced to pendingWrite.
+	writeMu         sync.Mutex
+	coveredWrite    WriteToken
+	pendingWrite    WriteToken
+	pendingWriteGen uint64
+	writeRecheck    *time.Timer
 
 	commands    chan command
 	control     chan command
@@ -176,25 +223,13 @@ func (m *Manager) Enabled() bool {
 }
 
 // Activate opens or reconciles the persistent index once workspace.Prepare
-// has succeeded and the API has seen the sandbox as ready. A full build is
-// only selected by the search process when no usable index exists.
+// has succeeded. A full build is only selected by the search process when no
+// usable index exists.
 func (m *Manager) Activate() {
 	if !m.Enabled() || m.closed.Load() {
 		return
 	}
 	m.enqueueControl(command{activate: true})
-}
-
-// Invalidate records a workspace change the watcher cannot see, such as an
-// API write to the shared volume that raced this sandbox becoming dialable.
-// Like a lost batch, it keeps queries on the fallback until a reconcile
-// accepted after this call has run.
-func (m *Manager) Invalidate() {
-	if !m.Enabled() || m.closed.Load() {
-		return
-	}
-	m.lostGen.Add(1)
-	m.enqueueControl(command{reconcile: true})
 }
 
 // Apply forwards an already debounced filewatch batch. The Rust process owns
@@ -208,7 +243,7 @@ func (m *Manager) Apply(batch filewatch.Batch) {
 
 // Plan asks the index which files an rg search must read.
 func (m *Manager) Plan(ctx context.Context, input PlanInput) (Plan, error) {
-	if reason := m.authority(ctx); reason != "" {
+	if reason := m.authority(ctx, input.WriteToken); reason != "" {
 		return Plan{Fallback: reason}, nil
 	}
 	var plan Plan
@@ -225,7 +260,7 @@ func (m *Manager) Plan(ctx context.Context, input PlanInput) (Plan, error) {
 
 // Paths asks the index for the entries an fd glob search reports.
 func (m *Manager) Paths(ctx context.Context, input PathInput) (PathMatches, error) {
-	if reason := m.authority(ctx); reason != "" {
+	if reason := m.authority(ctx, input.WriteToken); reason != "" {
 		return PathMatches{Fallback: reason}, nil
 	}
 	var matches PathMatches
@@ -241,9 +276,12 @@ func (m *Manager) Paths(ctx context.Context, input PathInput) (PathMatches, erro
 // authority returns a fallback reason unless every change that completed
 // before the call has reached cohub-search, which then reports whether it
 // has applied them.
-func (m *Manager) authority(ctx context.Context) string {
+func (m *Manager) authority(ctx context.Context, writes WriteToken) string {
 	if !m.Enabled() || !m.processReady.Load() || !m.compatible.Load() {
 		return FallbackUnavailable
+	}
+	if !m.coverWrites(writes) {
+		return FallbackWrites
 	}
 	watch := m.watch()
 	if watch == nil {
@@ -260,6 +298,42 @@ func (m *Manager) authority(ctx context.Context) string {
 		return FallbackPartial
 	}
 	return ""
+}
+
+// coverWrites reports whether a completed reconcile covers the direct writes
+// in token. A token newer than any seen so far starts a reconcile, accepted
+// after this call; like a lost batch, it covers everything written before.
+func (m *Manager) coverWrites(token WriteToken) bool {
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+	if m.coveredWrite.covers(token) {
+		return true
+	}
+	if !m.pendingWrite.covers(token) {
+		m.pendingWrite = token
+		m.pendingWriteGen = m.lostGen.Add(1)
+		m.enqueueControl(command{reconcile: true})
+		m.scheduleDirectWriteRecheck()
+		return false
+	}
+	if m.coveredGen.Load() < m.pendingWriteGen {
+		return false
+	}
+	m.coveredWrite = m.pendingWrite
+	return m.coveredWrite.covers(token)
+}
+
+// scheduleDirectWriteRecheck reconciles once more after the newest token's
+// writes can no longer hide in this pod's NFS caches. Callers hold writeMu.
+func (m *Manager) scheduleDirectWriteRecheck() {
+	if m.writeRecheck != nil {
+		m.writeRecheck.Stop()
+	}
+	m.writeRecheck = time.AfterFunc(directWriteRecheckDelay, func() {
+		if !m.closed.Load() {
+			m.enqueueControl(command{reconcile: true})
+		}
+	})
 }
 
 func (m *Manager) Close() {
@@ -459,8 +533,15 @@ func (m *Manager) sendBatch(ctx context.Context, batch filewatch.Batch) error {
 	if batch.Resync {
 		return m.reconcile(ctx)
 	}
-	changes := make([]indexChange, 0, len(batch.Changes))
-	for _, change := range batch.Changes {
+	all := append(append([]filewatch.Change{}, batch.Changes...), batch.Boundaries...)
+	for _, change := range all {
+		// JSON cannot carry a name that is not UTF-8; a reconcile notes it.
+		if !utf8.ValidString(change.Path) || !utf8.ValidString(change.OldPath) {
+			return m.reconcile(ctx)
+		}
+	}
+	changes := make([]indexChange, 0, len(all))
+	for _, change := range all {
 		changes = append(changes, indexChange{
 			Path:    change.Path,
 			OldPath: change.OldPath,

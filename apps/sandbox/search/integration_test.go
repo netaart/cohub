@@ -56,7 +56,7 @@ func TestIndexedPlansNeverMissCompletedWrites(t *testing.T) {
 	manager.Activate()
 
 	plan := func(token string) Plan {
-		result, err := manager.Plan(context.Background(), PlanInput{Pattern: token, Limit: 100})
+		result, err := manager.Plan(context.Background(), PlanInput{WriteToken: testWrites, Pattern: token, Limit: 100})
 		if err != nil {
 			t.Fatalf("Plan() error: %v", err)
 		}
@@ -71,10 +71,16 @@ func TestIndexedPlansNeverMissCompletedWrites(t *testing.T) {
 	}
 
 	// Query while each write moves through the watcher, the manager and the
-	// search process; every answer the index gives must include it.
+	// search process; every answer the index gives must include it. Writes
+	// below a name-excluded directory must show up as a directory rg walks.
 	for round := 0; round < 8; round++ {
 		token := fmt.Sprintf("needle_token_%04d", round)
 		name := filepath.Join("dir", fmt.Sprintf("f%d", round%3), "file.txt")
+		walked := ""
+		if round%4 == 3 {
+			walked = filepath.Join(fmt.Sprintf("app%d", round), "build")
+			name = filepath.Join(walked, "out.txt")
+		}
 		if err := os.MkdirAll(filepath.Join(workspace, filepath.Dir(name)), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +92,11 @@ func TestIndexedPlansNeverMissCompletedWrites(t *testing.T) {
 		for {
 			result := plan(token)
 			if result.Fallback == "" {
-				if !slices.Contains(result.Files, filepath.ToSlash(name)) {
+				if walked != "" {
+					if !slices.Contains(result.Dirs, filepath.ToSlash(walked)) {
+						t.Fatalf("round %d: plan %+v does not walk %s holding %s", round, result, walked, name)
+					}
+				} else if !slices.Contains(result.Files, filepath.ToSlash(name)) {
 					t.Fatalf("round %d: plan %+v misses %s written before the query", round, result, name)
 				}
 				t.Logf("round %d: answered after fallbacks %v", round, fallbacks)

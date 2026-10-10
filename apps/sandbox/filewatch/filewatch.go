@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,12 +21,21 @@ type Change struct {
 	NodeType string `json:"nodeType,omitempty"`
 	MtimeMs  int64  `json:"mtimeMs,omitempty"`
 	Size     int64  `json:"size,omitempty"`
+	// boundary marks an ignored entry whose parent is watched.
+	boundary bool
 }
 
 type Batch struct {
+	// Seq numbers batches that carry Changes or Resync; consumers detect gaps
+	// in it. A batch with only Boundaries has Seq 0.
 	Seq     int64    `json:"seq"`
 	Resync  bool     `json:"resync,omitempty"`
 	Changes []Change `json:"changes"`
+	// Boundaries are ignored entries whose parent is watched: a created,
+	// deleted or renamed `build` directory, never anything inside it. They
+	// are not file-tree changes; the workspace index uses them to keep the
+	// set of entries rg and fd must walk themselves current.
+	Boundaries []Change `json:"boundaries,omitempty"`
 }
 
 type Handler func(Batch)
@@ -340,8 +350,15 @@ func (w *Watcher) repairLoop() {
 
 func (w *Watcher) handleEvent(event fsnotify.Event) {
 	rel, ok := w.relative(event.Name)
-	if !ok || w.isIgnored(rel) {
+	if !ok {
 		return
+	}
+	boundary := false
+	if rel != "" && w.isIgnored(rel) {
+		if !w.isBoundary(rel) {
+			return
+		}
+		boundary = true
 	}
 	if rel == "" {
 		if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
@@ -370,14 +387,14 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 			return
 		}
 		nodeType = nodeTypeFor(info)
-		if info.IsDir() && event.Has(fsnotify.Create) {
+		if info.IsDir() && event.Has(fsnotify.Create) && !boundary {
 			discoverSubtree = true
 		}
 		size = info.Size()
 		mtimeMs = info.ModTime().UnixMilli()
 	}
 
-	w.enqueue(Change{Path: rel, Kind: kind, NodeType: nodeType, Size: size, MtimeMs: mtimeMs})
+	w.enqueue(Change{Path: rel, Kind: kind, NodeType: nodeType, Size: size, MtimeMs: mtimeMs, boundary: boundary})
 	if discoverSubtree {
 		// Keep the fsnotify loop responsive while a copied or extracted subtree
 		// is scanned. enqueue is synchronized and switches to resync at the cap.
@@ -467,6 +484,11 @@ func (w *Watcher) discoverAndWatchSubtree(root string, emit func(Change) bool) {
 			return nil
 		}
 		if rel != "" && w.isIgnored(rel) {
+			if emitting && w.isBoundary(rel) {
+				if info, infoErr := d.Info(); infoErr == nil && isWatchableNode(info.Mode()) {
+					emitting = emit(Change{Path: rel, Kind: "create", NodeType: nodeTypeFor(info), boundary: true})
+				}
+			}
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -508,6 +530,12 @@ func (w *Watcher) relative(path string) (string, bool) {
 
 func (w *Watcher) isIgnored(rel string) bool {
 	return isIgnoredPath(rel, w.ignored)
+}
+
+// isBoundary reports an ignored path whose parent is watched.
+func (w *Watcher) isBoundary(rel string) bool {
+	parent := path.Dir(rel)
+	return parent == "." || !w.isIgnored(parent)
 }
 
 // enqueue returns false once callers should stop materializing individual
@@ -569,19 +597,27 @@ func (w *Watcher) flush() {
 	}
 	w.mu.Lock()
 	changes := make([]Change, 0, len(w.pending))
+	var boundaries []Change
 	for _, change := range w.pending {
-		changes = append(changes, change)
+		if change.boundary {
+			boundaries = append(boundaries, change)
+		} else {
+			changes = append(changes, change)
+		}
 	}
 	resync := w.resync
 	w.pending = make(map[string]Change)
 	w.resync = false
 	w.timer = nil
-	if !resync && len(changes) == 0 {
+	if !resync && len(changes) == 0 && len(boundaries) == 0 {
 		w.mu.Unlock()
 		return
 	}
-	w.seq++
-	seq := w.seq
+	var seq int64
+	if resync || len(changes) > 0 {
+		w.seq++
+		seq = w.seq
+	}
 	w.flushing++
 	w.mu.Unlock()
 	defer func() {
@@ -593,7 +629,10 @@ func (w *Watcher) flush() {
 	sort.Slice(changes, func(i, j int) bool {
 		return changes[i].Path < changes[j].Path
 	})
-	w.handler(Batch{Seq: seq, Resync: resync, Changes: changes})
+	sort.Slice(boundaries, func(i, j int) bool {
+		return boundaries[i].Path < boundaries[j].Path
+	})
+	w.handler(Batch{Seq: seq, Resync: resync, Changes: changes, Boundaries: boundaries})
 }
 
 func mergeChange(a, b Change) Change {

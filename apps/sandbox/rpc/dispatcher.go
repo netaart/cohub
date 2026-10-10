@@ -162,8 +162,6 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.complete(request, accepted.OpID, d.handleFSSearch(request))
 	case "fs.pathSearch":
 		return accepted, d.complete(request, accepted.OpID, d.handleFSPathSearch(request))
-	case "fs.reconcile":
-		return accepted, d.complete(request, accepted.OpID, d.handleFSReconcile())
 	case "process.start":
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
@@ -244,6 +242,7 @@ type fsFindParams struct {
 }
 
 type fsSearchParams struct {
+	WriteToken   string `json:"writeToken"`
 	Pattern      string `json:"pattern"`
 	Path         string `json:"path"`
 	CWD          string `json:"cwd"`
@@ -254,11 +253,12 @@ type fsSearchParams struct {
 }
 
 type fsPathSearchParams struct {
-	Pattern  string `json:"pattern"`
-	Path     string `json:"path"`
-	CWD      string `json:"cwd"`
-	Limit    int    `json:"limit"`
-	FullPath bool   `json:"fullPath"`
+	WriteToken string `json:"writeToken"`
+	Pattern    string `json:"pattern"`
+	Path       string `json:"path"`
+	CWD        string `json:"cwd"`
+	Limit      int    `json:"limit"`
+	FullPath   bool   `json:"fullPath"`
 }
 
 type fsGrepParams struct {
@@ -992,7 +992,12 @@ func (d *Dispatcher) handleFSSearch(request protocol.RPCRequest) interface{} {
 	if fallback != "" {
 		return map[string]interface{}{"path": resolved.path, "fallback": fallback}
 	}
+	writes, ok := search.ParseWriteToken(params.WriteToken)
+	if !ok {
+		return d.failed(request, "", "BAD_REQUEST", "writeToken must be <epoch>:<gen>")
+	}
 	plan, err := manager.Plan(context.Background(), search.PlanInput{
+		WriteToken:   writes,
 		Pattern:      params.Pattern,
 		FixedStrings: params.FixedStrings,
 		IgnoreCase:   params.IgnoreCase,
@@ -1015,19 +1020,6 @@ func (d *Dispatcher) handleFSSearch(request protocol.RPCRequest) interface{} {
 	}
 }
 
-// handleFSReconcile is called after a workspace write this sandbox did not
-// perform, so the index stops answering until it has rescanned.
-func (d *Dispatcher) handleFSReconcile() interface{} {
-	d.mu.Lock()
-	manager := d.searchManager
-	d.mu.Unlock()
-	if manager == nil || !manager.Enabled() {
-		return map[string]interface{}{"invalidated": false}
-	}
-	manager.Invalidate()
-	return map[string]interface{}{"invalidated": true}
-}
-
 // handleFSPathSearch returns what fd reports for a glob below the requested
 // path, plus directories fd must still walk, or a fallback reason.
 func (d *Dispatcher) handleFSPathSearch(request protocol.RPCRequest) interface{} {
@@ -1043,7 +1035,12 @@ func (d *Dispatcher) handleFSPathSearch(request protocol.RPCRequest) interface{}
 	if fallback != "" {
 		return map[string]interface{}{"path": resolved.path, "fallback": fallback}
 	}
+	writes, ok := search.ParseWriteToken(params.WriteToken)
+	if !ok {
+		return d.failed(request, "", "BAD_REQUEST", "writeToken must be <epoch>:<gen>")
+	}
 	result, err := manager.Paths(context.Background(), search.PathInput{
+		WriteToken: writes,
 		Pattern:    params.Pattern,
 		PathPrefix: root,
 		FullPath:   params.FullPath,
