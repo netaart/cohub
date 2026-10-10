@@ -6,6 +6,7 @@ import { m } from "$lib/paraglide/messages.js";
 const {
 	label,
 	meta = [],
+	keepMetaVisible = false,
 	ariaLabel,
 	disabled = false,
 	expanded,
@@ -14,6 +15,7 @@ const {
 }: {
 	label: string;
 	meta?: string[];
+	keepMetaVisible?: boolean;
 	ariaLabel?: string;
 	disabled?: boolean;
 	expanded?: boolean;
@@ -40,7 +42,7 @@ const effectiveAriaLabel = $derived(
 		{label}
 	</span>
 	{#each meta as item}
-		<span class="flex min-w-0 max-w-[6.5rem] shrink-[3] items-baseline gap-0.5 text-[10px] leading-none text-text-placeholder/80 transition-colors group-hover:text-text-placeholder" aria-hidden="true">
+		<span class={`flex min-w-0 max-w-[6.5rem] ${keepMetaVisible ? "shrink-0" : "shrink-[3]"} items-baseline gap-0.5 text-[10px] leading-none text-text-placeholder/80 transition-colors group-hover:text-text-placeholder`} aria-hidden="true">
 			<span class="shrink-0 opacity-40">·</span>
 			<span class="min-w-0 truncate tabular-nums">{item}</span>
 		</span>

@@ -236,12 +236,17 @@ function thinkingLevels(item: ModelItem): ModelThinkingLevel[] {
 	return getSupportedThinkingLevels(item as never);
 }
 
-function candidateThinkingLevel(item: ModelItem): ModelThinkingLevel {
+function candidateThinkingLevel(item: ModelItem): ModelThinkingLevel | null {
 	// Thinking level follows the model: only the session's recorded model
 	// shows the session level; all others show their own default.
 	const bound = thinkingLevelModel ?? currentModel;
 	const isBound =
 		bound !== null && item.provider === bound.provider && item.id === bound.id;
+	if (
+		!(isBound && currentThinkingLevel) &&
+		item.model.defaultThinkingLevel === null
+	)
+		return null;
 	return clampThinkingLevel(
 		item as never,
 		isBound
@@ -251,7 +256,10 @@ function candidateThinkingLevel(item: ModelItem): ModelThinkingLevel {
 }
 
 function isDefaultLevel(item: ModelItem, level: ModelThinkingLevel): boolean {
-	return level === getModelDefaultThinkingLevel(item as never);
+	return (
+		item.model.defaultThinkingLevel !== null &&
+		level === getModelDefaultThinkingLevel(item as never)
+	);
 }
 
 function thinkingMenuKey(item: ModelItem): string {
@@ -1026,6 +1034,7 @@ const hoverCardPos = $derived.by(() => {
 					{@const showThinking = tLevels.length > 1}
 					{@const tMenuKey = thinkingMenuKey(item)}
 					{@const activeLevel = candidateThinkingLevel(item)}
+					{@const activeLevelLabel = activeLevel ? formatThinkingLevelFull(activeLevel) : m.model_selector_thinking_default({}, { locale })}
 					{@const thinkingOpen = thinkingMenuOpenFor === tMenuKey}
 					<div
 						role="presentation"
@@ -1081,14 +1090,14 @@ const hoverCardPos = $derived.by(() => {
 													? "border-border-subtle bg-bg-surface text-text-secondary"
 													: "border-transparent text-text-tertiary hover:border-border-subtle/80 hover:bg-bg-surface hover:text-text-secondary"
 											}`}
-											title={m.model_selector_thinking_title({ level: formatThinkingLevelFull(activeLevel) }, { locale })}
-											aria-label={m.model_selector_thinking_aria({ level: formatThinkingLevelFull(activeLevel) }, { locale })}
+											title={m.model_selector_thinking_title({ level: activeLevelLabel }, { locale })}
+											aria-label={m.model_selector_thinking_aria({ level: activeLevelLabel }, { locale })}
 											aria-expanded={thinkingOpen}
 											aria-haspopup="listbox"
 											onclick={(e) => toggleThinkingMenu(item, e)}
 										>
 											<Brain class="h-3 w-3 opacity-70" />
-											<span class="tabular-nums">{formatThinkingLevelShort(activeLevel)}</span>
+											<span class="tabular-nums">{activeLevel ? formatThinkingLevelShort(activeLevel) : activeLevelLabel}</span>
 											<ChevronDown class={`h-2.5 w-2.5 opacity-50 transition-transform ${thinkingOpen ? "rotate-180" : ""}`} />
 										</button>
 										{#if thinkingOpen && thinkingMenuPos}

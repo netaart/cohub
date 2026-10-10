@@ -91,6 +91,7 @@ export type RuntimeTraceContext = {
   traceparent?: string | null;
 };
 
+const runtimeThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const runtimeCapabilitiesSchema = z.object({
   harnesses: z.array(z.enum(["pi", "codex"])).max(2),
   models: z.array(z.object({
@@ -98,6 +99,9 @@ export const runtimeCapabilitiesSchema = z.object({
     provider: z.string().max(100),
     id: z.string().min(1).max(255),
     name: z.string().max(255),
+    reasoning: z.boolean().optional(),
+    defaultThinkingLevel: runtimeThinkingLevelSchema.optional(),
+    thinkingLevelMap: z.partialRecord(runtimeThinkingLevelSchema, z.string().max(100).nullable()).optional(),
   })).max(2000),
 });
 export type RuntimeCapabilities = z.infer<typeof runtimeCapabilitiesSchema>;

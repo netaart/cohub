@@ -16,7 +16,7 @@ const send = (value) => {
   const data = Buffer.from(`${JSON.stringify(value)}\n`);
   for (let offset = 0; offset < data.length; offset += 3) process.stdout.write(data.subarray(offset, offset + 3));
 };
-const model = { provider: "fixture", id: "test", name: "Test" };
+const model = { provider: "fixture", id: "test", name: "Test", reasoning: true, thinkingLevelMap: { xhigh: "xhigh" } };
 const rows = path ? readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [];
 const sessionId = rows[0]?.id ?? "discovery";
 let leaf = rows.at(-1)?.id ?? null;
@@ -81,6 +81,7 @@ for await (const line of createInterface({ input: process.stdin })) {
   const input = JSON.parse(line);
   const respond = (data = {}) => send({ id: input.id, type: "response", success: true, data });
   if (input.type === "get_available_models") respond({ models: [model] });
+  else if (input.type === "set_thinking_level") { append({ type: "thinking_level_change", thinkingLevel: input.level }); respond(); }
   else if (input.type === "get_state") respond({ sessionId, model, isStreaming: running !== null });
   else respond();
 }

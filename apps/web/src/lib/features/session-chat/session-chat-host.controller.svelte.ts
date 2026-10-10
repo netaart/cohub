@@ -54,6 +54,7 @@ import { extractSpaceMentionsFromText } from "$lib/mentions/space";
 import {
 	formatThinkingLevelShort,
 	getRequestedThinkingLevel,
+	type LocalModelSelection,
 	type ModelThinkingLevel,
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
@@ -162,6 +163,7 @@ import {
 	reconcileOptimisticTurn,
 	resolveComposerSelectionFromTurn,
 	resolveLastAgentTurnModel,
+	resolveLocalModelFromTurns,
 	resolveTurnHarness,
 	type SessionComposerSelection,
 	shouldClearComposerDraftAfterSend,
@@ -360,7 +362,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		model: null,
 	});
 	let harnessBySession = $state<Record<string, "cohub" | "pi" | "codex">>({});
-	let localModelsBySession = $state<Record<string, SelectedModel | null>>({});
+	let localModelsBySession = $state<Record<string, LocalModelSelection | null>>(
+		{},
+	);
 	const harnessSelectionKey = $derived(
 		`${spaceId}:${activeSessionId ?? "draft"}`,
 	);
@@ -378,14 +382,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const key = `${harnessSelectionKey}:${composerHarness}`;
 		if (Object.hasOwn(localModelsBySession, key))
 			return localModelsBySession[key] ?? null;
-		const previous = [...composerAgentTurns]
-			.reverse()
-			.find(
-				(turn) => resolveTurnHarness(turn) === composerHarness && turn.model,
-			);
-		return previous?.model && composerHarness !== "cohub"
-			? { id: previous.model, provider: previous.provider ?? composerHarness }
-			: null;
+		return resolveLocalModelFromTurns(composerAgentTurns, composerHarness);
 	});
 	const runtimeCatalog = $derived(cachedRuntimeStatus(spaceId));
 	async function loadRuntimeCatalog() {
@@ -3051,6 +3048,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		}
 		composer.sending = true;
 		const model = harness === "cohub" ? activeSessionModel : localModel;
+		const thinkingLevel =
+			harness === "cohub"
+				? activeSessionThinkingLevel
+				: localModel?.thinkingLevel;
 		clearComposerError();
 		// Snapshot identity for the whole send pipeline (multi-space host safe).
 		const opSpaceId = spaceId;
@@ -3268,6 +3269,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					meta: {
 						optimistic: true,
 						harness,
+						...(thinkingLevel ? { requestedThinkingLevel: thinkingLevel } : {}),
 						userId: currentUser.uuid,
 						clientMessageId,
 					},
@@ -3305,9 +3307,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				model: model?.id,
 				provider: model?.provider,
 				harness,
-				...(harness === "cohub" && activeSessionThinkingLevel
-					? { thinkingLevel: activeSessionThinkingLevel }
-					: {}),
+				...(thinkingLevel ? { thinkingLevel } : {}),
 				clientMessageId,
 				...(harness === "cohub"
 					? { generationPolicy: buildTurnGenerationPolicy() }
@@ -4601,7 +4601,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		get localModel() {
 			return localModel;
 		},
-		setLocalModel(model: SelectedModel | null) {
+		setLocalModel(model: LocalModelSelection | null) {
 			localModelsBySession = {
 				...localModelsBySession,
 				[`${harnessSelectionKey}:${composerHarness}`]: model,

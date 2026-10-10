@@ -1,10 +1,11 @@
+import { resolveHarness } from "@cohub/protocol";
 import type { SessionTurnRecord } from "@cohub/protocol/model";
+import type { SessionRecord, TaskRunRecord } from "@neta-art/cohub";
 import {
-	resolveHarness,
-	type SessionRecord,
-	type TaskRunRecord,
-} from "@neta-art/cohub";
-import type { ModelCatalogItem } from "$lib/model-catalog";
+	getRequestedThinkingLevel,
+	type LocalModelSelection,
+	type ModelCatalogItem,
+} from "$lib/model-catalog";
 import { mergeTurnsById } from "$lib/stores/turn-cache";
 import type { SessionViewState } from "./session-workspace-controller.svelte";
 
@@ -33,6 +34,26 @@ type ComposerTurnSource = Pick<
 	"id" | "sequence" | "executionKind" | "provider" | "model"
 > &
 	HarnessTurn;
+
+export function resolveLocalModelFromTurns(
+	turns: ComposerTurnSource[],
+	harness: "cohub" | "pi" | "codex",
+): LocalModelSelection | null {
+	if (harness === "cohub") return null;
+	const previous = turns.findLast(
+		(turn) =>
+			turn.executionKind !== "direct_generation" &&
+			resolveTurnHarness(turn) === harness &&
+			turn.model,
+	);
+	if (!previous?.model) return null;
+	const thinkingLevel = getRequestedThinkingLevel(previous.meta);
+	return {
+		id: previous.model,
+		provider: previous.provider ?? harness,
+		...(thinkingLevel ? { thinkingLevel } : {}),
+	};
+}
 
 export function mergeComposerTurnSources(
 	turns: ComposerTurnSource[],

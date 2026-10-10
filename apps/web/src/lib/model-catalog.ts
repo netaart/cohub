@@ -1,3 +1,5 @@
+import type { RuntimeCapabilities } from "@neta-art/cohub";
+
 export type ModelCatalogItem = {
 	provider: string;
 	id: string;
@@ -12,6 +14,38 @@ export type ModelThinkingLevel =
 	| "high"
 	| "xhigh"
 	| "max";
+
+export type LocalModelSelection = {
+	provider: string;
+	id: string;
+	name?: string;
+	thinkingLevel?: ModelThinkingLevel;
+};
+
+export function toLocalModelCatalog(
+	models: RuntimeCapabilities["models"],
+): ModelCatalogItem[] {
+	return models.map(
+		({
+			provider,
+			id,
+			name,
+			reasoning,
+			thinkingLevelMap,
+			defaultThinkingLevel,
+		}) => ({
+			provider,
+			id,
+			// Native settings may choose a default that the catalog does not expose.
+			model: {
+				name,
+				reasoning,
+				thinkingLevelMap,
+				defaultThinkingLevel: defaultThinkingLevel ?? null,
+			},
+		}),
+	);
+}
 
 const THINKING_LEVELS = new Set<ModelThinkingLevel>([
 	"off",
