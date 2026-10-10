@@ -7,6 +7,10 @@ import type {
 } from "@neta-art/cohub";
 import { canViewSpaceCost } from "$lib/activity";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import StatusGlyph, {
+	type StatusGlyphMotion,
+	type StatusGlyphTone,
+} from "$lib/components/StatusGlyph.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -19,6 +23,17 @@ import {
 	sandboxStatusLabel,
 } from "../space-utils";
 import type { SpaceSandboxSnapshot } from "./space-status-controller.svelte";
+
+const SANDBOX_GLYPH: Record<
+	ReturnType<typeof sandboxStatusKind>,
+	{ tone: StatusGlyphTone; motion?: StatusGlyphMotion; soft?: boolean }
+> = {
+	running: { tone: "success", motion: "slow" },
+	waking: { tone: "brand", motion: "active" },
+	sleeping: { tone: "muted", soft: true },
+	unknown: { tone: "muted", soft: true },
+	error: { tone: "error", soft: true },
+};
 
 type Props = {
 	spaceId: string;
@@ -122,7 +137,7 @@ function userTitle(
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
 						<h1 class="min-w-0 max-w-full break-words text-[23px] font-semibold leading-[1.08] tracking-[-0.035em] text-text-primary sm:text-[34px]">{spaceName}</h1>
 						{#if sandboxLoadedFor === spaceId}
-							<span class="sandbox-breathing-status" data-kind={sandboxStatusKind(sandbox)} title={sandboxStatusLabel(sandbox)} aria-label={sandboxStatusLabel(sandbox)}></span>
+							<StatusGlyph {...SANDBOX_GLYPH[sandboxStatusKind(sandbox)]} label={sandboxStatusLabel(sandbox)} class="translate-y-[0.02rem] [--status-glyph-size:0.48rem]" />
 						{/if}
 					</div>
 					{#if space?.createdAt}
@@ -198,53 +213,8 @@ function userTitle(
 		animation: new-chat-profile-fragment-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
 	}
 
-	.sandbox-breathing-status {
-		display: inline-flex;
-		width: 0.48rem;
-		height: 0.48rem;
-		flex-shrink: 0;
-		border-radius: 999px;
-		background: var(--text-placeholder);
-		opacity: 0.72;
-		transform: translateY(0.02rem);
-	}
-
-	.sandbox-breathing-status[data-kind="running"] {
-		background: var(--success-soft);
-		animation: sandbox-status-breathe 2.4s ease-in-out infinite;
-	}
-
-	.sandbox-breathing-status[data-kind="waking"] {
-		background: var(--brand);
-		animation: sandbox-status-breathe 1.4s ease-in-out infinite;
-	}
-
-	.sandbox-breathing-status[data-kind="sleeping"],
-	.sandbox-breathing-status[data-kind="unknown"] {
-		background: var(--text-placeholder);
-		opacity: 0.5;
-	}
-
-	.sandbox-breathing-status[data-kind="error"] {
-		background: var(--error-soft);
-		opacity: 0.86;
-	}
-
-	@keyframes sandbox-status-breathe {
-		0%,
-		100% {
-			opacity: 0.55;
-			transform: translateY(0.02rem) scale(0.92);
-		}
-		50% {
-			opacity: 1;
-			transform: translateY(0.02rem) scale(1.08);
-		}
-	}
-
 	@media (prefers-reduced-motion: reduce) {
-		.new-chat-profile-fragment,
-		.sandbox-breathing-status {
+		.new-chat-profile-fragment {
 			animation: none;
 		}
 	}

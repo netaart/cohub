@@ -1,4 +1,5 @@
 <script lang="ts">
+import StatusGlyph from "$lib/components/StatusGlyph.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
@@ -23,6 +24,6 @@ const label = $derived(
 </script>
 
 <div class={`inline-flex items-center gap-1.5 px-[var(--chat-msg-inset)] ${compact ? 'py-1' : 'py-1.5'} text-[12px] leading-none text-text-tertiary`}>
-	<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/70 motion-safe:animate-pulse"></span>
+	<StatusGlyph tone="brand" motion="active" soft class="[--status-glyph-size:6px]" />
 	<span class="truncate tabular-nums">{label}</span>
 </div>

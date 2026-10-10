@@ -1,4 +1,6 @@
 <script lang="ts">
+import StatusGlyph from "$lib/components/StatusGlyph.svelte";
+
 type Props = {
 	title?: string;
 	content: string;
@@ -21,7 +23,7 @@ let expanded = $state(false);
         <span>{expanded ? 'Hide reasoning' : 'Show reasoning'}</span>
         {#if isStreaming}
           <span class="inline-flex items-center gap-1 text-[10px] text-warning-soft/60">
-            <span class="w-1.5 h-1.5 rounded-full bg-status-starting animate-pulse"></span>
+            <StatusGlyph tone="warning" motion="active" class="[--status-glyph-size:6px]" />
             streaming
           </span>
         {/if}

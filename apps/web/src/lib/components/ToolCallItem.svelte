@@ -2,6 +2,7 @@
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-svelte";
 import ImageBlocks from "$lib/components/ImageBlocks.svelte";
 import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
+import StatusGlyph from "$lib/components/StatusGlyph.svelte";
 import ToolInputDetail from "$lib/components/ToolInputDetail.svelte";
 import ToolOutputDetail from "$lib/components/ToolOutputDetail.svelte";
 import {
@@ -48,10 +49,10 @@ const locale = $derived(getLocale());
 let expanded = $state(false);
 let userToggled = $state(false);
 
-const statusDotMap = {
-	done: "bg-status-running/80",
-	running: "bg-brand shadow-[0_0_0_3px_var(--brand-muted)]",
-	failed: "bg-status-error",
+const statusTone = {
+	done: "success",
+	running: "brand",
+	failed: "error",
 } as const;
 
 function toolActivityVerb(name: string): string {
@@ -153,10 +154,10 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 <div class="group/tool rounded-md">
 	<button
 		type="button"
-		class={`relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 px-0 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35 ${isRunning ? 'tool-call-running' : ''}`}
+		class="relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 px-0 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35"
 		onclick={toggle}
 	>
-		<span class="h-1.5 w-1.5 shrink-0 rounded-full transition-[background-color,box-shadow,opacity,transform] duration-200 {statusDotMap[tool.status]} {isRunning ? 'tool-call-dot' : ''}"></span>
+		<StatusGlyph tone={statusTone[tool.status]} motion={isRunning ? "active" : "none"} soft={tool.status === "done"} class="[--status-glyph-size:6px]" />
 		<span class="w-[3.25rem] shrink-0 truncate font-mono text-[13px] text-text-tertiary">{tool.name}</span>
 		{#if filePath}
 			<span
@@ -248,24 +249,3 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 		</div>
 	{/if}
 </div>
-
-<style>
-	.tool-call-running {
-		isolation: isolate;
-	}
-
-	.tool-call-dot {
-		animation: cohub-tool-dot-breathe 1.55s cubic-bezier(0.22, 1, 0.36, 1) infinite;
-	}
-
-	@keyframes cohub-tool-dot-breathe {
-		0%, 100% { opacity: 0.72; transform: scale(0.92); }
-		45% { opacity: 1; transform: scale(1.08); }
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.tool-call-dot {
-			animation: none;
-		}
-	}
-</style>

@@ -14,6 +14,7 @@ import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset } from "../avatar.js";
 import { createClient } from "../client.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
+import { SESSION_STATUS_COLUMN } from "../session-status.js";
 import { resolveSpace } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
@@ -1401,6 +1402,7 @@ function registerSessions(spacesCmd: Command): void {
         table(result.sessions, [
           { key: "id", label: "ID" },
           { key: "title", label: "Title" },
+          SESSION_STATUS_COLUMN,
           { key: "totalMessages", label: "Messages" },
           { key: "createdAt", label: "Created" },
         ]);
@@ -1446,6 +1448,7 @@ function registerSessions(spacesCmd: Command): void {
         table([result.session], [
           { key: "id", label: "ID" },
           { key: "title", label: "Title" },
+          SESSION_STATUS_COLUMN,
           { key: "totalMessages", label: "Messages" },
           { key: "totalToolCalls", label: "Tool Calls" },
           { key: "createdAt", label: "Created" },
