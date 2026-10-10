@@ -3709,7 +3709,7 @@ $effect(() => {
 
 {#if collapsed && !isMobile}
   <aside class="list-compact h-screen w-[52px] shrink-0 overflow-visible bg-[var(--sidebar-bg)]">
-    <div class="flex h-full flex-col items-center overflow-visible border-r border-border-subtle/70 px-2 py-2">
+    <div class="flex h-full flex-col items-center overflow-visible border-r border-border-subtle/70 px-2 pt-1 pb-2">
       <a
         href="/"
         class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-brand text-[11px] font-bold text-brand-contrast-fg transition-colors duration-100 hover:bg-brand-hover"
@@ -3965,7 +3965,7 @@ $effect(() => {
   class="list-compact {isMobile ? 'h-full w-full' : 'h-screen w-full'} flex flex-col bg-[var(--sidebar-bg)]"
 >
   <!-- Brand Header -->
-  <div class="@container flex h-[48px] shrink-0 items-center gap-2 border-b border-border-subtle px-3">
+  <div class="@container flex h-11 shrink-0 items-center gap-2 border-b border-border-subtle pl-[var(--list-content-x)] lg:h-10 {isMobile ? 'pr-[calc(var(--list-content-x)-7px)]' : 'pr-[calc(var(--list-content-x)-6px)]'}">
     <a href="/" class="group flex min-w-0 items-center gap-2" aria-label={m.sidebar_cohub_home({}, { locale })} title={m.sidebar_home({}, { locale })}>
       <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-brand text-[11px] font-bold text-brand-contrast-fg transition-colors group-hover:bg-brand-hover">
         C

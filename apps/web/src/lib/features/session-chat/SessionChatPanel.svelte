@@ -380,7 +380,7 @@ async function handleDraftDrop(event: DragEvent) {
 			class:chat-chrome--overlay={hasCustomPage}
 		>
 			{#if followupQueue.length > 0}
-				<div class="px-4 sm:px-6">
+				<div class="chat-gutter-x">
 					<div
 						class="mx-auto w-full max-w-[var(--chat-content-max-width)] border-t border-chat-panel-border/70 px-[var(--chat-msg-inset)] py-2"
 						class:bg-chat-panel={!hasCustomPage}

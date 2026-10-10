@@ -152,12 +152,18 @@
    Tailwind v4 @theme — semantic design tokens
    ============================================================ */
 @theme {
-	/* Breakpoints */
+	/* Breakpoints — px only: Tailwind sorts mixed units wrongly. */
+	--breakpoint-sm: 640px;
+	--breakpoint-md: 768px;
 	--breakpoint-lg: 960px;
+	--breakpoint-xl: 1280px;
+	--breakpoint-2xl: 1536px;
 
 	/* Fonts */
 	--font-sans: "Geist", system-ui, -apple-system, sans-serif;
 	--font-mono: "Geist Mono", "Fira Code", ui-monospace, monospace;
+
+	--spacing-workspace: 2rem;
 
 	/* Backgrounds */
 	--color-bg-primary: var(--bg-primary);

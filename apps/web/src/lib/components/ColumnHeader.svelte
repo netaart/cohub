@@ -5,11 +5,13 @@ const {
 	left,
 	right,
 	bordered = true,
+	inset = "column",
 	class: className = "",
 }: {
 	left: Snippet;
 	right?: Snippet;
 	bordered?: boolean;
+	inset?: "column" | "workspace";
 	class?: string;
 } = $props();
 </script>
@@ -17,6 +19,7 @@ const {
 <header
 	class="column-header {className}"
 	class:column-header--bordered={bordered}
+	class:column-header--workspace={inset === "workspace"}
 >
 	<div class="column-header__left">
 		{@render left()}
@@ -44,6 +47,10 @@ const {
 		.column-header {
 			height: 2.5rem;
 			padding: 0 1rem;
+		}
+
+		.column-header--workspace {
+			padding: 0 calc(var(--spacing-workspace) - 8px) 0 var(--spacing-workspace);
 		}
 	}
 

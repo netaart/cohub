@@ -151,7 +151,7 @@ function payloadProviderLabel(payload: unknown) {
 {/snippet}
 
 {#if mode === "create"}
-	<div class="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
+	<div class="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 lg:px-workspace">
 		<div class="max-w-3xl">
 			{#if spaceLoadError && !spaceHasMinimalAccess}
 				<div class="mb-3">
@@ -215,7 +215,7 @@ function payloadProviderLabel(payload: unknown) {
 		</div>
 	</div>
 {:else}
-	<div class="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 lg:px-8">
+	<div class="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 lg:px-workspace">
 		<div class="max-w-5xl">
 			{#if cronjobDetailLoading && cronjobDetail?.id !== cronjobId}
 				<CenteredLoading label={m.loading_cronjob({}, { locale })} size="panel" />

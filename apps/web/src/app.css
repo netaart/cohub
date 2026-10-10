@@ -288,6 +288,18 @@ body.sidebar-resizing .panel-shell-fade {
 	}
 }
 
+@utility chat-gutter-x {
+	padding-inline: 1rem;
+
+	@variant sm {
+		padding-inline: 1.5rem;
+	}
+
+	@variant lg {
+		padding-inline: calc(var(--spacing-workspace) - var(--chat-msg-inset));
+	}
+}
+
 @utility header-action {
 	display: inline-flex;
 	flex: 0 0 auto;
