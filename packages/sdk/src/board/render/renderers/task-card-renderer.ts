@@ -1,4 +1,4 @@
-import type { SceneItem } from "../../core/scene.js";
+import type { SceneItem } from "../../model/scene.js";
 import {
 	BOARD_FONT_STACK,
 	BOARD_MONO_FONT_STACK,
@@ -6,7 +6,7 @@ import {
 import type { BoardTaskItem } from "@cohub/protocol";
 import { Container, Graphics, Sprite, Text } from "pixi.js";
 import { drawAudioWaveform } from "../audio-waveform.js";
-import { featuredTaskArtifact } from "../../task.js";
+import { featuredTaskArtifact } from "../../model/task.js";
 import {
 	syncTextResolution,
 	textResolutionForZoom,

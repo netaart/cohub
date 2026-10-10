@@ -52,7 +52,7 @@
         "../sdk/src/websocket.ts"
       ],
       "@neta-art/cohub/board": [
-        "../sdk/src/board/index.ts"
+        "../sdk/src/board/model/index.ts"
       ],
       "@neta-art/cohub/board/render": [
         "../sdk/src/board/render/index.ts"
@@ -60,8 +60,8 @@
       "@neta-art/cohub/board/export": [
         "../sdk/src/board/export/index.ts"
       ],
-      "@neta-art/cohub/board/headless": [
-        "../sdk/src/board/headless/index.ts"
+      "@neta-art/cohub/board/export/node": [
+        "../sdk/src/board/export/node/index.ts"
       ],
       "@cohub/protocol/board-model": [
         "../protocol/src/board-model.ts"

@@ -1,6 +1,6 @@
 
 import { Container, Graphics } from "pixi.js";
-import type { BoardScene, BoardSceneItem } from "../core/scene.js";
+import type { BoardScene, BoardSceneItem } from "../model/scene.js";
 import { framePoint } from "@cohub/protocol";
 
 export function isClippingFrame(item: BoardSceneItem): boolean {

@@ -1,8 +1,8 @@
 import { Container, Graphics, Text } from "pixi.js";
 import type { BoardTextItem } from "@cohub/protocol";
 import { layoutBoardText } from "@cohub/protocol";
-import { boardFontFamily } from "../../core/text-metrics.js";
-import type { SceneItem } from "../../core/scene.js";
+import { boardFontFamily } from "../../model/text-metrics.js";
+import type { SceneItem } from "../../model/scene.js";
 import { itemColor } from "../palette.js";
 import { BOARD_FONT_STACKS } from "../text-measurement.js";
 import { syncTextResolution, textResolutionForZoom } from "../text-resolution.js";

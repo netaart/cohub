@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildBoardScene, refreshBoardScene } from "../../src/board/core/scene.js";
+import { buildBoardScene, refreshBoardScene } from "../../src/board/model/scene.js";
 import { boardDocument } from "./fixtures.js";
 
 /**

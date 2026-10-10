@@ -11,17 +11,17 @@ import { tmpdir } from "node:os";
 const execFile = promisify(execFileCallback);
 import type { BoardDocument, BoardExportRegion, BoardSceneItem } from "@neta-art/cohub/board";
 import type {
-  BoardHeadlessExportFormat,
-  BoardHeadlessFont,
-  BoardHeadlessRenderer,
-  BoardHeadlessTexture,
-} from "@neta-art/cohub/board/headless";
+  BoardNodeExportFormat,
+  BoardNodeFont,
+  BoardNodeRenderer,
+  BoardNodeTexture,
+} from "@neta-art/cohub/board/export/node";
 import {
   boardDocumentAt,
   boardImageKeySource,
   buildBoardScene,
-  createBoardHeadlessRenderer,
-  createBoardHeadlessSketchHost,
+  createNodeBoardRenderer,
+  createNodeBoardSketchHost,
   exportBoardImageBytes,
   imageAssetKey,
   parseBoardDocument,
@@ -33,7 +33,7 @@ import { BOARD_EXPORT_FONTS, type BoardExportFont } from "./board-fonts.js";
 import { createClient } from "./client.js";
 import { downloadPublicImage } from "./safe-remote-image.js";
 
-export function resolveBundledFonts(): BoardHeadlessFont[] {
+export function resolveBundledFonts(): BoardNodeFont[] {
   const require = createRequire(import.meta.url);
   const bundled = fileURLToPath(new URL("./fonts/", import.meta.url));
   const locate = ({ pkg, file }: BoardExportFont): string | null => {
@@ -75,17 +75,17 @@ export async function loadBoardDocument(
 }
 
 export async function loadBoardTextures(
-  headless: BoardHeadlessRenderer,
+  renderer: BoardNodeRenderer,
   spaceId: string,
   items: readonly BoardSceneItem[],
   options: { concurrency?: number } = {},
 ): Promise<{
-  textures: Map<string, BoardHeadlessTexture>;
+  textures: Map<string, BoardNodeTexture>;
   failed: string[];
   omitted: string[];
 }> {
   const selection = selectBoardExportAssets([...items], imageAssetKey);
-  const textures = new Map<string, BoardHeadlessTexture>();
+  const textures = new Map<string, BoardNodeTexture>();
   const failed: string[] = [];
   const pending = [...selection.keys];
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 16));
@@ -105,7 +105,7 @@ export async function loadBoardTextures(
           source.kind === "file"
             ? await readSpaceFileBytes(client, spaceId, source.value)
             : await downloadPublicImage(source.value);
-        const texture = await headless.decodeImage(bytes, mimeType);
+        const texture = await renderer.decodeImage(bytes, mimeType);
         textures.set(key, texture);
       } catch {
         failed.push(key);
@@ -136,7 +136,7 @@ export type BoardExportRunOptions = {
   padding?: number;
   colorScheme: "dark" | "light";
   background: "paper" | "transparent";
-  format: BoardHeadlessExportFormat;
+  format: BoardNodeExportFormat;
   quality?: number;
   withImages: boolean;
 };
@@ -148,7 +148,7 @@ export type BoardExportFrame = {
   height: number;
   scale: number;
   itemCount: number;
-  format: BoardHeadlessExportFormat;
+  format: BoardNodeExportFormat;
 };
 
 export type BoardExportRunResult = {
@@ -235,15 +235,15 @@ export async function runBoardExport(
   });
   if (!plan) return null;
 
-  const headless = await createBoardHeadlessRenderer({ fonts: resolveBundledFonts() });
-  let sketchHost: ReturnType<typeof createBoardHeadlessSketchHost> | null = null;
+  const renderer = await createNodeBoardRenderer({ fonts: resolveBundledFonts() });
+  let sketchHost: ReturnType<typeof createNodeBoardSketchHost> | null = null;
   try {
     const warnings: string[] = [];
-    let textures: Map<string, BoardHeadlessTexture> | undefined;
-    let backgroundTexture: BoardHeadlessTexture | undefined;
+    let textures: Map<string, BoardNodeTexture> | undefined;
+    let backgroundTexture: BoardNodeTexture | undefined;
     let omittedKeys = new Set<string>();
     if (options.withImages) {
-      const loaded = await loadBoardTextures(headless, options.spaceId, plan.items);
+      const loaded = await loadBoardTextures(renderer, options.spaceId, plan.items);
       textures = loaded.textures;
       omittedKeys = new Set(loaded.omitted);
       if (loaded.failed.length > 0) {
@@ -267,7 +267,7 @@ export async function runBoardExport(
     ) {
       try {
         const { bytes, mimeType } = await downloadPublicImage(declaredBackground.imageUrl);
-        backgroundTexture = await headless.decodeImage(bytes, mimeType);
+        backgroundTexture = await renderer.decodeImage(bytes, mimeType);
       } catch {
         warnings.push(
           "The board background image could not be loaded; the fallback color was exported.",
@@ -276,7 +276,7 @@ export async function runBoardExport(
     }
 
     const videoCount = plan.items.filter((item) => item.type === "video").length;
-    sketchHost = createBoardHeadlessSketchHost(headless, {
+    sketchHost = createNodeBoardSketchHost(renderer, {
       readModule: async (src) => {
         const { bytes } = await readSpaceFileBytes(createClient(), options.spaceId, src);
         return new TextDecoder().decode(bytes);
@@ -284,7 +284,7 @@ export async function runBoardExport(
     });
     const region: BoardExportRegion = times.length > 1 ? { kind: "rect", rect: plan.world } : options.region;
     const host = sketchHost;
-    if (!host) throw new Error("Headless sketch host could not be created.");
+    if (!host) throw new Error("Node sketch host could not be created.");
     const sketchVariants = new Map<string, { item: Extract<BoardSceneItem, { type: "sketch" }>; times: number[] }>();
     for (const time of times) {
       const sketchPlan = planBoardExport({
@@ -303,7 +303,7 @@ export async function runBoardExport(
     await Promise.all([...sketchVariants.values()].map((variant) => host.prepare([variant.item], variant.times, plan.scale)));
     if (videoCount > 0) {
       warnings.push(
-        `${videoCount} video preview${videoCount === 1 ? " was" : "s were"} drawn as placeholders; headless video decoding is unavailable.`,
+        `${videoCount} video preview${videoCount === 1 ? " was" : "s were"} drawn as placeholders; video decoding is unavailable in Node.`,
       );
     }
 
@@ -319,7 +319,7 @@ export async function runBoardExport(
     const frames: BoardExportFrame[] = [];
     const reported = new Set<string>();
     for (const time of times) {
-      const result = exportBoardImageBytes(headless, document, {
+      const result = exportBoardImageBytes(renderer, document, {
         ...(time === null ? {} : { at: { ...(options.animation ? { animation: options.animation } : {}), time } }),
         region,
         scale: options.scale,
@@ -353,7 +353,7 @@ export async function runBoardExport(
     return frames.length ? { frames, warnings } : null;
   } finally {
     sketchHost?.destroy();
-    headless.destroy();
+    renderer.destroy();
   }
 }
 

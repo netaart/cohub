@@ -23,19 +23,19 @@ const packagesRoot = resolvePath(here, "..", "..", "..", "packages");
  */
 const PACKAGE_SOURCES = [
 	["@neta-art/cohub/space-picker", `${packagesRoot}/sdk/src/space-picker.ts`],
-	[
-		"@neta-art/cohub/board/headless",
-		`${packagesRoot}/sdk/src/board/headless/index.ts`,
-	],
-	[
-		"@neta-art/cohub/board/render",
-		`${packagesRoot}/sdk/src/board/render/index.ts`,
-	],
-	[
-		"@neta-art/cohub/board/export",
-		`${packagesRoot}/sdk/src/board/export/index.ts`,
-	],
-	["@neta-art/cohub/board", `${packagesRoot}/sdk/src/board/index.ts`],
+	...[
+		["board/export/node", "board/export/node/index.ts"],
+		["board/export", "board/export/index.ts"],
+		["board/editor", "board/editor/index.ts"],
+		["board/player", "board/player/index.ts"],
+		["board/render", "board/render/index.ts"],
+		["board/replica", "board/replica/index.ts"],
+		["board/stage", "board/stage/index.ts"],
+		["board", "board/model/index.ts"],
+	].map(([subpath, file]) => [
+		`@neta-art/cohub/${subpath}`,
+		`${packagesRoot}/sdk/src/${file}`,
+	]),
 	["@neta-art/cohub/app-ref", `${packagesRoot}/sdk/src/app-ref.ts`],
 	[
 		"@cohub/protocol/public-identifiers",

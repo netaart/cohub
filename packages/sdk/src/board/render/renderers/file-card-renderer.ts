@@ -1,4 +1,4 @@
-import type { BoardSceneItem, SceneItem } from "../../core/scene.js";
+import type { BoardSceneItem, SceneItem } from "../../model/scene.js";
 import {
 	BOARD_FONT_STACK,
 	BOARD_MONO_FONT_STACK,
@@ -19,7 +19,7 @@ import {
 	filePreviewKind,
 	fileStem,
 	fileTypeLabel,
-} from "../../core/file-preview.js";
+} from "../../model/file-preview.js";
 import { positionShell } from "./base-card-renderer.js";
 import type {
 	BoardCardRenderer,

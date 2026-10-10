@@ -7,8 +7,8 @@ import {
 	type StrokeRibbonBuilder,
 	type StrokeRibbonMesh,
 	trimDrawPoints,
-} from "../../core/draw-geometry.js";
-import type { SceneItem } from "../../core/scene.js";
+} from "../../model/draw-geometry.js";
+import type { SceneItem } from "../../model/scene.js";
 import { itemColor } from "../palette.js";
 import { positionShell } from "./base-card-renderer.js";
 import type {

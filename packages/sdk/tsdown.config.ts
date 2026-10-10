@@ -29,7 +29,6 @@ export default defineConfig([
       debugger: "src/debugger.ts",
       "space-picker": "src/space-picker.ts",
       "host-bridge": "src/host-bridge.ts",
-      media: "src/media.ts",
     },
     clean: true,
     outputOptions: {
@@ -38,7 +37,7 @@ export default defineConfig([
   },
   {
     ...shared,
-    entry: ["src/board/**/*.ts"],
+    entry: ["src/board/**/*.ts", "!src/board/client/**", "src/media.ts"],
     root: "src",
     unbundle: true,
     clean: false,

@@ -11,6 +11,11 @@ import type {
 import { HttpError } from "@neta-art/cohub";
 import { type BoardDocument, parseBoardManifest } from "@neta-art/cohub/board";
 import {
+	type BoardReplica,
+	type BoardReplicaState,
+	createBoardReplica,
+} from "@neta-art/cohub/board/replica";
+import {
 	BOARD_AUTOMATION_ACTIVE_MS,
 	type BoardAutomationActivity,
 	boardAutomationExpiresAt,
@@ -19,11 +24,6 @@ import {
 	mergeBoardAutomationActivity,
 } from "$lib/board/board-activity";
 import { resolveBoardManifestText } from "$lib/board/board-manifest-text";
-import {
-	type BoardSync,
-	type BoardSyncState,
-	createBoardSync,
-} from "$lib/board/board-sync";
 import { boardPathMatchesTarget } from "$lib/board/board-sync-policy";
 import {
 	deleteBoardPendingPatch,
@@ -68,7 +68,10 @@ export function createBoardWindowController(
 	let activeBoardPath = $state<string | null>(null);
 	const requestTokens = new Map<string, number>();
 	let nextRequestToken = 0;
-	const syncs = new Map<string, { sync: BoardSync; unsubscribe: () => void }>();
+	const replicas = new Map<
+		string,
+		{ replica: BoardReplica; unsubscribe: () => void }
+	>();
 	const manifestRefreshByPath = new Map<string, Promise<void>>();
 	const manifestRefreshRequested = new Set<string>();
 	let automationActivities = $state<BoardAutomationActivity[]>([]);
@@ -194,7 +197,7 @@ export function createBoardWindowController(
 		);
 	}
 
-	function adoptSyncState(boardId: string, state: BoardSyncState) {
+	function adoptReplicaState(boardId: string, state: BoardReplicaState) {
 		updateBoards(boardId, (board) => ({
 			...board,
 			document: state.document ?? board.document,
@@ -205,17 +208,14 @@ export function createBoardWindowController(
 		}));
 	}
 
-	function ensureSync(boardId: string): BoardSync {
-		const existing = syncs.get(boardId);
-		if (existing) return existing.sync;
+	function ensureReplica(boardId: string): BoardReplica {
+		const existing = replicas.get(boardId);
+		if (existing) return existing.replica;
 		const spaceId = options.getSpaceId();
 		const client = sdk.space(spaceId).board(boardId);
-		const sync = createBoardSync({
-			transport: {
-				get: () => client.get(),
-				apply: (patch, input) => client.apply(patch, input),
-			},
-			store: {
+		const replica = createBoardReplica({
+			remote: client,
+			storage: {
 				listPending: async () =>
 					(await listBoardPendingPatches(spaceId, boardId)).map((record) => ({
 						mutationId: record.mutationId,
@@ -230,12 +230,12 @@ export function createBoardWindowController(
 				writeDocument: (version, document) =>
 					writeBoardDocumentCache({ spaceId, boardId, version, document }),
 			},
-			onChange: (state) => adoptSyncState(boardId, state),
 		});
-		const unsubscribe = client.subscribe({
-			changed: (event) => {
-				const { payload } = event;
-				sync.receive(payload);
+		const stopState = replica.subscribe((state) =>
+			adoptReplicaState(boardId, state),
+		);
+		const stopActivity = client.subscribe({
+			changed: ({ payload }) => {
 				if (
 					payload.source &&
 					payload.changed.items.length &&
@@ -249,19 +249,24 @@ export function createBoardWindowController(
 					});
 				}
 			},
-			playback: (event) => sync.receivePlayback(event.payload.playback),
 		});
-		syncs.set(boardId, { sync, unsubscribe });
-		void sync.start();
-		return sync;
+		replicas.set(boardId, {
+			replica,
+			unsubscribe: () => {
+				stopState();
+				stopActivity();
+			},
+		});
+		void replica.start();
+		return replica;
 	}
 
-	function releaseSync(boardId: string) {
-		const entry = syncs.get(boardId);
+	function releaseReplica(boardId: string) {
+		const entry = replicas.get(boardId);
 		if (!entry) return;
 		entry.unsubscribe();
-		entry.sync.dispose();
-		syncs.delete(boardId);
+		entry.replica.dispose();
+		replicas.delete(boardId);
 		clearActivitiesForBoard(boardId);
 	}
 
@@ -321,13 +326,13 @@ export function createBoardWindowController(
 			const boardId = await readManifest(path);
 			if (!isCurrent(token, path, sourceKey)) return;
 			const previous = boards.find((item) => item.path === path)?.boardId;
-			if (previous === boardId && syncs.has(boardId)) return;
+			if (previous === boardId && replicas.has(boardId)) return;
 			if (
 				previous &&
 				previous !== boardId &&
 				!boards.some((item) => item.boardId === previous && item.path !== path)
 			)
-				releaseSync(previous);
+				releaseReplica(previous);
 			const sibling = boards.find(
 				(item) => item.boardId === boardId && item.path !== path,
 			);
@@ -343,8 +348,8 @@ export function createBoardWindowController(
 						}
 					: item,
 			);
-			const sync = ensureSync(boardId);
-			adoptSyncState(boardId, sync.state);
+			const replica = ensureReplica(boardId);
+			adoptReplicaState(boardId, replica.state);
 		} catch (cause) {
 			if (!isCurrent(token, path, sourceKey)) return;
 			if (
@@ -390,7 +395,9 @@ export function createBoardWindowController(
 
 	async function reconcileOpenBoards() {
 		await Promise.all(boards.map((item) => refreshBoardManifest(item.path)));
-		await Promise.all([...syncs.values()].map(({ sync }) => sync.retry()));
+		await Promise.all(
+			[...replicas.values()].map(({ replica }) => replica.retry()),
+		);
 	}
 
 	function closeBoard(path = activeBoardPath) {
@@ -403,7 +410,7 @@ export function createBoardWindowController(
 			closing?.boardId &&
 			!next.some((item) => item.boardId === closing.boardId)
 		)
-			releaseSync(closing.boardId);
+			releaseReplica(closing.boardId);
 		boards = next;
 		if (activeBoardPath === path)
 			activeBoardPath =
@@ -438,17 +445,17 @@ export function createBoardWindowController(
 
 	function commitBoard(boardId: string, patch: BoardPatch) {
 		if (options.getReadonly?.()) return Promise.resolve();
-		const sync = syncs.get(boardId)?.sync;
-		if (!sync) return Promise.reject(new Error("Board is not open."));
+		const replica = replicas.get(boardId)?.replica;
+		if (!replica) return Promise.reject(new Error("Board is not open."));
 		const path = boards.find((item) => item.boardId === boardId)?.path;
 		if (path) options.onMarkSavePending?.(path);
-		return sync.commit(patch).finally(() => {
+		return replica.apply(patch).finally(() => {
 			if (path) options.onClearSavePendingSoon?.(path);
 		});
 	}
 
 	function retryBoardSave(boardId: string) {
-		return syncs.get(boardId)?.sync.retry() ?? Promise.resolve();
+		return replicas.get(boardId)?.replica.retry() ?? Promise.resolve();
 	}
 
 	async function playBoard(boardId: string, command: BoardPlaybackCommand) {
@@ -477,13 +484,13 @@ export function createBoardWindowController(
 					return board.stop();
 			}
 		})();
-		syncs.get(boardId)?.sync.receivePlayback(playback);
+		replicas.get(boardId)?.replica.receivePlayback(playback);
 		return playback;
 	}
 
 	function dispose() {
 		disposed = true;
-		for (const boardId of [...syncs.keys()]) releaseSync(boardId);
+		for (const boardId of [...replicas.keys()]) releaseReplica(boardId);
 		for (const activity of automationActivities)
 			clearActivityTimers(activity.id);
 		activityModelRequests.clear();

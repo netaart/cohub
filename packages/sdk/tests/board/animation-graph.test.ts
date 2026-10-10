@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compileBoardAnimations, evaluateBoardAnimations } from "../../src/board/animation.js";
+import { compileBoardAnimations, evaluateBoardAnimations } from "../../src/board/model/animation.js";
 import { boardDocument } from "./fixtures.js";
 
 const timeTrack = (target: string, value: number) => ({ target, property: "time", keyframes: [{ at: 0, value }] });

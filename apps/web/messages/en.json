@@ -1615,7 +1615,6 @@
 	"board_unlock_selection": "Unlock selection",
 	"board_regenerate_task": "Regenerate task",
 	"board_selection_actions": "Selection actions",
-	"board_failed_init": "Board failed to initialize",
 	"board_stage_aria": "Board stage",
 	"board_zoom_in": "Zoom in",
 	"board_zoom_out": "Zoom out",

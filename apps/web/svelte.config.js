@@ -47,10 +47,14 @@ const config = {
 			"@neta-art/cohub/media": `${sdkDir}/media.ts`,
 			"@neta-art/cohub/websocket": `${sdkDir}/websocket.ts`,
 			// Board subpaths must precede the SDK wildcard alias.
-			"@neta-art/cohub/board/render": `${sdkDir}/board/render/index.ts`,
+			"@neta-art/cohub/board/export/node": `${sdkDir}/board/export/node/index.ts`,
 			"@neta-art/cohub/board/export": `${sdkDir}/board/export/index.ts`,
-			"@neta-art/cohub/board/headless": `${sdkDir}/board/headless/index.ts`,
-			"@neta-art/cohub/board": `${sdkDir}/board/index.ts`,
+			"@neta-art/cohub/board/editor": `${sdkDir}/board/editor/index.ts`,
+			"@neta-art/cohub/board/player": `${sdkDir}/board/player/index.ts`,
+			"@neta-art/cohub/board/render": `${sdkDir}/board/render/index.ts`,
+			"@neta-art/cohub/board/replica": `${sdkDir}/board/replica/index.ts`,
+			"@neta-art/cohub/board/stage": `${sdkDir}/board/stage/index.ts`,
+			"@neta-art/cohub/board": `${sdkDir}/board/model/index.ts`,
 			"@neta-art/cohub/*": `${sdkDir}/*`,
 			// bare package aliases — must be last
 			"@neta-art/cohub": `${sdkDir}/index.ts`,

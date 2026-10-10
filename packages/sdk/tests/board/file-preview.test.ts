@@ -7,7 +7,7 @@ import {
 	fileStem,
 	fileTypeLabel,
 	splitFrontmatter,
-} from "../../src/board/core/file-preview.js";
+} from "../../src/board/model/file-preview.js";
 
 const facts = (
 	content: string,

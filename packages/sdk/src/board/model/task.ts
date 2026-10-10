@@ -1,0 +1,238 @@
+import {
+	BOARD_TASK_ARTIFACT_LIMIT,
+	type BoardTaskArtifact,
+	type BoardTaskSnapshot,
+} from "@cohub/protocol";
+import {
+	blockDurationMs,
+	blockIdentity,
+	blockMimeType,
+	blockNaturalSize,
+	blockPreviewUrl,
+	blockText,
+	blockTitle,
+	blockUrl,
+	cleanExcerpt,
+	generationCovers,
+	generationOutput,
+	generationPrompt,
+	taskData,
+} from "../../generation-blocks.js";
+import type { TaskRunRecord } from "../../types.js";
+
+function artifactId(
+	base: string,
+	used: Set<string>,
+	suffix?: string,
+): string {
+	const stem = cleanExcerpt(base, 220) ?? "output";
+	let candidate = suffix ? `${stem}-${suffix}` : stem;
+	let sequence = 2;
+	while (used.has(candidate)) {
+		candidate = `${stem}-${suffix ? `${suffix}-` : ""}${sequence}`;
+		sequence += 1;
+	}
+	used.add(candidate);
+	return candidate;
+}
+
+export function taskArtifacts(
+	blocks: Record<string, unknown>[],
+): BoardTaskArtifact[] {
+	const covers = new Map(
+		[...generationCovers(blocks)].filter(([media]) =>
+			Boolean(blockUrl(blocks[media] ?? {})),
+		),
+	);
+	const coverIndexes = new Set(covers.values());
+	const coverUrl = (index: number) => {
+		const cover = covers.get(index);
+		return cover === undefined ? undefined : blockUrl(blocks[cover] ?? {});
+	};
+	type Entry = { block: Record<string, unknown>; index: number; url?: string };
+	const groups = new Map<string, Entry[]>();
+	blocks.forEach((block, index) => {
+		if (coverIndexes.has(index)) return;
+		const key = blockIdentity(block) ?? `output-${index + 1}`;
+		const entry = { block, index, url: blockUrl(block) };
+		const group = groups.get(key);
+		if (group) group.push(entry);
+		else groups.set(key, [entry]);
+	});
+	const withUrl = (entry: Entry): entry is Entry & { url: string } =>
+		Boolean(entry.url);
+
+	const artifacts: BoardTaskArtifact[] = [];
+	const usedIds = new Set<string>();
+	for (const [groupId, blocksInGroup] of groups) {
+		const images = blocksInGroup
+			.filter(({ block }) => block.type === "image")
+			.filter(withUrl);
+		const media = blocksInGroup
+			.filter(({ block }) => block.type === "video" || block.type === "audio")
+			.filter(withUrl);
+
+		media.forEach(({ block, index, url }, mediaIndex) => {
+			const type = block.type as "video" | "audio";
+			const mimeType = blockMimeType(block);
+			const title = blockTitle(block);
+			const durationMs = blockDurationMs(block);
+			const previewUrl = blockPreviewUrl(block) ?? coverUrl(index);
+			const id = artifactId(
+				groupId,
+				usedIds,
+				media.length > 1 ? `${type}-${mediaIndex + 1}` : undefined,
+			);
+			if (type === "video") {
+				artifacts.push({
+					id,
+					type,
+					url,
+					...(title ? { title } : {}),
+					...(previewUrl ? { previewUrl } : {}),
+					...(mimeType ? { mimeType } : {}),
+					...(durationMs ? { durationMs } : {}),
+					...blockNaturalSize(block),
+				});
+				return;
+			}
+			artifacts.push({
+				id,
+				type,
+				url,
+				...(title ? { title } : {}),
+				...(previewUrl ? { previewUrl } : {}),
+				...(mimeType ? { mimeType } : {}),
+				...(durationMs ? { durationMs } : {}),
+			});
+		});
+
+		images.forEach(({ block, url }, imageIndex) => {
+			const mimeType = blockMimeType(block);
+			const title = blockTitle(block);
+			artifacts.push({
+				id: artifactId(
+					groupId,
+					usedIds,
+					images.length > 1
+						? `image-${imageIndex + 1}`
+						: undefined,
+				),
+				type: "image",
+				url,
+				...(title ? { title } : {}),
+				...(mimeType ? { mimeType } : {}),
+				...blockNaturalSize(block),
+			});
+		});
+
+		blocksInGroup
+			.filter(({ block }) => block.type === "text")
+			.forEach(({ block }, textIndex, texts) => {
+				const textExcerpt = blockText(block);
+				if (!textExcerpt) return;
+				const title = blockTitle(block);
+				artifacts.push({
+					id: artifactId(
+						groupId,
+						usedIds,
+						texts.length > 1 ? `text-${textIndex + 1}` : undefined,
+					),
+					type: "text",
+					...(title ? { title } : {}),
+					textExcerpt,
+				});
+			});
+	}
+	return artifacts;
+}
+
+function artifactScore(artifact: BoardTaskArtifact): readonly number[] {
+	const kind = { text: 1, image: 2, audio: 3, video: 4 }[artifact.type];
+	if (artifact.type === "text") return [kind, artifact.textExcerpt.length];
+	if (artifact.type === "image") {
+		return [kind, (artifact.naturalWidth ?? 0) * (artifact.naturalHeight ?? 0)];
+	}
+	return [
+		kind,
+		artifact.previewUrl ? 1 : 0,
+		artifact.durationMs ? 1 : 0,
+		artifact.durationMs ?? 0,
+	];
+}
+
+function compareArtifacts(a: BoardTaskArtifact, b: BoardTaskArtifact): number {
+	const left = artifactScore(a);
+	const right = artifactScore(b);
+	for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+		const difference = (right[index] ?? 0) - (left[index] ?? 0);
+		if (difference !== 0) return difference;
+	}
+	return 0;
+}
+
+export function rankedTaskArtifacts(
+	artifacts: readonly BoardTaskArtifact[],
+): BoardTaskArtifact[] {
+	return artifacts
+		.map((artifact, index) => ({ artifact, index }))
+		.sort(
+			(a, b) => compareArtifacts(a.artifact, b.artifact) || a.index - b.index,
+		)
+		.map(({ artifact }) => artifact);
+}
+
+export function featuredTaskArtifact(
+	artifacts: readonly BoardTaskArtifact[],
+): BoardTaskArtifact | undefined {
+	let featured: BoardTaskArtifact | undefined;
+	for (const artifact of artifacts) {
+		if (!featured || compareArtifacts(artifact, featured) < 0) {
+			featured = artifact;
+		}
+	}
+	return featured;
+}
+
+export function taskArtifactPreviewUrl(
+	artifact: BoardTaskArtifact | undefined,
+): string | undefined {
+	if (artifact?.type === "image") return artifact.url;
+	if (artifact?.type === "video" || artifact?.type === "audio") {
+		return artifact.previewUrl;
+	}
+	return undefined;
+}
+
+function taskTypeTitle(taskType: string): string {
+	return taskType
+		.replace(/[._-]+/g, " ")
+		.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+export function taskRunToBoardTaskSnapshot(
+	run: TaskRunRecord,
+): BoardTaskSnapshot {
+	const data = taskData(run);
+	const blocks = run.taskType === "generation" ? generationOutput(run) : [];
+	const promptExcerpt =
+		run.taskType === "generation"
+			? generationPrompt(run)
+			: cleanExcerpt(data?.command ?? data?.prompt ?? data?.title);
+	const model = typeof data?.model === "string" ? data.model : undefined;
+	const allArtifacts = taskArtifacts(blocks);
+	const artifacts = rankedTaskArtifacts(allArtifacts).slice(
+		0,
+		BOARD_TASK_ARTIFACT_LIMIT,
+	);
+	return {
+		taskType: run.taskType,
+		status: run.status,
+		title: promptExcerpt ?? taskTypeTitle(run.taskType),
+		...(model ? { model } : {}),
+		...(promptExcerpt ? { promptExcerpt } : {}),
+		artifactCount: allArtifacts.length,
+		artifacts,
+		updatedAt: run.updatedAt,
+	};
+}

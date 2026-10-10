@@ -11,7 +11,7 @@ import {
 	identityTone,
 } from "$lib/avatar-identity";
 import type { BoardThemeBackground } from "$lib/board/board-theme-background";
-import { readCssColorNumber } from "$lib/board/core/css-color";
+import { readCssColorNumber } from "$lib/board/css-color";
 import { getResolvedTheme, type ResolvedTheme } from "$lib/theme.svelte";
 import { isDarkTheme } from "$lib/theme-registry";
 

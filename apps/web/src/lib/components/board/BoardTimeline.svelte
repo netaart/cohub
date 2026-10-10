@@ -4,7 +4,7 @@ import type {
 	BoardPlaybackSnapshot,
 	BoardTrack,
 } from "@cohub/protocol";
-import { playbackTimeAt } from "@neta-art/cohub/board";
+import { playbackTimeAt } from "@neta-art/cohub/board/player";
 import {
 	Circle,
 	Crosshair,

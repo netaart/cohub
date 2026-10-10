@@ -1,6 +1,6 @@
 
 import type { BoardColor } from "@cohub/protocol";
-import { type BoardColorId, resolveItemColor } from "../core/palette.js";
+import { type BoardColorId, resolveItemColor } from "../model/palette.js";
 import { parseBoardCssColor } from "./css-color.js";
 import type { BoardRenderContext, BoardRenderPalette } from "./renderers/board-renderer-registry.js";
 

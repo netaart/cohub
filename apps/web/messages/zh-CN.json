@@ -1615,7 +1615,6 @@
 	"board_unlock_selection": "解锁选区",
 	"board_regenerate_task": "重新生成任务",
 	"board_selection_actions": "选区操作",
-	"board_failed_init": "Board 初始化失败",
 	"board_stage_aria": "Board 画布",
 	"board_zoom_in": "放大",
 	"board_zoom_out": "缩小",

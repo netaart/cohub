@@ -1,6 +1,6 @@
-import type { BoardSceneItem, } from "../core/scene.js";
-import type { WorldPoint } from "../geometry.js";
-import { featuredTaskArtifact } from "../task.js";
+import type { BoardSceneItem, } from "../model/scene.js";
+import type { WorldPoint } from "../model/geometry.js";
+import { featuredTaskArtifact } from "../model/task.js";
 import { TASK_CARD_FULL_DETAIL_ZOOM } from "./renderers/task-card-renderer.js";
 
 export type BoardMediaAction = {

@@ -1,7 +1,7 @@
 
 import { Container, Graphics } from "pixi.js";
 import type { BoardEffectItem } from "@cohub/protocol";
-import type { SceneItem } from "../../core/scene.js";
+import type { SceneItem } from "../../model/scene.js";
 import { itemColor } from "../palette.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";

@@ -57,24 +57,36 @@
         "import": "./dist/media.js"
       },
       "./board": {
-        "types": "./dist/board/index.d.ts",
-        "import": "./dist/board/index.js"
+        "types": "./dist/board/model/index.d.ts",
+        "import": "./dist/board/model/index.js"
+      },
+      "./board/editor": {
+        "types": "./dist/board/editor/index.d.ts",
+        "import": "./dist/board/editor/index.js"
+      },
+      "./board/replica": {
+        "types": "./dist/board/replica/index.d.ts",
+        "import": "./dist/board/replica/index.js"
       },
       "./board/player": {
-        "types": "./dist/board/runtime/board-player.d.ts",
-        "import": "./dist/board/runtime/board-player.js"
+        "types": "./dist/board/player/index.d.ts",
+        "import": "./dist/board/player/index.js"
       },
       "./board/render": {
         "types": "./dist/board/render/index.d.ts",
         "import": "./dist/board/render/index.js"
       },
+      "./board/stage": {
+        "types": "./dist/board/stage/index.d.ts",
+        "import": "./dist/board/stage/index.js"
+      },
       "./board/export": {
         "types": "./dist/board/export/index.d.ts",
         "import": "./dist/board/export/index.js"
       },
-      "./board/headless": {
-        "types": "./dist/board/headless/index.d.ts",
-        "import": "./dist/board/headless/index.js"
+      "./board/export/node": {
+        "types": "./dist/board/export/node/index.d.ts",
+        "import": "./dist/board/export/node/index.js"
       }
     },
     "types": "./dist/index.d.ts"
@@ -113,24 +125,36 @@
       "import": "./src/media.ts"
     },
     "./board": {
-      "types": "./src/board/index.ts",
-      "import": "./src/board/index.ts"
+      "types": "./src/board/model/index.ts",
+      "import": "./src/board/model/index.ts"
+    },
+    "./board/editor": {
+      "types": "./src/board/editor/index.ts",
+      "import": "./src/board/editor/index.ts"
+    },
+    "./board/replica": {
+      "types": "./src/board/replica/index.ts",
+      "import": "./src/board/replica/index.ts"
     },
     "./board/player": {
-      "types": "./src/board/runtime/board-player.ts",
-      "import": "./src/board/runtime/board-player.ts"
+      "types": "./src/board/player/index.ts",
+      "import": "./src/board/player/index.ts"
     },
     "./board/render": {
       "types": "./src/board/render/index.ts",
       "import": "./src/board/render/index.ts"
     },
+    "./board/stage": {
+      "types": "./src/board/stage/index.ts",
+      "import": "./src/board/stage/index.ts"
+    },
     "./board/export": {
       "types": "./src/board/export/index.ts",
       "import": "./src/board/export/index.ts"
     },
-    "./board/headless": {
-      "types": "./src/board/headless/index.ts",
-      "import": "./src/board/headless/index.ts"
+    "./board/export/node": {
+      "types": "./src/board/export/node/index.ts",
+      "import": "./src/board/export/node/index.ts"
     }
   },
   "types": "./src/index.ts",

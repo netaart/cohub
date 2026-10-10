@@ -5,7 +5,7 @@ import {
   BOARD_EXPORT_MAX_EDGE,
   BOARD_EXPORT_MAX_PIXELS,
   planBoardExport,
-} from "../../src/board/core/export-plan.js";
+} from "../../src/board/model/export-plan.js";
 import { boardScene } from "./fixtures.js";
 
 /**

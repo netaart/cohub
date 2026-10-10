@@ -1,7 +1,7 @@
 import type { Container, Graphics, Texture } from "pixi.js";
 import type { BoardSettings, BoardSketchItem } from "@cohub/protocol";
-import type { BoardShapeColors } from "../../core/palette.js";
-import type { BoardScene, BoardSceneItem, SceneItem } from "../../core/scene.js";
+import type { BoardShapeColors } from "../../model/palette.js";
+import type { BoardScene, BoardSceneItem, SceneItem } from "../../model/scene.js";
 import { ensureBoardTextMeasurement } from "../text-measurement.js";
 import { arrowCardRenderer } from "./arrow-card-renderer.js";
 import { audioCardRenderer } from "./audio-card-renderer.js";
@@ -75,7 +75,12 @@ export type BoardCardRenderer = {
 	destroy?: (container: Container, context: BoardRenderContext) => void;
 };
 
-const boardCardRenderers: BoardCardRenderer[] = [
+export type BoardCardRendererResolver = (
+	item: BoardSceneItem,
+	context: BoardRenderContext,
+) => BoardCardRenderer;
+
+const builtinCardRenderers: readonly BoardCardRenderer[] = [
 	textCardRenderer,
 	imageCardRenderer,
 	videoCardRenderer,
@@ -88,28 +93,24 @@ const boardCardRenderers: BoardCardRenderer[] = [
 	frameCardRenderer,
 	effectCardRenderer,
 	sketchCardRenderer,
-	unknownCardRenderer,
 ];
 
-export function boardCardRenderersForTest(): readonly BoardCardRenderer[] {
-	return boardCardRenderers;
+/**
+ * Pick a renderer per item: `renderers` first, then the built-ins. Items no
+ * renderer claims draw as a labelled placeholder box.
+ */
+export function createBoardCardRendererResolver(
+	renderers: Iterable<BoardCardRenderer> = [],
+): BoardCardRendererResolver {
+	const candidates = [...renderers, ...builtinCardRenderers];
+	return (item, context) => {
+		ensureBoardTextMeasurement();
+		return (
+			candidates.find((renderer) => renderer.canRender(item, context)) ??
+			unknownCardRenderer
+		);
+	};
 }
 
-export function getBoardCardRenderer(
-	item: BoardSceneItem,
-	context: BoardRenderContext,
-) {
-	ensureBoardTextMeasurement();
-	return (
-		boardCardRenderers.find((renderer) => renderer.canRender(item, context)) ??
-		unknownCardRenderer
-	);
-}
-
-export function registerBoardCardRenderer(renderer: BoardCardRenderer) {
-	const existingIndex = boardCardRenderers.findIndex(
-		(candidate) => candidate.id === renderer.id,
-	);
-	if (existingIndex >= 0) boardCardRenderers.splice(existingIndex, 1, renderer);
-	else boardCardRenderers.unshift(renderer);
-}
+/** The built-in renderers alone. */
+export const getBoardCardRenderer = createBoardCardRendererResolver();

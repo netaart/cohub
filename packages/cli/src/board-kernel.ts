@@ -8,4 +8,4 @@ export {
   planBoardExport,
   selectBoardExportAssets,
 } from "@neta-art/cohub/board";
-export { createBoardHeadlessRenderer, createBoardHeadlessSketchHost, exportBoardImageBytes } from "@neta-art/cohub/board/headless";
+export { createNodeBoardRenderer, createNodeBoardSketchHost, exportBoardImageBytes } from "@neta-art/cohub/board/export/node";
