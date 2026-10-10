@@ -50,6 +50,10 @@ import AccessStateView from "$lib/components/AccessStateView.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import ResourceLabelPicker from "$lib/components/ResourceLabelPicker.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
+import {
+	isThemeCssPath,
+	refreshThemeCss,
+} from "$lib/custom-theme/theme-css.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
 import {
 	cacheInstalledApps,
@@ -120,7 +124,6 @@ import {
 	buildSpaceSessionRoute,
 	buildSpaceTaskRoute,
 } from "$lib/space-routes";
-import { isSpaceStylePath, refreshSpaceStyle } from "$lib/space-style";
 import { authStore } from "$lib/stores/auth.svelte";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import {
@@ -1745,12 +1748,11 @@ async function submitSessionRename() {
 		cancelSessionRename();
 	}
 }
-function spaceStyleChanged(
+function themeCssChanged(
 	changes: Array<{ path?: string; oldPath?: string }> | undefined,
 ) {
 	return changes?.some(
-		(change) =>
-			isSpaceStylePath(change.path) || isSpaceStylePath(change.oldPath),
+		(change) => isThemeCssPath(change.path) || isThemeCssPath(change.oldPath),
 	);
 }
 function spaceConfigChanged(
@@ -1827,8 +1829,8 @@ function scheduleSpaceFsRefresh(input: {
 	generation: number;
 }) {
 	const { eventPayload, eventSpaceId } = input;
-	if (eventPayload.resync || spaceStyleChanged(eventPayload.changes))
-		refreshSpaceStyle(eventSpaceId);
+	if (eventPayload.resync || themeCssChanged(eventPayload.changes))
+		refreshThemeCss(eventSpaceId);
 	if (eventPayload.resync || spaceConfigChanged(eventPayload.changes))
 		refreshSpaceConfig(eventSpaceId);
 

@@ -49,6 +49,10 @@ import {
 	resolveBoardTheme,
 } from "$lib/board/board-theme";
 import type { BoardEditor } from "$lib/board/editor.svelte";
+import {
+	CUSTOM_THEME_CHANGED_EVENT,
+	type CustomThemeChangedDetail,
+} from "$lib/custom-theme/events";
 import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
 import {
 	type BoardDropItem,
@@ -60,7 +64,6 @@ import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { buildSpaceTaskRoute } from "$lib/space-routes";
-import { SPACE_STYLE_CHANGED_EVENT } from "$lib/space-style";
 import {
 	getCachedTaskRuns,
 	mergeCachedTaskRun,
@@ -123,21 +126,21 @@ let host: HTMLDivElement | null = $state(null);
 let stage: BoardStage | null = null;
 let dropActive = $state(false);
 let visibleIds = $state.raw<ReadonlySet<string> | null>(null);
-let spaceStyleVersion = $state(0);
+let customThemeVersion = $state(0);
 let previewVersion = $state(filePreviewVersion());
 let backdropLoadState = $state<BoardBackgroundLoadState | null>(null);
 let themeCache: BoardThemeSnapshot | null = null;
 
 function resolveTheme(): BoardThemeSnapshot {
-	const key = boardThemeKey(host, spaceStyleVersion);
+	const key = boardThemeKey(host, customThemeVersion);
 	if (themeCache?.key !== key)
-		themeCache = resolveBoardTheme(host, spaceStyleVersion, key);
+		themeCache = resolveBoardTheme(host, customThemeVersion, key);
 	return themeCache;
 }
 
 const boardBackdrop = $derived.by<BoardThemeBackground | null>(() => {
 	getResolvedTheme();
-	spaceStyleVersion;
+	customThemeVersion;
 	return resolveBoardBackground(editor.settings, resolveTheme().background);
 });
 const backdropReady = $derived(
@@ -148,10 +151,10 @@ const backdropReady = $derived(
 	),
 );
 
-function handleSpaceStyleChanged(event: Event) {
-	const detail = (event as CustomEvent<{ spaceId?: string | null }>).detail;
-	if (detail?.spaceId !== null && detail?.spaceId !== spaceId) return;
-	spaceStyleVersion += 1;
+function handleCustomThemeChanged(event: Event) {
+	const { detail } = event as CustomEvent<CustomThemeChangedDetail>;
+	if (detail.spaceId !== null && detail.spaceId !== spaceId) return;
+	customThemeVersion += 1;
 	themeCache = null;
 }
 
@@ -508,7 +511,7 @@ onMount(() => {
 			withTextures: (items, use) => assets.withTextures(items, use),
 		});
 	});
-	window.addEventListener(SPACE_STYLE_CHANGED_EVENT, handleSpaceStyleChanged);
+	window.addEventListener(CUSTOM_THEME_CHANGED_EVENT, handleCustomThemeChanged);
 });
 
 function setBackdropLoadState(state: BoardBackgroundLoadState | null) {
@@ -552,7 +555,7 @@ $effect(() => {
 	awarenessVersion;
 	backdropReady;
 	getResolvedTheme();
-	spaceStyleVersion;
+	customThemeVersion;
 	untrack(() => stage?.invalidate());
 });
 
@@ -564,8 +567,8 @@ $effect(() => {
 onDestroy(() => {
 	cancelLongPress();
 	window.removeEventListener(
-		SPACE_STYLE_CHANGED_EVENT,
-		handleSpaceStyleChanged,
+		CUSTOM_THEME_CHANGED_EVENT,
+		handleCustomThemeChanged,
 	);
 	unsubscribeTaskRuns();
 	unsubscribePreviews();

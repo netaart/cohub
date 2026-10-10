@@ -139,12 +139,12 @@ function readBackground(
 /** Cheap identity read used to avoid resolving all CSS tokens every frame. */
 export function boardThemeKey(
 	host: Element | null | undefined,
-	spaceStyleVersion = 0,
+	customThemeVersion = 0,
 ): string {
 	const id = getResolvedTheme();
 	return [
 		id,
-		spaceStyleVersion,
+		customThemeVersion,
 		cssToken(host, "--board-selection-accent"),
 		cssToken(host, "--bg-primary"),
 		cssToken(host, "--board-background-image-url"),
@@ -156,8 +156,8 @@ export function boardThemeKey(
 /** Resolve the full current Web theme into the values Pixi can consume. */
 export function resolveBoardTheme(
 	host: Element | null | undefined,
-	spaceStyleVersion = 0,
-	key = boardThemeKey(host, spaceStyleVersion),
+	customThemeVersion = 0,
+	key = boardThemeKey(host, customThemeVersion),
 ): BoardThemeSnapshot {
 	const id = getResolvedTheme();
 	const colorScheme = isDarkTheme(id) ? "dark" : "light";

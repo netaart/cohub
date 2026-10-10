@@ -15,6 +15,7 @@ import MobileTabBar from "$lib/components/MobileTabBar.svelte";
 import { mediaLightbox } from "$lib/components/media-lightbox";
 import Sidebar from "$lib/components/Sidebar.svelte";
 import TurnNotificationStack from "$lib/components/TurnNotificationStack.svelte";
+import CustomThemeLayers from "$lib/custom-theme/CustomThemeLayers.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
 import { pointerDrag } from "$lib/drag/pointer-drag.svelte";
 import CheckoutReturnHandler from "$lib/features/billing/CheckoutReturnHandler.svelte";
@@ -47,7 +48,6 @@ import {
 	resolveMobileSessionNavTransition,
 } from "$lib/navigation-transition";
 import { m } from "$lib/paraglide/messages.js";
-import { activateSpaceStyle, deactivateSpaceStyle } from "$lib/space-style";
 import "$lib/theme.svelte";
 import { authStore } from "$lib/stores/auth.svelte";
 import { initSpacePinRealtime } from "$lib/stores/space-pins.svelte";
@@ -78,8 +78,9 @@ onNavigate((navigation) => {
 const currentPath = $derived(page.url.pathname);
 const showMobileTabBar = $derived(!shouldHideMobileTabBar(currentPath));
 const sidebarArea = $derived(resolveAppArea(currentPath));
-// Per-space layout prefs (sidebar width/collapsed). Workspace space only —
-// never sessions-inbox draft targets (those use newChatSpaceId, not spaceId).
+// Per-space layout prefs (sidebar width/collapsed) and the page-wide Space
+// theme. Workspace space only — never sessions-inbox draft targets (those use
+// newChatSpaceId, not spaceId).
 const currentLayoutSpaceId = $derived(
 	resolveWorkspaceSpaceId({
 		pathname: currentPath,
@@ -89,16 +90,6 @@ const currentLayoutSpaceId = $derived(
 );
 let showHelpPanel = $state(false);
 let authReady = $state(false);
-
-$effect(() => {
-	if (!authReady) return;
-	const spaceId = currentLayoutSpaceId;
-	if (!spaceId) {
-		deactivateSpaceStyle();
-		return;
-	}
-	activateSpaceStyle(spaceId);
-});
 
 let gesturePhase = $state<DrawerGesturePhase>("idle");
 let gestureDirection = $state<DrawerGestureDirection>(null);
@@ -627,6 +618,7 @@ onMount(() => {
     <CenteredLoading label={m.shell_loading({}, { locale })} size="page" />
   </main>
 {:else}
+  <CustomThemeLayers spaceId={currentLayoutSpaceId} />
   <div class="app-shell safe-area-top h-full min-h-0 overflow-hidden flex flex-col lg:flex-row text-text-primary font-sans text-[13px] leading-[1.6] {showMobileTabBar ? 'max-lg:[--safe-area-bottom:0px]' : ''}">
     <!-- Desktop sidebar — hidden on mobile -->
     <!-- z-30 keeps collapsed rail flyouts above main workspace stacking contexts.

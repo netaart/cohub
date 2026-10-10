@@ -1,4 +1,5 @@
 <script lang="ts">
+import { SPACE_CUSTOM_THEME_CSS_PATH } from "@cohub/protocol";
 import {
 	Check,
 	Copy,
@@ -6,6 +7,7 @@ import {
 	Loader2,
 	Monitor,
 	Moon,
+	Paintbrush,
 	Palette,
 	Pencil,
 	Sun,
@@ -16,6 +18,8 @@ import { onMount } from "svelte";
 import { ensureAuth } from "$lib/auth";
 import UploadProgress from "$lib/components/UploadProgress.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
+import { getThemeCss } from "$lib/custom-theme/theme-css.svelte";
+import { userTheme } from "$lib/custom-theme/user-theme.svelte";
 import type { LocalePreference } from "$lib/i18n/locale";
 import {
 	getLocale,
@@ -30,6 +34,7 @@ import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
 import { uploadUserAvatarImage } from "$lib/public-asset-images";
 import { validateUsernameInput } from "$lib/slug-rules";
+import { buildSpaceFileRoute, buildSpaceRootRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
 import { getTheme } from "$lib/theme.svelte";
 import { THEME_OPTIONS, type ThemeMode } from "$lib/theme-registry";
@@ -38,6 +43,10 @@ import { setThemeWithTransition } from "$lib/theme-transition";
 const locale = $derived(getLocale());
 const localePreference = $derived(getLocalePreference());
 const mode = $derived(getTheme());
+const configSpaceId = $derived(userTheme.spaceId);
+const hasCustomTheme = $derived(
+	configSpaceId ? getThemeCss(configSpaceId) !== null : false,
+);
 type EditableField = "displayName" | "username";
 
 const userUuid = $derived(authStore.userUuid ?? "");
@@ -274,6 +283,16 @@ onMount(() => {
 				<h3 class="text-[13px] font-medium text-text-primary">{m.settings_theme({}, { locale })}</h3>
 				<p class="mt-1 text-[12px] leading-5 text-text-tertiary">{m.settings_theme_description({}, { locale })}</p>
 				<div class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{#each THEME_OPTIONS as option (option.value)}{@const active = mode === option.value}{@const Icon = themeIcon[option.value]}<button type="button" class="group flex min-w-0 items-center gap-2 rounded-[6px] px-3 py-2.5 text-left transition-colors duration-100 {active ? 'bg-brand-bg text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}" onclick={(event) => handleThemeChange(option.value, event)}><span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] {active ? 'bg-brand/15 text-brand' : 'bg-bg-hover-strong text-text-tertiary group-hover:text-text-secondary'}"><Icon class="h-3.5 w-3.5" /></span><span class="min-w-0 flex-1"><span class="block text-[12px] font-medium">{localizedThemeLabel(option.value, locale)}</span><span class="block truncate text-[10px] text-text-tertiary">{localizedThemeDescription(option.value, locale)}</span></span>{#if active}<Check class="h-3.5 w-3.5 shrink-0 text-brand" />{/if}</button>{/each}</div>
+				{#if configSpaceId}
+					{@const path = SPACE_CUSTOM_THEME_CSS_PATH}
+					{@const on = hasCustomTheme && userTheme.enabled}
+					<div class="mt-2 flex min-w-0 items-center gap-2 rounded-[6px] border border-border-subtle px-3 py-2.5">
+						<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] {on ? 'bg-brand/15 text-brand' : 'bg-bg-hover-strong text-text-tertiary'}"><Paintbrush class="h-3.5 w-3.5" /></span>
+						<span class="min-w-0 flex-1"><span class="block text-[12px] font-medium text-text-primary">{m.settings_custom_theme({}, { locale })}</span><span class="block truncate text-[10px] text-text-tertiary">{hasCustomTheme ? m.settings_custom_theme_description({ path }, { locale }) : m.settings_custom_theme_empty({ path }, { locale })}</span></span>
+						<a href={hasCustomTheme ? buildSpaceFileRoute(configSpaceId, path) : buildSpaceRootRoute(configSpaceId)} class="shrink-0 rounded-[5px] px-2 py-1 text-[11px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary">{hasCustomTheme ? m.common_edit({}, { locale }) : m.settings_custom_theme_open({}, { locale })}</a>
+						{#if hasCustomTheme}<button type="button" role="switch" aria-checked={userTheme.enabled} aria-label={m.settings_custom_theme_toggle({}, { locale })} title={m.settings_custom_theme_toggle({}, { locale })} class="inline-flex h-8 w-8 shrink-0 items-center justify-center" onclick={() => userTheme.setEnabled(!userTheme.enabled)}><span class="h-3.5 w-6 rounded-full p-0.5 transition-colors {userTheme.enabled ? 'bg-brand' : 'bg-bg-elevated'}"><span class="block h-2.5 w-2.5 rounded-full bg-brand-contrast-fg transition-transform {userTheme.enabled ? 'translate-x-2.5' : ''}"></span></span></button>{/if}
+					</div>
+				{/if}
 			</div>
 		</section>
 	</section>

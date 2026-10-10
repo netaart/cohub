@@ -58,6 +58,7 @@ const host = $derived.by(() => {
 	if (!app || !canUsePreviewOrigin) return null;
 	return createAppBridgeHost({
 		app,
+		getAppearanceHost: () => frame,
 		reply: (requestId, payload) => {
 			frame?.contentWindow?.postMessage(
 				{ requestId, ...payload },
