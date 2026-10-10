@@ -1,19 +1,84 @@
 package rpc
 
-import "testing"
+import (
+	"encoding/json"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
 
-func TestValidateSearchLiterals(t *testing.T) {
-	if err := validateSearchLiterals([]string{"needle"}); err != nil {
-		t.Fatalf("valid literal rejected: %v", err)
+	"github.com/cohub/apps/sandbox/env"
+	"github.com/cohub/apps/sandbox/process"
+	"github.com/cohub/apps/sandbox/protocol"
+	"github.com/cohub/apps/sandbox/search"
+)
+
+func searchRequest(t *testing.T, method string, params interface{}) protocol.RPCRequest {
+	t.Helper()
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
 	}
-	for _, literals := range [][]string{
-		nil,
-		{"a"},
-		{"ab"},
-		{"  "},
+	return protocol.RPCRequest{
+		RequestScopedMessage: protocol.RequestScopedMessage{RequestID: "req-1"},
+		Method:               method,
+		Params:               raw,
+	}
+}
+
+func TestSearchFallsBackWithoutAnEnabledIndex(t *testing.T) {
+	root := t.TempDir()
+	cfg := env.Config{WorkspaceDir: root, Fence: true}
+	d := NewDispatcher(cfg, process.NewManager(slog.Default()), slog.Default())
+
+	result, ok := d.handleFSSearch(searchRequest(t, "fs.search", fsSearchParams{Pattern: "needle"})).(map[string]interface{})
+	if !ok || result["fallback"] != search.FallbackUnavailable {
+		t.Fatalf("fs.search without a manager = %#v", result)
+	}
+
+	d.SetSearchManager(search.NewManager(env.Config{Mode: env.ModeListen, SearchEnabled: false}, slog.Default(), nil))
+	result, ok = d.handleFSPathSearch(searchRequest(t, "fs.pathSearch", fsPathSearchParams{Pattern: "*.ts"})).(map[string]interface{})
+	if !ok || result["fallback"] != search.FallbackUnavailable {
+		t.Fatalf("fs.pathSearch with a disabled manager = %#v", result)
+	}
+}
+
+func TestSearchScopeMapsPathsToWorkspaceRelativeRoots(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDispatcher(env.Config{WorkspaceDir: root}, process.NewManager(slog.Default()), slog.Default())
+	d.SetSearchManager(search.NewManager(env.Config{Mode: env.ModeListen, SearchEnabled: true}, slog.Default(), nil))
+
+	for path, want := range map[string]string{root: "", filepath.Join(root, "src"): "src"} {
+		if _, got, fallback := d.searchScope(path); fallback != "" || got != want {
+			t.Fatalf("searchScope(%q) = %q, %q", path, got, fallback)
+		}
+	}
+	if _, _, fallback := d.searchScope(filepath.Dir(root)); fallback != "scope" {
+		t.Fatalf("path outside the workspace fallback = %q", fallback)
+	}
+	if got := relativeToRoot("src", []string{"src/a.ts", "src/sub/b.ts"}); !reflect.DeepEqual(got, []string{"a.ts", "sub/b.ts"}) {
+		t.Fatalf("relativeToRoot = %v", got)
+	}
+	if got := relativeToRoot("", []string{"a.ts"}); !reflect.DeepEqual(got, []string{"a.ts"}) {
+		t.Fatalf("relativeToRoot at the workspace root = %v", got)
+	}
+}
+
+func TestIndexedSearchRequiresAWriteToken(t *testing.T) {
+	d := NewDispatcher(env.Config{WorkspaceDir: t.TempDir()}, process.NewManager(slog.Default()), slog.Default())
+	d.SetSearchManager(search.NewManager(env.Config{Mode: env.ModeListen, SearchEnabled: true}, slog.Default(), nil))
+	for _, request := range []protocol.RPCRequest{
+		searchRequest(t, "fs.search", fsSearchParams{Pattern: "needle"}),
+		searchRequest(t, "fs.pathSearch", fsPathSearchParams{Pattern: "*.ts", WriteToken: "no-generation"}),
 	} {
-		if err := validateSearchLiterals(literals); err == nil {
-			t.Fatalf("invalid literals accepted: %#v", literals)
+		_, response := d.Handle(request, "")
+		failed, ok := response.(protocol.RPCFailed)
+		if !ok || failed.Error.Code != "BAD_REQUEST" {
+			t.Fatalf("%s without a valid write token = %#v", request.Method, response)
 		}
 	}
 }

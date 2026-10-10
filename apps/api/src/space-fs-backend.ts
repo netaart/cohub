@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createLogger } from "@cohub/infra/logging";
 import * as direct from "./space-fs.js";
 import * as remote from "./space-fs-remote.js";
 import { getSpaceSandboxBySpaceId } from "./space-sandboxes.js";
-import { isSandboxDialable } from "@cohub/sandbox-controller";
+import { createWorkspaceWriteStore, isSandboxDialable, runDirectWorkspaceWrite } from "@cohub/sandbox-controller";
+import { db } from "./db/index.js";
 import type { AgentSandboxFsMutationOperation } from "@cohub/infra/agent-queue";
 import { enqueueSandboxFsMutationJob, SandboxFsMutationTimeoutError } from "./sandbox-fs-mutation-queue.js";
 import { SpaceFsError, assertSafeRelativePath } from "./space-fs.js";
@@ -121,6 +123,13 @@ function asApiEventOutcome<T extends object>(result: T): ApiEventOutcome<T> {
   return { ...result, executedBy: "api" };
 }
 
+const logger = createLogger({ serviceName: "cohub-api" });
+const workspaceWrites = createWorkspaceWriteStore(db);
+
+/** Cloud writes that reach the workspace volume without the sandbox. */
+const runDirectWrite = <T>(spaceId: string, write: () => Promise<T>) =>
+  runDirectWorkspaceWrite(workspaceWrites, spaceId, write, logger);
+
 export async function listSpaceDirectory(spaceId: string, path?: string, options?: Visibility) {
   return (await isLocalSpace(spaceId))
     ? remote.listSpaceDirectory(spaceId, path, options)
@@ -158,7 +167,7 @@ export async function writeSpaceFile(
     const { mutationId, ...mutation } = input;
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "write", ...mutation }, mutationId));
   }
-  return asApiEventOutcome(await direct.writeSpaceFile(spaceId, input));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.writeSpaceFile(spaceId, input)));
 }
 
 export async function createSpaceFileExclusive(
@@ -172,7 +181,7 @@ export async function createSpaceFileExclusive(
     const { mutationId, ...mutation } = input;
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "write", ...mutation, exclusive: true }, mutationId));
   }
-  return asApiEventOutcome(await direct.createSpaceFileExclusive(spaceId, input));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.createSpaceFileExclusive(spaceId, input)));
 }
 
 export async function createSpaceDirectory(
@@ -186,7 +195,7 @@ export async function createSpaceDirectory(
   if (await isCloudSandboxDialable(spaceId)) {
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "mkdir", path }, mutationId));
   }
-  return asApiEventOutcome(await direct.createSpaceDirectory(spaceId, path));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.createSpaceDirectory(spaceId, path)));
 }
 
 export async function deleteSpaceNode(
@@ -201,7 +210,7 @@ export async function deleteSpaceNode(
   if (await isCloudSandboxDialable(spaceId)) {
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "delete", path, recursive }, mutationId));
   }
-  return asApiEventOutcome(await direct.deleteSpaceNode(spaceId, path, recursive));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.deleteSpaceNode(spaceId, path, recursive)));
 }
 
 export async function moveSpaceNode(
@@ -215,13 +224,13 @@ export async function moveSpaceNode(
   if (await isCloudSandboxDialable(spaceId)) {
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "move", fromPath: move.fromPath, toPath: move.toPath }, mutationId));
   }
-  return asApiEventOutcome(await direct.moveSpaceNode(spaceId, move));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.moveSpaceNode(spaceId, move)));
 }
 
 export async function uploadSpaceFiles(spaceId: string, files: File[], targetDir: string) {
   return (await isLocalSpace(spaceId))
     ? remote.uploadSpaceFiles(spaceId, files, targetDir)
-    : direct.uploadSpaceFiles(spaceId, files, targetDir);
+    : runDirectWrite(spaceId, () => direct.uploadSpaceFiles(spaceId, files, targetDir));
 }
 
 /**

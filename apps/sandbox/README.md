@@ -12,7 +12,7 @@
 - `fs.ls`
 - `fs.find`
 - `fs.grep`
-- `fs.search`（可选的 Tantivy 候选文件搜索）
+- `fs.search` / `fs.pathSearch`（可选的工作区索引：返回与 rg/fd 遍历等价的精确搜索计划，无法保证时返回 fallback；请求必须带 `writeToken`）
 - `process.start`
 - `process.abort`
 - `display.list` / `display.capture` / `display.input`（显示，见 `docs/displays.md`；`COHUB_DISPLAY` 选择来源：
@@ -102,7 +102,11 @@ pnpm dev
 docker build -f apps/sandbox/Dockerfile -t cohub-sandbox:latest apps/sandbox
 ```
 
-Workspace search is optional. New cloud sandboxes enable it by default: at startup the Go runtime first honors `COHUB_SEARCH_BIN` or a preinstalled binary, otherwise resolves `https://public.cohub.live/search/latest.json`, downloads the immutable linux/amd64 release, verifies its SHA-256 checksum, and starts it. Download or process failures leave `fs.search` temporarily unavailable without affecting the rest of the sandbox; the supervisor retries later. Set `COHUB_SEARCH_ENABLED=false` to disable the feature, pin `COHUB_SEARCH_VERSION=vX.Y.Z`, or override `COHUB_SEARCH_CDN_BASE_URL` for staging.
+Workspace search is optional. New cloud sandboxes enable it by default: at startup the Go runtime first honors `COHUB_SEARCH_BIN` or a preinstalled binary, otherwise resolves `https://public.cohub.live/search/latest.json`, downloads the immutable linux/amd64 release, verifies its SHA-256 checksum, and starts it. Download or process failures, an incompatible binary API version, or a file watcher that is not settled make `fs.search` and `fs.pathSearch` answer with a fallback, so the agent runs rg and fd directly; the supervisor retries later. Set `COHUB_SEARCH_ENABLED=false` to disable the feature, pin `COHUB_SEARCH_VERSION=vX.Y.Z`, or override `COHUB_SEARCH_CDN_BASE_URL` for staging.
+
+The API writes to the workspace volume directly while a sandbox is not dialable, and for every multipart upload; the worker restores or clones a new Space's workspace while its sandbox is still being provisioned. The watcher sees none of these writes. Each such writer bumps `space_sandboxes.workspace_write_gen` before and after the write (`runDirectWorkspaceWrite` in `@cohub/sandbox-controller`), and every agent search sends `writeToken` = `<sandbox row id>:<generation>`. The sandbox answers from the index only once a reconcile accepted after it first saw that token has run (fallback `writes` until then), and reconciles once more 65 s after the newest token, after another NFS client's write can no longer hide in this pod's directory cache (default `acdirmax`). The index activates once the workspace is prepared, whether or not the ready report succeeds.
+
+The watcher reports ignored entries whose parent is watched, such as a created or deleted `build` directory, in `Batch.Boundaries`. Only the index consumes them; realtime file changes are unchanged.
 
 The single built-in index remains `workspace.candidates` at `/index/workspace-candidates`, with the Unix socket at `/tmp/cohub-search/search.sock`. Override storage and socket paths with `COHUB_SEARCH_INDEX_DIR` and `COHUB_SEARCH_SOCKET`. Cloud sandboxes mount `/index` from the system PVC at `{SPACE_SYSTEM_SUBPATH}/{SPACE_ID}/index`.
 

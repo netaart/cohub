@@ -732,3 +732,5 @@ export function createSandboxLifecycleController(input: {
 
   return { getSandbox, recordActivity, recordHeartbeat, ensureRunning, stopSandbox, checkIdleSandbox, reapIdleSandboxes };
 }
+
+export * from "./workspace-writes.js";
