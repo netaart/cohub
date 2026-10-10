@@ -2,6 +2,55 @@ import type { RuntimeCapabilities } from "@neta-art/cohub";
 import { record, type JsonRecord } from "./json-rpc.js";
 
 type Model = RuntimeCapabilities["models"][number];
+type ThinkingLevel = NonNullable<Model["defaultThinkingLevel"]>;
+const thinkingLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const thinkingLevel = (value: unknown): ThinkingLevel | undefined =>
+  thinkingLevels.includes(value as ThinkingLevel) ? value as ThinkingLevel : undefined;
+
+/**
+ * Publish only picker metadata, never provider credentials or request configuration.
+ * `state` is a fresh Pi's `get_state`: its model is what Pi runs when Cohub requests
+ * nothing, and its level is resolved and clamped for that model only. Pi's levels for
+ * other models live in its settings, which RPC does not expose; those models fall back
+ * to the picker's rule, and Cohub always sends the chosen level explicitly.
+ */
+export function piModelCatalog(entries: unknown[], state: JsonRecord): Model[] {
+  const current = record(state.model);
+  const currentLevel = thinkingLevel(state.thinkingLevel);
+  return entries.flatMap((value) => {
+    const model = record(value);
+    if (typeof model.id !== "string" || !model.id || typeof model.provider !== "string" || !model.provider) return [];
+    const map = record(model.thinkingLevelMap);
+    const thinkingLevelMap = Object.fromEntries(thinkingLevels.flatMap((level) =>
+      map[level] === null || typeof map[level] === "string" ? [[level, map[level]]] : []));
+    const isDefault = current.provider === model.provider && current.id === model.id;
+    return [{
+      harness: "pi", id: model.id, provider: model.provider, name: typeof model.name === "string" ? model.name : model.id,
+      ...(isDefault ? { isDefault } : {}),
+      ...(typeof model.reasoning === "boolean" ? { reasoning: model.reasoning } : {}),
+      ...(isDefault && currentLevel ? { defaultThinkingLevel: currentLevel } : {}),
+      ...(Object.keys(thinkingLevelMap).length ? { thinkingLevelMap } : {}),
+    }];
+  });
+}
+
+function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model, "reasoning" | "defaultThinkingLevel" | "thinkingLevelMap"> {
+  if (!Array.isArray(model.supportedReasoningEfforts)) return {};
+  const efforts = new Set(model.supportedReasoningEfforts.map((entry) => record(entry).reasoningEffort));
+  const thinkingLevelMap = Object.fromEntries(thinkingLevels.map((level) => {
+    const effort = level === "off" ? "none" : level;
+    return [level, efforts.has(effort) ? effort : null];
+  }));
+  const normalize = (value: unknown) => thinkingLevel(value === "none" ? "off" : value);
+  const configured = normalize(configuredEffort);
+  const fallback = normalize(model.defaultReasoningEffort);
+  const defaultThinkingLevel = [configured, fallback].find((level) => level && thinkingLevelMap[level] != null);
+  return {
+    reasoning: thinkingLevels.some((level) => level !== "off" && thinkingLevelMap[level] != null),
+    thinkingLevelMap,
+    ...(defaultThinkingLevel ? { defaultThinkingLevel } : {}),
+  };
+}
 
 /** Codex's built-in catalog is not authoritative for an arbitrary custom provider. */
 export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]): Model[] {
@@ -14,8 +63,10 @@ export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]
     const model = record(value);
     const id = typeof model.model === "string" ? model.model : typeof model.id === "string" ? model.id : null;
     if (!id || model.hidden) return [];
-    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id }];
+    // A configured model replaces the catalog's own default.
+    const isDefault = configuredModel ? id === configuredModel : model.isDefault === true;
+    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort) }];
   });
-  if (configuredModel && !models.some((model) => model.id === configuredModel)) models.unshift({ harness: "codex", provider, id: configuredModel, name: configuredModel });
+  if (configuredModel && !models.some((model) => model.id === configuredModel)) models.unshift({ harness: "codex", provider, id: configuredModel, name: configuredModel, isDefault: true });
   return models;
 }

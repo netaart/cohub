@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { delimiter, join, resolve, win32 } from "node:path";
 import type { ContentBlock, RuntimeCapabilities } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "./json-rpc.js";
-import { codexModelCatalog } from "./model-catalog.js";
+import { codexModelCatalog, piModelCatalog } from "./model-catalog.js";
 import { downloadPublicImage } from "../safe-remote-image.js";
 
 export type HarnessOptions = { pi?: string; codex?: string };
@@ -69,10 +69,8 @@ export async function discoverHarnesses(harnesses: ("pi" | "codex")[], options: 
     try {
       if (harness === "pi") {
         const result = await rpc.request("get_available_models");
-        for (const value of array(result.models)) {
-          const model = record(value);
-          if (model.id && model.provider) models.push({ harness, id: text(model.id), provider: text(model.provider), name: text(model.name) || text(model.id) });
-        }
+        const state = await rpc.request("get_state");
+        models.push(...piModelCatalog(array(result.models), state));
       } else {
         await initializeCodex(rpc);
         const config = await rpc.request("config/read", { includeLayers: false, cwd });

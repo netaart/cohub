@@ -8,6 +8,10 @@ import SpaceWorkspaceHeader, {
 } from "$lib/features/space/modules/SpaceWorkspaceHeader.svelte";
 import { refreshRuntimeStatus } from "$lib/features/space/runtime-status.svelte";
 import { setLocalePreference } from "$lib/i18n/locale.svelte";
+import {
+	type LocalModelSelection,
+	resolveLocalModel,
+} from "$lib/model-catalog";
 import { sdk } from "$lib/sdk";
 
 const spaceId = "11111111-1111-4111-8111-111111111111";
@@ -17,27 +21,46 @@ const models = [
 		provider: "anthropic",
 		id: "claude-opus-4-6",
 		name: "Claude Opus 4.6",
+		isDefault: true,
+		defaultThinkingLevel: "medium" as const,
+		reasoning: true,
+		thinkingLevelMap: { xhigh: "high", max: "max" },
 	},
 	{
 		harness: "pi" as const,
 		provider: "openai",
 		id: "gpt-5.4",
 		name: "GPT-5.4",
+		reasoning: true,
+		thinkingLevelMap: { xhigh: "xhigh" },
 	},
 	{
 		harness: "codex" as const,
 		provider: "openai",
 		id: "gpt-5.4-codex",
 		name: "GPT-5.4 Codex",
+		isDefault: true,
+		reasoning: true,
+		defaultThinkingLevel: "medium" as const,
+		thinkingLevelMap: {
+			off: "none",
+			minimal: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+			max: null,
+		},
 	},
 ];
 type PreviewState = "ready" | "limited" | "offline" | "unknown";
 let previewState = $state<PreviewState>("ready");
 let input = $state("");
 let harness = $state<"cohub" | "pi" | "codex">("pi");
-let model = $state<{ provider: string; id: string; name?: string } | null>(
-	null,
-);
+let model = $state<LocalModelSelection | null>(null);
+const localModels = $derived(models.filter((item) => item.harness === harness));
+// Mirrors the session host: the composer always shows a resolved model and level.
+const localModel = $derived(resolveLocalModel(localModels, model));
 let status = $state<RuntimeStatus>(makeStatus());
 function makeStatus(): RuntimeStatus {
 	return {
@@ -105,6 +128,7 @@ const noop = () => {};
 			<button class="rounded border border-border-subtle px-2 py-1" onclick={() => document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"}>Theme</button>
 		</div>
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
-		<SessionComposer bind:value={input} {harness} harnesses={["cohub", "pi", "codex"]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} localModels={models.filter((item) => item.harness === harness)} localModel={model} onlocalmodelchange={(next) => { model = next; }} onsubmit={noop} onpickattachment={noop} />
+		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
+		<SessionComposer bind:value={input} {harness} harnesses={["cohub", "pi", "codex"]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

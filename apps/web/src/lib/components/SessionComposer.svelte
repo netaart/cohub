@@ -2,6 +2,7 @@
 import type { ViewportContext } from "@cohub/protocol";
 import type {
 	PromptTemplateCatalogEntry,
+	RuntimeCapabilities,
 	SkillCatalogEntry,
 	VoiceInputClient,
 } from "@neta-art/cohub";
@@ -69,6 +70,11 @@ import {
 	spaceMentionTriggerKey,
 	type TextCaret,
 } from "$lib/mentions/space-trigger";
+import {
+	formatThinkingLevelShort,
+	type LocalModelSelection,
+	toLocalModelCatalog,
+} from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -109,9 +115,9 @@ type Props = {
 	/** Whether the Space's local Runtime is connected; local harnesses are unavailable when false. */
 	runtimeOnline?: boolean;
 	onharnessopen?: () => void;
-	localModels?: SelectedModel[];
-	localModel?: SelectedModel | null;
-	onlocalmodelchange?: (model: SelectedModel | null) => void;
+	localModels?: RuntimeCapabilities["models"];
+	localModel?: LocalModelSelection | null;
+	onlocalmodelchange?: (model: LocalModelSelection) => void;
 	/** Compact thinking level suffix; null/empty hides. */
 	thinkingLevelLabel?: string | null;
 	/** Compact generation-policy suffix; null/empty hides (Auto). */
@@ -182,26 +188,13 @@ const composerPlaceholder = $derived(
 );
 
 let showLocalModelSelector = $state(false);
-const localModelCatalog = $derived(
-	localModels.map((model) => ({
-		provider: model.provider,
-		id: model.id,
-		model: { name: model.name ?? model.id },
-	})),
-);
+const localModelCatalog = $derived(toLocalModelCatalog(localModels));
 const localModelTitle = $derived(
-	localModel?.name ?? localModel?.id ?? m.runtime_default_model({}, { locale }),
+	localModel?.name ?? localModel?.id ?? m.runtime_model({}, { locale }),
 );
 
-function selectLocalModel(selected: { provider: string; id: string } | null) {
-	onlocalmodelchange?.(
-		selected
-			? (localModels.find(
-					(model) =>
-						model.provider === selected.provider && model.id === selected.id,
-				) ?? null)
-			: null,
-	);
+function selectLocalModel(selected: LocalModelSelection) {
+	onlocalmodelchange?.(selected);
 	showLocalModelSelector = false;
 }
 
@@ -1589,6 +1582,8 @@ $effect(() => {
 							{#if mode === "agent" && harness !== "cohub"}
 								<ComposerModelTrigger
 									label={localModelTitle}
+									meta={localModel?.thinkingLevel ? [formatThinkingLevelShort(localModel.thinkingLevel)] : []}
+									keepMetaVisible
 									ariaLabel={m.runtime_model({}, { locale })}
 									expanded={showLocalModelSelector}
 									disabled={disabled || sending || !runtimeOnline}
@@ -1662,12 +1657,11 @@ $effect(() => {
 	open={showLocalModelSelector}
 	onClose={() => { showLocalModelSelector = false; }}
 	onSelect={selectLocalModel}
-	onSelectDefault={() => selectLocalModel(null)}
 	showGeneration={false}
 	title={`${harnessLabels[harness]} · ${m.runtime_model({}, { locale })}`}
-	defaultLabel={m.runtime_default_model({}, { locale })}
 	models={localModelCatalog}
 	currentModel={localModel}
+	currentThinkingLevel={localModel?.thinkingLevel ?? null}
 />
 
 <style>

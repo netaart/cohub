@@ -109,7 +109,6 @@
 	"runtime_archive_ready": "Archived",
 	"runtime_archive_failed": "Archive unavailable",
 	"runtime_model": "Local model",
-	"runtime_default_model": "Harness default",
 	"common_cancel": "Cancel",
 	"common_delete": "Delete",
 	"common_edit": "Edit",

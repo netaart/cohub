@@ -54,7 +54,9 @@ import { extractSpaceMentionsFromText } from "$lib/mentions/space";
 import {
 	formatThinkingLevelShort,
 	getRequestedThinkingLevel,
+	type LocalModelSelection,
 	type ModelThinkingLevel,
+	resolveLocalModel,
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
 import {
@@ -162,6 +164,7 @@ import {
 	reconcileOptimisticTurn,
 	resolveComposerSelectionFromTurn,
 	resolveLastAgentTurnModel,
+	resolveLocalModelFromTurns,
 	resolveTurnHarness,
 	type SessionComposerSelection,
 	shouldClearComposerDraftAfterSend,
@@ -360,7 +363,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		model: null,
 	});
 	let harnessBySession = $state<Record<string, "cohub" | "pi" | "codex">>({});
-	let localModelsBySession = $state<Record<string, SelectedModel | null>>({});
+	let localModelsBySession = $state<Record<string, LocalModelSelection>>({});
 	const harnessSelectionKey = $derived(
 		`${spaceId}:${activeSessionId ?? "draft"}`,
 	);
@@ -374,20 +377,20 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		harnessBySession[harnessSelectionKey] ??
 			resolveTurnHarness(composerAgentTurns.at(-1)),
 	);
-	const localModel = $derived.by(() => {
-		const key = `${harnessSelectionKey}:${composerHarness}`;
-		if (Object.hasOwn(localModelsBySession, key))
-			return localModelsBySession[key] ?? null;
-		const previous = [...composerAgentTurns]
-			.reverse()
-			.find(
-				(turn) => resolveTurnHarness(turn) === composerHarness && turn.model,
-			);
-		return previous?.model && composerHarness !== "cohub"
-			? { id: previous.model, provider: previous.provider ?? composerHarness }
-			: null;
-	});
 	const runtimeCatalog = $derived(cachedRuntimeStatus(spaceId));
+	// Local Turns always name a model and, when the model has a choice, a level:
+	// a Harness keeps a requested level for later Turns, so leaving it out would
+	// not mean its default.
+	const localModel = $derived.by(() => {
+		if (composerHarness === "cohub") return null;
+		const requested =
+			localModelsBySession[`${harnessSelectionKey}:${composerHarness}`] ??
+			resolveLocalModelFromTurns(composerAgentTurns, composerHarness);
+		const models = runtimeCatalog?.capabilities?.models.filter(
+			(model) => model.harness === composerHarness,
+		);
+		return models ? resolveLocalModel(models, requested) : requested;
+	});
 	async function loadRuntimeCatalog() {
 		const targetSpaceId = spaceId;
 		if (!targetSpaceId) return;
@@ -3051,6 +3054,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		}
 		composer.sending = true;
 		const model = harness === "cohub" ? activeSessionModel : localModel;
+		const thinkingLevel =
+			harness === "cohub"
+				? activeSessionThinkingLevel
+				: localModel?.thinkingLevel;
 		clearComposerError();
 		// Snapshot identity for the whole send pipeline (multi-space host safe).
 		const opSpaceId = spaceId;
@@ -3268,6 +3275,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					meta: {
 						optimistic: true,
 						harness,
+						// Mirrors the server's request meta, which local model restore reads.
+						...(model ? { model: model.id, provider: model.provider } : {}),
+						...(thinkingLevel ? { requestedThinkingLevel: thinkingLevel } : {}),
 						userId: currentUser.uuid,
 						clientMessageId,
 					},
@@ -3305,9 +3315,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				model: model?.id,
 				provider: model?.provider,
 				harness,
-				...(harness === "cohub" && activeSessionThinkingLevel
-					? { thinkingLevel: activeSessionThinkingLevel }
-					: {}),
+				...(thinkingLevel ? { thinkingLevel } : {}),
 				clientMessageId,
 				...(harness === "cohub"
 					? { generationPolicy: buildTurnGenerationPolicy() }
@@ -4601,7 +4609,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		get localModel() {
 			return localModel;
 		},
-		setLocalModel(model: SelectedModel | null) {
+		setLocalModel(model: LocalModelSelection) {
 			localModelsBySession = {
 				...localModelsBySession,
 				[`${harnessSelectionKey}:${composerHarness}`]: model,

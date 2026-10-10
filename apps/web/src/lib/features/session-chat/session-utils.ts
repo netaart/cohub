@@ -1,10 +1,11 @@
+import { resolveHarness } from "@cohub/protocol";
 import type { SessionTurnRecord } from "@cohub/protocol/model";
+import type { SessionRecord, TaskRunRecord } from "@neta-art/cohub";
 import {
-	resolveHarness,
-	type SessionRecord,
-	type TaskRunRecord,
-} from "@neta-art/cohub";
-import type { ModelCatalogItem } from "$lib/model-catalog";
+	getRequestedThinkingLevel,
+	type LocalModelSelection,
+	type ModelCatalogItem,
+} from "$lib/model-catalog";
 import { mergeTurnsById } from "$lib/stores/turn-cache";
 import type { SessionViewState } from "./session-workspace-controller.svelte";
 
@@ -33,6 +34,30 @@ type ComposerTurnSource = Pick<
 	"id" | "sequence" | "executionKind" | "provider" | "model"
 > &
 	HarnessTurn;
+
+/**
+ * The last local request for this Harness, as sent: `turn.model` is the model
+ * that answered, which a Harness-default request also fills in. A request
+ * without a model leaves the choice to the catalog default.
+ */
+export function resolveLocalModelFromTurns(
+	turns: ComposerTurnSource[],
+	harness: "pi" | "codex",
+): LocalModelSelection | null {
+	const meta = turns.findLast(
+		(turn) =>
+			turn.executionKind !== "direct_generation" &&
+			resolveTurnHarness(turn) === harness,
+	)?.meta;
+	if (typeof meta?.model !== "string" || typeof meta.provider !== "string")
+		return null;
+	const thinkingLevel = getRequestedThinkingLevel(meta);
+	return {
+		id: meta.model,
+		provider: meta.provider,
+		...(thinkingLevel ? { thinkingLevel } : {}),
+	};
+}
 
 export function mergeComposerTurnSources(
 	turns: ComposerTurnSource[],

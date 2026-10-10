@@ -179,8 +179,14 @@ for (const harness of ["pi", "codex"] as const) {
     try {
       const catalog = await discoverHarnesses([harness], { [harness]: fixture(harness) }, root);
       assert.equal(catalog.models[0]?.id, "test");
+      assert.equal(catalog.models[0]?.isDefault, true);
+      if (harness === "pi") {
+        assert.equal(catalog.models[0]?.defaultThinkingLevel, "medium");
+        assert.equal(catalog.models[0]?.reasoning, true);
+        assert.equal(catalog.models[0]?.thinkingLevelMap?.xhigh, "xhigh");
+      }
       const { executor } = runtime.native;
-      const turn = input(harness);
+      const turn = { ...input(harness), thinkingLevel: "xhigh" };
       runtime.source.addTurn(sessionId, previousTurn, { userContent: [{ type: "text", text: "historical fact" }] });
       const events: RuntimeExecutionEvent[] = [];
       const first = await executeTurn(executor, turn, (event) => events.push(event), new AbortController().signal, "first");
@@ -190,6 +196,13 @@ for (const harness of ["pi", "codex"] as const) {
       const expectedAnswer = harness === "pi" ? "history retained" : "native resumed";
       assert(first.event.message.content.some((block) => block.type === "text" && block.text.includes(expectedAnswer)));
       assert.equal(first.event.archive?.turnId, turnId);
+      const recordedLevel = async (path: string) => {
+        const rows = (await readFile(path, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+        return harness === "pi"
+          ? rows.findLast((row) => row.type === "thinking_level_change")?.thinkingLevel
+          : rows.findLast((row) => row.type === "turn_context")?.payload.effort;
+      };
+      assert.equal(await recordedLevel(first.session.path), "xhigh");
       await runtime.archives.flush(new AbortController().signal);
       if (harness === "codex") {
         assert.deepEqual(events.filter((event) => event.type === "message.start").map((event) => event.ordinal), [0, 1]);
@@ -198,10 +211,11 @@ for (const harness of ["pi", "codex"] as const) {
       }
       await executor.results.record(first.session, turn, "first", [first.event]);
       await executor.results.acknowledge(sessionId, turnId);
-      const next = { ...turn, turnId: previousTurn, context: { ...turn.context, throughTurnId: turnId, revision: "two" } };
+      const next = { ...turn, thinkingLevel: "off", turnId: previousTurn, context: { ...turn.context, throughTurnId: turnId, revision: "two" } };
       const second = await executeTurn(executor, next, () => {}, new AbortController().signal, "second");
       assert.equal(second.event.resume, "native");
       assert.equal(second.session.nativeSessionId, first.session.nativeSessionId);
+      assert.equal(await recordedLevel(second.session.path), harness === "pi" ? "off" : "none");
       const original = await readFile(first.session.path, "utf8");
       cold = await testNativeRuntime({ spaceId, root, stateRoot: join(root, "cold"), harnesses: [harness], transport: storage.transport });
       const restored = await executeTurn(cold.native.executor, { ...next, sessionId, context: { ...next.context, complete: false, messages: [], archive: first.event.archive } }, () => {}, new AbortController().signal, "third");
