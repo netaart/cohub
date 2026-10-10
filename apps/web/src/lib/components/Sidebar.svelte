@@ -42,7 +42,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-svelte";
-import { onMount, tick, untrack } from "svelte";
+import { onDestroy, onMount, tick, untrack } from "svelte";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
 import { floatNear } from "$lib/actions/portal";
@@ -278,15 +278,14 @@ const labelItemsRefresh = createRefreshCoordinator<{
 	labelRef: string;
 }>({
 	keyOf: ({ spaceId, labelId }) => labelItemsLoadKey(spaceId, labelId),
-	isCurrent: ({ spaceId }) => spaceId === currentSpaceId,
+	isCurrent: ({ spaceId }) => isCurrentSpace(spaceId),
 	refresh: async ({ spaceId, labelId, labelRef }) => {
 		const result = await fetchLabelItemsFirstPageFresh(
 			spaceId,
 			labelId,
 			labelRef,
 		);
-		if (spaceId === currentSpaceId)
-			applyLabelItemsPage(spaceId, labelId, result);
+		if (isCurrentSpace(spaceId)) applyLabelItemsPage(spaceId, labelId, result);
 	},
 });
 /** Hard stop so a hung await never leaves label rows on Loading… forever. */
@@ -413,6 +412,13 @@ const fallbackSpaceId = $derived.by(() => {
 const currentSpaceId = $derived(
 	area === "spaces" ? (routeSpaceId ?? fallbackSpaceId) : null,
 );
+let destroyed = false;
+onDestroy(() => {
+	destroyed = true;
+});
+function isCurrentSpace(spaceId: string) {
+	return !destroyed && spaceId === currentSpaceId;
+}
 const activeSessionId = $derived(workspaceRoute.sessionId);
 const activeAppId = $derived(workspaceRoute.appId);
 const activeCheckpointId = $derived(workspaceRoute.checkpointId);
@@ -807,7 +813,7 @@ async function loadCurrentSpaceFromUrl(
 
 	if (!alreadyLoaded) {
 		const cached = await getCachedSpaceRecord(spaceId).catch(() => null);
-		if (spaceId !== currentSpaceId) return;
+		if (!isCurrentSpace(spaceId)) return;
 		if (cached?.space) mergeSpaceIntoSidebarList(cached.space);
 	}
 
@@ -817,11 +823,11 @@ async function loadCurrentSpaceFromUrl(
 	refresh = (async () => {
 		try {
 			const space = await sdk.space(spaceId).get();
-			if (spaceId !== currentSpaceId) return;
-			mergeSpaceIntoSidebarList(space);
 			cacheSpaceRecordSoon(space);
+			if (!isCurrentSpace(spaceId)) return;
+			mergeSpaceIntoSidebarList(space);
 		} catch (error) {
-			if (spaceId !== currentSpaceId) return;
+			if (!isCurrentSpace(spaceId)) return;
 			console.warn("[sidebar] Failed to load current space", {
 				spaceId,
 				error,
@@ -876,13 +882,13 @@ async function loadSessionsForSpace(
 ) {
 	// Cache keys are user-scoped; wait for auth on cold start.
 	await authStore.ensureLoaded();
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	const force = options?.force ?? false;
 	const allowNetwork = options?.network ?? isSessionsNetworkEnabled(spaceId);
 	if (!force && loadingSessions && loadingSessionsSpaceId === spaceId) return;
 
 	const cachedSnapshot = await getCachedSessionListSnapshot(spaceId);
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	if (!force && cachedSnapshot && cachedSnapshot.sessions.length > 0) {
 		setSessionMembers(cachedSnapshot.sessions);
 		applySessionForks(cachedSnapshot.forks);
@@ -913,7 +919,7 @@ async function loadSessionsForSpace(
 			limit: SESSION_PAGE_SIZE,
 			includeForks: true,
 		});
-		if (spaceId !== currentSpaceId) return;
+		if (!isCurrentSpace(spaceId)) return;
 		const nextSessions = sessionStore.mergeAll(result.sessions ?? []);
 		const nextPageInfo = result.pageInfo ?? {
 			hasMore: false,
@@ -934,7 +940,7 @@ async function loadSessionsForSpace(
 		).catch((error) =>
 			console.warn("[sidebar] Failed to cache sessions", { spaceId, error }),
 		);
-		if (spaceId !== currentSpaceId) return;
+		if (!isCurrentSpace(spaceId)) return;
 		sessionsPageInfo = nextPageInfo;
 	} catch (error) {
 		console.warn("[sidebar] Failed to load sessions", { spaceId, error });
@@ -961,7 +967,7 @@ async function loadMoreSessionsForSpace(spaceId: string) {
 		});
 		// A space switch resets `sessions`/`sessionsPageInfo`; drop this page unless
 		// the request still belongs to the space on screen.
-		if (spaceId !== currentSpaceId) return;
+		if (!isCurrentSpace(spaceId)) return;
 		const moreSessions = sessionStore.mergeAll(result.sessions ?? []);
 		const nextPageInfo = result.pageInfo ?? {
 			hasMore: false,
@@ -993,7 +999,7 @@ async function loadMoreSessionsForSpace(spaceId: string) {
 
 async function loadCheckpointsForSpace(spaceId: string, force = false) {
 	await authStore.ensureLoaded();
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	if (!force && loadingCheckpoints && loadingCheckpointsSpaceId === spaceId)
 		return;
 	const shouldShowLoading = checkpoints.length === 0;
@@ -1007,7 +1013,7 @@ async function loadCheckpointsForSpace(spaceId: string, force = false) {
 		const result = await sdk.space(spaceId).checkpoints.list({
 			limit: CHECKPOINT_PAGE_SIZE,
 		});
-		if (spaceId === currentSpaceId) {
+		if (isCurrentSpace(spaceId)) {
 			checkpoints = result.checkpoints ?? [];
 			checkpointsPageInfo = result.pageInfo ?? {
 				hasMore: false,
@@ -1068,7 +1074,7 @@ async function loadMoreCheckpointsForSpace(spaceId: string) {
 			limit: CHECKPOINT_PAGE_SIZE,
 			cursor,
 		});
-		if (spaceId !== currentSpaceId) return;
+		if (!isCurrentSpace(spaceId)) return;
 		const byId = new Map(
 			checkpoints.map((checkpoint) => [checkpoint.id, checkpoint]),
 		);
@@ -1097,7 +1103,7 @@ async function loadMoreCheckpointsForSpace(spaceId: string) {
 async function loadLabelsForSpace(spaceId: string, force = false) {
 	const loadToken = ++labelsLoadToken;
 	const isCurrentLoad = () =>
-		spaceId === currentSpaceId && loadToken === labelsLoadToken;
+		isCurrentSpace(spaceId) && loadToken === labelsLoadToken;
 
 	const applyLabels = (nextLabels: LabelListItem[]) => {
 		labels = nextLabels;
@@ -1183,7 +1189,7 @@ function sessionNeedsParticipantHydration(
 
 async function warmLabelSessions(spaceId: string, ids: string[]) {
 	await sessionStore.hydrate(spaceId, ids);
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	const missing = [...new Set(ids)].filter(
 		(id) =>
 			!labelSessionWarmups.has(id) &&
@@ -1286,7 +1292,7 @@ function markLabelItemsLoading(spaceId: string, labelId: string) {
 		setTimeout(() => {
 			labelItemsLoadingWatchdogs.delete(key);
 			if (labelItemsLoadTokens.get(key) !== token) return;
-			if (spaceId !== currentSpaceId) return;
+			if (!isCurrentSpace(spaceId)) return;
 			console.warn(
 				"[sidebar] Label items load timed out; clearing loading state",
 				{
@@ -1308,7 +1314,7 @@ function clearLabelItemsLoading(
 	const key = labelItemsLoadKey(spaceId, labelId);
 	if (token !== undefined && labelItemsLoadTokens.get(key) !== token) return;
 	clearLabelItemsLoadingWatchdog(spaceId, labelId);
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	const current = loadingLabelIdsBySpace[spaceId];
 	if (!current?.has(labelId)) return;
 	loadingLabelIdsBySpace = {
@@ -1351,7 +1357,7 @@ async function loadLabelItems(
 	const spaceId = currentSpaceId;
 	if (!spaceId) return;
 	await authStore.ensureLoaded();
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	const append = options?.append ?? false;
 	const force = options?.force ?? false;
 	const spacePageInfo = labelItemsPageInfoBySpace[spaceId] ?? {};
@@ -1376,7 +1382,7 @@ async function loadLabelItems(
 					return null;
 				},
 			);
-			if (spaceId !== currentSpaceId) return;
+			if (!isCurrentSpace(spaceId)) return;
 			if (cached) {
 				applyLabelItemsPage(spaceId, labelId, cached);
 				if (!cached.stale) return;
@@ -1398,7 +1404,7 @@ async function loadLabelItems(
 				limit: LABEL_ITEMS_PAGE_SIZE,
 				cursor: spacePageInfo[labelId]?.nextCursor,
 			});
-			if (spaceId !== currentSpaceId) return;
+			if (!isCurrentSpace(spaceId)) return;
 			applyLabelItemsPage(spaceId, labelId, result, { append: true });
 			return;
 		}
@@ -1477,7 +1483,7 @@ function refreshExpandedSessionActivityLabels(
 	sessionIds: string[],
 ) {
 	const expanded = expandedLabelIdsBySpace[spaceId];
-	if (!expanded || spaceId !== currentSpaceId) return;
+	if (!expanded || !isCurrentSpace(spaceId)) return;
 	for (const label of flattenLabels(labels)) {
 		if (!expanded.has(label.id) || !isSessionActivityLabel(label)) continue;
 		const listed = new Set(
@@ -1581,7 +1587,7 @@ function pruneExpandedLabelIds(spaceId: string, nextLabels: LabelListItem[]) {
 
 function refreshExpandedLabelItems(spaceId: string) {
 	const expanded = expandedLabelIdsBySpace[spaceId];
-	if (!expanded || spaceId !== currentSpaceId) return;
+	if (!expanded || !isCurrentSpace(spaceId)) return;
 	for (const labelId of expanded) {
 		if (labelId !== ALL_CHATS_LABEL_ID)
 			void loadLabelItems(labelId, { force: true });
@@ -2023,7 +2029,7 @@ function isLabelAssignmentActive(item: LabelAssignmentListItem) {
 
 async function loadCronjobsForSpace(spaceId: string, force = false) {
 	await authStore.ensureLoaded();
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	if (!force && loadingCronjobs && loadingCronjobsSpaceId === spaceId) return;
 	const shouldShowLoading = cronjobs.length === 0;
 	if (shouldShowLoading) {
@@ -2034,7 +2040,7 @@ async function loadCronjobsForSpace(spaceId: string, force = false) {
 	}
 	try {
 		const result = await sdk.cronJobs.list(spaceId);
-		if (spaceId === currentSpaceId) cronjobs = result.jobs ?? [];
+		if (isCurrentSpace(spaceId)) cronjobs = result.jobs ?? [];
 	} catch (error) {
 		console.warn("[sidebar] Failed to load cronjobs", { spaceId, error });
 	} finally {
@@ -2048,13 +2054,12 @@ async function loadCronjobsForSpace(spaceId: string, force = false) {
 
 async function restoreTasksForSpace(spaceId: string) {
 	const cachedRuns = getCachedTaskRuns(spaceId);
-	if (cachedRuns.length > 0 && spaceId === currentSpaceId) {
+	if (cachedRuns.length > 0 && isCurrentSpace(spaceId)) {
 		tasks = cachedRuns.slice(0, TASK_PAGE_SIZE);
 	}
 	try {
 		const restoredRuns = await restoreCachedTaskRuns(spaceId);
-		if (spaceId === currentSpaceId)
-			tasks = restoredRuns.slice(0, TASK_PAGE_SIZE);
+		if (isCurrentSpace(spaceId)) tasks = restoredRuns.slice(0, TASK_PAGE_SIZE);
 	} catch (error) {
 		console.warn("[sidebar] Failed to restore cached tasks", {
 			spaceId,
@@ -2065,7 +2070,7 @@ async function restoreTasksForSpace(spaceId: string) {
 
 async function loadTasksForSpace(spaceId: string, force = false) {
 	await authStore.ensureLoaded();
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	if (!force && loadingTasks && loadingTasksSpaceId === spaceId) return;
 	const shouldShowLoading = tasks.length === 0;
 	if (shouldShowLoading) {
@@ -2076,7 +2081,7 @@ async function loadTasksForSpace(spaceId: string, force = false) {
 	}
 	try {
 		const result = await sdk.tasks.list({ spaceId, limit: TASK_PAGE_SIZE });
-		if (spaceId === currentSpaceId) {
+		if (isCurrentSpace(spaceId)) {
 			tasks = result.runs ?? [];
 			tasksPageInfo = result.pageInfo ?? { hasMore: false, nextCursor: null };
 			setCachedTaskRuns(spaceId, tasks);
@@ -2103,7 +2108,7 @@ async function loadMoreTasksForSpace(spaceId: string) {
 			limit: TASK_PAGE_SIZE,
 			cursor,
 		});
-		if (spaceId !== currentSpaceId) return;
+		if (!isCurrentSpace(spaceId)) return;
 		const moreRuns = result.runs ?? [];
 		const runById = new Map(tasks.map((run) => [run.id, run]));
 		for (const run of moreRuns) runById.set(run.id, run);
@@ -2124,7 +2129,7 @@ async function loadMoreTasksForSpace(spaceId: string) {
 /** Fold buffered realtime mutations onto a freshly fetched list. */
 async function loadAppsForSpace(spaceId: string, force = false) {
 	await authStore.ensureLoaded();
-	if (spaceId !== currentSpaceId) return;
+	if (!isCurrentSpace(spaceId)) return;
 	if (!force && loadingApps && loadingAppsSpaceId === spaceId) return;
 	const shouldShowLoading = apps.length === 0;
 	if (shouldShowLoading) {
@@ -2136,7 +2141,7 @@ async function loadAppsForSpace(spaceId: string, force = false) {
 	appsBuffer.reset();
 	try {
 		const result = await sdk.apps.listBySpace(spaceId);
-		if (spaceId === currentSpaceId) {
+		if (isCurrentSpace(spaceId)) {
 			// The API serves newest-updated-first; sorting again keeps a realtime
 			// snapshot replayed mid-request in its right place.
 			apps = sortAppsByRecentUpdate(appsBuffer.apply(result.apps ?? []));
@@ -2684,7 +2689,7 @@ onMount(() => {
 	});
 	const offSessionListCacheUpdated = onSessionListCacheUpdated(
 		({ spaceId, sessions: nextSessions, forks, pageInfo }) => {
-			if (spaceId !== currentSpaceId) return;
+			if (!isCurrentSpace(spaceId)) return;
 			const shouldPreserveLoadedPageInfo =
 				sessionIds.length > nextSessions.length;
 			const known = new Set(sessionIds);
@@ -2701,7 +2706,7 @@ onMount(() => {
 	);
 	const offSpaceLabelsCacheUpdated = onSpaceLabelsCacheUpdated(
 		({ spaceId, labels: nextLabels }) => {
-			if (spaceId !== currentSpaceId) return;
+			if (!isCurrentSpace(spaceId)) return;
 			labels = nextLabels;
 			pruneExpandedLabelIds(spaceId, nextLabels);
 			hydrateSystemLabelDisplays(nextLabels);
@@ -2718,7 +2723,7 @@ onMount(() => {
 	hydrateSystemLabelDisplays(labels);
 	const offTaskRunsCacheUpdated = onTaskRunsCacheUpdated(
 		({ spaceId, runs }) => {
-			if (spaceId !== currentSpaceId) return;
+			if (!isCurrentSpace(spaceId)) return;
 			tasks = runs;
 		},
 	);
@@ -2764,7 +2769,7 @@ onMount(() => {
 			affectedLabelIds?: string[];
 		}>;
 		const spaceId = custom.detail?.spaceId;
-		if (!spaceId || spaceId !== currentSpaceId) return;
+		if (!spaceId || !isCurrentSpace(spaceId)) return;
 		const expanded = expandedLabelIdsBySpace[spaceId];
 		if (!expanded) return;
 		for (const labelId of custom.detail?.affectedLabelIds ?? []) {

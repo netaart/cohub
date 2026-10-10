@@ -173,13 +173,11 @@ function disableVConsole() {
 	vConsole = null;
 }
 
+const isLeftDragging = $derived(isDragging && activeGestureType === "left");
 const isDrawerVisible = $derived(
-	isDragging || gesturePhase === "settling" || uiState.mobileDrawerOpen,
-);
-const isRightDrawerVisible = $derived(
-	uiState.rightIsDragging ||
-		gesturePhase === "settling" ||
-		uiState.mobileRightDrawerOpen,
+	uiState.mobileDrawerOpen ||
+		isLeftDragging ||
+		(gesturePhase === "settling" && activeGestureType === "left"),
 );
 
 function resetGestureState() {
@@ -208,7 +206,6 @@ function beginSettling(open: boolean) {
 	isDragging = false;
 	uiState.rightIsDragging = false;
 	activeTouchId = null;
-	activeGestureType = null;
 	gestureDirection = null;
 	velocityX = 0;
 	lastPointerTime = 0;
@@ -527,6 +524,7 @@ $effect(() => {
 	const timer = window.setTimeout(() => {
 		if (gesturePhase === "settling") {
 			gesturePhase = "idle";
+			activeGestureType = null;
 			if (!uiState.mobileRightDrawerOpen) uiState.rightDragOffsetPx = 0;
 			if (!uiState.mobileDrawerOpen) dragOffsetPx = 0;
 		}
@@ -662,7 +660,7 @@ onMount(() => {
   <!-- Mobile left drawer — outside flex container to avoid stacking context issues -->
   <MobileSidebarDrawer
     dragOffsetPx={dragOffsetPx}
-    {isDragging}
+    isDragging={isLeftDragging}
     {isDrawerVisible}
   />
 
