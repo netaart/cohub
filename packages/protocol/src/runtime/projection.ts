@@ -242,6 +242,11 @@ function codexOutput(block: ContentBlock): Record<string, unknown>[] {
   return block.type === "text" ? [{ type: "output_text", text: block.text }] : [];
 }
 
+// OpenAI Responses rejects call_id longer than 64 chars; other providers (e.g. Pi via Cursor) emit longer ids.
+// Hashing keeps the call/output pair linked without per-session state.
+const CODEX_CALL_ID_MAX = 64;
+const codexCallId = (id: string) => id.length <= CODEX_CALL_ID_MAX ? id : `call_${fingerprint(id)}`;
+
 function codexMessageRecords(input: ProjectionInput, message: CanonicalProjectionMessage, warnings: ProjectionWarning[]): ProjectionRecord[] {
   const timestamp = timestampOf(message, input.timestamp ?? DEFAULT_TIMESTAMP);
   const records: ProjectionRecord[] = [];
@@ -256,8 +261,8 @@ function codexMessageRecords(input: ProjectionInput, message: CanonicalProjectio
       const content = codexInputContent(block);
       if (content.length) push(records.length, { type: "message", role: "user", content });
     } else if (block.type === "thinking") push(records.length, { type: "reasoning", summary: [{ type: "summary_text", text: block.thinking }], content: null, encrypted_content: null });
-    else if (block.type === "tool_use") push(records.length, { type: "function_call", name: block.name, arguments: JSON.stringify(block.input), call_id: block.id });
-    else if (block.type === "tool_result") push(records.length, { type: "function_call_output", call_id: block.tool_use_id, output: typeof block.content === "string" ? block.content : block.content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n") });
+    else if (block.type === "tool_use") push(records.length, { type: "function_call", name: block.name, arguments: JSON.stringify(block.input), call_id: codexCallId(block.id) });
+    else if (block.type === "tool_result") push(records.length, { type: "function_call_output", call_id: codexCallId(block.tool_use_id), output: typeof block.content === "string" ? block.content : block.content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n") });
   }
   if (plain) records.push({ key: `${message.id}:${message.turnId}:event`, sourceTurnId: message.turnId, sourceMessageId: message.id, record: { timestamp, type: "event_msg", payload: { type: message.role === "user" ? "user_message" : "agent_message", message: plain, kind: "plain" } } });
   return records;
