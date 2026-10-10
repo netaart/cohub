@@ -33,11 +33,16 @@ import {
 } from "../runtime/tools/local-cross-space-query-tools.js";
 import { createRgJsonGrepCollector, formatRgJsonGrepResult } from "../runtime/tools/grep-json-format.js";
 import {
+  buildRgGlobArgv,
   buildRgPlanRuns,
   chunkArgs,
+  diffSets,
   joinSearchPath,
+  onlyVanishedFdRoots,
   onlyVanishedTargets,
   PROCESS_ARGV_LIMITS,
+  rgMatchKeys,
+  SEARCH_TOOL_EXCLUDES,
   type RgRun,
 } from "../runtime/tools/search-plan.js";
 
@@ -47,10 +52,11 @@ import type { TaskPayload } from "@cohub/protocol/task";
 import { RUN_COMMAND_TASK_TYPE } from "@cohub/core/commands";
 import { enqueueTaskRun } from "@cohub/core/tasks";
 import { COHUB_TASKS_QUEUE, createBullmqQueue } from "@cohub/infra/bullmq";
-import type { ProcessTermination, RpcMethod, RpcRequestMap } from "@cohub/protocol/sandbox";
+import type { FsSearchFallback, ProcessTermination, RpcMethod, RpcRequestMap } from "@cohub/protocol/sandbox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { wrapToolCall, wrapSandboxRpc, getAgentTracer } from "@cohub/infra/tracing/agent";
-import { createSandboxLifecycleController } from "@cohub/sandbox-controller";
+import { createSandboxLifecycleController, createWorkspaceWriteStore, readWorkspaceWriteToken } from "@cohub/sandbox-controller";
+import { trace } from "@opentelemetry/api";
 import {
   getAgentPlatformAgentsPath,
   getAgentPlatformConfigPath,
@@ -93,6 +99,7 @@ const taskQueue = createBullmqQueue(COHUB_TASKS_QUEUE, {
 });
 
 const sandboxLifecycle = createSandboxLifecycleController({ db, infra: null });
+const workspaceWrites = createWorkspaceWriteStore(db);
 const SANDBOX_PROVIDER_CACHE_TTL_MS = 30_000;
 const sandboxProviderCache = new Map<string, { provider: "cloud" | "local"; expiresAt: number }>();
 
@@ -888,8 +895,7 @@ function buildFdFindFlags(input: { useFullPath: boolean; ignore?: string[] }) {
     "--hidden",
     "--no-require-git",
     "--no-global-ignore-file",
-    "--exclude",
-    ".git",
+    ...SEARCH_TOOL_EXCLUDES.flatMap((name) => ["--exclude", name]),
     "--type",
     "f",
     "--type",
@@ -910,6 +916,37 @@ function isSandboxWorkspacePath(searchPath: string) {
 }
 
 /**
+ * Why a grep or find did or did not use the workspace index: `plan`, a
+ * sandbox fallback reason, or an agent-side reason. Recorded on the tool span.
+ */
+type SearchIndexOutcome = "plan" | FsSearchFallback | "disabled" | "no_write_token" | "rpc_error" | "argv";
+
+function recordSearchIndexOutcome(tool: "find" | "grep", outcome: SearchIndexOutcome) {
+  trace.getActiveSpan()?.setAttribute("cohub.search_index.outcome", outcome);
+  logger.debug(`[Tool:${tool}] search index outcome=${outcome}`);
+}
+
+/**
+ * Whether the index may be asked, and the write token the sandbox needs to
+ * tell whether it has seen every direct workspace write. Null means the walk
+ * runs alone.
+ */
+async function searchIndexWriteToken(tool: "find" | "grep", connection: SandboxConnection, path: string): Promise<string | null> {
+  if (agentEnv.AGENT_SEARCH_INDEX === "off" || connection.capabilities?.fsSearchIndex !== true || !isSandboxWorkspacePath(path)) {
+    recordSearchIndexOutcome(tool, "disabled");
+    return null;
+  }
+  const token = await readWorkspaceWriteToken(workspaceWrites, getCurrentSpaceId()).catch((error) => {
+    logger.warn(`[Tool:${tool}] failed to read the workspace write token`, error);
+    return null;
+  });
+  if (!token) recordSearchIndexOutcome(tool, "no_write_token");
+  return token;
+}
+
+type FindIndexMatches = { matches: string[]; truncated: boolean; dirs: string[] };
+
+/**
  * Asks the workspace path index what fd would list. Returns null whenever the
  * index cannot answer exactly, so the caller runs fd over the whole path.
  */
@@ -917,26 +954,70 @@ async function resolveFindIndexMatches(
   connection: SandboxConnection,
   input: { pattern: string; useFullPath: boolean; path: string; limit: number },
   context: ToolRpcContext,
-): Promise<{ matches: string[]; truncated: boolean; dirs: string[] } | null> {
-  if (connection.capabilities?.fsSearchIndex !== true || !isSandboxWorkspacePath(input.path)) return null;
+): Promise<FindIndexMatches | null> {
+  const writeToken = await searchIndexWriteToken("find", connection, input.path);
+  if (!writeToken) return null;
   try {
     const result = await tracedRpc(
       connection,
       "fs.pathSearch",
-      { pattern: input.pattern, path: input.path, cwd: SANDBOX_WORKSPACE_PATH, limit: input.limit, fullPath: input.useFullPath },
+      { writeToken, pattern: input.pattern, path: input.path, cwd: SANDBOX_WORKSPACE_PATH, limit: input.limit, fullPath: input.useFullPath },
       { context },
       false,
     );
     if (result.fallback !== undefined) {
-      logger.debug(`[Tool:find] path index fallback=${result.fallback}`);
+      recordSearchIndexOutcome("find", result.fallback);
       return null;
     }
+    recordSearchIndexOutcome("find", "plan");
     logger.debug(`[Tool:find] path index matches=${result.matches.length} dirs=${result.dirs.length}`);
     return result;
   } catch (error) {
+    recordSearchIndexOutcome("find", "rpc_error");
     logger.debug(`[Tool:find] path index unavailable, running fd: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
+}
+
+type FdRootsOutcome = { kind: "complete" } | { kind: "aborted"; note: string } | { kind: "outputLimit" };
+
+/**
+ * Runs fd over `roots`, chunked below the argv limit, until `limit()` matches
+ * are left to find. With `planned`, roots that vanished after the index plan
+ * was made are not errors: a walk of the search path would not see them.
+ */
+async function executeFdRoots(
+  roots: string[],
+  runner: SandboxProcessRunner,
+  input: { flags: string[]; pattern: string; path: string; planned: boolean; limit: () => number; onMatch: (match: string) => void; onChunk?: () => void },
+): Promise<FdRootsOutcome> {
+  const head = [...input.flags, "--max-results", String(input.limit()), "--", input.pattern];
+  for (const chunk of chunkArgs(head, roots, PROCESS_ARGV_LIMITS)) {
+    if (input.limit() <= 0) break;
+    let lineBuffer = "";
+    const argv = [...input.flags, "--max-results", String(input.limit()), "--", input.pattern, ...chunk];
+    const result = await runner.run(argv, (output) => {
+      lineBuffer += output;
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() ?? "";
+      for (const line of lines) input.onMatch(formatFdFindPath(line.trim(), input.path));
+    });
+    if (lineBuffer.trim()) input.onMatch(formatFdFindPath(lineBuffer.trim(), input.path));
+    input.onChunk?.();
+
+    if (runner.aborted) return { kind: "aborted", note: "Operation aborted." };
+    if (result.stdoutLimitReached) return { kind: "outputLimit" };
+    const termination = result.termination;
+    if (termination && termination.reason !== "exited") {
+      if (termination.reason === "aborted") return { kind: "aborted", note: termination.message ?? "Operation aborted." };
+      throw new Error(termination.message || `fd ${termination.reason}`);
+    }
+    if (result.exitCode == null) throw new Error("fd exited without an exit code");
+    if (result.exitCode !== 0 && !(input.planned && onlyVanishedFdRoots(result.stderr, chunk))) {
+      throw new Error(result.stderr.trim() || `fd exited with code ${result.exitCode}`);
+    }
+  }
+  return { kind: "complete" };
 }
 
 function formatFdFindPath(filePath: string, searchPath: string) {
@@ -1003,12 +1084,12 @@ function createRemoteFindOperations(): FindOperations {
           const indexed = options.ignore?.length
             ? null
             : await resolveFindIndexMatches(connection, { pattern: effectivePattern, useFullPath, path, limit: options.limit }, rpcContext);
-          for (const match of indexed?.matches ?? []) pushMatch(match);
+          const answeredByIndex = agentEnv.AGENT_SEARCH_INDEX === "on" && indexed !== null;
+          if (answeredByIndex) for (const match of indexed.matches) pushMatch(match);
           // The index lists every entry except the contents of directories
           // outside the watched domain, which fd still walks.
-          const roots = indexed ? indexed.dirs.map((dir) => joinSearchPath(path, dir)) : [path];
-
-          const runner = new SandboxProcessRunner({
+          const roots = answeredByIndex ? indexed.dirs.map((dir) => joinSearchPath(path, dir)) : [path];
+          const newRunner = () => new SandboxProcessRunner({
             connection,
             context: rpcContext,
             toolName: "find",
@@ -1018,37 +1099,40 @@ function createRemoteFindOperations(): FindOperations {
             maxStderrBytes: FD_FIND_MAX_STDERR_BYTES,
             signal: toolCtx?.abortSignal,
           });
-          try {
-            const head = [...flags, "--max-results", String(options.limit), "--", effectivePattern];
-            for (const chunk of chunkArgs(head, roots, PROCESS_ARGV_LIMITS)) {
-              if (matches.length >= options.limit) break;
-              let lineBuffer = "";
-              const argv = [...flags, "--max-results", String(options.limit - matches.length), "--", effectivePattern, ...chunk];
-              const result = await runner.run(argv, (output) => {
-                lineBuffer += output;
-                const lines = lineBuffer.split("\n");
-                lineBuffer = lines.pop() ?? "";
-                for (const line of lines) pushMatch(formatFdFindPath(line.trim(), path));
-              });
-              if (lineBuffer.trim()) pushMatch(formatFdFindPath(lineBuffer.trim(), path));
-              updates.flush();
+          const fd = { flags, pattern: effectivePattern, path };
 
-              if (runner.aborted) return { matches, note: "Operation aborted." };
-              if (result.stdoutLimitReached) return { matches, note: FD_FIND_OUTPUT_LIMIT_MESSAGE, details: { outputLimitReached: true, partial: true } };
-              const termination = result.termination;
-              if (termination && termination.reason !== "exited") {
-                if (termination.reason === "aborted") return { matches, note: termination.message ?? "Operation aborted." };
-                throw new Error(termination.message || `fd ${termination.reason}`);
-              }
-              if (result.exitCode == null) throw new Error("fd exited without an exit code");
-              if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `fd exited with code ${result.exitCode}`);
-            }
-            updates.flush();
-            if (indexed?.truncated || matches.length >= options.limit) return { matches, note: findLimitNote(options.limit) };
-            return matches;
+          const runner = newRunner();
+          let outcome: FdRootsOutcome;
+          try {
+            outcome = await executeFdRoots(roots, runner, { ...fd, planned: answeredByIndex, limit: () => options.limit - matches.length, onMatch: pushMatch, onChunk: () => updates.flush() });
           } finally {
             runner.dispose();
           }
+          updates.flush();
+          if (outcome.kind === "aborted") return { matches, note: outcome.note };
+          if (outcome.kind === "outputLimit") return { matches, note: FD_FIND_OUTPUT_LIMIT_MESSAGE, details: { outputLimitReached: true, partial: true } };
+          if (!answeredByIndex && indexed && !indexed.truncated && matches.length < options.limit) {
+            const shadow: string[] = [];
+            const keep = (match: string) => {
+              if (baseRelative != null) {
+                const relativePath = match === "." ? baseRelative : baseRelative ? `${baseRelative}/${match}` : match;
+                if (!filter.isVisible(relativePath)) return;
+              }
+              shadow.push(match);
+            };
+            for (const match of indexed.matches) keep(match);
+            const shadowRunner = newRunner();
+            try {
+              const shadowOutcome = await executeFdRoots(indexed.dirs.map((dir) => joinSearchPath(path, dir)), shadowRunner, { ...fd, planned: true, limit: () => options.limit, onMatch: keep });
+              recordSearchIndexShadow("find", shadowOutcome.kind === "complete" ? diffSets(new Set(matches), new Set(shadow)) : { status: "incomplete" });
+            } catch (error) {
+              logger.warn("[Tool:find] search index shadow comparison failed", error);
+            } finally {
+              shadowRunner.dispose();
+            }
+          }
+          if ((answeredByIndex && indexed.truncated) || matches.length >= options.limit) return { matches, note: findLimitNote(options.limit) };
+          return matches;
         }
 
         // Agent owns tool semantics: match pi-coding-agent fd behavior.
@@ -1087,9 +1171,8 @@ const RG_GREP_OUTPUT_LIMIT_MESSAGE = "Grep output limit reached. Refine pattern,
 const GREP_INDEX_MAX_TARGETS = 512;
 
 /**
- * rg flags without the glob, pattern or targets. `--no-config` keeps the
- * search independent of a user ripgrep config, and `!.git` hides git metadata
- * at any depth, like the fd invocation and the workspace index.
+ * rg flags without globs, pattern or targets. `--no-config` keeps the search
+ * independent of a user ripgrep config.
  */
 function buildRgGrepFlags(input: GrepToolInput) {
   const argv = [
@@ -1100,8 +1183,6 @@ function buildRgGrepFlags(input: GrepToolInput) {
     "--hidden",
     "--no-require-git",
     "--no-config",
-    "--glob",
-    "!.git",
   ];
   // Match the legacy fs.grep request: maxCount is only sent when the user
   // explicitly provides limit. The total limit counts matches when formatting.
@@ -1123,13 +1204,15 @@ async function resolveGrepIndexRuns(
   context: ToolRpcContext,
 ): Promise<RgRun[] | null> {
   const { grep, searchPath } = input;
-  if (connection.capabilities?.fsSearchIndex !== true || !isSandboxWorkspacePath(searchPath)) return null;
+  const writeToken = await searchIndexWriteToken("grep", connection, searchPath);
+  if (!writeToken) return null;
   let result: RpcRequestMap["fs.search"]["result"];
   try {
     result = await tracedRpc(
       connection,
       "fs.search",
       {
+        writeToken,
         pattern: grep.pattern,
         path: searchPath,
         cwd: SANDBOX_WORKSPACE_PATH,
@@ -1142,15 +1225,20 @@ async function resolveGrepIndexRuns(
       false,
     );
   } catch (error) {
+    recordSearchIndexOutcome("grep", "rpc_error");
     logger.debug(`[Tool:grep] index unavailable, running rg walk: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
   if (result.fallback !== undefined) {
-    logger.debug(`[Tool:grep] index fallback=${result.fallback}`);
+    recordSearchIndexOutcome("grep", result.fallback);
     return null;
   }
   const runs = buildRgPlanRuns({ flags: input.flags, globArgv: input.globArgv, pattern: grep.pattern, searchPath, plan: result });
-  if (!runs) return null;
+  if (!runs) {
+    recordSearchIndexOutcome("grep", "argv");
+    return null;
+  }
+  recordSearchIndexOutcome("grep", "plan");
   logger.debug(`[Tool:grep] index files=${result.files.length} walkFiles=${result.walkFiles.length} dirs=${result.dirs.length} runs=${runs.length}`);
   // With no candidates rg still validates the pattern, so syntax errors are
   // reported exactly as a walk would report them.
@@ -1166,6 +1254,102 @@ function isRgNoMatchOutput(lines: readonly string[]) {
       return false;
     }
   });
+}
+
+type RgRunsOutcome =
+  | { kind: "complete" }
+  | { kind: "aborted" }
+  | { kind: "outputLimit" }
+  | { kind: "terminated"; termination: ProcessTermination; message: string }
+  | { kind: "failed"; message: string };
+
+type RgJsonGrepCollector = ReturnType<typeof createRgJsonGrepCollector>;
+
+/**
+ * Runs rg invocations in order into one collector, stopping once `limit`
+ * matches are collected. Targets that vanished after planning are not errors:
+ * a walk of the search path would not have seen them either.
+ */
+async function executeRgRuns(
+  runs: RgRun[],
+  collector: RgJsonGrepCollector,
+  runner: SandboxProcessRunner,
+  options: { limit: number | null; onOutput?: () => void },
+): Promise<RgRunsOutcome> {
+  for (const run of runs) {
+    if (runner.aborted) return { kind: "aborted" };
+    const runStart = collector.lines.length;
+    const result = await runner.run(run.argv, (chunk) => {
+      if (collector.push(chunk)) options.onOutput?.();
+    });
+    if (collector.end()) options.onOutput?.();
+    if (runner.aborted) return { kind: "aborted" };
+    if (result.stdoutLimitReached || result.termination?.outputTruncated) return { kind: "outputLimit" };
+    if (result.termination && result.termination.reason !== "exited") {
+      return { kind: "terminated", termination: result.termination, message: result.termination.message || `rg ${result.termination.reason}` };
+    }
+    const exitCode = result.exitCode ?? 0;
+    const stderr = result.stderr.trim();
+    const ignorableRgError = stderr.includes("No files were searched") || onlyVanishedTargets(stderr, run.targets);
+    if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(collector.lines.slice(runStart))) && !ignorableRgError) {
+      return { kind: "failed", message: stderr || `rg exited with code ${exitCode}` };
+    }
+    if (options.limit !== null && collector.matches >= options.limit) break;
+  }
+  return { kind: "complete" };
+}
+
+/**
+ * Shadow mode: after a complete rg walk answered, run the index plan too and
+ * report every match one side found and the other did not. The comparison
+ * never changes the answer and never fails the tool call.
+ */
+async function compareGrepShadow(input: {
+  indexRuns: RgRun[];
+  walkLines: readonly string[];
+  searchPath?: string;
+  connection: SandboxConnection;
+  context: ToolRpcContext;
+  toolCallId: string;
+  signal?: AbortSignal;
+}) {
+  const shadow = createRgJsonGrepCollector({ searchPath: input.searchPath, limit: Number.MAX_SAFE_INTEGER });
+  const runner = new SandboxProcessRunner({
+    connection: input.connection,
+    context: input.context,
+    toolName: "grep",
+    toolCallId: input.toolCallId,
+    timeoutSecs: RG_GREP_TIMEOUT_SECS,
+    maxStdoutBytes: RG_GREP_MAX_STDOUT_BYTES,
+    maxStderrBytes: RG_GREP_MAX_STDERR_BYTES,
+    signal: input.signal,
+  });
+  try {
+    const outcome = await executeRgRuns(input.indexRuns, shadow, runner, { limit: null });
+    if (outcome.kind !== "complete") {
+      recordSearchIndexShadow("grep", { status: "incomplete" });
+      return;
+    }
+    recordSearchIndexShadow("grep", diffSets(rgMatchKeys(input.walkLines), rgMatchKeys(shadow.lines)));
+  } catch (error) {
+    logger.warn("[Tool:grep] search index shadow comparison failed", error);
+  } finally {
+    runner.dispose();
+  }
+}
+
+/** A shadow difference means the index would have answered wrongly. */
+function recordSearchIndexShadow(tool: "find" | "grep", result: { status: "incomplete" } | { missing: number; extra: number; sample: string[] }) {
+  const span = trace.getActiveSpan();
+  if ("status" in result) {
+    span?.setAttribute("cohub.search_index.shadow", "incomplete");
+    return;
+  }
+  const differs = result.missing > 0 || result.extra > 0;
+  span?.setAttribute("cohub.search_index.shadow", differs ? "diff" : "match");
+  if (!differs) return;
+  span?.setAttributes({ "cohub.search_index.shadow_missing": result.missing, "cohub.search_index.shadow_extra": result.extra });
+  logger.warn(`[Tool:${tool}] search index plan differs from the walk spaceId=${getCurrentSpaceId()} missing=${result.missing} extra=${result.extra} sample=${JSON.stringify(result.sample)}`);
 }
 
 /**
@@ -1237,9 +1421,10 @@ function createRemoteGrepTool() {
         };
 
         const flags = buildRgGrepFlags(grepInput);
-        const globArgv = grepInput.glob?.trim() ? ["--glob", grepInput.glob] : [];
-        const runs = await resolveGrepIndexRuns(connection, { grep: grepInput, searchPath, flags, globArgv }, rpcContext)
-          ?? [{ argv: [...flags, ...globArgv, "--", grepInput.pattern, searchPath], targets: [searchPath] }];
+        const globArgv = buildRgGlobArgv(grepInput.glob);
+        const walkRuns: RgRun[] = [{ argv: [...flags, ...globArgv, "--", grepInput.pattern, searchPath], targets: [searchPath] }];
+        const indexRuns = await resolveGrepIndexRuns(connection, { grep: grepInput, searchPath, flags, globArgv }, rpcContext);
+        const runs = agentEnv.AGENT_SEARCH_INDEX === "on" ? indexRuns ?? walkRuns : walkRuns;
         const runner = new SandboxProcessRunner({
           connection,
           context: rpcContext,
@@ -1250,49 +1435,32 @@ function createRemoteGrepTool() {
           maxStderrBytes: RG_GREP_MAX_STDERR_BYTES,
           signal,
         });
+        let outcome: RgRunsOutcome;
         try {
-          // Runs execute in order and stop once the match limit is covered.
-          for (const run of runs) {
-            if (runner.aborted) {
-              updates.flush();
-              return partialResult("Operation aborted.", { termination: { reason: "aborted", exitCode: null, message: "Operation aborted." } });
-            }
-            const runStart = collector.lines.length;
-            const result = await runner.run(run.argv, (chunk) => {
-              if (collector.push(chunk)) emitPartial();
-            });
-            if (collector.end()) emitPartial();
-
-            if (runner.aborted) {
-              updates.flush();
-              return partialResult("Operation aborted.", { termination: { reason: "aborted", exitCode: null, message: "Operation aborted." } });
-            }
-            if (result.stdoutLimitReached || result.termination?.outputTruncated) {
-              updates.flush();
-              return partialResult(RG_GREP_OUTPUT_LIMIT_MESSAGE, { outputLimitReached: true, partial: true });
-            }
-            if (result.termination && result.termination.reason !== "exited") {
-              updates.flush();
-              const message = result.termination.message || `rg ${result.termination.reason}`;
-              return partialResult(`${message}. Results may be incomplete.`, { termination: result.termination, partial: true });
-            }
-            const exitCode = result.exitCode ?? 0;
-            const stderr = result.stderr.trim();
-            const ignorableRgError = stderr.includes("No files were searched") || onlyVanishedTargets(stderr, run.targets);
-            if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(collector.lines.slice(runStart))) && !ignorableRgError) {
-              updates.flush();
-              return {
-                content: [{ type: "text" as const, text: stderr || `rg exited with code ${exitCode}` }],
-                details: createToolFailure(stderr || `rg exited with code ${exitCode}`),
-              };
-            }
-            if (collector.matches >= effectiveLimit) break;
-          }
-          updates.flush();
-          return collector.format();
+          outcome = await executeRgRuns(runs, collector, runner, { limit: effectiveLimit, onOutput: emitPartial });
         } finally {
           runner.dispose();
         }
+        updates.flush();
+        switch (outcome.kind) {
+          case "aborted":
+            return partialResult("Operation aborted.", { termination: { reason: "aborted", exitCode: null, message: "Operation aborted." } });
+          case "outputLimit":
+            return partialResult(RG_GREP_OUTPUT_LIMIT_MESSAGE, { outputLimitReached: true, partial: true });
+          case "terminated":
+            return partialResult(`${outcome.message}. Results may be incomplete.`, { termination: outcome.termination, partial: true });
+          case "failed":
+            return {
+              content: [{ type: "text" as const, text: outcome.message }],
+              details: createToolFailure(outcome.message),
+            };
+          case "complete":
+            break;
+        }
+        if (runs === walkRuns && indexRuns && collector.matches < effectiveLimit) {
+          await compareGrepShadow({ indexRuns, walkLines: collector.lines, searchPath: grepInput.path, connection, context: rpcContext, toolCallId, signal });
+        }
+        return collector.format();
       }
 
       let aborted = false;

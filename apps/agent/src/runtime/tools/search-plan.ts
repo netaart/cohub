@@ -1,5 +1,7 @@
 /** Turns fs.search and fs.pathSearch plans into rg and fd invocations. */
 
+import { SPACE_FS_STAGING_PREFIX } from "@cohub/core/space-fs";
+
 /** Stays under the sandbox process.start argv limits (256 items, 64 KiB). */
 export const PROCESS_ARGV_LIMITS = { maxItems: 240, maxBytes: 60 * 1024 };
 
@@ -80,6 +82,23 @@ export function buildRgPlanRuns(input: {
   return runs;
 }
 
+/**
+ * Names neither rg nor fd ever reports, like the workspace index: git
+ * metadata and upload staging, at any depth.
+ */
+export const SEARCH_TOOL_EXCLUDES = [".git", `${SPACE_FS_STAGING_PREFIX}*`];
+
+/**
+ * The user glob, then the shared exclusions. A later rg glob takes
+ * precedence, so no user glob can bring an excluded entry back.
+ */
+export function buildRgGlobArgv(glob: string | undefined): string[] {
+  return [
+    ...(glob?.trim() ? ["--glob", glob] : []),
+    ...SEARCH_TOOL_EXCLUDES.flatMap((name) => ["--glob", `!${name}`]),
+  ];
+}
+
 /** Mirror how rg and fd print paths below a `searchPath` argument. */
 export function joinSearchPath(searchPath: string, relative: string): string {
   if (relative === "." || relative === "") return searchPath;
@@ -129,6 +148,44 @@ export function onlyVanishedTargets(stderr: string, targets: string[]): boolean 
     const match = RG_MISSING_TARGET.exec(line);
     return match !== null && named.has(match[1] ?? "");
   });
+}
+
+const FD_MISSING_ROOT = /^\[fd error\]: Search path '(.+)' is not a directory\.$/;
+
+/**
+ * True when fd only reports search roots that vanished after the plan was
+ * made. fd fails only when every root of the invocation is gone.
+ */
+export function onlyVanishedFdRoots(stderr: string, roots: string[]): boolean {
+  const lines = stderr.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return false;
+  const named = new Set(roots);
+  return lines.every((line) => {
+    const match = FD_MISSING_ROOT.exec(line);
+    return match !== null && named.has(match[1] ?? "");
+  });
+}
+
+/** `path:line` of every match event in rg `--json` output. */
+export function rgMatchKeys(lines: readonly string[]): Set<string> {
+  const keys = new Set<string>();
+  for (const line of lines) {
+    let event: { type?: string; data?: { path?: { text?: string }; line_number?: number } };
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type === "match") keys.add(`${event.data?.path?.text ?? ""}:${event.data?.line_number ?? ""}`);
+  }
+  return keys;
+}
+
+/** Entries only one side of a shadow comparison found, capped for logging. */
+export function diffSets(expected: ReadonlySet<string>, actual: ReadonlySet<string>, sample = 5) {
+  const missing = [...expected].filter((key) => !actual.has(key));
+  const extra = [...actual].filter((key) => !expected.has(key));
+  return { missing: missing.length, extra: extra.length, sample: [...missing, ...extra].slice(0, sample) };
 }
 
 function parentOf(path: string) {

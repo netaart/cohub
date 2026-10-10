@@ -396,7 +396,14 @@ export type FsGrepResult = {
   truncated?: boolean;
 };
 
+/**
+ * `<epoch>:<generation>` of the writes that reached the workspace without the
+ * sandbox. The index answers only after a rescan that covers it.
+ */
+export type WorkspaceWriteToken = string;
+
 export type FsSearchParams = {
+  writeToken: WorkspaceWriteToken;
   /** rg pattern, with the same flags the caller passes to rg. */
   pattern: string;
   path?: string;
@@ -413,7 +420,9 @@ export type FsSearchFallback =
   | "unavailable"
   | "watcher"
   | "partial"
+  | "writes"
   | "stale"
+  | "names"
   | "rules"
   | "scope"
   | "pattern"
@@ -439,6 +448,7 @@ export type FsSearchResult =
     };
 
 export type FsPathSearchParams = {
+  writeToken: WorkspaceWriteToken;
   /** fd glob, matched against the file name or, with fullPath, the absolute path. */
   pattern: string;
   path?: string;

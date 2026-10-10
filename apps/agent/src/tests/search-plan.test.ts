@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  buildRgGlobArgv,
   buildRgPlanRuns,
   chunkArgs,
+  diffSets,
   escapeGlobPath,
   joinSearchPath,
+  onlyVanishedFdRoots,
   onlyVanishedTargets,
+  rgMatchKeys,
 } from "../runtime/tools/search-plan.js";
 
 const flags = ["rg", "--json"];
@@ -125,3 +133,48 @@ test("joined paths mirror rg and fd output for the search path", () => {
   assert.equal(joinSearchPath("/workspace/apps/", "src/a.ts"), "/workspace/apps/src/a.ts");
   assert.equal(joinSearchPath("/workspace/src", ""), "/workspace/src");
 });
+
+test("tool exclusions follow the user glob so it cannot bring them back", () => {
+  assert.deepEqual(buildRgGlobArgv(" "), ["--glob", "!.git", "--glob", "!.cohub-upload.*"]);
+  assert.deepEqual(buildRgGlobArgv("*"), ["--glob", "*", "--glob", "!.git", "--glob", "!.cohub-upload.*"]);
+});
+
+test("rg gives the later glob precedence, so a user glob never searches .git", { skip: !hasRg() }, () => {
+  const root = mkdtempSync(join(tmpdir(), "rg-globs-"));
+  try {
+    mkdirSync(join(root, ".git"));
+    writeFileSync(join(root, ".git", "config"), "needle\n");
+    writeFileSync(join(root, ".cohub-upload.abc"), "needle\n");
+    writeFileSync(join(root, "a.txt"), "needle\n");
+    const files = execFileSync("rg", ["--hidden", "--no-config", "-l", ...buildRgGlobArgv("*"), "--", "needle", "."], { cwd: root, encoding: "utf8" });
+    assert.deepEqual(files.trim().split("\n"), ["./a.txt"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("only planned fd roots that vanished are ignorable", () => {
+  const roots = ["/workspace/build", "/workspace/dist"];
+  assert.equal(onlyVanishedFdRoots("[fd error]: Search path '/workspace/build' is not a directory.\n", roots), true);
+  assert.equal(onlyVanishedFdRoots("[fd error]: Search path '/workspace/other' is not a directory.", roots), false);
+  assert.equal(onlyVanishedFdRoots("[fd error]: Permission denied", roots), false);
+  assert.equal(onlyVanishedFdRoots("", roots), false);
+});
+
+test("shadow comparisons key rg matches by path and line", () => {
+  const match = (path: string, line: number) => JSON.stringify({ type: "match", data: { path: { text: path }, line_number: line } });
+  const walk = rgMatchKeys([match("./a.ts", 1), match("./b.ts", 2), JSON.stringify({ type: "summary" })]);
+  const plan = rgMatchKeys([match("./a.ts", 1), match("./c.ts", 3), "not json"]);
+  assert.deepEqual([...walk], ["./a.ts:1", "./b.ts:2"]);
+  assert.deepEqual(diffSets(walk, plan), { missing: 1, extra: 1, sample: ["./b.ts:2", "./c.ts:3"] });
+  assert.deepEqual(diffSets(walk, walk), { missing: 0, extra: 0, sample: [] });
+});
+
+function hasRg() {
+  try {
+    execFileSync("rg", ["--version"]);
+    return true;
+  } catch {
+    return false;
+  }
+}

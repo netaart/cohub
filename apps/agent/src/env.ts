@@ -72,6 +72,12 @@ export const EnvSchema = z.object({
   TURN_OBJECT_S3_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   TURN_OBJECT_S3_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
   TURN_OBJECT_CDN_BASE_URL: z.string().optional().transform((value) => value?.replace(/\/+$/, "")),
+  /**
+   * How grep and find use the sandbox workspace index. `shadow` answers from
+   * the full rg/fd walk and compares the index plan against it; `on` answers
+   * from the plan; `off` never asks the index.
+   */
+  AGENT_SEARCH_INDEX: z.enum(["off", "shadow", "on"]).default("shadow"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
