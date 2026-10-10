@@ -5,6 +5,8 @@
  */
 import type { SpaceRecord, UserSessionListItem } from "@neta-art/cohub";
 import { ArrowLeft, ArrowUpRight, ChevronDown } from "lucide-svelte";
+import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import {
 	getSessionTitle,
@@ -110,7 +112,8 @@ const showDraftHint = $derived(
 			{#if isDraft}
 				<button
 					type="button"
-					class="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] px-1 py-0.5 text-left transition-colors hover:bg-bg-hover"
+					data-density="compact"
+					class="-mx-1 -my-0.5 flex min-w-0 flex-1 items-center gap-[var(--list-row-gap)] rounded-[6px] px-1 py-0.5 transition-colors hover:bg-bg-hover"
 					onclick={() => onChangeSpace?.()}
 					title={m.chat_change_space({}, { locale })}
 					aria-label={spaceName
@@ -118,42 +121,33 @@ const showDraftHint = $derived(
 						: m.chat_choose_space({}, { locale })}
 				>
 					{#if spaceName}
-						<SpaceAvatar name={spaceName} profile={spaceProfile} seed={spaceId} size="sm" />
+						<SpaceAvatar name={spaceName} profile={spaceProfile} seed={spaceId} size={LIST_ROW_AVATAR.compact} />
 					{/if}
-					<div class="min-w-0 flex-1">
-						<div class="truncate text-[13px] font-medium text-text-primary">
-							{title}
-						</div>
-						<div
-							class="flex min-w-0 items-center gap-1 text-[11px] text-text-placeholder"
-						>
-							<span class="truncate">
-								{spaceName
-									? m.chat_in_space({ space: spaceName }, { locale })
-									: m.chat_choose_space_short({}, { locale })}
+					<ListRowText {title}>
+						{#snippet lead()}
+							<span class="flex min-w-0 items-center gap-1">
+								<span class="truncate">
+									{spaceName
+										? m.chat_in_space({ space: spaceName }, { locale })
+										: m.chat_choose_space_short({}, { locale })}
+								</span>
+								<ChevronDown class="h-3 w-3 shrink-0 opacity-70" />
 							</span>
-							<ChevronDown class="h-3 w-3 shrink-0 opacity-70" />
-						</div>
-					</div>
+						{/snippet}
+					</ListRowText>
 				</button>
 			{:else}
-				{#if seed?.space || spaceName}
-					<SpaceAvatar
-						name={spaceName || seed?.space?.name || "Space"}
-						profile={spaceProfile}
-						seed={spaceId}
-						size="sm"
-					/>
-				{/if}
-				<div class="min-w-0 flex-1">
-					<div class="truncate text-[13px] font-medium text-text-primary">
-						{title}
-					</div>
-					{#if spaceName}
-						<div class="truncate text-[11px] text-text-placeholder">
-							{spaceName}
-						</div>
+				<div data-density="compact" class="flex min-w-0 flex-1 items-center gap-[var(--list-row-gap)]">
+					{#if seed?.space || spaceName}
+						<SpaceAvatar
+							name={spaceName || seed?.space?.name || "Space"}
+							profile={spaceProfile}
+							seed={spaceId}
+							size={LIST_ROW_AVATAR.compact}
+						/>
 					{/if}
+					{#snippet spaceLine()}{spaceName}{/snippet}
+					<ListRowText {title} tooltip={title} subtitle={spaceName ? spaceLine : undefined} />
 				</div>
 			{/if}
 

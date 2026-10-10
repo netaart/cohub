@@ -1,5 +1,7 @@
 <script lang="ts">
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
+import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { buildSpaceLandingRoute } from "$lib/space-routes";
@@ -304,13 +306,15 @@ const boardHint = $derived(
 					{@const userProfile = getUserProfile(row)}
 					{@const spaceHref = getSpaceHref(row)}
 					{@const secondary = getSecondaryMetrics(row)}
+					{@const hasAvatar = isSpaceRow(row) || (isUserRow(row) && Boolean(userProfile))}
 					<div
+						data-density="compact"
 						class="trending-table-row px-0 transition-all duration-300 ease-out"
 						class:row-top={row.rank <= 3}
 						class:row-data={row.rank > 3}
 						style="--row-index: {i}; animation: rowFadeIn 0.35s ease-out both; animation-delay: {i * 35}ms;"
 					>
-						<div class="row-span-2 flex min-h-12 items-start justify-center py-2.5 sm:row-span-1 sm:min-h-0 sm:items-center sm:py-3">
+						<div class="row-span-2 flex h-[var(--list-row-height)] items-center justify-center sm:row-span-1">
 							{#if row.rank === 1}
 								<span class="flex items-center justify-center w-6 h-6 rounded-[4px] bg-brand text-[11px] font-bold text-brand-contrast-fg">1</span>
 							{:else if row.rank === 2}
@@ -322,43 +326,28 @@ const boardHint = $derived(
 							{/if}
 						</div>
 
-						<div class="min-w-0 py-2.5 sm:py-3">
-							<div class="flex min-w-0 items-center gap-2">
-								{#if isSpaceRow(row)}
-									<SpaceAvatar name={row.spaceName} profile={row.spaceProfile} seed={row.spaceId} size="sm" />
-								{:else if isUserRow(row) && userProfile}
-									<UserAvatar name={userProfile.displayName} avatarUrl={userProfile.avatarUrl} seed={userProfile.userUuid} size="sm" />
-								{/if}
-								{#if spaceHref}
-									<a
-										href={spaceHref}
-										class="trending-name min-w-0 text-[14px] font-medium leading-snug text-text-primary transition-colors hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary sm:truncate sm:text-[13px] sm:leading-normal"
-										data-sveltekit-preload-data="hover"
-									>
-										{getDisplayName(row)}
-									</a>
-								{:else}
-									<div class="trending-name min-w-0 text-[14px] font-medium leading-snug text-text-primary sm:truncate sm:text-[13px] sm:leading-normal">
-										{getDisplayName(row)}
-									</div>
-								{/if}
-							</div>
-							{#if isSpaceRow(row) && userProfile}
-								<div class="mt-1 flex min-w-0 items-center gap-1.5 text-[12px] text-text-tertiary sm:mt-0.5 sm:text-[11px]">
-									<span>by</span>
-									<UserAvatar name={userProfile.displayName} avatarUrl={userProfile.avatarUrl} seed={userProfile.userUuid} size="xxs" class="border-0" />
-									<span class="min-w-0 truncate">{userProfile.displayName}</span>
-								</div>
+						<svelte:element
+							this={spaceHref ? "a" : "div"}
+							href={spaceHref}
+							class="flex h-[var(--list-row-height)] min-w-0 items-center gap-[var(--list-row-gap)] {spaceHref ? 'rounded-[var(--list-row-radius)] transition-colors hover:[--list-title-color:var(--color-brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand/70' : ''}"
+							data-sveltekit-preload-data={spaceHref ? "hover" : undefined}
+						>
+							{#if isSpaceRow(row)}
+								<SpaceAvatar name={row.spaceName} profile={row.spaceProfile} seed={row.spaceId} size={LIST_ROW_AVATAR.compact} />
+							{:else if isUserRow(row) && userProfile}
+								<UserAvatar name={userProfile.displayName} avatarUrl={userProfile.avatarUrl} seed={userProfile.userUuid} size={LIST_ROW_AVATAR.compact} />
 							{/if}
-						</div>
+							{#snippet owner()}by {userProfile?.displayName}{/snippet}
+							<ListRowText title={getDisplayName(row)} tooltip={getDisplayName(row)} subtitle={isSpaceRow(row) && userProfile ? owner : undefined} />
+						</svelte:element>
 
-						<div class="flex items-start justify-end py-2.5 sm:items-center sm:py-3">
+						<div class="flex h-[var(--list-row-height)] items-center justify-end">
 							<span class="font-mono text-[13px] tabular-nums text-text-primary">
 								{getPrimaryMetric(row)}
 							</span>
 						</div>
 
-						<div class="col-start-2 col-span-2 -mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 pb-2.5 text-[12px] leading-none text-text-tertiary sm:hidden">
+						<div class="col-start-2 col-span-2 flex flex-wrap items-center gap-x-3 gap-y-1 pb-2.5 text-[12px] leading-none text-text-tertiary sm:hidden {hasAvatar ? 'pl-[calc(var(--list-avatar-size)+var(--list-row-gap))]' : ''}">
 							{#each secondary as metric}
 								<span>
 									<span class="text-text-placeholder">{metric.label}</span>
@@ -367,20 +356,20 @@ const boardHint = $derived(
 							{/each}
 						</div>
 
-						<div class="hidden items-center justify-end py-2 sm:flex sm:py-3">
+						<div class="hidden items-center justify-end sm:flex">
 							<span class="text-[13px] text-text-secondary font-mono tabular-nums">
 								{formatCost(row.costTotal)}
 							</span>
 						</div>
 
-						<div class="hidden items-center justify-end py-2 sm:flex sm:py-3">
+						<div class="hidden items-center justify-end sm:flex">
 							<span class="text-[13px] text-text-secondary tabular-nums">
 								{row.sessionCount}
 							</span>
 						</div>
 
 						{#if activeBoard === "llm"}
-							<div class="hidden items-center justify-end py-2 sm:flex sm:py-3">
+							<div class="hidden items-center justify-end sm:flex">
 								<span class="text-[13px] text-text-secondary tabular-nums">
 									{formatNumber(row.requestCount)}
 								</span>
@@ -418,14 +407,6 @@ const boardHint = $derived(
 		column-gap: inherit;
 	}
 
-	.trending-name {
-		display: -webkit-box;
-		overflow: hidden;
-		-webkit-box-orient: vertical;
-		-webkit-line-clamp: 2;
-		line-clamp: 2;
-	}
-
 	.row-top {
 		border-bottom: 1px solid var(--border-subtle);
 	}
@@ -442,12 +423,6 @@ const boardHint = $derived(
 
 		.trending-table.generation-board {
 			grid-template-columns: 28px minmax(0, 1fr) minmax(64px, auto) minmax(64px, auto) minmax(48px, auto);
-		}
-
-		.trending-name {
-			display: block;
-			-webkit-line-clamp: unset;
-			line-clamp: unset;
 		}
 	}
 

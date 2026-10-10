@@ -2,6 +2,8 @@
 import { FolderKanban, MessageSquare, Pin, Plus, Tag } from "lucide-svelte";
 import { settingsCommandSection } from "$lib/command-palette/commands";
 import type { CommandPaletteItem } from "$lib/command-palette/types";
+import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import { SETTINGS_SECTION_ICONS } from "$lib/components/settings-section";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
@@ -34,9 +36,11 @@ const TYPE_META = {
 	space: { className: "space", icon: FolderKanban },
 } as const;
 
-const meta = $derived(TYPE_META[item.type]);
+const typeMeta = $derived(TYPE_META[item.type]);
 const section = $derived(settingsCommandSection(item));
-const Icon = $derived(section ? SETTINGS_SECTION_ICONS[section] : meta.icon);
+const Icon = $derived(
+	section ? SETTINGS_SECTION_ICONS[section] : typeMeta.icon,
+);
 const profile = $derived(
 	item.type === "space" &&
 		item.ownerProfile?.userUuid &&
@@ -90,9 +94,42 @@ const timestamp = $derived.by(() => {
 });
 </script>
 
+{#snippet titleText()}<HighlightedText text={title} ranges={item.titleHighlights} />{/snippet}
+
+{#snippet meta()}
+	{#if matchCount}
+		<span>{m.command_match_count({ count: matchCount }, { locale })}</span>
+	{/if}
+	{#if timestamp}
+		<time datetime={item.updatedAt ?? undefined} title={timestamp.title}>{timestamp.label}</time>
+	{/if}
+{/snippet}
+
+{#snippet lead()}
+	{#if profile}
+		<span class="command-profile" title={profile.displayName}>
+			<UserAvatar name={profile.displayName} avatarUrl={profile.avatarUrl} seed={profile.userUuid} size="xxs" class="border-0" />
+			<span class="truncate">{profile.displayName}</span>
+		</span>
+		<span class="text-text-placeholder">·</span>
+	{:else if item.type === "chat" && item.hit && item.spaceName}
+		<span class="command-space-name" title={item.spaceName}>{item.spaceName}</span>
+		<span class="text-text-placeholder">·</span>
+	{/if}
+{/snippet}
+
+{#snippet subtitle()}
+	{#if item.type === "chat" && item.hit}
+		<span title={item.hit.excerpt}><HighlightedText text={item.hit.excerpt} ranges={item.hit.highlights} /></span>
+	{:else}
+		<span title={context}>{context}</span>
+	{/if}
+{/snippet}
+
 <div
 	class:active
 	class="command-result"
+	data-density="compact"
 	onpointermove={onHover}
 	role="option"
 	aria-selected={active}
@@ -100,42 +137,13 @@ const timestamp = $derived.by(() => {
 >
 	<button type="button" class="command-result-main" onclick={onActivate}>
 		{#if showsSpaceAvatar}
-			<SpaceAvatar name={item.spaceName || item.title || item.spaceId} profile={item.spaceProfile} seed={item.spaceId} size="sm" />
+			<SpaceAvatar name={item.spaceName || item.title || item.spaceId} profile={item.spaceProfile} seed={item.spaceId} size={LIST_ROW_AVATAR.compact} />
 		{:else}
-			<div class={`command-type-mark ${meta.className}`} aria-label={item.type}>
-				<Icon class="h-3.5 w-3.5" />
+			<div class={`command-type-mark ${typeMeta.className}`} aria-label={item.type}>
+				<Icon class="h-4 w-4" />
 			</div>
 		{/if}
-		<div class="min-w-0 flex-1 text-left">
-			<div class="flex min-w-0 items-center gap-2">
-				<span class="truncate text-[13px] font-medium text-text-primary" title={title}><HighlightedText text={title} ranges={item.titleHighlights} /></span>
-				{#if matchCount}
-					<span class="command-match-count">{m.command_match_count({ count: matchCount }, { locale })}</span>
-				{/if}
-			</div>
-			<div class="command-context-row">
-				{#if profile}
-					<span class="command-profile" title={profile.displayName}>
-						<UserAvatar name={profile.displayName} avatarUrl={profile.avatarUrl} seed={profile.userUuid} size="xxs" class="border-0" />
-						<span class="truncate">{profile.displayName}</span>
-					</span>
-					<span class="command-context-separator">·</span>
-				{/if}
-				{#if item.type === "chat" && item.hit}
-					{#if item.spaceName}
-						<span class="command-space-name" title={item.spaceName}>{item.spaceName}</span>
-						<span class="command-context-separator">·</span>
-					{/if}
-					<span class="command-context" title={item.hit.excerpt}><HighlightedText text={item.hit.excerpt} ranges={item.hit.highlights} /></span>
-				{:else}
-					<span class="command-context" title={context}>{context}</span>
-				{/if}
-				{#if timestamp}
-					<span class="command-context-separator">·</span>
-					<time class="command-time" datetime={item.updatedAt ?? undefined} title={timestamp.title}>{timestamp.label}</time>
-				{/if}
-			</div>
-		</div>
+		<ListRowText title={titleText} tooltip={title} meta={matchCount || timestamp ? meta : undefined} {lead} {subtitle} />
 		<div class="command-enter">↵</div>
 	</button>
 	{#if pinnable}
@@ -162,25 +170,24 @@ const timestamp = $derived.by(() => {
 		width: 100%;
 		align-items: center;
 		gap: 4px;
-		border: 0;
-		border-radius: 9px;
+		border-radius: var(--list-row-radius);
 		background: transparent;
-		padding: 6px 6px;
 		color: inherit;
-		transition: background-color 90ms cubic-bezier(0.25, 1, 0.5, 1), transform 90ms cubic-bezier(0.25, 1, 0.5, 1);
+		transition: background-color 90ms cubic-bezier(0.25, 1, 0.5, 1);
 	}
 
 	.command-result-main {
 		display: flex;
-		align-items: center;
-		gap: 12px;
+		height: var(--list-row-height);
 		min-width: 0;
 		flex: 1;
+		align-items: center;
+		gap: var(--list-row-gap);
 		border: 0;
+		border-radius: inherit;
 		background: transparent;
+		padding: 0 var(--list-row-pad-x);
 		color: inherit;
-		padding: 4px 4px;
-		border-radius: 7px;
 		cursor: pointer;
 	}
 
@@ -195,6 +202,7 @@ const timestamp = $derived.by(() => {
 		flex: 0 0 auto;
 		width: 28px;
 		height: 28px;
+		margin-right: var(--list-row-pad-x);
 		border: 0;
 		border-radius: 7px;
 		background: transparent;
@@ -241,19 +249,17 @@ const timestamp = $derived.by(() => {
 
 	.command-result.active { background: color-mix(in oklch, var(--brand-bg) 56%, var(--bg-hover) 44%); }
 	.command-result.active::before { background: var(--brand); }
-	.command-result.active .command-enter {
-		opacity: 1;
-	}
-	.command-result.active .command-time { color: var(--text-secondary); }
+	.command-result.active .command-enter { opacity: 1; }
 	.command-result.active .command-type-mark { border-color: color-mix(in oklch, currentColor 36%, transparent); }
 
 	.command-type-mark {
 		display: grid;
+		flex: 0 0 auto;
 		place-items: center;
-		width: 28px;
-		height: 28px;
+		width: var(--list-avatar-size);
+		height: var(--list-avatar-size);
 		border: 1px solid color-mix(in oklch, currentColor 18%, transparent);
-		border-radius: 7px;
+		border-radius: 10px;
 		background: color-mix(in oklch, currentColor 10%, var(--bg-primary) 90%);
 		color: var(--text-tertiary);
 	}
@@ -271,17 +277,6 @@ const timestamp = $derived.by(() => {
 	.command-type-mark.command {
 		color: var(--brand);
 		background: color-mix(in oklch, var(--brand) 10%, var(--bg-primary) 90%);
-	}
-
-	.command-context-row {
-		margin-top: 2px;
-		display: flex;
-		min-width: 0;
-		align-items: center;
-		gap: 6px;
-		color: var(--text-tertiary);
-		font-size: 12px;
-		line-height: 1.35;
 	}
 
 	.command-profile {
@@ -304,39 +299,6 @@ const timestamp = $derived.by(() => {
 		color: var(--text-secondary);
 	}
 
-	.command-match-count {
-		flex: 0 0 auto;
-		margin-left: auto;
-		color: var(--text-placeholder);
-		font-size: 11px;
-		font-variant-numeric: tabular-nums;
-		white-space: nowrap;
-	}
-
-	.command-context {
-		min-width: 0;
-		flex: 0 1 auto;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.command-context-separator {
-		flex: 0 0 auto;
-		color: var(--text-placeholder);
-	}
-
-	.command-time {
-		flex: 0 0 auto;
-		color: var(--text-placeholder);
-		font-family: var(--font-mono);
-		font-size: 10px;
-		font-variant-numeric: tabular-nums;
-		letter-spacing: 0.01em;
-		line-height: 1;
-		white-space: nowrap;
-	}
-
 	.command-enter {
 		width: 12px;
 		flex: 0 0 auto;
@@ -350,12 +312,6 @@ const timestamp = $derived.by(() => {
 	}
 
 	@media (max-width: 640px) {
-		.command-result {
-			min-height: 58px;
-			gap: 6px;
-			padding: 8px 8px;
-		}
-
 		.command-enter {
 			display: none;
 		}
@@ -364,15 +320,11 @@ const timestamp = $derived.by(() => {
 			max-width: 30%;
 		}
 
-		.command-type-mark {
-			width: 32px;
-			height: 32px;
-		}
-
 		.command-pin-btn,
 		.command-pin-btn:not(.pinned) {
 			width: 44px;
 			height: 44px;
+			margin-right: 0;
 			opacity: 1;
 		}
 	}

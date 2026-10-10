@@ -99,6 +99,55 @@
 	--list-row-gap: 10px;
 }
 
+/* Row heights mirror LIST_ROW_HEIGHT in list-page/list-row.ts. */
+@layer base {
+	[data-density] {
+		--list-row-height: 52px;
+		--list-avatar-size: 36px;
+		--list-title-size: 14px;
+		--list-title-leading: 18px;
+		--list-subtitle-size: 12px;
+		--list-subtitle-leading: 16px;
+		--list-meta-size: 11px;
+		--list-title-color: var(--color-text-primary);
+		--list-title-weight: 500;
+		--list-subtitle-color: var(--color-text-tertiary);
+		--list-meta-color: var(--color-text-placeholder);
+	}
+
+	[data-density="comfortable"] {
+		--list-row-height: 64px;
+		--list-avatar-size: 48px;
+		--list-title-size: 16px;
+		--list-title-leading: 22px;
+		--list-subtitle-size: 14px;
+		--list-subtitle-leading: 20px;
+		--list-meta-size: 12px;
+		--list-subtitle-color: color-mix(
+			in oklab,
+			var(--color-text-tertiary) 60%,
+			var(--color-text-placeholder)
+		);
+	}
+
+	[data-density="dense"] {
+		--list-row-height: auto;
+		--list-title-size: 13px;
+		--list-title-leading: 16px;
+		--list-subtitle-size: 10px;
+		--list-subtitle-leading: 14px;
+		--list-meta-size: 9.5px;
+		--list-title-color: var(--color-text-tertiary);
+		--list-title-weight: 400;
+		--list-subtitle-color: var(--color-text-placeholder);
+		--list-meta-color: color-mix(
+			in oklab,
+			var(--color-text-placeholder) 70%,
+			transparent
+		);
+	}
+}
+
 /* ============================================================
    Tailwind v4 @theme — semantic design tokens
    ============================================================ */

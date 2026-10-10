@@ -2,6 +2,9 @@
 import type { SpacePresenceUser } from "@neta-art/cohub";
 import { onMount } from "svelte";
 import { floatNear, portal } from "$lib/actions/portal";
+import ListRow from "$lib/components/list-page/ListRow.svelte";
+import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -196,20 +199,16 @@ $effect(() => {
 						{@const label = typeof primaryPanel?.label === "string" ? primaryPanel.label.trim() : ""}
 						{@const kind = typeof primaryPanel?.kind === "string" ? primaryPanel.kind.trim() : ""}
 						{@const userName = displayUserName(user.profile, user.userId)}
-						<div class="presence-row" role="listitem">
-							<div class="presence-row-static">
-								<UserAvatar name={userName} avatarUrl={user.profile.avatarUrl} seed={user.userId} size="sm" />
-								<div class="presence-row-body">
-									<div class="presence-row-name">{userName}</div>
-									<div class="presence-row-subtitle">
-										<span>{label || (kind === "session" ? "in a chat" : kind === "file" ? "in a file" : kind === "checkpoint" ? "reviewing a save" : kind === "task" ? "on a task" : (kind === "app" || kind === "work") ? "in an app" : kind === "cronjob" ? "checking a cronjob" : "in this space")}</span>
-										{#if panels.length > 1}
-											<span>· {panels.length} panels</span>
-										{/if}
-									</div>
-								</div>
-							</div>
-						</div>
+						<ListRow density="compact" role="listitem">
+							{#snippet leading()}
+								<UserAvatar name={userName} avatarUrl={user.profile.avatarUrl} seed={user.userId} size={LIST_ROW_AVATAR.compact} />
+							{/snippet}
+							<ListRowText title={userName} tooltip={userName}>
+								{#snippet subtitle()}
+									{label || (kind === "session" ? "in a chat" : kind === "file" ? "in a file" : kind === "checkpoint" ? "reviewing a save" : kind === "task" ? "on a task" : (kind === "app" || kind === "work") ? "in an app" : kind === "cronjob" ? "checking a cronjob" : "in this space")}{#if panels.length > 1}<span class="ml-1.5">· {panels.length} panels</span>{/if}
+								{/snippet}
+							</ListRowText>
+						</ListRow>
 					{/each}
 				</div>
 				<div class="presence-popover-footer">
@@ -361,54 +360,6 @@ $effect(() => {
 		padding: 4px;
 	}
 
-	.presence-row {
-		border-radius: 10px;
-	}
-
-	.presence-row-static {
-		display: grid;
-		grid-template-columns: auto minmax(0, 1fr);
-		align-items: center;
-		gap: 8px;
-		border-radius: 10px;
-		padding: 7px 8px;
-	}
-
-	.presence-row:hover .presence-row-static {
-		background: var(--bg-hover);
-	}
-
-	.presence-row-body {
-		min-width: 0;
-		display: grid;
-		gap: 2px;
-	}
-
-	.presence-row-name {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-size: 13px;
-		font-weight: 550;
-		color: var(--text-primary);
-	}
-
-	.presence-row-subtitle {
-		display: flex;
-		min-width: 0;
-		gap: 6px;
-		overflow: hidden;
-		font-size: 11px;
-		line-height: 1.2;
-		color: var(--text-tertiary);
-	}
-
-	.presence-row-subtitle span:first-child {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
 	/* Live-messages toggle — pinned at the popover bottom so it stays
 	   visible even when the online list is long. */
 	.presence-popover-footer {
@@ -518,15 +469,6 @@ $effect(() => {
 		.presence-popover-list {
 			max-height: min(52vh, calc(100vh - 92px));
 			padding: 6px;
-		}
-
-		.presence-row-static {
-			gap: 10px;
-			padding: 9px 10px;
-		}
-
-		.presence-row-subtitle {
-			font-size: 10px;
 		}
 	}
 </style>

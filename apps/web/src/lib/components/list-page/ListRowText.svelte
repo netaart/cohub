@@ -9,7 +9,7 @@ const {
 	lead,
 	subtitle,
 }: {
-	title: string;
+	title: string | Snippet;
 	tooltip?: string;
 	badge?: Snippet;
 	meta?: Snippet;
@@ -18,10 +18,10 @@ const {
 } = $props();
 </script>
 
-<span class="flex min-w-0 flex-1 flex-col justify-center gap-0.5 self-stretch overflow-hidden">
+<span class="flex min-w-0 flex-1 flex-col justify-center gap-0.5 self-stretch overflow-hidden text-start">
 	<span class="list-row-title flex min-w-0 items-center gap-2">
 		<span class="flex min-w-0 flex-1 items-center gap-1.5">
-			<span class="list-row-title-text min-w-0 truncate" title={tooltip}>{title}</span>
+			<span class="list-row-title-text min-w-0 truncate" title={tooltip}>{#if typeof title === "string"}{title}{:else}{@render title()}{/if}</span>
 			{@render badge?.()}
 		</span>
 		{#if meta}

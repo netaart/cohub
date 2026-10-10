@@ -1,5 +1,7 @@
 <script lang="ts">
 import { Check, Copy, Gift, Loader2, RefreshCw, Share2 } from "lucide-svelte";
+import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import * as account from "$lib/features/settings/account-data";
 import { onSettingsPageActive } from "$lib/features/settings/page-context.svelte";
@@ -149,9 +151,12 @@ async function rotateLink() {
 				{:else}
 					<div class="divide-y divide-border-subtle border-y border-border-subtle">
 						{#each dashboard.items as item (item.id)}
-							<div class="flex min-h-14 items-center gap-3 py-2.5">
-								<UserAvatar name={item.profile?.displayName || m.referral_c_user({}, { locale })} avatarUrl={item.profile?.avatarUrl} seed={item.profile?.userUuid} size="sm" class="shrink-0" />
-								<div class="min-w-0 flex-1"><div class="truncate text-[12px] font-medium text-text-primary">{item.profile?.displayName || m.referral_c_user({}, { locale })}</div><div class="mt-0.5 truncate text-[10px] text-text-placeholder">{item.profile?.username ? `@${item.profile.username} · ` : ""}{m.referral_joined({ date: formatDate(item.claimedAt, locale) }, { locale })}</div></div>
+							{@const name = item.profile?.displayName || m.referral_c_user({}, { locale })}
+							<div data-density="compact" class="flex h-[var(--list-row-height)] items-center gap-[var(--list-row-gap)]">
+								<UserAvatar {name} avatarUrl={item.profile?.avatarUrl} seed={item.profile?.userUuid} size={LIST_ROW_AVATAR.compact} />
+								<ListRowText title={name} tooltip={name}>
+									{#snippet subtitle()}{item.profile?.username ? `@${item.profile.username} · ` : ""}{m.referral_joined({ date: formatDate(item.claimedAt, locale) }, { locale })}{/snippet}
+								</ListRowText>
 								<span class="shrink-0 text-[11px] {item.status === 'rewarded' ? 'text-status-running' : 'text-text-tertiary'}">{item.status === "rewarded" ? m.referral_rewarded({}, { locale }) : item.status === "qualified" ? m.referral_processing({}, { locale }) : m.referral_pending({}, { locale })}</span>
 							</div>
 						{/each}
