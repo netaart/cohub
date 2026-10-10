@@ -11,7 +11,7 @@ const {
 	left: Snippet;
 	right?: Snippet;
 	bordered?: boolean;
-	inset?: "column" | "workspace";
+	inset?: "column" | "list";
 	class?: string;
 } = $props();
 </script>
@@ -19,7 +19,7 @@ const {
 <header
 	class="column-header {className}"
 	class:column-header--bordered={bordered}
-	class:column-header--workspace={inset === "workspace"}
+	class:column-header--list={inset === "list"}
 >
 	<div class="column-header__left">
 		{@render left()}
@@ -49,8 +49,8 @@ const {
 			padding: 0 1rem;
 		}
 
-		.column-header--workspace {
-			padding: 0 calc(var(--spacing-workspace) - 8px) 0 var(--spacing-workspace);
+		.column-header--list {
+			padding: 0 calc(var(--list-content-x) - 8px) 0 var(--list-content-x);
 		}
 	}
 

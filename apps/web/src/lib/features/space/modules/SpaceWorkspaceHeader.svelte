@@ -305,7 +305,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 	{/if}
 {/snippet}
 
-<ColumnHeader inset="workspace">
+<ColumnHeader inset="list">
 		{#snippet left()}
 			<div class="flex min-w-0 items-center gap-1.5 overflow-hidden">
 				<button
