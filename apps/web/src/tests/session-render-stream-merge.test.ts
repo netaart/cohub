@@ -973,3 +973,54 @@ test("buildTurnTimelineItems never renders a queued follow-up as the streaming t
 		"turn-running",
 	);
 });
+
+test("restoring a running Turn never invents a starting footer or thinking block", () => {
+	const streaming = {
+		sessionId: "s",
+		turnId: "t",
+		status: "pending",
+		contentBlocks: [],
+	};
+	for (const contentBlocks of [
+		[],
+		[{ type: "thinking" as const, thinking: "" }],
+	]) {
+		const resumed = buildTurnTimelineItems({
+			sessionId: "s",
+			turns: [],
+			streaming: { ...streaming, resumed: true, contentBlocks },
+		});
+		assert.equal(
+			resumed.some(
+				(item) => item.kind === "turn_footer" || item.kind === "message",
+			),
+			false,
+		);
+	}
+	const fresh = buildTurnTimelineItems({
+		sessionId: "s",
+		turns: [],
+		streaming,
+	});
+	assert.equal(
+		fresh.some(
+			(item) => item.kind === "turn_footer" && item.phase === "starting",
+		),
+		true,
+	);
+	const waiting = buildTurnTimelineItems({
+		sessionId: "s",
+		turns: [],
+		streaming: {
+			...streaming,
+			resumed: true,
+			runtimePhase: "llm_call_started",
+		},
+	});
+	assert.equal(
+		waiting.some(
+			(item) => item.kind === "turn_footer" && item.phase === "waiting_model",
+		),
+		true,
+	);
+});

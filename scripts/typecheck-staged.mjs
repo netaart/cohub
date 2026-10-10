@@ -104,11 +104,10 @@ async function run(pnpmArgs) {
     console.log(`typecheck: [dry-run] pnpm ${fullArgs.join(" ")}`);
     return 0;
   }
-  const npmExecPath = process.env.npm_execpath;
-  const command = npmExecPath ? process.execPath : "pnpm";
-  const args = npmExecPath ? [npmExecPath, ...fullArgs] : fullArgs;
+  // pnpm 12 ships a native executable, so `npm_execpath` can no longer be run
+  // through `node`; spawn the `pnpm` on PATH instead (works on pnpm 10–12).
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: "inherit" });
+    const child = spawn("pnpm", fullArgs, { stdio: "inherit" });
     child.once("error", (error) => {
       console.error(`typecheck: failed to spawn pnpm: ${error.message}`);
       resolve(1);

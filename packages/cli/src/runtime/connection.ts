@@ -12,6 +12,7 @@ import {
   type RuntimeExecutionEvent,
   type NativeRuntimeEvent,
 } from "@neta-art/cohub";
+import { describeError } from "../network-error.js";
 import { executeTurn, type Executor, type HarnessResult } from "./native/execution.js";
 import { ContextRequiredError } from "./native/results.js";
 import { ProcessCleanupUncertainError } from "./process-group.js";
@@ -593,7 +594,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
             error: serializeDiagnosticError(error),
           }, context);
           try {
-            emit({ type: "turn.error", message: error instanceof Error ? error.message : String(error), uncertain: !!execution.result || frame.resumeOnly === true || error instanceof ProcessCleanupUncertainError });
+            emit({ type: "turn.error", message: describeError(error), uncertain: !!execution.result || frame.resumeOnly === true || error instanceof ProcessCleanupUncertainError });
           } catch {
             // Native files remain for recovery.
           }

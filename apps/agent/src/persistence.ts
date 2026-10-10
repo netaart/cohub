@@ -20,7 +20,7 @@ import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { sessionMessages, sessionTurns, spaceChannels, spaceSessionBindings, spaceSessions, providerMessageRefs, userChannels, userProfiles } from "@cohub/db";
 import { listResourceLabelRefs } from "@cohub/core/labels";
 import { collectImageToTextTiming, collectToolMetrics } from "@cohub/protocol/model";
-import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen, sessionActiveTurnEvent } from "@cohub/core/sessions";
+import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen, publishSessionTurnStates } from "@cohub/core/sessions";
 import { scheduleSessionSnapshot } from "./session-snapshot.js";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { addImageToTextCallsToSummary, claimSessionFallbackTitle, countToolCallsInContent, createImageToTextUsageSummaryAccumulator, deriveMessagePreviewText, deriveSessionFallbackTitle, finalizeImageToTextUsageSummary, readImageToTextCalls, readSessionTitleSource, resolveMessageTurnId, shouldGenerateSessionTitle, summarizeSessionTurnCompactions, sumImageToTextUsage } from "@cohub/core/sessions";
@@ -216,9 +216,16 @@ async function publishMessagePersisted(spaceId: string, message: MessageRecord) 
   });
 }
 
+async function publishTurnState(spaceId: string, turn: SessionTurnRecord) {
+  await publishSessionTurnStates(db, spaceId, [turn], publishRealtimeEnvelope).catch((error) => {
+    logger.warn("[Realtime] failed to publish user turn state", { sessionId: turn.sessionId, error });
+  });
+}
+
 async function publishTurnCreated(spaceId: string, turn: SessionTurnRecord) {
   const hydratedTurn = await hydrateTurnAuthorProfile(turn);
   await publishRealtimeEnvelope({ domain: "session", type: "session.turn.created", spaceId, sessionId: hydratedTurn.sessionId, payload: { turn: hydratedTurn } });
+  await publishTurnState(spaceId, hydratedTurn);
 }
 
 const truncateTurnPreview = (text: string | null | undefined) => {
@@ -236,6 +243,8 @@ export async function publishSessionTurnsUpdated(input: {
   const rows = await db.select({
     turn: sessionTurns,
     spaceId: spaceSessions.spaceId,
+    sessionUserUuid: spaceSessions.userUuid,
+    sessionMeta: sql<unknown>`jsonb_build_object('participants', ${spaceSessions.meta}->'participants')`,
   }).from(sessionTurns).innerJoin(
     spaceSessions,
     eq(spaceSessions.id, sessionTurns.sessionId),
@@ -252,9 +261,13 @@ export async function publishSessionTurnsUpdated(input: {
       sessionId: input.sessionId,
       payload: { turn: record },
     });
-    const activeTurn = sessionActiveTurnEvent({ spaceId, turn: record });
-    if (activeTurn) await publishRealtimeEnvelope(activeTurn);
   }));
+  const first = rows[0];
+  if (first) {
+    await publishSessionTurnStates(db, first.spaceId, rows.map(({ turn }) => toTurnRecord(turn)), publishRealtimeEnvelope, {
+      id: input.sessionId, spaceId: first.spaceId, userUuid: first.sessionUserUuid, meta: first.sessionMeta,
+    }).catch((error) => logger.warn("[Realtime] failed to publish user turn states", { sessionId: input.sessionId, error }));
+  }
 }
 
 async function publishTurnFinalized(spaceId: string, turn: SessionTurnRecord) {
@@ -280,6 +293,7 @@ async function publishTurnFinalized(spaceId: string, turn: SessionTurnRecord) {
     sessionId: turn.sessionId,
     payload: { turn, sessionLabelRefs },
   });
+  await publishTurnState(spaceId, turn);
   if (!turn.userUuid) return;
   await publishRealtimeEnvelope({
     domain: "session",
@@ -953,6 +967,7 @@ async function publishInterruptedResult(spaceId: string, result: Awaited<ReturnT
   else {
     void scheduleSessionSnapshot(turn.sessionId, turn.sequence);
     await publishRealtimeEnvelope({ domain: "session", type: "session.turn.updated", spaceId, sessionId: turn.sessionId, payload: { turn } });
+    await publishTurnState(spaceId, turn);
   }
 }
 

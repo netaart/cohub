@@ -21,13 +21,13 @@ Only HTML navigation requests are transformed: `Sec-Fetch-Dest: document|iframe|
 
 ## Development
 
-Use Node 24 and the repository's Corepack pnpm version:
+Use Node 26 and the repository's pinned pnpm (`.nvmrc` + `packageManager`):
 
 ```bash
-corepack pnpm --filter @cohub/app-runtime-edge... --filter cohub install --frozen-lockfile
-corepack pnpm --filter @cohub/app-runtime-edge lint
-corepack pnpm --filter @cohub/app-runtime-edge typecheck
-corepack pnpm --filter @cohub/app-runtime-edge build
+pnpm --filter @cohub/app-runtime-edge... --filter cohub install --frozen-lockfile
+pnpm --filter @cohub/app-runtime-edge lint
+pnpm --filter @cohub/app-runtime-edge typecheck
+pnpm --filter @cohub/app-runtime-edge build
 ```
 
 `typecheck` generates `worker-configuration.d.ts` from Wrangler. Worker, browser, and build-script TypeScript contexts are checked separately. `build` compiles the browser runtime to independent Dev/Production IIFEs and runtime text modules. Wrangler runs this build before compiling the edge TypeScript. Generated files stay in ignored directories.
@@ -39,8 +39,8 @@ The `App Runtime Deploy to Cloudflare Workers` workflow runs lint, typecheck, an
 For an authorized manual deployment, set the standard Wrangler environment variables and run:
 
 ```bash
-corepack pnpm --filter @cohub/app-runtime-edge run deploy
-corepack pnpm --filter @cohub/app-runtime-edge run deploy:prod
+pnpm --filter @cohub/app-runtime-edge run deploy
+pnpm --filter @cohub/app-runtime-edge run deploy:prod
 ```
 
 Wrangler owns the names, routes, environment variables, and disabled workers.dev/preview URLs. Do not make unsynchronized Dashboard changes. Worker deployment is separate from npm package releases; this package is private.

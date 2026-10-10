@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.24-bookworm AS builder
+# Single source of truth for the Go toolchain used by both the builder stage and
+# the runtime toolchain installed below.
+ARG GO_VERSION=1.27.2
+
+FROM golang:${GO_VERSION}-bookworm AS builder
 
 WORKDIR /app
 
@@ -10,7 +14,10 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/cohub-sandbox .
 
-FROM node:24-slim AS runtime
+FROM node:26-slim AS runtime
+
+# Re-declare so the build arg is available in this stage (ARGs do not cross stages).
+ARG GO_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV WORKSPACE_DIR=/workspace
@@ -19,7 +26,7 @@ ENV PLATFORM_AGENTS_DIR=/configs/platform/.agents
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     curl git wget ca-certificates openssh-client \
-    iputils-ping iproute2 dnsutils \
+    iputils-ping iproute2 bind9-dnsutils \
     file unzip zip \
     python3 python3-pip python3-venv python3-dev \
     ffmpeg imagemagick libimage-exiftool-perl \
@@ -31,11 +38,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash procps \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 \
     libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 \
-    libgtk-3-0 libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0 \
+    libgtk-3-0t64 libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0t64 \
     libcairo-gobject2 libcairo2 libgdk-pixbuf-2.0-0 libxrender1 \
-    libasound2 libfreetype6 libfontconfig1 libdbus-1-3 libnss3 \
-    libnspr4 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libatspi2.0-0 \
-    libcups2 libxshmfence1 libgbm1 \
+    libasound2t64 libfreetype6 libfontconfig1 libdbus-1-3 libnss3 \
+    libnspr4 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libatspi2.0-0t64 \
+    libcups2t64 libxshmfence1 libgbm1 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -52,23 +59,21 @@ RUN set -eux; \
     ln -sf /opt/chrome-for-testing/chrome-linux64/chrome /usr/local/bin/google-chrome; \
     google-chrome --version
 
-# Install latest core CLI tools from GitHub releases (apt versions are too old)
-RUN curl -fsSL https://github.com/sharkdp/fd/releases/download/v10.4.2/fd-v10.4.2-x86_64-unknown-linux-gnu.tar.gz | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/fd' \
- && curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/rg' \
- && curl -fsSL https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64 -o /usr/local/bin/jq \
+RUN curl -fsSL https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-gnu.tar.gz | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/fd' \
+ && curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/rg' \
+ && curl -fsSL https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64 -o /usr/local/bin/jq \
  && chmod +x /usr/local/bin/fd /usr/local/bin/rg /usr/local/bin/jq
 
 RUN ln -sf /usr/bin/python3 /usr/bin/python
 
-# Package managers: redirect global installs to node user's home directory
-# so they work after `USER node` switch
 ENV BUN_INSTALL=/home/node/.bun
 ENV NPM_CONFIG_PREFIX=/home/node/.npm-global
 ENV PIP_USER=true
 ENV PATH="/home/node/.bun/bin:${NPM_CONFIG_PREFIX}/bin:/home/node/.local/bin:/home/node/go/bin:/home/node/.pnpm-global/bin:${PATH}"
 
 RUN curl -fsSL https://bun.sh/install | bash
-RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
+RUN npm install -g pnpm@12.10.1
+
 # Resolve the latest cohub-cli at install time (intentionally unpinned so the
 # image always tracks the npm "latest" dist-tag). Docker caches this layer by
 # instruction text, so pass a unique COHUB_CLI_REFRESH (e.g. a timestamp) to
@@ -76,12 +81,10 @@ RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 ARG COHUB_CLI_REFRESH=0
 RUN echo "cohub-cli refresh token: ${COHUB_CLI_REFRESH}" \
  && npm install -g typescript tsx @neta-art/cohub-cli@latest
-# Create directories and ensure node user owns them for runtime access
 RUN mkdir -p /home/node/.npm-global /home/node/.bun /home/node/.local /home/node/go/bin /home/node/.pnpm-global/bin \
     && chown -R node:node /home/node/.npm-global /home/node/.bun /home/node/.local /home/node/go /home/node/.pnpm-global
 
-# Install Go toolchain
-RUN curl -fsSL https://go.dev/dl/go1.24.2.linux-amd64.tar.gz | tar xz -C /usr/local
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | tar xz -C /usr/local
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 WORKDIR /app
@@ -90,7 +93,6 @@ COPY --from=builder /out/cohub-sandbox /opt/cohub/internal/cohub-sandbox
 COPY LICENSE NOTICE /opt/cohub/
 
 RUN mkdir -p "$WORKSPACE_DIR"
-# Ensure workspace is writable by the node user
 RUN chown -R node:node "$WORKSPACE_DIR" 2>/dev/null || true
 
 USER node

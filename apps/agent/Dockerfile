@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.4
-# Cohub Agent Dockerfile
 
-FROM node:24-slim AS base
+FROM node:26-slim AS base
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
+COPY package.json ./
+RUN npm install -g "$(node -p 'require("./package.json").packageManager')" && rm package.json
 
 FROM base AS builder
 COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
@@ -75,7 +75,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
   fi
 
-FROM node:24-slim AS runtime
+FROM node:26-slim AS runtime
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size-percentage=75
 ENV WORKSPACE_ROOT=/space-storage
@@ -85,9 +85,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean \
-  && curl -fsSL https://github.com/sharkdp/fd/releases/download/v10.4.2/fd-v10.4.2-x86_64-unknown-linux-gnu.tar.gz \
+  && curl -fsSL https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-gnu.tar.gz \
     | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/fd' \
-  && curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz \
+  && curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz \
     | tar xz --wildcards -C /usr/local/bin --strip-components=1 '*/rg' \
   && chmod +x /usr/local/bin/fd /usr/local/bin/rg
 

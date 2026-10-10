@@ -1,4 +1,4 @@
-import { createSessionSnapshotScheduler, publishSessionSnapshot } from "@cohub/core/sessions";
+import { createSessionSnapshotScheduler, publishSessionSnapshot, publishSessionTurnStates } from "@cohub/core/sessions";
 import { isSettledStatsTurn } from "@cohub/protocol/model";
 import { db } from "./db.js";
 import { randomUUID } from "node:crypto";
@@ -130,6 +130,8 @@ async function dispatchTurnEvent(input: {
       payload: { turn: input.turn },
     }),
   );
+  await publishSessionTurnStates(db, input.spaceId, [input.turn], (event) => redisCommandClient.publish(REALTIME_OUTBOUND_CHANNEL, JSON.stringify(event)))
+    .catch((error) => console.warn("[Realtime] failed to publish user turn state", { sessionId: input.turn.sessionId, error }));
 }
 
 export const dispatchTurnCreated = (input: { spaceId: string; turn: SessionTurnRecord }) =>

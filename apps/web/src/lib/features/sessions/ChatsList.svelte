@@ -26,7 +26,6 @@ import {
 	buildUserSessionRoute,
 } from "$lib/space-routes";
 import { type ChatsFilter, chatsFilterScope } from "$lib/stores/chats-filter";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 
 const {
 	view,
@@ -172,7 +171,6 @@ function onScroll(event: Event) {
 						{density}
 						active={activeSessionId === session.id}
 						isMobile={isPage}
-						modelsCatalog={modelsCatalogStore.items ?? undefined}
 						showSourceBadge={!filter.source}
 						tree={row.tree}
 						tooltip={tooltipFor(row)}

@@ -16,7 +16,6 @@ import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { onListScrollTop } from "$lib/layout/list-scroll-top";
 import { m } from "$lib/paraglide/messages.js";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 
 const {
 	variant,
@@ -62,7 +61,6 @@ $effect(() => {
 });
 
 onMount(() => {
-	void modelsCatalogStore.load().catch(() => undefined);
 	const stopScrollTop = isPage
 		? onListScrollTop(() => tabs.scrollToTop())
 		: undefined;

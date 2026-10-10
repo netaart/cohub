@@ -4,7 +4,10 @@
 # space-commerce code paths — typechecking and building `@cohub/billing` and
 # `apps/api` will fail without it.
 #
-# Append these lines to a local .npmrc (or inject in CI).
+# Provide the token through trusted config. pnpm v11+ ignores ${...} placeholders
+# in the repository .npmrc (the committed scope routing there is non-secret), so
+# set the token in the global config instead:
 #
-# @talesofai-billing:registry=https://git.talesofai.com/api/packages/talesofai/npm/
-# //git.talesofai.com/api/packages/talesofai/npm/:_authToken=${GITEA_NPM_TOKEN}
+#   pnpm config set //git.talesofai.com/api/packages/talesofai/npm/:_authToken "$GITEA_NPM_TOKEN"
+#
+# CI/Docker inject the same line into the trusted home/root .npmrc.

@@ -16,20 +16,18 @@ import type { ListRowDensity } from "$lib/components/list-page/list-row";
 import SidebarActionButton from "$lib/components/sidebar/SidebarActionButton.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
 import {
 	getSessionPreview,
 	getSessionPreviewText,
 } from "$lib/session-preview";
-import { getSessionSidebarActivity } from "$lib/session-sidebar-activity";
+import { getSessionActivity } from "$lib/session-activity";
 import { getSessionActivityAt } from "$lib/session-sort";
 import { authStore } from "$lib/stores/auth.svelte";
 import {
 	chatsSourceName,
 	resolveSessionSourceKey,
 } from "$lib/stores/chats-filter";
-import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
 import { unreadTracker } from "$lib/stores/session-state.svelte";
 import { formatCompactAbsoluteTime } from "$lib/time-format";
 
@@ -40,7 +38,6 @@ const {
 	density,
 	active = false,
 	isMobile = false,
-	modelsCatalog,
 	showSourceBadge = false,
 	avatar,
 	tree,
@@ -70,7 +67,6 @@ const {
 	density: ListRowDensity;
 	active?: boolean;
 	isMobile?: boolean;
-	modelsCatalog?: ModelCatalogItem[] | null;
 	showSourceBadge?: boolean;
 	avatar?: Snippet;
 	tree?: SessionRowTree | null;
@@ -109,18 +105,8 @@ const locale = $derived(getLocale());
 let renameInput = $state<HTMLInputElement | null>(null);
 
 const dense = $derived(density === "dense");
-const activity = $derived(
-	getSessionSidebarActivity(sessionGenerationStore.get(session.id), {
-		locale,
-		modelsCatalog,
-		session,
-	}),
-);
-const showActivity = $derived(
-	activity.active ||
-		activity.phase === "failed" ||
-		activity.phase === "interrupted",
-);
+const activity = $derived(getSessionActivity(session, locale));
+const showActivity = $derived(activity.phase !== "idle");
 const isUnread = $derived(
 	unreadTracker.isUnread(session, session.lastMessageId),
 );
@@ -243,7 +229,11 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		{#if sourceBadge}
 			<span class="max-w-20 truncate rounded-[3px] bg-bg-hover-strong px-1.5 py-px text-[10px] font-medium leading-none text-text-tertiary" title={sourceBadge}>{sourceBadge}</span>
 		{/if}
-		{time}
+		{#if dense && showActivity}
+			<span class="max-w-24 truncate {activity.phase === 'failed' ? 'text-error-soft' : 'text-text-tertiary'}" title={[activity.label, activity.detail, time].filter(Boolean).join(' · ')}>{activity.label}</span>
+		{:else}
+			{time}
+		{/if}
 	</span>
 {/snippet}
 
@@ -260,8 +250,8 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 
 {#snippet secondLine()}
 	{#if showActivity}
-		<span class={activity.phase === "failed" ? "text-error-soft" : activity.active ? "text-text-tertiary" : "text-text-placeholder"} title={activity.text ? `${activity.label} · ${activity.text}` : activity.label}>
-			{activity.label}{activity.text ? ` · ${activity.text}` : ""}{#if activity.active}<span class="session-activity-caret" aria-hidden="true">▍</span>{/if}
+		<span class:text-error-soft={activity.phase === 'failed'} title={activity.detail ? `${activity.label} · ${activity.detail}` : activity.label}>
+			{activity.label}
 		</span>
 	{:else if preview}
 		<span title={preview}>{preview}</span>
@@ -322,7 +312,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		style={indentPx ? `--fork-indent: ${indentPx}px` : undefined}
 		aria-current={active ? "page" : undefined}
 		title={tooltip}
-		aria-label={tooltip ? `${title}, ${tooltip}` : title}
+		aria-label={[title, showActivity ? activity.label : null, tooltip].filter(Boolean).join(', ')}
 		draggable={!isMobile && draggable}
 		leading={avatar ? leading : undefined}
 		onclick={(event: MouseEvent) => onNavigate(event, session)}
@@ -335,7 +325,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 			badge={unreadDot}
 			{meta}
 			lead={participants.length > 0 ? people : undefined}
-			subtitle={dense && !showActivity ? undefined : secondLine}
+			subtitle={dense ? undefined : secondLine}
 		/>
 		{#snippet trailing()}
 			{#if actionCount > 0}
@@ -426,30 +416,11 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		bottom: 50%;
 	}
 
-	.session-activity-caret {
-		display: inline-block;
-		margin-left: 0.0625rem;
-		color: var(--color-brand);
-		font-size: 0.82em;
-		line-height: 1;
-		animation: session-activity-caret 1.15s steps(2, jump-none) infinite;
+	:global(.list-row.session-row[data-density="comfortable"]) {
+		--list-subtitle-size: 13px;
 	}
 
-	@keyframes session-activity-caret {
-		0%,
-		45% {
-			opacity: 1;
-		}
-		46%,
-		100% {
-			opacity: 0.28;
-		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.session-activity-caret {
-			animation: none;
-			opacity: 0.85;
-		}
+	:global(.list-row.session-row[data-density="compact"]) {
+		--list-subtitle-size: 11px;
 	}
 </style>

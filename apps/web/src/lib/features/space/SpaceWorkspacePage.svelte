@@ -2717,8 +2717,7 @@ onMount(() => {
 		}
 		scheduleDanmakuCatchup();
 	});
-	// Preload model catalogs so the selector is ready immediately
-	void sessionChat.loadModelsCatalog();
+	// The chat panel owns the agent catalog.
 	void sessionChat.loadGenerationModelsCatalog();
 	void sessionChat.loadPromptTemplates();
 	const handleOpenInlineFileEvent = (e: Event) => {

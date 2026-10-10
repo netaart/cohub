@@ -132,13 +132,13 @@
     "@cohub/infra": "workspace:*",
     "@cohub/protocol": "workspace:*",
     "@cohub/sandbox-controller": "workspace:*",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.4",
     "ignore": "^7.0.8",
     "picomatch": "^4.0.7",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/node": "26.4.0",
+    "@types/node": "catalog:",
     "typescript": "^7.0.2"
   }
 }

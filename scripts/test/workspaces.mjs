@@ -32,13 +32,10 @@ const pnpmArguments = [
 ];
 if (input.length > 0) pnpmArguments.push("--", ...input);
 
-const npmExecPath = process.env.npm_execpath;
-const command = npmExecPath ? process.execPath : "pnpm";
-const commandArguments = npmExecPath
-  ? [npmExecPath, ...pnpmArguments]
-  : pnpmArguments;
+// pnpm 12 ships a native executable, so `npm_execpath` can no longer be run
+// through `node`; spawn the `pnpm` on PATH instead (works on pnpm 10–12).
 const startedAt = performance.now();
-const child = spawn(command, commandArguments, {
+const child = spawn("pnpm", pnpmArguments, {
   cwd: process.cwd(),
   env: process.env,
   stdio: ["inherit", "pipe", "pipe"],

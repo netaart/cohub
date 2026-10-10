@@ -1,20 +1,10 @@
 # syntax=docker/dockerfile:1.4
-# Cohub Worker Dockerfile
-# BullMQ worker + Node.js runtime - Multi-stage build with pnpm deploy
 
-# ============================================
-# Base: common build tooling
-# ============================================
-FROM node:24-slim AS base
-
+FROM node:26-slim AS base
 WORKDIR /app
+COPY package.json ./
+RUN npm install -g "$(node -p 'require("./package.json").packageManager')" && rm package.json
 
-RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
-
-
-# ============================================
-# Stage 1: build workspace and deploy portable app
-# ============================================
 FROM base AS builder
 
 COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
@@ -54,7 +44,6 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
   fi
 
-# Copy source and build
 COPY packages/protocol ./packages/protocol
 COPY packages/billing ./packages/billing
 COPY packages/infra ./packages/infra
@@ -78,10 +67,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
   fi
 
-# ============================================
-# Stage 2: runtime
-# ============================================
-FROM node:24-slim AS runtime
+FROM node:26-slim AS runtime
 
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size-percentage=70

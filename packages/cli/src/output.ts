@@ -1,5 +1,6 @@
 import process from "node:process";
 import { extractBillingPayload } from "@neta-art/cohub";
+import { fetchFailureReason, isFetchFailure } from "./network-error.js";
 
 // -- Table rendering ---------------------------------------------------------
 
@@ -171,15 +172,9 @@ function debugErrorMetaFromBody(body: unknown): string[] {
 }
 
 function fetchFailureDetail(e: unknown): string | null {
-  if (!(e instanceof Error) || e.message !== "fetch failed") return null;
-  const cause = e.cause as { code?: unknown; hostname?: unknown; message?: unknown } | undefined;
-  const code = typeof cause?.code === "string" ? cause.code : null;
-  const hostname = typeof cause?.hostname === "string" ? cause.hostname : null;
-  const message = typeof cause?.message === "string" ? cause.message : null;
-  const parts = [code, hostname && `host: ${hostname}`, message].filter(Boolean);
-  return parts.length > 0
-    ? `Network request failed (${parts.join(" · ")}). Check DNS/proxy/firewall settings and try again.`
-    : "Network request failed. Check DNS/proxy/firewall settings and try again.";
+  if (!isFetchFailure(e)) return null;
+  const reason = fetchFailureReason(e);
+  return `Network request failed${reason ? ` (${reason})` : ""}. Check DNS/proxy/firewall settings and try again.`;
 }
 
 function errorPresentationFromHttpError(e: unknown): { message?: string; detail?: string } | null {

@@ -19,9 +19,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   js-checks:
     name: Lint, typecheck, test, build
@@ -30,16 +27,13 @@ jobs:
       GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          node-version: '24'
-          cache: 'pnpm'
+          cache: true
+          install: false
 
       # Optional: only used when available; installs fine without it
       # because @talesofai-billing/sdk is an optional dependency.
@@ -102,12 +96,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.24'
+          go-version-file: apps/sandbox/go.mod
           cache-dependency-path: apps/sandbox/go.sum
 
       - name: Check formatting

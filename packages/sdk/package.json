@@ -1,6 +1,6 @@
 {
   "name": "@neta-art/cohub",
-  "version": "9.0.0",
+  "version": "9.0.1",
   "description": "Cohub SDK for spaces, sessions, boards, and realtime agent collaboration.",
   "license": "Apache-2.0",
   "private": false,
@@ -149,16 +149,16 @@
   },
   "dependencies": {
     "perfect-freehand": "1.2.3",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.11",
+    "@biomejs/biome": "catalog:",
     "@cohub/protocol": "workspace:*",
     "@napi-rs/canvas": "^1.0.8",
-    "@types/node": "26.4.0",
+    "@types/node": "catalog:",
     "pixi.js": "^8.20.1",
     "tsdown": "^0.22.14",
-    "tsx": "4.23.13",
+    "tsx": "catalog:",
     "typescript": "^7.0.2"
   },
   "peerDependencies": {

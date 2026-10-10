@@ -21,7 +21,7 @@
     "sharp": "^0.35.4"
   },
   "devDependencies": {
-    "@types/node": "26.4.0",
+    "@types/node": "catalog:",
     "typescript": "^7.0.2"
   }
 }

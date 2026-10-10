@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.62 — 2026-10-10
+
+- **Quiet session activity**: session lists now derive status directly from turn records instead of per-session assistant stream subscriptions. Sidebars, chat lists, and workspaces receive lightweight `session.turn.updated` projections over the existing user realtime channel, with turn-sequence and terminal-state guards that leave generation state untouched, cutting realtime fan-out and render churn.
+- **Turn-state realtime pipeline**: a shared `publishSessionTurnStates` path in core now drives `session.turn.updated` for creators and participants across the agent and API, and a new client-side turn-state merger orders snapshots, events, and optimistic prompts by sequence so a new dispatch and a stale snapshot can no longer overwrite each other.
+- **Generation recovery hardening**: recovered running turns are now tagged `resumed`, distinguish pending snapshots from live output, and re-check turn ownership after awaited recovery and IndexedDB reads. Per-user cache keys guard persisted generation state and release the space-scoped store while keeping server-derived recovery snapshots.
+- **Unified session audience resolution**: realtime room routing now shares the session-list permission precedence, resolving access policies for the session then its space and filtering participants by `session.view` via role permissions, replacing the previous owner/member-only audience logic.
+- **Toolchain modernization**: Node 26 images, pnpm 12, Go 1.27.2 for the sandbox, and converged workspace dependency versions across the monorepo.
+
+### Bug Fixes
+
+- Board item timestamps are serialized correctly in raw SQL bounds-only batch updates, fixing `boards/:boardId/apply` returning 500.
+- The CLI can download Runtime image attachments again after fixing `Invalid IP address: undefined`, and Runtime `fetch failed` errors now include the underlying network reason.
+- The space file panel retains its identity during teardown instead of remounting.
+
 ## v2.61 — 2026-10-09
 
 - **Board v3 CLI surface**: `boards inspect` is replaced by a resource-scoped `boards get` (`--only board|items|animations`, `--items`, `--within`, `--rect`), `boards preset` emits bare `tracks` by default or wraps them when `--animation` is given, and `boards export` takes `--paper` instead of `--background`. The Board authoring guide now lives in `skills/cohub-board/SKILL.md`, with CLI README and developer docs rewritten around the document-as-JSON model.
