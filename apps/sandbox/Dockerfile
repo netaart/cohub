@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.24-bookworm AS builder
+# Single source of truth for the Go toolchain used by both the builder stage and
+# the runtime toolchain installed below.
+ARG GO_VERSION=1.27.2
+
+FROM golang:${GO_VERSION}-bookworm AS builder
 
 WORKDIR /app
 
@@ -11,6 +15,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/cohub-sandbox .
 
 FROM node:26-slim AS runtime
+
+# Re-declare so the build arg is available in this stage (ARGs do not cross stages).
+ARG GO_VERSION
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV WORKSPACE_DIR=/workspace
@@ -77,7 +84,7 @@ RUN echo "cohub-cli refresh token: ${COHUB_CLI_REFRESH}" \
 RUN mkdir -p /home/node/.npm-global /home/node/.bun /home/node/.local /home/node/go/bin /home/node/.pnpm-global/bin \
     && chown -R node:node /home/node/.npm-global /home/node/.bun /home/node/.local /home/node/go /home/node/.pnpm-global
 
-RUN curl -fsSL https://go.dev/dl/go1.24.13.linux-amd64.tar.gz | tar xz -C /usr/local
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | tar xz -C /usr/local
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 WORKDIR /app
