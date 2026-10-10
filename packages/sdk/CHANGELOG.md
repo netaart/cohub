@@ -1,5 +1,12 @@
 # @neta-art/cohub
 
+## 9.0.1
+
+### Patch Changes
+
+- 3f9f043: Fix `boards/:boardId/apply` returning 500: the bounds-only batch update interpolated a raw `Date` into a drizzle `sql` template, where raw `execute` does not serialize by column type. Convert it to an ISO string cast to `timestamptz` to match the column.
+- a4c7c0e: Personal session lists receive lightweight projections of the existing `session.turn.updated` events for authorized creators and participants, without subscribing to assistant streams. Session snapshots continue to use `session.updated`. Lists use Turn sequence and terminal-state guards rather than introducing new timestamps, revisions, or database indexes.
+
 ## 9.0.0
 
 ### Major Changes
