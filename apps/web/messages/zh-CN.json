@@ -109,7 +109,6 @@
 	"runtime_archive_ready": "已归档",
 	"runtime_archive_failed": "归档暂不可用",
 	"runtime_model": "本地模型",
-	"runtime_default_model": "跟随 Harness 默认",
 	"common_cancel": "取消",
 	"common_delete": "删除",
 	"common_edit": "编辑",

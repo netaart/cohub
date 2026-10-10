@@ -35,22 +35,26 @@ type ComposerTurnSource = Pick<
 > &
 	HarnessTurn;
 
+/**
+ * The last local request for this Harness, as sent: `turn.model` is the model
+ * that answered, which a Harness-default request also fills in. A request
+ * without a model leaves the choice to the catalog default.
+ */
 export function resolveLocalModelFromTurns(
 	turns: ComposerTurnSource[],
-	harness: "cohub" | "pi" | "codex",
+	harness: "pi" | "codex",
 ): LocalModelSelection | null {
-	if (harness === "cohub") return null;
-	const previous = turns.findLast(
+	const meta = turns.findLast(
 		(turn) =>
 			turn.executionKind !== "direct_generation" &&
-			resolveTurnHarness(turn) === harness &&
-			turn.model,
-	);
-	if (!previous?.model) return null;
-	const thinkingLevel = getRequestedThinkingLevel(previous.meta);
+			resolveTurnHarness(turn) === harness,
+	)?.meta;
+	if (typeof meta?.model !== "string" || typeof meta.provider !== "string")
+		return null;
+	const thinkingLevel = getRequestedThinkingLevel(meta);
 	return {
-		id: previous.model,
-		provider: previous.provider ?? harness,
+		id: meta.model,
+		provider: meta.provider,
 		...(thinkingLevel ? { thinkingLevel } : {}),
 	};
 }

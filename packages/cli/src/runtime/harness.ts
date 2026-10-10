@@ -69,7 +69,8 @@ export async function discoverHarnesses(harnesses: ("pi" | "codex")[], options: 
     try {
       if (harness === "pi") {
         const result = await rpc.request("get_available_models");
-        models.push(...piModelCatalog(array(result.models)));
+        const state = await rpc.request("get_state");
+        models.push(...piModelCatalog(array(result.models), state));
       } else {
         await initializeCodex(rpc);
         const config = await rpc.request("config/read", { includeLayers: false, cwd });

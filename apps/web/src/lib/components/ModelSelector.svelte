@@ -45,8 +45,6 @@ type Props = {
 	/** Local catalogs share search/selection, without Cloud generation policy. */
 	showGeneration?: boolean;
 	title?: string;
-	onSelectDefault?: () => void;
-	defaultLabel?: string;
 	onClose: () => void;
 	onSelect: (item: {
 		provider: string;
@@ -96,8 +94,6 @@ const {
 	open,
 	showGeneration = true,
 	title,
-	onSelectDefault,
-	defaultLabel,
 	onClose,
 	onSelect,
 	models,
@@ -236,17 +232,12 @@ function thinkingLevels(item: ModelItem): ModelThinkingLevel[] {
 	return getSupportedThinkingLevels(item as never);
 }
 
-function candidateThinkingLevel(item: ModelItem): ModelThinkingLevel | null {
+function candidateThinkingLevel(item: ModelItem): ModelThinkingLevel {
 	// Thinking level follows the model: only the session's recorded model
 	// shows the session level; all others show their own default.
 	const bound = thinkingLevelModel ?? currentModel;
 	const isBound =
 		bound !== null && item.provider === bound.provider && item.id === bound.id;
-	if (
-		!(isBound && currentThinkingLevel) &&
-		item.model.defaultThinkingLevel === null
-	)
-		return null;
 	return clampThinkingLevel(
 		item as never,
 		isBound
@@ -256,10 +247,7 @@ function candidateThinkingLevel(item: ModelItem): ModelThinkingLevel | null {
 }
 
 function isDefaultLevel(item: ModelItem, level: ModelThinkingLevel): boolean {
-	return (
-		item.model.defaultThinkingLevel !== null &&
-		level === getModelDefaultThinkingLevel(item as never)
-	);
+	return level === getModelDefaultThinkingLevel(item as never);
 }
 
 function thinkingMenuKey(item: ModelItem): string {
@@ -1002,12 +990,6 @@ const hoverCardPos = $derived.by(() => {
 
 	{/if}
 	{#if activeTab === "chat" || !showGeneration}
-		{#if onSelectDefault}
-			<button type="button" class="flex min-h-11 w-full items-center justify-between gap-3 border-b border-border-subtle px-4 py-2 text-left text-[13px] text-text-secondary hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-brand" onclick={onSelectDefault} aria-pressed={!currentModel}>
-				<span>{defaultLabel ?? m.runtime_default_model({}, { locale })}</span>
-				{#if !currentModel}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
-			</button>
-		{/if}
 		<div class="border-b border-border-subtle/70 px-3 py-2">
 			<input
 				bind:this={searchInputEl}
@@ -1034,7 +1016,6 @@ const hoverCardPos = $derived.by(() => {
 					{@const showThinking = tLevels.length > 1}
 					{@const tMenuKey = thinkingMenuKey(item)}
 					{@const activeLevel = candidateThinkingLevel(item)}
-					{@const activeLevelLabel = activeLevel ? formatThinkingLevelFull(activeLevel) : m.model_selector_thinking_default({}, { locale })}
 					{@const thinkingOpen = thinkingMenuOpenFor === tMenuKey}
 					<div
 						role="presentation"
@@ -1090,14 +1071,14 @@ const hoverCardPos = $derived.by(() => {
 													? "border-border-subtle bg-bg-surface text-text-secondary"
 													: "border-transparent text-text-tertiary hover:border-border-subtle/80 hover:bg-bg-surface hover:text-text-secondary"
 											}`}
-											title={m.model_selector_thinking_title({ level: activeLevelLabel }, { locale })}
-											aria-label={m.model_selector_thinking_aria({ level: activeLevelLabel }, { locale })}
+											title={m.model_selector_thinking_title({ level: formatThinkingLevelFull(activeLevel) }, { locale })}
+											aria-label={m.model_selector_thinking_aria({ level: formatThinkingLevelFull(activeLevel) }, { locale })}
 											aria-expanded={thinkingOpen}
 											aria-haspopup="listbox"
 											onclick={(e) => toggleThinkingMenu(item, e)}
 										>
 											<Brain class="h-3 w-3 opacity-70" />
-											<span class="tabular-nums">{activeLevel ? formatThinkingLevelShort(activeLevel) : activeLevelLabel}</span>
+											<span class="tabular-nums">{formatThinkingLevelShort(activeLevel)}</span>
 											<ChevronDown class={`h-2.5 w-2.5 opacity-50 transition-transform ${thinkingOpen ? "rotate-180" : ""}`} />
 										</button>
 										{#if thinkingOpen && thinkingMenuPos}

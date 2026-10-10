@@ -260,13 +260,16 @@ until the updated binary is published (or selected with `COHUB_SANDBOXD_BIN`).
 新 sandboxd 发布前保留兼容路径，不修改为尚未发布的版本号。后台运行不承诺开机自启；
 OS 级托管与断网继续执行任务属于后续阶段，当前仍保留断连中止及结果对账的安全边界。
 
-Web reuses the shared model selector for local catalogs, with a Harness default option.
-Pi/Codex model rows expose thinking levels declared by the local Harness. The selected
-level is sent with the prompt and restored from the Session's requested level for that
-Harness; choosing Harness default clears the model and level overrides. Codex `none`
-maps to Cohub `off`. Older Runtime catalogs and custom Codex providers without an
-authoritative model catalog do not advertise guessed reasoning capabilities. Deploy
-the updated services and Web, then update and restart the CLI Runtime to refresh its catalog.
+Web reuses the shared model selector for local catalogs. The Runtime publishes each Harness's
+default model (Codex `config.model` or its catalog default; Pi's current model) and default
+thinking level (Codex configured or model effort; Pi's level for its default model), so the composer always
+shows, and sends, a concrete model and level. A Session restores the model and level last
+requested for that Harness; a model the Runtime no longer offers falls back to the default.
+Pi/Codex model rows expose thinking levels declared by the local Harness, and Codex `none`
+maps to Cohub `off`. Models without a level choice send none. Older Runtime catalogs and custom
+Codex providers without an authoritative model catalog do not advertise guessed reasoning
+capabilities. Deploy the updated services and Web, then update and restart the CLI Runtime to
+refresh its catalog.
 The header distinguishes ready, limited, offline and stale/unknown status. Runtime lifecycle
 changes invalidate the existing status cache over the shared realtime room; old snapshots
 may populate labels/models, never authorize a local turn.

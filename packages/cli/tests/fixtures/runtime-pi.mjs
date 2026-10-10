@@ -82,6 +82,6 @@ for await (const line of createInterface({ input: process.stdin })) {
   const respond = (data = {}) => send({ id: input.id, type: "response", success: true, data });
   if (input.type === "get_available_models") respond({ models: [model] });
   else if (input.type === "set_thinking_level") { append({ type: "thinking_level_change", thinkingLevel: input.level }); respond(); }
-  else if (input.type === "get_state") respond({ sessionId, model, isStreaming: running !== null });
+  else if (input.type === "get_state") respond({ sessionId, model, thinkingLevel: "medium", isStreaming: running !== null });
   else respond();
 }

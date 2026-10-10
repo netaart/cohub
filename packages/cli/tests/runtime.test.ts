@@ -179,7 +179,9 @@ for (const harness of ["pi", "codex"] as const) {
     try {
       const catalog = await discoverHarnesses([harness], { [harness]: fixture(harness) }, root);
       assert.equal(catalog.models[0]?.id, "test");
+      assert.equal(catalog.models[0]?.isDefault, true);
       if (harness === "pi") {
+        assert.equal(catalog.models[0]?.defaultThinkingLevel, "medium");
         assert.equal(catalog.models[0]?.reasoning, true);
         assert.equal(catalog.models[0]?.thinkingLevelMap?.xhigh, "xhigh");
       }

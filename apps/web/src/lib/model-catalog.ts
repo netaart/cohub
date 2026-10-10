@@ -22,29 +22,62 @@ export type LocalModelSelection = {
 	thinkingLevel?: ModelThinkingLevel;
 };
 
+type LocalModel = RuntimeCapabilities["models"][number];
+
+function toLocalModelItem({
+	provider,
+	id,
+	name,
+	reasoning,
+	thinkingLevelMap,
+	defaultThinkingLevel,
+}: LocalModel): ModelCatalogItem {
+	return {
+		provider,
+		id,
+		model: { name, reasoning, thinkingLevelMap, defaultThinkingLevel },
+	};
+}
+
 export function toLocalModelCatalog(
 	models: RuntimeCapabilities["models"],
 ): ModelCatalogItem[] {
-	return models.map(
-		({
-			provider,
-			id,
-			name,
-			reasoning,
-			thinkingLevelMap,
-			defaultThinkingLevel,
-		}) => ({
-			provider,
-			id,
-			// Native settings may choose a default that the catalog does not expose.
-			model: {
-				name,
-				reasoning,
-				thinkingLevelMap,
-				defaultThinkingLevel: defaultThinkingLevel ?? null,
-			},
-		}),
-	);
+	return models.map(toLocalModelItem);
+}
+
+/**
+ * Resolves what a local Turn runs with against one Harness's catalog: the
+ * requested model when the Runtime still offers it, else the Harness default.
+ * The level follows the model like the Cohub picker: a requested level is
+ * clamped to the requested model, any other model starts at its default.
+ * Models without a level choice carry none, so none is sent.
+ */
+export function resolveLocalModel(
+	models: RuntimeCapabilities["models"],
+	requested: LocalModelSelection | null,
+): LocalModelSelection | null {
+	const match =
+		requested &&
+		models.find(
+			(model) =>
+				model.provider === requested.provider && model.id === requested.id,
+		);
+	const model = match ?? models.find((entry) => entry.isDefault);
+	if (!model) return null;
+	const item = toLocalModelItem(model);
+	const thinkingLevel =
+		getSupportedThinkingLevels(item).length > 1
+			? resolveCandidateThinkingLevel(
+					item,
+					match ? requested?.thinkingLevel : null,
+				)
+			: undefined;
+	return {
+		provider: model.provider,
+		id: model.id,
+		name: model.name,
+		...(thinkingLevel ? { thinkingLevel } : {}),
+	};
 }
 
 const THINKING_LEVELS = new Set<ModelThinkingLevel>([

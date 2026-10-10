@@ -117,7 +117,7 @@ type Props = {
 	onharnessopen?: () => void;
 	localModels?: RuntimeCapabilities["models"];
 	localModel?: LocalModelSelection | null;
-	onlocalmodelchange?: (model: LocalModelSelection | null) => void;
+	onlocalmodelchange?: (model: LocalModelSelection) => void;
 	/** Compact thinking level suffix; null/empty hides. */
 	thinkingLevelLabel?: string | null;
 	/** Compact generation-policy suffix; null/empty hides (Auto). */
@@ -190,19 +190,11 @@ const composerPlaceholder = $derived(
 let showLocalModelSelector = $state(false);
 const localModelCatalog = $derived(toLocalModelCatalog(localModels));
 const localModelTitle = $derived(
-	localModel?.name ?? localModel?.id ?? m.runtime_default_model({}, { locale }),
+	localModel?.name ?? localModel?.id ?? m.runtime_model({}, { locale }),
 );
 
-function selectLocalModel(selected: LocalModelSelection | null) {
-	const model =
-		selected &&
-		localModels.find(
-			(model) =>
-				model.provider === selected.provider && model.id === selected.id,
-		);
-	onlocalmodelchange?.(
-		model && selected ? { ...selected, name: model.name } : null,
-	);
+function selectLocalModel(selected: LocalModelSelection) {
+	onlocalmodelchange?.(selected);
 	showLocalModelSelector = false;
 }
 
@@ -1665,10 +1657,8 @@ $effect(() => {
 	open={showLocalModelSelector}
 	onClose={() => { showLocalModelSelector = false; }}
 	onSelect={selectLocalModel}
-	onSelectDefault={() => selectLocalModel(null)}
 	showGeneration={false}
 	title={`${harnessLabels[harness]} · ${m.runtime_model({}, { locale })}`}
-	defaultLabel={m.runtime_default_model({}, { locale })}
 	models={localModelCatalog}
 	currentModel={localModel}
 	currentThinkingLevel={localModel?.thinkingLevel ?? null}

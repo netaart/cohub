@@ -99,6 +99,8 @@ export const runtimeCapabilitiesSchema = z.object({
     provider: z.string().max(100),
     id: z.string().min(1).max(255),
     name: z.string().max(255),
+    /** The model the Harness runs when none is requested; at most one per Harness. */
+    isDefault: z.boolean().optional(),
     reasoning: z.boolean().optional(),
     defaultThinkingLevel: runtimeThinkingLevelSchema.optional(),
     thinkingLevelMap: z.partialRecord(runtimeThinkingLevelSchema, z.string().max(100).nullable()).optional(),

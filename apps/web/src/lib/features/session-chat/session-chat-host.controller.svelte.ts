@@ -56,6 +56,7 @@ import {
 	getRequestedThinkingLevel,
 	type LocalModelSelection,
 	type ModelThinkingLevel,
+	resolveLocalModel,
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
 import {
@@ -362,9 +363,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		model: null,
 	});
 	let harnessBySession = $state<Record<string, "cohub" | "pi" | "codex">>({});
-	let localModelsBySession = $state<Record<string, LocalModelSelection | null>>(
-		{},
-	);
+	let localModelsBySession = $state<Record<string, LocalModelSelection>>({});
 	const harnessSelectionKey = $derived(
 		`${spaceId}:${activeSessionId ?? "draft"}`,
 	);
@@ -378,13 +377,20 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		harnessBySession[harnessSelectionKey] ??
 			resolveTurnHarness(composerAgentTurns.at(-1)),
 	);
-	const localModel = $derived.by(() => {
-		const key = `${harnessSelectionKey}:${composerHarness}`;
-		if (Object.hasOwn(localModelsBySession, key))
-			return localModelsBySession[key] ?? null;
-		return resolveLocalModelFromTurns(composerAgentTurns, composerHarness);
-	});
 	const runtimeCatalog = $derived(cachedRuntimeStatus(spaceId));
+	// Local Turns always name a model and, when the model has a choice, a level:
+	// a Harness keeps a requested level for later Turns, so leaving it out would
+	// not mean its default.
+	const localModel = $derived.by(() => {
+		if (composerHarness === "cohub") return null;
+		const requested =
+			localModelsBySession[`${harnessSelectionKey}:${composerHarness}`] ??
+			resolveLocalModelFromTurns(composerAgentTurns, composerHarness);
+		const models = runtimeCatalog?.capabilities?.models.filter(
+			(model) => model.harness === composerHarness,
+		);
+		return models ? resolveLocalModel(models, requested) : requested;
+	});
 	async function loadRuntimeCatalog() {
 		const targetSpaceId = spaceId;
 		if (!targetSpaceId) return;
@@ -3269,6 +3275,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					meta: {
 						optimistic: true,
 						harness,
+						// Mirrors the server's request meta, which local model restore reads.
+						...(model ? { model: model.id, provider: model.provider } : {}),
 						...(thinkingLevel ? { requestedThinkingLevel: thinkingLevel } : {}),
 						userId: currentUser.uuid,
 						clientMessageId,
@@ -4601,7 +4609,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		get localModel() {
 			return localModel;
 		},
-		setLocalModel(model: LocalModelSelection | null) {
+		setLocalModel(model: LocalModelSelection) {
 			localModelsBySession = {
 				...localModelsBySession,
 				[`${harnessSelectionKey}:${composerHarness}`]: model,
