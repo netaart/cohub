@@ -1389,6 +1389,7 @@ onMount(() => {
 
 	.command-palette {
 		--palette-x: 16px;
+		--list-gutter-x: calc(var(--palette-x) - var(--list-row-pad-x));
 		--palette-bg: color-mix(in oklch, var(--bg-surface) 94%, var(--brand-900) 6%);
 		width: min(720px, calc(100vw - 32px));
 		max-height: min(640px, calc(100vh - 96px));
@@ -1404,7 +1405,6 @@ onMount(() => {
 
 	.command-header {
 		flex-shrink: 0;
-		--list-gutter-x: calc(var(--palette-x) - var(--list-row-pad-x));
 		border-bottom: 1px solid var(--border-subtle);
 		background: color-mix(in oklch, var(--bg-primary) 30%, transparent);
 	}
@@ -1492,18 +1492,17 @@ onMount(() => {
 	}
 
 	.command-results {
-		--list-gutter-x: calc(var(--palette-x) - 8px - var(--list-row-pad-x));
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
-		padding: 8px;
+		padding: 8px var(--list-gutter-x);
 	}
 
 	.command-subbar {
 		position: sticky;
 		top: -8px;
 		z-index: 1;
-		margin-top: -8px;
+		margin: -8px calc(-1 * var(--list-gutter-x)) 0;
 		background: var(--palette-bg);
 	}
 
@@ -1625,7 +1624,7 @@ onMount(() => {
 
 		.command-input-row {
 			gap: 4px;
-			padding: 6px 6px 2px 10px;
+			padding: 6px 6px 2px var(--list-gutter-x);
 		}
 
 		.command-field {
@@ -1633,7 +1632,7 @@ onMount(() => {
 			gap: 8px;
 			border-radius: 10px;
 			background: var(--bg-surface);
-			padding: 0 6px 0 10px;
+			padding: 0 6px 0 var(--list-row-pad-x);
 		}
 
 		/* 16px keeps iOS from zooming into the focused field. */

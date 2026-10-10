@@ -165,7 +165,6 @@ const timestamp = $derived.by(() => {
 
 <style>
 	.command-result {
-		position: relative;
 		display: flex;
 		width: 100%;
 		align-items: center;
@@ -236,19 +235,7 @@ const timestamp = $derived.by(() => {
 	.command-result.active .command-pin-btn { opacity: 1; }
 	.command-result.active .command-pin-btn:not(.pinned) { color: var(--text-tertiary); }
 
-	.command-result::before {
-		content: "";
-		position: absolute;
-		left: 0;
-		top: 8px;
-		bottom: 8px;
-		width: 2px;
-		border-radius: 999px;
-		background: transparent;
-	}
-
 	.command-result.active { background: color-mix(in oklch, var(--brand-bg) 56%, var(--bg-hover) 44%); }
-	.command-result.active::before { background: var(--brand); }
 	.command-result.active .command-enter { opacity: 1; }
 	.command-result.active .command-type-mark { border-color: color-mix(in oklch, currentColor 36%, transparent); }
 
