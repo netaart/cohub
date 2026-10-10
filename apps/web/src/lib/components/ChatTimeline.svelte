@@ -187,7 +187,7 @@ $effect(() => {
 <div
 	bind:this={bindListEl}
 	data-session-id={sessionId ?? undefined}
-	class="chat-timeline-scroll relative flex-1 min-h-0 overflow-y-auto bg-bg-content px-4 sm:px-6"
+	class="chat-timeline-scroll relative flex-1 min-h-0 overflow-y-auto bg-bg-content chat-gutter-x"
 >
 	<div class={`mx-auto max-w-[var(--chat-content-max-width)] flex flex-col [&>*]:mt-2 pt-6 pb-6`}>
 		{#if loading && timeline.length === 0}

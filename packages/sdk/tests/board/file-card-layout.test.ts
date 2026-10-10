@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
 	fileCategoryAccent,
 	fileMetaLine,
-} from "../../src/board/core/file-preview.js";
+} from "../../src/board/model/file-preview.js";
 import {
 	containCoverRect,
 	ellipsizeWrappedLines,

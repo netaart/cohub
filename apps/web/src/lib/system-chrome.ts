@@ -8,7 +8,7 @@ export const DEFAULT_PWA_BACKGROUND_COLOR = "#FFFFFF";
 
 /**
  * Keep browser chrome and the native host's system bars aligned with the
- * actual shell background, including space-level custom theme.css overrides.
+ * actual shell background, including account and Space custom theme overrides.
  */
 export function syncSystemChromeColor(fallback = DEFAULT_PWA_THEME_COLOR) {
 	if (typeof document === "undefined") return;

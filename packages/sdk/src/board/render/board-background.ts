@@ -1,6 +1,6 @@
 import { Container, Graphics, RenderTexture, TilingSprite, type Application } from "pixi.js";
 import type { BoardSettings } from "@cohub/protocol";
-import type { BoardViewport } from "../geometry.js";
+import type { BoardViewport } from "../model/geometry.js";
 import type { BoardRenderPalette } from "./renderers/board-renderer-registry.js";
 import { parseBoardCssColor } from "./css-color.js";
 

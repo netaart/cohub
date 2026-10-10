@@ -1,5 +1,5 @@
 // Live danmaku (floating messages) preference — a lightweight, best-effort
-// localStorage-backed toggle. Mirrors the space-config / space-style pattern:
+// localStorage-backed toggle. Mirrors the space-config pattern:
 // module-level singleton, synchronous read, subscribe for reactive updates.
 
 const STORAGE_KEY = "cohub:space-danmaku:v1";

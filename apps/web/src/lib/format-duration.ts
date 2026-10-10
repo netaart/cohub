@@ -34,6 +34,13 @@ export function formatDurationMs(ms: number, locale?: Locale): string {
 		: `${hours}${zh ? "时" : "h"}`;
 }
 
+export function formatElapsedMs(ms: number, locale?: Locale): string {
+	const seconds = Math.max(0, Math.floor(ms / 1000));
+	if (seconds < 60)
+		return `${seconds}${toIntlTag(locale) === "zh-CN" ? "秒" : "s"}`;
+	return formatDurationMs(Math.floor(seconds / 60) * 60_000, locale);
+}
+
 export function formatDurationDetail(
 	ms: number,
 	label = "Duration",

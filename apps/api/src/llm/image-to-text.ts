@@ -6,10 +6,7 @@ import type {
   Model,
   ThinkingLevel,
 } from "@earendil-works/pi-ai";
-import {
-  resolveModelTaskApiKey,
-  type ImageToTextConfig,
-} from "@cohub/infra/config-runtime/model-tasks";
+import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import { createModelsFromRegistry } from "./pi-models-adapter.js";
 import type { RuntimeLlmModel } from "./completion-registry.js";
 
@@ -58,7 +55,7 @@ function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTex
 }
 
 function createStandaloneRegistry(config: ImageToTextConfig, model: Model<Api>) {
-  const apiKey = resolveModelTaskApiKey(config.model.apiKey);
+  const apiKey = config.model.apiKey;
   return {
     getAvailable: () => [model],
     getApiKey: (provider: string) => provider === model.provider ? apiKey : undefined,

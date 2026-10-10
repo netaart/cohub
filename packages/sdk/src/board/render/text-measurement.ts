@@ -2,7 +2,7 @@
 import { BOARD_FONT_STACK, BOARD_MONO_FONT_STACK } from "@cohub/protocol/board-constants";
 import { DOMAdapter } from "pixi.js";
 import { setBoardTextMeasurer } from "@cohub/protocol";
-import { boardFontFamily } from "../core/text-metrics.js";
+import { boardFontFamily } from "../model/text-metrics.js";
 
 export const BOARD_FONT_STACKS = {
   sans: BOARD_FONT_STACK,

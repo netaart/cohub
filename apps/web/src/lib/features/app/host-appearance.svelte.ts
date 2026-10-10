@@ -2,7 +2,7 @@ import {
 	APP_APPEARANCE_TOKENS,
 	type AppAppearance,
 } from "@cohub/protocol/app-runtime";
-import { SPACE_STYLE_CHANGED_EVENT } from "$lib/space-style";
+import { CUSTOM_THEME_CHANGED_EVENT } from "$lib/custom-theme/events";
 import { getResolvedTheme } from "$lib/theme.svelte";
 import { isDarkTheme } from "$lib/theme-registry";
 
@@ -11,7 +11,10 @@ const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 /** Bumped when something outside the theme id restyles the host. */
 let revision = $state(0);
 let listening = false;
-let cached: { key: string; appearance: AppAppearance } | null = null;
+const cached = new WeakMap<
+	Element,
+	{ key: string; appearance: AppAppearance }
+>();
 
 function listen() {
 	if (listening || typeof window === "undefined") return;
@@ -19,8 +22,8 @@ function listen() {
 	const bump = () => {
 		revision += 1;
 	};
-	// A Space's custom theme overrides tokens without changing the theme id.
-	window.addEventListener(SPACE_STYLE_CHANGED_EVENT, bump);
+	// Custom themes override tokens without changing the theme id.
+	window.addEventListener(CUSTOM_THEME_CHANGED_EVENT, bump);
 	window.matchMedia?.(REDUCED_MOTION_QUERY).addEventListener("change", bump);
 }
 
@@ -31,12 +34,16 @@ export function hostAppearanceKey(): string {
 }
 
 /** The theme and resolved public tokens the viewer currently sees. */
-export function readHostAppearance(): AppAppearance | undefined {
+export function readHostAppearance(
+	host?: Element | null,
+): AppAppearance | undefined {
 	if (typeof document === "undefined") return undefined;
+	const element = host ?? document.documentElement;
 	const key = hostAppearanceKey();
-	if (cached?.key === key) return cached.appearance;
+	const hit = cached.get(element);
+	if (hit?.key === key) return hit.appearance;
 	const theme = getResolvedTheme();
-	const style = getComputedStyle(document.documentElement);
+	const style = getComputedStyle(element);
 	const tokens: AppAppearance["tokens"] = {};
 	for (const token of APP_APPEARANCE_TOKENS) {
 		const value = style.getPropertyValue(`--${token}`).trim();
@@ -48,6 +55,6 @@ export function readHostAppearance(): AppAppearance | undefined {
 		tokens,
 		reducedMotion: window.matchMedia?.(REDUCED_MOTION_QUERY).matches ?? false,
 	};
-	cached = { key, appearance };
+	cached.set(element, { key, appearance });
 	return appearance;
 }

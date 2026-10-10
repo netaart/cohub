@@ -1,4 +1,5 @@
 import type { SessionForkRecord } from "@cohub/protocol/model";
+import type { RealtimeSessionFork } from "@cohub/protocol/realtime";
 
 export type SessionForkListItem = SessionForkRecord & {
   firstUserTextAfterFork: string | null;
@@ -42,3 +43,10 @@ export const redactCrossSpaceSessionForks = (forks: SessionForkListItem[], input
   const partial = forks.filter((fork) => !input.fullViewSpaceIds.has(fork.spaceId));
   return [...full, ...redactSessionForksForViewer(partial, { isMember: false, visibleSessionIds: input.visibleSessionIds })];
 };
+
+export const toRealtimeSessionFork = (fork: RealtimeSessionFork): RealtimeSessionFork => ({
+  childSessionId: fork.childSessionId,
+  parentSessionId: fork.parentSessionId,
+  depth: fork.depth,
+  anchorSequence: fork.anchorSequence,
+});

@@ -1,8 +1,8 @@
 import { Container, Graphics, GraphicsPath, Matrix, Text } from "pixi.js";
 import type { BoardShapeItem } from "@cohub/protocol";
 import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
-import type { SceneItem } from "../../core/scene.js";
-import { type WorldPoint, worldPoint } from "../../geometry.js";
+import type { SceneItem } from "../../model/scene.js";
+import { type WorldPoint, worldPoint } from "../../model/geometry.js";
 import { dashPattern, tracePolyline, trimPolyline } from "../stroke.js";
 import { itemColor } from "../palette.js";
 import { syncTextResolution, syncTextWrapWidth, textResolutionForZoom } from "../text-resolution.js";

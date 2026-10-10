@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { Context } from "@earendil-works/pi-ai";
-import type { ModelsConfig } from "@cohub/infra/config-runtime/models";
+import { resolveRuntimeModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
 import { CohubModelRegistry } from "../runtime/model-registry.js";
 import { SessionManager } from "../runtime/local-session-manager.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "../runtime/pi-models-adapter.js";
@@ -35,7 +35,7 @@ const config: ModelsConfig = {
   },
 };
 
-const modelRegistry = new CohubModelRegistry({ configs: [config] });
+const modelRegistry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform: config })] });
 const model = modelRegistry.find("test", "gpt-test");
 assert.ok(model);
 

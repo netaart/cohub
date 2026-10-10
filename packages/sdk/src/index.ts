@@ -196,6 +196,8 @@ export type {
   ChannelEnvelope,
   LabelAssignmentsUpdatedEvent,
   RealtimeServerEvent,
+  RealtimeSessionFork,
+  SessionCreatedEvent,
 } from "@cohub/protocol/realtime";
 export type {
   RealtimeAppRecord,
@@ -203,11 +205,6 @@ export type {
   AppVersionPublishedEvent,
 } from "@cohub/protocol/realtime";
 export type {
-  BoardAwarenessUpdatedEvent,
-  BoardChangedEvent,
-  BoardEventName,
-  BoardPlaybackChangedEvent,
-  BoardSubscriptionHandlers,
   OpenSpaceFileOptions,
   SessionEventName,
   SessionSubscriptionHandlers,
@@ -233,10 +230,18 @@ export type {
   AppRoomState,
 } from "./apis/app-realtime.js";
 export {
-  BoardClient,
   SpacePublicFilesApi,
   SpaceWebhooksApi,
 } from "./apis/spaces.js";
+export { BoardClient } from "./board/client/index.js";
+export type {
+  BoardAwarenessUpdatedEvent,
+  BoardChangedEvent,
+  BoardClientOptions,
+  BoardEventName,
+  BoardPlaybackChangedEvent,
+  BoardSubscriptionHandlers,
+} from "./board/client/index.js";
 export type { SpaceWebhookListItem, SpaceWebhookTriggerResponse } from "@cohub/protocol";
 export {
   BOARD_COLOR_TOKENS,

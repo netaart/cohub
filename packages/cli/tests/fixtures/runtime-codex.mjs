@@ -40,6 +40,7 @@ for await (const line of lines) {
     const record = (type, payload) => appendFileSync(thread.path, `${JSON.stringify({ timestamp, type, payload })}\n`);
     // The rollout records the Turn the way Codex does, including the client's id for the prompt.
     record("event_msg", { type: "turn_started", turn_id: id });
+    record("turn_context", { effort: input.params.effort });
     record("event_msg", { type: "item_completed", item: { type: "UserMessage", client_id: input.params.clientUserMessageId ?? null, content: input.params.input.map((block) => block.type === "text" ? { type: "input_text", text: block.text } : block) } });
     record("response_item", { type: "message", role: "assistant", content: [{ type: "output_text", text: answer }] });
     record("event_msg", { type: "turn_complete", turn_id: id, last_agent_message: answer });

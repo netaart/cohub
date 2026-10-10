@@ -4,7 +4,7 @@ import {
 	syncTextResolution,
 	textResolutionForZoom,
 } from "../text-resolution.js";
-import type { BoardSceneItem } from "../../core/scene.js";
+import type { BoardSceneItem } from "../../model/scene.js";
 import { positionShell } from "./base-card-renderer.js";
 import type {
 	BoardCardRenderer,

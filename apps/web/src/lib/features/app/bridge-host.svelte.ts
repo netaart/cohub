@@ -55,6 +55,8 @@ export type AppBridgeHostConfig = {
 	getShell?: () => AppRuntimeShellContext | undefined;
 	/** Reads whether this surface is showing; omitted means always visible. */
 	getWindow?: () => { visible: boolean };
+	/** Element whose computed theme tokens the app sees; omitted means the page root. */
+	getAppearanceHost?: () => Element | null;
 	/** Sends an unsolicited event to the app runtime. */
 	notify?: (payload: Record<string, unknown>) => void;
 	/** Sends a reply payload back to the app runtime. */
@@ -112,7 +114,7 @@ export function createAppBridgeHost(
 			);
 		},
 		getLocale,
-		getAppearance: readHostAppearance,
+		getAppearance: () => readHostAppearance(config.getAppearanceHost?.()),
 		getWindow: config.getWindow,
 		notify: config.notify,
 		apiOrigin: PUBLIC_API_ORIGIN ?? "",

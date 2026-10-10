@@ -28,12 +28,13 @@ export type LiveView<T, E> = {
 	readonly error: string | null;
 };
 
-export type LiveChange<F, T> = {
+export type LiveChange<F, T, E = never> = {
 	id: string;
 	fit(filter: F): LiveFit;
 	merge(existing: T): T;
 	create?(filter: F): T | null;
 	settled?: boolean;
+	extra?: E;
 };
 
 export type LiveListSource<F, T, E> = {
@@ -49,10 +50,6 @@ export type LiveListSource<F, T, E> = {
 	read(filter: F): Promise<LivePage<T, E> | null>;
 	write(filter: F, snapshot: LivePage<T, E>): Promise<void>;
 	covered?(filter: F): boolean;
-	onRows?(
-		items: T[],
-		origin: { authoritative: boolean; startedAt?: number },
-	): void;
 };
 
 type Entry<F, T, E> = {
@@ -204,7 +201,6 @@ export class LiveList<F, T, E> {
 		const generation = this.#generation;
 		const epoch = syncStatus.epoch;
 		const covered = this.#source.covered?.(filter) ?? true;
-		const startedAt = Date.now();
 		this.#cancelStaleSync(key);
 		const flight: Flight<F, T, E> = {
 			promise: Promise.resolve(),
@@ -245,7 +241,6 @@ export class LiveList<F, T, E> {
 					next.extra !== current.extra ||
 					next.hasMore !== current.hasMore;
 				this.#set(key, next, { persist: changed, fresh: true });
-				this.#source.onRows?.(page.items, { authoritative: true, startedAt });
 			})
 			.catch((error: unknown) => {
 				if (generation !== this.#generation) return;
@@ -268,7 +263,6 @@ export class LiveList<F, T, E> {
 		const entry = this.#entries.get(key);
 		if (!entry || entry.loadingMore || !entry.hasMore || !entry.cursor) return;
 		const generation = this.#generation;
-		const startedAt = Date.now();
 		this.#set(key, { ...entry, loadingMore: true });
 		try {
 			const page = await this.#source.fetch(filter, entry.cursor);
@@ -283,7 +277,6 @@ export class LiveList<F, T, E> {
 				paged: true,
 				loadingMore: false,
 			});
-			this.#source.onRows?.(page.items, { authoritative: true, startedAt });
 		} catch (error) {
 			console.warn(`[${this.#source.name}] load more failed`, error);
 			const current = this.#entries.get(key);
@@ -292,7 +285,7 @@ export class LiveList<F, T, E> {
 		}
 	}
 
-	apply(change: LiveChange<F, T>) {
+	apply(change: LiveChange<F, T, E>) {
 		const apply = (entry: Entry<F, T, E>) => this.#applyChange(entry, change);
 		this.#forEachEntry(apply);
 	}
@@ -317,7 +310,7 @@ export class LiveList<F, T, E> {
 
 	#applyChange(
 		entry: Entry<F, T, E>,
-		change: LiveChange<F, T>,
+		change: LiveChange<F, T, E>,
 	): Entry<F, T, E> {
 		const { id } = this.#source;
 		const compare = this.#source.compare(entry.filter);
@@ -337,6 +330,7 @@ export class LiveList<F, T, E> {
 					compare,
 					hasMore: entry.hasMore,
 				}),
+				extra: this.#withExtra(entry.extra, change),
 			};
 		}
 		if (fit === "out" || fit === "keep") return entry;
@@ -350,8 +344,15 @@ export class LiveList<F, T, E> {
 				compare,
 				hasMore: entry.hasMore,
 			}),
+			extra: this.#withExtra(entry.extra, change),
 			stale: entry.stale || !change.settled,
 		};
+	}
+
+	#withExtra(current: E, change: LiveChange<F, T, E>) {
+		return change.extra === undefined
+			? current
+			: this.#source.mergeExtra(current, change.extra);
 	}
 
 	#isLive(entry: Entry<F, T, E>) {
@@ -419,7 +420,6 @@ export class LiveList<F, T, E> {
 					}
 				: entry,
 		);
-		if (cached) this.#source.onRows?.(cached.items, { authoritative: false });
 		this.#evict();
 	}
 

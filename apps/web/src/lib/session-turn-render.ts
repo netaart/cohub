@@ -199,6 +199,7 @@ function hasLiveAssistantPreview(blocks: ContentBlock[]) {
 
 function resolveTurnFooterPhase(streaming: {
 	status?: string;
+	resumed?: boolean;
 	contentBlocks: ContentBlock[];
 	intermediateMessages?: StoredIntermediateMessage[];
 	executionKind?: SessionTurnRecord["executionKind"];
@@ -215,6 +216,7 @@ function resolveTurnFooterPhase(streaming: {
 	// Only show starting while the active turn has nothing to render yet.
 	if (
 		streaming.status === "pending" &&
+		!streaming.resumed &&
 		(streaming.intermediateMessages?.length ?? 0) === 0
 	) {
 		return streaming.executionKind === "direct_generation"
@@ -274,6 +276,7 @@ export function buildTurnTimelineItems(input: {
 		executionKind?: SessionTurnRecord["executionKind"];
 		truncatedStart?: boolean;
 		status?: string;
+		resumed?: boolean;
 		runtimePhase?: "llm_call_started" | null;
 		runtimeProvider?: string | null;
 		runtimeModel?: string | null;
@@ -456,31 +459,18 @@ export function buildTurnTimelineItems(input: {
 			input.streaming?.turnId ?? null,
 			input.streaming?.clientMessageId ?? null,
 		);
-		if (!items.some((item) => item.id === renderKey)) {
-			const blocks = buildStreamingPreviewBlocks(streamingBlocks, {
-				truncatedStart: input.streaming?.truncatedStart,
-			});
-			const effectiveBlocks =
-				blocks.length > 0
-					? blocks
-					: ([
-							{
-								type: "thinking",
-								thinking:
-									input.streaming?.executionKind === "direct_generation"
-										? "Starting generation…"
-										: "Starting agent…",
-							},
-						] as ContentBlock[]);
+		const blocks = buildStreamingPreviewBlocks(streamingBlocks, {
+			truncatedStart: input.streaming?.truncatedStart,
+		});
+		if (blocks.length > 0 && !items.some((item) => item.id === renderKey)) {
 			items.push({
 				id: renderKey,
 				kind: "message",
 				message: {
 					id: renderKey,
 					role: "assistant",
-					content: effectiveBlocks,
-					text:
-						effectiveBlocks.find((block) => block.type === "text")?.text ?? "",
+					content: blocks,
+					text: blocks.find((block) => block.type === "text")?.text ?? "",
 					sequence: fallbackSequence + 1,
 					createdAt: resolveStreamingPreviewCreatedAt(
 						input.streaming,

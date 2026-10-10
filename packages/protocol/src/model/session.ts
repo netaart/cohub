@@ -147,6 +147,7 @@ export type SessionActiveTurn = {
   provider: string | null;
   model: string | null;
   startedAt: string | null;
+  updatedAt?: string | null;
   anchorUserMessageId: string | null;
 };
 

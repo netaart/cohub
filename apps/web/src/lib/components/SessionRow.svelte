@@ -14,22 +14,30 @@ import ListRow from "$lib/components/list-page/ListRow.svelte";
 import ListRowText from "$lib/components/list-page/ListRowText.svelte";
 import type { ListRowDensity } from "$lib/components/list-page/list-row";
 import SidebarActionButton from "$lib/components/sidebar/SidebarActionButton.svelte";
+import StatusGlyph, {
+	type StatusGlyphMotion,
+	type StatusGlyphShape,
+	type StatusGlyphTone,
+} from "$lib/components/StatusGlyph.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
+import { clock } from "$lib/clock.svelte";
+import { formatElapsedMs } from "$lib/format-duration";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
 import {
 	getSessionPreview,
 	getSessionPreviewText,
 } from "$lib/session-preview";
-import { getSessionSidebarActivity } from "$lib/session-sidebar-activity";
+import {
+	getSessionRowStatus,
+	type SessionRowStatusKind,
+} from "$lib/session-activity";
 import { getSessionActivityAt } from "$lib/session-sort";
 import { authStore } from "$lib/stores/auth.svelte";
 import {
 	chatsSourceName,
 	resolveSessionSourceKey,
 } from "$lib/stores/chats-filter";
-import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
 import { unreadTracker } from "$lib/stores/session-state.svelte";
 import { formatCompactAbsoluteTime } from "$lib/time-format";
 
@@ -40,7 +48,6 @@ const {
 	density,
 	active = false,
 	isMobile = false,
-	modelsCatalog,
 	showSourceBadge = false,
 	avatar,
 	tree,
@@ -70,7 +77,6 @@ const {
 	density: ListRowDensity;
 	active?: boolean;
 	isMobile?: boolean;
-	modelsCatalog?: ModelCatalogItem[] | null;
 	showSourceBadge?: boolean;
 	avatar?: Snippet;
 	tree?: SessionRowTree | null;
@@ -105,24 +111,47 @@ type Participant = {
 	avatarUrl: string | null;
 };
 
+type Glyph = {
+	shape: StatusGlyphShape;
+	tone: StatusGlyphTone;
+	motion?: StatusGlyphMotion;
+	soft?: boolean;
+};
+
+const GLYPHS: Record<
+	Exclude<SessionRowStatusKind, "idle" | "unread">,
+	Glyph
+> = {
+	running: { shape: "dots", tone: "brand", motion: "active" },
+	queued: { shape: "dots", tone: "muted", soft: true },
+	stopping: { shape: "dots", tone: "muted", motion: "slow" },
+	failed: { shape: "ring", tone: "error" },
+	lost: { shape: "ring", tone: "warning", soft: true },
+};
+
 const locale = $derived(getLocale());
 let renameInput = $state<HTMLInputElement | null>(null);
 
 const dense = $derived(density === "dense");
-const activity = $derived(
-	getSessionSidebarActivity(sessionGenerationStore.get(session.id), {
-		locale,
-		modelsCatalog,
-		session,
-	}),
-);
-const showActivity = $derived(
-	activity.active ||
-		activity.phase === "failed" ||
-		activity.phase === "interrupted",
-);
 const isUnread = $derived(
 	unreadTracker.isUnread(session, session.lastMessageId),
+);
+const status = $derived(getSessionRowStatus(session, isUnread, locale));
+const glyph = $derived(
+	status.kind === "idle" || status.kind === "unread"
+		? null
+		: GLYPHS[status.kind],
+);
+const startedAtMs = $derived(
+	status.startedAt ? Date.parse(status.startedAt) : Number.NaN,
+);
+const statusText = $derived(
+	Number.isFinite(startedAtMs)
+		? m.session_activity_running_for(
+				{ duration: formatElapsedMs(clock.now - startedAtMs, locale) },
+				{ locale },
+			)
+		: status.label,
 );
 const time = $derived(formatCompactAbsoluteTime(getSessionActivityAt(session)));
 const sourceKey = $derived(resolveSessionSourceKey(session.source));
@@ -149,11 +178,12 @@ const preview = $derived(
 			? getSessionPreviewText(session)
 			: getSessionPreview(session, title),
 );
+const statusDetail = $derived(status.errorMessage ?? preview);
 const showSourceLine = $derived(
-	!dense && !showActivity && !preview && hasMessages && sourceKey !== "web",
+	!dense && !preview && hasMessages && sourceKey !== "web",
 );
 const sourceBadge = $derived(
-	showSourceBadge && !activity.active && !showSourceLine && sourceKey !== "web"
+	showSourceBadge && !showSourceLine && sourceKey !== "web"
 		? sourceName
 		: "",
 );
@@ -233,8 +263,8 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 {/snippet}
 
 {#snippet unreadDot()}
-	{#if isUnread}
-		<span class="size-[0.45em] shrink-0 rounded-full bg-brand/70" role="img" aria-label={m.sidebar_unread({}, { locale })}></span>
+	{#if status.kind === "unread"}
+		<StatusGlyph tone="brand" soft />
 	{/if}
 {/snippet}
 
@@ -259,10 +289,11 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 {/snippet}
 
 {#snippet secondLine()}
-	{#if showActivity}
-		<span class={activity.phase === "failed" ? "text-error-soft" : activity.active ? "text-text-tertiary" : "text-text-placeholder"} title={activity.text ? `${activity.label} · ${activity.text}` : activity.label}>
-			{activity.label}{activity.text ? ` · ${activity.text}` : ""}{#if activity.active}<span class="session-activity-caret" aria-hidden="true">▍</span>{/if}
+	{#if glyph}
+		<span class="inline-flex items-center gap-1.5 align-top {status.kind === 'failed' ? 'text-error-soft' : 'text-text-tertiary'}">
+			<StatusGlyph {...glyph} class="[--status-glyph-size:5px]" />{statusText}
 		</span>
+		{#if statusDetail}<span title={statusDetail}> · {statusDetail}</span>{/if}
 	{:else if preview}
 		<span title={preview}>{preview}</span>
 	{:else if showSourceLine}
@@ -322,7 +353,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		style={indentPx ? `--fork-indent: ${indentPx}px` : undefined}
 		aria-current={active ? "page" : undefined}
 		title={tooltip}
-		aria-label={tooltip ? `${title}, ${tooltip}` : title}
+		aria-label={[title, status.label, tooltip].filter(Boolean).join(', ')}
 		draggable={!isMobile && draggable}
 		leading={avatar ? leading : undefined}
 		onclick={(event: MouseEvent) => onNavigate(event, session)}
@@ -334,8 +365,8 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 			{title}
 			badge={unreadDot}
 			{meta}
-			lead={participants.length > 0 ? people : undefined}
-			subtitle={dense && !showActivity ? undefined : secondLine}
+			lead={!glyph && participants.length > 0 ? people : undefined}
+			subtitle={dense && !glyph ? undefined : secondLine}
 		/>
 		{#snippet trailing()}
 			{#if actionCount > 0}
@@ -426,30 +457,11 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		bottom: 50%;
 	}
 
-	.session-activity-caret {
-		display: inline-block;
-		margin-left: 0.0625rem;
-		color: var(--color-brand);
-		font-size: 0.82em;
-		line-height: 1;
-		animation: session-activity-caret 1.15s steps(2, jump-none) infinite;
+	:global(.list-row.session-row[data-density="comfortable"]) {
+		--list-subtitle-size: 13px;
 	}
 
-	@keyframes session-activity-caret {
-		0%,
-		45% {
-			opacity: 1;
-		}
-		46%,
-		100% {
-			opacity: 0.28;
-		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.session-activity-caret {
-			animation: none;
-			opacity: 0.85;
-		}
+	:global(.list-row.session-row[data-density="compact"]) {
+		--list-subtitle-size: 11px;
 	}
 </style>

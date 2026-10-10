@@ -6,7 +6,7 @@ import {
 	computeDrawBounds,
 	createStrokeRibbonBuilder,
 	sampleRadius,
-} from "../../src/board/core/draw-geometry.js";
+} from "../../src/board/model/draw-geometry.js";
 
 const sharpReversal = [
 	{ x: 0, y: 0, p: 0.2 },

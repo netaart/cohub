@@ -37,7 +37,7 @@ jobs:
         working-directory: apps/search
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,7 +46,7 @@ jobs:
           targets: x86_64-unknown-linux-musl
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -79,7 +79,7 @@ jobs:
           (cd dist && sha256sum cohub-search-linux-amd64 > cohub-search-linux-amd64.sha256)
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cohub-search-linux-amd64
           path: |

@@ -20,7 +20,7 @@ import {
   isBoardPresetName,
   listBoardPresets,
 } from "@neta-art/cohub/board";
-import type { BoardHeadlessExportFormat } from "@neta-art/cohub/board/headless";
+import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
 import type { Command } from "commander";
 import {
   BOARD_CREATE_INPUT_MAX_BYTES,
@@ -143,7 +143,7 @@ function parseExportRegion(options: ExportOptions): BoardExportRegion {
   return { kind: "all" };
 }
 
-const BOARD_EXPORT_FORMATS: BoardHeadlessExportFormat[] = ["png", "jpeg", "webp"];
+const BOARD_EXPORT_FORMATS: BoardNodeExportFormat[] = ["png", "jpeg", "webp"];
 const BOARD_VIDEO_FORMATS = ["mp4", "webm"] as const;
 
 type BoardVideoExportFormat = (typeof BOARD_VIDEO_FORMATS)[number];
@@ -154,16 +154,16 @@ function videoFormatFromPath(path: string): BoardVideoExportFormat | null {
 }
 
 
-function formatFromPath(path: string): BoardHeadlessExportFormat {
+function formatFromPath(path: string): BoardNodeExportFormat {
   const lower = path.toLowerCase();
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "jpeg";
   if (lower.endsWith(".webp")) return "webp";
   return "png";
 }
 
-function parseExportFormat(options: ExportOptions, outPath: string): BoardHeadlessExportFormat {
+function parseExportFormat(options: ExportOptions, outPath: string): BoardNodeExportFormat {
   if (!options.format) return formatFromPath(outPath);
-  const format = options.format.toLowerCase() as BoardHeadlessExportFormat;
+  const format = options.format.toLowerCase() as BoardNodeExportFormat;
   if (!BOARD_EXPORT_FORMATS.includes(format)) throw new Error(`--format must be one of ${BOARD_EXPORT_FORMATS.join(", ")}.`);
   return format;
 }
@@ -209,7 +209,7 @@ Examples:
         const times = options.at ? parseBoardTimes(options.at) : undefined;
         const pathVideoFormat = videoFormatFromPath(out);
         const requestedFormat = options.format?.toLowerCase();
-        if (requestedFormat && ![...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].includes(requestedFormat as BoardHeadlessExportFormat | BoardVideoExportFormat)) throw new Error(`--format must be one of ${[...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].join(", ")}.`);
+        if (requestedFormat && ![...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].includes(requestedFormat as BoardNodeExportFormat | BoardVideoExportFormat)) throw new Error(`--format must be one of ${[...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].join(", ")}.`);
         const videoFormat = requestedFormat
           ? BOARD_VIDEO_FORMATS.includes(requestedFormat as BoardVideoExportFormat) ? requestedFormat as BoardVideoExportFormat : null
           : pathVideoFormat;

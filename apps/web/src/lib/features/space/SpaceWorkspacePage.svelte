@@ -50,6 +50,10 @@ import AccessStateView from "$lib/components/AccessStateView.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import ResourceLabelPicker from "$lib/components/ResourceLabelPicker.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
+import {
+	isThemeCssPath,
+	refreshThemeCss,
+} from "$lib/custom-theme/theme-css.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
 import {
 	cacheInstalledApps,
@@ -112,21 +116,17 @@ import {
 	subscribeSpaceConfigBackgroundAction,
 } from "$lib/space-config";
 import type { SpaceFsNode } from "$lib/space-fs";
+import { getSpacePublicProfile } from "$lib/space-profile";
 import {
 	buildSpaceCheckpointRoute,
 	buildSpaceCronjobRoute,
-	buildSpaceNewSessionRoute,
 	buildSpaceRootRoute,
 	buildSpaceSessionRoute,
 	buildSpaceTaskRoute,
 } from "$lib/space-routes";
-import { isSpaceStylePath, refreshSpaceStyle } from "$lib/space-style";
 import { authStore } from "$lib/stores/auth.svelte";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
-import {
-	getCachedSessionListSnapshot,
-	onSessionListCacheUpdated,
-} from "$lib/stores/session-list-cache";
+import { startSessionSync } from "$lib/stores/session-store";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import {
 	IMMERSIVE_CHAT_MAX,
@@ -142,7 +142,6 @@ import {
 	resolveWorkspaceFileAsset,
 } from "$lib/workspace-assets";
 import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
-import { resolveWorkspaceSpaceId } from "$lib/workspace-route";
 import { createAppPreviewController } from "./modules/app-window-controller.svelte";
 import { appWindowKey } from "./modules/app-window-key";
 import { createBoardWindowController } from "./modules/board-window-controller.svelte";
@@ -212,6 +211,10 @@ import {
 	type PublishedAppOpenInput,
 } from "./modules/workspace-app-open";
 import { createWorkspaceLayoutController } from "./modules/workspace-layout-controller.svelte";
+import {
+	spaceWorkspaceScope,
+	type WorkspaceScope,
+} from "./modules/workspace-scope";
 import { cachedRuntimeStatus } from "./runtime-status.svelte";
 import { createWorkspaceSidePanelController } from "./side-panel/workspace-side-panel-controller.svelte";
 import { displayUserName, fallbackUserName } from "./space-utils";
@@ -238,6 +241,7 @@ type Props = {
 		taskId?: string | null;
 		turnSequence?: string | null;
 	};
+	scope?: WorkspaceScope;
 };
 type ActiveFsSource =
 	| { kind: "live" }
@@ -245,6 +249,8 @@ type ActiveFsSource =
 
 const props = $props();
 const data = $derived((props as Props).data);
+const scope = $derived((props as Props).scope ?? spaceWorkspaceScope);
+const inSpaceScope = $derived(scope.kind === "space");
 const spaceId = $derived(data.spaceId);
 const routeView = $derived(data.view);
 const routeSessionId = $derived(data.sessionId ?? null);
@@ -355,20 +361,17 @@ const sessionChat = createSessionChatHost({
 	router: {
 		toSession: async (sessionId, opts) => {
 			// Keep open file/board/port preview when new chat becomes a real session.
-			await goto(
-				withCurrentWindow(buildSpaceSessionRoute(spaceId, sessionId)),
-				{
-					replaceState: opts?.replace ?? true,
-					keepFocus: true,
-					noScroll: true,
-				},
-			);
+			await goto(withCurrentWindow(scope.sessionRoute(spaceId, sessionId)), {
+				replaceState: opts?.replace ?? true,
+				keepFocus: true,
+				noScroll: true,
+			});
 		},
 		toTurn: async (sessionId, sequence) => {
 			// Merge turn + current preview; buildSpaceSessionTurnRoute alone drops preview.
 			await goto(
 				withWindowParam(
-					buildSpaceSessionRoute(spaceId, sessionId),
+					scope.sessionRoute(spaceId, sessionId),
 					new URLSearchParams({ turn: String(sequence) }),
 					readWindowFromSearch(
 						typeof window !== "undefined" ? window.location.search : null,
@@ -382,13 +385,14 @@ const sessionChat = createSessionChatHost({
 			);
 		},
 		toNewSession: async (opts) => {
-			await goto(withCurrentWindow(buildSpaceNewSessionRoute(spaceId)), {
+			await goto(withCurrentWindow(scope.newSessionRoute(spaceId)), {
 				replaceState: opts?.replace ?? false,
 				keepFocus: true,
 				noScroll: true,
 			});
 		},
 	},
+	onSessionForked: (session, fork) => scope.onSessionForked?.(session, fork),
 	getConnectionState: () => connectionStateBox.current,
 	canManageSessionAccess: () => canManageSessionAccess,
 	hasSpace: () => Boolean(space),
@@ -675,7 +679,7 @@ async function openWorkspaceNavigation(
 			return { handled: false as const, reason: "unsupported" as const };
 		const route =
 			target.kind === "session"
-				? buildSpaceSessionRoute(spaceId, target.sessionId)
+				? scope.sessionRoute(spaceId, target.sessionId)
 				: target.kind === "task"
 					? buildSpaceTaskRoute(spaceId, target.taskRunId)
 					: target.kind === "checkpoint"
@@ -1301,7 +1305,7 @@ $effect(() => {
 $effect(() => {
 	const currentSpaceId = spaceId;
 	const layout = spaceConfig?.ui?.workspace?.defaultLayout;
-	if (!layout) return;
+	if (!layout || !inSpaceScope) return;
 	untrack(() => {
 		const hasRoutePreview = Boolean(
 			readWindowFromSearch(
@@ -1332,6 +1336,7 @@ function danmakuUserKey() {
 
 function canRunDanmakuCatchup() {
 	return (
+		inSpaceScope &&
 		pageMounted &&
 		typeof document !== "undefined" &&
 		document.visibilityState === "visible" &&
@@ -1392,7 +1397,7 @@ const spaceRealtime = createSpaceRealtimeController({
 	onOnline: () => {
 		fileWorkspace.retryFailedInlineFiles();
 		if (wsConnectionState === "open") {
-			void sessionChat.refreshSessions(false);
+			void sessionChat.refreshSessions();
 			void boardPreview.reconcileOpenBoards();
 		}
 	},
@@ -1688,7 +1693,7 @@ async function openBoardActivity(activity: BoardAutomationActivity) {
 				.then((response) => response.turn.sequence)
 				.catch(() => null)
 		: null;
-	const pathname = buildSpaceSessionRoute(targetSpaceId, sessionId);
+	const pathname = scope.sessionRoute(targetSpaceId, sessionId);
 	// Keep the board open: the point is to read the turn beside what it changed.
 	const href = withWindowParam(
 		pathname,
@@ -1741,12 +1746,11 @@ async function submitSessionRename() {
 		cancelSessionRename();
 	}
 }
-function spaceStyleChanged(
+function themeCssChanged(
 	changes: Array<{ path?: string; oldPath?: string }> | undefined,
 ) {
 	return changes?.some(
-		(change) =>
-			isSpaceStylePath(change.path) || isSpaceStylePath(change.oldPath),
+		(change) => isThemeCssPath(change.path) || isThemeCssPath(change.oldPath),
 	);
 }
 function spaceConfigChanged(
@@ -1823,8 +1827,8 @@ function scheduleSpaceFsRefresh(input: {
 	generation: number;
 }) {
 	const { eventPayload, eventSpaceId } = input;
-	if (eventPayload.resync || spaceStyleChanged(eventPayload.changes))
-		refreshSpaceStyle(eventSpaceId);
+	if (eventPayload.resync || themeCssChanged(eventPayload.changes))
+		refreshThemeCss(eventSpaceId);
 	if (eventPayload.resync || spaceConfigChanged(eventPayload.changes))
 		refreshSpaceConfig(eventSpaceId);
 
@@ -2108,7 +2112,9 @@ beforeNavigate((navigation) => {
 		toUrl.pathname.includes("/checkpoints/");
 	const sameSpace =
 		Boolean(spaceId) &&
-		resolveWorkspaceSpaceId({ pathname: toUrl.pathname }) === spaceId;
+		scope.spaceAt(toUrl, (id) =>
+			sessionChat.hasSession(id) ? spaceId : null,
+		) === spaceId;
 	// Only prompt when unsaved work cannot survive the transition.
 	if (!fsSourceChanging && sameSpace) return;
 	if (!appsDirty) {
@@ -2695,12 +2701,7 @@ onMount(() => {
 		appPreview.refreshIfOpen(detail.app.id);
 	};
 	window.addEventListener(APPS_CHANGED_EVENT, handleAppsChanged);
-	const offSessionListCacheUpdated = onSessionListCacheUpdated(
-		({ spaceId: updatedSpaceId, sessions }) => {
-			if (updatedSpaceId !== spaceId) return;
-			sessionChat.applySessionsSnapshot(sessions);
-		},
-	);
+	const stopSessionSync = startSessionSync();
 	const offSpaceConfigUpdated = subscribeSpaceConfig((config) => {
 		spaceConfig = config;
 	});
@@ -2717,8 +2718,7 @@ onMount(() => {
 		}
 		scheduleDanmakuCatchup();
 	});
-	// Preload model catalogs so the selector is ready immediately
-	void sessionChat.loadModelsCatalog();
+	// The chat panel owns the agent catalog.
 	void sessionChat.loadGenerationModelsCatalog();
 	void sessionChat.loadPromptTemplates();
 	const handleOpenInlineFileEvent = (e: Event) => {
@@ -2839,7 +2839,7 @@ onMount(() => {
 			sessionChat.captureCurrentScrollAnchor(activeSessionId);
 		window.removeEventListener("keydown", handleSessionVimKeydown);
 		window.removeEventListener(APPS_CHANGED_EVENT, handleAppsChanged);
-		offSessionListCacheUpdated();
+		stopSessionSync();
 		offSpaceConfigUpdated();
 		offSpaceConfigBackgroundAction();
 		offDanmakuPrefs();
@@ -2926,19 +2926,17 @@ async function bootstrapSpace(currentSpaceId: string) {
 	try {
 		// Prepare once. Repeat calls used to re-trigger tail reconcile and look like auto-refresh.
 		if (routeSession) {
+			const known = scope.knownSession?.(routeSession);
+			if (known) sessionChat.upsertSessionRecord(known, { cache: false });
 			sessionChat.prepareRouteSession(routeSession);
 			sessionLoad = sessionChat
 				.loadSessionState(routeSession)
 				.catch(() => undefined);
 		}
-		const [cachedSpace, cachedSnapshot] = await Promise.all([
-			withBootstrapCacheTimeout(spaceRecordRepo.getCached(currentSpaceId)),
-			withBootstrapCacheTimeout(getCachedSessionListSnapshot(currentSpaceId)),
-		]);
+		const cachedSpace = await withBootstrapCacheTimeout(
+			spaceRecordRepo.getCached(currentSpaceId),
+		);
 		if (spaceId !== currentSpaceId) return;
-		const cachedSessions = cachedSnapshot?.sessions;
-		if (cachedSessions && cachedSessions.length > 0)
-			sessionChat.seedSessions(cachedSessions);
 		if (cachedSpace?.space && !space) {
 			space = cachedSpace.space;
 			portPreview.setEndpoints(extractPublicEndpoints(cachedSpace.space));
@@ -2946,7 +2944,7 @@ async function bootstrapSpace(currentSpaceId: string) {
 			await spaceLoad;
 		}
 		if (spaceId !== currentSpaceId) return;
-		void sessionChat.refreshSessions(false);
+		void sessionChat.refreshSessions();
 		void loadPreviewEndpoints();
 		void loadFileTree();
 		if (routeSession) {
@@ -3285,6 +3283,9 @@ const spaceFileDomainProps = $derived.by<
 	onBoardViewStateChange: (state) => sessionChat.reportBoardView(state),
 }));
 
+const knownSpace = $derived(
+	inSpaceScope ? null : (scope.knownSpace?.(spaceId) ?? null),
+);
 const headerContext = $derived({
 	routeView,
 	spaceId,
@@ -3305,6 +3306,32 @@ const headerContext = $derived({
 	rightSidebarAvailable,
 	// Icon tracks effective hide (column folded or empty rail with no preview).
 	rightSidebarCollapsed: filesChromeEffectivelyHidden,
+	spaceIdentity: inSpaceScope
+		? null
+		: {
+				name:
+					space?.name?.trim() ||
+					space?.title?.trim() ||
+					knownSpace?.name ||
+					m.spaces_default_name({}, { locale: getLocale() }),
+				profile: space
+					? getSpacePublicProfile(space)
+					: (knownSpace?.publicProfile ?? null),
+				href:
+					routeSessionId && !isNewSessionRoute
+						? withWindowParam(
+								buildSpaceSessionRoute(spaceId, routeSessionId),
+								null,
+								routePreviewRef,
+							)
+						: null,
+			},
+});
+$effect(() => {
+	const session = sessionChat.activeSession;
+	const currentSpace = space;
+	if (!session || !scope.onActiveSession) return;
+	untrack(() => scope.onActiveSession?.(session, currentSpace));
 });
 const sessionRenameState = $derived({
 	renaming: sessionRenaming,
@@ -3341,6 +3368,7 @@ const headerActions = {
 	},
 	insertHeaderReference,
 	toggleRightSidebar,
+	pickSpace: () => scope.pickSpace?.(),
 };
 </script>
 
@@ -3405,7 +3433,9 @@ const headerActions = {
 	class:workspace-body--preview-immersive={previewImmersiveMode}
 	style={`--immersive-chat-width: ${uiState.immersiveChatWidth}px; --immersive-chat-edge-gap: ${FLOAT_CHAT_EDGE_GAP}px; --immersive-chat-max-width: calc(100% - ${immersiveFilesInset}px - ${FLOAT_PREVIEW_MIN_WIDTH + FLOAT_PANEL_GAP}px); --preview-safe-left: ${previewImmersiveMode && immersiveChatVisible ? `calc(min(var(--immersive-chat-width), var(--immersive-chat-max-width)) + var(--immersive-chat-edge-gap) + ${FLOAT_PANEL_GAP}px)` : `${FLOAT_PANEL_GAP}px`}; --preview-safe-right: ${immersiveFilesInset}px`}
 >
-  <SpaceDanmakuLayer controller={danmakuController} {spaceId} hidden={previewImmersiveMode} />
+  {#if inSpaceScope}
+    <SpaceDanmakuLayer controller={danmakuController} {spaceId} hidden={previewImmersiveMode} />
+  {/if}
   <DesktopLayerHost
     manager={desktopLayers}
     surfaces={appSurfaces}

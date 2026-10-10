@@ -26,7 +26,7 @@ let {
 } = $props();
 
 const className = $derived(
-	`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 disabled:pointer-events-none disabled:opacity-50 lg:h-7 lg:w-7 lg:rounded-[6px] ${
+	`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 disabled:pointer-events-none disabled:opacity-50 lg:h-7 lg:w-7 lg:rounded-[6px] ${
 		tone === "brand"
 			? "text-brand hover:bg-brand-muted"
 			: expanded
@@ -38,9 +38,9 @@ const title = $derived(shortcut ? `${label} (${shortcut})` : label);
 </script>
 
 {#snippet content()}
-	<Icon class="h-[18px] w-[18px] lg:h-4 lg:w-4" strokeWidth={1.9} />
+	<Icon class="h-5 w-5 lg:h-4 lg:w-4" strokeWidth={1.9} />
 	{#if indicator}
-		<span class="absolute right-[5px] top-[5px] h-1.5 w-1.5 rounded-full bg-brand lg:right-[3px] lg:top-[3px]" aria-hidden="true"></span>
+		<span class="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand lg:right-[3px] lg:top-[3px]" aria-hidden="true"></span>
 	{/if}
 {/snippet}
 

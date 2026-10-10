@@ -1,5 +1,4 @@
 import type { SessionRecord } from "@neta-art/cohub";
-import { sessionGenerationStore } from "./session-generation.svelte";
 
 const STORAGE_KEY = "cohub:session_viewed";
 
@@ -68,10 +67,3 @@ class UnreadTracker {
 }
 
 export const unreadTracker = new UnreadTracker();
-
-/**
- * Whether the session has an active pending or streaming turn.
- */
-export function isStreaming(session: SessionRecord): boolean {
-	return sessionGenerationStore.isGenerating(session.id);
-}

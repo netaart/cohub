@@ -23,6 +23,14 @@ Platform and user configuration can define auxiliary model tasks in `.cohub/mode
 }
 ```
 
-A task model resolves `provider` and `id` from the merged platform and user `models.json` catalog. Any additional model fields use the same schema as `models.json` and override the catalog entry. A complete standalone model can be configured when no catalog entry exists.
+A task model resolves `provider` and `id` from a model catalog. The `imageToText` model must support image input. Set a task's `enabled` field to `false` to disable it.
 
-User task configuration merges over platform configuration. Set a task's `enabled` field to `false` to disable it. The `imageToText` model must support image input.
+Platform tasks resolve against the platform catalog only. A user can change a task's `prompt` or `enabled` without changing its platform model, even when the user's catalog contains a provider with the same name.
+
+When a user supplies `model`, it replaces the entire platform task model and must specify both `provider` and `id`. It does not inherit platform task credentials, headers, transport settings, or model overrides. For a selected platform provider, parameter-only overrides in the user's `models.json` merge into the catalog first, then the task's parameters apply. The provider's platform connection remains intact (see [Model credentials](model-credentials.md)).
+
+For a platform catalog provider, user tasks may select the model and override `name`, `reasoning`, `defaultThinkingLevel`, `thinkingLevelMap`, `hidden`, `input`, `contextWindow`, and `maxTokens`. Thinking-level maps merge their supplied entries. Tasks and ordinary chat share the allowed parameter fields. Platform `cost` values determine actual usage charges and cannot be changed by users; a complete matching price declaration is accepted and discarded. Connection declarations (`api`, `baseUrl`, `apiKey`, `headers`, `compat`, `requestProfile`, `imageUrlInput`) must match the selected platform model's raw effective connection. Matching declarations are discarded before resolving the platform key. Different connection values and unknown extension fields are rejected. The `cohub` provider is reserved: a user task must select one of its configured platform models. Define a separate user provider to use a different connection.
+
+For a user provider, task model fields can override that user's catalog entry, including its prices and supplying the task's own literal key when the catalog provider has none. Only the selected final model is checked for usable credentials; unused catalog entries do not disable tasks. A standalone user task requires a complete model (`provider`, `id`, `api`, `baseUrl`) and an explicit literal `apiKey`. User models use API-key-based adapters; ambient cloud credentials are reserved for platform configuration.
+
+Only platform configuration can resolve `apiKey` from a service environment variable. The loader resolves platform references in memory after reading the raw cache; image-to-text and session-title execution consume the resulting literal credentials. Resolved values must not be written to config files, Redis config caches, discovery responses, or logs.

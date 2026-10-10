@@ -272,6 +272,7 @@ export async function* streamCompletionEvents(input: RunCompletionInput): AsyncG
       maxTokens: typeof input.maxTokens === "number" && Number.isFinite(input.maxTokens) ? Math.floor(input.maxTokens) : undefined,
       reasoning,
       signal: input.signal,
+      originalImageUrls: true,
     });
 
     for await (const event of stream) {

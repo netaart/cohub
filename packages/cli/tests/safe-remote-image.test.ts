@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   downloadPublicImage,
+  pinnedLookup,
   type RemoteImageDownloadOptions,
 } from "../src/safe-remote-image.js";
 
@@ -15,7 +16,7 @@ const requester = (
   result: ReturnType<typeof response>,
   connected?: string[],
 ): NonNullable<RemoteImageDownloadOptions["requester"]> =>
-  async (_url, address) => {
+  async (_url, [address]) => {
     connected?.push(address.address);
     return result;
   };
@@ -28,6 +29,12 @@ test("pins downloads to the validated address", async () => {
   });
   assert.deepEqual([...result.bytes], [1, 2, 3]);
   assert.deepEqual(connected, ["8.8.8.8"]);
+});
+
+test("pinned lookup answers Happy Eyeballs with every address", async () => {
+  const addresses = [{ address: "8.8.8.8", family: 4 }, { address: "2606:4700::1", family: 6 }] as const;
+  const answer = await new Promise((resolve) => pinnedLookup(addresses)("cdn.example", { all: true }, (_error, result) => resolve(result)));
+  assert.deepEqual(answer, addresses);
 });
 
 test("blocks a redirect that resolves to a private address", async () => {
