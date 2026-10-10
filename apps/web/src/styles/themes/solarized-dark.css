@@ -233,7 +233,6 @@
 		transparent
 	);
 	--chat-composer-radius: 28px;
-	--chat-composer-expanded-max-width: 64rem;
 	--chat-composer-placeholder: var(--text-placeholder);
 
 	/* Data visualizations */

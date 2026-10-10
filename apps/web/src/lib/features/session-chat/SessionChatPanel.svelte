@@ -306,6 +306,7 @@ async function handleDraftDrop(event: DragEvent) {
 	{/if}
 	<div
 		class="relative flex-1 min-h-0 flex flex-col overflow-hidden"
+		data-composer-bounds
 		role="region"
 		aria-label={m.chat_panel_aria({}, { locale })}
 		ondragenter={handleDraftDragEnter}
@@ -376,6 +377,7 @@ async function handleDraftDrop(event: DragEvent) {
 		<div
 			bind:this={chatChromeEl}
 			class="chat-chrome relative z-10 shrink-0"
+			data-composer-chrome
 			class:bg-chat-panel={!hasCustomPage}
 			class:chat-chrome--overlay={hasCustomPage}
 		>

@@ -15,7 +15,7 @@ import {
 	Plus,
 	X,
 } from "lucide-svelte";
-import { onMount } from "svelte";
+import { flushSync, onMount } from "svelte";
 import ComposerHarnessPicker from "$lib/components/composer/ComposerHarnessPicker.svelte";
 import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
 import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
@@ -34,6 +34,16 @@ import {
 	type ComposerAttachment,
 	type ComposerImageAttachment,
 } from "$lib/composer-attachments";
+import {
+	COMPACT_COMPOSER_MIN_HEIGHT,
+	COMPOSER_BOUNDS_SELECTOR,
+	COMPOSER_CHROME_SELECTOR,
+	type ComposerMenuPlacement,
+	getBottomAnchoredScrollTop,
+	getCompactComposerMaxHeight,
+	getExpandedComposerHeight,
+	runComposerResizeTransition,
+} from "$lib/composer-expansion";
 import {
 	getComposerKeyAction,
 	isMobileComposerInput,
@@ -203,6 +213,8 @@ $effect(() => {
 		showLocalModelSelector = false;
 });
 
+let rootEl = $state<HTMLDivElement | null>(null);
+let surfaceEl = $state<HTMLElement | null>(null);
 let textareaEl = $state<HTMLTextAreaElement | null>(null);
 let mentionMirrorEl = $state<HTMLDivElement | null>(null);
 let fileInputEl = $state<HTMLInputElement | null>(null);
@@ -233,6 +245,12 @@ let blurCloseTimer: number | null = null;
 let selectionChangeBound = false;
 let isComposerExpanded = $state(false);
 let hasTextareaOverflow = $state(false);
+const slashMenuPlacement = $derived<ComposerMenuPlacement>(
+	isComposerExpanded ? "inside-bottom" : "above",
+);
+const mentionMenuPlacement = $derived<ComposerMenuPlacement>(
+	isComposerExpanded ? "inside-top" : "above",
+);
 let showModeMenu = $state(false);
 let voiceClient: VoiceInputClient | null = null;
 let voicePrefix = "";
@@ -254,6 +272,7 @@ const LOCAL_MENTION_SEARCH_RETRY_MS = 80;
 
 let isTextareaFocused = $state(false);
 let resizeFrame: number | null = null;
+let textareaHeight = 0;
 
 const hasDraft = $derived(hasVisibleDraftText(value) || attachments.length > 0);
 const showAbort = $derived(Boolean(isRunning && !hasDraft));
@@ -436,20 +455,6 @@ function getViewportHeight(): number {
 	return window.visualViewport?.height ?? window.innerHeight;
 }
 
-function getTextareaLimits(expanded = isComposerExpanded) {
-	const mobile = isMobileComposerInput();
-	const viewportHeight = getViewportHeight();
-	const min = expanded ? (mobile ? 144 : 168) : 44;
-	const max = expanded
-		? Math.min(viewportHeight * (mobile ? 0.46 : 0.52), mobile ? 420 : 560)
-		: Math.min(viewportHeight * (mobile ? 0.34 : 0.38), mobile ? 220 : 220);
-
-	return {
-		min,
-		max: Math.max(min, max),
-	};
-}
-
 function readTextareaCaret(): TextCaret | null {
 	if (!textareaEl) return null;
 	return {
@@ -502,36 +507,68 @@ function scheduleCaretSyncAndRefresh(options?: { forceOpen?: boolean }) {
 
 function resizeTextarea() {
 	resizeFrame = null;
-	if (!textareaEl) return;
-	if (!hasVisibleDraftText(value) && isComposerExpanded) {
+	const el = textareaEl;
+	if (!el) return;
+	if (isComposerExpanded && !hasVisibleDraftText(value)) {
 		isComposerExpanded = false;
 	}
-	const selection = readTextareaCaret();
-	const scrollTop = textareaEl.scrollTop;
-	// 1px (not 0): still allows shrink measurement, less likely to clobber Safari selection.
-	textareaEl.style.height = "1px";
-	const scrollHeight = textareaEl.scrollHeight;
-	const { min, max } = getTextareaLimits();
-	const nextHeight = Math.min(scrollHeight, max);
-	textareaEl.style.height = `${Math.max(nextHeight, min)}px`;
-	hasTextareaOverflow = scrollHeight > textareaEl.clientHeight + 1;
-	if (selection) {
-		const maxPos = textareaEl.value.length;
-		const start = Math.min(selection.start, maxPos);
-		const end = Math.min(selection.end, maxPos);
-		if (
-			textareaEl.selectionStart !== start ||
-			textareaEl.selectionEnd !== end
-		) {
-			textareaEl.setSelectionRange(start, end);
+	if (isComposerExpanded) setTextareaHeight(el, measureExpandedHeight(el));
+	else fitCompactTextarea(el);
+	syncMentionMirrorScroll();
+}
+
+function setTextareaHeight(el: HTMLTextAreaElement, height: number) {
+	if (height === textareaHeight) return;
+	textareaHeight = height;
+	el.style.height = `${height}px`;
+}
+
+function measureExpandedHeight(el: HTMLTextAreaElement): number {
+	const bounds = el.closest<HTMLElement>(COMPOSER_BOUNDS_SELECTOR);
+	const chrome = el.closest<HTMLElement>(COMPOSER_CHROME_SELECTOR) ?? rootEl;
+	const viewportHeight = getViewportHeight();
+	return getExpandedComposerHeight({
+		boundsHeight: bounds?.clientHeight ?? viewportHeight,
+		viewportHeight,
+		chromeHeight: chrome?.offsetHeight ?? el.offsetHeight,
+		inputHeight: el.offsetHeight,
+		mobile: isMobileComposerInput(),
+	});
+}
+
+function fitCompactTextarea(el: HTMLTextAreaElement) {
+	const max = getCompactComposerMaxHeight(
+		getViewportHeight(),
+		isMobileComposerInput(),
+	);
+	// Only a draft that fits the box may have shrunk and needs the 1px measurement.
+	let contentHeight = el.scrollHeight;
+	const restore =
+		contentHeight <= el.clientHeight
+			? { selection: readTextareaCaret(), scrollTop: el.scrollTop }
+			: null;
+	if (restore) {
+		// 1px (not 0): still allows shrink measurement, less likely to clobber Safari selection.
+		el.style.height = "1px";
+		textareaHeight = 1;
+		contentHeight = el.scrollHeight;
+	}
+	setTextareaHeight(
+		el,
+		Math.min(Math.max(contentHeight, COMPACT_COMPOSER_MIN_HEIGHT), max),
+	);
+	hasTextareaOverflow = contentHeight > textareaHeight + 1;
+	if (!restore) return;
+	if (restore.selection) {
+		const maxPos = el.value.length;
+		const start = Math.min(restore.selection.start, maxPos);
+		const end = Math.min(restore.selection.end, maxPos);
+		if (el.selectionStart !== start || el.selectionEnd !== end) {
+			el.setSelectionRange(start, end);
 		}
 		setCaretState({ start, end });
 	}
-	textareaEl.scrollTop = Math.min(
-		scrollTop,
-		Math.max(0, textareaEl.scrollHeight - textareaEl.clientHeight),
-	);
-	syncMentionMirrorScroll();
+	el.scrollTop = restore.scrollTop;
 }
 
 function scheduleResizeTextarea() {
@@ -556,27 +593,28 @@ function syncMentionMirrorScroll() {
 }
 
 function setComposerExpanded(expanded: boolean) {
-	if (expanded === isComposerExpanded || !textareaEl) return;
-	const selection = readTextareaCaret() ?? caret;
-	const scrollTop = textareaEl.scrollTop;
-	const shouldRestoreFocus = document.activeElement === textareaEl;
-	isComposerExpanded = expanded;
-	scheduleResizeTextarea();
-	requestAnimationFrame(() => {
-		if (!textareaEl) return;
-		setTextareaSelection(selection.start, selection.end);
-		textareaEl.scrollTop = Math.min(
+	const el = textareaEl;
+	if (expanded === isComposerExpanded || !el) return;
+	runComposerResizeTransition(surfaceEl, () => {
+		const { scrollTop, clientHeight: fromHeight } = el;
+		isComposerExpanded = expanded;
+		flushSync();
+		cancelScheduledResize();
+		resizeTextarea();
+		el.scrollTop = getBottomAnchoredScrollTop({
 			scrollTop,
-			Math.max(0, textareaEl.scrollHeight - textareaEl.clientHeight),
-		);
-		if (shouldRestoreFocus) textareaEl.focus({ preventScroll: true });
+			scrollHeight: el.scrollHeight,
+			fromHeight,
+			toHeight: el.clientHeight,
+		});
 		syncMentionMirrorScroll();
-		refreshMentionState();
 	});
 }
 
 function collapseComposer() {
-	setComposerExpanded(false);
+	if (!isComposerExpanded) return;
+	isComposerExpanded = false;
+	scheduleResizeTextarea();
 }
 
 function toggleComposerExpansion() {
@@ -1180,6 +1218,18 @@ $effect(() => {
 });
 
 $effect(() => {
+	if (!isComposerExpanded || !textareaEl) return;
+	const targets = [
+		textareaEl.closest(COMPOSER_BOUNDS_SELECTOR),
+		textareaEl.closest(COMPOSER_CHROME_SELECTOR),
+	].filter((target) => target !== null);
+	if (targets.length === 0) return;
+	const observer = new ResizeObserver(() => scheduleResizeTextarea());
+	for (const target of targets) observer.observe(target);
+	return () => observer.disconnect();
+});
+
+$effect(() => {
 	const shouldShow =
 		slashCommandActive &&
 		!showSpaceMentions &&
@@ -1229,8 +1279,8 @@ $effect(() => {
 });
 </script>
 
-<div class="chat-gutter-x pb-[calc(0.75rem+var(--safe-area-bottom))] pt-2 sm:pb-4">
-	<div class={`relative mx-auto transition-[max-width] duration-200 ${isComposerExpanded ? 'max-w-[var(--chat-composer-expanded-max-width)]' : 'max-w-[var(--chat-content-max-width)]'}`}>
+<div bind:this={rootEl} class="chat-gutter-x pb-[calc(0.75rem+var(--safe-area-bottom))] pt-2 sm:pb-4">
+	<div class="relative mx-auto max-w-[var(--chat-content-max-width)]">
 		{#if quickActions.length > 0}
 			<div class="mb-2">
 				<SessionChatQuickActions
@@ -1254,7 +1304,7 @@ $effect(() => {
 			{/if}
 		{/if}
 
-		<ComposerSurface onsubmit={submitDraft}>
+		<ComposerSurface bind:element={surfaceEl} onsubmit={submitDraft}>
 			{#if viewportContexts.length > 0}
 				<div class="mb-1.5 px-3 pt-1" data-drawer-swipe-ignore>
 					<ViewportContextBlocks
@@ -1459,8 +1509,7 @@ $effect(() => {
 							if (event.key === 'Escape') {
 								event.preventDefault();
 								if (isComposerExpanded) {
-									isComposerExpanded = false;
-									scheduleResizeTextarea();
+									setComposerExpanded(false);
 									return;
 								}
 								textareaEl?.blur();
@@ -1481,6 +1530,7 @@ $effect(() => {
 
 					<SlashCommandMenu
 						open={showPromptSuggestions}
+						placement={slashMenuPlacement}
 						items={filteredPromptTemplates}
 						query={slashCommandQuery}
 						selectedIndex={selectedPromptIndex}
@@ -1493,6 +1543,7 @@ $effect(() => {
 
 					<SpaceMentionMenu
 						open={showSpaceMentions}
+						placement={mentionMenuPlacement}
 						items={spaceMentionItems}
 						query={spaceMentionTrigger?.query ?? ""}
 						selectedIndex={selectedSpaceMentionIndex}
@@ -1665,6 +1716,29 @@ $effect(() => {
 />
 
 <style>
+	:global(html[data-composer-transition]) {
+		view-transition-name: none;
+	}
+
+	:global(html[data-composer-transition]::view-transition) {
+		pointer-events: none;
+	}
+
+	:global(::view-transition-group(session-composer)) {
+		animation-duration: 220ms;
+		animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+	}
+
+	:global(::view-transition-image-pair(session-composer)) {
+		overflow: clip;
+		border-radius: var(--chat-composer-radius);
+	}
+
+	:global(::view-transition-old(session-composer)),
+	:global(::view-transition-new(session-composer)) {
+		inset-block: auto 0;
+	}
+
 	.voice-record-button {
 		touch-action: manipulation;
 		-webkit-user-select: none;
