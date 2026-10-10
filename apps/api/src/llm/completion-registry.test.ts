@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ModelsConfig } from "@cohub/infra/config-runtime/models";
+import { resolveRuntimeModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
 import { CompletionModelRegistry } from "./completion-registry.js";
 
 function catalog(models: ModelsConfig["providers"][string]["models"]): ModelsConfig {
@@ -30,4 +30,58 @@ test("default falls back to hidden only when nothing else is available", () => {
 
   assert.deepEqual(registry.getDiscoverable(), []);
   assert.equal(registry.getDefault()?.id, "hidden");
+});
+
+test("completion registry never resolves user key literals from the service environment", (t) => {
+  const previous = process.env.R02_COMPLETION_SECRET;
+  process.env.R02_COMPLETION_SECRET = "synthetic-completion-secret";
+  t.after(() => {
+    if (previous === undefined) delete process.env.R02_COMPLETION_SECRET;
+    else process.env.R02_COMPLETION_SECRET = previous;
+  });
+  const platform: ModelsConfig = { providers: { cohub: {
+    api: "openai-responses", baseUrl: "https://platform.example.test", apiKey: "R02_COMPLETION_SECRET",
+    models: [{ id: "platform", contextWindow: 100000 }],
+  } } };
+  const user: ModelsConfig = {
+    providers: {
+      cohub: { ...platform.providers.cohub, models: [{ id: "platform", contextWindow: 200000 }] },
+      custom: { api: "openai-completions", baseUrl: "https://user.example.test", apiKey: "R02_COMPLETION_SECRET", models: [{ id: "custom" }] },
+    },
+  };
+  const registry = new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]);
+  assert.equal(registry.getApiKey("cohub"), "synthetic-completion-secret");
+  assert.equal(registry.find("cohub", "platform")?.baseUrl, "https://platform.example.test");
+  assert.equal(registry.find("cohub", "platform")?.contextWindow, 200000);
+  assert.equal(registry.getApiKey("custom"), "R02_COMPLETION_SECRET");
+  assert.equal(registry.find("custom", "custom")?.baseUrl, "https://user.example.test");
+});
+
+test("completion registry cannot combine a user destination with platform auth", () => {
+  const platform: ModelsConfig = {
+    providers: {
+      cohub: { api: "openai-responses", baseUrl: "https://platform.example.test", apiKey: "synthetic-platform-key", headers: { "X-Key": "synthetic-header" }, models: [{ id: "platform" }] },
+    },
+  };
+  const user: ModelsConfig = {
+    providers: {
+      cohub: { api: "openai-completions", baseUrl: "https://user.example.test", apiKey: "user-key", models: [{ id: "custom" }] },
+    },
+  };
+  assert.throws(() => new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]), /cannot override platform model connection/);
+});
+
+test("completion registry merges model parameters and preserves platform defaults", () => {
+  const platform = catalog([
+    { id: "visible", contextWindow: 100000, maxTokens: 4096 },
+    { id: "hidden", hidden: true },
+  ]);
+  const user: ModelsConfig = { providers: { cohub: { models: [{ id: "visible", contextWindow: 200000 }] } } };
+  const registry = new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]);
+  assert.equal(registry.find("cohub", "visible")?.contextWindow, 200000);
+  assert.equal(registry.find("cohub", "visible")?.maxTokens, 4096);
+  assert.equal(registry.find("cohub", "visible")?.baseUrl, "https://example.test");
+  assert.equal(registry.find("cohub", "hidden")?.hidden, true);
+  assert.deepEqual(registry.getDiscoverable().map((model) => model.id), ["visible"]);
+  assert.equal(registry.getDefault()?.id, "visible");
 });

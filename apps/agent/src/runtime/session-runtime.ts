@@ -1093,8 +1093,10 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       runtimeSystemPrompt = nextSystemPrompt;
       systemPromptStateKey = nextKey;
       const shouldChangeThinkingLevel = nextThinkingLevel !== agent.state.thinkingLevel;
+      // IDs can stay the same while credentials, headers and endpoints change.
+      // Bind the model and its auth registry to the same runtime configuration.
+      agent.state.model = target;
       if (shouldChangeModel) {
-        agent.state.model = target;
         options.sessionManager.appendModelChange(target.provider, target.id);
       }
       if (shouldChangeModel || shouldChangeThinkingLevel) {

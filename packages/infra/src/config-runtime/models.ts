@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 export const MODELS_REDIS_KEY_VERSION = "v2";
 export const PLATFORM_MODELS_REDIS_KEY = `configs:models:${MODELS_REDIS_KEY_VERSION}:platform`;
 export const USER_MODELS_REDIS_KEY_PREFIX = `configs:models:${MODELS_REDIS_KEY_VERSION}:user`;
@@ -237,35 +239,184 @@ export function parseCachedModelsConfig(rawText: string): CachedModelsConfig | n
   };
 }
 
-export function mergeModelsConfigs(...configs: Array<ModelsConfig | null | undefined>): ModelsConfig {
-  const providers: Record<string, ProviderConfig> = {};
+const MODEL_PARAMETER_FIELDS = new Set([
+  "id", "name", "reasoning", "defaultThinkingLevel", "thinkingLevelMap",
+  "hidden", "input", "contextWindow", "maxTokens",
+]);
 
-  for (const config of configs) {
-    if (!config) continue;
-    for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
-      const existing = providers[provider] ?? {};
-      const mergedModels = new Map<string, ModelDef>();
+const PROTECTED_MODEL_FIELDS = new Set([
+  "api", "baseUrl", "apiKey", "headers", "compat", "requestProfile", "imageUrlInput", "cost",
+]);
 
-      for (const model of existing.models ?? []) {
-        if (model.id) mergedModels.set(model.id, model);
+function assertMatchingPlatformField(
+  label: string,
+  field: string,
+  value: unknown,
+  platform: Record<string, unknown>,
+) {
+  if (!PROTECTED_MODEL_FIELDS.has(field)
+    || !Object.hasOwn(platform, field)
+    || platform[field] === undefined
+    || !isDeepStrictEqual(value, platform[field])) {
+    if (field === "cost") throw new Error(`${label} cannot override platform model pricing: cost`);
+    throw new Error(`${label} cannot override platform model connection or extension field: ${field}`);
+  }
+}
+
+export function getProtectedModelFields(provider: ProviderConfig, model: ModelDef): Record<string, unknown> {
+  return {
+    api: model.api ?? provider.api,
+    baseUrl: model.baseUrl ?? provider.baseUrl,
+    apiKey: provider.apiKey,
+    headers: mergeHeaders(provider.headers, model.headers) ?? model.headers ?? provider.headers,
+    compat: model.compat ?? provider.compat,
+    requestProfile: model.requestProfile ?? provider.requestProfile,
+    imageUrlInput: model.imageUrlInput ?? provider.imageUrlInput,
+    cost: model.cost,
+  };
+}
+
+export function selectModelParameters<T extends { id?: string }>(
+  provider: string,
+  override: T,
+  platformFields: Record<string, unknown>,
+  providerHeaders?: Record<string, string>,
+): T {
+  for (const [field, value] of Object.entries(override)) {
+    if (MODEL_PARAMETER_FIELDS.has(field)) continue;
+    // 模型 headers 与 provider headers 合并后必须保持平台的有效值。
+    const candidate = field === "headers" && isStringRecord(value)
+      ? mergeHeaders(providerHeaders, value) ?? value
+      : value;
+    assertMatchingPlatformField(`User model ${provider}/${override.id}`, field, candidate, platformFields);
+  }
+  const parameters = { ...override };
+  for (const field of Object.keys(parameters)) {
+    if (!MODEL_PARAMETER_FIELDS.has(field)) Reflect.deleteProperty(parameters, field);
+  }
+  return parameters;
+}
+
+export function isPlatformModelOverride(provider: string, config: ProviderConfig): boolean {
+  return provider === "cohub" || Object.keys(config).every((key) => key === "models");
+}
+
+export function mergeModelParameters<T extends { thinkingLevelMap?: ThinkingLevelMap }>(
+  base: T,
+  override: T,
+): T {
+  return {
+    ...base,
+    ...override,
+    ...(override.thinkingLevelMap ? { thinkingLevelMap: { ...base.thinkingLevelMap, ...override.thinkingLevelMap } } : {}),
+  };
+}
+
+export function mergeProviderModelParameters(
+  provider: string,
+  base: ProviderConfig,
+  override: ProviderConfig,
+): ProviderConfig {
+  for (const [field, value] of Object.entries(override)) {
+    if (field !== "models") assertMatchingPlatformField(`User provider ${provider}`, field, value, base);
+  }
+  const models = new Map((base.models ?? []).map((model) => [model.id, model]));
+  for (const model of override.models ?? []) {
+    const original = models.get(model.id);
+    if (!original) {
+      throw new Error(`User model ${provider}/${model.id} must select a configured model for parameter overrides`);
+    }
+    const parameters = selectModelParameters(provider, model, getProtectedModelFields(base, original), base.headers);
+    models.set(model.id, mergeModelParameters(original, parameters));
+  }
+  return { ...base, models: [...models.values()] };
+}
+
+export function mergeModelsConfigs(
+  platform?: ModelsConfig | null,
+  ...userConfigs: Array<ModelsConfig | null | undefined>
+): ModelsConfig {
+  const providers = new Map<string, ProviderConfig>(Object.entries(platform?.providers ?? {}));
+  for (const config of userConfigs) {
+    for (const [provider, providerConfig] of Object.entries(config?.providers ?? {})) {
+      const base = providers.get(provider);
+      if (provider === "cohub" && !base) {
+        throw new Error("Provider cohub requires a platform model catalog");
       }
+      if (base && isPlatformModelOverride(provider, providerConfig)) {
+        providers.set(provider, mergeProviderModelParameters(provider, base, providerConfig));
+        continue;
+      }
+      // 自定义连接必须使用自身凭据，参数覆盖则保留原有连接。
       for (const model of providerConfig.models ?? []) {
-        if (model.id) mergedModels.set(model.id, model);
+        assertUserModelCredentials({
+          provider,
+          id: model.id,
+          api: model.api ?? providerConfig.api,
+          apiKey: providerConfig.apiKey,
+        });
       }
-
-      providers[provider] = {
-        ...existing,
-        ...providerConfig,
-        headers: {
-          ...(existing.headers ?? {}),
-          ...(providerConfig.headers ?? {}),
-        },
-        models: [...mergedModels.values()],
-      };
+      providers.set(provider, providerConfig);
     }
   }
+  return { providers: Object.fromEntries(providers) };
+}
 
-  return { providers };
+/** 仅解析经过来源校验的平台密钥声明。 */
+export function resolvePlatformModelApiKey(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return process.env[value]?.trim() || value;
+}
+
+/** Runtime-only copy. Cache and discovery paths must keep the unresolved config. */
+export function resolvePlatformModelsConfig(config: ModelsConfig | null | undefined): ModelsConfig {
+  return {
+    providers: Object.fromEntries(Object.entries(config?.providers ?? {}).map(([provider, value]) => [
+      provider,
+      { ...value, apiKey: resolvePlatformModelApiKey(value.apiKey) },
+    ])),
+  };
+}
+
+// These adapters use explicit API keys. Cloud adapters with ambient service
+// credentials (for example Bedrock/Vertex) are platform-only.
+const USER_MODEL_APIS = new Set([
+  "anthropic-messages", "azure-openai-responses", "google-generative-ai",
+  "mistral-conversations", "openai-codex-responses", "openai-completions",
+  "openai-responses", "pi-messages",
+]);
+
+export function assertUserModelCredentials(model: {
+  provider: string;
+  id: string;
+  api?: string;
+  apiKey?: string;
+}) {
+  const label = `User model ${model.provider}/${model.id}`;
+  if (!model.apiKey?.trim()) {
+    throw new Error(`${label} requires an explicit API key`);
+  }
+  if (!model.api) {
+    throw new Error(`${label} requires an API-key-based adapter`);
+  }
+  if (!USER_MODEL_APIS.has(model.api)) {
+    throw new Error(`${label} uses an unsupported API adapter: ${model.api}`);
+  }
+}
+
+export function resolveRuntimeModelsConfig(input: {
+  platform?: ModelsConfig | null;
+  user?: ModelsConfig | null;
+}): ModelsConfig {
+  const merged = mergeModelsConfigs(input.platform, input.user);
+  return {
+    providers: Object.fromEntries(Object.entries(merged.providers).map(([provider, config]) => {
+      const user = Object.hasOwn(input.user?.providers ?? {}, provider) ? input.user?.providers[provider] : undefined;
+      const usesPlatform = Object.hasOwn(input.platform?.providers ?? {}, provider)
+        && (!user || isPlatformModelOverride(provider, user));
+      return [provider, usesPlatform ? { ...config, apiKey: resolvePlatformModelApiKey(config.apiKey) } : config];
+    })),
+  };
 }
 
 export function flattenModelsCatalog(config: ModelsConfig | null | undefined): ModelCatalogEntry[] {

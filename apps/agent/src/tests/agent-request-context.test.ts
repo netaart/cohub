@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
-import type { ModelsConfig } from "@cohub/infra/config-runtime/models";
+import { resolveRuntimeModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
 import {
   CLAUDE_CODE_BETA,
   CLAUDE_CODE_SYSTEM_IDENTITY,
@@ -32,7 +32,7 @@ const config: ModelsConfig = {
   },
 };
 
-type CapturedRequest = { headers: Headers; body: Record<string, unknown> };
+type CapturedRequest = { url: string; headers: Headers; body: Record<string, unknown> };
 
 function sse(block: Record<string, unknown>, delta: Record<string, unknown>, stopReason: string): string {
   return [
@@ -56,8 +56,8 @@ const requests: CapturedRequest[] = [];
 /** Replies served before falling back to a plain text reply. */
 const replies: string[] = [];
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async (_input, init) => {
-  requests.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+globalThis.fetch = async (input, init) => {
+  requests.push({ url: input instanceof Request ? input.url : String(input), headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
   return new Response(replies.shift() ?? SSE_TEXT_REPLY, { status: 200, headers: { "content-type": "text/event-stream" } });
 };
 
@@ -79,8 +79,8 @@ function textTool(name: string): AgentTool {
 
 const echoTool = textTool("echo");
 
-async function createSession(modelId: string) {
-  const modelRegistry = new CohubModelRegistry({ configs: [config] });
+async function createSession(modelId: string, user?: ModelsConfig) {
+  const modelRegistry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform: config, user })] });
   const model = modelRegistry.find("test", modelId);
   assert.ok(model);
   const sessionManager = SessionManager.create(root, join(root, "sessions"));
@@ -100,6 +100,35 @@ function toolNames(request: CapturedRequest | undefined): string[] {
   assert.ok(Array.isArray(tools), "request declares tools");
   return tools.map((tool: { name?: string }) => tool.name ?? "");
 }
+
+test("runtime identity refresh replaces a same-ID user endpoint before using platform credentials", async (t) => {
+  requests.length = 0;
+  const modelId = "claude-sonnet-5";
+  const user: ModelsConfig = { providers: { test: {
+    api: "anthropic-messages", baseUrl: "https://user.example.test", apiKey: "user-literal-key",
+    headers: { "x-r02-origin": "user" }, models: [{ id: modelId, reasoning: true }],
+  } } };
+  const { session, sessionManager } = await createSession(modelId, user);
+  t.after(() => session.dispose());
+  await session.prompt("use the user model");
+  const modelChanges = sessionManager.getBranchEntries().filter((entry) => entry.type === "model_change").length;
+
+  const modelRegistry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform: config })] });
+  await session.configureRuntimeIdentity({ modelRegistry });
+  assert.equal(session.agent.state.model, modelRegistry.find("test", modelId));
+  assert.equal(sessionManager.getBranchEntries().filter((entry) => entry.type === "model_change").length, modelChanges);
+  await session.prompt("use the platform model");
+
+  assert.equal(requests.length, 2);
+  const [before, after] = requests;
+  assert.ok(before && after);
+  assert.equal(new URL(before.url).origin, "https://user.example.test");
+  assert.equal(before.headers.get("x-api-key"), "user-literal-key");
+  assert.equal(before.headers.get("x-r02-origin"), "user");
+  assert.equal(new URL(after.url).origin, "https://anthropic.test");
+  assert.equal(after.headers.get("x-api-key"), "test-key");
+  assert.equal(after.headers.get("x-r02-origin"), null);
+});
 
 test("agent requests carry the system prompt and tools, also after the transcript is rebuilt", async () => {
   requests.length = 0;
