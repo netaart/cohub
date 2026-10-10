@@ -189,11 +189,11 @@ test("raw file and cache declarations enforce identical compatibility checks", (
   }), /cohub.*baseUrl/);
 });
 
-test("matching provider declarations still reject new model IDs and unknown extensions", () => {
+test("matching provider declarations ignore stale model IDs and reject unknown extensions", () => {
   const platform = platformConfig();
-  assert.throws(() => mergeModelsConfigs(platform, { providers: { cohub: {
+  assert.deepEqual(mergeModelsConfigs(platform, { providers: { cohub: {
     ...copiedProvider(platform), models: [{ id: "new-model" }],
-  } } }), /must select a configured model/);
+  } } }), platform);
   const user = { providers: { cohub: { ...copiedProvider(platform), privateRoute: "same" } } };
   platform.providers.cohub = { ...copiedProvider(platform), privateRoute: "same" };
   assert.throws(() => mergeModelsConfigs(platform, user), /privateRoute/);

@@ -323,9 +323,9 @@ export function mergeProviderModelParameters(
   const models = new Map((base.models ?? []).map((model) => [model.id, model]));
   for (const model of override.models ?? []) {
     const original = models.get(model.id);
-    if (!original) {
-      throw new Error(`User model ${provider}/${model.id} must select a configured model for parameter overrides`);
-    }
+    // Platform models can be retired while user overrides remain persisted.
+    // An override must neither add a model nor disable the remaining catalog.
+    if (!original) continue;
     const parameters = selectModelParameters(provider, model, getProtectedModelFields(base, original), base.headers);
     models.set(model.id, mergeModelParameters(original, parameters));
   }

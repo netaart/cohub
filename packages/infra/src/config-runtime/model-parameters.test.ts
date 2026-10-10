@@ -117,8 +117,34 @@ test("cohub cannot be redefined even with a complete user-owned connection", () 
   }
 });
 
-test("parameter overrides cannot add model IDs or create a platform provider", () => {
-  assert.throws(() => mergeModelsConfigs(platform, { providers: { cohub: { models: [{ id: "new" }] } } }), /cohub\/new must select a configured model/);
+test("stale parameter overrides do not disable configured models or add model IDs", () => {
+  const stale: ModelsConfig = { providers: { cohub: { models: [
+    { id: "claude-opus-5-5-gt", contextWindow: 200000 },
+    { id: "chat", maxTokens: 8192 },
+  ] } } };
+  const before = structuredClone(stale);
+  const expected = mergeModelsConfigs(platform, { providers: { cohub: { models: [{ id: "chat", maxTokens: 8192 }] } } });
+  const cached = parseCachedModelsConfig(JSON.stringify(createCachedModelsConfig({ content: stale })));
+
+  assert.deepEqual(mergeModelsConfigs(platform, stale), expected);
+  assert.deepEqual(resolveRuntimeModelsConfig({ platform, user: cached?.content }), expected);
+  assert.deepEqual(flattenModelsCatalog(mergeModelsConfigs(platform, stale)).map(({ id }) => id), ["chat", "sibling"]);
+  assert.equal(isRuntimeModelAvailable([platform, stale], "cohub", "chat"), true);
+  assert.equal(isRuntimeModelAvailable([platform, stale], "cohub", "claude-opus-5-5-gt"), false);
+  assert.deepEqual(stale, before);
+});
+
+test("stale parameter overrides cannot replace platform connections or pricing", () => {
+  for (const fields of [{ baseUrl: "https://user.example.test" }, { cost: { input: 0, output: 0 } }]) {
+    const overrides: ModelsConfig = { providers: { cohub: { models: [
+      { id: "unavailable" },
+      { id: "chat", ...fields },
+    ] } } };
+    assert.throws(() => mergeModelsConfigs(platform, overrides), /cohub\/chat cannot override platform model/);
+  }
+});
+
+test("parameter overrides cannot create a platform provider", () => {
   assert.throws(() => mergeModelsConfigs(null, user), /cohub requires a platform model catalog/);
   assert.throws(() => mergeModelsConfigs(platform, { providers: { custom: { models: [{ id: "new" }] } } }), /requires an explicit API key/);
 });
@@ -197,6 +223,11 @@ for (const name of ["sessionTitle", "imageToText"] as const) {
     assert.throws(() => resolveModelTasksConfig({
       platformTasks,
       userTasks: { [name]: { model: { provider: "cohub", id: "chat" } } },
+    }), /configured platform model/);
+    assert.throws(() => resolveModelTasksConfig({
+      platformModels: platform, platformTasks,
+      userModels: { providers: { cohub: { models: [{ id: "unavailable", maxTokens: 8192 }] } } },
+      userTasks: { [name]: { model: { provider: "cohub", id: "unavailable" } } },
     }), /configured platform model/);
   });
 }
