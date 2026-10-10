@@ -760,15 +760,12 @@ router.post("/upload", async (c) => {
           created: file.created !== false,
         })),
       ];
-      // The sandbox watcher owns realtime and hooks for sandbox writes; the API
-      // only performs CDN invalidation for them.
       await dispatchSpaceFsChanged(spaceId, {
         source: "api-fs",
         changes,
-      }, result.executedBy === "sandbox" ? { skipHooks: true, skipRealtime: true } : undefined)
-        .catch((error) => logger.error("[SpaceFS] failed to publish file-system change", error));
+      }).catch((error) => logger.error("[SpaceFS] failed to publish file-system change", error));
     }
-    return c.json(withoutExecutedBy(result));
+    return c.json(result);
   } catch (error) {
     const { status, body } = spaceFsJsonError(error);
     return c.json(body, status as never);

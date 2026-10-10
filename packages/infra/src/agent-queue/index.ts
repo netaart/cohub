@@ -139,8 +139,6 @@ function canonicalizeMutation(mutation: AgentSandboxFsMutationOperation): string
       return JSON.stringify(["delete", mutation.path, mutation.recursive ?? false]);
     case "move":
       return JSON.stringify(["move", mutation.fromPath, mutation.toPath]);
-    case "reconcile":
-      return JSON.stringify(["reconcile"]);
   }
 }
 
@@ -194,10 +192,6 @@ export type AgentSandboxFsMutationOperation =
       operation: "move";
       fromPath: string;
       toPath: string;
-    }
-  | {
-      /** Tell the sandbox its workspace changed behind its back. */
-      operation: "reconcile";
     };
 
 export type AgentSandboxFsMutationJobData = {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import type { Job } from "bullmq";
+import { QueueEvents, type Job } from "bullmq";
 import {
   buildSpaceFsCopyResultKey,
   createSpaceGitignoreFilter,
@@ -17,9 +17,9 @@ import {
   type AgentSandboxFsInstallJobData,
   type AgentSandboxFsInstallJobResult,
 } from "@cohub/infra/agent-queue";
+import { COHUB_AGENT_TURNS_QUEUE, createBullmqConnectionOptions } from "@cohub/infra/bullmq";
 import { createLogger } from "@cohub/infra/logging";
 import type { SpaceFsCopyResult, SpaceFsCopyStats } from "@cohub/protocol/fs";
-import { getAgentQueueEvents } from "../../../agent-queue-events.js";
 import { config } from "../../../config.js";
 import { getSpaceWorkspaceDir } from "../../../git.js";
 import { redisCommandClient } from "../../../redis.js";
@@ -45,10 +45,20 @@ const PROGRESS_INTERVAL_MS = 1000;
 const INSTALL_START_TIMEOUT_MS = 10 * 60 * 1000;
 
 let agentQueue: ReturnType<typeof createAgentTurnsQueue<AgentSandboxFsInstallJobData, AgentSandboxFsInstallJobResult>> | null = null;
+let agentQueueEvents: Promise<QueueEvents> | null = null;
 
 function getAgentQueue() {
   agentQueue ??= createAgentTurnsQueue<AgentSandboxFsInstallJobData, AgentSandboxFsInstallJobResult>(config.bullmqRedisUrl, "cohub-worker-space-fs-copy");
   return agentQueue;
+}
+
+function getAgentQueueEvents() {
+  agentQueueEvents ??= (async () => {
+    const events = new QueueEvents(COHUB_AGENT_TURNS_QUEUE, { connection: createBullmqConnectionOptions(config.bullmqRedisUrl) });
+    await events.waitUntilReady();
+    return events;
+  })();
+  return agentQueueEvents;
 }
 
 async function openRoot(spaceId: string, visibility: "full" | "filtered"): Promise<CopyRoot> {

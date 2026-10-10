@@ -183,6 +183,8 @@ export const spaceSandboxes = v2.table(
     stoppedAt: timestamp("stopped_at", { withTimezone: true }),
     stopReason: varchar("stop_reason", { length: 30 }),
     meta: jsonb("meta"),
+    /** Bumped around every write to the workspace volume that bypasses the sandbox. */
+    workspaceWriteGen: bigint("workspace_write_gen", { mode: "number" }).notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

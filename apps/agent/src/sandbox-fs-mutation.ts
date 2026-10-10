@@ -162,14 +162,6 @@ async function deleteMutation(connection: SandboxConnection, mutation: Extract<A
   return { ok: true, result: { path: mutation.path, deleted: true, nodeType } };
 }
 
-/** Sandboxes without index plans have nothing a write they missed can make stale. */
-async function reconcileMutation(connection: SandboxConnection): Promise<AgentSandboxFsMutationJobResult> {
-  if (connection.capabilities?.fsSearchIndex === true) {
-    await rpc(connection, "fs.reconcile", {});
-  }
-  return { ok: true, result: {} };
-}
-
 async function moveMutation(connection: SandboxConnection, mutation: Extract<AgentSandboxFsMutationOperation, { operation: "move" }>): Promise<AgentSandboxFsMutationJobResult> {
   const fromStat = await statOrNull(connection, mutation.fromPath);
   if (!fromStat?.exists) {
@@ -288,9 +280,6 @@ export async function processSandboxFsMutationJob(job: Job<AgentSandboxFsMutatio
           break;
         case "move":
           result = await moveMutation(connection, data.mutation);
-          break;
-        case "reconcile":
-          result = await reconcileMutation(connection);
           break;
       }
       await job.updateProgress({ stage: "completed", ...logMeta }).catch(() => undefined);

@@ -3,14 +3,11 @@ import { createLogger } from "@cohub/infra/logging";
 import * as direct from "./space-fs.js";
 import * as remote from "./space-fs-remote.js";
 import { getSpaceSandboxBySpaceId } from "./space-sandboxes.js";
-import { isSandboxDialable } from "@cohub/sandbox-controller";
+import { createWorkspaceWriteStore, isSandboxDialable, runDirectWorkspaceWrite } from "@cohub/sandbox-controller";
+import { db } from "./db/index.js";
 import type { AgentSandboxFsMutationOperation } from "@cohub/infra/agent-queue";
-import type { SpaceFsUploadResponse } from "@cohub/protocol/fs";
 import { enqueueSandboxFsMutationJob, SandboxFsMutationTimeoutError } from "./sandbox-fs-mutation-queue.js";
 import { SpaceFsError, assertSafeRelativePath } from "./space-fs.js";
-import { writeUploadsThroughSandbox } from "./space-fs-upload.js";
-
-const logger = createLogger({ serviceName: "cohub-api" });
 
 // Provider-aware facade over the space filesystem. Cloud spaces read/write the
 // shared PVC directly (the existing implementation); local spaces are served
@@ -77,8 +74,6 @@ function validateSandboxMutationPaths(mutation: AgentSandboxFsMutationOperation)
         fromPath: assertSafeRelativePath(mutation.fromPath),
         toPath: assertSafeRelativePath(mutation.toPath),
       };
-    case "reconcile":
-      return mutation;
   }
 }
 
@@ -128,32 +123,12 @@ function asApiEventOutcome<T extends object>(result: T): ApiEventOutcome<T> {
   return { ...result, executedBy: "api" };
 }
 
-/**
- * Writes straight to the workspace volume, which only happens while no
- * sandbox is dialable. A sandbox's watcher never sees these writes, and one
- * that became dialable meanwhile may already have indexed past the change,
- * so it is told to reconcile before the write is reported done. Sandboxes
- * start indexing only after the API sees them as ready, so a write that
- * finishes while none is dialable is always covered by the first reconcile.
- */
-async function runDirectMutation<T extends object>(spaceId: string, mutate: () => Promise<T>): Promise<ApiEventOutcome<T>> {
-  try {
-    return asApiEventOutcome(await mutate());
-  } finally {
-    await reconcileSandboxAfterDirectWrite(spaceId);
-  }
-}
+const logger = createLogger({ serviceName: "cohub-api" });
+const workspaceWrites = createWorkspaceWriteStore(db);
 
-async function reconcileSandboxAfterDirectWrite(spaceId: string): Promise<void> {
-  try {
-    if (!(await isCloudSandboxDialable(spaceId))) return;
-    await runCloudSandboxMutation(spaceId, { operation: "reconcile" });
-  } catch (error) {
-    // The write's own outcome stands: failing a completed write would invite
-    // retries of non-idempotent operations. The sandbox index may miss it.
-    logger.error(`[space-fs] sandbox reconcile after a direct write failed spaceId=${spaceId}`, error);
-  }
-}
+/** Cloud writes that reach the workspace volume without the sandbox. */
+const runDirectWrite = <T>(spaceId: string, write: () => Promise<T>) =>
+  runDirectWorkspaceWrite(workspaceWrites, spaceId, write, logger);
 
 export async function listSpaceDirectory(spaceId: string, path?: string, options?: Visibility) {
   return (await isLocalSpace(spaceId))
@@ -192,7 +167,7 @@ export async function writeSpaceFile(
     const { mutationId, ...mutation } = input;
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "write", ...mutation }, mutationId));
   }
-  return runDirectMutation(spaceId, () => direct.writeSpaceFile(spaceId, input));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.writeSpaceFile(spaceId, input)));
 }
 
 export async function createSpaceFileExclusive(
@@ -206,7 +181,7 @@ export async function createSpaceFileExclusive(
     const { mutationId, ...mutation } = input;
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "write", ...mutation, exclusive: true }, mutationId));
   }
-  return runDirectMutation(spaceId, () => direct.createSpaceFileExclusive(spaceId, input));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.createSpaceFileExclusive(spaceId, input)));
 }
 
 export async function createSpaceDirectory(
@@ -220,7 +195,7 @@ export async function createSpaceDirectory(
   if (await isCloudSandboxDialable(spaceId)) {
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "mkdir", path }, mutationId));
   }
-  return runDirectMutation(spaceId, () => direct.createSpaceDirectory(spaceId, path));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.createSpaceDirectory(spaceId, path)));
 }
 
 export async function deleteSpaceNode(
@@ -235,7 +210,7 @@ export async function deleteSpaceNode(
   if (await isCloudSandboxDialable(spaceId)) {
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "delete", path, recursive }, mutationId));
   }
-  return runDirectMutation(spaceId, () => direct.deleteSpaceNode(spaceId, path, recursive));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.deleteSpaceNode(spaceId, path, recursive)));
 }
 
 export async function moveSpaceNode(
@@ -249,25 +224,13 @@ export async function moveSpaceNode(
   if (await isCloudSandboxDialable(spaceId)) {
     return asSandboxOutcome(await runCloudSandboxMutation(spaceId, { operation: "move", fromPath: move.fromPath, toPath: move.toPath }, mutationId));
   }
-  return runDirectMutation(spaceId, () => direct.moveSpaceNode(spaceId, move));
+  return asApiEventOutcome(await runDirectWrite(spaceId, () => direct.moveSpaceNode(spaceId, move)));
 }
 
-export async function uploadSpaceFiles(
-  spaceId: string,
-  files: File[],
-  targetDir: string,
-): Promise<ApiEventOutcome<SpaceFsUploadResponse> | SandboxEventOutcome<SpaceFsUploadResponse>> {
-  if (await isLocalSpace(spaceId)) {
-    return asApiEventOutcome(await remote.uploadSpaceFiles(spaceId, files, targetDir));
-  }
-  if (await isCloudSandboxDialable(spaceId)) {
-    // A direct volume write, and any directory it creates, would be
-    // invisible to the running sandbox's watcher and workspace index.
-    const safeTargetDir = assertSafeRelativePath(targetDir, { allowEmpty: true });
-    return asSandboxOutcome(await writeUploadsThroughSandbox(files, safeTargetDir, (write) =>
-      runCloudSandboxMutation(spaceId, { operation: "write", path: write.path, content: write.content, encoding: "base64" })));
-  }
-  return runDirectMutation(spaceId, () => direct.uploadSpaceFiles(spaceId, files, targetDir));
+export async function uploadSpaceFiles(spaceId: string, files: File[], targetDir: string) {
+  return (await isLocalSpace(spaceId))
+    ? remote.uploadSpaceFiles(spaceId, files, targetDir)
+    : runDirectWrite(spaceId, () => direct.uploadSpaceFiles(spaceId, files, targetDir));
 }
 
 /**

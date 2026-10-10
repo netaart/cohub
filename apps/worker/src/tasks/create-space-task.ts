@@ -1,5 +1,6 @@
 import { isBillingAccessBlockedError } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
+import { createWorkspaceWriteStore, runDirectWorkspaceWrite } from "@cohub/sandbox-controller";
 import { eq, sql } from "drizzle-orm";
 import type { Job } from "bullmq";
 import type { TaskPayload } from "@cohub/protocol/task";
@@ -17,13 +18,17 @@ import { ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/
 import { materializeLatest } from "../checkpoint/materialize.js";
 import { scanWorkspace } from "../checkpoint/scan.js";
 import { ensureWorkerLocalTmpDir, getWorkerLocalTmpDir, removeWorkerLocalTmpDir } from "../local-tmp.js";
-import { runDirectWorkspaceWrite } from "../sandbox-reconcile.js";
 import {
   resolveCreateSpaceSource,
   type ResolvedSpaceCreateSource,
 } from "./create-space-source.js";
 
 const logger = createLogger({ serviceName: "cohub-worker" });
+const workspaceWrites = createWorkspaceWriteStore(db);
+
+// The sandbox is provisioned while these bootstrap writes land on the volume.
+const runDirectWrite = <T>(spaceId: string, write: () => Promise<T>) =>
+  runDirectWorkspaceWrite(workspaceWrites, spaceId, write, logger);
 const SAVE_VERSION = 2;
 type BootstrapStatus = "pending" | "running" | "ready" | "failed";
 type BootstrapStage = "prepare" | "import" | "checkpoint_restore" | "finalize";
@@ -250,21 +255,17 @@ const createSpaceHandler = async (job: Job) => {
       const restoreTmpDir = getWorkerLocalTmpDir("restore", currentSpace.id, taskRunId);
       await ensureWorkerLocalTmpDir(restoreTmpDir);
       await progress("restore_workspace", { checkpointId: source.checkpointId });
-      // The sandbox is provisioned concurrently, so these direct writes can race its index.
-      const { restoreResult, restoreDuration, aliasResult, aliasDuration, boardRestoreResult, boardRestoreDuration } = await runDirectWorkspaceWrite(currentSpace.id, async () => {
-        const { result: restoreResult, duration: restoreDuration } = await timeIt("restoreWorkspaceFromCheckpoint", () => restoreWorkspaceFromCheckpoint({ checkpointId: source.checkpointId, targetWorkspaceDir: workspaceDir, restoreTmpDir })).finally(async () => {
-          await removeWorkerLocalTmpDir(restoreTmpDir).catch((error) => logger.warn(`[CreateSpace] failed to clean restore tmp ${restoreTmpDir}: ${error instanceof Error ? error.message : String(error)}`));
-        });
-        stageTimings.restoreWorkspaceFromCheckpoint = restoreDuration;
-        await progress("create_checkpoint_alias");
-        const { result: aliasResult, duration: aliasDuration } = await timeIt("createCheckpointAlias", () => createCheckpointAlias({ targetSpace: currentSpace, sourceCheckpoint: restoreResult.checkpoint }));
-        stageTimings.createCheckpointAlias = aliasDuration;
-        currentSpace = aliasResult.space;
-        await progress("restore_board_snapshots");
-        const { result: boardRestoreResult, duration: boardRestoreDuration } = await timeIt("restoreBoardCheckpointSnapshots", () => restoreBoardCheckpointSnapshots({ checkpointId: source.checkpointId, targetSpaceId: currentSpace.id, workspaceDir }));
-        stageTimings.restoreBoardCheckpointSnapshots = boardRestoreDuration;
-        return { restoreResult, restoreDuration, aliasResult, aliasDuration, boardRestoreResult, boardRestoreDuration };
+      const { result: restoreResult, duration: restoreDuration } = await runDirectWrite(currentSpace.id, () => timeIt("restoreWorkspaceFromCheckpoint", () => restoreWorkspaceFromCheckpoint({ checkpointId: source.checkpointId, targetWorkspaceDir: workspaceDir, restoreTmpDir }))).finally(async () => {
+        await removeWorkerLocalTmpDir(restoreTmpDir).catch((error) => logger.warn(`[CreateSpace] failed to clean restore tmp ${restoreTmpDir}: ${error instanceof Error ? error.message : String(error)}`));
       });
+      stageTimings.restoreWorkspaceFromCheckpoint = restoreDuration;
+      await progress("create_checkpoint_alias");
+      const { result: aliasResult, duration: aliasDuration } = await timeIt("createCheckpointAlias", () => createCheckpointAlias({ targetSpace: currentSpace, sourceCheckpoint: restoreResult.checkpoint }));
+      stageTimings.createCheckpointAlias = aliasDuration;
+      currentSpace = aliasResult.space;
+      await progress("restore_board_snapshots");
+      const { result: boardRestoreResult, duration: boardRestoreDuration } = await runDirectWrite(currentSpace.id, () => timeIt("restoreBoardCheckpointSnapshots", () => restoreBoardCheckpointSnapshots({ checkpointId: source.checkpointId, targetSpaceId: currentSpace.id, workspaceDir })));
+      stageTimings.restoreBoardCheckpointSnapshots = boardRestoreDuration;
       await progress("bootstrap_ready", { checkpointAliasId: aliasResult.alias.id });
       currentSpace = await updateBootstrap({ space: currentSpace, taskRunId, source, status: "ready", stage: "finalize", finishedAt: new Date().toISOString(), stageTimings });
       await publishSpaceFsChanged(currentSpace.id, { source: "bootstrap", resync: true, changes: [] }).catch((error) => logger.warn(`[CreateSpace] Failed to publish bootstrap fs resync for ${currentSpace.id}: ${error instanceof Error ? error.message : String(error)}`));
@@ -284,7 +285,7 @@ const createSpaceHandler = async (job: Job) => {
       if (source.type === "git_repo") {
         currentSpace = await updateBootstrap({ space: currentSpace, taskRunId, source, status: "running", stage: "import", stageTimings });
         await progress("import_git_repo");
-        const { duration } = await runDirectWorkspaceWrite(currentSpace.id, () => timeIt("bootstrapFromGitRepo", () => bootstrapFromGitRepo({ workspaceDir, repoUrl: source.repoUrl, ref: source.ref, gitToken })));
+        const { duration } = await runDirectWrite(currentSpace.id, () => timeIt("bootstrapFromGitRepo", () => bootstrapFromGitRepo({ workspaceDir, repoUrl: source.repoUrl, ref: source.ref, gitToken })));
         stageTimings.bootstrapFromGitRepo = duration;
       } else {
         await progress("prepare_blank_workspace");
