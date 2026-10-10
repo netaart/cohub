@@ -1661,8 +1661,8 @@ onMount(() => {
 		}
 
 		.space-manage-link {
-			width: 32px;
-			height: 32px;
+			width: 44px;
+			height: 44px;
 			justify-content: center;
 			border-radius: 7px;
 			padding: 0;
