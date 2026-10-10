@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.4
-# Cohub Agent Dockerfile
 
-FROM node:24-slim AS base
+FROM node:26-slim AS base
 WORKDIR /app
-RUN corepack enable
+COPY package.json ./
+RUN npm install -g "$(node -p 'require("./package.json").packageManager')" && rm package.json
 
 FROM base AS builder
 COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
@@ -75,7 +75,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
   fi
 
-FROM node:24-slim AS runtime
+FROM node:26-slim AS runtime
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size-percentage=75
 ENV WORKSPACE_ROOT=/space-storage
