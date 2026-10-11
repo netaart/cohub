@@ -51,6 +51,19 @@ type GenerationTaskResult = {
 
 `requestId` and `cost` are observed provider fields captured via `generateResult()`. Older completed tasks may omit them.
 
+When the provider answered but the generation failed, the failed task run stores the request ids as its `result`, and the failed `generation.result` session message repeats them in `error`:
+
+```ts
+type GenerationTaskFailureResult = {
+  /** Router request id (`new_api.request_id` / `X-Request-Id`) */
+  requestId?: string;
+  /** new-api request ids behind the router request */
+  upstreamRequestIds: string[];
+};
+```
+
+The ids come from `GenerationProviderError` and are kept separately from `errorMessage`, so truncating the provider body in the message never drops them. The SDK `wait()` helper and the CLI add the `request ID` line to the failure message.
+
 `meta` is model-owned input and is validated against the model declaration. Cohub request provenance and task context are stored separately and are never forwarded to generation providers.
 
 ## Billing

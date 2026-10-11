@@ -8,6 +8,7 @@ import { taskRuns } from "@cohub/db";
 import { dispatchTaskCreated, dispatchTaskUpdated } from "../realtime-events.js";
 import { createLogger } from "@cohub/infra/logging";
 import { failGenerationSession } from "./generation-session.js";
+import { TaskRunFailure } from "./task-run-failure.js";
 
 
 const logger = createLogger({ serviceName: "cohub-worker" });
@@ -36,12 +37,16 @@ function billingFailureResult(error: unknown) {
   return { error: serializeBillingBlocked(error) };
 }
 
+function failureResult(error: unknown): Record<string, unknown> | null {
+  return billingFailureResult(error) ?? (error instanceof TaskRunFailure ? error.result : null);
+}
+
 export const markTaskRunFailed = async (job: Job, error: unknown) => {
   const jobId = job.id;
   if (!jobId) return;
 
   const errorMessage = error instanceof Error ? error.message : String(error);
-  const result = billingFailureResult(error);
+  const result = failureResult(error);
   const [taskRun] = await db
     .update(taskRuns)
     .set({

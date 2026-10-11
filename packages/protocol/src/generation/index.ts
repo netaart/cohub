@@ -111,6 +111,17 @@ export type GenerationTaskResult = {
   meta?: Record<string, unknown>;
 };
 
+/**
+ * Result stored on a failed generation task run when the provider answered.
+ *
+ * - `requestId` is the router canonical id (`new_api.request_id` / `X-Request-Id`)
+ * - `upstreamRequestIds` are the new-api request ids behind it
+ */
+export type GenerationTaskFailureResult = {
+  requestId?: string;
+  upstreamRequestIds: string[];
+};
+
 export type GenerationExampleRequest = Omit<CreateGenerationTaskRequest, "spaceId">;
 export type GenerationDeclaration = GenerationModelDeclaration;
 export type PublicGenerationDeclaration = Omit<GenerationModelDeclaration, "adapter">;

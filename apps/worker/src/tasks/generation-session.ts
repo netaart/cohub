@@ -8,6 +8,7 @@ import { sanitizeContentBlocksForPostgresJson } from "@cohub/core/content/saniti
 import { db } from "../db.js";
 import { wakeAgentSession } from "../session-services.js";
 import { dispatchTurnUpdated } from "../realtime-events.js";
+import { GenerationTaskFailure } from "./generation-errors.js";
 
 const toIso = (value: Date | null | undefined) => value?.toISOString() ?? null;
 
@@ -142,12 +143,13 @@ export async function failGenerationSession(input: { taskRunId: string; payload:
   if (!sessionId || !turnId) return;
   const request = generationInput(input.payload);
   const message = input.error instanceof Error ? input.error.message : String(input.error);
+  const requestIds = input.error instanceof GenerationTaskFailure ? input.error.result : null;
   const output = buildGenerationResultMessage({
     taskId: input.taskRunId,
     model: request.model,
     parameters: request.parameters,
     status: "failed",
-    error: { message },
+    error: { message, ...requestIds },
   });
   const content = sanitizeContentBlocksForPostgresJson(output.content);
   const completedAt = new Date();

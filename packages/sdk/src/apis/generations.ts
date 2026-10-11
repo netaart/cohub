@@ -1,6 +1,7 @@
 import type {
   CreateGenerationTaskRequest,
   CreateGenerationTaskResponse,
+  GenerationTaskFailureResult,
   GenerationTaskResult,
 } from "@cohub/protocol/generation";
 import type { HttpTransport } from "../transport.js";
@@ -76,6 +77,12 @@ function isGenerationTaskResult(value: unknown): value is GenerationTaskResult {
   return true;
 }
 
+function failureRequestId(result: unknown): string | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const requestId = (result as Partial<GenerationTaskFailureResult>).requestId;
+  return typeof requestId === "string" && requestId ? requestId : null;
+}
+
 export class GenerationsApi {
   constructor(private readonly transport: HttpTransport) {}
 
@@ -110,7 +117,8 @@ export class GenerationsApi {
 
       if (detail.run.status === "failed") {
         const message = detail.run.errorMessage || "Generation task failed";
-        throw new Error(`${message}\ntask ID: ${taskRunId}`);
+        const requestId = failureRequestId(detail.run.result);
+        throw new Error(`${message}\ntask ID: ${taskRunId}${requestId ? `\nrequest ID: ${requestId}` : ""}`);
       }
 
       const elapsedMs = Date.now() - startedAt;

@@ -75,7 +75,7 @@ export function buildGenerationResultMessage(input: {
   parameters?: Record<string, unknown>;
   status: "queued" | "running" | "completed" | "failed";
   result?: unknown;
-  error?: { code?: string | null; message: string } | null;
+  error?: { code?: string | null; message: string; requestId?: string; upstreamRequestIds?: string[] } | null;
 }): { content: ContentBlock[]; meta: GenerationMessageMeta } {
   const parameters = input.parameters ?? {};
   const message = {

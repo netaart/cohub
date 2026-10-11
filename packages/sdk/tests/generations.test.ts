@@ -74,3 +74,24 @@ test("generation wait rejects invalid billing discount multipliers", async (t) =
 		});
 	}
 });
+
+test("generation wait reports the router request id of a failed task", async () => {
+	const failedRun = (result: unknown) =>
+		clientReturning({
+			run: {
+				taskType: "generation",
+				status: "failed",
+				result,
+				errorMessage: "Generation provider is temporarily unavailable — HTTP 500",
+			},
+			progress: null,
+		});
+
+	await assert.rejects(
+		failedRun({ requestId: "router-1", upstreamRequestIds: ["newapi-1"] }).generations.wait("task-run-1"),
+		{ message: "Generation provider is temporarily unavailable — HTTP 500\ntask ID: task-run-1\nrequest ID: router-1" },
+	);
+	await assert.rejects(failedRun(null).generations.wait("task-run-1"), {
+		message: "Generation provider is temporarily unavailable — HTTP 500\ntask ID: task-run-1",
+	});
+});
