@@ -23,14 +23,13 @@ for (const name of ["cohub", "otherPlatform"]) {
   test(`${name}: users cannot change any platform price through catalog overrides`, () => {
     for (const price of [zero, ...Object.keys(cost).map((field) => ({ ...cost, [field]: 0 }))]) {
       const user: ModelsConfig = { providers: { [name]: { models: [{ id: "chat", cost: price }] } } };
-      const expected = { message: `User model ${name}/chat cannot override platform model pricing: cost` };
-      assert.throws(() => mergeModelsConfigs(platform, user), expected);
-      assert.throws(() => resolveRuntimeModelsConfig({ platform, user }), expected);
-      assert.throws(() => isRuntimeModelAvailable([platform, user], name, "chat"), expected);
-      assert.throws(() => resolveRuntimeModelsConfig({
+      assert.equal(mergeModelsConfigs(platform, user).providers[name]?.models?.[0]?.cost, cost);
+      assert.equal(resolveRuntimeModelsConfig({ platform, user }).providers[name]?.models?.[0]?.cost, cost);
+      assert.equal(isRuntimeModelAvailable([platform, user], name, "chat"), true);
+      assert.equal(resolveRuntimeModelsConfig({
         platform,
         user: parseCachedModelsConfig(JSON.stringify(createCachedModelsConfig({ content: user })))?.content,
-      }), expected);
+      }).providers[name]?.models?.[0]?.cost, cost);
     }
   });
 
@@ -44,16 +43,18 @@ for (const name of ["cohub", "otherPlatform"]) {
   });
 
   for (const taskName of ["sessionTitle", "imageToText"] as const) {
-    test(`${name}/${taskName}: catalog and task price changes are rejected`, () => {
+    test(`${name}/${taskName}: catalog prices are filtered and explicit task price changes are rejected`, () => {
       for (const fromCatalog of [false, true]) {
-        assert.throws(() => resolveModelTasksConfig({
+        const resolve = () => resolveModelTasksConfig({
           platformModels: platform,
           userModels: fromCatalog ? { providers: { [name]: { models: [{ id: "chat", cost: zero }] } } } : null,
           userTasks: { [taskName]: {
             prompt: "Describe the input.",
             model: { provider: name, id: "chat", ...(fromCatalog ? {} : { cost: zero }) },
           } },
-        }), /cannot override platform model pricing: cost/);
+        });
+        if (fromCatalog) assert.deepEqual(resolve()[taskName]?.model.cost, cost);
+        else assert.throws(resolve, /cannot override platform model pricing: cost/);
       }
       assert.throws(() => resolveModelTasksConfig({
         platformModels: platform,
@@ -94,11 +95,11 @@ test("custom connections retain their own catalog and task prices", () => {
   }
 });
 
-test("matching complete cohub catalogs keep platform prices while connection changes fail", () => {
+test("complete cohub catalogs keep current platform prices regardless of copied prices", () => {
   const user = structuredClone({ providers: { cohub: provider } });
   assert.equal(resolveRuntimeModelsConfig({ platform, user }).providers.cohub?.models?.[0]?.cost, cost);
   const model = user.providers.cohub.models[0];
   assert.ok(model);
   model.cost = zero;
-  assert.throws(() => resolveRuntimeModelsConfig({ platform, user }), /cannot override platform model pricing/);
+  assert.equal(resolveRuntimeModelsConfig({ platform, user }).providers.cohub?.models?.[0]?.cost, cost);
 });

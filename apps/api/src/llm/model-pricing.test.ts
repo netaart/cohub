@@ -36,13 +36,15 @@ test("Pi SDK calculates the platform price after allowed user overrides and matc
   }
 });
 
-test("user zero prices are rejected before a platform completion model is constructed", () => {
+test("Pi SDK charges platform prices when a user catalog supplies zero prices", () => {
   const user = { providers: { cohub: { models: [{
     id: "chat", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   }] } } };
-  assert.throws(() => new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]), {
-    message: "User model cohub/chat cannot override platform model pricing: cost",
-  });
+  const registry = new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]);
+  const selected = registry.find("cohub", "chat");
+  assert.ok(selected);
+  assert.ok(Math.abs(calculateCost(selected, usage()).total - 0.018) < 1e-12);
+  assert.equal(registry.getApiKey("cohub"), "platform-key");
 });
 
 test("Pi SDK uses configured prices for a user-owned connection", () => {

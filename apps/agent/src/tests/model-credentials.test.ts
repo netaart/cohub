@@ -55,7 +55,7 @@ test("agent registry keeps platform connection and sibling models when parameter
   assert.equal(registry.find("cohub", "platform")?.contextWindow, 200000);
 });
 
-test("agent registry rejects user definitions of the reserved cohub provider", () => {
+test("agent registry filters user connection fields and stale IDs for the reserved cohub provider", () => {
   const user: ModelsConfig = {
     providers: {
       cohub: {
@@ -64,5 +64,8 @@ test("agent registry rejects user definitions of the reserved cohub provider", (
       },
     },
   };
-  assert.throws(() => new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform, user })] }), /cannot override platform model connection/);
+  const registry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform, user })] });
+  assert.equal(registry.find("cohub", "platform")?.baseUrl, "https://platform.example.test/v1");
+  assert.deepEqual(registry.getHeaders("cohub", "platform"), { "X-Key": "synthetic-platform-header" });
+  assert.equal(registry.find("cohub", "custom"), undefined);
 });

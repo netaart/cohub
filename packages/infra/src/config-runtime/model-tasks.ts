@@ -201,7 +201,7 @@ export function resolveModelTasksConfig(input: {
           throw new Error("User model tasks must select a configured platform model");
         }
         const resolvedProvider = userProvider
-          ? mergeProviderModelParameters(provider, platformProvider, {
+          ? mergeProviderModelParameters(platformProvider, {
               ...userProvider,
               models: userProvider.models?.filter((model) => model.id === id),
             })

@@ -88,7 +88,7 @@ test("parseModelsConfig accepts every request profile", () => {
   assert.equal(parsed.providers.codex?.models?.[0]?.requestProfile, "codex");
 });
 
-test("user providers cannot inherit platform connection defaults", () => {
+test("catalog model URLs cannot redirect platform connections", () => {
   const user: ModelsConfig = {
     providers: {
       cohub: {
@@ -96,9 +96,8 @@ test("user providers cannot inherit platform connection defaults", () => {
       },
     },
   };
-  assert.throws(() => isRuntimeModelAvailable([platform, user], "cohub", "default"), {
-    message: "User model cohub/default cannot override platform model connection or extension field: baseUrl",
-  });
+  assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "default"), true);
+  assert.deepEqual(mergeModelsConfigs(platform, user), platform);
 });
 
 test("platform environment references resolve only in a runtime copy", (t) => {
@@ -223,16 +222,14 @@ test("valid user models and platform cloud adapters remain available", () => {
   assert.equal(isRuntimeModelAvailable([runtime], "custom", "second"), true);
 });
 
-test("an invalid same-name user provider fails without exposing platform credentials", () => {
+test("cohub catalog connection fields cannot redirect platform credentials", () => {
   const user: ModelsConfig = {
     providers: { cohub: { api: "openai-responses", baseUrl: "https://user.example.test", models: [{ id: "default" }] } },
   };
   const trusted: ModelsConfig = {
     providers: { cohub: { ...platform.providers.cohub, apiKey: "synthetic-platform-secret" } },
   };
-  assert.throws(() => resolveRuntimeModelsConfig({ platform: trusted, user }), {
-    message: "User provider cohub cannot override platform model connection or extension field: baseUrl",
-  });
+  assert.deepEqual(resolveRuntimeModelsConfig({ platform: trusted, user }), resolveRuntimeModelsConfig({ platform: trusted }));
   assert.equal(user.providers.cohub?.apiKey, undefined);
   assert.equal(trusted.providers.cohub?.apiKey, "synthetic-platform-secret");
 });

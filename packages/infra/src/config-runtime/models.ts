@@ -290,6 +290,10 @@ export function selectModelParameters<T extends { id?: string }>(
       : value;
     assertMatchingPlatformField(`User model ${provider}/${override.id}`, field, candidate, platformFields);
   }
+  return filterModelParameters(override);
+}
+
+function filterModelParameters<T extends { id?: string }>(override: T): T {
   const parameters = { ...override };
   for (const field of Object.keys(parameters)) {
     if (!MODEL_PARAMETER_FIELDS.has(field)) Reflect.deleteProperty(parameters, field);
@@ -313,20 +317,14 @@ export function mergeModelParameters<T extends { thinkingLevelMap?: ThinkingLeve
 }
 
 export function mergeProviderModelParameters(
-  provider: string,
   base: ProviderConfig,
   override: ProviderConfig,
 ): ProviderConfig {
-  for (const [field, value] of Object.entries(override)) {
-    if (field !== "models") assertMatchingPlatformField(`User provider ${provider}`, field, value, base);
-  }
   const models = new Map((base.models ?? []).map((model) => [model.id, model]));
   for (const model of override.models ?? []) {
     const original = models.get(model.id);
-    if (!original) {
-      throw new Error(`User model ${provider}/${model.id} must select a configured model for parameter overrides`);
-    }
-    const parameters = selectModelParameters(provider, model, getProtectedModelFields(base, original), base.headers);
+    if (!original) continue;
+    const parameters = filterModelParameters(model);
     models.set(model.id, mergeModelParameters(original, parameters));
   }
   return { ...base, models: [...models.values()] };
@@ -344,7 +342,7 @@ export function mergeModelsConfigs(
         throw new Error("Provider cohub requires a platform model catalog");
       }
       if (base && isPlatformModelOverride(provider, providerConfig)) {
-        providers.set(provider, mergeProviderModelParameters(provider, base, providerConfig));
+        providers.set(provider, mergeProviderModelParameters(base, providerConfig));
         continue;
       }
       // 自定义连接必须使用自身凭据，参数覆盖则保留原有连接。

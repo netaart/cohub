@@ -68,6 +68,29 @@ test("complete matching cohub declarations merge parameters using the platform c
   assert.deepEqual({ platform, user }, before);
 });
 
+test("persisted catalog copies survive platform connection changes and model retirement", () => {
+  const platform = platformConfig();
+  const user = { providers: { cohub: copiedProvider(platform) } };
+  const override = user.providers.cohub.models?.find((model) => model.id === "chat");
+  assert.ok(override);
+  override.contextWindow = 200000;
+  const current = platform.providers.cohub;
+  assert.ok(current);
+  current.baseUrl = "https://updated.example.test/v1";
+  current.apiKey = "updated-platform-key";
+  current.headers = { "X-Route": "updated" };
+  current.compat = { supportsStore: true };
+  current.models = current.models?.filter((model) => model.id !== "sibling");
+  const before = structuredClone({ platform, user });
+  const cached = parseCachedModelsConfig(JSON.stringify(createCachedModelsConfig({ content: user })));
+  const expected = mergeModelsConfigs(platform, { providers: { cohub: { models: [{ id: "chat", contextWindow: 200000 }] } } });
+  assert.deepEqual(mergeModelsConfigs(platform, parseModelsConfig(JSON.stringify(user))), expected);
+  assert.deepEqual(resolveRuntimeModelsConfig({ platform, user: cached?.content }), resolveRuntimeModelsConfig({ platform: expected }));
+  assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "chat"), true);
+  assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "sibling"), false);
+  assert.deepEqual({ platform, user }, before);
+});
+
 test("matching declarations compare object values independently of property order", () => {
   const platform = platformConfig();
   const user = { providers: { cohub: {
@@ -117,10 +140,9 @@ for (const change of changes) {
     platformKey(t);
     const platform = platformConfig();
     const user = { providers: { cohub: { ...copiedProvider(platform), ...change } } };
-    const expected = { message: `User provider cohub cannot override platform model connection or extension field: ${field}` };
-    assert.throws(() => mergeModelsConfigs(platform, user), expected);
-    assert.throws(() => resolveRuntimeModelsConfig({ platform, user }), expected);
-    assert.throws(() => isRuntimeModelAvailable([platform, user], "cohub", "chat"), expected);
+    assert.deepEqual(mergeModelsConfigs(platform, user), platform);
+    assert.deepEqual(resolveRuntimeModelsConfig({ platform, user }), resolveRuntimeModelsConfig({ platform }));
+    assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "chat"), true);
   });
 
   test(`matching provider connection cannot authorize a changed model ${field}`, (t) => {
@@ -129,9 +151,8 @@ for (const change of changes) {
     const user = { providers: { cohub: {
       ...copiedProvider(platform), models: [{ id: "chat", ...change }],
     } } };
-    const expected = { message: `User model cohub/chat cannot override platform model connection or extension field: ${field}` };
-    assert.throws(() => mergeModelsConfigs(platform, user), expected);
-    assert.throws(() => resolveRuntimeModelsConfig({ platform, user }), expected);
+    assert.deepEqual(mergeModelsConfigs(platform, user), platform);
+    assert.deepEqual(resolveRuntimeModelsConfig({ platform, user }), resolveRuntimeModelsConfig({ platform }));
   });
 }
 
@@ -140,17 +161,15 @@ test("a model-specific endpoint cannot be replaced by its provider endpoint", ()
   const user = { providers: { cohub: {
     apiKey: "COMPAT_PLATFORM_KEY", models: [{ id: "vision", baseUrl: "https://platform.example.test/v1" }],
   } } };
-  assert.throws(() => resolveRuntimeModelsConfig({ platform, user }), /cohub\/vision.*baseUrl/);
+  assert.equal(resolveRuntimeModelsConfig({ platform, user }).providers.cohub?.models?.[1]?.baseUrl, "https://vision.example.test");
 });
 
-test("connection aliases are compared against raw declarations without comparing resolved secrets", (t) => {
+test("user catalog key declarations never participate in platform key resolution", (t) => {
   platformKey(t);
   const platform = platformConfig();
   for (const apiKey of ["resolved-platform-credential", " COMPAT_PLATFORM_KEY ", "OTHER_SERVICE_KEY"]) {
     const user = { providers: { cohub: { ...copiedProvider(platform), apiKey } } };
-    assert.throws(() => resolveRuntimeModelsConfig({ platform, user }), {
-      message: "User provider cohub cannot override platform model connection or extension field: apiKey",
-    });
+    assert.equal(resolveRuntimeModelsConfig({ platform, user }).providers.cohub?.apiKey, "resolved-platform-credential");
   }
 });
 
@@ -183,20 +202,20 @@ test("raw file and cache declarations enforce identical compatibility checks", (
   }));
   assert.equal(JSON.stringify({ cachedPlatform, cachedUser }), before);
   user.providers.cohub.baseUrl = "https://user.example.test/v1";
-  assert.throws(() => resolveRuntimeModelsConfig({
+  assert.deepEqual(resolveRuntimeModelsConfig({
     platform: parseCachedModelsConfig(JSON.stringify(cachedPlatform))?.content,
     user: parseCachedModelsConfig(JSON.stringify(cachedUser))?.content,
-  }), /cohub.*baseUrl/);
+  }), fromCache);
 });
 
-test("matching provider declarations still reject new model IDs and unknown extensions", () => {
+test("stale model IDs and unknown catalog extensions leave platform models intact", () => {
   const platform = platformConfig();
-  assert.throws(() => mergeModelsConfigs(platform, { providers: { cohub: {
+  assert.deepEqual(mergeModelsConfigs(platform, { providers: { cohub: {
     ...copiedProvider(platform), models: [{ id: "new-model" }],
-  } } }), /must select a configured model/);
-  const user = { providers: { cohub: { ...copiedProvider(platform), privateRoute: "same" } } };
-  platform.providers.cohub = { ...copiedProvider(platform), privateRoute: "same" };
-  assert.throws(() => mergeModelsConfigs(platform, user), /privateRoute/);
+  } } }), platform);
+  const user = { providers: { cohub: { ...copiedProvider(platform), privateRoute: "user" } } };
+  platform.providers.cohub = { ...copiedProvider(platform), privateRoute: "platform" };
+  assert.deepEqual(mergeModelsConfigs(platform, user), platform);
 });
 
 for (const name of ["sessionTitle", "imageToText"] as const) {
@@ -221,7 +240,7 @@ for (const name of ["sessionTitle", "imageToText"] as const) {
     assert.equal(task?.model.baseUrl, "https://platform.example.test/v1");
   });
 
-  test(`${name}: every connection level rejects endpoint redirection with a matching key alias`, (t) => {
+  test(`${name}: catalog filtering and explicit task validation prevent endpoint redirection`, (t) => {
     platformKey(t);
     const platform = platformConfig();
     for (const level of ["provider", "model", "task"]) {
@@ -230,10 +249,17 @@ for (const name of ["sessionTitle", "imageToText"] as const) {
       if (level === "provider") provider.baseUrl = "https://user.example.test";
       if (level === "model") provider.models = [{ id: "chat", apiKey: "COMPAT_PLATFORM_KEY", baseUrl: "https://user.example.test" }];
       if (level === "task") taskModel.baseUrl = "https://user.example.test";
-      assert.throws(() => resolveModelTasksConfig({
+      const resolve = () => resolveModelTasksConfig({
         platformModels: platform, userModels: { providers: { cohub: provider } },
         userTasks: { [name]: { prompt: "Describe the input.", model: taskModel } },
-      }), /cannot override platform model connection or extension field: baseUrl/);
+      });
+      if (level === "task") {
+        assert.throws(resolve, /cannot override platform model connection or extension field: baseUrl/);
+      } else {
+        const task = resolve()[name];
+        assert.equal(task?.model.baseUrl, "https://platform.example.test/v1");
+        assert.equal(task?.model.apiKey, "resolved-platform-credential");
+      }
     }
   });
 

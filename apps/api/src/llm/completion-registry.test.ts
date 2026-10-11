@@ -68,7 +68,10 @@ test("completion registry cannot combine a user destination with platform auth",
       cohub: { api: "openai-completions", baseUrl: "https://user.example.test", apiKey: "user-key", models: [{ id: "custom" }] },
     },
   };
-  assert.throws(() => new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]), /cannot override platform model connection/);
+  const registry = new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]);
+  assert.equal(registry.find("cohub", "platform")?.baseUrl, "https://platform.example.test");
+  assert.equal(registry.getApiKey("cohub"), "synthetic-platform-key");
+  assert.equal(registry.find("cohub", "custom"), undefined);
 });
 
 test("completion registry merges model parameters and preserves platform defaults", () => {

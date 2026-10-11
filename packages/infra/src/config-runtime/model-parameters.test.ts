@@ -89,14 +89,12 @@ test("parameter-only layers retain trusted cloud adapters without requiring user
   assert.equal(result.providers.cloud?.models?.[0]?.contextWindow, 200000);
 });
 
-test("model parameter overrides reject connection changes and unknown extensions", () => {
+test("model parameter overrides filter connection changes and unknown extensions", () => {
   for (const field of ["api", "baseUrl", "apiKey", "headers", "compat", "requestProfile", "imageUrlInput", "routingTier", "__proto__"]) {
     const overrides: ModelsConfig = { providers: { cohub: {
       models: [{ id: "chat", contextWindow: 200000, [field]: "user-value" }],
     } } };
-    assert.throws(() => mergeModelsConfigs(platform, overrides), {
-      message: `User model cohub/chat cannot override platform model connection or extension field: ${field}`,
-    });
+    assert.deepEqual(mergeModelsConfigs(platform, overrides), mergeModelsConfigs(platform, user));
   }
 });
 
@@ -112,13 +110,27 @@ test("cohub cannot be redefined even with a complete user-owned connection", () 
       const overrides: ModelsConfig = { providers: { cohub: {
         ...fields, models: [{ id: "chat", contextWindow: 200000 }],
       } } };
-      assert.throws(() => mergeModelsConfigs(base, overrides), base ? /cannot override platform model connection/ : /cohub requires a platform model catalog/);
+      if (base) assert.deepEqual(mergeModelsConfigs(base, overrides), mergeModelsConfigs(base, user));
+      else assert.throws(() => mergeModelsConfigs(base, overrides), /cohub requires a platform model catalog/);
     }
   }
 });
 
-test("parameter overrides cannot add model IDs or create a platform provider", () => {
-  assert.throws(() => mergeModelsConfigs(platform, { providers: { cohub: { models: [{ id: "new" }] } } }), /cohub\/new must select a configured model/);
+test("stale parameter overrides leave existing models available without adding model IDs", () => {
+  const overrides: ModelsConfig = { providers: { cohub: { models: [
+    { id: "retired", contextWindow: 200000, baseUrl: "https://user.example.test" },
+    { id: "chat", contextWindow: 200000 },
+  ] } } };
+  const before = structuredClone(overrides);
+  const cached = parseCachedModelsConfig(JSON.stringify(createCachedModelsConfig({ content: overrides })));
+  assert.deepEqual(mergeModelsConfigs(platform, overrides), mergeModelsConfigs(platform, user));
+  assert.deepEqual(resolveRuntimeModelsConfig({ platform, user: cached?.content }), resolveRuntimeModelsConfig({ platform, user }));
+  assert.equal(isRuntimeModelAvailable([platform, overrides], "cohub", "chat"), true);
+  assert.equal(isRuntimeModelAvailable([platform, overrides], "cohub", "retired"), false);
+  assert.deepEqual(overrides, before);
+});
+
+test("parameter overrides cannot create a platform provider", () => {
   assert.throws(() => mergeModelsConfigs(null, user), /cohub requires a platform model catalog/);
   assert.throws(() => mergeModelsConfigs(platform, { providers: { custom: { models: [{ id: "new" }] } } }), /requires an explicit API key/);
 });
@@ -189,14 +201,21 @@ for (const name of ["sessionTitle", "imageToText"] as const) {
       platformModels: platform, platformTasks, userModels: user,
       userTasks: { [name]: { model: { provider: "cohub", id: "chat", baseUrl: "https://user.example.test" } } },
     }), /cannot override platform model connection/);
-    assert.throws(() => resolveModelTasksConfig({
+    const selected = resolveModelTasksConfig({
       platformModels: platform, platformTasks,
       userModels: { providers: { cohub: { apiKey: "user-key", api: "openai-responses", models: [{ id: "chat" }] } } },
       userTasks: { [name]: { model: { provider: "cohub", id: "chat" } } },
-    }), /User provider cohub cannot override platform model connection or extension field: apiKey/);
+    })[name];
+    assert.equal(selected?.model.apiKey, "platform-key");
+    assert.equal(selected?.model.baseUrl, "https://platform.example.test/v1");
     assert.throws(() => resolveModelTasksConfig({
       platformTasks,
       userTasks: { [name]: { model: { provider: "cohub", id: "chat" } } },
+    }), /configured platform model/);
+    assert.throws(() => resolveModelTasksConfig({
+      platformModels: platform, platformTasks,
+      userModels: { providers: { cohub: { models: [{ id: "retired", contextWindow: 200000 }] } } },
+      userTasks: { [name]: { model: { provider: "cohub", id: "retired" } } },
     }), /configured platform model/);
   });
 }
