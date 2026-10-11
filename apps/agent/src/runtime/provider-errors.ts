@@ -1,0 +1,34 @@
+import { isRetryableAssistantError, type AssistantMessage } from "@earendil-works/pi-ai";
+
+const COHUB_RETRYABLE_ERROR_OVERRIDE_PATTERN = /\b400\b.*(?:upstream(?:_error)?:?\s*upstream request failed|upstream response failed.*(?:bad_response_status_code|stage["']?\s*[:=]\s*["']?upstream_response))/i;
+const COHUB_NON_RETRYABLE_ERROR_PATTERN = /insufficient[_ ](?:user[_ ])?quota|quota exceeded|out of budget|billing|余额不足|额度不足|invalid (?:request|url)|content[_ ]filter|request (?:is )?too large|payload too large/i;
+const COHUB_MODEL_UNAVAILABLE_PATTERN = /model (?:is )?(?:(?:not )?available|unavailable)|requested model is not available/i;
+const COHUB_RETRYABLE_ERROR_PATTERN = /responses_missing_terminal|anthropic_missing_message_stop|upstream_temporarily_unavailable|stream_read_error|upstream_http2_stream_error|upstream HTTP\/2 stream failed|stream ended before a terminal response event|upstream service temporarily unavailable|upstream request failed/i;
+
+function getHttpErrorStatus(errorMessage: string): number | null {
+  const status = errorMessage.match(/\b([45]\d{2})\b/)?.[1];
+  return status ? Number(status) : null;
+}
+
+// null 表示仅凭错误文本无法判定，交给 pi-ai 继续分类。
+function classifyProviderErrorMessage(errorMessage: string): boolean | null {
+  if (COHUB_RETRYABLE_ERROR_OVERRIDE_PATTERN.test(errorMessage)) return true;
+  if (COHUB_NON_RETRYABLE_ERROR_PATTERN.test(errorMessage)) return false;
+
+  const status = getHttpErrorStatus(errorMessage);
+  if (status != null) return status === 408 || status === 413 || status === 429 || status >= 500;
+  if (COHUB_MODEL_UNAVAILABLE_PATTERN.test(errorMessage)) return false;
+  if (COHUB_RETRYABLE_ERROR_PATTERN.test(errorMessage)) return true;
+
+  return null;
+}
+
+export function isRetryableProviderErrorMessage(errorMessage: string): boolean {
+  if (!errorMessage) return false;
+  return classifyProviderErrorMessage(errorMessage) === true;
+}
+
+export function isRetryableProviderError(message: AssistantMessage | undefined): boolean {
+  if (message?.stopReason !== "error" || !message.errorMessage) return false;
+  return classifyProviderErrorMessage(message.errorMessage) ?? isRetryableAssistantError(message);
+}

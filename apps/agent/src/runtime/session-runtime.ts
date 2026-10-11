@@ -1,6 +1,6 @@
 import type { Agent, AgentEvent, AgentMessage, AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 import { Agent as PiAgent } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, type Api, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type ImageContent, type Model, type SimpleStreamOptions, type TranscriptContext, isContextOverflow, isRetryableAssistantError, toToolDeclaration, type AssistantMessage } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type Api, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type ImageContent, type Model, type SimpleStreamOptions, type TranscriptContext, isContextOverflow, toToolDeclaration, type AssistantMessage } from "@earendil-works/pi-ai";
 import { context, trace, type Span } from "@opentelemetry/api";
 import { sumStatsUsage } from "@cohub/protocol/model";
 import { IMAGE_URL_MIME_TYPE, imageUrlContent, type Usage } from "@cohub/protocol/core";
@@ -27,6 +27,10 @@ import {
   TOOL_CALL_LOOP_GUARD_PROMPT,
   TOOL_CALL_LOOP_GUARD_THRESHOLD,
 } from "./tool-call-loop-guard.js";
+
+import { isRetryableProviderError } from "./provider-errors.js";
+
+export { isRetryableProviderErrorMessage } from "./provider-errors.js";
 
 export type CohubAgentSessionEvent = AgentEvent;
 
@@ -63,47 +67,6 @@ const COMPACTION_SUMMARY_PREFIX = "The conversation history before this point wa
 const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const COHUB_RETRYABLE_ERROR_OVERRIDE_PATTERN = /\b400\b.*(?:upstream(?:_error)?:?\s*upstream request failed|upstream response failed.*(?:bad_response_status_code|stage["']?\s*[:=]\s*["']?upstream_response))/i;
-const COHUB_NON_RETRYABLE_ERROR_PATTERN = /insufficient[_ ](?:user[_ ])?quota|quota exceeded|out of budget|billing|余额不足|额度不足|invalid (?:request|url)|content[_ ]filter|request (?:is )?too large|payload too large/i;
-const COHUB_MODEL_UNAVAILABLE_PATTERN = /model (?:is )?(?:(?:not )?available|unavailable)|requested model is not available/i;
-const COHUB_RETRYABLE_ERROR_PATTERN = /responses_missing_terminal|anthropic_missing_message_stop|upstream_temporarily_unavailable|stream_read_error|stream ended before a terminal response event|upstream service temporarily unavailable|upstream request failed/i;
-
-function getHttpErrorStatus(errorMessage: string): number | null {
-  const status = errorMessage.match(/\b([45]\d{2})\b/)?.[1];
-  return status ? Number(status) : null;
-}
-
-/**
- * Classify a raw provider error string. `null` means the string alone is
- * inconclusive and the caller should consult pi's own classification.
- */
-function classifyProviderErrorMessage(errorMessage: string): boolean | null {
-  if (COHUB_RETRYABLE_ERROR_OVERRIDE_PATTERN.test(errorMessage)) return true;
-  if (COHUB_NON_RETRYABLE_ERROR_PATTERN.test(errorMessage)) return false;
-
-  const status = getHttpErrorStatus(errorMessage);
-  if (status != null) return status === 408 || status === 413 || status === 429 || status >= 500;
-  if (COHUB_MODEL_UNAVAILABLE_PATTERN.test(errorMessage)) return false;
-  if (COHUB_RETRYABLE_ERROR_PATTERN.test(errorMessage)) return true;
-
-  return null;
-}
-
-/**
- * Whether a raw provider error string is worth retrying. Shares the rules used
- * for assistant retries so callers holding only an error message (compaction's
- * summarize step) don't invent their own classification.
- */
-export function isRetryableProviderErrorMessage(errorMessage: string): boolean {
-  if (!errorMessage) return false;
-  return classifyProviderErrorMessage(errorMessage) === true;
-}
-
-function isRetryableProviderError(message: AssistantMessage | undefined): boolean {
-  if (message?.stopReason !== "error" || !message.errorMessage) return false;
-  return classifyProviderErrorMessage(message.errorMessage) ?? isRetryableAssistantError(message);
-}
-
 function hasAssistantContent(message: AssistantMessage): boolean {
   const content = Array.isArray(message.content) ? message.content : [];
   return content.length > 0;
