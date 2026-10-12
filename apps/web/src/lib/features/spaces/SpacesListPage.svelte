@@ -273,12 +273,12 @@ onMount(() => {
 {#snippet selectionTitle()}
 	<button
 		type="button"
-		class="-ml-[9px] flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary lg:-ml-1.5 lg:h-7 lg:w-7 lg:rounded-[6px]"
+		class="-ml-2.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary lg:-ml-1.5 lg:h-7 lg:w-7 lg:rounded-[6px]"
 		aria-label={m.common_cancel({}, { locale })}
 		title={m.common_cancel({}, { locale })}
 		onclick={clearSelection}
 	>
-		<X class="h-[18px] w-[18px] lg:h-4 lg:w-4" />
+		<X class="h-5 w-5 lg:h-4 lg:w-4" />
 	</button>
 	<span class="truncate text-[15px] font-semibold tabular-nums text-text-primary lg:text-[13px]" aria-live="polite">
 		{m.label_selected_count({ count: selected.size }, { locale })}

@@ -27,66 +27,6 @@ export function isTerminalGenerationStatus(status: string | null | undefined) {
 }
 
 /**
- * Turn statuses that own a live generation stream. `queued` is deliberately
- * excluded: a queued turn is waiting for a slot, not producing output, so it
- * must never drive the generation state or be rendered as running.
- */
-const LIVE_TURN_STATUSES = new Set(["running", "abort_requested"]);
-
-export function isLiveTurnStatus(status: string | null | undefined) {
-	return Boolean(status && LIVE_TURN_STATUSES.has(status));
-}
-
-export type GenerationReconcilePlan = {
-	/** Drop the current live state before applying the hint. */
-	reset: boolean;
-	/** Turn id to resume live generation for, if any. */
-	resumeTurnId: string | null;
-};
-
-/**
- * Decide how a session-list `activeTurn` hint should steer live generation.
- *
- * `activeTurn` is the newest unfinished turn, which can be `queued` behind a
- * running one. Only a live turn owns the generation state; a queued turn
- * belongs to the queue UI and is owned by turn data, so it must never be
- * resumed or mistaken for a replacement running turn.
- */
-export function planGenerationReconcile(input: {
-	current:
-		| { status: string; turnId: string | null; lastEventAt?: number | null }
-		| null
-		| undefined;
-	activeTurn: { id: string; status: string } | null | undefined;
-	authoritative: boolean;
-	requestStartedAt: number;
-}): GenerationReconcilePlan {
-	const keep: GenerationReconcilePlan = { reset: false, resumeTurnId: null };
-	const current = input.current;
-	const activeTurn = input.activeTurn;
-	// Cached records without the hint cannot clear or restore generation.
-	if (activeTurn === undefined) return keep;
-	if (activeTurn) {
-		if (!isLiveTurnStatus(activeTurn.status)) return keep;
-		return {
-			reset: Boolean(
-				current &&
-					current.turnId !== activeTurn.id &&
-					current.status !== "idle",
-			),
-			resumeTurnId: activeTurn.id,
-		};
-	}
-	return {
-		reset:
-			input.authoritative &&
-			current?.status === "pending" &&
-			(current.lastEventAt ?? 0) <= input.requestStartedAt,
-		resumeTurnId: null,
-	};
-}
-
-/**
  * A locally terminal generation for the same turn is the newest fact we own.
  * A stale `activeTurn` hint (list cache, background refresh) must never
  * downgrade it back to pending. New turns and idle states still resume.
@@ -101,6 +41,44 @@ export function shouldResumePendingGeneration(
 		current.turnId &&
 		nextTurnId &&
 		current.turnId === nextTurnId
+	);
+}
+
+/** Re-check after awaited recovery: an intervening Turn must keep ownership. */
+export function canResumeRecoveredGeneration(
+	current:
+		| { status: string; turnId?: string | null; lastEventAt?: number }
+		| null
+		| undefined,
+	turn: { id: string; sequence: number },
+	requestStartedAt: number,
+	currentTurnSequence?: number,
+): boolean {
+	if (currentTurnSequence !== undefined && currentTurnSequence > turn.sequence)
+		return false;
+	if (current?.turnId && current.turnId !== turn.id) return false;
+	// A new optimistic prompt may not have its server Turn id yet.
+	if (!current?.turnId && (current?.lastEventAt ?? 0) > requestStartedAt)
+		return false;
+	return shouldResumePendingGeneration(current, turn.id);
+}
+
+/** The composer can show Stop from cached server state before stream recovery. */
+export function hasRunningSessionTurn(
+	current: { status: string; turnId?: string | null } | null | undefined,
+	activeTurn?: { id: string; status: string } | null,
+): boolean {
+	if (
+		current &&
+		current.status !== "idle" &&
+		!isTerminalGenerationStatus(current.status)
+	)
+		return true;
+	return Boolean(
+		activeTurn &&
+			(activeTurn.status === "running" ||
+				activeTurn.status === "abort_requested") &&
+			shouldResumePendingGeneration(current, activeTurn.id),
 	);
 }
 

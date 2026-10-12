@@ -510,7 +510,7 @@ function previewContentOut(node: Element) {
 			out:previewContentOut
 		>
 			<div class="relative min-h-0 flex-1">
-{#if inlineFile}
+{#each inlineFile ? [inlineFile] : [] as file (file.path)}
 	<div
 		class="h-full min-h-0"
 		hidden={activeWindowKind !== "file"}
@@ -518,7 +518,7 @@ function previewContentOut(node: Element) {
 		aria-hidden={activeWindowKind !== "file"}
 	>
 		<InlineFilePanel
-		{inlineFile}
+		inlineFile={file}
 		{windows}
 		{chrome}
 		onActivateWindow={activateWindow}
@@ -570,7 +570,7 @@ function previewContentOut(node: Element) {
 		onVisibleLinesChange={onVisibleLinesChange}
 		/>
 	</div>
-{/if}
+{/each}
 
 {#if inlineBoard}
 	<div

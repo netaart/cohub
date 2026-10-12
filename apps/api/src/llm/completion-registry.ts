@@ -3,7 +3,6 @@ import {
   mergeModelsConfigs,
   type ModelDef,
   type ModelsConfig,
-  type ProviderConfig,
 } from "@cohub/infra/config-runtime/models";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
@@ -14,12 +13,6 @@ export type RuntimeLlmModel = Model<Api> & {
   /** Discovery hint: hidden models stay resolvable by id but never become implicit defaults. */
   hidden?: boolean;
 };
-
-function resolveApiKey(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const envValue = process.env[value];
-  return envValue && envValue.trim().length > 0 ? envValue.trim() : value;
-}
 
 function finiteNumberOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -43,7 +36,7 @@ export class CompletionModelRegistry {
     const mergedModels = new Map<string, RuntimeLlmModel>();
 
     for (const [provider, providerConfig] of Object.entries(merged.providers ?? {})) {
-      const apiKey = resolveApiKey((providerConfig as ProviderConfig).apiKey);
+      const apiKey = providerConfig.apiKey;
       if (apiKey) this.providerApiKeys.set(provider, apiKey);
 
       for (const modelDef of providerConfig.models ?? []) {

@@ -1,4 +1,4 @@
-import type { BoardSceneItem, SceneItem } from "../../core/scene.js";
+import type { BoardSceneItem, SceneItem } from "../../model/scene.js";
 import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
 import type { BoardVideoItem } from "@cohub/protocol";
 import { Container, Graphics, Sprite, Text, Texture } from "pixi.js";

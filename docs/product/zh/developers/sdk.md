@@ -96,6 +96,8 @@ client.onUserEvent((event) => {
 });
 ```
 
+Fork 出来的 Chat，其 `session.created` 还会带上 `fork`（`RealtimeSessionFork`：`childSessionId`、`parentSessionId`、`depth`、`anchorSequence`）。已经展示父 Chat 的列表可以立刻把新 Chat 嵌套到它下面。如果父 Chat 设置了单独的访问权限，事件里不会带 `fork`。事件里也不含标题，父 Chat 的标题从你自己的列表里取。
+
 `client.spaces.list()` 返回的条目包含 `personalActivityAt`，即查看者自己在该 Space 的最近活动时间，列表首先按它排序。
 
 ## Apps

@@ -1,3 +1,4 @@
+import { CUSTOM_THEME_CHANGED_EVENT } from "$lib/custom-theme/events";
 import { syncSystemChromeColor } from "$lib/system-chrome";
 import {
 	getSystemTheme,
@@ -51,10 +52,10 @@ if (typeof window !== "undefined") {
 	// app.html inline script already set data-theme before JS loads —
 	// skip redundant DOM write here, only sync reactive state.
 	applyTheme(initial, true);
-	// Custom space styles load after the shell boots; the space-style-changed
-	// event below re-syncs the color once those overrides are applied.
+	// Custom themes load after the shell boots; their change event re-syncs
+	// the color once those overrides are applied.
 	syncSystemChromeColor(THEME_COLOR[resolveThemeMode(initial)]);
-	window.addEventListener("cohub:space-style-changed", () => {
+	window.addEventListener(CUSTOM_THEME_CHANGED_EVENT, () => {
 		syncSystemChromeColor(THEME_COLOR[_resolved]);
 	});
 

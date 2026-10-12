@@ -10,14 +10,8 @@ import type {
   SpaceWebhookListItem,
   SpaceWebhookTriggerResponse,
 } from "@cohub/protocol";
-import {
-  getRealtimeBoardRoom,
-  getRealtimeSpaceRoom,
-  type BoardAwarenessUpdatedEvent as ProtocolBoardAwarenessUpdatedEvent,
-  type BoardChangedEvent as ProtocolBoardChangedEvent,
-  type BoardPlaybackChangedEvent as ProtocolBoardPlaybackChangedEvent,
-} from "@cohub/protocol/realtime/types";
-import type { BoardAwarenessUpdate } from "@cohub/protocol/realtime";
+import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime/types";
+import { BoardClient, SpaceBoardsApi } from "../board/client/index.js";
 import { ensureRealtimeConnected } from "../realtime.js";
 import { SpaceDisplaysApi } from "./displays.js";
 import type { WebsocketClient, WebsocketEventPayload } from "../websocket.js";
@@ -104,16 +98,6 @@ import type {
   SpaceConfigInput,
   SpaceConfigResponse,
   SpaceConfigUpdateResponse,
-  BoardApplyInput,
-  BoardApplyResult,
-  BoardCreateInput,
-  BoardHistoryInput,
-  BoardHistoryPage,
-  BoardPatch,
-  BoardPlaybackCommand,
-  BoardPlaybackSnapshot,
-  BoardReadInput,
-  BoardReadResult,
   ChannelConfig,
   ChannelHealth,
 } from "../types.js";
@@ -158,29 +142,6 @@ const getFilenameFromContentDisposition = (value: string | null) => {
 
   const plainMatch = value.match(/filename="?([^";]+)"?/i);
   return plainMatch?.[1] ?? null;
-};
-
-/**
- * Identifier for a client-authored Board entity (connection id, transaction id).
- *
- * `crypto.randomUUID` is used where available and falls back to a random string
- * otherwise, so the SDK works in a plain browser, a worker and Node without
- * pulling in a polyfill.
- */
-function randomBoardId(): string {
-  const cryptoRef = globalThis.crypto;
-  if (cryptoRef && typeof cryptoRef.randomUUID === "function") return cryptoRef.randomUUID();
-  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-export type BoardChangedEvent = ProtocolBoardChangedEvent;
-export type BoardAwarenessUpdatedEvent = ProtocolBoardAwarenessUpdatedEvent;
-export type BoardPlaybackChangedEvent = ProtocolBoardPlaybackChangedEvent;
-export type BoardEventName = "changed" | "awareness" | "playback";
-export type BoardSubscriptionHandlers = {
-  changed?: (event: BoardChangedEvent) => void;
-  awareness?: (event: BoardAwarenessUpdatedEvent) => void;
-  playback?: (event: BoardPlaybackChangedEvent) => void;
-  event?: (event: BoardChangedEvent | BoardAwarenessUpdatedEvent | BoardPlaybackChangedEvent) => void;
 };
 
 export type SessionSubscriptionHandlers = {
@@ -1858,207 +1819,6 @@ export class SpaceCommerceApi {
   }
 }
 
-class BoardRealtimeClient {
-  constructor(
-    private readonly websocketClient: WebsocketClient | null,
-    private readonly spaceId: string,
-    private readonly boardId: string,
-  ) {}
-
-  subscribe(handlers: BoardSubscriptionHandlers) {
-    if (!this.websocketClient) {
-      throw new Error("realtime transport is not configured for this client");
-    }
-    ensureRealtimeConnected(this.websocketClient);
-    const releaseRoom = this.websocketClient.retainRooms([
-      getRealtimeSpaceRoom(this.spaceId),
-      getRealtimeBoardRoom(this.boardId),
-    ]);
-    const unsubscribe = this.websocketClient.on("event", (event) => {
-      if (event.spaceId !== this.spaceId) return;
-      if (event.type === "board.changed" && event.payload.boardId === this.boardId) {
-        const changedEvent = event as BoardChangedEvent;
-        handlers.event?.(changedEvent);
-        handlers.changed?.(changedEvent);
-      }
-      if (event.type === "board.awareness.updated" && event.payload.boardId === this.boardId) {
-        const awarenessEvent = event as BoardAwarenessUpdatedEvent;
-        if (awarenessEvent.payload.connectionId !== this.websocketClient?.connectionId) {
-          handlers.event?.(awarenessEvent);
-          handlers.awareness?.(awarenessEvent);
-        }
-      }
-      if (event.type === "board.playback.changed" && event.payload.boardId === this.boardId) {
-        const playbackEvent = event as BoardPlaybackChangedEvent;
-        handlers.event?.(playbackEvent);
-        handlers.playback?.(playbackEvent);
-      }
-    });
-    return () => {
-      unsubscribe();
-      releaseRoom();
-    };
-  }
-
-  on(type: "changed", handler: (event: BoardChangedEvent) => void): () => void;
-  on(type: "awareness", handler: (event: BoardAwarenessUpdatedEvent) => void): () => void;
-  on(type: "playback", handler: (event: BoardPlaybackChangedEvent) => void): () => void;
-  on(
-    type: BoardEventName,
-    handler:
-      | ((event: BoardChangedEvent) => void)
-      | ((event: BoardAwarenessUpdatedEvent) => void)
-      | ((event: BoardPlaybackChangedEvent) => void),
-  ) {
-    if (type === "changed") {
-      return this.subscribe({ changed: handler as (event: BoardChangedEvent) => void });
-    }
-    if (type === "awareness") {
-      return this.subscribe({ awareness: handler as (event: BoardAwarenessUpdatedEvent) => void });
-    }
-    return this.subscribe({ playback: handler as (event: BoardPlaybackChangedEvent) => void });
-  }
-}
-
-export class BoardClient {
-  readonly realtime: BoardRealtimeClient;
-
-  constructor(
-    readonly spaceId: string,
-    readonly id: string,
-    private readonly transport: HttpTransport,
-    private readonly websocketClient: WebsocketClient | null,
-  ) {
-    this.realtime = new BoardRealtimeClient(websocketClient, spaceId, id);
-  }
-
-  private get path() {
-    return `/api/spaces/${this.spaceId}/boards/${this.id}`;
-  }
-
-  /** Read the Board, or part of it. Every value is complete, defaults included. */
-  get(input: BoardReadInput = {}, customFetch?: Fetch) {
-    const params = new URLSearchParams();
-    if (input.only?.length) params.set("only", input.only.join(","));
-    if (input.rect) params.set("rect", [input.rect.x, input.rect.y, input.rect.width, input.rect.height].join(","));
-    if (input.within) params.set("within", input.within);
-    if (input.items?.length) params.set("items", input.items.join(","));
-    if (input.animations?.length) params.set("animations", input.animations.join(","));
-    if (input.limit !== undefined) params.set("limit", String(input.limit));
-    if (input.cursor) params.set("cursor", input.cursor);
-    const query = params.toString();
-    return this.transport.request<BoardReadResult>(`${this.path}${query ? `?${query}` : ""}`, { fetch: customFetch });
-  }
-
-  /** Merge a patch into the Board: fields merge, `null` deletes. */
-  apply(patch: BoardPatch, options: Omit<BoardApplyInput, "patch"> = {}) {
-    return this.transport.request<BoardApplyResult>(`${this.path}/apply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...options, patch, mutationId: options.mutationId ?? randomBoardId() }),
-    });
-  }
-
-  /** Transactions newest first, each with the before/after state of what it changed. */
-  history(input: BoardHistoryInput = {}, customFetch?: Fetch) {
-    const params = new URLSearchParams();
-    if (input.before !== undefined) params.set("before", String(input.before));
-    if (input.limit !== undefined) params.set("limit", String(input.limit));
-    const query = params.toString();
-    return this.transport.request<BoardHistoryPage>(`${this.path}/history${query ? `?${query}` : ""}`, { fetch: customFetch });
-  }
-
-  /** Return the Board to an earlier version as a new write. */
-  restore(version: number) {
-    return this.transport.request<BoardApplyResult>(`${this.path}/restore`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ version }),
-    });
-  }
-
-  private playback(command: BoardPlaybackCommand) {
-    return this.transport
-      .request<{ playback: BoardPlaybackSnapshot | null }>(`${this.path}/playback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(command),
-      })
-      .then((response) => response.playback);
-  }
-
-  /** Shared playback: every viewer follows the same clock. */
-  play(animationId: string, options: { position?: number; timeScale?: number; seed?: string } = {}) {
-    return this.playback({ commandId: randomBoardId(), type: "play", animationId, ...options });
-  }
-
-  pause() {
-    return this.playback({ commandId: randomBoardId(), type: "pause" });
-  }
-
-  resume() {
-    return this.playback({ commandId: randomBoardId(), type: "resume" });
-  }
-
-  seek(position: number) {
-    return this.playback({ commandId: randomBoardId(), type: "seek", position });
-  }
-
-  /** Continue past the marker a presentation is holding at. */
-  next() {
-    return this.playback({ commandId: randomBoardId(), type: "next" });
-  }
-
-  stop() {
-    return this.playback({ commandId: randomBoardId(), type: "stop" });
-  }
-
-  updateAwareness(seq: number, update: BoardAwarenessUpdate) {
-    if (!this.websocketClient) return Promise.resolve();
-    return this.websocketClient.updateBoardAwareness({ spaceId: this.spaceId, boardId: this.id, seq, update });
-  }
-
-  subscribe(handlers: BoardSubscriptionHandlers) {
-    return this.realtime.subscribe(handlers);
-  }
-
-  on(type: "changed", handler: (event: BoardChangedEvent) => void): () => void;
-  on(type: "awareness", handler: (event: BoardAwarenessUpdatedEvent) => void): () => void;
-  on(type: "playback", handler: (event: BoardPlaybackChangedEvent) => void): () => void;
-  on(
-    type: BoardEventName,
-    handler:
-      | ((event: BoardChangedEvent) => void)
-      | ((event: BoardAwarenessUpdatedEvent) => void)
-      | ((event: BoardPlaybackChangedEvent) => void),
-  ) {
-    if (type === "changed") return this.realtime.on("changed", handler as (event: BoardChangedEvent) => void);
-    if (type === "awareness") return this.realtime.on("awareness", handler as (event: BoardAwarenessUpdatedEvent) => void);
-    return this.realtime.on("playback", handler as (event: BoardPlaybackChangedEvent) => void);
-  }
-}
-
-export class SpaceBoardsApi {
-  constructor(
-    private readonly transport: HttpTransport,
-    private readonly spaceId: string,
-    private readonly websocketClient: WebsocketClient | null,
-  ) {}
-
-  byId(boardId: string) {
-    return new BoardClient(this.spaceId, boardId, this.transport, this.websocketClient);
-  }
-
-  /** Create a `.board` file and its Board, optionally with an initial document. */
-  create(input: BoardCreateInput) {
-    return this.transport.request<BoardReadResult>(`/api/spaces/${this.spaceId}/boards`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-  }
-}
-
 export class SpaceCheckpointFilesApi {
   constructor(
     private readonly transport: HttpTransport,
@@ -2545,7 +2305,7 @@ export class SpaceClient {
   }
 
   board(boardId: string) {
-    return new BoardClient(this.id, boardId, this.transport, this.websocketClient);
+    return new BoardClient({ http: this.transport, websocket: this.websocketClient, spaceId: this.id, boardId });
   }
 
   updatePresence(meta?: Record<string, unknown> | null) {

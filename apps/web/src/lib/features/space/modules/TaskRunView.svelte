@@ -179,7 +179,7 @@ function userTitle(
 	</button>
 {/snippet}
 
-<div class="flex-1 min-h-0 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5 lg:px-8">
+<div class="flex-1 min-h-0 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5 lg:px-workspace">
 	<div class="max-w-4xl">
 		{#if taskRunDetailLoading && taskRunDetail?.id !== taskId}
 			<CenteredLoading label={m.loading_task({}, { locale })} size="panel" />

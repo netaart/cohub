@@ -38,7 +38,7 @@
     "@talesofai-billing/sdk": "^1.16.0"
   },
   "devDependencies": {
-    "@types/node": "26.4.0",
+    "@types/node": "catalog:",
     "typescript": "^7.0.2"
   }
 }

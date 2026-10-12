@@ -6,6 +6,7 @@ import {
 } from "@cohub/protocol";
 import { AlertCircle, Box, Loader2, PackageOpen, Trash2 } from "lucide-svelte";
 import { onMount } from "svelte";
+import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
 import { setCohubResourceDragData } from "$lib/drag/cohub-resource-drag";
 import { pointerDrag, pointerDragSource } from "$lib/drag/pointer-drag.svelte";
 import {
@@ -196,10 +197,7 @@ onMount(() => {
 							<div class="mt-0.5 truncate font-mono text-[10px] text-text-placeholder">{app.ref}</div>
 						</button>
 						<div class="flex shrink-0 items-center gap-0.5">
-							<label class="inline-flex h-8 w-8 cursor-pointer items-center justify-center" title={app.enabled ? "Disable" : "Enable"}>
-								<input type="checkbox" class="sr-only" checked={app.enabled} disabled={!canWrite || Boolean(mutationId)} onchange={(event) => setEnabled(app, event.currentTarget.checked)} />
-								<span class="h-3.5 w-6 rounded-full p-0.5 transition-colors {app.enabled ? 'bg-brand' : 'bg-bg-elevated'}"><span class="block h-2.5 w-2.5 rounded-full bg-brand-contrast-fg transition-transform {app.enabled ? 'translate-x-2.5' : ''}"></span></span>
-							</label>
+							<ToggleSwitch checked={app.enabled} label={app.enabled ? "Disable" : "Enable"} disabled={!canWrite || Boolean(mutationId)} onchange={(enabled) => setEnabled(app, enabled)} />
 							<button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-[5px] text-text-placeholder transition-colors hover:bg-bg-hover hover:text-error-soft disabled:opacity-40" title="Uninstall" aria-label={`Uninstall ${app.snapshot.name}`} disabled={!canWrite || Boolean(mutationId)} onclick={() => uninstall(app)}><Trash2 class="h-3.5 w-3.5" /></button>
 						</div>
 					</div>

@@ -1,20 +1,10 @@
 # syntax=docker/dockerfile:1.4
-# Cohub Worker Dockerfile
-# BullMQ worker + Node.js runtime - Multi-stage build with pnpm deploy
 
-# ============================================
-# Base: common build tooling
-# ============================================
-FROM node:24-slim AS base
-
+FROM node:26-slim AS base
 WORKDIR /app
+COPY package.json ./
+RUN npm install -g "$(node -p 'require("./package.json").packageManager')" && rm package.json
 
-RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
-
-
-# ============================================
-# Stage 1: build workspace and deploy portable app
-# ============================================
 FROM base AS builder
 
 COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
@@ -54,7 +44,6 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
   fi
 
-# Copy source and build
 COPY packages/protocol ./packages/protocol
 COPY packages/billing ./packages/billing
 COPY packages/infra ./packages/infra
@@ -79,7 +68,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
   fi
 
 # Pinned Linux amd64 binary (the worker image's supported deployment platform).
-FROM node:24-slim AS pdu
+FROM node:26-slim AS pdu
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
   curl -fsSL --retry 3 https://github.com/KSXGitHub/parallel-disk-usage/releases/download/0.24.0/pdu-x86_64-unknown-linux-musl -o /usr/local/bin/pdu && \
   echo 'b991a68c1555d9144ea8ef2dd8cab91efb0b90ec8be53fdec4d0b2dd0e596f56  /usr/local/bin/pdu' | sha256sum -c - && \
@@ -88,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 # ============================================
 # Stage 2: runtime
 # ============================================
-FROM node:24-slim AS runtime
+FROM node:26-slim AS runtime
 
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size-percentage=70

@@ -76,138 +76,135 @@ await session.messages.send({
 
 ## Boards
 
-Use `space.boards` for collection operations and bind an ID with
-`space.board(boardId)` for entity operations:
+A Board is one document of `board` settings, `items` and `animations`. Bind
+one with `space.board(boardId)`; every write is a JSON Merge Patch (`null`
+deletes, unmentioned fields stay):
 
 ```ts
 const created = await space.boards.create({
   path: "boards/plan.board",
   title: "Plan",
-  items: [{
-    id: "goal",
-    type: "geo",
-    frame: { x: 80, y: 80, width: 240, height: 120, rotation: 0 },
-    props: { shape: "rounded", text: "Ship" },
-    style: { color: "green" },
-  }],
+  document: {
+    items: {
+      goal: { type: "shape", position: { x: 80, y: 80 }, size: { width: 240, height: 120 }, props: { geometry: "rounded", text: "Ship" } },
+    },
+  },
 });
 
-const board = space.board(created.board.id);
-// Equivalent: space.boards.byId(created.board.id)
+const board = space.board(created.id);
+const { items, version } = await board.get({ only: ["items"] });
+await board.apply({ items: { goal: { props: { text: "Shipped" } } } }, { baseVersion: version });
 
-// Machine-readable types, enums and coordinate spaces for dynamic clients.
-const capabilities = await board.capabilities();
-
-const snapshot = await board.authoring({ include: ["items"] });
-
-await board.mutateSemantic({
-  baseVersion: snapshot.board.version,
-  commands: [{
-    type: "item.patch",
-    itemId: "goal",
-    patch: { props: { text: "Updated plan" } },
-  }],
-});
-
-await board.play({
-  commandId: crypto.randomUUID(),
-  type: "play",
-  compositionId: "ambient",
-});
-```
-
-A bound `BoardClient` injects its `boardId` into semantic mutation requests.
-Realtime subscriptions use the same semantic resource projection:
-
-```ts
 const stop = board.subscribe({
-  changed(event) {
-    console.log("version", event.payload.version);
-    console.log("items", event.payload.changed.items);
-  },
-  playback(event) {
-    console.log("playback", event.payload.status);
-  },
+  changed: (event) => console.log("version", event.payload.version),
+  playback: (event) => console.log("playback", event.payload.playback?.status),
+});
+```
+
+Task Items keep a small, replaceable display snapshot beside their stable
+`taskRunId`; build it from an authoritative TaskRun with
+`taskRunToBoardTaskSnapshot(taskRun)` from `@neta-art/cohub/board`, and restore
+a Board's TaskRuns in one request with `client.tasks.getMany(ids, { spaceId })`.
+
+### Layers
+
+Board is layered by dependency, so each use pulls in only what it needs:
+
+| Import | What it is | Needs |
+|---|---|---|
+| `@neta-art/cohub/board` | Document model, geometry, item types (`defineBoardItem`, `createBoardRegistry`), export planning | — |
+| `@neta-art/cohub/board/replica` | A local copy kept in step with the server, with offline writes | — |
+| `@neta-art/cohub/board/editor` | The editor engine: selection, tools, gestures, undo, camera | — |
+| `@neta-art/cohub/board/player` | Animation playback | — |
+| `@neta-art/cohub/board/render` | Canvas renderers for each item type | `pixi.js` |
+| `@neta-art/cohub/board/stage` | An editor drawn into a DOM element, with input and DOM item views | `pixi.js` |
+| `@neta-art/cohub/board/export` | Render a document to an image | `pixi.js` |
+| `@neta-art/cohub/board/export/node` | The same in Node.js | `pixi.js`, `@napi-rs/canvas` |
+
+`pixi.js` and `@napi-rs/canvas` are optional peers: HTTP-only installs, agents
+and servers never load them.
+
+### Embedding an editor
+
+The editor has no framework. Read state through its getters and listen with
+`subscribe(channel, listener)`; snapshots keep their identity until they
+change, so they work directly with `useSyncExternalStore`:
+
+```ts
+import { createBoardRegistry, defineBoardItem } from "@neta-art/cohub/board";
+import { createBoardEditor } from "@neta-art/cohub/board/editor";
+import { createBoardReplica } from "@neta-art/cohub/board/replica";
+import { createBoardAssetManager, mountBoardStage } from "@neta-art/cohub/board/stage";
+import { z } from "zod";
+
+// A business item type. The server stores extension props as they are; the
+// schema is checked when the editor creates or edits one.
+const order = defineBoardItem({
+  type: "acme.order",
+  props: z.object({ orderId: z.string(), status: z.enum(["open", "paid"]) }),
+  size: { width: 320, height: 200 },
+  capabilities: { canRotate: false },
 });
 
-stop();
-```
+const replica = createBoardReplica({ remote: space.board(boardId) });
+await replica.start();
 
-Task Items keep a small, replaceable display snapshot beside their stable `taskRunId`. The SDK can build that projection from an authoritative TaskRun without copying the full payload, result or inline media into a Board:
+const editor = createBoardEditor({
+  document: replica.state.document!,
+  registry: createBoardRegistry([order]),
+  key: boardId,
+  onCommit: (patch) => replica.apply(patch),
+});
+replica.subscribe((state) => state.document && editor.loadDocument(state.document, boardId));
 
-```ts
-import { taskRunToBoardTaskSnapshot } from "@neta-art/cohub/board";
-
-const snapshot = taskRunToBoardTaskSnapshot(taskRun);
-```
-
-Use `client.tasks.getMany(ids, { spaceId })` to restore the TaskRuns for a Board in one request. The server applies the same Space permissions and result sanitization as the regular task list endpoint.
-
-Board is split by dependency: the model runs anywhere, drawing needs PixiJS.
-`@neta-art/cohub/board` carries the document schema, geometry, the shape layer,
-timeline compilation and export planning, with no renderer and no PixiJS — so
-agents, servers and edge workers can read, write and measure boards without a
-graphics stack:
-
-```ts
-import {
-  BoardDocumentSchema,
-  compileComposition,
-  createBoardExtensionRegistry,
-  itemBounds,
-  planBoardExport,
-} from "@neta-art/cohub/board";
-
-const composition = compileComposition({
-  id: "ambient",
-  name: "Ambient",
-  duration: 1_000,
-  tracks: [{
-    id: "image-translation",
-    target: { type: "item", itemId: "image" },
-    channel: "transform.translation",
-    fill: "both",
-    keyframes: [
-      { time: 0, value: { x: 0, y: 0 } },
-      { time: 500, value: { x: 0, y: -8 } },
-      { time: 1_000, value: { x: 0, y: 0 } },
-    ],
+// Where Space file paths resolve; a published copy could resolve elsewhere.
+const source = {
+  resolveFileUrl: (path: string) => space.files.resolveUrl(path, { purpose: "preview" }),
+  resolvePlaybackUrl: (path: string) => space.files.resolveUrl(path, { purpose: "playback" }),
+};
+const stage = mountBoardStage(element, {
+  editor,
+  source,
+  assets: createBoardAssetManager({ resolveFileUrl: source.resolveFileUrl }),
+  views: [{
+    type: "acme.order",
+    // Mount anything: a React root, a Vue app, plain DOM.
+    mount: (target, item, context) => {
+      const root = createRoot(target);
+      const render = (next = item, ctx = context) => root.render(<OrderCard item={next} selected={ctx.selected} />);
+      render();
+      return { update: render, destroy: () => root.unmount() };
+    },
   }],
-  playback: { loop: true, endBehavior: "hold", reducedMotion: { mode: "base" } },
 });
 
-await space.boards.create({
-  path: "boards/ambient.board",
-  metadata: {
-    playback: { compositionId: composition.id, delayMs: 500 },
-  },
-  compositions: [composition],
-});
+editor.addItem("acme.order", { at: editor.viewCenter(), props: { orderId: "o-1", status: "open" } });
+
+// React: const selection = useSyncExternalStore((fn) => editor.subscribe("selection", fn), () => editor.selection);
 ```
 
-Drawing pixels is where PixiJS enters. The card renderers and themes the editor
-uses live behind `@neta-art/cohub/board/render`, and turning a plan into an
-image has dedicated browser and Node.js entries:
+Items of a type the client does not know still render as a placeholder, move
+and keep every field, so documents written by newer clients are never
+rewritten by older ones. For a canvas look instead of DOM, pass renderers to
+`createBoardCardRendererResolver` from `board/render` and hand the result to
+the stage or to `renderBoardExport` as `renderers`.
+
+### Images
+
+In the browser, `renderBoardExport(renderer, document, options)` from
+`board/export` draws with the page's renderer (`stage.renderer`). In Node.js:
 
 ```ts
-import { getBoardCardRenderer } from "@neta-art/cohub/board/render";
-import { renderBoardExport } from "@neta-art/cohub/board/export";
-import {
-  createBoardHeadlessRenderer,
-  exportBoardImageBytes,
-} from "@neta-art/cohub/board/headless";
-```
+import { createNodeBoardRenderer, exportBoardImageBytes } from "@neta-art/cohub/board/export/node";
 
-Install `pixi.js` to use `board/render` or `board/export`, and add
-`@napi-rs/canvas` as well for `board/headless`. Both are optional peers, and
-`@neta-art/cohub/board` never reaches for either, so HTTP-only installations
-stay lightweight.
+const renderer = await createNodeBoardRenderer();
+const result = exportBoardImageBytes(renderer, document, { format: "png", scale: 2 });
+```
 
 Text metrics follow the same split. The renderers measure through a real canvas
-and set that up themselves, so nothing extra is needed to draw or export. Called
-straight off `@neta-art/cohub/board` with no renderer in play,
-`measureBoardText` returns a per-character estimate instead — fine for laying
-out a board on a server, but call `installBoardTextMeasurement` from
+and set that up themselves. Called straight off `@neta-art/cohub/board` with no
+renderer in play, `measureBoardText` returns a per-character estimate — fine
+for laying out a board on a server; call `installBoardTextMeasurement` from
 `board/render` first if the numbers have to match what the editor draws.
 
 ## Session subscriptions

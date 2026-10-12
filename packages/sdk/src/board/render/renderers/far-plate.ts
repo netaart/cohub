@@ -1,6 +1,6 @@
 
 import type { Graphics } from "pixi.js";
-import { degToRad } from "../../geometry.js";
+import { degToRad } from "../../model/geometry.js";
 import type { BoardFrame } from "@cohub/protocol";
 
 const FAR_STROKE_MAX_POINTS = 24;

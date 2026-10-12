@@ -172,7 +172,7 @@ router.post("/", writeBodyLimit, async (c) => {
 router.get("/:boardId", async (c) => {
   const params = boardParams(c);
   if (!params) return c.json(boardNotFound, 404);
-  if (!(await hasPermission(getOptionalAuth(c), "file.view", { spaceId: params.spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(getOptionalAuth(c), "file.view.filtered", { spaceId: params.spaceId }))) return authzDenied(c);
   const list = (name: string) => c.req.query(name)?.split(",").map((value) => value.trim()).filter(Boolean);
   const rect = list("rect")?.map(Number);
   const limit = c.req.query("limit");
@@ -219,7 +219,7 @@ router.post("/:boardId/apply", writeBodyLimit, async (c) => {
 router.get("/:boardId/history", async (c) => {
   const params = boardParams(c);
   if (!params) return c.json(boardNotFound, 404);
-  if (!(await hasPermission(getOptionalAuth(c), "file.view", { spaceId: params.spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(getOptionalAuth(c), "file.view.filtered", { spaceId: params.spaceId }))) return authzDenied(c);
   const before = c.req.query("before");
   const limit = c.req.query("limit");
   const history = BoardHistoryInputSchema.safeParse({

@@ -7,7 +7,7 @@ import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import { ArrowDown, FileCode2, ListTree, Plus, Upload } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import { untrack } from "svelte";
+import { onMount, untrack } from "svelte";
 import AccessStateView from "$lib/components/AccessStateView.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import ChatTimeline from "$lib/components/ChatTimeline.svelte";
@@ -71,6 +71,11 @@ let {
 } = $props();
 
 const locale = $derived(getLocale());
+
+// Only the chat needs model catalogs.
+onMount(() => {
+	void host.loadModelsCatalog();
+});
 
 // Chat markdown resolves workspace-relative images and media to workspace
 // files. Provide it once here instead of threading it through the timeline.
@@ -301,6 +306,7 @@ async function handleDraftDrop(event: DragEvent) {
 	{/if}
 	<div
 		class="relative flex-1 min-h-0 flex flex-col overflow-hidden"
+		data-composer-bounds
 		role="region"
 		aria-label={m.chat_panel_aria({}, { locale })}
 		ondragenter={handleDraftDragEnter}
@@ -371,11 +377,12 @@ async function handleDraftDrop(event: DragEvent) {
 		<div
 			bind:this={chatChromeEl}
 			class="chat-chrome relative z-10 shrink-0"
+			data-composer-chrome
 			class:bg-chat-panel={!hasCustomPage}
 			class:chat-chrome--overlay={hasCustomPage}
 		>
 			{#if followupQueue.length > 0}
-				<div class="px-4 sm:px-6">
+				<div class="chat-gutter-x">
 					<div
 						class="mx-auto w-full max-w-[var(--chat-content-max-width)] border-t border-chat-panel-border/70 px-[var(--chat-msg-inset)] py-2"
 						class:bg-chat-panel={!hasCustomPage}

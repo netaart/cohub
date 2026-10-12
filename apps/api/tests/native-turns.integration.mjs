@@ -34,7 +34,7 @@ mock.module("../src/permissions.js", { exports: { hasPermission: async (user, _p
 mock.module("../src/space-sessions.js", { exports: { getSpaceSessionById: async (id) => (await database.select().from(spaceSessions).where(eq(spaceSessions.id, id)))[0] } });
 const published = [];
 mock.module("../src/realtime-events.js", { exports: {
-  dispatchSessionCreated: async (session) => { published.push(["session.created", session.id]); },
+  dispatchSessionCreated: async (session, fork) => { published.push(["session.created", session.id, fork?.parentSessionId ?? null]); },
   dispatchSessionUpdated: async ({ session }) => { published.push(["session.updated", session.id]); },
   dispatchTurnCreated: async ({ turn }) => { published.push(["turn.created", turn.id]); },
   dispatchLabelAssignmentsUpdated: async () => {}, messageRecordFromRow: (row) => row,
@@ -242,6 +242,9 @@ test("two transcripts continuing one Turn fork the later one into its own Sessio
   assert.equal(forked.turns[0].forked, true);
   assert.notEqual(forked.turns[0].sessionId, base.sessionId);
   assert.equal(forked.turns[1].sessionId, forked.turns[0].sessionId, "later Turns follow their parent into the fork");
+  published.length = 0;
+  await publishNativeIngest(spaceId, forked.effects);
+  assert.deepEqual(published.filter(([kind]) => kind === "session.created"), [["session.created", forked.turns[0].sessionId, base.sessionId]], "the fork is announced once, with its lineage");
 });
 
 test("ingest reports what it created and settled, so live Turns are announced and imported ones are not", async () => {

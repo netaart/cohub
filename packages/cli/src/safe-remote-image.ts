@@ -1,7 +1,7 @@
 import dns from "node:dns/promises";
 import http, { type IncomingHttpHeaders } from "node:http";
 import https from "node:https";
-import { isIP } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
 import {
   isPublicBoardRemoteAddress,
   normalizeBoardRemoteUrl,
@@ -20,6 +20,7 @@ const IMAGE_MIME_TYPES = new Set([
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 type ResolvedAddress = { address: string; family: 4 | 6 };
+type PinnedAddresses = readonly [ResolvedAddress, ...ResolvedAddress[]];
 type Lookup = (hostname: string) => Promise<readonly ResolvedAddress[]>;
 type RemoteResponse = {
   status: number;
@@ -28,7 +29,7 @@ type RemoteResponse = {
 };
 type Requester = (
   url: URL,
-  address: ResolvedAddress,
+  addresses: PinnedAddresses,
   timeoutMs: number,
   maxBytes: number,
 ) => Promise<RemoteResponse>;
@@ -60,9 +61,21 @@ function responseHeaders(input: IncomingHttpHeaders): Headers {
   return headers;
 }
 
+/** Async like `dns.lookup`: a synchronous answer crashes TLS on an immediate connect failure. */
+export function pinnedLookup(addresses: PinnedAddresses): LookupFunction {
+  const [first] = addresses;
+  return (_hostname, options, callback) => {
+    process.nextTick(() =>
+      options.all
+        ? callback(null, [...addresses])
+        : callback(null, first.address, first.family),
+    );
+  };
+}
+
 function requestPinned(
   url: URL,
-  address: ResolvedAddress,
+  addresses: PinnedAddresses,
   timeoutMs: number,
   maxBytes: number,
 ): Promise<RemoteResponse> {
@@ -73,9 +86,7 @@ function requestPinned(
       {
         agent: false,
         headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/gif" },
-        lookup: (_hostname, _options, callback) => {
-          callback(null, address.address, address.family);
-        },
+        lookup: pinnedLookup(addresses),
       },
       (response) => {
         const status = response.statusCode ?? 0;
@@ -153,7 +164,7 @@ async function resolvePublicUrl(
   value: string,
   lookup: Lookup,
   deadline: number,
-): Promise<{ url: URL; address: ResolvedAddress }> {
+): Promise<{ url: URL; addresses: PinnedAddresses }> {
   const normalized = normalizeBoardRemoteUrl(value);
   if (!normalized) throw new Error("Image URL must be a public HTTP(S) URL");
   const url = new URL(normalized);
@@ -161,13 +172,14 @@ async function resolvePublicUrl(
   const addresses = isIP(hostname)
     ? [{ address: hostname, family: isIP(hostname) as 4 | 6 }]
     : await withDeadline(lookup(hostname), deadline);
+  const [first, ...rest] = addresses;
   if (
-    addresses.length === 0 ||
+    !first ||
     addresses.some((entry) => !isPublicBoardRemoteAddress(entry.address))
   ) {
     throw new Error("Image URL resolves to a private address");
   }
-  return { url, address: addresses[0] as ResolvedAddress };
+  return { url, addresses: [first, ...rest] };
 }
 
 export async function downloadPublicImage(
@@ -181,9 +193,9 @@ export async function downloadPublicImage(
   let current = input;
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
-    const { url, address } = await resolvePublicUrl(current, lookup, deadline);
+    const { url, addresses } = await resolvePublicUrl(current, lookup, deadline);
     const response = await withDeadline(
-      requester(url, address, remainingMs(deadline), maxBytes),
+      requester(url, addresses, remainingMs(deadline), maxBytes),
       deadline,
     );
     if (REDIRECT_STATUSES.has(response.status)) {

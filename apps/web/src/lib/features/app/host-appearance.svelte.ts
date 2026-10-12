@@ -2,7 +2,7 @@ import {
 	APP_APPEARANCE_TOKENS,
 	type AppAppearance,
 } from "@cohub/protocol/app-runtime";
-import { SPACE_STYLE_CHANGED_EVENT } from "$lib/space-style";
+import { CUSTOM_THEME_CHANGED_EVENT } from "$lib/custom-theme/events";
 import { getResolvedTheme } from "$lib/theme.svelte";
 import { isDarkTheme } from "$lib/theme-registry";
 
@@ -19,8 +19,8 @@ function listen() {
 	const bump = () => {
 		revision += 1;
 	};
-	// A Space's custom theme overrides tokens without changing the theme id.
-	window.addEventListener(SPACE_STYLE_CHANGED_EVENT, bump);
+	// Custom themes override tokens without changing the theme id.
+	window.addEventListener(CUSTOM_THEME_CHANGED_EVENT, bump);
 	window.matchMedia?.(REDUCED_MOTION_QUERY).addEventListener("change", bump);
 }
 

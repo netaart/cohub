@@ -1,5 +1,6 @@
 <script lang="ts">
 import { BOARD_COLORS, boardColorCssVar } from "@neta-art/cohub/board";
+import { canTapSelectWithHand } from "@neta-art/cohub/board/editor";
 import {
 	AlignCenterHorizontal,
 	AlignCenterVertical,
@@ -19,7 +20,6 @@ import {
 	Sparkles,
 	Trash2,
 } from "lucide-svelte";
-import { canTapSelectWithHand } from "$lib/board/board-tool";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -60,7 +60,9 @@ const canGenerate = $derived(
 const generationTask = $derived.by(() => {
 	if (editor.selectedItems.length !== 1) return null;
 	const item = editor.selectedItems[0];
-	return item?.type === "task" && (item.props as { snapshot: { taskType: string } }).snapshot.taskType === "generation"
+	return item?.type === "task" &&
+		(item.props as { snapshot: { taskType: string } }).snapshot.taskType ===
+			"generation"
 		? item
 		: null;
 });
@@ -77,10 +79,13 @@ const position = $derived.by(() => {
 const currentColor = $derived.by<string | null | undefined>(() => {
 	const colors = editor.selectedItems.flatMap((item) => {
 		const { fill, stroke } = item.style;
-		const id = (value: unknown, fallback: string) => (typeof value === "string" ? value : value === undefined ? fallback : null);
-		if (item.type === "text" || item.type === "effect") return [id(fill, "neutral")];
+		const id = (value: unknown, fallback: string) =>
+			typeof value === "string" ? value : value === undefined ? fallback : null;
+		if (item.type === "text" || item.type === "effect")
+			return [id(fill, "neutral")];
 		if (item.type === "shape") return [id(stroke ?? fill, "brand")];
-		if (item.type === "draw" || item.type === "arrow") return [id(stroke, "brand")];
+		if (item.type === "draw" || item.type === "arrow")
+			return [id(stroke, "brand")];
 		if (item.type === "frame") return [id(stroke ?? fill, "neutral")];
 		return [];
 	});

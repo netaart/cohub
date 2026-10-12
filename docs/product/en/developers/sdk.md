@@ -96,6 +96,8 @@ client.onUserEvent((event) => {
 });
 ```
 
+A `session.created` for a forked Chat also carries `fork` (`RealtimeSessionFork`: `childSessionId`, `parentSessionId`, `depth`, `anchorSequence`), so a list that already shows the parent can nest the new Chat right away. It is omitted when the parent Chat has its own access policy, and never includes titles; take the parent's title from your own list.
+
 `client.spaces.list()` items include `personalActivityAt`, the viewer's own latest activity in the Space, which the list is sorted by first.
 
 ## Apps

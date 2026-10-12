@@ -1,4 +1,5 @@
 import type { ContentBlock, Usage } from "@cohub/protocol/core";
+import { getCacheUserKey } from "$lib/cache/keys";
 import { sessionGenerationSnapshotsRepo } from "$lib/cache/repositories/session-generation-snapshots-repo";
 import { shouldPreserveLivePreviewOnArchive } from "$lib/session-generation-stream-guards";
 import {
@@ -44,6 +45,8 @@ export type SessionGenerationState = {
 	spaceId?: string | null;
 	sessionId: string;
 	status: SessionGenerationStatus | string;
+	/** Recovered running Turn, not a newly dispatched prompt. */
+	resumed?: boolean;
 	requestId?: string | null;
 	error?: string | null;
 	errorCode?: string | null;
@@ -247,6 +250,7 @@ function parseSnapshotState(
 		spaceId: record.spaceId,
 		sessionId: record.sessionId,
 		status: record.status,
+		resumed: true,
 		requestId: null,
 		error: null,
 		errorCode: null,
@@ -302,16 +306,29 @@ function toSnapshotInput(state: SessionGenerationState) {
 class SessionGenerationStore {
 	bySessionId = $state<Record<string, SessionGenerationState>>({});
 	private persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private userKey = getCacheUserKey();
+
+	private ensureUser() {
+		const userKey = getCacheUserKey();
+		if (this.userKey === userKey) return;
+		for (const timer of this.persistTimers.values()) clearTimeout(timer);
+		this.persistTimers.clear();
+		this.bySessionId = {};
+		this.userKey = userKey;
+	}
 
 	constructor() {
 		void sessionGenerationSnapshotsRepo.deleteExpired().catch(() => undefined);
 	}
 
 	async restore(spaceId: string, sessionId: string) {
+		this.ensureUser();
 		const current = this.get(sessionId);
 		if (current && isPersistable(current)) return current;
 		const requestStartedAt = Date.now();
+		const userKey = getCacheUserKey();
 		const record = await sessionGenerationSnapshotsRepo.get(spaceId, sessionId);
+		if (getCacheUserKey() !== userKey) return null;
 		const latest = this.get(sessionId);
 		if (
 			latest &&
@@ -321,6 +338,9 @@ class SessionGenerationStore {
 			return latest;
 		}
 		const state = parseSnapshotState(record);
+		// A terminal event can arrive while IndexedDB is reading the old live output.
+		if (state && latest && !shouldResumePendingGeneration(latest, state.turnId))
+			return latest;
 		if (!state) {
 			if (record) {
 				void sessionGenerationSnapshotsRepo
@@ -373,8 +393,10 @@ class SessionGenerationStore {
 		// from the store when it fires.
 		if (this.persistTimers.has(state.sessionId)) return;
 		const sessionId = state.sessionId;
+		const userKey = this.userKey;
 		const timer = setTimeout(() => {
 			this.persistTimers.delete(sessionId);
+			if (getCacheUserKey() !== userKey) return;
 			const latest = this.bySessionId[sessionId];
 			if (!latest) return;
 			if (!shouldPersistSnapshot(latest) || !latest.spaceId) {
@@ -389,6 +411,7 @@ class SessionGenerationStore {
 	}
 
 	private setState(sessionId: string, state: SessionGenerationState) {
+		this.ensureUser();
 		this.bySessionId = {
 			...this.bySessionId,
 			[sessionId]: state,
@@ -397,19 +420,14 @@ class SessionGenerationStore {
 	}
 
 	get(sessionId: string | null | undefined): SessionGenerationState | null {
-		if (!sessionId) return null;
+		// Reads stay pure: this method is also used inside Svelte derived state.
+		if (!sessionId || this.userKey !== getCacheUserKey()) return null;
 		return this.bySessionId[sessionId] ?? null;
-	}
-
-	isStreaming(sessionId: string | null | undefined): boolean {
-		if (!sessionId) return false;
-		const state = this.bySessionId[sessionId];
-		return state?.status === "streaming";
 	}
 
 	isGenerating(sessionId: string | null | undefined): boolean {
 		if (!sessionId) return false;
-		const state = this.bySessionId[sessionId];
+		const state = this.get(sessionId);
 		return Boolean(state && !TERMINAL_STATUSES.has(state.status));
 	}
 
@@ -432,6 +450,7 @@ class SessionGenerationStore {
 			sessionId,
 			spaceId: input?.spaceId ?? current.spaceId ?? null,
 			status: "pending",
+			resumed: false,
 			requestId: input?.requestId ?? current.requestId ?? null,
 			error: null,
 			errorCode: null,
@@ -483,6 +502,7 @@ class SessionGenerationStore {
 			sessionId,
 			spaceId: input?.spaceId ?? current.spaceId ?? null,
 			status: "pending",
+			resumed: true,
 			error: null,
 			errorCode: null,
 			startedAt: Date.now(),
@@ -824,8 +844,9 @@ class SessionGenerationStore {
 	}
 
 	reset(sessionId: string | null | undefined) {
+		this.ensureUser();
 		if (!sessionId) return;
-		const currentSpaceId = this.bySessionId[sessionId]?.spaceId ?? null;
+		const currentSpaceId = this.get(sessionId)?.spaceId ?? null;
 		this.bySessionId = {
 			...this.bySessionId,
 			[sessionId]: createIdleState(sessionId),
@@ -834,6 +855,7 @@ class SessionGenerationStore {
 	}
 
 	resetAll() {
+		this.ensureUser();
 		for (const sessionId of Object.keys(this.bySessionId)) {
 			this.clearPersisted(sessionId);
 		}
@@ -842,15 +864,22 @@ class SessionGenerationStore {
 		this.bySessionId = {};
 	}
 
-	/** Clear only sessions belonging to one space (multi-host safe). */
-	resetSpace(spaceId: string | null | undefined) {
+	/** Release inactive-space memory, preserving server-derived recovery output. */
+	releaseSpace(spaceId: string | null | undefined) {
+		this.ensureUser();
 		if (!spaceId) return;
 		const { remaining, removedSessionIds } = removeGenerationStatesForSpace(
 			this.bySessionId,
 			spaceId,
 		);
 		for (const sessionId of removedSessionIds) {
-			this.clearPersisted(sessionId, spaceId);
+			const state = this.bySessionId[sessionId];
+			this.clearPersistTimer(sessionId);
+			if (state && shouldPersistSnapshot(state)) {
+				void sessionGenerationSnapshotsRepo
+					.put(toSnapshotInput(state))
+					.catch(() => undefined);
+			}
 		}
 		this.bySessionId = remaining;
 	}

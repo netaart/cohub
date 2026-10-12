@@ -6,6 +6,7 @@ import {
   parseCachedModelsConfig,
   parseModelsConfig,
   PLATFORM_MODELS_REDIS_KEY,
+  resolveRuntimeModelsConfig,
   type CachedModelsConfig,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
@@ -59,18 +60,14 @@ export async function loadRuntimeModelsConfigs(userId?: string | null): Promise<
     allowMissing: false,
   });
 
-  const configs: ModelsConfig[] = [];
-  if (platform) configs.push(platform);
-
   const trimmedUserId = userId?.trim();
-  if (trimmedUserId) {
-    const user = await loadCachedModels({
-      redisKey: getUserModelsRedisKey(trimmedUserId),
-      modelsPath: getAgentUserModelsPath(trimmedUserId),
-      allowMissing: true,
-    });
-    if (user) configs.push(user);
-  }
+  const user = trimmedUserId
+    ? await loadCachedModels({
+        redisKey: getUserModelsRedisKey(trimmedUserId),
+        modelsPath: getAgentUserModelsPath(trimmedUserId),
+        allowMissing: true,
+      })
+    : null;
 
-  return configs;
+  return [resolveRuntimeModelsConfig({ platform, user })];
 }

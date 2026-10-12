@@ -1,7 +1,7 @@
 /**
  * Process-wide lease for space-scoped generation store ownership.
  * Multiple chat hosts in the same space share generation state; only the last
- * host to leave a space may reset/clear its persisted snapshots.
+ * host to leave a space may release its generation memory.
  *
  * Callers must not release more times than they acquired. Prefer host-local
  * `leasedSpaceId` tracking so dispose + enterSpace cannot double-release.
@@ -25,8 +25,8 @@ export function acquireSpaceGeneration(spaceId: string) {
 }
 
 /**
- * Release one host's claim on a space. When the last host leaves, clear that
- * space's generation memory + persisted recovery snapshots.
+ * Release one host's claim on a space. The last host releases generation memory
+ * only; persisted recovery snapshots remain.
  * Releasing a space that is not leased is a no-op (never resets).
  */
 export function releaseSpaceGeneration(spaceId: string) {

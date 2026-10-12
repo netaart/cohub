@@ -7,6 +7,7 @@ import {
 	resolveSceneArrow,
 	type SceneItem,
 } from "@neta-art/cohub/board";
+import { canTapSelectWithHand } from "@neta-art/cohub/board/editor";
 import {
 	ArrowLeft,
 	ArrowRight,
@@ -17,7 +18,6 @@ import {
 	Spline,
 	Trash2,
 } from "lucide-svelte";
-import { canTapSelectWithHand } from "$lib/board/board-tool";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -29,49 +29,95 @@ const locale = $derived(getLocale());
 const arrow = $derived.by(() => {
 	if (
 		editor.selection.length !== 1 ||
-		(editor.tool !== "select" && !(editor.tool === "hand" && canTapSelectWithHand(editor.pointerType))) ||
+		(editor.tool !== "select" &&
+			!(editor.tool === "hand" && canTapSelectWithHand(editor.pointerType))) ||
 		editor.interaction.type !== "idle"
 	)
 		return null;
 	const item = editor.selectedItems[0];
-	return item?.type === "arrow" && !item.locked ? (item as SceneItem<BoardArrowItem>) : null;
+	return item?.type === "arrow" && !item.locked
+		? (item as SceneItem<BoardArrowItem>)
+		: null;
 });
 
 const position = $derived.by(() => {
 	if (!arrow) return null;
 	const mid = resolveSceneArrow(arrow, editor.scene).mid;
 	const camera = editor.camera;
-	return { left: mid.x * camera.zoom + camera.x, top: Math.max(36, mid.y * camera.zoom + camera.y) };
+	return {
+		left: mid.x * camera.zoom + camera.x,
+		top: Math.max(36, mid.y * camera.zoom + camera.y),
+	};
 });
 
 type Heads = "none" | "end" | "start" | "both";
 const heads = $derived<Heads>(
-	!arrow ? "none" : arrow.props.arrowStart && arrow.props.arrowEnd ? "both" : arrow.props.arrowEnd ? "end" : arrow.props.arrowStart ? "start" : "none",
+	!arrow
+		? "none"
+		: arrow.props.arrowStart && arrow.props.arrowEnd
+			? "both"
+			: arrow.props.arrowEnd
+				? "end"
+				: arrow.props.arrowStart
+					? "start"
+					: "none",
 );
 
-const HEAD_OPTIONS = $derived<Array<{ id: Heads; label: string; icon: typeof Minus }>>([
+const HEAD_OPTIONS = $derived<
+	Array<{ id: Heads; label: string; icon: typeof Minus }>
+>([
 	{ id: "none", label: m.board_no_direction({}, { locale }), icon: Minus },
-	{ id: "end", label: m.board_direction_source_target({}, { locale }), icon: ArrowRight },
-	{ id: "start", label: m.board_direction_target_source({}, { locale }), icon: ArrowLeft },
-	{ id: "both", label: m.board_direction_bidirectional({}, { locale }), icon: ArrowRightLeft },
+	{
+		id: "end",
+		label: m.board_direction_source_target({}, { locale }),
+		icon: ArrowRight,
+	},
+	{
+		id: "start",
+		label: m.board_direction_target_source({}, { locale }),
+		icon: ArrowLeft,
+	},
+	{
+		id: "both",
+		label: m.board_direction_bidirectional({}, { locale }),
+		icon: ArrowRightLeft,
+	},
 ]);
 
-const ROUTE_OPTIONS = $derived<Array<{ id: BoardArrowRoute; label: string; icon: typeof Minus }>>([
-	{ id: "straight", label: m.board_route_straight({}, { locale }), icon: MoveRight },
+const ROUTE_OPTIONS = $derived<
+	Array<{ id: BoardArrowRoute; label: string; icon: typeof Minus }>
+>([
+	{
+		id: "straight",
+		label: m.board_route_straight({}, { locale }),
+		icon: MoveRight,
+	},
 	{ id: "curve", label: m.board_route_curve({}, { locale }), icon: Spline },
-	{ id: "orthogonal", label: m.board_route_orthogonal({}, { locale }), icon: CornerDownRight },
+	{
+		id: "orthogonal",
+		label: m.board_route_orthogonal({}, { locale }),
+		icon: CornerDownRight,
+	},
 ]);
 
 function setHeads(value: Heads) {
-	editor.setSelectionProps("arrow", { arrowStart: value === "start" || value === "both", arrowEnd: value === "end" || value === "both" });
+	editor.setSelectionProps("arrow", {
+		arrowStart: value === "start" || value === "both",
+		arrowEnd: value === "end" || value === "both",
+	});
 }
 
 function setRoute(route: BoardArrowRoute) {
-	editor.setSelectionProps("arrow", { route, ...(route === "straight" ? { bend: 0 } : {}) });
+	editor.setSelectionProps("arrow", {
+		route,
+		...(route === "straight" ? { bend: 0 } : {}),
+	});
 }
 
 function toggleDash() {
-	editor.setSelectionStyle({ dash: arrow?.style.dash === "dashed" ? "solid" : "dashed" });
+	editor.setSelectionStyle({
+		dash: arrow?.style.dash === "dashed" ? "solid" : "dashed",
+	});
 }
 </script>
 

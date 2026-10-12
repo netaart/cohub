@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { Type, type Context } from "@earendil-works/pi-ai";
-import type { ModelsConfig } from "@cohub/infra/config-runtime/models";
+import { resolveRuntimeModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
 import { CohubModelRegistry } from "../runtime/model-registry.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "../runtime/pi-models-adapter.js";
 
@@ -59,7 +59,7 @@ function normalizeHeaders(headers: Headers): Record<string, string> {
 }
 
 async function captureRequests() {
-  const registry = new CohubModelRegistry({ configs: [config] });
+  const registry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform: config })] });
   const captured: Record<string, unknown> = {};
   let current: { url: string; headers: Record<string, string>; body: unknown } | undefined;
   const originalFetch = globalThis.fetch;

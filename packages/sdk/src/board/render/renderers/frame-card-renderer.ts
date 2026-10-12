@@ -1,7 +1,7 @@
 import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
 import type { BoardFrameItem } from "@cohub/protocol";
 import { Container, Graphics, type Text } from "pixi.js";
-import type { SceneItem } from "../../core/scene.js";
+import type { SceneItem } from "../../model/scene.js";
 import { itemColor } from "../palette.js";
 import { syncTextResolution } from "../text-resolution.js";
 import { createLabel, positionShell } from "./base-card-renderer.js";

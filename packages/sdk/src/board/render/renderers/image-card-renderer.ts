@@ -1,4 +1,4 @@
-import type { BoardSceneItem, SceneItem } from "../../core/scene.js";
+import type { BoardSceneItem, SceneItem } from "../../model/scene.js";
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 import type { BoardImageItem, } from "@cohub/protocol";
 import { positionShell } from "./base-card-renderer.js";

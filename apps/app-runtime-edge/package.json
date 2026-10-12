@@ -13,11 +13,11 @@
     "deploy:prod": "wrangler deploy --env prod"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.11",
-    "@cloudflare/workers-types": "5.20260918.1",
-    "@types/node": "26.4.0",
+    "@biomejs/biome": "catalog:",
+    "@cloudflare/workers-types": "5.20261009.1",
+    "@types/node": "catalog:",
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
-    "wrangler": "4.134.0"
+    "wrangler": "catalog:"
   }
 }

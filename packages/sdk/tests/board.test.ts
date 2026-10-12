@@ -14,7 +14,7 @@ import {
 	resolveSceneArrow,
 	type BoardArrowItem,
 	type SceneItem,
-} from "../src/board/index.js";
+} from "../src/board/model/index.js";
 import { boardDocument } from "./board/fixtures.js";
 
 const close = (actual: number, expected: number, epsilon = 1e-6) =>

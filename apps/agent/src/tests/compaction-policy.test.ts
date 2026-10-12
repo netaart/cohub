@@ -16,7 +16,7 @@ assert.equal(estimateProxyContextTokens(asMessages([textMessage("a".repeat(400))
 assert.equal(estimateProxyContextTokens(asMessages([{ role: "user", content: "a".repeat(40) }])), 10);
 
 // ── Images count as a flat bounded estimate, not their raw base64 length ──
-// Ingestion normalizes images (<=1984px webp), so per-image vision cost is
+// Models receive images bounded to 1280px, so per-image vision cost is
 // predictable; base64 length is a text-billing proxy artifact that compaction
 // accounting deliberately ignores (same approach as pi/codex).
 assert.equal(estimateProxyContextTokens(asMessages([imageMessage(200_000)])), FLAT_IMAGE_TOKEN_ESTIMATE);

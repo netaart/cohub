@@ -155,8 +155,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@neta-art/generation": "^0.1.30",
-    "zod": "^4.5.4"
+    "@neta-art/generation": "^0.1.33",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "typescript": "^7.0.2"

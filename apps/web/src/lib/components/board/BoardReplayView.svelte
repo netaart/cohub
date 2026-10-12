@@ -6,9 +6,9 @@ import {
 	type BoardViewport,
 	visibleWorldRect,
 } from "@neta-art/cohub/board";
+import type { BoardAssetManager } from "@neta-art/cohub/board/stage";
 import { onDestroy, onMount, untrack } from "svelte";
 import type { BoardCollaboratorProfile } from "$lib/board/board-activity";
-import type { BoardAssetManager } from "$lib/board/board-asset-manager";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
 import { createBoardAwarenessController } from "$lib/board/board-awareness";
 import {
@@ -27,7 +27,6 @@ import BoardStage from "$lib/components/board/BoardStage.svelte";
 import BoardZoomMenu from "$lib/components/board/BoardZoomMenu.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
-
 
 const {
 	boardId,
@@ -318,7 +317,6 @@ onDestroy(() => {
 		awarenessVersion={0}
 		readonly
 		onSurfaceChange={(size) => {
-			editor.surfaceSize = size;
 			surfaceSize = size;
 		}}
 	/>

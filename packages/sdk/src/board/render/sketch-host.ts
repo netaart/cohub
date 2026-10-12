@@ -1,7 +1,7 @@
 
 import type { BoardSketchItem } from "@cohub/protocol";
 import { Texture } from "pixi.js";
-import type { SceneItem } from "../core/scene.js";
+import type { SceneItem } from "../model/scene.js";
 import type { BoardSketchHost } from "./renderers/board-renderer-registry.js";
 
 const MAX_EDGE = 2048;

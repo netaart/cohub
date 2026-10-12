@@ -484,6 +484,16 @@ type WrapAssistantMessageStreamOptions = {
   onFailure?: (error: unknown) => void;
 };
 
+/**
+ * A stopped Turn ends as aborted whatever surfaced the stop. Pi still starts the
+ * next round after a tool returns on an aborted signal, and its setup rejects
+ * with the abort reason but reports `error`.
+ */
+function settleAbortedFailure(event: AssistantMessageEvent, signal: AbortSignal | undefined): AssistantMessageEvent {
+  if (event.type !== "error" || event.reason === "aborted" || !signal?.aborted) return event;
+  return { type: "error", reason: "aborted", error: { ...event.error, stopReason: "aborted" } };
+}
+
 export function wrapAssistantMessageStream(
   stream: AsyncIterable<AssistantMessageEvent>,
   options: WrapAssistantMessageStreamOptions,
@@ -524,7 +534,8 @@ export function wrapAssistantMessageStream(
 
   void (async () => {
     try {
-      for await (const event of stream) {
+      for await (const received of stream) {
+        const event = settleAbortedFailure(received, options.signal);
         if ("partial" in event) latestPartial = event.partial;
         const observed = options.onEvent?.(event);
         if (observed) await observed;
@@ -1093,8 +1104,10 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       runtimeSystemPrompt = nextSystemPrompt;
       systemPromptStateKey = nextKey;
       const shouldChangeThinkingLevel = nextThinkingLevel !== agent.state.thinkingLevel;
+      // IDs can stay the same while credentials, headers and endpoints change.
+      // Bind the model and its auth registry to the same runtime configuration.
+      agent.state.model = target;
       if (shouldChangeModel) {
-        agent.state.model = target;
         options.sessionManager.appendModelChange(target.provider, target.id);
       }
       if (shouldChangeModel || shouldChangeThinkingLevel) {

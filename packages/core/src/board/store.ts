@@ -636,7 +636,7 @@ async function writeDelta(tx: Tx, boardId: string, after: BoardDelta, preloaded:
 	for (let offset = 0; offset < boundsOnly.length; offset += WRITE_CHUNK) {
 		const chunk = boundsOnly.slice(offset, offset + WRITE_CHUNK);
 		await tx.execute(sql`
-			UPDATE ${boardItems} AS i SET min_x = v.min_x, min_y = v.min_y, max_x = v.max_x, max_y = v.max_y, version = ${version}, updated_at = ${now}
+			UPDATE ${boardItems} AS i SET min_x = v.min_x, min_y = v.min_y, max_x = v.max_x, max_y = v.max_y, version = ${version}, updated_at = ${now.toISOString()}::timestamptz
 			FROM (VALUES ${sql.join(chunk.map((row) => sql`(${row.id}, ${row.minX}::float8, ${row.minY}::float8, ${row.maxX}::float8, ${row.maxY}::float8)`), sql`, `)}) AS v(id, min_x, min_y, max_x, max_y)
 			WHERE i.board_id = ${boardId} AND i.id = v.id
 		`);

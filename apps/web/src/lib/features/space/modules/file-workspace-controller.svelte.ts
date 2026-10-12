@@ -16,6 +16,8 @@ import {
 	type FileViewMode,
 } from "$lib/components/file-diff-view";
 import { filePreviewModel } from "$lib/file-preview-model";
+import { getLocale } from "$lib/i18n/locale.svelte";
+import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import {
 	isTextFileResponse,
@@ -441,10 +443,8 @@ export function createFileWorkspaceController(
 	): boolean {
 		if (fileTreeSourceKey === sourceKey) return true;
 		if (!optionsArg.force && hasDirtyInlineFiles()) {
-			const ok = confirm(
-				"Discard unsaved file changes before switching files source?",
-			);
-			if (!ok) return false;
+			if (!confirm(m.workspace_leave_unsaved({}, { locale: getLocale() })))
+				return false;
 		}
 		const previousContext = getWorkspaceContext();
 		workspaceGeneration += 1;
@@ -480,10 +480,8 @@ export function createFileWorkspaceController(
 		optionsArg: { force?: boolean } = {},
 	): boolean {
 		if (!optionsArg.force && hasDirtyInlineFiles()) {
-			const ok = confirm(
-				"Discard unsaved file changes before leaving this space?",
-			);
-			if (!ok) return false;
+			if (!confirm(m.workspace_leave_unsaved({}, { locale: getLocale() })))
+				return false;
 		}
 		const previousContext = getWorkspaceContext();
 		workspaceGeneration += 1;
@@ -1513,7 +1511,9 @@ export function createFileWorkspaceController(
 		const path = parentPath ? `${parentPath}/${fileName}` : fileName;
 		try {
 			// The title follows the file name; the server derives it from the path.
-			await sdk.space(options.getSpaceId()).boards.create({ path, mutationId: crypto.randomUUID() });
+			await sdk
+				.space(options.getSpaceId())
+				.boards.create({ path, mutationId: crypto.randomUUID() });
 			await patchFsDirectory(parentPath, (entries) => [
 				...entries,
 				buildFsEntry(path, "file"),

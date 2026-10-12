@@ -1,5 +1,5 @@
 import { type BoardDocument, parseBoardDocument } from "@cohub/protocol";
-import { type BoardScene, type BoardSceneItem, buildBoardScene } from "../../src/board/core/scene.js";
+import { type BoardScene, type BoardSceneItem, buildBoardScene } from "../../src/board/model/scene.js";
 
 /** A parsed document from loose input; throws on invalid input. */
 export function boardDocument(input: { board?: Record<string, unknown>; items?: Record<string, unknown>; animations?: Record<string, unknown> }): BoardDocument {

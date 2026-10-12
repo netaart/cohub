@@ -11,6 +11,22 @@ export const buildUserNewSessionRoute = (spaceId: string) => {
 	return `${buildSessionsRoute()}/new?${params.toString()}`;
 };
 
+export type UserSessionRoute =
+	| { kind: "session"; sessionId: string }
+	| { kind: "new"; spaceId: string | null };
+
+export function parseUserSessionRoute(url: URL): UserSessionRoute | null {
+	const match = url.pathname.match(/^\/sessions\/([^/]+)\/?$/);
+	if (!match?.[1]) return null;
+	if (match[1] === "new") {
+		return {
+			kind: "new",
+			spaceId: url.searchParams.get("space")?.trim() || null,
+		};
+	}
+	return { kind: "session", sessionId: match[1] };
+}
+
 export const buildUserSessionTurnRoute = (
 	sessionId: string,
 	sequence: number,

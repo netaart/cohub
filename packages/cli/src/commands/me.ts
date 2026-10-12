@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { formatLocalDateTime, handleHttp, json as outJson, jsonRequested, table } from "../output.js";
+import { SESSION_STATUS_COLUMN } from "../session-status.js";
 
 function parseInteger(value: string, name: string, min: number): number {
   const parsed = Number.parseInt(value, 10);
@@ -37,6 +38,7 @@ export function registerMe(program: Command): void {
           { key: "id", label: "ID" },
           { key: "spaceId", label: "Space" },
           { key: "title", label: "Title" },
+          SESSION_STATUS_COLUMN,
           { key: "totalMessages", label: "Messages" },
           { key: "createdAt", label: "Created" },
         ]);

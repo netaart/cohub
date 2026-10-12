@@ -1,7 +1,7 @@
 import { Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import type { BoardSketchItem } from "@cohub/protocol";
 import { BOARD_MONO_FONT_STACK } from "@cohub/protocol/board-constants";
-import type { SceneItem } from "../../core/scene.js";
+import type { SceneItem } from "../../model/scene.js";
 import { getBoardResolution } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";

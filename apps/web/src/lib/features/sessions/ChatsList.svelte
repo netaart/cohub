@@ -13,6 +13,8 @@ import {
 	type ChatsView,
 	chatsInbox,
 } from "$lib/features/sessions/chats-inbox.svelte";
+import { chatsWorkspaceScope } from "$lib/features/sessions/chats-workspace-scope";
+import { withCurrentWindow } from "$lib/features/space/modules/window-route";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { scrollListToTop } from "$lib/layout/list-scroll-top";
 import { scrollMemory } from "$lib/layout/scroll-memory";
@@ -26,7 +28,6 @@ import {
 	buildUserSessionRoute,
 } from "$lib/space-routes";
 import { type ChatsFilter, chatsFilterScope } from "$lib/stores/chats-filter";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 
 const {
 	view,
@@ -100,10 +101,18 @@ function open(event: MouseEvent, session: UserSessionListItem) {
 		return;
 	event.preventDefault();
 	onNavigate?.();
-	void goto(
-		hrefFor(session),
-		isPage ? undefined : { keepFocus: true, noScroll: true },
-	);
+	if (isPage) {
+		void goto(hrefFor(session));
+		return;
+	}
+	const href = hrefFor(session);
+	const sameSpace =
+		chatsWorkspaceScope.spaceAt(new URL(window.location.href)) ===
+		session.spaceId;
+	void goto(sameSpace ? withCurrentWindow(href) : href, {
+		keepFocus: true,
+		noScroll: true,
+	});
 }
 
 function onScroll(event: Event) {
@@ -172,7 +181,6 @@ function onScroll(event: Event) {
 						{density}
 						active={activeSessionId === session.id}
 						isMobile={isPage}
-						modelsCatalog={modelsCatalogStore.items ?? undefined}
 						showSourceBadge={!filter.source}
 						tree={row.tree}
 						tooltip={tooltipFor(row)}

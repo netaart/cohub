@@ -1,6 +1,6 @@
 import type { ContentBlock } from "../core/content.js";
 import type { BillingPayload } from "../billing.js";
-import type { MessageRecord, SessionRecord, SessionTurnRecord } from "../model/session.js";
+import type { MessageRecord, SessionForkRecord, SessionRecord, SessionTurnRecord } from "../model/session.js";
 import type { ModelThinkingLevel } from "../model/completion.js";
 import type { SessionTurnSummary } from "../model/turn.js";
 import type { TaskRunStatus } from "../task/index.js";
@@ -348,6 +348,12 @@ export type RealtimeSessionRecord = Pick<
   participantUserUuids?: string[];
 };
 
+/** Sent only while the parent is exactly as visible as the child; never carries titles. */
+export type RealtimeSessionFork = Pick<
+  SessionForkRecord,
+  "childSessionId" | "parentSessionId" | "depth" | "anchorSequence"
+>;
+
 export type SessionCreatedEvent = {
   id: string;
   timestamp: number;
@@ -356,7 +362,7 @@ export type SessionCreatedEvent = {
   requestId?: string | null;
   spaceId: string;
   sessionId: string;
-  payload: { session: RealtimeSessionRecord };
+  payload: { session: RealtimeSessionRecord; fork?: RealtimeSessionFork };
 };
 
 export type SessionUpdatedEvent = {
