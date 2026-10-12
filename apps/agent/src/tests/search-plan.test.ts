@@ -8,12 +8,11 @@ import {
   buildRgGlobArgv,
   buildRgPlanRuns,
   chunkArgs,
-  diffSets,
   escapeGlobPath,
+  formatFdPath,
   joinSearchPath,
   onlyVanishedFdRoots,
   onlyVanishedTargets,
-  rgMatchKeys,
 } from "../runtime/tools/search-plan.js";
 
 const flags = ["rg", "--json"];
@@ -39,6 +38,7 @@ test("plans search text files explicitly and walk files through their parent", (
       argv: [
         "rg", "--json", "--max-depth", "1",
         "--glob", "/src/nested/c.bin", "--glob", "/src/nested/d.log", "--glob", "/src/e.bin",
+        "--glob", "!.git", "--glob", "!.cohub-upload.*",
         "--", "needle", "src/nested", "src",
       ],
       targets: ["src/nested", "src"],
@@ -93,10 +93,11 @@ test("plans split into runs that fit the argv limits", () => {
     pattern: "needle",
     searchPath: "src",
     plan: { root: "src", files, walkFiles: files.map((file) => `dir-${file}/x.bin`), dirs: [] },
-    limits: { maxItems: 10, maxBytes: 64 * 1024 },
+    limits: { maxItems: 16, maxBytes: 64 * 1024 },
   });
   assert.ok(runs);
-  for (const run of runs) assert.ok(run.argv.length <= 10, `run has ${run.argv.length} items`);
+  for (const run of runs) assert.ok(run.argv.length <= 16, `run has ${run.argv.length} items`);
+  assert.ok(runs.filter((run) => run.argv.includes("--max-depth")).length > 1, "walk files split across runs");
   const explicit = runs.filter((run) => !run.argv.includes("--max-depth")).flatMap((run) => run.targets);
   assert.deepEqual(explicit, files.map((file) => `src/${file}`));
   const globs = runs.flatMap((run) => run.argv.filter((item) => item.startsWith("/src/dir-")));
@@ -139,7 +140,7 @@ test("tool exclusions follow the user glob so it cannot bring them back", () => 
   assert.deepEqual(buildRgGlobArgv("*"), ["--glob", "*", "--glob", "!.git", "--glob", "!.cohub-upload.*"]);
 });
 
-test("rg gives the later glob precedence, so a user glob never searches .git", { skip: !hasRg() }, () => {
+test("rg gives the later glob precedence, so a user glob never searches .git", { skip: !hasTool("rg") }, () => {
   const root = mkdtempSync(join(tmpdir(), "rg-globs-"));
   try {
     mkdirSync(join(root, ".git"));
@@ -156,23 +157,55 @@ test("rg gives the later glob precedence, so a user glob never searches .git", {
 test("only planned fd roots that vanished are ignorable", () => {
   const roots = ["/workspace/build", "/workspace/dist"];
   assert.equal(onlyVanishedFdRoots("[fd error]: Search path '/workspace/build' is not a directory.\n", roots), true);
+  assert.equal(onlyVanishedFdRoots([
+    "[fd error]: Search path '/workspace/build' is not a directory.",
+    "[fd error]: Search path '/workspace/dist' is not a directory.",
+    "[fd error]: No valid search paths given.",
+    "",
+  ].join("\n"), roots), true);
+  assert.equal(onlyVanishedFdRoots("[fd error]: No valid search paths given.\n", roots), false);
   assert.equal(onlyVanishedFdRoots("[fd error]: Search path '/workspace/other' is not a directory.", roots), false);
   assert.equal(onlyVanishedFdRoots("[fd error]: Permission denied", roots), false);
   assert.equal(onlyVanishedFdRoots("", roots), false);
 });
 
-test("shadow comparisons key rg matches by path and line", () => {
-  const match = (path: string, line: number) => JSON.stringify({ type: "match", data: { path: { text: path }, line_number: line } });
-  const walk = rgMatchKeys([match("./a.ts", 1), match("./b.ts", 2), JSON.stringify({ type: "summary" })]);
-  const plan = rgMatchKeys([match("./a.ts", 1), match("./c.ts", 3), "not json"]);
-  assert.deepEqual([...walk], ["./a.ts:1", "./b.ts:2"]);
-  assert.deepEqual(diffSets(walk, plan), { missing: 1, extra: 1, sample: ["./b.ts:2", "./c.ts:3"] });
-  assert.deepEqual(diffSets(walk, walk), { missing: 0, extra: 0, sample: [] });
+test("fd's error for vanished roots is recognised", { skip: !hasTool("fd") }, () => {
+  const root = mkdtempSync(join(tmpdir(), "fd-roots-"));
+  try {
+    const roots = [join(root, "build"), join(root, "dist")];
+    let stderr = "";
+    try {
+      execFileSync("fd", ["--type", "f", ".", ...roots], { encoding: "utf8", stdio: "pipe" });
+    } catch (error) {
+      stderr = String((error as { stderr?: string }).stderr ?? "");
+    }
+    assert.equal(onlyVanishedFdRoots(stderr, roots), true, stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
-function hasRg() {
+test("fd output keeps names verbatim, as the index lists them", { skip: !hasTool("fd") }, () => {
+  const root = mkdtempSync(join(tmpdir(), "fd-names-"));
   try {
-    execFileSync("rg", ["--version"]);
+    mkdirSync(join(root, "d ir"));
+    for (const name of ["a\\b.txt", "trailing.txt ", " leading.txt", "d ir/x.txt"]) writeFileSync(join(root, name), "");
+    const expected = [" leading.txt", "a\\b.txt", "d ir", "d ir/x.txt", "trailing.txt "];
+    for (const searchPath of [root, `${root}/`]) {
+      const lines = execFileSync("fd", ["--hidden", "--", ".", searchPath], { encoding: "utf8" }).split("\n").filter(Boolean);
+      assert.deepEqual(lines.map((line) => formatFdPath(line, searchPath)).sort(), expected);
+    }
+    const relative = execFileSync("fd", ["--hidden", "--", ".", "."], { cwd: root, encoding: "utf8" }).split("\n").filter(Boolean);
+    assert.deepEqual(relative.map((line) => formatFdPath(line, ".")).sort(), expected);
+    assert.equal(formatFdPath(`${root}/`, root), ".");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function hasTool(name: string) {
+  try {
+    execFileSync(name, ["--version"]);
     return true;
   } catch {
     return false;

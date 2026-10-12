@@ -36,12 +36,12 @@ import {
   buildRgGlobArgv,
   buildRgPlanRuns,
   chunkArgs,
-  diffSets,
+  type FindPlan,
+  formatFdPath,
   joinSearchPath,
   onlyVanishedFdRoots,
   onlyVanishedTargets,
   PROCESS_ARGV_LIMITS,
-  rgMatchKeys,
   SEARCH_TOOL_EXCLUDES,
   type RgRun,
 } from "../runtime/tools/search-plan.js";
@@ -918,8 +918,19 @@ function isSandboxWorkspacePath(searchPath: string) {
 /**
  * Why a grep or find did or did not use the workspace index: `plan`, a
  * sandbox fallback reason, or an agent-side reason. Recorded on the tool span.
+ * `direct_write`: a write that bypassed the sandbox may still be invisible to
+ * it. `legacy`: the sandbox runs neither rg nor fd for the agent.
  */
-type SearchIndexOutcome = "plan" | FsSearchFallback | "disabled" | "no_write_token" | "rpc_error" | "argv";
+type SearchIndexOutcome =
+  | "plan"
+  | FsSearchFallback
+  | "disabled"
+  | "legacy"
+  | "ignore"
+  | "direct_write"
+  | "write_token_error"
+  | "rpc_error"
+  | "argv";
 
 function recordSearchIndexOutcome(tool: "find" | "grep", outcome: SearchIndexOutcome) {
   trace.getActiveSpan()?.setAttribute("cohub.search_index.outcome", outcome);
@@ -932,19 +943,21 @@ function recordSearchIndexOutcome(tool: "find" | "grep", outcome: SearchIndexOut
  * runs alone.
  */
 async function searchIndexWriteToken(tool: "find" | "grep", connection: SandboxConnection, path: string): Promise<string | null> {
-  if (agentEnv.AGENT_SEARCH_INDEX === "off" || connection.capabilities?.fsSearchIndex !== true || !isSandboxWorkspacePath(path)) {
+  if (connection.capabilities?.fsSearchIndex !== true || !isSandboxWorkspacePath(path)) {
     recordSearchIndexOutcome(tool, "disabled");
     return null;
   }
-  const token = await readWorkspaceWriteToken(workspaceWrites, getCurrentSpaceId()).catch((error) => {
+  let token: string | null;
+  try {
+    token = await readWorkspaceWriteToken(workspaceWrites, getCurrentSpaceId());
+  } catch (error) {
     logger.warn(`[Tool:${tool}] failed to read the workspace write token`, error);
+    recordSearchIndexOutcome(tool, "write_token_error");
     return null;
-  });
-  if (!token) recordSearchIndexOutcome(tool, "no_write_token");
+  }
+  if (!token) recordSearchIndexOutcome(tool, "direct_write");
   return token;
 }
-
-type FindIndexMatches = { matches: string[]; truncated: boolean; dirs: string[] };
 
 /**
  * Asks the workspace path index what fd would list. Returns null whenever the
@@ -952,9 +965,14 @@ type FindIndexMatches = { matches: string[]; truncated: boolean; dirs: string[] 
  */
 async function resolveFindIndexMatches(
   connection: SandboxConnection,
-  input: { pattern: string; useFullPath: boolean; path: string; limit: number },
+  input: { pattern: string; useFullPath: boolean; path: string; limit: number; ignore?: string[] },
   context: ToolRpcContext,
-): Promise<FindIndexMatches | null> {
+): Promise<FindPlan | null> {
+  // The index does not apply caller exclusions.
+  if (input.ignore?.length) {
+    recordSearchIndexOutcome("find", "ignore");
+    return null;
+  }
   const writeToken = await searchIndexWriteToken("find", connection, input.path);
   if (!writeToken) return null;
   try {
@@ -1000,9 +1018,9 @@ async function executeFdRoots(
       lineBuffer += output;
       const lines = lineBuffer.split("\n");
       lineBuffer = lines.pop() ?? "";
-      for (const line of lines) input.onMatch(formatFdFindPath(line.trim(), input.path));
+      for (const line of lines) input.onMatch(formatFdPath(line, input.path));
     });
-    if (lineBuffer.trim()) input.onMatch(formatFdFindPath(lineBuffer.trim(), input.path));
+    if (lineBuffer) input.onMatch(formatFdPath(lineBuffer, input.path));
     input.onChunk?.();
 
     if (runner.aborted) return { kind: "aborted", note: "Operation aborted." };
@@ -1018,14 +1036,6 @@ async function executeFdRoots(
     }
   }
   return { kind: "complete" };
-}
-
-function formatFdFindPath(filePath: string, searchPath: string) {
-  const file = toPosixPath(filePath).replace(/\/$/, "");
-  const search = toPosixPath(searchPath).replace(/\/$/, "");
-  if (file === search) return ".";
-  if (file.startsWith(`${search}/`)) return file.slice(search.length + 1);
-  return file.replace(/^\.\//, "");
 }
 
 function findLimitNote(limit: number) {
@@ -1071,25 +1081,22 @@ function createRemoteFindOperations(): FindOperations {
           const flags = buildFdFindFlags({ useFullPath, ignore: options.ignore });
           const matches: string[] = [];
           const updates = createThrottledTextToolUpdate(options.onUpdate, { maxChars: DEFAULT_MAX_BYTES });
+          const isVisible = (match: string) => {
+            if (baseRelative == null) return true;
+            return filter.isVisible(match === "." ? baseRelative : baseRelative ? `${baseRelative}/${match}` : match);
+          };
           const pushMatch = (match: string) => {
-            if (!match || matches.length >= options.limit) return;
-            if (baseRelative != null) {
-              const relativePath = match === "." ? baseRelative : baseRelative ? `${baseRelative}/${match}` : match;
-              if (!filter.isVisible(relativePath)) return;
-            }
+            if (!match || matches.length >= options.limit || !isVisible(match)) return;
             matches.push(match);
             updates.push(matches.join("\n"));
           };
 
-          const indexed = options.ignore?.length
-            ? null
-            : await resolveFindIndexMatches(connection, { pattern: effectivePattern, useFullPath, path, limit: options.limit }, rpcContext);
-          const answeredByIndex = agentEnv.AGENT_SEARCH_INDEX === "on" && indexed !== null;
-          if (answeredByIndex) for (const match of indexed.matches) pushMatch(match);
+          const indexed = await resolveFindIndexMatches(connection, { pattern: effectivePattern, useFullPath, path, limit: options.limit, ignore: options.ignore }, rpcContext);
+          if (indexed) for (const match of indexed.matches) pushMatch(match);
           // The index lists every entry except the contents of directories
           // outside the watched domain, which fd still walks.
-          const roots = answeredByIndex ? indexed.dirs.map((dir) => joinSearchPath(path, dir)) : [path];
-          const newRunner = () => new SandboxProcessRunner({
+          const roots = indexed ? indexed.dirs.map((dir) => joinSearchPath(path, dir)) : [path];
+          const runner = new SandboxProcessRunner({
             connection,
             context: rpcContext,
             toolName: "find",
@@ -1099,42 +1106,20 @@ function createRemoteFindOperations(): FindOperations {
             maxStderrBytes: FD_FIND_MAX_STDERR_BYTES,
             signal: toolCtx?.abortSignal,
           });
-          const fd = { flags, pattern: effectivePattern, path };
-
-          const runner = newRunner();
           let outcome: FdRootsOutcome;
           try {
-            outcome = await executeFdRoots(roots, runner, { ...fd, planned: answeredByIndex, limit: () => options.limit - matches.length, onMatch: pushMatch, onChunk: () => updates.flush() });
+            outcome = await executeFdRoots(roots, runner, { flags, pattern: effectivePattern, path, planned: indexed !== null, limit: () => options.limit - matches.length, onMatch: pushMatch, onChunk: () => updates.flush() });
           } finally {
             runner.dispose();
           }
           updates.flush();
           if (outcome.kind === "aborted") return { matches, note: outcome.note };
           if (outcome.kind === "outputLimit") return { matches, note: FD_FIND_OUTPUT_LIMIT_MESSAGE, details: { outputLimitReached: true, partial: true } };
-          if (!answeredByIndex && indexed && !indexed.truncated && matches.length < options.limit) {
-            const shadow: string[] = [];
-            const keep = (match: string) => {
-              if (baseRelative != null) {
-                const relativePath = match === "." ? baseRelative : baseRelative ? `${baseRelative}/${match}` : match;
-                if (!filter.isVisible(relativePath)) return;
-              }
-              shadow.push(match);
-            };
-            for (const match of indexed.matches) keep(match);
-            const shadowRunner = newRunner();
-            try {
-              const shadowOutcome = await executeFdRoots(indexed.dirs.map((dir) => joinSearchPath(path, dir)), shadowRunner, { ...fd, planned: true, limit: () => options.limit, onMatch: keep });
-              recordSearchIndexShadow("find", shadowOutcome.kind === "complete" ? diffSets(new Set(matches), new Set(shadow)) : { status: "incomplete" });
-            } catch (error) {
-              logger.warn("[Tool:find] search index shadow comparison failed", error);
-            } finally {
-              shadowRunner.dispose();
-            }
-          }
-          if ((answeredByIndex && indexed.truncated) || matches.length >= options.limit) return { matches, note: findLimitNote(options.limit) };
+          if (indexed?.truncated || matches.length >= options.limit) return { matches, note: findLimitNote(options.limit) };
           return matches;
         }
 
+        recordSearchIndexOutcome("find", "legacy");
         // Agent owns tool semantics: match pi-coding-agent fd behavior.
         // In --full-path mode fd matches against the absolute candidate path,
         // so a path-containing pattern like 'src/**/*.spec.ts' needs a leading
@@ -1274,7 +1259,7 @@ async function executeRgRuns(
   runs: RgRun[],
   collector: RgJsonGrepCollector,
   runner: SandboxProcessRunner,
-  options: { limit: number | null; onOutput?: () => void },
+  options: { limit: number; onOutput?: () => void },
 ): Promise<RgRunsOutcome> {
   for (const run of runs) {
     if (runner.aborted) return { kind: "aborted" };
@@ -1294,62 +1279,9 @@ async function executeRgRuns(
     if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(collector.lines.slice(runStart))) && !ignorableRgError) {
       return { kind: "failed", message: stderr || `rg exited with code ${exitCode}` };
     }
-    if (options.limit !== null && collector.matches >= options.limit) break;
+    if (collector.matches >= options.limit) break;
   }
   return { kind: "complete" };
-}
-
-/**
- * Shadow mode: after a complete rg walk answered, run the index plan too and
- * report every match one side found and the other did not. The comparison
- * never changes the answer and never fails the tool call.
- */
-async function compareGrepShadow(input: {
-  indexRuns: RgRun[];
-  walkLines: readonly string[];
-  searchPath?: string;
-  connection: SandboxConnection;
-  context: ToolRpcContext;
-  toolCallId: string;
-  signal?: AbortSignal;
-}) {
-  const shadow = createRgJsonGrepCollector({ searchPath: input.searchPath, limit: Number.MAX_SAFE_INTEGER });
-  const runner = new SandboxProcessRunner({
-    connection: input.connection,
-    context: input.context,
-    toolName: "grep",
-    toolCallId: input.toolCallId,
-    timeoutSecs: RG_GREP_TIMEOUT_SECS,
-    maxStdoutBytes: RG_GREP_MAX_STDOUT_BYTES,
-    maxStderrBytes: RG_GREP_MAX_STDERR_BYTES,
-    signal: input.signal,
-  });
-  try {
-    const outcome = await executeRgRuns(input.indexRuns, shadow, runner, { limit: null });
-    if (outcome.kind !== "complete") {
-      recordSearchIndexShadow("grep", { status: "incomplete" });
-      return;
-    }
-    recordSearchIndexShadow("grep", diffSets(rgMatchKeys(input.walkLines), rgMatchKeys(shadow.lines)));
-  } catch (error) {
-    logger.warn("[Tool:grep] search index shadow comparison failed", error);
-  } finally {
-    runner.dispose();
-  }
-}
-
-/** A shadow difference means the index would have answered wrongly. */
-function recordSearchIndexShadow(tool: "find" | "grep", result: { status: "incomplete" } | { missing: number; extra: number; sample: string[] }) {
-  const span = trace.getActiveSpan();
-  if ("status" in result) {
-    span?.setAttribute("cohub.search_index.shadow", "incomplete");
-    return;
-  }
-  const differs = result.missing > 0 || result.extra > 0;
-  span?.setAttribute("cohub.search_index.shadow", differs ? "diff" : "match");
-  if (!differs) return;
-  span?.setAttributes({ "cohub.search_index.shadow_missing": result.missing, "cohub.search_index.shadow_extra": result.extra });
-  logger.warn(`[Tool:${tool}] search index plan differs from the walk spaceId=${getCurrentSpaceId()} missing=${result.missing} extra=${result.extra} sample=${JSON.stringify(result.sample)}`);
 }
 
 /**
@@ -1424,7 +1356,7 @@ function createRemoteGrepTool() {
         const globArgv = buildRgGlobArgv(grepInput.glob);
         const walkRuns: RgRun[] = [{ argv: [...flags, ...globArgv, "--", grepInput.pattern, searchPath], targets: [searchPath] }];
         const indexRuns = await resolveGrepIndexRuns(connection, { grep: grepInput, searchPath, flags, globArgv }, rpcContext);
-        const runs = agentEnv.AGENT_SEARCH_INDEX === "on" ? indexRuns ?? walkRuns : walkRuns;
+        const runs = indexRuns ?? walkRuns;
         const runner = new SandboxProcessRunner({
           connection,
           context: rpcContext,
@@ -1457,12 +1389,10 @@ function createRemoteGrepTool() {
           case "complete":
             break;
         }
-        if (runs === walkRuns && indexRuns && collector.matches < effectiveLimit) {
-          await compareGrepShadow({ indexRuns, walkLines: collector.lines, searchPath: grepInput.path, connection, context: rpcContext, toolCallId, signal });
-        }
         return collector.format();
       }
 
+      recordSearchIndexOutcome("grep", "legacy");
       let aborted = false;
       let activeProcessId: string | null = null;
       let abortSent = false;

@@ -27,7 +27,8 @@ export type RgRun = { argv: string[]; targets: string[] };
  *   those, and the index has already applied ignore rules and the glob.
  * - Walk files keep rg's directory-walk semantics, where binary detection
  *   stops at the first NUL instead of converting it, by walking their parent
- *   directory one level deep with an anchored whitelist glob per file.
+ *   directory one level deep with an anchored whitelist glob per file,
+ *   followed by the shared tool exclusions.
  * - Directories are walked like the full search would walk them.
  *
  * Returns null when a path cannot be expressed as an argument or glob.
@@ -52,7 +53,7 @@ export function buildRgPlanRuns(input: {
   }
 
   const walkHead = [...input.flags, "--max-depth", "1"];
-  const walkTail = ["--", input.pattern];
+  const walkTail = [...buildRgGlobArgv(undefined), "--", input.pattern];
   let globs: string[] = [];
   let parents: string[] = [];
   const flush = () => {
@@ -97,6 +98,19 @@ export function buildRgGlobArgv(glob: string | undefined): string[] {
     ...(glob?.trim() ? ["--glob", glob] : []),
     ...SEARCH_TOOL_EXCLUDES.flatMap((name) => ["--glob", `!${name}`]),
   ];
+}
+
+/**
+ * One line of fd output relative to `searchPath`, the way the index lists
+ * entries. Names stay verbatim, backslashes and surrounding spaces included;
+ * only fd's trailing slash on directories is dropped.
+ */
+export function formatFdPath(line: string, searchPath: string): string {
+  const file = line.replace(/\/$/, "");
+  const search = searchPath.replace(/\/$/, "");
+  if (file === search) return ".";
+  if (file.startsWith(`${search}/`)) return file.slice(search.length + 1);
+  return file.replace(/^\.\//, "");
 }
 
 /** Mirror how rg and fd print paths below a `searchPath` argument. */
@@ -151,13 +165,16 @@ export function onlyVanishedTargets(stderr: string, targets: string[]): boolean 
 }
 
 const FD_MISSING_ROOT = /^\[fd error\]: Search path '(.+)' is not a directory\.$/;
+const FD_NO_ROOTS = "[fd error]: No valid search paths given.";
 
 /**
  * True when fd only reports search roots that vanished after the plan was
- * made. fd fails only when every root of the invocation is gone.
+ * made. fd fails only when every root of the invocation is gone, and then
+ * ends with FD_NO_ROOTS after naming each of them.
  */
 export function onlyVanishedFdRoots(stderr: string, roots: string[]): boolean {
   const lines = stderr.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.at(-1) === FD_NO_ROOTS) lines.pop();
   if (lines.length === 0) return false;
   const named = new Set(roots);
   return lines.every((line) => {
@@ -166,27 +183,8 @@ export function onlyVanishedFdRoots(stderr: string, roots: string[]): boolean {
   });
 }
 
-/** `path:line` of every match event in rg `--json` output. */
-export function rgMatchKeys(lines: readonly string[]): Set<string> {
-  const keys = new Set<string>();
-  for (const line of lines) {
-    let event: { type?: string; data?: { path?: { text?: string }; line_number?: number } };
-    try {
-      event = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (event.type === "match") keys.add(`${event.data?.path?.text ?? ""}:${event.data?.line_number ?? ""}`);
-  }
-  return keys;
-}
-
-/** Entries only one side of a shadow comparison found, capped for logging. */
-export function diffSets(expected: ReadonlySet<string>, actual: ReadonlySet<string>, sample = 5) {
-  const missing = [...expected].filter((key) => !actual.has(key));
-  const extra = [...actual].filter((key) => !expected.has(key));
-  return { missing: missing.length, extra: extra.length, sample: [...missing, ...extra].slice(0, sample) };
-}
+/** What the path index answered for a find. */
+export type FindPlan = { matches: string[]; truncated: boolean; dirs: string[] };
 
 function parentOf(path: string) {
   const slash = path.lastIndexOf("/");
