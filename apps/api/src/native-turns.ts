@@ -12,6 +12,7 @@ import { addUsage, buildIntermediateObjectsForTurn } from "./session-turns.js";
 import { adoptNativeStreamSnapshot, cacheNativeTurnBinding, clearNativeTurnBinding, releaseNativeStreamSnapshot } from "./native-turn-progress.js";
 import { enqueueAgentTurnJob } from "./agent-turn-queue.js";
 import { createLogger } from "@cohub/infra/logging";
+import type { RealtimeSessionFork } from "@cohub/protocol/realtime";
 
 const nativeLogger = createLogger({ serviceName: "cohub-api" });
 const terminal = new Set<string>(SETTLED_TURN_STATUSES);
@@ -166,7 +167,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
 
 /** Follow-up work of an ingest batch, performed after the response; never part of the wire result. */
 export type NativeIngestEffects = {
-  createdSessions: string[];
+  createdSessions: Array<{ sessionId: string; fork?: RealtimeSessionFork }>;
   turns: Array<{ sessionId: string; turnId: string; created: boolean; changed: boolean; imported: boolean }>;
 };
 
@@ -219,7 +220,7 @@ export async function ingestNativeTurns(spaceId: string, userId: string, input: 
       await adoptNativeStreamSnapshot(spaceId, binding.sessionId, binding.turnId, userMessageId);
     }
     if (fork) await publishSessionFork(fork).catch((error) => nativeLogger.warn("[NativeTurn] fork publish failed", { error }));
-    if (sessionCreated) effects.createdSessions.push(binding.sessionId);
+    if (sessionCreated) effects.createdSessions.push({ sessionId: binding.sessionId, ...(fork ? { fork: fork.fork } : {}) });
     if (created || changed) effects.turns.push({ sessionId: binding.sessionId, turnId: binding.turnId, created, changed, imported: turn.origin === "local_import" });
     turns.push({ turnId: binding.turnId, sessionId: binding.sessionId, forked: binding.forked, settled: Boolean(turn.result), created, changed });
     sessions.set(binding.turnId, binding.sessionId);

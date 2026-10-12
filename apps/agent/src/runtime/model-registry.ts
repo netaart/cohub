@@ -14,12 +14,6 @@ export type CohubModel<TApi extends Api = Api> = Model<TApi> & {
   imageUrlInput?: boolean;
 };
 
-function resolveApiKey(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const envValue = process.env[value];
-  return envValue && envValue.trim().length > 0 ? envValue.trim() : value;
-}
-
 function finiteNumberOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -53,7 +47,7 @@ export class CohubModelRegistry {
     const mergedModels = new Map<string, CohubModel>();
 
     for (const [provider, providerConfig] of Object.entries(mergedConfig.providers)) {
-      const apiKey = resolveApiKey(providerConfig.apiKey);
+      const apiKey = providerConfig.apiKey;
       if (apiKey) this.providerApiKeys.set(provider, apiKey);
 
       for (const modelDef of providerConfig.models ?? []) {

@@ -45,8 +45,6 @@ type Props = {
 	/** Local catalogs share search/selection, without Cloud generation policy. */
 	showGeneration?: boolean;
 	title?: string;
-	onSelectDefault?: () => void;
-	defaultLabel?: string;
 	onClose: () => void;
 	onSelect: (item: {
 		provider: string;
@@ -96,8 +94,6 @@ const {
 	open,
 	showGeneration = true,
 	title,
-	onSelectDefault,
-	defaultLabel,
 	onClose,
 	onSelect,
 	models,
@@ -994,12 +990,6 @@ const hoverCardPos = $derived.by(() => {
 
 	{/if}
 	{#if activeTab === "chat" || !showGeneration}
-		{#if onSelectDefault}
-			<button type="button" class="flex min-h-11 w-full items-center justify-between gap-3 border-b border-border-subtle px-4 py-2 text-left text-[13px] text-text-secondary hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-brand" onclick={onSelectDefault} aria-pressed={!currentModel}>
-				<span>{defaultLabel ?? m.runtime_default_model({}, { locale })}</span>
-				{#if !currentModel}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
-			</button>
-		{/if}
 		<div class="border-b border-border-subtle/70 px-3 py-2">
 			<input
 				bind:this={searchInputEl}

@@ -1,8 +1,8 @@
 import { Container, Graphics, Text } from "pixi.js";
 import type { BoardArrowItem } from "@cohub/protocol";
 import { BOARD_ARROW_STROKE_SIZE, BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
-import { resolveSceneArrow, pathPointAt } from "../../core/arrow-geometry.js";
-import type { SceneItem } from "../../core/scene.js";
+import { resolveSceneArrow, pathPointAt } from "../../model/arrow-geometry.js";
+import type { SceneItem } from "../../model/scene.js";
 import { itemColor } from "../palette.js";
 import { dashPattern, endAngle, traceArrowhead, tracePolyline, trimPolyline } from "../stroke.js";
 import { syncTextResolution, textResolutionForZoom } from "../text-resolution.js";

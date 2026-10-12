@@ -270,7 +270,7 @@ async function runCodex(executor: Executor, turn: Turn, context?: RuntimeDiagnos
         if (host) escalation = setTimeout(() => void host?.close().catch(() => undefined), ABORT_ESCALATION_MS);
       };
       signal.addEventListener("abort", abort, { once: true });
-      codex.request("turn/start", { threadId, clientUserMessageId: input.turnId, input: content, ...(input.thinkingLevel ? { effort: input.thinkingLevel } : {}) })
+      codex.request("turn/start", { threadId, clientUserMessageId: input.turnId, input: content, ...(input.thinkingLevel ? { effort: input.thinkingLevel === "off" ? "none" : input.thinkingLevel } : {}) })
         .then((result) => { nativeTurnId ??= text(record(result.turn).id) || null; if (signal.aborted) interrupt(); })
         .catch(finish);
     }).finally(() => executor.codex.driving.delete(threadId));

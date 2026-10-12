@@ -1,5 +1,7 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
+import { prefersReducedMotion } from "svelte/motion";
+import { slide } from "svelte/transition";
 
 const {
 	title,
@@ -9,7 +11,7 @@ const {
 	lead,
 	subtitle,
 }: {
-	title: string;
+	title: string | Snippet;
 	tooltip?: string;
 	badge?: Snippet;
 	meta?: Snippet;
@@ -18,10 +20,10 @@ const {
 } = $props();
 </script>
 
-<span class="flex min-w-0 flex-1 flex-col justify-center gap-0.5 self-stretch overflow-hidden">
+<span class="flex min-w-0 flex-1 flex-col justify-center gap-0.5 self-stretch overflow-hidden text-start">
 	<span class="list-row-title flex min-w-0 items-center gap-2">
 		<span class="flex min-w-0 flex-1 items-center gap-1.5">
-			<span class="list-row-title-text min-w-0 truncate" title={tooltip}>{title}</span>
+			<span class="list-row-title-text min-w-0 truncate" title={tooltip}>{#if typeof title === "string"}{title}{:else}{@render title()}{/if}</span>
 			{@render badge?.()}
 		</span>
 		{#if meta}
@@ -29,7 +31,7 @@ const {
 		{/if}
 	</span>
 	{#if lead || subtitle}
-		<span class="list-row-subtitle flex min-w-0 items-center gap-2">
+		<span class="list-row-subtitle flex min-w-0 items-center gap-2" transition:slide={{ duration: prefersReducedMotion.current ? 0 : 180 }}>
 			{@render lead?.()}
 			{#if subtitle}
 				<span class="min-w-0 flex-1 truncate">{@render subtitle()}</span>

@@ -4,15 +4,16 @@ import type {
 	BoardPlaybackSnapshot,
 } from "@cohub/protocol";
 import {
-	nextLocalPlayback,
 	parseBoardDocument,
 	screenToWorld,
-	shapeCapabilities,
 	taskRunToBoardTaskSnapshot as taskBoardSnapshot,
 	worldPoint,
 } from "@neta-art/cohub/board";
+import { defaultBoardTool } from "@neta-art/cohub/board/editor";
+import { nextLocalPlayback } from "@neta-art/cohub/board/player";
+import { createBoardAssetManager } from "@neta-art/cohub/board/stage";
 import { onDestroy, onMount, untrack } from "svelte";
-import { createBoardAssetManager } from "$lib/board/board-asset-manager";
+import { createBoardAppItemView } from "$lib/board/board-app-view.svelte";
 import { createSpaceBoardAssetSource } from "$lib/board/board-asset-source";
 import {
 	type BoardAwarenessController,
@@ -35,7 +36,6 @@ import {
 import type { BoardStageExportBridge } from "$lib/board/board-image-export";
 import { playableBoardMedia } from "$lib/board/board-media-playback";
 import type { BoardBackgroundLoadState } from "$lib/board/board-theme";
-import { defaultBoardTool } from "$lib/board/board-tool";
 import {
 	type BoardViewPreference,
 	boardViewPreferenceFromCamera,
@@ -47,7 +47,6 @@ import { createBoardEditor } from "$lib/board/editor.svelte";
 import type { BoardRuntimeProps } from "$lib/board/runtime/board-runtime";
 import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
 import BoardAppearancePopover from "$lib/components/board/BoardAppearancePopover.svelte";
-import BoardAppOverlay from "$lib/components/board/BoardAppOverlay.svelte";
 import BoardArrowToolbar from "$lib/components/board/BoardArrowToolbar.svelte";
 import BoardCollaboratorOverlay from "$lib/components/board/BoardCollaboratorOverlay.svelte";
 import BoardContextMenu from "$lib/components/board/BoardContextMenu.svelte";
@@ -106,14 +105,19 @@ const resolvedAssetSource = $derived(
 );
 
 const assets = createBoardAssetManager({
-	spaceId: untrack(() => spaceId),
 	loadVideoPreviews:
 		typeof navigator === "undefined" ||
 		!(navigator as Navigator & { connection?: { saveData?: boolean } })
 			.connection?.saveData,
-	resolveSpaceFileUrl: (_spaceId, path) =>
+	resolveFileUrl: (path) =>
 		untrack(() => resolvedAssetSource).resolveFileUrl(path),
 });
+const itemViews = [
+	createBoardAppItemView({
+		shell: () => shell,
+		onNavigationOpen: () => onNavigationOpen,
+	}),
+];
 
 let stageWrap: HTMLDivElement | null = $state(null);
 let contextMenu = $state<{ x: number; y: number } | null>(null);
@@ -316,7 +320,6 @@ function scheduleViewPreference(preference: BoardViewPreference) {
 }
 
 function handleSurfaceChange(size: { width: number; height: number }) {
-	editor.surfaceSize = size;
 	surfaceSize = size;
 	if (viewPreferenceRestored || size.width <= 0 || size.height <= 0) return;
 	viewPreferenceRestored = true;
@@ -579,7 +582,7 @@ function handleKeydown(event: KeyboardEvent) {
 				void onOpenTask?.((single.props as { taskRunId: string }).taskRunId);
 				return;
 			}
-			if (!single.locked && shapeCapabilities(single).canEdit)
+			if (!single.locked && editor.registry.capabilities(single).canEdit)
 				editor.editingId = single.id;
 			return;
 		}
@@ -853,19 +856,12 @@ onDestroy(() => {
 			{onOpenFile}
 			onPlayMedia={playMedia}
 			onPointerPresence={(cursor) => { if (!readonly) awareness.setCursor(cursor); }}
+			views={itemViews}
 			onSurfaceChange={handleSurfaceChange}
 			onExportReady={(bridge) => { exportBridge = bridge; }}
 			onBackgroundLoadStateChange={(state) => { backgroundLoadState = state; }}
 			onLongPress={isMobile ? handleLongPress : undefined}
 			highlightedIds={changedIds}
-		/>
-		<BoardAppOverlay
-			{editor}
-			{spaceId}
-			{readonly}
-			surface={surfaceSize}
-			{shell}
-			onNavigationOpen={onNavigationOpen}
 		/>
 
 		{#if !readonly}

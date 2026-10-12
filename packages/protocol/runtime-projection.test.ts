@@ -43,6 +43,26 @@ test("Codex projection emits a native rollout and excludes external images", () 
   assert.equal(JSON.stringify(result.records).includes("example.invalid"), false);
 });
 
+test("Codex projection shortens call ids over the Responses 64-char limit and keeps pairs linked", () => {
+  const longId = `toolu_${"x".repeat(80)}`;
+  const result = projectNativeSession({ spaceId: "space", sessionId, nativeSessionId: "native", cwd: "/repo", turns: [turn([
+    message("assistant", "assistant", [
+      { type: "tool_use", id: longId, name: "shell", input: { command: "pwd" } },
+      { type: "tool_result", tool_use_id: longId, content: "/repo" },
+      { type: "tool_use", id: "call-short", name: "shell", input: { command: "ls" } },
+    ]),
+  ])] }, "codex");
+  const callIds = result.records.flatMap((entry) => {
+    const payload = entry.record.payload as { call_id?: string } | undefined;
+    return payload?.call_id ? [payload.call_id] : [];
+  });
+  assert.equal(callIds.length, 3);
+  assert(callIds.every((id) => id.length <= 64));
+  assert.equal(callIds[0], callIds[1]);
+  assert.notEqual(callIds[0], longId);
+  assert.equal(callIds[2], "call-short");
+});
+
 test("Codex projection preserves non-completed turn states as aborted terminal events", () => {
   for (const status of ["failed", "cancelled", "merged", "interrupted"] as const) {
     const result = projectNativeSession({ spaceId: "space", sessionId, nativeSessionId: "native", cwd: "/repo", turns: [{ ...turn([]), status }] }, "codex");

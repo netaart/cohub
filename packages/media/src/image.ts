@@ -6,15 +6,16 @@ export const IMAGE_MAX_INPUT_BYTES = 32 * 1024 * 1024;
 export const IMAGE_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const IMAGE_MAX_INPUT_PIXELS = 64_000_000;
 
-const ENCODE_ATTEMPTS = [
-  { edge: IMAGE_MAX_EDGE, quality: 86 },
-  { edge: IMAGE_MAX_EDGE, quality: 78 },
-  { edge: 1600, quality: 78 },
-  { edge: 1600, quality: 70 },
-  { edge: 1280, quality: 70 },
-  { edge: 1280, quality: 62 },
-  { edge: 1024, quality: 62 },
-];
+export type ImageProfile = { maxEdge: number; quality: number };
+
+export const STORED_IMAGE: ImageProfile = { maxEdge: IMAGE_MAX_EDGE, quality: 86 };
+
+const FALLBACK_EDGES = [1600, 1280, 1024];
+const QUALITY_STEP = 8;
+
+const encodeAttempts = ({ maxEdge, quality }: ImageProfile) =>
+  [maxEdge, ...FALLBACK_EDGES.filter((edge) => edge < maxEdge)].flatMap((edge, index) =>
+    [0, 1].map((step) => ({ edge, quality: quality - QUALITY_STEP * (index + step) })));
 
 const PASSTHROUGH_FORMATS: Record<string, string> = {
   jpeg: "image/jpeg",
@@ -22,6 +23,8 @@ const PASSTHROUGH_FORMATS: Record<string, string> = {
   webp: "image/webp",
   gif: "image/gif",
 };
+
+const KEPT_FORMATS = new Set(["webp", "gif"]);
 
 export type NormalizedImage = {
   data: Buffer;
@@ -38,7 +41,7 @@ export type NormalizedImage = {
   };
 };
 
-export async function normalizeImage(data: Buffer, mimeType?: string | null): Promise<NormalizedImage> {
+export async function normalizeImage(data: Buffer, mimeType?: string | null, profile: ImageProfile = STORED_IMAGE): Promise<NormalizedImage> {
   if (data.byteLength === 0) throw new Error("Image is empty");
   if (data.byteLength > IMAGE_MAX_INPUT_BYTES) throw new Error(`Image exceeds ${IMAGE_MAX_INPUT_BYTES} bytes`);
 
@@ -54,17 +57,19 @@ export async function normalizeImage(data: Buffer, mimeType?: string | null): Pr
   };
 
   const upright = !metadata.orientation || metadata.orientation === 1;
-  const fits = (metadata.width ?? Infinity) <= IMAGE_MAX_EDGE && (metadata.height ?? Infinity) <= IMAGE_MAX_EDGE;
-  if (passthroughMimeType && upright && fits && data.byteLength <= IMAGE_MAX_OUTPUT_BYTES) {
-    return { data, mimeType: passthroughMimeType, changed: false, width: original.width, height: original.height, original };
-  }
+  const fits = (metadata.width ?? Infinity) <= profile.maxEdge && (metadata.height ?? Infinity) <= profile.maxEdge;
+  const passthrough: NormalizedImage | null = passthroughMimeType && upright && fits && data.byteLength <= IMAGE_MAX_OUTPUT_BYTES
+    ? { data, mimeType: passthroughMimeType, changed: false, width: original.width, height: original.height, original }
+    : null;
+  if (passthrough && KEPT_FORMATS.has(metadata.format)) return passthrough;
 
-  for (const attempt of ENCODE_ATTEMPTS) {
+  for (const attempt of encodeAttempts(profile)) {
     const output = await sharp(data, options)
       .rotate()
       .resize(attempt.edge, attempt.edge, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: attempt.quality })
       .toBuffer({ resolveWithObject: true });
+    if (passthrough && output.data.byteLength >= data.byteLength) return passthrough;
     if (output.data.byteLength <= IMAGE_MAX_OUTPUT_BYTES) {
       return { data: output.data, mimeType: "image/webp", changed: true, width: output.info.width, height: output.info.height, original };
     }

@@ -1,5 +1,5 @@
 import { normalizeImage, type NormalizedImage } from "@cohub/media";
-import { IMAGE_UNAVAILABLE_TEXT, imageUrlContent, type PiImageContent } from "@cohub/protocol/core";
+import { IMAGE_UNAVAILABLE_TEXT, imageUrlContent, MODEL_IMAGE, type PiImageContent } from "@cohub/protocol/core";
 import { createSessionImageUpload } from "./api.js";
 import { logger } from "./logger.js";
 import { getCurrentSessionExecutionAuth } from "./runtime/session-execution-auth.js";
@@ -34,5 +34,7 @@ export async function prepareToolImage(input: { data: Buffer; mimeType: string; 
     logger.warn(`[ToolImage] hosting failed; sending inline label=${input.label ?? "unknown"}:`, error);
     return null;
   });
-  return url ? imageUrlContent(url) : { type: "image", data: image.data.toString("base64"), mimeType: image.mimeType };
+  if (url) return imageUrlContent(url);
+  const inline = await normalizeImage(input.data, input.mimeType, MODEL_IMAGE).catch(() => image);
+  return { type: "image", data: inline.data.toString("base64"), mimeType: inline.mimeType };
 }

@@ -5,10 +5,9 @@ import {
   setSessionTitleMeta,
 } from "@cohub/core/sessions";
 import { sessionMessages, spaceSessions } from "@cohub/db";
-import {
-  resolveModelTaskApiKey,
-  type ModelTaskConfig,
-  type ModelTaskModelConfig,
+import type {
+  ModelTaskConfig,
+  ModelTaskModelConfig,
 } from "@cohub/infra/config-runtime/model-tasks";
 import {
   SESSION_TITLE_GENERATE_JOB,
@@ -54,7 +53,7 @@ function toRuntimeModel(config: ModelTaskModelConfig): Model<Api> & Pick<ModelTa
 }
 
 function createTaskRegistry(task: ModelTaskConfig, model: Model<Api>) {
-  const apiKey = resolveModelTaskApiKey(task.model.apiKey);
+  const apiKey = task.model.apiKey;
   return {
     getAvailable: () => [model],
     getApiKey: (provider: string) => provider === model.provider ? apiKey : undefined,

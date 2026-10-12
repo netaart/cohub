@@ -57,7 +57,7 @@ export function createSessionGenerationRealtimeController(options: {
 	hasExplicitScrollTarget: (sessionId: string) => boolean;
 	getSessionState: (id: string) => SessionViewState | undefined;
 	updateSessionState: (id: string, state: SessionViewState) => void;
-	refreshSessionsList: (force?: boolean) => Promise<void>;
+	refreshSessionsList: () => Promise<void>;
 	requestBottomFollow: (options?: { immediate?: boolean }) => void;
 	shouldAutoFollow: () => boolean;
 	getListEl: () => HTMLElement | null | undefined;
@@ -338,7 +338,7 @@ export function createSessionGenerationRealtimeController(options: {
 	const recoveryCoordinator = new SessionRecoveryCoordinator({
 		isTransportOpen: () => options.getConnectionState() === "open",
 		reconcileSessionTail: (sessionId) => reconcileSessionTail(sessionId),
-		refreshSessionsList: () => options.refreshSessionsList(true),
+		refreshSessionsList: () => options.refreshSessionsList(),
 		onRecovered: () => {
 			options.onRecovered();
 			clearPostSendRecovery(options.getActiveSessionId());

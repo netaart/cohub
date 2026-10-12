@@ -51,6 +51,11 @@ Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
 | `task` | `taskRunId`, `snapshot` |
 | `effect` | `kind` (`particles` `trail` `impact` `flash` `glow`) and its parameters |
 | `sketch` | `src` (a JS module in the Space), `params` |
+| `vendor.kind` | any; an extension type, namespaced like `acme.order` |
+
+An extension type is stored as written. A client that registers it (see
+`defineBoardItem` in the SDK) checks its props on edit and draws it; any other
+client shows a placeholder that still moves and keeps every field.
 
 Background pattern lives in `board.background.kind` (`dots` or `grid`); `board.grid.visible` toggles its overlay and `board.grid.size` sets spacing in board units. The Appearance panel edits all three. Use `cohub boards schema effect` to see which parameters apply to each effect kind.
 

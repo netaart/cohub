@@ -2,49 +2,79 @@ import type { SessionRecord } from "@neta-art/cohub";
 import type { Locale } from "$lib/i18n/locale";
 import { m } from "$lib/paraglide/messages.js";
 
-export type SessionActivity = {
-	phase: "idle" | "queued" | "running" | "stopping" | "failed" | "interrupted";
-	active: boolean;
+export type SessionRowStatusKind =
+	| "running"
+	| "queued"
+	| "stopping"
+	| "failed"
+	| "lost"
+	| "unread"
+	| "idle";
+
+export type SessionRowStatus = {
+	kind: SessionRowStatusKind;
 	label: string;
-	detail: string | null;
+	errorMessage: string | null;
+	startedAt: string | null;
 };
 
-export function getSessionActivity(
+export function getSessionRowStatus(
 	session: Pick<SessionRecord, "activeTurn" | "lastTurnIssue">,
+	unread: boolean,
 	locale: Locale,
-): SessionActivity {
+): SessionRowStatus {
 	const turn = session.activeTurn;
 	if (turn) {
-		const phase =
+		const kind =
 			turn.status === "queued"
 				? "queued"
 				: turn.status === "abort_requested"
 					? "stopping"
 					: "running";
 		const label =
-			phase === "queued"
+			kind === "queued"
 				? m.session_activity_queued({}, { locale })
-				: phase === "stopping"
+				: kind === "stopping"
 					? m.session_activity_stopping({}, { locale })
 					: m.session_activity_running({}, { locale });
-		return { phase, active: true, label, detail: null };
-	}
-	const issue = session.lastTurnIssue;
-	if (issue) {
-		const label =
-			issue.status === "failed"
-				? m.session_activity_failed({}, { locale })
-				: issue.reason === "abort"
-					? m.session_activity_stopped({}, { locale })
-					: issue.reason === "stale_active_recovered"
-						? m.session_activity_run_lost({}, { locale })
-						: m.session_activity_interrupted({}, { locale });
 		return {
-			phase: issue.status,
-			active: false,
+			kind,
 			label,
-			detail: issue.errorMessage,
+			errorMessage: null,
+			startedAt: kind === "running" ? (turn.startedAt ?? null) : null,
 		};
 	}
-	return { phase: "idle", active: false, label: "", detail: null };
+	const issue = session.lastTurnIssue;
+	// Stops, steers, and local CLI interruptions are the user's own, not issues.
+	const issueKind =
+		issue?.status === "failed"
+			? "failed"
+			: issue?.reason === "stale_active_recovered"
+				? "lost"
+				: null;
+	if (issue && issueKind) {
+		return {
+			kind: issueKind,
+			label:
+				issueKind === "failed"
+					? m.session_activity_failed({}, { locale })
+					: m.session_activity_run_lost({}, { locale }),
+			errorMessage: issue.errorMessage?.replace(/\s+/g, " ").trim() || null,
+			startedAt: null,
+		};
+	}
+	if (unread) {
+		return {
+			kind: "unread",
+			label: m.sidebar_unread({}, { locale }),
+			errorMessage: null,
+			startedAt: null,
+		};
+	}
+	return {
+		kind: "idle",
+		label: "",
+		errorMessage: null,
+		startedAt: null,
+	};
 }

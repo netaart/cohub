@@ -1,10 +1,11 @@
-import type { SessionRecord } from "@neta-art/cohub";
+import type { RealtimeSessionFork, SessionRecord } from "@neta-art/cohub";
 import { formatResourceMentionTextForDisplay } from "$lib/mentions/resource";
 import { getSessionSortTime } from "$lib/session-sort";
 
 export type SessionForkEdge = {
 	childSessionId: string;
 	parentSessionId?: string | null;
+	depth?: number | null;
 	anchorSequence?: number | null;
 	firstUserTextAfterFork?: string | null;
 	parentTitle?: string | null;
@@ -47,6 +48,56 @@ export function getSessionTreeTitle(item: SessionTreeItem): string | null {
 	return getSessionListTitle(session);
 }
 
+function forkSignature(fork: SessionForkEdge) {
+	return [
+		fork.parentSessionId ?? "",
+		fork.depth ?? 0,
+		fork.anchorSequence ?? "",
+		fork.parentTitle ?? "",
+		fork.firstUserTextAfterFork ?? "",
+	].join("|");
+}
+
+// Missing or empty input is "unknown", never "clear": partial sources can't drop the tree.
+export function mergeSessionForks<T extends SessionForkEdge>(
+	current: T[],
+	incoming: readonly T[] | null | undefined,
+): T[] {
+	if (!incoming?.length) return current;
+	const byChild = new Map(current.map((fork) => [fork.childSessionId, fork]));
+	let changed = false;
+	for (const fork of incoming) {
+		if (!fork.childSessionId) continue;
+		const existing = byChild.get(fork.childSessionId);
+		const merged = existing ? { ...existing, ...fork } : fork;
+		if (existing && forkSignature(existing) === forkSignature(merged)) continue;
+		byChild.set(fork.childSessionId, merged);
+		changed = true;
+	}
+	return changed ? [...byChild.values()] : current;
+}
+
+export function readRealtimeSessionFork(
+	payload: unknown,
+): RealtimeSessionFork | null {
+	const fork = (
+		payload as { fork?: { [K in keyof RealtimeSessionFork]?: unknown } } | null
+	)?.fork;
+	if (
+		typeof fork?.childSessionId !== "string" ||
+		typeof fork.parentSessionId !== "string" ||
+		typeof fork.depth !== "number" ||
+		typeof fork.anchorSequence !== "number"
+	)
+		return null;
+	return {
+		childSessionId: fork.childSessionId,
+		parentSessionId: fork.parentSessionId,
+		depth: fork.depth,
+		anchorSequence: fork.anchorSequence,
+	};
+}
+
 export function buildSessionForkTree<T extends SessionRecord>(
 	sessions: readonly T[],
 	forks: readonly SessionForkEdge[] | null | undefined,
@@ -55,10 +106,15 @@ export function buildSessionForkTree<T extends SessionRecord>(
 	const forkByChild = new Map<string, SessionForkEdge>();
 	for (const fork of forks ?? []) {
 		const parentId = fork.parentSessionId;
-		if (!parentId || parentId === fork.childSessionId || !byId.has(parentId))
-			continue;
-		if (byId.has(fork.childSessionId))
-			forkByChild.set(fork.childSessionId, fork);
+		const parent = parentId ? byId.get(parentId) : undefined;
+		if (!parent || parentId === fork.childSessionId) continue;
+		if (!byId.has(fork.childSessionId)) continue;
+		forkByChild.set(
+			fork.childSessionId,
+			fork.parentTitle == null && parent.title
+				? { ...fork, parentTitle: parent.title }
+				: fork,
+		);
 	}
 
 	const children = new Map<string, T[]>();

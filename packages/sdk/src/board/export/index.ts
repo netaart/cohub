@@ -1,30 +1,30 @@
 
 import type { BoardDocument } from "@cohub/protocol";
-import { boardDocumentAt } from "../animation.js";
-import { type BoardSceneItem, buildBoardScene } from "../core/scene.js";
+import { boardDocumentAt } from "../model/animation.js";
+import { type BoardSceneItem, buildBoardScene } from "../model/scene.js";
 import { type ICanvas, Rectangle, type Renderer, type Texture } from "pixi.js";
 import { parseBoardCssColor } from "../render/css-color.js";
-import type { BoardShapeColors } from "../core/palette.js";
+import type { BoardShapeColors } from "../model/palette.js";
 import {
   BOARD_EXPORT_ITEM_WARN_THRESHOLD,
   type BoardExportPlan,
   type BoardExportRegion,
   normalizeBoardDocument,
   planBoardExport,
-} from "../core/export-plan.js";
+} from "../model/export-plan.js";
 import {
   type BoardRenderPalette,
   defaultBoardPalette,
 } from "../render/index.js";
 import { ensureBoardTextMeasurement } from "../render/text-measurement.js";
-import type { BoardSketchHost } from "../render/renderers/board-renderer-registry.js";
+import type { BoardCardRendererResolver, BoardSketchHost } from "../render/renderers/board-renderer-registry.js";
 import { createBoardExportScene } from "./scene.js";
 
 export type {
   BoardExportPlan,
   BoardExportPlanInput,
   BoardExportRegion,
-} from "../core/export-plan.js";
+} from "../model/export-plan.js";
 export { createBoardExportScene } from "./scene.js";
 export type { BoardExportScene, BoardExportSceneInput } from "./scene.js";
 
@@ -42,6 +42,7 @@ export type BoardExportOptions = {
   textures?: Map<string, Texture>;
   sketches?: BoardSketchHost;
   assetKey?: (item: BoardSceneItem) => string | null;
+  renderers?: BoardCardRendererResolver;
   backgroundImage?: {
     texture: Texture;
     fit: "cover" | "contain" | "repeat";
@@ -110,6 +111,7 @@ export function renderBoardExport(
     textures: options.textures,
     sketches: options.sketches,
     assetKey: options.assetKey,
+    renderers: options.renderers,
     background: resolveBackground(options.background, palette, document, colorScheme),
     backgroundImage: options.backgroundImage,
   });

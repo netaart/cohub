@@ -1,6 +1,7 @@
 import type { SessionRecord, SpaceRecord } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 import { getCachedSessionListSnapshot } from "$lib/stores/session-list-cache";
+import { sessionStore } from "$lib/stores/session-store";
 import type { ParsedCohubSpaceLink } from "./space";
 
 const LINK_RESOLVE_LIMIT = 20;
@@ -48,6 +49,8 @@ function hasSessionView(space: SpaceRecord) {
 }
 
 async function getCachedSession(spaceId: string, sessionId: string) {
+	const known = sessionStore.get(sessionId);
+	if (known) return known;
 	const snapshot = await getCachedSessionListSnapshot(spaceId).catch(
 		() => null,
 	);
@@ -89,14 +92,16 @@ export async function resolveCohubLinkMentionLabels(
 				const cached = await getCachedSession(link.spaceId, link.sessionId);
 				const session =
 					cached ??
-					(
-						await sdk
-							.space(link.spaceId)
-							.session(link.sessionId)
-							.get((input, init) =>
-								fetch(input, { ...init, signal: options?.signal }),
-							)
-					).session;
+					sessionStore.merge(
+						(
+							await sdk
+								.space(link.spaceId)
+								.session(link.sessionId)
+								.get((input, init) =>
+									fetch(input, { ...init, signal: options?.signal }),
+								)
+						).session,
+					);
 				resolved.set(
 					linkKey(link),
 					buildSessionMentionLabel({ space, session }),

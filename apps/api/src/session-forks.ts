@@ -6,6 +6,7 @@ import { labelAssignments, sessionForks, sessionTurnSegments, sessionTurns, spac
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { sessionForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "./reference-index-queue.js";
+import { dispatchSessionCreated } from "./realtime-events.js";
 import type { SessionForkListItem } from "./session-fork-visibility.js";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
 import { inheritSessionMetaForFork, normalizeSessionTitle, readSessionParticipantUserUuids, refreshSessionStats, setSessionParticipantsMeta, setSessionTitleMeta } from "@cohub/core/sessions";
@@ -334,5 +335,10 @@ export async function publishSessionFork(result: Awaited<ReturnType<typeof creat
 }
 
 export async function createSessionFork(input: SessionForkInput) {
-  return publishSessionFork(await db.transaction((tx) => createSessionForkInTransaction(tx, input)));
+  const result = await db.transaction((tx) => createSessionForkInTransaction(tx, input));
+  const published = await publishSessionFork(result);
+  void dispatchSessionCreated(published.session, result.fork).catch((error) => {
+    logger.warn("[SessionFork] failed to dispatch session.created", { sessionId: result.session.id, error });
+  });
+  return published;
 }

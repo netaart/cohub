@@ -1,17 +1,18 @@
 
 import { Container, Graphics, Sprite, TilingSprite, type Texture } from "pixi.js";
-import type { BoardShapeColors } from "../core/palette.js";
-import { buildFallbackShapeColors } from "../core/palette.js";
-import { imageAssetKey } from "../image-key.js";
+import type { BoardShapeColors } from "../model/palette.js";
+import { buildFallbackShapeColors } from "../model/palette.js";
+import { imageAssetKey } from "../model/image-key.js";
 import {
+  type BoardCardRendererResolver,
   type BoardRenderContext,
   type BoardRenderPalette,
   defaultBoardPalette,
   getBoardCardRenderer,
 } from "../render/index.js";
 import type { BoardSettings } from "@cohub/protocol";
-import type { BoardScene, BoardSceneItem } from "../core/scene.js";
-import type { Rect } from "../geometry.js";
+import type { BoardScene, BoardSceneItem } from "../model/scene.js";
+import type { Rect } from "../model/geometry.js";
 import { clippingAncestor, isClippingFrame, syncClipGroup } from "../render/clip.js";
 
 export type BoardExportSceneInput = {
@@ -27,6 +28,8 @@ export type BoardExportSceneInput = {
   textures?: Map<string, Texture>;
   sketches?: BoardRenderContext["sketches"];
   assetKey?: (item: BoardSceneItem) => string | null;
+  /** Renderers for item types beyond the built-ins. */
+  renderers?: BoardCardRendererResolver;
   background?: number | null;
   backgroundImage?: {
     texture: Texture;
@@ -109,11 +112,12 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
   world.scale.set(input.scale);
   world.position.set(-input.world.x * input.scale, -input.world.y * input.scale);
 
+  const resolve = input.renderers ?? getBoardCardRenderer;
   const groups = new Map<string, Container>();
   for (const item of input.items) {
     const clip = clippingAncestor(input.scene, item);
     const host = (clip && groups.get(clip)) || world;
-    const container = getBoardCardRenderer(item, context).create(item, context);
+    const container = resolve(item, context).create(item, context);
     container.alpha = input.scene.opacity(item.id);
     host.addChild(container);
     if (isClippingFrame(item)) {

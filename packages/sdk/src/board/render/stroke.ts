@@ -1,8 +1,8 @@
 
 import type { BoardDash } from "@cohub/protocol";
 import type { Graphics } from "pixi.js";
-import type { WorldPoint } from "../geometry.js";
-import { worldPoint } from "../geometry.js";
+import type { WorldPoint } from "../model/geometry.js";
+import { worldPoint } from "../model/geometry.js";
 
 const HEAD_SPREAD = Math.PI / 6;
 

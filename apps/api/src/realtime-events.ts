@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { sessionMessages } from "@cohub/db";
-import type { RealtimeMessageRecord, RealtimeSessionRecord, RealtimeTaskRecord, RealtimeTurnRecord, SpacePresenceSnapshot } from "@cohub/protocol/realtime";
+import { accessPolicies, type sessionMessages } from "@cohub/db";
+import { and, eq } from "drizzle-orm";
+import type { RealtimeMessageRecord, RealtimeSessionFork, RealtimeSessionRecord, RealtimeTaskRecord, RealtimeTurnRecord, SpacePresenceSnapshot } from "@cohub/protocol/realtime";
 import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime";
 import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnIssue, SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
@@ -9,6 +10,7 @@ import { buildResourceLabelSnapshot, type LabelResourceType } from "@cohub/core/
 import { createLogger } from "@cohub/infra/logging";
 import { publishSessionTurnStates, readSessionActiveTurn, readSessionParticipantUserUuids, resolveSessionAudienceRooms } from "@cohub/core/sessions";
 import { db } from "./db/index.js";
+import { toRealtimeSessionFork } from "./session-fork-visibility.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
@@ -190,8 +192,19 @@ async function sessionEventRooms(session: RealtimeSessionInput) {
   });
 }
 
-export async function dispatchSessionCreated(session: RealtimeSessionInput) {
+/** Lineage only while the parent has no Chat-level policy, so it is as visible as the child. */
+async function broadcastableForkLineage(fork: RealtimeSessionFork) {
+  return db
+    .select({ id: accessPolicies.id })
+    .from(accessPolicies)
+    .where(and(eq(accessPolicies.resourceType, "session"), eq(accessPolicies.resourceId, fork.parentSessionId)))
+    .limit(1)
+    .then((policies) => (policies.length ? null : toRealtimeSessionFork(fork)), () => null);
+}
+
+export async function dispatchSessionCreated(session: RealtimeSessionInput, fork?: RealtimeSessionFork | null) {
   const realtimeSession = toRealtimeSessionRecord(session);
+  const [rooms, lineage] = await Promise.all([sessionEventRooms(session), fork ? broadcastableForkLineage(fork) : null]);
   await dispatchRealtimeEvent({
     id: randomUUID(),
     timestamp: Date.now(),
@@ -199,8 +212,8 @@ export async function dispatchSessionCreated(session: RealtimeSessionInput) {
     type: "session.created",
     spaceId: realtimeSession.spaceId,
     sessionId: realtimeSession.id,
-    rooms: await sessionEventRooms(session),
-    payload: { session: realtimeSession },
+    rooms,
+    payload: { session: realtimeSession, ...(lineage ? { fork: lineage } : {}) },
   });
 }
 

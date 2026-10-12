@@ -439,7 +439,7 @@ onDestroy(() => {
 		</div>
 	</div>
 {:else}
-	<div class="flex-1 min-h-0 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5 lg:px-8">
+	<div class="flex-1 min-h-0 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5 lg:px-workspace">
 		<div class="max-w-4xl">
 			{#if checkpointDetailLoading && checkpointDetail?.id !== checkpointId}
 				<CenteredLoading label={m.cp_loading_save({}, { locale })} size="panel" />

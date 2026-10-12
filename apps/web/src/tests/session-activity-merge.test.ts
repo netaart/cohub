@@ -112,3 +112,35 @@ test("parallel direct generation does not hide the running Agent Turn", () => {
 		null,
 	);
 });
+
+test("a newer Session snapshot cannot regress older Turn state", () => {
+	const queuedTurn = {
+		id: "turn-1",
+		sequence: 1,
+		status: "queued" as const,
+		provider: null,
+		model: null,
+		startedAt: null,
+		updatedAt: "2026-10-01T00:00:05Z",
+		anchorUserMessageId: null,
+	};
+	const queued: SessionRecord = {
+		...session,
+		updatedAt: "2026-10-01T00:00:05Z",
+		activeTurn: queuedTurn,
+		activeTurnSequence: 1,
+		lastTurnIssue: null,
+	};
+	const running = mergeSessionTurnState(
+		{ ...queued, updatedAt: session.updatedAt },
+		{ ...turn(1, "running"), updatedAt: "2026-10-01T00:00:06Z" },
+	);
+	assert.equal(
+		mergeSessionRecord(queued, running).activeTurn?.status,
+		"running",
+	);
+	assert.equal(
+		mergeSessionRecord(running, queued).activeTurn?.status,
+		"running",
+	);
+});

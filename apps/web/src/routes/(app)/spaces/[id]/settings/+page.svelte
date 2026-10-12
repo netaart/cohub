@@ -53,6 +53,8 @@ import {
 	channelHealthMessage,
 } from "$lib/channel-health";
 import ChannelModelPicker from "$lib/components/ChannelModelPicker.svelte";
+import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
 import Sheet from "$lib/components/Sheet.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UploadProgress from "$lib/components/UploadProgress.svelte";
@@ -1777,16 +1779,18 @@ $effect(() => {
 							<div class="mt-3 overflow-hidden rounded-md border border-border-subtle">
 								<div class="divide-y divide-border-subtle">
 									{#each members as member (member.userId)}
-										<div class="flex items-center gap-3 px-3 py-2.5">
-											<UserAvatar name={getMemberDisplayName(member)} avatarUrl={member.profile?.avatarUrl} seed={member.userId} size="sm" />
-											<div class="min-w-0 flex-1">
-												<div class="flex items-center gap-1.5">
-													<span class="truncate text-[13px] font-medium text-text-primary">{getMemberDisplayName(member)}</span>
+										{@const name = getMemberDisplayName(member)}
+										<div data-density="compact" class="flex h-[var(--list-row-height)] items-center gap-[var(--list-row-gap)] px-3">
+											<UserAvatar {name} avatarUrl={member.profile?.avatarUrl} seed={member.userId} size={LIST_ROW_AVATAR.compact} />
+											<ListRowText title={name} tooltip={name}>
+												{#snippet badge()}
 													{#if getMemberRoleIcon(member.role)}<span class="shrink-0 text-[11px]" title={m.space_role_host({}, { locale })}>{getMemberRoleIcon(member.role)}</span>{/if}
-												</div>
-												<button type="button" onclick={() => { void copyMemberUuid(member); }} title={m.space_copy_user_uuid({}, { locale })} class="mt-0.5 inline-flex max-w-full items-center gap-1 font-mono text-[10px] text-text-placeholder transition-colors hover:text-text-secondary"><span class="min-w-0 truncate">{getMemberUuid(member)}</span>{#if copiedMemberUserId === member.userId}<Check class="h-3 w-3 shrink-0 text-status-running" />{/if}</button>
-											</div>
-											<select value={member.role} disabled={!canManageSpaceMembers || updatingMemberUserId === member.userId || removingMemberUserId === member.userId} onchange={(e) => { const role = (e.currentTarget as HTMLSelectElement).value as SpaceRole; void selectMemberRole(member.userId, member.role, role); }} class="h-8 w-24 shrink-0 rounded-[5px] border border-border-subtle bg-bg-input px-2 text-[12px] text-text-primary focus:border-brand/40 focus:outline-none disabled:opacity-50" aria-label={`${getMemberDisplayName(member)} role`}>
+												{/snippet}
+												{#snippet subtitle()}
+													<button type="button" onclick={() => { void copyMemberUuid(member); }} title={m.space_copy_user_uuid({}, { locale })} class="inline-flex max-w-full items-center gap-1 align-top font-mono text-[11px] text-text-placeholder transition-colors hover:text-text-secondary"><span class="min-w-0 truncate">{getMemberUuid(member)}</span>{#if copiedMemberUserId === member.userId}<Check class="h-3 w-3 shrink-0 text-status-running" />{/if}</button>
+												{/snippet}
+											</ListRowText>
+											<select value={member.role} disabled={!canManageSpaceMembers || updatingMemberUserId === member.userId || removingMemberUserId === member.userId} onchange={(e) => { const role = (e.currentTarget as HTMLSelectElement).value as SpaceRole; void selectMemberRole(member.userId, member.role, role); }} class="h-8 w-24 shrink-0 rounded-[5px] border border-border-subtle bg-bg-input px-2 text-[12px] text-text-primary focus:border-brand/40 focus:outline-none disabled:opacity-50" aria-label={`${name} role`}>
 												{#each memberRoleOptions as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
 											</select>
 											<button type="button" onclick={() => { void removeMember(member.userId); }} disabled={!canManageSpaceMembers || removingMemberUserId === member.userId} title={m.space_remove_member({}, { locale })} class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[5px] text-text-tertiary transition-colors hover:bg-error-bg hover:text-error-soft disabled:opacity-40">{#if removingMemberUserId === member.userId}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else}<Trash2 class="h-3.5 w-3.5" />{/if}</button>

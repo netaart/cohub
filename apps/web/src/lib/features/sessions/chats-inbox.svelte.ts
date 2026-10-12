@@ -17,12 +17,12 @@ import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
 import { type LiveChange, LiveList } from "$lib/lists/live-list.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import {
+	mergeSessionForks,
+	readRealtimeSessionFork,
+} from "$lib/session-fork-tree";
 import { mergeSessionRecord } from "$lib/session-record-merge";
 import { compareSessionsByRecentActivity } from "$lib/session-sort";
-import {
-	mergeSessionTurnState,
-	readSessionTurnState,
-} from "$lib/session-turn-state";
 import { getSpacePublicProfile } from "$lib/space-profile";
 import { buildUserNewSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -42,6 +42,7 @@ import {
 	getCachedSessionListSnapshot,
 	setCachedSessionList,
 } from "$lib/stores/session-list-cache";
+import { sessionStore, startSessionSync } from "$lib/stores/session-store";
 import {
 	fetchLabelItemsFirstPageFresh,
 	fetchSpaceLabels,
@@ -75,18 +76,38 @@ function sourceSystemKey(source: UserSessionSourceKey) {
 	return `session-source:${source}`;
 }
 
-function mergeForks(current: Forks, incoming: Forks): Forks {
-	if (incoming.length === 0) return current;
-	const byChild = new Map(current.map((fork) => [fork.childSessionId, fork]));
-	for (const fork of incoming) byChild.set(fork.childSessionId, fork);
-	return [...byChild.values()];
-}
-
 function withSpace(
 	sessions: readonly SessionRecord[],
 	space: UserSessionSpaceSummary,
 ): UserSessionListItem[] {
 	return sessions.map((session) => ({ ...session, space }));
+}
+
+function sameInboxRow(row: UserSessionListItem, session: SessionRecord) {
+	return (
+		row.title === session.title &&
+		row.updatedAt === session.updatedAt &&
+		row.lastMessageId === session.lastMessageId
+	);
+}
+
+function sessionOf({ space: _space, ...session }: UserSessionListItem) {
+	return session as SessionRecord;
+}
+
+const liveRows = new WeakMap<
+	UserSessionListItem,
+	{ session: SessionRecord; row: UserSessionListItem }
+>();
+
+function liveRow(row: UserSessionListItem): UserSessionListItem {
+	const session = sessionStore.get(row.id);
+	if (!session) return row;
+	const cached = liveRows.get(row);
+	if (cached?.session === session) return cached.row;
+	const live = { ...session, space: row.space } as UserSessionListItem;
+	liveRows.set(row, { session, row: live });
+	return live;
 }
 
 export function spaceSummaryOf(space: SpaceRecord): UserSessionSpaceSummary {
@@ -126,9 +147,10 @@ class ChatsInbox {
 		id: (session) => session.id,
 		compare: () => compareSessionsByRecentActivity,
 		emptyExtra: () => [],
-		mergeExtra: mergeForks,
+		mergeExtra: mergeSessionForks,
 		fetch: async (filter, cursor) => {
 			const page = await this.#fetchPage(filter, cursor);
+			sessionStore.mergeAll(page.sessions.map(sessionOf));
 			return {
 				items: page.sessions,
 				hasMore: page.pageInfo.hasMore,
@@ -138,6 +160,7 @@ class ChatsInbox {
 		},
 		read: async (filter) => {
 			const cached = await this.#readCachedPage(filter);
+			if (cached) sessionStore.seedAll(cached.sessions.map(sessionOf));
 			return cached
 				? {
 						items: cached.sessions,
@@ -189,6 +212,7 @@ class ChatsInbox {
 		if (this.#stop) return this.#stop;
 		this.list.start();
 		void this.#ensureUser();
+		const stopSessionSync = startSessionSync();
 		const stopEvents = sdk.onUserEvent((event) => this.#handleEvent(event));
 		const stopChips = $effect.root(() => {
 			$effect(() => {
@@ -197,6 +221,7 @@ class ChatsInbox {
 			});
 		});
 		this.#stop = () => {
+			stopSessionSync();
 			stopEvents();
 			stopChips();
 			this.#hide();
@@ -221,7 +246,7 @@ class ChatsInbox {
 	viewOf(filter: ChatsFilter): ChatsView {
 		const view = this.list.view(filter);
 		return {
-			sessions: view.items,
+			sessions: view.items.map(liveRow),
 			forks: view.extra,
 			loading: view.loading,
 			loadingMore: view.loadingMore,
@@ -246,7 +271,8 @@ class ChatsInbox {
 	}
 
 	findById(sessionId: string) {
-		return this.list.find(sessionId) ?? null;
+		const row = this.list.find(sessionId);
+		return row ? liveRow(row) : null;
 	}
 
 	async findLocal(sessionId: string): Promise<UserSessionListItem | null> {
@@ -265,7 +291,23 @@ class ChatsInbox {
 	}
 
 	upsertSession(session: UserSessionListItem) {
+		sessionStore.merge(sessionOf(session));
 		this.#applySession(session, { settled: true, space: session.space });
+	}
+
+	recordFork(session: SessionRecord, fork: SessionListForkRecord) {
+		this.#applySession(session, { settled: true, fork });
+	}
+
+	syncSession(session: SessionRecord, space: SpaceRecord | null) {
+		const existing = this.findById(session.id);
+		if (existing && sameInboxRow(existing, session)) return;
+		this.upsertSession({
+			...session,
+			space:
+				existing?.space ??
+				(space?.id === session.spaceId ? spaceSummaryOf(space) : null),
+		} as UserSessionListItem);
 	}
 
 	loadMore() {
@@ -340,27 +382,26 @@ class ChatsInbox {
 	}
 
 	#handleEvent(event: ChannelEnvelope) {
-		const turn = readSessionTurnState(event);
-		if (turn?.sessionId) {
-			this.list.apply({
-				id: turn.sessionId,
-				fit: () => "keep",
-				merge: (session) => mergeSessionTurnState(session, turn),
-			});
-			return;
-		}
 		if (event.type !== "session.created" && event.type !== "session.updated")
 			return;
 		const record = readSessionRecord(
 			(event.payload as { session?: unknown }).session,
 		);
-		if (record)
-			this.#applySession(record, { settled: event.type === "session.created" });
+		if (!record) return;
+		const created = event.type === "session.created";
+		this.#applySession(record, {
+			settled: created,
+			fork: created ? readRealtimeSessionFork(event.payload) : null,
+		});
 	}
 
 	#applySession(
 		record: SessionEventRecord,
-		options: { settled: boolean; space?: UserSessionSpaceSummary | null },
+		options: {
+			settled: boolean;
+			space?: UserSessionSpaceSummary | null;
+			fork?: SessionListForkRecord | null;
+		},
 	) {
 		const viewer = authStore.userUuid ?? null;
 		const merge = (existing: UserSessionListItem) =>
@@ -375,13 +416,13 @@ class ChatsInbox {
 			}
 			return;
 		}
-		const change: LiveChange<ChatsFilter, UserSessionListItem> = {
+		const change: LiveChange<ChatsFilter, UserSessionListItem, Forks> = {
 			id: record.id,
 			fit: (filter) => sessionFit(record, filter, viewer),
 			merge,
 			create: (filter) => {
 				const space =
-					filter.space ?? options.space ?? this.#spaceSummary(record.spaceId);
+					filter.space ?? options.space ?? this.spaceSummary(record.spaceId);
 				return space
 					? (mergeSessionRecord(undefined, {
 							...record,
@@ -390,11 +431,12 @@ class ChatsInbox {
 					: null;
 			},
 			settled: options.settled,
+			extra: options.fork ? [options.fork] : undefined,
 		};
 		this.list.apply(change);
 	}
 
-	#spaceSummary(spaceId: string): UserSessionSpaceSummary | null {
+	spaceSummary(spaceId: string): UserSessionSpaceSummary | null {
 		const space = spacesInbox.find(spaceId);
 		if (space) return spaceSummaryOf(space);
 		return (
@@ -405,7 +447,7 @@ class ChatsInbox {
 	}
 
 	async #cachedSpaceSummary(spaceId: string) {
-		const known = this.#spaceSummary(spaceId);
+		const known = this.spaceSummary(spaceId);
 		if (known) return known;
 		const cached = await getCachedSpaceRecord(spaceId).catch(() => null);
 		return cached ? spaceSummaryOf(cached.space) : null;

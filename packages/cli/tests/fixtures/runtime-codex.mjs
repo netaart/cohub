@@ -12,7 +12,13 @@ for await (const line of lines) {
   const input = JSON.parse(line);
   if (input.method === "initialize") respond(input, { userAgent: "fixture" });
   else if (input.method === "config/read") respond(input, { config: { model: "test", model_provider: "fixture" } });
-  else if (input.method === "model/list") respond(input, { data: [{ id: "test", model: "test", displayName: "Test", supportedReasoningEfforts: [{ reasoningEffort: "medium" }] }], nextCursor: null });
+  else if (input.method === "model/list") {
+    const secondPage = input.params.cursor === "next-model";
+    respond(input, {
+      data: [{ id: secondPage ? "another" : "test", model: secondPage ? "another" : "test", displayName: secondPage ? "Another" : "Test", defaultReasoningEffort: "medium", supportedReasoningEfforts: ["medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort })) }],
+      nextCursor: secondPage ? null : "next-model",
+    });
+  }
   else if (input.method === "thread/start") {
     const id = randomUUID();
     thread = { id, path: join(process.cwd(), `native-${id}.jsonl`) };
@@ -40,6 +46,7 @@ for await (const line of lines) {
     const record = (type, payload) => appendFileSync(thread.path, `${JSON.stringify({ timestamp, type, payload })}\n`);
     // The rollout records the Turn the way Codex does, including the client's id for the prompt.
     record("event_msg", { type: "turn_started", turn_id: id });
+    record("turn_context", { effort: input.params.effort });
     record("event_msg", { type: "item_completed", item: { type: "UserMessage", client_id: input.params.clientUserMessageId ?? null, content: input.params.input.map((block) => block.type === "text" ? { type: "input_text", text: block.text } : block) } });
     record("response_item", { type: "message", role: "assistant", content: [{ type: "output_text", text: answer }] });
     record("event_msg", { type: "turn_complete", turn_id: id, last_agent_message: answer });

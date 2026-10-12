@@ -22,7 +22,7 @@ const listeners = new Set<
 		snapshot: SessionDetailSnapshot & { spaceId: string; sessionId: string },
 	) => void
 >();
-const inFlight = new Map<string, Promise<SessionDetailSnapshot>>();
+const remoteListeners = new Set<(session: SessionRecord) => void>();
 let subscribedToBroadcast = false;
 
 export type SessionDetailSnapshot = {
@@ -135,12 +135,10 @@ function ensureBroadcastSubscription() {
 		if (!message.sessionId) return;
 		if (message.type === "cache-deleted") return;
 		void readRecord(message.spaceId, message.sessionId).then((result) => {
-			if (result)
-				emit(
-					message.spaceId as string,
-					message.sessionId as string,
-					toSnapshot(result.record, "indexeddb"),
-				);
+			if (!result) return;
+			const snapshot = toSnapshot(result.record, "indexeddb");
+			emit(message.spaceId as string, message.sessionId as string, snapshot);
+			for (const listener of remoteListeners) listener(snapshot.session);
 		});
 	});
 }
@@ -218,27 +216,6 @@ export const sessionDetailRepo = {
 		>;
 	},
 
-	async refresh(
-		spaceId: string,
-		sessionId: string,
-		fetcher: () => Promise<SessionRecord>,
-	) {
-		ensureBroadcastSubscription();
-		const userKey = getCacheUserKey();
-		const key = sessionDetailKey(userKey, spaceId, sessionId);
-		const pending = inFlight.get(key);
-		if (pending) return pending;
-		const run = (async () => {
-			const session = await fetcher();
-			const record = await writeRecord(spaceId, session, { source: "network" });
-			return { ...toSnapshot(record, "network"), stale: false };
-		})().finally(() => {
-			if (inFlight.get(key) === run) inFlight.delete(key);
-		});
-		inFlight.set(key, run);
-		return run;
-	},
-
 	async delete(spaceId: string, sessionId: string) {
 		const userKey = getCacheUserKey();
 		const key = sessionDetailKey(userKey, spaceId, sessionId);
@@ -253,6 +230,12 @@ export const sessionDetailRepo = {
 			sessionId,
 			updatedAt: Date.now(),
 		});
+	},
+
+	onRemote(handler: (session: SessionRecord) => void) {
+		ensureBroadcastSubscription();
+		remoteListeners.add(handler);
+		return () => remoteListeners.delete(handler);
 	},
 
 	subscribe(

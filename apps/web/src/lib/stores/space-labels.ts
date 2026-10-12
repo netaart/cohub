@@ -1,6 +1,5 @@
 import type {
 	LabelAssignmentListItem,
-	LabelAssignmentPageInfo,
 	LabelAssignmentRecord,
 	LabelItemsResponse,
 	LabelListItem,
@@ -19,6 +18,7 @@ import {
 	hydrateChannelLabels,
 	onChannelLabelDisplayUpdated,
 } from "$lib/stores/channel-label-display";
+import { sessionStore } from "$lib/stores/session-store";
 
 const LABEL_ITEMS_PAGE_SIZE = 30;
 const SESSION_USER_LABEL_SYSTEM_KEY_PREFIX = "session-user:";
@@ -392,11 +392,29 @@ export async function fetchResourceLabels(
 	);
 }
 
+function sessionRefs(items: readonly LabelAssignmentListItem[]) {
+	return items.flatMap((item) =>
+		item.resourceType === "session" ? [item.resourceRef] : [],
+	);
+}
+
+function storedSessions(refs: readonly string[]) {
+	return refs.flatMap((ref) => {
+		const session = sessionStore.get(ref);
+		return session ? [session] : [];
+	});
+}
+
 export async function getCachedLabelItemsSnapshot(
 	spaceId: string,
 	labelId: string,
 ) {
-	return labelItemsRepo.getFirstPage(spaceId, labelId);
+	const snapshot = await labelItemsRepo.getFirstPage(spaceId, labelId);
+	if (!snapshot) return null;
+	sessionStore.seedAll(snapshot.sessions);
+	const refs = sessionRefs(snapshot.items);
+	await sessionStore.hydrate(spaceId, refs);
+	return { ...snapshot, sessions: storedSessions(refs) };
 }
 
 export async function fetchLabelItemsFirstPageFresh(
@@ -419,14 +437,19 @@ export async function fetchLabelItemsFirstPageFresh(
 	const page = {
 		items: result.items ?? [],
 		pageInfo: result.pageInfo,
-		sessions: result.sessions ?? [],
+		sessions: sessionStore.mergeAll(result.sessions ?? []),
 		forks: result.forks ?? [],
 	};
 	// Always return network data first. Cache is best-effort and must not keep the
 	// sidebar on Loading… after labels/items already returned 200.
 	if (await resolveCacheUserKey()) {
 		void labelItemsRepo
-			.setFirstPage(spaceId, labelId, page, { source: "network" })
+			.setFirstPage(
+				spaceId,
+				labelId,
+				{ ...page, sessions: [] },
+				{ source: "network" },
+			)
 			.catch((error) => {
 				console.warn("[space-labels] Failed to cache label items", {
 					spaceId,
@@ -436,20 +459,6 @@ export async function fetchLabelItemsFirstPageFresh(
 			});
 	}
 	return page;
-}
-
-export async function setCachedLabelItemsFirstPage(
-	spaceId: string,
-	labelId: string,
-	input: {
-		items: LabelAssignmentListItem[];
-		pageInfo?: LabelAssignmentPageInfo | null;
-		sessions?: SessionRecord[] | null;
-		forks?: LabelItemsResponse["forks"] | null;
-	},
-) {
-	if (!(await resolveCacheUserKey())) return null;
-	return labelItemsRepo.setFirstPage(spaceId, labelId, input);
 }
 
 export async function markLabelItemsStale(spaceId: string, labelId: string) {

@@ -169,7 +169,7 @@ router.post("/authorize-realtime-rooms", async (c) => {
         .where(eq(boards.id, parsed.id))
         .limit(1);
       const allowed = board
-        ? await hasPermission(user, "file.view", { spaceId: board.spaceId }).catch((error) => {
+        ? await hasPermission(user, "file.view.filtered", { spaceId: board.spaceId }).catch((error) => {
             logger.warn("[RealtimeRooms] failed to authorize Board room", { room, userId: user.uuid, error });
             return false;
           })
@@ -260,7 +260,7 @@ router.post("/authorize-board-awareness", async (c) => {
     return c.json({ ok: false, message: "board not found" }, 404);
   }
 
-  const requiredPermission = permission === "edit" ? "file.edit" : "file.view";
+  const requiredPermission = permission === "edit" ? "file.edit" : "file.view.filtered";
   const allowed = await hasPermission(user, requiredPermission, { spaceId }).catch((error) => {
     logger.warn("[BoardAwareness] failed to authorize update", {
       boardId,

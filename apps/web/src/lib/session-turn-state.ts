@@ -1,6 +1,9 @@
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
 import type { SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
-import { mergeSessionRecord } from "$lib/session-record-merge";
+import { sameData } from "$lib/lists/live-list-core";
+import { TURN_PHASE, turnAdvances, turnPhase } from "$lib/session-record-merge";
+
+type ActiveTurn = NonNullable<SessionRecord["activeTurn"]>;
 
 export function readSessionTurnState(
 	event: ChannelEnvelope,
@@ -36,55 +39,51 @@ export function mergeSessionTurnState<T extends SessionRecord>(
 		return session;
 	const active = session.activeTurn;
 	const sequence = turn.sequence as number;
-	const live = turn.status === "running" || turn.status === "abort_requested";
-	const queued = turn.status === "queued";
-	if (active) {
-		if (active.id !== turn.id) {
-			const candidateRank = queued ? 1 : 0;
-			const activeRank = active.status === "queued" ? 1 : 0;
-			const replaces =
-				(live || queued) &&
-				(candidateRank < activeRank ||
-					(candidateRank === activeRank && sequence < active.sequence));
-			if (!replaces) return session;
-		}
-	}
-	if (
-		!active &&
-		(live || queued) &&
-		sequence <= (session.activeTurnSequence ?? 0)
-	)
+	const status = turn.status;
+	const phase = turnPhase(status);
+	const open = phase !== TURN_PHASE.settled;
+	if (active?.id === turn.id) {
+		if (!turnAdvances(active, { status, updatedAt: turn.updatedAt }))
+			return session;
+	} else if (active) {
+		const shown = turnPhase(active.status);
+		const replaces =
+			open &&
+			(phase > shown || (phase === shown && sequence < active.sequence));
+		if (!replaces) return session;
+	} else if (sequence < (session.activeTurnSequence ?? 0)) {
 		return session;
-	const patch: Partial<SessionRecord> = {
+	} else if (open && sequence === session.activeTurnSequence) {
+		return session;
+	}
+	const next: T = {
+		...session,
 		activeTurnSequence: sequence,
-		activeTurn:
-			live || queued
-				? {
-						id: turn.id,
-						sequence,
-						status: turn.status as NonNullable<
-							SessionRecord["activeTurn"]
-						>["status"],
-						provider: turn.provider ?? active?.provider ?? null,
-						model: turn.model ?? active?.model ?? null,
-						startedAt: turn.startedAt ?? active?.startedAt ?? null,
-						updatedAt: turn.updatedAt ?? active?.updatedAt ?? null,
-						anchorUserMessageId:
-							typeof turn.meta?.userMessageId === "string"
-								? turn.meta.userMessageId
-								: (active?.anchorUserMessageId ?? null),
-					}
-				: null,
+		activeTurn: open
+			? {
+					id: turn.id,
+					sequence,
+					status: status as ActiveTurn["status"],
+					provider: turn.provider ?? active?.provider ?? null,
+					model: turn.model ?? active?.model ?? null,
+					startedAt: turn.startedAt ?? active?.startedAt ?? null,
+					updatedAt: turn.updatedAt ?? active?.updatedAt ?? null,
+					anchorUserMessageId:
+						typeof turn.meta?.userMessageId === "string"
+							? turn.meta.userMessageId
+							: (active?.anchorUserMessageId ?? null),
+				}
+			: null,
 		lastTurnIssue:
-			turn.status === "failed" || turn.status === "interrupted"
+			status === "failed" || status === "interrupted"
 				? {
 						turnId: turn.id,
 						sequence,
-						status: turn.status,
+						status,
 						reason: turn.summary?.reason ?? null,
 						errorMessage: turn.errorMessage ?? null,
 					}
 				: null,
 	};
-	return mergeSessionRecord(session, { ...session, ...patch }) as T;
+	return sameData(session, next) ? session : next;
 }

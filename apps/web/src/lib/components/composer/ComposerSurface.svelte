@@ -1,10 +1,12 @@
 <script lang="ts">
-const {
+let {
 	children,
 	onsubmit,
+	element = $bindable(null),
 }: {
 	children: import("svelte").Snippet;
 	onsubmit?: (event: SubmitEvent) => void;
+	element?: HTMLElement | null;
 } = $props();
 
 const surfaceClass =
@@ -13,6 +15,7 @@ const surfaceClass =
 
 {#if onsubmit}
 	<form
+		bind:this={element}
 		class={surfaceClass}
 		onsubmit={(event) => {
 			event.preventDefault();
@@ -22,7 +25,7 @@ const surfaceClass =
 		{@render children()}
 	</form>
 {:else}
-	<div class={surfaceClass}>
+	<div bind:this={element} class={surfaceClass}>
 		{@render children()}
 	</div>
 {/if}

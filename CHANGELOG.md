@@ -4,6 +4,22 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.63 — 2026-10-10
+
+- **Board SDK layers**: Board is split into framework-free, embeddable layers — `board/editor`, `board/replica`, and a PixiJS `board/stage` — with an instance-scoped item registry (`defineBoardItem` / `createBoardRegistry`) and DOM item views; `board/headless` becomes `board/export/node` (SDK 10.0.0, stored documents unchanged)
+- **Roomier chat workspace**: opening a chat now renders the full Space workspace for it, so chats get the side panel, windows, focus/immersive modes, and the new chat profile, with instant first paint from seeded session and Space data
+- **Custom theme islands**: a `.cohub/theme.css` from the personal config Space applies across the app, and Space themes are scoped with `@scope` to the chats pane so the inbox keeps the account theme, with a per-device switch and `?theme=safe` opt-out
+- **Model-sized WebP images**: requests now send a CDN-derived WebP variant bounded to a 1280px long edge (OSS `x-oss-process` / Cloudflare `/cdn-cgi/image`) built at request time, so stored content and history keep original URLs and token accounting follows the smaller bound
+- **Unified Session status and store**: one client Session store backs the sidebar, label rows, chat host, and Chats inbox — ids/order stay separate from the single record, turn state is ordered by lifecycle, realtime events apply for every Space, and a shared StatusGlyph gives rows and CLI tables one queued/running/stopping/failed status slot
+- **Live forked chat nesting**: `session.created` now carries `payload.fork` lineage for HTTP and native forks, so chats nest under their parent on first paint across clients while titles stay private
+
+### Bug Fixes
+
+- **Model credentials**: platform credentials resolve before user providers, endpoints/headers/auth stay bound to one configuration source, user connection keys are always literal, and changed platform prices, connection fields, or new `cohub` model IDs are rejected
+- **Partial Session profiles**: incomplete live Session profiles are no longer written back as hydrated, so the sidebar keeps fetching missing profiles instead of showing stale rows
+- **Drawer state**: a right-edge swipe or Android back gesture no longer mounts the left Sidebar, whose post-unmount loads read stale deriveds; visibility is scoped to left-edge gestures and async continuations are gated on unmount
+- **Pi/Codex reasoning effort**: reasoning capabilities are preserved in local runtime model catalogs so the picker offers supported thinking levels, and explicit selections (including Codex `none` for Cohub `off`) are forwarded to the native Harness
+
 ## v2.62 — 2026-10-10
 
 - **Quiet session activity**: session lists now derive status directly from turn records instead of per-session assistant stream subscriptions. Sidebars, chat lists, and workspaces receive lightweight `session.turn.updated` projections over the existing user realtime channel, with turn-sequence and terminal-state guards that leave generation state untouched, cutting realtime fan-out and render churn.

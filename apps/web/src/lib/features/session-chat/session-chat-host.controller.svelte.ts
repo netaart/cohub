@@ -25,7 +25,6 @@ import { tick, untrack } from "svelte";
 import { classifyAccessError } from "$lib/access/access-state";
 import type { SessionListForkRecord } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
-import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
 import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
 import { shouldRefreshAgentCatalogs } from "$lib/cache/space-fs-invalidation";
 import { noteViewerActivity } from "$lib/command-palette/palette-overview";
@@ -49,12 +48,13 @@ import { isStale } from "$lib/features/space/runtime-status-view";
 import { asRecord } from "$lib/features/space/space-utils";
 import { resolvePreferredGenerationModel } from "$lib/generation-model-catalog";
 import { formatGenerationPolicyLabel } from "$lib/generation-policy-label";
-import { sameData } from "$lib/lists/live-list-core";
 import { extractSpaceMentionsFromText } from "$lib/mentions/space";
 import {
 	formatThinkingLevelShort,
 	getRequestedThinkingLevel,
+	type LocalModelSelection,
 	type ModelThinkingLevel,
+	resolveLocalModel,
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
 import {
@@ -68,12 +68,13 @@ import {
 	EMPTY_SENT_TURNS,
 	NO_SENT_SESSIONS,
 } from "$lib/sent-turns";
-import { mergeSessionRecord } from "$lib/session-record-merge";
+import {
+	mergeSessionForks,
+	readRealtimeSessionFork,
+} from "$lib/session-fork-tree";
 import type { SessionRelations } from "$lib/session-relations-context";
-import { sortSessionsByRecentActivity } from "$lib/session-sort";
 import type { TimelineItem } from "$lib/session-tree";
 import { buildTurnTimelineItems } from "$lib/session-turn-render";
-import { mergeSessionTurnState } from "$lib/session-turn-state";
 import type { NewChatComposerApplyPayload } from "$lib/space-config";
 import { materializeSpaceEntries } from "$lib/space-upload";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -114,11 +115,12 @@ import {
 	hasRunningSessionTurn,
 } from "$lib/stores/session-generation-state";
 import {
-	fetchSessionListWithCache,
-	getCachedSessionListSnapshot,
+	listCachedSession,
 	patchCachedSessionList,
+	refreshCachedSessionList,
 } from "$lib/stores/session-list-cache";
 import { unreadTracker } from "$lib/stores/session-state.svelte";
+import { sessionStore } from "$lib/stores/session-store";
 import { mergeTurnsById } from "$lib/stores/turn-cache";
 import {
 	loadMessageToolCalls,
@@ -162,6 +164,7 @@ import {
 	reconcileOptimisticTurn,
 	resolveComposerSelectionFromTurn,
 	resolveLastAgentTurnModel,
+	resolveLocalModelFromTurns,
 	resolveTurnHarness,
 	type SessionComposerSelection,
 	shouldClearComposerDraftAfterSend,
@@ -213,6 +216,10 @@ export type SessionChatHostOptions = SessionChatEnvironment & {
 		| "error";
 	canManageSessionAccess?: () => boolean;
 	hasSpace?: () => boolean;
+	onSessionForked?: (
+		session: SessionRecord,
+		fork: SessionListForkRecord,
+	) => void;
 };
 
 // Last host releases memory; persisted recovery snapshots stay.
@@ -283,7 +290,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		canManageAccess: () => options.canManageSessionAccess?.() ?? false,
 	});
 
-	const spaceSessions = $derived(workspace.spaceSessions);
 	const sessionStateById = $derived(workspace.sessionStateById);
 	const activeSessionId = $derived(workspace.activeSessionId);
 	const loadingSessionIds = $derived(workspace.loadingSessionIds);
@@ -360,7 +366,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		model: null,
 	});
 	let harnessBySession = $state<Record<string, "cohub" | "pi" | "codex">>({});
-	let localModelsBySession = $state<Record<string, SelectedModel | null>>({});
+	let localModelsBySession = $state<Record<string, LocalModelSelection>>({});
 	const harnessSelectionKey = $derived(
 		`${spaceId}:${activeSessionId ?? "draft"}`,
 	);
@@ -374,20 +380,20 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		harnessBySession[harnessSelectionKey] ??
 			resolveTurnHarness(composerAgentTurns.at(-1)),
 	);
-	const localModel = $derived.by(() => {
-		const key = `${harnessSelectionKey}:${composerHarness}`;
-		if (Object.hasOwn(localModelsBySession, key))
-			return localModelsBySession[key] ?? null;
-		const previous = [...composerAgentTurns]
-			.reverse()
-			.find(
-				(turn) => resolveTurnHarness(turn) === composerHarness && turn.model,
-			);
-		return previous?.model && composerHarness !== "cohub"
-			? { id: previous.model, provider: previous.provider ?? composerHarness }
-			: null;
-	});
 	const runtimeCatalog = $derived(cachedRuntimeStatus(spaceId));
+	// Local Turns always name a model and, when the model has a choice, a level:
+	// a Harness keeps a requested level for later Turns, so leaving it out would
+	// not mean its default.
+	const localModel = $derived.by(() => {
+		if (composerHarness === "cohub") return null;
+		const requested =
+			localModelsBySession[`${harnessSelectionKey}:${composerHarness}`] ??
+			resolveLocalModelFromTurns(composerAgentTurns, composerHarness);
+		const models = runtimeCatalog?.capabilities?.models.filter(
+			(model) => model.harness === composerHarness,
+		);
+		return models ? resolveLocalModel(models, requested) : requested;
+	});
 	async function loadRuntimeCatalog() {
 		const targetSpaceId = spaceId;
 		if (!targetSpaceId) return;
@@ -561,7 +567,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 
 	let refreshSessionsListInFlight: Promise<void> | null = null;
 	let refreshSessionsListQueued = false;
-	let refreshSessionsListQueuedForce = false;
 	const turnHydrationInFlight = new Map<string, Promise<void>>();
 	let reconnectSyncInFlight: Promise<void> | null = null;
 
@@ -593,10 +598,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		return previousSentTurns;
 	});
 	const relatedSessions = createRelatedSessions({
-		live: (ref) =>
-			ref.spaceId === spaceId
-				? workspace.spaceSessions.find((item) => item.id === ref.sessionId)
-				: null,
+		live: (ref) => sessionStore.get(ref.sessionId),
 		load: (ref) =>
 			fetchSessionDetailWithCache(
 				ref.spaceId,
@@ -796,7 +798,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		updateSessionState: (id, state) => {
 			workspace.sessionStateById = { ...sessionStateById, [id]: state };
 		},
-		refreshSessionsList: (force) => refreshSessionsList(force ?? true),
+		refreshSessionsList,
 		requestBottomFollow: (opts) => requestBottomFollow(opts),
 		shouldAutoFollow: () => scroll.shouldAutoFollow,
 		getListEl: () =>
@@ -1169,7 +1171,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					}),
 				),
 			);
-			const nextSession = snapshot.session ?? current.session;
+			const nextSession = snapshot.session
+				? sessionStore.seed(snapshot.session)
+				: current.session;
 			const nextOldestCursor = snapshot.oldestSequence ?? undefined;
 			// A cache emit fires on every in-memory write even when the merged
 			// content is identical. Rewriting the state with a fresh object would
@@ -1660,52 +1664,25 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 
 	function upsertSessionRecord(
 		session: SessionRecord,
-		options?: { cache?: boolean },
+		options?: { cache?: boolean; fork?: SessionListForkRecord | null },
 	) {
-		const nextSessions = workspace.upsertSessionRecord(session);
-		if (options?.cache !== false) {
-			void patchCachedSessionList(spaceId, () => nextSessions).catch(
-				() => undefined,
-			);
-		}
+		const record = sessionStore.merge(session);
+		if (options?.cache !== false) listSession(record, options?.fork ?? null);
+		return record;
 	}
 
-	function applySessionRealtimeRecord(session: SessionRecord) {
-		const current = workspace.spaceSessions.find(
-			(item) => item.id === session.id,
-		);
-		upsertSessionRecord(mergeSessionRecord(current, session));
-		const merged = workspace.spaceSessions.find(
-			(item) => item.id === session.id,
-		);
-		if (merged)
-			void sessionDetailRepo
-				.set(spaceId, merged, { source: "network" })
-				.catch((error) =>
-					console.warn("[session-chat] failed to cache session update", error),
-				);
-	}
-
-	function applySessionsSnapshot(sessions: SessionRecord[]) {
-		workspace.applySessionsSnapshot(sessions);
-	}
-
-	function seedSessions(sessions: SessionRecord[]) {
-		workspace.seedSessions(sessions);
+	function listSession(
+		session: SessionRecord,
+		fork: SessionListForkRecord | null,
+	) {
+		void listCachedSession(spaceId, session, fork).catch(() => undefined);
 	}
 
 	async function syncForkResponseToSessionListCache(
 		session: SessionRecord,
-		fork: SessionListForkRecord | null | undefined,
+		fork: SessionListForkRecord,
 		parentSession?: SessionRecord | null,
 	) {
-		const snapshot = await getCachedSessionListSnapshot(spaceId).catch(
-			() => null,
-		);
-		const forkByChildId = new Map(
-			(snapshot?.forks ?? []).map((item) => [item.childSessionId, item]),
-		);
-		if (fork?.childSessionId) forkByChildId.set(fork.childSessionId, fork);
 		await patchCachedSessionList(
 			spaceId,
 			(current) => {
@@ -1714,61 +1691,37 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				return [session, ...base.filter((item) => item.id !== session.id)];
 			},
 			undefined,
-			Array.from(forkByChildId.values()),
+			(forks) => mergeSessionForks(forks, [fork]),
 		);
 	}
 
-	async function refreshSessionsList(force = true) {
+	async function refreshSessionsList() {
 		if (refreshSessionsListInFlight) {
 			refreshSessionsListQueued = true;
-			refreshSessionsListQueuedForce ||= force;
 			return refreshSessionsListInFlight;
 		}
-		// Pin the request identity: a space switch mid-flight must never fetch,
-		// cache, or apply another space's sessions.
+		// Pin the request identity: a space switch mid-flight must never fetch
+		// or cache another space's sessions.
 		const requestSpaceId = spaceId;
-		const run = (async () => {
-			try {
-				let backgroundRefreshApplied = false;
-				const sessions = await fetchSessionListWithCache(
-					requestSpaceId,
-					async () => {
-						const result = await sdk.space(requestSpaceId).sessions.list({
-							includeForks: true,
-						});
-						return {
-							sessions: result.sessions ?? [],
-							forks: result.forks,
-							pageInfo: result.pageInfo,
-						};
-					},
-					{
-						force,
-						onBackgroundRefresh: force
-							? undefined
-							: (freshSessions) => {
-									if (spaceId !== requestSpaceId) return;
-									backgroundRefreshApplied = true;
-									applySessionsSnapshot(freshSessions);
-								},
-					},
-				);
-				if (spaceId !== requestSpaceId) return;
-				if (force || !backgroundRefreshApplied) {
-					applySessionsSnapshot(sessions);
-				}
-			} catch (error) {
+		const run = refreshCachedSessionList(requestSpaceId, async () => {
+			const result = await sdk.space(requestSpaceId).sessions.list({
+				includeForks: true,
+			});
+			return {
+				sessions: result.sessions ?? [],
+				forks: result.forks,
+				pageInfo: result.pageInfo,
+			};
+		})
+			.then(() => undefined)
+			.catch((error) => {
 				console.warn("[space] Failed to refresh sessions:", error);
-			}
-		})();
+			});
 		refreshSessionsListInFlight = run.finally(() => {
 			refreshSessionsListInFlight = null;
-			if (refreshSessionsListQueued) {
-				const rerunForce = refreshSessionsListQueuedForce;
-				refreshSessionsListQueued = false;
-				refreshSessionsListQueuedForce = false;
-				void refreshSessionsList(rerunForce);
-			}
+			if (!refreshSessionsListQueued) return;
+			refreshSessionsListQueued = false;
+			void refreshSessionsList();
 		});
 		return refreshSessionsListInFlight;
 	}
@@ -1961,9 +1914,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					...sessionStateById,
 					[sessionId]: {
 						session: cached.session
-							? mergeSessionRecord(existing?.session, cached.session)
-							: (existing?.session ??
-								spaceSessions.find((s) => s.id === sessionId)),
+							? sessionStore.seed(cached.session)
+							: existing?.session,
 						turns: cached.turns,
 						loading: true,
 						loaded: true,
@@ -2000,7 +1952,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					session:
 						currentSeed?.session ??
 						existing?.session ??
-						spaceSessions.find((s) => s.id === sessionId),
+						sessionStore.get(sessionId),
 					turns: currentSeed?.turns ?? existing?.turns ?? [],
 					loading: true,
 					loaded: currentSeed?.loaded ?? existing?.loaded ?? false,
@@ -2070,7 +2022,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						session:
 							fallback?.session ??
 							existing?.session ??
-							spaceSessions.find((s) => s.id === sessionId),
+							sessionStore.get(sessionId),
 						turns: fallback?.turns ?? existing?.turns ?? [],
 						loading: false,
 						loaded: Boolean(fallback?.loaded ?? existing?.loaded),
@@ -2541,9 +2493,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					...sessionStateById,
 					[input.sessionId]: {
 						...latest,
-						session: snapshot.session
-							? mergeSessionRecord(latest.session, snapshot.session)
-							: latest.session,
+						session: snapshot.session ?? latest.session,
 						turns: snapshot.turns,
 					},
 				};
@@ -2603,13 +2553,15 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				.turn(turn.sourceTurnId ?? turn.id)
 				.fork();
 			if (disposed || spaceId !== opSpaceId) return;
+			const fork = response.fork as SessionListForkRecord;
+			options.onSessionForked?.(response.session, fork);
 			await sessionTurnsRepo
 				.clearSession(opSpaceId, response.session.id)
 				.catch(() => undefined);
 			if (disposed || spaceId !== opSpaceId) return;
 			await syncForkResponseToSessionListCache(
 				response.session,
-				response.fork as SessionListForkRecord,
+				fork,
 				parentSession,
 			).catch(() => undefined);
 			if (disposed || spaceId !== opSpaceId) return;
@@ -2828,15 +2780,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		model: SelectedModel | null;
 	}) {
 		const { session, turn, model } = input;
-		const nextSessions = sortSessionsByRecentActivity([
-			session,
-			...spaceSessions.filter((item) => item.id !== session.id),
-		]);
-		void patchCachedSessionList(spaceId, (current) => [
-			session,
-			...current.filter((item) => item.id !== session.id),
-		]).catch(() => undefined);
-		seedSessions(nextSessions);
+		upsertSessionRecord(session);
 		// Merge with any state already populated by realtime while prompt was in flight.
 		// Never clobber turns with [] if WS already delivered session.turn.* events.
 		const existing = sessionStateById[session.id];
@@ -3051,6 +2995,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		}
 		composer.sending = true;
 		const model = harness === "cohub" ? activeSessionModel : localModel;
+		const thinkingLevel =
+			harness === "cohub"
+				? activeSessionThinkingLevel
+				: localModel?.thinkingLevel;
 		clearComposerError();
 		// Snapshot identity for the whole send pipeline (multi-space host safe).
 		const opSpaceId = spaceId;
@@ -3268,6 +3216,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					meta: {
 						optimistic: true,
 						harness,
+						// Mirrors the server's request meta, which local model restore reads.
+						...(model ? { model: model.id, provider: model.provider } : {}),
+						...(thinkingLevel ? { requestedThinkingLevel: thinkingLevel } : {}),
 						userId: currentUser.uuid,
 						clientMessageId,
 					},
@@ -3305,9 +3256,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				model: model?.id,
 				provider: model?.provider,
 				harness,
-				...(harness === "cohub" && activeSessionThinkingLevel
-					? { thinkingLevel: activeSessionThinkingLevel }
-					: {}),
+				...(thinkingLevel ? { thinkingLevel } : {}),
 				clientMessageId,
 				...(harness === "cohub"
 					? { generationPolicy: buildTurnGenerationPolicy() }
@@ -3979,7 +3928,13 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				payload.type === "session.updated"
 			) {
 				const session = payload.payload.session as SessionRecord | undefined;
-				if (session?.id) applySessionRealtimeRecord(session);
+				if (session?.id && session.spaceId === spaceId)
+					listSession(
+						sessionStore.merge(session),
+						payload.type === "session.created"
+							? readRealtimeSessionFork(payload.payload)
+							: null,
+					);
 				return;
 			}
 			const targetSessionId =
@@ -3996,13 +3951,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				payload.type === "session.turn.finalized"
 			) {
 				const turn = payload.payload.turn as SessionTurnRecord | undefined;
-				const session =
-					workspace.spaceSessions.find((item) => item.id === targetSessionId) ??
-					sessionStateById[targetSessionId]?.session;
-				if (turn?.id && session) {
-					const next = mergeSessionTurnState(session, turn);
-					if (!sameData(session, next)) upsertSessionRecord(next);
-				}
 				// Personal-room projections carry lifecycle only; never overwrite content.
 				if (turn?.id && !Array.isArray(turn.userContent)) return;
 				if (turn?.id && Array.isArray(turn.userContent)) {
@@ -4414,6 +4362,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		generationRealtime.onTransportOpen();
 	}
 	function onConnectionRecovered() {
+		void refreshSessionsList();
 		void reconnectSync();
 	}
 	function onVisibilityChanged(visible: boolean) {
@@ -4421,7 +4370,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			if (activeSessionId) captureCurrentScrollAnchor(activeSessionId);
 			return;
 		}
-		void refreshSessionsList(false);
+		void refreshSessionsList();
 		if (activeSessionId && sessionStateById[activeSessionId]?.loaded) {
 			void reconcileSessionTail(activeSessionId);
 		}
@@ -4452,21 +4401,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			.space(spaceId)
 			.session(activeSessionId)
 			.rename(trimmed);
-		workspace.spaceSessions = spaceSessions.map((s) =>
-			s.id === activeSessionId ? result.session : s,
-		);
-		void patchCachedSessionList(spaceId, (current) =>
-			current.map((s) => (s.id === activeSessionId ? result.session : s)),
-		).catch(() => undefined);
-		if (sessionStateById[activeSessionId]) {
-			workspace.sessionStateById = {
-				...sessionStateById,
-				[activeSessionId]: {
-					...sessionStateById[activeSessionId],
-					session: result.session,
-				},
-			};
-		}
+		sessionStore.merge(result.session);
 		return result.session;
 	}
 
@@ -4601,7 +4536,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		get localModel() {
 			return localModel;
 		},
-		setLocalModel(model: SelectedModel | null) {
+		setLocalModel(model: LocalModelSelection) {
 			localModelsBySession = {
 				...localModelsBySession,
 				[`${harnessSelectionKey}:${composerHarness}`]: model,
@@ -4813,8 +4748,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		loadTurnIndex,
 		loadSessionState,
 		prepareRouteSession,
-		seedSessions,
-		applySessionsSnapshot,
 		upsertSessionRecord,
 		handleCreateNewSession,
 		loadModelsCatalog,
@@ -4833,6 +4766,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		onRequestIntermediateSync,
 		applyBackgroundComposerPayload,
 		openShareModal: (sessionId: string) => share.openFor(sessionId),
+		hasSession: (sessionId: string) =>
+			sessionStore.get(sessionId)?.spaceId === spaceId ||
+			Boolean(sessionStateById[sessionId]),
 		openPath: (target: string | WorkspaceFileLinkTarget) =>
 			options.openPath(target),
 		resolveWorkspaceAsset: options.resolveWorkspaceAsset,
