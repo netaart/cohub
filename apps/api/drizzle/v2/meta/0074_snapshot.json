@@ -1,5 +1,5 @@
 {
-  "id": "de51d156-2cda-4468-b761-ed5e5d31f362",
+  "id": "b2f442e8-17cf-467d-913f-3c46fda51fe5",
   "prevId": "876b919f-20f5-4ac2-be56-b3bc0a9e9a45",
   "version": "7",
   "dialect": "postgresql",
@@ -5108,13 +5108,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "workspace_write_gen": {
-          "name": "workspace_write_gen",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5700,6 +5693,84 @@
           "with": {}
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "v2.space_workspace_writers": {
+      "name": "space_workspace_writers",
+      "schema": "v2",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "space_id": {
+          "name": "space_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lease_until": {
+          "name": "lease_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "v2_idx_space_workspace_writers_space_id": {
+          "name": "v2_idx_space_workspace_writers_space_id",
+          "columns": [
+            {
+              "expression": "space_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "v2.space_workspace_writes": {
+      "name": "space_workspace_writes",
+      "schema": "v2",
+      "columns": {
+        "space_id": {
+          "name": "space_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "gen": {
+          "name": "gen",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "settled_at": {
+          "name": "settled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -37,11 +37,6 @@ const (
 	activationRetryMaxDelay  = 10 * time.Second
 	reconcileRetryBaseDelay  = 500 * time.Millisecond
 	reconcileRetryMaxDelay   = 10 * time.Second
-	// Another NFS client's write can stay invisible to this pod's directory
-	// and attribute caches (acdirmax defaults to 60s), so a reconcile right
-	// after a direct write can miss it. One more reconcile once the caches
-	// have expired picks it up.
-	directWriteRecheckDelay = 65 * time.Second
 )
 
 // Reasons the sandbox answers without consulting the index. cohub-search adds
@@ -166,7 +161,6 @@ type Manager struct {
 	coveredWrite    WriteToken
 	pendingWrite    WriteToken
 	pendingWriteGen uint64
-	writeRecheck    *time.Timer
 
 	commands    chan command
 	control     chan command
@@ -303,6 +297,8 @@ func (m *Manager) authority(ctx context.Context, writes WriteToken) string {
 // coverWrites reports whether a completed reconcile covers the direct writes
 // in token. A token newer than any seen so far starts a reconcile, accepted
 // after this call; like a lost batch, it covers everything written before.
+// Writers publish a token only once their writes can no longer hide in this
+// pod's NFS caches, so that reconcile sees them.
 func (m *Manager) coverWrites(token WriteToken) bool {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
@@ -313,7 +309,6 @@ func (m *Manager) coverWrites(token WriteToken) bool {
 		m.pendingWrite = token
 		m.pendingWriteGen = m.lostGen.Add(1)
 		m.enqueueControl(command{reconcile: true})
-		m.scheduleDirectWriteRecheck()
 		return false
 	}
 	if m.coveredGen.Load() < m.pendingWriteGen {
@@ -321,19 +316,6 @@ func (m *Manager) coverWrites(token WriteToken) bool {
 	}
 	m.coveredWrite = m.pendingWrite
 	return m.coveredWrite.covers(token)
-}
-
-// scheduleDirectWriteRecheck reconciles once more after the newest token's
-// writes can no longer hide in this pod's NFS caches. Callers hold writeMu.
-func (m *Manager) scheduleDirectWriteRecheck() {
-	if m.writeRecheck != nil {
-		m.writeRecheck.Stop()
-	}
-	m.writeRecheck = time.AfterFunc(directWriteRecheckDelay, func() {
-		if !m.closed.Load() {
-			m.enqueueControl(command{reconcile: true})
-		}
-	})
 }
 
 func (m *Manager) Close() {

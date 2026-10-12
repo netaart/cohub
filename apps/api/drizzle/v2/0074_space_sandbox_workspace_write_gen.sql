@@ -1,1 +1,0 @@
-ALTER TABLE "v2"."space_sandboxes" ADD COLUMN "workspace_write_gen" bigint DEFAULT 0 NOT NULL;

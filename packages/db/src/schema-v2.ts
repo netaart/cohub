@@ -183,8 +183,6 @@ export const spaceSandboxes = v2.table(
     stoppedAt: timestamp("stopped_at", { withTimezone: true }),
     stopReason: varchar("stop_reason", { length: 30 }),
     meta: jsonb("meta"),
-    /** Bumped around every write to the workspace volume that bypasses the sandbox. */
-    workspaceWriteGen: bigint("workspace_write_gen", { mode: "number" }).notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -201,6 +199,32 @@ export const spaceSandboxes = v2.table(
       "v2_chk_space_sandboxes_provider",
       sql`${table.provider} in ('cloud', 'local')`,
     ),
+  }),
+);
+
+/**
+ * Writes to a space's workspace volume that bypass its sandbox, which agent
+ * searches must not answer past. Keyed by space rather than sandbox so a
+ * write is recorded whether or not a sandbox row exists yet.
+ */
+export const spaceWorkspaceWrites = v2.table("space_workspace_writes", {
+  spaceId: uuid("space_id").primaryKey(),
+  /** Bumped whenever a direct writer records itself. */
+  gen: bigint("gen", { mode: "number" }).notNull(),
+  /** Until then the last finished direct write may hide in NFS caches. */
+  settledAt: timestamp("settled_at", { withTimezone: true }).notNull(),
+});
+
+/** Direct writers still running; a writer that stops renewing lapses. */
+export const spaceWorkspaceWriters = v2.table(
+  "space_workspace_writers",
+  {
+    id: uuid("id").primaryKey(),
+    spaceId: uuid("space_id").notNull(),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    spaceIdx: index("v2_idx_space_workspace_writers_space_id").on(table.spaceId),
   }),
 );
 
