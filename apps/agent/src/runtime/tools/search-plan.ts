@@ -148,7 +148,8 @@ export function chunkArgs(head: string[], args: string[], limits: ArgvLimits): s
   return chunks;
 }
 
-const RG_MISSING_TARGET = /^rg: (.+): No such file or directory \(os error 2\)$/;
+// rg words the error differently when the missing path is its only target.
+const RG_MISSING_TARGET = /^rg: (.+?): (?:IO error for operation on \1: )?No such file or directory \(os error 2\)$/;
 
 /**
  * True when stderr only reports targets that vanished after the plan was

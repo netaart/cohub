@@ -122,6 +122,9 @@ test("chunking keeps every argument and respects both limits", () => {
 test("only errors for vanished targets are ignorable", () => {
   const targets = ["src/a.ts", "src/b.ts"];
   assert.equal(onlyVanishedTargets("rg: src/a.ts: No such file or directory (os error 2)\n", targets), true);
+  assert.equal(onlyVanishedTargets("rg: src/a.ts: IO error for operation on src/a.ts: No such file or directory (os error 2)", targets), true);
+  assert.equal(onlyVanishedTargets("rg: src/a.ts: IO error for operation on other.ts: No such file or directory (os error 2)", targets), false);
+  assert.equal(onlyVanishedTargets("rg: src/a.ts: IO error for operation on src/a.ts: Permission denied (os error 13)", targets), false);
   assert.equal(onlyVanishedTargets("rg: other.ts: No such file or directory (os error 2)", targets), false);
   assert.equal(onlyVanishedTargets("rg: src/a.ts: Permission denied (os error 13)", targets), false);
   assert.equal(onlyVanishedTargets("regex parse error", targets), false);
@@ -149,6 +152,24 @@ test("rg gives the later glob precedence, so a user glob never searches .git", {
     writeFileSync(join(root, "a.txt"), "needle\n");
     const files = execFileSync("rg", ["--hidden", "--no-config", "-l", ...buildRgGlobArgv("*"), "--", "needle", "."], { cwd: root, encoding: "utf8" });
     assert.deepEqual(files.trim().split("\n"), ["./a.txt"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rg's errors for vanished targets are recognised", { skip: !hasTool("rg") }, () => {
+  const root = mkdtempSync(join(tmpdir(), "rg-targets-"));
+  try {
+    writeFileSync(join(root, "a.txt"), "needle\n");
+    for (const targets of [["./gone.txt"], ["./gone"], ["./a.txt", "./gone.txt"], ["./gone1.txt", "./gone2.txt"]]) {
+      let stderr = "";
+      try {
+        execFileSync("rg", ["--json", "--no-config", "--", "needle", ...targets], { cwd: root, encoding: "utf8", stdio: "pipe" });
+      } catch (error) {
+        stderr = String((error as { stderr?: string }).stderr ?? "");
+      }
+      assert.equal(onlyVanishedTargets(stderr, targets), true, stderr);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
