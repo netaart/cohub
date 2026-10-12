@@ -383,7 +383,7 @@ impl IndexStore {
         // rules; only entries of traversed directories matter to rg.
         let mut hidden_targets = BTreeMap::new();
         for target in &targets {
-            if found.contains_key(target) {
+            if found.contains_key(target) || walk::is_tool_excluded(target) {
                 continue;
             }
             if let Ok(metadata) = fs::symlink_metadata(self.workspace.join(target)) {
@@ -499,7 +499,9 @@ impl IndexStore {
         }
         // Another name of a hard-linked file may still be indexed as text from
         // before the link existed. Creating the link changed that file's ctime,
-        // so a reconcile finds and re-reads it.
+        // so a reconcile finds and re-reads it. Neither the content kind nor
+        // the event kind tells a new link from a write through a known one: a
+        // replaced name can be reported as a modify.
         if added.values().any(|meta| meta.kind == ContentKind::Linked) {
             return self.reconcile();
         }
@@ -514,7 +516,7 @@ impl IndexStore {
         if domain.rules.non_utf8_names {
             return Ok(QueryOutcome::Fallback(Fallback::Names));
         }
-        if domain.rules.content_mismatch() || walk::global_excludes_present() {
+        if domain.rules.content_mismatch(&self.workspace) {
             return Ok(QueryOutcome::Fallback(Fallback::Rules));
         }
         let root = normalize_prefix(&request.path_prefix);
@@ -619,7 +621,7 @@ impl IndexStore {
         if domain.rules.non_utf8_names {
             return Ok(PathOutcome::Fallback(Fallback::Names));
         }
-        if domain.rules.paths_mismatch() || walk::global_excludes_present() {
+        if domain.rules.paths_mismatch(&self.workspace) {
             return Ok(PathOutcome::Fallback(Fallback::Rules));
         }
         let root = normalize_prefix(&request.path_prefix);
@@ -1259,6 +1261,54 @@ mod tests {
     }
 
     #[test]
+    fn exclude_rules_the_watcher_cannot_see_are_read_per_query() {
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "NEEDLE\n");
+        fixture.write("repo/b.txt", "NEEDLE\n");
+        let store = fixture.reconciled();
+        // `git init` in a subdirectory: the watcher reports only the `.git`
+        // entry, and the rules inside it change without any event.
+        fixture.write("repo/.git/info/exclude", "# comment only\n");
+        store
+            .apply_changes(&[change("repo/.git", "create")])
+            .expect("apply git init");
+        assert_eq!(plan(&store, &request("NEEDLE")).files.len(), 2);
+        fixture.write("repo/.git/info/exclude", "b.txt\n");
+        assert_eq!(fallback(&store, &request("NEEDLE")), Fallback::Rules);
+        fixture.write("repo/.git/info/exclude", "");
+        assert_eq!(plan(&store, &request("NEEDLE")).files.len(), 2);
+    }
+
+    #[test]
+    fn git_files_resolve_exclude_rules_like_rg() {
+        let fixture = Fixture::new();
+        fixture.write("wt/a.txt", "NEEDLE\n");
+        // A worktree: its git dir has a `commondir` leading to the exclude file.
+        fixture.write("main.git/worktrees/wt/commondir", "../..\n");
+        fixture.write("main.git/info/exclude", "a.txt\n");
+        let gitdir = fixture.path("main.git/worktrees/wt");
+        fixture.write("wt/.git", format!("gitdir: {}\n", gitdir.display()));
+        let store = fixture.reconciled();
+        assert_eq!(fallback(&store, &request("NEEDLE")), Fallback::Rules);
+        // Without `commondir` (a submodule), the git dir's own rules count.
+        fs::remove_file(fixture.path("main.git/worktrees/wt/commondir")).expect("remove commondir");
+        assert!(matches!(
+            store.query(&request("NEEDLE")).unwrap(),
+            QueryOutcome::Plan(_)
+        ));
+        fixture.write("main.git/worktrees/wt/info/exclude", "a.txt\n");
+        assert_eq!(fallback(&store, &request("NEEDLE")), Fallback::Rules);
+        fs::remove_file(fixture.path("main.git/worktrees/wt/info/exclude"))
+            .expect("remove exclude");
+        // A relative gitdir resolves against the workspace root or the file.
+        fixture.write("main.git/worktrees/wt/commondir", "../..\n");
+        fixture.write("wt/.git", "gitdir: main.git/worktrees/wt\n");
+        assert_eq!(fallback(&store, &request("NEEDLE")), Fallback::Rules);
+        fixture.write("wt/.git", "gitdir: ../main.git/worktrees/wt\n");
+        assert_eq!(fallback(&store, &request("NEEDLE")), Fallback::Rules);
+    }
+
+    #[test]
     fn unnarrowable_patterns_and_large_plans_fall_back() {
         let fixture = Fixture::new();
         for index in 0..5 {
@@ -1850,6 +1900,28 @@ mod tests {
     }
 
     #[test]
+    fn replacing_a_linked_name_rereads_its_new_peer() {
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "old\n");
+        fixture.write("c.txt", "old\n");
+        fs::hard_link(fixture.path("a.txt"), fixture.path("b.txt")).expect("link");
+        let store = fixture.reconciled();
+        fs::remove_file(fixture.path("a.txt")).expect("remove");
+        fs::hard_link(fixture.path("c.txt"), fixture.path("a.txt")).expect("relink");
+        // The polling watcher reports a replaced name as a modify.
+        store
+            .apply_changes(&[change("a.txt", "modify")])
+            .expect("apply relink");
+        fixture.write("a.txt", "NEEDLE\n");
+        store
+            .apply_changes(&[change("a.txt", "modify")])
+            .expect("apply write");
+        let replaced = plan(&store, &request("NEEDLE"));
+        assert!(replaced.files.is_empty());
+        assert_eq!(replaced.walk_files, strings(&["a.txt", "c.txt"]));
+    }
+
+    #[test]
     fn backslashes_are_ordinary_name_characters() {
         let fixture = Fixture::new();
         fixture.write("a\\b.txt", "NEEDLE\n");
@@ -1925,6 +1997,31 @@ mod tests {
         assert_eq!(staged.files, strings(&["a.txt"]));
         assert!(staged.walk_files.is_empty() && staged.dirs.is_empty());
         assert_eq!(path_matches(&store, "*", 10).0, strings(&["a.txt"]));
+    }
+
+    #[test]
+    fn staging_entries_stay_out_of_whitelist_glob_plans() {
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "NEEDLE\n");
+        fixture.write(".cohub-upload.abc", "NEEDLE\n");
+        fixture.write("sub/.cohub-upload.copy-1-0", "NEEDLE\n");
+        let store = fixture.reconciled();
+        let mut globbed = request("NEEDLE");
+        globbed.glob = Some("*".to_string());
+        let full = plan(&store, &globbed);
+        assert_eq!(full.files, strings(&["a.txt"]));
+        assert!(
+            full.walk_files.is_empty(),
+            "walk files {:?}",
+            full.walk_files
+        );
+
+        // A staging entry reported by an update is not hidden either.
+        fixture.write("sub/.cohub-upload.copy-2-0", "NEEDLE\n");
+        store
+            .apply_changes(&[change("sub/.cohub-upload.copy-2-0", "create")])
+            .expect("apply staging create");
+        assert!(plan(&store, &globbed).walk_files.is_empty());
     }
 
     #[test]

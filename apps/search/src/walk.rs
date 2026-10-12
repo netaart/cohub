@@ -5,7 +5,8 @@
 //! walks the same way, so a file list from the index can stand in for a walk.
 //! Rules only one tool applies (`.rgignore`, `.fdignore`) and rules the file
 //! watcher cannot observe (`.git/info/exclude`, the global excludes file) are
-//! reported instead of mirrored, and callers fall back to a real walk.
+//! reported instead of mirrored, and callers fall back to a real walk. The
+//! unobservable ones are read again for every query.
 
 use anyhow::Result;
 use ignore::{
@@ -16,7 +17,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     os::unix::fs::MetadataExt,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -33,7 +34,7 @@ const STAGING_PREFIX: &str = ".cohub-upload.";
 pub fn changes_walk_rules(relative: &str) -> bool {
     matches!(
         relative.rsplit('/').next(),
-        Some(".gitignore" | ".ignore" | RG_IGNORE_FILE | FD_IGNORE_FILE)
+        Some(".gitignore" | ".ignore" | ".git" | RG_IGNORE_FILE | FD_IGNORE_FILE)
     )
 }
 
@@ -109,7 +110,7 @@ fn is_default_excluded_name(name: &str) -> bool {
 
 /// The agent excludes `.git` and staging entries from rg and fd after any
 /// user glob, so neither tool ever sees them.
-fn is_tool_excluded(relative: &str) -> bool {
+pub fn is_tool_excluded(relative: &str) -> bool {
     let name = relative.rsplit('/').next().unwrap_or(relative);
     name == ".git" || name.starts_with(STAGING_PREFIX)
 }
@@ -150,32 +151,40 @@ pub enum Found {
 }
 
 /// Rules present in the workspace that the index walk does not apply.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuleNotes {
     pub rg_ignore_files: bool,
     pub fd_ignore_files: bool,
-    pub vcs_excludes: bool,
-    pub global_excludes: bool,
+    /// `.git` entries in traversed directories. The watcher does not report
+    /// what happens inside them, so their exclude rules are read per query.
+    pub git_markers: BTreeSet<String>,
     /// A traversed name is not UTF-8. Plans and the wire protocol carry UTF-8
     /// paths only, so such a workspace is never answered from the index.
     pub non_utf8_names: bool,
 }
 
 impl RuleNotes {
-    pub fn content_mismatch(&self) -> bool {
-        self.rg_ignore_files || self.vcs_excludes || self.global_excludes
+    pub fn content_mismatch(&self, workspace: &Path) -> bool {
+        self.rg_ignore_files || self.unobserved_excludes(workspace)
     }
 
-    pub fn paths_mismatch(&self) -> bool {
-        self.fd_ignore_files || self.vcs_excludes || self.global_excludes
+    pub fn paths_mismatch(&self, workspace: &Path) -> bool {
+        self.fd_ignore_files || self.unobserved_excludes(workspace)
+    }
+
+    fn unobserved_excludes(&self, workspace: &Path) -> bool {
+        global_excludes_present()
+            || self
+                .git_markers
+                .iter()
+                .any(|marker| git_excludes_present(workspace, marker))
     }
 
     /// Notes from a walk of part of the workspace only add to what is known.
     pub fn merge(&mut self, other: RuleNotes) {
         self.rg_ignore_files |= other.rg_ignore_files;
         self.fd_ignore_files |= other.fd_ignore_files;
-        self.vcs_excludes |= other.vcs_excludes;
-        self.global_excludes |= other.global_excludes;
+        self.git_markers.extend(other.git_markers);
         self.non_utf8_names |= other.non_utf8_names;
     }
 }
@@ -249,7 +258,6 @@ pub fn observe(workspace: &Path, names: &NameRules) -> Result<Observation> {
     ));
     let traversed = std::iter::once(String::new()).chain(traversed_dirs(&found));
     let (hidden, mut rules) = list_hidden(workspace, traversed.collect(), &found);
-    rules.global_excludes = global_excludes_present();
     rules.non_utf8_names |= non_utf8.load(Ordering::Relaxed);
     Ok(Observation {
         found,
@@ -293,11 +301,16 @@ fn list_hidden(
                 RG_IGNORE_FILE => rules.rg_ignore_files = true,
                 FD_IGNORE_FILE => rules.fd_ignore_files = true,
                 ".git" => {
-                    if file_type.is_dir() && git_dir_has_excludes(&child.path()) {
-                        rules.vcs_excludes = true;
-                    }
+                    rules.git_markers.insert(if dir.is_empty() {
+                        ".git".to_string()
+                    } else {
+                        format!("{dir}/.git")
+                    });
                     continue;
                 }
+                // Never searched, so not a rule-hidden entry a whitelist glob
+                // could bring back.
+                name if is_tool_excluded(name) => continue,
                 _ => {}
             }
             let relative = if dir.is_empty() {
@@ -518,22 +531,64 @@ fn is_dir(entry: &DirEntry) -> bool {
         .is_some_and(|file_type| file_type.is_dir())
 }
 
-fn git_dir_has_excludes(git_dir: &Path) -> bool {
-    let exclude = git_dir.join("info").join("exclude");
-    if !exclude.is_file() {
-        return false;
-    }
-    let mut builder = GitignoreBuilder::new(git_dir.parent().unwrap_or(git_dir));
-    if builder.add(&exclude).is_some() {
+/// Whether `info/exclude` rules may apply below the workspace-relative `.git`
+/// entry `marker`.
+fn git_excludes_present(workspace: &Path, marker: &str) -> bool {
+    let dot_git = workspace.join(marker);
+    let root = dot_git.parent().unwrap_or(workspace);
+    git_exclude_files(workspace, &dot_git)
+        .iter()
+        .any(|exclude| exclude.is_file() && has_rules(root, exclude))
+}
+
+fn has_rules(root: &Path, exclude: &Path) -> bool {
+    let mut builder = GitignoreBuilder::new(root);
+    if builder.add(exclude).is_some() {
         // Unreadable rules cannot be mirrored either.
         return true;
     }
     builder.build().map_or(true, |rules| !rules.is_empty())
 }
 
+/// The exclude files rg may read for a `.git` entry. A `.git` directory holds
+/// its own. For a `.git` file, rg with `--no-require-git` reads none today,
+/// but its git dir is resolved every way rg or git might (`gitdir:` relative
+/// to the working directory, which the agent sets to the workspace root, or
+/// to the file; that dir's own rules or its `commondir`'s), so no rg version
+/// can apply a rule the index does not see.
+fn git_exclude_files(workspace: &Path, dot_git: &Path) -> Vec<PathBuf> {
+    let first_line = |path: &Path| {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|text| text.lines().next().map(str::to_string))
+    };
+    let exclude = |git_dir: &Path| git_dir.join("info").join("exclude");
+    let Ok(metadata) = fs::symlink_metadata(dot_git) else {
+        return Vec::new();
+    };
+    if !metadata.file_type().is_file() {
+        return vec![exclude(dot_git)];
+    }
+    let Some(line) = first_line(dot_git) else {
+        return Vec::new();
+    };
+    let Some(target) = line.strip_prefix("gitdir: ") else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    for base in [workspace, dot_git.parent().unwrap_or(workspace)] {
+        let git_dir = base.join(target);
+        files.push(exclude(&git_dir));
+        if let Some(common) = first_line(&git_dir.join("commondir")) {
+            files.push(exclude(&git_dir.join(common)));
+        }
+    }
+    files
+}
+
 /// The global excludes file lives outside the workspace, so the watcher cannot
 /// report changes to it; queries check it again because the check is cheap.
-pub fn global_excludes_present() -> bool {
+fn global_excludes_present() -> bool {
     let (rules, error) = Gitignore::global();
     error.is_some() || !rules.is_empty()
 }
