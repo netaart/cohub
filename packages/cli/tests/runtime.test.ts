@@ -184,6 +184,10 @@ for (const harness of ["pi", "codex"] as const) {
         assert.equal(catalog.models[0]?.defaultThinkingLevel, "medium");
         assert.equal(catalog.models[0]?.reasoning, true);
         assert.equal(catalog.models[0]?.thinkingLevelMap?.xhigh, "xhigh");
+      } else {
+        assert.deepEqual(catalog.models.map((model) => model.id), ["test", "another"]);
+        assert(catalog.models.every((model) => model.provider === "fixture" && model.reasoning && model.thinkingLevelMap?.xhigh === "xhigh"));
+        assert.equal(catalog.models[0]?.defaultThinkingLevel, "medium");
       }
       const { executor } = runtime.native;
       const turn = { ...input(harness), thinkingLevel: "xhigh" };

@@ -266,10 +266,11 @@ thinking level (Codex configured or model effort; Pi's level for its default mod
 shows, and sends, a concrete model and level. A Session restores the model and level last
 requested for that Harness; a model the Runtime no longer offers falls back to the default.
 Pi/Codex model rows expose thinking levels declared by the local Harness, and Codex `none`
-maps to Cohub `off`. Models without a level choice send none. Older Runtime catalogs and custom
-Codex providers without an authoritative model catalog do not advertise guessed reasoning
-capabilities. Deploy the updated services and Web, then update and restart the CLI Runtime to
-refresh its catalog.
+maps to Cohub `off`. Models without a level choice send none. Codex's picker-visible `model/list`
+is used for all providers, including custom providers without `model_catalog_json`; the
+configured model is retained as a fallback when absent from the list, without guessed reasoning
+capabilities. Older Runtime catalogs remain supported. Deploy the updated services and Web,
+then update and restart the CLI Runtime to refresh its catalog.
 The header distinguishes ready, limited, offline and stale/unknown status. Runtime lifecycle
 changes invalidate the existing status cache over the shared realtime room; old snapshots
 may populate labels/models, never authorize a local turn.

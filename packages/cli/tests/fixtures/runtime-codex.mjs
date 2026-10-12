@@ -12,7 +12,13 @@ for await (const line of lines) {
   const input = JSON.parse(line);
   if (input.method === "initialize") respond(input, { userAgent: "fixture" });
   else if (input.method === "config/read") respond(input, { config: { model: "test", model_provider: "fixture" } });
-  else if (input.method === "model/list") respond(input, { data: [{ id: "test", model: "test", displayName: "Test", supportedReasoningEfforts: [{ reasoningEffort: "medium" }] }], nextCursor: null });
+  else if (input.method === "model/list") {
+    const secondPage = input.params.cursor === "next-model";
+    respond(input, {
+      data: [{ id: secondPage ? "another" : "test", model: secondPage ? "another" : "test", displayName: secondPage ? "Another" : "Test", defaultReasoningEffort: "medium", supportedReasoningEfforts: ["medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort })) }],
+      nextCursor: secondPage ? null : "next-model",
+    });
+  }
   else if (input.method === "thread/start") {
     const id = randomUUID();
     thread = { id, path: join(process.cwd(), `native-${id}.jsonl`) };

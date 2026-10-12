@@ -52,14 +52,12 @@ function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model
   };
 }
 
-/** Codex's built-in catalog is not authoritative for an arbitrary custom provider. */
+/** Use Codex's picker-visible model/list for every provider, including custom providers. */
 export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]): Model[] {
   const config = record(configResponse.config);
   const provider = typeof config.model_provider === "string" ? config.model_provider : "openai";
   const configuredModel = typeof config.model === "string" ? config.model : null;
-  const customCatalog = typeof config.model_catalog_json === "string";
-  const catalog = provider !== "openai" && !customCatalog ? [] : entries;
-  const models: Model[] = catalog.flatMap((value) => {
+  const models: Model[] = entries.flatMap((value) => {
     const model = record(value);
     const id = typeof model.model === "string" ? model.model : typeof model.id === "string" ? model.id : null;
     if (!id || model.hidden) return [];

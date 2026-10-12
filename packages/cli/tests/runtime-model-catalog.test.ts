@@ -66,9 +66,33 @@ test("older Runtime capabilities remain valid and offer no invented reasoning ch
   assert.deepEqual(getSupportedThinkingLevels(item), ["off"]);
 });
 
-test("custom Codex providers do not inherit unsupported built-in reasoning choices", () => {
-  const models = codexModelCatalog({ config: { model_provider: "custom", model: "test" } }, [{
-    id: "test", supportedReasoningEfforts: [{ reasoningEffort: "high" }],
-  }]);
-  assert.deepEqual(models, [{ harness: "codex", provider: "custom", id: "test", name: "test", isDefault: true }]);
+test("custom Codex providers retain the native picker catalog and reasoning choices", () => {
+  const entries = [
+    { id: "first", displayName: "First", isDefault: true, defaultReasoningEffort: "medium", supportedReasoningEfforts: ["low", "medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort })) },
+    { id: "configured", displayName: "Configured", defaultReasoningEffort: "medium", supportedReasoningEfforts: ["medium", "high", "xhigh", "max"].map((reasoningEffort) => ({ reasoningEffort })) },
+    { id: "hidden", hidden: true },
+  ];
+  for (const catalog of [undefined, null, "/local/catalog.json"]) {
+    const models = codexModelCatalog({ config: { model_provider: "crs", model: "configured", model_reasoning_effort: "xhigh", model_catalog_json: catalog } }, entries);
+    const parsed = runtimeCapabilitiesSchema.parse({ harnesses: ["codex"], models });
+    assert.deepEqual(parsed.models.map(({ id, provider, name, isDefault }) => ({ id, provider, name, isDefault })), [
+      { id: "first", provider: "crs", name: "First", isDefault: undefined },
+      { id: "configured", provider: "crs", name: "Configured", isDefault: true },
+    ]);
+    const [first, configured] = toLocalModelCatalog(parsed.models);
+    assert(first && configured);
+    assert.deepEqual(getSupportedThinkingLevels(first), ["low", "medium", "high", "xhigh"]);
+    assert.deepEqual(getSupportedThinkingLevels(configured), ["medium", "high", "xhigh", "max"]);
+    assert.equal(getModelDefaultThinkingLevel(configured), "xhigh");
+  }
+});
+
+test("custom Codex providers retain an unlisted configured model without guessing capabilities", () => {
+  const config = { model_provider: "custom", model: "unlisted" };
+  const fallback = { harness: "codex", provider: "custom", id: "unlisted", name: "unlisted", isDefault: true };
+  assert.deepEqual(codexModelCatalog({ config }, []), [fallback]);
+  assert.deepEqual(codexModelCatalog({ config }, [{ id: "listed", isDefault: true }]), [
+    fallback,
+    { harness: "codex", provider: "custom", id: "listed", name: "listed" },
+  ]);
 });
