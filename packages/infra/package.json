@@ -76,6 +76,10 @@
       "types": "./dist/logging/index.d.ts",
       "default": "./dist/logging/index.js"
     },
+    "./workspace-usage": {
+      "types": "./dist/workspace-usage/index.d.ts",
+      "default": "./dist/workspace-usage/index.js"
+    },
     "./safe-fetch": {
       "types": "./dist/safe-fetch/index.d.ts",
       "default": "./dist/safe-fetch/index.js"

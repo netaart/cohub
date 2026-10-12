@@ -156,6 +156,9 @@
       "@cohub/core/fs-cdn": [
         "../../packages/core/src/fs-cdn/index.ts"
       ],
+      "@cohub/infra/workspace-usage": [
+        "../../packages/infra/src/workspace-usage/index.ts"
+      ],
       "@cohub/core/space-fs": [
         "../../packages/core/src/space-fs/index.ts"
       ]

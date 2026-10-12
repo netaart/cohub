@@ -21,7 +21,8 @@
   "dependencies": {
     "@cohub/db": "workspace:*",
     "@cohub/protocol": "workspace:*",
-    "drizzle-orm": "^0.45.4"
+    "drizzle-orm": "^0.45.4",
+    "@cohub/infra": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
