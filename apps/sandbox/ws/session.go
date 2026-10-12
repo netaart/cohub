@@ -90,6 +90,10 @@ func (s *Server) serveSession(parentCtx context.Context, conn *websocket.Conn, r
 				s.logger.Warn("failed to parse rpc.request", slog.String("connectionId", session.id), slog.String("error", err.Error()))
 				continue
 			}
+			if request.SpaceID != session.spaceID || request.SandboxID != s.hostname {
+				conn.Close(websocket.StatusPolicyViolation, "sandbox resource mismatch")
+				return
+			}
 			s.logger.Debug("rpc:request received", slog.String("connectionId", session.id), slog.String("identity", session.identity), slog.String("method", request.Method), slog.String("requestId", request.RequestID))
 			go s.handleRPCRequest(session, request)
 		default:
@@ -99,6 +103,11 @@ func (s *Server) serveSession(parentCtx context.Context, conn *websocket.Conn, r
 }
 
 func (s *Server) handleSessionAttach(session *connectionSession, attach protocol.SessionAttach) {
+	if attach.SpaceID != session.spaceID || attach.SandboxID != s.hostname {
+		session.conn.Close(websocket.StatusPolicyViolation, "sandbox resource mismatch")
+		session.cancel()
+		return
+	}
 	identity := attach.Identity
 	if identity == "" {
 		s.logger.Warn("session.attach missing identity", slog.String("connectionId", session.id))

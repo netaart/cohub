@@ -5,9 +5,11 @@ import {
   getSandboxClientConnection,
   hasPendingSandboxRequests,
   disconnectSandboxWsClient,
+  resolveSandboxConnectionOptions,
   startSandboxWsClient,
   waitForSandboxConnection,
   type SandboxConnection,
+  type SandboxConnectionOptions,
 } from "@cohub/sandbox-client";
 import type { RpcEventPayload, RpcMethod, RpcRequestMap } from "@cohub/protocol/sandbox";
 import { config } from "./config.js";
@@ -40,24 +42,16 @@ export class SandboxOfflineError extends Error {
 type PoolEntry = { spaceId: string; lastUsedAt: number; idleTimer: ReturnType<typeof setTimeout> | null };
 const entries = new Map<string, PoolEntry>();
 
-function relayAuthHeaders(wsUrl: string): Record<string, string> | undefined {
-  try {
-    const { pathname } = new URL(wsUrl);
-    if (pathname.startsWith("/internal/sandbox-relay/") && config.workerSecret) {
-      return { "x-worker-secret": config.workerSecret };
-    }
-  } catch {
-    // ignore malformed url; resolution below validates it
-  }
-  return undefined;
-}
-
-async function resolveWsEndpoint(spaceId: string): Promise<string> {
+async function resolveConnectionOptions(spaceId: string): Promise<SandboxConnectionOptions> {
   const sandbox = await getSpaceSandboxBySpaceId(spaceId);
   const meta = (sandbox?.meta as Record<string, unknown> | null) ?? null;
-  const wsEndpoint = typeof meta?.wsEndpoint === "string" ? meta.wsEndpoint.trim() : "";
-  if (!wsEndpoint) throw new SandboxOfflineError(spaceId);
-  return wsEndpoint;
+  if (!meta?.wsEndpoint) throw new SandboxOfflineError(spaceId);
+  return resolveSandboxConnectionOptions({
+    spaceId,
+    sandbox,
+    signingKey: config.appEncryptionKey,
+    workerSecret: config.workerSecret,
+  });
 }
 
 function disconnectEntry(spaceId: string, reason: string) {
@@ -93,12 +87,12 @@ async function ensureConnection(spaceId: string): Promise<SandboxConnection> {
   const existing = getSandboxClientConnection(spaceId);
   if (existing) return existing;
 
-  const wsUrl = await resolveWsEndpoint(spaceId);
+  const connectionOptions = await resolveConnectionOptions(spaceId);
   await startSandboxWsClient({
     spaceId,
-    wsUrl,
+    ...connectionOptions,
     identity: API_IDENTITY,
-    headers: relayAuthHeaders(wsUrl),
+    hooks: { onRefreshConnection: () => resolveConnectionOptions(spaceId) },
   });
   try {
     return await waitForSandboxConnection(spaceId, CONNECT_TIMEOUT_MS);

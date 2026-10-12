@@ -22,6 +22,7 @@ var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var blockedInheritedEnvKeys = map[string]struct{}{
 	"SANDBOX_REPORT_TOKEN":  {},
+	"SANDBOX_RPC_TOKEN":     {},
 	"INTERNAL_API_BASE_URL": {},
 	"POD_IP":                {},
 	// Local mode: the user's access token must never leak into agent-started

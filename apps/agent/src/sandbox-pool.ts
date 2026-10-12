@@ -10,8 +10,10 @@ import {
   hasPendingSandboxRequests,
   isSandboxConnectRetryable,
   isSandboxEndpointUnreachable,
+  resolveSandboxConnectionOptions,
   startSandboxWsClient,
   type SandboxConnection,
+  type SandboxConnectionOptions,
   waitForSandboxConnection,
 } from "@cohub/sandbox-client";
 import { getSpaceSandbox, recoverSpaceSandbox } from "./api.js";
@@ -48,7 +50,7 @@ export type SandboxRecoverOutcome = {
 };
 
 const entries = new Map<string, PoolEntry>();
-const wsUrlResolutions = new Map<string, Promise<string>>();
+const wsUrlResolutions = new Map<string, Promise<SandboxConnectionOptions>>();
 const sandboxRecoveries = new Map<string, Promise<SandboxRecoverOutcome>>();
 
 function normalizeSandboxStatus(status: string): NormalizedSandboxStatus {
@@ -122,10 +124,6 @@ async function recoverSandboxOnce(spaceId: string, reason: string): Promise<Sand
   return promise;
 }
 
-function missingSandboxEndpointError(spaceId: string) {
-  return new Error(`sandbox is not ready for requests yet: missing endpoint for ${spaceId}`);
-}
-
 /**
  * Resolve a dialable sandbox WS URL.
  *
@@ -138,9 +136,11 @@ function missingSandboxEndpointError(spaceId: string) {
  * Skip recover while status is still "stopping" so we do not race the idle
  * reaper's delete; a later poll after status becomes stopped will resume.
  */
-async function resolveSandboxWsUrl(spaceId: string): Promise<string> {
+async function resolveSandboxWsUrl(spaceId: string): Promise<SandboxConnectionOptions> {
   if (LOCAL_SANDBOX_SPACE_ID && LOCAL_SANDBOX_WS_URL && spaceId === LOCAL_SANDBOX_SPACE_ID) {
-    return LOCAL_SANDBOX_WS_URL;
+    const token = process.env.SANDBOX_RPC_TOKEN?.trim();
+    if (!token) throw new Error("SANDBOX_RPC_TOKEN is required for the development sandbox connection.");
+    return { wsUrl: LOCAL_SANDBOX_WS_URL, headers: { authorization: `Bearer ${token}` } };
   }
 
   let sandbox = (await getSpaceSandbox({ spaceId }))?.sandbox ?? null;
@@ -150,48 +150,12 @@ async function resolveSandboxWsUrl(spaceId: string): Promise<string> {
     sandbox = (await getSpaceSandbox({ spaceId }))?.sandbox ?? null;
   }
 
-  const endpoint = resolveSandboxWsEndpoint(sandbox?.meta);
-  if (!endpoint) throw missingSandboxEndpointError(spaceId);
-  return endpoint;
-}
-
-/**
- * Resolve the sandbox websocket endpoint from persisted meta. Prefers an
- * explicit `wsEndpoint` (reported by the sandbox / relay) and falls back to the
- * legacy `podIp` form for sandboxes that have not yet reported an endpoint.
- */
-function resolveSandboxWsEndpoint(meta: unknown): string | null {
-  const record = (meta as Record<string, unknown> | null) ?? null;
-  const wsEndpoint = typeof record?.wsEndpoint === "string" ? record.wsEndpoint.trim() : "";
-  if (wsEndpoint) return validateSandboxWsEndpoint(wsEndpoint);
-  const podIp = typeof record?.podIp === "string" ? record.podIp.trim() : "";
-  if (podIp) return validateSandboxWsEndpoint(`ws://${podIp}:8788/sandbox`);
-  return null;
-}
-
-/**
- * Guard against tainted meta pointing the agent at an arbitrary address.
- * Only ws:// and wss:// with a real host are accepted. Per-provider host
- * allowlisting (pod CIDR for cloud, relay domain for local) will be added
- * alongside the relay in a later milestone.
- */
-function validateSandboxWsEndpoint(value: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    logger.warn(`[SandboxPool] rejecting malformed wsEndpoint: ${value}`);
-    return null;
-  }
-  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
-    logger.warn(`[SandboxPool] rejecting wsEndpoint with unsupported scheme: ${url.protocol}`);
-    return null;
-  }
-  if (!url.hostname) {
-    logger.warn(`[SandboxPool] rejecting wsEndpoint with empty host: ${value}`);
-    return null;
-  }
-  return url.toString();
+  return resolveSandboxConnectionOptions({
+    spaceId,
+    sandbox,
+    signingKey: env.APP_ENCRYPTION_KEY,
+    workerSecret: env.WORKER_SECRET,
+  });
 }
 
 function resolveSandboxWsUrlOnce(spaceId: string) {
@@ -253,31 +217,13 @@ function touchSandboxConnection(spaceId: string) {
   scheduleIdleEviction(entry);
 }
 
-/**
- * Cluster-internal relay peer endpoints (local sandboxes) require the shared
- * worker secret. Cloud sandbox pod endpoints do not. We key off the relay path
- * so the same pool transparently serves both providers.
- */
-function relayAuthHeaders(wsUrl: string): Record<string, string> | undefined {
-  try {
-    const { pathname } = new URL(wsUrl);
-    if (pathname.startsWith("/internal/sandbox-relay/") && env.WORKER_SECRET) {
-      return { "x-worker-secret": env.WORKER_SECRET };
-    }
-  } catch {
-    // ignore malformed url; resolution already validated it
-  }
-  return undefined;
-}
-
 async function connectSandboxOnce(spaceId: string, options?: { timeoutMs?: number }): Promise<SandboxConnection> {
   touchSandboxConnection(spaceId);
-  const wsUrl = await resolveSandboxWsUrlOnce(spaceId);
+  const connectionOptions = await resolveSandboxWsUrlOnce(spaceId);
   await startSandboxWsClient({
     spaceId,
-    wsUrl,
+    ...connectionOptions,
     identity: env.AGENT_INSTANCE_ID,
-    headers: relayAuthHeaders(wsUrl),
     hooks: {
       onHeartbeat: (message) => syncSandboxHeartbeat(spaceId, message),
       onFsChanged: (payload, broadcast) => {
@@ -296,12 +242,12 @@ async function connectSandboxOnce(spaceId: string, options?: { timeoutMs?: numbe
         status: "provisioning",
         reason: error.message,
       }),
-      onRefreshWsUrl: async ({ currentWsUrl, error }) => {
-        const nextWsUrl = await refreshSandboxWsUrl(spaceId);
-        if (nextWsUrl !== currentWsUrl) {
-          logger.warn(`[SandboxPool] refreshed sandbox wsUrl spaceId=${spaceId} oldHash=${hashLogValue(currentWsUrl)} newHash=${hashLogValue(nextWsUrl)} reason=${error?.message ?? "unknown"}`);
+      onRefreshConnection: async ({ currentWsUrl, error }) => {
+        const nextOptions = await refreshSandboxWsUrl(spaceId);
+        if (nextOptions.wsUrl !== currentWsUrl) {
+          logger.warn(`[SandboxPool] refreshed sandbox wsUrl spaceId=${spaceId} oldHash=${hashLogValue(currentWsUrl)} newHash=${hashLogValue(nextOptions.wsUrl)} reason=${error?.message ?? "unknown"}`);
         }
-        return nextWsUrl;
+        return nextOptions;
       },
     },
   });

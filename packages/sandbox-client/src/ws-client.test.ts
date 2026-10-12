@@ -15,7 +15,7 @@ class FakeWebSocket extends EventEmitter {
   readonly sent: string[] = [];
   readyState = FakeWebSocket.CONNECTING;
 
-  constructor(readonly url: string) {
+  constructor(readonly url: string, readonly options?: { headers?: Record<string, string> }) {
     super();
     FakeWebSocket.instances.push(this);
   }
@@ -95,6 +95,38 @@ function finishAttach(socket: FakeWebSocket, spaceId: string, requestId: string,
 function attach(socket: FakeWebSocket, spaceId: string, connectionId: string) {
   finishAttach(socket, spaceId, beginAttach(socket, spaceId), connectionId);
 }
+
+test("authentication rejection refreshes the endpoint and credentials together", async () => {
+  for (const nextWsUrl of ["ws://old.test/sandbox", "ws://new.test/sandbox"]) {
+    const spaceId = `space-auth-refresh-${nextWsUrl}`;
+    FakeWebSocket.instances = [];
+    try {
+      await startSandboxWsClient({
+        spaceId,
+        wsUrl: "ws://old.test/sandbox",
+        identity: "agent-test",
+        headers: { "x-worker-secret": "old-relay-secret" },
+        hooks: {
+          onRefreshConnection: () => ({ wsUrl: nextWsUrl, headers: { authorization: "Bearer new-instance-token" } }),
+        },
+      });
+      const rejected = FakeWebSocket.instances[0];
+      assert.ok(rejected);
+      rejected.fail(new Error("Unexpected server response: 401"));
+      await delay(400);
+      const replacement = FakeWebSocket.instances[1];
+      assert.ok(replacement);
+      assert.equal(replacement.url, nextWsUrl);
+      assert.deepEqual(replacement.options?.headers, { authorization: "Bearer new-instance-token" });
+      attach(replacement, spaceId, "connection-authenticated");
+      await waitForSandboxConnection(spaceId, 100);
+    } finally {
+      disconnectSandboxWsClient(spaceId, "test cleanup");
+      for (const socket of FakeWebSocket.instances) socket.terminate();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+});
 
 test("a superseded connection attempt cannot replace the current connection", async () => {
   const spaceId = "space-stale-attach";

@@ -61,6 +61,28 @@ apps/sandbox/
   ws/
 ```
 
+## RPC authentication
+
+Cloud listeners require `Authorization: Bearer <SANDBOX_RPC_TOKEN>` before the
+WebSocket upgrade. Missing or invalid credentials return 401; a missing server
+credential prevents startup. Health probes remain unauthenticated.
+
+Provisioning generates a fresh public `rpcTokenNonce` and derives a space-bound
+RPC token using the platform encryption key and the `sandbox-rpc-v1` domain.
+Only the nonce is persisted in metadata; the platform key never enters the
+sandbox. Agent/API derive the same token, and recreation rotates it. Report and
+RPC credentials are separate. Cloud report endpoints come from Kubernetes, not
+reported URLs. Local dial-out runners retain their authenticated relay flow.
+
+Deploy the API, Agent, and sandbox image together, then recreate existing cloud
+sandboxes through the existing rollout workflow. During rollout, clients omit
+authentication only for cloud metadata with an absent or null `rpcTokenNonce`.
+Invalid nonces remain errors, and a 401 never triggers an anonymous downgrade.
+New listeners always require authentication. Old anonymous images remain usable
+but insecure until recreated. No database migration is required.
+The bearer authenticates access to one instance, not individual RPC methods;
+use TLS or network isolation to protect transport where required.
+
 ## 本地开发与验证
 
 ### 本地检查
@@ -77,7 +99,8 @@ go build ./...
 
 ```bash
 cd apps/sandbox
-SPACE_ID=00000000-0000-0000-0000-000000000001 \
+export SANDBOX_RPC_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+COHUB_SPACE_ID=00000000-0000-0000-0000-000000000001 \
 WORKSPACE_DIR=/tmp/cohub-sandbox-workspace \
 PLATFORM_AGENTS_DIR=/configs/platform/.agents \
 go run .
@@ -86,6 +109,8 @@ go run .
 默认监听：`ws://0.0.0.0:8788/sandbox`
 
 ### 2. 启动 agent
+
+Set the same `SANDBOX_RPC_TOKEN` in the Agent terminal before starting it.
 
 ```bash
 cd apps/agent

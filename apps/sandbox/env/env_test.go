@@ -4,6 +4,7 @@ import "testing"
 
 func TestCloudSearchDefaultsToEnabledLatestRelease(t *testing.T) {
 	t.Setenv("COHUB_SPACE_ID", "00000000-0000-0000-0000-000000000001")
+	t.Setenv("SANDBOX_RPC_TOKEN", "instance-a-token")
 	t.Setenv("COHUB_SEARCH_ENABLED", "")
 	t.Setenv("COHUB_SEARCH_VERSION", "")
 	cfg, err := Load()
@@ -37,6 +38,19 @@ func TestSearchFeatureCanBeDisabled(t *testing.T) {
 	t.Setenv("COHUB_SEARCH_ENABLED", "false")
 	if got := parseBoolEnv("COHUB_SEARCH_ENABLED", true); got {
 		t.Fatal("search feature should be disabled")
+	}
+}
+
+func TestLoadRequiresRPCToken(t *testing.T) {
+	t.Setenv("COHUB_SPACE_ID", "space-a")
+	t.Setenv("SANDBOX_RPC_TOKEN", "")
+	if _, err := Load(); err == nil || err.Error() != "SANDBOX_RPC_TOKEN is required" {
+		t.Fatalf("Load() error = %v", err)
+	}
+	t.Setenv("SANDBOX_RPC_TOKEN", "instance-a-token")
+	cfg, err := Load()
+	if err != nil || cfg.SandboxRPCToken != "instance-a-token" {
+		t.Fatalf("Load() token configuration failed: %v", err)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { asc, eq, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { billingOperations, COHUB_BILLING_FEATURES } from "@cohub/billing";
 import {
   DEFAULT_SANDBOX_SPEC_ID,
@@ -11,6 +11,7 @@ import {
   resolveSpaceSandboxAutoDestroyPolicy,
   type SandboxSpecId,
 } from "@cohub/sandbox-controller";
+import { createSandboxRpcNonce, createSandboxRpcToken } from "@cohub/sandbox-client";
 import { db } from "./db/index.js";
 import { listEnabledSpaceMods, getSpaceModMountSignature } from "@cohub/core/space-mods";
 import { spaceSandboxes, spaces } from "@cohub/db";
@@ -286,6 +287,7 @@ export const deleteSpaceSandbox = async (spaceId: string) => {
 
 export const updateSpaceSandbox = async (input: {
   spaceId: string;
+  expectedReportTokenHash?: string;
   status?: SpaceSandboxStatus;
   runtimeStatus?: SpaceSandboxRuntimeStatus;
   podName?: string | null;
@@ -314,7 +316,12 @@ export const updateSpaceSandbox = async (input: {
       ...(input.meta !== undefined ? { meta: input.meta } : {}),
       updatedAt: new Date(),
     })
-    .where(eq(spaceSandboxes.spaceId, input.spaceId))
+    .where(and(
+      eq(spaceSandboxes.spaceId, input.spaceId),
+      input.expectedReportTokenHash !== undefined
+        ? sql`${spaceSandboxes.meta}->>'reportTokenHash' = ${input.expectedReportTokenHash}`
+        : undefined,
+    ))
     .returning();
 
   return sandbox ?? null;
@@ -481,6 +488,8 @@ export const reconcileSpaceSandbox = async (input: {
   const desiredSpecConfig = SANDBOX_SPECS[desiredSpec] ?? SANDBOX_SPECS[DEFAULT_SANDBOX_SPEC_ID];
   const reportToken = createSandboxReportToken();
   const reportTokenHash = hashSandboxReportToken(reportToken);
+  const rpcTokenNonce = createSandboxRpcNonce();
+  const rpcToken = createSandboxRpcToken(config.appEncryptionKey, input.spaceId, rpcTokenNonce);
   const reportTokenIssuedAt = new Date().toISOString();
   const nowIso = new Date().toISOString();
   const baseMeta = input.mode === "replace"
@@ -492,6 +501,7 @@ export const reconcileSpaceSandbox = async (input: {
     reconcileReason: input.reason,
     provisioningStartedAt: nowIso,
     reportTokenHash,
+    rpcTokenNonce,
     reportTokenIssuedAt,
     publicNetappStatus: "provisioning",
     publicNetworkLastError: null,
@@ -575,6 +585,7 @@ export const reconcileSpaceSandbox = async (input: {
             : `https://public.cohub.run/dev/s/${input.spaceId}`,
       },
       { name: "SANDBOX_REPORT_TOKEN", value: reportToken },
+      { name: "SANDBOX_RPC_TOKEN", value: rpcToken },
     ];
   }
 
