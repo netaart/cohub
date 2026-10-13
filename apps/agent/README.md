@@ -20,8 +20,9 @@
 - 所有 tools 都通过 ws rpc 转发给对应 space 的 sandbox
 
 ```bash
-# 开发（本地单 sandbox 调试）
+# 开发（本地单 sandbox 调试；设置与 sandbox 相同的 token，不要重新生成）
 cd apps/agent
+export SANDBOX_RPC_TOKEN="<same-token-as-sandbox>"
 LOCAL_SANDBOX_SPACE_ID=<space-id> \
 LOCAL_SANDBOX_WS_URL=ws://127.0.0.1:8788/sandbox \
 pnpm dev

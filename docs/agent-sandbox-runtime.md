@@ -83,7 +83,10 @@ The system keeps a single mode:
 
 - `apps/sandbox` exposes a WebSocket server (listens on `0.0.0.0:8788` by default)
 - `apps/agent` connects to the sandbox as a client
-- On connect, the sandbox immediately sends a first `sandbox.heartbeat` frame with capabilities / filesystem / metadata snapshots
+- On authenticated connect, the sandbox sends a first `sandbox.heartbeat` frame with capabilities / filesystem / metadata snapshots
+- Cloud listeners require `Authorization: Bearer <SANDBOX_RPC_TOKEN>` before Upgrade; health probes remain unauthenticated.
+- Clients derive per-instance credentials using the platform key and metadata nonce. Legacy cloud instances without a nonce remain anonymous until recreated; Pod-IP-only metadata is still supported.
+- See [RPC auth rollout](sandbox-rpc-auth-rollout.md) for deployment, rollback and key rotation.
 - All tools are forwarded to the sandbox over WebSocket RPC
 
 ## Current sandbox filesystem semantics
@@ -116,6 +119,7 @@ The system keeps a single mode:
 
 - `LOCAL_SANDBOX_SPACE_ID` — Space ID of the sandbox during local debugging
 - `LOCAL_SANDBOX_WS_URL` — WebSocket address of the sandbox during local debugging (e.g. `ws://127.0.0.1:8788/sandbox`)
+- `SANDBOX_RPC_TOKEN` — The same token configured on the listen-mode development sandbox
 - `SPACE_ID`
 - `REDIS_URL`
 - `SPACE_DIR`
@@ -125,13 +129,11 @@ The system keeps a single mode:
 
 ### Sandbox
 
-- `SANDBOX_WS_HOST=0.0.0.0`
-- `SANDBOX_WS_PORT=8788`
-- `SPACE_ID`
-- `SANDBOX_ID`
+- `COHUB_SPACE_ID`
+- `SANDBOX_RPC_TOKEN` — Required for cloud/listen mode; retained in Config, removed from inherited environments
+- `SANDBOX_REPORT_TOKEN` — Separate report credential; retained in Config, removed from inherited environments
 - `WORKSPACE_DIR`
 - `PLATFORM_AGENTS_DIR=/configs/platform/.agents`
-- `HEARTBEAT_INTERVAL_SECS`
 - `COHUB_SANDBOX_VERSION` (accepts legacy `IMAGE_VERSION`)
 
 ## Local development
@@ -140,10 +142,8 @@ The system keeps a single mode:
 
 ```bash
 cd apps/sandbox
-SANDBOX_WS_HOST=0.0.0.0 \
-SANDBOX_WS_PORT=8788 \
-SPACE_ID=00000000-0000-0000-0000-000000000001 \
-SANDBOX_ID=sandbox-dev \
+export SANDBOX_RPC_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+COHUB_SPACE_ID=00000000-0000-0000-0000-000000000001 \
 WORKSPACE_DIR=/tmp/cohub-sandbox-workspace \
 PLATFORM_AGENTS_DIR=/configs/platform/.agents \
 go run .
@@ -152,6 +152,8 @@ go run .
 Default listen address: `ws://0.0.0.0:8788/sandbox`
 
 ### Start the agent (client)
+
+Set the same `SANDBOX_RPC_TOKEN` in this terminal; do not generate a second token.
 
 ```bash
 cd apps/agent

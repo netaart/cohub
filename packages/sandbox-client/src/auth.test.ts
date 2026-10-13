@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createSandboxRpcNonce, createSandboxRpcToken, resolveSandboxConnectionOptions, sandboxWsEndpoint } from "./auth.js";
+import { createSandboxRpcNonce, createSandboxRpcToken, resolveSandboxConnectionOptions, sandboxWsEndpoint, SandboxConnectionConfigError } from "./auth.js";
 
 const signingKey = "test-platform-key";
 const nonce = createSandboxRpcNonce();
@@ -32,6 +32,8 @@ test("cloud connections use only RPC authorization and reject invalid instance c
 
 test("legacy cloud metadata without a nonce does not send any credential", () => {
   for (const meta of [
+    { podIp: cloud.meta.podIp },
+    { podIp: cloud.meta.podIp, wsEndpoint: "" },
     { podIp: cloud.meta.podIp, wsEndpoint: cloud.meta.wsEndpoint },
     { ...cloud.meta, rpcTokenNonce: null },
   ]) {
@@ -40,6 +42,23 @@ test("legacy cloud metadata without a nonce does not send any credential", () =>
       sandbox: { provider: "cloud", meta },
     });
     assert.deepEqual(options, { wsUrl: cloud.meta.wsEndpoint, headers: {} });
+  }
+});
+
+test("Pod-IP-only authenticated instances still send their RPC credential", () => {
+  const options = resolveSandboxConnectionOptions({
+    spaceId: "space-a", signingKey,
+    sandbox: { provider: "cloud", meta: { podIp: cloud.meta.podIp, rpcTokenNonce: nonce } },
+  });
+  assert.deepEqual(options, {
+    wsUrl: cloud.meta.wsEndpoint,
+    headers: { authorization: `Bearer ${createSandboxRpcToken(signingKey, "space-a", nonce)}` },
+  });
+});
+
+test("connection configuration failures have an explicit error type", () => {
+  for (const meta of [{}, { podIp: "invalid" }, { ...cloud.meta, wsEndpoint: "not-a-url" }, { ...cloud.meta, rpcTokenNonce: "invalid" }]) {
+    assert.throws(() => resolveSandboxConnectionOptions({ spaceId: "space-a", signingKey, sandbox: { provider: "cloud", meta } }), SandboxConnectionConfigError);
   }
 });
 

@@ -2,6 +2,7 @@ import { hostname } from "node:os";
 import { createLogger } from "@cohub/infra/logging";
 import {
   SandboxRpcError,
+  SandboxConnectionConfigError,
   getSandboxClientConnection,
   hasPendingSandboxRequests,
   disconnectSandboxWsClient,
@@ -44,14 +45,17 @@ const entries = new Map<string, PoolEntry>();
 
 async function resolveConnectionOptions(spaceId: string): Promise<SandboxConnectionOptions> {
   const sandbox = await getSpaceSandboxBySpaceId(spaceId);
-  const meta = (sandbox?.meta as Record<string, unknown> | null) ?? null;
-  if (!meta?.wsEndpoint) throw new SandboxOfflineError(spaceId);
-  return resolveSandboxConnectionOptions({
-    spaceId,
-    sandbox,
-    signingKey: config.appEncryptionKey,
-    workerSecret: config.workerSecret,
-  });
+  try {
+    return resolveSandboxConnectionOptions({
+      spaceId,
+      sandbox,
+      signingKey: config.appEncryptionKey,
+      workerSecret: config.workerSecret,
+    });
+  } catch (error) {
+    if (error instanceof SandboxConnectionConfigError) throw new SandboxOfflineError(spaceId, error);
+    throw error;
+  }
 }
 
 function disconnectEntry(spaceId: string, reason: string) {

@@ -88,6 +88,13 @@ func Load() (Config, error) {
 	if rpcToken == "" {
 		return Config{}, fmt.Errorf("SANDBOX_RPC_TOKEN is required")
 	}
+	reportToken := strings.TrimSpace(os.Getenv("SANDBOX_REPORT_TOKEN"))
+	// Keep credentials in Config, not in environments inherited by setup or tools.
+	for _, key := range []string{"SANDBOX_RPC_TOKEN", "SANDBOX_REPORT_TOKEN"} {
+		if err := os.Unsetenv(key); err != nil {
+			return Config{}, fmt.Errorf("remove %s from environment: %w", key, err)
+		}
+	}
 
 	workspaceDir := strings.TrimSpace(os.Getenv("WORKSPACE_DIR"))
 	if workspaceDir == "" {
@@ -117,7 +124,7 @@ func Load() (Config, error) {
 		UserAgentsDir:                  userAgentsDir,
 		ImageVersion:                   imageVersion,
 		InternalAPIBaseURL:             strings.TrimSpace(os.Getenv("INTERNAL_API_BASE_URL")),
-		SandboxReportToken:             strings.TrimSpace(os.Getenv("SANDBOX_REPORT_TOKEN")),
+		SandboxReportToken:             reportToken,
 		SandboxRPCToken:                rpcToken,
 		PublicURLPrefix:                strings.TrimSpace(os.Getenv("PUBLIC_URL_PREFIX")),
 		PodIP:                          strings.TrimSpace(os.Getenv("POD_IP")),

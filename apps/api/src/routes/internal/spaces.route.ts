@@ -162,7 +162,16 @@ router.post("/:id/sandbox-report", async (c) => {
   }
 
   if (sandbox.provider !== "cloud" || !sandbox.podName) return c.json({ message: "forbidden" }, 403);
-  const pod = await k8sCoreApi.readNamespacedPod({ name: sandbox.podName, namespace: sessionsNamespace });
+  let pod: Awaited<ReturnType<typeof k8sCoreApi.readNamespacedPod>>;
+  try {
+    pod = await k8sCoreApi.readNamespacedPod({ name: sandbox.podName, namespace: sessionsNamespace });
+  } catch (error) {
+    const statusCode = (error as { statusCode?: number; code?: number }).statusCode
+      ?? (error as { code?: number }).code;
+    if (statusCode === 404) return c.json({ message: "sandbox Pod is not ready" }, 409);
+    logger.warn("[SandboxReport] Pod lookup failed", { spaceId, podName: sandbox.podName, statusCode });
+    return c.json({ message: "sandbox Pod lookup is temporarily unavailable" }, 503);
+  }
   if (pod.metadata?.labels?.["space-id"] !== spaceId || pod.metadata.labels.app !== "agent-sandbox") {
     return c.json({ message: "sandbox instance mismatch" }, 403);
   }

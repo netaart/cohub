@@ -398,7 +398,7 @@ const triggerSandboxPublicNetworkReconcile = (spaceId: string) => {
     });
 };
 
-const tryCreatePod = async (spaceId: string, pod: V1Pod, retry = 0): Promise<{ podName: string; created: boolean }> => {
+const tryCreatePod = async (spaceId: string, pod: V1Pod): Promise<{ podName: string; created: boolean }> => {
   try {
     await k8sCoreApi.createNamespacedPod({
       namespace: sessionsNamespace,
@@ -413,17 +413,10 @@ const tryCreatePod = async (spaceId: string, pod: V1Pod, retry = 0): Promise<{ p
     if (statusCode === 409 && message.includes("object is being deleted")) {
       const deleted = await waitForSandboxPodDeleted(podName);
       if (!deleted) throw new Error(`timed out waiting for deleted sandbox pod: ${podName}`);
-      return tryCreatePod(spaceId, pod, retry + 1);
+      return tryCreatePod(spaceId, pod);
     }
 
-    if (statusCode === 409 && retry < 10) {
-      const backoffMs = Math.min(250 * 2 ** retry, 4000);
-      await sleep(backoffMs);
-      return tryCreatePod(spaceId, pod, retry + 1);
-    }
-    if (statusCode === 409) {
-      throw new Error(`sandbox pod already exists after retries: sandbox-${spaceId}`);
-    }
+    if (statusCode === 409) return { podName, created: false };
     throw error;
   }
 };
@@ -508,21 +501,6 @@ export const reconcileSpaceSandbox = async (input: {
     publicEndpoints: getSandboxPublicEndpoints(input.spaceId),
   };
 
-  await ensureSpaceSandbox({
-    spaceId: input.spaceId,
-    status: "provisioning",
-    runtimeStatus: "starting",
-    podName,
-    desiredImage: toSandboxImageVersion(config.sandboxImage),
-    meta: {
-      ...provisioningMeta,
-      desiredSpec,
-      configuredSpec,
-      ...(specEntitlementDowngraded ? { specEntitlementDowngraded: true, specEntitlementAllowedSpec: allowedSpec, specEntitlementCheckedAt: nowIso } : { specEntitlementDowngraded: false }),
-      desiredSpecResources: desiredSpecConfig.resources,
-    },
-  });
-
   const pod = renderSandboxPodTemplate({
     SPACE_ID: input.spaceId,
     USER_ID: input.userUuid,
@@ -589,10 +567,15 @@ export const reconcileSpaceSandbox = async (input: {
     ];
   }
 
-  await tryCreatePod(input.spaceId, pod);
+  const created = await tryCreatePod(input.spaceId, pod);
+  if (!created.created) {
+    if (input.mode === "ensure") return;
+    throw new Error(`Sandbox Pod already exists during replacement: ${podName}`);
+  }
 
+  // Publish credentials only after this call creates the Pod; an ensure conflict must not rotate a live instance.
   const provisionedAt = new Date().toISOString();
-  await updateSpaceSandbox({
+  await ensureSpaceSandbox({
     spaceId: input.spaceId,
     status: "provisioning",
     runtimeStatus: "starting",
@@ -600,6 +583,10 @@ export const reconcileSpaceSandbox = async (input: {
     desiredImage: toSandboxImageVersion(config.sandboxImage),
     meta: {
       ...provisioningMeta,
+      desiredSpec,
+      configuredSpec,
+      ...(specEntitlementDowngraded ? { specEntitlementDowngraded: true, specEntitlementAllowedSpec: allowedSpec, specEntitlementCheckedAt: nowIso } : { specEntitlementDowngraded: false }),
+      desiredSpecResources: desiredSpecConfig.resources,
       modMountSignature,
       modMounts: enabledMods.map((mod) => ({
         modSpaceId: mod.modSpaceId,
