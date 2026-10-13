@@ -107,8 +107,8 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
       config.capabilities ?? discoverHarnesses(config.harnesses, config.executables, config.root),
     ]);
     signal.throwIfAborted();
-    const url = new URL(resolveWebsocketUrl({ url: process.env.COHUB_WS_URL })); url.pathname = "/runtime/relay";
-    const relay = new URL(url); relay.pathname = "/sandbox/relay";
+    const url = new URL(resolveWebsocketUrl()); url.pathname = url.pathname.replace(/\/ws$/, "/runtime/relay");
+    const relay = new URL(url); relay.pathname = relay.pathname.replace(/\/runtime\/relay$/, "/sandbox/relay");
 
     const runBridge = async () => {
       let attempts = 0;

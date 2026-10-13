@@ -34,11 +34,34 @@ ENV=dev cohub auth login
 ENV=dev cohub spaces ls
 ```
 
+Use a custom API endpoint for self-hosted deployments or proxies:
+
+```bash
+cohub --base-url https://api.example.com spaces ls
+COHUB_BASE_URL=https://api.example.com cohub spaces ls
+```
+
+`--base-url` takes precedence over `COHUB_BASE_URL`. Without either, the CLI uses
+the selected environment's default API address. Configure other endpoints separately:
+
+| Variable | Endpoint |
+| --- | --- |
+| `COHUB_BASE_URL` | API base URL |
+| `COHUB_WS_URL` | Realtime gateway URL (`http(s)` or `ws(s)`) |
+| `COHUB_WEB_URL` | Web base URL used in links |
+
+Changing the API base URL does not change the gateway or authentication provider.
+For self-hosted authentication, set `COHUB_AUTH_ISSUER`, `COHUB_AUTH_CLIENT_ID`,
+and, if needed, `COHUB_AUTH_RESOURCE` and `COHUB_AUTH_SCOPE`. Stored login sessions,
+Home Space caches, and Runtime directory bindings are scoped to the API base URL.
+Sign in once for each custom server, or supply `COHUB_EXECUTION_TOKEN`.
+
 ## Global flags
 
 | Flag | Purpose |
 | --- | --- |
 | `-s, --space <space>` | Target Space for space-scoped commands |
+| `--base-url <url>` | Override the API base URL |
 | `--json` | Machine-readable output |
 | `-h, --help` | Command help |
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { readFileSync } from "node:fs";
+import { registerEndpointOptions } from "./endpoint-options.js";
 import { registerAuth } from "./commands/auth.js";
 import { registerBoards } from "./commands/boards.js";
 import { registerChannels } from "./commands/channels.js";
@@ -33,7 +34,7 @@ const VERSION = (() => {
   }
 })();
 
-const program = new Command("cohub");
+const program = registerEndpointOptions(new Command("cohub"));
 
 program
   .name("cohub")
@@ -81,6 +82,9 @@ Target space:
 Environment:
   COHUB_SPACE_ID         Target Space when -s is omitted
   COHUB_EXECUTION_TOKEN  Use this token instead of the stored Logto session
+  COHUB_BASE_URL         Override the API base URL
+  COHUB_WS_URL           Override the realtime WebSocket URL
+  COHUB_WEB_URL          Override the web URL used in links
   ENV=dev                Use the development Cohub environment
   HTTPS_PROXY            Honored for API and uploads (also HTTP_PROXY, NO_PROXY)
   Runtime logs            ~/.local/state/cohub/runtime/<space-id>/diagnostics

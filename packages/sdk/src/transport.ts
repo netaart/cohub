@@ -68,6 +68,7 @@ export type UnauthorizedContext = {
 export type CohubClientOptions = {
   env?: CohubEnvironment;
   baseUrl?: string;
+  webBaseUrl?: string;
   getAccessToken?: (options?: AccessTokenRequestOptions) => Promise<string | null> | string | null;
   getAuthSessionVersion?: () => AuthSessionVersion;
   onUnauthorized?: (context: UnauthorizedContext) => Promise<void> | void;
@@ -125,7 +126,7 @@ export function joinApiUrl(baseUrl: string, path: string): string {
   if (!base) return normalizedPath;
   if (/^https?:\/\//i.test(base)) {
     try {
-      return new URL(normalizedPath, `${base}/`).href;
+      return new URL(`.${normalizedPath}`, `${base}/`).href;
     } catch {
       // Fall through to string join for non-standard bases.
     }

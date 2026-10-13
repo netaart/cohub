@@ -126,7 +126,7 @@ export class CohubClient {
       appRuntime,
       appIdResolver,
       originAppResolver,
-      resolveWebBaseUrl({ env: options.env }),
+      resolveWebBaseUrl({ env: options.env, url: options.webBaseUrl }),
     );
     this.appRuntime = createAppRuntime(appTransport, appRuntime?.appId, appIdResolver);
     this.appWindow = new AppWindowApi(appTransport, {

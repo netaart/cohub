@@ -41,7 +41,24 @@ const client = createCohubClient({
 
 Or with `ENV=dev` in Node.js.
 
-Custom endpoints are supported when self-hosting or proxying.
+Override endpoints for self-hosted deployments or proxies:
+
+```ts
+const client = createCohubClient({
+  baseUrl: "https://api.example.com",
+  webBaseUrl: "https://cohub.example.com",
+  websocket: { url: "https://gateway.example.com" },
+  voice: { url: "https://gateway.example.com" },
+  getAccessToken: async () => token,
+});
+```
+
+In Node.js, use `COHUB_BASE_URL`, `COHUB_WS_URL`, `COHUB_WEB_URL`, and
+`COHUB_VOICE_WS_URL` to override API, realtime, web, and voice input endpoints.
+Explicit options take precedence over environment variables; unconfigured
+endpoints use the selected environment's defaults. Voice input falls back to
+`COHUB_WS_URL` with `/asr/ws` when `COHUB_VOICE_WS_URL` is omitted. API and gateway
+addresses are independent, so changing `baseUrl` does not change realtime connections.
 
 ## Spaces and Chats
 

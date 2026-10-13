@@ -146,18 +146,23 @@ export const resolveApiBaseUrl = (options: {
   baseUrl?: string;
   env?: CohubEnvironment;
 } = {}) => {
-  if (options.baseUrl) return normalizeBaseUrl(options.baseUrl);
+  const baseUrl = options.baseUrl?.trim() || readProcessEnv()?.COHUB_BASE_URL?.trim();
+  if (baseUrl) return normalizeBaseUrl(baseUrl);
   return COHUB_ENVIRONMENTS[resolveCohubEnvironment(options.env)].apiBaseUrl;
 };
 
-export const resolveWebBaseUrl = (options: { env?: CohubEnvironment } = {}) =>
-  COHUB_ENVIRONMENTS[resolveCohubEnvironment(options.env)].webBaseUrl;
+export const resolveWebBaseUrl = (options: { url?: string; env?: CohubEnvironment } = {}) => {
+  const url = options.url?.trim() || readProcessEnv()?.COHUB_WEB_URL?.trim();
+  if (url) return normalizeBaseUrl(url);
+  return COHUB_ENVIRONMENTS[resolveCohubEnvironment(options.env)].webBaseUrl;
+};
 
 export const resolveWebsocketUrl = (options: {
   url?: string;
   env?: CohubEnvironment;
 } = {}) => {
-  if (options.url) return normalizeWebsocketUrl(options.url);
+  const url = options.url?.trim() || readProcessEnv()?.COHUB_WS_URL?.trim();
+  if (url) return normalizeWebsocketUrl(url);
   return COHUB_ENVIRONMENTS[resolveCohubEnvironment(options.env)].websocketUrl;
 };
 
@@ -165,6 +170,8 @@ export const resolveVoiceInputWebsocketUrl = (options: {
   url?: string;
   env?: CohubEnvironment;
 } = {}) => {
-  if (options.url) return normalizeVoiceInputWebsocketUrl(options.url);
+  const env = readProcessEnv();
+  const url = options.url?.trim() || env?.COHUB_VOICE_WS_URL?.trim() || env?.COHUB_WS_URL?.trim();
+  if (url) return normalizeVoiceInputWebsocketUrl(url);
   return COHUB_ENVIRONMENTS[resolveCohubEnvironment(options.env)].voiceInputWebsocketUrl;
 };

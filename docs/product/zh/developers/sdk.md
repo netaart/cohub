@@ -41,7 +41,19 @@ const client = createCohubClient({
 
 或在 Node.js 中设置 `ENV=dev`。
 
-自托管或代理时也支持自定义端点。
+自部署或通过代理访问时，可自定义服务地址：
+
+```ts
+const client = createCohubClient({
+  baseUrl: "https://api.example.com",
+  webBaseUrl: "https://cohub.example.com",
+  websocket: { url: "https://gateway.example.com" },
+  voice: { url: "https://gateway.example.com" },
+  getAccessToken: async () => token,
+});
+```
+
+Node.js 中可通过 `COHUB_BASE_URL`、`COHUB_WS_URL`、`COHUB_WEB_URL`、`COHUB_VOICE_WS_URL` 分别覆盖 API、实时连接、Web 和语音输入地址。显式参数优先于环境变量；未配置的地址使用当前环境的默认值。未设置 `COHUB_VOICE_WS_URL` 时，语音输入使用 `COHUB_WS_URL` 对应 gateway 的 `/asr/ws`。API 和 gateway 地址独立配置，修改 `baseUrl` 不会修改实时连接地址。
 
 ## Spaces 与 Chats
 

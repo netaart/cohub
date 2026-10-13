@@ -34,11 +34,29 @@ ENV=dev cohub auth login
 ENV=dev cohub spaces ls
 ```
 
+自部署或通过代理访问时，可指定 API 地址：
+
+```bash
+cohub --base-url https://api.example.com spaces ls
+COHUB_BASE_URL=https://api.example.com cohub spaces ls
+```
+
+`--base-url` 优先于 `COHUB_BASE_URL`。两者都未设置时，使用当前环境的默认 API 地址。其他服务地址独立配置：
+
+| 变量 | 地址 |
+| --- | --- |
+| `COHUB_BASE_URL` | API base URL |
+| `COHUB_WS_URL` | 实时连接的 gateway 地址，支持 `http(s)` 和 `ws(s)` |
+| `COHUB_WEB_URL` | CLI 输出链接使用的 Web base URL |
+
+修改 API 地址不会修改 gateway 或鉴权服务。自部署鉴权可通过 `COHUB_AUTH_ISSUER`、`COHUB_AUTH_CLIENT_ID` 配置，必要时再设置 `COHUB_AUTH_RESOURCE` 和 `COHUB_AUTH_SCOPE`。登录会话、Home Space 缓存和 Runtime 目录绑定按 API 地址隔离；每台自定义服务器需要分别登录，也可使用 `COHUB_EXECUTION_TOKEN`。
+
 ## 全局 flags
 
 | Flag | 作用 |
 | --- | --- |
 | `-s, --space <space>` | 指定 space-scoped 命令的目标 Space |
+| `--base-url <url>` | 覆盖 API base URL |
 | `--json` | 机器可读输出 |
 | `-h, --help` | 命令帮助 |
 

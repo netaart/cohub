@@ -83,11 +83,11 @@ function runRemainderRequestsHelp(argv: string[]): boolean {
     if (token === "--") return false;
     if (isHelpFlag(token)) return true;
     if (token === "--async" || token === "--json") continue;
-    if (token === "-c" || token === "--command") {
+    if (token === "-c" || token === "--command" || token === "--base-url") {
       index += 1;
       continue;
     }
-    if (token.startsWith("--command=")) continue;
+    if (token.startsWith("--command=") || token.startsWith("--base-url=")) continue;
     return false;
   }
   return false;

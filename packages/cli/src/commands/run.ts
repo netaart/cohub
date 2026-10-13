@@ -1,4 +1,5 @@
 import type { TaskRunDetailResponse } from "@neta-art/cohub";
+import { consumeBaseUrlOption } from "../endpoint-options.js";
 import { createClient } from "../client.js";
 import { error, handleHttp, json as outJson, spinner } from "../output.js";
 import { resolveSpaceTarget } from "../space.js";
@@ -41,7 +42,7 @@ function topLevelRunIndex(argv: string[]): number {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index] ?? "";
     if (token === "--") return -1;
-    if (token === "-s" || token === "--space") {
+    if (token === "-s" || token === "--space" || token === "--base-url") {
       index += 1;
       continue;
     }
@@ -75,6 +76,11 @@ export async function parseRunCliOptions(
   const beforeRun = argv.slice(0, runIndex);
   const afterRun = argv.slice(runIndex + 1);
 
+  for (let index = 0; index < beforeRun.length; index += 1) {
+    index = consumeBaseUrlOption(beforeRun, index) ?? index;
+    if (beforeRun[index] === "-s" || beforeRun[index] === "--space") index += 1;
+  }
+
   const explicitSpaceId = parseSpaceId(beforeRun) ?? process.env.COHUB_SPACE_ID?.trim() ?? "";
   let json = beforeRun.includes("--json");
   let async = false;
@@ -83,6 +89,12 @@ export async function parseRunCliOptions(
 
   for (let index = 0; index < afterRun.length; index += 1) {
     const token = afterRun[index] ?? "";
+
+    const endpointIndex = consumeBaseUrlOption(afterRun, index);
+    if (endpointIndex !== null) {
+      index = endpointIndex;
+      continue;
+    }
 
     if (token === "-h" || token === "--help") {
       printRunHelp();
@@ -146,10 +158,11 @@ export async function parseRunCliOptions(
 export function printRunHelp(): void {
   process.stdout.write(`
 Usage:
-  cohub [-s <space>] run [options] -- <shell command>
+  cohub [--base-url <url>] [-s <space>] run [options] -- <shell command>
   cohub [-s <space>] run --command <shell command>
 
 Options:
+      --base-url <url>     API base URL (overrides COHUB_BASE_URL)
   -c, --command <command>  Shell command to execute in the space workspace
       --async              Queue the command and return immediately
       --json               Output as JSON

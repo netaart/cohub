@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { HOME_SPACE_SLUG, parseSpaceRef, resolveCohubEnvironment } from "@neta-art/cohub";
+import { COHUB_ENVIRONMENTS, HOME_SPACE_SLUG, normalizeBaseUrl, parseSpaceRef, resolveApiBaseUrl, resolveCohubEnvironment } from "@neta-art/cohub";
 import { readAuthSession } from "./auth.js";
 import { createClient } from "./client.js";
 import { getRuntimeSpaceBinding } from "./runtime/space-binding.js";
@@ -18,7 +18,6 @@ const CACHE_TTL_MS = 86_400_000;
 const SPACE_REF_HINT = "Use a Space ID, a slug you own such as home, or username/slug.";
 
 type HomeSpaceCache = {
-  /** Identity fingerprint the cached space belongs to (env + subject). */
   key: string;
   spaceId: string;
   cachedAt: number;
@@ -51,22 +50,27 @@ function jwtClaim(token: string | undefined | null, key: string): string | null 
  */
 export function identityKeyFrom(input: {
   env: string;
+  baseUrl?: string;
   executionToken?: string | null;
   idToken?: string | null;
   accessToken?: string | null;
 }): string | null {
+  const baseUrl = input.baseUrl ? normalizeBaseUrl(input.baseUrl) : "";
+  const defaultBaseUrl = COHUB_ENVIRONMENTS[input.env === "dev" ? "dev" : "prod"].apiBaseUrl;
+  const namespace = baseUrl && baseUrl !== defaultBaseUrl ? `${input.env}:${baseUrl}` : input.env;
   if (input.executionToken) {
     const actor = jwtClaim(input.executionToken, "actorUserId") ?? jwtClaim(input.executionToken, "sub");
-    return actor ? `${input.env}:${actor}` : null;
+    return actor ? `${namespace}:${actor}` : null;
   }
   const sub = jwtClaim(input.idToken, "sub") ?? jwtClaim(input.accessToken, "sub");
-  return sub ? `${input.env}:${sub}` : null;
+  return sub ? `${namespace}:${sub}` : null;
 }
 
 export function currentIdentityKey(): string | null {
   const session = readAuthSession();
   return identityKeyFrom({
     env: resolveCohubEnvironment(),
+    baseUrl: resolveApiBaseUrl(),
     executionToken: process.env.COHUB_EXECUTION_TOKEN?.trim(),
     idToken: session?.idToken,
     accessToken: session?.accessToken,
@@ -96,11 +100,11 @@ function writeHomeSpaceCache(key: string, spaceId: string): void {
   }
 }
 
-let homeSpacePromise: Promise<string> | null = null;
+const homeSpaces = new Map<string, Promise<string>>();
 const spaceRefs = new Map<string, Promise<string>>();
 
 export function clearHomeSpaceCache(): void {
-  homeSpacePromise = null;
+  homeSpaces.clear();
   spaceRefs.clear();
   try {
     rmSync(CACHE_PATH, { force: true });
@@ -123,15 +127,18 @@ export function explicitSpace(program: Command): string | null {
 
 /** Cached per identity and memoized per process. */
 export function resolveHomeSpace(): Promise<string> {
-  homeSpacePromise ??= (async () => {
-    const key = currentIdentityKey();
+  const key = currentIdentityKey();
+  const memoKey = key ?? resolveApiBaseUrl();
+  let resolved = homeSpaces.get(memoKey);
+  if (!resolved) resolved = (async () => {
     const cached = key ? readHomeSpaceCache(CACHE_PATH, key) : null;
     if (cached) return cached;
     const space = await createClient().spaces.ensureHome();
     if (key) writeHomeSpaceCache(key, space.id);
     return space.id;
   })();
-  return homeSpacePromise;
+  homeSpaces.set(memoKey, resolved);
+  return resolved;
 }
 
 async function lookupSpaceRef(value: string): Promise<string> {
@@ -152,10 +159,10 @@ async function lookupSpaceRef(value: string): Promise<string> {
 }
 
 export function resolveSpaceRef(value: string): Promise<string> {
-  const key = value.trim();
+  const key = `${currentIdentityKey() ?? resolveApiBaseUrl()}:${value.trim()}`;
   let resolved = spaceRefs.get(key);
   if (!resolved) {
-    resolved = lookupSpaceRef(key);
+    resolved = lookupSpaceRef(value.trim());
     spaceRefs.set(key, resolved);
   }
   return resolved;

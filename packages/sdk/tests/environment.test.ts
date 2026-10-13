@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
 	COHUB_ENVIRONMENTS,
 	getCohubContext,
+	createHttpClient,
 	resolveApiBaseUrl,
 	resolveVoiceInputWebsocketUrl,
 	resolveWebBaseUrl,
@@ -111,4 +112,22 @@ test("development uses cohub.live endpoints", () => {
 		resolveVoiceInputWebsocketUrl({ env: "dev" }),
 		"wss://gateway-dev.cohub.live/asr/ws",
 	);
+});
+
+test("custom API endpoints preserve proxy paths and explicit overrides", async () => {
+  const previous = process.env.COHUB_BASE_URL;
+  process.env.COHUB_BASE_URL = " https://custom.example.test/proxy/ ";
+  try {
+    const calls: string[] = [];
+    const fetch = async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return Response.json({ uuid: "user-1" });
+    };
+    await createHttpClient({ fetch, getAccessToken: () => "token" }).user.getMe();
+    await createHttpClient({ baseUrl: "https://explicit.example.test/", fetch, getAccessToken: () => "token" }).user.getMe();
+    assert.deepEqual(calls, ["https://custom.example.test/proxy/api/me", "https://explicit.example.test/api/me"]);
+  } finally {
+    if (previous === undefined) delete process.env.COHUB_BASE_URL;
+    else process.env.COHUB_BASE_URL = previous;
+  }
 });

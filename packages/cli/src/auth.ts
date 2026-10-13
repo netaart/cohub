@@ -1,6 +1,6 @@
-import { resolveCohubEnvironment, type CohubEnvironment } from "@neta-art/cohub";
+import { COHUB_ENVIRONMENTS, normalizeBaseUrl, resolveApiBaseUrl, resolveCohubEnvironment, type CohubEnvironment } from "@neta-art/cohub";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { withRuntimeSpaceBindingsLock } from "./runtime/space-binding.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -33,6 +33,7 @@ type DeviceCode = {
 type AuthSession = {
   schemaVersion: 1;
   env: CohubEnvironment;
+  baseUrl?: string;
   issuer: string;
   clientId: string;
   resource: string;
@@ -78,9 +79,18 @@ const authConfig = (env = currentEnv()): AuthConfig => {
   };
 };
 
-const sessionPath = (env = currentEnv()) => join(CONFIG_DIR, env === "dev" ? "auth.dev.json" : "auth.json");
-const deviceCodePath = (env = currentEnv()) => join(CONFIG_DIR, env === "dev" ? "device-code.dev.json" : "device-code.json");
-const legacyTokenPath = (env = currentEnv()) => join(CONFIG_DIR, env === "dev" ? "token.dev" : "token");
+const endpointSuffix = (env: CohubEnvironment, baseUrl = resolveApiBaseUrl({ env })) => {
+  const url = normalizeBaseUrl(baseUrl);
+  const endpoint = url === COHUB_ENVIRONMENTS[env].apiBaseUrl
+    ? ""
+    : `.${createHash("sha256").update(url).digest("hex")}`;
+  return `${env === "dev" ? ".dev" : ""}${endpoint}`;
+};
+
+const sessionPath = (env = currentEnv(), baseUrl?: string) => join(CONFIG_DIR, `auth${endpointSuffix(env, baseUrl)}.json`);
+const deviceCodePath = (env = currentEnv(), baseUrl?: string) => join(CONFIG_DIR, `device-code${endpointSuffix(env, baseUrl)}.json`);
+const legacyTokenPath = (env = currentEnv(), baseUrl?: string) => join(CONFIG_DIR, `token${endpointSuffix(env, baseUrl)}`);
+const sessionBaseUrl = (session: AuthSession) => session.baseUrl ?? COHUB_ENVIRONMENTS[session.env].apiBaseUrl;
 
 const writePrivateJson = (path: string, value: unknown) => {
   mkdirSync(CONFIG_DIR, { recursive: true });
@@ -154,6 +164,7 @@ const toSession = (token: LogtoTokenResponse, config: AuthConfig, env: CohubEnvi
   return {
     schemaVersion: 1,
     env,
+    baseUrl: previous ? sessionBaseUrl(previous) : resolveApiBaseUrl({ env }),
     issuer: config.issuer,
     clientId: config.clientId,
     resource: config.resource,
@@ -170,14 +181,10 @@ const toSession = (token: LogtoTokenResponse, config: AuthConfig, env: CohubEnvi
 
 export const readAuthSession = () => readJson<AuthSession>(sessionPath());
 
-const clearDeviceCode = () => {
-  removeIfExists(deviceCodePath());
-};
-
-export const clearAuthSession = () => {
-  removeIfExists(sessionPath());
-  clearDeviceCode();
-  removeIfExists(legacyTokenPath());
+export const clearAuthSession = (env = currentEnv(), baseUrl = resolveApiBaseUrl({ env })) => {
+  removeIfExists(sessionPath(env, baseUrl));
+  removeIfExists(deviceCodePath(env, baseUrl));
+  removeIfExists(legacyTokenPath(env, baseUrl));
 };
 
 export const authSource = (): AuthSource => {
@@ -202,24 +209,27 @@ export async function requireAccessToken(): Promise<string> {
   return token;
 }
 
-let refreshInFlight: Promise<string | null> | null = null;
+const refreshesInFlight = new Map<string, Promise<string | null>>();
 
 export function refreshAccessToken(session = readAuthSession()): Promise<string | null> {
   if (!session?.refreshToken) return Promise.reject(new AuthRequiredError());
-  if (refreshInFlight) return refreshInFlight;
-  const path = sessionPath(session.env);
-  refreshInFlight = withRuntimeSpaceBindingsLock(async () => {
+  const path = sessionPath(session.env, sessionBaseUrl(session));
+  const inFlight = refreshesInFlight.get(path);
+  if (inFlight) return inFlight;
+  const refresh = withRuntimeSpaceBindingsLock(async () => {
     const current = readJson<AuthSession>(path);
     if (!current) throw new AuthRequiredError();
     // Another process may already have rotated this refresh token.
     if (current.refreshToken !== session.refreshToken || current.updatedAt !== session.updatedAt) return current.accessToken;
     return performRefresh(current);
-  }, { path, lockPath: `${path}.refresh.lock` }).finally(() => { refreshInFlight = null; });
-  return refreshInFlight;
+  }, { path, lockPath: `${path}.refresh.lock` }).finally(() => { refreshesInFlight.delete(path); });
+  refreshesInFlight.set(path, refresh);
+  return refresh;
 }
 
 async function performRefresh(session: AuthSession): Promise<string | null> {
   const config = authConfig(session.env);
+  const path = sessionPath(session.env, sessionBaseUrl(session));
   const { response, data } = await formPost(tokenEndpoint(session.issuer), new URLSearchParams({
     client_id: session.clientId,
     grant_type: "refresh_token",
@@ -230,7 +240,7 @@ async function performRefresh(session: AuthSession): Promise<string | null> {
 
   if (!response.ok) {
     if (isUnrecoverableRefreshError(data)) {
-      if (readJson<AuthSession>(sessionPath(session.env))?.refreshToken === session.refreshToken) clearAuthSession();
+      if (readJson<AuthSession>(path)?.refreshToken === session.refreshToken) clearAuthSession(session.env, sessionBaseUrl(session));
       return null;
     }
     throw new Error(formatAuthError(data, response.status));
@@ -238,15 +248,16 @@ async function performRefresh(session: AuthSession): Promise<string | null> {
 
   const next = toSession(data as LogtoTokenResponse, config, session.env, session);
   // Never overwrite a login/logout that completed while the request was in flight.
-  const current = readJson<AuthSession>(sessionPath(session.env));
+  const current = readJson<AuthSession>(path);
   if (!current) throw new AuthRequiredError();
   if (current.refreshToken !== session.refreshToken) return current.accessToken;
-  writePrivateJson(sessionPath(session.env), next);
+  writePrivateJson(path, next);
   return next.accessToken;
 }
 
 export async function requestDeviceCode(): Promise<DeviceCode> {
   const env = currentEnv();
+  const baseUrl = resolveApiBaseUrl({ env });
   const config = authConfig(env);
   const { response, data } = await formPost(deviceEndpoint(config.issuer), new URLSearchParams({
     client_id: config.clientId,
@@ -272,14 +283,15 @@ export async function requestDeviceCode(): Promise<DeviceCode> {
     interval,
     createdAt: now,
   };
-  writePrivateJson(deviceCodePath(env), deviceCode);
+  writePrivateJson(deviceCodePath(env, baseUrl), deviceCode);
   return deviceCode;
 }
 
 export async function verifyDeviceCode(): Promise<AuthSession> {
   const env = currentEnv();
+  const baseUrl = resolveApiBaseUrl({ env });
   const config = authConfig(env);
-  const deviceCode = readJson<DeviceCode>(deviceCodePath(env));
+  const deviceCode = readJson<DeviceCode>(deviceCodePath(env, baseUrl));
   if (!deviceCode) throw new Error("Device code not found. Run `cohub auth login --request-code` first.");
   if (deviceCode.expiresAt <= Date.now()) throw new Error("Device code expired. Run `cohub auth login` again.");
 
@@ -291,9 +303,9 @@ export async function verifyDeviceCode(): Promise<AuthSession> {
   }));
   if (!response.ok) throw new Error(formatAuthError(data, response.status));
 
-  const session = toSession(data as LogtoTokenResponse, config, env);
-  writePrivateJson(sessionPath(env), session);
-  removeIfExists(deviceCodePath(env));
+  const session = { ...toSession(data as LogtoTokenResponse, config, env), baseUrl };
+  writePrivateJson(sessionPath(env, sessionBaseUrl(session)), session);
+  removeIfExists(deviceCodePath(env, baseUrl));
   return session;
 }
 
