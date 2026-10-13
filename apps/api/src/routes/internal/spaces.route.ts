@@ -191,6 +191,9 @@ router.post("/:id/sandbox-report", async (c) => {
   const updatedSandbox = await updateSpaceSandbox({
     spaceId,
     expectedReportTokenHash: expectedTokenHash,
+    expectedProvisioningGeneration: typeof sandboxMeta?.provisioningGeneration === "string"
+      ? sandboxMeta.provisioningGeneration
+      : null,
     status: normalizeSandboxLifecycleStatus(body.status),
     runtimeStatus: normalizeSandboxRuntimeStatus(body.status),
     podName: sandbox.podName,

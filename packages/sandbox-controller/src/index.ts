@@ -243,6 +243,7 @@ export function sandboxEndpointInvalidationPatch(reason: string, at = new Date()
     reportTokenHash: null,
     reportTokenIssuedAt: null,
     rpcTokenNonce: null,
+    provisioningGeneration: null,
   };
 }
 

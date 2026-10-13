@@ -65,7 +65,7 @@ assert.equal(
 );
 
 const invalidated = buildInvalidatedSandboxEndpointMeta(
-  { podIp: "10.0.0.1", wsEndpoint: "ws://10.0.0.1:8788/sandbox", reportTokenHash: "abc", rpcTokenNonce: "nonce", keep: 1 },
+  { podIp: "10.0.0.1", wsEndpoint: "ws://10.0.0.1:8788/sandbox", reportTokenHash: "abc", rpcTokenNonce: "nonce", provisioningGeneration: "generation", keep: 1 },
   "endpoint_unreachable",
   "2026-07-13T00:00:00.000Z",
 );
@@ -73,6 +73,7 @@ assert.equal(invalidated.podIp, null);
 assert.equal(invalidated.wsEndpoint, null);
 assert.equal(invalidated.reportTokenHash, null);
 assert.equal(invalidated.rpcTokenNonce, null);
+assert.equal(invalidated.provisioningGeneration, null);
 assert.equal(invalidated.keep, 1);
 assert.deepEqual(
   sandboxEndpointInvalidationPatch("idle", "2026-07-13T00:00:00.000Z").podIp,

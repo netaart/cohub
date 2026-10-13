@@ -69,18 +69,34 @@ There is no automatic dual-key or anonymous fallback.
 
 ## Provisioning and report failures
 
-Credentials are published to the database only after this invocation creates
-its Pod. An `ensure` that encounters an existing Pod leaves its credentials and
-status untouched. A replacement conflict fails clearly rather than attaching
-new credentials to an old Pod.
+Initial creation and replacement use the same per-space provisioning lease
+(`sandbox:recover:<spaceId>`), with periodic renewal and owner-checked release.
+Creation claims a database generation and creates a `provisioning` placeholder
+when no row exists, without replacing an existing instance's credentials.
+Prompt recovery no longer performs an unfenced upsert before acquiring the lease.
+
+Credentials are published only after Pod creation succeeds and lease ownership
+is rechecked. Claims, credential publication, recovery completion and failure
+cleanup are conditional on the database generation, so a delayed old operation
+cannot overwrite a successor even if its Redis lease expired. Failure cleanup
+may mark only its own unfinished generation as an error, allowing recovery after
+lease loss without corrupting a newer instance. Replacement deletion uses a Pod
+UID precondition. Endpoint invalidation also clears the database generation so
+stopped/cleaned instances cannot be republished by late work. An `ensure` conflict
+preserves active credentials and status; a replacement conflict remains an
+actionable error.
+
+The lease uses the existing Redis service and the generation is stored in JSONB
+metadata; no new service, network change or schema migration is introduced.
 
 A freshly created Pod can report before its database credentials are committed.
 The report client retries briefly without changing credentials: at most three
 attempts within an overall ten-second deadline, for connection failures,
 403 during the publication window, 409, 429 and server errors. Persistent failures
 remain errors; 400/401 fail immediately. A Kubernetes lookup 404 returns 409,
-and other lookup failures return 503. Report writes remain conditional on the
-current report-token hash, so an old instance is not accepted by retrying.
+and other lookup failures return 503. Report writes remain conditional on both
+the current report-token hash and the generation read with that snapshot, so a
+stale report cannot restore an older generation while credentials are unchanged.
 
 Monitor persistent report failures, authentication rejections, create conflicts,
 provisioning duration and Kubernetes API latency. A bounded retry is not a promise

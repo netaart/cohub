@@ -10,7 +10,7 @@ import { config } from "./config.js";
 import { redisCommandClient } from "./redis.js";
 import { expandPromptTemplate, type LoadPromptTemplatesOptions, type ExpandedPromptTemplate } from "./prompt-templates.js";
 import { expandSkillCommand, type ExpandedSkill, type LoadSkillsOptions } from "./skills.js";
-import { ensureSpaceSandbox, recoverSpaceSandbox } from "./space-sandboxes.js";
+import { recoverSpaceSandbox } from "./space-sandboxes.js";
 import { assignSessionUserLabelsAndDispatch, getSpaceSessionById, getSpaceById } from "./space-sessions.js";
 import { touchSpaceActivity } from "./space-activity.js";
 import { dispatchSessionUpdated, dispatchTurnCreated } from "./realtime-events.js";
@@ -93,10 +93,6 @@ export function getSessionDomainServices(input?: {
 
         const space = await getSpaceById(spaceId);
         if (!space) return;
-        if (reason === "missing") {
-          await ensureSpaceSandbox({ spaceId, status: "pending", runtimeStatus: "unknown" });
-        }
-
         void recoverSpaceSandbox({
           spaceId,
           userUuid: userId,
