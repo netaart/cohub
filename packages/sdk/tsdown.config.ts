@@ -12,6 +12,12 @@ const shared = {
   deps: {
     onlyBundle: false,
   },
+  // The SDK inlines Generation SDK types, which reference @openrouter/sdk
+  // declarations. Its `declare global` augmentation would otherwise keep every
+  // transitively imported OpenRouter declaration file in the output.
+  treeshake: {
+    moduleSideEffects: [{ test: /[\\/]node_modules[\\/]@openrouter[\\/]sdk[\\/]/, sideEffects: false }],
+  },
   outExtensions: () => ({
     js: ".js",
     dts: ".d.ts",

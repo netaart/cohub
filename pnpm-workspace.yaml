@@ -19,6 +19,7 @@ allowBuilds:
   core-js: false
   protobufjs: false
   "@google/genai": false
+  "@openrouter/sdk": false
 overrides:
   ioredis: ^6.0.0
 peerDependencyRules:
