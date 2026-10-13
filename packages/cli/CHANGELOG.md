@@ -1,5 +1,19 @@
 # @neta-art/cohub-cli
 
+## 10.1.0
+
+### Minor Changes
+
+- cbbb519: Allow the SDK and CLI to override service endpoints through environment variables while retaining production and development defaults. Add the CLI `--base-url` flag and the SDK `webBaseUrl` option. Isolate CLI login sessions, Home Space caches, and Runtime directory bindings by API base URL.
+
+### Patch Changes
+
+- Updated dependencies [56abacd]
+- Updated dependencies [be2784e]
+- Updated dependencies [8d37cc6]
+- Updated dependencies [cbbb519]
+  - @neta-art/cohub@11.1.0
+
 ## 10.0.0
 
 ### Major Changes

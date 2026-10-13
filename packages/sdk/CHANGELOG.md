@@ -1,5 +1,17 @@
 # @neta-art/cohub
 
+## 11.1.0
+
+### Minor Changes
+
+- 8d37cc6: Board task items are kept current by the server: write only `props.taskRunId`, and every Board in the Space that shows the run receives its final snapshot when it finishes. Task cards draw a live generating state with elapsed time, prompt and failure reasons, and fit their result's aspect ratio. Add `createTaskResultItems`, media `origin`, and `boards` on task details. `editor.applyTaskSnapshots` is removed; the server is the only writer of task snapshots.
+- cbbb519: Allow the SDK and CLI to override service endpoints through environment variables while retaining production and development defaults. Add the CLI `--base-url` flag and the SDK `webBaseUrl` option. Isolate CLI login sessions, Home Space caches, and Runtime directory bindings by API base URL.
+
+### Patch Changes
+
+- 56abacd: Make Board dot and grid patterns visible: dots are centered in their tile and drawn in muted ink, grid lines use the theme hairline.
+- be2784e: Reuse Board script textures safely across frames, cache script composition order, and avoid redundant accessibility DOM updates.
+
 ## 11.0.0
 
 ### Major Changes
