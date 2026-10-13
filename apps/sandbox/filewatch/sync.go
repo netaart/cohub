@@ -19,6 +19,8 @@ var errWatcherClosed = errors.New("file watcher is closed")
 // syncBarrier is a private directory watched by the same inotify instance as
 // the workspace. Linux delivers the events of one instance in order, so
 // seeing a marker created after a call proves every earlier event was read.
+// It lives in the sandbox's own cache, not /tmp, which agents and users treat
+// as scratch space and clean.
 type syncBarrier struct {
 	dir     string
 	mu      sync.Mutex
@@ -27,7 +29,15 @@ type syncBarrier struct {
 }
 
 func newSyncBarrier(watcher *fsnotify.Watcher) (*syncBarrier, error) {
-	dir, err := os.MkdirTemp("", "cohub-filewatch-sync-")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	parent := filepath.Join(home, ".cache", "cohub", "filewatch")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp(parent, "sync-")
 	if err != nil {
 		return nil, err
 	}

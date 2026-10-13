@@ -129,9 +129,14 @@ func TestSyncIsUnsupportedWithoutAnOrderedBackend(t *testing.T) {
 	}
 }
 
-func TestCloseRemovesTheSyncBarrier(t *testing.T) {
+func TestTheSyncBarrierStaysOutOfTmpAndCloseRemovesIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	watcher, _ := startSyncTestWatcher(t, func(Batch) {})
 	dir := watcher.barrier.dir
+	if parent := filepath.Join(home, ".cache", "cohub", "filewatch"); filepath.Dir(dir) != parent {
+		t.Fatalf("barrier directory %s is not in %s", dir, parent)
+	}
 	if err := watcher.Close(); err != nil {
 		t.Fatalf("Close() error: %v", err)
 	}
